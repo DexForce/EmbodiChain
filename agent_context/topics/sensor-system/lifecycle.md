@@ -5,18 +5,32 @@ validation, return to the [sensor overview](sensor-system.md).
 
 ## Camera rebuilds
 
-`SimulationManager.prepare()` detaches parented camera views before committing
-a topology rebuild. Cameras are owned outside Spawn, so Spawn camera retention
-cannot protect their native parents when Newton recreates robot skeletons.
-`Camera._detach_from_parent_nodes()` and the stereo override clear both native
-attachment and attachment state. After scene binding, the manager resolves new
-parents and reapplies extrinsics through `attach_to_parent_nodes()`.
-Preparation without topology changes leaves existing attachment intact.
+Camera views and their shared targets belong to the existing Spawn Scene.
+`SceneBuilder.prepare_arenas()` supplies its lightweight render Scene before
+physical finalization, so camera creation must not finalize an incomplete Newton
+model. Creation/removal use Scene batches; image buffers
+retain the existing environment and left-then-right eye layout.
+
+`SimulationManager.prepare()` detaches parented native camera views before
+committing a topology rebuild. After scene binding, the manager resolves new
+parent nodes and reapplies configured extrinsics through
+`attach_to_parent_nodes()`. Both stereo eyes follow that lifecycle; the manager
+owns semantic parent resolution rather than retaining native parent identities
+across rebuilds. Preparation without topology changes leaves existing attachment
+intact.
 
 This separates three owners: the manager schedules detachment/reattachment,
 `attachment.py` resolves semantic asset/link identity, and camera classes apply
 the concrete render-node relationship. Missing/ambiguous registered links are
 configuration failures; missing per-arena render topology is a runtime failure.
+
+Camera and light facades cache weak native selections only for one Scene
+topology revision and reselect their stable handles after finalization/rebuild.
+Pose/parameter getters return owned tensors; later reads or writes must not
+change earlier results. Camera reset restores selected configured offsets while
+preserving the current lens. Removing cameras precedes releasing their empty
+shared group; light removal and manager teardown release Scene-owned light
+handles before closing the Scene.
 
 ## Contact queries
 

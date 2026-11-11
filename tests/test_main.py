@@ -41,6 +41,7 @@ EXPECTED_COMMANDS = {
     "decompose-urdf",
     "eval-policy",
     "expansion",
+    "gensim",
     "list-robot",
     "list-task",
     "show-task",

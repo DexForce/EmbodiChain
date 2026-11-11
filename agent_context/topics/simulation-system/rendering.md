@@ -48,9 +48,10 @@ skips configured lights/IBL and built-in native visual effects; background
 objects and collision geometry remain. Render-only `VisualObject` declarations
 stay in the registry without native handles; visual pose events must skip
 native writes in this mode. DexSim uses its existing package and
-device-free NoRender engine. Native camera and window operations require a
-native renderer. Viser retains native rendering because its current exporter
-reads visual meshes. Checkpoint evaluation with `--viewer` defaults to Hybrid
+device-free NoRender engine. Native camera, light creation and window operations
+require a native renderer. Standalone scene helpers skip optional light
+declarations when `has_native_renderer` is false. Viser retains native rendering
+because its current exporter reads visual meshes. Checkpoint evaluation with `--viewer` defaults to Hybrid
 when the saved training configuration uses NoRender.
 
 DexSim 0.6 still processes Spawn's visual material table on NoRender native

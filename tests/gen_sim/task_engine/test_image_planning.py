@@ -330,7 +330,7 @@ def test_preview_and_existing_output_remain_read_only(
     source_image, tmp_path, monkeypatch, home_path
 ):
     from embodichain.cli.main import main
-    from embodichain.gen_sim.task_engine import cli
+    from embodichain.gen_sim.task_engine import _image_run as cli
 
     def extra(step, grounding, plan):
         grounding["objects"].append(

@@ -49,6 +49,10 @@ from dexsim.types import ActorType, DriveType
 
 ART_PATH = "SlidingBoxDrawer/SlidingBoxDrawer.urdf"
 USD_DRAWER_PATH = "DrawerUSD/drawer_001.usdc"
+# These small scenes do not inspect pixels; leave room for all tested links.
+TEST_SCENE_NODE_CAPACITY = 512
+TEST_VIEWPORT_SIZE = 64
+
 NUM_ARENAS = 10
 NEWTON_EFFORT_TARGET_MODE = 4
 DRIVE_TEST_STIFFNESS = 12.0
@@ -719,6 +723,9 @@ class BaseArticulationTest:
             device=device,
             num_envs=NUM_ARENAS,
             physics_cfg=physics_cfg,
+            scene_node_capacity=TEST_SCENE_NODE_CAPACITY,
+            width=TEST_VIEWPORT_SIZE,
+            height=TEST_VIEWPORT_SIZE,
         )
         self.sim = SimulationManager(config)
         self.physics = physics
@@ -1655,33 +1662,36 @@ class BaseArticulationTest:
     def teardown_method(self):
         """Clean up resources after each test method."""
         self.sim.destroy()
+        # Drop test-owned views before queued child/parent destruction runs.
+        self.__dict__.clear()
         import embodichain.lab.sim as om
 
         om.SimulationManager.flush_cleanup_queue()
-        self.__dict__.clear()
-        import gc
-
-        gc.collect()
 
 
 class BaseArticulationLinkPhysicsTest:
     """Tests for per-link physics configuration (isolated sim per test)."""
 
     def setup_simulation(self, device: str) -> None:
-        config = SimulationManagerCfg(headless=True, device=device, num_envs=2)
+        config = SimulationManagerCfg(
+            headless=True,
+            device=device,
+            num_envs=2,
+            scene_node_capacity=TEST_SCENE_NODE_CAPACITY,
+            width=TEST_VIEWPORT_SIZE,
+            height=TEST_VIEWPORT_SIZE,
+        )
         self.sim = SimulationManager(config)
         self.art_path = get_data_path(ART_PATH)
         assert os.path.isfile(self.art_path)
 
     def teardown_method(self):
         self.sim.destroy()
+        # Drop test-owned views before queued child/parent destruction runs.
+        self.__dict__.clear()
         import embodichain.lab.sim as om
 
         om.SimulationManager.flush_cleanup_queue()
-        self.__dict__.clear()
-        import gc
-
-        gc.collect()
 
     def test_global_attrs_applied_to_all_links(self):
         """Default attrs should set the same static friction on every link."""

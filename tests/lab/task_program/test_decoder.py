@@ -332,7 +332,9 @@ def test_decoder_rejects_missing_or_reserved_program_discriminator(
     ("mutate", "expected_path"),
     [
         (
-            lambda data: data["targets"]["drop_pose"].update({"kind": "pose"}),
+            lambda data: data["targets"]["drop_pose"].update(
+                {"kind": "unsupported_pose"}
+            ),
             "$.targets.drop_pose.kind",
         ),
         (

@@ -35,6 +35,10 @@ from dexsim.types import ActorType
 
 DUCK_PATH = "ToyDuck/toy_duck.glb"
 TABLE_PATH = "ShopTableSimple/shop_table_simple.ply"
+# These small scenes do not inspect pixels; leave room for all tested links.
+TEST_SCENE_NODE_CAPACITY = 512
+TEST_VIEWPORT_SIZE = 64
+
 NUM_ARENAS = 4
 Z_TRANSLATION = 2.0
 # Newton converts principal-frame inertia diagonals through a float32 full
@@ -79,6 +83,9 @@ class BaseRigidObjectGroupTest:
             device=device,
             num_envs=NUM_ARENAS,
             physics_cfg=physics_cfg_for_backend(physics),
+            scene_node_capacity=TEST_SCENE_NODE_CAPACITY,
+            width=TEST_VIEWPORT_SIZE,
+            height=TEST_VIEWPORT_SIZE,
         )
         self.sim = SimulationManager(config)
         self.physics = physics
@@ -275,23 +282,20 @@ class BaseRigidObjectGroupTest:
             self.obj_group.uid not in self.sim.asset_uids
         ), "Object group UID still present after removal"
 
-    def test_set_physical_visible(self):
-        self.obj_group.set_physical_visible(visible=True)
-        self.obj_group.set_physical_visible(visible=False)
-
-    def test_set_visible(self):
+    def test_visibility_controls(self):
+        """Collision debug and render visibility accept both toggle states."""
         self.obj_group.set_visible(visible=True)
         self.obj_group.set_visible(visible=False)
+        # Restore the initial render state before creating collision overlays.
+        self.obj_group.set_visible(visible=True)
+        self.obj_group.set_physical_visible(visible=True)
+        self.obj_group.set_physical_visible(visible=False)
 
     def teardown_method(self):
         """Clean up resources after each test method."""
         self.sim.destroy(exit_process=False)
         self.__dict__.clear()
-        import gc
-
-        gc.collect()
         SimulationManager.flush_cleanup_queue()
-        gc.collect()
 
 
 class TestRigidObjectGroupCPU(BaseRigidObjectGroupTest):

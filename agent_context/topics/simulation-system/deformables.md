@@ -17,6 +17,12 @@ accept the default DexUni solver or an explicit supported particle solver
 post-finalization additions. Default soft/cloth compatibility is absent.
 Future backend support belongs at dispatch, not inside a monolithic config.
 
+`UsdImportCfg` whole-scene loading and a deformable config's optional `source`
+bind authored soft-body/cloth descriptors through these same facades. Source
+physics and simulation/render topology are retained; the source route accepts
+identity, pose and particle flag/radius overrides rather than regenerating a
+mesh with the procedural meshing defaults.
+
 `spawn/descriptors.py` translates volume/surface configs to typed `SoftBodyDesc`
 and `ClothDesc`; volume meshing uses `SoftBodyMeshingDesc`. Runtime mutation
 uses `Scene.create_particle_set_batch()`, not renderer buffers or legacy native

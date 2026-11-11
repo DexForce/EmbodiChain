@@ -45,7 +45,19 @@ def _physical_state(env: Any, task_name: str) -> dict[str, object]:
     """Read object poses and speeds independently of semantic acceptance."""
     import torch
 
-    uids = ("handover_object",) if task_name == "hand_over" else ("block_1", "block_2")
+    uids = (
+        ("handover_object",)
+        if task_name == "hand_over"
+        else (
+            ("cube",)
+            if task_name == "repeated_pick_place"
+            else (
+                ("carton",)
+                if task_name == "carton_stocking"
+                else ("block_1", "block_2")
+            )
+        )
+    )
     if task_name == "blocks_ranking_rgb":
         uids += ("block_3",)
     result = {}
@@ -120,7 +132,11 @@ def _run_real_sim_episode(
     source = (
         _REPOSITORY_ROOT
         / "extensions/embodichain_tasks/configs/tasks/manipulation"
-        / (task_name if task_name == "hand_over" else f"tableware/{task_name}")
+        / (
+            task_name
+            if task_name in {"hand_over", "repeated_pick_place", "carton_stocking"}
+            else f"tableware/{task_name}"
+        )
         / f"task.{variant}.yaml"
     )
     payload = load_config(source)
@@ -196,7 +212,9 @@ def _run_child(
         os._exit(exit_code)
 
 
-def _assert_physical_goal(task_name: str, state: dict[str, Any]) -> None:
+def _assert_physical_goal(
+    task_name: str, state: dict[str, Any], variant: str = "cobotmagic"
+) -> None:
     """Check measured placement, upright poses, and resting speeds directly."""
     poses = {uid: value["pose"] for uid, value in state.items()}
     positions = {
@@ -215,9 +233,38 @@ def _assert_physical_goal(task_name: str, state: dict[str, Any]) -> None:
         assert value["angular_speed"] < 0.20, (uid, state)
     if task_name == "hand_over":
         # Authored delivery_rest_pose in the shared tabletop hand-over program.
-        destination = (0.45, -0.18, 0.782)
+        destination = (
+            (0.0, -0.2, 0.5582232)
+            if variant == "dual_franka_robotiq_arg2f_140"
+            else (0.45, -0.18, 0.782)
+        )
         error = math.dist(positions["handover_object"], destination)
-        assert error < 0.05, state
+        assert error < (
+            0.04 if variant == "dual_franka_robotiq_arg2f_140" else 0.05
+        ), state
+        if variant == "dual_franka_robotiq_arg2f_140":
+            assert poses["handover_object"][2][1] > 0.98, state
+    elif task_name == "carton_stocking":
+        assert (
+            math.dist(positions["carton"][:2], (0.656938142745868, 0.01285806378570287))
+            < 0.025
+        ), state
+        assert abs(positions["carton"][2] - 0.0618918780165142) < 0.01, state
+        assert poses["carton"][2][2] > math.cos(math.pi / 4), state
+        yaw = math.atan2(poses["carton"][1][0], poses["carton"][0][0])
+        target_yaw = math.radians(-40.27074248457973)
+        assert (
+            abs(math.atan2(math.sin(yaw - target_yaw), math.cos(yaw - target_yaw)))
+            < math.pi / 18
+        ), state
+    elif task_name == "repeated_pick_place":
+        destination = (
+            (0.60, 0.22, 0.925)
+            if variant == "dexforce_w1_030_pika"
+            else (-0.10, -0.05, 0.775)
+        )
+        assert math.dist(positions["cube"], destination) < 0.02, state
+        assert poses["cube"][2][2] > math.cos(math.pi / 12), state
     elif task_name == "stack_blocks_two":
         separation = [a - b for a, b in zip(positions["block_2"], positions["block_1"])]
         assert abs(separation[0]) < 0.025, state
@@ -247,6 +294,11 @@ def _assert_physical_goal(task_name: str, state: dict[str, Any]) -> None:
     ]
     + [
         ("hand_over", "tianji_marvin"),
+        ("hand_over", "dual_franka_robotiq_arg2f_140"),
+        ("repeated_pick_place", "dexforce_w1_030_pika"),
+        ("repeated_pick_place", "dual_franka_robotiq_arg2f_140"),
+        ("repeated_pick_place", "dual_ur10_robotiq_arg2f_140"),
+        ("carton_stocking", "panda.rgbd"),
     ],
 )
 def test_production_expert_and_dynamic_replay_satisfy_physical_goal(
@@ -281,19 +333,26 @@ def test_production_expert_and_dynamic_replay_satisfy_physical_goal(
             "stack_blocks_two": 2,
             "blocks_ranking_rgb": 4,
             "hand_over": 1,
+            "repeated_pick_place": 6,
+            "carton_stocking": 3,
         }[task_name]
     )
     for segment in segments:
         assert segment["success"], segment
         validation = segment["metadata"]["validation"]
         assert validation["accepted_mask"] == [True], segment
-        assert validation["validators"], segment
+        if not (task_name == "carton_stocking" and segment["name"] == "transport"):
+            assert validation["validators"], segment
         for trace in validation["validators"]:
             assert (
                 trace["result_mask"] == trace["result"]["accepted_mask"] == [True]
             ), trace
         for trace in segment["metadata"]["post_policies"]:
             assert trace["result_mask"] == [True], trace
-            assert trace["result"]["state"]["settled_mask"] == [True], trace
-    _assert_physical_goal(task_name, report["expert_final"])
-    _assert_physical_goal(task_name, report["replay_final"])
+            if "state" in trace["result"]:
+                assert trace["result"]["state"]["settled_mask"] == [True], trace
+            else:
+                assert trace["result"]["accepted_mask"] == [True], trace
+                assert min(trace["result"]["measurements"]["alignment"]) >= 0.98, trace
+    _assert_physical_goal(task_name, report["expert_final"], variant)
+    _assert_physical_goal(task_name, report["replay_final"], variant)

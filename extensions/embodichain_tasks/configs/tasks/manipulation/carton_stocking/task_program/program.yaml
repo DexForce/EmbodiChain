@@ -14,39 +14,28 @@ targets:
       - -0.3442393738635206
       - 0.9388819166871047
 program:
-  kind: sequence
-  items:
-  - kind: segment
-    name: pick
-    steps:
-      kind: invoke
-      call:
-        kind: pick
-        object: carton
-    validators:
-    - kind: object_lifted
+- segment: pick
+  steps:
+    pick:
       object: carton
-      minimum_lift: 0.03
-  - kind: segment
-    name: transport
-    steps:
-      kind: invoke
-      call:
-        kind: registered
-        call_id: simulation.move_held_object
-        arguments:
-          target: above_worktop
-  - kind: segment
-    name: place
-    steps:
-      kind: invoke
-      call:
-        kind: place
-        object: carton
-        'on': marked_support
-    post:
-    - kind: wait_stable
-      entity: carton
-    validators:
-    - kind: object_upright
+  validators:
+  - kind: object_lifted
+    object: carton
+    minimum_lift: 0.03
+- segment: transport
+  steps:
+    registered:
+      call_id: simulation.move_held_object
+      arguments:
+        target: above_worktop
+- segment: place
+  steps:
+    place:
       object: carton
+      'on': marked_support
+  post:
+  - kind: wait_stable
+    entity: carton
+  validators:
+  - kind: object_upright
+    object: carton

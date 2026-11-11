@@ -43,6 +43,8 @@ from embodichain.lab.sim.physics import (
 )
 from embodichain.lab.sim.sim_manager import SimulationManager
 
+pytestmark = pytest.mark.no_sim
+
 # ---------------------------------------------------------------------------
 # The parity matrix — edit this table when a backend gains/loses a feature.
 # ---------------------------------------------------------------------------

@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+
 import ast
 import gc
 import importlib
@@ -35,8 +36,6 @@ from embodichain.toolkits.graspkit import pg_grasp
 from embodichain.toolkits.graspkit import (
     GraspPoseGenerator,
     ParallelJawGraspPoseGenerator,
-    ParallelJawGripperModelCfg,
-    get_parallel_jaw_gripper_model,
 )
 from embodichain.toolkits.graspkit.pg_grasp import (
     AntipodalGraspPoseGenerator,
@@ -61,7 +60,6 @@ def test_public_facade_preserves_canonical_export_identity() -> None:
         "embodichain.toolkits.graspkit.pg_grasp.collision_checker",
         "embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker",
         "embodichain.toolkits.graspkit.pg_grasp.fixed_geometry",
-        "embodichain.toolkits.graspkit.pg_grasp.model_geometry",
         "embodichain.toolkits.graspkit.pg_grasp.pose_generator",
     ):
         owner = importlib.import_module(name)
@@ -171,11 +169,9 @@ def _generator(
     *, force_refresh: bool = False, alignment_angle: float | None = None
 ) -> AntipodalGraspPoseGenerator:
     return AntipodalGraspPoseGenerator(
-        ParallelJawGripperModelCfg(
-            model_id="concrete_test_eef",
-            min_opening_width=0.004,
-            max_opening_width=0.12,
-        ),
+        model_id="concrete_test_eef",
+        min_opening_width=0.004,
+        max_opening_width=0.12,
         collision_geometry=FixedGripperCollisionGeometry(
             torch.zeros((1, 3)), {"grasp_from_tcp": torch.eye(4).tolist()}
         ),
@@ -197,55 +193,9 @@ def test_generic_hierarchy_contains_no_concrete_eef_name() -> None:
 
     assert isinstance(generator, GraspPoseGenerator)
     assert isinstance(generator, ParallelJawGraspPoseGenerator)
-    assert generator.gripper_model.model_id == "concrete_test_eef"
+    assert generator.gripper_data["model_id"] == "concrete_test_eef"
     assert "pgi" not in type(generator).__name__.lower()
-    assert "pgi" not in type(generator.gripper_model).__name__.lower()
-
-
-@pytest.mark.parametrize(
-    ("model_id", "expected"),
-    [
-        ("dh_pgi_140_80", (0.005, 0.1)),
-        # Versioned usable aperture limits; collision geometry is separate.
-        # see graspkit/README.md for the source hashes and axis mapping.
-        ("franka_panda_hand", (0.001, 0.08)),
-        ("cobotmagic_v100_gripper", (0.001, 0.1)),
-        ("tianji_marvin_gripper", (0.001, 0.095)),
-        ("pika_gripper", (0.001, 0.094)),
-    ],
-)
-def test_named_gripper_model_returns_reviewed_geometry(
-    model_id: str, expected: tuple[float, ...]
-) -> None:
-    model = get_parallel_jaw_gripper_model(model_id)
-
-    assert model.model_id == model_id
-    assert (
-        model.min_opening_width,
-        model.max_opening_width,
-    ) == pytest.approx(expected)
-
-
-@pytest.mark.parametrize(
-    "model_id",
-    [
-        "dh_pgi_140_80",
-        "franka_panda_hand",
-        "cobotmagic_v100_gripper",
-        "tianji_marvin_gripper",
-        "pika_gripper",
-    ],
-)
-def test_named_gripper_model_returns_independent_configs(model_id: str) -> None:
-    first = get_parallel_jaw_gripper_model(model_id)
-    second = get_parallel_jaw_gripper_model(model_id)
-    expected = second.to_dict()
-
-    first.max_opening_width = 2.0
-
-    assert first is not second
-    assert second.to_dict() == expected
-    assert get_parallel_jaw_gripper_model(model_id).to_dict() == expected
+    assert "pgi" not in type(generator.gripper_data).__name__.lower()
 
 
 @pytest.mark.parametrize(
@@ -256,25 +206,24 @@ def test_named_gripper_model_returns_independent_configs(model_id: str) -> None:
         ("max_opening_width", float("nan"), ValueError),
     ],
 )
-def test_named_geometry_rejects_invalid_calibration(
+def test_generator_rejects_invalid_opening_bounds(
     field: str, value: float | bool, error: type[Exception]
 ) -> None:
-    values = get_parallel_jaw_gripper_model("franka_panda_hand").to_dict()
-    values[field] = value
-
+    data = {"model_id": "test", "min_opening_width": 0.001, "max_opening_width": 0.08}
+    data[field] = value
     with pytest.raises(error, match=field):
-        ParallelJawGripperModelCfg(**values)
-
-
-def test_named_gripper_model_rejects_unknown_ids() -> None:
-    with pytest.raises(ValueError, match="unknown.*available.*dh_pgi_140_80"):
-        get_parallel_jaw_gripper_model("missing_gripper")
+        AntipodalGraspPoseGenerator(
+            **data,
+            collision_geometry=FixedGripperCollisionGeometry(
+                torch.zeros(1, 3), {"grasp_from_tcp": torch.eye(4).tolist()}
+            ),
+        )
 
 
 def test_package_exposes_only_the_unified_generator_api() -> None:
     assert "AntipodalGraspPoseGenerator" in pg_grasp.__all__
     assert "GraspPoseGenerator" in pg_grasp.__all__
-    assert "ParallelJawGripperModelCfg" in pg_grasp.__all__
+    assert "ParallelJawGripperModelCfg" not in pg_grasp.__all__
     assert "GraspGenerator" not in pg_grasp.__all__
     assert "GraspGeneratorCfg" not in pg_grasp.__all__
 
@@ -439,10 +388,13 @@ def test_failed_candidates_receive_infinite_cost_and_refresh_is_service_owned(
 def test_rejects_missing_collision_geometry_instead_of_using_a_box() -> None:
     with pytest.raises(TypeError, match="collision_geometry"):
         AntipodalGraspPoseGenerator(
-            ParallelJawGripperModelCfg(), collision_geometry=None
+            model_id="parallel_jaw",
+            min_opening_width=0.001,
+            max_opening_width=0.1,
+            collision_geometry=None,
         )
     with pytest.raises(TypeError, match="finger_length"):
-        ParallelJawGripperModelCfg(finger_length=0.05)
+        AntipodalGraspPoseGenerator(finger_length=0.05)
 
 
 def test_backend_cache_key_includes_sampling_and_annotation_policy() -> None:

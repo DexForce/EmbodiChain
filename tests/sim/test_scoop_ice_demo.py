@@ -16,6 +16,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+import subprocess
+import sys
 from types import SimpleNamespace
 
 import numpy as np
@@ -75,14 +78,17 @@ def test_scoop_path_follows_container_and_measured_grasp() -> None:
         scoop_pose = scene_pose.clone()
         scoop_pose[:, :3, 3] += torch.tensor([0.0, 0.0, 0.1])
 
+        def current_grasp():
+            return grasp_pose[len(commands)] if grasp_pose.ndim == 4 else grasp_pose
+
         def compute_ik(pose, **kwargs):
-            commands.append(pose @ torch.linalg.inv(grasp_pose))
+            commands.append(pose @ torch.linalg.inv(current_grasp()))
             return torch.tensor([True]), torch.zeros(1, 6)
 
         robot = SimpleNamespace(
             get_joint_ids=lambda name: list(range(6)),
             get_qpos=lambda: torch.zeros(1, 6),
-            compute_fk=lambda *args, **kwargs: scoop_pose @ grasp_pose,
+            compute_fk=lambda *args, **kwargs: scoop_pose @ current_grasp(),
             compute_ik=compute_ik,
             set_qpos=lambda *args, **kwargs: None,
         )
@@ -110,18 +116,43 @@ def test_scoop_path_follows_container_and_measured_grasp() -> None:
     assert baseline[1, 0, 0, 3] < -0.21
     assert abs(baseline[-1, 0, 0, 3]) < 0.15
     torch.testing.assert_close(plan(moved_bin, tilted_grasp), moved_bin @ baseline)
+    # Contact can move the tool within the fingers between motion phases.
+    drifting_grasp = tilted_grasp.unsqueeze(0).repeat(len(baseline), 1, 1, 1)
+    drifting_grasp[:, 0, 0, 3] += torch.linspace(0.0, 0.03, len(baseline))
+    torch.testing.assert_close(plan(identity, drifting_grasp), baseline)
 
 
 @pytest.mark.gpu
-@pytest.mark.requires_sim
+@pytest.mark.subprocess_sim
 @pytest.mark.slow
 @pytest.mark.parametrize("seed", [0, 1, 2])
 def test_default_scoops_and_retains_ice(seed: int) -> None:
+    """Run the standalone demo with its own renderer and native physics state."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import runpy, sys; "
+            "runpy.run_path(sys.argv[1])['_run_scoop_case'](int(sys.argv[2]))",
+            str(Path(__file__).resolve()),
+            str(seed),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def _run_scoop_case(seed: int) -> None:
     """Qualify the physical grasp and retained ice after the final settling step."""
+    from dexsim.types import Renderer
+
     sim = demo.initialize_simulation(
         demo.build_parser().parse_args(["--headless", "--physics", "default"])
     )
     try:
+        assert sim.get_world().get_renderer_type() == Renderer.OFFLINERT
         robot = demo.create_robot(sim)
         demo.create_container(sim)
         padding = demo.create_padding_box(sim)

@@ -81,26 +81,35 @@ def cli_ingest_single(
         print("No asset returned (might be direct_copy mode)")
 
 
-def main(argv: Sequence[str] | None = None) -> None:
+def main(
+    argv: Sequence[str] | None = None, *, prog: str = "embodichain asset-engine"
+) -> None:
     """Run the SimReady asset pipeline CLI.
 
     Args:
         argv: Arguments excluding the command name. Uses ``sys.argv`` when
             omitted.
+        prog: Display name supplied by the unified GenSim dispatcher.
     """
     parser = argparse.ArgumentParser(
-        prog="embodichain asset-engine",
+        prog=prog,
         description="Convert a raw asset directory into a SimReady asset.",
     )
 
     parser.add_argument(
+        "--input",
+        "--input-dir",
         "--input_dir",
+        dest="input_dir",
         type=str,
         required=True,
         help="Path to the single asset directory.",
     )
     parser.add_argument(
+        "--output",
+        "--output-root",
         "--output_root",
+        dest="output_root",
         type=str,
         required=True,
         help="Root directory for generated assets.",

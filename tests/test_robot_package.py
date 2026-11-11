@@ -105,6 +105,8 @@ def test_main_distribution_stages_robot_package_without_legacy_modules(tmp_path)
         "embodichain_robots/__init__.py",
         "embodichain_robots/_catalog.py",
         "embodichain_robots/_asset_catalog.py",
+        "embodichain_robots/i2rt/yam/cfg.py",
+        "embodichain_robots/i2rt/yam/assets.py",
         "embodichain_robots/_locomotion.py",
         "embodichain_robots/locomotion_profiles.py",
         "embodichain_robots/franka/assets.py",

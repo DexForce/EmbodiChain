@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+
 from dataclasses import fields
 
 import dexsim
@@ -107,8 +108,8 @@ def test_articulation_cfg_uses_grouped_physics_fields_only() -> None:
         "joint_props",
     }.isdisjoint(field_names)
     assert root_props == ArticulationRootPropertiesCfg()
-    assert root_props.fixed_base is True
-    assert root_props.self_collision_enabled is False
+    assert root_props.fixed_base is None
+    assert root_props.self_collision_enabled is None
 
 
 @pytest.mark.parametrize(
@@ -1008,7 +1009,7 @@ def test_backend_joint_and_articulation_configs_round_trip() -> None:
     assert isinstance(restored_drive, NewtonJointDrivePropertiesCfg)
     assert root.to_dict() == {
         "fixed_base": False,
-        "self_collision_enabled": False,
+        "self_collision_enabled": None,
         "sleep_threshold": None,
         "min_position_iters": None,
         "min_velocity_iters": None,
@@ -1605,6 +1606,16 @@ def test_nrd_rejects_invalid_settings(field_name: str, invalid_value: object) ->
     """Malformed NRD values fail before entering the native renderer."""
     with pytest.raises(ValueError, match=field_name):
         sim_cfg.NRDCfg(**{field_name: invalid_value})
+
+
+def test_urdf_cfg_preserves_positional_constructor_with_keyword_mounting_flag():
+    from embodichain.lab.sim.cfg import URDFCfg
+
+    cfg = URDFCfg(
+        None, None, None, None, "/tmp", True, "robot_base", force_assembly=True
+    )
+    assert cfg.base_link_name == "robot_base"
+    assert cfg.force_assembly is True
 
 
 @configclass

@@ -70,6 +70,7 @@ UV seams and render detail.
    NewtonJointDrivePropertiesCfg
    ObjectBaseCfg
    UsdSourceCfg
+   UsdImportCfg
    LightCfg
    VisualObjectCfg
    RigidObjectCfg
@@ -106,6 +107,42 @@ existing ``shape``/``fpath`` input. Ordinary mesh files continue to use
 ``MeshCfg(fpath=...)``. Without a selector, USD loading requires one candidate
 of the requested type; ambiguous sources fail instead of selecting the first
 object. Whole-scene imports preserve this source address on their facades.
+
+USD import recipes
+------------------
+
+``SimulationManager.add_usd(UsdImportCfg(...))`` declares a complete scene
+selection. ``source.root_prim_path`` selects a source subtree and ``variants``
+selects source variants. The import recipe separately owns runtime namespace,
+the optional left-multiplied scene pose and overrides keyed by unchanged source
+prim paths. Unset source properties are retained. Source and override validation
+precedes native declaration; returned facades bind in place at ``prepare()``.
+
+.. code-block:: python
+
+   from embodichain.lab.sim.cfg import UsdImportCfg, UsdSourceCfg
+
+   imported = sim.add_usd(
+       UsdImportCfg(
+           name="workcell",
+           source=UsdSourceCfg(
+               file_path="workcell.usda",
+               root_prim_path="/World/Cell",
+           ),
+           namespace="cell_1",
+       )
+   )
+   sim.prepare()
+   robot = imported["/World/Cell/Robot"]
+
+.. autoclass:: embodichain.lab.sim.cfg.usd.UsdImportCfg
+   :members:
+
+Single-asset configurations retain their exact ``source_prim_path`` selector.
+Their ``source_pose_mode`` chooses automatic, replacement, preservation or
+offset placement. Legacy source-option spellings remain accepted by the
+compatibility adapter. New scene recipes keep namespace and placement on
+``UsdImportCfg``.
 
 Deformable physics and meshing
 -----------------------------
