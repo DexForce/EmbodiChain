@@ -239,7 +239,7 @@ embodichain.gen_sim.action_agent_pipeline.cli.run_agent
 
 ```text
 python -m embodichain scene-engine
-embodichain/gen_sim/scene_engine/cli/preview.py
+embodichain/lab/scripts/preview_scene.py
 .env
 ```
 

@@ -66,6 +66,35 @@ class VisualizationBackend(ABC):
         """
         self._replay_control_command_sink = sink
 
+    def set_preview_command_sink(self, sink: Callable[[str], None] | None) -> None:
+        """Set the simulation-thread command sink for scene preview controls.
+
+        Args:
+            sink: Thread-safe receiver for play, pause, step, reset and stop.
+        """
+        self._preview_command_sink = sink
+
+    def publish_preview_control(
+        self, *, running: bool, steps: int, visible: bool
+    ) -> None:
+        """Publish scene play/pause controls without changing simulation state.
+
+        Args:
+            running: Whether physics is currently advancing.
+            steps: Number of completed physics steps since loading.
+            visible: Whether the preview panel should be shown.
+        """
+
+    def publish_preview_camera(
+        self, *, eye: tuple[float, float, float], target: tuple[float, float, float]
+    ) -> None:
+        """Set the preview navigation view without modifying scene cameras.
+
+        Args:
+            eye: Viewer eye in resolved world meters/Z-up.
+            target: Look-at position in the same frame.
+        """
+
     @property
     @abstractmethod
     def endpoint(self) -> str | None:

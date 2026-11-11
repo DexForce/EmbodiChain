@@ -204,7 +204,7 @@ class _Gui:
         self.numbers[label] = number
         return number
 
-    def add_button(self, label: str) -> _Button:
+    def add_button(self, label: str, **options: object) -> _Button:
         button = _Button(label=label)
         self.buttons[label] = button
         return button
@@ -1634,3 +1634,26 @@ def test_marker_removal_reselects_and_shows_existing_scene_mesh():
         assert server.gui.dropdowns["Selected environment"].value == "0"
         np.testing.assert_array_equal(handle.batched_opacities, [1])
     backend.stop()
+
+
+def test_scene_preview_buttons_only_emit_commands_and_survive_manifest_refresh():
+    server = _Server()
+    backend = ViserBackend(
+        ViserServerCfg(), server_factory=lambda **_: server, allow_commands=True
+    )
+    commands = []
+    backend.set_preview_command_sink(commands.append)
+    backend.start()
+    try:
+        backend.publish_manifest(SceneManifest("run", 1, (), ()))
+        backend.publish_preview_control(running=False, steps=0, visible=True)
+        for label in ("Play", "Pause", "Step", "Reset to source", "Stop"):
+            server.gui.buttons[label].callback(SimpleNamespace(client_id="client-a"))
+        assert commands == ["play", "pause", "step", "reset", "stop"]
+        backend.publish_manifest(SceneManifest("run", 2, (), ()))
+        backend.publish_preview_control(running=True, steps=3, visible=True)
+        server.gui.buttons["Pause"].callback(SimpleNamespace(client_id="client-a"))
+        assert commands[-1] == "pause"
+        backend.publish_preview_control(running=False, steps=3, visible=False)
+    finally:
+        backend.stop()

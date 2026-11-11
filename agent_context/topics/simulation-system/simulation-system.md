@@ -21,6 +21,10 @@ runtime dependencies. Gym launchers compose configuration separately; follow
 physics selection and overrides. Numeric defaults and example recipes belong
 to their source configs and callers.
 
+SimulationManagerCfg.default_ground controls the manager-owned colliding plane
+(default enabled). Whole-scene preview disables it so source physics is not
+augmented; Viser's display grid and source-authored ground are separate.
+
 ## Ownership
 
 `SimulationManager` owns a DexSim `World`, a `SpawnScene`, resource registries,

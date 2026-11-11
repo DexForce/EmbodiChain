@@ -88,16 +88,17 @@ run-owned Z-up OBJ copies, with isolated texture/material sidecars. Native verte
 coordinates carry the conversion; GLB scene-node transforms are insufficient
 across graphics/collision loaders. The editable source export stays unchanged.
 Generation, editing and staged materialization also produce a `scene_usd/` delivery package
-with a schema-v2 `scene.usda` carrying EmbodiChain entity metadata and a
+with a `scene.usda` carrying generation provenance metadata and a
 relocatable `scene.usdz` single-file package, plus `scene_package.zip` using
 DexSim's AssetRevision `2.0-draft` contract. The SDK owns canonical `/Asset`
 packaging, schema validation, file digests and provenance; it currently exposes
 processed-USD export through a private entry isolated in `scene_package.py`.
 Packaging leaves classification and unmeasured quality facts unknown and grants
 no runtime capability or certification. Export failures propagate; stale delivery
-files are invalidated when an editable export is replaced. DexSim preview loads schema-v2
-stages directly through `preview-scene --usd-file`; the manifest and native GLTF/USDC assets remain legacy
-compatibility data. Build it only after the complete simulation scene is
+files are invalidated when an editable export is replaced. The Lab-owned
+`preview-scene --usd-file` loads standard USD through `SimulationManager.add_usd`
+without interpreting GenSim identity or joint-state tags. Manifest and packaged
+native-asset preview adapters have been removed. Build USD only after the complete simulation scene is
 prepared; validate UIDs and keep every packaged asset path inside the output
 root.
 

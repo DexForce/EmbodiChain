@@ -23,12 +23,11 @@
    the same portable directory (`edit.py`).
 5. The editable export is `scene_export/` with `scene.json`, `scene_config.json`,
    `scene_graph.json`, `mesh_assets/`, and `articulated_assets/`. Generation and
-   editing may additionally build `scene_usd/`; schema-v2 `scene.usda` carries
-   stable EmbodiChain entity metadata and is loaded directly by DexSim, while
-   `scene.usdz` is the relocatable single-file delivery form and
-   `preview-scene --usd-file` imports it directly. The manifest and native
-   GLTF/USDC files remain legacy compatibility data. It represents a scene,
-   not a complete `EmbodiedEnv` deployment.
+   editing also build standard `scene_usd/scene.usda`, relocatable `scene.usdz`
+   and a DexSim AssetRevision ZIP. Lab owns `preview-scene --usd-file`; preview
+   consumes the USD file without GenSim manifests or private state restoration.
+   Runtime staging assets are removed after export. These files represent a
+   scene, not a complete `EmbodiedEnv` deployment.
 6. The Asset Engine CLI is a separate ingest path. `asset_engine/cli/start.py` sets
    `PYOPENGL_PLATFORM=egl`, builds `JsonStore` and `ParserManager`, then calls
    `ingest_one_asset()`.

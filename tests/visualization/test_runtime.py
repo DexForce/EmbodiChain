@@ -243,6 +243,7 @@ class _Backend(VisualizationBackend):
         self.image_published = image_published
         self.thread_ids: list[int] = []
         self.replay_states: list[tuple[int, int, bool]] = []
+        self.preview_states: list[tuple[bool, int, bool]] = []
         self.stopped = False
 
     @property
@@ -281,6 +282,12 @@ class _Backend(VisualizationBackend):
     ) -> None:
         self._record_thread()
         self.replay_states.append((step, max_step, visible))
+
+    def publish_preview_control(
+        self, *, running: bool, steps: int, visible: bool
+    ) -> None:
+        self._record_thread()
+        self.preview_states.append((running, steps, visible))
 
     def poll(self) -> None:
         self._record_thread()
@@ -430,5 +437,32 @@ def test_runtime_keeps_only_latest_replay_seek() -> None:
 
         assert runtime.drain_replay_control_command() == REPLAY_LATEST_SEEK
         assert runtime.drain_replay_control_command() is None
+    finally:
+        runtime.stop()
+
+
+@pytest.mark.parametrize("allowed", [True, False])
+def test_preview_controls_publish_on_worker_and_commands_require_permission(allowed):
+    published = threading.Event()
+    backend = _Backend(published, threading.Event())
+    runtime = VisualizationRuntime(
+        _Exporter(published),
+        VisualizationCfg(backend="viser", allow_commands=allowed),
+        backend=backend,
+    )
+    runtime.start()
+    try:
+        runtime.publish_preview_control(running=False, steps=3)
+        deadline = monotonic() + 2
+        while not backend.preview_states and monotonic() < deadline:
+            sleep(0.01)
+        assert backend.preview_states[-1] == (False, 3, True)
+        assert len(set(backend.thread_ids)) == 1
+        for command in ("play", "pause", "step", "reset", "stop", "invalid"):
+            backend._preview_command_sink(command)
+        assert runtime.drain_preview_commands() == (
+            ("stop", "play", "pause", "step", "reset") if allowed else ()
+        )
+        assert runtime.drain_preview_commands() == ()
     finally:
         runtime.stop()

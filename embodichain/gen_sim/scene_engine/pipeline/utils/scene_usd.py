@@ -43,8 +43,6 @@ from embodichain.gen_sim.asset_engine.utils.articulated_usdc_utils import (
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.usd_scene import (
     USD_SCENE_SCHEMA,
-    UsdSceneBinding,
-    UsdSceneIndex,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_package import (
     _export_scene_package,
@@ -53,7 +51,6 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.scene_package import (
 __all__: list[str] = []
 
 _SCENE_EXPORT_FORMAT = "embodichain.scene-export/v1"
-_SCENE_USD_FORMAT = "embodichain.scene-usd/v1"
 
 
 def _validate_uid(value: object, *, label: str) -> str:
@@ -156,9 +153,9 @@ def build_scene_usd(
     """Materialize a Scene Engine export as a self-contained USD package.
 
     ``scene.usda`` is the scene-level USD interchange artifact and receives
-    stable EmbodiChain entity metadata. Its adjacent ``assets/`` directory is
-    retained for legacy compatibility and texture packaging; schema-v2 preview
-    loads the USD stage directly through :meth:`SimulationManager.add_usd`.
+    stable provenance metadata and relative texture dependencies. Preview loads
+    the USD through :meth:`SimulationManager.add_usd` without producer-specific
+    identity or initial-state adaptation.
     ``scene_package.zip`` additionally delivers DexSim's canonical ``asset.usda``
     and schema-validated AssetRevision ``asset.json`` with dependency digests.
     Packaging does not certify geometry, physics, or runtime capabilities.
@@ -187,11 +184,12 @@ def build_scene_usd(
         resolved_output_root / "scene_package.zip",
     ):
         delivery.unlink(missing_ok=True)
-    manifest_path = scene_usd_root / "scene_usd_manifest.json"
+    (scene_usd_root / "scene_usd_manifest.json").unlink(missing_ok=True)
     runtime_assets_root = scene_usd_root / ".export_runtime_assets"
     packaged_assets_root = scene_usd_root / "assets"
     temporary_scene_usd_path.unlink(missing_ok=True)
-    for managed_file in (scene_usd_path, manifest_path):
+    _remove_path(packaged_assets_root)
+    for managed_file in (scene_usd_path,):
         if managed_file.is_symlink():
             managed_file.unlink()
     _remove_path(scene_usd_root / "textures")
@@ -212,11 +210,7 @@ def build_scene_usd(
             config_dir=config_path.parent,
             runtime_assets_root=runtime_assets_root,
         )
-        packaged_assets = _package_runtime_assets(
-            runtime_assets=runtime_assets,
-            destination_root=packaged_assets_root,
-        )
-        articulations = load_scene_export_into_sim(
+        load_scene_export_into_sim(
             sim=sim,
             output_root=resolved_output_root,
             runtime_assets=runtime_assets,
@@ -244,20 +238,10 @@ def build_scene_usd(
             sim=sim,
         )
         temporary_scene_usd_path.replace(scene_usd_path)
-        _write_scene_usd_manifest(
-            path=manifest_path,
-            scene_config=scene_config,
-            scene_usd_path=scene_usd_path,
-            output_root=resolved_output_root,
-            sim=sim,
-            articulations=articulations,
-            packaged_assets=packaged_assets,
-        )
     except Exception:
         # A stale snapshot is worse than no snapshot: ``--usd`` would load a
         # layout that no longer matches the freshly written scene_export.
         scene_usd_path.unlink(missing_ok=True)
-        manifest_path.unlink(missing_ok=True)
         shutil.rmtree(packaged_assets_root, ignore_errors=True)
         raise
     finally:
@@ -277,7 +261,7 @@ def build_scene_usdz(
     scene_usd_path: str | Path,
     output_path: str | Path | None = None,
 ) -> Path:
-    """Package one schema-v2 USD stage into a relocatable USDZ file.
+    """Package one standard USD stage into a relocatable USDZ file.
 
     The USD stage remains the authoring and debug artifact. USDZ is the
     single-file delivery form: USD asset dependencies referenced by the stage
@@ -321,213 +305,6 @@ def build_scene_usdz(
     return destination
 
 
-def load_scene_usd_into_sim(
-    *,
-    sim: SimulationManager,
-    output_root: str | Path,
-) -> list[Articulation]:
-    """Load a generated USD scene, preferring direct stage import.
-
-    Schema-v2 stages are indexed from prim metadata and loaded through
-    ``SimulationManager.add_usd``. Legacy snapshots without entity metadata
-    retain the manifest/runtime-asset compatibility path.
-    """
-    resolved_output_root = Path(output_root).expanduser().resolve()
-    manifest_path = resolved_output_root / "scene_usd" / "scene_usd_manifest.json"
-    if not manifest_path.is_file():
-        raise FileNotFoundError(
-            "Scene USD manifest not found. Generate or re-export the Scene Engine "
-            f"output first: {manifest_path}"
-        )
-    try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise ValueError(
-            f"Scene USD manifest is not valid JSON: {manifest_path}"
-        ) from exc
-    if not isinstance(manifest, dict) or manifest.get("format") != _SCENE_USD_FORMAT:
-        raise ValueError(f"Expected format={_SCENE_USD_FORMAT!r} in {manifest_path}.")
-    raw_scene_usd = manifest.get("scene_usd")
-    entries = manifest.get("objects")
-    if (
-        not isinstance(raw_scene_usd, str)
-        or not isinstance(entries, list)
-        or not all(isinstance(entry, dict) for entry in entries)
-    ):
-        raise ValueError(
-            "Scene USD manifest must contain scene_usd and object entries."
-        )
-    scene_usd_path = (resolved_output_root / raw_scene_usd).resolve()
-    if (
-        resolved_output_root not in scene_usd_path.parents
-        or not scene_usd_path.is_file()
-    ):
-        raise FileNotFoundError(f"Scene USD not found: {scene_usd_path}")
-    usd_index = UsdSceneIndex.load(scene_usd_path)
-    if usd_index.entities:
-        manifest_uids = {
-            entry.get("uid") for entry in entries if isinstance(entry.get("uid"), str)
-        }
-        indexed_uids = {entity.uid for entity in usd_index.entities}
-        if indexed_uids != manifest_uids:
-            raise ValueError(
-                "USD entity metadata and scene manifest contain different UID sets."
-            )
-        if usd_index.schema_version == USD_SCENE_SCHEMA:
-            return _load_embodichain_usd_stage(
-                sim=sim,
-                scene_usd_path=scene_usd_path,
-                index=usd_index,
-            )
-    if all(isinstance(entry.get("runtime_asset"), str) for entry in entries):
-        return _load_packaged_scene_usd(
-            sim=sim,
-            output_root=resolved_output_root,
-            entries=entries,
-        )
-
-    # Compatibility for scene_usd snapshots generated before the package
-    # contained runtime assets.  The legacy flattened USD meshes are still a
-    # useful interchange artifact, but DexSim cannot render GLB submesh
-    # transforms faithfully after a USD round trip.  Rebuild from the paired
-    # Scene Export assets instead, preserving the exact native GLB appearance.
-    _resolve_manifest_source_config(output_root=resolved_output_root, manifest=manifest)
-    return load_scene_export_into_sim(
-        sim=sim,
-        output_root=resolved_output_root,
-        force_static_rigids=True,
-    )
-
-
-def load_usd_stage_into_sim(
-    *,
-    sim: SimulationManager,
-    scene_usd_path: str | Path,
-) -> list[Articulation]:
-    """Load one schema-v2 USD or USDZ stage directly into a simulator.
-
-    This is the single-file delivery path. It does not require a Scene Engine
-    output directory or a JSON manifest; entity identity comes from USD prim
-    metadata and DexSim imports the same stage that EmbodiChain indexes.
-    """
-    path = Path(scene_usd_path).expanduser().resolve()
-    index = UsdSceneIndex.load(path, require_schema=True)
-    return _load_embodichain_usd_stage(
-        sim=sim,
-        scene_usd_path=path,
-        index=index,
-    )
-
-
-def _load_embodichain_usd_stage(
-    *,
-    sim: SimulationManager,
-    scene_usd_path: Path,
-    index: UsdSceneIndex,
-) -> list[Articulation]:
-    """Load a schema-v2 USD stage directly through SimulationManager.add_usd()."""
-    binding = UsdSceneBinding.load_into(sim, scene_usd_path)
-    sim.prepare()
-    binding.apply_initial_state()
-    articulations: list[Articulation] = []
-    for entity in index.entities:
-        if entity.kind != "articulation":
-            continue
-        articulations.append(binding.get(entity.uid).runtime)  # type: ignore[arg-type]
-    return articulations
-
-
-def _load_packaged_scene_usd(
-    *,
-    sim: SimulationManager,
-    output_root: Path,
-    entries: list[dict[str, Any]],
-) -> list[Articulation]:
-    """Build a native preview from the self-contained scene USD package.
-
-    ``scene.usda`` is the package's standard USD interchange artifact.  For
-    native DexSim rendering, the adapter uses its preserved GLB/USDC payloads:
-    DexSim's flattened-USD mesh importer loses GLB internal node transforms,
-    whereas native payload loading retains the render hierarchy, textures, and
-    articulation behavior.
-    """
-    _add_lights(sim)
-    articulations: list[Articulation] = []
-    for entry in entries:
-        uid = _validate_uid(entry.get("uid"), label="Scene USD object")
-        kind = entry.get("kind")
-        asset_path = _resolve_manifest_runtime_asset(
-            output_root=output_root,
-            entry=entry,
-            uid=uid,
-            suffix=".gltf" if kind == "rigid" else ".usdc",
-        )
-        init_pos = tuple(_vector3(entry.get("init_pos"), f"{uid}.init_pos"))
-        init_rot = tuple(_vector3(entry.get("init_rot"), f"{uid}.init_rot"))
-        body_scale = tuple(
-            _vector3(entry.get("body_scale", [1.0, 1.0, 1.0]), f"{uid}.body_scale")
-        )
-        if kind == "rigid":
-            shape = MeshCfg(
-                fpath=str(asset_path),
-                collision=_mesh_collision_cfg(entry.get("max_convex_hull_num", 32)),
-            )
-            shape.load_option.gltfloader = True
-            sim.add_rigid_object(
-                RigidObjectCfg(
-                    uid=uid,
-                    shape=shape,
-                    body_type="static",
-                    init_pos=init_pos,
-                    init_rot=init_rot,
-                    body_scale=body_scale,
-                )
-            )
-        elif kind == "articulation":
-            if entry.get("fix_base", True) is not True:
-                raise ValueError(
-                    f"Scene USD articulation {uid!r} must set fix_base=true."
-                )
-            articulations.append(
-                sim.add_articulation(
-                    ArticulationCfg(
-                        uid=uid,
-                        fpath=str(asset_path),
-                        init_pos=init_pos,
-                        init_rot=init_rot,
-                        body_scale=body_scale,
-                        root_props=ArticulationRootPropertiesCfg(fixed_base=True),
-                        build_pk_chain=False,
-                    )
-                )
-            )
-        else:
-            raise ValueError(f"Scene USD object {uid!r} has invalid kind {kind!r}.")
-    return articulations
-
-
-def _resolve_manifest_runtime_asset(
-    *,
-    output_root: Path,
-    entry: dict[str, Any],
-    uid: str,
-    suffix: str,
-) -> Path:
-    raw_asset = entry.get("runtime_asset")
-    if not isinstance(raw_asset, str):
-        raise ValueError(f"Scene USD object {uid!r} has no runtime_asset.")
-    asset_path = (output_root / raw_asset).resolve()
-    if (
-        output_root not in asset_path.parents
-        or asset_path.suffix.lower() != suffix
-        or not asset_path.is_file()
-    ):
-        raise FileNotFoundError(
-            f"Scene USD {uid!r} runtime asset is invalid or missing: {asset_path}"
-        )
-    return asset_path
-
-
 def _scene_export_config_path(output_root: str | Path) -> Path:
     config_path = (
         Path(output_root).expanduser().resolve() / "scene_export" / "scene_config.json"
@@ -535,18 +312,6 @@ def _scene_export_config_path(output_root: str | Path) -> Path:
     if not config_path.is_file():
         raise FileNotFoundError(f"Scene config not found: {config_path}")
     return config_path
-
-
-def _resolve_manifest_source_config(
-    *, output_root: Path, manifest: dict[str, Any]
-) -> Path:
-    raw_path = manifest.get("source_scene_export")
-    if not isinstance(raw_path, str):
-        raise ValueError("Scene USD manifest has no source_scene_export path.")
-    source_path = (output_root / raw_path).resolve()
-    if output_root not in source_path.parents or not source_path.is_file():
-        raise FileNotFoundError(f"Source scene export not found: {source_path}")
-    return source_path
 
 
 def _read_scene_export(config_path: Path) -> dict[str, Any]:
@@ -743,33 +508,6 @@ def _prepare_runtime_assets(
             allowed_root=config_dir,
         )
     return runtime_assets
-
-
-def _package_runtime_assets(
-    *,
-    runtime_assets: dict[str, Path],
-    destination_root: Path,
-) -> dict[str, Path]:
-    """Persist the externally textured runtime assets beside ``scene.usda``.
-
-    The transient assets are used to create a standard USD texture package.
-    Keeping an identical copy in the delivery directory additionally lets the
-    native DexSim adapter preserve GLB submesh transforms that its USD mesh
-    round-trip currently cannot represent faithfully.
-    """
-    _remove_path(destination_root)
-    packaged_assets: dict[str, Path] = {}
-    for uid, source_asset in runtime_assets.items():
-        safe_uid = _validate_uid(uid, label="Packaged asset")
-        target_root = _resolve_contained_path(
-            destination_root,
-            safe_uid,
-            label="Packaged asset",
-        )
-        target_root.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(source_asset.parent, target_root)
-        packaged_assets[safe_uid] = target_root / source_asset.name
-    return packaged_assets
 
 
 def _externalize_glb_textures(*, source_glb: Path, destination_root: Path) -> Path:
@@ -1590,85 +1328,3 @@ def _author_usd_entity_metadata(
             )
         author_entity(entry=entry, kind="articulation", scene_object=articulation)
     stage.GetRootLayer().Save()
-
-
-def _write_scene_usd_manifest(
-    *,
-    path: Path,
-    scene_config: dict[str, Any],
-    scene_usd_path: Path,
-    output_root: Path,
-    sim: SimulationManager,
-    articulations: list[Articulation],
-    packaged_assets: dict[str, Path],
-) -> None:
-    articulation_by_uid = {
-        articulation.cfg.uid: articulation for articulation in articulations
-    }
-    objects: list[dict[str, object]] = []
-    for field_name in ("background", "rigid_object"):
-        for entry in _config_entries(scene_config, field_name):
-            uid = _validate_uid(entry.get("uid"), label="Scene USD object")
-            rigid = sim.get_rigid_object(uid)
-            if rigid is None:
-                raise RuntimeError(f"Scene USD export did not register rigid {uid!r}.")
-            runtime_asset = packaged_assets.get(uid)
-            if runtime_asset is None:
-                raise RuntimeError(f"Scene USD export did not package rigid {uid!r}.")
-            objects.append(
-                {
-                    "uid": uid,
-                    "kind": "rigid",
-                    "body_type": entry["body_type"],
-                    "runtime_name": rigid._entities[0].get_name(),
-                    "source_asset": entry["shape"]["fpath"],
-                    "runtime_asset": runtime_asset.relative_to(output_root).as_posix(),
-                    "init_pos": _vector3(entry["init_pos"], f"{uid}.init_pos"),
-                    "init_rot": _vector3(entry["init_rot"], f"{uid}.init_rot"),
-                    "body_scale": _vector3(
-                        entry.get("body_scale", [1.0, 1.0, 1.0]),
-                        f"{uid}.body_scale",
-                    ),
-                    "max_convex_hull_num": max(
-                        1, int(entry.get("max_convex_hull_num", 32))
-                    ),
-                }
-            )
-    for entry in _config_entries(scene_config, "articulation"):
-        uid = _validate_uid(entry.get("uid"), label="Scene USD articulation")
-        articulation = articulation_by_uid.get(uid)
-        if articulation is None:
-            raise RuntimeError(
-                f"Scene USD export did not register articulation {uid!r}."
-            )
-        runtime_asset = packaged_assets.get(uid)
-        if runtime_asset is None:
-            raise RuntimeError(
-                f"Scene USD export did not package articulation {uid!r}."
-            )
-        objects.append(
-            {
-                "uid": uid,
-                "kind": "articulation",
-                "runtime_name": articulation._entities[0].get_name(),
-                "source_asset": entry["fpath"],
-                "proxy_asset": entry["proxy_glb_fpath"],
-                "runtime_asset": runtime_asset.relative_to(output_root).as_posix(),
-                "init_pos": _vector3(entry["init_pos"], f"{uid}.init_pos"),
-                "init_rot": _vector3(entry["init_rot"], f"{uid}.init_rot"),
-                "body_scale": _vector3(
-                    entry.get("body_scale", [1.0, 1.0, 1.0]),
-                    f"{uid}.body_scale",
-                ),
-                "fix_base": entry["fix_base"],
-            }
-        )
-    manifest = {
-        "format": _SCENE_USD_FORMAT,
-        "scene_usd": scene_usd_path.relative_to(output_root).as_posix(),
-        "source_scene_export": "scene_export/scene_config.json",
-        "objects": objects,
-    }
-    path.write_text(
-        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )

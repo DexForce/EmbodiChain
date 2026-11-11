@@ -35,10 +35,7 @@ from embodichain.gen_sim.scene_engine.core.scene_object import (
     ObjectPhysics,
     SceneObject,
 )
-from embodichain.gen_sim.scene_engine.cli.preview import (
-    _setup_viser_joint_control,
-    preview_scene_export,
-)
+
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_exporter import SceneExporter
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_importer import (
     SceneExportImporter,
@@ -51,12 +48,9 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd import (
     _externalize_glb_textures,
     _validate_uid,
     build_scene_usdz,
-    load_scene_usd_into_sim,
-    load_usd_stage_into_sim,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.usd_scene import (
     USD_SCENE_SCHEMA,
-    UsdSceneBinding,
     UsdSceneIndex,
 )
 from embodichain.lab.visualization import VisualizationCfg
@@ -460,163 +454,6 @@ def test_scene_export_importer_rejects_explicit_directory_outside_output_root(
         )
 
 
-def test_scene_usd_manifest_restores_only_declared_scene_resources(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    output_root = tmp_path / "output"
-    scene_usd_root = output_root / "scene_usd"
-    scene_usd_root.mkdir(parents=True)
-    (scene_usd_root / "scene.usda").write_text("#usda 1.0\n", encoding="utf-8")
-    manifest_objects = [
-        {
-            "uid": "table",
-            "kind": "rigid",
-            "body_type": "kinematic",
-            "runtime_name": "table_0",
-            "source_asset": "mesh_assets/table/table.glb",
-        },
-        {
-            "uid": "drawer",
-            "kind": "articulation",
-            "runtime_name": "drawer",
-            "source_asset": "articulated_assets/drawer/drawer.usdc",
-            "proxy_asset": "mesh_assets/drawer/drawer.glb",
-            "fix_base": True,
-        },
-    ]
-    (scene_usd_root / "scene_usd_manifest.json").write_text(
-        json.dumps(
-            {
-                "format": "embodichain.scene-usd/v1",
-                "scene_usd": "scene_usd/scene.usda",
-                "source_scene_export": "scene_export/scene_config.json",
-                "objects": manifest_objects,
-            }
-        ),
-        encoding="utf-8",
-    )
-    scene_export_root = output_root / "scene_export"
-    scene_export_root.mkdir()
-    (scene_export_root / "scene_config.json").write_text(
-        json.dumps(
-            {
-                "format": "embodichain.scene-export/v1",
-                "background": [],
-                "rigid_object": [],
-                "articulation": [
-                    {
-                        "uid": "drawer",
-                        "fpath": "articulated_assets/drawer/drawer.usdc",
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    drawer = object()
-    loaded: dict[str, object] = {}
-
-    def _load_legacy_scene_export(**kwargs: object) -> list[object]:
-        loaded.update(kwargs)
-        return [drawer]
-
-    monkeypatch.setattr(
-        "embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd.load_scene_export_into_sim",
-        _load_legacy_scene_export,
-    )
-
-    sim = object()
-    articulations = load_scene_usd_into_sim(  # type: ignore[arg-type]
-        sim=sim,
-        output_root=output_root,
-    )
-
-    assert loaded == {
-        "sim": sim,
-        "output_root": output_root,
-        "force_static_rigids": True,
-    }
-    assert articulations == [drawer]
-
-
-def test_scene_usd_preview_loads_packaged_runtime_assets(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    output_root = tmp_path / "output"
-    scene_usd_root = output_root / "scene_usd"
-    runtime_asset = scene_usd_root / "assets" / "table" / "model.gltf"
-    runtime_asset.parent.mkdir(parents=True)
-    runtime_asset.write_text("{}", encoding="utf-8")
-    articulation_asset = scene_usd_root / "assets" / "drawer" / "model.usdc"
-    articulation_asset.parent.mkdir(parents=True)
-    articulation_asset.write_bytes(b"USDC-drawer")
-    (scene_usd_root / "scene.usda").write_text("#usda 1.0\n", encoding="utf-8")
-    (scene_usd_root / "scene_usd_manifest.json").write_text(
-        json.dumps(
-            {
-                "format": "embodichain.scene-usd/v1",
-                "scene_usd": "scene_usd/scene.usda",
-                "source_scene_export": "scene_export/scene_config.json",
-                "objects": [
-                    {
-                        "uid": "table",
-                        "kind": "rigid",
-                        "body_type": "kinematic",
-                        "runtime_name": "table_0",
-                        "runtime_asset": "scene_usd/assets/table/model.gltf",
-                        "init_pos": [1.0, 2.0, 3.0],
-                        "init_rot": [10.0, 20.0, 30.0],
-                        "body_scale": [1.0, 2.0, 3.0],
-                        "max_convex_hull_num": 16,
-                    },
-                    {
-                        "uid": "drawer",
-                        "kind": "articulation",
-                        "runtime_name": "drawer",
-                        "runtime_asset": "scene_usd/assets/drawer/model.usdc",
-                        "init_pos": [4.0, 5.0, 6.0],
-                        "init_rot": [40.0, 50.0, 60.0],
-                        "body_scale": [1.5, 2.5, 3.5],
-                        "fix_base": True,
-                    },
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    class _SceneUsdSim:
-        def __init__(self) -> None:
-            self.rigid_cfg: object | None = None
-            self.articulation_cfg: object | None = None
-
-        def add_rigid_object(self, cfg: object) -> None:
-            self.rigid_cfg = cfg
-
-        def add_articulation(self, cfg: object) -> object:
-            self.articulation_cfg = cfg
-            return "drawer-resource"
-
-    monkeypatch.setattr(
-        "embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd._add_lights",
-        lambda _: None,
-    )
-
-    sim = _SceneUsdSim()
-    assert load_scene_usd_into_sim(sim=sim, output_root=output_root) == [  # type: ignore[arg-type]
-        "drawer-resource"
-    ]
-    assert sim.rigid_cfg.uid == "table"  # type: ignore[union-attr]
-    assert sim.rigid_cfg.shape.fpath == str(runtime_asset)  # type: ignore[union-attr]
-    assert sim.rigid_cfg.shape.collision.approximation == "convex_decomposition"  # type: ignore[union-attr]
-    assert sim.rigid_cfg.shape.collision.max_hulls == 16  # type: ignore[union-attr]
-    assert sim.rigid_cfg.init_pos == (1.0, 2.0, 3.0)  # type: ignore[union-attr]
-    assert sim.articulation_cfg.uid == "drawer"  # type: ignore[union-attr]
-    assert sim.articulation_cfg.fpath == str(articulation_asset)  # type: ignore[union-attr]
-    assert sim.articulation_cfg.init_pos == (4.0, 5.0, 6.0)  # type: ignore[union-attr]
-
-
 def test_scene_usd_overwrites_existing_runtime_texture(tmp_path: Path) -> None:
     scene_usd_root = tmp_path / "scene_usd"
     texture_root = scene_usd_root / "textures"
@@ -670,66 +507,6 @@ def test_usd_scene_index_reads_entity_metadata(tmp_path: Path) -> None:
     assert drawer.initial_qpos == (0.2, -0.4)
 
 
-def test_schema_v2_usd_preview_uses_direct_simulation_import(
-    tmp_path: Path,
-) -> None:
-    from pxr import Usd, UsdGeom
-
-    output_root = tmp_path / "output"
-    scene_usd_root = output_root / "scene_usd"
-    scene_usd_root.mkdir(parents=True)
-    scene_path = scene_usd_root / "scene.usda"
-    stage = Usd.Stage.CreateNew(str(scene_path))
-    world = UsdGeom.Xform.Define(stage, "/World").GetPrim()
-    world.SetCustomDataByKey("embodichain:scene_schema", USD_SCENE_SCHEMA)
-    entity = UsdGeom.Xform.Define(stage, "/World/Scene/Entities/drawer").GetPrim()
-    entity.SetCustomDataByKey("embodichain:uid", "drawer")
-    entity.SetCustomDataByKey("embodichain:kind", "articulation")
-    stage.GetRootLayer().Save()
-    (scene_usd_root / "scene_usd_manifest.json").write_text(
-        json.dumps(
-            {
-                "format": "embodichain.scene-usd/v1",
-                "scene_usd": "scene_usd/scene.usda",
-                "objects": [{"uid": "drawer", "kind": "articulation"}],
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    drawer = object()
-
-    class _DirectUsdSim:
-        def __init__(self) -> None:
-            self.calls: list[dict[str, str]] = []
-
-        def add_usd(self, cfg) -> dict[str, object]:
-            self.calls.append({"name": cfg.name, "file_path": cfg.source.file_path})
-            return {"/World/Scene/Entities/drawer": drawer}
-
-        def prepare(self) -> None:
-            return None
-
-        def get_articulation(self, _uid: str) -> None:
-            return None
-
-    sim = _DirectUsdSim()
-    assert load_scene_usd_into_sim(sim=sim, output_root=output_root) == [drawer]  # type: ignore[arg-type]
-    assert sim.calls == [{"name": "scene", "file_path": str(scene_path)}]
-
-    standalone_sim = _DirectUsdSim()
-    assert load_usd_stage_into_sim(  # type: ignore[arg-type]
-        sim=standalone_sim,
-        scene_usd_path=scene_path,
-    ) == [drawer]
-    assert standalone_sim.calls == [{"name": "scene", "file_path": str(scene_path)}]
-
-    binding_sim = _DirectUsdSim()
-    binding = UsdSceneBinding.load_into(binding_sim, scene_path)
-    assert binding.get("drawer").runtime is drawer
-    assert binding.scene_entity_cfg("drawer").uid == "drawer"
-
-
 def test_build_scene_usdz_creates_relocatable_single_file(tmp_path: Path) -> None:
     from pxr import Usd, UsdGeom
 
@@ -743,61 +520,6 @@ def test_build_scene_usdz_creates_relocatable_single_file(tmp_path: Path) -> Non
     assert package_path == tmp_path / "scene.usdz"
     assert package_path.is_file()
     assert Usd.Stage.Open(str(package_path)) is not None
-
-
-def test_preview_prepares_before_viser_joint_control(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    output_root = tmp_path / "output"
-    scene_export_root = output_root / "scene_export"
-    scene_export_root.mkdir(parents=True)
-    (scene_export_root / "scene_config.json").write_text("{}", encoding="utf-8")
-    events: list[str] = []
-
-    class FakeSimulationManager:
-        def __init__(self, _cfg: object) -> None:
-            self.sim_config = SimpleNamespace(
-                visualization=SimpleNamespace(backend="viser")
-            )
-
-        def prepare(self) -> None:
-            events.append("prepare")
-
-        def update(self, *, step: int) -> None:
-            events.append(f"update:{step}")
-            raise KeyboardInterrupt
-
-        def destroy(self, *, exit_process: bool) -> None:
-            events.append("destroy")
-
-        @staticmethod
-        def flush_cleanup_queue() -> None:
-            events.append("flush")
-
-    monkeypatch.setattr(
-        "embodichain.lab.sim.SimulationManager",
-        FakeSimulationManager,
-    )
-    monkeypatch.setattr(
-        "embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd.load_scene_export_into_sim",
-        lambda **_: events.append("load") or [],
-    )
-    monkeypatch.setattr(
-        "embodichain.gen_sim.scene_engine.cli.preview._setup_viser_joint_control",
-        lambda **_: events.append("controller") or None,
-    )
-    monkeypatch.setattr(
-        "embodichain.lab.sim.SimulationManager.flush_cleanup_queue",
-        lambda: events.append("flush"),
-    )
-
-    preview_scene_export(
-        output_root=output_root,
-        headless=True,
-        visualization=VisualizationCfg(backend="viser"),
-    )
-
-    assert events == ["load", "prepare", "controller", "update:1", "destroy", "flush"]
 
 
 def test_scene_usd_externalizes_every_pbr_gltf_image(tmp_path: Path) -> None:
@@ -1019,49 +741,6 @@ def test_preview_loads_exported_usdc_as_an_articulation(
     assert articulation_cfg.body_scale == (1.25, 2.5, 3.75)  # type: ignore[attr-defined]
 
 
-def test_preview_registers_exported_articulation_joint_controls(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    class FakeRuntime:
-        def __init__(self) -> None:
-            self.provider: object | None = None
-
-        def set_joint_control_provider(self, provider: object) -> None:
-            self.provider = provider
-
-    class FakeSimulationManager:
-        def __init__(self) -> None:
-            self.visualization_runtime = FakeRuntime()
-
-    class FakeController:
-        def __init__(self, articulations: list[object], runtime: FakeRuntime) -> None:
-            self.articulations = articulations
-            self.runtime = runtime
-            self.has_controls = True
-            self.update_count = 0
-
-        def update(self) -> None:
-            self.update_count += 1
-
-    monkeypatch.setattr(
-        "embodichain.lab.scripts.preview_joint_control.ArticulationPreviewController",
-        FakeController,
-    )
-    articulation = object()
-    sim = FakeSimulationManager()
-
-    controller = _setup_viser_joint_control(
-        sim=sim,  # type: ignore[arg-type]
-        articulations=[articulation],  # type: ignore[list-item]
-        enabled=True,
-    )
-
-    assert controller is sim.visualization_runtime.provider
-    assert controller is not None
-    assert controller.articulations == [articulation]  # type: ignore[attr-defined]
-    assert controller.update_count == 1  # type: ignore[attr-defined]
-
-
 def test_scene_graph_importer_restores_node_pose_description() -> None:
     imported_graph = SceneExportImporter._scene_graph_from_data(
         {
@@ -1223,140 +902,6 @@ def test_scene_export_rejects_backslash_in_object_id(tmp_path: Path) -> None:
             scene_graph=_scene_graph(scene),
             output_root=tmp_path / "output",
         ).export()
-
-
-@pytest.mark.parametrize("headless", [True, False])
-def test_preview_initial_display_does_not_integrate_physics(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, headless: bool
-) -> None:
-    from embodichain.gen_sim.scene_engine.cli import preview
-
-    root = tmp_path / "export"
-    (root / "scene_export").mkdir(parents=True)
-    (root / "scene_export" / "scene_config.json").write_text("{}")
-    events: list[str] = []
-
-    class FakeSimulation:
-        def __init__(self, cfg: object) -> None:
-            self.sim_config = SimpleNamespace(
-                visualization=SimpleNamespace(backend="none")
-            )
-
-        def prepare(self) -> None:
-            events.append("prepare")
-
-        def sync_render_state(self) -> None:
-            events.append("publish")
-
-        def open_window(self) -> None:
-            assert events[-1] == "publish"
-            events.append("open")
-
-        def update(self, **kwargs: object) -> None:
-            assert "open" in events
-            events.append("explicit_preview_step")
-            raise KeyboardInterrupt
-
-        def destroy(self, **kwargs: object) -> None:
-            events.append("destroy")
-
-        @staticmethod
-        def flush_cleanup_queue() -> None:
-            events.append("flush")
-
-    monkeypatch.setattr("embodichain.lab.sim.SimulationManager", FakeSimulation)
-    monkeypatch.setattr(
-        "embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd.load_scene_export_into_sim",
-        lambda **_: [],
-    )
-    preview.preview_scene_export(output_root=root, headless=headless)
-
-    expected = ["prepare", "publish"]
-    if not headless:
-        expected += ["open", "explicit_preview_step"]
-    assert events == expected + ["destroy", "flush"]
-
-
-@pytest.mark.parametrize("backend", ["none", "viser"])
-def test_preview_pose_playback_renders_without_physics(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend: str
-) -> None:
-    from embodichain.gen_sim.scene_engine.cli import preview
-
-    root = tmp_path / "export"
-    (root / "scene_export").mkdir(parents=True)
-    (root / "scene_export" / "scene_config.json").write_text("{}")
-    events: list[str] = []
-    callback_count = 0
-
-    class FakeSimulation:
-        def __init__(self, cfg: object) -> None:
-            self.sim_config = SimpleNamespace(
-                visualization=SimpleNamespace(backend=backend)
-            )
-
-        def prepare(self) -> None:
-            events.append("prepare")
-
-        def sync_render_state(self) -> None:
-            events.append("publish")
-
-        def open_window(self) -> None:
-            events.append("open")
-
-        @contextmanager
-        def render_frame(
-            self, *, force_visualization: bool, capture_camera_images: bool
-        ) -> Iterator[None]:
-            assert not capture_camera_images
-            events.append(f"render:{force_visualization}")
-            yield
-
-        def update(self, **kwargs: object) -> None:
-            pytest.fail("Pose playback must not integrate physics.")
-
-        def destroy(self, **kwargs: object) -> None:
-            events.append("destroy")
-
-        @staticmethod
-        def flush_cleanup_queue() -> None:
-            events.append("flush")
-
-    def on_frame(sim: object) -> bool:
-        nonlocal callback_count
-        assert isinstance(sim, FakeSimulation)
-        callback_count += 1
-        if callback_count == 3:
-            raise KeyboardInterrupt
-        events.append(f"callback:{callback_count}")
-        return callback_count == 2
-
-    monkeypatch.setattr("embodichain.lab.sim.SimulationManager", FakeSimulation)
-    monkeypatch.setattr(
-        "embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd.load_scene_export_into_sim",
-        lambda **_: events.append("load") or [],
-    )
-    monkeypatch.setattr(preview.time, "sleep", lambda _: None)
-    preview.preview_scene_export(
-        output_root=root,
-        headless=backend == "viser",
-        visualization=VisualizationCfg(backend=backend),
-        joint_control=False,
-        on_frame=on_frame,
-        advance_physics=False,
-    )
-
-    initial = ["load", "prepare"]
-    if backend == "none":
-        initial += ["publish", "open"]
-    assert events == initial + [
-        "callback:1",
-        "render:False",
-        "callback:2",
-        "render:True",
-        "destroy",
-        "flush",
-    ]
 
 
 def test_preview_converted_limits_reach_resolved_descriptor(tmp_path, monkeypatch):

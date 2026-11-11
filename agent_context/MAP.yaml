@@ -184,8 +184,8 @@ topics:
   status: active
 - id: sim-visualization
   title: Simulation Visualization
-  aliases: [browser visualization, viser, sim visualization, marker visualization, 标志物可视化, 仿真可视化]
-  keywords: [VisualizationCfg, ViserServerCfg, SceneManifest, visualization, EntityGizmoManipulator, robot_ik_gizmo,
+  aliases: [browser visualization, viser, sim visualization, marker visualization, USD scene preview, 场景预览, 标志物可视化, 仿真可视化]
+  keywords: [preview-scene, preview_scene, VisualizationCfg, ViserServerCfg, SceneManifest, visualization, EntityGizmoManipulator, robot_ik_gizmo,
     GizmoCfg, MarkerGroup, MarkerPrototypeCfg, RobotMarkers, VisualizationMarkers, robot markers, ghost robot, 机器人可视化, backpressure, capture_visualization, Newton deformable, particle set,
     render topology, quaternion, xyzw]
   paths: [topics/sim-visualization/sim-visualization.md]
@@ -196,11 +196,13 @@ topics:
   - embodichain/lab/sim/sim_manager.py
   - embodichain/lab/sim/objects/gizmo.py
   - embodichain/lab/sim/objects/deformable/
+  - embodichain/lab/scripts/preview_scene.py
+  - embodichain/lab/scripts/_scene_preview.py
   - embodichain/lab/scripts/preview_asset.py
   - embodichain/lab/scripts/_preview.py
   - embodichain/lab/scripts/preview_joint_control.py
   watch_paths: [embodichain/lab/visualization/, embodichain/lab/sim/objects/gizmo.py, embodichain/lab/sim/sim_manager.py,
-    tests/visualization/, embodichain/lab/scripts/_preview.py, embodichain/lab/scripts/preview_asset.py,
+    tests/visualization/, embodichain/lab/scripts/_preview.py, embodichain/lab/scripts/preview_scene.py, embodichain/lab/scripts/_scene_preview.py, tests/lab/scripts/test_preview_scene.py, tests/lab/scripts/test_preview_scene_integration.py, embodichain/lab/scripts/preview_asset.py,
     embodichain/lab/scripts/preview_joint_control.py, tests/lab/scripts/test_preview_asset.py,
     tests/lab/scripts/test_preview_joint_control.py]
   related_topics: [simulation-system, env-framework, sensor-system, robot-system, configclass-pattern]

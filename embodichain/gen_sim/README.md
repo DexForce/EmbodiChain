@@ -8,14 +8,15 @@ embodichain gensim asset ingest --input raw_asset --category cup --output output
 embodichain gensim scene generate --image table.png --output outputs/scene
 embodichain gensim scene edit --scene outputs/scene --prompt "Move the cup to the left"
 embodichain gensim scene expand --scene outputs/scene --config layouts.yaml
-embodichain gensim scene preview --scene outputs/scene --viser
+embodichain gensim scene preview --usd-file outputs/scene/scene_usd/scene.usda --viser
 embodichain gensim task plan --image table.png --instruction "Put the cup on the tray" --output outputs/task
 embodichain gensim ui --host 127.0.0.1 --port 7860
 ```
 
 Domain operations share their application implementation with the existing
 `asset-engine`, `scene-engine`, `scene-randomization`, `preview-scene`, and
-`task-engine` commands. Existing argument spellings remain accepted. New commands
+`task-engine` commands. Preview uses the Lab-owned standard USD file interface;
+the old workspace/manifest preview arguments have been removed. New commands
 use `--input`, `--output`, `--scene`, `--prompt`, and hyphenated option names.
 The new scene operation is named `expand`; the legacy top-level command remains
 `scene-randomization`.
@@ -38,8 +39,11 @@ The AssetRevision describes packaging provenance. A scene with multiple
 independent bodies is not automatically one rigidbody or articulation:
 `asset_kind` remains unknown until classified. Unmeasured quality facts stay
 null, the quality summary is `incomplete`, and no runtime capabilities or
-certification are granted by packaging. The legacy scene manifests and
-`embodichain.scene/v2` USD metadata remain available for EmbodiChain preview.
+certification are granted by packaging. Preview consumes the standard USD file
+without interpreting GenSim UID or
+initial-state tags. No scene manifest or copied native-asset preview package is
+produced. The import owner resolves the USD-authored state; old custom metadata
+is not restored by preview.
 
 The UI launcher uses the active Python interpreter, preserves the selected SDK
 import root, and retains the existing UI's process cleanup and authentication.

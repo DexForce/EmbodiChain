@@ -27,6 +27,7 @@ from PIL import Image
 from dexsim.kit.usd import parse_usd
 
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd import (
+    _externalize_glb_textures,
     build_scene_usd,
     build_scene_usdz,
 )
@@ -91,6 +92,9 @@ def test_exported_usd_texture_matches_native_gltf(
         ),
         encoding="utf-8",
     )
+    reference_gltf = _externalize_glb_textures(
+        source_glb=mesh_root / "table.glb", destination_root=tmp_path / "reference_gltf"
+    )
     usd_path = build_scene_usd(output_root=tmp_path)
     if delivery == "usdz":
         usd_path = build_scene_usdz(scene_usd_path=usd_path)
@@ -131,9 +135,7 @@ def test_exported_usd_texture_matches_native_gltf(
         reference = sim.add_visual_object(
             VisualObjectCfg(
                 uid="gltf_reference",
-                shape=MeshCfg(
-                    fpath=str(tmp_path / "scene_usd/assets/table/model.gltf")
-                ),
+                shape=MeshCfg(fpath=str(reference_gltf)),
             )
         )
         exported = sim.add_visual_object(
