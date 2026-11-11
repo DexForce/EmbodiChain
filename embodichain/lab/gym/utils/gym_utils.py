@@ -969,7 +969,10 @@ def config_to_cfg(
     env_cfg.cable_object = []
     for value in config.get("cable_object", []):
         cable = CableObjectCfg.from_dict(value)
-        if isinstance(cable.visual_shape, MeshCfg):
+        if (
+            isinstance(cable.visual_shape, MeshCfg)
+            and cable.visual_shape.fpath is not None
+        ):
             cable.visual_shape.fpath = get_data_path(cable.visual_shape.fpath)
         env_cfg.cable_object.append(cable)
 
