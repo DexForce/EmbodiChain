@@ -38,8 +38,7 @@ pytestmark = [pytest.mark.gpu, pytest.mark.subprocess_sim]
 def _run_fluid_partial_reset():
     from dexsim.engine.newton_physics.solver_runtime import ensure_solver_available
 
-    if not getattr(ensure_solver_available("sph"), "supports_world_reset", False):
-        pytest.skip("requires world-isolated SPH build")
+    ensure_solver_available("dexuni")
     sim = SimulationManager(
         SimulationManagerCfg(
             headless=True,
@@ -112,8 +111,7 @@ def _run_fluid_partial_reset():
 def test_fluid_partial_reset_preserves_other_world():
     from dexsim.engine.newton_physics.solver_runtime import ensure_solver_available
 
-    if not getattr(ensure_solver_available("sph"), "supports_world_reset", False):
-        pytest.skip("requires world-isolated SPH build")
+    ensure_solver_available("dexuni")
     result = subprocess.run(
         [sys.executable, str(Path(__file__).resolve())],
         capture_output=True,

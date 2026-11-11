@@ -177,3 +177,13 @@ def test_online_runner_commits_last_recording_before_close(
     assert order == (["save", "close"] if renderer == "fast-rt" else ["close"])
     assert len(report["videos"]) == (2 if renderer == "fast-rt" and not stale else 0)
     assert (tmp_path / "fluid_gym_result.json").is_file()
+
+
+def test_fluid_state_recording_requires_trajectory(monkeypatch, capsys):
+    import sys
+    from embodichain.lab.scripts import run_fluid_task_program as runner
+
+    monkeypatch.setattr(sys, "argv", ["fluid-task", "--record-fluid-state"])
+    with pytest.raises(SystemExit, match="2"):
+        runner.main()
+    assert "requires --record-trajectory" in capsys.readouterr().err

@@ -79,7 +79,18 @@ FastRT 使用蓝色液面材质，并为每个环境生成独立的 960 × 720�
 Gym 的 `fluid_gym_result.json` 和 Sim 的 `validation.json` 分别记录任务完成情况、
 杯子抬升、最大倾角、放回误差和接水量。完整验收要求实际抬升至少 5 cm、倾角
 至少 45°、放回误差不超过 3 cm，且最终接水至少 50 mL；规划成功或部分视频不能
-替代这些物理测量。`--record-trajectory` 仅保存可选的在线状态诊断。
+替代这些物理测量。使用 `--record-trajectory --record-fluid-state` 可在验收通过后
+保存完整粒子状态；每环境约需 1.28 GiB（76,607 粒、746 帧）。普通
+`ReplayWrapper` 的 `kinematic`/`control` 模式回填粒子，`dynamic` 模式只回填
+初始粒子状态，之后随录制控制动作重新求解流体。
 
-`FluidReplayEnv` 是独立的历史记录诊断工具，不是在线任务的默认输入。它使用
-运动学边界和固定根记录，不能替代动态抓取验证。
+```bash
+python -m embodichain.lab.scripts.run_fluid_task_program \
+  --num-envs 1 --record-trajectory --record-fluid-state \
+  --output outputs/fluid-task-program-online
+embodichain run-task \
+  --gym-config extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml \
+  --num-envs 1 --replay \
+  --replay_trajectory outputs/fluid-task-program-online/online_trajectory.pt \
+  --replay_mode kinematic  # 或 dynamic
+```

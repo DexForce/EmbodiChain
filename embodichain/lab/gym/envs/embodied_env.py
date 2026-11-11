@@ -75,6 +75,7 @@ from embodichain.lab.gym.envs.demo import (
     DemoSegment,
     DemoSegmentResult,
 )
+from embodichain.lab.gym.envs._fluid_trajectory import FluidTrajectoryRecorder
 from embodichain.lab.gym.envs.types import ControllerAction
 from embodichain.lab.gym.envs.expert_trajectory import (
     ExpertTrajectoryCfg,
@@ -375,6 +376,40 @@ class EmbodiedEnvCfg(EnvCfg):
     """
 
 
+class _EpisodeMetadataRows(Sequence):
+    """Retain reset-time metadata, materializing row copies when recording uses them."""
+
+    def __init__(self, count: int, template: dict[str, Any]) -> None:
+        pending = (copy.deepcopy(template),)
+        self._rows = [pending] * count
+
+    def __len__(self) -> int:
+        return len(self._rows)
+
+    def __getitem__(self, index: int | slice) -> dict[str, Any] | list[dict[str, Any]]:
+        if isinstance(index, slice):
+            return [self[i] for i in range(*index.indices(len(self)))]
+        record = self._rows[index]
+        if isinstance(record, tuple):
+            record = copy.deepcopy(record[0])
+            episode_uuid = str(uuid4())
+            record.update(
+                env_id=index % len(self),
+                episode_uuid=episode_uuid,
+                source_episode_uuid=episode_uuid,
+            )
+            self._rows[index] = record
+        return record
+
+    def __setitem__(self, index: int, record: dict[str, Any]) -> None:
+        self._rows[index] = record
+
+    def reset_rows(self, ids: Sequence[int], template: dict[str, Any]) -> None:
+        pending = (copy.deepcopy(template),)
+        for index in ids:
+            self._rows[index] = pending
+
+
 @register_env("EmbodiedEnv-v1")
 class EmbodiedEnv(BaseEnv):
     """Embodied AI environment that is used to simulate the Embodied AI tasks.
@@ -490,7 +525,7 @@ class EmbodiedEnv(BaseEnv):
         self._record_raw_actions = self._explicit_policy_rollout
         self._last_action_manager_qpos: torch.Tensor | None = None
         self._last_action_trace: ActionTrace | None = None
-        self._expert_controller_qpos_history: list[list[torch.Tensor]] = []
+        self._expert_controller_qpos_history: list[list[torch.Tensor]] | None = None
 
         super().__init__(cfg, **kwargs)
 
@@ -565,13 +600,14 @@ class EmbodiedEnv(BaseEnv):
                 )
 
             self._traj_buffer: TensorDict | None = None
+            self._fluid_trajectory_recorder: FluidTrajectoryRecorder | None = None
             self._traj_steps: torch.Tensor | None = None
             self._traj_raw_action: EnvAction | None = None
             self._trajectory_action_kind: str | None = None
-            self._raw_action_history: list[list[EnvAction]] = [
-                [] for _ in range(self.num_envs)
-            ]
-            self._expert_controller_qpos_history = [[] for _ in range(self.num_envs)]
+            # Recording methods allocate row histories on their first sample.
+            # Training resets then avoid downloading IDs to clear empty lists.
+            self._raw_action_history: list[list[EnvAction]] | None = None
+            self._expert_controller_qpos_history = None
             self._traj_save_count = 0
             self._traj_run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
             if self.cfg.record_trajectory:
@@ -631,9 +667,9 @@ class EmbodiedEnv(BaseEnv):
             self._demo_segment_participants = self._demo_active_mask.clone()
             self._demo_active_segment_start_steps = self._demo_steps.clone()
             self._demo_active_rollout_start_steps = self.rollout_steps.clone()
+            self._demo_metadata_initialized = False
             self._demo_episode_metadata: list[dict[str, Any]] = [
-                self._new_demo_episode_metadata(env_id)
-                for env_id in range(self.num_envs)
+                {} for _ in range(self.num_envs)
             ]
 
             self.episode_success_status: torch.Tensor = torch.zeros(
@@ -806,6 +842,23 @@ class EmbodiedEnv(BaseEnv):
                         policy[key] = storage[key]
                     # Existing consumers retain their transition-length view.
                     self.rollout_buffer = policy[:, : self._max_rollout_steps]
+        recorder = getattr(self, "_fluid_trajectory_recorder", None)
+        if recorder is not None:
+            recorder.capture(self, env_ids.tolist(), reset=True)
+
+    def attach_fluid_trajectory_recorder(
+        self, recorder: FluidTrajectoryRecorder
+    ) -> None:
+        """Attach a bounded fluid-state recorder before the first reset."""
+        if not isinstance(recorder, FluidTrajectoryRecorder):
+            raise TypeError("recorder must be a FluidTrajectoryRecorder.")
+        if not self.cfg.record_trajectory or not self.cfg.fluid_object:
+            raise ValueError(
+                "Fluid recording requires trajectory and fluid configuration."
+            )
+        if self._fluid_trajectory_recorder is not None:
+            raise RuntimeError("A fluid trajectory recorder is already attached.")
+        self._fluid_trajectory_recorder = recorder
 
     def set_rollout_buffer(self, rollout_buffer: TensorDict) -> None:
         """Set the rollout buffer for episode data collection.
@@ -1517,12 +1570,12 @@ class EmbodiedEnv(BaseEnv):
         active_segment_ids = getattr(self, "_demo_active_segment_ids", None)
         if active_segment_ids is not None:
             demo_ids = env_ids_to_process.to(active_segment_ids.device)
-            active_segment_ids[demo_ids] = 0
-            self._demo_active_mask[demo_ids] = True
-            self._demo_segment_participants[demo_ids] = False
-            self._demo_active_segment_start_steps[demo_ids] = 0
-            self._demo_active_rollout_start_steps[demo_ids] = 0
-            self._demo_steps[demo_ids] = 0
+            active_segment_ids.index_fill_(0, demo_ids, 0)
+            self._demo_active_mask.index_fill_(0, demo_ids, True)
+            self._demo_segment_participants.index_fill_(0, demo_ids, False)
+            self._demo_active_segment_start_steps.index_fill_(0, demo_ids, 0)
+            self._demo_active_rollout_start_steps.index_fill_(0, demo_ids, 0)
+            self._demo_steps.index_fill_(0, demo_ids, 0)
 
         self.episode_success_status.index_fill_(0, env_ids_to_process, False)
 
@@ -1530,10 +1583,41 @@ class EmbodiedEnv(BaseEnv):
         self, env_ids: Sequence[int] | torch.Tensor | None = None, **kwargs: Any
     ) -> None:
         env_ids_to_process = self.episode_context._ids(env_ids)
+        # Keep one shared provenance snapshot per seed epoch, even without a
+        # recorder. Individual episode dictionaries and UUIDs stay lazy.
+        seed = getattr(self.cfg, "seed", None)
+        snapshot = getattr(self, "_demo_reset_provenance", None)
+        if snapshot is None or snapshot["seed"] != seed:
+            self._recording_provenance = build_recording_provenance(self)
+            snapshot = {"seed": seed, **self._recording_provenance}
+            self._demo_reset_provenance = snapshot
+        rows = getattr(self, "_demo_episode_provenance", None)
+        if rows is None:
+            rows = self._demo_episode_provenance = [snapshot] * self.num_envs
+        metadata_ids = env_ids_to_process.cpu().tolist()
+        for env_id in metadata_ids:
+            rows[env_id] = snapshot
         episode_metadata = getattr(self, "_demo_episode_metadata", None)
-        if episode_metadata is not None:
-            for env_id in env_ids_to_process.cpu().tolist():
-                episode_metadata[env_id] = self._new_demo_episode_metadata(env_id)
+        if not getattr(self, "_demo_metadata_initialized", True) and (
+            self.dataset_manager is not None
+            or getattr(self, "rollout_buffer", None) is not None
+            or getattr(self, "_traj_buffer", None) is not None
+        ):
+            episode_metadata = self._demo_episode_metadata = _EpisodeMetadataRows(
+                self.num_envs, self._new_demo_episode_metadata(0)
+            )
+            self._demo_metadata_initialized = True
+        if episode_metadata is not None and getattr(
+            self, "_demo_metadata_initialized", True
+        ):
+            if isinstance(episode_metadata, _EpisodeMetadataRows):
+                if metadata_ids:
+                    episode_metadata.reset_rows(
+                        metadata_ids, self._new_demo_episode_metadata(metadata_ids[0])
+                    )
+            else:
+                for env_id in metadata_ids:
+                    episode_metadata[env_id] = self._new_demo_episode_metadata(env_id)
         # Stateful managers reset selected rows before reset-mode events run.
         action_manager = getattr(self, "action_manager", None)
         if action_manager is not None:
@@ -1664,7 +1748,9 @@ class EmbodiedEnv(BaseEnv):
             "terminal_reason": "unknown",
             "segments": [],
         }
-        metadata.update(copy.deepcopy(self._recording_provenance))
+        rows = getattr(self, "_demo_episode_provenance", None)
+        provenance = rows[env_id] if rows is not None else self._recording_provenance
+        metadata.update(copy.deepcopy(provenance))
         expert_action_spec = getattr(self, "expert_action_spec", None)
         if expert_action_spec is not None:
             metadata.update(expert_action_spec.metadata(step_dt=self.step_dt))
@@ -1690,9 +1776,10 @@ class EmbodiedEnv(BaseEnv):
         self._demo_segment_participants.fill_(False)
         self._demo_active_segment_start_steps = self._demo_steps.clone()
         self._demo_active_rollout_start_steps = self.rollout_steps.clone()
-        self._demo_episode_metadata = [
-            self._new_demo_episode_metadata(env_id) for env_id in range(self.num_envs)
-        ]
+        self._demo_metadata_initialized = True
+        self._demo_episode_metadata = _EpisodeMetadataRows(
+            self.num_envs, self._new_demo_episode_metadata(0)
+        )
         bridge = getattr(self, "_active_task_program_bridge", None)
         program = getattr(bridge, "_program", None)
         if program is not None:
@@ -1872,6 +1959,11 @@ class EmbodiedEnv(BaseEnv):
         Returns:
             A JSON-compatible metadata dictionary.
         """
+        if "episode_uuid" not in self._demo_episode_metadata[env_id]:
+            metadata = EmbodiedEnv._new_demo_episode_metadata(self, env_id)
+            metadata.update(self._demo_episode_metadata[env_id])
+            self._demo_episode_metadata[env_id] = metadata
+        self._demo_metadata_initialized = True
         metadata = copy.deepcopy(self._demo_episode_metadata[env_id])
         metadata["episode_context"] = self.episode_context.snapshot([env_id])[0]
         metadata["segments"] = [
@@ -2205,17 +2297,27 @@ class EmbodiedEnv(BaseEnv):
                 "Trajectory recording requires an explicit observation frame and action."
             )
         manager._bind_schema(frame)
+        selected = (
+            active if active is not None else getattr(self, "_demo_active_mask", None)
+        )
         _write_raw_rollout(
             self._rollout_storage,
             self.episode_context,
             frame,
             action=self._traj_raw_action,
-            active=(
-                active
-                if active is not None
-                else getattr(self, "_demo_active_mask", None)
-            ),
+            active=selected,
         )
+        recorder = getattr(self, "_fluid_trajectory_recorder", None)
+        if recorder is not None:
+            ids = (
+                list(range(self.num_envs))
+                if selected is None
+                else torch.as_tensor(selected, dtype=torch.bool)
+                .nonzero()
+                .flatten()
+                .tolist()
+            )
+            recorder.capture(self, ids)
         self._traj_raw_action = None
 
     def _write_rl_rollout_step(
@@ -2684,7 +2786,8 @@ class EmbodiedEnv(BaseEnv):
         outcome = getattr(self, "termination_manager", None)
         if outcome is not None:
             info["task_outcome"] = outcome.snapshot()
-        info["episode_context"] = self.episode_context.snapshot()
+        if getattr(self.cfg, "episode_context_in_info", True):
+            info["episode_context"] = self.episode_context.snapshot()
         return info
 
     def check_truncated(self, obs: EnvObs, info: dict[str, Any]) -> torch.Tensor:
@@ -2811,7 +2914,10 @@ class EmbodiedEnv(BaseEnv):
                     if callable(processed_qpos)
                     else None
                 )
-            else:
+            elif self.dataset_manager is not None or (
+                getattr(self, "rollout_buffer", None) is not None
+                and getattr(self, "_rollout_buffer_mode", None) != "rl"
+            ):
                 processed_qpos = getattr(self.action_manager, "_processed_qpos", None)
                 try:
                     self._last_action_manager_qpos = (
@@ -3497,6 +3603,7 @@ class EmbodiedEnv(BaseEnv):
         env_ids: Sequence[int] | None = None,
         *,
         purpose: str = "recording",
+        extra_meta: Mapping[str, Any] | None = None,
     ) -> str:
         """Save a causally aligned trajectory to a ``.pt`` file.
 
@@ -3510,6 +3617,7 @@ class EmbodiedEnv(BaseEnv):
             env_ids: Env indices to save (default: all). Each saved env's actual
                 recorded length is stored in ``meta["lengths"]``.
             purpose: Normal recording or explicitly labeled diagnostic export.
+            extra_meta: Additional artifact metadata; standard fields cannot be replaced.
 
         Raises:
             RuntimeError: If trajectory recording was never enabled.
@@ -3612,6 +3720,17 @@ class EmbodiedEnv(BaseEnv):
             meta["episode_uuid"] = meta["episode_uuids"][0]
             meta["source_episode_uuid"] = meta["source_episode_uuids"][0]
             meta["program_hash"] = meta["demo_episodes"][0].get("program_hash")
+        if extra_meta is not None:
+            if not isinstance(extra_meta, Mapping) or not all(
+                type(key) is str for key in extra_meta
+            ):
+                raise TypeError("extra_meta must be a string-keyed mapping.")
+            duplicate = set(extra_meta) & set(meta)
+            if duplicate:
+                raise ValueError(
+                    f"extra_meta cannot replace trajectory fields: {sorted(duplicate)}"
+                )
+            meta.update(copy.deepcopy(dict(extra_meta)))
         replay_path = str(Path(path).resolve())
         for episode in meta["demo_episodes"]:
             episode["trajectory_path"] = replay_path

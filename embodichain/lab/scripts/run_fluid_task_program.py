@@ -30,6 +30,7 @@ import torch
 
 from embodichain.lab.gym.envs.demo import execute_demo_episode
 from embodichain.lab.gym.envs.embodied_env import EmbodiedEnvCfg
+from embodichain.lab.gym.envs._fluid_trajectory import FluidTrajectoryRecorder
 from embodichain.lab.gym.envs.managers.cfg import SceneEntityCfg
 from embodichain.lab.gym.envs.managers.observations import (
     get_fluid_summary,
@@ -146,7 +147,11 @@ def _run(args: argparse.Namespace, output: Path) -> dict[str, Any]:
     )
     discover_task_packages()
     env = make(task_id, cfg=cfg)
+    fluid_recorder = None
     try:
+        if getattr(args, "record_fluid_state", False):
+            fluid_recorder = FluidTrajectoryRecorder(output, env.num_envs, env.step_dt)
+            env.unwrapped.attach_fluid_trajectory_recorder(fluid_recorder)
         env.reset(seed=0)
         cup = env.sim.get_rigid_object("cup")
         poses = [cup.get_local_pose().cpu().numpy().copy()]
@@ -207,8 +212,6 @@ def _run(args: argparse.Namespace, output: Path) -> dict[str, Any]:
                         matches.append(video_path)
                 if matches:
                     videos.append(str(sorted(matches)[-1].relative_to(output)))
-        if args.record_trajectory:
-            env.save_trajectory(str(output / "online_trajectory.pt"))
         report = {
             "task": str(path),
             "coupling": "online one-way rigid-to-fluid",
@@ -234,6 +237,36 @@ def _run(args: argparse.Namespace, output: Path) -> dict[str, Any]:
         (output / "fluid_gym_result.json").write_text(
             json.dumps(report, indent=2) + "\n"
         )
+        if args.record_trajectory:
+            trajectory_path = output / "online_trajectory.pt"
+            extra_meta = None
+            if fluid_recorder is not None and accepted:
+                episodes = [
+                    env.unwrapped.get_demo_episode_metadata(index)
+                    for index in range(env.num_envs)
+                ]
+                hashes = {episode.get("program_hash") for episode in episodes}
+                if len(hashes) != 1 or not next(iter(hashes)):
+                    raise RuntimeError(
+                        "Accepted fluid source has no common program hash."
+                    )
+                extra_meta = {
+                    "fluid_qualification": {
+                        "kind": "task_program",
+                        "accepted": True,
+                        "program_hash": next(iter(hashes)),
+                    },
+                    "fluid_state": fluid_recorder.finish(
+                        trajectory_path, env.unwrapped._traj_steps.tolist()
+                    ),
+                }
+            env.save_trajectory(
+                str(trajectory_path),
+                purpose="recording" if accepted else "diagnostic",
+                extra_meta=extra_meta,
+            )
+            if fluid_recorder is not None and accepted:
+                fluid_recorder.commit()
         print(
             json.dumps(
                 {
@@ -249,6 +282,8 @@ def _run(args: argparse.Namespace, output: Path) -> dict[str, Any]:
             )
         return report
     finally:
+        if fluid_recorder is not None:
+            fluid_recorder.abort()
         env.close(exit_process=False)
         del env
         SimulationManager.flush_cleanup_queue()
@@ -273,7 +308,14 @@ def main() -> None:
         action="store_true",
         help="Optionally save measured online states for inspection.",
     )
+    parser.add_argument(
+        "--record-fluid-state",
+        action="store_true",
+        help="Spool full particle states alongside an accepted trajectory.",
+    )
     args = parser.parse_args()
+    if args.record_fluid_state and not args.record_trajectory:
+        parser.error("--record-fluid-state requires --record-trajectory")
     if args.seconds is not None and (
         not np.isfinite(args.seconds) or args.seconds <= 0
     ):

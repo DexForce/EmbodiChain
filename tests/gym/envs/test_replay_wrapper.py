@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from contextlib import contextmanager
 
 import gymnasium as gym
 import pytest
@@ -34,12 +35,30 @@ class _FakeSim:
     def __init__(self) -> None:
         self.physics_enabled: list[bool] = []
         self.updates: list[tuple[float, int]] = []
+        self.rendered = 0
 
     def enable_physics(self, enabled: bool) -> None:
         self.physics_enabled.append(enabled)
 
     def update(self, physics_dt: float, substeps: int) -> None:
         self.updates.append((physics_dt, substeps))
+
+    @contextmanager
+    def render_frame(self, *, force_visualization: bool = False):
+        self.rendered += 1
+        yield
+
+
+class _FakeFluidReader:
+    def __init__(self) -> None:
+        self.applied: list[list[int]] = []
+        self.closed = False
+
+    def apply(self, env, steps: torch.Tensor) -> None:
+        self.applied.append(steps.tolist())
+
+    def close(self) -> None:
+        self.closed = True
 
 
 class _FakeEnv(gym.Env):
@@ -204,3 +223,59 @@ def test_dynamic_replay_decodes_position_velocity_expert_action(fake_restore):
 def test_replay_rejects_unknown_mode():
     with pytest.raises(ValueError, match="Invalid replay mode"):
         ReplayWrapper(_FakeEnv(), _trajectory(), mode="unsupported")
+
+
+@pytest.mark.parametrize("mode", ["kinematic", "control"])
+def test_fluid_kinematic_and_control_restore_recorded_frames(fake_restore, mode):
+    env = _FakeEnv()
+    env.cfg.fluid_object = [object()]
+    reader = _FakeFluidReader()
+    replay = ReplayWrapper(env, _trajectory(), mode=mode, fluid_reader=reader)
+
+    replay.reset()
+    replay.step(None)
+    if mode == "control":
+        replay.go_to_step(1)
+
+    assert reader.applied == ([[0], [0], [1]] if mode == "control" else [[0], [0]])
+    assert env.sim.updates == []
+    assert env.sim.rendered == (2 if mode == "control" else 1)
+    replay.close()
+    assert reader.closed
+
+
+def test_fluid_dynamic_restores_only_initial_particles(fake_restore):
+    env = _FakeEnv()
+    env.cfg.fluid_object = [object()]
+    reader = _FakeFluidReader()
+    replay = ReplayWrapper(env, _trajectory(), mode="dynamic", fluid_reader=reader)
+
+    replay.reset()
+    replay.step(None)
+
+    assert reader.applied == [[0]]
+    assert len(env.received_actions) == 1
+    replay.close()
+
+
+def test_fluid_control_can_seek_recorded_terminal_state(fake_restore):
+    env = _FakeEnv()
+    env.cfg.fluid_object = [object()]
+    reader = _FakeFluidReader()
+    trajectory = _trajectory()
+    trajectory["terminal_states"] = trajectory["states"][:, -1].clone()
+    replay = ReplayWrapper(env, trajectory, mode="control", fluid_reader=reader)
+
+    replay.reset()
+    replay.go_to_step(2)
+
+    assert replay.control_max_step == 2
+    assert reader.applied == [[0], [2]]
+    replay.close()
+
+
+def test_fluid_artifact_rejects_scene_without_fluid():
+    trajectory = _trajectory()
+    trajectory["meta"]["fluid_state"] = {"schema_version": 1}
+    with pytest.raises(ValueError, match="configured fluid"):
+        ReplayWrapper(_FakeEnv(), trajectory, mode="kinematic")

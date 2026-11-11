@@ -39,6 +39,7 @@ from embodichain.lab.gym.envs.demo import (
     execute_demo_episode,
 )
 from embodichain.lab.gym.envs.wrapper import ReplayWrapper
+from embodichain.lab.gym.envs._fluid_trajectory import FluidTrajectoryReader
 from embodichain.lab.gym.utils.gym_utils import (
     add_env_launcher_args_to_parser,
     build_env_cfg_from_args,
@@ -1132,7 +1133,13 @@ def _run_expansion(
     )
 
 
-def replay(env, trajectory_path: str, mode: str = "kinematic") -> None:
+def replay(
+    env,
+    trajectory_path: str,
+    mode: str = "kinematic",
+    *,
+    fluid_reader: FluidTrajectoryReader | None = None,
+) -> None:
     """Replay a recorded trajectory.
 
     The caller retains ownership of ``env``. Wrapper-specific replay state is
@@ -1153,19 +1160,39 @@ def replay(env, trajectory_path: str, mode: str = "kinematic") -> None:
         f"num_steps={meta['num_steps']}, mode={mode}",
         color="green",
     )
-    replay_env = ReplayWrapper(env.unwrapped, trajectory_path, mode=mode)
+    if fluid_reader is not None:
+        behavior = (
+            "recorded particle states without physics"
+            if mode in {"kinematic", "control"}
+            else "recorded controls with newly simulated fluid"
+        )
+        log_info(
+            f"Accepted Task Program fluid source; replaying {behavior}. "
+            "Source acceptance does not qualify this replay's physical outcome.",
+            color="green",
+        )
+    replay_env = None
     try:
+        replay_env = ReplayWrapper(
+            env.unwrapped, trajectory_path, mode=mode, fluid_reader=fluid_reader
+        )
         if mode == "control":
             replay_control(replay_env)
         else:
             replay_auto(replay_env, mode)
     finally:
-        # ReplayWrapper.close() also closes its wrapped environment. Restore
-        # its local state here and leave the single close() to cli().
-        try:
-            replay_env.env.sim.enable_physics(True)
-        finally:
-            replay_env.env._replay_no_auto_reset = False
+        if replay_env is None:
+            if fluid_reader is not None:
+                fluid_reader.close()
+        else:
+            # ReplayWrapper.close() also closes its wrapped environment. Restore
+            # its local state here and leave the single close() to cli().
+            try:
+                replay_env.env.sim.enable_physics(True)
+            finally:
+                replay_env.env._replay_no_auto_reset = False
+                if replay_env._fluid_reader is not None:
+                    replay_env._fluid_reader.close()
 
 
 def replay_auto(replay_env: ReplayWrapper, mode: str) -> None:
@@ -1445,7 +1472,13 @@ def replay_control(replay_env: ReplayWrapper) -> None:
         )
 
 
-def main(args: Any, env: Any, gym_config: dict[str, Any]) -> None:
+def main(
+    args: Any,
+    env: Any,
+    gym_config: dict[str, Any],
+    *,
+    fluid_reader: FluidTrajectoryReader | None = None,
+) -> None:
     """Run the selected workflow without taking ownership of ``env``."""
     if getattr(args, "replay", False):
         log_info("Replay mode.", color="green")
@@ -1453,6 +1486,7 @@ def main(args: Any, env: Any, gym_config: dict[str, Any]) -> None:
             env,
             args.replay_trajectory,
             getattr(args, "replay_mode", "kinematic"),
+            fluid_reader=fluid_reader,
         )
         return
 
@@ -1904,7 +1938,19 @@ def cli(argv: Sequence[str] | None = None) -> None:
     if args.replay and args.replay_mode == "control":
         log_info("Dataset saving disabled for control replay mode.", color="green")
 
-    env = gymnasium.make(id=gym_config["id"], cfg=env_cfg, **action_config)
+    fluid_reader = None
+    if args.replay and env_cfg.fluid_object:
+        fluid_reader = FluidTrajectoryReader(
+            args.replay_trajectory,
+            load_trajectory(args.replay_trajectory),
+            env_cfg,
+        )
+    try:
+        env = gymnasium.make(id=gym_config["id"], cfg=env_cfg, **action_config)
+    except BaseException:
+        if fluid_reader is not None:
+            fluid_reader.close()
+        raise
 
     # Ensure the sim is torn down via env.close() (-> SimulationManager.destroy())
     # before the interpreter shuts down. Without this, C++ resources (dexsim/warp/
@@ -1925,7 +1971,7 @@ def cli(argv: Sequence[str] | None = None) -> None:
             install_real2sim_tabletop_owner(
                 env, real2sim_profile, dataset_dir=args.expansion_dataset_dir
             )
-        main(args, env, gym_config)
+        main(args, env, gym_config, fluid_reader=fluid_reader)
     except BaseException as error:
         body_error = error
         raise

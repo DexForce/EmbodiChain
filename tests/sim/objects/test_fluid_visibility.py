@@ -75,13 +75,8 @@ def _run_visibility_worker(output: Path, clipping: bool) -> None:
     from embodichain.lab.sim.material import VisualMaterialCfg
     from embodichain.lab.sim.sensors import CameraCfg
 
-    solver = ensure_solver_available("sph")
-    num_envs = (
-        2
-        if getattr(solver, "supports_world_isolation", False)
-        and getattr(solver, "supports_world_reset", False)
-        else 1
-    )
+    ensure_solver_available("dexuni")
+    num_envs = 2
     sim = SimulationManager(
         SimulationManagerCfg(
             headless=True,

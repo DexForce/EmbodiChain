@@ -43,6 +43,8 @@ names pass through to DexSim's `RegisteredNewtonSolverCfg`; unregistered names
 remain errors. Read exact solver options/defaults in `cfg/physics.py` and the
 installed DexSim config types; do not substitute a
 hardcoded fallback when an expected DexSim API is absent.
+`mesh_bvh_constructor` selects the mesh and heightfield query acceleration
+structure. `None` keeps the native default.
 
 The spring-slider provider lives only in
 `scripts/tutorials/sim/simple_newton_solver/`; see its

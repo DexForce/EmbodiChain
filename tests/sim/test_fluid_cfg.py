@@ -298,6 +298,28 @@ def test_dexuni_fluid_capability_tracks_native_config(monkeypatch, has_sph_cfg):
     assert backend.supports_dexuni_fluids is has_sph_cfg
 
 
+def test_dexuni_fluid_world_capability_uses_prepared_backend(monkeypatch):
+    from types import SimpleNamespace
+    import dexsim.engine.newton_physics as native
+    from dexsim.engine.newton_physics import backend_registry
+    from embodichain.lab.sim.physics.newton import NewtonPhysicsBackend
+
+    fake_cfg = type("FakeDexUniCfg", (), {"__dataclass_fields__": {"sph_cfg": None}})
+    monkeypatch.setattr(native, "DexUniSolverCfg", fake_cfg)
+    fluid = SimpleNamespace(supports_world_isolation=True, supports_world_reset=True)
+    monkeypatch.setattr(
+        backend_registry,
+        "get_newton_backend",
+        lambda _: SimpleNamespace(solver_type="dexuni", sph_solver=fluid),
+    )
+    backend = NewtonPhysicsBackend(SimpleNamespace(_world=object()))
+    backend._configured_solver_type = "dexuni"
+
+    assert backend.supports_fluid_worlds
+    fluid.supports_world_reset = False
+    assert not backend.supports_fluid_worlds
+
+
 def test_fluid_reset_invalidates_sph_without_resetting_dexuni_bodies(monkeypatch):
     from types import SimpleNamespace
     from unittest.mock import Mock

@@ -22,6 +22,8 @@ from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from .motion import MotionLibrary
+    from .motion_sampling import MotionStartSampler, MotionStartSamplerCfg
     from .online_data import OnlineDataset
     from .sampler import ChunkSizeSampler, GMMChunkSampler, UniformChunkSampler
     from .sequence import (
@@ -37,6 +39,9 @@ if TYPE_CHECKING:
     from .schema import validate_data_schema, data_schema_fingerprint
 
 __all__ = [
+    "MotionLibrary",
+    "MotionStartSampler",
+    "MotionStartSamplerCfg",
     "ChunkSizeSampler",
     "GMMChunkSampler",
     "OnlineDataset",
@@ -60,6 +65,9 @@ def __getattr__(name: str) -> Any:
     if name not in __all__:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     module_name = {
+        "MotionLibrary": "motion",
+        "MotionStartSampler": "motion_sampling",
+        "MotionStartSamplerCfg": "motion_sampling",
         "OnlineDataset": "online_data",
         "OfflineDataset": "offline_data",
         "SequenceDataset": "sequence_data",

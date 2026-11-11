@@ -304,6 +304,10 @@ not orchestrate multiple experiments or qualify kinematic playback.
   accepted. Objective-enabled dynamic replay requires one row and a full reset.
   `control` exposes `go_to_step(step)` for O(1) scrubbing. The replay env must
   use the same robot/objects/`actions` config as the recording env.
+  Qualified fluid recordings carry bounded particle-state sidecars. Kinematic
+  and control replay restore complete particle states at each recorded boundary;
+  dynamic replay restores only the initial particle state and recomputes later
+  fluid motion from recorded actions.
 - **Policy projection**: `rollout_buffer` retains actual policy observations,
   including sampled noise, and its existing obs/action/reward alignment for
   LeRobot/RL. It shares the acquisition boundary with raw history, rather than
@@ -335,3 +339,11 @@ All normal output selections also intersect context eligibility. Explicit
 and are never dataset commits. Closing only drains committed writes and discards
 live buffers. Camera recordings use independent row buffers and files, with owned
 context sidecars; asynchronous jobs do not wait for another row or a mosaic.
+
+## Recording cost during RL rollouts
+
+`EmbodiedEnv` allocates raw/controller action histories on the first recording
+sample. Demo provenance is created when recording metadata is requested;
+episode initialization refreshes it once it has been used. Ordinary RL resets
+do not enumerate empty recording histories on the host. Metadata snapshots
+retain deep-copy and episode-context ownership.
