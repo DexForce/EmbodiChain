@@ -92,3 +92,30 @@ unselected joints keep their defaults. Runtime direct-rule priority and caller
 ambiguity validation remain unchanged. Keep source-ordered `asset.init_qpos`
 separate from `robot.joint_names` / `robot.default_joint_position`. These are
 simulation PD presets, without external learned actuator implementations.
+
+## Model-specific calibration
+
+Concrete defaults remain in each vendor/model package, with asset provenance and
+usage links beside it. `FrankaCfg` supports bare FR3/Panda arms; hand embodiments
+add tools explicitly. The original-Panda and historical FR3 asset identities are
+not interchangeable. Tool mount and hand-local TCP must agree with solver TCP.
+
+W1 V030 is a bare-body profile with flange TCPs and FEP defaults; older body
+revisions keep their own solver/hand defaults. Optional Pika assembly belongs to
+`dexforce_w1_030_pika.yaml`, not a new catalog variant. Its ready pose, tool/head
+drives and cameras are embodiment-owned; body assets/groups/solvers remain
+preset-owned. W1 serialization removes and restores revision offsets exactly once.
+
+Aloha Mini and Marvin use strict Warp SSIK arm defaults, ARX5 uses explicit
+near-parallel geometry, and Rizon4S uses prepared RR. Aloha's torso retains a
+position-only Pytorch solver. These modes have different geometric and artifact
+requirements; consult [IK boundaries](../ik-solvers/ik-solvers.md) before replacing
+one. Source URDFs, runtime joint names and PK chains must remain aligned.
+
+Marvin catalog configs preserve source mass, inertia and COM. The bundled
+embodiment's recorded scaling is a demo calibration with unconfirmed source
+units, not a manufacturer-verified SI conversion. Its source revision and
+fingerprint remain explicit. Nominal wrist optics and mesh-derived mounts are
+not hardware calibration. Runtime sensor overrides replace the suite; standalone
+and Gym acquisition switches still apply. Initial positions retain source order,
+and deployment files should reuse the embodiment's ready pose.
