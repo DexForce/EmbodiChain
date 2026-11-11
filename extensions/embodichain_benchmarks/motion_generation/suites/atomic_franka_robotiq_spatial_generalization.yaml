@@ -795,23 +795,17 @@ x-skill-push-object: &skill_push_object
   approach_height_m: 0.10
   retract_height_m: 0.10
   push_overshoot_m: 0.0
-  # Keep the push frame flange-aligned at the Robotiq contact centre.
-  contact_frame_to_eef:
-    - [0.0, -1.0, 0.0, 0.0]
-    - [1.0, 0.0, 0.0, 0.0]
-    - [0.0, 0.0, 1.0, 0.01]
-    - [0.0, 0.0, 0.0, 1.0]
   object_contact_offset_m: [0.0, 0.0, -0.01]
   cases:
     - name: spatial_cube_push_lateral_10cm
       object: cube_50mm
       task_difficulty: simple
-      contact_distance_m: 0.060
+      contact_distance_m: 0.042
       target_object_offset_m: [0.0, 0.10, 0.0]
     - name: spatial_cube_push_toward_base_8cm
       object: cube_50mm
       task_difficulty: simple
-      contact_distance_m: 0.0465
+      contact_distance_m: 0.052
       target_object_offset_m: [0.08, 0.0, 0.0]
 
 robot:
