@@ -36,7 +36,7 @@ profile:
     pick:
       kind: pick_up
       hand_interp_steps: 10
-      grasp_settle_steps: 10
+      grasp_settle_steps: 20
       lift_height: 0.12
       pre_grasp_distance: 0.08
       approach_direction:

@@ -23,8 +23,13 @@ python -m embodichain.lab.scripts.run_fluid_task_program \
 
 任务的执行节奏由
 [`trajectory_open_loop_fluid_pour.yaml`](../../../../components/execution_policies/trajectory_open_loop_fluid_pour.yaml)
-配置。轨迹最少采样 80 点；规划器会根据关节速度和加速度约束增加采样点，并保留
-抓取及放回时的稳定等待。
+配置。轨迹最少采样 80 点，任务级规划加速度预算为 2.0 rad/s²；规划器仍遵守
+机器人原有的关节速度上限。流体部署使用独立的加速夹爪组件，不改变普通 Newton
+部署的接触参数。程序的 `wait_stable` 负责放回后的稳定检查，在线运行器默认不再
+附加额外等待。
+
+流体专用的 `franka_panda_fast_fluid` 组件将仿真夹指最大驱动力设为 160，接触
+动摩擦系数设为 3.0，以在更高加速度下保持抓取；这组任务参数不代表实机标定。
 
 也可使用普通任务入口：
 
@@ -52,7 +57,7 @@ python scripts/tutorials/sim/franka_dexuni_pour_demo.py --headless --renderer fa
 
 `env.fluid.yaml` 声明 DexUni 的 `sph_cfg`、机器人和场景。外层物理步为 1/240 s，
 每步 2 个 DFSPH 子步，每个 DFSPH 子步包含 15 个 MuJoCo 刚体子步；控制周期为
-0.05 s（每 12 个物理步更新一次控制）。未指定关节所有权时，流体准备阶段将完整的机器人和杯子关节拓扑分配给
+0.025 s（每 6 个物理步更新一次控制）。未指定关节所有权时，流体准备阶段将完整的机器人和杯子关节拓扑分配给
 MuJoCo，以满足当前 DexUni/DFSPH 原型的纯 MuJoCo 刚体要求。任务使用完整机器人
 关节目标，使两个手指都收到夹持目标。
 
@@ -64,7 +69,7 @@ MuJoCo，以满足当前 DexUni/DFSPH 原型的纯 MuJoCo 刚体要求。任务�
 
 ## 录制与验收
 
-FastRT 使用蓝色液面材质，并为每个环境生成独立的 960 × 720、20 fps 视频。Gym
+FastRT 使用蓝色液面材质，并为每个环境生成独立的 960 × 720、40 fps 视频。Gym
 正常录制保存到 `videos/env_000/episode_000000_fluid_gym.mp4`；未完成或不合格的
 片段保存到 `videos/diagnostics/`。Sim 示例输出 `fluid_sim_env0.mp4`。
 

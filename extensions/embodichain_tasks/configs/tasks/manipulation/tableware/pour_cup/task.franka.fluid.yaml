@@ -8,7 +8,7 @@ task_program:
   integration: task_program/integration.fluid.yaml
   execution_policy: ../../../../components/execution_policies/trajectory_open_loop_fluid_pour.yaml
 embodiment:
-  component: ../../../../components/embodiments/franka_panda_firm_grip_newton.yaml
+  component: ../../../../components/embodiments/franka_panda_fast_fluid.yaml
   overrides:
     init_rot:
     - 0.0

@@ -8,11 +8,12 @@ motion:
   strategy: ik_interp
   # This is a minimum; interpolation adds samples to respect robot limits.
   sample_count: 80
+  acceleration_limit: 2.0
   dynamic_collision_mode: "off"
 
 tracking:
   kind: timed
-  settle_duration: 0.4
+  settle_duration: 0.2
 
 recovery:
   max_replans: 0

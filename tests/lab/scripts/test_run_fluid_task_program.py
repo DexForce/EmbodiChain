@@ -78,7 +78,7 @@ def test_online_task_uses_live_grasp_and_same_body_particle_boundary(tmp_path):
     assert cfg.events.record_camera.params["max_env_num"] == 2
     assert cfg.record_trajectory is False
     assert cfg.control_parts is None and cfg.active_joint_ids == []
-    assert cfg.sim_steps_per_control * cfg.sim_cfg.physics_dt == pytest.approx(0.05)
+    assert cfg.sim_steps_per_control * cfg.sim_cfg.physics_dt == pytest.approx(0.025)
     assert not hasattr(cfg.events, "settle_cup")
 
 

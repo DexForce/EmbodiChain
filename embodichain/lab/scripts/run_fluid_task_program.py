@@ -267,7 +267,7 @@ def main() -> None:
     )
     parser.add_argument("--seconds", type=float)
     parser.add_argument("--particle-spacing", type=float)
-    parser.add_argument("--settle-seconds", type=float, default=2.0)
+    parser.add_argument("--settle-seconds", type=float, default=0.0)
     parser.add_argument(
         "--record-trajectory",
         action="store_true",
