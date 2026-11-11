@@ -134,5 +134,7 @@ quota are integration contracts. Generic image tiling belongs to
 | Backend contact behavior | `tests/sim/sensors/test_contact_default_e2e.py`, `test_contact_newton_e2e.py` in that directory |
 
 For missing camera output, inspect enabled fields and `ViewFlags` together.
+Camera and stereo images exclude visual markers by default. Set
+`include_visual_overlays=True` for an explicit preview camera.
 For missing contacts, inspect backend capabilities, the query filter and quota
 before changing buffer allocation. Pure resolver tests do not require a renderer.
