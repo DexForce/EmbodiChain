@@ -29,9 +29,9 @@ if not torch.cuda.is_available():
     pytest.skip("cuRobo V2 requires CUDA", allow_module_level=True)
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg  # noqa: E402
-from embodichain.lab.sim.atomic_actions import (  # noqa: E402
+from embodichain.lab.sim.atomic_skills import (  # noqa: E402
     CARTESIAN_POSE_CAPABILITY,
-    AtomicActionEngine,
+    AtomicSkillEngine,
     CommandAcknowledgement,
     DynamicCollisionMode,
     EndEffectorPoseGoal,
@@ -47,7 +47,7 @@ from embodichain.lab.sim.atomic_actions import (  # noqa: E402
     SimulationExecutionAdapter,
     SkillDescriptor,
 )
-from embodichain.lab.sim.atomic_actions.tracking import TrackingPolicy  # noqa: E402
+from embodichain.lab.sim.atomic_skills.tracking import TrackingPolicy  # noqa: E402
 from embodichain.lab.sim.cfg import RigidBodyPhysicsCfg  # noqa: E402
 from embodichain.lab.sim.objects import RigidObjectCfg  # noqa: E402
 from embodichain.lab.sim.motion.motion_generator import MotionGenCfg, MotionGenerator
@@ -190,7 +190,7 @@ def _profile() -> RobotSkillProfile:
             "safe": SkillPolicyPreset(
                 "safe",
                 effect_assurance=EffectAssurance.PROJECTED,
-                action_option_templates={
+                skill_option_templates={
                     CALL_ID: MoveEndEffectorOptions(),
                 },
                 motion_policy=MotionPolicy(
@@ -205,7 +205,7 @@ def _profile() -> RobotSkillProfile:
                 ),
                 recovery_policy=RecoveryPolicy(
                     max_replans=2,
-                    action_timeout=30.0,
+                    skill_timeout=30.0,
                 ),
                 runner_cfg=ExecutionRunnerCfg(minimum_cycle_time=COMMAND_CYCLE_TIME),
             )
@@ -216,7 +216,7 @@ def _profile() -> RobotSkillProfile:
 
 def _compiler(
     registry: SceneRegistry,
-    engine: AtomicActionEngine,
+    engine: AtomicSkillEngine,
 ) -> SemanticCallCompiler:
     """Bind the test semantic extension to the real engine and scene registry."""
     catalog = builtin_semantic_call_catalog().with_descriptor(
@@ -294,7 +294,7 @@ def test_semantic_runtime_replans_after_dynamic_curobo_world_change() -> None:
             scene_provider=scene_provider,
         )
         sink = _CountingCommandSink(adapter)
-        engine = AtomicActionEngine(motion_generator)
+        engine = AtomicSkillEngine(motion_generator)
         runtime = SemanticCallExecutor(
             _compiler(registry, engine),
             adapter,

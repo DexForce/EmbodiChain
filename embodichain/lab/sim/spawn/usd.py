@@ -17,6 +17,8 @@
 
 from __future__ import annotations
 
+from ._usd_assets import _parse_singleton
+
 import os
 from dataclasses import fields, replace
 from typing import TypeVar
@@ -43,6 +45,7 @@ from embodichain.lab.sim.spawn.descriptors import (
     _compile_rigid_physics,
     _compile_visual_material,
     _articulation_root_values,
+    _articulation_gravity_compensation,
     _pose_from_cfg,
     _required_uid,
     _resolve_rigid_physics,
@@ -245,6 +248,7 @@ def _load_usd_articulation(
     source_path: str | None = None,
     newton_solver_type: str | None = None,
 ) -> tuple[ArticulationDesc, dict[str, MaterialDesc], list[ConstraintDesc]]:
+    compensation = _articulation_gravity_compensation(cfg, newton_solver_type)
     preserve_asset_physics = cfg.resolve_asset_physics_mode() == "preserve"
     if not preserve_asset_physics:
         _validate_articulation_rigid_physics(
@@ -282,6 +286,8 @@ def _load_usd_articulation(
         fixed_base_default=bool(desc.fixed_base),
         self_collision_default=desc.enable_self_collision,
     )
+    if compensation is not None:
+        desc.newton_gravity_compensation = compensation
     return desc, materials, constraints
 
 
@@ -312,35 +318,6 @@ def _articulation_constraints(
             )
         )
     return selected
-
-
-def _parse_singleton(
-    path: object, collection: str, label: str, *, prim_path: str | None = None
-):
-    if path is None:
-        raise ValueError(f"A USD path is required for the {label}.")
-
-    from dexsim.kit.usd import parse_usd
-
-    scene = parse_usd(str(path))
-    candidates = getattr(scene, collection)
-    if prim_path is not None:
-        candidates = [
-            item
-            for item in candidates
-            if item.usd is not None and item.usd.prim_path == prim_path
-        ]
-    if len(candidates) != 1:
-        found = [
-            (item.name, None if item.usd is None else item.usd.prim_path)
-            for item in candidates
-        ]
-        selection = "" if prim_path is None else f" at prim path {prim_path!r}"
-        raise ValueError(
-            f"Expected exactly one {label} in USD file {path!r}{selection}, found "
-            f"{len(candidates)}: {found}."
-        )
-    return scene, candidates[0]
 
 
 def _namespace_materials(

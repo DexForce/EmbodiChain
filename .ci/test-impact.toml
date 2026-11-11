@@ -146,10 +146,10 @@ tests = [
 contracts = ["tests/gym/envs/managers/test_event_manager_seed.py"]
 
 [topics."atomic-actions"]
-tests = ["tests/sim/atomic_actions/**"]
+tests = ["tests/sim/atomic_skills/**"]
 contracts = [
-  "tests/sim/atomic_actions/test_core.py",
-  "tests/sim/atomic_actions/test_engine.py",
+  "tests/sim/atomic_skills/test_core.py",
+  "tests/sim/atomic_skills/test_engine.py",
 ]
 
 [topics."task-programs"]
@@ -339,8 +339,8 @@ risk = "medium"
 
 [[rules]]
 id = "atomic-actions"
-paths = ["embodichain/lab/sim/atomic_actions/**"]
-tests = ["tests/sim/atomic_actions/**", "tests/examples/atomic_action/test_support.py"]
+paths = ["embodichain/lab/sim/atomic_skills/**"]
+tests = ["tests/sim/atomic_skills/**", "tests/examples/atomic_skill/test_support.py"]
 resource_hints = ["sim"]
 risk = "medium"
 
@@ -360,7 +360,7 @@ risk = "medium"
 
 [[rules]]
 id = "atomic-action-tutorials"
-paths = ["scripts/tutorials/atomic_action/*.py"]
+paths = ["scripts/tutorials/atomic_skill/*.py"]
 tests = ["tests/visualization/test_example_tutorial_coverage.py"]
 risk = "medium"
 

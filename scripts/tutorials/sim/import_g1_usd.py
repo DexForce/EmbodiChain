@@ -29,12 +29,19 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from embodichain.lab.visualization import (
+    add_viser_args_to_parser,
+    visualization_cfg_from_args,
+)
+
 
 def main() -> None:
     """Load the complete USD scene and command both grippers through Robot."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("usd", type=Path, help="Original G1_120s/robot.usda")
-    usd = parser.parse_args().usd
+    add_viser_args_to_parser(parser)
+    args = parser.parse_args()
+    usd = args.usd
     if not usd.is_file():
         parser.error(f"USD file does not exist: {usd}")
 
@@ -54,6 +61,7 @@ def main() -> None:
             num_envs=1,
             physics_cfg=DefaultPhysicsCfg(device="cpu", physics_dt=0.001),
             render_cfg=RenderCfg(renderer="no-render"),
+            visualization=visualization_cfg_from_args(args),
         )
     )
     robot = None

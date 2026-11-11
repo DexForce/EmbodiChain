@@ -34,6 +34,8 @@ from embodichain.lab.sim.physics import DefaultPhysicsBackend, NewtonPhysicsBack
 from embodichain.lab.sim.physics import newton as newton_physics
 from embodichain.lab.sim import sim_manager
 
+pytestmark = pytest.mark.no_sim
+
 
 def test_simulation_manager_cfg_uses_default_physics_cfg() -> None:
     cfg = SimulationManagerCfg()
@@ -263,6 +265,7 @@ def test_newton_warp_log_suppression_covers_world_update() -> None:
         _visualization_sim_step=0,
         _visualization_sim_time=0.0,
         _pending_record_dt=0.0,
+        _refresh_marker_attachments=lambda: None,
         _window_record_state=None,
         render_frame=lambda **_kwargs: nullcontext(),
         _log_scene_summary=lambda: None,

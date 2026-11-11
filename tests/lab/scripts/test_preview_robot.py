@@ -118,8 +118,18 @@ def test_preview_defaults_and_opt_outs() -> None:
     assert not disabled.gizmo and not disabled.joint_control
 
 
-@pytest.mark.parametrize("robot_id", (*ROBOT_CONFIGS, "DualArmRobot"))
-def test_all_registered_robot_configs_pass_preview_validation(
+@pytest.mark.parametrize(
+    "robot_id",
+    (
+        *(
+            name
+            for name, spec in ROBOT_CONFIGS.items()
+            if "description_path" not in spec
+        ),
+        "DualArmRobot",
+    ),
+)
+def test_registered_body_configs_pass_preview_validation(
     monkeypatch, robot_asset, robot_id
 ) -> None:
     from importlib import import_module
@@ -666,3 +676,26 @@ def test_interrupted_preview_still_releases_its_world(
     monkeypatch.setattr(manager, "update", interrupt)
     preview_robot.main(_args("--robot", "ur5"))
     assert events[-2:] == ["destroy", "flush"]
+
+
+@pytest.mark.parametrize(
+    "robot_id,variant",
+    [
+        ("FrankaPandaHand", None),
+        ("DHPGI14080", None),
+        ("CobotMagicV100Gripper", None),
+        ("PikaGripper", None),
+        ("TianjiMarvinGripper", "left"),
+        ("TianjiMarvinGripper", "right"),
+        ("RobotiqArg2F85", None),
+        ("RobotiqArg2F140", None),
+    ],
+)
+def test_registered_gripper_preview_uses_its_actual_native_asset(robot_id, variant):
+    args = ["--robot", robot_id]
+    if variant is not None:
+        args += ["--variant", variant]
+    cfg = preview_robot.build_robot_cfg(_args(*args))
+    assert cfg.urdf_cfg.force_assembly
+    assert cfg.catalog_id == robot_id
+    assert cfg.solver_cfg == {}

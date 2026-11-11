@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Literal
 
 import torch
 
-from embodichain.lab.sim.atomic_actions import (
+from embodichain.lab.sim.atomic_skills import (
     Affordance,
     HeldObjectState,
     ObjectSemantics,

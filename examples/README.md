@@ -9,8 +9,8 @@ embodichain run-example ods/simple_bc_demo/train --help
 embodichain run-example learning/nerd --help
 embodichain run-example learning/rwm --help
 embodichain run-example learning/rigidformer demo --help
-embodichain run-example sim/atomic_action --skill place --variants 8
-embodichain run-example sim/atomic_action/coordinated_pickment --help
+embodichain run-example sim/atomic_skill --skill place --variants 8
+embodichain run-example sim/atomic_skill/coordinated_pickment --help
 ```
 
 A directory with `__main__.py` can be selected by its directory path. All arguments
@@ -63,9 +63,9 @@ weights and geometry, trains and evaluates the model, and runs an engine demo
 with Newton spheres beside a free model rollout. The demo opens a native window
 or records an engine-camera video with `--headless`.
 
-The [Atomic Skill example catalog](sim/atomic_action/README.md) owns all per-skill,
+The [Atomic Skill example catalog](sim/atomic_skill/README.md) owns all per-skill,
 coordinated-manipulation and recovery demonstrations. The two source-checkout
-walkthroughs under `scripts/tutorials/atomic_action/` teach single-arm and dual-arm
+walkthroughs under `scripts/tutorials/atomic_skill/` teach single-arm and dual-arm
 API composition; they reuse the canonical example setup.
 
 The [scene and robot feasibility preview](expansion/scene_robot_feasibility/README.md)
@@ -73,10 +73,24 @@ compares an authored installation with task-conditioned joint layout/deployment
 search in an offline 3D viewer. It replays measured successful episodes, exposes
 failed candidates and keeps independent region validation separate.
 
+The [GenSim workflow configuration](gensim/README.md) runs image task planning,
+scene generation, native binding and configured Task Program execution through
+`embodichain gensim run`.
+The [scripted GenSim reproduction](gensim/scripted_pick_place/README.md) rebuilds
+fixed table/cube inputs and executes the same binding/deployment workflow,
+preserving the measured pickup/placement verdict, graph frontend and wall time.
+
 The [differentiable retiming showcase](learning/differentiable_toppra/README.md)
 compares a stopped duration objective with autograd optimization of free path
 nodes. Its CPU browser preview displays gradients, finite-difference checks and
 trajectories on a shared physical clock, with portable export and replay.
+
+The [camera ground visibility example](sim/camera_ground_visibility.py) uses one
+physical ground across four Arenas. Training and debug cameras independently
+include it, then change selected environment policies and reset one camera row.
+It saves RGB mosaics, depth arrays and capture-policy metadata. This requires the
+DexSim camera render-category API; the default camera configuration continues to
+work with older SDKs. Ground hidden in a camera still supports the falling box.
 
 The [Expansion Engine showcase](expansion/engine/showcase/README.md) demonstrates
 native and real-demonstration-driven experts through the shared engine. Its offline

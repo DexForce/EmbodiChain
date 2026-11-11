@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from time import perf_counter
 from typing import TYPE_CHECKING
 from urllib.parse import quote
@@ -39,6 +39,7 @@ from .protocol import (
     JointControlSpec,
     JointControlState,
     MeshGeometry,
+    MeshMarkerOverlay,
     PointCloudOverlay,
     SceneFrame,
     SceneManifest,
@@ -772,10 +773,35 @@ class SceneExporter:
             else None
         )
         marker_frames = self._capture_axis_marker_overlays(reserved_frame_ids)
-        if overlays is None:
-            return SceneOverlays(frames=marker_frames)
+        reserved_mesh_ids = (
+            {mesh.overlay_id for mesh in overlays.meshes}
+            if overlays is not None
+            else set()
+        )
+        marker_meshes = self._capture_marker_mesh_overlays(reserved_mesh_ids)
+        overlays = overlays or SceneOverlays()
+        fluid_points = []
+        for uid, fluid in getattr(self._sim, "_fluid_objects", {}).items():
+            if fluid.is_declared or fluid.cfg.render.mode == "none":
+                continue
+            state = fluid.data.particle_pos_w
+            for env_id in self._env_ids:
+                points = state[env_id].detach().cpu().numpy().copy()
+                if fluid.cfg.render.clip_below_z is not None:
+                    points = points[points[:, 2] >= fluid.cfg.render.clip_below_z]
+                fluid_points.append(
+                    PointCloudOverlay(
+                        overlay_id=f"fluid/{uid}/{env_id}",
+                        points=points,
+                        point_size=2
+                        * (
+                            fluid.cfg.render.render_radius
+                            or fluid.cfg.particle_spacing / 2
+                        ),
+                    )
+                )
         point_clouds: list[PointCloudOverlay] = []
-        for point_cloud in overlays.point_clouds:
+        for point_cloud in overlays.point_clouds + tuple(fluid_points):
             point_count = point_cloud.points.shape[0]
             if point_count <= self.cfg.point_cloud_max_points:
                 point_clouds.append(point_cloud)
@@ -805,7 +831,36 @@ class SceneExporter:
             trajectories=overlays.trajectories,
             targets=overlays.targets,
             point_clouds=tuple(point_clouds),
+            meshes=marker_meshes + overlays.meshes,
         )
+
+    def _capture_marker_mesh_overlays(
+        self, reserved_mesh_ids: set[str]
+    ) -> tuple[MeshMarkerOverlay, ...]:
+        """Capture world-space marker meshes supplied by the simulation."""
+        get_marker_overlays = getattr(self._sim, "get_marker_overlays", None)
+        if get_marker_overlays is None:
+            return ()
+
+        meshes: list[MeshMarkerOverlay] = []
+        used_ids = set(reserved_mesh_ids)
+        selected_env_ids = set(self._env_ids)
+        for marker in get_marker_overlays():
+            if marker.env_id is not None and marker.env_id not in selected_env_ids:
+                continue
+            base_id = marker.overlay_id
+            overlay_id = base_id
+            suffix = 1
+            while overlay_id in used_ids:
+                overlay_id = f"{base_id}#{suffix}"
+                suffix += 1
+            used_ids.add(overlay_id)
+            meshes.append(
+                marker
+                if overlay_id == base_id
+                else replace(marker, overlay_id=overlay_id)
+            )
+        return tuple(meshes)
 
     def capture(
         self,

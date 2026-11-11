@@ -27,6 +27,7 @@ from typing import Any
 
 __all__ = [
     "AgibotG1Cfg",
+    "YamI2rtCfg",
     "UnitreeGo1Cfg",
     "UnitreeGo2Cfg",
     "UnitreeG1Cfg",
@@ -46,10 +47,18 @@ __all__ = [
     "BrainCoRevo1Cfg",
     "SharpaWaveCfg",
     "WujiHandCfg",
+    "FrankaPandaHandCfg",
+    "DHPGI14080Cfg",
+    "CobotMagicV100GripperCfg",
+    "PikaGripperCfg",
+    "TianjiMarvinGripperCfg",
+    "RobotiqArg2F85Cfg",
+    "RobotiqArg2F140Cfg",
 ]
 
 _EXPORTS = {
     "AgibotG1Cfg": ".agibot.g1",
+    "YamI2rtCfg": ".i2rt.yam",
     "UnitreeGo1Cfg": ".unitree.go1",
     "UnitreeGo2Cfg": ".unitree.go2",
     "UnitreeG1Cfg": ".unitree.g1",
@@ -69,6 +78,13 @@ _EXPORTS = {
     "BrainCoRevo1Cfg": ".brainco.revo1",
     "SharpaWaveCfg": ".sharpa.wave",
     "WujiHandCfg": ".wuji.hand",
+    "FrankaPandaHandCfg": ".franka.hand.cfg",
+    "DHPGI14080Cfg": ".dh_robotics.pgi_140_80.cfg",
+    "CobotMagicV100GripperCfg": ".agilex.cobotmagic.gripper.cfg",
+    "PikaGripperCfg": ".agilex.pika.cfg",
+    "TianjiMarvinGripperCfg": ".tianji.marvin.gripper.cfg",
+    "RobotiqArg2F85Cfg": ".robotiq.arg2f85.cfg",
+    "RobotiqArg2F140Cfg": ".robotiq.arg2f140.cfg",
 }
 
 
