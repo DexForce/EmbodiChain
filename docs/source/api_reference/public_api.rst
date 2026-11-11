@@ -185,6 +185,34 @@ the exact repository and revision used for evaluation.
 
 .. autofunction:: download_pretrained_policy
 
+embodichain.data.assets.scene_assets
+------------------------------------
+
+Download scene bundles through the shared asset registry. The four SimReady
+rooms retain their original GLB visuals and separate static USD floor collision.
+For example, ``get_data_path("WoodLab/wood_lab/wood_lab.usda")`` resolves the
+portable USD entry; keep its sibling ``visual`` and ``collision`` directories.
+The new bundles use the shared download lock, verify the archive MD5 and
+respect the configured download host, with the official Hub as fallback.
+
+.. currentmodule:: embodichain.data.assets.scene_assets
+
+.. autosummary::
+
+   SceneData
+   EmptyRoom
+   WoodLab
+   IndustrialWorkshop
+   DemoStudio
+   CleanLab
+
+.. autoclass:: SceneData
+.. autoclass:: EmptyRoom
+.. autoclass:: WoodLab
+.. autoclass:: IndustrialWorkshop
+.. autoclass:: DemoStudio
+.. autoclass:: CleanLab
+
 embodichain.data.assets.solver_assets
 -------------------------------------
 
@@ -3722,6 +3750,7 @@ embodichain.lab.sim.spawn.descriptors
    configure_articulation_desc
    rigid_desc_from_cfg
    visual_desc_from_cfg
+   cable_desc_from_cfg
    surface_deformable_desc_from_cfg
    volume_deformable_desc_from_cfg
 

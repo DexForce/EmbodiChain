@@ -134,7 +134,12 @@ _DEPLOYMENTS[
     "dual_franka_robotiq140_handover",
     "dual_franka_robotiq_arg2f_140_handover",
 )
-for _variant in ("dual_franka_robotiq_arg2f_140", "dual_ur10_robotiq_arg2f_140"):
+for _variant in (
+    "dual_franka_robotiq_arg2f_140",
+    "dual_ur10_robotiq_arg2f_140",
+    "dual_franka_robotiq_arg2f_140_gensim",
+    "dual_ur10_robotiq_arg2f_140_gensim",
+):
     _DEPLOYMENTS[
         Path(f"tasks/manipulation/repeated_pick_place/task.{_variant}.yaml")
     ] = ("repeated_cube_pick_place_workbench", "robotiq140_tabletop", _variant)
@@ -248,6 +253,8 @@ _RESOURCE_PATHS = frozenset(
         Path("components/embodiments/dual_franka_robotiq_arg2f_140_handover.yaml"),
         Path("components/embodiments/dual_franka_robotiq_arg2f_140.yaml"),
         Path("components/embodiments/dual_ur10_robotiq_arg2f_140.yaml"),
+        Path("components/embodiments/dual_franka_robotiq_arg2f_140_gensim.yaml"),
+        Path("components/embodiments/dual_ur10_robotiq_arg2f_140_gensim.yaml"),
         Path(
             "tasks/manipulation/repeated_pick_place/envs/dual_franka_robotiq140.default.yaml"
         ),

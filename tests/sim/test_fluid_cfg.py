@@ -382,6 +382,7 @@ def _fluid_manager_for_renderer(renderer):
     import torch
     from embodichain.lab.sim import SimulationManagerCfg
     from embodichain.lab.sim.cfg import RenderCfg
+    from embodichain.lab.sim.spawn.scene import SpawnScene
 
     return SimpleNamespace(
         physics=SimpleNamespace(
@@ -400,7 +401,7 @@ def _fluid_manager_for_renderer(renderer):
         asset_uids=[],
         _fluid_objects={},
         _rigid_objects={},
-        _spawn_scene=SimpleNamespace(declare=Mock()),
+        _spawn_scene=Mock(spec=SpawnScene),
         add_runtime_control=Mock(),
         create_visual_material=Mock(),
         _invalidate_fluid_state=Mock(),

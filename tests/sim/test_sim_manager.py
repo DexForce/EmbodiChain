@@ -34,6 +34,7 @@ import embodichain.lab.sim.sim_manager as sim_manager_module
 import embodichain.lab.visualization as visualization_module
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
+    CableObjectCfg,
     DefaultPhysicsCfg,
     DenoisingCfg,
     DLSSCfg,
@@ -2081,8 +2082,16 @@ def test_robot_sensor_preflight_precedes_resource_allocation(invalid: str) -> No
 
 @pytest.mark.gpu
 @pytest.mark.requires_sim
-@pytest.mark.parametrize("backend", ["default", "newton"])
-@pytest.mark.parametrize("stereo", [False, True])
+@pytest.mark.parametrize(
+    "backend,stereo",
+    [
+        ("default", False),
+        ("default", True),
+        ("newton", False),
+        ("newton", True),
+        ("newton_cable", False),
+    ],
+)
 def test_robot_mounted_camera_backend_lifecycle(
     tmp_path: Path, backend: str, stereo: bool
 ) -> None:
@@ -2110,7 +2119,9 @@ def test_robot_mounted_camera_backend_lifecycle(
             device="cuda:0",
             use_cuda_graph=False,
             num_substeps=1,
-            solver_cfg={"solver_type": "mujoco_warp"},
+            solver_cfg={
+                "solver_type": "dexuni" if backend == "newton_cable" else "mujoco_warp"
+            },
         )
     )
     sim = SimulationManager(
@@ -2137,6 +2148,15 @@ def test_robot_mounted_camera_backend_lifecycle(
                 sensors=[camera_cfg],
             )
         )
+        if backend == "newton_cable":
+            sim.add_cable_object(
+                CableObjectCfg(
+                    uid="wire",
+                    points=[[0, 0, 0], [0, 0, 0.1], [0, 0, 0.2]],
+                    radius=0.01,
+                    init_pos=(0.3, 0, 1),
+                )
+            )
         sim.prepare()
         camera = sim.get_sensor("mounted")
         assert camera.is_attached
@@ -2146,6 +2166,14 @@ def test_robot_mounted_camera_backend_lifecycle(
             camera.get_local_pose(to_matrix=True)[0].cpu(),
             camera_cfg.extrinsics.transformation,
         )
+        if backend == "newton_cable":
+            with pytest.raises(NotImplementedError, match="topology changes"):
+                sim.remove_asset("robot")
+            assert sim.get_asset("robot") is robot
+            assert sim.get_sensor("mounted") is camera and camera.is_attached
+            camera.update()
+            assert camera.get_data()["color"].shape == (1, 24, 32, 4)
+            return
         before = camera.get_arena_pose(to_matrix=True).clone()
         robot.set_qpos(torch.tensor([[0.5]], device=sim.device), target=False)
         sim.sync_render_state()
@@ -2795,7 +2823,9 @@ def _make_camera_attachment_manager(num_envs: int = 2) -> SimulationManager:
         bind=MagicMock(),
     )
     sim.physics = SimpleNamespace(
-        prepare_spawn_runtime=MagicMock(), sync_render_state=MagicMock()
+        _prepare_scene_build=MagicMock(),
+        prepare_spawn_runtime=MagicMock(),
+        sync_render_state=MagicMock(),
     )
     sim._default_plane = object()
     sim._ready_spawn_topology_revision = result.topology_revision
@@ -3119,7 +3149,7 @@ def test_stop_window_record_waits_for_background_export(monkeypatch) -> None:
 
 def test_reset_objects_state_includes_deformable_assets() -> None:
     sim = object.__new__(SimulationManager)
-    sim.physics = SimpleNamespace(name="default")
+    sim.physics = SimpleNamespace(name="default", _reset_scene_state=lambda *_: None)
     sim._robots = {}
     sim._articulations = {}
     sim._rigid_objects = {}
@@ -3141,6 +3171,25 @@ def test_reset_objects_state_includes_deformable_assets() -> None:
     assert sim.simulation_time == 1.25
 
 
+def test_scene_reset_delegates_physical_ownership_to_backend() -> None:
+    sim = object.__new__(SimulationManager)
+    scene_reset = MagicMock(return_value=[1])
+    sim.physics = SimpleNamespace(name="third_party", _reset_scene_state=scene_reset)
+    robot, cloth, light, camera = (MagicMock() for _ in range(4))
+    sim._robots = {"robot": robot}
+    sim._deformable_objects = {"cloth": cloth}
+    sim._lights = {"light": light}
+    sim._sensors = {"camera": camera}
+
+    sim.reset_objects_state(env_ids=[1], excluded_sensor_uids=["camera"])
+
+    scene_reset.assert_called_once_with([1], set())
+    robot.reset.assert_not_called()
+    cloth.reset.assert_not_called()
+    light.reset.assert_called_once_with([1])
+    camera.reset.assert_not_called()
+
+
 @pytest.mark.parametrize("solver_type", ["mujoco_warp", "dexuni"])
 def test_newton_reset_clears_all_articulations_in_selected_worlds_together(
     solver_type,
@@ -3155,7 +3204,9 @@ def test_newton_reset_clears_all_articulations_in_selected_worlds_together(
         "robot": ("robot_0", "robot_1"),
         "arm": ("arm_0", "arm_1"),
     }
-    sim.physics = SimpleNamespace(name="newton", solver_type=solver_type)
+    sim.physics = SimpleNamespace(
+        name="newton", solver_type=solver_type, _reset_scene_state=lambda *_: None
+    )
     sim.num_envs = 2
     sim._spawn_scene = SimpleNamespace(
         builder=SimpleNamespace(is_finalized=True, result=spawn_result),
@@ -3186,7 +3237,9 @@ def test_newton_reset_rejects_excluding_one_articulation_from_selected_worlds(
     sim = object.__new__(SimulationManager)
     robot = MagicMock()
     articulation = MagicMock()
-    sim.physics = SimpleNamespace(name="newton", solver_type=solver_type)
+    sim.physics = SimpleNamespace(
+        name="newton", solver_type=solver_type, _reset_scene_state=lambda *_: None
+    )
     sim._robots = {"robot": robot}
     sim._articulations = {"arm": articulation}
     sim._rigid_objects = {}
@@ -3211,7 +3264,9 @@ def test_newton_non_mujoco_reset_allows_excluding_an_articulation() -> None:
     native_batch = MagicMock()
     spawn_result = SimpleNamespace(create_articulation_batch=MagicMock())
     spawn_result.create_articulation_batch.return_value = native_batch
-    sim.physics = SimpleNamespace(name="newton", solver_type="xpbd")
+    sim.physics = SimpleNamespace(
+        name="newton", solver_type="xpbd", _reset_scene_state=lambda *_: None
+    )
     sim.num_envs = 2
     sim._spawn_scene = SimpleNamespace(
         builder=SimpleNamespace(is_finalized=True, result=spawn_result),
@@ -3927,7 +3982,7 @@ def test_marker_update_in_observer_waits_for_deferred_final_frame() -> None:
 
 def test_reset_fluid_and_rigid_controls_selects_rows_and_honors_exclusions():
     sim = object.__new__(SimulationManager)
-    sim.physics = SimpleNamespace(name="default")
+    sim.physics = NewtonPhysicsBackend(sim)
     sim.num_envs = 2
     for name in (
         "_robots",

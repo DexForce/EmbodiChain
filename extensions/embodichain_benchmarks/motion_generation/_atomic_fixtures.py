@@ -537,6 +537,27 @@ def _create_franka_pgi_cfg(overrides: dict[str, Any]) -> RobotCfg:
     return _FrankaPgiCfg.from_dict(overrides)
 
 
+def _create_franka_robotiq_cfg(overrides: dict[str, Any]) -> RobotCfg:
+    """Mount Robotiq on the bare Franka with flange-local FK and tool TCP."""
+    cfg = FrankaPandaCfg.from_dict({})
+    cfg.urdf_cfg.add_component(
+        "hand", get_data_path(ROBOTIQ_2F_140_URDF_PATH), np.eye(4)
+    )
+    cfg.control_parts["eef"] = list(_ROBOTIQ_HAND_JOINTS)
+    cfg.init_qpos = list(cfg.init_qpos[:7]) + [0.0] * 6
+    cfg.solver_cfg["arm"].tcp = sample_tool_tcp("franka", gripper="robotiq_2f_140")
+    for field, value in (("stiffness", 1e3), ("damping", 1e2), ("max_effort", 40.0)):
+        for joint in _ROBOTIQ_HAND_JOINTS:
+            getattr(cfg.joint_drive_props, field)[joint] = value
+    cfg.link_attrs = {
+        **(cfg.link_attrs or {}),
+        "newton_gripper_contacts": _newton_gripper_contacts(
+            ["left_inner_finger_pad", "right_inner_finger_pad"]
+        ),
+    }
+    return merge_robot_cfg(cfg, overrides)
+
+
 def create_franka_panda_robot_cfg(
     init_pos: Sequence[float] = (0.0, 0.0, 0.0),
     init_qpos: Sequence[float] | None = None,
@@ -775,6 +796,10 @@ def create_dual_tutorial_robot_cfg(
         if tcp_z is not None:
             raise ValueError("panda_hand uses its native URDF TCP; omit tcp_z.")
         base_cfg = _create_franka_native_hand_cfg(
+            {"init_rot": list(_FRANKA_TUTORIAL_BASE_ROTATION)}
+        )
+    elif gripper == "robotiq_2f_140" and robot_type == "franka":
+        base_cfg = _create_franka_robotiq_cfg(
             {"init_rot": list(_FRANKA_TUTORIAL_BASE_ROTATION)}
         )
     else:

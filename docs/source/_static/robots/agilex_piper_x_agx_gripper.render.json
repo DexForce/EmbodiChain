@@ -1,0 +1,139 @@
+{
+  "reference": "https://github.com/DexForce/EmbodiChain/pull/1135",
+  "variant": "gripper",
+  "render_cfg": {
+    "renderer": "rt",
+    "spp": 1,
+    "denoising": {
+      "window": "dlss",
+      "offscreen": "dlss"
+    },
+    "dlss": {
+      "dlss_quality": 2,
+      "upsample_ratio": null,
+      "render_width": 0,
+      "render_height": 0,
+      "target_width": 0,
+      "target_height": 0,
+      "tiled_enabled": true,
+      "exposure_compensation": 1.0
+    },
+    "nrd": {
+      "max_indirect_bounces": 1,
+      "denoising_range": 500000.0,
+      "disocclusion_threshold": 0.01,
+      "disocclusion_threshold_alternate": 0.05,
+      "disocclusion_threshold_mix_enabled": true,
+      "history_confidence_enabled": true,
+      "history_confidence_probe_stride": 5,
+      "history_confidence_sigma_scale": 2.0,
+      "history_confidence_sensitivity": 1.0,
+      "max_accumulated_frame_num": 30,
+      "max_fast_accumulated_frame_num": 6,
+      "history_fix_frame_num": 3,
+      "diffuse_prepass_blur_radius": 30.0,
+      "specular_prepass_blur_radius": 50.0,
+      "anti_firefly_enabled": false,
+      "sh_mode_enabled": false,
+      "validation_enabled": false,
+      "max_stabilized_frame_num": 63,
+      "min_blur_radius": 1.0,
+      "max_blur_radius": 30.0,
+      "antilag_luminance_sigma_scale": 2.0,
+      "antilag_luminance_sensitivity": 3.0,
+      "taa_min_current_weight": 0.0625,
+      "taa_sigma_scale": 2.0,
+      "taa_depth_rejection_enabled": true,
+      "taa_tone_mapping_enabled": false
+    },
+    "tone_mapping_enabled": false,
+    "tone_mapping_exposure": 1.0,
+    "min_bounces": 4,
+    "max_bounces": 8
+  },
+  "camera": {
+    "uid": "preview_camera",
+    "init_pos": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "init_rot": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "init_local_pose": null,
+    "sensor_type": "Camera",
+    "visualization_role": "sensor",
+    "width": 960,
+    "height": 1200,
+    "near": 0.03,
+    "far": 60.0,
+    "intrinsics": [
+      2350.0,
+      2350.0,
+      480.0,
+      600.0
+    ],
+    "extrinsics": {
+      "pos": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "parent": null,
+      "eye": [
+        0.92,
+        -1.41,
+        0.89
+      ],
+      "target": [
+        0.04,
+        -0.08,
+        0.34
+      ],
+      "up": [
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    "enable_color": true,
+    "enable_depth": false,
+    "enable_mask": false,
+    "enable_normal": false,
+    "enable_position": false,
+    "fx": 600,
+    "fy": 600,
+    "cx": 320.0,
+    "cy": 240.0
+  },
+  "scene": "SimulationManager defaults",
+  "physics_stepped": false,
+  "warmup_frames": 48,
+  "joint_positions": {
+    "joint1": 0.0,
+    "joint2": 0.7200000286102295,
+    "joint3": -1.25,
+    "joint4": 0.0,
+    "joint5": 0.7200000286102295,
+    "joint6": 1.2000000476837158,
+    "gripper": 0.07000000029802322,
+    "gripper_joint1": 0.03500000014901161,
+    "gripper_joint2": -0.03500000014901161
+  },
+  "asset_revision": "680fa925cd00db7e2628563d2edc5540963045de",
+  "runtime": {
+    "dexsim": "0.6.0rc1",
+    "torch": "2.11.0+cu128"
+  },
+  "image_sha256": "18b9855d6513219c7ea239905a4a447f72bec5b3f0763863d9c20a384de26ef9",
+  "embodichain_base_commit": "7b76de6116323f60bf6308ee602a90d1e8ec5b06"
+}

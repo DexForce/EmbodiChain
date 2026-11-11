@@ -69,11 +69,15 @@ def test_migrated_robot_assets_keep_legacy_class_identity() -> None:
                 else "so101_assets" if name == "SO101FollowerAssets" else "robot_assets"
             )
         )
-        assert (
-            getattr(import_module("embodichain.data.assets." + legacy), name)
-            is canonical
-        )
-        assert getattr(assets, name) is canonical
+        if name == "AgilexPiperX":
+            assert not hasattr(import_module("embodichain.data.assets." + legacy), name)
+            assert not hasattr(assets, name)
+        else:
+            assert (
+                getattr(import_module("embodichain.data.assets." + legacy), name)
+                is canonical
+            )
+            assert getattr(assets, name) is canonical
         assert get_data_class(name) is canonical
         assert dict(registry[spec["category"]])[name] is canonical
         assert canonical.__module__ == module
@@ -343,8 +347,9 @@ def test_eef_catalog_preserves_ids_without_legacy_exports(monkeypatch, capsys) -
     monkeypatch.setattr(EmbodiChainDataset, "__init__", unexpected_download)
     assert util.find_spec("embodichain.data.assets.eef_assets") is None
     entries = download.get_registry()["eef"]
-    assert {name for name, _ in entries} == set(EEF_ARCHIVES)
-    assert len(entries) == len(EEF_ARCHIVES)
+    expected_ids = EEF_ARCHIVES.keys() | {"AgxGripper"}
+    assert {name for name, _ in entries} == expected_ids
+    assert len(entries) == len(expected_ids)
     for name, cls in entries:
         assert cls is get_data_class(name)
         assert cls.__module__.startswith("embodichain_robots.")
@@ -354,7 +359,7 @@ def test_eef_catalog_preserves_ids_without_legacy_exports(monkeypatch, capsys) -
     )
     download.cmd_list(Namespace(category="eef"))
     output = capsys.readouterr().out
-    for name in EEF_ARCHIVES:
+    for name in expected_ids:
         assert name in output
 
 
