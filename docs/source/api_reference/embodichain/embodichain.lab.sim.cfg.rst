@@ -269,6 +269,12 @@ It is independent of the drive velocity gain ``damping`` and stays active for
 passive and effort target modes. In dictionaries, select this subtype with
 ``joint_drive_props.backend="newton"``. Both settings require Newton.
 
+``JointDrivePropertiesCfg.limit_stiffness`` and ``limit_damping`` separate
+joint-limit gains from drive gains. Each accepts a scalar or joint-rule mapping;
+``None`` preserves the source/backend value. With Newton's MuJoCo solver,
+setting both to zero selects the default MuJoCo limit response while retaining
+joint bounds.
+
 .. currentmodule:: embodichain.lab.sim.cfg.articulation
 
 .. autosummary::

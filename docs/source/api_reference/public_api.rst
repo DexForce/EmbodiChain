@@ -4194,6 +4194,21 @@ embodichain.learning.rl.algo.apg
    complete_discounted_return
    segmented_discounted_return
 
+embodichain.learning.rl.algo.apg_actor_critic
+-------------------------------------------
+
+.. currentmodule:: embodichain.learning.rl.algo.apg_actor_critic
+
+Short differentiable trajectories use terminal values for actor optimization
+and detached lambda returns for critic regression. Actor and critic optimizers
+retain separate state in checkpoints.
+
+.. autosummary::
+
+   APGActorCritic
+   APGActorCriticCfg
+   differentiable_lambda_returns
+
 embodichain.learning.rl.algo.base
 ---------------------------------
 
@@ -4554,6 +4569,25 @@ embodichain_tasks.configs
 .. autosummary::
 
    get_config_path
+
+embodichain_tasks.locomotion.managers.actions
+----------------------------------------------
+
+The reference position action combines a policy output with the next motion
+frame using the task's per-joint reference weights, then applies encoder bias.
+
+.. automodule:: embodichain_tasks.locomotion.managers.actions
+   :members:
+
+embodichain_tasks.locomotion.tracking.g1_motion
+-----------------------------------------------
+
+The G1 motion task connects reference data and differentiable tracking
+calculations to the simulator Gym loop. It owns frame progress, history,
+reference-state resets and terminal snapshots before automatic row resets.
+
+.. automodule:: embodichain_tasks.locomotion.tracking.g1_motion
+   :members:
 
 embodichain_tasks.manipulation.push_cube
 ----------------------------------------
