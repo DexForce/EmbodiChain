@@ -35,8 +35,8 @@ profile:
   action_options:
     pick:
       kind: pick_up
-      hand_interp_steps: 20
-      grasp_settle_steps: 20
+      hand_interp_steps: 10
+      grasp_settle_steps: 10
       lift_height: 0.12
       pre_grasp_distance: 0.08
       approach_direction:
@@ -65,8 +65,8 @@ profile:
       rotate_angle: 1.3962634015954636
     place:
       kind: place
-      hand_interp_steps: 20
-      release_settle_steps: 20
+      hand_interp_steps: 10
+      release_settle_steps: 10
       preserve_current_object_orientation: false
     simulation.move_held_object:
       kind: move_held_object

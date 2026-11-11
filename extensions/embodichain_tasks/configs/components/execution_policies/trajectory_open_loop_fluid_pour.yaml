@@ -7,7 +7,7 @@ requires:
 motion:
   strategy: ik_interp
   # This is a minimum; interpolation adds samples to respect robot limits.
-  sample_count: 160
+  sample_count: 80
   dynamic_collision_mode: "off"
 
 tracking:

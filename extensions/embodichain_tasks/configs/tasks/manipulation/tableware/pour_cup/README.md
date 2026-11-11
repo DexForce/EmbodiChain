@@ -23,7 +23,7 @@ python -m embodichain.lab.scripts.run_fluid_task_program \
 
 任务的执行节奏由
 [`trajectory_open_loop_fluid_pour.yaml`](../../../../components/execution_policies/trajectory_open_loop_fluid_pour.yaml)
-配置。轨迹采样数是下限；规划器会根据关节速度和加速度约束增加采样点，并保留
+配置。轨迹最少采样 80 点；规划器会根据关节速度和加速度约束增加采样点，并保留
 抓取及放回时的稳定等待。
 
 也可使用普通任务入口：
@@ -34,7 +34,7 @@ embodichain run-task \
   --headless --renderer fast-rt
 ```
 
-独立 Sim 示例从当前场景规划 Atomic Action 目标，通过相同的 DexUni/DFSPH 物理场景
+独立 Sim 示例从当前场景规划 Atomic Skill 目标，通过相同的 DexUni/DFSPH 物理场景
 执行并录制视频：
 
 ```bash
@@ -52,9 +52,9 @@ python scripts/tutorials/sim/franka_dexuni_pour_demo.py --headless --renderer fa
 
 `env.fluid.yaml` 声明 DexUni 的 `sph_cfg`、机器人和场景。外层物理步为 1/240 s，
 每步 2 个 DFSPH 子步，每个 DFSPH 子步包含 15 个 MuJoCo 刚体子步；控制周期为
-0.025 s。未指定关节所有权时，流体准备阶段将完整的机器人和杯子关节拓扑分配给
+0.05 s（每 12 个物理步更新一次控制）。未指定关节所有权时，流体准备阶段将完整的机器人和杯子关节拓扑分配给
 MuJoCo，以满足当前 DexUni/DFSPH 原型的纯 MuJoCo 刚体要求。任务使用完整机器人
-关节目标，使主从手指都收到夹持目标。
+关节目标，使两个手指都收到夹持目标。
 
 杯子质量为 0.30 kg，凸分解形状提供机器人抓取接触，独立的
 `particle_collision_shape` SDF 提供流体边界。当前 DexSim 的碰撞描述符没有单独
@@ -64,7 +64,7 @@ MuJoCo，以满足当前 DexUni/DFSPH 原型的纯 MuJoCo 刚体要求。任务�
 
 ## 录制与验收
 
-FastRT 使用蓝色液面材质，并为每个环境生成独立的 960 × 720、40 fps 视频。Gym
+FastRT 使用蓝色液面材质，并为每个环境生成独立的 960 × 720、20 fps 视频。Gym
 正常录制保存到 `videos/env_000/episode_000000_fluid_gym.mp4`；未完成或不合格的
 片段保存到 `videos/diagnostics/`。Sim 示例输出 `fluid_sim_env0.mp4`。
 
