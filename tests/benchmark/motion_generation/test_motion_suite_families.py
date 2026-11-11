@@ -298,7 +298,14 @@ def test_component_ur5_policy_tcp_is_inverse_of_the_component_solver_tcp():
 
     suite = load_suite("atomic_ur5_embodiment")
     resolution = resolve_embodiment(suite.embodiment, suite.robot)
-    runtime_tcp = torch.tensor(resolution.simulation["solver_cfg"]["arm"]["tcp"])
+    from embodichain.robot_registry import resolve_robot_cfg
+
+    values = dict(resolution.simulation)
+    cfg = resolve_robot_cfg(values.pop("class_type"), values)
+    from embodichain.lab.sim.utility.gripper_binding import prepare_robot_grippers
+
+    prepare_robot_grippers(cfg)
+    runtime_tcp = torch.tensor(cfg.solver_cfg["arm"].tcp)
     candidate = next(spec for spec in suite.planners if spec.id == "nmg")
     policy_tcp = torch.tensor(candidate.config["runtime_tcp_from_policy_tcp"])
     torch.testing.assert_close(runtime_tcp @ policy_tcp, torch.eye(4))

@@ -1095,12 +1095,16 @@ def _write_collection_manifest(command: list[str], files: list[str]) -> Path | N
     ["gpu", "sim", "slow-gpu", "slow-sim"],
     ids=["accelerator", "simulation", "slow-accelerator", "slow-simulation"],
 )
-@pytest.mark.parametrize("no_finalize_resource_lanes", [False, True])
+@pytest.mark.parametrize(
+    "no_finalize_resource_lanes,freeze_native_imports",
+    [(False, False), (True, False), (True, True)],
+)
 def test_runner_narrows_native_resource_nodes_and_preserves_original_options(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     lane: str,
     no_finalize_resource_lanes: bool,
+    freeze_native_imports: bool,
 ) -> None:
     original_selectors = [
         "tests/empty.py",
@@ -1144,6 +1148,7 @@ def test_runner_narrows_native_resource_nodes_and_preserves_original_options(
             root=tmp_path,
             lanes=[base_lane],
             no_finalize_resource_lanes=no_finalize_resource_lanes,
+            freeze_native_imports=freeze_native_imports,
         )
         == 0
     )
@@ -1156,7 +1161,10 @@ def test_runner_narrows_native_resource_nodes_and_preserves_original_options(
     )
     assert "--collect-only" in discovery and "--collect-only" not in execution
     marker_index = execution.index("-m", 3)
-    assert execution[4:marker_index] == [
+    assert ("--freeze-native-imports" in execution) == freeze_native_imports
+    assert "--freeze-native-imports" not in discovery
+    node_start = 5 if freeze_native_imports else 4
+    assert execution[node_start:marker_index] == [
         f"{file}::TestContract::test_selected" for file in files
     ]
     original_options = original[original.index("-m", 3) :]
@@ -1175,6 +1183,15 @@ def test_runner_narrows_native_resource_nodes_and_preserves_original_options(
     assert all(
         kwargs["env"] is None and kwargs["cwd"] == tmp_path for _, kwargs in calls
     )
+
+
+def test_import_freezing_requires_owned_native_process(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="requires no_finalize_resource_lanes"):
+        run_test_plan.run_plan(
+            {"version": 1, "mode": "full", "lanes": {"sim": ["tests"]}},
+            root=tmp_path,
+            freeze_native_imports=True,
+        )
 
 
 @pytest.mark.parametrize("exit_code", [1, 2, 4])
@@ -1295,3 +1312,173 @@ def test_no_finalize_runner_preserves_pytest_result(
     assert result.returncode == exit_code, result.stdout + result.stderr
     assert summary in result.stdout
     assert not finalizer_marker.exists()
+
+
+@pytest.mark.parametrize("workers", [1, 8])
+def test_cpu_worker_budget_does_not_parallelize_native_lanes(workers: int) -> None:
+    plan = {
+        "version": 1,
+        "mode": "partial",
+        "lanes": {"fast": ["tests"], "gpu": ["tests"], "sim": ["tests"]},
+        "slow_lanes": {"slow-fast": ["tests"]},
+    }
+    commands = dict(build_commands(plan, cpu_workers=workers))
+    for lane in ("fast", "slow-fast"):
+        assert commands[lane][commands[lane].index("-n") + 1] == str(workers)
+    for lane in ("gpu", "sim"):
+        assert "-n" not in commands[lane]
+
+
+@pytest.mark.parametrize("workers", [0, -1, True, 1.5])
+def test_invalid_cpu_worker_budget_is_rejected(workers: object) -> None:
+    with pytest.raises(ValueError, match="positive integer"):
+        build_commands({"mode": "full", "lanes": {}}, cpu_workers=workers)
+
+
+def test_metrics_and_duration_order_stay_inside_requested_lanes(tmp_path: Path) -> None:
+    plan = {
+        "mode": "full",
+        "lanes": {"fast": ["tests"], "gpu": ["tests"], "sim": ["tests"]},
+    }
+    commands = dict(
+        build_commands(
+            plan, metrics_dir=tmp_path / "metrics", cpu_duration_history=tmp_path
+        )
+    )
+    assert "--ci-duration-history" in commands["fast"]
+    assert "--no-loadscope-reorder" in commands["fast"]
+    for lane in ("gpu", "sim"):
+        assert "--ci-duration-history" not in commands[lane]
+        assert "--no-loadscope-reorder" not in commands[lane]
+        assert "--ci-metrics-dir" in commands[lane]
+
+
+def test_partial_cpu_history_keeps_unselected_cases_and_ignores_other_lanes(
+    tmp_path: Path,
+) -> None:
+    from scripts.ci.duration_history import merge_history
+
+    history = tmp_path / "history/history.json"
+    history.parent.mkdir()
+    history.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "phases": [
+                    {"nodeid": "unselected", "group": "other", "seconds": 7.0},
+                    {"nodeid": "updated", "group": "module", "seconds": 20.0},
+                ],
+            }
+        )
+    )
+    metrics = tmp_path / "metrics"
+    (metrics / "fast").mkdir(parents=True)
+    (metrics / "gpu").mkdir()
+    (metrics / "fast/gw0.json").write_text(
+        json.dumps(
+            {
+                "exitstatus": 0,
+                "phases": [
+                    {"nodeid": "updated@module", "group": "module", "seconds": 1.0},
+                    {"nodeid": "updated@module", "group": "module", "seconds": 2.0},
+                ],
+            }
+        )
+    )
+    (metrics / "gpu/main.json").write_text(
+        json.dumps(
+            {
+                "exitstatus": 0,
+                "phases": [
+                    {"nodeid": "updated", "group": "module", "seconds": 1000.0},
+                ],
+            }
+        )
+    )
+    (metrics / "fast/failed.json").write_text(
+        json.dumps(
+            {
+                "exitstatus": 1,
+                "phases": [
+                    {"nodeid": "unselected", "group": "other", "seconds": 9999.0},
+                ],
+            }
+        )
+    )
+    merge_history(metrics, history)
+    values = {
+        row["nodeid"]: row["seconds"]
+        for row in json.loads(history.read_text())["phases"]
+    }
+    assert values == {"unselected": 7.0, "updated": 3.0}
+
+
+def _owned_import_gc_run(
+    tmp_path: Path, program: str, preload_domain: bool = False
+) -> subprocess.CompletedProcess[str]:
+    """Exercise real bootstrap/exit behavior with stdlib dependency stand-ins."""
+    test_file = tmp_path / "test_native_exit.py"
+    test_file.write_text(program)
+    wrapper = Path(__file__).parents[2] / "scripts/ci/pytest_no_finalize.py"
+    driver = tmp_path / "driver.py"
+    driver.write_text(f"""
+import importlib.util, sys, types
+spec = importlib.util.spec_from_file_location('owned_native', {str(wrapper)!r})
+runner = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(runner)
+runner._NATIVE_IMPORTS = ()
+if {preload_domain!r}:
+    sys.modules['embodichain'] = types.ModuleType('embodichain')
+    def forbidden_freeze():
+        raise AssertionError('a preexisting domain graph must not be frozen')
+    runner.gc.freeze = forbidden_freeze
+runner.main(['--freeze-native-imports', '-q', {str(test_file)!r}])
+""")
+    environment = os.environ.copy()
+    environment["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
+    environment.pop("PYTEST_ADDOPTS", None)
+    environment.pop("PYTEST_PLUGINS", None)
+    return subprocess.run(
+        [sys.executable, str(driver)],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+
+def test_import_freezing_refuses_an_existing_domain(tmp_path: Path) -> None:
+    result = _owned_import_gc_run(
+        tmp_path, "def test_ordinary_contract(): assert True\n", preload_domain=True
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "domain or test modules already loaded" in result.stdout
+    assert "1 passed" in result.stdout
+
+
+@pytest.mark.parametrize("remaining_worlds", [0, 1])
+@pytest.mark.parametrize("manager_present", [False, True])
+def test_owned_import_gc_requires_native_release(
+    tmp_path: Path, remaining_worlds: int, manager_present: bool
+) -> None:
+    result = _owned_import_gc_run(
+        tmp_path,
+        f"""
+import queue, sys, types
+native = types.ModuleType('dexsim')
+native.get_world_num = lambda: {remaining_worlds}
+sys.modules['dexsim'] = native
+manager = types.ModuleType('embodichain.lab.sim.sim_manager')
+manager.SimulationManager = types.SimpleNamespace(_instances={{}}, _cleanup_queue=queue.Queue())
+if {manager_present!r}:
+    sys.modules[manager.__name__] = manager
+def test_ordinary_contract(): assert True
+""",
+    )
+    assert "1 passed" in result.stdout
+    assert "static import objects" in result.stdout
+    assert result.returncode == remaining_worlds, result.stdout + result.stderr
+    if remaining_worlds:
+        assert "native World/manager/cleanup queue remain" in result.stderr

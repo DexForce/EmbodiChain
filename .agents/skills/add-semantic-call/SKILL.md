@@ -72,6 +72,12 @@ It must also own exactly one fingerprinted
 `RegisteredSemanticLowererFactory` for the same call ID and revision. The
 factory creates a fresh live lowerer for each adapter assembly.
 
+Factories may expose a provider-free immutable `argument_contract` using
+`language.semantic_contracts.SemanticCallContract`. It participates in the
+registration fingerprint and effective planning catalog; keep its parameter,
+reference and resource rules aligned with lowering. Opaque historical extensions
+remain loadable but cannot advertise a complete planning argument contract.
+
 ### 3. Keep lowering typed and narrow
 
 The lowerer:

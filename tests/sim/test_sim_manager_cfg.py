@@ -34,6 +34,8 @@ from embodichain.lab.sim.physics import DefaultPhysicsBackend, NewtonPhysicsBack
 from embodichain.lab.sim.physics import newton as newton_physics
 from embodichain.lab.sim import sim_manager
 
+pytestmark = pytest.mark.no_sim
+
 
 def test_simulation_manager_cfg_uses_default_physics_cfg() -> None:
     cfg = SimulationManagerCfg()

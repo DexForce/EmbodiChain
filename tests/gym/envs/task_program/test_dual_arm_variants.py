@@ -128,4 +128,7 @@ def test_variants_reuse_program_and_measured_acceptance(task: str) -> None:
     template = deepcopy(
         load_config(paths[0].parent / payloads[0]["task_program"]["program"])
     )
+    from embodichain.lab.task_program.language.authoring import normalize_task_program
+
+    template = normalize_task_program(template).declaration
     assert all(segment.get("validators") for segment in template["program"]["items"])

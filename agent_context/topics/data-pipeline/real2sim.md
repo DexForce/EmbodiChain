@@ -33,7 +33,10 @@ events are monitoring/edit boundaries, not independent recovery boundaries.
 
 Configured registered calls use the allowlisted `demo_skill` lowerer and
 occurrence-bound `demo_skill` source declarations, sealed to asset content and
-compiled-program identity. Native calls remain unbound. The Expansion Engine
+compiled-program identity. Task Program's optional named `demo_skills` registry
+generates these same declarations for every expanded occurrence; explicit
+legacy bindings remain strict. See the [configuration contract](../task-programs/configuration.md)
+for ownership. Native calls remain unbound. The Expansion Engine
 owns qualified collection; its source adapter retains standard prototype guards
 for explicitly selected occurrences when a program mixes source families.
 See `examples/expansion/demo_skill/` for migration of the existing real DROID

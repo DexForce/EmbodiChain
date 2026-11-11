@@ -485,14 +485,14 @@ def test_handover_grasp_model_uses_robotiq_opening_and_owns_its_geometry() -> No
         n_sample=32,
         force_refresh=False,
         robot=SimpleNamespace(cfg=create_tutorial_robot_cfg("ur10")),
-        gripper_model=handover.HANDOVER_GRIPPER_MODEL,
+        gripper_data=handover.HANDOVER_GRIPPER_MODEL,
     )
-    assert generator.gripper_model.model_id == "robotiq_2f_140"
-    assert generator.gripper_model.max_opening_width == 0.14
-    geometry = generator.gripper_model
-    geometry.max_opening_width = 0.12
-    assert generator.gripper_model.max_opening_width == 0.14
-    assert handover.HANDOVER_GRIPPER_MODEL.max_opening_width == 0.14
+    assert generator.gripper_data["model_id"] == "robotiq_2f_140"
+    assert generator.gripper_data["max_opening_width"] == 0.14
+    geometry = generator.gripper_data
+    geometry["max_opening_width"] = 0.12
+    assert generator.gripper_data["max_opening_width"] == 0.14
+    assert handover.HANDOVER_GRIPPER_MODEL["max_opening_width"] == 0.14
     collision_geometry = generator.collision_geometry
     original_points = collision_geometry.points.clone()
     collision_geometry.points.add_(1.0)
@@ -502,7 +502,7 @@ def test_handover_grasp_model_uses_robotiq_opening_and_owns_its_geometry() -> No
             n_sample=32,
             force_refresh=False,
             robot=SimpleNamespace(cfg=create_tutorial_robot_cfg("ur5")),
-        ).gripper_model.model_id
+        ).gripper_data["model_id"]
         == "dh_pgi_140_80"
     )
 
@@ -538,7 +538,10 @@ def test_sample_omitted_device_preserves_backend_default(
 
     def create_sim(cfg):
         captured["cfg"] = cfg
-        return SimpleNamespace(add_light=lambda cfg: None)
+        return SimpleNamespace(
+            add_light=lambda cfg: None,
+            has_native_renderer=cfg.render_cfg.renderer != "no-render",
+        )
 
     monkeypatch.setattr(support, "SimulationManager", create_sim)
     args = launcher._create_parser().parse_args(
@@ -667,7 +670,10 @@ def test_sample_solver_overrides_preserve_configured_host_fields(monkeypatch) ->
 
     def create_sim(cfg):
         captured["cfg"] = cfg
-        return SimpleNamespace(add_light=lambda cfg: None)
+        return SimpleNamespace(
+            add_light=lambda cfg: None,
+            has_native_renderer=cfg.render_cfg.renderer != "no-render",
+        )
 
     monkeypatch.setattr(support, "SimulationManager", create_sim)
     args = SimpleNamespace(
