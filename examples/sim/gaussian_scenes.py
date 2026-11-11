@@ -47,6 +47,7 @@ from embodichain.data.dataset import _dataset_download_lock
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import GaussianSplatCfg, RenderCfg, VisualObjectCfg
 from embodichain.lab.sim.sensors import CameraCfg
+from embodichain.lab.sim.scene import SceneView, apply_group_transform
 from embodichain.lab.visualization.cfg import VisualizationCfg
 
 __all__ = ["main"]
@@ -111,6 +112,13 @@ def main() -> None:
     )
     parser.add_argument("--output", type=Path, default=Path("outputs/gaussian_scenes"))
     parser.add_argument("--download-only", action="store_true")
+    parser.add_argument(
+        "--group-translation",
+        type=float,
+        nargs=3,
+        metavar=("X", "Y", "Z"),
+        help="Translate every imported visual/static collider together, in arena metres.",
+    )
     args = parser.parse_args()
     presets = json.loads(
         (Path(__file__).parent / "assets/gaussian_scenes.json").read_text()
@@ -133,14 +141,15 @@ def main() -> None:
     )
     try:
         if args.scene == "library-usd":
-            sim.add_usd("library", str(asset))
+            assets = sim.add_usd("library", str(asset))
         else:
-            sim.add_visual_object(
+            visual = sim.add_visual_object(
                 VisualObjectCfg(
                     uid="garden",
                     visuals=GaussianSplatCfg(file_path=str(asset)),
                 )
             )
+            assets = {"garden": visual}
         camera = sim.add_sensor(
             CameraCfg(
                 uid="view",
@@ -157,6 +166,22 @@ def main() -> None:
             )
         )
         sim.prepare()
+        group = SceneView(
+            sim, entity_uids=tuple(entity.uid for entity in assets.values())
+        )
+        group_report = {
+            "members": {
+                path: {"uid": entity.uid, "type": type(entity).__name__}
+                for path, entity in assets.items()
+            },
+            "before": {uid: group.pose(uid) for uid in group.entity_uids},
+        }
+        if args.group_translation is not None:
+            delta = np.eye(4)
+            delta[:3, 3] = args.group_translation
+            apply_group_transform(group, delta, movable_uids=group.entity_uids)
+            group_report["delta"] = delta
+        group_report["after"] = {uid: group.pose(uid) for uid in group.entity_uids}
         for _ in range(4):
             sim.render_camera_group([camera.group_id])
             camera.update(fetch_only=True)
@@ -182,6 +207,7 @@ def main() -> None:
             rgb_std=float(rgb.std()),
             finite_depth_fraction=float(np.isfinite(depth).mean()),
             capture=capture,
+            group=group_report,
         )
         # Native contracts represent invalid background as +inf; JSON uses null.
         normalized = json.loads(

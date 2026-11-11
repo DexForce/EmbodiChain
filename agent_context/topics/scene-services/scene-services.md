@@ -17,7 +17,7 @@ semantic scene graph, generation model client or task lifecycle.
 | Exact native planar footprint observations | `embodichain/lab/sim/scene/planar_observation.py` |
 | Immutable physical capture and restoration | `embodichain/lab/sim/scene/state.py` |
 | Exact native hand/rigid shape and physical-offset capture | `embodichain/lab/sim/scene/native_hand.py` |
-| Preflighted allowed rigid-body pose changes | `embodichain/lab/sim/scene/operations.py` |
+| Preflighted rigid/visual pose changes and static-group transforms | `embodichain/lab/sim/scene/operations.py` |
 | Explicit evidence, state comparison and caller-driven settling | `embodichain/lab/sim/scene/validation.py` |
 | Static USD root/link geometry and explicit proxy fitting | `embodichain/lab/sim/scene/articulation_geometry.py` |
 | Source-declared prismatic, press and revolute physical bindings | `embodichain/lab/sim/scene/articulation_inputs.py`, `press_inputs.py`, `revolute_inputs.py` |
@@ -104,7 +104,7 @@ See [collision worlds](../motion-planning/collision-worlds.md) for cuRobo query 
 
 ## Construction and proposal flow
 
-Resolved asset configurations → owned `SceneFragment` → optional anchor/frame
+Resolved rigid/visual/articulation configurations → owned `SceneFragment` → optional anchor/frame
 composition → `SceneRecipe` → seeded XY proposal → existing Spawn declaration
 or allowed state changes → host physics steps → measured checks.
 
@@ -176,15 +176,21 @@ covered by the selected mesh component, excluding openings during preparation.
   level; `preserve_holes` retains its mesh openings. Explicit polygon inputs retain holes and
   disconnected regions. Group translation and height alignment preserve
   relative poses; independent AABB separation uses a separate strategy.
-- `SceneView` wraps existing rigid objects, robots and articulations. Nonempty,
-  unique `env_ids` retain their declared order in reads and physical snapshots.
-  Restore preflights every selected row before writes and leaves other rows
-  untouched. Changes to world capacity invalidate the view. Rigid groups,
-  deformables and explicit rigid constraints remain unsupported.
+- `SceneView` defaults to existing rigid objects, robots and articulations.
+  Explicit `entity_uids` select an ordered group that may also contain pure
+  visual objects. `members()` exposes that group; `entities()` retains only its
+  physical members. It borrows manager-owned facades without a new registry.
+  Nonempty unique `env_ids` retain their declared order. Changed selected
+  bindings or world capacity invalidate the view. Rigid groups, deformables and
+  constraints remain unsupported members; unrelated entities do not enter an
+  explicit selection. `SceneFragment` composes visual configurations alongside
+  physical ones; robots remain embodiment-owned and recipe movers remain rigid.
 - Physical snapshots own numeric poses, velocities, joints, targets and efforts;
   restore checks original ownership, binding, backend and topology. It does not
   restore solver internals, task progress or a full backend checkpoint. Host
   integrations retain control-period and episode identity contracts.
+  Pure visual group members have no physical snapshot rows and are not restored
+  by physical state services; their render state stays separate.
   `restore_render_state` is a separate physics-disabled publication path for
   complete measured states, including solver excursions beyond command limits.
   It temporarily admits those positions and restores the exact original limits;
@@ -200,15 +206,20 @@ covered by the selected mesh component, excluding openings during preparation.
   baseline. All requested values are checked before mutation. Other parameters,
   including damping, are outside this operation's capability contract. Native
   or readback failures require the host to stop the batch.
-- Change sets preflight all UIDs and movable permissions, apply rigid poses,
-  clear dynamics and publish render state without stepping. Native write errors
+- Change sets preflight all UIDs, selected rows and movable permissions, apply
+  rigid/visual poses, clear dynamics only for rigid bodies and publish render
+  state without stepping. `apply_group_transform` requires an explicit static
+  rigid/visual group and applies one arena-local delta to current member poses,
+  preserving relative transforms and facade types. It rejects dynamic,
+  kinematic and articulated group members. Native write errors
   propagate without guaranteed rollback. The host handles reported planner and
   observation invalidations even when the simulation clock has not advanced.
 - Required checks are `passed`, `failed` or `unverified`; empty or unverified
   reports cannot accept a candidate. Fixed-step settling is unverified stability.
   Opt-in convergence checks consecutive low-velocity measurements. Supplied
-  step callbacks advance the whole world, so settling requires a full-world
-  selection and checks convergence across all rows. A shared `SceneChangeSet`
+  step callbacks advance the whole world, so settling requires every physical
+  entity and every environment row. A subset cannot certify world stability.
+  A shared `SceneChangeSet`
   applies its declared poses to every selected row. `apply_changes_batch` takes
   distinct change sets keyed by environment ID, preflights all rows first, then
   groups native writes by entity without touching unselected rows.

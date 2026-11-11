@@ -19,6 +19,15 @@ Use `--download-only` to populate the cache without starting rendering;
 Hybrid offscreen initialization requires the desktop session's working DISPLAY
 and X authority, even though no interactive window opens.
 
+`--group-translation 0.35 0 0.1` applies one arena-local offset to the imported
+visual and static collision entities together. The demo constructs an explicit
+`SceneView` from the facades returned by `add_usd()` and calls
+`apply_group_transform`; it does not merge their physical or rendering types.
+Capture JSON includes source-prim membership and before/after poses. The fixed
+camera makes the scene's movement visible. Use `delta @ current_pose` for a
+general group rotation/translation; runtime operations retain manager/Spawn
+ownership and do not create another scene controller.
+
 - **Garden**: the classic outdoor Garden reconstruction, mirrored by
   [kishimisu/3d-gaussian-splatting-webgl](https://huggingface.co/kishimisu/3d-gaussian-splatting-webgl/blob/d9bd1af40261b318a95d0f5882228f332a4c1afd/garden.ply).
   4,325,323 Gaussians, degree-3 SH, 1,072,681,636 bytes. The source is an Inria

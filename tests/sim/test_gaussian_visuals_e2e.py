@@ -39,6 +39,7 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.lab.sim.sensors import CameraCfg
 from embodichain.lab.sim.shapes import CubeCfg
+from embodichain.lab.sim.scene import SceneView, apply_group_transform
 
 pytestmark = [
     pytest.mark.requires_sim,
@@ -433,6 +434,88 @@ def test_gaussian_randomization_parallel_cameras_isolation_and_reset(
     finally:
         cameras.clear()
         visual = None
+        sim.destroy(exit_process=False)
+        sim.flush_cleanup_queue()
+
+
+def test_native_usd_static_visual_collision_group_moves_together(tmp_path):
+    """A Library-shaped import keeps both facade types and native collision geometry."""
+    from pxr import Usd, UsdPhysics
+
+    usd = _write_usd_splat(tmp_path)
+    stage = Usd.Stage.Open(str(usd))
+    root = stage.GetPrimAtPath("/Asset")
+    root.RemoveAPI(UsdPhysics.RigidBodyAPI)
+    root.RemoveAPI(UsdPhysics.MassAPI)
+    stage.GetRootLayer().Save()
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            num_envs=1,
+            device="cpu",
+            enable_entity_gizmo=False,
+            startup_summary="off",
+            render_cfg=RenderCfg.for_gaussian(renderer="hybrid", spp=1),
+        )
+    )
+    try:
+        assets = sim.add_usd("library", str(usd))
+        visual, collider = assets["/Asset/Visual"], assets["/Asset/Collision"]
+        from embodichain.lab.sim.objects import VisualObject, RigidObject
+
+        assert isinstance(visual, VisualObject) and isinstance(collider, RigidObject)
+        assert collider.body_type == "static"
+        camera = sim.add_sensor(
+            CameraCfg(
+                uid="group_view",
+                width=64,
+                height=64,
+                intrinsics=(64, 64, 32, 32),
+                ground_plane_visible=False,
+                enable_depth=True,
+                extrinsics=CameraCfg.ExtrinsicsCfg(
+                    eye=(0, -1.5, 0.8), target=(0, 0, 0.8)
+                ),
+            )
+        )
+        sim.prepare()
+        sim.enable_physics(False)
+        view = SceneView(sim, entity_uids=(visual.uid, collider.uid))
+        before = {uid: view.pose(uid) for uid in view.entity_uids}
+        collisions = collider.get_collision_shapes()
+        assert len(collisions) == 1
+        sim.render_camera_group([camera.group_id])
+        camera.update(fetch_only=True)
+        rgb = camera.get_data()["color"].clone().float()
+        capture_id = camera.capture_metadata["frame_id"]
+        delta = np.eye(4)
+        delta[:2, :2] = [[0, -1], [1, 0]]
+        delta[:2, 3] = [0.25, 0.1]
+        result = apply_group_transform(view, delta, movable_uids=view.entity_uids)
+        assert result.changed_uids == view.entity_uids
+        for uid in view.entity_uids:
+            torch.testing.assert_close(
+                view.pose(uid), torch.tensor(delta, dtype=torch.float32) @ before[uid]
+            )
+        assert collider.get_collision_shapes()[0].shape_type == collisions[0].shape_type
+        torch.testing.assert_close(
+            collider.get_collision_shapes()[0].half_extents, collisions[0].half_extents
+        )
+        assert (
+            collider.body_type == "static"
+            and visual.uid in sim.get_visual_object_uid_list()
+        )
+        sim.render_camera_group([camera.group_id])
+        camera.update(fetch_only=True)
+        assert camera.capture_metadata["valid"]
+        assert camera.capture_metadata["frame_id"] != capture_id
+        assert float((camera.get_data()["color"].float() - rgb).abs().mean()) > 0.1
+        assert torch.isfinite(camera.get_data()["depth"]).any()
+        relative = torch.linalg.inv(view.pose(collider.uid)) @ view.pose(visual.uid)
+        torch.testing.assert_close(
+            relative, torch.linalg.inv(before[collider.uid]) @ before[visual.uid]
+        )
+    finally:
         sim.destroy(exit_process=False)
         sim.flush_cleanup_queue()
 

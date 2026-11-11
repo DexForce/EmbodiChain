@@ -18,7 +18,7 @@ from __future__ import annotations
 import pytest
 import torch
 from embodichain.lab.sim.scene.query import SceneView
-from ._runtime_ports import Sim
+from ._runtime_ports import Sim, Rigid, Visual
 
 
 @pytest.mark.parametrize("env_ids", [(1,), (0, 0), (), (False,)])
@@ -45,3 +45,37 @@ def test_pose_is_owned_and_keeps_environment_dimension():
     assert sim.rigid["cube"].value[0, 0] != 0
     with pytest.raises(KeyError, match="Unknown"):
         view.pose("missing")
+
+
+def test_explicit_group_keeps_member_order_types_and_owned_pose_rows():
+    sim = Sim(4)
+    visual = sim.visuals["scan"] = Visual(4)
+    visual.value[:, 0, 3] = torch.arange(4)
+    selection = ["scan", "cube"]
+    view = SceneView(sim, env_ids=(3, 1), entity_uids=selection)
+    selection.clear()
+    assert view.members() == (
+        ("visual_object", "scan", visual),
+        ("rigid_object", "cube", sim.rigid["cube"]),
+    )
+    assert [uid for _, uid, _ in view.entities()] == ["cube"]
+    assert all(kind != "visual_object" for kind, _, _ in SceneView(sim).members())
+    pose = view.pose("scan")
+    assert pose[:, 0, 3].tolist() == [3, 1]
+    pose.zero_()
+    assert visual.value[:, 0, 3].tolist() == [0, 1, 2, 3]
+    with pytest.raises(KeyError, match="Unknown"):
+        view.pose("other")
+    sim.rigid["other"] = Rigid(4)  # Unselected replacement does not rebind this group.
+    view.check_topology()
+    sim.visuals["scan"] = Visual(4)
+    with pytest.raises(ValueError, match="bindings changed"):
+        view.pose("cube")
+
+
+@pytest.mark.parametrize(
+    "uids", [(), ("cube", "cube"), ("missing",), (" cube",), "cube"]
+)
+def test_invalid_group_members_reject(uids):
+    with pytest.raises(ValueError):
+        SceneView(Sim(), entity_uids=uids)

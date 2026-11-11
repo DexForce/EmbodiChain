@@ -276,6 +276,7 @@ topics:
     NativePlanarPlacement, planar_floor_region, planar_placement_metrics, select_container_landing,
     SceneMeshSnapshot, SceneMeshComponent, capture_scene_meshes, CollisionObjectSnapshot, snapshot_collision_sources,
     LayoutSolution, PlanarRelation, SceneView, SceneState, SceneChangeSet, SceneCheckReport,
+    apply_group_transform, scene group, 组变换,
     SettlingCfg, declare_fragment, detect_support_region, clamp_group,
     solve_layout, capture_state, restore_state, settle_scene, check_layout,
     aabb_overlap_depth, aabb_containment_violation, transform_aabbs, triangle_geometry,

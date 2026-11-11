@@ -32,13 +32,23 @@ class SceneView:
     Args:
         sim: Existing prepared simulation manager.
         env_ids: Nonempty unique arena indices, in the desired output order.
+        entity_uids: Explicit nonempty group of existing entity UIDs, in member
+            order. May include visual objects. None retains the whole physical
+            scene selection. This view owns no entities or native resources.
     """
 
     def __init__(
-        self, sim: SimulationManager, *, env_ids: Sequence[int] = (0,)
+        self,
+        sim: SimulationManager,
+        *,
+        env_ids: Sequence[int] = (0,),
+        entity_uids: Sequence[str] | None = None,
     ) -> None:
         self.sim = sim
         self.env_ids = tuple(env_ids)
+        if isinstance(entity_uids, str):
+            raise ValueError("entity_uids must be a nonempty sequence of UIDs")
+        self.entity_uids = None if entity_uids is None else tuple(entity_uids)
         self._num_envs = getattr(sim, "num_envs", 1)
         self._validate_selection()
         self.topology = self.describe_entities()
@@ -53,28 +63,65 @@ class SceneView:
             or len(set(self.env_ids)) != len(self.env_ids)
         ):
             raise ValueError("Scene env_ids must be nonempty, unique and in range")
+        if self.entity_uids is not None and (
+            not self.entity_uids
+            or any(
+                not isinstance(uid, str) or not uid or uid.strip() != uid
+                for uid in self.entity_uids
+            )
+            or len(set(self.entity_uids)) != len(self.entity_uids)
+        ):
+            raise ValueError("entity_uids must be nonempty, unique, stripped UIDs")
 
     def entities(self) -> tuple[tuple[str, str, object], ...]:
-        """Return current supported physical bindings, ordered by kind and UID."""
-        for method in (
-            "get_rigid_object_group_uid_list",
-            "get_deformable_object_uid_list",
-            "get_rigid_constraint_uid_list",
-        ):
-            getter = getattr(self.sim, method, None)
-            if callable(getter) and getter():
-                raise ValueError(
-                    f"scene snapshots do not support entities from {method}"
-                )
+        """Return selected physical bindings; visual members have no physical state.
+
+        Whole-scene views retain kind/UID order. Explicit groups retain member
+        order. Physical snapshots intentionally exclude pure visual members.
+        """
+        return tuple(row for row in self.members() if row[0] != "visual_object")
+
+    def members(self) -> tuple[tuple[str, str, object], ...]:
+        """Return current group bindings, including explicitly selected visuals.
+
+        Returns:
+            Tuples of entity kind, UID and the original manager-owned facade.
+            Unknown or unsupported selected UIDs raise before state is read.
+        """
+        if self.entity_uids is None:
+            for method in (
+                "get_rigid_object_group_uid_list",
+                "get_deformable_object_uid_list",
+                "get_rigid_constraint_uid_list",
+            ):
+                getter = getattr(self.sim, method, None)
+                if callable(getter) and getter():
+                    raise ValueError(
+                        f"scene snapshots do not support entities from {method}"
+                    )
         entities = []
-        for kind in ("rigid_object", "robot", "articulation"):
-            for uid in getattr(self.sim, f"get_{kind}_uid_list")():
+        kinds = ("rigid_object", "robot", "articulation")
+        if self.entity_uids is not None:
+            kinds += ("visual_object",)
+        for kind in kinds:
+            getter = getattr(self.sim, f"get_{kind}_uid_list", None)
+            for uid in getter() if callable(getter) else ():
+                if self.entity_uids is not None and uid not in self.entity_uids:
+                    continue
                 entity = getattr(self.sim, f"get_{kind}")(uid)
                 if entity is None:
                     raise ValueError(f"Scene entity {uid!r} disappeared")
                 entities.append((kind, uid, entity))
         if len({uid for _, uid, _ in entities}) != len(entities):
-            raise ValueError("Physical entity UIDs must be unique across scene kinds")
+            raise ValueError("Entity UIDs must be unique across scene kinds")
+        if self.entity_uids is not None:
+            bindings = {row[1]: row for row in entities}
+            missing = set(self.entity_uids) - bindings.keys()
+            if missing:
+                raise ValueError(
+                    f"Unknown or unsupported scene group UIDs: {sorted(missing)}"
+                )
+            return tuple(bindings[uid] for uid in self.entity_uids)
         return tuple(sorted(entities, key=lambda value: (value[0], value[1])))
 
     def describe_entities(self) -> tuple[tuple[object, ...], ...]:
@@ -84,10 +131,14 @@ class SceneView:
                 kind,
                 uid,
                 getattr(entity, "body_type", ""),
-                () if kind == "rigid_object" else tuple(entity.joint_names),
+                (
+                    ()
+                    if kind in ("rigid_object", "visual_object")
+                    else tuple(entity.joint_names)
+                ),
                 id(entity),
             )
-            for kind, uid, entity in self.entities()
+            for kind, uid, entity in self.members()
         )
 
     def check_topology(self) -> None:
@@ -118,7 +169,7 @@ class SceneView:
             Independent pose tensor in meters and Z-up.
         """
         self.check_topology()
-        for _, entity_uid, entity in self.entities():
+        for _, entity_uid, entity in self.members():
             if entity_uid == uid:
                 return entity.get_local_pose(to_matrix=to_matrix)[
                     list(self.env_ids)
