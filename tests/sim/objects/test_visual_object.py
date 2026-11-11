@@ -300,6 +300,7 @@ def test_add_usd_classifies_visuals_without_promoting_collision_only_objects(tmp
     manager.notify_visualization_topology_changed = MagicMock()
     with patch("dexsim.kit.usd.parse_usd", return_value=source):
         assets = manager.add_usd("scene", str(path))
+    assert isinstance(assets, dict)
     assert isinstance(assets["/World/Visual"], VisualObject)
     assert isinstance(assets["/World/Physical"], RigidObject)
     assert manager.get_asset("scene_default_plane") is assets["/World/Visual"]

@@ -17,6 +17,12 @@ accept the default DexUni solver or an explicit supported particle solver
 post-finalization additions. Default soft/cloth compatibility is absent.
 Future backend support belongs at dispatch, not inside a monolithic config.
 
+`UsdImportCfg` whole-scene loading and a deformable config's optional `source`
+bind authored soft-body/cloth descriptors through these same facades. Source
+physics and simulation/render topology are retained; the source route accepts
+identity, pose and particle flag/radius overrides rather than regenerating a
+mesh with the procedural meshing defaults.
+
 `spawn/descriptors.py` translates volume/surface configs to typed `SoftBodyDesc`
 and `ClothDesc`; volume meshing uses `SoftBodyMeshingDesc`. Runtime mutation
 uses `Scene.create_particle_set_batch()`, not renderer buffers or legacy native
@@ -106,9 +112,9 @@ and binds the same facade in place during `prepare()`. Backend capabilities
 reject Default, CPU, other Newton solvers and gradient mode; use DexUni on CUDA.
 With this backend, an arena containing a cable cannot also contain fluid,
 cloth or soft-body particles: cable episode reset does not support those
-particles. The manager rejects the second declaration before it registers
-materials or changes the builder. A duplicate cable UID is rejected at the
-same boundary.
+particles. Spawn checks the native cable and particle descriptors for direct
+declarations and USD imports, including mixtures within a single USD source.
+It checks topology and UIDs before publishing declaration materials.
 
 `CableObjectData` uses `Scene.create_cable_batch()` and exposes independent
 world snapshots for equal-topology replicated segments. Public poses are

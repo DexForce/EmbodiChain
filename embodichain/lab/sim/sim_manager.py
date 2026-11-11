@@ -114,6 +114,7 @@ from embodichain.lab.sim.cfg import (
     RigidObjectCfg,
     VisualObjectCfg,
     UsdSourceCfg,
+    UsdImportCfg,
     DeformableObjectCfg,
     SurfaceDeformableObjectCfg,
     VolumeDeformableObjectCfg,
@@ -140,6 +141,7 @@ from embodichain.lab.sim.spawn.usd import (
     rigid_desc_from_usd,
     visual_desc_from_usd,
 )
+from embodichain.lab.sim.spawn.usd_result import UsdImportResult
 from embodichain.lab.sim.spawn.scene import SpawnScene
 from embodichain.lab.sim import VisualMaterial, VisualMaterialCfg
 from embodichain.lab.sim.material import _material_desc_from_cfg
@@ -2658,206 +2660,94 @@ class SimulationManager:
 
     def add_usd(
         self,
-        name: str,
-        file_path: str,
+        cfg: UsdImportCfg | str | None = None,
+        file_path: str | None = None,
         *,
+        name: str | None = None,
         pose: np.ndarray | None = None,
         robot_cfgs: dict[str, RobotCfg] | None = None,
-    ) -> dict[str, VisualObject | RigidObject | Articulation | Robot]:
-        """Declare the supported entities in a USD scene.
+        usd: UsdSourceCfg | None = None,
+        asset_cfgs: (
+            dict[str, RigidObjectCfg | ArticulationCfg | dict[str, Any]] | None
+        ) = None,
+    ) -> (
+        UsdImportResult
+        | dict[
+            str, VisualObject | RigidObject | Articulation | Robot | DeformableObject
+        ]
+    ):
+        """Declare a USD import through a validated configuration recipe.
 
-        The returned facades are keyed by their USD prim paths. They remain in
-        declared state until :meth:`prepare` finalizes the shared Spawn scene,
-        then bind in place to the resulting DexSim handles.
-
-        Objects without physics or collision geometry become VisualObjects.
-        Conflicting render-only names receive a ``name_`` prefix; dictionary
-        keys retain their original USD prim paths. Other UID conflicts fail
-        before native declarations.
-
-        USD does not identify which articulations should expose EmbodiChain's
-        robot interface. Pass those explicitly through ``robot_cfgs``; all
-        other articulation descriptions become :class:`Articulation` objects.
+        The returned mapping uses source resource keys; unique sources retain
+        their prim paths. See :class:`UsdImportResult` for derived resource keys.
+        Facades bind in place at ``prepare()``. Source selection, overrides and supported facade
+        types are checked before native declaration. Backend materialization is
+        validated at ``prepare()``;
+        native creation failures do not promise rollback.
 
         Args:
-            name: Name passed to DexSim's USD scene parser.
-            file_path: USD, USDA, USDC, or USDZ file path.
-            pose: Optional scene-root transform.
-            robot_cfgs: Robot configurations keyed by USD prim path. These
-                provide robot-side metadata while physics remains authored by
-                the USD scene.
+            cfg: Complete USD import recipe. A string retains the legacy name argument.
+            file_path: Legacy source path; use ``cfg.source.file_path``.
+            name: Legacy keyword spelling of the import name.
+            pose: Legacy scene transform; use ``cfg.pose``.
+            robot_cfgs: Legacy robot metadata; use ``cfg.robot_cfgs``.
+            usd: Legacy source options; use ``cfg.source`` and ``cfg.namespace``.
+            asset_cfgs: Legacy per-asset overrides; use ``cfg.asset_cfgs``.
 
         Returns:
-            Supported EmbodiChain facades keyed by USD prim path.
-
-        Raises:
-            RuntimeError: If called after the Spawn scene was finalized.
+            Source-path mapping of declared facades and imported resource UIDs.
+            Legacy argument forms retain the mutable asset dictionary result.
         """
+        from .cfg.usd import _normalize_usd_import
+        from .spawn.usd_import import _compile_usd_import
+
         if self.spawn_result is not None:
             raise RuntimeError(
                 "add_usd() must be called before SimulationManager.prepare()."
             )
-
-        from dexsim.spawn import ArticulationDesc, MeshObjectDesc
-
-        from dexsim.kit.usd import parse_usd
-
-        source = parse_usd(file_path, root_name=name)
-        occupied = set(self.asset_uids)
-        for descriptor in (
-            *getattr(self._spawn_scene.builder, "mesh_objects", ()),
-            *getattr(self._spawn_scene.builder, "scene_entities", ()),
-        ):
-            occupied.add(descriptor.name)
-        # Exported scenes can contain a visual ground named like our global
-        # physical ground. Keep both and retain the original USD path as the key.
-        for descriptor in source.mesh_objects:
-            if (
-                descriptor.name in occupied
-                and descriptor.physics is None
-                and not descriptor.collisions
-            ):
-                descriptor.name = f"{name}_{descriptor.name}"
-        for collection in (
-            "mesh_objects",
-            "articulations",
-            "particle_sets",
-            "cameras",
-            "lights",
-            "cables",
-            "records",
-        ):
-            for descriptor in getattr(source, collection, ()):
-                if descriptor.name in occupied:
-                    raise ValueError(
-                        f"USD asset UID already exists: {descriptor.name!r}."
-                    )
-                occupied.add(descriptor.name)
-                if pose is not None and hasattr(descriptor, "pose"):
-                    descriptor.pose = (
-                        np.asarray(pose, dtype=np.float32).reshape(4, 4)
-                        @ descriptor.pose
-                    )
-        source.materials = self._spawn_scene._resolve_materials(source.materials)
-        descriptors = self._spawn_scene.builder.add_scene(source, per_env=True)
-        assets: dict[str, VisualObject | RigidObject | Articulation | Robot] = {}
-        robot_cfgs = robot_cfgs or {}
-
-        for descriptor in descriptors:
-            source_path = (
-                descriptor.usd.prim_path
-                if descriptor.usd is not None and descriptor.usd.prim_path
-                else descriptor.name
+        legacy_result = not isinstance(cfg, UsdImportCfg)
+        recipe = _normalize_usd_import(
+            cfg,
+            file_path=file_path,
+            name=name,
+            pose=pose,
+            robot_cfgs=robot_cfgs,
+            usd=usd,
+            asset_cfgs=asset_cfgs,
+        )
+        plan = _compile_usd_import(self, recipe)
+        plan.source.materials = self._spawn_scene._resolve_materials(
+            plan.source.materials
+        )
+        added = self._spawn_scene.builder.add_scene(plan.source, per_env=True)
+        added_by_name = {item.name: item for item in added}
+        assets = {}
+        for source_path, kind, descriptor, facade in plan.declarations:
+            self._spawn_scene.track(
+                kind, descriptor.name, added_by_name[descriptor.name], facade=facade
             )
-
-            if type(descriptor) is MeshObjectDesc:
-                if descriptor.physics is None and not descriptor.collisions:
-                    cfg = VisualObjectCfg(
-                        uid=descriptor.name,
-                        source=UsdSourceCfg(
-                            file_path=file_path,
-                            source_prim_path=(
-                                descriptor.usd.prim_path
-                                if descriptor.usd is not None
-                                else None
-                            ),
-                        ),
-                        init_local_pose=descriptor.pose.copy(),
-                        body_scale=tuple(
-                            float(value) for value in descriptor.body_scale
-                        ),
-                    )
-                    facade = VisualObject(cfg=cfg, device=self.device)
-                    self._spawn_scene.track(
-                        "visual_object", descriptor.name, descriptor, facade=facade
-                    )
-                    self._visual_objects[descriptor.name] = facade
-                    assets[source_path] = facade
-                    continue
-                body_type = "static"
-                if descriptor.physics is not None:
-                    body_type = {
-                        ActorType.DYNAMIC: "dynamic",
-                        ActorType.KINEMATIC: "kinematic",
-                        ActorType.STATIC: "static",
-                    }[descriptor.physics.actor_type]
-                cfg = RigidObjectCfg(
-                    uid=descriptor.name,
-                    source=UsdSourceCfg(
-                        file_path=file_path,
-                        source_prim_path=(
-                            descriptor.usd.prim_path
-                            if descriptor.usd is not None
-                            else None
-                        ),
-                    ),
-                    init_local_pose=descriptor.pose.copy(),
-                    body_type=body_type,
-                    body_scale=tuple(float(value) for value in descriptor.body_scale),
-                    asset_physics_mode="preserve",
-                )
-                facade = RigidObject(
-                    cfg=cfg,
-                    device=self.device,
-                )
-
-                self._spawn_scene.track(
-                    "rigid_object",
-                    descriptor.name,
-                    descriptor,
-                    facade=facade,
-                )
-                self._rigid_objects[descriptor.name] = facade
-                assets[source_path] = facade
-                continue
-
-            if isinstance(descriptor, ArticulationDesc):
-                robot_cfg = robot_cfgs.get(source_path)
-                facade_type: type[Articulation] = (
-                    Robot if robot_cfg is not None else Articulation
-                )
-                cfg = (
-                    deepcopy(robot_cfg)
-                    if robot_cfg is not None
-                    else ArticulationCfg(uid=descriptor.name)
-                )
-                cfg.uid = descriptor.name
-                cfg.fpath = None
-                cfg.source = UsdSourceCfg(
-                    file_path=file_path,
-                    source_prim_path=(
-                        descriptor.usd.prim_path if descriptor.usd is not None else None
-                    ),
-                )
-                cfg.init_local_pose = descriptor.pose.copy()
-                cfg.asset_physics_mode = "preserve"
-                if robot_cfg is None:
-                    cfg.root_props = ArticulationRootPropertiesCfg()
-                else:
-                    cfg.root_props = cfg.root_props.copy()
-                cfg.root_props.fixed_base = bool(descriptor.fixed_base)
-                cfg.root_props.self_collision_enabled = descriptor.enable_self_collision
-                cfg.body_scale = tuple(float(value) for value in descriptor.body_scale)
-                cfg.build_pk_chain = False
-                facade = facade_type(
-                    cfg=cfg,
-                    device=self.device,
-                )
-
-                self._spawn_scene.track(
-                    "articulation",
-                    descriptor.name,
-                    descriptor,
-                    facade=facade,
-                )
-                registry = (
-                    self._robots if robot_cfg is not None else self._articulations
-                )
-                registry[descriptor.name] = facade
-                assets[source_path] = facade
-
+            registry = {
+                "visual_object": self._visual_objects,
+                "rigid_object": self._rigid_objects,
+                "articulation": (
+                    self._robots if isinstance(facade, Robot) else self._articulations
+                ),
+                "soft_object": self._deformable_objects,
+                "cloth_object": self._deformable_objects,
+            }[kind]
+            registry[descriptor.name] = facade
+            assets[source_path] = facade
+        for sensor_cfg in plan.mounted_sensors:
+            self.add_sensor(sensor_cfg)
         self.notify_visualization_topology_changed()
-        return assets
+        result = UsdImportResult(
+            assets,
+            resource_uids=plan.resource_uids,
+            resource_types=plan.resource_types,
+            constraint_uids=plan.constraint_uids,
+            resource_source_paths=plan.resource_source_paths,
+        )
+        return dict(result) if legacy_result else result
 
     def add_visual_object(self, cfg: VisualObjectCfg) -> VisualObject:
         """Declare a render-only mesh or primitive, without physics or colliders.
@@ -2869,6 +2759,7 @@ class SimulationManager:
         Returns:
             The declared facade, bound after ``prepare()``.
         """
+        cfg = deepcopy(cfg)
         if cfg.uid is None or cfg.uid in self.asset_uids:
             raise ValueError("Visual object requires a unique, nonempty UID.")
         path = _asset_file_path(cfg)
@@ -2878,10 +2769,9 @@ class SimulationManager:
             descriptor, materials = visual_desc_from_cfg(cfg)
         visual = VisualObject(cfg, self.device)
         was_materialized = self.spawn_result is not None
-        self._spawn_scene.builder.materials.update(
-            self._spawn_scene._resolve_materials(materials)
+        self._spawn_scene.declare(
+            "visual_object", cfg.uid, descriptor, facade=visual, materials=materials
         )
-        self._spawn_scene.declare("visual_object", cfg.uid, descriptor, facade=visual)
         self._visual_objects[cfg.uid] = visual
         self.notify_visualization_topology_changed()
         if was_materialized:
@@ -2910,16 +2800,22 @@ class SimulationManager:
     def add_rigid_object(
         self,
         cfg: RigidObjectCfg,
+        *,
+        validate_resolved: Callable[[RigidObjectCfg], None] | None = None,
     ) -> RigidObject:
         """Add a rigid object to the scene.
 
         Args:
             cfg (RigidObjectCfg): Configuration for the rigid object.
+            validate_resolved: Optional check of the source-resolved config,
+                run before declaring the object in Spawn.
 
         Returns:
             RigidObject: The added rigid object instance handle.
         """
-        return self._declare_rigid_object(cfg, replace=False)
+        return self._declare_rigid_object(
+            cfg, replace=False, validate_resolved=validate_resolved
+        )
 
     def replace_rigid_object(self, cfg: RigidObjectCfg) -> RigidObject:
         """Replace a rigid object with the same UID in one preparation.
@@ -2969,15 +2865,25 @@ class SimulationManager:
         return self._declare_rigid_objects(cfgs, replace=True)
 
     def _declare_rigid_object(
-        self, cfg: RigidObjectCfg, *, replace: bool
+        self,
+        cfg: RigidObjectCfg,
+        *,
+        replace: bool,
+        validate_resolved: Callable[[RigidObjectCfg], None] | None = None,
     ) -> RigidObject:
-        return self._declare_rigid_objects([cfg], replace=replace)[0]
+        return self._declare_rigid_objects(
+            [cfg], replace=replace, validate_resolved=validate_resolved
+        )[0]
 
     def _declare_rigid_objects(
-        self, cfgs: Sequence[RigidObjectCfg], *, replace: bool
+        self,
+        cfgs: Sequence[RigidObjectCfg],
+        *,
+        replace: bool,
+        validate_resolved: Callable[[RigidObjectCfg], None] | None = None,
     ) -> list[RigidObject]:
         """Translate the complete batch before changing the scene."""
-        cfgs = list(cfgs)
+        cfgs = [deepcopy(cfg) for cfg in cfgs]
         if not cfgs:
             return []
         seen: set[str] = set()
@@ -3008,14 +2914,19 @@ class SimulationManager:
                     per_env=True,
                     newton_solver_type=self._active_newton_solver_type,
                 )
+            if validate_resolved is not None:
+                validate_resolved(cfg)
             rigid_obj = RigidObject(cfg=cfg, device=self.device)
             declarations.append((cfg.uid, descriptor, materials, rigid_obj))
 
+        for uid, _, _, _ in declarations:
+            if replace:
+                self._spawn_scene._require_removable(uid)
+            else:
+                self._spawn_scene._preflight_declaration("rigid_object", uid)
+        self._spawn_scene._register_material_batches(item[2] for item in declarations)
         was_materialized = self.spawn_result is not None
         for uid, descriptor, materials, rigid_obj in declarations:
-            self._spawn_scene.builder.materials.update(
-                self._spawn_scene._resolve_materials(materials)
-            )
             if replace:
                 self._spawn_scene.remove(uid)
             self._spawn_scene.declare("rigid_object", uid, descriptor, facade=rigid_obj)
@@ -3049,10 +2960,6 @@ class SimulationManager:
         if not getattr(self.physics, "supports_dexuni_fluids", False):
             raise NotImplementedError(
                 "Fluid objects require a DexSim build supporting DexUniSolverCfg.sph_cfg."
-            )
-        if getattr(self, "_cable_objects", {}):
-            raise NotImplementedError(
-                "Cable episode reset does not support fluid particles in the same arena."
             )
         if getattr(self, "_deformable_objects", {}):
             raise NotImplementedError("DexUni fluids cannot coexist with deformables.")
@@ -3120,6 +3027,7 @@ class SimulationManager:
                 raise ValueError(
                     f"Fluid {key} conflicts with solver_cfg.sph_cfg.{key}."
                 )
+        self._spawn_scene._preflight_declaration("fluid_object", cfg.uid)
         points = cfg.spawn.sample(cfg.particle_spacing)
         pose = _pose_from_cfg(cfg)
         if cfg.spawn.reference_uid is not None:
@@ -3207,21 +3115,18 @@ class SimulationManager:
             raise NotImplementedError(
                 "Declare cable objects before scene finalization."
             )
-        if self._fluid_objects or self._deformable_objects:
-            raise NotImplementedError(
-                "Cable episode reset does not support fluid or deformable particles in the same arena."
-            )
         descriptor, materials = cable_desc_from_cfg(cfg, per_env=True)
         if descriptor.name in self.asset_uids or descriptor.name in self._spawn_scene:
             raise ValueError(
                 f"Scene asset uid is already declared: {descriptor.name!r}."
             )
         cable = CableObject(cfg, device=self.device)
-        self._spawn_scene.builder.materials.update(
-            self._spawn_scene._resolve_materials(materials)
-        )
         self._spawn_scene.declare(
-            "cable_object", descriptor.name, descriptor, facade=cable
+            "cable_object",
+            descriptor.name,
+            descriptor,
+            facade=cable,
+            materials=materials,
         )
         self._cable_objects[descriptor.name] = cable
         self.notify_visualization_topology_changed()
@@ -3259,6 +3164,7 @@ class SimulationManager:
                 the requested deformable type.
             ValueError: If the discriminator or UID is invalid.
         """
+        cfg = deepcopy(cfg)
         deformable_type = cfg.deformable_type
         if deformable_type == "volume":
             supported = self.physics.supports_volume_deformables
@@ -3279,10 +3185,6 @@ class SimulationManager:
                 "Newton deformable particle sets currently require a CUDA device."
             )
         solver_type = self._active_newton_solver_type
-        if getattr(self, "_cable_objects", {}):
-            raise NotImplementedError(
-                "Cable episode reset does not support deformable particles in the same arena."
-            )
         if solver_type == "dexuni" and getattr(self, "_fluid_objects", {}):
             raise NotImplementedError("DexUni fluids cannot coexist with deformables.")
         supported_solvers = {"dexuni", "xpbd", "semi_implicit", "vbd"}
@@ -3327,10 +3229,12 @@ class SimulationManager:
                 f"A {deformable_type} deformable requires "
                 f"{config_cls.__name__}, got {type(cfg).__name__}."
             )
-        descriptor, materials = descriptor_factory(cfg, per_env=True)
-        self._spawn_scene.builder.materials.update(
-            self._spawn_scene._resolve_materials(materials)
-        )
+        if cfg.source is not None:
+            from .spawn.usd import _deformable_desc_from_usd
+
+            descriptor, materials = _deformable_desc_from_usd(cfg)
+        else:
+            descriptor, materials = descriptor_factory(cfg, per_env=True)
         deformable = object_cls(
             cfg,
             device=self.device,
@@ -3340,6 +3244,7 @@ class SimulationManager:
             uid,
             descriptor,
             facade=deformable,
+            materials=materials,
         )
         self._deformable_objects[uid] = deformable
         self.notify_visualization_topology_changed()
@@ -3638,7 +3543,9 @@ class SimulationManager:
             "dynamic": ActorType.DYNAMIC,
             "kinematic": ActorType.KINEMATIC,
         }[cfg.body_type]
+        self._spawn_scene._preflight_declaration("rigid_object_group", uid)
         descriptors = []
+        material_batches = []
         for index, member in enumerate(cfg.rigid_objects.values()):
             member_cfg = deepcopy(member)
             member_cfg.uid = f"{uid}__member_{index}"
@@ -3661,9 +3568,8 @@ class SimulationManager:
                     f"Rigid object group member {index} has no rigid-body physics."
                 )
             descriptor.physics.actor_type = actor_type
-            self._spawn_scene.builder.materials.update(
-                self._spawn_scene._resolve_materials(materials)
-            )
+            self._spawn_scene._require_available_uid(descriptor.name)
+            material_batches.append(materials)
             descriptors.append(descriptor)
 
         group = RigidObjectGroup(
@@ -3672,6 +3578,7 @@ class SimulationManager:
         )
 
         was_materialized = self.spawn_result is not None
+        self._spawn_scene._register_material_batches(material_batches)
         self._spawn_scene.declare(
             "rigid_object_group",
             uid,
@@ -3894,14 +3801,13 @@ class SimulationManager:
         backend materializes it. Runtime Batch data is created at the shared
         prepare boundary.
         """
+        cfg = deepcopy(cfg)
+        materials = {}
         if _is_usd_path(_asset_file_path(cfg)):
             descriptor, materials = articulation_desc_from_usd(
                 cfg,
                 per_env=True,
                 newton_solver_type=self._active_newton_solver_type,
-            )
-            self._spawn_scene.builder.materials.update(
-                self._spawn_scene._resolve_materials(materials)
             )
         else:
             descriptor = articulation_desc_from_cfg(
@@ -3912,6 +3818,8 @@ class SimulationManager:
         if cfg.uid is None:
             cfg.uid = descriptor.name
 
+        cfg.root_props.fixed_base = bool(descriptor.fixed_base)
+        cfg.root_props.self_collision_enabled = descriptor.enable_self_collision
         facade = facade_type(
             cfg=cfg,
             device=self.device,
@@ -3922,6 +3830,7 @@ class SimulationManager:
             descriptor.name,
             descriptor,
             facade=facade,
+            materials=materials,
             configure_source=partial(
                 configure_articulation_desc,
                 cfg=cfg,

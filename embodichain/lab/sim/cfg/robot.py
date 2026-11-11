@@ -143,10 +143,17 @@ class RobotCfg(ArticulationCfg):
 
         solver_module = importlib.import_module("embodichain.lab.sim.motion.solvers")
 
-        cfg = cls()  # Create a new instance of the class (cls)
+        file_fields = {}
+        if "source" in init_dict:
+            file_fields["source"] = _usd_source_from_value(init_dict["source"])
+        if "fpath" in init_dict:
+            path = init_dict["fpath"]
+            file_fields["fpath"] = None if path is None else _get_data_path(path)
+        # Resolve source-dependent defaults with the actual file owner present.
+        cfg = cls(**file_fields)
         for key, value in init_dict.items():
-            if key == "source":
-                cfg.source = _usd_source_from_value(value)
+            if key in file_fields:
+                continue
             elif key == "link_attrs" and isinstance(value, dict):
                 cfg.link_attrs = link_attrs_from_dict(value)
             elif key == "attrs" and isinstance(value, Mapping):
@@ -187,8 +194,6 @@ class RobotCfg(ArticulationCfg):
                             for part, part_cfg in value.items()
                         },
                     )
-                elif key == "fpath":
-                    setattr(cfg, key, None if value is None else _get_data_path(value))
                 elif isinstance(attr, JointDrivePropertiesCfg) and isinstance(
                     value, dict
                 ):

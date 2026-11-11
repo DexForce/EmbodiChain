@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -317,6 +318,137 @@ def test_particle_and_cable_declarations_preserve_first_asset(
     assert second_cfg.uid not in scene
 
 
+def _usd_import_manager() -> SimulationManager:
+    from dexsim.spawn import SceneBuilder, SceneDesc
+
+    sim = _manager()
+    scene = sim._spawn_scene
+    # Keep the SDK's descriptor inventory and add_scene traversal without
+    # allocating a native World or particle solver.
+    builder = object.__new__(SceneBuilder)
+    builder.backend = "newton"
+    builder.scene_desc = SceneDesc(name="usd_particle_regression")
+    builder.result = None
+    builder._finalized = False
+    builder._adapter = SimpleNamespace(backend="newton", add=Mock())
+    builder.replicate_plan = SimpleNamespace(env_names=lambda: ("arena_0", "arena_1"))
+    scene.builder = builder
+    del scene._resolve_materials
+    scene._usd_texture_files = SimpleNamespace(resolve=lambda materials: materials)
+    scene._resource_material_definitions = {}
+    scene._material_resources = SimpleNamespace(renderer="no-render")
+    scene._resolve_materials = Mock(wraps=scene._resolve_materials)
+    sim._visual_objects = {}
+    return sim
+
+
+def _write_cable_usd(tmp_path: Path, *, include_particles: bool = False) -> Path:
+    particle_source = (
+        Path(__file__).resolve().parents[2] / "fixtures/usd/volume_particle.usda"
+    )
+    source = particle_source.read_text() if include_particles else "#usda 1.0\n"
+    path = tmp_path / "cables.usda"
+    path.write_text(source + """
+def BasisCurves "Cable" (
+    prepend apiSchemas = ["PhysicsCurvesDeformableSimAPI"]
+)
+{
+    uniform token type = "linear"
+    uniform token wrap = "nonperiodic"
+    int[] curveVertexCounts = [2]
+    point3f[] points = [(0, 0, 1), (0.1, 0, 1)]
+}
+""")
+    return path
+
+
+@pytest.mark.parametrize("cable_first", [True, False])
+@pytest.mark.parametrize("cable_source", ["typed", "usd"])
+def test_usd_particles_and_cables_reject_mix_before_scene_mutation(
+    tmp_path: Path, cable_first: bool, cable_source: str
+) -> None:
+    from dexsim.spawn import SoftBodyDesc
+    from embodichain.lab.sim.cfg import UsdImportCfg, UsdSourceCfg
+    from embodichain.lab.sim.material import VisualMaterialCfg
+
+    sim = _usd_import_manager()
+    scene = sim._spawn_scene
+    builder = scene.builder
+    source = Path(__file__).resolve().parents[2] / "fixtures/usd/volume_particle.usda"
+    recipe = UsdImportCfg(name="volume", source=UsdSourceCfg(file_path=str(source)))
+    cable_cfg = _cfg()
+    cable_cfg.visual_material = VisualMaterialCfg(
+        uid="cable_material", base_color=[1, 0, 0, 1]
+    )
+
+    def add_cable():
+        if cable_source == "typed":
+            return sim.add_cable_object(cable_cfg)
+        imported = sim.add_usd(
+            UsdImportCfg(
+                name="cables",
+                source=UsdSourceCfg(file_path=str(_write_cable_usd(tmp_path))),
+            )
+        )
+        assert dict(imported) == {}
+        assert list(imported.resource_types.values()) == ["cable"]
+        assert len(builder.cables) == 1
+        assert not sim._cable_objects and not scene._assets
+        return None
+
+    if cable_first:
+        first = add_cable()
+    else:
+        imported = sim.add_usd(recipe)
+        first = imported["/World/Soft"]
+        assert len(builder.particle_sets) == 1
+        assert isinstance(builder.particle_sets[0], SoftBodyDesc)
+        assert sim.get_asset(first.uid) is first
+
+    initial_entities = [id(item) for item in builder.scene_desc.iter_entities()]
+    initial_materials = dict(builder.materials)
+    initial_definitions = dict(scene._resource_material_definitions)
+    initial_assets = dict(scene._assets)
+    scene._resolve_materials.reset_mock()
+    builder._adapter.add.reset_mock()
+    with pytest.raises(NotImplementedError, match="same arena"):
+        if cable_first:
+            sim.add_usd(recipe)
+        else:
+            add_cable()
+
+    assert [id(item) for item in builder.scene_desc.iter_entities()] == initial_entities
+    assert builder.materials == initial_materials
+    assert scene._resource_material_definitions == initial_definitions
+    assert scene._assets == initial_assets
+    if first is not None:
+        assert sim.get_asset(first.uid) is first
+    scene._resolve_materials.assert_not_called()
+    builder._adapter.add.assert_not_called()
+
+
+def test_one_usd_import_rejects_cables_and_particles_before_scene_mutation(
+    tmp_path: Path,
+) -> None:
+    from dexsim.kit.usd import parse_usd
+    from embodichain.lab.sim.cfg import UsdImportCfg, UsdSourceCfg
+
+    source = _write_cable_usd(tmp_path, include_particles=True)
+    parsed = parse_usd(str(source))
+    assert len(parsed.cables) == len(parsed.particle_sets) == 1
+    sim = _usd_import_manager()
+    scene = sim._spawn_scene
+    with pytest.raises(NotImplementedError, match="same arena"):
+        sim.add_usd(
+            UsdImportCfg(name="mixed", source=UsdSourceCfg(file_path=str(source)))
+        )
+    assert list(scene.builder.scene_desc.iter_entities()) == []
+    assert not scene._assets and not sim._deformable_objects
+    assert not scene.builder.materials and not scene._resource_material_definitions
+    scene._resolve_materials.assert_not_called()
+    scene.builder._adapter.add.assert_not_called()
+
+
 @pytest.mark.parametrize("renderer", ["rt", "no-render"])
 def test_generated_cable_material_uses_scene_resource_resolution(renderer) -> None:
     from embodichain.lab.sim._material_presets import _AssetMaterialDesc
@@ -458,6 +590,54 @@ def test_finalized_cable_scene_rejects_topology_changes_before_builder_mutation(
     builder.add_object.assert_not_called()
     with pytest.raises(NotImplementedError, match="pending removal"):
         sim._spawn_scene.remove("wire")
+
+
+def test_rejected_rigid_declaration_preserves_material_name_for_no_render_visual() -> (
+    None
+):
+    from embodichain.lab.sim.cfg import RigidObjectCfg, VisualObjectCfg
+    from embodichain.lab.sim.material import VisualMaterialCfg
+    from embodichain.lab.sim.shapes import CubeCfg
+
+    sim = _manager(device="cpu")
+    sim._visual_objects = {}
+    scene = sim._spawn_scene
+    del scene._resolve_materials
+    scene._usd_texture_files = SimpleNamespace(resolve=lambda materials: materials)
+    scene._resource_material_definitions = {}
+    scene._material_resources = SimpleNamespace(renderer="no-render")
+    scene.track("cable_object", "wire", SimpleNamespace(name="wire"))
+    scene.builder.is_finalized = True
+    scene.builder.add_object = Mock()
+    with pytest.raises(NotImplementedError, match="topology changes"):
+        sim.add_rigid_object(
+            RigidObjectCfg(
+                uid="blocked",
+                shape=CubeCfg(
+                    size=(0.1, 0.1, 0.1),
+                    visual_material=VisualMaterialCfg(
+                        uid="reserved", base_color=[1, 0, 0, 1]
+                    ),
+                ),
+            )
+        )
+
+    visual = sim.add_visual_object(
+        VisualObjectCfg(
+            uid="allowed",
+            shape=CubeCfg(
+                size=(0.1, 0.1, 0.1),
+                visual_material=VisualMaterialCfg(
+                    uid="reserved", base_color=[0, 1, 0, 1]
+                ),
+            ),
+        )
+    )
+    assert sim.get_visual_object("allowed") is visual
+    assert list(visual.cfg.shape.visual_material.base_color) == [0, 1, 0, 1]
+    assert "blocked" not in scene and "blocked" not in sim._rigid_objects
+    assert scene._assets["allowed"].declaration_only
+    scene.builder.add_object.assert_not_called()
 
 
 @pytest.mark.parametrize(

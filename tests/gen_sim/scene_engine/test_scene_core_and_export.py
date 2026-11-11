@@ -696,8 +696,8 @@ def test_schema_v2_usd_preview_uses_direct_simulation_import(
         def __init__(self) -> None:
             self.calls: list[dict[str, str]] = []
 
-        def add_usd(self, **kwargs: str) -> dict[str, object]:
-            self.calls.append(kwargs)
+        def add_usd(self, cfg) -> dict[str, object]:
+            self.calls.append({"name": cfg.name, "file_path": cfg.source.file_path})
             return {"/World/Scene/Entities/drawer": drawer}
 
         def prepare(self) -> None:
