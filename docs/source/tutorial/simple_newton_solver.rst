@@ -50,6 +50,18 @@ renders through ``SimulationManager.render_camera_group()``, and reads the RGB
 frames from ``Camera.get_data()``. This needs a working native GPU renderer even
 when the solver runs on the CPU.
 
+To record the same offscreen cameras as a video, run:
+
+.. code-block:: bash
+
+   python scripts/tutorials/sim/simple_newton_solver/demo.py --device cpu \
+       --video-path simple_newton_offscreen.mp4
+
+The H.264 MP4 places the two environments side by side and records all 30
+native simulation steps at 10 fps, with short holds on the initial and final
+poses. It requires ``ffmpeg`` with ``libx264`` on ``PATH``. Combine
+``--render-path`` and ``--video-path`` to save both outputs in one run.
+
 To inspect the actual EmbodiChain scene in Viser, run:
 
 .. code-block:: bash

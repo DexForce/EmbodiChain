@@ -33,6 +33,8 @@ python scripts/tutorials/sim/simple_newton_solver/demo.py --device cpu \
 python scripts/tutorials/sim/simple_newton_solver/demo.py --device cpu \
     --render-path simple_newton_offscreen.png
 python scripts/tutorials/sim/simple_newton_solver/demo.py --device cpu \
+    --video-path simple_newton_offscreen.mp4
+python scripts/tutorials/sim/simple_newton_solver/demo.py --device cpu \
     --viser --viser-seconds 60
 ```
 
@@ -53,6 +55,12 @@ the native FastRT renderer before World construction, then uses `CameraCfg`,
 `SimulationManager.render_camera_group()` and `Camera.get_data()["color"]`.
 The physics and gradient checks remain the same. Native camera rendering needs
 a working GPU renderer even when Newton physics runs on the CPU.
+
+Pass `--video-path` to record those two offscreen cameras side by side during
+the 30-step replay. The H.264 MP4 has 40 frames at 10 fps, including short
+holds on the initial and final poses. This option requires `ffmpeg` with
+`libx264` on `PATH` and the same native GPU renderer as `--render-path`.
+Both options may be used in one run.
 
 Pass `--viser` to see the actual EmbodiChain scene at `http://127.0.0.1:8080`.
 The script exports both slider links, replays 30 native simulation steps, and

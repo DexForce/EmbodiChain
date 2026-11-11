@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import time
 from pathlib import Path
 
@@ -114,11 +115,60 @@ def _save_offscreen_preview(before: np.ndarray, after: np.ndarray, path: Path) -
     image.save(path)
 
 
+def _start_video_encoder(path: Path, width: int, height: int) -> subprocess.Popen:
+    """Start an H.264 encoder for the two side-by-side offscreen views."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        return subprocess.Popen(
+            [
+                "ffmpeg",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "rawvideo",
+                "-pixel_format",
+                "rgb24",
+                "-video_size",
+                f"{2 * width}x{height}",
+                "-framerate",
+                "10",
+                "-i",
+                "pipe:0",
+                "-an",
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                str(path),
+            ],
+            stdin=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError("--video-path requires ffmpeg on PATH") from exc
+
+
+def _write_video_frame(encoder: subprocess.Popen, rgb: np.ndarray) -> None:
+    """Append one RGB frame per environment without retaining the video in RAM."""
+    combined = np.ascontiguousarray(np.concatenate((rgb[0], rgb[1]), axis=1))
+    encoder.stdin.write(combined.tobytes())
+
+
+def _finish_video_encoder(encoder: subprocess.Popen) -> None:
+    """Flush the encoder and report an unsuccessful conversion."""
+    encoder.stdin.close()
+    error = encoder.stderr.read().decode(errors="replace")
+    if encoder.wait() != 0:
+        raise RuntimeError(f"ffmpeg could not encode the tutorial video: {error}")
+
+
 def run(
     device: str,
     preview_path: Path | None = None,
     *,
     render_path: Path | None = None,
+    video_path: Path | None = None,
     viser: bool = False,
     viser_port: int = 8080,
     viser_seconds: float = 30.0,
@@ -128,7 +178,13 @@ def run(
         raise ValueError("viser_seconds must be non-negative")
     config = SimulationManagerCfg(
         headless=True,
-        render_cfg=RenderCfg(renderer="fast-rt" if render_path is not None else "auto"),
+        render_cfg=RenderCfg(
+            renderer=(
+                "fast-rt"
+                if render_path is not None or video_path is not None
+                else "auto"
+            )
+        ),
         visualization=VisualizationCfg(
             backend="viser" if viser else "none",
             env_ids=[0, 1],
@@ -151,7 +207,10 @@ def run(
             ),
         ),
     )
-    sim = SimulationManager(config, requires_native_renderer=render_path is not None)
+    sim = SimulationManager(
+        config,
+        requires_native_renderer=render_path is not None or video_path is not None,
+    )
     try:
         slider = sim.add_articulation(
             ArticulationCfg(
@@ -165,7 +224,7 @@ def run(
         )
         sim.prepare()
         camera = None
-        if render_path is not None:
+        if render_path is not None or video_path is not None:
             camera = sim.add_sensor(
                 CameraCfg(
                     uid="slider_preview",
@@ -245,22 +304,45 @@ def run(
         }
         if preview_path is not None:
             result["preview_path"] = str(preview_path)
-        if viser or render_path is not None:
+        if viser or render_path is not None or video_path is not None:
             # Replay in the live EmbodiChain scene for Viser and/or native RGB.
             # The numerical and gradient checks above remain independent.
             slider.reset()
             slider.set_qf(force.detach().reshape(2, 1))
             initial_rgb = _capture_rgb(sim, camera) if camera is not None else None
-            for _ in range(30):
-                sim.update(step=1)
-                if viser:
-                    sim.capture_visualization(force=True)
-                    time.sleep(0.05)
+            encoder = (
+                _start_video_encoder(video_path, camera.cfg.width, camera.cfg.height)
+                if video_path is not None
+                else None
+            )
+            final_rgb = None
+            try:
+                if encoder is not None:
+                    for _ in range(5):
+                        _write_video_frame(encoder, initial_rgb)
+                for _ in range(30):
+                    sim.update(step=1)
+                    if viser:
+                        sim.capture_visualization(force=True)
+                        time.sleep(0.05)
+                    if encoder is not None:
+                        final_rgb = _capture_rgb(sim, camera)
+                        _write_video_frame(encoder, final_rgb)
+                if encoder is not None:
+                    for _ in range(5):
+                        _write_video_frame(encoder, final_rgb)
+            finally:
+                if encoder is not None:
+                    _finish_video_encoder(encoder)
             result["visualized_position"] = slider.get_qpos().flatten().tolist()
             if camera is not None:
-                final_rgb = _capture_rgb(sim, camera)
-                _save_offscreen_preview(initial_rgb, final_rgb, render_path)
-                result["render_path"] = str(render_path)
+                if render_path is not None:
+                    if final_rgb is None:
+                        final_rgb = _capture_rgb(sim, camera)
+                    _save_offscreen_preview(initial_rgb, final_rgb, render_path)
+                    result["render_path"] = str(render_path)
+                if video_path is not None:
+                    result["video_path"] = str(video_path)
         if viser:
             result["viser_url"] = f"http://127.0.0.1:{viser_port}"
             result["visualized_links"] = sum(
@@ -285,6 +367,9 @@ if __name__ == "__main__":
         help="save EmbodiChain offscreen RGB before and after replay",
     )
     parser.add_argument(
+        "--video-path", type=Path, help="record a side-by-side offscreen MP4"
+    )
+    parser.add_argument(
         "--viser", action="store_true", help="replay in EmbodiChain Viser"
     )
     parser.add_argument("--viser-port", type=int, default=8080)
@@ -302,6 +387,7 @@ if __name__ == "__main__":
                     args.device,
                     args.preview_path,
                     render_path=args.render_path,
+                    video_path=args.video_path,
                     viser=args.viser,
                     viser_port=args.viser_port,
                     viser_seconds=args.viser_seconds,
