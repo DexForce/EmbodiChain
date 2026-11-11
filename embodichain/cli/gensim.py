@@ -29,6 +29,16 @@ from embodichain.cli.main import _load_handler
 __all__: list[str] = []
 
 _DOMAINS = {
+    "services": {
+        "validate": (
+            "embodichain.gen_sim.services.cli:validate_main",
+            "Validate user-deployed model-service profiles without provider calls.",
+        ),
+        "doctor": (
+            "embodichain.gen_sim.services.cli:doctor_main",
+            "Initialize model services and run available health checks.",
+        ),
+    },
     "asset": {
         "ingest": (
             "embodichain.gen_sim.asset_engine.cli.start:main",
