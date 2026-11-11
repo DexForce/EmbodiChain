@@ -2,8 +2,10 @@
 
 `cfg/fluid.py` owns source, object and render configuration. Fluids use DexUni,
 which dispatches DFSPH when the scene contains fluid particles. Optional
-numerical settings belong to DexSim `SPHSolverCfg`, nested under
-`NewtonPhysicsCfg.solver_cfg.sph_cfg`; omitting them uses native DFSPH defaults.
+numerical settings belong to `DexUniSolverCfg.sph_cfg`, supplied as a nested
+mapping or the DexUni-owned native settings object. Default-value checks also
+resolve through DexUni; no standalone SPH configuration is constructed by
+EmbodiChain. Omitting these settings uses native DFSPH defaults.
 `SimulationManager.add_fluid_object()` declares through SpawnScene and binds
 `objects/fluid.py` in place at `prepare()`.
 

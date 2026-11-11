@@ -97,7 +97,7 @@ class TestFluidRuntime:
 
 def _run_fluid_lifecycle(num_envs: int, automatic: bool) -> dict[str, object]:
     """Run the complete NoRender lifecycle in a fresh native process."""
-    from dexsim.engine.newton_physics import DexUniSolverCfg, SPHSolverCfg
+    from dexsim.engine.newton_physics import DexUniSolverCfg
     from dexsim.engine.newton_physics.backend_registry import get_newton_backend
     from embodichain.lab.sim.cfg import RigidObjectCfg
     from embodichain.lab.sim.shapes import CubeCfg
@@ -119,11 +119,11 @@ def _run_fluid_lifecycle(num_envs: int, automatic: bool) -> dict[str, object]:
                     None
                     if automatic
                     else DexUniSolverCfg(
-                        sph_cfg=SPHSolverCfg(
-                            sph_method="dfsph",
-                            particle_support_radius=0.0225,
-                            volume_map_boundary_enabled=False,
-                        )
+                        sph_cfg={
+                            "sph_method": "dfsph",
+                            "particle_support_radius": 0.0225,
+                            "volume_map_boundary_enabled": False,
+                        }
                     )
                 ),
             ),

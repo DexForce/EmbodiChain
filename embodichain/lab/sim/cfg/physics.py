@@ -557,10 +557,6 @@ def _normalize_newton_solver_type(solver_type: str) -> str:
         "vbdsolver": "vbd",
         "vbdsolvercfg": "vbd",
     }
-    if key == "sph":
-        logger.log_error(
-            "Unsupported Newton solver type 'sph'; configure DexUni.sph_cfg instead."
-        )
     if key not in aliases:
         try:
             from dexsim.engine.newton_physics import normalize_newton_solver_name
