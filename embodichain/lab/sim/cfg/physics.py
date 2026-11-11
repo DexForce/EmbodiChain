@@ -559,7 +559,10 @@ def _normalize_newton_solver_type(solver_type: str) -> str:
                 f"Solver {solver_type!r} requires a DexSim build with named solver extensions"
             ) from exc
         try:
-            return normalize_newton_solver_name(solver_type)
+            normalized = normalize_newton_solver_name(solver_type)
+            if normalized == "sph":
+                raise ValueError("Configure SPH through DexUni's nested sph_cfg.")
+            return normalized
         except ValueError as exc:
             logger.log_error(f"Unsupported Newton solver type {solver_type!r}. {exc}")
     return aliases[key]
