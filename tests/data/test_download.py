@@ -55,8 +55,9 @@ def test_migrated_robot_assets_keep_legacy_class_identity() -> None:
 
     registry = download.get_registry()
     for name, spec in ROBOT_ASSETS.items():
-        if spec["category"] == "eef":
-            continue  # EEF imports deliberately have no legacy compatibility surface.
+        if spec["category"] == "eef" or name == "YamI2rt":
+            # EEFs and new model-owned assets have no legacy core import surface.
+            continue
         module, _, symbol = spec["class_path"].partition(":")
         canonical = getattr(import_module(module), symbol)
         legacy = (
