@@ -48,9 +48,10 @@ skips configured lights/IBL and built-in native visual effects; background
 objects and collision geometry remain. Render-only `VisualObject` declarations
 stay in the registry without native handles; visual pose events must skip
 native writes in this mode. DexSim uses its existing package and
-device-free NoRender engine. Native camera and window operations require a
-native renderer. Viser retains native rendering because its current exporter
-reads visual meshes. Checkpoint evaluation with `--viewer` defaults to Hybrid
+device-free NoRender engine. Native camera, light creation and window operations
+require a native renderer. Standalone scene helpers skip optional light
+declarations when `has_native_renderer` is false. Viser retains native rendering
+because its current exporter reads visual meshes. Checkpoint evaluation with `--viewer` defaults to Hybrid
 when the saved training configuration uses NoRender.
 
 DexSim 0.6 still processes Spawn's visual material table on NoRender native
@@ -103,6 +104,10 @@ The Newton backend step hook suppresses automatic DexSim publication during
 manager-owned updates to avoid publishing twice. The manager honors explicit
 `sync_to_renderer=True` even without consumers; `None`/`False` publish only for
 consumers. Raw DexSim `World.update()` retains its configured automatic policy.
+When fluids are present, publication orders Newton and Torch work before the
+native CUDA staging copy and waits for that copy before a camera reads the frame.
+After an explicit fluid-state write, it first drains prior staged updates so a
+busy native double buffer cannot silently discard the newer state.
 Render-thread recording only consumes already-published state and must never
 call the blocking physics-to-render bridge. Marker publication while paused uses
 `capture_visualization(force=True)` without advancing physics.
@@ -154,6 +159,10 @@ Configuration tests do not prove GPU/NGX/NRD runtime support, which initializes
 on a rendered frame. Read exact renderer and algorithm defaults in the config
 source.
 
+Optical settings use `VisualMaterialCfg.parameters` for direct and shape-owned
+materials. Resource definitions and their reset baselines are owned by the
+[material system](materials.md).
+
 ## Gaussian composition
 
 `RenderCfg.gaussian` configures native CUDA raster before World construction.
@@ -187,6 +196,7 @@ metadata are rejected. Captured SH is not scene-light relighting. Completed
 CameraGroups retain their own status/calibration snapshot before another group
 can overwrite native last-frame status; failures prevent successful observations.
 Depth/alpha meanings come from the native output contract, not mesh assumptions.
+
 
 ## Startup summaries
 

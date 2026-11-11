@@ -34,6 +34,7 @@ from embodichain.lab.sim.cfg import (
     RenderCfg,
     RigidObjectCfg,
     UsdSourceCfg,
+    UsdImportCfg,
     VisualElementCfg,
     VisualObjectCfg,
 )
@@ -520,7 +521,7 @@ def test_native_usd_static_visual_collision_group_moves_together(tmp_path):
         sim.flush_cleanup_queue()
 
 
-@pytest.mark.parametrize("entry", ["scene", "rigid", "visual"])
+@pytest.mark.parametrize("entry", ["scene", "recipe", "rigid", "visual"])
 def test_native_usd_gaussian_import_keeps_physics_and_capture(tmp_path, entry):
     """DexSim's USD PLY reference renders through each supported facade entry."""
     usd = _write_usd_splat(tmp_path)
@@ -542,6 +543,12 @@ def test_native_usd_gaussian_import_keeps_physics_and_capture(tmp_path, entry):
         source = UsdSourceCfg(file_path=str(usd), source_prim_path="/Asset")
         if entry == "scene":
             asset = sim.add_usd("sample", str(usd))["/Asset"]
+        elif entry == "recipe":
+            imported = sim.add_usd(
+                UsdImportCfg(name="sample", source=UsdSourceCfg(file_path=str(usd)))
+            )
+            asset = imported["/Asset"]
+            assert imported.resource_source_paths["/Asset"] == "/Asset"
         elif entry == "rigid":
             asset = sim.add_rigid_object(
                 RigidObjectCfg(uid="body", source=source, init_pos=(0, 0, 0.8))
@@ -610,7 +617,7 @@ def test_native_usd_gaussian_import_keeps_physics_and_capture(tmp_path, entry):
                 rebuilt[..., 0] > np.maximum(rebuilt[..., 1], rebuilt[..., 2]) + 25
             ).sum() >= 4
             assert asset.get_visual_elements()[0]["source_prim_path"] == "/Asset/Visual"
-        if entry == "scene":
+        if entry in ("scene", "recipe"):
             sim.enable_physics(True)
             sim.update(step=30, render_final_step=False)
             assert asset.get_local_pose()[0, 2].item() < 0.7

@@ -5,16 +5,20 @@ Gym ID: `MicroDuckFlatRL-v1`.
 
 | Deployment | Environment | PPO configuration |
 |---|---|---|
+| `newton` (DexUni, recommended) | [env.newton.yaml](env.newton.yaml) | [agents/ppo.newton.yaml](agents/ppo.newton.yaml) |
 | `default` (Default) | [env.yaml](env.yaml) | [agents/ppo.yaml](agents/ppo.yaml) |
-| `newton` (Newton) | [env.newton.yaml](env.newton.yaml) | [agents/ppo.newton.yaml](agents/ppo.newton.yaml) |
 
 Each PPO file's `trainer.gym_config` selects its matching deployment. The
-catalog defaults to `default`; backend selection belongs to the environment file.
+catalog defaults to `newton`; backend selection belongs to the environment file.
+The Newton deployment uses DexUni with dynamic joints and automatic contact
+selection. For this rigid articulation scene, DexUni dispatches to MuJoCo Warp
+on CUDA (`use_mujoco_cpu: false`). Its MuJoCo settings are explicit, including
+20 solver iterations and 50 line-search iterations. Both deployments preserve
+unbounded policy actions with `clip: null`.
 
 ```bash
 embodichain show-task embodichain_tasks:microduck_flat
-embodichain run-task --gym_config extensions/embodichain_tasks/configs/tasks/locomotion/velocity/microduck_flat/env.yaml
-embodichain train-rl --config extensions/embodichain_tasks/configs/tasks/locomotion/velocity/microduck_flat/agents/ppo.yaml
+embodichain run-task --gym_config extensions/embodichain_tasks/configs/tasks/locomotion/velocity/microduck_flat/env.newton.yaml
 embodichain train-rl --config extensions/embodichain_tasks/configs/tasks/locomotion/velocity/microduck_flat/agents/ppo.newton.yaml
 ```
 

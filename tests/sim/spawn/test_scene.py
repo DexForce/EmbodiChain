@@ -30,6 +30,7 @@ from embodichain.lab.sim.cfg import (
 from embodichain.lab.sim.objects import (
     Articulation,
     DeformableObject,
+    FluidObject,
     RigidObject,
     RigidObjectGroup,
     Robot,
@@ -57,6 +58,29 @@ def test_material_resolution_rejects_conflicting_explicit_definitions():
         scene._resolve_materials({"shared": MaterialDesc(name="shared", roughness=0.9)})
 
     assert scene.builder.materials["shared"] is original
+
+
+def test_no_render_preserves_authored_alpha_recipe_without_native_alpha_write():
+    scene = object.__new__(SpawnScene)
+    scene.builder = SimpleNamespace(materials={})
+    scene._usd_texture_files = SimpleNamespace(resolve=lambda materials: materials)
+    scene._material_resources = SimpleNamespace(renderer="no-render")
+    original = MaterialDesc(
+        name="glass", alpha_mode="BLEND", base_color_map="authored.png"
+    )
+
+    native = scene._resolve_materials({"glass": original})
+
+    assert native["glass"].alpha_mode is None
+    assert native["glass"].base_color_map is None
+    assert original.alpha_mode == "BLEND"
+    assert original.base_color_map == "authored.png"
+    scene.builder.materials.update(native)
+    assert scene._material_definition("glass") is original
+    with pytest.raises(ValueError, match="Conflicting visual material"):
+        scene._resolve_materials(
+            {"glass": MaterialDesc(name="glass", alpha_mode="MASK")}
+        )
 
 
 def _make_scene(handles: dict[str, object]) -> SpawnScene:
@@ -285,7 +309,7 @@ def test_visual_owner_add_failure_preserves_existing_companion(failure):
         uid=uid, num_instances=1, cfg=VisualObjectCfg(uid=uid, visuals=[])
     )
     error = ValueError if failure == "duplicate" else RuntimeError
-    message = "already exists" if failure == "duplicate" else "partial native add"
+    message = "already" if failure == "duplicate" else "partial native add"
 
     with pytest.raises(error, match=message):
         scene.declare("visual_object", uid, ObjectDesc(name=uid), facade=facade)
@@ -293,7 +317,7 @@ def test_visual_owner_add_failure_preserves_existing_companion(failure):
     assert len(builder.mesh_objects) == 1
     assert builder.mesh_objects[0] is companion
     assert set(scene._assets) == {"room"}
-    assert facade._visual_binding is None
+    assert getattr(facade, "_visual_binding", None) is None
 
 
 def test_rigid_object_receives_instance_count_only_when_declared() -> None:
@@ -323,7 +347,7 @@ def test_rigid_object_receives_instance_count_only_when_declared() -> None:
 
 @pytest.mark.parametrize(
     "facade_type",
-    [RigidObject, Articulation, Robot, RigidObjectGroup, DeformableObject],
+    [RigidObject, Articulation, Robot, RigidObjectGroup, DeformableObject, FluidObject],
 )
 def test_object_constructors_hide_spawn_lifecycle_parameters(
     facade_type: type[object],
@@ -332,6 +356,9 @@ def test_object_constructors_hide_spawn_lifecycle_parameters(
 
     assert "declared_num_instances" not in parameters
     assert "spawn_result" not in parameters
+    assert "positions" not in parameters
+    assert "pose" not in parameters
+    assert "on_write" not in parameters
 
 
 def test_runtime_config_attaches_articulation_before_preparing_it() -> None:

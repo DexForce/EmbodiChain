@@ -338,7 +338,10 @@ def test_failed_frame_cannot_republish_previous_camera_capture(tmp_path, failure
         sync_visuals=binding.sync,
     )
     sim.physics = SimpleNamespace(sync_render_state=MagicMock())
-    sim._world = SimpleNamespace(render_camera_group=MagicMock())
+    sim.sim_config = SimpleNamespace(render_cfg=SimpleNamespace(renderer="hybrid"))
+    sim._world = SimpleNamespace(
+        render_camera_group=MagicMock(), _flush_render_updates=lambda: 0
+    )
     camera = object.__new__(Camera)
     camera.group_id = 8
     camera._owner = lambda: sim

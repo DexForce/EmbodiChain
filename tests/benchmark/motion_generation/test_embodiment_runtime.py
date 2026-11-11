@@ -285,7 +285,11 @@ def test_official_ur5_component_uses_robot_catalog_and_binds_fingers(
     assert isinstance(cfg, ur_robot.URRobotCfg)
     assert len(cfg.control_parts["arm"]) == 6
     assert cfg.control_parts["eef"] == ["gripper_finger1_joint_1"]
-    assert cfg.solver_cfg["arm"].tcp[2][3] == pytest.approx(0.15)
+    # These mocked assets validate declarations; effective solver TCP requires
+    # the actual fixed chain, covered by the physical component/TCP test.
+    assert cfg.gripper_bindings["eef"]["defaults"]["default_root_from_tcp"][2][
+        3
+    ] == pytest.approx(0.15)
     assert provider.gripper_config["grasp_qpos"] == [0.024]
     assert contact_configuration(track.config) == {
         "eef": (("gripper_finger1_link_1", "gripper_finger2_link_1"), 0.005)

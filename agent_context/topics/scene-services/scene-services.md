@@ -181,7 +181,7 @@ covered by the selected mesh component, excluding openings during preparation.
   visual objects. `members()` exposes that group; `entities()` retains only its
   physical members. It borrows manager-owned facades without a new registry.
   Nonempty unique `env_ids` retain their declared order. Changed selected
-  bindings or world capacity invalidate the view. Rigid groups, deformables and
+  bindings or world capacity invalidate the view. Rigid groups, cables, deformables and
   constraints remain unsupported members; unrelated entities do not enter an
   explicit selection. `SceneFragment` composes visual configurations alongside
   physical ones; robots remain embodiment-owned and recipe movers remain rigid.

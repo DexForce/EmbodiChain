@@ -1,0 +1,29 @@
+# Seed each Cartesian keyframe from the previous solution to keep contact approaches on one IK branch.
+policy_id: sequential_ik_verified_v1
+preset_id: safe
+requires:
+  embodiment_contract: dual_arm_parallel_gripper
+motion:
+  strategy: ik_interp
+  sample_count: 220
+  velocity_limit: 0.2
+  acceleration_limit: 0.5
+  dynamic_collision_mode: auto
+  interpolation_mode: adaptive
+  ik_seed_mode: sequential
+tracking:
+  kind: joint_position
+  in_flight_max_abs_error: 1.0
+  terminal_max_abs_error: 1.0
+recovery:
+  action_timeout: 120.0
+  max_replans: 3
+  max_action_retries: 0
+  goal_rotation_threshold: 0.5
+workflow_recovery:
+  max_recovery_attempts: 2
+runner:
+  minimum_cycle_time: 0.04
+  hold_on_completion: false
+  hold_during_effect_verification: false
+effect_assurance: verified

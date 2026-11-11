@@ -13,6 +13,11 @@ resolves source metadata before its first immutable build. Do not implement
 initial configuration as finalize-then-rebuild or duplicate descriptor writes
 inside `Articulation._apply_spawn_config()`.
 
+URDF continuous joints retain unbounded source limits during resolution. Native
+Skeleton metadata may expose zero-filled limits; those must not become a locked
+joint at the Newton boundary. Caller-authored limits and later config overlays
+retain precedence over the source default.
+
 `ArticulationRootPropertiesCfg` separates root intent from link physics.
 Fixed-base/self-collision settings enter common descriptors, independently of
 the source overlay policy; explicit `None` preserves USD intent and selects
@@ -21,12 +26,26 @@ the native articulation before Direct GPU initialization and initial reset.
 Iteration counts are configured together because the native setter is atomic.
 Applying them only during facade binding is too late for captured GPU settings.
 
+`root_props.newton_gravity_compensation` is Newton creation intent applied in
+both asset physics modes; omission preserves the source/default policy. It
+compensates articulation link weight without removing payload gravity or
+contact reactions. DexSim checks the resolved solver's MuJoCo support.
+URDF mimic joints on Newton keep the configured follower drives and the
+native MuJoCo equality by default, matching a plain DexSim scene; reset starts
+followers on their mimic relation. `root_props.newton_mimic_stabilizer=True`
+opts in to the Default-parity stabilizer (follower drive = 1 % of the leader,
+mirrored follower targets, retuned equality `solref`).
+
 `joint_drive_props` is the sole joint-property entry point; sparse fields retain
 source values. `drive_type` describes the response and `target_mode` the active
 command components. Lowering masks inactive gains: none/effort clear both,
 velocity clears position gain. Newton rejects active acceleration drives;
 non-MuJoCo position mode is gain-based emulation with zero velocity target.
 Exact field options and defaults remain in `cfg/articulation.py`.
+Newton-specific `joint_drive_props.passive_damping` lowers to passive DOF
+damping, separately from the drive's velocity gain. It retains the same
+exact-name/regex/control-part matching and remains active for passive or effort
+target modes. Applied Newton-only settings are rejected on Default.
 
 ## State order and batched writes
 
@@ -48,6 +67,13 @@ pose/velocities together into existing data buffers. The Scene view reuses
 DexSim's batch fetch and converts the root-pose layout once. Returned tensors
 are borrowed buffers, not snapshots; clone values that must survive later
 reads. Fetch after reset or direct writes rather than caching across them.
+
+`Articulation.set_state()` writes selected root, joint and drive fields in one
+backend operation. Current joint positions are clipped to joint limits.
+Position targets are also clipped by default; `clamp_target_qpos=False` retains
+raw PD targets while physical joint limits remain enabled. `set_qpos()` exposes
+the same target-only option. Keep this distinction when a task records motor
+commands for learned dynamics.
 
 `Articulation.set_root_velocity()` writes selected world-frame linear and
 angular velocities as `(N, 6)` rows. The Scene adapter validates the complete
@@ -75,6 +101,10 @@ output tensors. Public inertia/COM remain principal moments plus `xyz + xyzw`;
 scalar descriptors expose body-frame mat33. Runtime writes compose the pair
 before DexSim, and reset restores the saved pair together to avoid reordering
 principal axes between two writes.
+COM writes pass environment rows and link columns directly to
+`ArticulationBatch.apply_link_com_local_pose(rows=..., link_ids=...)`. Property
+selection does not need a selected batch's joint/link state routing buffers;
+DexSim retains descriptor updates and solver-constant refresh ownership.
 
 ## Mimic coupling
 
@@ -122,3 +152,5 @@ FREE-joint synchronization, mesh export and no-op root writes;
 `tests/sim/objects/test_articulation.py` for topology/FK. Source configuration
 and root timing are covered by `tests/sim/spawn/test_descriptors.py` and
 `tests/sim/test_sim_manager.py`.
+`tests/sim/test_dexuni_two_way.py` compares contact-limited dynamic fingers
+against the same one-way commands, including CUDA Graph and reset.

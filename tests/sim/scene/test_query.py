@@ -79,3 +79,12 @@ def test_explicit_group_keeps_member_order_types_and_owned_pose_rows():
 def test_invalid_group_members_reject(uids):
     with pytest.raises(ValueError):
         SceneView(Sim(), entity_uids=uids)
+
+
+def test_cable_world_requires_an_explicit_supported_entity_selection():
+    sim = Sim()
+    sim.get_cable_object_uid_list = lambda: ["cable"]
+    with pytest.raises(ValueError, match="get_cable_object_uid_list"):
+        SceneView(sim)
+    group = SceneView(sim, entity_uids=("cube",))
+    assert [uid for _, uid, _ in group.members()] == ["cube"]

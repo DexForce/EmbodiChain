@@ -15,6 +15,11 @@
 # ----------------------------------------------------------------------------
 
 
+from __future__ import annotations
+
+__all__ = ["NameNormalizer"]
+
+
 class NameNormalizer:
     """Handles name normalization for different entity types."""
 
@@ -42,6 +47,40 @@ class NameNormalizer:
                         f"Invalid default_case entry {key}={mode}. "
                         f"Allowed keys: {self.VALID_KEYS}, allowed modes: {self.VALID_MODES}."
                     )
+
+    @staticmethod
+    def resolve_component_prefixes(
+        overrides: dict[str, str | None] | list[tuple[str, str | None]] | None = None,
+    ) -> dict[str, str | None]:
+        """Resolve the assembler's partial prefix overrides over native defaults.
+
+        Args:
+            overrides: Per-component patches; omitted components retain defaults.
+
+        Returns:
+            An independently owned complete component-prefix mapping.
+
+        Raises:
+            ValueError: An override names an unsupported component.
+        """
+        defaults = {
+            "chassis": None,
+            "legs": None,
+            "torso": None,
+            "head": None,
+            "left_arm": "left_",
+            "right_arm": "right_",
+            "left_hand": "left_",
+            "right_hand": "right_",
+            "arm": None,
+            "hand": None,
+        }
+        patches = dict(overrides or {})
+        unknown = patches.keys() - defaults.keys()
+        if unknown:
+            raise ValueError(f"Unsupported URDF component prefixes: {sorted(unknown)}")
+        defaults.update(patches)
+        return defaults
 
     def set_case(self, key: str, mode: str):
         """Set the normalization mode for a specific key.
@@ -77,3 +116,9 @@ class NameNormalizer:
         if mode == "upper":
             return name.upper()
         return name
+
+    def component_name(self, kind: str, name: str, prefix: str | None) -> str:
+        """Map an unambiguous native component name before collision resolution."""
+        if prefix and not name.lower().startswith(prefix.lower()):
+            name = prefix + name
+        return self.normalize(kind, name)

@@ -34,6 +34,7 @@ import embodichain.lab.sim.sim_manager as sim_manager_module
 import embodichain.lab.visualization as visualization_module
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
+    CableObjectCfg,
     DefaultPhysicsCfg,
     DenoisingCfg,
     DLSSCfg,
@@ -317,6 +318,9 @@ class FakeWorld:
     def update(self, physics_dt: float) -> None:
         self.physics_updates.append(physics_dt)
 
+    def _flush_render_updates(self) -> int:
+        return 0
+
     def enable_entity_gizmo(self, config: object | None = None) -> object:
         self.entity_gizmo_configs.append(config)
         if self.entity_gizmo is None:
@@ -455,6 +459,7 @@ def _make_visualization_sim_manager() -> (
         physics_dt=0.01,
         physics_cfg=DefaultPhysicsCfg(),
         visualization=SimpleNamespace(backend="viser"),
+        render_cfg=SimpleNamespace(renderer="hybrid"),
     )
     sim.device = SimpleNamespace(type="cpu")
     sim.profiler = Profiler(None, torch.device("cpu"))
@@ -488,6 +493,7 @@ def _make_runtime_control_sim_manager(
     sim._robots = {"robot": object()}
     sim._articulations = {}
     sim._rigid_objects = {"table": object()}
+    sim._fluid_objects = {}
     sim._deformable_objects = {
         "cloth": SimpleNamespace(
             cfg=SurfaceDeformableObjectCfg(uid="cloth", particle_flags=[0, 1, 0])
@@ -540,6 +546,19 @@ def test_flush_cleanup_queue_waits_after_running_pending_destroy(
     wait_scene_destruction.assert_called_once_with()
 
 
+@pytest.mark.parametrize("worlds", [0, 1])
+def test_wait_scene_destruction_collects_only_when_worlds_remain(
+    monkeypatch: pytest.MonkeyPatch, worlds: int
+) -> None:
+    """An empty World set needs no GC; cyclic live Worlds still get collected."""
+    counts = iter([worlds, 0])
+    monkeypatch.setattr(dexsim, "get_world_num", lambda: next(counts))
+    collect = MagicMock()
+    monkeypatch.setattr(gc, "collect", collect)
+    SimulationManager.wait_scene_destruction()
+    assert collect.call_count == worlds
+
+
 def test_flush_cleanup_queue_preserves_other_live_managers(monkeypatch):
     cleanup_queue = queue.Queue()
     cleanup_queue.put(MagicMock())
@@ -569,6 +588,7 @@ def test_deferred_destroy_prepares_backend_before_releasing_world(
     sim._rigid_objects = {}
     sim._constraints = {}
     sim._rigid_object_groups = {}
+    sim._fluid_objects = {}
     sim._deformable_objects = {}
     sim._articulations = {}
     sim._robots = {}
@@ -1314,6 +1334,7 @@ def test_start_visualization_does_not_prepare_an_empty_declaration_phase(
     )
     sim._rigid_objects = {}
     sim._rigid_object_groups = {}
+    sim._fluid_objects = {}
     sim._deformable_objects = {}
     sim._articulations = {}
     sim._robots = {}
@@ -1695,6 +1716,31 @@ def test_failed_publication_retries_within_the_same_frame():
     assert sim.physics.sync_render_state.call_count == 2
 
 
+def test_joint_motor_registration_preserves_manager_arena_order() -> None:
+    sim, builder = _make_runtime_control_sim_manager()
+    control = sim._register_joint_dc_motor_control("robot", {})
+    builder.add_runtime_control.assert_called_once_with(control)
+    assert control.target_paths == ("arena_0/robot", "arena_1/robot")
+
+
+@pytest.mark.parametrize(
+    "backend, uid, finalized, error",
+    [
+        ("default", "robot", False, RuntimeError),
+        ("newton", "missing", False, KeyError),
+        ("newton", "robot", True, RuntimeError),
+    ],
+)
+def test_joint_motor_registration_rejects_invalid_lifecycle(
+    backend, uid, finalized, error
+) -> None:
+    sim, builder = _make_runtime_control_sim_manager(backend=backend)
+    builder.is_finalized = finalized
+    with pytest.raises(error):
+        sim._register_joint_dc_motor_control(uid, {})
+    builder.add_runtime_control.assert_not_called()
+
+
 def test_register_kinematic_joint_trajectory_expands_each_arena() -> None:
     sim, builder = _make_runtime_control_sim_manager()
     frame_count = 3
@@ -1896,6 +1942,68 @@ def test_register_kinematic_nodal_trajectory_rejects_finalized_scene() -> None:
     builder.add_runtime_control.assert_not_called()
 
 
+def _runtime_control(**attrs: object):
+    from dexsim.engine.newton_physics.runtime_control import RuntimeControl
+
+    control = type("RecordingControl", (RuntimeControl,), {})()
+    for name, value in attrs.items():
+        setattr(control, name, value)
+    return control
+
+
+def test_add_runtime_control_registers_one_scene_control() -> None:
+    sim, builder = _make_runtime_control_sim_manager()
+    control = _runtime_control()
+
+    assert sim.add_runtime_control(control) == (control,)
+
+    builder.add_runtime_control.assert_called_once_with(control)
+
+
+def test_add_runtime_control_expands_factory_per_arena() -> None:
+    sim, builder = _make_runtime_control_sim_manager(num_envs=3)
+
+    controls = sim.add_runtime_control(
+        lambda arena_name, env_index: _runtime_control(
+            target=f"{arena_name}/robot", env_index=env_index
+        )
+    )
+
+    assert [control.target for control in controls] == [
+        "arena_0/robot",
+        "arena_1/robot",
+        "arena_2/robot",
+    ]
+    assert [control.env_index for control in controls] == [0, 1, 2]
+    assert [
+        call.args[0] for call in builder.add_runtime_control.call_args_list
+    ] == list(controls)
+
+
+def test_add_runtime_control_rejects_non_control_factory_results() -> None:
+    sim, builder = _make_runtime_control_sim_manager()
+
+    with pytest.raises(TypeError, match="RuntimeControl instances"):
+        sim.add_runtime_control(lambda arena_name, env_index: object())
+    with pytest.raises(TypeError, match="RuntimeControl or a factory"):
+        sim.add_runtime_control(object())
+
+    builder.add_runtime_control.assert_not_called()
+
+
+def test_add_runtime_control_rejects_finalized_scene_and_default_backend() -> None:
+    sim, builder = _make_runtime_control_sim_manager()
+    builder.is_finalized = True
+    with pytest.raises(RuntimeError, match=r"before SimulationManager\.prepare"):
+        sim.add_runtime_control(_runtime_control())
+
+    sim, builder = _make_runtime_control_sim_manager(backend="default")
+    with pytest.raises(RuntimeError, match="Newton backend"):
+        sim.add_runtime_control(_runtime_control())
+
+    builder.add_runtime_control.assert_not_called()
+
+
 def test_add_robot_resolves_backend_preset_before_declaration() -> None:
     @configclass
     class TestRobotPresetCfg(RobotPresetCfg):
@@ -1996,8 +2104,19 @@ def test_robot_sensor_preflight_precedes_resource_allocation(invalid: str) -> No
 
 @pytest.mark.gpu
 @pytest.mark.requires_sim
-@pytest.mark.parametrize("backend", ["default", "newton"])
-def test_robot_mounted_camera_backend_lifecycle(tmp_path: Path, backend: str) -> None:
+@pytest.mark.parametrize(
+    "backend,stereo",
+    [
+        ("default", False),
+        ("default", True),
+        ("newton", False),
+        ("newton", True),
+        ("newton_cable", False),
+    ],
+)
+def test_robot_mounted_camera_backend_lifecycle(
+    tmp_path: Path, backend: str, stereo: bool
+) -> None:
     """Mounted cameras follow state writes and survive physical topology rebuilds."""
     urdf_path = tmp_path / "camera_robot.urdf"
     urdf_path.write_text("""<robot name="camera_robot">
@@ -2022,7 +2141,9 @@ def test_robot_mounted_camera_backend_lifecycle(tmp_path: Path, backend: str) ->
             device="cuda:0",
             use_cuda_graph=False,
             num_substeps=1,
-            solver_cfg={"solver_type": "mujoco_warp"},
+            solver_cfg={
+                "solver_type": "dexuni" if backend == "newton_cable" else "mujoco_warp"
+            },
         )
     )
     sim = SimulationManager(
@@ -2034,7 +2155,7 @@ def test_robot_mounted_camera_backend_lifecycle(tmp_path: Path, backend: str) ->
         )
     )
     try:
-        camera_cfg = CameraCfg(
+        camera_cfg = (StereoCameraCfg if stereo else CameraCfg)(
             uid="mounted",
             width=32,
             height=24,
@@ -2049,6 +2170,15 @@ def test_robot_mounted_camera_backend_lifecycle(tmp_path: Path, backend: str) ->
                 sensors=[camera_cfg],
             )
         )
+        if backend == "newton_cable":
+            sim.add_cable_object(
+                CableObjectCfg(
+                    uid="wire",
+                    points=[[0, 0, 0], [0, 0, 0.1], [0, 0, 0.2]],
+                    radius=0.01,
+                    init_pos=(0.3, 0, 1),
+                )
+            )
         sim.prepare()
         camera = sim.get_sensor("mounted")
         assert camera.is_attached
@@ -2058,6 +2188,14 @@ def test_robot_mounted_camera_backend_lifecycle(tmp_path: Path, backend: str) ->
             camera.get_local_pose(to_matrix=True)[0].cpu(),
             camera_cfg.extrinsics.transformation,
         )
+        if backend == "newton_cable":
+            with pytest.raises(NotImplementedError, match="topology changes"):
+                sim.remove_asset("robot")
+            assert sim.get_asset("robot") is robot
+            assert sim.get_sensor("mounted") is camera and camera.is_attached
+            camera.update()
+            assert camera.get_data()["color"].shape == (1, 24, 32, 4)
+            return
         before = camera.get_arena_pose(to_matrix=True).clone()
         robot.set_qpos(torch.tensor([[0.5]], device=sim.device), target=False)
         sim.sync_render_state()
@@ -2404,23 +2542,45 @@ def test_prepare_retries_render_state_sync_without_recommit() -> None:
     sim._world.update.assert_not_called()
 
 
-def test_sync_render_state_publishes_current_state_without_stepping() -> None:
-    """Explicit publication must refresh render state without advancing physics."""
+@pytest.mark.parametrize("renderer", ["hybrid", "no-render"])
+def test_sync_render_state_publishes_current_state_without_stepping(renderer) -> None:
+    """Explicit publication makes staged states visible without a physics step."""
     result = MagicMock()
     spawn_scene = MagicMock()
     spawn_scene.builder.is_finalized = True
     spawn_scene.builder.result = result
-    sync_render_state = MagicMock()
-
+    staged, visible = {}, {}
     sim = object.__new__(SimulationManager)
+    sim.sim_config = SimpleNamespace(render_cfg=RenderCfg(renderer=renderer))
     sim._spawn_scene = spawn_scene
     sim._world = MagicMock()
-    sim.physics = SimpleNamespace(sync_render_state=sync_render_state)
+    sim._render_state_published = False
+    sim.physics = SimpleNamespace(
+        sync_render_state=lambda _result: staged.update(robot=3)
+    )
+    sim._refresh_marker_attachments = lambda: staged.update(marker=7)
 
+    def publish():
+        visible.update(staged)
+        return 0
+
+    sim._world._flush_render_updates.side_effect = publish
     sim.sync_render_state()
 
-    sync_render_state.assert_called_once_with(result)
+    assert visible == ({"robot": 3, "marker": 7} if renderer == "hybrid" else {})
+    assert sim._render_state_published is True
     sim._world.update.assert_not_called()
+
+
+def test_failed_native_render_publication_remains_retryable() -> None:
+    sim, _, _, _, _ = _make_render_frame_sim()
+    sim._world._flush_render_updates = MagicMock(side_effect=[-1, 0])
+    sim._render_state_published = False
+    with pytest.raises(RuntimeError, match="Native render-state publication failed"):
+        sim.sync_render_state()
+    assert sim._render_state_published is False
+    sim.sync_render_state()
+    assert sim._render_state_published is True
 
 
 def test_add_camera_uses_owning_manager_render_context(
@@ -2434,6 +2594,10 @@ def test_add_camera_uses_owning_manager_render_context(
         num_envs=len(arenas), render_cfg=RenderCfg(renderer="hybrid")
     )
     sim.device = torch.device("cpu")
+    sim._spawn_scene = SimpleNamespace(
+        builder=SimpleNamespace(result=object(), is_finalized=False),
+        arena_names=("arena_0", "arena_1"),
+    )
     sim._world = world
     sim._arenas = arenas
     sim._sensors = {}
@@ -2535,6 +2699,7 @@ def test_remove_asset_marks_visualization_topology_dirty() -> None:
     sim.prepare = MagicMock()
     sim._rigid_objects = {"cube": rigid_object}
     sim._rigid_object_groups = {}
+    sim._fluid_objects = {}
     sim._deformable_objects = {}
     sim._articulations = {}
     sim._robots = {}
@@ -2679,7 +2844,9 @@ def _make_camera_attachment_manager(num_envs: int = 2) -> SimulationManager:
         bind=MagicMock(),
     )
     sim.physics = SimpleNamespace(
-        prepare_spawn_runtime=MagicMock(), sync_render_state=MagicMock()
+        _prepare_scene_build=MagicMock(),
+        prepare_spawn_runtime=MagicMock(),
+        sync_render_state=MagicMock(),
     )
     sim._default_plane = object()
     sim._ready_spawn_topology_revision = result.topology_revision
@@ -3003,13 +3170,14 @@ def test_stop_window_record_waits_for_background_export(monkeypatch) -> None:
 
 def test_reset_objects_state_includes_deformable_assets() -> None:
     sim = object.__new__(SimulationManager)
-    sim.physics = SimpleNamespace(name="default")
+    sim.physics = SimpleNamespace(name="default", _reset_scene_state=lambda *_: None)
     sim._robots = {}
     sim._articulations = {}
     sim._rigid_objects = {}
     sim._rigid_object_groups = {}
     sim._lights = {}
     sim._sensors = {}
+    sim._fluid_objects = {}
     sim._visualization_sim_time = 1.25
     sim._deformable_objects = {
         "soft": MagicMock(),
@@ -3023,7 +3191,29 @@ def test_reset_objects_state_includes_deformable_assets() -> None:
     assert sim.simulation_time == 1.25
 
 
-def test_newton_reset_clears_all_articulations_in_selected_worlds_together() -> None:
+def test_scene_reset_delegates_physical_ownership_to_backend() -> None:
+    sim = object.__new__(SimulationManager)
+    scene_reset = MagicMock(return_value=[1])
+    sim.physics = SimpleNamespace(name="third_party", _reset_scene_state=scene_reset)
+    robot, cloth, light, camera = (MagicMock() for _ in range(4))
+    sim._robots = {"robot": robot}
+    sim._deformable_objects = {"cloth": cloth}
+    sim._lights = {"light": light}
+    sim._sensors = {"camera": camera}
+
+    sim.reset_objects_state(env_ids=[1], excluded_sensor_uids=["camera"])
+
+    scene_reset.assert_called_once_with([1], set())
+    robot.reset.assert_not_called()
+    cloth.reset.assert_not_called()
+    light.reset.assert_called_once_with([1])
+    camera.reset.assert_not_called()
+
+
+@pytest.mark.parametrize("solver_type", ["mujoco_warp", "dexuni"])
+def test_newton_reset_clears_all_articulations_in_selected_worlds_together(
+    solver_type,
+) -> None:
     sim = object.__new__(SimulationManager)
     robot = MagicMock()
     articulation = MagicMock()
@@ -3034,7 +3224,9 @@ def test_newton_reset_clears_all_articulations_in_selected_worlds_together() -> 
         "robot": ("robot_0", "robot_1"),
         "arm": ("arm_0", "arm_1"),
     }
-    sim.physics = SimpleNamespace(name="newton", solver_type="mujoco_warp")
+    sim.physics = SimpleNamespace(
+        name="newton", solver_type=solver_type, _reset_scene_state=lambda *_: None
+    )
     sim.num_envs = 2
     sim._spawn_scene = SimpleNamespace(
         builder=SimpleNamespace(is_finalized=True, result=spawn_result),
@@ -3044,6 +3236,7 @@ def test_newton_reset_clears_all_articulations_in_selected_worlds_together() -> 
     sim._articulations = {"arm": articulation}
     sim._rigid_objects = {}
     sim._rigid_object_groups = {}
+    sim._fluid_objects = {}
     sim._deformable_objects = {}
     sim._lights = {}
     sim._sensors = {}
@@ -3056,15 +3249,21 @@ def test_newton_reset_clears_all_articulations_in_selected_worlds_together() -> 
     native_batch.clear_dynamics.assert_called_once_with()
 
 
-def test_newton_reset_rejects_excluding_one_articulation_from_selected_worlds() -> None:
+@pytest.mark.parametrize("solver_type", ["mujoco_warp", "dexuni"])
+def test_newton_reset_rejects_excluding_one_articulation_from_selected_worlds(
+    solver_type,
+) -> None:
     sim = object.__new__(SimulationManager)
     robot = MagicMock()
     articulation = MagicMock()
-    sim.physics = SimpleNamespace(name="newton", solver_type="mujoco_warp")
+    sim.physics = SimpleNamespace(
+        name="newton", solver_type=solver_type, _reset_scene_state=lambda *_: None
+    )
     sim._robots = {"robot": robot}
     sim._articulations = {"arm": articulation}
     sim._rigid_objects = {}
     sim._rigid_object_groups = {}
+    sim._fluid_objects = {}
     sim._deformable_objects = {}
     sim._lights = {}
     sim._sensors = {}
@@ -3083,7 +3282,9 @@ def test_newton_non_mujoco_reset_allows_excluding_an_articulation() -> None:
     native_batch = MagicMock()
     spawn_result = SimpleNamespace(create_articulation_batch=MagicMock())
     spawn_result.create_articulation_batch.return_value = native_batch
-    sim.physics = SimpleNamespace(name="newton", solver_type="xpbd")
+    sim.physics = SimpleNamespace(
+        name="newton", solver_type="xpbd", _reset_scene_state=lambda *_: None
+    )
     sim.num_envs = 2
     sim._spawn_scene = SimpleNamespace(
         builder=SimpleNamespace(is_finalized=True, result=spawn_result),
@@ -3093,6 +3294,7 @@ def test_newton_non_mujoco_reset_allows_excluding_an_articulation() -> None:
     sim._articulations = {"arm": articulation}
     sim._rigid_objects = {}
     sim._rigid_object_groups = {}
+    sim._fluid_objects = {}
     sim._deformable_objects = {}
     sim._lights = {}
     sim._sensors = {}
@@ -3254,6 +3456,351 @@ def test_replace_rigid_objects_prevalidates_and_prepares_once(monkeypatch, inval
         assert operations == []
 
 
+@pytest.mark.parametrize(
+    ("renderer", "backend"),
+    [("hybrid", "viser"), ("no-render", "none"), ("no-render", "viser")],
+)
+def test_marker_group_lifecycle_and_environment_offsets_do_not_step_physics(
+    renderer, backend
+):
+    from embodichain.lab.visualization.markers import MarkerGroupCfg, MarkerPrototypeCfg
+
+    sim, runtime = _make_visualization_sim_manager()
+    sim._marker_groups = {}
+    sim._native_markers = None
+    sim._markers = {}
+    sim.sim_config.visualization.backend = backend
+    sim.sim_config.render_cfg = SimpleNamespace(renderer=renderer)
+    sim.sim_config.num_envs = 1
+    sim.arena_offsets = torch.tensor([[10.0, 20.0, 30.0]])
+    group = sim.add_marker_group(
+        MarkerGroupCfg(
+            name="goal",
+            prototypes={"sphere": MarkerPrototypeCfg(shape="sphere")},
+        )
+    )
+    assert sim.get_marker_group("goal") is group
+    assert sim._native_markers is None
+    group.update(translations=[[1, 2, 3]])
+    np.testing.assert_allclose(sim.get_marker_overlays()[0].position, [11, 22, 33])
+    assert sim._world.physics_updates == []
+    assert sim._visualization_sim_step == 0
+    with pytest.raises(ValueError, match="already exists"):
+        sim.add_marker_group(
+            MarkerGroupCfg(name="goal", prototypes={"box": MarkerPrototypeCfg()})
+        )
+    group.clear()
+    assert sim.get_marker_overlays() == ()
+    group.update(translations=[[0, 0, 0]])
+    assert sim.remove_marker("goal")
+    assert sim.get_marker_overlays() == ()
+    with pytest.raises(RuntimeError, match="removed"):
+        group.update(translations=[[0, 0, 0]])
+
+
+def test_legacy_marker_arena_names_are_unique_before_registration():
+    sim, _ = _make_visualization_sim_manager()
+    sim._markers = {}
+    sim._arenas = [MagicMock()]
+    cfg = MarkerCfg(name="target", axis_xpos=np.eye(4), arena_index=0)
+    sim.draw_marker(cfg)
+    sim.draw_marker(cfg)
+    assert set(sim._markers) == {"target_0", "target_0_1"}
+
+
+def test_marker_publication_before_prepare_only_uses_existing_manifest():
+    from embodichain.lab.visualization.markers import MarkerGroupCfg, MarkerPrototypeCfg
+
+    sim, runtime = _make_visualization_sim_manager()
+    sim.sim_config.num_envs = 1
+    sim._marker_groups, sim._markers, sim._native_markers = {}, {}, None
+    sim.arena_offsets = torch.zeros((1, 3))
+    sim._spawn_scene = MagicMock()
+    sim._rigid_objects = {"declared_but_not_prepared": object()}
+    sim._visualization_manifest_topology_revision = sim._visualization_topology_revision
+    sim.start_visualization = MagicMock(side_effect=AssertionError("must not prepare"))
+    sim.sync_render_state = MagicMock(side_effect=AssertionError("must not sync"))
+    group = sim.add_marker_group(
+        MarkerGroupCfg(name="only_markers", prototypes={"box": MarkerPrototypeCfg()})
+    )
+    group.update(translations=[[0, 0, 0]])
+    assert len(runtime.capture_calls) == 1
+    assert runtime.capture_calls[-1]["capture_camera_images"] is False
+    assert not sim._visualization_error_reported
+    sim.prepare.assert_not_called()
+    sim.start_visualization.assert_not_called()
+    sim.sync_render_state.assert_not_called()
+    # Declarations may invalidate captured sources. Wait for explicit host prepare.
+    sim._visualization_topology_revision += 1
+    group.update(translations=[[1, 0, 0]])
+    assert len(runtime.capture_calls) == 1
+    assert sim.get_marker_overlays()[0].position[0] == 1
+    sim.prepare.assert_not_called()
+
+
+def _make_attachment_sim():
+    from embodichain.lab.visualization.markers import MarkerGroupCfg, MarkerPrototypeCfg
+
+    sim, runtime = _make_visualization_sim_manager()
+    sim.sim_config.num_envs = 2
+    sim.arena_offsets = torch.tensor([[10.0, 0, 0], [0, 20.0, 0]])
+    sim._marker_groups, sim._markers, sim._native_markers = {}, {}, None
+    sim._rigid_objects, sim._robots, sim._articulations = {}, {}, {}
+    sim._sensors, sim._deformable_objects, sim._rigid_object_groups = {}, {}, {}
+    sim._lights = {}
+    sim._spawn_scene = MagicMock()
+    sim._spawn_scene.builder.is_finalized = True
+    sim._spawn_scene.__contains__.side_effect = lambda uid: uid in sim._rigid_objects
+    sim.physics.sync_render_state = lambda result: None
+    group = sim.add_marker_group(
+        MarkerGroupCfg(name="attached", prototypes={"box": MarkerPrototypeCfg()})
+    )
+    group.update(translations=[[[1, 0, 0]], [[2, 0, 0]]])
+    return sim, group
+
+
+def test_marker_manager_default_batches_root_and_link_attachment_without_prepare():
+    sim, group = _make_attachment_sim()
+    root = torch.tensor([[2.0, 0, 0, 0, 0, 0, 1], [3.0, 0, 0, 0, 0, 0, 1]])
+    tool = torch.tensor([[0.0, 4, 0, 0, 0, 0, 1], [0.0, 5, 0, 0, 0, 0, 1]])
+    sim._robots["robot"] = SimpleNamespace(
+        is_spawn_bound=True,
+        link_names=["tool"],
+        get_local_pose=lambda: root,
+        get_link_pose=lambda name, env_ids: tool[env_ids],
+    )
+    assert group.num_envs == sim.num_envs == 2
+    group.attach("robot", env_ids=[0])
+    group.attach("robot", link_name="tool", env_ids=[1])
+    np.testing.assert_allclose(
+        [m.position for m in sim.get_marker_overlays()], [[13, 0, 0], [2, 25, 0]]
+    )
+    root[0, 0] = 4
+    tool[1, 1] = 7
+    SimulationManager.sync_render_state(sim)
+    np.testing.assert_allclose(
+        [m.position for m in sim.get_marker_overlays()], [[15, 0, 0], [2, 27, 0]]
+    )
+    sim.prepare.assert_not_called()
+    assert sim._world.physics_updates == []
+
+
+def test_marker_attachment_update_precedes_recording_and_uses_live_replacement():
+    sim, group = _make_attachment_sim()
+    pose = torch.tensor([[2.0, 0, 0, 0, 0, 0, 1], [3.0, 0, 0, 0, 0, 0, 1]])
+    sim._rigid_objects["target"] = SimpleNamespace(
+        is_spawn_bound=True, get_local_pose=lambda: pose
+    )
+    group.attach("target")
+    # Replacing the registry facade must not leave borrowed parent/native handles.
+    sim._rigid_objects["target"] = SimpleNamespace(
+        is_spawn_bound=True,
+        get_local_pose=lambda: pose + torch.tensor([5.0, 0, 0, 0, 0, 0, 0]),
+    )
+    recorded = []
+    sim._window_record_state = SimpleNamespace(capture_from_sim_update=True)
+    sim._step_window_record_from_sim_update = lambda state, dt: recorded.append(
+        [m.position.copy() for m in sim.get_marker_overlays()]
+    )
+    sim.update_gizmos = lambda: None
+    sim.capture_visualization_safely = lambda **kw: None
+    sim._log_scene_summary = lambda: None
+    sim.update(step=1)
+    np.testing.assert_allclose(recorded[0], [[18, 0, 0], [10, 20, 0]])
+    assert len(sim._world.physics_updates) == 1
+
+
+def test_marker_attachment_removal_detaches_before_destroying_parent():
+    sim, group = _make_attachment_sim()
+    alive = True
+
+    def pose():
+        assert alive, "read destroyed parent"
+        return torch.tensor([[2.0, 0, 0, 0, 0, 0, 1], [3.0, 0, 0, 0, 0, 0, 1]])
+
+    def remove(uid):
+        nonlocal alive
+        alive = False
+
+    sim._rigid_objects["target"] = SimpleNamespace(
+        is_spawn_bound=True, get_local_pose=pose
+    )
+    sim._spawn_scene.remove.side_effect = remove
+    group.attach("target")
+    assert sim.remove_asset("target")
+    SimulationManager.sync_render_state(sim)
+    group.update(env_ids=[0], colors=[[0, 1, 0, 0.5]])
+    np.testing.assert_allclose(
+        [m.position for m in sim.get_marker_overlays()], [[13, 0, 0], [5, 20, 0]]
+    )
+
+
+@pytest.mark.parametrize(
+    "target,link,error",
+    [
+        ("missing", None, KeyError),
+        ("unbound", None, RuntimeError),
+        ("rigid", "tool", ValueError),
+        ("robot", "missing", ValueError),
+    ],
+)
+def test_marker_attach_rejects_missing_unprepared_and_invalid_links(
+    target, link, error
+):
+    sim, group = _make_attachment_sim()
+    sim._rigid_objects = {
+        "unbound": SimpleNamespace(is_spawn_bound=False),
+        "rigid": SimpleNamespace(is_spawn_bound=True),
+    }
+    sim._robots["robot"] = SimpleNamespace(is_spawn_bound=True, link_names=["tool"])
+    with pytest.raises(error):
+        group.attach(target, link_name=link)
+    np.testing.assert_allclose(
+        [m.position for m in group.snapshot()], [[11, 0, 0], [2, 20, 0]]
+    )
+    sim.prepare.assert_not_called()
+    assert sim._world.physics_updates == []
+
+
+def test_marker_publication_failure_rolls_back_selected_environment_state():
+    sim, group = _make_attachment_sim()
+    sim._visualization_manifest_topology_revision = sim._visualization_topology_revision
+
+    def fail_capture(**kwargs):
+        raise RuntimeError("snapshot capture failed")
+
+    sim._visualization_runtime.capture = fail_capture
+    with pytest.raises(RuntimeError, match="snapshot capture failed"):
+        group.update(env_ids=[1], translations=[[9, 0, 0], [8, 0, 0]])
+    assert group.counts == (1, 1)
+    np.testing.assert_allclose(
+        [m.position for m in group.snapshot()], [[11, 0, 0], [2, 20, 0]]
+    )
+    assert sim._visualization_error_reported
+
+
+def _attach_groups_for_host_update(group_count):
+    from embodichain.lab.visualization.markers import MarkerGroupCfg, MarkerPrototypeCfg
+
+    sim, group = _make_attachment_sim()
+    pose = torch.tensor([[2.0, 0, 0, 0, 0, 0, 1], [3.0, 0, 0, 0, 0, 0, 1]])
+    sim._rigid_objects["target"] = SimpleNamespace(
+        is_spawn_bound=True, get_local_pose=lambda: pose
+    )
+    groups = [group]
+    for index in range(1, group_count):
+        extra = sim.add_marker_group(
+            MarkerGroupCfg(
+                name=f"attached_{index}", prototypes={"box": MarkerPrototypeCfg()}
+            )
+        )
+        extra.update(translations=[[[1, 0, 0]], [[2, 0, 0]]])
+        groups.append(extra)
+    for attached in groups:
+        attached.attach("target")
+    sim._visualization_manifest_topology_revision = sim._visualization_topology_revision
+    runtime = sim._visualization_runtime
+    sim.start_visualization = lambda: runtime
+    sim.sync_render_state = lambda: SimulationManager.sync_render_state(sim)
+    sim.update_gizmos = lambda: None
+    sim._log_scene_summary = lambda: None
+    runtime.capture_calls.clear()
+    return sim, groups, pose
+
+
+def test_automatic_attachment_capture_failure_does_not_interrupt_physics_or_recording():
+    sim, groups, pose = _attach_groups_for_host_update(2)
+    pose[:, 0] += 1
+    attempts = []
+
+    def fail_capture(**kwargs):
+        attempts.append(kwargs)
+        raise RuntimeError("worker capture failed")
+
+    sim._visualization_runtime.capture = fail_capture
+    recorded = []
+    sim._window_record_state = SimpleNamespace(capture_from_sim_update=True)
+    sim._step_window_record_from_sim_update = lambda state, dt: recorded.append(
+        (sim._visualization_sim_step, groups[0].snapshot()[0].position.copy())
+    )
+    sim.update(step=2)
+    assert len(sim._world.physics_updates) == sim._visualization_sim_step == 2
+    assert sim._visualization_sim_time == pytest.approx(0.02)
+    assert [step for step, _ in recorded] == [1, 2]
+    for _, position in recorded:
+        np.testing.assert_allclose(position, [14, 0, 0])
+    assert len(attempts) == 1 and attempts[0]["force"] is False
+    assert sim._visualization_error_reported
+
+
+def test_automatic_attachment_native_publication_only_when_parent_changes():
+    sim, groups, pose = _attach_groups_for_host_update(1)
+    published = []
+    sim._native_markers = SimpleNamespace(
+        publish=lambda name, markers: published.append((name, markers))
+    )
+    SimulationManager.sync_render_state(sim)
+    assert published == []
+    pose[:, 0] += 1
+    SimulationManager.sync_render_state(sim)
+    SimulationManager.sync_render_state(sim)
+    assert len(published) == 1
+    np.testing.assert_allclose(published[0][1][0].position, [14, 0, 0])
+    assert sim._visualization_runtime.capture_calls == []
+
+
+def test_automatic_attachment_native_failure_preserves_step_accounting():
+    sim, groups, pose = _attach_groups_for_host_update(1)
+    sim.sim_config.visualization.backend = "none"
+    pose[:, 0] += 1
+
+    def fail_publish(name, markers):
+        raise RuntimeError("native marker upload failed")
+
+    sim._native_markers = SimpleNamespace(publish=fail_publish)
+    sim.update(step=2)
+    assert len(sim._world.physics_updates) == sim._visualization_sim_step == 2
+    assert sim._visualization_sim_time == pytest.approx(0.02)
+    # Failed native publication keeps the previous detached transforms.
+    np.testing.assert_allclose(groups[0].snapshot()[0].position, [13, 0, 0])
+
+
+@pytest.mark.parametrize(
+    "renderer_name, use_scene", [("hybrid", False), ("fast-rt", True), ("rt", True)]
+)
+def test_native_markers_receive_prepared_scene_without_preparing_physics(
+    monkeypatch, renderer_name: str, use_scene: bool
+) -> None:
+    from embodichain.lab.visualization.markers import MarkerGroupCfg, MarkerPrototypeCfg
+
+    sim, _ = _make_visualization_sim_manager()
+    sim.sim_config.num_envs = 1
+    sim.sim_config.visualization.backend = "native"
+    sim.sim_config.render_cfg.renderer = renderer_name
+    sim._marker_groups, sim._markers, sim._native_markers = {}, {}, None
+    sim.arena_offsets = torch.zeros((1, 3))
+    scene = object()
+    sim._spawn_scene = SimpleNamespace(
+        builder=SimpleNamespace(backend="newton", is_finalized=False, result=scene)
+    )
+    sim.get_env = MagicMock(side_effect=AssertionError("raw Arena is not the owner"))
+    renderer = SimpleNamespace(publish=MagicMock(), remove=MagicMock())
+    factory = MagicMock(return_value=renderer)
+    monkeypatch.setattr(sim_manager_module, "NativeMarkerRenderer", factory)
+
+    group = sim.add_marker_group(
+        MarkerGroupCfg(name="goal", prototypes={"box": MarkerPrototypeCfg()})
+    )
+    group.update(translations=[[0, 0, 0]])
+
+    factory.assert_called_once_with(scene, use_scene_for_overlays=use_scene)
+    renderer.publish.assert_called_once()
+    sim.get_env.assert_not_called()
+    sim.prepare.assert_not_called()
+    sim.sync_render_state.assert_not_called()
+    assert sim._world.physics_updates == []
+
+
 @pytest.mark.parametrize("steps", [0, 1, 4])
 def test_after_substep_observer_preserves_manager_and_camera_boundaries(
     steps: int,
@@ -3328,3 +3875,182 @@ def test_process_no_render_is_detected_after_world_cleanup(monkeypatch) -> None:
         lambda: SimpleNamespace(renderer=dexsim.types.Renderer.NORENDER),
     )
     assert SimulationManager._get_process_renderer() == "no-render"
+
+
+def test_after_substep_marker_refresh_precedes_visualization_capture() -> None:
+    sim, groups, pose = _attach_groups_for_host_update(3)
+    runtime = sim._visualization_runtime
+    events: list[str] = []
+    captured_positions: list[np.ndarray] = []
+    published_positions: list[np.ndarray] = []
+    world_update = sim._world.update
+    capture = sim.capture_visualization_safely
+
+    def update_world(dt: float) -> None:
+        world_update(dt)
+        events.append("physics")
+
+    def after_substep(dt: float) -> None:
+        events.append("observer")
+        pose[:, 0] += 1
+
+    def publish(name: str, markers: object) -> None:
+        events.append("markers")
+        published_positions.append(np.array([marker.position for marker in markers]))
+
+    def capture_state(**kwargs: object) -> None:
+        events.append("capture")
+        captured_positions.append(
+            np.array([marker.position for marker in groups[0].snapshot()])
+        )
+        capture(**kwargs)
+
+    sim._world.update = update_world
+    sim._native_markers = SimpleNamespace(publish=publish)
+    sim.capture_visualization_safely = capture_state
+
+    sim.update(step=2, after_substep=after_substep)
+
+    assert (
+        events
+        == ["physics", "observer", "markers", "markers", "markers", "capture"] * 2
+    )
+    # The fixture's parent poses, marker offsets, and Arena offsets produce
+    # these world positions after the observer moves each parent by one unit.
+    expected = [[[14, 0, 0], [6, 20, 0]], [[15, 0, 0], [7, 20, 0]]]
+    np.testing.assert_allclose(published_positions, np.repeat(expected, 3, axis=0))
+    np.testing.assert_allclose(captured_positions, expected)
+    assert [call["capture_camera_images"] for call in runtime.capture_calls] == [
+        False,
+        True,
+    ]
+    assert [(call["sim_step"], call["force"]) for call in runtime.capture_calls] == [
+        (1, False),
+        (2, False),
+    ]
+    groups[0].update(env_ids=[0], translations=[[2, 0, 0]])
+    assert len(runtime.capture_calls) == 3
+    assert runtime.capture_calls[-1]["force"] is True
+
+
+def test_deferred_final_frame_refreshes_markers_after_interval_state_writes() -> None:
+    sim, groups, pose = _attach_groups_for_host_update(1)
+    runtime = sim._visualization_runtime
+    rendered, recorded, captured = [], [], []
+
+    def marker_positions():
+        return np.array([marker.position for marker in groups[0].snapshot()])
+
+    sim._world.render_camera_group = lambda _: rendered.append(marker_positions())
+    sim._window_record_state = SimpleNamespace(capture_from_sim_update=True)
+    sim._step_window_record_from_sim_update = lambda _state, _dt: recorded.append(
+        marker_positions()
+    )
+    capture = sim.capture_visualization_safely
+
+    def capture_markers(**kwargs: object) -> None:
+        capture(**kwargs)
+        captured.append(marker_positions())
+
+    sim.capture_visualization_safely = capture_markers
+
+    def after_substep(_dt: float) -> None:
+        pose[:, 0] += 1
+
+    sim.update(step=1, after_substep=after_substep, render_final_step=False)
+    assert runtime.capture_calls == []
+    assert rendered == recorded == []
+    np.testing.assert_allclose(marker_positions(), [[14, 0, 0], [6, 20, 0]])
+
+    # Gym interval events may change the parent after the final physics substep.
+    pose[:, 0] += 5
+    with sim.render_frame():
+        sim.render_camera_group([0])
+
+    expected = [[19, 0, 0], [11, 20, 0]]
+    np.testing.assert_allclose(rendered, [expected])
+    np.testing.assert_allclose(recorded, [expected])
+    np.testing.assert_allclose(captured, [expected])
+    assert len(runtime.capture_calls) == 1
+    assert len(sim._world.physics_updates) == 1
+
+
+def test_marker_update_in_observer_waits_for_deferred_final_frame() -> None:
+    sim, groups, pose = _attach_groups_for_host_update(2)
+    runtime = sim._visualization_runtime
+
+    def after_substep(_dt: float) -> None:
+        pose[:, 0] += 1
+        groups[1].set_visibility(False)
+
+    sim.update(step=1, after_substep=after_substep, render_final_step=False)
+
+    assert runtime.capture_calls == []
+    assert all(not marker.visible for marker in groups[1].snapshot())
+    np.testing.assert_allclose(
+        [marker.position for marker in groups[0].snapshot()],
+        [[14, 0, 0], [6, 20, 0]],
+    )
+    with sim.render_frame():
+        pass
+    assert len(runtime.capture_calls) == 1
+    assert runtime.capture_calls[0]["sim_step"] == 1
+
+
+def test_reset_fluid_selects_rows_and_honors_exclusions():
+    sim = object.__new__(SimulationManager)
+    sim.physics = NewtonPhysicsBackend(sim)
+    sim.num_envs = 2
+    for name in (
+        "_robots",
+        "_articulations",
+        "_rigid_objects",
+        "_rigid_object_groups",
+        "_lights",
+        "_sensors",
+        "_deformable_objects",
+    ):
+        setattr(sim, name, {})
+    fluid, excluded = MagicMock(), MagicMock()
+    sim._fluid_objects = {"water": fluid, "other": excluded}
+    sim.reset_objects_state(env_ids=[1], excluded_uids=["other"])
+    excluded.reset.assert_not_called()
+    fluid.reset.assert_called_once_with([1])
+
+
+@pytest.mark.usefixtures("requires_particle_contact_material")
+def test_targeted_particle_material_schedule_expands_arena_paths() -> None:
+    from dexsim.engine import newton_physics
+    from dexsim.engine.newton_physics.runtime_control import GraphRuntimeControl
+
+    if not hasattr(newton_physics, "DexUniParticleContactMaterialSchedule"):
+        pytest.skip("Targeted particle schedules require a supporting DexSim build.")
+    sim, builder = _make_runtime_control_sim_manager()
+    sim.register_particle_contact_material_schedule(
+        {"dynamic_friction": ((0.0, 0.5), (1.0, 1.2))}, uid="cloth"
+    )
+    controls = [call.args[0] for call in builder.add_runtime_control.call_args_list]
+    assert [control.target for control in controls] == [
+        "arena_0/cloth",
+        "arena_1/cloth",
+    ]
+    assert all(isinstance(control, GraphRuntimeControl) for control in controls)
+
+
+def test_targeted_particle_material_schedule_rejects_unknown_uid() -> None:
+    sim, builder = _make_runtime_control_sim_manager()
+    with pytest.raises(KeyError, match="missing"):
+        sim.register_particle_contact_material_schedule(
+            {"stiffness": ((0.0, 1000.0),)}, uid="missing"
+        )
+    builder.add_runtime_control.assert_not_called()
+
+
+def test_targeted_particle_material_schedule_validates_before_registration() -> None:
+    sim, builder = _make_runtime_control_sim_manager()
+    sim._spawn_scene.arena_names = ("arena_0",)
+    with pytest.raises(RuntimeError, match="arena count"):
+        sim.register_particle_contact_material_schedule(
+            {"stiffness": ((0.0, 1000.0),)}, uid="cloth"
+        )
+    builder.add_runtime_control.assert_not_called()

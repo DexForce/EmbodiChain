@@ -60,6 +60,11 @@ variants satisfy its required embodiment contract and task defaults address
 logical resources shared by those profiles. Otherwise create an intentionally
 different integration/policy pairing; do not fork the provider-independent
 program just to rename robot parts.
+A matching capability contract does not qualify the physical workspace, a fixed
+object-to-EEF grasp, or a handover target for another tool. Check base placement,
+open-hand approach, closing contacts and final physical acceptance before reusing
+an integration. Keep those task choices separate from hardware TCP/contact-frame
+calibration.
 
 Give every runnable deployment a unique Gym ID. Loading a configuration-owned
 ID is process-local and occurs when the config passes through

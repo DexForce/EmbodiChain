@@ -43,7 +43,9 @@ class RigidObjectCfg(ObjectBaseCfg):
     such as physical attributes and collision group.
     """
 
-    visuals: list[VisualElementCfg | GaussianSplatCfg] | GaussianSplatCfg | None = None
+    visuals: list[VisualElementCfg | GaussianSplatCfg] | GaussianSplatCfg | None = (
+        field(default=None, kw_only=True)
+    )
     __annotations__["visuals"] = (
         list[VisualElementCfg | GaussianSplatCfg] | GaussianSplatCfg | None
     )
@@ -53,7 +55,7 @@ class RigidObjectCfg(ObjectBaseCfg):
     explicit VisualElementCfg IDs.
     """
 
-    semantic_shape: ShapeCfg | None = None
+    semantic_shape: ShapeCfg | None = field(default=None, kw_only=True)
     """Optional independent mesh/primitive for semantic geometry queries."""
 
     shape: ShapeCfg | None = None
@@ -70,10 +72,16 @@ class RigidObjectCfg(ObjectBaseCfg):
     :class:`RigidBodyPhysicsCfg` groups portable and backend-native intent.
     """
 
-    body_type: Literal["dynamic", "kinematic", "static"] = "dynamic"
+    body_type: Literal["dynamic", "kinematic", "static"] | None = None
+    """Actor type for procedural bodies or explicit USD ``overlay`` mode.
 
-    body_scale: tuple | list = (1.0, 1.0, 1.0)
-    """Scale of the rigid body in the simulation world frame."""
+    USD ``preserve`` mode always retains the source actor, including when
+    loading older configurations that serialized a default actor type."""
+
+    body_scale: tuple | list | None = None
+    """Geometry scale for procedural bodies or USD ``overlay`` mode.
+
+    USD ``preserve`` mode retains its source scale."""
 
     asset_physics_mode: AssetPhysicsMode = "preserve"
     """How a file-backed asset's physical properties are handled.
@@ -82,6 +90,22 @@ class RigidObjectCfg(ObjectBaseCfg):
     configured properties on top of the parsed asset. Procedural shapes always
     use config.
     """
+
+    def __post_init__(self) -> None:
+        self._resolve_procedural_defaults()
+
+    def _resolve_procedural_defaults(self) -> None:
+        """Resolve defaults only after ordinary geometry is assembled."""
+        if self.shape is None or self.source is not None:
+            return
+        path = getattr(self.shape, "fpath", None)
+        if path is None or not str(path).lower().endswith(
+            (".usd", ".usda", ".usdc", ".usdz")
+        ):
+            if self.body_type is None:
+                self.body_type = "dynamic"
+            if self.body_scale is None:
+                self.body_scale = (1.0, 1.0, 1.0)
 
     def resolve_asset_physics_mode(self) -> AssetPhysicsMode:
         """Return the effective file-backed physics policy."""
@@ -120,7 +144,23 @@ class RigidObjectCfg(ObjectBaseCfg):
                 DeprecationWarning,
                 stacklevel=2,
             )
-        return super().from_dict(data)
+        cfg = super().from_dict(data)
+        path = (
+            cfg.source.file_path
+            if cfg.source is not None
+            else getattr(cfg.shape, "fpath", None)
+        )
+        if path is not None and str(path).lower().endswith(
+            (".usd", ".usda", ".usdc", ".usdz")
+        ):
+            if "body_type" not in data:
+                cfg.body_type = None
+            if "body_scale" not in data:
+                cfg.body_scale = None
+            if not {"init_pos", "init_rot", "init_local_pose"}.intersection(data):
+                cfg.init_local_pose = None
+        cfg._resolve_procedural_defaults()
+        return cfg
 
     def to_dexsim_body_type(self) -> ActorType:
         """Convert the body type to dexsim ActorType."""

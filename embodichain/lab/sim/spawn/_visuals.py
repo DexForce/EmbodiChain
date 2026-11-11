@@ -80,8 +80,9 @@ class _VisualBinding:
         self.default_materials: list[list[list[Any]]] = []
         self.materials: list[list[list[Any]]] = []
         cfg = facade.cfg
+        scale = getattr(cfg, "body_scale", None)
         self.body_scale = np.asarray(
-            getattr(cfg, "body_scale", (1, 1, 1)), dtype=np.float32
+            (1, 1, 1) if scale is None else scale, dtype=np.float32
         )
         if (
             self.body_scale.shape != (3,)

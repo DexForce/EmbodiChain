@@ -11,6 +11,10 @@ independent control DOFs, default control parts, and mimic followers without
 loading simulation or downloading assets. See :ref:`cli-list-robots` for the
 command reference and :doc:`/guides/robot_catalog` for variant selection.
 
+Parallel-jaw grippers share physical defaults between standalone robots and
+mounted embodiments. See :doc:`parallel_jaw_grippers` for catalog IDs, binding
+syntax, command ownership and the TCP resolution contract.
+
 Manufacturers
 -------------
 
@@ -27,6 +31,10 @@ Manufacturers
      - :doc:`CobotMagic <agilex/cobotmagic>`
      - ``CobotMagicCfg``
      - Fixed-base dual arms and grippers for bimanual tasks.
+   * - :doc:`AgileX <agilex/index>`
+     - :doc:`PiPER-X <agilex/piper_x>`
+     - ``AgilexPiperXCfg``
+     - Fixed-base six-axis arm with a separately mounted AGX tool.
    * - :doc:`ANYbotics <anybotics/index>`
      - :doc:`ANYmal-C <anybotics/anymal_c>`
      - ``ANYmalCCfg``
@@ -63,6 +71,10 @@ Manufacturers
      - :doc:`Franka Panda <franka/panda>`
      - ``FrankaPandaCfg``
      - Legacy FR3 bare-arm selector; native-hand deployments use the explicit ``franka_panda`` embodiment.
+   * - :doc:`I2RT Robotics <i2rt/index>`
+     - :doc:`YAM dual arms <i2rt/yam>`
+     - ``YamI2rtCfg``
+     - Two six-joint arms with four independent finger joints and per-arm numerical FK/IK.
    * - :doc:`Pollen Robotics <pollen_robotics/index>`
      - :doc:`MicroDuck <pollen_robotics/microduck>`
      - ``MicroDuckCfg``
@@ -98,6 +110,8 @@ Manufacturers
 
 .. toctree::
    :maxdepth: 2
+
+   parallel_jaw_grippers
    :caption: Manufacturers
    :hidden:
 
@@ -115,6 +129,7 @@ Manufacturers
    dexforce/index
    flexiv/index
    franka/index
+   i2rt/index
    pollen_robotics/index
    the_robot_studio/index
    tianji/index
@@ -142,7 +157,7 @@ instructions, provenance boundaries and rendered source-model illustrations.
      - Assets
      - Coverage
    * - :doc:`AgileX <agilex/index>`
-     - :doc:`Pika Gripper <agilex/pika>`
+     - :doc:`Pika Gripper <agilex/pika>`, :doc:`AGX Gripper <agilex/piper_x>`
      - Gripper asset; host-owned mounting.
    * - :doc:`BrainCo <brainco/index>`
      - :doc:`Revo 1 <brainco/revo1>`

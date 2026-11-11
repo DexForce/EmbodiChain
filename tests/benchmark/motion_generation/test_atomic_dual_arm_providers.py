@@ -18,6 +18,9 @@
 
 from __future__ import annotations
 
+from embodichain.robot_registry import resolve_gripper_defaults
+
+
 import math
 import xml.etree.ElementTree as ET
 from dataclasses import replace
@@ -34,10 +37,7 @@ from embodichain_benchmarks.motion_generation.scenarios._atomic_pose_sampling im
 )
 
 from embodichain.lab.sim.motion.planners import PlanState
-from embodichain.toolkits.graspkit import (
-    ParallelJawGraspPoseGenerator,
-    ParallelJawGripperModelCfg,
-)
+from embodichain.toolkits.graspkit import ParallelJawGraspPoseGenerator
 from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
 from embodichain_benchmarks.motion_generation.config import (
     AtomicPoseRandomizationCfg,
@@ -975,7 +975,9 @@ def _hand_over_generation(monkeypatch, *, endpoint_failure=None):
     )
     scenario.restore_base_robot = Mock()
     scenario.open_grippers = Mock()
-    scenario.grasp_model = Mock()
+    scenario.grasp_model = Mock(
+        return_value=resolve_gripper_defaults("FrankaPandaHand")
+    )
     monkeypatch.setattr(dual, "_settled_pose", Mock(return_value=(object_pose, 0)))
     monkeypatch.setattr(
         dual, "snapshot_case_qpos", Mock(return_value=(full_start[:, :3], full_start))
@@ -1365,10 +1367,22 @@ class _CountingSampler(ParallelJawGraspPoseGenerator):
         self,
         n_sample: int,
         *,
-        gripper_model: ParallelJawGripperModelCfg | None = None,
+        gripper_data: dict[str, object] | None = None,
         root_from_tcp: list[list[float]] | None = None,
     ) -> None:
-        super().__init__(gripper_model or ParallelJawGripperModelCfg())
+        super().__init__(
+            **{
+                key: (
+                    gripper_data
+                    or {
+                        "model_id": "parallel_jaw",
+                        "min_opening_width": 0.001,
+                        "max_opening_width": 0.1,
+                    }
+                )[key]
+                for key in ("model_id", "min_opening_width", "max_opening_width")
+            }
+        )
         self.n_sample = n_sample
         self.root_from_tcp = root_from_tcp
 
@@ -1402,7 +1416,9 @@ def test_each_self_sampling_case_compiles_with_its_own_sample_count(
     }[name]
     robot.get_qpos_limits.side_effect = lambda name: torch.tensor([[[0.0, 0.04]]])
     scenario = AtomicSkillScenario()
-    scenario.track = SimpleNamespace(config={"grasp_model": model_id})
+    scenario.track = SimpleNamespace(
+        config={"grasp_model": "FrankaPandaHand" if model_id else None}
+    )
     scenario.robot = robot
     scenario.control_part = "left_arm"
     scenario.simulation = Mock(sim_config=Mock(physics_dt=0.01))
@@ -1440,8 +1456,8 @@ def test_each_self_sampling_case_compiles_with_its_own_sample_count(
     sampler = scenario.require_engine().grasp_pose_generators["left_eef"]
     assert isinstance(sampler, CaseSampleCountGraspPoseGenerator)
     if model_id is not None:
-        assert sampler.gripper_model.model_id == model_id
-        assert sampler.gripper_model.max_opening_width == pytest.approx(0.08)
+        assert sampler.gripper_data["model_id"] == model_id
+        assert sampler.gripper_data["max_opening_width"] == pytest.approx(0.08)
     assert scenario.require_engine().grasp_pose_generators["right_eef"] is sampler
     engine = Mock(motion_generator=motion_generator)
     engine.compile.side_effect = lambda *args, **kwargs: (
@@ -1568,12 +1584,28 @@ def test_dual_arm_provider_builds_both_arms_and_grippers():
     assert create_robot_provider(suite.robot).control_part == "left_arm"
 
 
-def test_franka_handover_uses_authored_robotiq_linkage_and_finger_contacts(tmp_path):
+@pytest.mark.parametrize(
+    "suite_name,tcp_z,closure",
+    [
+        ("atomic_dual_franka_robotiq_hand_over", 0.20, 0.45),
+        ("atomic_dual_franka_robotiq_coordinated_placement", 0.21, 0.7),
+    ],
+)
+def test_franka_dual_suites_use_authored_robotiq_linkage_and_finger_contacts(
+    tmp_path, suite_name, tcp_z, closure
+):
     """Qualify both hands and limited closure against the real assembled URDF."""
     from embodichain.utils.string import resolve_matching_names
 
-    suite = load_suite("atomic_dual_franka_robotiq_hand_over")
+    suite = load_suite(suite_name)
     cfg = create_robot_provider(suite.robot).build_cfg()
+    # Omitting the selector must retain Robotiq on Franka, too.
+    default_config = dict(suite.robot.config)
+    default_config.pop("gripper_type")
+    default_cfg = create_robot_provider(
+        replace(suite.robot, config=default_config)
+    ).build_cfg()
+    assert default_cfg.to_dict() == cfg.to_dict()
     cfg.urdf_cfg.fpath = str(tmp_path / "franka_robotiq.urdf")
     tree = ET.parse(cfg.urdf_cfg.assemble_urdf())
     joints = {
@@ -1590,7 +1622,7 @@ def test_franka_handover_uses_authored_robotiq_linkage_and_finger_contacts(tmp_p
         )
         np.testing.assert_allclose(
             cfg.solver_cfg[f"{side}_arm"].tcp,
-            [[0, -1, 0, 0], [1, 0, 0, 0], [0, 0, 1, 0.20], [0, 0, 0, 1]],
+            [[0, -1, 0, 0], [1, 0, 0, 0], [0, 0, 1, tcp_z], [0, 0, 0, 1]],
         )
     declared_contacts = set()
     for gripper in suite.enabled_tracks()[0].config["grippers"]:
@@ -1605,7 +1637,7 @@ def test_franka_handover_uses_authored_robotiq_linkage_and_finger_contacts(tmp_p
         robot.get_qpos_limits.return_value = torch.tensor([limits])
         _, opened, closed = AtomicSkillScenario._resolve_gripper(robot, gripper)
         torch.testing.assert_close(opened, torch.zeros(6))
-        assert float(closed[0]) == pytest.approx(0.45)
+        assert float(closed[0]) == pytest.approx(closure)
         assert joints[names[0]].find("mimic") is None
         for name, command in zip(names[1:], closed[1:], strict=True):
             mimic = joints[name].find("mimic")
@@ -1697,6 +1729,9 @@ def test_native_panda_dual_provider_preserves_real_fingers_and_stock_tcp(tmp_pat
         end_link_name="fr3_hand_tcp",
     )
     expected_fk = source.forward_kinematics(qpos).get_matrix()
+    from embodichain.lab.sim.utility.gripper_binding import prepare_robot_grippers
+
+    prepare_robot_grippers(cfg)
     chains = cfg.build_pk_serial_chain(device=CPU)
     for side in ("left", "right"):
         arm = f"{side}_arm"
@@ -1761,7 +1796,7 @@ def test_native_panda_dual_rejects_incompatible_arm_or_tool_override(
 
 def test_native_grasp_sampling_maps_closing_axis_once_before_frozen_replay(monkeypatch):
     """Every sampler API preserves metadata and native replay retains the pose."""
-    from embodichain.toolkits.graspkit import get_parallel_jaw_gripper_model
+
     from embodichain_benchmarks.motion_generation import _atomic_fixtures
 
     canonical = _pose(0.2, 0.3, 0.4).unsqueeze(0)
@@ -1772,7 +1807,7 @@ def test_native_grasp_sampling_maps_closing_axis_once_before_frozen_replay(monke
         torch.tensor([0.03]),
         torch.tensor([True]),
     )
-    model = get_parallel_jaw_gripper_model("franka_panda_hand")
+    model = resolve_gripper_defaults("FrankaPandaHand")
     source = Mock(device=torch.device("cpu"))
     source.get_valid_grasp_poses.return_value = (True, canonical, widths, costs)
     source.get_grasp_poses.return_value = (True, canonical[0], float(widths[0]))
@@ -1784,7 +1819,7 @@ def test_native_grasp_sampling_maps_closing_axis_once_before_frozen_replay(monke
         None,
     ]
     sampler = _atomic_fixtures.create_parallel_jaw_grasp_pose_generator(
-        n_sample=32, force_refresh=False, gripper_model=model
+        n_sample=32, force_refresh=False, gripper_data=model
     )
     monkeypatch.setattr(sampler, "_backend", lambda *_: source)
     arguments = dict(
@@ -1867,7 +1902,7 @@ def test_franka_dual_suites_use_independent_seven_joint_arms(skill_id: str) -> N
     suite = load_suite(
         "atomic_dual_franka_robotiq_hand_over"
         if skill_id == "hand_over"
-        else "atomic_dual_franka_pgi_coordinated_placement"
+        else "atomic_dual_franka_robotiq_coordinated_placement"
     )
     cfg = create_robot_provider(suite.robot).build_cfg()
     for part in ("left_arm", "right_arm"):

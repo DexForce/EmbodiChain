@@ -92,6 +92,7 @@ class SceneView:
             for method in (
                 "get_rigid_object_group_uid_list",
                 "get_deformable_object_uid_list",
+                "get_cable_object_uid_list",
                 "get_rigid_constraint_uid_list",
             ):
                 getter = getattr(self.sim, method, None)
