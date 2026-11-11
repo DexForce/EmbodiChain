@@ -18,11 +18,12 @@
 from __future__ import annotations
 
 import importlib
-from typing import TYPE_CHECKING
 from collections.abc import Sequence
+from typing import TYPE_CHECKING
 import weakref
 
 import warp as wp
+import numpy as np
 
 from .base import PhysicsBackend
 
@@ -32,6 +33,7 @@ if TYPE_CHECKING:
 
     from embodichain.lab.sim.sim_manager import SimulationManagerCfg
     from embodichain.lab.sim.objects.fluid import FluidObject
+    from embodichain.lab.sim._runtime_controls import _SceneInitialJointStates
 
 __all__ = ["NewtonPhysicsBackend"]
 
@@ -64,6 +66,7 @@ class NewtonPhysicsBackend(PhysicsBackend):
         self._fluid_render_clip_key: tuple[object, ...] | None = None
         self._fluid_render_clip_z: torch.Tensor | None = None
         self._fluid_render_dirty = False
+        self._joint_defaults: _SceneInitialJointStates | None = None
 
     @property
     def solver_type(self) -> str | None:
@@ -105,6 +108,103 @@ class NewtonPhysicsBackend(PhysicsBackend):
         # WorldConfig.newton_cfg registers the World-owned NewtonBackend.
         # SceneBuilder.finalize() completes its model; no second manager-level
         # activation or rebuild domain participates.
+
+    def _prepare_scene_build(self) -> None:
+        """Preflight cable anchors and prepare defaults for the current declarations."""
+        manager = self._manager
+        cables = getattr(manager, "_cable_objects", {})
+        if not cables:
+            return
+        from embodichain.lab.sim._runtime_controls import (
+            _InitialJointState,
+            _SceneInitialJointStates,
+        )
+
+        articulations = {**manager._robots, **manager._articulations}
+        # Normalize the entire input before registration so an invalid config
+        # cannot leave an incomplete set of initialization controls behind.
+        positions = {
+            uid: (
+                None
+                if obj.cfg.init_qpos is None
+                else _InitialJointState.normalize_positions(obj.cfg.init_qpos)
+            )
+            for uid, obj in articulations.items()
+        }
+        attached_articulations: set[str] = set()
+        for cable in cables.values():
+            for anchor in (cable.cfg.start_attachment, cable.cfg.end_attachment):
+                if anchor is not None and anchor.target in positions:
+                    attached_articulations.add(anchor.target)
+                    if positions[anchor.target] is not None and np.any(
+                        positions[anchor.target] != 0
+                    ):
+                        raise NotImplementedError(
+                            f"Cable {cable.uid!r} attachment to {anchor.target!r} "
+                            "with nonzero init_qpos requires a DexSim authoring "
+                            "API that applies initial joint poses before attachment "
+                            "construction; the current model-initialization hook "
+                            "runs too late. No scene has been committed."
+                        )
+        scene = manager._spawn_scene
+        if scene.builder.is_finalized:
+            return
+        seeds = tuple(
+            _InitialJointState(
+                f"{arena_name}/{uid}",
+                values,
+                mimic_stabilizer=articulations[
+                    uid
+                ].cfg.root_props.newton_mimic_stabilizer,
+                has_permanent_attachment=uid in attached_articulations,
+            )
+            for uid, values in positions.items()
+            if values is None or values.size
+            for arena_name in scene.arena_names
+        )
+        # Spawn only accepts additions to its pending control list. Refresh the
+        # group we own, so a failed build can remove or replace any articulation
+        # without duplicating or modifying caller-registered controls.
+        if self._joint_defaults is not None:
+            self._joint_defaults.replace(seeds)
+        elif seeds:
+            control = _SceneInitialJointStates(seeds)
+            scene.builder.add_runtime_control(control)
+            self._joint_defaults = control
+
+    def _reset_scene_state(
+        self, env_ids: Sequence[int] | None, excluded_uids: set[str]
+    ) -> list[int] | None:
+        """Restore cable worlds through the public engine episode boundary."""
+        manager = self._manager
+        cables = getattr(manager, "_cable_objects", {})
+        if not cables:
+            return None
+        physical_uids = (
+            set(manager._robots)
+            | set(manager._articulations)
+            | set(manager._rigid_objects)
+            | set(manager._rigid_object_groups)
+            | set(manager._deformable_objects)
+            | set(cables)
+        )
+        if physical_uids.intersection(excluded_uids):
+            raise NotImplementedError(
+                "Cable episode reset requires every physical asset in selected "
+                "environments; no objects have been reset."
+            )
+        cable = next(iter(cables.values()))
+        cable._require_bound()
+        ids = cable._resolve_env_ids(env_ids)
+        if ids:
+            result = manager.spawn_result
+            if result is None:
+                raise RuntimeError("Cable reset requires a prepared Spawn scene.")
+            arenas = [
+                result.arenas.index(manager._spawn_scene.arena_names[i]) for i in ids
+            ]
+            result.reset_arenas(arenas)
+        return ids
 
     def sync_render_state(self, result: "dexsim.scene.Scene") -> None:
         """Publish Newton state through DexSim's render bridge without stepping."""
@@ -374,6 +474,11 @@ class NewtonPhysicsBackend(PhysicsBackend):
         )
 
     # -- capabilities --------------------------------------------------- #
+    @property
+    def supports_cables(self) -> bool:
+        """Newton supports cables with explicit DexUni on CUDA."""
+        return True
+
     @property
     def supports_volume_deformables(self) -> bool:
         return True
