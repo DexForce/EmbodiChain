@@ -10,6 +10,7 @@ extension types.
 | `embodichain_robots/` | `embodichain_robots` | Concrete robot presets and the official robot catalog |
 | `embodichain_benchmarks/` | `embodichain_benchmarks` | Evaluation suites, planner adapters, scoring policies, and reports |
 | `embodichain_models/` | `embodichain_models` | Bundled model implementations |
+| `embodichain_solvers/` | `embodichain_solvers` | Concrete physics solver integrations |
 
 Keep the `embodichain_` prefix on extension modules and Python packages. It
 identifies their ecosystem outside this repository and avoids ambiguous

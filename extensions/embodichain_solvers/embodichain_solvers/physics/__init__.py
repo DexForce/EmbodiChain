@@ -14,11 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Physics solver providers discovered through DexSim entry points.
-
-Import providers explicitly; package discovery must not load neural weights or
-initialize a physics model.
-"""
+"""Named physics providers using the DexSim solver extension contract."""
 
 from __future__ import annotations
 

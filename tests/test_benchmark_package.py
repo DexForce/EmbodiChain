@@ -54,6 +54,7 @@ def installed_benchmark(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path,
         "extensions/embodichain_tasks",
         "extensions/embodichain_benchmarks",
         "extensions/embodichain_models",
+        "extensions/embodichain_solvers",
     ):
         shutil.copytree(root / name, source / name, ignore=ignore)
     built = subprocess.run(
@@ -239,3 +240,51 @@ print("installed benchmark suites and CLI passed")
     )
     assert cli.returncode == 0, cli.stdout + cli.stderr
     assert "--suite" in cli.stdout
+
+
+def test_installed_solver_entry_point_and_core_dependency_boundary(
+    installed_benchmark: tuple[Path, Path], tmp_path: Path
+) -> None:
+    """The real wheel discovers the provider without loading it from core."""
+    target, _ = installed_benchmark
+    script = r"""
+import importlib.abc
+from importlib import metadata
+from pathlib import Path
+import sys
+
+import embodichain_solvers.physics.nerd
+assert Path(embodichain_solvers.__file__).is_relative_to(Path(sys.prefix))
+for name in ('torch', 'newton', 'dexsim', 'embodichain_models'):
+    assert name not in sys.modules, name
+
+class ConcreteImportsForbidden(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split('.')[0] in {'embodichain_models', 'embodichain_solvers'}:
+            raise AssertionError('Core imported a concrete implementation: ' + fullname)
+
+blocker = ConcreteImportsForbidden()
+sys.meta_path.insert(0, blocker)
+from embodichain.lab.gym.envs.differentiable_env import DifferentiableEnv
+from embodichain.lab.sim.diff.dynamics import FunctionalDynamics
+from embodichain.lab.sim.diff.kinematics import differentiable_fk
+sys.meta_path.remove(blocker)
+assert 'embodichain_models' not in sys.modules
+entries = [entry for entry in metadata.entry_points(group='dexsim.newton_solvers') if entry.name == 'nerd']
+assert len(entries) == 1
+entry = entries[0]
+assert entry.value == 'embodichain_solvers.physics.nerd.provider:NeRDProvider'
+provider = entry.load()
+assert provider.__module__ == 'embodichain_solvers.physics.nerd.provider'
+assert provider.capabilities.supported_control_fields == ('joint_f',)
+import dexsim
+assert dexsim.get_world_num() == 0
+"""
+    result = subprocess.run(
+        [str(target / "bin/python"), "-I", "-c", script],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

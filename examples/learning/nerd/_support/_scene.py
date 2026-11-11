@@ -50,7 +50,7 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import NewtonPhysicsCfg, RenderCfg
 from embodichain.lab.visualization import VisualizationCfg
 
-from embodichain.lab.sim.physics.solvers._nerd_binding import NeRDBinding
+from embodichain_solvers.physics.nerd._binding import NeRDBinding
 from ._generation import _sample, _positive_integer, _sha256, _write_json
 from ._scene_assets import (
     _ant_reference_friction,
@@ -63,13 +63,12 @@ __all__: list[str] = []
 
 def _runtime_identity(device: torch.device) -> dict[str, Any]:
     """Capture the actual neural executor separately from stored teacher metadata."""
-    from embodichain.lab.sim.physics.solvers import nerd
+    from embodichain_solvers.physics.nerd import provider
+    from embodichain.lab.sim.diff import kinematics
 
-    solver_directory = Path(nerd.__file__).parent
-    sources = {
-        name: solver_directory / name
-        for name in ("nerd.py", "_nerd_binding.py", "_kinematics.py")
-    }
+    solver_directory = Path(provider.__file__).parent
+    sources = {name: solver_directory / name for name in ("provider.py", "_binding.py")}
+    sources["kinematics.py"] = Path(kinematics.__file__)
     sources.update(
         {
             name: Path(__file__).with_name(name)

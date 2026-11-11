@@ -115,7 +115,9 @@ Both task factories inherit `DifferentiableEnv` and explicitly select
 `step_mode="dynamics"`; its default pure-kinematic Warp mode remains available
 for other tasks. The mode does not change the configured solver.
 
-The NeRD provider shares one transition between native and functional stepping.
+The provider in `embodichain_solvers.physics.nerd.provider` shares one transition
+between native and functional stepping. Generic differentiable simulation APIs
+remain in core; the model/codec stay in `embodichain_models.dynamics.nerd`.
 Functional trajectories retain their own physical/history tensors; publishing
 detached live state does not overwrite tensors needed by backward. Finish
 backward before resetting terminal rows or updating model parameters, and use

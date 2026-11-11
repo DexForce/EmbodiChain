@@ -43,7 +43,7 @@ from examples.learning.nerd._support._scene_assets import (
     make_reference_articulation,
     reference_profile,
 )
-from embodichain.lab.sim.physics.solvers._nerd_binding import NeRDBinding
+from embodichain_solvers.physics.nerd._binding import NeRDBinding
 from embodichain_models.dynamics.nerd import NeRDModel, NeRDModelCfg, export_model
 
 DT = 1 / 60
@@ -448,7 +448,7 @@ def _check_real_manager_public_scene_and_partial_arena_reset(
 
 
 def test_fk_vjp_matches_directional_difference(tmp_path: Path) -> None:
-    from embodichain.lab.sim.physics.solvers._kinematics import differentiable_fk
+    from embodichain.lab.sim.diff.kinematics import differentiable_fk
 
     with _scene("ant") as (scene, backend):
         physical = scene.dynamics_snapshot().physical

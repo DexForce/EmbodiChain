@@ -24,7 +24,7 @@ import warp as wp
 
 newton = pytest.importorskip("newton")
 
-from embodichain.lab.sim.physics.solvers._kinematics import differentiable_fk
+from embodichain.lab.sim.diff.kinematics import differentiable_fk
 
 
 def _model():

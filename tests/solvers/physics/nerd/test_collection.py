@@ -159,7 +159,7 @@ def test_fixed_policy_adapter_uses_own_state_and_records_hash() -> None:
 
 
 def _helper():
-    path = Path(__file__).with_name("test_nerd_solver.py")
+    path = Path(__file__).with_name("test_provider.py")
     spec = importlib.util.spec_from_file_location("_collection_export_fixture", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -295,7 +295,7 @@ def _check_pipeline(tmp_path: Path, robot: str) -> None:
     assert report["runtime_identity"]["versions"][
         "torch"
     ] == importlib_metadata.version("torch")
-    assert len(report["runtime_identity"]["source_sha256"]["nerd.py"]) == 64
+    assert len(report["runtime_identity"]["source_sha256"]["provider.py"]) == 64
     assert len(report["selected_teacher_sha256"]) == 64
     # Same immutable teacher trajectories have the same selected-content digest
     # even when replay batching and output destination change.

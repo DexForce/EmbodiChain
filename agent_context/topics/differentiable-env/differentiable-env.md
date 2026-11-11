@@ -107,6 +107,8 @@ Newton dynamics.
 
 ## Dynamics boundary
 
+`sim.diff.kinematics.differentiable_fk` owns the reusable first-order Newton
+FK bridge; it does not depend on a model family or concrete provider.
 `sim.diff.FunctionalDynamics` exposes registered solver dynamics through the
 public manager/Scene path. `NewtonStepFunc` retains the pure-kinematic Warp
 contract. The environment selects between these paths without passing solver

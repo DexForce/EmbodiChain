@@ -147,4 +147,4 @@ markers = [
 ]
 
 [project.entry-points."dexsim.newton_solvers"]
-nerd = "embodichain.lab.sim.physics.solvers.nerd:NeRDProvider"
+nerd = "embodichain_solvers.physics.nerd.provider:NeRDProvider"

@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from contextlib import AbstractContextManager, nullcontext
 from typing import Any
 import math
 
@@ -41,8 +42,8 @@ from embodichain_models.dynamics.nerd.codec import (
 )
 from embodichain_models.dynamics.nerd import load_model
 
-from ._kinematics import differentiable_fk, _stream_scope
-from ._nerd_binding import NeRDBinding, _PHYSICS_SIGNATURE_SCHEMA
+from embodichain.lab.sim.diff.kinematics import differentiable_fk
+from ._binding import NeRDBinding, _PHYSICS_SIGNATURE_SCHEMA
 
 __all__ = ["NeRDProvider", "NeuralRobotDynamicSolver"]
 
@@ -54,6 +55,12 @@ _PHYSICAL_FIELDS = (
     "particle_q",
     "particle_qd",
 )
+
+
+def _stream_scope(device: torch.device) -> AbstractContextManager[Any]:
+    if device.type == "cuda":
+        return wp.ScopedStream(wp.stream_from_torch(torch.cuda.current_stream(device)))
+    return nullcontext()
 
 
 class NeuralRobotDynamicSolver(SolverBase):
@@ -253,7 +260,7 @@ class NeuralRobotDynamicSolver(SolverBase):
         state: FunctionalSolverState,
         reset_state: FunctionalSolverState,
         world_mask: Any | None,
-    ):
+    ) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
         """Clear selected histories without detaching unselected trajectories."""
         del reset_state
         mask = self._selected_rows(world_mask)

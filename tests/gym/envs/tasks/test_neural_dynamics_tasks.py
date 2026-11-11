@@ -64,7 +64,7 @@ def _check_task_and_trainer(
     from examples.learning.nerd._support._scene import DynamicsSimulation
     from embodichain.learning.rl.train import train_from_config
 
-    helper_path = _ROOT / "tests/sim/physics/solvers/test_nerd_solver.py"
+    helper_path = _ROOT / "tests/solvers/physics/nerd/test_provider.py"
     spec = importlib.util.spec_from_file_location("_nerd_export_helper", helper_path)
     helper = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(helper)

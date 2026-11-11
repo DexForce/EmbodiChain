@@ -25,7 +25,7 @@ import torch
 from torch.autograd.function import once_differentiable
 import warp as wp
 
-__all__: list[str] = []
+__all__ = ["differentiable_fk"]
 
 
 def _stream_scope(device: torch.device):

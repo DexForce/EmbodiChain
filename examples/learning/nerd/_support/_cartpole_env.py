@@ -35,7 +35,7 @@ from examples.learning.nerd._support._scene_assets import (
     make_reference_articulation,
     reference_profile,
 )
-from embodichain.lab.sim.physics.solvers._nerd_binding import NeRDBinding
+from embodichain_solvers.physics.nerd._binding import NeRDBinding
 from ._task_values import reference_task_values
 from embodichain.learning.rl.env import register_learning_env
 

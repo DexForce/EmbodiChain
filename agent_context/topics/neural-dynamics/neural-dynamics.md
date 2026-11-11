@@ -42,11 +42,15 @@ Scene consumer described below. There are no NeRD-specific core `compute/dynamic
 
 ## Scene solver integration
 
-`lab/sim/physics/solvers/nerd.py` registers `nerd` through
+`embodichain_solvers.physics.nerd.provider` registers `nerd` through
 `dexsim.newton_solvers` and adapts the shared model/codec to native stepping and
-the SDK's complete functional dynamics service. `_nerd_binding.py` verifies
-ordered joints, contact slots, timestep, gravity and the recorded physical
-signature. `_kinematics.py` owns the first-order Torch/Warp FK bridge.
+the SDK's complete functional dynamics service. Its private `_binding.py`
+verifies ordered joints, contact slots, timestep, gravity and the recorded
+physical signature. This extension ships in the same wheel; core simulation
+never imports concrete model or solver implementations. The
+[solver extension](../../../extensions/embodichain_solvers/README.md) owns this
+boundary. The generic first-order Newton FK gradient bridge remains in core
+`lab/sim/diff/kinematics.py`.
 The project-pinned DexSim 0.6 APIs provide named providers and functional
 Scene services; ordinary built-in solvers retain the mainline DexUni
 configuration contract.
@@ -68,7 +72,8 @@ separate domains and cannot be relabeled. `eval` with `mode: rollout` performs
 matched live evaluation; `train-policy` loads the showcase factories for APG.
 The configurations remain under the example, outside the official task catalog.
 
-Core solver/gradient tests live in `tests/sim/physics/solvers`, `tests/sim/diff`
+Solver-specific tests live in `tests/solvers/physics/nerd`; generic gradient
+tests live in `tests/sim/diff`
 and `tests/gym/envs/test_differentiable_dynamics_env.py`; Scene collection and
 APG integration use the showcase. SDK-dependent tests use the pinned Newton
 provider and Scene interfaces. Published artifacts and historical results retain
