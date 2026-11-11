@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 import pytest
 
@@ -24,6 +26,17 @@ from embodichain.lab.sim.cfg import RenderCfg
 from embodichain.lab.visualization.markers import MarkerGroupCfg, MarkerPrototypeCfg
 
 pytestmark = [pytest.mark.gpu, pytest.mark.requires_sim]
+
+_WINDOW_MODES = [
+    False,
+    pytest.param(
+        True,
+        marks=pytest.mark.skipif(
+            os.environ.get("SDL_VIDEODRIVER") == "dummy",
+            reason="SDL's dummy video driver cannot open a native window.",
+        ),
+    ),
+]
 
 
 def _require_render_actor_capability():
@@ -149,7 +162,7 @@ def _exercise_repeated_marker_lifecycle(sim):
         arena = None
 
 
-@pytest.mark.parametrize("window", [False, True])
+@pytest.mark.parametrize("window", _WINDOW_MODES)
 def test_marker_group_native_rendering_and_sensor_isolation(window: bool) -> None:
     _require_render_actor_capability()
     sim = SimulationManager(
@@ -367,7 +380,7 @@ def test_native_environment_batches_selected_mutations_without_preparation():
 
 
 @pytest.mark.parametrize("stereo", [False, True])
-@pytest.mark.parametrize("window", [False, True])
+@pytest.mark.parametrize("window", _WINDOW_MODES)
 def test_robot_markers_textures_opacity_and_material_switch(
     tmp_path, request: pytest.FixtureRequest, stereo: bool, window: bool
 ) -> None:
