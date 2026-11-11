@@ -41,7 +41,7 @@ The public API is split deliberately:
 | `embodichain.lab.task_program.runtime` | Semantic Call execution state and parallel scheduling | Episode lifecycle or recording |
 | `embodichain.lab.task_program.integrations` | Immutable registrations and explicit environment/simulation assembly | Core language rules |
 | `embodichain.lab.gym.envs.task_program` | `DemoSegment` adaptation, `env.step()` handshake, and configured Gym registration | Compiler, catalog, or simulation assembly |
-| `embodichain.lab.sim.atomic_actions` | Executable Atomic Skills, planning, commands, recovery, and verification requests | Task-language sequencing |
+| `embodichain.lab.sim.atomic_skills` | Executable Atomic Skills, planning, commands, recovery, and verification requests | Task-language sequencing |
 
 The stable language API is re-exported from `embodichain.lab.task_program`.
 Provider-specific applications import `task_program.integrations`; Gym bridge
@@ -211,7 +211,7 @@ scene_binding:
           kind: antipodal_grasp
 profile:
   defaults: {}
-  action_options: {}
+  skill_options: {}
   effect_monitors: {}
 ```
 
@@ -271,8 +271,8 @@ recording, rewards, and reset lifecycle.
 compile program
     -> provider-aware preflight
     -> prepare next semantic call from fresh observation
-    -> lower to ActionInvocation
-    -> AtomicActionEngine + ExecutionRunner
+    -> lower to SkillInvocation
+    -> AtomicSkillEngine + ExecutionRunner
     -> verify or project the declared effect
     -> post-policies
     -> segment validators
@@ -360,7 +360,7 @@ not be presented as physically qualified task-success integrations.
 | Registration and environment assembly | `embodichain/lab/task_program/integrations/` |
 | Gym bridge and segment lifecycle | `embodichain/lab/gym/envs/task_program/bridge.py` |
 | Dynamic Gym ID registration | `embodichain/lab/gym/envs/task_program/registration.py` |
-| Atomic planning and execution | `embodichain/lab/sim/atomic_actions/` |
+| Atomic planning and execution | `embodichain/lab/sim/atomic_skills/` |
 
 ## Focused validation
 
@@ -369,7 +369,7 @@ Run:
 ```bash
 pytest -q tests/lab/task_program
 pytest -q tests/gym/envs/task_program
-pytest -q tests/sim/atomic_actions
+pytest -q tests/sim/atomic_skills
 python docs/scripts/check_api_docs.py
 ```
 
@@ -381,7 +381,7 @@ completion metadata.
 
 - {doc}`scene_registry` — canonical scene identities, affordances, and live providers
 - {doc}`robot_profiles` — robot resources, Atomic Skill bindings, and assurance
-- {doc}`../sim/atomic_actions/index` — direct typed atomic-action planning and
+- {doc}`../sim/atomic_skills/index` — direct typed atomic-skill planning and
   execution
 - {doc}`/tutorial/task_program_python` — author and compile a Task Program in Python
 - {doc}`/tutorial/task_program` — configure and run an embodied Task Program

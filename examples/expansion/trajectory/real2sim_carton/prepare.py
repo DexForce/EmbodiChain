@@ -440,7 +440,7 @@ def prepare(source_directory: Path, output: Path) -> None:
         (official / "task_program/integration.yaml").read_text()
     )
     integration["runtime_services"].pop("nominal_motion_sources")
-    integration["profile"]["action_options"]["pick"]["fixed_object_to_eef"] = (
+    integration["profile"]["skill_options"]["pick"]["fixed_object_to_eef"] = (
         real_grasp.reshape(-1).tolist()
     )
     write_yaml(output / "integration.qualification.yaml", integration)

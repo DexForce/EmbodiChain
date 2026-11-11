@@ -96,6 +96,9 @@ def build_commands(
     *,
     python_executable: str | None = None,
     lanes: Sequence[str] | None = None,
+    cpu_workers: int = 4,
+    metrics_dir: Path | None = None,
+    cpu_duration_history: Path | None = None,
 ) -> list[tuple[str, list[str]]]:
     """Build shell-free pytest commands for a serialized test plan.
 
@@ -103,10 +106,19 @@ def build_commands(
         plan: Parsed output from :mod:`select_tests`.
         python_executable: Python executable used to invoke pytest.
         lanes: Optional lane subset for local debugging.
+        cpu_workers: Positive worker budget for CPU lanes.
+        metrics_dir: Optional directory for per-lane phase metrics.
+        cpu_duration_history: Prior CPU metrics used to prioritize whole groups.
 
     Returns:
         Ordered ``(lane, argv)`` pairs. Empty lanes are omitted.
     """
+    if (
+        isinstance(cpu_workers, bool)
+        or not isinstance(cpu_workers, int)
+        or cpu_workers < 1
+    ):
+        raise ValueError("cpu_workers must be a positive integer")
     selected_lanes = tuple(lanes) if lanes else _LANE_ORDER
     mode = str(plan.get("mode", "partial"))
     if mode not in _PLAN_MODES:
@@ -158,7 +170,13 @@ def build_commands(
                 command = [*base, *selectors, "-m", marker]
                 if lane == "fast":
                     command.extend(
-                        ("--ignore=tests/docs", "-n", "4", "--dist", "loadgroup")
+                        (
+                            "--ignore=tests/docs",
+                            "-n",
+                            str(cpu_workers),
+                            "--dist",
+                            "loadgroup",
+                        )
                     )
                 elif lane == "sim":
                     command.append("--ignore=tests/docs")
@@ -198,7 +216,7 @@ def build_commands(
                 # ``loadgroup`` would put the whole module on one worker and
                 # leave a large reference matrix effectively serial.
                 slow_command.extend(
-                    ("--ignore=tests/docs", "-n", "4", "--dist", "load")
+                    ("--ignore=tests/docs", "-n", str(cpu_workers), "--dist", "load")
                 )
             elif lane == "sim":
                 slow_command.append("--ignore=tests/docs")
@@ -220,7 +238,22 @@ def build_commands(
     # enough to make the next lane fail during allocation.  Slow lanes are
     # independent coverage and can safely run after the regular lanes, when no
     # later resource lane needs a clean device.
-    return [*commands, *slow_commands]
+    ordered = [*commands, *slow_commands]
+    for lane, command in ordered:
+        order_cpu = cpu_duration_history is not None and lane in {"fast", "slow-fast"}
+        if metrics_dir is not None or order_cpu:
+            command.extend(("-p", "scripts.ci.pytest_metrics"))
+        if metrics_dir is not None:
+            command.extend(("--ci-metrics-dir", str((metrics_dir / lane).resolve())))
+        if order_cpu:
+            command.extend(
+                (
+                    "--ci-duration-history",
+                    str(cpu_duration_history.resolve()),
+                    "--no-loadscope-reorder",
+                )
+            )
+    return ordered
 
 
 def _resource_collection_nodes(manifest: Path) -> list[str]:
@@ -271,6 +304,7 @@ def _run_resource_lane(
     repository_root: Path,
     *,
     no_finalize_resource_lanes: bool = False,
+    freeze_native_imports: bool = False,
 ) -> int:
     """Discover selected nodes, then run the same ordered collection freshly."""
     with tempfile.TemporaryDirectory(prefix="embodichain-test-selection-") as directory:
@@ -295,9 +329,23 @@ def _run_resource_lane(
                 "nonempty resource collection returned pytest exit code 5"
             )
         narrowed = _resource_command_for_nodes(command, nodes)
+        # Native failures can leave the device unusable for subsequent scenes.
+        # Report the first failure before another test can hang, and expose the
+        # active node and Python stack if a native call stops making progress.
+        narrowed.extend(
+            (
+                "--exitfirst",
+                "--verbose",
+                "--tb=short",
+                "-o",
+                "faulthandler_timeout=120",
+            )
+        )
         narrowed.append(f"--ci-expected-collection={manifest}")
         if no_finalize_resource_lanes:
             narrowed[2] = "scripts.ci.pytest_no_finalize"
+            if freeze_native_imports:
+                narrowed.insert(3, "--freeze-native-imports")
         print(f"[CI] {lane}: selected nodes: {shlex.join(narrowed)}", flush=True)
         return subprocess.run(
             narrowed, cwd=repository_root, check=False, env=None
@@ -312,6 +360,10 @@ def run_plan(
     lanes: Sequence[str] | None = None,
     dry_run: bool = False,
     no_finalize_resource_lanes: bool = False,
+    freeze_native_imports: bool = False,
+    cpu_workers: int = 4,
+    metrics_dir: Path | None = None,
+    cpu_duration_history: Path | None = None,
 ) -> int:
     """Execute all selected lanes and return the first failing exit code.
 
@@ -327,12 +379,20 @@ def run_plan(
     included in the reported lane time; ordered nodes and markers must match.
     ``no_finalize_resource_lanes`` returns after pytest hooks without unloading
     native libraries in GPU and simulation processes.
+    ``freeze_native_imports`` additionally excludes static dependency imports
+    from repeated cyclic GC in those owned processes. Domain/test objects stay
+    collectible; successful exits require zero native Worlds/managers/queue.
     """
+    if freeze_native_imports and not no_finalize_resource_lanes:
+        raise ValueError("freeze_native_imports requires no_finalize_resource_lanes")
     repository_root = Path(root).resolve()
     commands = build_commands(
         plan,
         python_executable=python_executable,
         lanes=lanes,
+        cpu_workers=cpu_workers,
+        metrics_dir=metrics_dir,
+        cpu_duration_history=cpu_duration_history,
     )
     if not commands:
         if plan.get("selectors"):
@@ -355,6 +415,7 @@ def run_plan(
                 command,
                 repository_root,
                 no_finalize_resource_lanes=no_finalize_resource_lanes,
+                freeze_native_imports=freeze_native_imports,
             )
         else:
             returncode = subprocess.run(
@@ -383,6 +444,14 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--python", dest="python_executable")
     parser.add_argument("--lane", action="append", dest="lanes")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--cpu-workers", type=int, default=4)
+    parser.add_argument("--metrics-dir", type=Path)
+    parser.add_argument("--cpu-duration-history", type=Path)
+    parser.add_argument(
+        "--freeze-native-imports",
+        action="store_true",
+        help="Freeze static imports only in owned --no-finalize-resource-lanes workers.",
+    )
     parser.add_argument(
         "--no-finalize-resource-lanes",
         action="store_true",
@@ -402,7 +471,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             python_executable=args.python_executable,
             lanes=args.lanes,
             dry_run=args.dry_run,
+            cpu_workers=args.cpu_workers,
+            metrics_dir=args.metrics_dir,
+            cpu_duration_history=args.cpu_duration_history,
             no_finalize_resource_lanes=args.no_finalize_resource_lanes,
+            freeze_native_imports=args.freeze_native_imports,
         )
     except (OSError, RuntimeError, ValueError) as error:
         print(f"test plan execution failed: {error}", file=sys.stderr)

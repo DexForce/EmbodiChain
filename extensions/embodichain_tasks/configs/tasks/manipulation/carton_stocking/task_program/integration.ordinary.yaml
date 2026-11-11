@@ -1,0 +1,146 @@
+integration_id: ordinary_carton_stocking_v1
+program_id: real2sim_carton_stocking
+requires:
+  scene_contract: carton_worktop_v1
+  embodiment_contract: single_arm_parallel_gripper
+scene_binding:
+  contract_id: carton_worktop_v1
+  registry_id: carton_worktop
+  rigid_objects:
+  - entity_id: carton
+    simulation_uid: carton
+    dynamics: dynamic
+    semantic_type: carton
+    affordances:
+    - entity_id: carton_grasp
+      kind: antipodal_grasp
+  - entity_id: worktop
+    simulation_uid: worktop
+    dynamics: static
+    semantic_type: worktop
+    affordances:
+    - entity_id: marked_support
+      kind: support_surface
+      native_name: top
+      object_target_frame: parent
+      object_target_pose:
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+      - 0.062095391004831975
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+profile:
+  defaults:
+    pick_up:
+      primary: primary_manipulator
+    move_held_object:
+      primary: primary_manipulator
+    place:
+      primary: primary_manipulator
+  action_options:
+    pick:
+      kind: pick_up
+      lift_height: 0.045
+      pre_grasp_distance: 0.1
+      hand_interp_steps: 30
+      grasp_settle_steps: 10
+      grasp_frame_to_eef:
+      - 2.220446049250313e-16
+      - 1.0
+      - 0.0
+      - 0.0
+      - -1.0
+      - 2.220446049250313e-16
+      - -0.0
+      - 0.0
+      - -0.0
+      - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+      fixed_object_to_eef:
+      - 1.0
+      - -2.220446049250313e-16
+      - 0.0
+      - -0.014791118689052474
+      - -2.220446049250313e-16
+      - -1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - -1.0
+      - -0.005
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+    simulation.move_held_object:
+      kind: move_held_object
+    place:
+      kind: place
+      lift_height: 0.03
+      hand_interp_steps: 30
+      release_settle_steps: 60
+      preserve_current_object_orientation: false
+  effect_monitors:
+    pick:
+      monitor_id: builtin.composite_effect
+      revision: '1'
+      params:
+        consecutive_samples: 5
+    place:
+      monitor_id: builtin.composite_effect
+      revision: '1'
+      params:
+        consecutive_samples: 5
+        attached_translation_threshold: 0.01
+        detached_translation_threshold: 0.015
+runtime_services:
+  registered_semantic_lowerers:
+  - kind: move_held_object
+    target_id: above_worktop
+    reference_entity_id: worktop
+    relative_pose:
+    - 1.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
+    - 0.09509539100483197
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
+  control_part_evidence:
+    kind: joint_position_constraint
+    control_parts:
+    - eef
+    open_qpos:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    minimum_displacement: 0.02

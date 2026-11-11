@@ -31,6 +31,12 @@ from importlib import import_module
 from typing import Any
 
 __all__ = [
+    "PoseTargetCfg",
+    "SceneRelativePoseTargetCfg",
+    "MoveHeldObjectCfg",
+    "HoldPostCfg",
+    "NormalizedTaskProgram",
+    "normalize_task_program",
     "ArticulationJointPositionValidatorCfg",
     "BarrierCfg",
     "CompiledTaskProgram",
@@ -103,6 +109,12 @@ _EXPORTS = {
     ),
     "ObjectUprightValidatorCfg": (".language", "ObjectUprightValidatorCfg"),
     "ParallelCfg": (".language", "ParallelCfg"),
+    "PoseTargetCfg": (".language", "PoseTargetCfg"),
+    "SceneRelativePoseTargetCfg": (".language", "SceneRelativePoseTargetCfg"),
+    "MoveHeldObjectCfg": (".language", "MoveHeldObjectCfg"),
+    "HoldPostCfg": (".language", "HoldPostCfg"),
+    "NormalizedTaskProgram": (".language", "NormalizedTaskProgram"),
+    "normalize_task_program": (".language", "normalize_task_program"),
     "PickCfg": (".language", "PickCfg"),
     "PlaceCfg": (".language", "PlaceCfg"),
     "PoseCfg": (".language", "PoseCfg"),

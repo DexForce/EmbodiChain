@@ -16,10 +16,10 @@ mixed scene class and is the main Newton path documented by EmbodiChain.
 
 ## DexSim Unified Coupled Solver For Embodied AI
 
-DexUni supports scenes that combine articulated robots with cloth or volume
-soft bodies. It is selected automatically when a finalized scene contains both
-an articulation and a supported deformable, or explicitly with
-`solver_type="dexuni"`.
+DexUni is the default Newton solver configuration. It supports rigid scenes
+and scenes that combine articulated robots with cloth or volume soft bodies.
+Leave `solver_cfg` unset to retain its defaults, or select
+`solver_type="dexuni"` explicitly.
 
 ```python
 from embodichain.lab.sim import SimulationManagerCfg
@@ -32,7 +32,8 @@ sim_config = SimulationManagerCfg(
         num_substeps=10,
         solver_cfg={
             "solver_type": "dexuni",
-            "iterations": 8,
+            "contact_mode": "auto",
+            "vbd_options": {"iterations": 8},
         },
         # DexUni owns particle-shape collision generation.
         collision_cfg=None,
@@ -44,24 +45,26 @@ DexUni is a DexSim integration configuration, not another native solver class
 in Newton's public solver list. Its capabilities and current EmbodiChain
 limitations are documented in {doc}`newton/dexuni`.
 
-## Automatic solver selection
+## DexUni automatic dispatch
 
-Leaving `solver_cfg=None` preserves DexSim's scene-aware `AutoSolverCfg`.
-DexSim resolves it when {meth}`SimulationManager.prepare` finalizes the complete
-Spawn scene:
+Leaving `solver_cfg=None` preserves DexSim's `DexUniSolverCfg`. DexUni resolves
+ownership and its internal execution path when {meth}`SimulationManager.prepare`
+finalizes the complete Spawn scene. Unset ownership selectors retain scene-based
+partitioning, while `contact_mode="auto"` selects the native contact path.
 
-| Finalized EmbodiChain scene | Resolved configuration | Solver type |
-| :--- | :--- | :--- |
-| Independent rigid bodies only | `XPBDSolverCfg` | `xpbd` |
-| One or more articulations, without deformables | `MJWarpSolverCfg` | `mujoco_warp` |
-| Cloth or volume soft bodies, without articulations | `VBDSolverCfg` | `vbd` |
-| Articulations together with cloth or volume soft bodies | `DexUniSolverCfg` | `dexuni` |
+| Finalized scene under default ownership | Internal execution |
+| :--- | :--- |
+| Independent rigid bodies only | MuJoCo branch |
+| Articulations with no VBD-owned dynamic bodies or deformables | MuJoCo branch for dynamic joints |
+| Deformables with no MuJoCo-owned joints | VBD branch |
+| Articulations together with VBD-owned rigid bodies or deformables | Mixed execution selected from ownership, joint mode and contact policy |
 
 Add every initial robot and object before `prepare()` so selection sees the
-complete scene. An explicit `{"solver_type": "auto"}` or
-`{"class_type": "AutoSolverCfg"}` mapping is equivalent to leaving
-`solver_cfg` unset. After preparation, inspect `sim.physics.solver_type`; do
-not treat `physics: newton` alone as a solver qualification.
+complete scene. An explicit
+`{"solver_type": "dexuni", "contact_mode": "auto"}` mapping preserves this
+automatic policy. `sim.physics.solver_type` remains `"dexuni"`; inspect
+`sim.spawn_result.get_solver_diagnostics()` after preparation for the resolved
+path. Explicit ownership selectors and kinematic control can change dispatch.
 
 For native solver feature comparisons, joint support, contact-material support,
 and algorithm details, use the
@@ -72,11 +75,11 @@ DexSim's scene routing as exposed by this EmbodiChain integration.
 ## Explicit solver selection
 
 Choose a concrete solver when an algorithm or solver-specific parameter must be
-fixed. EmbodiChain mapping configs recognize `auto`, `dexuni`, `mujoco_warp`
+fixed. EmbodiChain mapping configs recognize `dexuni`, `mujoco_warp`
 (or `mjwarp`), `xpbd`, `semi_implicit`, `featherstone`, and `vbd`. A DexSim
 `NewtonSolverCfg` object can also be assigned directly.
 
-AutoSolver does not select a differentiable solver. `requires_grad=True`
+DexUni's default dispatch does not select a differentiable solver. `requires_grad=True`
 therefore requires an explicit `semi_implicit` configuration. See
 {doc}`newton/runtime_qualification` before treating a successfully decoded
 configuration as a supported runtime path.
@@ -93,7 +96,7 @@ such as `gpu_memory`, `bounce_threshold`, and `enable_ccd` do not belong here.
 | `device` | `"cuda:0"` | Compute device; explicit CPU execution remains solver/asset dependent. |
 | `gravity` | `[0.0, 0.0, -9.81]` | World-frame acceleration in m/s². |
 | `num_substeps` | `10` | Solver substeps per physics step; interval is `physics_dt / num_substeps`. |
-| `solver_cfg` | `None` | Preserve DexSim AutoSolver; a mapping or native config fixes a solver. |
+| `solver_cfg` | `None` | Preserve native DexUni defaults; mappings or native configs select a solver family and its options. |
 | `collision_cfg` | `NewtonCollisionPipelineCfg()` | External Newton collision pipeline. Set `None` when the selected path owns collision generation, including DexUni. |
 | `requires_grad` | `False` | Enable the current differentiable integration; requires explicit `semi_implicit`. |
 | `use_cuda_graph` | `True` | Request graph capture when supported; unavailable on CPU and disabled in gradient mode. |
