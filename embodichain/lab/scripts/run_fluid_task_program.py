@@ -151,7 +151,7 @@ def _run(args: argparse.Namespace, output: Path) -> dict[str, Any]:
     try:
         if getattr(args, "record_fluid_state", False):
             fluid_recorder = FluidTrajectoryRecorder(output, env.num_envs, env.step_dt)
-            env.unwrapped.attach_fluid_trajectory_recorder(fluid_recorder)
+            env.unwrapped._set_fluid_trajectory_recorder(fluid_recorder)
         env.reset(seed=0)
         cup = env.sim.get_rigid_object("cup")
         poses = [cup.get_local_pose().cpu().numpy().copy()]
@@ -283,6 +283,7 @@ def _run(args: argparse.Namespace, output: Path) -> dict[str, Any]:
         return report
     finally:
         if fluid_recorder is not None:
+            env.unwrapped._set_fluid_trajectory_recorder(None)
             fluid_recorder.abort()
         env.close(exit_process=False)
         del env

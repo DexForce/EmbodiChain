@@ -846,10 +846,13 @@ class EmbodiedEnv(BaseEnv):
         if recorder is not None:
             recorder.capture(self, env_ids.tolist(), reset=True)
 
-    def attach_fluid_trajectory_recorder(
-        self, recorder: FluidTrajectoryRecorder
+    def _set_fluid_trajectory_recorder(
+        self, recorder: FluidTrajectoryRecorder | None
     ) -> None:
-        """Attach a bounded fluid-state recorder before the first reset."""
+        """Bind one episode's fluid spool, or detach it after publication."""
+        if recorder is None:
+            self._fluid_trajectory_recorder = None
+            return
         if not isinstance(recorder, FluidTrajectoryRecorder):
             raise TypeError("recorder must be a FluidTrajectoryRecorder.")
         if not self.cfg.record_trajectory or not self.cfg.fluid_object:
