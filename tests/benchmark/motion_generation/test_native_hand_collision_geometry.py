@@ -233,3 +233,87 @@ def test_grasp_depth_moves_contact_toward_hand_and_rebases_collision_surfaces() 
         np.testing.assert_allclose(
             geometry.provenance["root_from_contact_frame"][2][3], expected_depth
         )
+
+
+@pytest.mark.parametrize(
+    "suite_name",
+    [
+        "atomic_franka_robotiq_door_pour_align_push",
+        "atomic_franka_robotiq_spatial_generalization",
+    ],
+)
+def test_robotiq_push_targets_clear_ground_with_closed_native_geometry(suite_name):
+    """Check actual closed meshes, including the smallest authored cube."""
+    from copy import deepcopy
+
+    from embodichain.lab.sim.utility.gripper_geometry import (
+        build_gripper_collision_geometry,
+    )
+    from embodichain_benchmarks.motion_generation.config import load_suite
+    from embodichain_benchmarks.motion_generation.registry import create_robot_provider
+    from embodichain_benchmarks.motion_generation import robots as _robots
+    from embodichain_benchmarks.motion_generation.scenarios.atomic_skill_providers import (
+        _push_poses,
+    )
+
+    suite = load_suite(suite_name)
+    track = next(
+        track
+        for track in suite.tracks
+        if any(skill["id"] == "push_object" for skill in track.config["skills"])
+    )
+    skill = next(
+        skill for skill in track.config["skills"] if skill["id"] == "push_object"
+    )
+    cfg = create_robot_provider(suite.robot).build_cfg()
+    model = deepcopy(resolve_gripper_defaults(track.config["grasp_model"]))
+    model["joint_commands"]["open"] = dict(
+        zip(
+            cfg.control_parts["eef"], track.config["gripper"]["grasp_qpos"], strict=True
+        )
+    )
+    geometry = build_gripper_collision_geometry(
+        model, root_from_tcp=cfg.solver_cfg["arm"].tcp, point_spacing=0.005
+    )
+    contact_from_tcp = torch.tensor(
+        geometry.provenance["grasp_from_tcp"], dtype=torch.float64
+    )
+    points = geometry.points.to(torch.float64)
+    for size in (0.04, 0.05, 0.06):
+        # Conservative support at z=0: no extra native rest-offset clearance.
+        object_pose = torch.eye(4)[None]
+        object_pose[:, 2, 3] = size / 2
+        for case in skill["cases"]:
+            target = object_pose.clone()
+            target[:, :3, 3] += torch.tensor(case["target_object_offset_m"])
+            poses = _push_poses(
+                object_pose,
+                target,
+                contact_distance=case["contact_distance_m"],
+                approach_height=skill["approach_height_m"],
+                retract_height=skill["retract_height_m"],
+                push_overshoot=skill["push_overshoot_m"],
+                contact_frame_to_eef=torch.tensor(
+                    skill.get("contact_frame_to_eef", torch.eye(4).tolist())
+                ),
+                object_contact_offset=torch.tensor(skill["object_contact_offset_m"]),
+            )
+            world_from_contact = poses[0, 1].to(torch.float64) @ torch.linalg.inv(
+                contact_from_tcp
+            )
+            world_points = (
+                points @ world_from_contact[:3, :3].T + world_from_contact[:3, 3]
+            )
+            assert float(world_points[:, 2].min()) >= 0.001
+            if size == 0.05:
+                # Nominal cube starts about 2 mm ahead of the closed finger face.
+                direction = (target[0, :3, 3] - object_pose[0, :3, 3]).to(torch.float64)
+                direction = direction / torch.linalg.vector_norm(direction)
+                slab = world_points[
+                    (world_points[:, 2] >= 0) & (world_points[:, 2] <= size)
+                ]
+                cube_face = (
+                    object_pose[0, :3, 3].to(torch.float64) @ direction - size / 2
+                )
+                clearance = cube_face - (slab @ direction).amax()
+                assert 0.0015 <= float(clearance) <= 0.003

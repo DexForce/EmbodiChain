@@ -154,8 +154,24 @@ with the URDF mimic signs, and two actual finger-pad links per hand. The
 single-arm and placement fixtures use the mounted Robotiq TCP rotation and
 0.21 m offset. NMG mappings preserve the policy's original flange-relative
 TCP after this change. Handover retains its separately calibrated 0.20 m TCP
-and limited closure described below. Task motion parameters retain their
-existing values; physical skill calibration and qualification are follow-up work.
+and limited closure described below.
+
+The Robotiq TCP is 6 cm longer than the former single-arm PGI TCP. The
+AxisAlign suites try the original object-centre goal first, then inward world-XY
+translations of 2.5, 5, 7.5 and 10 cm toward the arm base when the declared grasp
+pool has no independently solved full endpoint chain. The target axis and grasp
+remain constrained; this does not relax the alignment tolerance. Each row freezes
+its smallest accepted declared offset in `alignment_offset_m`, with rejected
+attempts in `alignment_realisation`, before any planner is evaluated. Endpoint
+IK does not certify a collision-free trajectory or physical success.
+
+PushObject uses a contact point 5 mm above the cube centre to accommodate the
+closed Robotiq finger-pad geometry. The minimum authored 40 mm cube retains over
+1.8 mm ground clearance even with zero rest-offset allowance. The nominal 50 mm
+cube's lateral and toward-base contact distances are 40.5 and 48 mm, respectively,
+leaving about 2 mm between its face and the closed finger surfaces at approach.
+The two calibrated suites have new versions and require fresh frozen manifests.
+
 The native Franka hand remains available
 for custom robot configurations; packaged Franka Atomic suites use Robotiq.
 

@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_franka_robotiq_spatial_generalization
-suite_version: atomic_franka_robotiq_spatial_generalization_v11
+suite_version: atomic_franka_robotiq_spatial_generalization_v12
 profile: coverage
 
 # Reusable strict-spatial domain definitions. Every track below selects only
@@ -767,6 +767,8 @@ x-skill-pour: &skill_pour
 
 x-skill-axis-align: &skill_axis_align
   id: axis_align
+  # Keep the original centre when reachable; otherwise try bounded inward goals.
+  alignment_inward_candidates_m: [0.0, 0.025, 0.05, 0.075, 0.10]
   sample_count: 180
   hand_interp_steps: 12
   pre_grasp_distance_m: 0.15
@@ -795,17 +797,17 @@ x-skill-push-object: &skill_push_object
   approach_height_m: 0.10
   retract_height_m: 0.10
   push_overshoot_m: 0.0
-  object_contact_offset_m: [0.0, 0.0, -0.01]
+  object_contact_offset_m: [0.0, 0.0, 0.005]
   cases:
     - name: spatial_cube_push_lateral_10cm
       object: cube_50mm
       task_difficulty: simple
-      contact_distance_m: 0.042
+      contact_distance_m: 0.0405
       target_object_offset_m: [0.0, 0.10, 0.0]
     - name: spatial_cube_push_toward_base_8cm
       object: cube_50mm
       task_difficulty: simple
-      contact_distance_m: 0.052
+      contact_distance_m: 0.048
       target_object_offset_m: [0.08, 0.0, 0.0]
 
 robot:

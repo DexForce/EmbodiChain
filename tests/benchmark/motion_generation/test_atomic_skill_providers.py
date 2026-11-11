@@ -1550,3 +1550,86 @@ def test_pour_requires_full_return_orientation_after_successful_tilt() -> None:
     assert results[1].stages[1].measurements[
         "return_rotation_error_rad"
     ] == pytest.approx(0.3)
+
+
+def test_robotiq_axis_align_inward_search_restores_franka_edge_reachability() -> None:
+    """The longer hand loses a PGI-valid target; the declared inner target restores it."""
+    from embodichain.robot_registry import resolve_gripper_defaults
+    from embodichain_benchmarks.motion_generation._atomic_fixtures import (
+        _create_franka_pgi_cfg,
+        _create_franka_robotiq_cfg,
+    )
+
+    skill_configs = []
+    for name in (
+        "atomic_franka_robotiq_door_pour_align_push",
+        "atomic_franka_robotiq_spatial_generalization",
+    ):
+        suite = load_suite(name)
+        skill_configs.append(
+            next(
+                skill
+                for track in suite.tracks
+                for skill in track.config["skills"]
+                if skill["id"] == "axis_align"
+            )
+        )
+    distances = providers._axis_align_inward_distances(skill_configs[0])
+    assert distances is not None
+    assert providers._axis_align_inward_distances(skill_configs[1]) == distances
+    # One ordinary object and one formerly PGI-valid target near the workspace edge.
+    objects = torch.eye(4).repeat(2, 1, 1)
+    objects[:, :3, 3] = torch.tensor([[-0.42, -0.08, 0.027], [-0.57, -0.08, 0.027]])
+    contact_poses = objects.clone()
+    contact_poses[:, :3, :3] = torch.diag(torch.tensor([1.0, -1.0, -1.0]))
+    world_from_base = torch.diag(torch.tensor([-1.0, -1.0, 1.0, 1.0]))
+    inward = torch.nn.functional.normalize(-objects[:, :2, 3], dim=-1)
+    for catalog, factory in (
+        ("DHPGI14080", _create_franka_pgi_cfg),
+        ("RobotiqArg2F140", _create_franka_robotiq_cfg),
+    ):
+        cfg = factory({})
+        solver_cfg = cfg.solver_cfg["arm"]
+        solver_cfg.urdf_path = cfg._pk_urdf_path
+        solver_cfg.joint_names = cfg.control_parts["arm"]
+        solver = solver_cfg.init_solver(device=CPU)
+        root_from_contact = torch.tensor(
+            resolve_gripper_defaults(catalog)["root_from_contact_frame"]
+        )
+        grasps = (
+            contact_poses @ pose_inv(root_from_contact) @ torch.tensor(solver_cfg.tcp)
+        )
+        for distance in distances[:2]:
+            offsets = torch.zeros(2, 3)
+            offsets[:, :2] = inward * distance
+            poses = providers._axis_align_poses(
+                objects,
+                grasps,
+                torch.tensor([0.0, 0.0, -1.0]),
+                pre_grasp_distance=skill_configs[0]["pre_grasp_distance_m"],
+                lift_height=skill_configs[0]["lift_height_m"],
+                internal_axis=torch.tensor([1.0, 0.0, 0.0]),
+                target_axis=torch.tensor([0.0, 0.0, 1.0]),
+                alignment_offset_m=offsets,
+            )
+            joints = torch.tensor(cfg.init_qpos[:7]).repeat(2, 1)
+            valid = torch.ones(2, dtype=torch.bool)
+            for target in poses.unbind(dim=1):
+                success, solved = solver.get_ik(
+                    world_from_base @ target, qpos_seed=joints
+                )
+                valid &= success
+                joints = torch.where(success[:, None], solved, joints)
+            expected = (
+                [True, False]
+                if catalog == "RobotiqArg2F140" and distance == 0
+                else [True, True]
+            )
+            assert valid.tolist() == expected
+            if valid.all():
+                torch.testing.assert_close(
+                    world_from_base @ solver.get_fk(joints),
+                    poses[:, -1],
+                    atol=2e-5,
+                    rtol=0,
+                )
