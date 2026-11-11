@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, replace
 from typing import TYPE_CHECKING, Any, Callable, Literal
 
 from ._usd_assets import _UsdTextureFiles
@@ -119,9 +119,38 @@ class SpawnScene:
         # Native Spawn's simplified MaterialDesc path cannot express these
         # definitions. Bind the exact loaded child directly on each RenderDesc.
         # NoRender retains only metadata and never invokes a native loader.
-        return {uid: desc for uid, desc in resolved.items() if uid not in resources}
+        native = {uid: desc for uid, desc in resolved.items() if uid not in resources}
+        if (
+            getattr(getattr(self, "_material_resources", None), "renderer", None)
+            == "no-render"
+        ):
+            # NoRender has no texture or alpha-mode consumer. Retain authored
+            # recipes for metadata/identity while avoiding rendering-only
+            # resource creation and setters in its native adapter input.
+            from dexsim.spawn import MaterialDesc
+
+            if not hasattr(self, "_no_render_material_definitions"):
+                self._no_render_material_definitions = {}
+            for uid, desc in native.items():
+                if isinstance(desc, MaterialDesc):
+                    self._no_render_material_definitions[uid] = desc
+                    omitted = {
+                        item.name: None
+                        for item in fields(desc)
+                        if item.name.endswith("_map")
+                    }
+                    omitted.update(
+                        alpha_mode=None,
+                        unlit=None,
+                        depth_write=None,
+                        transmission_bounce_limit=None,
+                    )
+                    native[uid] = replace(desc, **omitted)
+        return native
 
     def _material_definition(self, uid: str) -> Any | None:
+        if uid in getattr(self, "_no_render_material_definitions", {}):
+            return self._no_render_material_definitions[uid]
         return getattr(self, "_resource_material_definitions", {}).get(
             uid, self.builder.materials.get(uid)
         )
@@ -465,6 +494,7 @@ class SpawnScene:
             self.builder.result = None
             self._assets.clear()
             self._usd_texture_files.close()
+            getattr(self, "_no_render_material_definitions", {}).clear()
             if hasattr(self, "_material_resources"):
                 self._material_resources.close()
                 self._resource_material_definitions.clear()

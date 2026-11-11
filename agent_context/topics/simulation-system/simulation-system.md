@@ -7,6 +7,7 @@
 | Public simulation facade | `embodichain/lab/sim/__init__.py` |
 | World, registries, readiness and stepping | `embodichain/lab/sim/sim_manager.py` → `SimulationManager`, `SimulationManagerCfg` |
 | Declaration, source resolution and binding | `embodichain/lab/sim/spawn/scene.py`, `spawn/source.py`, `spawn/descriptors.py` |
+| USD import recipes, preflight and source-path results | `cfg/usd.py`, `spawn/usd_import.py`, `spawn/usd_result.py` |
 | Fresh static USD reads and owned authored link meshes | `embodichain/lab/sim/spawn/source_geometry.py` |
 | Manager-level backend hooks and capabilities | `embodichain/lab/sim/physics/` |
 | Object-level Scene batch adapters | `embodichain/lab/sim/objects/backends/scene.py`, `newton.py` |
@@ -31,15 +32,26 @@ that same object in place. UIDs identify resources in the manager registry.
 `VisualObject` owns render-only root poses, visibility and material assignments,
 with no rigid-body buffers or collision API. Its config lives in
 `cfg/visual_object.py`; mesh files use `MeshCfg.fpath`, as for rigid objects.
-`cfg/source.py:UsdSourceCfg` owns the source file and exact `source_prim_path`;
+`cfg/source.py:UsdSourceCfg` owns the source file, exact singleton
+`source_prim_path` and optional parser subtree/variants;
 visual, rigid and articulation configs accept it through `source`, exclusively
 with their existing shape/file input. `ObjectBaseCfg` keeps runtime identity
 and initial pose independent of file formats. `add_visual_object()` compiles mesh/primitive appearance or
-selects a USD object's appearance. Whole-scene `add_usd()`
-preserves physical types and wraps only objects without physics and colliders
+selects a USD object's appearance. Whole-scene `add_usd(UsdImportCfg(...))`
+owns namespace, scene placement and sparse per-asset overrides keyed by source
+prim paths. Single-asset placement belongs to `source_pose_mode` on the asset
+configuration. Both routes share the fresh DexSim source parser and validate
+before native declaration. `UsdImportResult` maps source paths to facades and
+records logical UIDs for constraints and native-only resources. Unique sources
+retain prim-path keys; multiple resources from one prim receive ordinal keys,
+with `resource_source_paths` retaining the original prim identity. It remaps
+standalone constraint endpoints after UID changes, preserves physical types,
+and wraps only objects without physics and colliders
 as visuals. Conflicting visual UIDs receive the scene-name prefix while returned
 keys preserve source prim paths. Other import UID conflicts fail before declaration.
-Imported facades retain their source address in `cfg.source`. This metadata
+Volume and surface particle sets bind through the existing deformable facades;
+they require Newton/CUDA and retain source topology and physics. Imported
+facades retain their source address in `cfg.source`. This metadata
 does not request a second spawn or bind an unrelated existing scene entity.
 Single-articulation USD imports through `add_robot()` and
 `add_articulation()` keep constraints between links of the selected prim.
