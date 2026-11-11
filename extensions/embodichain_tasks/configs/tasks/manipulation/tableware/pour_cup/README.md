@@ -7,7 +7,7 @@
 ## 依赖
 
 基础流体接口来自 [PR #777](https://github.com/DexForce/EmbodiChain/pull/777)。
-仓库锁定的 `dexsim_engine==0.6.0rc1` 提供 `DexUniSolverCfg.sph_cfg`、SPH world
+仓库锁定的 `dexsim_engine==0.6.0rc1` 提供 `DexUniSolverCfg.sph_cfg`、DexUni 流体多 world
 隔离和选择性 reset；在线流体运行还需要 CUDA。
 任务网格由资产缓存中的 `PourCupAssets` 提供。
 

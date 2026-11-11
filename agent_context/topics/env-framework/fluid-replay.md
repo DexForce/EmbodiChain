@@ -26,7 +26,7 @@ count times nominal spacing cubed, not a reconstructed-surface measurement.
 through ordinary `EmbodiedEnv` and `execute_demo_episode()`. The environment
 component selects DexUni with DFSPH settings nested under `sph_cfg`. Robot
 drive targets, dynamic grasp contacts and fluid state
-advance in one World, with no recorded trajectory input. SPH reads live rigid
+advance in one World, with no recorded trajectory input. DexUni's fluid component reads live rigid
 boundaries; fluid reaction forces are not fed back into the rigid solver.
 The fluid program measures cup lift and alignment, transports the held cup
 to a receiver-relative pour pose through the existing MoveHeldObject lowerer,

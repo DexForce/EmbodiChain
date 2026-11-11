@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Run a Task Program with live robot/cup contact and one-way SPH fluids."""
+"""Run a Task Program with live robot/cup contact and DexUni DFSPH fluid."""
 
 from __future__ import annotations
 

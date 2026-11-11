@@ -331,36 +331,40 @@ class NewtonPhysicsBackend(PhysicsBackend):
 
         return "sph_cfg" in getattr(DexUniSolverCfg, "__dataclass_fields__", {})
 
+    def _prepared_dexuni_fluid(self) -> tuple[object | None, object | None]:
+        """Resolve the fluid component owned by a prepared DexUni backend."""
+        from dexsim.engine.newton_physics.backend_registry import get_newton_backend
+
+        backend = get_newton_backend(self._manager._world)
+        if backend is None or backend.solver_type != "dexuni":
+            return None, None
+        # DexSim names this internal component sph_solver. It is not an
+        # independently selected Newton solver in EmbodiChain.
+        return backend, getattr(backend, "sph_solver", None)
+
     @property
     def supports_fluid_worlds(self) -> bool:
         """Whether the prepared DexUni fluid supports isolated worlds and reset."""
         if not self.supports_dexuni_fluids:
             return False
-        from dexsim.engine.newton_physics.backend_registry import get_newton_backend
-
-        backend = get_newton_backend(self._manager._world)
-        solver = getattr(backend, "sph_solver", None)
+        _, solver = self._prepared_dexuni_fluid()
         return bool(
             getattr(solver, "supports_world_isolation", False)
             and getattr(solver, "supports_world_reset", False)
         )
 
     def invalidate_fluid_state(self, env_ids: Sequence[int] | None = None) -> None:
-        """Clear selected SPH history after an explicit state write.
+        """Clear selected DexUni fluid history after an explicit state write.
 
         Args:
             env_ids: Local worlds to clear, or all local worlds when omitted.
                 Shared boundary history remains unchanged. Legacy single-world
                 artifacts rebaseline their optional SDF history directly.
         """
-        from dexsim.engine.newton_physics.backend_registry import get_newton_backend
-
-        backend = get_newton_backend(self._manager._world)
-        if backend is None or backend.solver_type != "dexuni":
-            raise RuntimeError("Prepared DexUni fluid backend required.")
-        solver = getattr(backend, "sph_solver", None)
+        backend, solver = self._prepared_dexuni_fluid()
         if solver is None:
-            raise RuntimeError("Prepared DexUni SPH solver required.")
+            raise RuntimeError("Prepared DexUni fluid solver required.")
+        assert backend is not None
         backend.invalidate_cuda_graph("fluid state write")
         self._fluid_render_dirty = True
         if getattr(solver, "supports_world_reset", False):
@@ -382,14 +386,12 @@ class NewtonPhysicsBackend(PhysicsBackend):
             reset_warm_start()
 
     def fluid_diagnostics(self, fluid: FluidObject) -> dict[str, object]:
-        """Read detached native SPH diagnostics without publishing or stepping."""
-        from dexsim.engine.newton_physics.backend_registry import get_newton_backend
+        """Read detached DexUni fluid diagnostics without stepping."""
         import torch
 
-        backend = get_newton_backend(self._manager._world)
-        solver = getattr(backend, "sph_solver", None)
+        _, solver = self._prepared_dexuni_fluid()
         if solver is None:
-            raise RuntimeError("Prepared DexUni SPH solver required.")
+            raise RuntimeError("Prepared DexUni fluid solver required.")
         density = wp.to_torch(solver.particle_density)
         values = []
         for entity in fluid._entities:

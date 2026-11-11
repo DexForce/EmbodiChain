@@ -3133,9 +3133,11 @@ class SimulationManager:
             if isinstance(configured, Mapping)
             else getattr(configured, "sph_cfg", None)
         )
-        from dexsim.engine.newton_physics import SPHSolverCfg
+        from dexsim.engine.newton_physics import DexUniSolverCfg
 
-        defaults = SPHSolverCfg()
+        # Query defaults through the supported DexUni composition, not a
+        # standalone fluid solver configuration.
+        defaults = DexUniSolverCfg(sph_cfg={"sph_method": "dfsph"}).sph_cfg
         for key, value in (
             ("rest_density", cfg.density),
             ("particle_diameter", cfg.particle_spacing),

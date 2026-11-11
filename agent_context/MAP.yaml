@@ -15,7 +15,7 @@ topics:
     UsdSourceSnapshot, read_usd_source, LinkMesh,
     PhysicalCollisionGeometry, capture_physical_collision_geometry,
     ArticulationJointKinematics, get_parent_joint_chain, asset_physics_mode, joint_drive_props, enable_gravity,
-    fixed-cadence playback, FluidObjectCfg, FluidSpawnCfg, FluidObject, SPHSolverCfg, revolved_volume, fill_level,
+    fixed-cadence playback, FluidObjectCfg, FluidSpawnCfg, FluidObject, sph_cfg, DFSPH, revolved_volume, fill_level,
     粒子采样, fluid, 流体, quaternion, xyzw, cable, CableObject, CableObjectCfg,
     CableObjectData, 线缆对象]
   paths: [topics/simulation-system/simulation-system.md]

@@ -2,12 +2,13 @@
 
 `cfg/fluid.py` owns source, object and render configuration. Fluids use DexUni,
 which dispatches DFSPH when the scene contains fluid particles. Optional
-numerical settings belong to DexSim `SPHSolverCfg`, nested under
-`NewtonPhysicsCfg.solver_cfg.sph_cfg`; omitting them uses native DFSPH defaults.
+numerical settings belong only under DexUni's
+`NewtonPhysicsCfg.solver_cfg.sph_cfg`; DexSim materializes it inside DexUni.
+There is no standalone fluid solver selection.
 `SimulationManager.add_fluid_object()` declares through SpawnScene and binds
 `objects/fluid.py` in place at `prepare()`.
 
-The fluid declaration owns density and spacing. Default native SPH values for
+The fluid declaration owns density and spacing. Default nested DFSPH values for
 `rest_density` and `particle_diameter` are placeholders, equally for mappings
 and native config objects; non-default solver values must match the fluid.
 DexSim derives the effective solver values from the fluid descriptors.
@@ -36,7 +37,7 @@ Writes use Scene particle batches, invalidate captured graphs and reset
 supported solver history. The legacy single-world solver rebaselines optional
 SDF boundary pose history. Reset restores the immutable initial state or
 transforms a saved local template without stepping the world. Explicit state
-writes do not refresh density diagnostics until the next SPH step.
+writes do not refresh density diagnostics until the next DexUni fluid step.
 
 A spawn reference resolves a declared rigid body's initial pose once; it is
 not a persistent attachment. Sources include explicit points/NPZ, primitives,
@@ -71,7 +72,7 @@ follow the renderer requirements of the [material system](materials.md).
 
 `scripts/tutorials/sim/create_fluid.py` demonstrates procedural box sampling,
 five primitive container walls, prepare, step, state reads and reset. Pass
-`--num-envs` to use multiple independent worlds on a capable SPH build. The
+`--num-envs` to use multiple independent worlds on a capable DexUni build. The
 fixed container uses static SDF collision shapes, so DFSPH can collide with it
 without running a rigid-body solver. It needs no robot, task configuration or downloaded assets:
 

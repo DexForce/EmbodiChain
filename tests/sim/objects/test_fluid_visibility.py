@@ -35,7 +35,7 @@ def test_fluid_surface_changes_record_camera_pixels_in_every_environment(
     from dexsim.engine.newton_physics import DexUniSolverCfg
 
     if "sph_cfg" not in getattr(DexUniSolverCfg, "__dataclass_fields__", {}):
-        pytest.skip("This DexSim build does not compose SPH through DexUni.")
+        pytest.skip("This DexSim build lacks DexUni fluid composition.")
     result = subprocess.run(
         [
             sys.executable,
