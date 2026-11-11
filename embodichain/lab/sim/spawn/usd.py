@@ -48,6 +48,7 @@ from embodichain.lab.sim.spawn.descriptors import (
     _compile_rigid_physics,
     _compile_visual_material,
     _articulation_root_values,
+    _articulation_gravity_compensation,
     _pose_from_cfg,
     _particle_flags_from_cfg,
     _required_uid,
@@ -397,6 +398,7 @@ def _configure_articulation_usd(
     newton_solver_type: str | None = None,
 ) -> tuple[ArticulationDesc, dict[str, MaterialDesc]]:
     """Apply an articulation configuration to an already parsed USD descriptor."""
+    compensation = _articulation_gravity_compensation(cfg, newton_solver_type)
     preserve_asset_physics = cfg.resolve_asset_physics_mode() == "preserve"
     if not preserve_asset_physics:
         _validate_articulation_rigid_physics(cfg, newton_solver_type=newton_solver_type)
@@ -421,6 +423,8 @@ def _configure_articulation_usd(
         fixed_base_default=bool(desc.fixed_base),
         self_collision_default=desc.enable_self_collision,
     )
+    if compensation is not None:
+        desc.newton_gravity_compensation = compensation
     return desc, materials
 
 

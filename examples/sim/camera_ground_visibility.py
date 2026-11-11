@@ -33,6 +33,10 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import RenderCfg, RigidObjectCfg, VisualObjectCfg
 from embodichain.lab.sim.sensors import CameraCfg
 from embodichain.lab.sim.shapes import CubeCfg
+from embodichain.lab.visualization import (
+    add_viser_args_to_parser,
+    visualization_cfg_from_args,
+)
 
 
 def main() -> None:
@@ -41,6 +45,7 @@ def main() -> None:
     parser.add_argument(
         "--output", type=Path, default=Path("outputs/camera_ground_visibility")
     )
+    add_viser_args_to_parser(parser)
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     sim = SimulationManager(
@@ -49,6 +54,7 @@ def main() -> None:
             device="cpu",
             num_envs=4,
             render_cfg=RenderCfg(renderer=args.renderer),
+            visualization=visualization_cfg_from_args(args),
         )
     )
     records = []

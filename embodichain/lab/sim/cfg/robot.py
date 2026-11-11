@@ -128,6 +128,9 @@ class RobotCfg(ArticulationCfg):
     with its environment-wide acquisition switch, which defaults to True.
     """
 
+    gripper_bindings: dict[str, dict] = {}
+    """Resolved explicit hand bindings; runtime assembly validates their topology."""
+
     @classmethod
     def from_dict(cls, init_dict: Dict[str, str | float | tuple]) -> RobotCfg:
         """Initialize the configuration from a dictionary."""
@@ -203,7 +206,11 @@ class RobotCfg(ArticulationCfg):
                     setattr(
                         cfg, key, attr.from_dict(value)
                     )  # Call from_dict on the attribute
-                elif isinstance(value, dict) and "class_type" in value:
+                elif (
+                    key == "solver_cfg"
+                    and isinstance(value, dict)
+                    and "class_type" in value
+                ):
                     setattr(
                         cfg,
                         key,
@@ -211,8 +218,10 @@ class RobotCfg(ArticulationCfg):
                             value
                         ),
                     )
-                elif isinstance(value, dict) and key_in_nested_dict(
-                    value, "class_type"
+                elif (
+                    key == "solver_cfg"
+                    and isinstance(value, dict)
+                    and key_in_nested_dict(value, "class_type")
                 ):
                     setattr(
                         cfg,
@@ -231,6 +240,12 @@ class RobotCfg(ArticulationCfg):
                 logger.log_warning(
                     f"Key '{key}' not found in {cfg.__class__.__name__}."
                 )
+        if cfg.gripper_bindings:
+            from embodichain.lab.sim.utility.gripper_binding import (
+                _apply_gripper_tcp_defaults,
+            )
+
+            _apply_gripper_tcp_defaults(cfg, init_dict.get("solver_cfg"))
         return cfg
 
     def _build_defaults(self, init_dict: dict | None = None) -> None:
@@ -292,7 +307,16 @@ class RobotCfg(ArticulationCfg):
                 if tracked_id is not None:
                     _visited.remove(tracked_id)
 
-        return serialize(self)
+        data = serialize(self)
+        for binding in self.gripper_bindings.values():
+            part = binding["declaration"]["motion_part"]
+            solver = (data.get("solver_cfg") or {}).get(part)
+            if isinstance(solver, dict) and binding.get("explicit_solver_tcp") is None:
+                # A hand-owned TCP is derived at assembly. Serializing either
+                # an unresolved solver default or its derived result as an
+                # override would falsely turn it into an authored calibration.
+                solver.pop("tcp", None)
+        return data
 
     def to_string(self):
         """Return config as a JSON string."""

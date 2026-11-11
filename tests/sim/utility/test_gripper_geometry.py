@@ -15,13 +15,24 @@
 
 from __future__ import annotations
 
+_GRIPPER_IDS = {
+    "franka_panda_hand": "FrankaPandaHand",
+    "dh_pgi_140_80": "DHPGI14080",
+    "cobotmagic_v100_gripper": "CobotMagicV100Gripper",
+    "pika_gripper": "PikaGripper",
+    "tianji_marvin_gripper": "TianjiMarvinGripper",
+    "robotiq_2f85": "RobotiqArg2F85",
+    "robotiq_arg2f_140": "RobotiqArg2F140",
+}
+
+from embodichain.robot_registry import resolve_gripper_defaults
+from embodichain.lab.sim.utility.gripper_geometry import (
+    build_gripper_collision_geometry,
+)
+
 import numpy as np
 import pytest
 import torch
-
-from embodichain.toolkits.graspkit.pg_grasp.model_geometry import (
-    get_parallel_jaw_collision_geometry,
-)
 
 
 @pytest.mark.parametrize(
@@ -40,7 +51,9 @@ from embodichain.toolkits.graspkit.pg_grasp.model_geometry import (
 def test_registered_real_hand_assets_are_complete_and_open(
     model, side, root, opened, parts
 ):
-    geometry = get_parallel_jaw_collision_geometry(model, side=side)
+    geometry = build_gripper_collision_geometry(
+        resolve_gripper_defaults(_GRIPPER_IDS.get(model, model), variant=side)
+    )
     provenance = geometry.provenance
     assert provenance["root_link"] == root
     assert len(provenance["parts"]) == parts
@@ -51,15 +64,17 @@ def test_registered_real_hand_assets_are_complete_and_open(
     # Full link meshes (not fitted scalar boxes) retain exact mesh identities.
     assert all(part["surface_point_count"] > 0 for part in provenance["parts"])
     if model == "cobotmagic_v100_gripper":
-        assert len(provenance["mesh_paths"]) == 3
+        assert (
+            len(provenance["mesh_paths"]) == 6
+        )  # Exact collision and visual archive-path corrections.
 
 
 def test_runtime_tcp_override_changes_output_without_moving_hand_geometry():
-    default = get_parallel_jaw_collision_geometry("dh_pgi_140_80")
+    default = build_gripper_collision_geometry(resolve_gripper_defaults("DHPGI14080"))
     root_from_tcp = np.eye(4)
     root_from_tcp[2, 3] = 0.17
-    overridden = get_parallel_jaw_collision_geometry(
-        "dh_pgi_140_80", root_from_tcp=root_from_tcp
+    overridden = build_gripper_collision_geometry(
+        resolve_gripper_defaults("DHPGI14080"), root_from_tcp=root_from_tcp
     )
     torch.testing.assert_close(overridden.points, default.points, rtol=0, atol=1e-8)
     candidate = torch.eye(4).repeat(2, 1, 1)
@@ -72,7 +87,9 @@ def test_runtime_tcp_override_changes_output_without_moving_hand_geometry():
 
 
 def test_native_panda_tcp_uses_y_closing_once_and_retains_contact_origin():
-    geometry = get_parallel_jaw_collision_geometry("franka_panda_hand")
+    geometry = build_gripper_collision_geometry(
+        resolve_gripper_defaults("FrankaPandaHand")
+    )
     canonical = torch.eye(4).unsqueeze(0)
     native = geometry.canonical_to_tcp_poses(canonical)
     torch.testing.assert_close(native[0, :3, 1], torch.tensor([1.0, 0, 0]))
@@ -91,16 +108,20 @@ def test_native_panda_tcp_uses_y_closing_once_and_retains_contact_origin():
 )
 def test_geometry_registry_never_guesses_unknown_hand_or_side(model, side):
     with pytest.raises(ValueError):
-        get_parallel_jaw_collision_geometry(model, side=side)
+        build_gripper_collision_geometry(
+            resolve_gripper_defaults(_GRIPPER_IDS.get(model, model), variant=side)
+        )
 
 
 def test_contact_frame_override_preserves_root_surfaces_and_runtime_tcp():
-    default = get_parallel_jaw_collision_geometry("robotiq_arg2f_140")
+    default = build_gripper_collision_geometry(
+        resolve_gripper_defaults("RobotiqArg2F140")
+    )
     contact = np.array(
         [[0, -1, 0, 0], [1, 0, 0, 0], [0, 0, 1, 0.21], [0, 0, 0, 1]], dtype=float
     )
-    calibrated = get_parallel_jaw_collision_geometry(
-        "robotiq_arg2f_140",
+    calibrated = build_gripper_collision_geometry(
+        resolve_gripper_defaults("RobotiqArg2F140"),
         root_from_tcp=contact,
         root_from_contact_frame=contact,
     )
@@ -117,3 +138,27 @@ def test_contact_frame_override_preserves_root_surfaces_and_runtime_tcp():
         calibrated.canonical_to_tcp_poses(candidates), candidates
     )
     assert calibrated.provenance["files_sha256"] == default.provenance["files_sha256"]
+
+
+@pytest.mark.parametrize("limits_form", ["regex", "rows"])
+def test_effective_limit_forms_resolve_to_native_geometry_joints(limits_form):
+    defaults = resolve_gripper_defaults("RobotiqArg2F85")
+    expected = defaults["qpos_limits"]
+    defaults["joint_commands"]["open"] = {
+        name: value * 0.25
+        for name, value in defaults["joint_commands"]["grasp"].items()
+    }
+    if limits_form == "rows":
+        defaults["qpos_limits"] = [
+            expected[name] for name in defaults["control_parts"]["eef"]
+        ]
+    else:
+        defaults["qpos_limits"] = {
+            "finger_joint": [0.0, 0.8],
+            "(?:left|right)_inner_finger_joint": [-0.8, 0.0],
+            "(?:left|right)_inner_knuckle_joint": [0.0, 0.8757],
+            "right_outer_knuckle_joint": [0.0, 0.81],
+        }
+    geometry = build_gripper_collision_geometry(defaults)
+    assert geometry.provenance["joint_limits"] == expected
+    assert geometry.provenance["joint_positions"] == defaults["joint_commands"]["open"]

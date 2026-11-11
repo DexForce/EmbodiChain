@@ -60,6 +60,7 @@ def _manager():
         "_rigid_objects",
         "_rigid_object_groups",
         "_deformable_objects",
+        "_fluid_objects",
         "_articulations",
     ):
         setattr(manager, name, {})

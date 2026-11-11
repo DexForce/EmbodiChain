@@ -36,7 +36,12 @@ order; node selection for a runtime control is not a render vertex selection.
 For surfaces requiring stable authored node indices, array-backed `MeshCfg`
 preserves the supplied order; native file importers can reorder vertices.
 Volume voxelization creates tetrahedral particles whose indices do not match
-the source mesh vertices.
+the source mesh vertices. When stable volume node ids matter (material lines,
+benchmarks), set `VolumeDeformableObjectCfg.tetrahedra` with an array-backed
+`shape`: its vertices become the particles in order, meshing is skipped, and
+`shape.triangles` is the optional boundary (derived from the tets if omitted).
+`set_nodal_state()` writes world `[position, velocity]` nodes, the inverse of
+`data.nodal_state_w`, without changing the rest shape.
 
 A surface's optional `visual_shape` can have independent indexing and UV seams;
 `visual_binding_mode` controls mapping from particles. Visual material/UVs
@@ -54,6 +59,23 @@ surface). Exact fields and defaults stay in the typed config source.
 Optional `attrs.contact_material` sets DexUni stiffness, damping and dynamic
 friction per soft or cloth object; it is separate from element elasticity and
 replaces removed flat solver-level soft-contact coefficients in examples.
+
+Surface cloth can author a constant signed rest dihedral angle through
+`attrs.edge_rest_angle`; omitting it preserves the mesh-inferred rest geometry.
+The surface descriptor compiler validates and forwards it to native cloth
+physics. This is a rest-shape choice separate from bending stiffness and is not
+a volume-surface material field.
+
+The contact material lowers to the native cloth/soft-body physics descriptor.
+Native validation and pair-material mixing remain DexSim-owned. An explicit
+block requires the native per-object material API.
+
+Surface `attrs.pneumatic` optionally lowers a mapping to native
+`PneumaticPhysicsDesc`. Closed-surface topology, pressure-law validation and
+solver compatibility remain DexSim-owned. A closed cloth mesh alone has no
+gas pressure; callers must author this block for an inflatable cavity. Omission
+keeps ordinary cloth compatible with older wheels; explicit cavities fail
+before declaration if the installed descriptor API cannot represent them.
 
 ## Kinematic node controls
 

@@ -153,6 +153,24 @@ must match the matching `control_parts` entry (the test stub asserts this).
 
 9. **Verify:** `preview-asset` CLI + `RobotCfg.from_dict(cfg.to_dict())` round-trip.
 
+## Parallel-jaw hands
+
+Use `ParallelJawGripperCfg` for a separately controllable two-finger model.
+Place its pure `get_gripper_defaults(variant=None)` beside its model assets and
+reuse it in full Cfg construction; register its `description_path` in the
+existing robot catalog. The pure provider must not import Lab, read assets or
+initialize geometry/backends. Physical geometry/contact frames and complete
+native commands and `grasp_generators` support declarations belong to that
+provider and the flat Cfg fields. Do not introduce a second physical model Cfg.
+GraspKit receives scalar opening bounds and numerical geometry; simulation
+asset adaptation belongs to `lab/sim/utility/gripper_geometry.py`. Provide explicit left/right variants where source hands
+differ. Do not fill unknown hardware with a generic grasp model.
+
+Embodiment bindings reuse mounted or existing hand definitions and generate
+effective solver TCPs. Preserve all native mimic commands and use assembler
+name mapping. Check standalone preview/open-close, config round trips and pure
+provider imports. Full physics validation is separate from metadata resolution.
+
 ## Reusable embodiment handoff
 
 `RobotCfg` owns simulation construction, control parts, solvers, and physical

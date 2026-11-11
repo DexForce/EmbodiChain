@@ -13,14 +13,14 @@ Keep `program_id` matched to the integration and use its semantic entity names.
 
 **Need:** make two moves instead of three, or visit B before A.
 
-**Edit:** `program.count` and `targets.drop_pose.values` in `program.yaml`.
+**Edit:** `program.repeat.count` and `targets.drop_pose.values` in `program.yaml`.
 A repeat count is the number of times its whole body runs, not the number of
 individual calls. With one Pick and one Place, count 2 produces four segments.
 Swap entire pose entries, including their orientations. If using acceptance
 checks, swap `rest_pose.values` in the same way. Update the root instruction.
 
 The {download}`two-move program <examples/two_moves.yaml>` is the complete
-worked example. Reordering `body.items` changes actual execution order; preserve
+worked example. Reordering `program.repeat.body` changes actual execution order; preserve
 physical prerequisites such as picking before placing. Cyclic targets are
 selected by the nearest enclosing repeat iteration, not by a global call counter.
 
@@ -55,10 +55,11 @@ For other frames and semantic targets, see {doc}`scene_registry`.
 
 **Need:** perform another move with the existing cube.
 
-**Edit:** for the same pair of operations, increase `program.count` first. If the
+**Edit:** for the same pair of operations, increase `program.repeat.count` first. If the
 steps need different instructions or checks, use a `sequence` with explicit
 segment entries, following the complete structures in the downloadable files.
-Keep `kind: invoke` under `steps` and `kind: pick` / `kind: place` under `call`.
+Write one action mapping under `steps`, such as `pick: {object: cube}` or
+`place: {object: cube, at: drop_pose}`. The explicit `kind` AST remains supported.
 Use `object: cube` and declare every referenced target.
 
 This integration supports the Pick/Place workflow. A call being part of the

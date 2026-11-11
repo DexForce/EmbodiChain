@@ -116,8 +116,18 @@ class DexforceW1Cfg(RobotCfg):
                 if isinstance(component, dict)
             }
 
+        bound_components = {
+            b["declaration"].get("component_type")
+            for b in self.gripper_bindings.values()
+        }
+        bound_parts = {
+            b["declaration"]["motion_part"] for b in self.gripper_bindings.values()
+        }
         for component_name, arm_side in side_by_component.items():
-            if component_name not in component_names:
+            if (
+                component_name in bound_components
+                or component_name not in component_names
+            ):
                 continue
             component = self.urdf_cfg.components.get(component_name)
             if component is None:
@@ -132,6 +142,8 @@ class DexforceW1Cfg(RobotCfg):
             return
         for arm_side in DexforceW1ArmSide:
             part_name = f"{arm_side.value}_arm"
+            if part_name in bound_parts:
+                continue
             part_override = solver_cfg.get(part_name)
             if not isinstance(part_override, dict) or "tcp" not in part_override:
                 continue
@@ -149,8 +161,17 @@ class DexforceW1Cfg(RobotCfg):
             "right_hand": DexforceW1ArmSide.RIGHT,
         }
         components = data.get("urdf_cfg", {}).get("components", {})
+        bound_components = {
+            b["declaration"].get("component_type")
+            for b in self.gripper_bindings.values()
+        }
+        bound_parts = {
+            b["declaration"]["motion_part"] for b in self.gripper_bindings.values()
+        }
         for component_name, arm_side in side_by_component.items():
             component = components.get(component_name)
+            if component_name in bound_components:
+                continue
             if not isinstance(component, dict) or component.get("transform") is None:
                 continue
             spec = get_w1_version_spec(self.version)
@@ -163,6 +184,8 @@ class DexforceW1Cfg(RobotCfg):
         for arm_side in DexforceW1ArmSide:
             part_name = f"{arm_side.value}_arm"
             solver = solver_cfg.get(part_name)
+            if part_name in bound_parts:
+                continue
             if not isinstance(solver, dict) or solver.get("tcp") is None:
                 continue
             spec = get_w1_version_spec(self.version)

@@ -1,0 +1,76 @@
+integration_id: robotiq140_tabletop_pick_place_v1
+program_id: repeated_cube_pick_place_workbench
+requires:
+  scene_contract: repeated_pick_place_tabletop_scene_v1
+  embodiment_contract: dual_arm_parallel_gripper
+scene_binding:
+  contract_id: repeated_pick_place_tabletop_scene_v1
+  registry_id: robotiq140_tabletop
+  rigid_objects:
+  - entity_id: cube
+    simulation_uid: cube
+    dynamics: dynamic
+    semantic_type: cube
+    affordances:
+    - entity_id: cube_grasp
+      kind: antipodal_grasp
+  - entity_id: support_surface
+    simulation_uid: support_surface
+    dynamics: static
+    semantic_type: support_surface
+profile:
+  defaults:
+    pick_up:
+      primary: left
+    place:
+      primary: left
+  action_options:
+    pick:
+      kind: pick_up
+      hand_interp_steps: 20
+      grasp_settle_steps: 15
+      pre_grasp_distance: 0.08
+      approach_alignment_max_angle: 0.01
+      lift_height: 0.1
+      # Known-cube grasp with 10 mm surface clearance, without another hand-frame conversion.
+      fixed_object_to_eef:
+      - 0
+      - -1
+      - 0
+      - 0
+      - -1
+      - 0
+      - 0
+      - 0
+      - 0
+      - 0
+      - -1
+      - 0.01
+      - 0
+      - 0
+      - 0
+      - 1
+    place:
+      kind: place
+      hand_interp_steps: 40
+      release_settle_steps: 30
+      preserve_current_object_orientation: true
+      lift_height: 0.08
+  effect_monitors:
+    pick:
+      monitor_id: builtin.composite_effect
+      revision: '1'
+      params:
+        consecutive_samples: 5
+    place:
+      monitor_id: builtin.composite_effect
+      revision: '1'
+      params:
+        consecutive_samples: 5
+        attached_translation_threshold: 0.01
+        detached_translation_threshold: 0.015
+runtime_services:
+  grasp_pose_generator_overrides:
+    left_eef:
+      sample_count: 4000
+      filter_ground_collision: false
