@@ -39,10 +39,14 @@ assurance alone does not prove grasp or pouring success. Optional trajectory
 recording stores measured online state for inspection. `--seconds` qualifies
 only a bounded fragment, not completion of the task.
 
-`FluidReplayEnv` remains an explicit diagnostic utility for accepted historical
-recordings; it is not the default deployment or task runner. It requires a
-separate kinematic configuration, one Newton substep and fixed-root source
-states, and rejects action managers and policy dataset/trajectory recording.
+Accepted Task Program recordings can opt into control-aligned full particle-state
+sidecars with `--record-trajectory --record-fluid-state`. Each source row has a
+bounded, content-verified chunk manifest. Particle positions are arena-local in
+the artifact and converted to the target arena on replay. The ordinary
+`ReplayWrapper` restores particles along with rigid states in `kinematic` and
+`control`; `dynamic` restores only the initial particle frame, then replays
+recorded controls through DexUni. Fluid replay requires qualified sidecars and
+does not infer fluid state from the scene's initial fill.
 
 ## Rendering and recording
 

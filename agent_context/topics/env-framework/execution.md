@@ -304,6 +304,10 @@ not orchestrate multiple experiments or qualify kinematic playback.
   accepted. Objective-enabled dynamic replay requires one row and a full reset.
   `control` exposes `go_to_step(step)` for O(1) scrubbing. The replay env must
   use the same robot/objects/`actions` config as the recording env.
+  Qualified fluid recordings carry bounded particle-state sidecars. Kinematic
+  and control replay restore complete particle states at each recorded boundary;
+  dynamic replay restores only the initial particle state and recomputes later
+  fluid motion from recorded actions.
 - **Policy projection**: `rollout_buffer` retains actual policy observations,
   including sampled noise, and its existing obs/action/reward alignment for
   LeRobot/RL. It shares the acquisition boundary with raw history, rather than
