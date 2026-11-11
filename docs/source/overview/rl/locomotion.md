@@ -46,6 +46,34 @@ Velocity tasks convert normalized joint actions to offsets around the task's def
 
 Humanoid uses clipped effort actions (`[-0.4, 0.4]`) multiplied by per-joint motor gears and limited by joint effort bounds. The benchmark's progress potential divides distance by the physics timestep; it deliberately retains that original reward scaling. The maximum episode length is 900 control steps at 60 Hz.
 
+## G1 rough terrain with DexUni
+
+`g1_isaac_rough/agents/ppo.dexuni.yaml` selects the pure MuJoCo branch of
+DexUni with Newton-generated terrain contacts. The paired DexSim build must
+support `mujoco_options.use_mujoco_contacts: false` in this branch and export
+MuJoCo solver contact forces for contact sensors. The MJWarp deployment remains
+`ppo.newton.yaml`; both configurations retain the same terrain and physical
+parameters.
+
+The separate `UnitreeG1Rough` and `G1RoughTerrains` asset packages provide the
+37-joint model and terrain inputs. They do not replace `UnitreeG1Locomotion`.
+
+Use `embodichain train-rl --config CONFIG --resume CHECKPOINT` to restore learning
+state and the saved terrain levels/types. `trainer.iterations` is the cumulative
+update target. The first reset uses the restored terrain assignments without
+advancing the curriculum; later episode resets resume normal progression.
+Physical state and partial episodes restart. Curriculum state is stored per rank
+in the shared schema-v2 checkpoint and validated before learning state changes.
+Restore requires the original terrain map and per-rank environment count.
+The local G1 validation uses a single training process. Older checkpoints without
+environment state warn that terrain assignments cannot be restored.
+
+The G1 rough deployments set `env.episode_context_in_info: false` to avoid
+building per-row provenance dictionaries on every control step. Episode state,
+curriculum restoration and recorder metadata remain active. Set the option to
+`true` when a consumer needs the context snapshot in step/reset info; this is
+the shared environment default.
+
 ## PPO configuration
 
 For example, the prepared Go2 training entry is:
