@@ -464,10 +464,16 @@ def test_finalized_cable_scene_rejects_topology_changes_before_builder_mutation(
     "fixed_kind", ["cable_object", "fluid_object", "cloth_object", "soft_object"]
 )
 @pytest.mark.parametrize("finalized", [False, True])
-def test_robot_removal_preserves_mounted_camera_if_scene_is_immutable(
-    fixed_kind: str, finalized: bool
+@pytest.mark.parametrize("mounted_camera", [False, True])
+def test_robot_removal_preserves_mounted_resources_if_scene_is_immutable(
+    fixed_kind: str, finalized: bool, mounted_camera: bool
 ) -> None:
     from embodichain.lab.sim.sensors import Camera, CameraCfg
+    from embodichain.lab.visualization.markers import (
+        MarkerGroup,
+        MarkerGroupCfg,
+        MarkerPrototypeCfg,
+    )
 
     sim = _manager()
     scene = sim._spawn_scene
@@ -476,10 +482,25 @@ def test_robot_removal_preserves_mounted_camera_if_scene_is_immutable(
         uid="mounted", extrinsics=CameraCfg.ExtrinsicsCfg(parent="robot/tool")
     )
     scene.track(fixed_kind, "fixed", SimpleNamespace(name="fixed"))
-    robot = Mock(cfg=SimpleNamespace(enable_sensor=True, sensors=[camera.cfg]))
+    robot = Mock(
+        cfg=SimpleNamespace(
+            enable_sensor=mounted_camera,
+            sensors=[camera.cfg] if mounted_camera else [],
+        )
+    )
     scene.track("articulation", "robot", SimpleNamespace(name="robot"), facade=robot)
     sim._robots["robot"] = robot
-    sim._sensors["mounted"] = camera
+    if mounted_camera:
+        sim._sensors["mounted"] = camera
+    parent_poses = np.array([[1, 0, 0, 0, 0, 0, 1]] * 2, dtype=np.float64)
+    group = MarkerGroup(
+        MarkerGroupCfg(name="attached", prototypes={"box": MarkerPrototypeCfg()}),
+        num_envs=2,
+        pose_resolver=lambda parent, link, ids: parent_poses[ids],
+    )
+    group.update(translations=np.zeros((2, 1, 3)))
+    group.attach("robot")
+    sim._marker_groups = {group.name: group}
     scene.builder.is_finalized = finalized
     scene.builder.remove_articulation = Mock(
         return_value=scene._assets["robot"].descriptor
@@ -488,15 +509,26 @@ def test_robot_removal_preserves_mounted_camera_if_scene_is_immutable(
         with pytest.raises(NotImplementedError, match="topology changes"):
             sim.remove_asset("robot")
         assert sim.get_asset("robot") is robot
-        assert sim.get_sensor("mounted") is camera
+        if mounted_camera:
+            assert sim.get_sensor("mounted") is camera
         camera.destroy.assert_not_called()
         scene.builder.remove_articulation.assert_not_called()
+        parent_poses[:, 0] = 2
+        group.update(colors=np.ones((2, 1, 4)))
+        np.testing.assert_allclose(
+            [marker.position for marker in group.snapshot()], [[2, 0, 0]] * 2
+        )
     else:
         sim._gizmos = {}
         sim._disabled_robot_gizmos = set()
         assert sim.remove_asset("robot")
         assert "robot" not in scene and "mounted" not in sim.get_sensor_uid_list()
-        camera.destroy.assert_called_once_with()
+        assert camera.destroy.call_count == int(mounted_camera)
+        parent_poses[:, 0] = 2
+        group.update(colors=np.ones((2, 1, 4)))
+        np.testing.assert_allclose(
+            [marker.position for marker in group.snapshot()], [[1, 0, 0]] * 2
+        )
 
 
 def test_default_backend_does_not_advertise_cables() -> None:

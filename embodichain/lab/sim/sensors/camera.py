@@ -27,6 +27,7 @@ from functools import cached_property
 from typing import TYPE_CHECKING, Any, List, Literal, Sequence, Tuple
 
 from embodichain.lab.sim.sensors import BaseSensor, SensorCfg
+from embodichain.lab.visualization.markers._native import _MARKER_RENDER_CATEGORY
 from embodichain.lab.sim._render_selection import (
     _normalize_render_rows,
     _select_render_values,
@@ -78,6 +79,9 @@ class CameraCfg(SensorCfg):
 
     visualization_role: Literal["sensor", "record"] = "sensor"
     """Role used to group this camera in live visualization previews."""
+
+    include_visual_overlays: bool = False
+    """Include native visual overlays and scene-lit markers in captured images."""
 
     # Camera parameters
     width: int = 640
@@ -252,6 +256,8 @@ class Camera(BaseSensor):
         self._create_camera_views(config, (config.intrinsics,))
         self._entities = [handle.native for handle in self._camera_handles]
 
+        self._configure_visual_overlays(self._entities, config.include_visual_overlays)
+
         # Define a mapping of data types to their respective shapes and dtypes
         buffer_specs = {
             "color": (
@@ -287,6 +293,15 @@ class Camera(BaseSensor):
 
         self.cfg: CameraCfg = config
 
+    def _configure_visual_overlays(
+        self, views: Sequence[dr.CameraView], include: bool
+    ) -> None:
+        if include:
+            self._frame_buffer.set_visual_overlay_enabled(True)
+        else:
+            for view in views:
+                view.set_excluded_render_categories(_MARKER_RENDER_CATEGORY)
+
     def set_ground_plane_visibility(
         self, visible: bool, env_ids: Sequence[int] | None = None
     ) -> None:
@@ -295,6 +310,7 @@ class Camera(BaseSensor):
         This changes every image output, shadow and reflection consistently.
         It preserves collisions and other cameras. ``reset`` restores the
         configured policy; topology reattachment preserves the current policy.
+        Marker filtering retains the configured ``include_visual_overlays`` policy.
 
         Args:
             visible: Whether this camera permits rendering the default ground.
@@ -338,6 +354,8 @@ class Camera(BaseSensor):
             raise RuntimeError("Camera owner is unavailable")
         owner._require_ground_plane_filtering()
         excluded = 0 if visible else owner._GROUND_RENDER_CATEGORY
+        if not self.cfg.include_visual_overlays:
+            excluded |= _MARKER_RENDER_CATEGORY
         self._capture_metadata = None
         for index in changed:
             self._entities[index].set_excluded_render_categories(excluded)

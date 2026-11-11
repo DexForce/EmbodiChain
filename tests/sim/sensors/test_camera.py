@@ -597,29 +597,45 @@ def test_batched_camera_depth_matches_known_geometry(stereo):
 
 
 @pytest.mark.no_sim
-def test_ground_visibility_preflight_and_selected_reset() -> None:
+@pytest.mark.parametrize("stereo", [False, True])
+@pytest.mark.parametrize("include_overlays", [False, True])
+def test_ground_visibility_preflight_and_selected_reset(
+    stereo, include_overlays
+) -> None:
     """Invalid batches cannot partially change camera policy or enqueue writes."""
-    camera = object.__new__(Camera)
+    camera = object.__new__(StereoCamera if stereo else Camera)
     owner = MagicMock()
     owner._GROUND_RENDER_CATEGORY = 1
     camera._owner_ref = lambda: owner
     camera._is_destroyed = False
     camera.num_instances = 4
-    camera._entities = [MagicMock() for _ in range(4)]
+    views = [[MagicMock() for _ in range(2 if stereo else 1)] for _ in range(4)]
+    camera._entities = [
+        PairCameraView(*pair, np.eye(4)) if stereo else pair[0] for pair in views
+    ]
     camera._ground_plane_visibility = [True] * 4
     camera._capture_metadata = None
-    camera.cfg = CameraCfg()
+    camera.cfg = CameraCfg(include_visual_overlays=include_overlays)
     camera._reset_pose = MagicMock()
     for ids in ([0, 4], [0, 0], [1.5]):
         with pytest.raises(ValueError):
             camera.set_ground_plane_visibility(False, ids)
-    for entity in camera._entities:
-        entity.set_excluded_render_categories.assert_not_called()
+    for pair in views:
+        for view in pair:
+            view.set_excluded_render_categories.assert_not_called()
     camera.set_ground_plane_visibility(False, torch.tensor([1, 3]))
     assert camera._ground_plane_visibility == [True, False, True, False]
     camera.reset([1])
     assert camera._ground_plane_visibility == [True, True, True, False]
-    assert camera._entities[3].set_excluded_render_categories.call_args.args == (1,)
+    # Ground uses bit 0; default sensor images must also exclude marker bit 31.
+    marker_mask = 0 if include_overlays else 1 << 31
+    for view in views[1]:
+        assert view.set_excluded_render_categories.call_args.args == (marker_mask,)
+    for view in views[3]:
+        assert view.set_excluded_render_categories.call_args.args == (1 | marker_mask,)
+    for index in (0, 2):
+        for view in views[index]:
+            view.set_excluded_render_categories.assert_not_called()
     camera._is_destroyed = True
     with pytest.raises(RuntimeError, match="destroyed"):
         camera.set_ground_plane_visibility(True)

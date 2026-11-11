@@ -43,9 +43,10 @@ baselines while other assets retain runtime state. Native preparation failure
 propagates without rollback. Randomization requiring the replacements runs
 after this boundary.
 
-Removing a robot from a finalized cable or particle scene checks the topology
-restriction before detaching its cameras. A rejected removal leaves the robot
-and its mounted sensors available.
+Spawn-owned asset removal checks pending-removal and topology restrictions
+before detaching mounted cameras or marker groups. A rejected removal leaves
+the asset, sensors and marker attachments usable. NoRender declaration-only
+visual objects remain removable without rebuilding physical topology.
 
 Pending Newton topology/descriptor changes requiring a new immutable model
 become usable only after preparation. Keep model rebuilding in Spawn; object

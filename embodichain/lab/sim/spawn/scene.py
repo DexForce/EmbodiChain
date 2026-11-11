@@ -305,21 +305,11 @@ class SpawnScene:
 
     def remove(self, uid: str) -> None:
         """Remove a declared asset from its DexSim owner."""
+        self._require_removable(uid)
         declaration = self._assets[uid]
         if getattr(declaration, "declaration_only", False):
             del self._assets[uid]
             return
-        if declaration.kind in {
-            "soft_object",
-            "cloth_object",
-            "fluid_object",
-            "cable_object",
-        }:
-            raise NotImplementedError(
-                "DexSim Spawn does not yet expose pending removal for "
-                f"{declaration.kind.replace('_', ' ')}."
-            )
-        self._require_mutable_topology()
         if declaration.kind == "rigid_object_group":
             for member in declaration.descriptor:
                 self.builder.remove_object(member.name)
@@ -338,6 +328,23 @@ class SpawnScene:
             self._pending_material_assignments = {
                 key: materials for key, materials in pending.items() if key[0] != uid
             }
+
+    def _require_removable(self, uid: str) -> None:
+        """Validate removal before mounted render resources are detached."""
+        declaration = self._assets[uid]
+        if getattr(declaration, "declaration_only", False):
+            return
+        if declaration.kind in {
+            "soft_object",
+            "cloth_object",
+            "fluid_object",
+            "cable_object",
+        }:
+            raise NotImplementedError(
+                "DexSim Spawn does not yet expose pending removal for "
+                f"{declaration.kind.replace('_', ' ')}."
+            )
+        self._require_mutable_topology()
 
     def _require_mutable_topology(self) -> None:
         """Reject unsupported Newton rebuilds before changing scene resources."""
