@@ -1857,8 +1857,8 @@ class SimulationManager:
             or scene.builder.has_pending_changes
         ):
             if result is not None:
-                # These native cameras are owned outside Spawn. Detach them
-                # before a rebuild removes their articulation render parents.
+                # Clear configured parent paths before rebuilding native links;
+                # semantic parent resolution is retried after facade binding.
                 for sensor in self._sensors.values():
                     if (
                         isinstance(sensor, Camera)
@@ -2619,8 +2619,10 @@ class SimulationManager:
             Light: The created light instance.
 
         Raises:
+            RuntimeError: If the World has no native renderer.
             ValueError: If ``cfg.light_type`` is not supported.
         """
+        self._require_native_renderer("Light creation")
         if cfg.uid is None:
             uid = "light"
             cfg.uid = uid
@@ -2649,19 +2651,25 @@ class SimulationManager:
                 f"(width={cfg.rect_width}, height={cfg.rect_height})."
             )
 
-        if cfg.light_type in self._GLOBAL_LIGHT_TYPES:
-            batch_lights = Light(
-                cfg=cfg,
-                entities=[self._env.create_light(uid, light_type)],
-            )
-        else:
-            batch_lights = Light(
-                cfg=cfg,
-                entities=[
-                    arena.create_light(f"{uid}_{index}", light_type)
-                    for index, arena in enumerate(self._arenas)
-                ],
-            )
+        from dexsim.spawn import LightDesc
+
+        scene = self._spawn_scene.builder.result
+        global_light = cfg.light_type in self._GLOBAL_LIGHT_TYPES
+        arena_names = ("default",) if global_light else self._spawn_scene.arena_names
+        handles = scene.add_lights(
+            [
+                LightDesc(
+                    name=uid if global_light else f"{uid}_{i}", light_type=light_type
+                )
+                for i in range(len(arena_names))
+            ],
+            arena_names=arena_names,
+        )
+        try:
+            batch_lights = Light(cfg=cfg, entities=handles, scene=scene)
+        except Exception:
+            scene.remove_lights(handles)
+            raise
 
         self._lights[uid] = batch_lights
         self.notify_visualization_topology_changed()
@@ -3776,6 +3784,12 @@ class SimulationManager:
                 newton_solver_type=self._active_newton_solver_type,
             )
 
+        if cfg.gripper_bindings:
+            from embodichain.lab.sim.utility.gripper_binding import (
+                prepare_robot_grippers,
+            )
+
+            prepare_robot_grippers(cfg)
         uid = cfg.uid
         source_path = _asset_file_path(cfg)
         if source_path is None:
@@ -4314,7 +4328,7 @@ class SimulationManager:
     def add_sensor(self, sensor_cfg: SensorCfg) -> BaseSensor:
         """Create a sensor on the pre-created simulation Arenas.
 
-        Cameras keep EmbodiChain's native CameraGroup implementation. A camera
+        Cameras use Scene-owned native batches and shared CameraGroups. A camera
         attached to an articulation link is created immediately and attached
         after the physical Spawn scene is prepared. Contact sensors are created
         after preparation and query contacts through the backend-neutral Spawn
@@ -4464,8 +4478,7 @@ class SimulationManager:
     def remove_asset(self, uid: str) -> bool:
         """Remove an asset by its UID.
 
-        Native render lights are not removed by this method. Sensors and
-        Spawn-owned physical assets are supported. Removing a robot also
+        Scene-owned lights, sensors and physical assets are supported. Removing a robot also
         destroys its automatically initialized mounted cameras.
 
         Args:
@@ -4478,6 +4491,12 @@ class SimulationManager:
             destroy = getattr(sensor, "destroy", None)
             if callable(destroy):
                 destroy()
+            self.notify_visualization_topology_changed()
+            return True
+
+        if uid in self._lights:
+            self._lights[uid].destroy()
+            del self._lights[uid]
             self.notify_visualization_topology_changed()
             return True
 
@@ -5429,7 +5448,10 @@ class SimulationManager:
         import dexsim
         import gc
 
-        # Force garbage collection to break cycle references
+        if dexsim.get_world_num() == 0:
+            return
+
+        # Live Worlds may still be held by cycles; release them before polling.
         gc.collect()
 
         import time
@@ -5521,6 +5543,9 @@ class SimulationManager:
                     f"{error!r}"
                 )
 
+        for light in getattr(self, "_lights", {}).values():
+            light.destroy()
+
         if self._spawn_scene is not None:
             # Release result-scoped batches/facades before closing the
             # Scene and, finally, the World that owns native resources.
@@ -5603,9 +5628,8 @@ class SimulationManager:
         self._world = None
         self._default_plane = None
 
-        # Try to break ANY possible frame cycle
-        gc.collect()
-
+        # Clear all remaining Python owners before the post-World collection.
+        # Collecting both here and after these clears scans the same live heap.
         self._visual_materials.clear()
         self._texture_cache.clear()
         self._arenas.clear()
@@ -5616,11 +5640,8 @@ class SimulationManager:
         if SimulationManager._instances.get(self.instance_id) is self:
             SimulationManager.reset(self.instance_id)
 
-        # Forcefully drop underlying C++ object wrappers
-        self._env = None
-        self._world = None
-
-        gc.collect()
+        # The queue performs the post-World collection after destruction-task
+        # locals unwind. Keep the pre-Scene collection for child destructors.
 
     @staticmethod
     def flush_cleanup_queue() -> None:

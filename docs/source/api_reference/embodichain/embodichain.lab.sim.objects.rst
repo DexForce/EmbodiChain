@@ -47,6 +47,13 @@ bodies.
 Light
 -----
 
+Lights are owned by the existing Scene, including creation before physical
+finalization. Setters use native camera/light property batches;
+``Light.apply_state`` combines fields into one validated publication. Local-pose
+writes retain their translation-only meaning. CPU and CUDA inputs are accepted,
+but the SDK may stage them on the host. Falloff remains a legacy compatibility
+field without an effective native batch consumer.
+
 .. autoclass:: Light
     :members:
     :inherited-members:
@@ -57,6 +64,16 @@ Light
     :inherited-members:
     :show-inheritance:
     :exclude-members: __init__, copy, replace, to_dict, validate
+
+The implementation module also exports the same class:
+
+.. currentmodule:: embodichain.lab.sim.objects.light
+
+.. autosummary::
+
+    Light
+
+.. currentmodule:: embodichain.lab.sim.objects
 
 Visual Object
 -------------

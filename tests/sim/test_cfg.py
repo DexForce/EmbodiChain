@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+
 from dataclasses import fields
 
 import dexsim
@@ -1611,6 +1612,16 @@ def test_newton_mesh_bvh_constructor_round_trip(constructor: str | None) -> None
     cfg = NewtonPhysicsCfg(mesh_bvh_constructor=constructor)
     assert cfg.to_dict()["mesh_bvh_constructor"] == constructor
     assert cfg.to_dexsim_cfg(gpu_id=0).mesh_bvh_constructor == constructor
+
+
+def test_urdf_cfg_preserves_positional_constructor_with_keyword_mounting_flag():
+    from embodichain.lab.sim.cfg import URDFCfg
+
+    cfg = URDFCfg(
+        None, None, None, None, "/tmp", True, "robot_base", force_assembly=True
+    )
+    assert cfg.base_link_name == "robot_base"
+    assert cfg.force_assembly is True
 
 
 @configclass

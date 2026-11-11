@@ -12,6 +12,11 @@ This page also demonstrates how to execute a generated pose with a robot arm. It
 covers scene initialization, robot and object creation, grasp pose computation,
 and trajectory execution in the simulation loop.
 
+Model-owned hand defaults and embodiment TCP binding are described in
+:doc:`../../resources/robot/parallel_jaw_grippers`. Concrete hand values come
+from ``embodichain_robots``; GraspKit consumes explicit physical descriptions
+and keeps sampling, collision and annotation policy separate.
+
 Processing Pipeline
 -------------------
 
@@ -47,7 +52,7 @@ Command-line arguments are parsed with ``argparse`` to select the number of para
 
 .. literalinclude:: ../../../../scripts/tutorials/grasp/grasp_generator.py
    :language: python
-   :start-at: def parse_arguments():
+   :start-at: def parse_arguments(
    :end-at: return parser.parse_args()
 
 The parsed arguments are passed to ``initialize_simulation``, which builds a :class:`SimulationManagerCfg` and creates the :class:`SimulationManager` instance. When ray tracing is enabled a directional :class:`cfg.LightCfg` is also added to the scene.
@@ -121,9 +126,11 @@ Configuration
 
 Configuration ownership is split by meaning:
 
-* :class:`~embodichain.toolkits.graspkit.ParallelJawGripperModelCfg` describes
-  physical opening limits, finger dimensions, and palm depth. A concrete EEF
-  name belongs only in its ``model_id``.
+* :class:`~embodichain.lab.sim.cfg.gripper.ParallelJawGripperCfg` owns physical
+  opening bounds, native geometry, commands, calibration and compatible
+  ``grasp_generators`` declarations. Concrete defaults live beside model assets.
+  GraspKit receives resolved scalar limits and collision geometry through the
+  Sim adapter, without importing the Cfg or looking up a model identifier.
 * :class:`~embodichain.toolkits.graspkit.pg_grasp.AntipodalGraspPoseGeneratorCfg`
   controls sample count, angular deviations, approach variants, and result
   count.

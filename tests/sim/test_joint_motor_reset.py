@@ -18,6 +18,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
+import sys
+
 import pytest
 import torch
 import warp as wp
@@ -30,12 +33,31 @@ from embodichain.lab.sim.cfg import (
     RenderCfg,
 )
 
-pytestmark = [pytest.mark.gpu, pytest.mark.requires_sim]
+pytestmark = [pytest.mark.gpu, pytest.mark.subprocess_sim]
 
 
 def test_scene_reset_with_graph_motor_preserves_unselected_arena(
     tmp_path: Path,
 ) -> None:
+    """Run NoRender in a fresh process after any parent renderer initialization."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import runpy, sys; from pathlib import Path; "
+            "runpy.run_path(sys.argv[1])['_run_motor_reset_case'](Path(sys.argv[2]))",
+            str(Path(__file__).resolve()),
+            str(tmp_path),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def _run_motor_reset_case(tmp_path: Path) -> None:
+    """Qualify in-place selected reset with a captured NoRender motor graph."""
     source = tmp_path / "motor.urdf"
     link = """<link name="{name}">
       <inertial><mass value="1"/>

@@ -19,17 +19,23 @@ from __future__ import annotations
 import dexsim
 import operator
 import weakref
+import numpy as np
 import torch
 import dexsim.render as dr
 
 from functools import cached_property
-from typing import TYPE_CHECKING, List, Literal, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, List, Literal, Sequence, Tuple
 
 from embodichain.lab.sim.sensors import BaseSensor, SensorCfg
+from embodichain.lab.sim._render_selection import (
+    _normalize_render_rows,
+    _select_render_values,
+)
 from embodichain.utils.math import matrix_from_quat, quat_from_matrix, look_at_to_pose
 from embodichain.utils import logger, configclass
 
 if TYPE_CHECKING:
+    from dexsim.scene import CameraBatch, Scene, SpawnedCamera
     from embodichain.lab.sim.sim_manager import SimulationManager
 
 __all__ = ["Camera", "CameraCfg"]
@@ -88,6 +94,7 @@ class CameraCfg(SensorCfg):
     enable_mask: bool = False
     enable_normal: bool = False
     enable_position: bool = False
+
     ground_plane_visible: bool = True
     """Include the shared default ground in this camera (both stereo eyes).
 
@@ -170,38 +177,80 @@ class Camera(BaseSensor):
         self._capture_sequence = 0
         self._pending_capture_metadata: dict[str, object] | None = None
         self._world = owner.get_world()
+        self._scene: Scene = owner._spawn_scene.builder.result
+        self._arena_names = owner._spawn_scene.arena_names
         self._arenas = [owner.get_env(i) for i in range(owner.num_envs)]
         if len(self._arenas) == 0:
             raise ValueError("Camera requires at least one materialized Arena.")
         self._camera_names: list[tuple[dexsim.environment.Arena, str]] = []
+        self._camera_handles: tuple[SpawnedCamera, ...] = ()
+        self._camera_batch: CameraBatch | None = None
+        self._batch_revision = -1
+        self._camera_group = None
         self._is_attached = False
         self._is_destroyed = False
-        super().__init__(config, device, num_instances=len(self._arenas))
-        self.reset()
+        try:
+            super().__init__(config, device, num_instances=len(self._arenas))
+            self.reset()
+        except Exception:
+            self.destroy()
+            raise
+
+    @property
+    def _batch(self) -> CameraBatch:
+        """Refresh the weak native selection after a physical topology change."""
+        if self._is_destroyed:
+            raise RuntimeError("Camera has been destroyed.")
+        revision = self._scene.topology_revision
+        if self._camera_batch is None or self._batch_revision != revision:
+            self._camera_batch = self._scene.create_camera_batch(self._camera_handles)
+            self._batch_revision = revision
+        return self._camera_batch
+
+    def _create_camera_views(
+        self, config: CameraCfg, intrinsics: Sequence[Sequence[float]]
+    ) -> None:
+        """Create all eyes together in the already prepared, Scene-owned Arenas."""
+        from dexsim.spawn import CameraDesc
+
+        self._camera_group = self._scene.create_camera_group(
+            f"{config.uid}_group",
+            config.width,
+            config.height,
+            self.num_instances * len(intrinsics),
+            view_flags=config.get_view_attrib(),
+        )
+        descriptors = []
+        for eye, values in enumerate(intrinsics):
+            matrix = np.eye(3, dtype=np.float32)
+            matrix[0, 0], matrix[1, 1], matrix[0, 2], matrix[1, 2] = values
+            for i in range(self.num_instances):
+                suffix = (
+                    "" if len(intrinsics) == 1 else ("_left" if eye == 0 else "_right")
+                )
+                descriptors.append(
+                    CameraDesc(
+                        name=f"{config.uid}{suffix}_view{i + 1}",
+                        width=config.width,
+                        height=config.height,
+                        intrinsic=matrix,
+                        near=config.near,
+                        far=config.far,
+                        view_flags=config.get_view_attrib(),
+                    )
+                )
+        self._camera_handles = self._scene.add_cameras(
+            descriptors,
+            arena_names=list(self._arena_names) * len(intrinsics),
+            camera_groups=self._camera_group,
+        )
+        self._frame_buffer = self._camera_group.native
 
     def _build_sensor_from_config(
         self, config: CameraCfg, device: torch.device
     ) -> None:
-        self._frame_buffer = self._world.create_camera_group(
-            [config.width, config.height], self.num_instances, True
-        )
-
-        view_attrib = config.get_view_attrib()
-        for i, arena in enumerate(self._arenas):
-            view_name = f"{config.uid}_view{i + 1}"
-            view = arena.create_camera(
-                view_name,
-                config.width,
-                config.height,
-                True,
-                view_attrib,
-                self._frame_buffer,
-            )
-            view.set_intrinsic(config.intrinsics)
-            view.set_near(config.near)
-            view.set_far(config.far)
-            self._entities[i] = view
-            self._camera_names.append((arena, view_name))
+        self._create_camera_views(config, (config.intrinsics,))
+        self._entities = [handle.native for handle in self._camera_handles]
 
         # Define a mapping of data types to their respective shapes and dtypes
         buffer_specs = {
@@ -333,7 +382,7 @@ class Camera(BaseSensor):
         """
         return self._is_attached
 
-    def update(self, **kwargs) -> None:
+    def update(self, **kwargs: Any) -> None:
         """Update the sensor data.
 
         The supported data types are:
@@ -350,7 +399,7 @@ class Camera(BaseSensor):
         fetch_only = kwargs.get("fetch_only", False)
         if not fetch_only:
             self._pending_capture_metadata = None
-            self._frame_buffer.apply()
+            self._frame_buffer.apply_ordered()
             self._snapshot_render_metadata()
         self.cfg: CameraCfg
 
@@ -497,24 +546,27 @@ class Camera(BaseSensor):
         """Remove render cameras before releasing their World-owned group."""
         if self._is_destroyed:
             return
+        self._camera_batch = None
+        if self._camera_handles:
+            self._scene.remove_cameras(self._camera_handles)
+            self._camera_handles = ()
+        if hasattr(self, "_data_buffer"):
+            self._data_buffer.clear()
+        if hasattr(self, "_data_buffer_stereo"):
+            self._data_buffer_stereo.clear()
+        self._frame_buffer = None
+        if self._camera_group is not None:
+            self._scene.release_camera_groups([self._camera_group])
+            self._camera_group = None
         self._is_destroyed = True
         self._capture_metadata = None
-        for arena, camera_name in self._camera_names:
-            try:
-                arena.remove_camera(camera_name)
-            except Exception as error:
-                logger.log_warning(
-                    f"Failed to remove camera {camera_name!r}: {error!r}"
-                )
         self._entities = []
         self._camera_names = []
-        # DexSim currently has no public remove_camera_group API. The group is
-        # World-owned; dropping this borrowed facade after removing all views
-        # is the narrowest safe lifetime boundary available to EmbodiChain.
         self._frame_buffer = None
         self._is_attached = False
         self._arenas = []
         self._world = None
+        self._scene = None
 
     def look_at(
         self,
@@ -545,49 +597,33 @@ class Camera(BaseSensor):
     def set_intrinsics(
         self,
         intrinsics: torch.Tensor,
-        env_ids: Sequence[int] | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
     ) -> None:
         """
-        Set the camera intrinsics for both left and right cameras.
+        Set intrinsics for the selected camera instances in one native batch.
 
         Args:
             intrinsics (torch.Tensor): The intrinsics for the left camera with shape (4,) / (3, 3) or (N, 4) / (N, 3, 3).
             env_ids (Sequence[int] | None): The environment ids to set the intrinsics. If None, set for all environments.
         """
-        ids = env_ids if env_ids is not None else range(self.num_instances)
-
-        if intrinsics.dim() == 2 and intrinsics.shape[1] == 3:
-            intrinsics = intrinsics.unsqueeze(0).repeat(len(ids), 1, 1)
-
-        if intrinsics.dim() == 1:
-            intrinsics = intrinsics.unsqueeze(0).repeat(len(ids), 1)
-
-        if len(ids) != intrinsics.shape[0]:
-            logger.log_error(
-                f"Invalid intrinsics shape {intrinsics.shape} for {len(ids)} environments."
-            )
-
-        for i, env_id in enumerate(ids):
-            entity = self._entities[env_id]
-            if intrinsics.shape[1] == 3:
-                entity.set_intrinsic(intrinsics[i].cpu().numpy())
-            else:
-                entity.set_intrinsic(intrinsics[i].cpu().tolist())
+        rows, offsets = _normalize_render_rows(env_ids, self.num_instances)
+        broadcast_ndim = 2 if intrinsics.shape[-2:] == (3, 3) else 1
+        self._batch.apply_intrinsics(
+            _select_render_values(intrinsics, offsets, broadcast_ndim), rows=rows
+        )
 
     def get_intrinsics(self) -> torch.Tensor:
         """
-        Get the camera intrinsics for both left and right cameras.
+        Read owned camera intrinsic matrices in environment order.
 
         Returns:
             torch.Tensor: The intrinsics for the left camera with shape (N, 3, 3).
         """
-        intrinsics = []
-        for entity in self._entities:
-            intrinsics.append(
-                torch.as_tensor(entity.get_intrinsic(), dtype=torch.float32)
-            )
-
-        return torch.stack(intrinsics, dim=0).to(self.device)
+        return torch.as_tensor(
+            self._batch.fetch_intrinsics(matrix=True, device=str(self.device)),
+            dtype=torch.float32,
+            device=self.device,
+        )
 
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
         """Restore configured extrinsics and ground visibility for selected views."""

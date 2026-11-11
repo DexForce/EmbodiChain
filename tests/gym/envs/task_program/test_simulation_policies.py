@@ -1643,3 +1643,217 @@ def test_support_height_uses_highest_qualified_contact_without_averaging():
     )
     assert heights[0].item() == pytest.approx(0.12)
     assert torch.isnan(heights[1])
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    ["success", "lost", "lost_all", "pose", "missing", "cancelled", "clock_gap"],
+)
+def test_hold_requires_the_complete_measured_window(outcome):
+    from embodichain.lab.gym.envs.task_program.bridge import EnvironmentStepClock
+    from types import SimpleNamespace
+    from embodichain.lab.task_program.semantics.integration import SceneManifest
+
+    registry = SceneRegistry(
+        (
+            SceneEntityRegistration(
+                SceneObjectRef("cube"), state_provider=_StaticStateProvider()
+            ),
+        )
+    )
+    program = decode_task_program(
+        dict(
+            program_id="hold",
+            integration=dict(
+                robot_profile="r", scene_registry="s", runtime_preset="safe"
+            ),
+            targets={
+                "destination": dict(
+                    kind="pose",
+                    position=[0.0, 0.0, 0.0],
+                    quaternion_xyzw=[0.0, 0.0, 0.0, 1.0],
+                )
+            },
+            program=[
+                dict(
+                    segment="hold",
+                    steps=[dict(pick=dict(object="cube"))],
+                    post=[
+                        dict(
+                            hold=dict(
+                                object="cube",
+                                at="destination",
+                                duration_s=0.21,
+                                position_tolerance=0.02,
+                                orientation_tolerance=0.1,
+                            )
+                        )
+                    ],
+                )
+            ],
+        )
+    )
+    segment = next(
+        TaskProgramCompiler(SceneManifest.from_registry(registry))
+        .compile(program)
+        .iter_segments()
+    )
+    policy = segment.post_policies[0]
+    targets = torch.tensor([[5.0, 6.0], [7.0, 8.0]])
+    port, entity, robot = _port(torch.zeros(2, 3), step_dt=0.1, target_qpos=targets)
+    clock = EnvironmentStepClock(0.1)
+    port.bind_clock(clock)
+
+    def observe(object_id, active_mask):
+        assert object_id == "cube"
+        pose = torch.eye(4).repeat(2, 1, 1)
+        attached = active_mask.clone()
+        if clock.step_index == 1:
+            if outcome in ("lost", "missing", "lost_all"):
+                attached[0] = False
+                if outcome == "lost_all":
+                    attached[:] = False
+            elif outcome == "pose":
+                pose[0, 0, 3] = 0.1
+        return (
+            SimpleNamespace(
+                scene=SimpleNamespace(entities={"cube": SimpleNamespace(pose=pose)})
+            ),
+            attached,
+            None,
+        )
+
+    port.bind_hold_observer(observe)
+    actions = port.actions(
+        policy, segment=segment, active_mask=torch.ones(2, dtype=torch.bool)
+    )
+    action = next(actions)
+    torch.testing.assert_close(action, targets)
+    if outcome == "cancelled":
+        actions.close()
+        assert port.post_policy_result(policy, segment=segment).tolist() == [
+            False,
+            False,
+        ]
+        assert (
+            port.post_policy_metadata(policy, segment=segment)["status"] == "cancelled"
+        )
+        return
+    if outcome == "clock_gap":
+        clock.advance_after_env_step()
+        clock.advance_after_env_step()
+        with pytest.raises(ValueError, match="consecutive"):
+            next(actions)
+        assert not port.post_policy_result(policy, segment=segment).any()
+        return
+    count = 1
+    while True:
+        clock.advance_after_env_step()
+        try:
+            next(actions)
+            count += 1
+        except StopIteration:
+            break
+    assert count == (1 if outcome == "lost_all" else 3)
+    assert port.post_policy_result(policy, segment=segment).tolist() == [
+        outcome == "success",
+        outcome != "lost_all",
+    ]
+    metadata = port.post_policy_metadata(policy, segment=segment)
+    assert metadata["elapsed_s"] == pytest.approx(0.1 if outcome == "lost_all" else 0.3)
+    assert metadata["required_steps"] == 3
+    assert metadata["observation_count"][1] == (2 if outcome == "lost_all" else 4)
+    if outcome == "success":
+        assert metadata["max_position_error"] == [0.0, 0.0]
+        assert metadata["attachment_verified_observations"] == [4, 4]
+    if outcome == "pose":
+        assert metadata["max_position_error"][0] == pytest.approx(0.1)
+
+
+def test_relative_target_validator_consumes_the_frozen_call_target() -> None:
+    from dataclasses import replace
+    from embodichain.lab.task_program.compiler import CompiledObjectNearTargetValidator
+    from embodichain.lab.task_program.semantics.calls import SemanticRelativePose
+
+    segment = _compiled_segment()
+    validator = next(
+        item
+        for item in segment.validators
+        if type(item) is CompiledObjectNearTargetValidator
+    )
+    validator = replace(
+        validator,
+        target_pose=SemanticRelativePose(
+            "reference", (1.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0)
+        ),
+    )
+    segment = replace(segment, validators=(validator,))
+    port, entity, _ = _port(torch.tensor([[1.0, 0.0, 0.0], [1.2, 0.0, 0.0]]))
+    with pytest.raises(ValueError, match="observer"):
+        port.validate(validator, segment=segment)
+    frozen = torch.eye(4).repeat(2, 1, 1)
+    frozen[:, 0, 3] = 1.0
+    # No live reference is bound to this port. Acceptance must consume the
+    # target captured at grounding rather than resampling that reference.
+    port.bind_target_observer(lambda object_id, declaration: frozen.clone())
+    assert port.validate(validator, segment=segment).tolist() == [True, False]
+
+
+def test_hold_does_not_reuse_another_objects_target_selection() -> None:
+    from embodichain.lab.gym.envs.task_program.bridge import EnvironmentStepClock
+    from embodichain.lab.task_program.semantics.integration import SceneManifest
+    from types import SimpleNamespace
+
+    scene = SceneRegistry(
+        tuple(
+            SceneEntityRegistration(
+                SceneObjectRef(name), state_provider=_StaticStateProvider()
+            )
+            for name in ("cube", "reference")
+        )
+    )
+    data = dict(
+        program_id="hold",
+        integration=dict(robot_profile="r", scene_registry="s", runtime_preset="safe"),
+        targets={
+            "target": dict(
+                kind="pose",
+                position=[0.0, 0.0, 0.0],
+                quaternion_xyzw=[0.0, 0.0, 0.0, 1.0],
+            )
+        },
+        program=[
+            dict(
+                segment="two_objects",
+                steps=[dict(move_held_object=dict(object="reference", at="target"))],
+                post=[dict(hold=dict(object="cube", at="target", duration_s=0.1))],
+            )
+        ],
+    )
+    segment = next(
+        TaskProgramCompiler(SceneManifest.from_registry(scene))
+        .compile(decode_task_program(data))
+        .iter_segments()
+    )
+    policy = segment.post_policies[0]
+    port, _, _ = _port(torch.zeros(2, 3), step_dt=0.1)
+    clock = EnvironmentStepClock(0.1)
+    port.bind_clock(clock)
+    old_cube_target = torch.eye(4).repeat(2, 1, 1)
+    old_cube_target[:, 0, 3] = 1.0
+    current = SimpleNamespace(
+        scene=SimpleNamespace(
+            entities={"cube": SimpleNamespace(pose=torch.eye(4).repeat(2, 1, 1))}
+        )
+    )
+    port.bind_hold_observer(
+        lambda object_id, active: (current, active.clone(), old_cube_target)
+    )
+    actions = port.actions(
+        policy, segment=segment, active_mask=torch.ones(2, dtype=torch.bool)
+    )
+    next(actions)
+    clock.advance_after_env_step()
+    with pytest.raises(StopIteration):
+        next(actions)
+    assert port.post_policy_result(policy, segment=segment).tolist() == [True, True]
