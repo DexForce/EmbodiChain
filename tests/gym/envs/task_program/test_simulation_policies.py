@@ -1383,13 +1383,16 @@ def test_joint_stability_uses_joint_window_and_original_observed_hold():
     assert not any(robot.qpos_reads)
 
 
-def test_joint_stability_resets_the_full_range_and_does_not_count_tick_zero():
-    port, art, _, segment, policy = _joint_condition_port(torch.tensor([[0.1]]))
+@pytest.mark.parametrize("initial,changed", [(0.1, 0.1011), (0.1304, 0.1296)])
+def test_joint_stability_requires_full_duration_after_drift_or_target_entry(
+    initial, changed
+):
+    port, art, _, segment, policy = _joint_condition_port(torch.tensor([[initial]]))
     steps = 0
     for _ in port.actions(policy, segment=segment, active_mask=torch.tensor([True])):
         steps += 1
         if steps == 10:
-            art._qpos[0, 0] = 0.1011
+            art._qpos[0, 0] = changed
     assert steps == 35
     assert port.post_policy_result(policy, segment=segment).tolist() == [True]
 

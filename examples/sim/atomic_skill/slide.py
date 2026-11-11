@@ -38,6 +38,7 @@ from embodichain.lab.sim.atomic_skills import (
 )
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
+    ArticulationRootPropertiesCfg,
     JointDrivePropertiesCfg,
 )
 from embodichain.lab.sim.objects import Articulation
@@ -90,6 +91,7 @@ def create_drawer(
         uid="drawer",
         fpath=get_data_path(DRAWER_ASSET),
         asset_physics_mode="overlay",
+        root_props=ArticulationRootPropertiesCfg(fixed_base=True),
         init_pos=DRAWER_POSITION,
         init_rot=DRAWER_ORIENTATION,
         init_qpos=(0.0,),

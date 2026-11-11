@@ -29,6 +29,7 @@ Datasets
 
 .. automodule:: embodichain.data_pipeline.datasets
    :members:
+   :exclude-members: MotionLibrary, MotionStartSampler, MotionStartSamplerCfg
    :undoc-members:
    :show-inheritance:
 

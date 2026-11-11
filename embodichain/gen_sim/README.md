@@ -10,6 +10,8 @@ embodichain gensim scene edit --scene outputs/scene --prompt "Move the cup to th
 embodichain gensim scene expand --scene outputs/scene --config layouts.yaml
 embodichain gensim scene preview --scene outputs/scene --viser
 embodichain gensim task plan --image table.png --instruction "Put the cup on the tray" --output outputs/task
+embodichain gensim services validate --config model_services.json --env-file services.env
+embodichain gensim services doctor --config model_services.json --env-file services.env
 embodichain gensim ui --host 127.0.0.1 --port 7860
 ```
 
@@ -27,6 +29,9 @@ viewer. Its output alone does not construct a robot or execute a task.
 The UI launcher uses the active Python interpreter, preserves the selected SDK
 import root, and retains the existing UI's process cleanup and authentication.
 Install the `embodichain[gensim]` extra for its optional dependencies.
+Model implementations and serving frameworks remain operator-selected; see the
+[deployment and BYOS guide](services/DEPLOYMENT.md) and the versioned
+[HTTP protocol](services/spec/v1/README.md).
 
 ## Generate, bind and execute
 

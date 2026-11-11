@@ -185,6 +185,34 @@ the exact repository and revision used for evaluation.
 
 .. autofunction:: download_pretrained_policy
 
+embodichain.data.assets.scene_assets
+------------------------------------
+
+Download scene bundles through the shared asset registry. The four SimReady
+rooms retain their original GLB visuals and separate static USD floor collision.
+For example, ``get_data_path("WoodLab/wood_lab/wood_lab.usda")`` resolves the
+portable USD entry; keep its sibling ``visual`` and ``collision`` directories.
+The new bundles use the shared download lock, verify the archive MD5 and
+respect the configured download host, with the official Hub as fallback.
+
+.. currentmodule:: embodichain.data.assets.scene_assets
+
+.. autosummary::
+
+   SceneData
+   EmptyRoom
+   WoodLab
+   IndustrialWorkshop
+   DemoStudio
+   CleanLab
+
+.. autoclass:: SceneData
+.. autoclass:: EmptyRoom
+.. autoclass:: WoodLab
+.. autoclass:: IndustrialWorkshop
+.. autoclass:: DemoStudio
+.. autoclass:: CleanLab
+
 embodichain.data.assets.solver_assets
 -------------------------------------
 
@@ -2697,6 +2725,7 @@ embodichain.lab.sim
    VisualMaterialInst
    ReuseSegmentState
    BatchEntity
+   UsdImportResult
    SimulationManager
    SimulationManagerCfg
    SIM_CACHE_DIR
@@ -3721,6 +3750,7 @@ embodichain.lab.sim.spawn.descriptors
    configure_articulation_desc
    rigid_desc_from_cfg
    visual_desc_from_cfg
+   cable_desc_from_cfg
    surface_deformable_desc_from_cfg
    volume_deformable_desc_from_cfg
 
@@ -3752,6 +3782,23 @@ embodichain.lab.sim.spawn.usd
    articulation_desc_from_usd
    rigid_desc_from_usd
    visual_desc_from_usd
+
+embodichain.lab.sim.spawn.usd_result
+-------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.spawn.usd_result
+
+USD import results retain stable source keys for declared facades and logical
+resource UIDs. A unique source keeps its prim path as its key. If one prim emits
+several resources, keys append ``#0``, ``#1``, and so on in parser order;
+``resource_source_paths`` maps each key back to its exact source prim path.
+The UID, type and source-path maps use the same keys, independently of namespace
+and runtime UID changes. Results share the manager's ``prepare()`` lifecycle and
+do not own another object registry or native-resource lifetime.
+
+.. autosummary::
+
+   UsdImportResult
 
 embodichain.lab.sim.utility.dynamic_pybind
 ----------------------------------------
@@ -4147,6 +4194,21 @@ embodichain.learning.rl.algo.apg
    complete_discounted_return
    segmented_discounted_return
 
+embodichain.learning.rl.algo.apg_actor_critic
+-------------------------------------------
+
+.. currentmodule:: embodichain.learning.rl.algo.apg_actor_critic
+
+Short differentiable trajectories use terminal values for actor optimization
+and detached lambda returns for critic regression. Actor and critic optimizers
+retain separate state in checkpoints.
+
+.. autosummary::
+
+   APGActorCritic
+   APGActorCriticCfg
+   differentiable_lambda_returns
+
 embodichain.learning.rl.algo.base
 ---------------------------------
 
@@ -4507,6 +4569,25 @@ embodichain_tasks.configs
 .. autosummary::
 
    get_config_path
+
+embodichain_tasks.locomotion.managers.actions
+----------------------------------------------
+
+The reference position action combines a policy output with the next motion
+frame using the task's per-joint reference weights, then applies encoder bias.
+
+.. automodule:: embodichain_tasks.locomotion.managers.actions
+   :members:
+
+embodichain_tasks.locomotion.tracking.g1_motion
+-----------------------------------------------
+
+The G1 motion task connects reference data and differentiable tracking
+calculations to the simulator Gym loop. It owns frame progress, history,
+reference-state resets and terminal snapshots before automatic row resets.
+
+.. automodule:: embodichain_tasks.locomotion.tracking.g1_motion
+   :members:
 
 embodichain_tasks.manipulation.push_cube
 ----------------------------------------

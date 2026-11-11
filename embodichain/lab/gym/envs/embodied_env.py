@@ -370,6 +370,40 @@ class EmbodiedEnvCfg(EnvCfg):
     """
 
 
+class _EpisodeMetadataRows(Sequence):
+    """Retain reset-time metadata, materializing row copies when recording uses them."""
+
+    def __init__(self, count: int, template: dict[str, Any]) -> None:
+        pending = (copy.deepcopy(template),)
+        self._rows = [pending] * count
+
+    def __len__(self) -> int:
+        return len(self._rows)
+
+    def __getitem__(self, index: int | slice) -> dict[str, Any] | list[dict[str, Any]]:
+        if isinstance(index, slice):
+            return [self[i] for i in range(*index.indices(len(self)))]
+        record = self._rows[index]
+        if isinstance(record, tuple):
+            record = copy.deepcopy(record[0])
+            episode_uuid = str(uuid4())
+            record.update(
+                env_id=index % len(self),
+                episode_uuid=episode_uuid,
+                source_episode_uuid=episode_uuid,
+            )
+            self._rows[index] = record
+        return record
+
+    def __setitem__(self, index: int, record: dict[str, Any]) -> None:
+        self._rows[index] = record
+
+    def reset_rows(self, ids: Sequence[int], template: dict[str, Any]) -> None:
+        pending = (copy.deepcopy(template),)
+        for index in ids:
+            self._rows[index] = pending
+
+
 @register_env("EmbodiedEnv-v1")
 class EmbodiedEnv(BaseEnv):
     """Embodied AI environment that is used to simulate the Embodied AI tasks.
@@ -485,7 +519,7 @@ class EmbodiedEnv(BaseEnv):
         self._record_raw_actions = self._explicit_policy_rollout
         self._last_action_manager_qpos: torch.Tensor | None = None
         self._last_action_trace: ActionTrace | None = None
-        self._expert_controller_qpos_history: list[list[torch.Tensor]] = []
+        self._expert_controller_qpos_history: list[list[torch.Tensor]] | None = None
 
         super().__init__(cfg, **kwargs)
 
@@ -563,10 +597,10 @@ class EmbodiedEnv(BaseEnv):
             self._traj_steps: torch.Tensor | None = None
             self._traj_raw_action: EnvAction | None = None
             self._trajectory_action_kind: str | None = None
-            self._raw_action_history: list[list[EnvAction]] = [
-                [] for _ in range(self.num_envs)
-            ]
-            self._expert_controller_qpos_history = [[] for _ in range(self.num_envs)]
+            # Recording methods allocate row histories on their first sample.
+            # Training resets then avoid downloading IDs to clear empty lists.
+            self._raw_action_history: list[list[EnvAction]] | None = None
+            self._expert_controller_qpos_history = None
             self._traj_save_count = 0
             self._traj_run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
             if self.cfg.record_trajectory:
@@ -626,9 +660,9 @@ class EmbodiedEnv(BaseEnv):
             self._demo_segment_participants = self._demo_active_mask.clone()
             self._demo_active_segment_start_steps = self._demo_steps.clone()
             self._demo_active_rollout_start_steps = self.rollout_steps.clone()
+            self._demo_metadata_initialized = False
             self._demo_episode_metadata: list[dict[str, Any]] = [
-                self._new_demo_episode_metadata(env_id)
-                for env_id in range(self.num_envs)
+                {} for _ in range(self.num_envs)
             ]
 
             self.episode_success_status: torch.Tensor = torch.zeros(
@@ -1512,12 +1546,12 @@ class EmbodiedEnv(BaseEnv):
         active_segment_ids = getattr(self, "_demo_active_segment_ids", None)
         if active_segment_ids is not None:
             demo_ids = env_ids_to_process.to(active_segment_ids.device)
-            active_segment_ids[demo_ids] = 0
-            self._demo_active_mask[demo_ids] = True
-            self._demo_segment_participants[demo_ids] = False
-            self._demo_active_segment_start_steps[demo_ids] = 0
-            self._demo_active_rollout_start_steps[demo_ids] = 0
-            self._demo_steps[demo_ids] = 0
+            active_segment_ids.index_fill_(0, demo_ids, 0)
+            self._demo_active_mask.index_fill_(0, demo_ids, True)
+            self._demo_segment_participants.index_fill_(0, demo_ids, False)
+            self._demo_active_segment_start_steps.index_fill_(0, demo_ids, 0)
+            self._demo_active_rollout_start_steps.index_fill_(0, demo_ids, 0)
+            self._demo_steps.index_fill_(0, demo_ids, 0)
 
         self.episode_success_status.index_fill_(0, env_ids_to_process, False)
 
@@ -1525,10 +1559,41 @@ class EmbodiedEnv(BaseEnv):
         self, env_ids: Sequence[int] | torch.Tensor | None = None, **kwargs: Any
     ) -> None:
         env_ids_to_process = self.episode_context._ids(env_ids)
+        # Keep one shared provenance snapshot per seed epoch, even without a
+        # recorder. Individual episode dictionaries and UUIDs stay lazy.
+        seed = getattr(self.cfg, "seed", None)
+        snapshot = getattr(self, "_demo_reset_provenance", None)
+        if snapshot is None or snapshot["seed"] != seed:
+            self._recording_provenance = build_recording_provenance(self)
+            snapshot = {"seed": seed, **self._recording_provenance}
+            self._demo_reset_provenance = snapshot
+        rows = getattr(self, "_demo_episode_provenance", None)
+        if rows is None:
+            rows = self._demo_episode_provenance = [snapshot] * self.num_envs
+        metadata_ids = env_ids_to_process.cpu().tolist()
+        for env_id in metadata_ids:
+            rows[env_id] = snapshot
         episode_metadata = getattr(self, "_demo_episode_metadata", None)
-        if episode_metadata is not None:
-            for env_id in env_ids_to_process.cpu().tolist():
-                episode_metadata[env_id] = self._new_demo_episode_metadata(env_id)
+        if not getattr(self, "_demo_metadata_initialized", True) and (
+            self.dataset_manager is not None
+            or getattr(self, "rollout_buffer", None) is not None
+            or getattr(self, "_traj_buffer", None) is not None
+        ):
+            episode_metadata = self._demo_episode_metadata = _EpisodeMetadataRows(
+                self.num_envs, self._new_demo_episode_metadata(0)
+            )
+            self._demo_metadata_initialized = True
+        if episode_metadata is not None and getattr(
+            self, "_demo_metadata_initialized", True
+        ):
+            if isinstance(episode_metadata, _EpisodeMetadataRows):
+                if metadata_ids:
+                    episode_metadata.reset_rows(
+                        metadata_ids, self._new_demo_episode_metadata(metadata_ids[0])
+                    )
+            else:
+                for env_id in metadata_ids:
+                    episode_metadata[env_id] = self._new_demo_episode_metadata(env_id)
         # Stateful managers reset selected rows before reset-mode events run.
         action_manager = getattr(self, "action_manager", None)
         if action_manager is not None:
@@ -1659,7 +1724,9 @@ class EmbodiedEnv(BaseEnv):
             "terminal_reason": "unknown",
             "segments": [],
         }
-        metadata.update(copy.deepcopy(self._recording_provenance))
+        rows = getattr(self, "_demo_episode_provenance", None)
+        provenance = rows[env_id] if rows is not None else self._recording_provenance
+        metadata.update(copy.deepcopy(provenance))
         expert_action_spec = getattr(self, "expert_action_spec", None)
         if expert_action_spec is not None:
             metadata.update(expert_action_spec.metadata(step_dt=self.step_dt))
@@ -1685,9 +1752,10 @@ class EmbodiedEnv(BaseEnv):
         self._demo_segment_participants.fill_(False)
         self._demo_active_segment_start_steps = self._demo_steps.clone()
         self._demo_active_rollout_start_steps = self.rollout_steps.clone()
-        self._demo_episode_metadata = [
-            self._new_demo_episode_metadata(env_id) for env_id in range(self.num_envs)
-        ]
+        self._demo_metadata_initialized = True
+        self._demo_episode_metadata = _EpisodeMetadataRows(
+            self.num_envs, self._new_demo_episode_metadata(0)
+        )
         bridge = getattr(self, "_active_task_program_bridge", None)
         program = getattr(bridge, "_program", None)
         if program is not None:
@@ -1867,6 +1935,11 @@ class EmbodiedEnv(BaseEnv):
         Returns:
             A JSON-compatible metadata dictionary.
         """
+        if "episode_uuid" not in self._demo_episode_metadata[env_id]:
+            metadata = EmbodiedEnv._new_demo_episode_metadata(self, env_id)
+            metadata.update(self._demo_episode_metadata[env_id])
+            self._demo_episode_metadata[env_id] = metadata
+        self._demo_metadata_initialized = True
         metadata = copy.deepcopy(self._demo_episode_metadata[env_id])
         metadata["episode_context"] = self.episode_context.snapshot([env_id])[0]
         metadata["segments"] = [
@@ -2679,7 +2752,8 @@ class EmbodiedEnv(BaseEnv):
         outcome = getattr(self, "termination_manager", None)
         if outcome is not None:
             info["task_outcome"] = outcome.snapshot()
-        info["episode_context"] = self.episode_context.snapshot()
+        if getattr(self.cfg, "episode_context_in_info", True):
+            info["episode_context"] = self.episode_context.snapshot()
         return info
 
     def check_truncated(self, obs: EnvObs, info: dict[str, Any]) -> torch.Tensor:
@@ -2806,7 +2880,10 @@ class EmbodiedEnv(BaseEnv):
                     if callable(processed_qpos)
                     else None
                 )
-            else:
+            elif self.dataset_manager is not None or (
+                getattr(self, "rollout_buffer", None) is not None
+                and getattr(self, "_rollout_buffer_mode", None) != "rl"
+            ):
                 processed_qpos = getattr(self.action_manager, "_processed_qpos", None)
                 try:
                     self._last_action_manager_qpos = (
@@ -3116,27 +3193,32 @@ class EmbodiedEnv(BaseEnv):
 
     def _setup_background(self) -> None:
         """Setup the static rigid objects in the environment."""
+
+        def validate_resolved(cfg: RigidObjectCfg) -> None:
+            if cfg.body_type == "dynamic":
+                logger.log_error(
+                    "Background object must be kinematic or static rigid object."
+                )
+
         for cfg in self.cfg.visual_object:
             self.sim.add_visual_object(cfg)
         for cfg in self.cfg.background:
-            if cfg.body_type == "dynamic":
-                logger.log_error(
-                    f"Background object must be kinematic or static rigid object."
-                )
-            self.sim.add_rigid_object(cfg=cfg)
+            self.sim.add_rigid_object(cfg=cfg, validate_resolved=validate_resolved)
 
     def _setup_interactive_objects(self) -> None:
         """Setup the interactive objects in the environment."""
+
+        def validate_resolved(cfg: RigidObjectCfg) -> None:
+            if cfg.body_type != "dynamic":
+                logger.log_error(
+                    "Interactive rigid object must be dynamic rigid object."
+                )
 
         for cfg in self.cfg.articulation:
             self.sim.add_articulation(cfg=cfg)
 
         for cfg in self.cfg.rigid_object:
-            if cfg.body_type != "dynamic":
-                logger.log_error(
-                    f"Interactive rigid object must be dynamic rigid object."
-                )
-            self.sim.add_rigid_object(cfg=cfg)
+            self.sim.add_rigid_object(cfg=cfg, validate_resolved=validate_resolved)
 
         for cfg in self.cfg.rigid_object_group:
             self.sim.add_rigid_object_group(cfg=cfg)
