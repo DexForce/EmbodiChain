@@ -41,6 +41,7 @@ from .articulation import (
 from .asset import AssetPhysicsMode, ObjectBaseCfg, _resolve_asset_physics_mode
 from .fluid import FluidObjectCfg, FluidSpawnCfg, FluidRenderCfg
 from .source import UsdSourceCfg
+from .usd import UsdImportCfg
 from .deformable import (
     SurfaceElementPropertiesCfg,
     VolumeDeformableMeshingCfg,
@@ -125,6 +126,7 @@ __all__ = [
     "RigidBodyPhysicsCfg",
     "ObjectBaseCfg",
     "UsdSourceCfg",
+    "UsdImportCfg",
     "LightCfg",
     "RigidObjectCfg",
     "VisualObjectCfg",
