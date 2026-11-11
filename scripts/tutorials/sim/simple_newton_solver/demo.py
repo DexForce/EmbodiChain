@@ -32,10 +32,50 @@ from embodichain.lab.sim.cfg import (
     RigidBodyPhysicsCfg,
 )
 from embodichain.lab.visualization import VisualizationCfg
-from embodichain.lab.sim.physics.solvers.simple import SimpleSolverProvider
+from solver import SimpleSolverProvider
 
 
-def run(device: str) -> dict[str, object]:
+def _save_preview(
+    positions: list[torch.Tensor], reset_position: torch.Tensor, path: Path
+) -> None:
+    """Plot the measured functional trajectory and selected-arena reset."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    values = torch.stack(positions).detach().cpu().numpy()
+    reset_values = reset_position.detach().cpu().numpy()
+    figure, axis = plt.subplots(figsize=(8, 4.5))
+    for arena_id, color in enumerate(("#2563eb", "#ea580c")):
+        axis.plot(
+            range(len(values)),
+            values[:, arena_id],
+            marker="o",
+            color=color,
+            label=f"arena_{arena_id}",
+        )
+        axis.plot(
+            (len(values) - 1, len(values)),
+            (values[-1, arena_id], reset_values[arena_id]),
+            linestyle="--",
+            marker="o",
+            color=color,
+        )
+    axis.set_xticks(range(len(values) + 1))
+    axis.set_xticklabels([*(str(step) for step in range(len(values))), "reset"])
+    axis.set_xlabel("Functional transition")
+    axis.set_ylabel("Joint position (m)")
+    axis.set_title("Spring-slider tutorial: rollout and selected-arena reset")
+    axis.grid(alpha=0.25)
+    axis.legend()
+    figure.tight_layout()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(path, dpi=160)
+    plt.close(figure)
+
+
+def run(device: str, preview_path: Path | None = None) -> dict[str, object]:
     """Demonstrate direct provider creation, parity, gradients and partial reset."""
     config = SimulationManagerCfg(
         headless=True,
@@ -86,10 +126,13 @@ def run(device: str) -> dict[str, object]:
         )
 
         trajectory = initial
+        positions = [initial.physical["joint_q"]]
         for _ in range(6):
             trajectory = scene.functional_step(trajectory, force, publish=False)
+            positions.append(trajectory.physical["joint_q"])
         saved = trajectory.physical["joint_q"].clone()
         published = scene.functional_step(trajectory, force, publish=True)
+        positions.append(published.physical["joint_q"])
         torch.testing.assert_close(
             slider.get_qpos().flatten(), published.physical["joint_q"]
         )
@@ -102,6 +145,8 @@ def run(device: str) -> dict[str, object]:
         torch.testing.assert_close(
             reset.physical["joint_q"][1], published.physical["joint_q"][1]
         )
+        if preview_path is not None:
+            _save_preview(positions, reset.physical["joint_q"], preview_path)
         loss = (
             trajectory.physical["joint_q"].square().sum()
             + reset.physical["joint_q"].square().sum()
@@ -115,7 +160,7 @@ def run(device: str) -> dict[str, object]:
         torch.testing.assert_close(
             slider.get_qpos()[0].flatten(), initial.physical["joint_q"][:1]
         )
-        return {
+        result = {
             "device": device,
             "native_functional_parity": True,
             "published_position": published.physical["joint_q"].detach().tolist(),
@@ -123,6 +168,9 @@ def run(device: str) -> dict[str, object]:
             "force_gradient": grad_force.tolist(),
             "force_scale_gradient": grad_scale.item(),
         }
+        if preview_path is not None:
+            result["preview_path"] = str(preview_path)
+        return result
     finally:
         sim.destroy(exit_process=False)
 
@@ -130,8 +178,11 @@ def run(device: str) -> dict[str, object]:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--device", default="cpu", help="cpu or cuda:0")
+    parser.add_argument(
+        "--preview-path", type=Path, help="save the rollout and reset plot as PNG"
+    )
     args = parser.parse_args()
     try:
-        print(json.dumps(run(args.device), indent=2))
+        print(json.dumps(run(args.device, args.preview_path), indent=2))
     finally:
         SimulationManager.flush_cleanup_queue()

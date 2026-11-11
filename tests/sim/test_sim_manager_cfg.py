@@ -44,25 +44,6 @@ def test_simulation_manager_cfg_uses_default_physics_cfg() -> None:
 
 
 @pytest.mark.no_sim
-def test_optional_solver_definition_is_inspectable_without_extension_sdk(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import importlib.util
-    import inspect
-
-    from dexsim.engine import newton_physics as sdk
-
-    source = importlib.util.find_spec("embodichain.lab.sim.physics.solvers.simple")
-    monkeypatch.delattr(sdk, "FunctionalDynamics", raising=False)
-    spec = importlib.util.spec_from_file_location("_simple_sdk_probe", source.origin)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    assert inspect.isclass(module.SimpleSolverProvider)
-    with pytest.raises(ImportError, match="FunctionalDynamics"):
-        module.SimpleSolverProvider()
-
-
-@pytest.mark.no_sim
 def test_newton_physics_cfg_owns_backend_device_default() -> None:
     """The concrete Newton default shadows the generic backend default."""
     assert PhysicsBackendCfg().device == "cpu"
@@ -559,6 +540,32 @@ def test_newton_physics_cfg_directly_accepts_dexsim_solver_cfg_object() -> None:
     assert isinstance(dexsim_cfg.solver_cfg, XPBDSolverCfg)
     assert dexsim_cfg.solver_cfg.iterations == 8
     assert dexsim_cfg.solver_cfg.enable_restitution is True
+
+
+@pytest.mark.no_sim
+def test_newton_physics_cfg_direct_provider_skips_name_discovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dexsim.engine import newton_physics
+
+    provider_cfg_type = getattr(newton_physics, "ProviderNewtonSolverCfg", None)
+    if provider_cfg_type is None:
+        pytest.skip("DexSim direct-provider configuration is unavailable")
+
+    def unexpected_discovery() -> None:
+        pytest.fail("A direct provider must not scan installed entry points")
+
+    monkeypatch.setattr(
+        "dexsim.engine.newton_physics.solver_extensions._entry_points",
+        unexpected_discovery,
+    )
+    provider_cfg = provider_cfg_type(provider_factory=lambda: object())
+
+    native = NewtonPhysicsCfg(solver_cfg=provider_cfg).to_dexsim_cfg(gpu_id=0)
+
+    assert isinstance(native.solver_cfg, provider_cfg_type)
+    assert native.solver_cfg.provider_factory is provider_cfg.provider_factory
+    assert native.solver_cfg.options == provider_cfg.options
 
 
 @pytest.mark.no_sim

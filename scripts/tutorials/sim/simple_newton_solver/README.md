@@ -1,9 +1,14 @@
-# Simple Newton solver
+# Tutorial: a custom Newton solver
 
-This example passes `SimpleSolverProvider` directly to DexSim, without requiring
-entry-point registration. It demonstrates an ordinary `SimulationManager.update()`,
+This directory owns the complete spring-slider example: `solver.py`, `demo.py`,
+and `slider.urdf`. The provider is tutorial code; it is not part of the
+`embodichain` package or its solver registry. `demo.py` passes the local
+`SimpleSolverProvider` directly to DexSim. It demonstrates `SimulationManager.update()`,
 independent differentiable rollout, parameter/input gradients, publication into
 the live Scene, and partial functional/native reset in two environments.
+
+The [narrative tutorial](../../../../docs/source/tutorial/simple_newton_solver.rst)
+walks through the configuration, shared transition, and expected output.
 
 ## Prerequisite
 
@@ -14,29 +19,32 @@ may lag these development APIs; selecting the provider reports an actionable
 error when the SDK is insufficient. The provider can still be inspected without
 activating the extension.
 
-The adapter is validated with DexSim `0.6.0+c3e92584`, Newton 1.7.0 and Warp
+The example was validated with DexSim `0.6.0+c3e92584`, Newton 1.7.0 and Warp
 1.17.0 in the conda `open` environment. Run this checkout against that environment
 without reinstalling its editable package or SDK:
 
 ```bash
 conda activate open
 export PYTHONPATH="$PWD:$PWD/extensions${PYTHONPATH:+:$PYTHONPATH}"
-python examples/simple_newton_solver/demo.py --device cpu
-python examples/simple_newton_solver/demo.py --device cuda:0
+python scripts/tutorials/sim/simple_newton_solver/demo.py --device cpu
+python scripts/tutorials/sim/simple_newton_solver/demo.py --device cuda:0
+python scripts/tutorials/sim/simple_newton_solver/demo.py --device cpu \
+    --preview-path simple_newton_solver_preview.png
 ```
 
 For a separate development installation, install the checkout with `--no-deps`
 and install a compatible DexSim wheel with its dependencies. The direct factory
 example requires no entry-point metadata refresh.
 
-The command runs
-headlessly and prints a JSON result with positions and nonzero gradients. It
-checks numerical equality and state isolation before reporting success.
+The command runs headlessly and prints a JSON result with positions and nonzero
+gradients. It checks numerical equality and state isolation before reporting
+success. The two slider positions after publication are about `0.02087 m` and
+`0.03131 m`; resetting the first arena leaves the second at `0.03131 m`.
+Pass `--preview-path` to save a PNG with the measured functional trajectory and
+the selected-arena reset. The plot is generated only when this option is used.
 
-For feature acceptance, first require the SDK capability, then run the provider
-tests. CI without the direct-provider SDK skips this optional test module; a skip
-is not validation of the solver. Name-based tests use isolated temporary package
-metadata, so running them does not require reinstalling the checkout:
+For local verification, first require the SDK capability, then run the tutorial
+on CPU or CUDA. The default package test suite does not exercise this example:
 
 ```bash
 python - <<'PY'
@@ -45,7 +53,7 @@ from dexsim.engine.newton_physics import ProviderNewtonSolverCfg
 from dexsim.scene import Scene
 assert callable(getattr(Scene, "dynamics_capabilities", None))
 PY
-python -m pytest tests/sim/physics/test_simple_solver.py -q --run-gpu
+python scripts/tutorials/sim/simple_newton_solver/demo.py --device cpu
 ```
 
 ## Dynamics and supported model
@@ -81,7 +89,7 @@ Python configuration passes the provider factory directly:
 ```python
 from dexsim.engine.newton_physics import ProviderNewtonSolverCfg
 from embodichain.lab.sim.cfg import NewtonPhysicsCfg
-from embodichain.lab.sim.physics.solvers.simple import SimpleSolverProvider
+from solver import SimpleSolverProvider  # local to this tutorial directory
 
 physics = NewtonPhysicsCfg(
     solver_cfg=ProviderNewtonSolverCfg(
@@ -92,14 +100,10 @@ physics = NewtonPhysicsCfg(
 ```
 
 Pass a class or zero-argument factory, not an already-created provider/solver.
-DexSim creates a fresh provider for every model build and applies the same
-validation and lifecycle as named providers. This path does not scan installed
-entry points.
-
-The package also keeps an optional `simple` entry point for data-based configs:
-`NewtonPhysicsCfg(solver_cfg={"solver_type": "simple", "stiffness": 2.0})`.
-Only that name-based path requires installed metadata; reinstall editable
-metadata after changing entry points. No global registration call is needed.
+DexSim creates a fresh provider for every model build. The direct factory path
+does not scan installed entry points. To try name-based registration in a
+separate project, package and register your own provider under
+`dexsim.newton_solvers`; this tutorial deliberately does not register one.
 `requires_grad=True` enables the functional path. After `sim.prepare()`, use
 the public `sim.spawn_result` Scene:
 

@@ -391,9 +391,8 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     contact modes and option combinations.
 
     Installed ``dexsim.newton_solvers`` entry-point names are also accepted by
-    DexSim builds with the named-extension API. For example,
-    ``{"solver_type": "simple", "stiffness": 2.0}`` selects the spring-slider
-    demonstration. Extension names are exact; options pass to their provider.
+    DexSim builds with the named-extension API. Extension names are exact;
+    options pass to their provider.
 
     Python callers can pass DexSim's ``ProviderNewtonSolverCfg`` with a
     ``provider_factory`` class or zero-argument factory and provider ``options``.

@@ -44,16 +44,10 @@ remain errors. Read exact solver options/defaults in `cfg/physics.py` and the
 installed DexSim config types; do not substitute a
 hardcoded fallback when an expected DexSim API is absent.
 
-`physics/solvers/simple.py` owns the optional spring-slider provider;
-`examples/simple_newton_solver/` demonstrates it through the public
-`SimulationManager.spawn_result` Scene. The installed SDK must include the
-direct-factory and service APIs. The example uses direct factory configuration;
-the `simple` entry point remains optional for name-based configurations.
-DexSim owns physical state, clocks and publication; the provider
-owns its model-scoped parameters and functional transition. Independent
-rollout uses `publish=False`; publishing advances the live clock once and must
-not be paired with a manager update for the same transition. Scene functional
-reset selects arena names, including the separate global `default` arena.
+The spring-slider provider lives only in
+`scripts/tutorials/sim/simple_newton_solver/`; see its
+[tutorial](../../../docs/source/tutorial/simple_newton_solver.rst) for functional
+Scene stepping. It is not a packaged solver or registered entry point.
 
 Articulation initialization also calls `reset(clear_dynamics=False)` without a
 later coordinated clear. Preserve its position hold targets and mimic target

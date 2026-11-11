@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""Small spring-slider solver demonstrating the DexSim extension contract."""
+"""Tutorial spring-slider solver demonstrating the DexSim extension contract."""
 
 from __future__ import annotations
 
