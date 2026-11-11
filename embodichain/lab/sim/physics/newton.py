@@ -333,12 +333,13 @@ class NewtonPhysicsBackend(PhysicsBackend):
 
     @property
     def supports_fluid_worlds(self) -> bool:
-        """Whether the loaded SPH artifact supports isolated worlds and reset."""
+        """Whether the prepared DexUni fluid supports isolated worlds and reset."""
         if not self.supports_dexuni_fluids:
             return False
-        from dexsim.engine.newton_physics.solver_runtime import ensure_solver_available
+        from dexsim.engine.newton_physics.backend_registry import get_newton_backend
 
-        solver = ensure_solver_available("sph")
+        backend = get_newton_backend(self._manager._world)
+        solver = getattr(backend, "sph_solver", None)
         return bool(
             getattr(solver, "supports_world_isolation", False)
             and getattr(solver, "supports_world_reset", False)

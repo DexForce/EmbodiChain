@@ -56,12 +56,7 @@ class TestFluidRuntime:
                 ensure_solver_available,
             )
 
-            solver = ensure_solver_available("sph")
-            if not (
-                getattr(solver, "supports_world_isolation", False)
-                and getattr(solver, "supports_world_reset", False)
-            ):
-                pytest.skip("This DexSim SPH build supports only a single world.")
+            ensure_solver_available("dexuni")
 
         def run_worlds(count: int, use_default: bool) -> dict:
             result_path = tmp_path / f"lifecycle-{count}-{use_default}.json"

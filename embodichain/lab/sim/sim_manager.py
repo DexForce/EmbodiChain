@@ -1951,6 +1951,14 @@ class SimulationManager:
         scene.prepare_runtime_config(result)
         self._prepare_spawn_runtime(result)
         scene.bind()
+        if (
+            self.num_envs > 1
+            and self._fluid_objects
+            and not self.physics.supports_fluid_worlds
+        ):
+            raise NotImplementedError(
+                "Batched DexUni fluids require world isolation and selected-world reset."
+            )
         for visual in getattr(self, "_visual_objects", {}).values():
             if visual.is_spawn_bound:
                 visual._sync_spawn_state()
@@ -3087,12 +3095,6 @@ class SimulationManager:
             )
         if getattr(self, "_deformable_objects", {}):
             raise NotImplementedError("DexUni fluids cannot coexist with deformables.")
-        if self.num_envs != 1 and not getattr(
-            self.physics, "supports_fluid_worlds", False
-        ):
-            raise NotImplementedError(
-                "Batch fluids require a DexSim SPH build with world isolation and selected-world reset."
-            )
         if self.spawn_result is not None:
             raise NotImplementedError("Declare fluids before prepare().")
         if not isinstance(cfg, FluidObjectCfg):

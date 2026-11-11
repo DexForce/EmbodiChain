@@ -16,9 +16,10 @@ DexSim derives the effective solver values from the fluid descriptors.
 
 Fluid simulation requires Newton CUDA, a DexSim build exposing
 `DexUniSolverCfg.sph_cfg`, no gradients and fixed particle topology.
-Multiple environments require a DexSim SPH solver that explicitly advertises
-both world isolation and selected-world reset; arena spacing alone does not
-establish isolation. The repository's pinned `dexsim_engine==0.6.0rc1` build
+Multiple environments require DexUni's prepared internal fluid solver to
+advertise both world isolation and selected-world reset; the check runs after
+scene preparation and before the first physical step. Arena spacing alone does
+not establish isolation. The repository's pinned `dexsim_engine==0.6.0rc1` build
 provides the DexUni/DFSPH composition and both multi-world capabilities.
 
 The current native DexUni/DFSPH implementation is a prototype: DFSPH follows
