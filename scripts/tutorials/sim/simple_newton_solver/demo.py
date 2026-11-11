@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from pathlib import Path
 
 import torch
@@ -31,7 +32,7 @@ from embodichain.lab.sim.cfg import (
     NewtonPhysicsCfg,
     RigidBodyPhysicsCfg,
 )
-from embodichain.lab.visualization import VisualizationCfg
+from embodichain.lab.visualization import VisualizationCfg, ViserServerCfg
 from solver import SimpleSolverProvider
 
 
@@ -75,11 +76,24 @@ def _save_preview(
     plt.close(figure)
 
 
-def run(device: str, preview_path: Path | None = None) -> dict[str, object]:
+def run(
+    device: str,
+    preview_path: Path | None = None,
+    *,
+    viser: bool = False,
+    viser_port: int = 8080,
+    viser_seconds: float = 30.0,
+) -> dict[str, object]:
     """Demonstrate direct provider creation, parity, gradients and partial reset."""
+    if viser_seconds < 0:
+        raise ValueError("viser_seconds must be non-negative")
     config = SimulationManagerCfg(
         headless=True,
-        visualization=VisualizationCfg(backend="none"),
+        visualization=VisualizationCfg(
+            backend="viser" if viser else "none",
+            env_ids=[0, 1],
+            viser_server=ViserServerCfg(port=viser_port),
+        ),
         num_envs=2,
         enable_entity_gizmo=False,
         startup_summary="off",
@@ -110,6 +124,11 @@ def run(device: str, preview_path: Path | None = None) -> dict[str, object]:
             )
         )
         sim.prepare()
+        if viser:
+            manifest = sim.refresh_visualization()
+            if not any(node.kind == "articulation_link" for node in manifest.nodes):
+                raise RuntimeError("Viser scene has no slider visual geometry")
+            sim.capture_visualization(force=True)
         scene = sim.spawn_result
         initial = scene.create_functional_state()
         params = scene.functional_parameters()
@@ -170,6 +189,22 @@ def run(device: str, preview_path: Path | None = None) -> dict[str, object]:
         }
         if preview_path is not None:
             result["preview_path"] = str(preview_path)
+        if viser:
+            # Replay in the live EmbodiChain scene so the browser shows motion,
+            # while the numerical and gradient checks above remain independent.
+            slider.reset()
+            slider.set_qf(force.detach().reshape(2, 1))
+            for _ in range(30):
+                sim.update(step=1)
+                sim.capture_visualization(force=True)
+                time.sleep(0.05)
+            result["viser_url"] = f"http://127.0.0.1:{viser_port}"
+            result["visualized_links"] = sum(
+                node.kind == "articulation_link" for node in manifest.nodes
+            )
+            result["visualized_position"] = slider.get_qpos().flatten().tolist()
+            print(f"Viser preview: {result['viser_url']}", flush=True)
+            time.sleep(viser_seconds)
         return result
     finally:
         sim.destroy(exit_process=False)
@@ -181,8 +216,29 @@ if __name__ == "__main__":
     parser.add_argument(
         "--preview-path", type=Path, help="save the rollout and reset plot as PNG"
     )
+    parser.add_argument(
+        "--viser", action="store_true", help="replay in EmbodiChain Viser"
+    )
+    parser.add_argument("--viser-port", type=int, default=8080)
+    parser.add_argument(
+        "--viser-seconds",
+        type=float,
+        default=30.0,
+        help="seconds to keep the browser scene open after replay",
+    )
     args = parser.parse_args()
     try:
-        print(json.dumps(run(args.device, args.preview_path), indent=2))
+        print(
+            json.dumps(
+                run(
+                    args.device,
+                    args.preview_path,
+                    viser=args.viser,
+                    viser_port=args.viser_port,
+                    viser_seconds=args.viser_seconds,
+                ),
+                indent=2,
+            )
+        )
     finally:
         SimulationManager.flush_cleanup_queue()

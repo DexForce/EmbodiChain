@@ -30,6 +30,8 @@ python scripts/tutorials/sim/simple_newton_solver/demo.py --device cpu
 python scripts/tutorials/sim/simple_newton_solver/demo.py --device cuda:0
 python scripts/tutorials/sim/simple_newton_solver/demo.py --device cpu \
     --preview-path simple_newton_solver_preview.png
+python scripts/tutorials/sim/simple_newton_solver/demo.py --device cpu \
+    --viser --viser-seconds 60
 ```
 
 For a separate development installation, install the checkout with `--no-deps`
@@ -42,6 +44,15 @@ success. The two slider positions after publication are about `0.02087 m` and
 `0.03131 m`; resetting the first arena leaves the second at `0.03131 m`.
 Pass `--preview-path` to save a PNG with the measured functional trajectory and
 the selected-arena reset. The plot is generated only when this option is used.
+
+Pass `--viser` to see the actual EmbodiChain scene at `http://127.0.0.1:8080`.
+The script exports both slider links, replays 30 native simulation steps, and
+keeps the browser scene open for 30 seconds by default. Use `--viser-seconds 60`
+to leave more time to inspect the result, or `--viser-port PORT` if 8080 is busy.
+The JSON includes the visible link count and final replay positions. Viser
+shows the URDF cube mesh; the `base` has no visual geometry. This mode uses the
+existing `VisualizationCfg` and `SimulationManager.capture_visualization()`
+without requiring a native render window.
 
 For local verification, first require the SDK capability, then run the tutorial
 on CPU or CUDA. The default package test suite does not exercise this example:

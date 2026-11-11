@@ -36,6 +36,21 @@ printing JSON. A successful CPU run reports approximately:
 The optional PNG plots the two slider trajectories. Its dashed final segment
 shows that resetting ``arena_0`` returns only the first slider to zero.
 
+To inspect the actual EmbodiChain scene in Viser, run:
+
+.. code-block:: bash
+
+   python scripts/tutorials/sim/simple_newton_solver/demo.py --device cpu \
+       --viser --viser-seconds 60
+
+Open ``http://127.0.0.1:8080`` while the script runs. Viser receives both URDF
+slider meshes, then shows 30 native simulation steps. The scene remains open
+for the requested number of seconds after replay. Use ``--viser-port PORT`` if
+8080 is in use. The ``base`` link has no visual geometry, so the visible objects
+are the two cubes. This browser view uses EmbodiChain's
+``SimulationManager.capture_visualization()`` and does not require a native
+render window.
+
 Follow the data flow
 --------------------
 
