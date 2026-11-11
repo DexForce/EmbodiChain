@@ -80,14 +80,14 @@ topics:
   - embodichain/lab/gym/envs/episode_context.py
   - embodichain/lab/gym/envs/expert_trajectory.py
   - embodichain/lab/gym/envs/_fluid_trajectory.py
-  - embodichain/lab/scripts/run_fluid_task_program.py
+  - embodichain/lab/gym/envs/_fluid_pour.py
   - embodichain/lab/gym/utils/trajectory_state.py
   - embodichain/lab/gym/envs/managers/observation_types.py
   - embodichain/lab/gym/envs/demo.py
   - embodichain/lab/gym/utils/profiler.py
   watch_paths: [embodichain/lab/gym/envs/managers/observation_types.py, embodichain/lab/gym/envs/episode_context.py, embodichain/lab/gym/envs/base_env.py, embodichain/lab/gym/envs/embodied_env.py, embodichain/lab/gym/envs/expert_trajectory.py,
     embodichain/lab/gym/envs/demo.py, embodichain/lab/gym/envs/_fluid_trajectory.py,
-    embodichain/lab/scripts/run_fluid_task_program.py, embodichain/lab/gym/utils/, embodichain/lab/gym/envs/task_program/, embodichain/cli/, embodichain/lab/scripts/run_task.py,
+    embodichain/lab/gym/envs/_fluid_pour.py, embodichain/lab/gym/utils/, embodichain/lab/gym/envs/task_program/, embodichain/cli/, embodichain/lab/scripts/run_task.py,
     extensions/embodichain_tasks/, tests/gym/envs/, embodichain/lab/gym/envs/objectives/,
     embodichain/lab/scripts/evaluate_task_objective.py, tests/lab/scripts/test_evaluate_task_objective.py]
   related_topics: [simulation-system, manager-functor, sim-visualization, task-programs, data-pipeline]

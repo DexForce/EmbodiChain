@@ -13,34 +13,26 @@
 
 ## 运行
 
-Gym Task Program 在线生成 `Pick → MoveHeldObject → Pour → Place` 动作，
-并记录实测流体与杯子状态：
+`run-task` 在线生成 `Pick → MoveHeldObject → Pour → Place` 动作，并按部署配置
+验收杯子运动与接水量：
 
 ```bash
-python -m embodichain.lab.scripts.run_fluid_task_program \
-  --num-envs 1 --renderer fast-rt --output outputs/fluid-task-program-online
+embodichain run-task \
+  --gym-config extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml \
+  --num-envs 1 --headless --renderer fast-rt
 ```
 
 任务的执行节奏由
 [`trajectory_open_loop_fluid_pour.yaml`](../../../../components/execution_policies/trajectory_open_loop_fluid_pour.yaml)
 配置。轨迹最少采样 80 点，任务级规划加速度预算为 1.5 rad/s²；规划器仍遵守
 机器人原有的关节速度上限。流体部署使用独立的加速夹爪组件，不改变普通 Newton
-部署的接触参数。程序的 `wait_stable` 负责放回后的稳定检查，在线运行器默认不再
-附加额外等待。
+部署的接触参数。程序的 `wait_stable` 负责放回后的稳定检查。
 
 倾倒和回正各至少运行 4 秒；`simulation.pour` 的 `rotation_duration` 在原规划轨迹
 较短时拉伸整段运动，不再用终点保持帧凑时长。它不改变抓杯与移杯的控制频率。
 
 流体专用的 `franka_panda_fast_fluid` 组件将仿真夹指最大驱动力设为 160，接触
 动摩擦系数设为 3.0，以在更高加速度下保持抓取；这组任务参数不代表实机标定。
-
-也可使用普通任务入口：
-
-```bash
-embodichain run-task \
-  --gym-config extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml \
-  --headless --renderer fast-rt
-```
 
 独立 Sim 示例从当前场景规划 Atomic Skill 目标，通过相同的 DexUni/DFSPH 物理场景
 执行并录制视频：
@@ -52,9 +44,9 @@ embodichain run-example sim/demo/franka_dexuni_pour_demo --headless --renderer f
 增加 `--num-envs 4` 可在同一个 World 中并行运行四个环境，分别输出
 `fluid_sim_env0.mp4` 至 `fluid_sim_env3.mp4`。
 
-默认粒子间距为 1.5 mm，初始填充 76,607 粒。Gym 的 `--particle-spacing 0.003`
-或 Sim 的 `--spacing 0.003` 可用于较快的物理检查，但会改变流体分辨率。
-`--seconds 2` 只运行起始片段，不代表完整任务验收。NoRender 仅用于物理检查。
+默认粒子间距为 1.5 mm，初始填充 76,607 粒。`run-task` 的
+`--particle-spacing 0.003` 或 Sim 的 `--spacing 0.003` 可用于较快的物理检查，
+但会改变流体分辨率。NoRender 仅用于物理检查。
 
 ## 求解与碰撞
 
@@ -80,17 +72,21 @@ Gym 的 `fluid_gym_result.json` 和 Sim 的 `validation.json` 分别记录任务
 杯子抬升、最大倾角、放回误差和接水量。完整验收要求实际抬升至少 5 cm、倾角
 至少 45°、放回误差不超过 3 cm，且最终接水至少 50 mL；规划成功或部分视频不能
 替代这些物理测量。使用 `--record-trajectory --record-fluid-state` 可在验收通过后
-保存完整粒子状态；每环境约需 1.28 GiB（76,607 粒、746 帧）。普通
+保存完整粒子状态；默认任务实测约 1.30 GiB/环境（76,607 粒、757 状态帧）。普通
 `ReplayWrapper` 的 `kinematic`/`control` 模式回填粒子，`dynamic` 模式只回填
 初始粒子状态，之后随录制控制动作重新求解流体。
 
 ```bash
-python -m embodichain.lab.scripts.run_fluid_task_program \
-  --num-envs 1 --record-trajectory --record-fluid-state \
-  --output outputs/fluid-task-program-online
+embodichain run-task \
+  --gym-config extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml \
+  --num-envs 1 --headless --renderer fast-rt \
+  --record-trajectory --record-fluid-state \
+  --trajectory-save-dir outputs/fluid-task-program-online
 embodichain run-task \
   --gym-config extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml \
   --num-envs 1 --replay \
-  --replay_trajectory outputs/fluid-task-program-online/online_trajectory.pt \
+  --replay_trajectory outputs/fluid-task-program-online/fluid_batch_000000_RUN_ID.pt \
   --replay_mode kinematic  # 或 dynamic
 ```
+
+将 `RUN_ID` 替换为录制命令输出的对应后缀。

@@ -1509,6 +1509,7 @@ def add_env_launcher_args_to_parser(
     )
     parser.add_argument(
         "--record_trajectory",
+        "--record-trajectory",
         help="Whether to record per-object kinematic trajectories (for replay). "
         "Episodes auto-save to --trajectory_save_dir (or "
         "~/.cache/embodichain_data/trajectories/<run_id>/ by default).",
@@ -1517,6 +1518,7 @@ def add_env_launcher_args_to_parser(
     )
     parser.add_argument(
         "--trajectory_save_dir",
+        "--trajectory-save-dir",
         help="Directory for auto-saved trajectories (default: "
         "~/.cache/embodichain_data/trajectories/<run_id>/).",
         default=None,

@@ -34,10 +34,11 @@ import imageio.v2 as imageio
 import numpy as np
 import torch
 
-from embodichain.lab.scripts.run_fluid_task_program import (
-    _configure,
-    _cup_qualification,
+from embodichain.lab.gym.envs._fluid_pour import (
+    configure_fluid_spacing,
+    cup_motion_qualification,
 )
+from embodichain.lab.gym.utils.gym_utils import config_to_cfg
 from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
     AxisAlignAffordance,
@@ -58,6 +59,7 @@ from embodichain.lab.sim.motion.motion_generator import MotionGenerator, MotionG
 from embodichain.lab.sim.motion.planners import ToppraPlannerCfg
 from embodichain.lab.sim.sensors import CameraCfg
 from embodichain.utils.config_paths import resolve_config_path
+from embodichain.utils.utility import load_config
 
 __all__ = ["main"]
 
@@ -109,13 +111,16 @@ def main() -> None:
         parser.error("seconds must be finite and positive")
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
-    _, cfg = _configure(
-        TASK,
-        num_envs=args.num_envs,
-        renderer=args.renderer,
-        output=output,
-        particle_spacing=args.spacing,
-    )
+    cfg = config_to_cfg(load_config(str(TASK)), source_path=TASK)
+    cfg.num_envs = args.num_envs
+    cfg.sim_cfg.headless = True
+    cfg.sim_cfg.render_cfg.renderer = args.renderer
+    cfg.enable_sensor = False
+    if args.renderer == "no-render":
+        cfg.events.record_camera = None
+        for fluid in cfg.fluid_object:
+            fluid.render.mode = "none"
+    configure_fluid_spacing(cfg, args.spacing)
     _use_dexuni(cfg, args)
     cfg.sim_cfg.num_envs = cfg.num_envs
     sim = SimulationManager(cfg.sim_cfg)
@@ -305,7 +310,12 @@ def main() -> None:
         report = {
             "coupling": "online one-way rigid-to-fluid",
             "controller": "fresh Atomic Action joint targets",
-            "cup": _cup_qualification(poses),
+            "cup": cup_motion_qualification(
+                poses,
+                min_lift_m=0.05,
+                min_tilt_deg=45.0,
+                max_return_error_m=0.03,
+            ),
             "num_envs": sim.num_envs,
             "particle_count_per_env": sim.get_fluid_object("water").num_particles,
             "control_dt": control_dt,

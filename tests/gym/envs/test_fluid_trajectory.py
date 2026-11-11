@@ -186,3 +186,26 @@ def test_selected_row_reset_restarts_only_its_particle_stream(tmp_path: Path):
         recorder.capture(env, [0], reset=True)
     assert manifest.is_file()
     recorder.abort()
+
+
+def test_partial_batch_publishes_only_selected_particle_rows(tmp_path: Path):
+    env = _env(2)
+    recorder = FluidTrajectoryRecorder(tmp_path, 2, 0.025, enabled_env_ids=[0])
+    recorder.capture(env, [0, 1], reset=True)
+    recorder.capture(env, [0, 1])
+    path = tmp_path / "trajectory.pt"
+    sidecar = recorder.finish(path, [1, 1], env_ids=[0])
+    recorder.commit()
+    assert len(sidecar["manifests"]) == len(sidecar["parent_ids"]) == 1
+    assert not (recorder.directory / "env_001").exists()
+    source = _source(1, 1)
+    source["meta"]["fluid_state"] = sidecar
+    target = _env(2)
+    reader = FluidTrajectoryReader(
+        path, source, SimpleNamespace(num_envs=2, fluid_object=target.cfg.fluid_object)
+    )
+    try:
+        reader.apply(target, torch.tensor([0, 1]))
+        assert target.fluid.written is not None
+    finally:
+        reader.close()

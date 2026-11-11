@@ -418,6 +418,103 @@ def test_generate_function_discards_retry_then_commits_once(monkeypatch) -> None
     assert env.reset_options == [{"save_data": False}, None]
 
 
+@pytest.mark.parametrize("accepted", [True, False])
+def test_fluid_qualification_gates_sidecar_commit(
+    monkeypatch, tmp_path, accepted: bool
+) -> None:
+    env = _ResetTrackingEnv()
+    diagnostic_videos = []
+    env.event_manager = SimpleNamespace(
+        cfg=SimpleNamespace(record_camera=object()),
+        get_functor=lambda _: SimpleNamespace(
+            save_and_clear=lambda **kwargs: diagnostic_videos.append(kwargs)
+        ),
+    )
+    monkeypatch.setattr(
+        run_task,
+        "execute_demo_episode",
+        lambda *args, **kwargs: _episode_result(success=True, reason="success"),
+    )
+    monkeypatch.setattr(
+        run_task,
+        "FluidPourQualification",
+        lambda *_: SimpleNamespace(
+            start=lambda: None,
+            after_step=lambda: None,
+            finish=lambda *_: {"accepted": accepted},
+        ),
+    )
+    saved = []
+    monkeypatch.setattr(
+        run_task,
+        "_save_qualified_fluid_trajectory",
+        lambda *args, **kwargs: saved.append((args, kwargs)),
+    )
+    generated = generate_function(
+        env,
+        max_attempts=1,
+        reset_before=False,
+        fluid_recorder=object(),
+        fluid_qualification={"kind": "fluid_pour"},
+        fluid_output_dir=tmp_path,
+    )
+    assert generated is accepted
+    assert len(saved) == int(accepted)
+    assert diagnostic_videos == (
+        [] if accepted else [{"env_ids": [0], "purpose": "diagnostic"}]
+    )
+    assert env.reset_options == ([None] if accepted else [{"save_data": False}])
+    assert (tmp_path / "fluid_gym_result.json").is_file()
+    assert (
+        json.loads((tmp_path / "fluid_gym_result.json").read_text())["accepted"]
+        is accepted
+    )
+
+
+def test_fluid_recording_requires_ordinary_trajectory(capsys) -> None:
+    with pytest.raises(SystemExit, match="2"):
+        run_task.cli(["--gym-config", "task.yaml", "--record-fluid-state"])
+    assert "requires --record_trajectory" in capsys.readouterr().err
+
+
+def test_fluid_batch_prepare_does_not_publish_initial_camera_frames(
+    monkeypatch, tmp_path
+) -> None:
+    env = _ResetTrackingEnv()
+    monkeypatch.setattr(run_task, "generate_function", lambda *args, **kwargs: True)
+    run_task.main(
+        SimpleNamespace(fluid_output_dir=str(tmp_path), record_trajectory=False),
+        env,
+        {"id": GYM_ID, "collection": {"qualification": {"kind": "fluid_pour"}}},
+    )
+    assert env.reset_options == [{"save_data": False}, {"save_data": False}]
+
+
+def test_qualified_fluid_sources_keep_distinct_run_artifacts(tmp_path) -> None:
+    paths = []
+    target = SimpleNamespace(
+        _traj_steps=torch.tensor([1]),
+        get_demo_episode_metadata=lambda row: {"program_hash": "program"},
+        save_trajectory=lambda path, **kwargs: paths.append((path, kwargs)),
+        _set_fluid_trajectory_recorder=lambda recorder: None,
+    )
+    for run in ("first", "second"):
+        recorder = SimpleNamespace(
+            directory=tmp_path / f"fluid-state-{run}",
+            finish=lambda path, lengths, env_ids: {"manifests": [run]},
+            commit=lambda: None,
+        )
+        run_task._save_qualified_fluid_trajectory(
+            target, recorder, tmp_path, [0], batch=0
+        )
+    assert paths[0][0] != paths[1][0]
+    assert all(
+        item[1]["extra_meta"]["fluid_qualification"]
+        == {"kind": "task_program", "accepted": True, "program_hash": "program"}
+        for item in paths
+    )
+
+
 def test_source_bound_recording_cannot_bypass_real2sim_receipt() -> None:
     env = _ResetTrackingEnv()
     env._task_program_adapter = SimpleNamespace(_configured_nominal_sources=(object(),))
@@ -484,7 +581,7 @@ def test_cli_selects_configured_real2sim_owner_and_explicit_profile_override(
     monkeypatch.setattr(real2sim_collection, "load_real2sim_tabletop_profile", load)
     monkeypatch.setattr(real2sim_collection, "install_real2sim_tabletop_owner", install)
     monkeypatch.setattr(run_task.gymnasium, "make", lambda **_: env)
-    monkeypatch.setattr(run_task, "main", lambda *args: None)
+    monkeypatch.setattr(run_task, "main", lambda *args, **kwargs: None)
     monkeypatch.setattr(run_task, "_abort_and_close_env", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         "embodichain.lab.sim.sim_manager.SimulationManager.flush_cleanup_queue",
