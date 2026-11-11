@@ -38,11 +38,11 @@ from .image_planning import (
 from .orchestration.workflow_artifacts import WorkflowRunArtifacts, write_run_json
 from .semantic_graph_html import render_semantic_task_graph_html
 
-__all__: list[str] = []
+__all__ = ["plan_image_task"]
 
 
 @service_entry
-def _plan_image_task(
+def plan_image_task(
     image_path: Path,
     instruction: str,
     output: Path,
@@ -73,6 +73,36 @@ def _plan_image_task(
                 overwrite=False,
             )
             raise
+        candidate_id = result["task_spec"]["metadata"]["candidate_id"]
+        from embodichain.gen_sim.task_spec.publication import (
+            project_expansion_requirements,
+            project_scene_requirements,
+            scene_agent_messages,
+        )
+
+        document = result["task_spec_v1"]
+        result["expansion_requirements"] = project_expansion_requirements(document)
+        result["scene_requirements"] = project_scene_requirements(document)
+        result["scene_agent_messages"] = scene_agent_messages(
+            result["scene_requirements"]
+        )
+        result["plan_coverage"] = {
+            "spec_digest": document["spec_digest"],
+            "graph_digest": result["semantic_graph_validation"]["graph_digest"],
+            "role_entities": {
+                role: sorted(
+                    {
+                        entity["id"]
+                        for row in document["interpretation"]["references"]
+                        if row["role_id"] == role
+                        for entity in row["entities"]
+                    }
+                )
+                for role in document["configuration"]["descriptions"]
+            },
+            "milestone_groups": result["task_spec"]["metadata"]["milestone_sources"],
+            "goal_groups": result["task_spec"]["metadata"]["goal_sources"],
+        }
         for name, value in result.items():
             write_run_json(artifacts.output_dir / f"{name}.json", value)
         source_copy = artifacts.output_dir / f"source_image{image_path.suffix.lower()}"
@@ -108,12 +138,47 @@ def _plan_image_task(
         )
         services.write_records(artifacts.output_dir / "service_calls.json")
         write_run_json(artifacts.output_dir / "run_manifest.json", summary)
+        inventory = {
+            path.relative_to(artifacts.output_dir)
+            .as_posix(): hashlib.sha256(path.read_bytes())
+            .hexdigest()
+            for path in sorted(artifacts.output_dir.rglob("*"))
+            if path.is_file() and path.name != "task_plan_manifest.json"
+        }
+        write_run_json(
+            artifacts.output_dir / "task_plan_manifest.json",
+            {
+                "schema_version": "embodichain.task-plan-artifact/v2",
+                "spec_digest": document["spec_digest"],
+                "spec_path": "task_spec_v1.json",
+                "graph_path": "semantic_task_graph.json",
+                "task_semantic_hash": document["task_semantic_hash"],
+                "generalization_hash": document["generalization_hash"],
+                "task_id": task_id,
+                "candidate_id": candidate_id,
+                "instruction": instruction,
+                "image_sha256": summary["image_sha256"],
+                "semantic_graph_sha256": result["semantic_graph_validation"][
+                    "graph_digest"
+                ],
+                "task_spec_sha256": result["semantic_graph_validation"][
+                    "task_spec_digest"
+                ],
+                "semantic_status": summary["semantic_status"],
+                "visual_status": summary["visual_status"],
+                "execution_ready": False,
+                "artifacts": inventory,
+            },
+        )
         artifacts.commit()
     print(f"Semantic graph: {artifacts.output_dir / 'semantic_task_graph.json'}")
     print(f"Offline viewer: {artifacts.output_dir / 'semantic_task_graph.html'}")
     print("Stage: semantic_graph; runtime integration unbound; simulation not run.")
 
     return artifacts.output_dir
+
+
+_plan_image_task = plan_image_task
 
 
 def _image_preview(

@@ -235,6 +235,11 @@ def _execute_batch(
             )
             episode["accepted"] = result.accepted
             episode["validation"] = result.to_metadata()
+            episode["capture_step"] = (
+                None
+                if result.execution is None
+                else result.execution.to_metadata()["length"]
+            )
             target._demo_episode_metadata[0]["primitive_variation"] = {
                 "task_id": config["id"],
                 "seed": seed,

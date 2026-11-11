@@ -64,6 +64,10 @@ _DOMAINS = {
         ),
     },
     "task": {
+        "revise": (
+            "embodichain.gen_sim.task_engine.cli:_revise",
+            "Validate and publish a graph revision against a frozen TaskSpec.",
+        ),
         "plan": (
             "embodichain.gen_sim.task_engine.cli:main",
             "Plan image-grounded Semantic Calls without simulation.",

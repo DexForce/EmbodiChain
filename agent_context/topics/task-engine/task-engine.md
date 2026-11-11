@@ -1,5 +1,10 @@
 # Task Engine semantic contracts
 
+`gensim task revise` validates a planner proposal against the frozen v1
+document and grounding in a published plan. The caller identifies both
+expected revisions and supplies a new output directory. The revised graph and
+its coverage report share the original document and scene requirements.
+
 `embodichain.gen_sim.task_engine` owns instruction understanding, candidate
 contracts, TaskSpec generation, canonical Semantic Call graphs and declaration
 coverage. Importing its front end does not initialize Lab or a simulator.

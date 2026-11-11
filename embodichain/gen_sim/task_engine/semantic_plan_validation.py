@@ -70,6 +70,17 @@ def semantic_plan_rules() -> dict[str, Any]:
     }
 
 
+def _validate_clause_coverage(
+    document: dict[str, Any], requirements: list[dict[str, Any]]
+) -> None:
+    """Require graph authors to account for each frozen explicit task qualifier."""
+    for clause in document["interpretation"]["clauses"]:
+        if clause["origin"] == "explicit" and not any(
+            clause["quote"] in requirement["quote"] for requirement in requirements
+        ):
+            raise ValueError(f"Graph omits instruction qualifier {clause['id']!r}")
+
+
 def validate_semantic_plan(
     graph: dict[str, Any],
     candidate: dict[str, Any],
@@ -95,11 +106,26 @@ def validate_semantic_plan(
             request; these suggestions never change the input or establish
             validity without a complete subsequent validation.
     """
-    graph = validate_semantic_task_graph(graph)
     candidate = validate_task_candidate(candidate)
+    return _validate_interpreted_plan(
+        graph,
+        candidate["draft"],
+        candidate["scene_request"]["references"],
+        grounding,
+        annotations,
+        requirements,
+        bindings,
+    )
+
+
+def _validate_interpreted_plan(
+    graph, draft, references, grounding, annotations, requirements, bindings
+):
+    """Check an executable witness against resolved source intent."""
+    graph = validate_semantic_task_graph(graph)
     if (
-        graph["task_id"] != candidate["draft"]["task_id"]
-        or graph["instruction"] != candidate["draft"]["instruction"]
+        graph["task_id"] != draft["task_id"]
+        or graph["instruction"] != draft["instruction"]
     ):
         raise ValueError("Plan source identity mismatch")
     for entity in grounding["objects"]:
@@ -128,7 +154,7 @@ def validate_semantic_plan(
                 raise ValueError("Invalid normalized image evidence")
         elif box is not None:
             raise ValueError("Unobserved entities cannot have boxes")
-    steps = {s["id"]: s for s in candidate["draft"]["steps"]}
+    steps = {s["id"]: s for s in draft["steps"]}
     nodes = {n["id"]: n for n in graph["nodes"]}
     entities = {o["id"] for o in grounding["objects"]}
     entity_by_id = {o["id"]: o for o in grounding["objects"]}
@@ -159,9 +185,7 @@ def validate_semantic_plan(
             raise ValueError("Invalid semantic annotation: intent must be a dictionary")
     if set(g["id"] for g in graph["task_groups"]) != set(steps):
         raise ValueError("Graph must retain every source step")
-    _validate_reference_identity(
-        grounding["bindings"], candidate["scene_request"]["references"]
-    )
+    _validate_reference_identity(grounding["bindings"], references)
     expected_refs = {
         f"{step['id']}.{role}"
         for step in steps.values()

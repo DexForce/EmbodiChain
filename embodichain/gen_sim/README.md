@@ -33,6 +33,15 @@ Model implementations and serving frameworks remain operator-selected; see the
 [deployment and BYOS guide](services/DEPLOYMENT.md) and the versioned
 [HTTP protocol](services/spec/v1/README.md).
 
+External whole-scene generators use the independent
+`embodichain.gensim_scene_providers` contract. Public operations in
+`embodichain.gen_sim.workflow` publish a Task Plan and scene requirements, retain
+durable provider job identities, validate a provider-neutral generated scene,
+publish a structured qualification report, and prepare an execution-ready
+deployment. The default remains the in-package Scene Engine; an external provider
+must be selected explicitly and never silently falls back. Simulation execution
+continues through the ordinary task runner.
+
 ## Generate, bind and execute
 
 For a self-contained input fixture, see the
@@ -86,6 +95,25 @@ than selecting a substitute or claiming execution readiness. Model grounding
 never creates capabilities, rewrites control-part names or chooses physics.
 
 ## Outputs and verdicts
+
+The v2 task-plan manifest publishes `task_spec_v1.json` and the selected
+semantic graph. The v0.1 normative source remains available as `task_spec.json`.
+Use `load_task_plan` to verify the publication. Scene providers receive
+`scene_requirements.json`; an agent provider can consume the associated
+`scene_agent_messages.json`. Expansion clients read `expansion_requirements.json`
+or project a frozen document against supported dimensions in Python.
+
+To revise graph calls against a published spec and its original grounding:
+
+```bash
+embodichain gensim task revise --parent outputs/task --proposal proposed_nodes.json \
+  --expected-spec-digest "$SPEC_DIGEST" --expected-graph-digest "$GRAPH_DIGEST" \
+  --output outputs/task-revision-2
+```
+
+The proposal uses the semantic planner response fields `nodes` and
+`requirements`. Each accepted revision publishes a new immutable plan
+directory and records the parent manifest digest.
 
 A new run directory contains:
 

@@ -1,5 +1,12 @@
 # Task specification
 
+Image task plans publish the authoring document in `task_spec_v1.json` and
+retain the normative v0.1 source for evidence bindings and replay. The v2
+plan manifest pins the graph and document independently. Scene projections
+distinguish initial predicates from achievable goals. Expansion projections
+distinguish permission to vary from required coverage. Neither projection
+supplies an observed outcome.
+
 `embodichain.gen_sim.task_spec` owns a simulator-independent normative task
 contract, evidence evaluation and a content-addressed cache. Core protocol/cache
 and evidence cold imports use only the standard library. Physical proof rechecks

@@ -204,13 +204,13 @@ def source_image(tmp_path):
     return image
 
 
-def _plan(image, task_type="E1", mutate=None):
+def _plan(image, task_type="E1", mutate=None, instruction="执行测试任务"):
     step, grounding, plan = _fixture(task_type)
     if mutate:
         mutate(step, grounding, plan)
     return generate_semantic_task_graph_from_image(
         image,
-        "执行测试任务",
+        instruction,
         task_id="case",
         instruction_caller=lambda **_: dict(steps=[step]),
         image_caller=lambda **_: json.dumps(grounding),
@@ -231,6 +231,132 @@ def test_all_task_families_plan_using_real_catalog_without_simulation(
     assert result["binding_requirements"]
     assert result["image_grounding"]["objects"][0]["bbox"] == [0.1, 0.2, 0.3, 0.5]
     assert source_image.read_bytes() == before
+
+
+def test_variation_permission_and_coverage_have_independent_identities(source_image):
+    from embodichain.gen_sim.task_spec.publication import (
+        project_expansion_requirements,
+        project_scene_requirements,
+    )
+
+    def document(mode):
+        def variation(step, grounding, plan):
+            grounding["generalization"] = [
+                dict(
+                    domain="background",
+                    scope="visual",
+                    dimension="kitchen_background",
+                    mode=mode,
+                    quote="执行测试任务",
+                )
+            ]
+
+        return _plan(source_image, mutate=variation)["task_spec_v1"]
+
+    permitted, required = document("allow"), document("cover")
+    assert permitted["task_semantic_hash"] == required["task_semantic_hash"]
+    assert permitted["generalization_hash"] != required["generalization_hash"]
+    assert not project_expansion_requirements(permitted, set())["required_coverage"]
+    assert (
+        project_expansion_requirements(required, set())["unsupported"]
+        == required["generalization"]
+    )
+    scene = project_scene_requirements(required)
+    assert scene["initial_conditions"] == []
+    assert any(p.get("relation") == "inside" for p in scene["achievable_goals"])
+    required["configuration"]["roles"].clear()
+    with pytest.raises(ValueError, match="identity"):
+        project_scene_requirements(required)
+
+
+def test_task_document_requires_fresh_observations_for_each_attempt(source_image):
+    from embodichain.gen_sim.task_spec.publication import evaluate_attempt_observations
+
+    document = _plan(source_image)["task_spec_v1"]
+    identity = dict(
+        run_id="run",
+        attempt_id="one",
+        spec_digest=document["spec_digest"],
+        scene_digest="1" * 64,
+        program_digest="2" * 64,
+        bundle_digest="3" * 64,
+    )
+    capture = dict(identity=identity, step=7, observations={})
+    assert (
+        evaluate_attempt_observations(document, identity, capture)["status"]
+        == "unavailable"
+    )
+    with pytest.raises(ValueError, match="Stale"):
+        evaluate_attempt_observations(
+            document, {**identity, "attempt_id": "two"}, capture
+        )
+
+
+def test_ambiguous_goal_blocks_freeze_before_planning(source_image):
+    def ambiguous(step, grounding, plan):
+        grounding["clauses"] = [
+            dict(
+                id="meaning",
+                quote="执行测试任务",
+                target="goal_001",
+                origin="explicit",
+                resolution="ambiguous_goal",
+            )
+        ]
+
+    with pytest.raises(ValueError, match="instruction obligation"):
+        _plan(source_image, mutate=ambiguous)
+
+
+def test_graph_must_account_for_explicit_qualifier(source_image):
+    def omit(step, grounding, plan):
+        grounding["clauses"] = [
+            dict(
+                id="qualifier",
+                quote="测试",
+                target="role_001",
+                origin="explicit",
+                resolution="resolved",
+            )
+        ]
+        plan["requirements"][0]["quote"] = "执行"
+
+    with pytest.raises(ValueError, match="omits instruction qualifier"):
+        _plan(source_image, mutate=omit)
+
+
+def test_explicit_role_properties_survive_standalone_scene_projection(source_image):
+    from embodichain.gen_sim.task_spec.publication import (
+        decode_task_document,
+        project_scene_requirements,
+    )
+
+    def constrain(step, grounding, plan):
+        grounding["role_properties"] = {"role_001": {"color": "red"}}
+        grounding["clauses"] = [
+            dict(
+                id="red",
+                target="role_001",
+                quote="红色",
+                origin="explicit",
+                resolution="resolved",
+            )
+        ]
+        plan["requirements"][0]["quote"] = "执行测试任务，物体必须是红色"
+
+    doc = _plan(
+        source_image, mutate=constrain, instruction="执行测试任务，物体必须是红色"
+    )["task_spec_v1"]
+    assert (
+        doc["task_semantic_hash"]
+        != _plan(source_image)["task_spec_v1"]["task_semantic_hash"]
+    )
+    roles = project_scene_requirements(decode_task_document(doc))["configuration"][
+        "roles"
+    ]
+    assert (
+        next(r for r in roles if r["id"] == "role_001")["properties"]["color"] == "red"
+    )
 
 
 def test_hidden_objects_have_no_invented_image_boxes(source_image):
@@ -372,6 +498,40 @@ def test_preview_and_existing_output_remain_read_only(
     assert (output / "semantic_task_graph.html").read_text() == html
     manifest = json.loads((output / "run_manifest.json").read_text())
     assert manifest["execution_ready"] is False and manifest["pending_bindings"] > 0
+    from embodichain.gen_sim.workflow import load_task_plan
+
+    plan = load_task_plan(output)
+    assert plan["schema_version"] == "embodichain.task-plan-artifact/v2"
+    assert plan["scene_requirements"]["schema_version"] == (
+        "embodichain.scene-requirements/v2"
+    )
+    assert plan["scene_requirements"]["image_sha256"] == manifest["image_sha256"]
+    from embodichain.gen_sim.workflow import revise_task_plan
+
+    proposal = _fixture()[2]
+    proposal["nodes"][-1]["id"] = "revised_place"
+    proposal["requirements"][0]["node_ids"][-1] = "revised_place"
+    target = tmp_path / "revised"
+    with pytest.raises(ValueError, match="Stale"):
+        revise_task_plan(
+            output,
+            proposal,
+            target,
+            expected_spec_digest=plan["spec_digest"],
+            expected_graph_digest="0" * 64,
+        )
+    assert not target.exists()
+    revise_task_plan(
+        output,
+        proposal,
+        target,
+        expected_spec_digest=plan["spec_digest"],
+        expected_graph_digest=plan["semantic_graph_sha256"],
+    )
+    revision = load_task_plan(target)
+    assert revision["semantic_graph_sha256"] != plan["semantic_graph_sha256"]
+    assert revision["spec_digest"] == plan["spec_digest"]
+    assert revision["scene_requirements"] == plan["scene_requirements"]
 
 
 def test_ambiguous_reference_preserves_observed_candidates(source_image):

@@ -1007,6 +1007,36 @@ with zero candidates; interrupted writes may leave a run without that manifest.
 
    save_layouts
 
+embodichain.gen_sim.scene_providers
+-----------------------------------
+
+Provider-neutral, durable references for scene generation jobs. A selected
+installed adapter owns transport and provider lifecycle; these contracts do not
+import a model runtime or simulator.
+
+.. currentmodule:: embodichain.gen_sim.scene_providers
+
+.. autosummary::
+
+   CancellationReport
+   SceneGenerationProvider
+   SceneGenerationRequest
+   SceneJobRef
+   SceneJobStatus
+   load_scene_generation_provider
+
+.. autoclass:: CancellationReport
+
+.. autoclass:: SceneGenerationProvider
+
+.. autoclass:: SceneGenerationRequest
+
+.. autoclass:: SceneJobRef
+
+.. autoclass:: SceneJobStatus
+
+.. autofunction:: load_scene_generation_provider
+
 embodichain.gen_sim.services
 ----------------------------
 
@@ -1111,6 +1141,51 @@ semantic and physical validation remain with the consuming owners.
 .. autoclass:: ServiceResponseError
 
 .. autoclass:: SubmissionUnknown
+
+embodichain.gen_sim.workflow
+----------------------------
+
+Artifact-based Task Engine planning, external scene-job control, structured
+scene qualification and deterministic deployment preparation. Simulation
+execution remains with the ordinary task runner.
+
+.. currentmodule:: embodichain.gen_sim.workflow
+
+.. autosummary::
+
+   cancel_scene_generation
+   inspect_scene_generation
+   load_generated_scene
+   load_task_plan
+   materialize_scene_generation
+   plan_image_task
+   prepare_task_deployment
+   qualify_task_scene
+   resume_scene_generation
+   revise_task_plan
+   submit_scene_generation
+
+.. autofunction:: cancel_scene_generation
+
+.. autofunction:: inspect_scene_generation
+
+.. autofunction:: load_generated_scene
+
+.. autofunction:: load_task_plan
+
+.. autofunction:: materialize_scene_generation
+
+.. autofunction:: plan_image_task
+
+.. autofunction:: prepare_task_deployment
+
+.. autofunction:: qualify_task_scene
+
+.. autofunction:: resume_scene_generation
+
+.. autofunction:: revise_task_plan
+
+.. autofunction:: submit_scene_generation
 
 embodichain.gen_sim.task_engine.evidence
 ----------------------------------------
@@ -1425,6 +1500,36 @@ normalization are standard-library-only.
 
 .. autofunction:: evaluate_pour_evidence
 
+
+embodichain.gen_sim.task_spec.publication
+-----------------------------------------
+
+Publish a task with independent episode and generalization identities. Scene
+providers consume the initial conditions and achievable goals, while expansion
+consumers check requested coverage against their available dimensions.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.publication
+
+.. autosummary::
+
+   freeze_task_spec
+   decode_task_document
+   project_scene_requirements
+   project_expansion_requirements
+   scene_agent_messages
+   evaluate_attempt_observations
+
+.. autofunction:: freeze_task_spec
+
+.. autofunction:: decode_task_document
+
+.. autofunction:: project_scene_requirements
+
+.. autofunction:: project_expansion_requirements
+
+.. autofunction:: scene_agent_messages
+
+.. autofunction:: evaluate_attempt_observations
 
 embodichain.gen_sim.task_spec.registry
 --------------------------------------

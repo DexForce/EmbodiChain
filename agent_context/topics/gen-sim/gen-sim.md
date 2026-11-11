@@ -12,6 +12,8 @@ Paths below are relative to `embodichain/gen_sim/` unless qualified.
 | Request | Owner |
 |---|---|
 | Model service configuration, adapters and ownership | `services/`; [service guide](../../../embodichain/gen_sim/services/README.md) |
+| External scene-provider lifecycle | `scene_providers.py`: request/job/cancellation contracts and selected entry-point loading |
+| Public staged workflow | `workflow.py`: Task Plan loading, provider job operations, generated-scene validation, qualification and deterministic deployment preparation |
 | Unified command dispatch | `embodichain/cli/gensim.py`: `gensim asset ingest`, `scene generate/edit/expand/preview`, `task plan`, `run`, `ui`; legacy top-level commands remain in `embodichain/cli/main.py` |
 | Image to native execution | `_workflow.py`, `_run_config.py`, `_run_binding.py`, `_run_execution.py`; [command and run guide](../../../embodichain/gen_sim/README.md) |
 | Generate/edit CLI modes | `scene_engine/cli/start.py` |
@@ -49,6 +51,16 @@ plugins are not imported. `gensim services validate` resolves profiles and
 constructs adapters without provider requests, while `services doctor` also
 initializes selected roles and runs their available health checks. The versioned
 wire protocol remains model, port and deployment-framework independent.
+
+Full scene providers are separate from model-service roles. The selected
+`embodichain.gensim_scene_providers` adapter owns its external job transport and
+materialization, while GenSim owns task requirements, qualification and deployment
+validity. Task plans, generated scenes, qualification reports and prepared
+deployments use separate immutable manifests. Expected scene incompatibility is a
+structured qualification result; artifact corruption and transport failure remain
+errors. These operations reserve the durable identity and feedback boundary needed
+by a later bounded agent loop, but do not implement an agent runtime, MCP transport
+or automatic retry loop.
 
 Owned transports close when the run exits; explicit legacy clients and supplied
 service runs remain caller-owned. Chat requests own their stateless transport.
