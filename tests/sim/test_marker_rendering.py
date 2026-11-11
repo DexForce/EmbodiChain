@@ -149,18 +149,23 @@ def _exercise_repeated_marker_lifecycle(sim):
         arena = None
 
 
-def test_marker_group_native_rendering_and_sensor_isolation():
+@pytest.mark.parametrize("window", [False, True])
+def test_marker_group_native_rendering_and_sensor_isolation(window: bool) -> None:
     _require_render_actor_capability()
     sim = SimulationManager(
         SimulationManagerCfg(
             headless=True,
             sim_device="cpu",
+            width=320,
+            height=240,
             enable_entity_gizmo=False,
             render_cfg=RenderCfg(renderer="hybrid"),
             startup_summary="off",
         )
     )
     try:
+        if window:
+            assert sim.open_window()
         _exercise_marker_rendering(sim)
     finally:
         sim.destroy(exit_process=False)
@@ -183,8 +188,12 @@ def _exercise_marker_rendering(sim):
     sim.prepare()
 
     def render():
-        sim.sync_render_state()
-        camera.render()
+        if sim.is_window_opened:
+            with sim.render_frame():
+                sim.render_camera_group([camera_group.get_group_id()])
+        else:
+            sim.sync_render_state()
+            camera.render()
         return np.array(camera.get_rgb_map()[..., :3], copy=True)
 
     baseline = render()

@@ -85,6 +85,10 @@ physics, interval events or reset writes. An open native window, nonempty camera
 groups, due simulation-time recording and due Viser captures share one state
 publication in that phase. Empty camera groups alone are not consumers; an open
 window remains a consumer even with `NewtonPhysicsCfg.sync_to_renderer=False`.
+Window publication stages transforms and marker updates without waiting for
+native render completion. Camera reads and due captures complete those uploads
+before consumption, sharing one completion wait within the frame. Explicit
+`sync_render_state()` always publishes and waits for native completion.
 Viser decides whether a frame is due before invoking its publication callback.
 
 `update()` renders after each substep by default. Gym uses
