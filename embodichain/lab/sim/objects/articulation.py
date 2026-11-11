@@ -79,6 +79,7 @@ from embodichain.lab.sim.objects.backends.articulation_topology import (
 )
 from embodichain.lab.sim.objects.backends._kinematics import _build_pk_chain
 from embodichain.lab.sim.objects.backends.articulation_state import (
+    _project_mimic_positions,
     get_state_joint_names,
     map_source_qpos_to_state_order,
     read_state_mimic_info,
@@ -97,6 +98,7 @@ from embodichain.lab.sim.objects.backends.base import ArticulationViewBase
 from embodichain.lab.sim.objects.backends.newton import (
     _configure_newton_mimic_compliance,
     _stabilize_newton_mimic_target_write,
+    _supports_newton_position_targets,
 )
 from embodichain.utils.math import (
     matrix_from_euler,
@@ -1103,22 +1105,13 @@ class Articulation(BatchEntity):
         """Return qpos with every mimic child projected from its parent."""
         if not self.mimic_ids:
             return qpos
-
-        projected = qpos.clone()
-        mimic_ids = torch.as_tensor(
-            self.mimic_ids, dtype=torch.long, device=qpos.device
+        return _project_mimic_positions(
+            qpos,
+            self.mimic_ids,
+            self.mimic_parents,
+            self.mimic_multipliers,
+            self.mimic_offsets,
         )
-        parent_ids = torch.as_tensor(
-            self.mimic_parents, dtype=torch.long, device=qpos.device
-        )
-        multipliers = torch.as_tensor(
-            self.mimic_multipliers, dtype=qpos.dtype, device=qpos.device
-        )
-        offsets = torch.as_tensor(
-            self.mimic_offsets, dtype=qpos.dtype, device=qpos.device
-        )
-        projected[..., mimic_ids] = projected[..., parent_ids] * multipliers + offsets
-        return projected
 
     def _stabilize_newton_mimic_target_write(
         self,
@@ -2828,6 +2821,11 @@ class Articulation(BatchEntity):
         num_instances = len(local_env_ids)
         self.cfg: ArticulationCfg
 
+        write_hold_targets = (
+            not self.body_data.is_newton_backend
+            or _supports_newton_position_targets(self._spawn_result)
+        )
+
         self.restore_visual_material(env_ids=local_env_ids)
         self._restore_default_physical_properties(local_env_ids)
 
@@ -2876,8 +2874,11 @@ class Articulation(BatchEntity):
             # impulse when initialized away from their equality manifold.
             qpos = self._project_mimic_qpos(qpos)
         self.set_qpos(qpos, target=False, env_ids=local_env_ids)
-        # Set drive target to hold position.
-        self.set_qpos(qpos, target=True, env_ids=local_env_ids)
+        # Initialization uses clear_dynamics=False with no subsequent clear.
+        # Keep hold targets and mimic propagation for position-capable solvers;
+        # effort-only solvers use native reset bookkeeping without a command.
+        if write_hold_targets:
+            self.set_qpos(qpos, target=True, env_ids=local_env_ids)
 
         if clear_dynamics:
             self.clear_dynamics(env_ids=local_env_ids)

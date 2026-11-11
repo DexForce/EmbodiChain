@@ -27,6 +27,7 @@ import pytest
 import torch
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
+    CableObjectCfg,
     FluidObjectCfg,
     FluidSpawnCfg,
     FluidRenderCfg,
@@ -152,6 +153,15 @@ def _run_fluid_lifecycle(num_envs: int, automatic: bool) -> dict[str, object]:
                 render=FluidRenderCfg(mode="none"),
             )
         )
+        with pytest.raises(NotImplementedError, match="same arena"):
+            sim.add_cable_object(
+                CableObjectCfg(
+                    uid="wire",
+                    points=[[0, 0, 0], [0, 0, 0.1], [0, 0, 0.2]],
+                    radius=0.01,
+                )
+            )
+        assert "wire" not in sim.asset_uids
         with pytest.raises(RuntimeError, match="prepare"):
             _ = fluid.data
         sim.prepare()
@@ -187,6 +197,10 @@ def _run_fluid_lifecycle(num_envs: int, automatic: bool) -> dict[str, object]:
             continued = fluid.data.particle_state_w
             torch.testing.assert_close(continued[0], first[0], rtol=1e-5, atol=1e-6)
             assert continued[1, :, 2].mean() < first[1, :, 2].mean()
+            sim.reset_objects_state(env_ids=[1])
+            selected = fluid.data.particle_state_w
+            torch.testing.assert_close(selected[0], continued[0], rtol=0, atol=0)
+            torch.testing.assert_close(selected[1], original[1], rtol=0, atol=0)
         sim.reset_objects_state()
         torch.testing.assert_close(fluid.data.particle_state_w, original)
         sim.update(step=3, render_final_step=False)

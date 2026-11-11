@@ -22,7 +22,7 @@ Usage examples::
     embodichain benchmark rl --rebuild-report-only
     embodichain benchmark robotics-kinematic-solver -s pytorch
     embodichain benchmark motion-generation --suite motion_panda_free_space_smoke
-    embodichain benchmark motion-generation --suite atomic_franka_pgi_smoke
+    embodichain benchmark motion-generation --suite atomic_franka_robotiq_smoke
     embodichain benchmark atomic-skill-profile --smoke
     embodichain benchmark grasp-pose-generator --device cuda
     embodichain benchmark workspace-analyzer

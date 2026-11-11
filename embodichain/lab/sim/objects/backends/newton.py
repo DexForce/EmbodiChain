@@ -34,6 +34,23 @@ def is_newton_scene(scene: object) -> bool:
     return isinstance(scene, Scene) and scene.backend == "newton"
 
 
+def _supports_newton_position_targets(scene: Scene) -> bool:
+    """Query the finalized solver contract while preserving legacy SDK support."""
+    query = getattr(scene, "dynamics_capabilities", None)
+    if query is None:
+        from dexsim.engine import newton_physics
+
+        if hasattr(newton_physics, "NewtonSolverExtension"):
+            raise RuntimeError(
+                "Newton solver extensions require a compatible DexSim SDK with "
+                "Scene.dynamics_capabilities() for articulation initialization."
+            )
+        # Released SDKs predating extensions accept the existing target channels.
+        return True
+    fields = query().supported_control_fields
+    return fields is None or "joint_target_q" in fields
+
+
 def _create_newton_standalone_state_sync(
     model: Any,
     body_ids: Sequence[int],
@@ -178,6 +195,22 @@ def _default_mujoco_mimic_solref(physics_dt: float, num_substeps: int) -> np.nda
     )
 
 
+def _supports_newton_mimic_compliance(result: Scene | None) -> bool:
+    """Whether the finalized solver can configure the opt-in mimic stabilizer."""
+    if result is None or result.backend != "newton":
+        return False
+    from dexsim.engine.newton_physics.backend_registry import get_newton_backend
+
+    backend = get_newton_backend(result.world)
+    return bool(
+        backend is not None
+        and backend.solver_type in {"mujoco_warp", "dexuni"}
+        and not backend.cfg.requires_grad
+        and not (backend.model is not None and backend.model.requires_grad)
+        and backend.mujoco_solver is not None
+    )
+
+
 def _configure_newton_mimic_compliance(
     *,
     result: Scene | None,
@@ -196,7 +229,7 @@ def _configure_newton_mimic_compliance(
     native equality rows enabled preserves mechanical force coupling; the drive
     is only a stabilizer and never mirrors measured follower state.
     """
-    if result is None or result.backend != "newton" or not mimic_ids:
+    if not mimic_ids or not _supports_newton_mimic_compliance(result):
         return False
 
     from dexsim.engine.newton_physics.backend_registry import get_newton_backend

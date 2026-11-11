@@ -97,3 +97,33 @@ native and real-demonstration-driven experts through the shared engine. Its offl
 viewer pairs measured 3D playback with RGB-D, recipes, source clocks and explicit
 capability/acceptance results. Full and quick modes preserve unrun and failed cases;
 recovery and portability diagnostics keep their evidence separate from expert data.
+
+
+## Newton cable runtime
+
+The [create-cable tutorial](../scripts/tutorials/sim/create_cable.py) creates a
+procedural cable with one fixed segment, steps it under gravity, reads world
+segment state and restores the episode creation state. Run it with the native
+viewer or with two headless environments:
+
+```bash
+python scripts/tutorials/sim/create_cable.py
+python scripts/tutorials/sim/create_cable.py --headless --renderer no-render --num-envs 2
+```
+
+The cable examples use CUDA and DexSim `0.6.0rc1` (engine commit
+`1b968250ada2b06b210bc7aa08ef219769f01217`). The DexForce package index
+provides Linux x86_64 wheels for Python 3.11 and 3.12. To install the pinned
+engine in your EmbodiChain environment and check its build, run:
+
+```bash
+python -m pip install --index-url https://pypi.org/simple \
+  --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site \
+  dexsim-engine==0.6.0rc1
+python -c "import dexsim; from dexsim.scene import SpawnedCable; print(dexsim.__version__, dexsim.__commit_id__)"
+```
+
+EmbodiChain defaults to DexUni when no solver is selected;
+legacy `auto`/`AutoSolverCfg` selections must migrate to `dexuni` or the concrete
+solver needed by the scene. Explicit `semi_implicit` remains required for
+Newton gradient mode.
