@@ -266,6 +266,106 @@ def test_camera_backend_smoke(sim_device, renderer):
         test.teardown_method()
 
 
+@pytest.mark.parametrize("sim_device", ["cpu", "cuda"])
+def test_camera_group_capacity_follows_native_renderer(sim_device: str) -> None:
+    """The 65th Arena view uses one RT group or multiple Hybrid groups."""
+    import dexsim
+    from dexsim.types import Renderer
+
+    test = CameraTest()
+    test.setup_simulation(
+        sim_device,
+        renderer="fast-rt",
+        num_envs=65,
+        width=64,
+        height=64,
+        enable_auxiliary_data=False,
+    )
+    try:
+        renderer = dexsim.get_world_config().renderer
+        native_group = test.sim.get_world().create_camera_group([64, 64], 65, True)
+        if renderer == Renderer.HYBRID:
+            assert native_group is None
+            assert len(test.camera.group_ids) == 3
+        elif native_group is None:  # DexSim 0.6.0rc1
+            assert len(test.camera.group_ids) == 2
+        else:
+            assert len(test.camera.group_ids) == 1
+            assert test.camera.group_id == test.camera.group_ids[0]
+        if len(test.camera.group_ids) > 1:
+            with pytest.raises(ValueError, match="all of its group IDs"):
+                test.sim.render_camera_group([test.camera.group_ids[0]])
+        test.sim.render_camera_group(list(test.camera.group_ids))
+        test.camera.update(fetch_only=True)
+        assert test.camera.get_data()["color"].shape == (65, 64, 64, 4)
+        assert test.camera.get_capture_metadata() is not None
+    finally:
+        test.teardown_method()
+
+
+@pytest.mark.no_sim
+def test_camera_falls_back_to_legacy_rt_groups(monkeypatch) -> None:
+    """A rejected 65-view group still produces ordered 64+1 targets."""
+    import dexsim
+    from dexsim.types import Renderer
+
+    monkeypatch.setattr(
+        dexsim, "get_world_config", lambda: SimpleNamespace(renderer=Renderer.FASTRT)
+    )
+    camera = object.__new__(Camera)
+    camera._num_instances = 65
+    camera._scene = MagicMock()
+    first, second = MagicMock(), MagicMock()
+    first.get_group_id.return_value = 11
+    second.get_group_id.return_value = 12
+    camera._scene.create_camera_group.side_effect = [
+        RuntimeError("Camera group creation returned no target."),
+        first,
+        second,
+    ]
+    camera._scene.add_cameras.return_value = ()
+    camera._arena_names = ["arena"] * 65
+    camera._camera_groups = ()
+
+    cfg = CameraCfg(uid="legacy", width=64, height=64)
+    camera._create_camera_views(cfg, (cfg.intrinsics,))
+
+    capacities = [
+        call.args[3] for call in camera._scene.create_camera_group.call_args_list
+    ]
+    assert capacities == [65, 64, 1]
+    assert camera.group_ids == (11, 12)
+
+
+@pytest.mark.gpu
+@pytest.mark.no_sim
+def test_cpu_camera_copy_keeps_previous_frame() -> None:
+    """Completed CPU images retain their pixels after the GPU buffer changes."""
+    camera = object.__new__(Camera)
+    camera.device = torch.device("cpu")
+    camera.cfg = CameraCfg(uid="pinned", width=2, height=2, enable_depth=True)
+    camera._data_buffer = TensorDict({}, batch_size=[2], device="cpu")
+    camera._pending_capture_metadata = None
+    color = torch.full((2, 2, 2, 4), 11, dtype=torch.uint8, device="cuda")
+    depth = torch.full((2, 2, 2), 1.0, device="cuda")
+    group = MagicMock()
+    group.get_rgb_gpu_buffer.return_value = color
+    group.get_depth_gpu_buffer.return_value = depth
+    camera._frame_buffers = (group,)
+
+    camera.update(fetch_only=True)
+    first_color = camera.get_data()["color"]
+    first_depth = camera.get_data()["depth"]
+    assert first_color.is_pinned() and first_depth.is_pinned()
+    color.fill_(22)
+    depth.fill_(2.0)
+    camera.update(fetch_only=True)
+    assert camera.get_data()["color"][0, 0, 0, 0].item() == 22
+    assert camera.get_data()["depth"][0, 0, 0].item() == 2.0
+    assert first_color[0, 0, 0, 0].item() == 11
+    assert first_depth[0, 0, 0].item() == 1.0
+
+
 def test_camera_parent_attachment_cpu() -> None:
     """Attach a camera to a materialized articulation link on the CPU backend."""
     test = CameraTest()

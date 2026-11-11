@@ -44,6 +44,14 @@ multiple robots need distinct sensor UIDs. Camera creation and rebuilds retain
 the same manager-owned lifecycle. Removing a robot destroys its automatically
 initialized cameras before rebuilding the physical scene.
 
+`Camera` and `StereoCamera` use one Scene-owned native group for FastRT and
+offline RT when the installed DexSim accepts the requested view count. DexSim
+0.6.0rc1 rejects groups over 64 views, so they fall back to ordered 64-view
+groups. Hybrid's Vulkan target uses groups of at most 32 views. These are
+per-group limits, not total camera limits. Gym and recording consumers render
+every group; sensor updates concatenate images in Arena/eye order. A partial
+group render cannot publish a complete capture-metadata snapshot.
+
 Componentized Gym deployments select the robot and independent sensors through
 an embodiment component. The component/inline exclusion rules, Gym acquisition
 switch and effective suite belong to

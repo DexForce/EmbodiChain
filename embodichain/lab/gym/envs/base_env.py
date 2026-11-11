@@ -208,9 +208,10 @@ class BaseEnv(gym.Env):
 
             self.sensors = self._setup_sensors(**kwargs)
             self._camera_group_ids = [
-                sensor.group_id
+                group_id
                 for sensor in self.sensors.values()
                 if isinstance(sensor, Camera)
+                for group_id in sensor.group_ids
             ]
 
             if not self.sim_cfg.headless:

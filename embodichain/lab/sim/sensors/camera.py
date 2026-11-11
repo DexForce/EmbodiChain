@@ -23,7 +23,6 @@ import numpy as np
 import torch
 import dexsim.render as dr
 
-from functools import cached_property
 from typing import TYPE_CHECKING, Any, List, Literal, Sequence, Tuple
 
 from embodichain.lab.sim.sensors import BaseSensor, SensorCfg
@@ -36,10 +35,13 @@ from embodichain.utils.math import matrix_from_quat, quat_from_matrix, look_at_t
 from embodichain.utils import logger, configclass
 
 if TYPE_CHECKING:
-    from dexsim.scene import CameraBatch, Scene, SpawnedCamera
+    from dexsim.scene import CameraBatch, Scene, SpawnedCamera, SpawnedCameraGroup
     from embodichain.lab.sim.sim_manager import SimulationManager
 
 __all__ = ["Camera", "CameraCfg"]
+
+_MAX_HYBRID_VIEWS_PER_GROUP = 32
+_LEGACY_RT_VIEWS_PER_GROUP = 64
 
 
 @configclass
@@ -191,6 +193,8 @@ class Camera(BaseSensor):
         self._camera_batch: CameraBatch | None = None
         self._batch_revision = -1
         self._camera_group = None
+        self._camera_groups: tuple[SpawnedCameraGroup, ...] = ()
+        self._frame_buffers: tuple[Any, ...] = ()
         self._is_attached = False
         self._is_destroyed = False
         try:
@@ -216,14 +220,44 @@ class Camera(BaseSensor):
     ) -> None:
         """Create all eyes together in the already prepared, Scene-owned Arenas."""
         from dexsim.spawn import CameraDesc
+        from dexsim.types import Renderer
 
-        self._camera_group = self._scene.create_camera_group(
-            f"{config.uid}_group",
-            config.width,
-            config.height,
-            self.num_instances * len(intrinsics),
-            view_flags=config.get_view_attrib(),
+        total_views = self.num_instances * len(intrinsics)
+        renderer = dexsim.get_world_config().renderer
+        capacity = (
+            _MAX_HYBRID_VIEWS_PER_GROUP if renderer == Renderer.HYBRID else total_views
         )
+
+        def create_group(start: int, count: int) -> SpawnedCameraGroup:
+            """Create one Scene-owned target for contiguous view rows."""
+            suffix = "" if start == 0 else f"_{start}"
+            return self._scene.create_camera_group(
+                f"{config.uid}_group{suffix}",
+                config.width,
+                config.height,
+                count,
+                view_flags=config.get_view_attrib(),
+            )
+
+        try:
+            first = create_group(0, min(capacity, total_views))
+        except RuntimeError as error:
+            if (
+                renderer not in {Renderer.FASTRT, Renderer.OFFLINERT}
+                or total_views <= _LEGACY_RT_VIEWS_PER_GROUP
+                or "Camera group creation returned no target" not in str(error)
+            ):
+                raise
+            capacity = _LEGACY_RT_VIEWS_PER_GROUP
+            first = create_group(0, capacity)
+        self._group_capacity = capacity
+        groups = [first]
+        self._camera_groups = tuple(groups)
+        for start in range(capacity, total_views, capacity):
+            groups.append(create_group(start, min(capacity, total_views - start)))
+            self._camera_groups = tuple(groups)
+        self._camera_group = first
+        self._frame_buffers = tuple(group.native for group in groups)
         descriptors = []
         for eye, values in enumerate(intrinsics):
             matrix = np.eye(3, dtype=np.float32)
@@ -246,9 +280,13 @@ class Camera(BaseSensor):
         self._camera_handles = self._scene.add_cameras(
             descriptors,
             arena_names=list(self._arena_names) * len(intrinsics),
-            camera_groups=self._camera_group,
+            camera_groups=(
+                first
+                if len(groups) == 1
+                else [groups[i // capacity] for i in range(total_views)]
+            ),
         )
-        self._frame_buffer = self._camera_group.native
+        self._frame_buffer = self._frame_buffers[0]
 
     def _build_sensor_from_config(
         self, config: CameraCfg, device: torch.device
@@ -297,7 +335,8 @@ class Camera(BaseSensor):
         self, views: Sequence[dr.CameraView], include: bool
     ) -> None:
         if include:
-            self._frame_buffer.set_visual_overlay_enabled(True)
+            for frame_buffer in self._frame_buffers:
+                frame_buffer.set_visual_overlay_enabled(True)
         else:
             for view in views:
                 view.set_excluded_render_categories(_MARKER_RENDER_CATEGORY)
@@ -382,14 +421,44 @@ class Camera(BaseSensor):
             ),
         }
 
-    @cached_property
+    @property
     def group_id(self) -> int:
-        """Get the camera group ID in the dexsim world.
+        """Get the camera group ID when this sensor owns one native group.
 
         Returns:
             int: The camera group ID.
         """
-        return self._frame_buffer.get_group_id()
+        if len(self._camera_groups) != 1:
+            raise RuntimeError("This camera has multiple groups; use group_ids.")
+        return self._camera_groups[0].get_group_id()
+
+    @property
+    def group_ids(self) -> tuple[int, ...]:
+        """Return native group IDs in view order."""
+        return tuple(group.get_group_id() for group in self._camera_groups)
+
+    def _read_groups(
+        self, getter_name: str, dtype: torch.dtype | None = None
+    ) -> torch.Tensor:
+        """Return owned CPU images or GPU views in contiguous group order."""
+        outputs = []
+        for group in self._frame_buffers:
+            tensor = getattr(group, getter_name)()
+            if self.device.type == "cpu" and tensor.device.type == "cuda":
+                if dtype is not None:
+                    tensor = tensor.to(dtype=dtype)
+                output = torch.empty(
+                    tensor.shape, dtype=tensor.dtype, device="cpu", pin_memory=True
+                )
+                output.copy_(tensor, non_blocking=False)
+            else:
+                output = (
+                    tensor.to(self.device)
+                    if dtype is None
+                    else tensor.to(self.device, dtype)
+                )
+            outputs.append(output)
+        return outputs[0] if len(outputs) == 1 else torch.cat(outputs, dim=0)
 
     @property
     def is_attached(self) -> bool:
@@ -417,36 +486,31 @@ class Camera(BaseSensor):
         fetch_only = kwargs.get("fetch_only", False)
         if not fetch_only:
             self._pending_capture_metadata = None
-            self._frame_buffer.apply_ordered()
+            for group in self._camera_groups:
+                group.apply_ordered()
             self._snapshot_render_metadata()
         self.cfg: CameraCfg
 
         if self.cfg.enable_color:
-            self._data_buffer["color"] = self._frame_buffer.get_rgb_gpu_buffer().to(
-                self.device
-            )
+            self._data_buffer["color"] = self._read_groups("get_rgb_gpu_buffer")
 
         if self.cfg.enable_depth:
-            self._data_buffer["depth"] = self._frame_buffer.get_depth_gpu_buffer().to(
-                self.device
-            )
+            self._data_buffer["depth"] = self._read_groups("get_depth_gpu_buffer")
 
         if self.cfg.enable_mask:
-            self._data_buffer[
-                "mask"
-            ] = self._frame_buffer.get_visible_mask_gpu_buffer().to(
-                self.device, torch.int32
+            self._data_buffer["mask"] = self._read_groups(
+                "get_visible_mask_gpu_buffer", torch.int32
             )
 
         if self.cfg.enable_normal:
-            self._data_buffer["normal"] = self._frame_buffer.get_normal_gpu_buffer().to(
-                self.device
-            )[..., :3]
+            self._data_buffer["normal"] = self._read_groups("get_normal_gpu_buffer")[
+                ..., :3
+            ]
 
         if self.cfg.enable_position:
-            self._data_buffer["position"] = (
-                self._frame_buffer.get_position_gpu_buffer().to(self.device)[..., :3]
-            )
+            self._data_buffer["position"] = self._read_groups(
+                "get_position_gpu_buffer"
+            )[..., :3]
 
         self._capture_metadata = self._pending_capture_metadata
 
@@ -573,9 +637,11 @@ class Camera(BaseSensor):
         if hasattr(self, "_data_buffer_stereo"):
             self._data_buffer_stereo.clear()
         self._frame_buffer = None
-        if self._camera_group is not None:
-            self._scene.release_camera_groups([self._camera_group])
+        if self._camera_groups:
+            self._scene.release_camera_groups(self._camera_groups)
+            self._camera_groups = ()
             self._camera_group = None
+            self._frame_buffers = ()
         self._is_destroyed = True
         self._capture_metadata = None
         self._entities = []

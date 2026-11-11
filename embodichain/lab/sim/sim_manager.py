@@ -2046,11 +2046,20 @@ class SimulationManager:
         if group_ids or self.is_window_opened:
             self._ensure_render_state()
         if group_ids:
-            cameras = [
-                sensor
-                for sensor in self._sensors.values()
-                if isinstance(sensor, Camera) and sensor.group_id in group_ids
-            ]
+            requested = set(group_ids)
+            cameras = []
+            for sensor in self._sensors.values():
+                if not isinstance(sensor, Camera):
+                    continue
+                owned = set(sensor.group_ids)
+                if not requested.intersection(owned):
+                    continue
+                if not owned.issubset(requested):
+                    raise ValueError(
+                        f"Camera {sensor.uid!r} requires all of its group IDs "
+                        "for a complete render."
+                    )
+                cameras.append(sensor)
             for sensor in cameras:
                 sensor._capture_metadata = None
                 sensor._pending_capture_metadata = None

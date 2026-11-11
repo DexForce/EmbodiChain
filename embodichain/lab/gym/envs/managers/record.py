@@ -80,8 +80,9 @@ class record_camera_data(Functor):
             )
         )
 
-        # Add this camera's group ID to the environment for batch rendering when RT is enabled.
-        env.add_camera_group_id(self.camera.group_id)
+        # Render every native group when a camera spans multiple batches.
+        for group_id in self.camera.group_ids:
+            env.add_camera_group_id(group_id)
 
         self._save_path = cfg.params.get("save_path", "./outputs/videos")
         self._num_envs = getattr(env, "num_envs", 1)
