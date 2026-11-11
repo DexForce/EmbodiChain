@@ -27,7 +27,7 @@ pytest.importorskip("newton")
 from embodichain.learning.rl.algo import APG, APGCfg
 from embodichain.learning.rl.algo import segmented_discounted_return
 from embodichain.learning.rl.collector import DifferentiableCollector
-from embodichain.learning.rl.env import DifferentiableVecEnv
+from embodichain.learning.rl.env import DifferentiableEnvProtocol
 from embodichain.learning.rl.experimental.newton import (
     NewtonPlanarReachEnv,
     NewtonPlanarReachEnvCfg,
@@ -141,7 +141,7 @@ def test_newton_env_satisfies_contract_and_fk_matches_analytical_pose() -> None:
         dim=-1,
     )
 
-    assert isinstance(env, DifferentiableVecEnv)
+    assert isinstance(env, DifferentiableEnvProtocol)
     assert observation.shape == (2, 8)
     assert torch.allclose(observation[:, 2:4], expected_xy, atol=1e-5)
 
