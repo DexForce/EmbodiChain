@@ -161,12 +161,15 @@ a different robot's base position, grasp offset or workspace.
   floor-level, elbow-down validation layout. No joint limit, drive gain or
   hand TCP is changed.
 - `task.dual_ur10_robotiq_arg2f_140_gensim.yaml` uses the same workcell and
-  expert path with the GenSim force drive, zero friction/armature and 150 mm
-  grasp-search opening. Its hand topology remains explicitly declared.
+  expert path. `DualArmRobot` composes the registered `URRobot` UR10 arms and
+  Robotiq 2F-140 grippers; the component retains GenSim zero friction/armature
+  and the model's 150 mm grasp-search opening.
 - `task.dual_franka_robotiq_arg2f_140_gensim.yaml` installs the GenSim Panda
-  assembly over the workbench supports. It uses the source's 0.741 rad seventh
-  joints, FEP IK and higher arm effort limit while retaining the calibrated
-  200 mm hand TCP and explicit hand geometry.
+  assembly over the workbench supports. `DualArmRobot` composes the registered
+  `Franka` FR3 arms and Robotiq 2F-140 grippers. The component preserves the
+  source's 0.741 rad seventh-joint pose; the arm preset supplies FEP IK and arm
+  drive, and the gripper preset supplies the 200 mm TCP. Explicit hand geometry
+  remains in the skill profile.
 
 The ARG2F-140 deployments share a known-cube grasp selection and program,
 with independent physical environments and robot placement. The object-frame

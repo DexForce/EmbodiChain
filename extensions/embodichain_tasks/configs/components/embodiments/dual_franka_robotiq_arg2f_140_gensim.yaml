@@ -1,52 +1,18 @@
-# GenSim dual-Panda/Robotiq calibration; preserve the frozen B0 embodiment separately.
-# Task deployments own scene placement; gripper bindings supply hand topology and TCP.
+# Reuse the registered dual-arm preset and Robotiq 2F-140 defaults.
+# Keep only GenSim calibration and task-independent hand services here.
 embodiment_id: dual_franka_robotiq_arg2f_140_gensim
 simulation:
+  class_type: DualArmRobot
+  base_robot:
+    type: Franka
+    init:
+      arm_model: fr3
+  mount:
+    preset: side_by_side
+    separation: 0.6
   uid: DualFrankaPanda
   urdf_cfg:
     fname: dual_franka_robotiq_arg2f_140_gensim
-    name_case:
-      joint: original
-      link: original
-    components:
-    - component_type: left_arm
-      urdf_path: Franka/Panda/Panda.urdf
-      transform:
-      - - 1.0
-        - 0.0
-        - 0.0
-        - 0.0
-      - - 0.0
-        - 1.0
-        - 0.0
-        - 0.3
-      - - 0.0
-        - 0.0
-        - 1.0
-        - 0.0
-      - - 0.0
-        - 0.0
-        - 0.0
-        - 1.0
-    - component_type: right_arm
-      urdf_path: Franka/Panda/Panda.urdf
-      transform:
-      - - 1.0
-        - 0.0
-        - 0.0
-        - 0.0
-      - - 0.0
-        - 1.0
-        - 0.0
-        - -0.3
-      - - 0.0
-        - 0.0
-        - 1.0
-        - 0.0
-      - - 0.0
-        - 0.0
-        - 0.0
-        - 1.0
   init_pos:
   - 0.0
   - 0.0
@@ -84,72 +50,20 @@ simulation:
   - 0.0
   joint_drive_props:
     stiffness:
-      left_arm: 10000.0
-      right_arm: 10000.0
       left_eef: 50.0
       right_eef: 50.0
     damping:
-      left_arm: 1000.0
-      right_arm: 1000.0
       left_eef: 5.0
       right_eef: 5.0
     max_effort:
-      left_arm: 100000.0
-      right_arm: 100000.0
       left_eef: 500.0
       right_eef: 500.0
-    drive_type: force
     friction:
       left_eef: 0.0
       right_eef: 0.0
     armature:
       left_eef: 0.0
       right_eef: 0.0
-  control_parts:
-    left_arm:
-    - left_fr3_joint1
-    - left_fr3_joint2
-    - left_fr3_joint3
-    - left_fr3_joint4
-    - left_fr3_joint5
-    - left_fr3_joint6
-    - left_fr3_joint7
-    right_arm:
-    - right_fr3_joint1
-    - right_fr3_joint2
-    - right_fr3_joint3
-    - right_fr3_joint4
-    - right_fr3_joint5
-    - right_fr3_joint6
-    - right_fr3_joint7
-    dual_arm:
-    - left_fr3_joint1
-    - left_fr3_joint2
-    - left_fr3_joint3
-    - left_fr3_joint4
-    - left_fr3_joint5
-    - left_fr3_joint6
-    - left_fr3_joint7
-    - right_fr3_joint1
-    - right_fr3_joint2
-    - right_fr3_joint3
-    - right_fr3_joint4
-    - right_fr3_joint5
-    - right_fr3_joint6
-    - right_fr3_joint7
-  solver_cfg:
-    left_arm:
-      class_type: FEPSolver
-      urdf_path: null
-      end_link_name: left_fr3_link8
-      root_link_name: left_base
-      redundancy_search: true
-    right_arm:
-      class_type: FEPSolver
-      urdf_path: null
-      end_link_name: right_fr3_link8
-      root_link_name: right_base
-      redundancy_search: true
 sensor:
 - sensor_type: Camera
   uid: cam_high
@@ -249,7 +163,6 @@ skill_profile:
         center_mode: centroid
         filter_ground_collision: false
         point_spacing: 0.012
-        max_opening_width: 0.15
       right_eef:
         kind: antipodal_parallel_jaw
         sample_count: 10000
@@ -259,7 +172,6 @@ skill_profile:
         center_mode: centroid
         filter_ground_collision: false
         point_spacing: 0.012
-        max_opening_width: 0.15
     control_part_evidence:
       kind: joint_position_constraint
       control_parts:
@@ -307,43 +219,9 @@ grippers:
     motion_part: left_arm
     control_part: left_eef
     component_type: left_hand
-    root_from_tcp:
-    - - 0.0
-      - -1.0
-      - 0.0
-      - 0.0
-    - - 1.0
-      - 0.0
-      - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-      - 1.0
-      - 0.2
-    - - 0.0
-      - 0.0
-      - 0.0
-      - 1.0
   right_eef:
     class_type: RobotiqArg2F140
     mode: mounted
     motion_part: right_arm
     control_part: right_eef
     component_type: right_hand
-    root_from_tcp:
-    - - 0.0
-      - -1.0
-      - 0.0
-      - 0.0
-    - - 1.0
-      - 0.0
-      - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-      - 1.0
-      - 0.2
-    - - 0.0
-      - 0.0
-      - 0.0
-      - 1.0

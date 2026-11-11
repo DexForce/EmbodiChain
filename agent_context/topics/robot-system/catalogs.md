@@ -54,12 +54,14 @@ remain example/benchmark-owned. Root public class exports remain available.
 
 The `dual_franka_robotiq_arg2f_140` and `dual_ur10_robotiq_arg2f_140`
 embodiment components retain their frozen arm/tool calibration. Their separate
-`*_gensim` components select GenSim drive and grasp-search values; the Franka
-variant also selects its arm mounts, ready pose and FEP IK. Gripper bindings
-provide the complete hand joints and calibrated TCPs, while the skill profiles
-keep explicit hand geometry and search settings. The `repeated_pick_place`
-deployments place each variant in its workcell without changing the base
-components.
+`*_gensim` components select `DualArmRobot` with the registered `URRobot` UR10
+or `Franka` FR3 arm preset and mounted `RobotiqArg2F140` grippers. The preset
+provides arm assets, joint groups, solvers and arm drives; the component keeps
+GenSim-specific hand drives, friction, initial pose and camera calibration.
+Gripper bindings provide hand joints and calibrated TCPs, while the skill
+profiles keep explicit hand geometry and search settings. The
+`repeated_pick_place` deployments place each variant in its workcell without
+changing the frozen base components.
 
 `resolve_robot_cfg(..., variant=...)` selects a declared profile's defaults
 between catalog defaults and caller overrides. Omitting the variant keeps
