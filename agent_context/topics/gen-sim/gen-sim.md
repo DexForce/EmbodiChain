@@ -23,6 +23,7 @@ Paths below are relative to `embodichain/gen_sim/` unless qualified.
 | Grouped layouts from an existing export | `scene_engine/cli/randomization.py`, `scene_engine/randomization/generation.py` |
 | Baseline cache, saved runs and pose playback | `scene_engine/randomization/baseline.py`, `persistence.py`, `loading.py` |
 | Whole-scene USD package | `scene_engine/pipeline/utils/scene_usd.py`: `build_scene_usd()`, direct preview loading; `usd_scene.py`: entity index |
+| DexSim AssetRevision delivery | `scene_engine/pipeline/utils/scene_package.py`: SDK-owned scheme-one packaging and dependency closure; [output contract](../../../embodichain/gen_sim/README.md) |
 | General asset ingest | `asset_engine/pipeline/ingest.py`: `ingest_one_asset()` |
 | Articulated asset generation | `asset_engine/pipeline/articulation.py`, `asset_engine/clients/articulated_generation.py` |
 | Web app launch/configuration | `gensim ui` replaces its process with `gradio_ui/gradio_app.py`; `app_env.py` retains auth and allowed-root rules |
@@ -48,6 +49,11 @@ Owned transports close when the run exits; explicit legacy clients and supplied
 service runs remain caller-owned. Chat requests own their stateless transport.
 Edit: import export → validate graph/typed edit plan → generate additions
 → change layout → overwrite export. Combined image/edit mode generates first.
+
+Articulated USDC admission allows absent `gen_sim:closedPosition` metadata;
+present declarations must identify a finite joint-limit endpoint. Missing
+endpoint semantics remain unknown. Operation-specific target qualification
+belongs to the [source control bindings](../scene-services/scene-services.md).
 
 Read [pipeline details](pipeline-details.md) for stage contracts, parser resume
 behavior, Gradio artifact ownership and focused failure diagnosis.
@@ -81,9 +87,15 @@ The GenSim execution handoff bakes Y-up GLB scale and axis conversion into
 run-owned Z-up OBJ copies, with isolated texture/material sidecars. Native vertex
 coordinates carry the conversion; GLB scene-node transforms are insufficient
 across graphics/collision loaders. The editable source export stays unchanged.
-Generation and editing also produce an optional `scene_usd/` delivery package
+Generation, editing and staged materialization also produce a `scene_usd/` delivery package
 with a schema-v2 `scene.usda` carrying EmbodiChain entity metadata and a
-relocatable `scene.usdz` single-file package. DexSim preview loads schema-v2
+relocatable `scene.usdz` single-file package, plus `scene_package.zip` using
+DexSim's AssetRevision `2.0-draft` contract. The SDK owns canonical `/Asset`
+packaging, schema validation, file digests and provenance; it currently exposes
+processed-USD export through a private entry isolated in `scene_package.py`.
+Packaging leaves classification and unmeasured quality facts unknown and grants
+no runtime capability or certification. Export failures propagate; stale delivery
+files are invalidated when an editable export is replaced. DexSim preview loads schema-v2
 stages directly through `preview-scene --usd-file`; the manifest and native GLTF/USDC assets remain legacy
 compatibility data. Build it only after the complete simulation scene is
 prepared; validate UIDs and keep every packaged asset path inside the output
@@ -205,6 +217,7 @@ environment files.
 | Edit plans and graph | `tests/gen_sim/scene_engine/test_scene_edit.py`, `test_scene_edit_plan.py`, `test_scene_graph.py` |
 | Ingest formats and metadata | `tests/gen_sim/asset_engine/` |
 | UI roots/auth/session workflow | `tests/gen_sim/gradio_ui/` |
+| DexSim package schema, bytes, dependency closure and namespace preservation | `tests/gen_sim/scene_engine/test_scene_package.py` |
 | Unified/legacy CLI grammar and lightweight help | `tests/cli/test_gensim.py`, `tests/test_main.py` |
 | Cross-engine binding, geometry handoff and execution outcomes | `tests/gen_sim/test_workflow.py` |
 

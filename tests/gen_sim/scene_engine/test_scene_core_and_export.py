@@ -320,6 +320,10 @@ def test_preview_forwards_visacd_collision_policy(
                 "init_pos": [0.0, 0.0, 0.0],
                 "init_rot": [0.0, 0.0, 0.0],
                 "max_convex_hull_num": max_hulls,
+                "attrs": {
+                    "mass_props": {"mass": 0.25},
+                    "material_props": {"static_friction": 0.7, "dynamic_friction": 0.4},
+                },
             }
         ],
         config_dir=tmp_path,
@@ -329,6 +333,9 @@ def test_preview_forwards_visacd_collision_policy(
 
     cfg = sim.configs[0]
     assert cfg.body_type == "static"
+    assert cfg.attrs.mass_props.mass == pytest.approx(0.25)
+    assert cfg.attrs.material_props.static_friction == pytest.approx(0.7)
+    assert cfg.attrs.material_props.dynamic_friction == pytest.approx(0.4)
     collision = cfg.shape.collision
     assert collision.acd_method == ("visacd" if max_hulls > 1 else None)
     descriptor, _ = rigid_desc_from_cfg(cfg)
@@ -1130,6 +1137,16 @@ def test_scene_export_overwrites_an_existing_scene_export(tmp_path: Path) -> Non
         output_root=output_root,
     ).export()
 
+    stale_delivery = [
+        output_root / "scene_package.zip",
+        output_root / "scene_usd" / "scene.usda",
+        output_root / "scene_usd" / "scene.usdz",
+        output_root / "scene_usd" / "scene_usd_manifest.json",
+    ]
+    for path in stale_delivery:
+        path.parent.mkdir(exist_ok=True)
+        path.write_bytes(b"previous scene")
+
     # The imported table mesh already occupies its final export location.
     exported_table_glb = (
         output_root / "scene_export" / "mesh_assets" / "table" / "table.glb"
@@ -1154,6 +1171,7 @@ def test_scene_export_overwrites_an_existing_scene_export(tmp_path: Path) -> Non
     ).export()
 
     scene_export_root = output_root / "scene_export"
+    assert not any(path.exists() for path in stale_delivery)
     assert exported_table_glb.read_bytes() == b"glTF-table"
     assert (
         scene_export_root / "mesh_assets" / "banana" / "banana.glb"

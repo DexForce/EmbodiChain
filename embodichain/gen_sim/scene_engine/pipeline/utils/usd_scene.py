@@ -88,7 +88,8 @@ class UsdSceneIndex:
         Args:
             stage_path: USD file to open.
             require_schema: Require ``embodichain.scene/v2`` metadata on
-                ``/World``. Set this for newly generated runtime scenes;
+                ``/World`` or its packaged ``/Asset/World`` path.
+                Set this for newly generated runtime scenes;
                 leave it false for legacy USD snapshots.
 
         Returns:
@@ -109,6 +110,10 @@ class UsdSceneIndex:
             raise ValueError(f"Could not open USD scene: {resolved_path}")
 
         world = stage.GetPrimAtPath("/World")
+        if not world.IsValid():
+            # DexSim's scheme-one package preserves the scene below a neutral
+            # /Asset wrapper, retargeting USD relationships in its private copy.
+            world = stage.GetPrimAtPath("/Asset/World")
         schema_version = (
             world.GetCustomDataByKey("embodichain:scene_schema")
             if world.IsValid()
@@ -118,7 +123,8 @@ class UsdSceneIndex:
             raise ValueError("USD scene schema metadata must be a string.")
         if require_schema and schema_version != USD_SCENE_SCHEMA:
             raise ValueError(
-                f"Expected {USD_SCENE_SCHEMA!r} on /World, got {schema_version!r}."
+                f"Expected {USD_SCENE_SCHEMA!r} on /World or /Asset/World, "
+                f"got {schema_version!r}."
             )
 
         entities: list[UsdEntityDesc] = []

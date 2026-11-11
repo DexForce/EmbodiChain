@@ -67,6 +67,10 @@ Captured shapes and nominal queries do not establish physical acquisition/releas
 Static control readers consume explicit authored roles, keep source mesh frames
 and identity, and never build semantic graphs or select execution/recovery
 budgets. Acceptance thresholds and semantic link IDs belong to their callers.
+`PrismaticBinding` permits unknown closed-position semantics during geometry
+inspection, but `target()` and `axis_sign` require an explicit source or binding
+coordinate. No endpoint is inferred from proximity to zero. Press controls use
+their separate released/pressed coordinate contract in `press_inputs.py`.
 They consume the shared [Object/Spawn source reader](../simulation-system/simulation-system.md)
 and may explicitly share one `UsdSourceSnapshot` within an assembly. Source
 freshness checks reuse captured identities without repeating role parsing at

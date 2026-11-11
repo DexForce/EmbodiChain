@@ -24,6 +24,23 @@ Scene editing modifies the selected workspace in place. Task planning requires a
 fresh output directory and ends with an unbound semantic graph and offline HTML
 viewer. Its output alone does not construct a robot or execute a task.
 
+Scene generation, editing and staged materialization produce an editable
+`scene_export/`, a Z-up/metre/kilogram `scene_usd/scene.usda`, a relocatable
+`scene_usd/scene.usdz`, and **`scene_package.zip`** for DexSim AssetRevision
+`2.0-draft` interchange. The ZIP contains a canonical `asset.usda` entry with
+default prim `/Asset`, its USD/texture dependency closure, `asset.json`, and
+`reports/dexsim-packaging.json` / `reports/dexsim-registry.json`. DexSim's
+packager validates the JSON schema, byte digests and cross-object references.
+Its processed-USD packaging support is required; an export failure fails the
+operation while retaining the editable workspace for diagnosis.
+
+The AssetRevision describes packaging provenance. A scene with multiple
+independent bodies is not automatically one rigidbody or articulation:
+`asset_kind` remains unknown until classified. Unmeasured quality facts stay
+null, the quality summary is `incomplete`, and no runtime capabilities or
+certification are granted by packaging. The legacy scene manifests and
+`embodichain.scene/v2` USD metadata remain available for EmbodiChain preview.
+
 The UI launcher uses the active Python interpreter, preserves the selected SDK
 import root, and retains the existing UI's process cleanup and authentication.
 Install the `embodichain[gensim]` extra for its optional dependencies.

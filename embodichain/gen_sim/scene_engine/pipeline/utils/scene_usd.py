@@ -33,6 +33,7 @@ from embodichain.lab.sim.cfg import (
     LightCfg,
     MeshCfg,
     MeshCollisionCfg,
+    RigidBodyPhysicsCfg,
     RigidObjectCfg,
 )
 from embodichain.lab.sim.objects import Articulation
@@ -45,6 +46,11 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.usd_scene import (
     UsdSceneBinding,
     UsdSceneIndex,
 )
+from embodichain.gen_sim.scene_engine.pipeline.utils.scene_package import (
+    _export_scene_package,
+)
+
+__all__: list[str] = []
 
 _SCENE_EXPORT_FORMAT = "embodichain.scene-export/v1"
 _SCENE_USD_FORMAT = "embodichain.scene-usd/v1"
@@ -153,6 +159,9 @@ def build_scene_usd(
     stable EmbodiChain entity metadata. Its adjacent ``assets/`` directory is
     retained for legacy compatibility and texture packaging; schema-v2 preview
     loads the USD stage directly through :meth:`SimulationManager.add_usd`.
+    ``scene_package.zip`` additionally delivers DexSim's canonical ``asset.usda``
+    and schema-validated AssetRevision ``asset.json`` with dependency digests.
+    Packaging does not certify geometry, physics, or runtime capabilities.
 
     Args:
         output_root: Scene Engine output root containing ``scene_export/``.
@@ -173,6 +182,11 @@ def build_scene_usd(
         raise ValueError("Scene USD directory must stay within the output root.")
     scene_usd_path = scene_usd_root / "scene.usda"
     temporary_scene_usd_path = scene_usd_root / "scene.in_progress.usda"
+    for delivery in (
+        scene_usd_root / "scene.usdz",
+        resolved_output_root / "scene_package.zip",
+    ):
+        delivery.unlink(missing_ok=True)
     manifest_path = scene_usd_root / "scene_usd_manifest.json"
     runtime_assets_root = scene_usd_root / ".export_runtime_assets"
     packaged_assets_root = scene_usd_root / "assets"
@@ -251,6 +265,10 @@ def build_scene_usd(
         shutil.rmtree(runtime_assets_root, ignore_errors=True)
         sim.destroy(exit_process=False)
         SimulationManager.flush_cleanup_queue()
+    _export_scene_package(
+        scene_usd_path=scene_usd_path,
+        destination=resolved_output_root / "scene_package.zip",
+    )
     return scene_usd_path
 
 
@@ -621,6 +639,7 @@ def _add_objects(
                 init_pos=tuple(_vector3(entry.get("init_pos"), f"{uid}.init_pos")),
                 init_rot=tuple(_vector3(entry.get("init_rot"), f"{uid}.init_rot")),
                 body_scale=tuple(body_scale),
+                attrs=RigidBodyPhysicsCfg.from_dict(entry.get("attrs", {})),
             )
         )
 
@@ -1070,6 +1089,7 @@ def _apply_runtime_textures_to_usd(
             materials_by_index = _usd_materials_by_gltf_index(
                 stage=stage,
                 object_prim=object_prim,
+                runtime_asset=runtime_asset,
             )
             for material_index, texture_paths in gltf_texture_paths.items():
                 material = materials_by_index.get(material_index)
@@ -1222,11 +1242,12 @@ def _usd_bound_materials(*, stage: object, object_prim: object) -> list[object]:
 
 
 def _usd_materials_by_gltf_index(
-    *, stage: object, object_prim: object
+    *, stage: object, object_prim: object, runtime_asset: Path | None = None
 ) -> dict[int, object]:
     """Match DexSim-exported material names to their GLTF material indices."""
     materials_by_index: dict[int, object] = {}
-    for material in _usd_bound_materials(stage=stage, object_prim=object_prim):
+    materials = _usd_bound_materials(stage=stage, object_prim=object_prim)
+    for material in materials:
         match = re.search(
             r"(?:^|_)gltf_material_index_(?P<index>\d+)$",
             material.GetPrim().GetName(),
@@ -1240,6 +1261,13 @@ def _usd_materials_by_gltf_index(
                 f"{material_index}: {object_prim.GetPath()}"
             )
         materials_by_index[material_index] = material
+    # Newer DexSim builds use opaque runtime material names. A source and
+    # destination with exactly one material have an unambiguous binding;
+    # multiple materials still require explicit index identity.
+    if not materials_by_index and len(materials) == 1 and runtime_asset is not None:
+        tree = json.loads(runtime_asset.read_text(encoding="utf-8"))
+        if len(tree.get("materials", [])) == 1:
+            materials_by_index[0] = materials[0]
     return materials_by_index
 
 
@@ -1467,14 +1495,38 @@ def _author_usd_entity_metadata(
     sim: SimulationManager,
 ) -> None:
     """Author stable EmbodiChain identity metadata directly on USD prims."""
-    from pxr import Usd, UsdGeom, Vt
+    from pxr import Gf, Kind, Usd, UsdGeom, UsdPhysics, Vt
 
     stage = Usd.Stage.Open(str(scene_usd_path))
     if stage is None:
         raise RuntimeError(f"Could not reopen exported USD: {scene_usd_path}")
     world = stage.GetPrimAtPath("/World")
     if not world.IsValid():
-        world = UsdGeom.Xform.Define(stage, "/World").GetPrim()
+        root = stage.GetDefaultPrim()
+        if not root.IsValid():
+            raise RuntimeError("Exported USD has no default prim.")
+        editor = Usd.NamespaceEditor(stage)
+        if (
+            not editor.MovePrimAtPath(root.GetPath(), "/World")
+            or not editor.CanApplyEdits()
+        ):
+            raise RuntimeError("Could not map the exported USD root to /World.")
+        if not editor.ApplyEdits():
+            raise RuntimeError("Could not apply the exported USD root mapping.")
+        world = stage.GetPrimAtPath("/World")
+    stage.SetDefaultPrim(world)
+    Usd.ModelAPI(world).SetKind(Kind.Tokens.assembly)
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    UsdGeom.SetStageMetersPerUnit(stage, 1.0)
+    UsdPhysics.SetStageKilogramsPerUnit(stage, 1.0)
+    gravity = tuple(float(value) for value in sim.sim_config.physics_cfg.gravity)
+    magnitude = math.sqrt(sum(value * value for value in gravity))
+    direction = (
+        tuple(value / magnitude for value in gravity) if magnitude else (0, 0, -1)
+    )
+    physics_scene = UsdPhysics.Scene.Define(stage, "/World/PhysicsScene")
+    physics_scene.CreateGravityDirectionAttr().Set(Gf.Vec3f(*direction))
+    physics_scene.CreateGravityMagnitudeAttr().Set(magnitude)
     world.SetCustomDataByKey("embodichain:scene_schema", USD_SCENE_SCHEMA)
     world.SetCustomDataByKey("embodichain:up_axis", "Z")
     world.SetCustomDataByKey("embodichain:meters_per_unit", 1.0)

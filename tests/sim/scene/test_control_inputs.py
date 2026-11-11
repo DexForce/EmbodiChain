@@ -278,6 +278,9 @@ def test_prismatic_and_object_inputs_share_link_frames_and_source_topology(butto
     path = "/Button/cap/pull_grip"
     Sdf.CopySpec(layer, "/Button/cap/contact", layer, path)
     stage.RemovePrim("/Button/cap/contact")
+    stage.GetPrimAtPath("/Button/press_joint").CreateAttribute(
+        "gen_sim:closedPosition", Sdf.ValueTypeNames.Double
+    ).Set(0.0)
     layer.Save()
     source = read_usd_source(button["fpath"])
     binding = inspect_prismatic(button, source=source)

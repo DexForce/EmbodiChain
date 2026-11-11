@@ -17,6 +17,8 @@
 
 from __future__ import annotations
 
+__all__: list[str] = []
+
 import json
 from pathlib import Path
 import shutil
@@ -90,6 +92,15 @@ class SceneExporter:
         self.scene_graph.validate()
         if set(self.scene_graph.node_by_id()) != set(object_ids):
             raise ValueError("Scene graph nodes must match exported scene object ids.")
+
+        # A failed replacement must not leave an earlier scene's delivery usable.
+        for delivery in (
+            self.output_root / "scene_package.zip",
+            self.output_root / "scene_usd" / "scene.usda",
+            self.output_root / "scene_usd" / "scene_usd_manifest.json",
+            self.output_root / "scene_usd" / "scene.usdz",
+        ):
+            delivery.unlink(missing_ok=True)
 
         exported_entries = {
             scene_object.id: self._copy_scene_object_to_assets(

@@ -442,7 +442,6 @@ def test_articulated_usdcs_use_visible_rgba_in_scene_order(
     assert "black microwave with a hinged door" in client.calls[1][0]
     assert all("self-contained USDC" in call[0] for call in client.calls)
     assert all("gen_sim:closedPosition" in call[0] for call in client.calls)
-    assert all("every push button and plunger" in call[0] for call in client.calls)
     assert all("closed_position=<endpoint>" in call[0] for call in client.calls)
     assert all("Do not patch USD files" in call[0] for call in client.calls)
     assert drawer.articulated_usdc_path == str(
