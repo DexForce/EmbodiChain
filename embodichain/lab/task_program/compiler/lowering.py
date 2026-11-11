@@ -52,6 +52,8 @@ from embodichain.lab.sim.atomic_skills import (
 from embodichain.lab.sim.atomic_skills.goals import resolve_pose_goal
 from embodichain.lab.task_program.semantics.calls import (
     HandOver,
+    MoveHeldObjectCall,
+    SemanticRelativePose,
     Pick,
     Place,
     RegisteredSemanticCall,
@@ -237,7 +239,7 @@ class SemanticObjectTarget:
     the same object target that placement will eventually lower.
     """
 
-    pose: SemanticPose | SceneEntityPose | None = None
+    pose: SemanticPose | SemanticRelativePose | SceneEntityPose | None = None
     relation: SemanticRelationTarget | None = None
     preserve_current_object_orientation: bool = False
 
@@ -248,7 +250,7 @@ class SemanticObjectTarget:
                 "SemanticObjectTarget requires exactly one of pose or relation."
             )
         if self.pose is not None:
-            if type(self.pose) is SemanticPose:
+            if type(self.pose) in (SemanticPose, SemanticRelativePose):
                 object.__setattr__(self, "pose", self.pose.snapshot())
             elif type(self.pose) is SceneEntityPose:
                 object.__setattr__(self, "pose", self.pose.snapshot())
@@ -965,6 +967,69 @@ class GroundedSemanticCall:
         return self._eligible_mask.clone()
 
 
+def _held_transport_lowering(object_id: str, target: PoseGoalValue) -> SemanticLowering:
+    """Construct the common typed goal and exact retained-attachment contract."""
+    from embodichain.lab.sim.atomic_skills import HeldObjectPoseGoal
+
+    return SemanticLowering(
+        goal=HeldObjectPoseGoal(target, object_id=object_id),
+        registered_effect=RegisteredSemanticEffect(
+            effect_kind=SemanticEffectKind.ATTACH,
+            held_objects=(
+                RegisteredHeldObjectEffect(
+                    expectation_id="primary",
+                    relation=HeldObjectRelation.ATTACHED,
+                    object_id=object_id,
+                    slot_id="primary",
+                    retain_during_segments=("transport",),
+                ),
+            ),
+        ),
+    )
+
+
+class _TypedMoveHeldObjectLowerer(RegisteredSemanticLowerer):
+    """Use the existing registered retention lifecycle for built-in transport."""
+
+    call_id = "move_held_object"
+    from embodichain.lab.sim.atomic_skills import MoveHeldObject as _Skill
+
+    target_descriptor = _Skill.descriptor()
+    effect_contract_kind = SemanticEffectKind.ATTACH
+
+    def lower(
+        self,
+        call: MoveHeldObjectCall,
+        *,
+        context: PlanningContext,
+        bound: BoundSemanticCall,
+        option_template: SkillOptions,
+    ) -> SemanticLowering:
+        from embodichain.lab.sim.atomic_skills.goals import resolve_pose_goal
+
+        target = (
+            call.at.to_goal()
+            if type(call.at) is SemanticRelativePose
+            else call.at.to_matrix()
+        )
+        # Freeze relative targets at this occurrence's initial observation. Atomic
+        # recovery retains this goal rather than following a moving reference.
+        target = resolve_pose_goal(target, context, name="move_held_object.at")
+        return _held_transport_lowering(call.object.entity_id, target)
+
+    def pick_lookahead_targets(
+        self,
+        call: MoveHeldObjectCall,
+        *,
+        picked_object: SceneObjectRef,
+        bound: BoundSemanticCall,
+        previous_target: SemanticObjectTarget | None,
+    ) -> tuple[SemanticObjectTarget, ...] | None:
+        if call.object != picked_object:
+            return None
+        return (SemanticObjectTarget(pose=call.at),)
+
+
 class SemanticCallCompiler:
     """Analyze semantic workflows and JIT-lower exactly one call at a time."""
 
@@ -1102,6 +1167,7 @@ class SemanticCallCompiler:
             normalized_handover_providers[provider_id] = provider
         self._integration = integration
         self._compiler_id = uuid4().hex
+        lowerers["move_held_object"] = _TypedMoveHeldObjectLowerer()
         self._registered_lowerers = MappingProxyType(lowerers)
         self._relation_grounders = MappingProxyType(normalized_grounders)
         self._handover_pose_providers = MappingProxyType(normalized_handover_providers)
@@ -1183,6 +1249,7 @@ class SemanticCallCompiler:
             Pick,
             Place,
             HandOver,
+            MoveHeldObjectCall,
             RegisteredSemanticCall,
         )
         if not all(type(call) in allowed_types for call in supplied):
@@ -1202,7 +1269,7 @@ class SemanticCallCompiler:
 
         bound_calls: list[BoundSemanticCall] = []
         for index, call in enumerate(supplied):
-            if type(call) is RegisteredSemanticCall and (
+            if type(call) in (RegisteredSemanticCall, MoveHeldObjectCall) and (
                 call.call_id not in self._registered_lowerers
             ):
                 raise _diagnostic(
@@ -1340,6 +1407,31 @@ class SemanticCallCompiler:
                         index,
                         destination_resource,
                     )
+            elif type(call) is MoveHeldObjectCall:
+                producer = latest_holder.get(call.object.entity_id)
+                selected = bound.binding.resource_ids["primary"]
+                if producer is not None and producer[1] != selected:
+                    raise _diagnostic(
+                        "held_resource_mismatch",
+                        (*path, index, "call", "resources", "primary"),
+                        "Transport selects a different resource from the verified producer.",
+                    )
+                if bound.preset.effect_assurance is not EffectAssurance.VERIFIED:
+                    raise _diagnostic(
+                        "transport_requires_verified_effect",
+                        (*path, index, "call"),
+                        "Typed held-object transport requires verified effects.",
+                    )
+                requires_held = True
+                effect_kind = SemanticEffectKind.ATTACH
+                dependencies.append(
+                    SemanticEffectDependency(
+                        producer_index=None if producer is None else producer[0],
+                        consumer_index=index,
+                        object=call.object,
+                    )
+                )
+                latest_holder[call.object.entity_id] = (index, selected)
             else:
                 effect_kind = SemanticEffectKind.REGISTERED
                 lowerer = self._registered_lowerers[call.call_id]
@@ -1405,7 +1497,7 @@ class SemanticCallCompiler:
         because its exact pair keys depend on verified input ``TaskState``.
         """
         call = bound.linked.call
-        if type(call) in (Pick, Place):
+        if type(call) in (Pick, Place, MoveHeldObjectCall):
             return (
                 frozenset(
                     {
@@ -1434,7 +1526,7 @@ class SemanticCallCompiler:
                 ),
                 False,
             )
-        if type(call) is RegisteredSemanticCall:
+        if type(call) in (RegisteredSemanticCall, MoveHeldObjectCall):
             lowerer = self._registered_lowerers[call.call_id]
             return frozenset(), not lowerer.preserves_symbolic_state
         raise AssertionError(f"Unsupported linked call {type(call).__name__}.")
@@ -1526,7 +1618,7 @@ class SemanticCallCompiler:
             lowering = self._lower_place(analyzed, context, eligible, path=path)
         elif type(call) is HandOver:
             lowering = self._lower_handover(analyzed, context, eligible, path=path)
-        elif type(call) is RegisteredSemanticCall:
+        elif type(call) in (RegisteredSemanticCall, MoveHeldObjectCall):
             lowering = self._lower_registered(analyzed, context, path=path)
             self._validate_registered_held_effects(
                 analyzed,
@@ -1730,7 +1822,7 @@ class SemanticCallCompiler:
                     f"Verified preset {bound.preset.preset_id!r} requires an "
                     f"effect monitor for curated call {semantic_id!r}.",
                 )
-            if type(bound.linked.call) is RegisteredSemanticCall:
+            if type(bound.linked.call) in (RegisteredSemanticCall, MoveHeldObjectCall):
                 lowerer = self._registered_lowerers.get(bound.linked.call.call_id)
                 if lowerer is not None and lowerer.effect_contract_kind is not None:
                     raise _diagnostic(
@@ -1740,7 +1832,7 @@ class SemanticCallCompiler:
                         f"effect monitor for registered call {semantic_id!r}.",
                     )
             return None
-        if type(bound.linked.call) is RegisteredSemanticCall:
+        if type(bound.linked.call) in (RegisteredSemanticCall, MoveHeldObjectCall):
             lowerer = self._registered_lowerers.get(bound.linked.call.call_id)
             if lowerer is None or lowerer.effect_contract_kind is None:
                 raise _diagnostic(
@@ -1785,7 +1877,7 @@ class SemanticCallCompiler:
         for index in range(pick_index + 1, len(bound_calls)):
             bound = bound_calls[index]
             call = bound.linked.call
-            if type(call) is RegisteredSemanticCall:
+            if type(call) in (RegisteredSemanticCall, MoveHeldObjectCall):
                 lowerer = self._registered_lowerers[call.call_id]
                 if (
                     bound.binding.resource_ids.get("primary")
@@ -2019,7 +2111,7 @@ class SemanticCallCompiler:
     ) -> SemanticLowering:
         """Invoke one explicitly installed registered-call lowerer."""
         call = analyzed.call
-        assert type(call) is RegisteredSemanticCall
+        assert type(call) in (RegisteredSemanticCall, MoveHeldObjectCall)
         lowerer = self._registered_lowerers.get(call.call_id)
         if lowerer is None:
             raise _diagnostic(
@@ -2179,7 +2271,7 @@ class SemanticCallCompiler:
             )
             state_expectations.extend((source, destination))
             clauses.extend((*source_clauses, *destination_clauses))
-        elif type(call) is RegisteredSemanticCall:
+        elif type(call) in (RegisteredSemanticCall, MoveHeldObjectCall):
             contract = lowering.registered_effect
             if contract is None:
                 raise _diagnostic(
@@ -2313,7 +2405,10 @@ class SemanticCallCompiler:
                         HeldObjectRelation.DETACHED,
                     ),
                 )
-        elif type(call) is RegisteredSemanticCall and registered_effect is not None:
+        elif (
+            type(call) in (RegisteredSemanticCall, MoveHeldObjectCall)
+            and registered_effect is not None
+        ):
             definitions = tuple(
                 (
                     f"{item.expectation_id}_acquired",
@@ -2525,7 +2620,10 @@ class SemanticCallCompiler:
                         True,
                     ),
                 )
-        elif type(call) is RegisteredSemanticCall and registered_effect is not None:
+        elif (
+            type(call) in (RegisteredSemanticCall, MoveHeldObjectCall)
+            and registered_effect is not None
+        ):
             definitions = tuple(
                 (
                     f"{item.expectation_id}_attached",
@@ -2861,6 +2959,10 @@ class SemanticCallCompiler:
         context: PlanningContext,
     ) -> PoseGoalValue:
         """Ground a direct pose or dispatch one typed relation grounder."""
+        if type(target.pose) is SemanticRelativePose:
+            from embodichain.lab.sim.atomic_skills.goals import resolve_pose_goal
+
+            return resolve_pose_goal(target.pose.to_goal(), context, name="target")
         if type(target.pose) is SemanticPose:
             return target.pose.to_matrix()
         if type(target.pose) is SceneEntityPose:

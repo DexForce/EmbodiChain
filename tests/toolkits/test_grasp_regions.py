@@ -15,13 +15,14 @@
 
 from __future__ import annotations
 
+
 from unittest.mock import Mock
 from types import SimpleNamespace
 
 import pytest
 import torch
 
-from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
+
 from embodichain.toolkits.graspkit.pg_grasp._antipodal_backend import (
     _AntipodalMeshBackend,
 )
@@ -186,7 +187,9 @@ def test_service_policy_is_per_call_and_default_preserves_legacy_keyword_shape(
     method, policy
 ):
     generator = AntipodalGraspPoseGenerator(
-        ParallelJawGripperModelCfg(),
+        model_id="parallel_jaw",
+        min_opening_width=0.001,
+        max_opening_width=0.1,
         collision_geometry=FixedGripperCollisionGeometry(
             torch.zeros(1, 3), {"grasp_from_tcp": torch.eye(4).tolist()}
         ),
@@ -309,9 +312,11 @@ def test_opening_envelope_filters_after_ranking_and_owns_selected_rows():
     )
 
     delegate = Mock(spec=ParallelJawGraspPoseGenerator)
-    delegate.gripper_model = ParallelJawGripperModelCfg(
-        model_id="test", max_opening_width=0.08
-    )
+    delegate.gripper_data = {
+        "model_id": "test",
+        "max_opening_width": 0.08,
+        "min_opening_width": 0.001,
+    }
     poses = torch.eye(4).expand(3, 4, 4).clone()
     poses[:, 0, 3] = torch.tensor([0.0, 0.05, 0.01])
     costs = torch.tensor([3.0, 1.0, 2.0])

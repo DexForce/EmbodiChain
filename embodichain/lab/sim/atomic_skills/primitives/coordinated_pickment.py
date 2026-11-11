@@ -664,10 +664,10 @@ class CoordinatedPickment(AtomicSkill[CoordinatedPickGoal, CoordinatedPickmentOp
                 "CoordinatedPickment requires ParallelJawGraspPoseGenerator "
                 "services for both grasp endpoints."
             )
-        if left_generator.gripper_model != right_generator.gripper_model:
+        if left_generator.paired_query_key != right_generator.paired_query_key:
             raise ValueError(
                 "CoordinatedPickment requires matching left and right parallel-jaw "
-                "gripper geometry."
+                "gripper geometry and TCP mappings, or a shared paired provider."
             )
         partition_ratios = self._candidate_middle_empty_ratios(
             semantics.affordance,

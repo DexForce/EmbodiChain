@@ -3,7 +3,7 @@
   "kind": "static-architecture",
   "coverage": "curated-sample",
   "repository": "DexForce/EmbodiChain",
-  "revision": "5610ce3231ad1a13a1feea8e14082638d98356cb",
+  "revision": "4ffc3dd7b4ace00bc5fdc1fdac132e77684824ac",
   "source_ref": "HEAD",
   "package_version": "0.3.2",
   "topic_index": "agent_context/MAP.yaml",
@@ -3340,10 +3340,10 @@
           "excerpt": "    template = TaskSpec("
         },
         {
-          "path": "embodichain/gen_sim/task_engine/cli.py",
-          "symbol": "main",
-          "start_line": 114,
-          "end_line": 118,
+          "path": "embodichain/gen_sim/task_engine/_image_run.py",
+          "symbol": "_plan_image_task",
+          "start_line": 99,
+          "end_line": 103,
           "excerpt": "            \"pending_bindings\": len(result[\"binding_requirements\"]),\n            \"execution_ready\": False,\n            \"runtime_evidence_status\": \"not_run\",\n            \"image_sha256\": result[\"image_grounding\"][\"image_sha256\"],\n            \"integration_status\": \"unbound\","
         },
         {
@@ -4116,8 +4116,8 @@
         {
           "path": "embodichain/cli/main.py",
           "symbol": "<module>",
-          "start_line": 167,
-          "end_line": 167,
+          "start_line": 172,
+          "end_line": 172,
           "excerpt": "        target=\"embodichain.toolkits.acd.cli:main\","
         }
       ]
@@ -4134,8 +4134,8 @@
         {
           "path": "embodichain/cli/main.py",
           "symbol": "<module>",
-          "start_line": 52,
-          "end_line": 52,
+          "start_line": 57,
+          "end_line": 57,
           "excerpt": "        target=\"embodichain.data.download:main\","
         }
       ]
@@ -4152,22 +4152,22 @@
         {
           "path": "embodichain/cli/main.py",
           "symbol": "<module>",
-          "start_line": 102,
-          "end_line": 102,
+          "start_line": 107,
+          "end_line": 107,
           "excerpt": "        target=\"embodichain.lab.scripts.run_task:cli\","
         },
         {
           "path": "embodichain/cli/main.py",
           "symbol": "_load_handler",
-          "start_line": 222,
-          "end_line": 224,
+          "start_line": 227,
+          "end_line": 229,
           "excerpt": "    module_name, attribute = target.split(\":\", maxsplit=1)\n    module = importlib.import_module(module_name)\n    return getattr(module, attribute)"
         },
         {
           "path": "embodichain/cli/main.py",
           "symbol": "main",
-          "start_line": 257,
-          "end_line": 258,
+          "start_line": 262,
+          "end_line": 263,
           "excerpt": "    handler = _load_handler(command.target)\n    handler(arguments[1:])"
         }
       ]
@@ -4184,8 +4184,8 @@
         {
           "path": "embodichain/cli/main.py",
           "symbol": "<module>",
-          "start_line": 162,
-          "end_line": 162,
+          "start_line": 167,
+          "end_line": 167,
           "excerpt": "        target=\"embodichain.toolkits.graspkit.scripts.annotate_grasp:cli\","
         }
       ]
@@ -4220,8 +4220,8 @@
         {
           "path": "embodichain/cli/main.py",
           "symbol": "<module>",
-          "start_line": 157,
-          "end_line": 157,
+          "start_line": 162,
+          "end_line": 162,
           "excerpt": "        target=\"embodichain.learning.rl.policy_evaluation.cli:cli\","
         }
       ]
@@ -4238,8 +4238,8 @@
         {
           "path": "embodichain/cli/main.py",
           "symbol": "<module>",
-          "start_line": 67,
-          "end_line": 67,
+          "start_line": 72,
+          "end_line": 72,
           "excerpt": "        target=\"embodichain.gen_sim.scene_engine.cli.start:main\","
         }
       ]
@@ -4256,8 +4256,8 @@
         {
           "path": "embodichain/cli/main.py",
           "symbol": "<module>",
-          "start_line": 57,
-          "end_line": 57,
+          "start_line": 62,
+          "end_line": 62,
           "excerpt": "        target=\"embodichain.gen_sim.asset_engine.cli.start:main\","
         }
       ]
@@ -4274,22 +4274,22 @@
         {
           "path": "embodichain/cli/main.py",
           "symbol": "<module>",
-          "start_line": 152,
-          "end_line": 152,
+          "start_line": 157,
+          "end_line": 157,
           "excerpt": "        target=\"embodichain.learning.rl.train:cli\","
         },
         {
           "path": "embodichain/cli/main.py",
           "symbol": "_load_handler",
-          "start_line": 222,
-          "end_line": 224,
+          "start_line": 227,
+          "end_line": 229,
           "excerpt": "    module_name, attribute = target.split(\":\", maxsplit=1)\n    module = importlib.import_module(module_name)\n    return getattr(module, attribute)"
         },
         {
           "path": "embodichain/cli/main.py",
           "symbol": "main",
-          "start_line": 257,
-          "end_line": 258,
+          "start_line": 262,
+          "end_line": 263,
           "excerpt": "    handler = _load_handler(command.target)\n    handler(arguments[1:])"
         }
       ]
@@ -4306,8 +4306,8 @@
         {
           "path": "embodichain/cli/main.py",
           "symbol": "<module>",
-          "start_line": 182,
-          "end_line": 182,
+          "start_line": 187,
+          "end_line": 187,
           "excerpt": "        target=\"embodichain.lab.scripts.analyze_workspace:cli\","
         }
       ]
@@ -5830,15 +5830,15 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_robot",
-          "start_line": 3478,
-          "end_line": 3479,
+          "start_line": 3508,
+          "end_line": 3509,
           "excerpt": "        robot = self._declare_spawn_articulation(cfg, Robot)\n        self._robots[uid] = robot"
         },
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager._declare_spawn_articulation",
-          "start_line": 3516,
-          "end_line": 3519,
+          "start_line": 3546,
+          "end_line": 3549,
           "excerpt": "        facade = facade_type(\n            cfg=cfg,\n            device=self.device,\n        )"
         }
       ]
@@ -5873,8 +5873,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_robot",
-          "start_line": 3479,
-          "end_line": 3484,
+          "start_line": 3509,
+          "end_line": 3514,
           "excerpt": "        self._robots[uid] = robot\n        if was_materialized:\n            self.prepare()\n        for sensor_cfg in mounted_sensors:\n            self.add_sensor(sensor_cfg)\n        return robot"
         }
       ]
@@ -5891,8 +5891,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.enable_gizmo",
-          "start_line": 3669,
-          "end_line": 3669,
+          "start_line": 3699,
+          "end_line": 3699,
           "excerpt": "            gizmo = Gizmo(target, gizmo_cfg, control_part)"
         }
       ]
@@ -5909,8 +5909,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.create_rigid_constraint",
-          "start_line": 3151,
-          "end_line": 3151,
+          "start_line": 3181,
+          "end_line": 3181,
           "excerpt": "        constraint = RigidConstraint("
         }
       ]
@@ -5927,8 +5927,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_rigid_object_group",
-          "start_line": 3276,
-          "end_line": 3276,
+          "start_line": 3306,
+          "end_line": 3306,
           "excerpt": "        group = RigidObjectGroup("
         }
       ]
@@ -5945,8 +5945,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager._declare_rigid_objects",
-          "start_line": 2841,
-          "end_line": 2841,
+          "start_line": 2871,
+          "end_line": 2871,
           "excerpt": "            rigid_obj = RigidObject(cfg=cfg, device=self.device)"
         }
       ]
@@ -5963,8 +5963,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_articulation",
-          "start_line": 3376,
-          "end_line": 3376,
+          "start_line": 3406,
+          "end_line": 3406,
           "excerpt": "        self._articulations[uid] = articulation"
         }
       ]
@@ -5981,8 +5981,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_deformable_object",
-          "start_line": 2951,
-          "end_line": 2951,
+          "start_line": 2981,
+          "end_line": 2981,
           "excerpt": "        self._deformable_objects[uid] = deformable"
         }
       ]
@@ -5999,8 +5999,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_light",
-          "start_line": 2463,
-          "end_line": 2463,
+          "start_line": 2493,
+          "end_line": 2493,
           "excerpt": "        self._lights[uid] = batch_lights"
         }
       ]

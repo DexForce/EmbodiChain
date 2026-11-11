@@ -103,8 +103,8 @@ def test_w1_pika_deployment_composes_and_preserves_task_route(
         assert restored.urdf_cfg.component_prefix == cfg.robot.urdf_cfg.component_prefix
         for side in ("left_arm", "right_arm"):
             torch.testing.assert_close(
-                torch.tensor(restored.solver_cfg[side].tcp),
-                torch.tensor(cfg.robot.solver_cfg[side].tcp),
+                torch.as_tensor(restored.solver_cfg[side].tcp, dtype=torch.float64),
+                torch.as_tensor(cfg.robot.solver_cfg[side].tcp, dtype=torch.float64),
             )
         for before, after in zip(cfg.robot.sensors, restored.sensors, strict=True):
             assert after.extrinsics.parent == before.extrinsics.parent

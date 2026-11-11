@@ -66,6 +66,17 @@ to Spawn, not per-object collision-group calculations. Backend differences
 belong in physics hooks/capabilities or object adapters, not task-side native
 access. Contact sensors use the finalized Scene's `ContactQuery` boundary.
 
+Camera and light resources also belong to that existing Scene. Its lightweight
+prepared-Arena phase permits creation before physical finalization. Light
+property setters/reset and multi-field randomization use native property batches;
+global sun/direction lights remain single instances. Manager-created light
+getters retain owned CPU snapshots. Render-batch selections
+are refreshed on topology revision, and unsupported falloff retains only its
+legacy compatibility path; mesh binding preserves scalar sharing/conflict
+behavior. Standalone camera/light pose methods retain their
+per-instance native implementations. See [sensor lifecycle](../sensor-system/lifecycle.md)
+for camera attachment and shared-target release ordering.
+
 `spawn.source_geometry` owns `UsdSourceSnapshot`, `read_usd_source` and
 `LinkMesh` for Object source adapters and static Scene consumers. Reads use fresh
 anonymous USD layers and recheck captured bytes. Explicit snapshots can be
@@ -156,6 +167,7 @@ tests need non-symmetric rotations to expose component-order mistakes.
 | Preparation, topology changes, reset, cleanup, controls | [Lifecycle](lifecycle.md); manager and `spawn/scene.py` |
 | Backend/device selection, source overlays, collision/mass policy | [Physics configuration](physics-configuration.md); `cfg/`, `spawn/descriptors.py` |
 | Joint state order, drive lowering, mimic coupling, native adaptation | [Articulation and batch adapters](articulation-adapters.md); `objects/backends/`, `objects/articulation.py` |
+| Initial-fill fluid configuration, state and rendering | [Fluids](fluids.md); `cfg/fluid.py`, `objects/fluid.py` |
 | Volume/surface state, topology and kinematic nodes | [Deformables](deformables.md); `cfg/deformable.py`, `objects/deformable/` |
 | Camera synchronization, native window/offscreen denoising, startup readiness | [Rendering and diagnostics](rendering.md); manager, `cfg/simulation.py`, `_startup_summary.py` |
 | Robot definition, control parts, robot presets | [Robot system](../robot-system/robot-system.md) |

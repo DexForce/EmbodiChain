@@ -11,6 +11,10 @@ independent control DOFs, default control parts, and mimic followers without
 loading simulation or downloading assets. See :ref:`cli-list-robots` for the
 command reference and :doc:`/guides/robot_catalog` for variant selection.
 
+Parallel-jaw grippers share physical defaults between standalone robots and
+mounted embodiments. See :doc:`parallel_jaw_grippers` for catalog IDs, binding
+syntax, command ownership and the TCP resolution contract.
+
 Manufacturers
 -------------
 
@@ -102,6 +106,8 @@ Manufacturers
 
 .. toctree::
    :maxdepth: 2
+
+   parallel_jaw_grippers
    :caption: Manufacturers
    :hidden:
 
