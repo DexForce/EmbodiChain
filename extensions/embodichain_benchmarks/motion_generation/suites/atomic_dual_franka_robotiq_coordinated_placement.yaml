@@ -2,17 +2,17 @@
 # Supply a 12-slot exported Franka policy for the paired NMG rows. Both reuse
 # its arm-local observations with the checked base and tool transforms below.
 schema_version: 1
-name: atomic_dual_franka_pgi_coordinated_placement
-suite_version: atomic_dual_franka_pgi_coordinated_placement_v1
+name: atomic_dual_franka_robotiq_coordinated_placement
+suite_version: atomic_dual_franka_robotiq_coordinated_placement_v2
 profile: smoke
 robot:
-  id: dual_franka_pgi_coordinated_placement
+  id: dual_franka_robotiq_coordinated_placement
   provider: dual_arm
   config:
     robot_type: franka
-    uid: benchmark_dual_franka_coordinated_placement
-    urdf_name: benchmark_dual_franka_coordinated_placement
-    tcp_z: 0.15
+    uid: benchmark_dual_franka_robotiq_coordinated_placement
+    urdf_name: benchmark_dual_franka_robotiq_coordinated_placement
+    tcp_z: 0.21
     init_pos:
     - 1.95
     - 0.0
@@ -21,6 +21,8 @@ robot:
     - 0.0
     - 0.0
     - -90.0
+    gripper_type: robotiq_2f_140
+
 planners:
 - id: toppra
   adapter: toppra
@@ -76,18 +78,18 @@ planners:
         - 0.0
         - 1.0
     runtime_tcp_from_policy_tcp:
-    - - 0.7071067811865476
+    - - -0.7071067811865476
       - 0.7071067811865476
       - 0.0
       - 0.0
     - - -0.7071067811865476
-      - 0.7071067811865476
+      - -0.7071067811865476
       - 0.0
       - 0.0
     - - 0.0
       - 0.0
       - 1.0
-      - -0.0466
+      - -0.1066
     - - 0.0
       - 0.0
       - 0.0
@@ -108,18 +110,18 @@ planners:
     num_arm_joints: 7
     policy_frame_from_world_by_control_part: *id001
     runtime_tcp_from_policy_tcp:
-    - - 0.7071067811865476
+    - - -0.7071067811865476
       - 0.7071067811865476
       - 0.0
       - 0.0
     - - -0.7071067811865476
-      - 0.7071067811865476
+      - -0.7071067811865476
       - 0.0
       - 0.0
     - - 0.0
       - 0.0
       - 1.0
-      - -0.0466
+      - -0.1066
     - - 0.0
       - 0.0
       - 0.0
@@ -145,6 +147,7 @@ tracks:
   scenario: atomic_skill
   enabled: true
   config:
+    grasp_model: RobotiqArg2F140
     batch_sizes:
     - 1
     seeds:
@@ -157,17 +160,37 @@ tracks:
       joint_tracking_tolerance_rad: 0.05
     grippers:
     - control_part: left_eef
-      finger_links: [left_gripper_finger1_link_1, left_gripper_finger2_link_1]
+      finger_links: [left_inner_finger_pad, left_right_inner_finger_pad]
       open_qpos:
       - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
       grasp_qpos:
-      - 0.03
+      - 0.7
+      - -0.7
+      - 0.7
+      - -0.7
+      - -0.7
+      - 0.7
     - control_part: right_eef
-      finger_links: [right_gripper_finger1_link_1, right_gripper_finger2_link_1]
+      finger_links: [right_left_inner_finger_pad, right_inner_finger_pad]
       open_qpos:
       - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
       grasp_qpos:
-      - 0.04
+      - 0.7
+      - -0.7
+      - 0.7
+      - -0.7
+      - -0.7
+      - 0.7
     fixtures:
     - id: table
       kind: mesh

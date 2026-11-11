@@ -1,6 +1,6 @@
 schema_version: 1
-name: atomic_franka_pgi_spatial_generalization
-suite_version: atomic_franka_pgi_spatial_generalization_v10
+name: atomic_franka_robotiq_spatial_generalization
+suite_version: atomic_franka_robotiq_spatial_generalization_v11
 profile: coverage
 
 # Reusable strict-spatial domain definitions. Every track below selects only
@@ -394,15 +394,15 @@ x-physics: &physics
 
 x-gripper-cube: &gripper_cube
   control_part: eef
-  finger_links: [gripper_finger1_link_1, gripper_finger2_link_1]
-  open_qpos: [0.0]
-  grasp_qpos: [0.036]
+  finger_links: [left_inner_finger_pad, right_inner_finger_pad]
+  open_qpos: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+  grasp_qpos: [0.7, -0.7, 0.7, -0.7, -0.7, 0.7]
 
 x-gripper-contact: &gripper_contact
   control_part: eef
-  finger_links: [gripper_finger1_link_1, gripper_finger2_link_1]
-  open_qpos: [0.0]
-  grasp_qpos: [0.040]
+  finger_links: [left_inner_finger_pad, right_inner_finger_pad]
+  open_qpos: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+  grasp_qpos: [0.7, -0.7, 0.7, -0.7, -0.7, 0.7]
 
 # Parameter anchors are the single edit surface for the first-stage primitive
 # geometry sweep. Runtime object overrides and domain provenance reuse the same
@@ -800,29 +800,22 @@ x-skill-push-object: &skill_push_object
     - name: spatial_cube_push_lateral_10cm
       object: cube_50mm
       task_difficulty: simple
-      contact_distance_m: 0.042
+      contact_distance_m: 0.0465
       target_object_offset_m: [0.0, 0.10, 0.0]
     - name: spatial_cube_push_toward_base_8cm
       object: cube_50mm
       task_difficulty: simple
-      contact_distance_m: 0.052
+      contact_distance_m: 0.060
       target_object_offset_m: [0.08, 0.0, 0.0]
 
 robot:
-  id: franka_pgi
-  provider: franka_pgi
+  id: franka_robotiq
+  provider: franka_robotiq
   config:
     attrs:
       material_props:
         static_friction: 1.0
         dynamic_friction: 1.0
-    solver_cfg:
-      arm:
-        tcp:
-          - [1.0, 0.0, 0.0, 0.0]
-          - [0.0, 1.0, 0.0, 0.0]
-          - [0.0, 0.0, 1.0, 0.15]
-          - [0.0, 0.0, 0.0, 1.0]
 
 planners:
   - id: curobo
@@ -870,23 +863,24 @@ tracks:
     domains:
       - <<: *domain_nominal
         applicability: [pick_up, pour, axis_align]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_object_xy
         applicability: [pick_up, pour, axis_align]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_object_yaw
         applicability: [pick_up, pour, axis_align]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_task_frame_planar
         applicability: [pick_up, pour, axis_align]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_object_planar_pose
         applicability: [pick_up, pour, axis_align]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_object_workspace_shell
         applicability: [pick_up, pour, axis_align]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
     config:
+      grasp_model: RobotiqArg2F140
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -900,35 +894,36 @@ tracks:
     domains:
       - <<: *domain_nominal
         applicability: [move_held_object]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_object_xy
         applicability: [move_held_object]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_object_yaw
         applicability: [move_held_object]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_target_relative_pose
         applicability: [move_held_object]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_target_yaw
         applicability: [move_held_object]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_target_z
         applicability: [move_held_object]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_target_roll_pitch
         applicability: [move_held_object]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_task_frame_planar
         applicability: [move_held_object]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_object_target_spatial_pose
         applicability: [move_held_object]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_target_relative_shell
         applicability: [move_held_object]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
     config:
+      grasp_model: RobotiqArg2F140
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -942,29 +937,30 @@ tracks:
     domains:
       - <<: *domain_nominal
         applicability: [place]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_object_xy
         applicability: [place]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_object_yaw
         applicability: [place]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_target_relative_pose
         applicability: [place]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_target_yaw
         applicability: [place]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_task_frame_planar
         applicability: [place]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_object_target_planar_pose
         applicability: [place]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_target_relative_shell
         applicability: [place]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
     config:
+      grasp_model: RobotiqArg2F140
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -978,26 +974,27 @@ tracks:
     domains:
       - <<: *domain_nominal
         applicability: [push_object]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_object_xy
         applicability: [push_object]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_object_yaw
         applicability: [push_object]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_target_relative_pose
         applicability: [push_object]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_task_frame_planar
         applicability: [push_object]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_object_target_position
         applicability: [push_object]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_target_relative_shell
         applicability: [push_object]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
     config:
+      grasp_model: RobotiqArg2F140
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -1013,23 +1010,24 @@ tracks:
     domains:
       - <<: *domain_cube_nominal
         applicability: [pick_up, pour, axis_align]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_cube_uniform_40mm
         applicability: [pick_up, pour, axis_align]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_cube_uniform_60mm
         applicability: [pick_up, pour, axis_align]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_cube_aspect_x
         applicability: [pick_up, pour, axis_align]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_cube_aspect_y
         applicability: [pick_up, pour, axis_align]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_cube_aspect_z
         applicability: [pick_up, pour, axis_align]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
     config:
+      grasp_model: RobotiqArg2F140
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -1043,23 +1041,24 @@ tracks:
     domains:
       - <<: *domain_cube_nominal
         applicability: [move_held_object]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_cube_uniform_40mm
         applicability: [move_held_object]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_cube_uniform_60mm
         applicability: [move_held_object]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_cube_aspect_x
         applicability: [move_held_object]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_cube_aspect_y
         applicability: [move_held_object]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_cube_aspect_z
         applicability: [move_held_object]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
     config:
+      grasp_model: RobotiqArg2F140
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -1073,23 +1072,24 @@ tracks:
     domains:
       - <<: *domain_cube_nominal
         applicability: [place]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_cube_uniform_40mm
         applicability: [place]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_cube_uniform_60mm
         applicability: [place]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_cube_aspect_x
         applicability: [place]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_cube_aspect_y
         applicability: [place]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_cube_aspect_z
         applicability: [place]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
     config:
+      grasp_model: RobotiqArg2F140
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -1103,23 +1103,24 @@ tracks:
     domains:
       - <<: *domain_cube_nominal
         applicability: [push_object]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_cube_uniform_40mm
         applicability: [push_object]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_cube_uniform_60mm
         applicability: [push_object]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_cube_aspect_x
         applicability: [push_object]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_cube_aspect_y
         applicability: [push_object]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
       - <<: *domain_cube_aspect_z
         applicability: [push_object]
-        scene_layout: franka_pgi_cube_table_v1
+        scene_layout: franka_robotiq_cube_table_v1
     config:
+      grasp_model: RobotiqArg2F140
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -1133,29 +1134,30 @@ tracks:
     domains:
       - <<: *domain_nominal
         applicability: [press, twist]
-        scene_layout: franka_pgi_microwave_controls_v1
+        scene_layout: franka_robotiq_microwave_controls_v1
       - <<: *domain_object_xy
         applicability: [press, twist]
-        scene_layout: franka_pgi_microwave_controls_v1
+        scene_layout: franka_robotiq_microwave_controls_v1
       - <<: *domain_object_yaw
         applicability: [press, twist]
-        scene_layout: franka_pgi_microwave_controls_v1
+        scene_layout: franka_robotiq_microwave_controls_v1
       - <<: *domain_object_z
         applicability: [press, twist]
-        scene_layout: franka_pgi_microwave_controls_v1
+        scene_layout: franka_robotiq_microwave_controls_v1
       - <<: *domain_object_roll_pitch
         applicability: [press, twist]
-        scene_layout: franka_pgi_microwave_controls_v1
+        scene_layout: franka_robotiq_microwave_controls_v1
       - <<: *domain_task_frame_planar
         applicability: [press, twist]
-        scene_layout: franka_pgi_microwave_controls_v1
+        scene_layout: franka_robotiq_microwave_controls_v1
       - <<: *domain_articulation_spatial_pose
         applicability: [press, twist]
-        scene_layout: franka_pgi_microwave_controls_v1
+        scene_layout: franka_robotiq_microwave_controls_v1
       - <<: *domain_articulation_workspace_shell
         applicability: [press, twist]
-        scene_layout: franka_pgi_microwave_controls_v1
+        scene_layout: franka_robotiq_microwave_controls_v1
     config:
+      grasp_model: RobotiqArg2F140
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -1169,29 +1171,30 @@ tracks:
     domains:
       - <<: *domain_nominal
         applicability: [slide]
-        scene_layout: franka_pgi_drawer_v1
+        scene_layout: franka_robotiq_drawer_v1
       - <<: *domain_object_xy
         applicability: [slide]
-        scene_layout: franka_pgi_drawer_v1
+        scene_layout: franka_robotiq_drawer_v1
       - <<: *domain_object_yaw
         applicability: [slide]
-        scene_layout: franka_pgi_drawer_v1
+        scene_layout: franka_robotiq_drawer_v1
       - <<: *domain_object_z
         applicability: [slide]
-        scene_layout: franka_pgi_drawer_v1
+        scene_layout: franka_robotiq_drawer_v1
       - <<: *domain_object_roll_pitch
         applicability: [slide]
-        scene_layout: franka_pgi_drawer_v1
+        scene_layout: franka_robotiq_drawer_v1
       - <<: *domain_task_frame_planar
         applicability: [slide]
-        scene_layout: franka_pgi_drawer_v1
+        scene_layout: franka_robotiq_drawer_v1
       - <<: *domain_articulation_spatial_pose
         applicability: [slide]
-        scene_layout: franka_pgi_drawer_v1
+        scene_layout: franka_robotiq_drawer_v1
       - <<: *domain_articulation_workspace_shell
         applicability: [slide]
-        scene_layout: franka_pgi_drawer_v1
+        scene_layout: franka_robotiq_drawer_v1
     config:
+      grasp_model: RobotiqArg2F140
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -1205,29 +1208,30 @@ tracks:
     domains:
       - <<: *domain_nominal
         applicability: [open_door]
-        scene_layout: franka_pgi_microwave_door_v1
+        scene_layout: franka_robotiq_microwave_door_v1
       - <<: *domain_object_xy
         applicability: [open_door]
-        scene_layout: franka_pgi_microwave_door_v1
+        scene_layout: franka_robotiq_microwave_door_v1
       - <<: *domain_object_yaw
         applicability: [open_door]
-        scene_layout: franka_pgi_microwave_door_v1
+        scene_layout: franka_robotiq_microwave_door_v1
       - <<: *domain_object_z
         applicability: [open_door]
-        scene_layout: franka_pgi_microwave_door_v1
+        scene_layout: franka_robotiq_microwave_door_v1
       - <<: *domain_object_roll_pitch
         applicability: [open_door]
-        scene_layout: franka_pgi_microwave_door_v1
+        scene_layout: franka_robotiq_microwave_door_v1
       - <<: *domain_task_frame_planar
         applicability: [open_door]
-        scene_layout: franka_pgi_microwave_door_v1
+        scene_layout: franka_robotiq_microwave_door_v1
       - <<: *domain_articulation_spatial_pose
         applicability: [open_door]
-        scene_layout: franka_pgi_microwave_door_v1
+        scene_layout: franka_robotiq_microwave_door_v1
       - <<: *domain_articulation_workspace_shell
         applicability: [open_door]
-        scene_layout: franka_pgi_microwave_door_v1
+        scene_layout: franka_robotiq_microwave_door_v1
     config:
+      grasp_model: RobotiqArg2F140
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics

@@ -24,7 +24,7 @@ Run after installing EmbodiChain and the selected backend's dependencies:
 
 ```bash
 embodichain benchmark motion-generation --suite motion_panda_free_space_smoke
-embodichain benchmark motion-generation --suite atomic_franka_pgi_smoke --device cuda
+embodichain benchmark motion-generation --suite atomic_franka_robotiq_smoke --device cuda
 ```
 
 The equivalent Python entry point is
@@ -134,41 +134,35 @@ any directory. Robot assets and optional cuRobo or ONNX Runtime dependencies
 follow their normal installation and asset-resolution rules. TOPPRA uses the
 in-tree implementation and needs no separate `toppra` package.
 
-### Native Panda hand
+### Franka Atomic Skills with Robotiq 2F-140
 
-`robot.provider: franka_panda` uses the stock `PandaWithHand.urdf`, including
-two prismatic finger joints and `fr3_hand_tcp`. For the same hand on both arms,
-select `provider: dual_arm` with `robot.config.robot_type: franka` and
-`robot.config.gripper_type: panda_hand`. This duplicates the complete native
-asset, preserves the arm mount transforms and exposes `left_arm` / `right_arm`
-and two-joint `left_eef` / `right_eef`. The native URDF owns the TCP; omit
-`tcp_z`. Each arm solver ends at its prefixed `fr3_hand_tcp` with an identity
-additional TCP transform. Give the assembly its own `uid` and `urdf_name`.
+All packaged Franka Atomic Skill suites use Robotiq 2F-140, including
+single-arm interactions, dual-arm handover and coordinated placement.
+Single-arm suites select `robot.provider: franka_robotiq`; dual-arm suites
+select `provider: dual_arm`, `robot_type: franka` and
+`gripper_type: robotiq_2f_140`. Franka's dual-arm provider also defaults to
+Robotiq when the hand selector is omitted.
 
-Atomic tracks using this hardware declare `config.grasp_model: franka_panda_hand`
-and explicit per-hand commands `open_qpos: [0.04, 0.04]` and
-`grasp_qpos: [0.0, 0.0]`. Preparation and self-sampling replay both use that
-hand's geometry, including its 0.08 m maximum opening. Single-arm declarations
-use `gripper.control_part: eef`; dual declarations use the `grippers` list.
-Omitting these new selectors retains the existing PGI fixture behavior.
+The former `atomic_franka_pgi_*` and
+`atomic_dual_franka_pgi_coordinated_placement` suites are now named
+`atomic_franka_robotiq_*` and
+`atomic_dual_franka_robotiq_coordinated_placement`. Their versions have changed;
+generate fresh frozen case manifests instead of replaying PGI inputs.
 
-Physical grasp scoring also requires explicit `finger_links`, one collision
-link per finger. Native Panda uses `[fr3_leftfinger, fr3_rightfinger]`; mounted
-dual hands use their actual assembled link names. Custom control-part names
-remain valid. Component-backed tracks may supply only these benchmark contact
-settings in `config.gripper`; the component still owns the command presets.
+Tracks declare `grasp_model: RobotiqArg2F140`, six-joint open/grasp vectors
+with the URDF mimic signs, and two actual finger-pad links per hand. The
+single-arm and placement fixtures use the mounted Robotiq TCP rotation and
+0.21 m offset. NMG mappings preserve the policy's original flange-relative
+TCP after this change. Handover retains its separately calibrated 0.20 m TCP
+and limited closure described below. The native Franka hand remains available
+for custom robot configurations; packaged Franka Atomic suites use Robotiq.
 
-GraspKit returns sampled poses already converted once to the declared runtime
-TCP; see its [frame contract](../../../embodichain/toolkits/graspkit/README.md#frames-and-collision-scope).
-The Placement provider converts its explicitly authored canonical top/handle
-poses to that TCP before freezing them. Frozen replay consumes these runtime-TCP
-poses directly, without another hand-specific conversion. This boundary is
-separate from the policy/runtime TCP map.
-
-Changing hands changes case generation and requires fresh frozen Atomic inputs.
-Explicit Placement top/handle grasps still need native-hand input and physical
-qualification; matching TCP kinematics alone does not certify a successful grasp
-or task. Existing PGI suites and their generic services remain available.
+GraspKit returns sampled poses converted once to the declared runtime TCP;
+see its [frame contract](../../../embodichain/toolkits/graspkit/README.md#frames-and-collision-scope).
+Placement converts its authored canonical top/handle poses to that TCP before
+freezing them. Preparation and replay use Robotiq geometry and the configured
+solver TCP. Physical success still requires measured replay; kinematic checks
+do not qualify a grasp or task by themselves.
 
 ### Franka handover with Robotiq 2F-140
 
@@ -210,14 +204,14 @@ The new hand and suite identity require newly generated frozen inputs.
 | --- | --- |
 | [`motion_panda_free_space_smoke`](./suites/motion_panda_free_space_smoke.yaml) | Small Panda EEF/joint planning check |
 | [`motion_panda_free_space_coverage`](./suites/motion_panda_free_space_coverage.yaml), [`motion_ur5_free_space_coverage`](./suites/motion_ur5_free_space_coverage.yaml) | Planning coverage across batches, path shapes and start-state bins |
-| [`atomic_franka_pgi_smoke`](./suites/atomic_franka_pgi_smoke.yaml) | Single-arm motion integration and six interaction skills |
-| [`atomic_franka_pgi_randomized`](./suites/atomic_franka_pgi_randomized.yaml), [`atomic_ur5_pgi_randomized`](./suites/atomic_ur5_pgi_randomized.yaml) | Seeded single-arm interaction sweeps |
-| [`atomic_franka_pgi_pose_batch`](./suites/atomic_franka_pgi_pose_batch.yaml) | Batched object/target translation perturbations |
-| [`atomic_franka_pgi_door_pour_align_push`](./suites/atomic_franka_pgi_door_pour_align_push.yaml) | OpenDoor, Pour, AxisAlign and PushObject |
-| [`atomic_franka_pgi_spatial_generalization`](./suites/atomic_franka_pgi_spatial_generalization.yaml) | Ten task-level skills across nominal, pose and primitive-geometry domains |
+| [`atomic_franka_robotiq_smoke`](./suites/atomic_franka_robotiq_smoke.yaml) | Single-arm motion integration and six interaction skills |
+| [`atomic_franka_robotiq_randomized`](./suites/atomic_franka_robotiq_randomized.yaml), [`atomic_ur5_pgi_randomized`](./suites/atomic_ur5_pgi_randomized.yaml) | Seeded single-arm interaction sweeps |
+| [`atomic_franka_robotiq_pose_batch`](./suites/atomic_franka_robotiq_pose_batch.yaml) | Batched object/target translation perturbations |
+| [`atomic_franka_robotiq_door_pour_align_push`](./suites/atomic_franka_robotiq_door_pour_align_push.yaml) | OpenDoor, Pour, AxisAlign and PushObject |
+| [`atomic_franka_robotiq_spatial_generalization`](./suites/atomic_franka_robotiq_spatial_generalization.yaml) | Ten task-level skills across nominal, pose and primitive-geometry domains |
 | [`atomic_dual_ur5_pgi_hand_over`](./suites/atomic_dual_ur5_pgi_hand_over.yaml), [`atomic_dual_ur5_pgi_coordinated_pickment`](./suites/atomic_dual_ur5_pgi_coordinated_pickment.yaml), [`atomic_dual_ur5_pgi_coordinated_placement`](./suites/atomic_dual_ur5_pgi_coordinated_placement.yaml) | Dual UR5 + PGI physical skills with TOPPRA |
 | [`atomic_dual_franka_robotiq_hand_over`](./suites/atomic_dual_franka_robotiq_hand_over.yaml) | Nominal B=1 dual Franka + Robotiq 2F-140 handover with TOPPRA |
-| [`atomic_dual_franka_pgi_coordinated_placement`](./suites/atomic_dual_franka_pgi_coordinated_placement.yaml) | Nominal B=1 dual Franka + PGI placement fixture with TOPPRA, cuRobo and paired raw/retimed NMG |
+| [`atomic_dual_franka_robotiq_coordinated_placement`](./suites/atomic_dual_franka_robotiq_coordinated_placement.yaml) | Nominal B=1 dual Franka + Robotiq 2F-140 placement fixture with TOPPRA, cuRobo and paired raw/retimed NMG |
 | [`atomic_dual_ur5_pgi_hand_over_spatial_generalization`](./suites/atomic_dual_ur5_pgi_hand_over_spatial_generalization.yaml), [`atomic_dual_ur5_pgi_coordinated_pickment_spatial_generalization`](./suites/atomic_dual_ur5_pgi_coordinated_pickment_spatial_generalization.yaml), [`atomic_dual_ur5_pgi_coordinated_placement_spatial_generalization`](./suites/atomic_dual_ur5_pgi_coordinated_placement_spatial_generalization.yaml) | Dual-arm pose, task-frame and composed domains |
 | [`atomic_ur5_embodiment`](./suites/atomic_ur5_embodiment.yaml) | Component-defined UR5 embodiment with nominal/object-XY PickUp domains |
 
@@ -239,7 +233,7 @@ For visual inspection:
 
 ```bash
 embodichain benchmark motion-generation \
-  --suite atomic_franka_pgi_smoke --device cuda \
+  --suite atomic_franka_robotiq_smoke --device cuda \
   --record-video --video-case-limit 0
 ```
 
