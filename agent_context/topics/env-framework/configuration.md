@@ -58,6 +58,32 @@ with `background` and `rigid_object`. See the [simulation object boundary](../si
 Component files do not use compatibility `version` fields. Inline runnable
 Gym configs remain supported when no conflicting component selector is used.
 
+### Whole-scene USD environments
+
+An environment's `simulation.usd_scene` (inline: `usd_scene`) supplies one
+`UsdImportCfg`, alongside any ordinary physical declarations. Its file resolves
+from the declaring environment file. Task-bound imported resources need explicit
+`asset_cfgs` UIDs; `integration.yaml.scene_binding` retains logical/native mapping
+and affordance ownership. The embodiment supplies the robot: source scenes must
+already omit robots, and this route rejects USD robot configuration bindings.
+The source importer does not identify robots from names or generate task semantics.
+
+Component resolution statically compiles the scene without a World or facades,
+retaining a detached `usd_scene_inventory`. Binding validation includes imported
+resource types and link names. Environment construction rechecks source bytes and
+the actual import mapping, declares the whole scene once, then uses the ordinary
+prepare/reset/Task Program lifecycle. The deployment inspector prints source prim,
+native UID and logical entity mappings. Use the
+[USD pick/place example](../../../examples/gym/usd_scene_pick_place/README.md)
+for the existing `run-task` entry and measured qualification.
+
+`default_ground` is an optional physical environment setting. With a USD scene,
+omission disables the added plane; ordinary environments retain their existing
+default. Backend and world gravity remain environment-owned, and an explicitly
+authored USD gravity must agree after source-convention and scene-pose conversion.
+Package admission and dependency lifetime belong to the
+[simulation importer](../simulation-system/simulation-system.md).
+
 ### Reusable Gym deployment components
 
 `resolve_gym_components()` in `lab.gym.utils.composition` exposes physical

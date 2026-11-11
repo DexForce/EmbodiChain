@@ -50,13 +50,13 @@ topics:
   status: active
 - id: env-framework
   title: Environment Framework
-  aliases: [env framework, environment framework, task registration, list task, expert trajectory, 环境框架, 任务环境,
+  aliases: [env framework, environment framework, task registration, list task, expert trajectory, USD environment import, 统一USD环境导入, 环境框架, 任务环境,
     专家轨迹]
   keywords: [BaseEnv, EmbodiedEnv, EpisodeContext, EnvCfg, ControlTiming, resolve_control_timing, register_env, list-task, run-task, run-example, target_control_frequency,
     sim_steps_per_control, step_dt, environment.component, embodiment.component, file-owned physics backend,
     physics_config, ControllerAction, EnvProfiler, startup_summary, dexsim_startup_info,
     ExpertTrajectoryCfg, joint_command_mode, position_velocity, qpos qvel, expert action schema, ObservationHistorySnapshot, ObservationFrame,
-    task_instruction, resolve_demo_instruction,
+    task_instruction, resolve_demo_instruction, usd_scene,
     show-task, task catalog, task gallery, 任务画廊, physical_objective, 物理目标, RLTaskCfg, rl_task]
   paths: [topics/env-framework/env-framework.md]
   source_of_truth:

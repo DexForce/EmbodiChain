@@ -127,6 +127,12 @@ selection into the unbound program, and registers the common `EmbodiedEnv`.
 The CLI may override only the program. Components have closed fields and
 intentionally omit compatibility `version` values.
 
+Physical scenes may come from an environment's `simulation.usd_scene`.
+The [environment import owner](../env-framework/configuration.md#whole-scene-usd-environments)
+preflights source paths/types and explicit UIDs; the existing integration still
+owns logical entities, affordances and execution bindings. No GenSim workspace
+or AssetRevision semantic projection is required.
+
 External callers compose the same semantic deployment through
 `integrations.load_configured_task_program_deployment`, implemented in
 `integrations/composition.py`. It consumes the resolved embodiment skill profile

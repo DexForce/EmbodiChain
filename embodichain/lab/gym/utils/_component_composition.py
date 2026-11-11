@@ -40,6 +40,7 @@ _ENVIRONMENT_COMPONENT_FIELDS = frozenset(
         "arena_space",
         "physics",
         "physics_config",
+        "default_ground",
         "render_cfg",
         "visualization",
         "simulation",
@@ -62,6 +63,7 @@ _SCENE_SIMULATION_FIELDS = frozenset(
         "rigid_object",
         "rigid_object_group",
         "articulation",
+        "usd_scene",
     }
 )
 
@@ -152,6 +154,15 @@ def _resolve_local_resource_paths(value: object, *, base_dir: Path) -> None:
     """
     if isinstance(value, dict):
         for key, child in value.items():
+            if key == "usd_scene" and isinstance(child, dict):
+                source = child.get("source")
+                if isinstance(source, dict) and isinstance(
+                    source.get("file_path"), str
+                ):
+                    selected = Path(source["file_path"]).expanduser()
+                    if not selected.is_absolute():
+                        selected = base_dir / selected
+                    source["file_path"] = str(selected.resolve())
             if (
                 key in {"fpath", "urdf_path", "xml_path"}
                 and isinstance(child, str)
@@ -410,6 +421,7 @@ def _validate_scene_binding_targets(
     binding: Mapping[str, object],
     *,
     simulation: Mapping[str, object],
+    usd_scene_inventory: Mapping[str, object] | None = None,
 ) -> None:
     """Fail before runtime when semantic roots select absent native entities."""
     physical_ids = {
@@ -426,6 +438,22 @@ def _validate_scene_binding_targets(
             field_names=("articulation",),
         ),
     }
+    if "usd_scene" in simulation:
+        if usd_scene_inventory is None:
+            raise ValueError(
+                "USD scene binding validation requires its preflight inventory."
+            )
+        for binding_field, kind in (
+            ("rigid_objects", "rigid_object"),
+            ("articulations", "articulation"),
+            ("rigidized_articulations", "articulation"),
+        ):
+            imported = {
+                usd_scene_inventory["resource_uids"][path]
+                for path, resource_kind in usd_scene_inventory["resource_types"].items()
+                if resource_kind == kind
+            }
+            physical_ids[binding_field] |= imported
     for binding_field, available in physical_ids.items():
         values = binding.get(binding_field, ())
         for index, value in enumerate(
@@ -448,6 +476,37 @@ def _validate_scene_binding_targets(
                     f"scene binding {binding_field}[{index}] selects simulation UID "
                     f"{simulation_uid!r}, which is not declared by the physical "
                     "environment."
+                )
+            if (
+                usd_scene_inventory is not None
+                and simulation_uid in usd_scene_inventory["resource_uids"].values()
+            ):
+                if simulation_uid not in usd_scene_inventory["explicit_uids"]:
+                    raise ValueError(
+                        f"Task-bound USD UID {simulation_uid!r} requires an explicit asset_cfgs UID."
+                    )
+
+    if usd_scene_inventory is not None:
+        articulation_ids = {
+            item["entity_id"]: item.get("simulation_uid", item["entity_id"])
+            for field in ("articulations", "rigidized_articulations")
+            for item in binding.get(field, ())
+        }
+        imported_links = {
+            usd_scene_inventory["resource_uids"][key]: usd_scene_inventory["links"][
+                path
+            ]
+            for key, path in usd_scene_inventory["resource_source_paths"].items()
+            if path in usd_scene_inventory["links"]
+        }
+        for item in binding.get("links", ()):
+            uid = articulation_ids.get(item["articulation_id"])
+            if (
+                uid in imported_links
+                and item["native_link_name"] not in imported_links[uid]
+            ):
+                raise ValueError(
+                    f"USD articulation {uid!r} has no native link {item['native_link_name']!r}."
                 )
 
 
@@ -533,6 +592,57 @@ def _resolve_gym_components(
             if field_name in resolved
         }
 
+    usd_scene_inventory = None
+    if scene_config is not None and "usd_scene" in scene_config:
+        from embodichain.lab.sim.cfg import UsdImportCfg
+        from embodichain.lab.sim.spawn._usd_scene import _inspect_usd_scene
+
+        reserved = set()
+        if resolved.get("default_ground", False):
+            reserved.add("default_plane")
+        for field in (
+            "background",
+            "rigid_object",
+            "articulation",
+            "visual_object",
+            "rigid_object_group",
+        ):
+            for item in resolved.get(field, ()):
+                if item.get("uid"):
+                    reserved.add(item["uid"])
+                for member in item.get("rigid_objects", {}).values():
+                    if member.get("uid"):
+                        reserved.add(member["uid"])
+        robot = resolved.get("robot", {})
+        if robot:
+            from .gym_utils import _robot_cfg_from_dict
+            from embodichain.lab.sim.cfg import RobotPresetCfg
+            from embodichain.lab.sim.cfg.physics import physics_cfg_for_backend
+
+            selected_robot = _robot_cfg_from_dict(robot)
+            if isinstance(selected_robot, RobotPresetCfg):
+                physics = type(
+                    physics_cfg_for_backend(resolved.get("physics", "default"))
+                )(**resolved.get("physics_config", {}))
+                selected_robot = selected_robot.resolve(physics)
+            reserved.add(selected_robot.uid or "robot")
+            robot = selected_robot.to_dict()
+        sensors = (
+            (*resolved.get("sensor", ()), *robot.get("sensors", ()))
+            if resolved.get("enable_sensor", True)
+            else ()
+        )
+        for item in (*sensors, *resolved.get("light", {}).get("direct", ())):
+            if item.get("uid"):
+                reserved.add(item["uid"])
+        usd_scene_inventory = _inspect_usd_scene(
+            UsdImportCfg.from_dict(scene_config["usd_scene"]),
+            reserved_uids=tuple(reserved),
+            physics_backend=resolved.get("physics", "default"),
+            device=resolved.get("device"),
+            gravity=resolved.get("physics_config", {}).get("gravity", (0, 0, -9.81)),
+        )
+
     return _ResolvedGymComponents(
         config=resolved,
         embodiment_selected=embodiment_selected,
@@ -541,4 +651,5 @@ def _resolve_gym_components(
         or scene_config is not None,
         embodiment_skill_profile=embodiment_skill_profile,
         scene_config=scene_config,
+        usd_scene_inventory=usd_scene_inventory,
     )

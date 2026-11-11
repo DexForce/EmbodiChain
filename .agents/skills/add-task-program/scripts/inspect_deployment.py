@@ -85,6 +85,7 @@ def inspect_deployment(path: str | Path, *, explain: bool = False) -> dict[str, 
     _validate_scene_binding_targets(
         deployment.scene_binding,
         simulation=physical.scene_config,
+        usd_scene_inventory=physical.usd_scene_inventory,
     )
 
     from embodichain.lab.task_program.integrations.demo_skill import (
@@ -131,6 +132,25 @@ def inspect_deployment(path: str | Path, *, explain: bool = False) -> dict[str, 
         "call_count": len(calls),
         "semantic_calls": semantic_calls,
     }
+    if physical.usd_scene_inventory is not None:
+        inventory = physical.usd_scene_inventory
+        logical = {
+            item.get("simulation_uid", item["entity_id"]): item["entity_id"]
+            for field in ("rigid_objects", "articulations", "rigidized_articulations")
+            for item in deployment.scene_binding.get(field, ())
+        }
+        summary["usd_scene"] = {
+            **inventory,
+            "bindings": [
+                {
+                    "source_prim_path": inventory["resource_source_paths"][key],
+                    "simulation_uid": uid,
+                    "kind": inventory["resource_types"][key],
+                    "entity_id": logical.get(uid),
+                }
+                for key, uid in inventory["resource_uids"].items()
+            ],
+        }
     if explain:
         from embodichain.lab.task_program.integrations.catalog import _canonical_value
         from embodichain.lab.task_program.integrations._program_identity import (

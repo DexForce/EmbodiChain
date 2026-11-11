@@ -50,7 +50,11 @@ class UsdImportCfg:
     """Import label, also used to disambiguate conflicting visual names."""
 
     source: UsdSourceCfg = MISSING
-    """USD source file, optional subtree and variant selections."""
+    """USD/USDZ or standard AssetRevision ZIP, subtree and variant selections.
+
+    ZIP admission belongs to the whole-scene importer. Singleton source
+    configurations continue to require a USD file.
+    """
 
     namespace: str | None = None
     """Prefix passed to DexSim for imported entity and material names."""
@@ -171,7 +175,13 @@ class UsdImportCfg:
             raise ValueError("USD import name must be a non-empty string.")
         if not isinstance(self.source, UsdSourceCfg):
             raise TypeError("USD import source must be a UsdSourceCfg.")
-        self.source.validate_source()
+        if isinstance(
+            self.source.file_path, str
+        ) and self.source.file_path.lower().endswith(".zip"):
+            self.source.validate()
+            self.source.parse_kwargs()
+        else:
+            self.source.validate_source()
         if self.source.source_prim_path is not None:
             raise ValueError(
                 "Scene imports select a subtree with source.root_prim_path; source_prim_path is an exact singleton selector."

@@ -54,6 +54,7 @@ from embodichain.lab.sim.cfg import (
     VisualObjectCfg,
     RigidObjectGroupCfg,
     ArticulationCfg,
+    UsdImportCfg,
     LightCfg,
 )
 from embodichain.lab.sim.objects import Robot
@@ -240,6 +241,19 @@ class EmbodiedEnvCfg(EnvCfg):
     rigid_object_group: List[RigidObjectGroupCfg] = []
 
     articulation: List[ArticulationCfg] = []
+
+    usd_scene: UsdImportCfg | None = None
+    """Optional whole-scene USD/USDZ or standard AssetRevision ZIP import.
+
+    Robot construction remains owned by the embodiment. Imported resources
+    coexist with the ordinary object lists and must have distinct UIDs.
+    """
+
+    default_ground: bool | None = None
+    """Explicit default-plane selection; USD scenes default to no added plane.
+
+    Without a USD scene, ``None`` preserves ``sim_cfg.default_ground``.
+    """
 
     events: Union[object, None] = None
     """Event settings. Defaults to None, in which case no events are applied through the event manager.
@@ -1026,6 +1040,66 @@ class EmbodiedEnv(BaseEnv):
     def _setup_scene(self, **kwargs) -> None:
         """Filter configuration independently of the overridable demand hook."""
         self._apply_functor_filter()
+        recipe = getattr(self.cfg, "usd_scene", None)
+        ground = getattr(self.cfg, "default_ground", None)
+        if ground is not None and type(ground) is not bool:
+            raise TypeError("default_ground must be a bool or None.")
+        if ground is not None or recipe is not None:
+            self.sim_cfg.default_ground = False if ground is None else ground
+        if recipe is not None:
+            from embodichain.lab.sim.cfg.physics import physics_backend_from_cfg
+            from embodichain.lab.sim.spawn._usd_scene import (
+                _assert_usd_scene_current,
+                _inspect_usd_scene,
+            )
+
+            previous = getattr(self.cfg, "_usd_scene_inventory", None)
+            if previous is not None:
+                _assert_usd_scene_current(previous)
+            reserved = {
+                item.uid
+                for field in (
+                    "background",
+                    "rigid_object",
+                    "articulation",
+                    "visual_object",
+                    "rigid_object_group",
+                )
+                for item in getattr(self.cfg, field)
+                if item.uid is not None
+            }
+            for group in self.cfg.rigid_object_group:
+                reserved.update(
+                    item.uid
+                    for item in group.rigid_objects.values()
+                    if item.uid is not None
+                )
+            selected_robot = (
+                self.cfg.robot.resolve(self.sim_cfg.physics_cfg)
+                if isinstance(self.cfg.robot, RobotPresetCfg)
+                else self.cfg.robot
+            )
+            reserved.add(selected_robot.uid or "robot")
+            if self.cfg.enable_sensor:
+                reserved.update(
+                    item.uid for item in selected_robot.sensors if item.uid is not None
+                )
+            if self.sim_cfg.default_ground:
+                reserved.add("default_plane")
+            if self.cfg.enable_sensor:
+                reserved.update(
+                    item.uid for item in self.cfg.sensor if item.uid is not None
+                )
+            reserved.update(
+                item.uid for item in self.cfg.light.direct if item.uid is not None
+            )
+            self._usd_scene_inventory = _inspect_usd_scene(
+                recipe,
+                reserved_uids=tuple(reserved),
+                physics_backend=physics_backend_from_cfg(self.sim_cfg.physics_cfg),
+                device=str(self.sim_cfg.device),
+                gravity=self.sim_cfg.physics_cfg.gravity,
+            )
         self.cfg.ground_plane_visible = self._resolve_ground_plane_visibility()
         super()._setup_scene(**kwargs)
 
@@ -1062,6 +1136,11 @@ class EmbodiedEnv(BaseEnv):
         from embodichain.lab.sim import SimulationManager
 
         if super()._requires_native_renderer():
+            return True
+        inventory = getattr(self, "_usd_scene_inventory", None)
+        if inventory is not None and {"camera", "light"}.intersection(
+            inventory["resource_types"].values()
+        ):
             return True
         if self.cfg.enable_sensor:
             for sensor_cfg in self._sensor_configs():
@@ -1214,6 +1293,22 @@ class EmbodiedEnv(BaseEnv):
         self._setup_background()
         self._setup_interactive_objects()
         self._setup_lights()
+        if self.cfg.usd_scene is not None:
+            from embodichain.lab.sim.spawn._usd_scene import _assert_usd_scene_current
+
+            _assert_usd_scene_current(self._usd_scene_inventory)
+            self.usd_scene_import = self.sim.add_usd(self.cfg.usd_scene)
+            for field in (
+                "resource_uids",
+                "resource_types",
+                "resource_source_paths",
+                "constraint_uids",
+            ):
+                if (
+                    dict(getattr(self.usd_scene_import, field))
+                    != self._usd_scene_inventory[field]
+                ):
+                    raise ValueError(f"USD scene {field} changed since preflight.")
 
     def _update_sim_state(self, **kwargs) -> None:
         """Perform the simulation step and apply events if configured.

@@ -7,7 +7,7 @@
 | Public simulation facade | `embodichain/lab/sim/__init__.py` |
 | World, registries, readiness and stepping | `embodichain/lab/sim/sim_manager.py` → `SimulationManager`, `SimulationManagerCfg` |
 | Declaration, source resolution and binding | `embodichain/lab/sim/spawn/scene.py`, `spawn/source.py`, `spawn/descriptors.py` |
-| USD import recipes, preflight and source-path results | `cfg/usd.py`, `spawn/usd_import.py`, `spawn/usd_result.py` |
+| USD import recipes, preflight and source-path results | `cfg/usd.py`, `spawn/usd_import.py`, `spawn/_usd_scene.py`, `spawn/usd_result.py` |
 | Fresh static USD reads and owned authored link meshes | `embodichain/lab/sim/spawn/source_geometry.py` |
 | Manager-level backend hooks and capabilities | `embodichain/lab/sim/physics/` |
 | Object-level Scene batch adapters | `embodichain/lab/sim/objects/backends/scene.py`, `newton.py` |
@@ -75,6 +75,16 @@ native ownership around those values without duplicating SDK geometry reads.
 `spawn/_usd_assets.py` materializes package textures into `SpawnScene`-owned
 files. They survive topology rebuilds and are deleted after native Scene closure;
 facade source configs retain the original package address.
+
+Whole-scene imports also admit standard AssetRevision ZIPs through SDK package
+validation. `spawn/_usd_scene.py` resolves their declared USD entrypoint and
+retains the original address/digest in the static environment inventory.
+`SpawnScene` owns the extraction context until native Scene closure; ZIP-imported
+facades address the resolved USD during that lifetime. Singleton USD sources do
+not accept arbitrary ZIPs. The same descriptor compiler supports manager-free
+identity/override/constraint preflight without constructing object facades.
+Configured Gym ownership and semantic binding are described by
+[USD environments](../env-framework/configuration.md#whole-scene-usd-environments).
 
 `BaseEnv` owns Gym reset/step timing; `EmbodiedEnv` translates task composition
 into manager declarations. Scene replication and collision isolation belong

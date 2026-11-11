@@ -1025,7 +1025,11 @@ class SimulationManager:
         Returns:
             List[str]: list of all assets uid.
         """
-        uid_list = ["default_plane"]
+        uid_list = (
+            ["default_plane"]
+            if getattr(getattr(self, "sim_config", None), "default_ground", True)
+            else []
+        )
         uid_list.extend(list(self._lights.keys()))
         uid_list.extend(list(self._sensors.keys()))
         uid_list.extend(list(self._robots.keys()))
@@ -2697,6 +2701,10 @@ class SimulationManager:
         validated at ``prepare()``;
         native creation failures do not promise rollback.
 
+        Standard AssetRevision ZIPs are validated by the SDK and extracted
+        into Spawn-owned files kept until scene teardown. Returned facade
+        sources address the resolved USD; the caller's recipe is unchanged.
+
         Args:
             cfg: Complete USD import recipe. A string retains the legacy name argument.
             file_path: Legacy source path; use ``cfg.source.file_path``.
@@ -2727,6 +2735,13 @@ class SimulationManager:
             usd=usd,
             asset_cfgs=asset_cfgs,
         )
+        recipe.validate_import()
+        if recipe.source.file_path.lower().endswith(".zip"):
+            from .spawn._usd_scene import _open_usd_scene_source
+
+            recipe = self._spawn_scene._usd_source_files.enter_context(
+                _open_usd_scene_source(recipe)
+            )
         plan = _compile_usd_import(self, recipe)
         plan.source.materials = self._spawn_scene._resolve_materials(
             plan.source.materials
@@ -4458,7 +4473,7 @@ class SimulationManager:
         scene = self._spawn_scene
         if uid not in scene:
             return False
-        if uid == "default_plane":
+        if uid == "default_plane" and self.sim_config.default_ground:
             raise ValueError("The Spawn-owned default plane cannot be removed.")
 
         scene._require_removable(uid)
