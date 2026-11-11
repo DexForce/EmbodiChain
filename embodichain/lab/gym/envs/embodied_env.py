@@ -3003,7 +3003,9 @@ class EmbodiedEnv(BaseEnv):
         else:
             robot_cfg.enable_sensor = self.cfg.enable_sensor
             selected_cfg = robot_cfg
-        _collect_sensor_cfgs(selected_cfg, self.cfg.sensor)
+        sensor_cfgs = _collect_sensor_cfgs(selected_cfg, self.cfg.sensor)
+        if self.cfg.enable_sensor:
+            self.sim._plan_camera_groups(sensor_cfgs)
         self._robot_sensor_cfgs = selected_cfg.sensors
         return self.sim.add_robot(robot_cfg)
 

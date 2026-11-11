@@ -294,9 +294,7 @@ class StereoCamera(Camera):
         fetch_only = kwargs.get("fetch_only", False)
         if not fetch_only:
             self._pending_capture_metadata = None
-            for group in self._camera_groups:
-                group.apply_ordered()
-            self._snapshot_render_metadata()
+            self._apply_camera_groups()
 
         self.cfg: StereoCameraCfg
         if self.cfg.enable_color:

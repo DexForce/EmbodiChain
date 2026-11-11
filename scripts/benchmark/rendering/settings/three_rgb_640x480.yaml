@@ -1,0 +1,19 @@
+# Three equal-resolution RGB cameras for native group throughput comparison.
+scene: fixed_reflective
+resolution: 640x480
+camera_count: 3
+enable_color: true
+enable_depth: false
+num_envs: 1
+renderer: fast-rt
+spp: 1
+denoising_modes: [dlss]
+reference_mode: dlss
+warmup_frames: 15
+measure_frames: 100
+quality_frames: 1
+dlss_quality: 2
+gpu_id: 0
+device: cuda:0
+env_sweep: [1, 2, 4, 8, 16, 32, 64, 80]
+repeats: 5

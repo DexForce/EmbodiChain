@@ -37,11 +37,9 @@ from embodichain.utils import logger, configclass
 if TYPE_CHECKING:
     from dexsim.scene import CameraBatch, Scene, SpawnedCamera, SpawnedCameraGroup
     from embodichain.lab.sim.sim_manager import SimulationManager
+    from ._camera_group_pool import _CameraGroupLease
 
 __all__ = ["Camera", "CameraCfg"]
-
-_MAX_HYBRID_VIEWS_PER_GROUP = 32
-_LEGACY_RT_VIEWS_PER_GROUP = 64
 
 
 @configclass
@@ -195,6 +193,7 @@ class Camera(BaseSensor):
         self._camera_group = None
         self._camera_groups: tuple[SpawnedCameraGroup, ...] = ()
         self._frame_buffers: tuple[Any, ...] = ()
+        self._camera_lease: _CameraGroupLease | None = None
         self._is_attached = False
         self._is_destroyed = False
         try:
@@ -220,44 +219,16 @@ class Camera(BaseSensor):
     ) -> None:
         """Create all eyes together in the already prepared, Scene-owned Arenas."""
         from dexsim.spawn import CameraDesc
-        from dexsim.types import Renderer
 
         total_views = self.num_instances * len(intrinsics)
-        renderer = dexsim.get_world_config().renderer
-        capacity = (
-            _MAX_HYBRID_VIEWS_PER_GROUP if renderer == Renderer.HYBRID else total_views
-        )
-
-        def create_group(start: int, count: int) -> SpawnedCameraGroup:
-            """Create one Scene-owned target for contiguous view rows."""
-            suffix = "" if start == 0 else f"_{start}"
-            return self._scene.create_camera_group(
-                f"{config.uid}_group{suffix}",
-                config.width,
-                config.height,
-                count,
-                view_flags=config.get_view_attrib(),
-            )
-
-        try:
-            first = create_group(0, min(capacity, total_views))
-        except RuntimeError as error:
-            if (
-                renderer not in {Renderer.FASTRT, Renderer.OFFLINERT}
-                or total_views <= _LEGACY_RT_VIEWS_PER_GROUP
-                or "Camera group creation returned no target" not in str(error)
-            ):
-                raise
-            capacity = _LEGACY_RT_VIEWS_PER_GROUP
-            first = create_group(0, capacity)
-        self._group_capacity = capacity
-        groups = [first]
-        self._camera_groups = tuple(groups)
-        for start in range(capacity, total_views, capacity):
-            groups.append(create_group(start, min(capacity, total_views - start)))
-            self._camera_groups = tuple(groups)
-        self._camera_group = first
-        self._frame_buffers = tuple(group.native for group in groups)
+        owner = self._owner_ref()
+        if owner is None:
+            raise RuntimeError("Camera owner is unavailable.")
+        lease = owner._camera_group_pool.acquire(config, total_views, self._scene)
+        self._camera_lease = lease
+        self._camera_groups = lease.groups
+        self._camera_group = lease.groups[0]
+        self._frame_buffers = tuple(group.native for group in lease.groups)
         descriptors = []
         for eye, values in enumerate(intrinsics):
             matrix = np.eye(3, dtype=np.float32)
@@ -280,11 +251,7 @@ class Camera(BaseSensor):
         self._camera_handles = self._scene.add_cameras(
             descriptors,
             arena_names=list(self._arena_names) * len(intrinsics),
-            camera_groups=(
-                first
-                if len(groups) == 1
-                else [groups[i // capacity] for i in range(total_views)]
-            ),
+            camera_groups=lease.camera_groups,
         )
         self._frame_buffer = self._frame_buffers[0]
 
@@ -440,10 +407,14 @@ class Camera(BaseSensor):
     def _read_groups(
         self, getter_name: str, dtype: torch.dtype | None = None
     ) -> torch.Tensor:
-        """Return owned CPU images or GPU views in contiguous group order."""
+        """Read only this camera's slots from shared native targets."""
         outputs = []
-        for group in self._frame_buffers:
-            tensor = getattr(group, getter_name)()
+        if self._camera_lease is None:
+            raise RuntimeError("Camera has no live group allocation.")
+        for segment in self._camera_lease.slices:
+            tensor = getattr(segment.group.native, getter_name)()[
+                segment.slot_start : segment.slot_start + segment.count
+            ]
             if self.device.type == "cpu" and tensor.device.type == "cuda":
                 if dtype is not None:
                     tensor = tensor.to(dtype=dtype)
@@ -459,6 +430,21 @@ class Camera(BaseSensor):
                 )
             outputs.append(output)
         return outputs[0] if len(outputs) == 1 else torch.cat(outputs, dim=0)
+
+    def _apply_camera_groups(self) -> None:
+        """Capture shared groups and publish every affected camera's metadata."""
+        owner = self._owner_ref()
+        if owner is None or self._camera_lease is None:
+            raise RuntimeError("Camera owner is unavailable.")
+        pool = owner._camera_group_pool
+        if pool.is_shared(self._camera_lease):
+            owner.render_camera_group(
+                list(pool.group_ids_for_bucket(self._camera_lease))
+            )
+        else:
+            for group in self._camera_groups:
+                group.apply_ordered()
+            self._snapshot_render_metadata()
 
     @property
     def is_attached(self) -> bool:
@@ -486,9 +472,7 @@ class Camera(BaseSensor):
         fetch_only = kwargs.get("fetch_only", False)
         if not fetch_only:
             self._pending_capture_metadata = None
-            for group in self._camera_groups:
-                group.apply_ordered()
-            self._snapshot_render_metadata()
+            self._apply_camera_groups()
         self.cfg: CameraCfg
 
         if self.cfg.enable_color:
@@ -637,11 +621,14 @@ class Camera(BaseSensor):
         if hasattr(self, "_data_buffer_stereo"):
             self._data_buffer_stereo.clear()
         self._frame_buffer = None
-        if self._camera_groups:
-            self._scene.release_camera_groups(self._camera_groups)
-            self._camera_groups = ()
-            self._camera_group = None
-            self._frame_buffers = ()
+        if self._camera_lease is not None:
+            owner = self._owner_ref()
+            if owner is not None:
+                owner._camera_group_pool.release(self._camera_lease)
+            self._camera_lease = None
+        self._camera_groups = ()
+        self._camera_group = None
+        self._frame_buffers = ()
         self._is_destroyed = True
         self._capture_metadata = None
         self._entities = []

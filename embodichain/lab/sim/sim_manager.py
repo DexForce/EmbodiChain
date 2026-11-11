@@ -98,6 +98,7 @@ from embodichain.lab.sim.sensors import (
     ContactSensor,
 )
 from embodichain.lab.sim.sensors.attachment import resolve_parent_nodes
+from embodichain.lab.sim.sensors._camera_group_pool import _CameraGroupPool
 from embodichain.lab.sim.cfg import (
     RenderCfg,
     PhysicsBackendCfg,
@@ -737,6 +738,7 @@ class SimulationManager:
         self._robots: Dict[str, Robot] = dict()
 
         self._sensors: Dict[str, BaseSensor] = dict()
+        self._camera_group_pool = _CameraGroupPool(sim_config.num_envs)
         self._lights: Dict[str, Light] = dict()
 
         self._spawn_scene = SpawnScene(
@@ -2043,6 +2045,7 @@ class SimulationManager:
         Note: This interface is only valid when Ray Tracing rendering backend is enabled.
         """
 
+        group_ids = list(dict.fromkeys(group_ids))
         if group_ids or self.is_window_opened:
             self._ensure_render_state()
         if group_ids:
@@ -2067,6 +2070,10 @@ class SimulationManager:
             for sensor in cameras:
                 sensor._snapshot_render_metadata()
         self._log_scene_summary()
+
+    def _plan_camera_groups(self, configs: Sequence[SensorCfg]) -> None:
+        """Reserve startup camera slots before the first sensor is created."""
+        self._camera_group_pool.plan(configs)
 
     def update(
         self,
