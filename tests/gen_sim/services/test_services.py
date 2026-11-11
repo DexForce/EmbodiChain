@@ -814,7 +814,11 @@ def test_accepted_geometry_job_is_not_resubmitted(tmp_path, outcome):
     assert session.posts == 1
 
 
-def test_legacy_run_and_simready_imports_do_not_initialize_clients():
+def test_legacy_run_and_simready_imports_do_not_initialize_clients(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    monkeypatch.delenv("EMBODICHAIN_MODEL_SERVICES_CONFIG", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     script = "from embodichain.gen_sim.services import GenSimServices; import sys; run = GenSimServices(); run.close(); assert 'torch' not in sys.modules; import embodichain.gen_sim.asset_engine.utils.simready_utils as module; assert not hasattr(module, 'client'); assert not hasattr(module, 'DEPLOYMENT')"
     result = subprocess.run(
         [sys.executable, "-c", script], text=True, capture_output=True

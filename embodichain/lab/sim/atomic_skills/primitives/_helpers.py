@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING
 
 import torch
@@ -287,6 +287,9 @@ def plan_named_arm_trajectory(
     n_waypoints: int,
     motion_policy: MotionPolicy,
     interpolation_dt: float | None,
+    *,
+    cartesian_linear: bool = False,
+    cartesian_path_sampler: Callable[[torch.Tensor], torch.Tensor] | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Plan a fixed-size pose trajectory for one named manipulator."""
     result = motion_generator.generate(
@@ -296,6 +299,8 @@ def plan_named_arm_trajectory(
             control_part=control_part,
             sample_count=n_waypoints,
             interpolation_dt=interpolation_dt,
+            cartesian_linear=cartesian_linear,
+            cartesian_path_sampler=cartesian_path_sampler,
         ),
     )
     return _named_arm_result(result, n_waypoints, interpolation_dt, control_part)

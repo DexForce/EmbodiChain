@@ -52,7 +52,6 @@ from embodichain.lab.sim.cfg import (
 from dexsim.types import PhysicalAttr
 from embodichain.utils.string import (
     resolve_matching_names,
-    resolve_matching_names_values,
 )
 from embodichain.lab.sim.common import BatchEntity
 from embodichain.lab.sim.cfg.source import _asset_file_path
@@ -2933,75 +2932,6 @@ class Articulation(BatchEntity):
         self._data.articulation_view.compute_kinematics(local_env_ids)
         if self.device.type == "cpu" and not self._data.is_newton_backend:
             self._world.update(0.0)
-
-    def _set_default_joint_drive(
-        self,
-        joint_drive_props: JointDrivePropertiesCfg | dict | None = None,
-    ) -> None:
-        """Set default joint drive parameters based on the configuration."""
-        import numbers
-        from embodichain.utils.string import resolve_matching_names_values
-
-        if joint_drive_props is None:
-            joint_drive_props = self.cfg.joint_drive_props
-        if joint_drive_props is None:
-            return
-
-        joint_property_targets = [
-            ("damping", self.default_joint_damping),
-            ("stiffness", self.default_joint_stiffness),
-            ("max_effort", self.default_joint_max_effort),
-            ("max_velocity", self.default_joint_max_velocity),
-            ("friction", self.default_joint_friction),
-            ("armature", self.default_joint_armature),
-        ]
-
-        for prop_name, default_array in joint_property_targets:
-            value = (
-                joint_drive_props.get(prop_name)
-                if isinstance(joint_drive_props, dict)
-                else getattr(joint_drive_props, prop_name, None)
-            )
-            if value is None:
-                continue
-            if isinstance(value, numbers.Number):
-                default_array[:] = value
-            else:
-                try:
-                    indices, _, values = resolve_matching_names_values(
-                        value, self.joint_names
-                    )
-                    default_array[:, indices] = torch.as_tensor(
-                        values, dtype=torch.float32, device=self.device
-                    )
-                except Exception as e:
-                    logger.log_error(f"Failed to set {prop_name}: {e}")
-
-        if isinstance(joint_drive_props, dict):
-            drive_type = joint_drive_props.get("drive_type")
-            target_mode = joint_drive_props.get("target_mode")
-        else:
-            drive_type = getattr(joint_drive_props, "drive_type", None)
-            target_mode = getattr(joint_drive_props, "target_mode", None)
-        if isinstance(target_mode, dict):
-            logger.log_warning(
-                "Per-joint target_mode mappings require a Spawn-bound "
-                "articulation; the retained raw-articulation path preserves "
-                "its current target modes."
-            )
-            target_mode = None
-
-        # Apply drive parameters to all articulations in the batch
-        self.set_joint_drive(
-            stiffness=self.default_joint_stiffness,
-            damping=self.default_joint_damping,
-            max_effort=self.default_joint_max_effort,
-            max_velocity=self.default_joint_max_velocity,
-            friction=self.default_joint_friction,
-            armature=self.default_joint_armature,
-            drive_type=drive_type,
-            target_mode=target_mode,
-        )
 
     def compute_fk(
         self,

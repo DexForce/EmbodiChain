@@ -24,8 +24,10 @@ Paths below are relative to `embodichain/gen_sim/` unless qualified.
 | Baseline cache, saved runs and pose playback | `scene_engine/randomization/baseline.py`, `persistence.py`, `loading.py` |
 | Whole-scene USD package | `scene_engine/pipeline/utils/scene_usd.py`: `build_scene_usd()`, direct preview loading; `usd_scene.py`: entity index |
 | General asset ingest | `asset_engine/pipeline/ingest.py`: `ingest_one_asset()` |
+| Asset orientation and scaling orchestration | `asset_engine/utils/_simready_pipeline.py`; `simready_utils.py` and `full_blender.py` retain geometry/render/export adapters and entry points |
 | Articulated asset generation | `asset_engine/pipeline/articulation.py`, `asset_engine/clients/articulated_generation.py` |
 | Web app launch/configuration | `gensim ui` replaces its process with `gradio_ui/gradio_app.py`; `app_env.py` retains auth and allowed-root rules |
+| Shared dotenv syntax | `env.py`; environment and service readers retain key selection, missing-file and precedence policies |
 | Session-owned subprocesses | `gradio_ui/app_processes.py`: `SessionProcessRegistry` |
 | Frozen placement declaration → normative evidence binding | `task_engine/evidence.py` → [TaskSpec evidence boundary](../task-spec/task-spec.md#physical-evidence-boundary) |
 
