@@ -30,7 +30,7 @@ advance in one World, with no recorded trajectory input. SPH reads live rigid
 boundaries; fluid reaction forces are not fed back into the rigid solver.
 The fluid program measures cup lift and alignment, transports the held cup
 to a receiver-relative pour pose through the existing MoveHeldObject lowerer,
-then pours and returns it. The standalone Sim tutorial uses the same physical
+then pours and returns it. The standalone Sim example uses the same physical
 component and relative pour target with freshly planned Atomic Action targets.
 
 Program completion and physical qualification are separate: the runner measures

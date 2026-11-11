@@ -46,7 +46,7 @@ embodichain run-task \
 执行并录制视频：
 
 ```bash
-python scripts/tutorials/sim/franka_dexuni_pour_demo.py --headless --renderer fast-rt
+embodichain run-example sim/demo/franka_dexuni_pour_demo --headless --renderer fast-rt
 ```
 
 增加 `--num-envs 4` 可在同一个 World 中并行运行四个环境，分别输出

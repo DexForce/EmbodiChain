@@ -57,13 +57,12 @@ from embodichain.lab.sim.atomic_actions import (
 from embodichain.lab.sim.motion.motion_generator import MotionGenerator, MotionGenCfg
 from embodichain.lab.sim.motion.planners import ToppraPlannerCfg
 from embodichain.lab.sim.sensors import CameraCfg
+from embodichain.utils.config_paths import resolve_config_path
 
 __all__ = ["main"]
 
-ROOT = Path(__file__).resolve().parents[3]
-TASK = (
-    ROOT
-    / "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"
+TASK = resolve_config_path(
+    "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"
 )
 
 
@@ -80,7 +79,7 @@ def main() -> None:
     """Plan fresh joint commands and solve the robot, cup and fluid online."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--output", type=Path, default=ROOT / "outputs/fluid-dexuni-online"
+        "--output", type=Path, default=Path("outputs/fluid-dexuni-online")
     )
     parser.add_argument("--spacing", type=float, default=0.0015)
     parser.add_argument("--seconds", type=float)
