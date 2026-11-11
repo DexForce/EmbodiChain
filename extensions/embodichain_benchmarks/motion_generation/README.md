@@ -154,7 +154,9 @@ with the URDF mimic signs, and two actual finger-pad links per hand. The
 single-arm and placement fixtures use the mounted Robotiq TCP rotation and
 0.21 m offset. NMG mappings preserve the policy's original flange-relative
 TCP after this change. Handover retains its separately calibrated 0.20 m TCP
-and limited closure described below. The native Franka hand remains available
+and limited closure described below. PushObject declares a flange-aligned
+contact frame at 0.20 m and closed-hand clearances measured from the Robotiq
+collision meshes. The native Franka hand remains available
 for custom robot configurations; packaged Franka Atomic suites use Robotiq.
 
 GraspKit returns sampled poses converted once to the declared runtime TCP;

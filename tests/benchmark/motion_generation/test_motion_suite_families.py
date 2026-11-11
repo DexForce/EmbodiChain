@@ -322,6 +322,17 @@ def test_packaged_franka_atomic_suites_bind_robotiq_geometry_and_policy_tcp(suit
             assert len(gripper["grasp_qpos"]) == 6
             assert len(gripper["finger_links"]) == 2
             assert all("finger_pad" in link for link in gripper["finger_links"])
+        for skill in track.config["skills"]:
+            if skill["id"] == "push_object":
+                # This contact pose retains the original flange orientation;
+                # Robotiq's rotated TCP sits 1 cm beyond its contact centre.
+                flange_from_contact = torch.eye(4)
+                flange_from_contact[2, 3] = 0.20
+                torch.testing.assert_close(
+                    torch.tensor(cfg.solver_cfg["arm"].tcp)
+                    @ torch.linalg.inv(torch.tensor(skill["contact_frame_to_eef"])),
+                    flange_from_contact,
+                )
     # The exported Franka policy observes its original flange-relative TCP:
     # a -45 degree rotation about Z and a 0.1034 m translation along Z.
     s = 2**-0.5

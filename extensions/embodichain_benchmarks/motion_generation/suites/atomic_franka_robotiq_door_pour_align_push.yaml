@@ -178,20 +178,26 @@ tracks:
           approach_height_m: 0.10
           retract_height_m: 0.10
           push_overshoot_m: 0.0
+          # Keep the push frame flange-aligned at the Robotiq contact centre.
+          contact_frame_to_eef:
+            - [0.0, -1.0, 0.0, 0.0]
+            - [1.0, 0.0, 0.0, 0.0]
+            - [0.0, 0.0, 1.0, 0.01]
+            - [0.0, 0.0, 0.0, 1.0]
           # Push 1 cm below the cube centre so the closed fingers do not tip it.
           object_contact_offset_m: [0.0, 0.0, -0.01]
           # contact_distance_m is the cube half-size plus the distance from the
-          # Robotiq contact frame to the closed finger face at the push height.
-          # The authored 0.7 rad closure gives 19.45 mm lateral and 32.75 mm
+          # authored push frame to the closed finger face at the push height.
+          # The authored 0.7 rad closure gives 32.75 mm lateral and 19.45 mm
           # toward-base extents across the cube-height slab, plus 2 mm clearance.
           cases:
             - name: cube_push_lateral_10cm
               object: cube_50mm
               task_difficulty: simple
-              contact_distance_m: 0.0465
+              contact_distance_m: 0.060
               target_object_offset_m: [0.0, 0.10, 0.0]
             - name: cube_push_toward_base_8cm
               object: cube_50mm
               task_difficulty: simple
-              contact_distance_m: 0.060
+              contact_distance_m: 0.0465
               target_object_offset_m: [0.08, 0.0, 0.0]
