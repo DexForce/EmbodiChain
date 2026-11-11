@@ -51,6 +51,7 @@ def apply_mimic_compliance(
                 entity.get_actived_joint_names(in_cache_order=True)
             )
         }
+        # DexSim Default reports mimic parents in this same active-joint cache order.
         masters = set(entity.get_mimic_info().mimic_parent)
         groups: dict[tuple[float, float], dict[str, int]] = {}
         for name, compliance in settings.items():

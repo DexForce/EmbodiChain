@@ -133,6 +133,9 @@ and its [usage notes](../../../extensions/embodichain_tasks/configs/components/e
 frames against that arm's source URDF. It translates assembled names back to
 source link names, keeps chains arm-local, and rejects opposite-arm/unknown
 frames. Mount transforms belong to assembly, not the serial chain.
+Dual-arm composition also copies base `mimic_compliance` entries to each
+side's assembled master joint names, including joints from explicitly bound
+hands.
 
 ## Joint and solver boundaries
 
