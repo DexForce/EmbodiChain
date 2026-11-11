@@ -1324,10 +1324,10 @@
       "topic_ids": [
         "differentiable-env"
       ],
-      "summary": "Preserves the Gym lifecycle while bridging task-defined kinematics to autograd.",
-      "details": "A Newton-backed environment records a task-defined kinematic callback on a Warp tape and exposes gradients through PyTorch. It requires gradient-enabled Newton configuration and coordinates terminal resets with backward completion.",
+      "summary": "Hosts pure Warp kinematics and functional Scene dynamics behind one Gym entry point.",
+      "details": "The default kinematic mode records task-defined Warp callbacks without advancing physics. Explicit dynamics mode maps actions to controls and advances the configured solver through the Scene functional interface. Each path preserves its graph ownership and terminal-reset contract.",
       "boundaries": [
-        "This environment does not run the Newton dynamics solver; it is not the lightweight APG trainer route."
+        "Mode selection is explicit. Kinematics defers tracked resets until backward; functional dynamics preserves terminal observations across selected-row auto-reset."
       ],
       "evidence": [
         {
@@ -4709,7 +4709,7 @@
       "evidence": [
         {
           "path": "embodichain/lab/gym/envs/differentiable_env.py",
-          "symbol": "DifferentiableEnv.step",
+          "symbol": "DifferentiableEnv._step_kinematic",
           "start_line": 163,
           "end_line": 163,
           "excerpt": "        outputs = NewtonStepFunc.apply(action, sim_state, *functional_state)"
