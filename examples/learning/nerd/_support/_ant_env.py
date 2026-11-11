@@ -22,8 +22,8 @@ from typing import Any, TYPE_CHECKING
 import gymnasium as gym
 import numpy as np
 import torch
-from embodichain.lab.gym.envs.differentiable_dynamics_env import (
-    DifferentiableDynamicsEnv,
+from embodichain.lab.gym.envs.differentiable_env import (
+    DifferentiableEnv,
 )
 from embodichain.lab.gym.envs.embodied_env import EmbodiedEnvCfg
 from embodichain.lab.gym.utils.registration import register_env
@@ -47,7 +47,7 @@ __all__ = ["AntDynamicsEnv", "make_ant_dynamics_env"]
 
 
 @register_env("AntDynamics-v1", max_episode_steps=1000, supports_rl=True)
-class AntDynamicsEnv(DifferentiableDynamicsEnv):
+class AntDynamicsEnv(DifferentiableEnv):
     """Differentiable ant task with normalized effort actions.
 
     The pinned reference articulation is task-owned. A compatible exported model
@@ -67,7 +67,7 @@ class AntDynamicsEnv(DifferentiableDynamicsEnv):
             )
         if cfg.sim_cfg is not None and bool(cfg.sim_cfg.enable_ground_plane) != True:
             raise ValueError("AntDynamics requires enable_ground_plane: true")
-        super().__init__(cfg, **kwargs)
+        super().__init__(cfg, step_mode="dynamics", **kwargs)
 
     def _declare_robot(self, **kwargs: Any) -> Articulation:
         del kwargs

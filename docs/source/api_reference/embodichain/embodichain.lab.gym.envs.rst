@@ -66,11 +66,19 @@ Environment Classes
 Differentiable Environment
 --------------------------
 
-``DifferentiableEnv`` keeps the standard environment lifecycle while bridging
-task-defined Newton kinematics into PyTorch autograd for analytic
-policy-gradient tasks. Subclasses provide action, kinematics, and output
-kernels; the base class owns tape-aware stepping and deferred resets without
-advancing the Newton solver.
+``DifferentiableEnv`` provides one entry point with explicit execution modes.
+The default ``step_mode="kinematic"`` records task-defined action, kinematics
+and output hooks in a Warp tape without advancing the Newton solver. Tracked
+terminal steps expose deferred reset IDs; callers finish backward before reset.
+
+``step_mode="dynamics"`` maps actions to controls and advances the configured
+solver through the Scene functional interface. Its independent state/history
+supports automatic selected-row reset, graph-connected terminal observations
+and ``detach_state()`` rollout boundaries. ``dynamics_state`` and
+``dynamics_parameters()`` expose solver-owned tensors in this mode. Kinematic
+tasks own their recurrence and must define ``detach_state()`` when used with a
+segmented trainer. The mode is selected by the Python task constructor and is
+independent of the solver name.
 
 .. currentmodule:: embodichain.lab.gym.envs.differentiable_env
 

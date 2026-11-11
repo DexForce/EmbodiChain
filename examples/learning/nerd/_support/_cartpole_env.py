@@ -22,8 +22,8 @@ from typing import Any, TYPE_CHECKING
 import gymnasium as gym
 import numpy as np
 import torch
-from embodichain.lab.gym.envs.differentiable_dynamics_env import (
-    DifferentiableDynamicsEnv,
+from embodichain.lab.gym.envs.differentiable_env import (
+    DifferentiableEnv,
 )
 from embodichain.lab.gym.envs.embodied_env import EmbodiedEnvCfg
 from embodichain.lab.gym.utils.registration import register_env
@@ -46,7 +46,7 @@ __all__ = ["CartpoleDynamicsEnv", "make_cartpole_dynamics_env"]
 
 
 @register_env("CartpoleDynamics-v1", max_episode_steps=500, supports_rl=True)
-class CartpoleDynamicsEnv(DifferentiableDynamicsEnv):
+class CartpoleDynamicsEnv(DifferentiableEnv):
     """Differentiable cartpole task with normalized effort actions.
 
     The pinned reference articulation is task-owned. A compatible exported model
@@ -66,7 +66,7 @@ class CartpoleDynamicsEnv(DifferentiableDynamicsEnv):
             )
         if cfg.sim_cfg is not None and bool(cfg.sim_cfg.enable_ground_plane) != False:
             raise ValueError("CartpoleDynamics requires enable_ground_plane: false")
-        super().__init__(cfg, **kwargs)
+        super().__init__(cfg, step_mode="dynamics", **kwargs)
 
     def _declare_robot(self, **kwargs: Any) -> Articulation:
         del kwargs

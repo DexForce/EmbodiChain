@@ -21,8 +21,8 @@ from types import SimpleNamespace
 import torch
 import warp as wp
 import pytest
-from embodichain.lab.gym.envs.differentiable_dynamics_env import (
-    DifferentiableDynamicsEnv,
+from embodichain.lab.gym.envs.differentiable_env import (
+    DifferentiableEnv,
 )
 from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.sim.cfg import NewtonPhysicsCfg, DefaultPhysicsCfg
@@ -42,7 +42,7 @@ _fixture_spec.loader.exec_module(_fixture_module)
 manager = _fixture_module.manager
 
 
-class _Task(DifferentiableDynamicsEnv):
+class _Task(DifferentiableEnv):
     def _action_to_control(self, action, state):
         return action.flatten()
 
@@ -63,6 +63,7 @@ def make_env(
     # production step/reset/facade and actual solver execution remain exercised.
     env = object.__new__(_Task)
     env.sim = manager
+    env._step_mode = "dynamics"
     env._num_envs = 2
     env.cfg = SimpleNamespace(sim_steps_per_control=steps, ignore_terminations=False)
     env.sim_cfg = SimpleNamespace(physics_dt=0.1, device="cpu")
@@ -107,10 +108,10 @@ def test_terminal_reset_keeps_reward_graph_and_other_rows(manager, monkeypatch) 
     obs, reward, terminated, truncated, info = env.step(action)
     assert terminated.tolist() == [True, False]
     torch.testing.assert_close(obs, torch.tensor([[0.0], [0.2]]))
-    assert env.functional_state.valid_history_lengths.tolist() == [0, 2]
+    assert env.dynamics_state.valid_history_lengths.tolist() == [0, 2]
     assert manager.backend.step_index == 1
     assert info["terminal_mask"].tolist() == [True, False]
-    loss = reward.sum() + obs.sum() + env.functional_state.history["memory"].sum()
+    loss = reward.sum() + obs.sum() + env.dynamics_state.history["memory"].sum()
     loss.backward()
     torch.testing.assert_close(action.grad, torch.tensor([[0.16], [0.38]]))
 
@@ -121,10 +122,10 @@ def test_detach_state_stops_prior_control_gradient_without_reset(
     env = make_env(manager, monkeypatch, steps=1)
     first = torch.ones(2, 1, requires_grad=True)
     env.step(first)
-    before = env.functional_state.physical["joint_q"].detach().clone()
+    before = env.dynamics_state.physical["joint_q"].detach().clone()
     obs = env.detach_state()
     assert not obs.requires_grad
-    torch.testing.assert_close(env.functional_state.physical["joint_q"], before)
+    torch.testing.assert_close(env.dynamics_state.physical["joint_q"], before)
     second = torch.ones(2, 1, requires_grad=True)
     _, reward, *_ = env.step(second)
     reward.sum().backward()
@@ -150,15 +151,15 @@ def test_max_episode_steps_truncate_and_reset(manager, monkeypatch) -> None:
 
 def test_configuration_rejects_nonfunctional_paths_before_scene_creation() -> None:
     cfg = EmbodiedEnvCfg(sim_cfg=SimulationManagerCfg(physics_cfg=DefaultPhysicsCfg()))
-    with pytest.raises(ValueError, match="NewtonPhysicsCfg"):
-        DifferentiableDynamicsEnv._validate_dynamics_cfg(cfg)
+    with pytest.raises(RuntimeError, match="NewtonPhysicsCfg"):
+        DifferentiableEnv._validate_diff_cfg(cfg, step_mode="dynamics")
     cfg.sim_cfg.physics_cfg = NewtonPhysicsCfg(requires_grad=False)
-    with pytest.raises(ValueError, match="requires_grad"):
-        DifferentiableDynamicsEnv._validate_dynamics_cfg(cfg)
+    with pytest.raises(RuntimeError, match="requires_grad"):
+        DifferentiableEnv._validate_diff_cfg(cfg, step_mode="dynamics")
     cfg.sim_cfg.physics_cfg.requires_grad = True
     cfg.actions = {"unsupported": object()}
     with pytest.raises(ValueError, match="functional hooks"):
-        DifferentiableDynamicsEnv._validate_dynamics_cfg(cfg)
+        DifferentiableEnv._validate_diff_cfg(cfg, step_mode="dynamics")
 
 
 def test_sensor_sampling_follows_macro_steps_and_ignore_terminations(

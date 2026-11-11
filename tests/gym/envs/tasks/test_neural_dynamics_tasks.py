@@ -106,14 +106,14 @@ def _check_task_and_trainer(
         assert not env.detach_state().requires_grad
         # Selected episode reset clears only selected history, uses a continuing
         # named RNG stream, and keeps the other row's physical state unchanged.
-        before = env.functional_state
+        before = env.dynamics_state
         unchanged = (
             before.physical["joint_q"][env._binding.q_indices[1]].detach().clone()
         )
         env.reset(options={"reset_ids": torch.tensor([0])})
-        assert env.functional_state.valid_history_lengths.tolist() == [0, 1]
+        assert env.dynamics_state.valid_history_lengths.tolist() == [0, 1]
         torch.testing.assert_close(
-            env.functional_state.physical["joint_q"][env._binding.q_indices[1]],
+            env.dynamics_state.physical["joint_q"][env._binding.q_indices[1]],
             unchanged,
         )
     finally:

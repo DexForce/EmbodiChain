@@ -1851,21 +1851,6 @@ embodichain.lab.gym.envs.demo
    execute_demo_episode
    resolve_demo_segments
 
-embodichain.lab.gym.envs.differentiable_dynamics_env
-----------------------------------------------------
-
-Solver-backed Gym environments retain independent functional state and defer terminal resets until backward has consumed their graphs.
-
-.. currentmodule:: embodichain.lab.gym.envs.differentiable_dynamics_env
-
-.. autosummary::
-   :nosignatures:
-
-   DifferentiableDynamicsEnv
-
-.. autoclass:: embodichain.lab.gym.envs.differentiable_dynamics_env.DifferentiableDynamicsEnv
-   :members:
-
 embodichain.lab.gym.envs.embodied_env
 -------------------------------------
 

@@ -1,17 +1,18 @@
 # differentiable-env
 
-> Topic: Newton-backed kinematic environments for analytic policy gradient
-> (APG) through the Warp-tape ↔ PyTorch-autograd bridge.
+> Topic: One Newton-backed environment entry point for pure Warp kinematics
+> and Scene functional solver dynamics.
 
 ## Public entry point
 
 Use
 `embodichain.lab.gym.envs.differentiable_env.DifferentiableEnv`.
-It inherits `EmbodiedEnv`, preserves its scene lifecycle, and replaces the
-normal physics step with a task-defined kinematics callback recorded on a
-Warp tape.
+It inherits `EmbodiedEnv` and selects an explicit Python constructor
+`step_mode="kinematic"|"dynamics"`. Kinematics is the default; solver names
+never select the mode. Both paths share terminal handling while preserving
+their different graph/reset lifetimes.
 
-The resolution path is:
+The kinematic resolution path is:
 
     DifferentiableEnv.step(action)
       → _functional_state_tensors()
@@ -27,12 +28,16 @@ The resolution path is:
 - `NewtonPhysicsCfg.requires_grad` must be `True`.
 - Default physics and other backends fail during `DifferentiableEnv`
   construction.
-- `DifferentiableEnv` always supplies a named kinematics callback; its bridge
-  contract has no dynamics mode, solver substeps, or control buffer.
-- The environment never invokes the configured Newton solver or collision
-  pipeline.
-- Newton gradient configuration still selects the semi-implicit solver, but
-  `DifferentiableEnv` never advances it.
+- Kinematic mode supplies a named callback through `NewtonStepFunc`; that
+  bridge has no solver substeps or control buffer and never invokes Newton
+  dynamics. Its callback runs once per control step without advancing physics.
+- Dynamics mode uses `FunctionalDynamics` through the public manager/Scene
+  path. The task maps actions to controls held over `sim_steps_per_control`;
+  DexSim owns solver substeps and native publication/time. There is no second
+  World update.
+- Both modes require a compatible Newton configuration. Dynamics validates
+  provider support through the Scene; kinematic deployments retain their
+  semi-implicit setup without stepping it.
 - Gradient mode disables Newton CUDA graph capture.
 - `NewtonStepFunc.apply(action, sim_state, *state_tensors)` accepts optional
   functional state tensors. They are appended to the action-kernel arguments
@@ -60,10 +65,13 @@ Task authors implement three required hooks and may override one state hook:
   `truncated`, plus `_order` and `_grad_track` metadata used by
   `NewtonStepFunc`.
 
-There is no public `_apply_dynamics_action_kernel` or
-`differentiable_step_mode` extension point. Registered solver dynamics use the
-separate `DifferentiableDynamicsEnv` and `FunctionalDynamics` interfaces; see
-[neural dynamics](../neural-dynamics/neural-dynamics.md).
+Dynamics tasks instead implement `_action_to_control(action, state)` and pure
+`_read_outputs(state)` over `FunctionalSolverState`. The output hook also runs
+for observation, reset and detach. Configured action/observation/reward functors
+and native interval events are rejected in dynamics mode. The Scene's physics
+and history tensors remain separate from task hooks and live native buffers.
+`dynamics_state` and `dynamics_parameters()` are available only in that mode.
+There is no parallel environment class or mode field inside `NewtonStepFunc`.
 
 ## Autograd and reset rules
 
@@ -71,11 +79,20 @@ Action, kinematics, and gradient-producing output kernels must execute while
 the Warp tape is open. Each tracked output names its backing Warp array in
 `_grad_track`; an output mapped to `None` does not seed Warp backward.
 
-A terminal step tracked through either the action or functional state returns
+In kinematic mode, a terminal step tracked through either the action or recurrent state returns
 the terminal observation and exposes
 `requires_reset_after_backward` plus `deferred_reset_ids` in `info`. Reset
 those rows only after backward. A no-grad terminal step resets them
-synchronously.
+synchronously. Kinematic tasks own their recursive tensors and must implement
+their own `detach_state()` boundary for segmented policy training.
+
+Dynamics mode owns independent physical/history tensors and auto-resets
+finished rows while retaining terminal reward/observation graphs. The full
+pre-reset batch is in `info["terminal_observation"]` for Actor-Critic bootstrap.
+Unselected rows preserve their histories and graphs. `detach_state()` cuts
+history without resetting, sampling or changing values. Finish backward before
+updating model parameters. Shared storage alone never connects Torch/Warp
+autograd; the FK bridge owns that derivative.
 
 ## Franka reference task
 
@@ -91,22 +108,23 @@ Newton dynamics.
 ## Dynamics boundary
 
 `sim.diff.FunctionalDynamics` exposes registered solver dynamics through the
-public manager/Scene path. It does not change `NewtonStepFunc` or this
-kinematic environment's callbacks. Functional physical/history tensors own
-backward storage independently of detached live publication. Read the
-[neural dynamics lifecycle](../neural-dynamics/neural-dynamics.md) before
-changing resets, parameter updates or native/functional mode transitions.
+public manager/Scene path. `NewtonStepFunc` retains the pure-kinematic Warp
+contract. The environment selects between these paths without passing solver
+modes into the Warp bridge. NeRD binding and physical identity belong to
+[neural dynamics](../neural-dynamics/neural-dynamics.md).
 
 ## Source of truth
 
 - `embodichain/lab/gym/envs/differentiable_env.py`
-- `embodichain/lab/sim/cfg/simulation.py`
+- `embodichain/lab/sim/cfg/physics.py`
 - `embodichain/lab/sim/diff/`
 - `extensions/embodichain_tasks/embodichain_tasks/special/franka_reach_apg.py`
 
 ## Focused validation
 
 - `tests/gym/envs/test_differentiable_embodied_env.py`
+- `tests/gym/envs/test_differentiable_dynamics_env.py`
+- `tests/gym/envs/tasks/test_neural_dynamics_tasks.py`
 - `tests/sim/test_sim_manager_cfg.py`
 
 ## Related topics

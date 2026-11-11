@@ -111,6 +111,10 @@ Scene export, then run:
 embodichain run-example learning/nerd train-policy --config examples/learning/nerd/configs/cartpole/agents/apg.nerd.yaml
 ```
 
+Both task factories inherit `DifferentiableEnv` and explicitly select
+`step_mode="dynamics"`; its default pure-kinematic Warp mode remains available
+for other tasks. The mode does not change the configured solver.
+
 The NeRD provider shares one transition between native and functional stepping.
 Functional trajectories retain their own physical/history tensors; publishing
 detached live state does not overwrite tensors needed by backward. Finish

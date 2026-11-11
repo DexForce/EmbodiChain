@@ -27,7 +27,7 @@ import warp as wp
 
 import embodichain.lab.gym.envs.differentiable_env as differentiable_env_module
 from embodichain.lab.gym.envs.differentiable_env import DifferentiableEnv
-from embodichain.lab.gym.envs.embodied_env import EmbodiedEnvCfg
+from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.sim.cfg import DefaultPhysicsCfg, NewtonPhysicsCfg
 from embodichain.lab.sim.diff import NewtonStepFunc, tape_context
 from embodichain.lab.sim.diff.runtime import NewtonDifferentiableRuntime
@@ -113,6 +113,7 @@ def _bare_env() -> DifferentiableEnv:
     """Build an uninitialized environment with only its hook dependencies."""
     env = object.__new__(DifferentiableEnv)
     env.sim = SimpleNamespace(is_newton_backend=True)
+    env._step_mode = "kinematic"
     env._apply_action_kernel = lambda _action, tape: None
     env._make_kinematic_step_fn = lambda: (lambda: object())
     env._read_outputs = lambda _state: {
@@ -388,6 +389,29 @@ def test_kinematic_runtime_does_not_validate_or_expose_a_solver() -> None:
     assert runtime.live_states == (backend.state_0, backend.state_1)
     assert not hasattr(runtime, "control")
     assert not hasattr(runtime, "create_differentiable_trajectory")
+
+
+def test_default_mode_keeps_warp_hooks_with_a_registered_solver(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Solver configuration cannot silently select functional dynamics."""
+    cfg = _diff_env_cfg()
+    cfg.sim_cfg.physics_cfg.solver_cfg = {"solver_type": "nerd"}
+    monkeypatch.setattr(EmbodiedEnv, "__init__", lambda self, cfg: None)
+    env = DifferentiableEnv(cfg)
+    state = _bridge_state()
+    env._build_sim_state_dict = lambda action: state
+    action = torch.tensor([0.5], requires_grad=True)
+    _, reward, *_ = env.step(action)
+    reward.sum().backward()
+    torch.testing.assert_close(action.grad, torch.tensor([4.0]))
+    with pytest.raises(RuntimeError, match="step_mode='dynamics'"):
+        env.dynamics_parameters()
+
+
+def test_unknown_step_mode_fails_before_simulation() -> None:
+    with pytest.raises(ValueError, match="step_mode"):
+        DifferentiableEnv(_diff_env_cfg(), step_mode="automatic")
 
 
 def test_construct_without_requires_grad_raises() -> None:

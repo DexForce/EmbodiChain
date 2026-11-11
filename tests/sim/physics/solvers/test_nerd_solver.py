@@ -572,8 +572,8 @@ def test_real_manager_public_scene_and_partial_arena_reset(
 
 def _check_real_differentiable_environment(tmp_path: Path) -> None:
     import gymnasium as gym
-    from embodichain.lab.gym.envs.differentiable_dynamics_env import (
-        DifferentiableDynamicsEnv,
+    from embodichain.lab.gym.envs.differentiable_env import (
+        DifferentiableEnv,
     )
     from embodichain.lab.gym.envs.embodied_env import EmbodiedEnvCfg
     from embodichain.lab.sim.sim_manager import SimulationManager, SimulationManagerCfg
@@ -619,7 +619,7 @@ def _check_real_differentiable_environment(tmp_path: Path) -> None:
         teacher.destroy(exit_process=False)
         SimulationManager.flush_cleanup_queue()
 
-    class Task(DifferentiableDynamicsEnv):
+    class Task(DifferentiableEnv):
         def _setup_scene(self, **kwargs):
             self.sim = SimulationManager(self.sim_cfg)
             self.sim.add_articulation_descriptor(
@@ -654,7 +654,8 @@ def _check_real_differentiable_environment(tmp_path: Path) -> None:
             sim_cfg=sim_cfg(checkpoint),
             sim_steps_per_control=1,
             max_episode_steps=5,
-        )
+        ),
+        step_mode="dynamics",
     )
     try:
         obs, _ = env.reset(seed=7)
@@ -662,7 +663,7 @@ def _check_real_differentiable_environment(tmp_path: Path) -> None:
         action = torch.ones(2, 2, requires_grad=True)
         obs, reward, terminated, truncated, info = env.step(action)
         assert terminated.tolist() == [True, False]
-        assert env.functional_state.valid_history_lengths.tolist() == [0, 1]
+        assert env.dynamics_state.valid_history_lengths.tolist() == [0, 1]
         assert env.sim._visualization_sim_step == 1
         loss = reward.sum() + obs.square().sum()
         loss.backward()

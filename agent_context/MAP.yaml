@@ -338,7 +338,7 @@ topics:
 - id: neural-dynamics
   title: Neural Dynamics Models and Training
   aliases: [neural dynamics, neural robot dynamics, NeRD, RigidFormer, 神经动力学, 动力学模型训练, NeRD 示例, RigidFormer 示例]
-  keywords: [NeRDProvider, NeuralRobotDynamicSolver, RegisteredNewtonSolverCfg, dexsim.newton_solvers, DifferentiableDynamicsEnv, FunctionalDynamics, NeRDStateCodec, NeRDModel, DynamicsGenerationCfg,
+  keywords: [NeRDProvider, NeuralRobotDynamicSolver, RegisteredNewtonSolverCfg, dexsim.newton_solvers, FunctionalDynamics, NeRDStateCodec, NeRDModel, DynamicsGenerationCfg,
     DynamicsShardWriter, DynamicsWindowDataset, DynamicsTrainer, embodichain_models,
     learning/nerd, nerd reference assets, RigidFormerModel, MOViSequenceSource, build_rigidformer_trainer,
     官方训练精度对比]
@@ -351,11 +351,10 @@ topics:
   - examples/learning/nerd/configs/
   - embodichain/lab/sim/physics/solvers/
   - embodichain/lab/sim/diff/dynamics.py
-  - embodichain/lab/gym/envs/differentiable_dynamics_env.py
   - extensions/embodichain_models/embodichain_models/dynamics/rigidformer/
   - examples/learning/rigidformer/
   watch_paths: [embodichain/lab/sim/physics/solvers/, tests/sim/physics/solvers/,
-    embodichain/lab/sim/diff/dynamics.py, embodichain/lab/gym/envs/differentiable_dynamics_env.py,
+    embodichain/lab/sim/diff/dynamics.py,
     extensions/embodichain_models/, examples/learning/nerd/, examples/learning/rigidformer/,
     docs/source/features/neural_dynamics.md, docs/source/features/neural_dynamics/,
     docs/source/guides/neural_dynamics.md, docs/source/api_reference/model_catalogs.rst,
@@ -417,11 +416,11 @@ topics:
   aliases: [differentiable env, DifferentiableEnv, apg, analytic policy gradient, differentiable rl,
     Warp tape autograd, NewtonStepFunc, 可微环境]
   keywords: [differentiable, gradient, apg, autograd, warp tape, requires_grad, semi_implicit,
-    DifferentiableEnv, NewtonStepFunc, quaternion, xyzw]
+    DifferentiableEnv, NewtonStepFunc, step_mode, dynamics_state, quaternion, xyzw]
   paths: [topics/differentiable-env/differentiable-env.md]
   source_of_truth:
   - embodichain/lab/gym/envs/differentiable_env.py
-  - embodichain/lab/sim/cfg/simulation.py
+  - embodichain/lab/sim/cfg/physics.py
   - embodichain/lab/sim/diff/
   - extensions/embodichain_tasks/embodichain_tasks/special/franka_reach_apg.py
   related_topics: [env-framework, rl-learning]

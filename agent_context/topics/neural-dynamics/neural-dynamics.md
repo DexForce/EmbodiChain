@@ -51,16 +51,13 @@ The project-pinned DexSim 0.6 APIs provide named providers and functional
 Scene services; ordinary built-in solvers retain the mainline DexUni
 configuration contract.
 
-`lab/sim/diff/dynamics.py` and
-`lab/gym/envs/differentiable_dynamics_env.py` own independent functional state,
-parameter forwarding, selective reset and explicit detach boundaries. Published
-native state/history is detached; backward storage remains owned by the
-functional trajectory. Automatic selected-row resets preserve terminal reward
-and observation graphs. `info["terminal_observation"]` retains the full pre-reset
-batch for value bootstrap through `DifferentiableEnvProtocol`; finish backward
-before changing model parameters. Collector, trainer and Actor-Critic ownership
-remain in [RL learning](../rl-learning/rl-learning.md).
-The existing kinematic `DifferentiableEnv` retains its separate callback path.
+`lab/sim/diff/dynamics.py` owns the solver facade; the shared
+`lab/gym/envs/differentiable_env.py::DifferentiableEnv` hosts it with explicit
+`step_mode="dynamics"`. The NeRD tasks select that mode in their constructors.
+The default remains pure Warp kinematics. Mode hooks, state ownership and reset
+policies belong to [differentiable environments](../differentiable-env/differentiable-env.md).
+Collector, trainer and Actor-Critic ownership remain in
+[RL learning](../rl-learning/rl-learning.md).
 
 The NeRD showcase owns Scene-specific consumers in `_support/_scene.py`, asset
 descriptors in `_scene_assets.py`, and Cartpole/Ant Gym factories in
