@@ -22,7 +22,7 @@ from collections.abc import Callable
 from pathlib import Path
 import socket
 import threading
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 import webbrowser
 
 if TYPE_CHECKING:
@@ -33,7 +33,10 @@ __all__ = ["create_annotation_app", "launch_annotation"]
 
 
 def create_annotation_app(
-    source_factory: Callable[[], FrameSource], annotations: str | Path
+    source_factory: Callable[[], FrameSource],
+    annotations: str | Path,
+    *,
+    fitting_options: dict[str, Any] | None = None,
 ) -> FastAPI:
     """Create a source-independent FastAPI application for a single process.
 
@@ -41,13 +44,17 @@ def create_annotation_app(
         source_factory: Create a fresh FrameSource on the app's worker thread.
             The app closes it on shutdown or failed preparation.
         annotations: Destination JSON path; persisted only after an edit/save.
+        fitting_options: Initial joint/profile settings, with the same field
+            names as the web fitting form. Omit to configure them in the browser.
 
     Returns:
         ASGI application with lifespan-managed frame input and preview cache.
     """
     from ._server import create_app
 
-    return create_app(source_factory, Path(annotations))
+    return create_app(
+        source_factory, Path(annotations), fitting_options=fitting_options
+    )
 
 
 def launch_annotation(
@@ -56,6 +63,7 @@ def launch_annotation(
     *,
     port: int = 0,
     open_browser: bool = True,
+    fitting_options: dict[str, Any] | None = None,
 ) -> None:
     """Run the local website until Ctrl+C, accepting any frame source factory.
 
@@ -64,6 +72,7 @@ def launch_annotation(
         annotations: JSON output file, distinct from any source file.
         port: Loopback port; zero asks the OS to select an available port.
         open_browser: Open the website after the server starts.
+        fitting_options: Initial joint/profile settings for offline reconstruction.
 
     Raises:
         ValueError: Port is outside 0–65535.
@@ -76,7 +85,9 @@ def launch_annotation(
     annotations = Path(annotations).resolve()
     server = uvicorn.Server(
         uvicorn.Config(
-            create_annotation_app(source_factory, annotations),
+            create_annotation_app(
+                source_factory, annotations, fitting_options=fitting_options
+            ),
             host="127.0.0.1",
             port=port,
             access_log=False,

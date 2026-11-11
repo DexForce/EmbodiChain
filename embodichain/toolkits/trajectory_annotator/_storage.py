@@ -170,6 +170,18 @@ class AnnotationStore:
                 "persisted": self._digest is not None,
             }
 
+    def check_unchanged(self) -> None:
+        """Reject fits based on an annotation file edited outside this session."""
+        with self._lock:
+            content = self._read()
+            digest = (
+                hashlib.sha256(content).hexdigest() if content is not None else None
+            )
+            if digest != self._digest:
+                raise ConflictError(
+                    "磁盘上的标注文件已被其他程序修改，请重新打开项目。"
+                )
+
     def save(
         self, skill_intervals: object, expected_revision: object
     ) -> dict[str, Any]:

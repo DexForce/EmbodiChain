@@ -22,8 +22,62 @@ import argparse
 from collections.abc import Sequence
 from pathlib import Path
 import math
+import json
+from typing import Any
 
 __all__ = ["cli"]
+
+
+def _add_fitting_arguments(parser: argparse.ArgumentParser) -> None:
+    """Share optional web fitting defaults with the runnable annotation example."""
+    group = parser.add_argument_group("轨迹拟合与连续回填（可在网页中填写或修改）")
+    group.add_argument("--joints", type=Path, help="关节记录：NPZ / HDF5 / Atomic PT。")
+    group.add_argument(
+        "--robot-profile", type=Path, help="FK/IK、TCP、关节顺序与限制的 JSON 配置。"
+    )
+    group.add_argument(
+        "--qpos-semantics",
+        choices=("measured_state", "actual_submission", "design_reference"),
+    )
+    group.add_argument(
+        "--time-offset", type=float, help="视频零时刻对应的关节时间，秒；必须显式指定。"
+    )
+    group.add_argument("--qpos-key", default="qpos")
+    group.add_argument("--timestamps-key", default="timestamps")
+    group.add_argument(
+        "--joint-dt", type=float, help="无关节时间戳时显式指定的采样周期，秒。"
+    )
+    group.add_argument("--env-index", type=int, default=0)
+    group.add_argument(
+        "--phase-hints", type=Path, help="完整阶段分区 JSON（半开、选区相对关节索引）。"
+    )
+    group.add_argument("--fit-config", type=Path, help="SkillFitCfg 覆盖项 JSON。")
+    group.add_argument("--device", default="cpu", help="离线 FK/IK 计算设备。")
+
+
+def _fitting_options(args: argparse.Namespace) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for name in (
+        "joints",
+        "robot_profile",
+        "qpos_semantics",
+        "time_offset",
+        "qpos_key",
+        "timestamps_key",
+        "joint_dt",
+        "env_index",
+        "device",
+    ):
+        value = getattr(args, name)
+        if value is not None:
+            result[name] = (
+                str(value.expanduser().resolve()) if isinstance(value, Path) else value
+            )
+    for name in ("phase_hints", "fit_config"):
+        path = getattr(args, name)
+        if path is not None:
+            result[name] = json.loads(path.read_text())
+    return result
 
 
 def cli(argv: Sequence[str] | None = None) -> None:
@@ -68,6 +122,7 @@ def cli(argv: Sequence[str] | None = None) -> None:
     parser.add_argument(
         "--no-browser", action="store_true", help="只打印网址，不自动打开浏览器。"
     )
+    _add_fitting_arguments(parser)
     args = parser.parse_args(argv)
     source_path = (args.video or args.hdf5).resolve()
     if not source_path.is_file():
@@ -117,7 +172,11 @@ def cli(argv: Sequence[str] | None = None) -> None:
 
         print(f"输入：{source_path}", flush=True)
         launch_annotation(
-            factory, annotations, port=args.port, open_browser=not args.no_browser
+            factory,
+            annotations,
+            port=args.port,
+            open_browser=not args.no_browser,
+            fitting_options=_fitting_options(args),
         )
     except ImportError as error:
         parser.exit(

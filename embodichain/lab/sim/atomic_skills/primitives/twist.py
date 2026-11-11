@@ -76,6 +76,33 @@ from embodichain.lab.sim.atomic_skills.trajectory_ops import (
 
 
 @dataclass(frozen=True, slots=True, eq=False)
+class TwistMotionGoal:
+    """World TCP and rotation line for effect-free native Twist motion.
+
+    Args:
+        grasp_xpos: Explicit world grasp TCP transform.
+        twist_axis: World rotation direction.
+        axis_origin: One world point on the rotation line.
+    """
+
+    goal_kind: ClassVar[str] = "twist_motion"
+    grasp_xpos: PoseGoalValue
+    twist_axis: torch.Tensor
+    axis_origin: tuple[float, float, float]
+
+    def __post_init__(self) -> None:
+        validate_pose_goal(self.grasp_xpos, "grasp_xpos", allow_waypoints=False)
+        axis = self.twist_axis
+        if axis.shape != (3,) or not torch.isfinite(axis).all() or axis.norm() < 1e-8:
+            raise ValueError("twist_axis must be a finite nonzero world vector.")
+        if len(self.axis_origin) != 3 or not all(
+            math.isfinite(v) for v in self.axis_origin
+        ):
+            raise ValueError("axis_origin must be one finite world point.")
+        object.__setattr__(self, "twist_axis", axis.clone())
+
+
+@dataclass(frozen=True, slots=True, eq=False)
 class TwistGoal(ObjectSkillGoal):
     """Target object described by a twist affordance."""
 
@@ -116,11 +143,11 @@ class TwistOptions(SkillOptions):
             raise ValueError("twist_angle must be finite.")
 
 
-class Twist(AtomicSkill[TwistGoal, TwistOptions]):
+class Twist(AtomicSkill[TwistGoal | TwistMotionGoal, TwistOptions]):
     """Open-loop approach, grasp, twist, release, and retract motion."""
 
     skill_id: ClassVar[str] = "twist"
-    GoalType: ClassVar[type] = TwistGoal
+    GoalType: ClassVar[tuple[type, ...]] = (TwistGoal, TwistMotionGoal)
     OptionsType: ClassVar[type] = TwistOptions
     open_loop: ClassVar[bool] = True
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
@@ -158,7 +185,11 @@ class Twist(AtomicSkill[TwistGoal, TwistOptions]):
                 "twist path must preserve every Cartesian sample."
             )
         target = self.require_goal(request)
-        affordance = self._require_twist_affordance(target.semantics)
+        affordance = (
+            None
+            if isinstance(target, TwistMotionGoal)
+            else self._require_twist_affordance(target.semantics)
+        )
         options = request.skill_options
         interpolation_dt = context.require_control_dt()
         binding = request.binding
@@ -184,24 +215,46 @@ class Twist(AtomicSkill[TwistGoal, TwistOptions]):
             dtype=context.robot.qpos.dtype,
         )
 
-        link_pose = resolve_pose_target(
-            resolve_pose_goal(target.target_pose, context, name="target_pose"),
-            num_envs=self.num_envs,
-            device=self.device,
-        )
-        grasp_sample = affordance.sample_grasp_pose(
-            link_pose,
-            sampling=context.affordance_sampling,
-            env_ids=context.env_ids,
-            key=(request.invocation_id or self.skill_id) + ":grasp",
-        )
-        grasp_xpos = grasp_sample.poses.to(device=self.device, dtype=torch.float32)
-        grasp_xpos = find_symmetric_nearest_xpos(
-            grasp_xpos,
-            reference_xpos=self.robot.compute_fk(
-                qpos=start_arm_qpos, name=control_part, to_matrix=True
-            ),
-        )
+        if isinstance(target, TwistMotionGoal):
+            grasp_xpos = resolve_pose_target(
+                resolve_pose_goal(target.grasp_xpos, context, name="grasp_xpos"),
+                num_envs=self.num_envs,
+                device=self.device,
+            )
+            # Identity is the world coordinate frame, not an invented object pose.
+            link_pose = torch.eye(4, device=self.device).expand(self.num_envs, 4, 4)
+            twist_axis = target.twist_axis
+            axis_origin = target.axis_origin
+            grasp_success = torch.ones(
+                self.num_envs, dtype=torch.bool, device=self.device
+            )
+            grasp_metadata = {
+                "grounding": "explicit_tcp",
+                "physical_success": "unknown",
+            }
+        else:
+            link_pose = resolve_pose_target(
+                resolve_pose_goal(target.target_pose, context, name="target_pose"),
+                num_envs=self.num_envs,
+                device=self.device,
+            )
+            grasp_sample = affordance.sample_grasp_pose(
+                link_pose,
+                sampling=context.affordance_sampling,
+                env_ids=context.env_ids,
+                key=(request.invocation_id or self.skill_id) + ":grasp",
+            )
+            grasp_xpos = grasp_sample.poses.to(device=self.device, dtype=torch.float32)
+            grasp_xpos = find_symmetric_nearest_xpos(
+                grasp_xpos,
+                reference_xpos=self.robot.compute_fk(
+                    qpos=start_arm_qpos, name=control_part, to_matrix=True
+                ),
+            )
+            twist_axis = affordance.twist_axis
+            axis_origin = affordance.require_axis_origin()
+            grasp_success = grasp_sample.success
+            grasp_metadata = grasp_sample.metadata
         pre_grasp_xpos = translate_pose_world(
             grasp_xpos,
             -grasp_xpos[:, :3, 2] * options.pre_grasp_distance,
@@ -214,8 +267,8 @@ class Twist(AtomicSkill[TwistGoal, TwistOptions]):
         twist_xpos = self._twisted_grasp_poses(
             link_pose,
             grasp_xpos,
-            affordance.twist_axis,
-            affordance.require_axis_origin(),
+            twist_axis,
+            axis_origin,
             options.twist_angle,
             n_twist - 1,
         )
@@ -234,7 +287,7 @@ class Twist(AtomicSkill[TwistGoal, TwistOptions]):
             grasp_xpos[:, :3, 2],
             n_waypoints=n_reach - 1,
         )
-        reach_active = grasp_sample.success & approach_success
+        reach_active = grasp_success & approach_success
         reach_hold_pose = self.robot.compute_fk(
             qpos=approach_arm[:, -1],
             name=control_part,
@@ -270,8 +323,8 @@ class Twist(AtomicSkill[TwistGoal, TwistOptions]):
             sampled = self._twisted_grasp_poses_at_fractions(
                 link_pose,
                 grasp_xpos,
-                affordance.twist_axis,
-                affordance.require_axis_origin(),
+                twist_axis,
+                axis_origin,
                 options.twist_angle,
                 progress,
             )
@@ -300,7 +353,7 @@ class Twist(AtomicSkill[TwistGoal, TwistOptions]):
             interpolation_dt=interpolation_dt,
         )
         success = (
-            grasp_sample.success
+            grasp_success
             & approach_success
             & reach_success
             & twist_success
@@ -380,7 +433,10 @@ class Twist(AtomicSkill[TwistGoal, TwistOptions]):
             expected_effects=StateDelta(),
             diagnostics=PlannerDiagnostics(
                 backend=self.planning_services.planner_name,
-                metadata={"affordance_sample": grasp_sample.metadata},
+                metadata={
+                    "affordance_sample": grasp_metadata,
+                    **(grasp_metadata if isinstance(target, TwistMotionGoal) else {}),
+                },
             ),
             segment_lengths={
                 "approach": lengths[0],
@@ -503,4 +559,4 @@ class Twist(AtomicSkill[TwistGoal, TwistOptions]):
         return eef_poses
 
 
-__all__ = ["Twist", "TwistGoal", "TwistOptions"]
+__all__ = ["TwistMotionGoal", "Twist", "TwistGoal", "TwistOptions"]

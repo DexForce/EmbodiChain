@@ -90,6 +90,24 @@ from embodichain.lab.sim.atomic_skills.primitives._binding_contracts import (
 
 
 @dataclass(frozen=True, slots=True, eq=False)
+class PickUpMotionGoal:
+    """Explicit world TCP anchor for effect-free pickup motion reconstruction.
+
+    This goal shares PickUp's native phase generator. It carries no object
+    identity and creates no held-object state or physical-success evidence.
+
+    Args:
+        grasp_xpos: Observed or FK-derived world grasp TCP transform.
+    """
+
+    goal_kind: ClassVar[str] = "pickup_motion"
+    grasp_xpos: PoseGoalValue
+
+    def __post_init__(self) -> None:
+        validate_pose_goal(self.grasp_xpos, "grasp_xpos", allow_waypoints=False)
+
+
+@dataclass(frozen=True, slots=True, eq=False)
 class GraspGoal(ObjectSkillGoal):
     """Pickup target with an affordance-selected or supplied grasp pose."""
 
@@ -307,11 +325,11 @@ class PickUpOptions(SkillOptions):
             )
 
 
-class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
+class PickUp(AtomicSkill[GraspGoal | PickUpMotionGoal, PickUpOptions]):
     """Approach a grasp pose, close the gripper, lift."""
 
     skill_id: ClassVar[str] = "pick_up"
-    GoalType: ClassVar[type] = GraspGoal
+    GoalType: ClassVar[tuple[type, ...]] = (GraspGoal, PickUpMotionGoal)
     OptionsType: ClassVar[type] = PickUpOptions
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
@@ -338,6 +356,8 @@ class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
     ) -> tuple[str, ...]:
         """Monitor the acquired object and late-bound downstream targets."""
         dependencies = set(super()._scene_dependencies(request))
+        if isinstance(request.goal, PickUpMotionGoal):
+            return tuple(sorted(dependencies))
         entity_id = request.goal.semantics.entity_id
         # An explicit object pose is a scene-independent planning input.  Do
         # not retain the semantic entity as a dynamic dependency in that
@@ -474,6 +494,8 @@ class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
     ) -> SkillPlan:
         """Plan approach, close, and lift segments without committing attachment."""
         target = self.require_goal(request)
+        if isinstance(target, PickUpMotionGoal):
+            return self._plan_motion(request, context)
         options = replace(
             request.skill_options,
             downstream_object_target_poses=tuple(
@@ -639,6 +661,73 @@ class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
             provenance=None,
         )
 
+    def _plan_motion(
+        self,
+        request: ResolvedSkillRequest[PickUpMotionGoal, PickUpOptions],
+        context: PlanningContext,
+    ) -> SkillPlan:
+        """Use the native pickup phases with explicit TCP grounding only."""
+        options = request.skill_options
+        if (
+            options.fixed_object_to_eef is not None
+            or options.rotate_upright is not None
+            or options.downstream_object_target_poses
+            or options.approach_along_grasp_axis
+        ):
+            raise ValueError("Pickup motion goals cannot use object-relative options.")
+        arm = request.binding.endpoint("primary", "motion").require_target(
+            JointPositionTarget
+        )
+        hand = request.binding.endpoint("primary", "grasp")
+        hand_target = hand.require_target(JointPositionTarget)
+        pose = resolve_pose_target(
+            resolve_pose_goal(request.goal.grasp_xpos, context, name="grasp_xpos"),
+            num_envs=context.batch_size,
+            device=self.device,
+        )
+        direction = options.approach_direction.to(pose)
+        if direction.ndim == 2 and direction.shape[0] != context.batch_size:
+            raise ValueError("approach_direction must match the planning batch.")
+        direction = direction / torch.linalg.vector_norm(
+            direction, dim=-1, keepdim=True
+        )
+        commands = {
+            command: hand.joint_positions(
+                command,
+                num_envs=context.batch_size,
+                device=self.device,
+                dtype=context.robot.qpos.dtype,
+            )
+            for command in (OPEN_COMMAND, GRASP_COMMAND)
+        }
+        success, full, lengths = self._get_full_pickup_trajectory(
+            pose,
+            context.robot.qpos[:, list(arm.joint_ids)],
+            context.last_qpos,
+            request.motion_policy,
+            options,
+            direction,
+            arm,
+            hand_target,
+            commands[OPEN_COMMAND],
+            commands[GRASP_COMMAND],
+            context.require_control_dt(),
+        )
+        return self.build_plan(
+            request,
+            context,
+            success=success,
+            trajectory=TimedTrajectory.from_uniform_step(
+                full, env_ids=context.env_ids, step_dt=context.require_control_dt()
+            ),
+            expected_effects=StateDelta(),
+            segment_lengths=lengths,
+            diagnostics=PlannerDiagnostics(
+                backend=self.planning_services.planner_name,
+                metadata={"grounding": "explicit_tcp", "physical_success": "unknown"},
+            ),
+        )
+
     def _plan_from_nominal(
         self,
         request: ResolvedSkillRequest[GraspGoal, PickUpOptions],
@@ -647,6 +736,8 @@ class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
     ) -> SkillPlan:
         """Assemble a Pick from an explicitly supplied external motion."""
         target = self.require_goal(request)
+        if isinstance(target, PickUpMotionGoal):
+            raise ValueError("Pickup motion goals require native generation.")
         motion = self._validate_nominal_motion(
             request, context, nominal_source, segments=("approach", "close", "lift")
         )
@@ -1118,4 +1209,4 @@ class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
         return adjusted_grasp_xpos
 
 
-__all__ = ["GraspGoal", "PickUp", "PickUpOptions"]
+__all__ = ["PickUpMotionGoal", "GraspGoal", "PickUp", "PickUpOptions"]

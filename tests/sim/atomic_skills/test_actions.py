@@ -54,8 +54,10 @@ from embodichain.lab.sim.atomic_skills import (
     EntityState,
     ExecutionEventKind,
     GraspGoal,
+    PickUpMotionGoal,
     HandOver,
     HandOverGoal,
+    HandOverMotionGoal,
     HandOverOptions,
     HeldObjectPoseGoal,
     HeldObjectState,
@@ -97,6 +99,7 @@ from embodichain.lab.sim.atomic_skills import (
     SlideAffordance,
     Slide,
     SlideGoal,
+    SlideMotionGoal,
     SlideJointTarget,
     SlideOptions,
     RobotObservation,
@@ -107,6 +110,7 @@ from embodichain.lab.sim.atomic_skills import (
     TwistAffordance,
     Twist,
     TwistGoal,
+    TwistMotionGoal,
     TwistOptions,
 )
 from embodichain.lab.sim.atomic_skills.goals import collect_scene_dependencies
@@ -937,19 +941,72 @@ def _plan_segment_contract_case(case_id: str) -> SkillPlan:
 def test_builtin_descriptors_expose_strict_goal_types() -> None:
     assert MoveEndEffector.GoalType is EndEffectorPoseGoal
     assert MoveJoints.GoalType is JointPositionGoal
-    assert PickUp.GoalType is GraspGoal
+    assert PickUp.GoalType == (GraspGoal, PickUpMotionGoal)
     assert AxisAlign.GoalType is AxisAlignGoal
     assert MoveHeldObject.GoalType is HeldObjectPoseGoal
     assert Place.GoalType == (PlaceGoal, AssembleGoal)
     assert Pour.GoalType is PourGoal
     assert Press.GoalType is PressGoal
     assert PushObject.GoalType is PushObjectGoal
-    assert Slide.GoalType is SlideGoal
+    assert Slide.GoalType == (SlideGoal, SlideMotionGoal)
     assert OpenDoor.GoalType is OpenDoorGoal
-    assert Twist.GoalType is TwistGoal
+    assert Twist.GoalType == (TwistGoal, TwistMotionGoal)
     assert CoordinatedPickment.GoalType is CoordinatedPickGoal
     assert CoordinatedPlacement.GoalType is CoordinatedPlacementGoal
-    assert HandOver.GoalType is HandOverGoal
+    assert HandOver.GoalType == (HandOverGoal, HandOverMotionGoal)
+
+
+@pytest.mark.parametrize("kind", ("pick_up", "slide", "twist", "hand_over"))
+def test_explicit_motion_goals_plan_without_scene_or_physical_effects(
+    kind: str,
+) -> None:
+    pose = torch.eye(4)
+    if kind == "hand_over":
+        action = _bind_action(_dual_motion_generator(), HandOver())
+        context = _dual_context()
+        binding = _dual_binding(action, "source", "destination")
+        goal = HandOverMotionGoal(pose, pose, pose)
+        options = HandOverOptions(arm_selection="bound", release_at_target=False)
+    else:
+        action = _bind_action(
+            _motion_generator(),
+            {
+                "pick_up": PickUp,
+                "slide": Slide,
+                "twist": Twist,
+            }[kind](),
+        )
+        context = _context()
+        binding = _binding(action)
+        goal = {
+            "pick_up": lambda: PickUpMotionGoal(pose),
+            "slide": lambda: SlideMotionGoal(pose, torch.tensor([1.0, 0.0, 0.0])),
+            "twist": lambda: TwistMotionGoal(
+                pose, torch.tensor([0.0, 0.0, 1.0]), (0.0, 0.0, 0.0)
+            ),
+        }[kind]()
+        options = {
+            "pick_up": PickUpOptions,
+            "slide": SlideOptions,
+            "twist": TwistOptions,
+        }[kind]()
+    plan = _plan_action(
+        action,
+        SkillInvocation(
+            skill_id=kind,
+            goal=goal,
+            binding=binding,
+            skill_options=options,
+            motion_policy=MotionPolicy(sample_count=100),
+        ),
+        context,
+    )
+    assert plan.plan_success.all()
+    assert not plan.scene_dependencies
+    assert not plan.expected_effects.held_object_updates
+    assert not plan.effect_candidates.held_object_updates
+    assert plan.diagnostics.metadata["grounding"] == "explicit_tcp"
+    assert plan.joint_trajectory.robot_dof == context.robot.robot_dof
 
 
 @pytest.mark.parametrize(

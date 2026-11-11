@@ -1,7 +1,9 @@
 // Copyright (c) 2021-2026 DexForce Technology Co., Ltd. Licensed under Apache-2.0.
 // Completed atomic skill intervals are immutable snapshots; draft and displayed-frame state
 // stay separate so neither an in-flight seek nor autosave can move an endpoint.
+import { createFittingPanel } from "/static/fitting.js";
 const $ = (id) => document.getElementById(id);
+let fittingPanel = null;
 const state = {
   project: null, skillIntervals: [], selected: null, draft: null, lastLabel: "",
   displayed: null, target: 0, delay: 1 / 30, playing: false, loading: false,
@@ -109,6 +111,7 @@ async function pumpFrames() {
         state.loading = false;
         $("frame-current").textContent = index;
         $("frame-time").textContent = timecode(Number(response.headers.get("X-Frame-Time")));
+        fittingPanel?.displayTime(Number(response.headers.get("X-Frame-Time")));
         $("scrubber").value = index;
         // Do not change a number the user is still typing.
         if (document.activeElement !== $("goto-frame")) $("goto-frame").value = index;
@@ -292,6 +295,7 @@ function renderSelection() {
   $("delete").disabled = !skillInterval || !!state.draft;
   $("undo").disabled = !state.undo.length || !!state.draft;
   $("redo").disabled = !state.redo.length || !!state.draft;
+  fittingPanel?.selectionChanged();
 }
 function renderSkillIntervals() {
   $("skill-interval-list").replaceChildren();
@@ -392,6 +396,7 @@ async function save() {
   } finally {
     state.saving = false;
     renderSave();
+    fittingPanel?.selectionChanged();
   }
 }
 function exportJson() {
@@ -587,6 +592,23 @@ async function initialize() {
       tick.append(caption);
       return tick;
     }));
+    fittingPanel = createFittingPanel({
+      context: () => ({ selection: selected(), revision: state.project.document.revision, dirty: dirty(), draft: state.draft, token: state.token }),
+      saveAnnotations: async () => {
+        if (state.draft) throw new Error("请先提交或取消当前标注草稿。");
+        while (state.saving) await new Promise((resolve) => setTimeout(resolve, 50));
+        await save();
+        if (dirty() || state.saveError || state.conflict) throw new Error("标注尚未成功保存，请处理保存错误后重新拟合。");
+      },
+      seekTime: async (seconds) => {
+        pause();
+        const serial = state.serial;
+        const response = await checked(await fetch(`/api/frame-index?time_seconds=${encodeURIComponent(seconds)}`));
+        const result = await response.json();
+        if (serial === state.serial) requestFrame(result.index);
+      },
+    });
+    fittingPanel.initialize();
     bindControls(); zoom(1); renderSkillIntervals(); renderDraft(); requestFrame(0);
     message("已就绪。定位起点按 I，终点按 O，填写名称后按 Enter 提交。 ");
     $("video-stage").focus({ preventScroll: true });

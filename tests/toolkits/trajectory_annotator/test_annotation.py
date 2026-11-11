@@ -340,3 +340,117 @@ def test_worker_keeps_only_the_latest_pending_seek(
         release.set()
         worker.close()
     assert worker.status()["phase"] == "closed"
+
+
+@pytest.mark.parametrize("accepted", [True, False])
+def test_web_fitting_vfr_clock_concurrency_export_and_stale_revisions(
+    make_video: Callable[..., Path],
+    tmp_path: Path,
+    fitting_oracle: dict[str, object],
+    accepted: bool,
+) -> None:
+    """A fit never owns decoding, blocks edits, exports rejection as success or outlives its annotation."""
+    import io
+    import numpy as np
+    from fastapi.testclient import TestClient
+    from embodichain.toolkits.trajectory_annotator._server import create_app
+    from embodichain.toolkits.trajectory_annotator.video import VideoFrameSource
+
+    video = make_video(variable=True, start=90)
+    fitting_oracle["accepted"] = accepted
+    fitting_oracle["release"].clear()
+    app = create_app(lambda: VideoFrameSource(video), tmp_path / "annotations.json")
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        deadline = time.monotonic() + 10
+        while client.get("/api/status").json()["phase"] != "ready":
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        headers = {
+            "X-Annotation-Token": client.get("/api/project").json()["session_token"]
+        }
+        selected = skill_interval(5, 20)
+        saved = client.put(
+            "/api/annotations",
+            json=dict(segments=[selected], expected_revision=0),
+            headers=headers,
+        ).json()
+        payload = dict(
+            segment_id=selected["id"],
+            expected_revision=saved["revision"],
+            skill_id="pick_up",
+            inputs=dict(
+                joints="known.npz",
+                robot_profile="robot.json",
+                qpos_semantics="measured_state",
+                time_offset=0,
+            ),
+        )
+        assert client.post("/api/fitting/jobs", json=payload).status_code == 403
+        assert (
+            client.post(
+                "/api/fitting/jobs",
+                json={**payload, "expected_revision": 0},
+                headers=headers,
+            ).status_code
+            == 409
+        )
+        assert (
+            client.post(
+                "/api/fitting/jobs",
+                json={**payload, "inputs": {**payload["inputs"], "time_offset": None}},
+                headers=headers,
+            ).status_code
+            == 422
+        )
+        response = client.post("/api/fitting/jobs", json=payload, headers=headers)
+        assert response.status_code == 202
+        job = response.json()["job_id"]
+        try:
+            assert fitting_oracle["entered"].wait(timeout=3)
+            assert (
+                client.post(
+                    "/api/fitting/jobs", json=payload, headers=headers
+                ).status_code
+                == 409
+            )
+            assert client.get("/api/frames/47").status_code == 200
+            assert client.get("/api/fitting").json()["phase"] == "running"
+        finally:
+            fitting_oracle["release"].set()
+        while (status := client.get("/api/fitting").json())["phase"] == "running":
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        assert status["phase"] == "done" and status["accepted"] == accepted
+        # The source has nonzero PTS and an extra tick every five frames. FPS
+        # multiplication would instead yield 5/30 and 20/30, so it must fail here.
+        call = fitting_oracle["calls"][0]
+        np.testing.assert_allclose(call["frame_times"], [6 / 30, 24 / 30])
+        assert call["frame_durations"][-1] == pytest.approx(1 / 30)
+        assert client.get("/api/frame-index?time_seconds=0.2").json() == {"index": 5}
+        assert client.get("/api/frame-index?time_seconds=nan").status_code == 422
+        preview = client.get(f"/api/fitting/jobs/{job}/preview").json()
+        assert preview["report"]["parameters"]["lift_height"] == 0.12
+        response = client.get(f"/api/fitting/jobs/{job}/bundle")
+        assert response.status_code == 200
+        with np.load(io.BytesIO(response.content), allow_pickle=False) as bundle:
+            original, patched = bundle["original_qpos"], bundle["patched_qpos"]
+            np.testing.assert_array_equal(bundle["timestamps"], np.arange(300) / 100)
+            np.testing.assert_array_equal(patched[:23], original[:23])
+            np.testing.assert_array_equal(patched[81:], original[81:])
+            if accepted:
+                assert patched[50, 0] - original[50, 0] == pytest.approx(0.01)
+            else:
+                np.testing.assert_array_equal(patched, original)
+                assert not np.array_equal(bundle["proposed_qpos"], original)
+        changed = {**selected, "end_frame": 21}
+        assert (
+            client.put(
+                "/api/annotations",
+                json=dict(segments=[changed], expected_revision=1),
+                headers=headers,
+            ).status_code
+            == 200
+        )
+        assert client.get("/api/fitting").json()["stale"]
+        for endpoint in ("bundle", "preview"):
+            assert client.get(f"/api/fitting/jobs/{job}/{endpoint}").status_code == 409

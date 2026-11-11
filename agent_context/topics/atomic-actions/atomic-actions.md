@@ -153,6 +153,27 @@ ExecuteDemoSkill executes task-specific demonstration assets with measured runti
 contracts through the same nominal-source and runner interfaces. Its internal
 events do not create independent recovery boundaries.
 
+Video-selected reconstruction enters through `embodichain fit-trajectory`
+(`toolkits/skill_fitting/cli.py`) or the annotation website's selected-interval
+fitting panel (`toolkits/trajectory_annotator/_fitting.py`). Both hosts reuse
+`toolkits/skill_fitting/_pipeline.py`; the web host retains one background job
+and result, keeps decoding on its existing owner, and invalidates results after
+annotation revisions change. Its bounded joint/FK preview follows video time;
+the downloadable NPZ retains full samples. See the
+[web example](../../../examples/toolkits/trajectory_annotation/README.md).
+`atomic_skills/fitting.py` identifies explicit
+world-TCP motion goals for PickUp, Slide, Twist and HandOver, then calls their
+ordinary registered planners. Motion goals carry no object identity and emit
+empty effects; they cannot establish an attachment or physical success. Native
+generation remains independent of the source joint samples. A source-derived
+monotone phase clock and bounded boundary correction are qualified separately;
+rejected bundles retain candidates while leaving the patched reference unchanged.
+The host supplies a named robot profile and an offline FK/IK port, without
+constructing a simulator. Annotation source identity, frame endpoint conversion,
+joint semantics and clock offsets remain explicit. Automatic video contact
+recognition is not provided. The [runnable guide](../../../examples/toolkits/skill_fitting/README.md)
+owns supported phase partitions, calibration and standalone result arrays.
+
 PickUp, MoveHeldObject and Place can also assemble a pre-planning nominal motion
 source. The source does not own semantic effects or environment lifecycle; see
 [Real2Sim motion](../data-pipeline/real2sim.md) for source and replay limits.

@@ -35,6 +35,12 @@ tabletop Cartesian transfer needs source TCP poses. Prototype preparation and
 planning do not establish collision freedom or physical task success. See
 [Real2Sim motion](real2sim.md) for ownership and source binding.
 
+`data_pipeline/skill_fitting.py` separately owns named joint recordings, inclusive
+video-to-joint clock conversion and standalone numeric/JSON reconstruction
+bundles. It does not relax Real2Sim's object-reference requirements. The
+[Atomic Skills overview](../atomic-actions/atomic-actions.md) owns the fitting
+entry point and the effect-free motion-goal boundary.
+
 Read [online sampling](online-sampling.md) for worker states, refill, shared
 errors, action schemas, sample provenance, causal histories and example-runner
 boundaries. Read [persistence](persistence.md)

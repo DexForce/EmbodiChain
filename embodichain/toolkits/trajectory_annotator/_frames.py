@@ -168,6 +168,9 @@ class FrameWorker:
             phase="starting", completed=0, total=None, error=None
         )
         self._pending: tuple[int, Future[FramePreview]] | None = None
+        self._interval: (
+            tuple[int, int, Future[tuple[FramePreview, FramePreview]]] | None
+        ) = None
         self._thread: threading.Thread | None = None
 
     def status(self) -> dict[str, Any]:
@@ -200,6 +203,31 @@ class FrameWorker:
             self._condition.notify()
         return future
 
+    def interval(
+        self, first: int, last: int
+    ) -> Future[tuple[FramePreview, FramePreview]]:
+        """Capture exact endpoint timing on the decoder owner, without a new index.
+
+        One pending interval is permitted independently of the latest seek. A
+        video scrub cannot supersede a fitting job's clock snapshot.
+
+        Args:
+            first: Included start frame index.
+            last: Included end frame index.
+
+        Returns:
+            A future containing both owned endpoint previews and their timing.
+        """
+        future: Future[tuple[FramePreview, FramePreview]] = Future()
+        with self._condition:
+            if self._status["phase"] != "ready" or self._cancelled.is_set():
+                raise RuntimeError("帧源尚未就绪或已关闭。")
+            if self._interval is not None:
+                raise RuntimeError("已有待处理的选区时间请求。")
+            self._interval = (first, last, future)
+            self._condition.notify()
+        return future
+
     def _run(self) -> None:
         try:
             self.reader = FrameReader(
@@ -216,9 +244,21 @@ class FrameWorker:
             while not self._cancelled.is_set():
                 with self._condition:
                     self._condition.wait_for(
-                        lambda: self._pending is not None or self._cancelled.is_set()
+                        lambda: self._pending is not None
+                        or self._interval is not None
+                        or self._cancelled.is_set()
                     )
+                    interval, self._interval = self._interval, None
                     pending, self._pending = self._pending, None
+                if interval is not None:
+                    first, last, result = interval
+                    if result.set_running_or_notify_cancel():
+                        try:
+                            result.set_result(
+                                (self.reader.preview(first), self.reader.preview(last))
+                            )
+                        except Exception as error:
+                            result.set_exception(error)
                 if pending is None:
                     continue
                 index, future = pending
@@ -243,6 +283,9 @@ class FrameWorker:
                     if self._pending is not None and not self._pending[1].done():
                         self._pending[1].set_exception(RuntimeError("帧源已关闭。"))
                     self._pending = None
+                    if self._interval is not None and not self._interval[2].done():
+                        self._interval[2].set_exception(RuntimeError("帧源已关闭。"))
+                    self._interval = None
 
     def _check_running(self) -> None:
         if self._cancelled.is_set():

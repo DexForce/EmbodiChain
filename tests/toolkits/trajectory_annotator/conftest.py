@@ -24,8 +24,76 @@ from pathlib import Path
 import socket
 import threading
 import time
+from typing import Any
 
 import pytest
+
+
+@pytest.fixture
+def fitting_oracle(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """Isolate host lifecycle from IK with known accepted/rejected numeric bundles.
+
+    Native reconstruction itself is independently covered by the Cartesian robot
+    tests. This oracle protects web timing, background ownership and export.
+    """
+    import numpy as np
+    from embodichain.toolkits.skill_fitting import _pipeline
+
+    control: dict[str, Any] = dict(
+        accepted=True, entered=threading.Event(), release=threading.Event(), calls=[]
+    )
+    control["release"].set()
+
+    def fit(inputs: Any, **kwargs: Any) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
+        control["calls"].append(kwargs)
+        control["entered"].set()
+        assert control["release"].wait(
+            timeout=10
+        ), "Test did not release the fitting worker."
+        if control.get("error"):
+            raise ValueError("No observable closing event; provide phase hints.")
+        # A 3 s recording, 100 Hz, with two known reference columns.
+        times = np.arange(300, dtype=np.float64) / 100
+        original = np.column_stack((times / 10, -times / 20))
+        native = original.copy()
+        native[20:84, 0] += 0.02
+        proposed = original.copy()
+        proposed[23:81, 0] += 0.01
+        patched = proposed if control["accepted"] else original.copy()
+        report = dict(
+            schema_version=1,
+            skill_id=kwargs["skill_id"],
+            accepted=control["accepted"],
+            failures=(
+                [] if control["accepted"] else ["patched path exceeds joint limits"]
+            ),
+            joint_names=["arm_joint", "hand_joint"],
+            start=20,
+            stop=84,
+            phases=[dict(name="approach", start=0, stop=64)],
+            parameters=dict(lift_height=0.12),
+            native_joint_rmse=0.02,
+            tcp_errors={"primary": {"native_tcp_rmse_m": 0.003}},
+            time_offset=inputs.time_offset,
+            **kwargs["provenance"],
+        )
+        arrays = dict(timestamps=times, geometry_indices=np.arange(len(times)))
+        for name, q in (
+            ("original", original),
+            ("native", native),
+            ("patched", patched),
+            ("proposed", proposed),
+        ):
+            arrays[f"{name}_qpos"] = q
+            tcp = np.column_stack((q[:, 0], np.zeros(len(q)), 0.4 + q[:, 1]))
+            arrays[f"{name}_tcp"] = tcp[:, None, :]
+            arrays[f"{name}_links"] = np.stack(
+                (np.zeros_like(tcp), tcp / 2, tcp), axis=1
+            )[:, None, :, :]
+        return arrays, report
+
+    monkeypatch.setattr(_pipeline, "fit_recording", fit)
+    return control
 
 
 @pytest.fixture

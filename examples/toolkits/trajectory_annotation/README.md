@@ -28,6 +28,7 @@ embodichain run-example toolkits/trajectory_annotation \
 - `--output-dir`：可选，默认 `outputs/trajectory_annotation`；首次保存时自动创建目录。
 - JSON 文件名自动使用 `<HDF5文件名去后缀>.<相机名>.segments.json`。例如 `episode.hdf5`、`cam_high` 对应 `episode.cam_high.segments.json`。
 - `--annotations`：也可直接指定完整 JSON 路径，与显式传入 `--output-dir` 二选一。
+- `--video`：使用本地视频替代 HDF5 输入；JSON 文件名为 `<视频名>.segments.json`。
 
 可进一步指定相机和帧率：
 
@@ -49,6 +50,36 @@ embodichain annotate-trajectory \
 操作流程：←/→ 逐帧，Space 播放/暂停，I 标起点，O 标终点，填写原子技能名称后 Enter 提交。
 右侧显示全部区间，点击帧号跳转，选中后 Delete 删除，Ctrl+Z 撤销，Ctrl+S 保存。
 帧号从 0 开始，起止均包含；例如 `[100, 150]` 包含 51 帧。HDF5 的时间显示按 FPS 推算。
+
+## 在网页中重建并回填 Pickup
+
+先生成 UR5 / PGI 的示例录像和对应机器人配置（已有这些文件时可直接执行第三条命令）：
+
+```bash
+embodichain run-example sim/atomic_skill --skill pickup --headless \
+  --save-video --output-dir /tmp/pickup-source
+embodichain run-example toolkits/skill_fitting \
+  --replay-dir /tmp/pickup-source --output-dir /tmp/pickup-fit
+
+embodichain run-example toolkits/trajectory_annotation \
+  --video /tmp/pickup-source/00_pickup_cube_auto_play.mp4 \
+  --joints /tmp/pickup-source/00_pickup_cube_auto_play.pt \
+  --robot-profile /tmp/pickup-fit/robot_profile.json \
+  --qpos-semantics actual_submission --time-offset 0 \
+  --output-dir /tmp/pickup-labels
+```
+
+在网页中用 **I / O** 选中完整 Pickup，命名并提交，选择拟合技能 **Pickup**，点击
+**“拟合并回填选中区间”**。会显示通过/拒绝状态、参数和误差，以及与视频联动的关节曲线、
+可旋转的 FK 骨架和 TCP 路径；可下载包含完整关节轨迹的 NPZ。此示例辨识出的 `lift_height` 约为 **0.16 m**。
+
+同一面板也支持 Slide、Twist、HandOver。任意真实记录需提供自己的机器人配置，示例 UR5 配置不能直接用于 Piper。
+`--joints`、`--robot-profile`、`--qpos-semantics`、`--time-offset` 可省略后在网页中填写；
+`--qpos-key`、`--timestamps-key`、`--joint-dt`、`--env-index`、`--phase-hints`、`--fit-config` 也可预填高级设置。
+默认 HDF5 标注流程保持可独立使用。
+
+每次仅回填当前选区，以原始关节记录为基准。未通过校验时回填数组保持原始值，并保留候选；
+修改标注后需重新拟合再下载。完整数据格式与边界说明见[工具说明](../../../embodichain/toolkits/trajectory_annotator/README.md)。
 
 ## 输入已有图像数组
 

@@ -115,6 +115,27 @@ class SlideJointTarget:
 
 
 @dataclass(frozen=True, slots=True, eq=False)
+class SlideMotionGoal:
+    """World TCP and rail direction for effect-free native Slide motion.
+
+    Args:
+        grasp_xpos: Explicit world grasp TCP transform.
+        translation_axis: World rail direction; Options owns push/pull sign.
+    """
+
+    goal_kind: ClassVar[str] = "slide_motion"
+    grasp_xpos: PoseGoalValue
+    translation_axis: torch.Tensor
+
+    def __post_init__(self) -> None:
+        validate_pose_goal(self.grasp_xpos, "grasp_xpos", allow_waypoints=False)
+        axis = self.translation_axis
+        if axis.shape != (3,) or not torch.isfinite(axis).all() or axis.norm() < 1e-8:
+            raise ValueError("translation_axis must be a finite nonzero world vector.")
+        object.__setattr__(self, "translation_axis", axis.clone())
+
+
+@dataclass(frozen=True, slots=True, eq=False)
 class SlideGoal(ObjectSkillGoal):
     """Translating articulation link described by a slide affordance."""
 
@@ -191,11 +212,11 @@ class SlideOptions(SkillOptions):
             raise ValueError("Release retreat requires hand_interp_steps >= 2.")
 
 
-class Slide(AtomicSkill[SlideGoal, SlideOptions]):
+class Slide(AtomicSkill[SlideGoal | SlideMotionGoal, SlideOptions]):
     """Open-loop approach, grasp, and axis-constrained sliding motion."""
 
     skill_id: ClassVar[str] = "slide"
-    GoalType: ClassVar[type] = SlideGoal
+    GoalType: ClassVar[tuple[type, ...]] = (SlideGoal, SlideMotionGoal)
     OptionsType: ClassVar[type] = SlideOptions
     open_loop: ClassVar[bool] = True
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
@@ -231,16 +252,21 @@ class Slide(AtomicSkill[SlideGoal, SlideOptions]):
                 "must preserve every Cartesian sample."
             )
         target = self.require_goal(request)
-        affordance = self._require_slide_affordance(target.semantics)
+        affordance = (
+            None
+            if isinstance(target, SlideMotionGoal)
+            else self._require_slide_affordance(target.semantics)
+        )
+        joint_target = target.joint_target if isinstance(target, SlideGoal) else None
         options = request.skill_options
         interpolation_dt = context.require_control_dt()
         # Resolve late-bound scene targets before any already-satisfied fast
         # path so invalid or low-confidence references fail at the goal
         # boundary instead of being reported as a successful hold.
-        resolved_link_pose = resolve_pose_goal(
-            target.target_pose,
-            context,
-            name="target_pose",
+        resolved_link_pose = (
+            resolve_pose_goal(target.target_pose, context, name="target_pose")
+            if isinstance(target, SlideGoal)
+            else None
         )
         direction = options.direction
         displacement = None
@@ -249,18 +275,18 @@ class Slide(AtomicSkill[SlideGoal, SlideOptions]):
         )
         reached = torch.zeros_like(joint_valid)
         diagnostics: PlannerDiagnostics | None = None
-        if target.joint_target is not None:
+        if joint_target is not None:
             displacement, joint_valid, reached = self._joint_displacement(
-                target.joint_target, affordance, context
+                joint_target, affordance, context
             )
             active = joint_valid & ~reached
             diagnostics = PlannerDiagnostics(
                 backend=self.planning_services.planner_name,
                 metadata={
                     "joint_target": {
-                        "articulation_id": target.joint_target.articulation_id,
-                        "joint_name": target.joint_target.joint_name,
-                        "position": target.joint_target.position,
+                        "articulation_id": joint_target.articulation_id,
+                        "joint_name": joint_target.joint_name,
+                        "position": joint_target.position,
                         "already_satisfied": reached.detach().cpu().tolist(),
                     }
                 },
@@ -307,33 +333,54 @@ class Slide(AtomicSkill[SlideGoal, SlideOptions]):
             dtype=context.robot.qpos.dtype,
         )
 
-        link_pose = resolve_pose_target(
-            resolved_link_pose,
-            num_envs=self.num_envs,
-            device=self.device,
-        )
-        translation_axis = affordance.translation_axis.to(
-            device=self.device, dtype=torch.float32
-        )
-        translation_axis = translation_axis / torch.linalg.vector_norm(translation_axis)
-        translation_axis_world = torch.matmul(link_pose[:, :3, :3], translation_axis)
-        grasp_generator = self.planning_services.grasp_pose_generator(
-            grasp_target.target_id
-        )
-        candidates = affordance.get_grasp_candidates(
-            grasp_generator,
-            link_pose,
-            translation_axis_world,
-        )
-        grasp_sample = affordance.sample_candidates(
-            candidates,
-            sampling=context.affordance_sampling,
-            env_ids=context.env_ids,
-            key=(request.invocation_id or self.skill_id) + ":grasp",
-            reference_poses=link_pose,
-        )
-        grasp_success = grasp_sample.success
-        grasp_xpos = grasp_sample.poses.to(device=self.device, dtype=torch.float32)
+        if isinstance(target, SlideMotionGoal):
+            grasp_xpos = resolve_pose_target(
+                resolve_pose_goal(target.grasp_xpos, context, name="grasp_xpos"),
+                num_envs=self.num_envs,
+                device=self.device,
+            )
+            axis = target.translation_axis.to(grasp_xpos)
+            translation_axis_world = (axis / axis.norm()).expand(self.num_envs, 3)
+            grasp_success = torch.ones(
+                self.num_envs, dtype=torch.bool, device=self.device
+            )
+            grasp_metadata = {
+                "grounding": "explicit_tcp",
+                "physical_success": "unknown",
+            }
+        else:
+            link_pose = resolve_pose_target(
+                resolved_link_pose,
+                num_envs=self.num_envs,
+                device=self.device,
+            )
+            translation_axis = affordance.translation_axis.to(
+                device=self.device, dtype=torch.float32
+            )
+            translation_axis = translation_axis / torch.linalg.vector_norm(
+                translation_axis
+            )
+            translation_axis_world = torch.matmul(
+                link_pose[:, :3, :3], translation_axis
+            )
+            grasp_generator = self.planning_services.grasp_pose_generator(
+                grasp_target.target_id
+            )
+            candidates = affordance.get_grasp_candidates(
+                grasp_generator,
+                link_pose,
+                translation_axis_world,
+            )
+            grasp_sample = affordance.sample_candidates(
+                candidates,
+                sampling=context.affordance_sampling,
+                env_ids=context.env_ids,
+                key=(request.invocation_id or self.skill_id) + ":grasp",
+                reference_poses=link_pose,
+            )
+            grasp_success = grasp_sample.success
+            grasp_xpos = grasp_sample.poses.to(device=self.device, dtype=torch.float32)
+            grasp_metadata = grasp_sample.metadata
         grasp_success = normalize_success_mask(
             grasp_success,
             num_envs=self.num_envs,
@@ -341,7 +388,7 @@ class Slide(AtomicSkill[SlideGoal, SlideOptions]):
             name="Slide grasp-pose success",
         )
         if not grasp_success.any():
-            if target.joint_target is not None and reached.any():
+            if joint_target is not None and reached.any():
                 return self.build_plan(
                     request,
                     context,
@@ -549,7 +596,7 @@ class Slide(AtomicSkill[SlideGoal, SlideOptions]):
             full[:, offset:, arm_joint_ids] = return_arm
             full[:, offset:, hand_joint_ids] = hand_open_qpos.unsqueeze(1)
 
-        if target.joint_target is not None:
+        if joint_target is not None:
             full[reached] = context.robot.qpos[reached, None]
             success = (success & joint_valid) | reached
 
@@ -567,7 +614,8 @@ class Slide(AtomicSkill[SlideGoal, SlideOptions]):
                 backend=self.planning_services.planner_name,
                 metadata={
                     **(diagnostics.metadata if diagnostics is not None else {}),
-                    "affordance_sample": {"grasp": grasp_sample.metadata},
+                    "affordance_sample": {"grasp": grasp_metadata},
+                    **(grasp_metadata if isinstance(target, SlideMotionGoal) else {}),
                 },
             ),
             segment_lengths=segment_lengths,
@@ -693,6 +741,7 @@ class Slide(AtomicSkill[SlideGoal, SlideOptions]):
 
 
 __all__ = [
+    "SlideMotionGoal",
     "Slide",
     "SlideGoal",
     "SlideJointTarget",

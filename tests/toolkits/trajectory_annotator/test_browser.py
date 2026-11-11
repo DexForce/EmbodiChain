@@ -107,6 +107,65 @@ def create_skill_interval(page: Page) -> None:
     expect(page.locator("#skill-interval-count")).to_have_text("1")
 
 
+def test_web_fitting_comparison_download_rejection_and_invalidation(
+    page: Page,
+    annotation_server: tuple[str, Path],
+    fitting_oracle: dict[str, Any],
+    tmp_path: Path,
+) -> None:
+    """Exercise the new production web workflow without coupling browser tests to IK."""
+    import numpy as np
+    from playwright.sync_api import expect
+
+    fitting_oracle["accepted"] = False
+    open_project(page, annotation_server[0])
+    expect(page.locator("#fit-run")).to_be_disabled()
+    create_skill_interval(page)
+    page.locator("#fit-joints").fill("known.npz")
+    page.locator("#fit-profile").fill("robot.json")
+    page.locator("#fit-semantics").select_option("measured_state")
+    page.locator("#fit-offset").fill("0")
+    page.locator("#fit-run").click()
+    expect(page.locator("#fit-state")).to_have_text("未通过校验", timeout=15000)
+    expect(page.locator("#fit-result")).to_be_visible()
+    expect(page.locator("#fit-proposed-legend")).to_be_visible()
+    expect(page.locator("#fit-message")).to_contain_text(
+        "patched path exceeds joint limits"
+    )
+    page.locator("#fit-joint").select_option("1")
+    expect(page.locator("#fit-cursor")).to_contain_text("hand_joint")
+    page.locator("#fit-exaggeration").select_option("20")
+    chart = page.locator("#fit-joint-chart").bounding_box()
+    # The plot spans 0..2.99 s. This point is video t=.2 s, where the VFR
+    # recording's displayed frame is 5 (its nonzero first PTS is normalized).
+    x = chart["x"] + 62 + 0.2 / 2.99 * (chart["width"] - 76)
+    page.mouse.click(x, chart["y"] + 65)
+    expect(page.locator("#frame-current")).to_have_text("5")
+    with page.expect_download() as download:
+        page.locator("#fit-download").click()
+    destination = tmp_path / "fit.npz"
+    download.value.save_as(destination)
+    with np.load(destination, allow_pickle=False) as data:
+        np.testing.assert_array_equal(data["patched_qpos"], data["original_qpos"])
+    page.locator("#edit").click()
+    page.locator("#end-frame").fill("6")
+    page.locator("#commit").click()
+    expect(page.locator("#fit-state")).to_have_text("标注已变化")
+    expect(page.locator("#fit-download")).to_have_attribute("aria-disabled", "true")
+    # An unobservable segment must surface the error and release the job guard,
+    # allowing a corrected configuration/selection to be fitted again.
+    fitting_oracle["error"] = True
+    page.locator("#fit-run").click()
+    expect(page.locator("#fit-state")).to_have_text("拟合失败")
+    expect(page.locator("#fit-message")).to_contain_text("No observable closing event")
+    expect(page.locator("#fit-run")).to_be_enabled()
+    fitting_oracle["error"], fitting_oracle["accepted"] = False, True
+    page.locator("#fit-run").click()
+    expect(page.locator("#fit-state")).to_have_text("通过校验")
+    expect(page.locator("#fit-proposed-legend")).to_be_hidden()
+    expect(page.locator("#fit-parameters")).to_contain_text("lift_height")
+
+
 def test_keyboard_edit_delete_undo_and_resume(
     page: Page, annotation_server: tuple[str, Path]
 ) -> None:

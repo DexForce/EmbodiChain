@@ -14,12 +14,13 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Annotate the supplied cam_high HDF5 demo through the common frame interface.
+"""Annotate image frames and fit selected joint segments in the same local website.
 
 Run from the repository root in conda environment py312:
     embodichain run-example toolkits/trajectory_annotation
 Override --hdf5 and --output-dir for another recording and output directory.
 Use --image-key or --fps to override camera selection and timing. Ctrl+C stops the app.
+Alternatively pass --video, --joints and --robot-profile for offline skill fitting.
 """
 
 from __future__ import annotations
@@ -28,7 +29,10 @@ import argparse
 from pathlib import Path
 
 from embodichain.toolkits.trajectory_annotator.app import launch_annotation
-from embodichain.toolkits.trajectory_annotator.hdf5 import Hdf5FrameSource
+from embodichain.toolkits.trajectory_annotator._cli import (
+    _add_fitting_arguments,
+    _fitting_options,
+)
 
 
 def main() -> None:
@@ -38,12 +42,13 @@ def main() -> None:
         description=__doc__,
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument(
+    inputs = parser.add_mutually_exclusive_group()
+    inputs.add_argument(
+        "--video", type=Path, help="本地视频，作为 HDF5 图像序列的替代输入。"
+    )
+    inputs.add_argument(
         "--hdf5",
         type=Path,
-        default=Path(
-            "/home/oem/piper-sim-data/label_down/episode_20261022T073344_323022Z/episode.hdf5"
-        ),
         help="HDF5 recording; omit to use the supplied local demo.",
     )
     parser.add_argument(
@@ -66,23 +71,45 @@ def main() -> None:
     )
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--no-browser", action="store_true")
+    _add_fitting_arguments(parser)
     args = parser.parse_args()
-    if not args.hdf5.is_file():
-        parser.error(f"HDF5 file does not exist: {args.hdf5}")
+    if args.video is None and args.hdf5 is None:
+        args.hdf5 = Path(
+            "/home/oem/piper-sim-data/label_down/episode_20261022T073344_323022Z/episode.hdf5"
+        )
+    source_path = args.video or args.hdf5
+    if not source_path.is_file():
+        parser.error(f"Input file does not exist: {source_path}")
+    if args.video and (args.image_key is not None or args.fps is not None):
+        parser.error("--image-key and --fps are only valid with HDF5.")
     if args.image_key is not None and not args.image_key.strip("/"):
         parser.error("--image-key must name an image dataset.")
     if args.annotations is None:
         if args.output_dir.exists() and not args.output_dir.is_dir():
             parser.error(f"--output-dir must be a directory: {args.output_dir}")
         camera = (args.image_key or "cam_high").strip("/").rsplit("/", 1)[-1]
-        annotations = args.output_dir / f"{args.hdf5.stem}.{camera}.segments.json"
+        name = f"{source_path.stem}.{camera}" if args.hdf5 else source_path.stem
+        annotations = args.output_dir / f"{name}.segments.json"
     else:
         annotations = args.annotations
+    if args.hdf5:
+        from embodichain.toolkits.trajectory_annotator.hdf5 import Hdf5FrameSource
+
+        def factory() -> Hdf5FrameSource:
+            return Hdf5FrameSource(args.hdf5, image_key=args.image_key, fps=args.fps)
+
+    else:
+        from embodichain.toolkits.trajectory_annotator.video import VideoFrameSource
+
+        def factory() -> VideoFrameSource:
+            return VideoFrameSource(args.video)
+
     launch_annotation(
-        lambda: Hdf5FrameSource(args.hdf5, image_key=args.image_key, fps=args.fps),
+        factory,
         annotations,
         port=args.port,
         open_browser=not args.no_browser,
+        fitting_options=_fitting_options(args),
     )
 
 

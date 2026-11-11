@@ -38,6 +38,11 @@ class Command:
 
 COMMANDS = (
     Command(
+        name="fit-trajectory",
+        target="embodichain.toolkits.skill_fitting.cli:main",
+        help="Fit a video-selected joint segment through native atomic skills.",
+    ),
+    Command(
         name="expansion",
         target="embodichain.cli.expansion:main",
         help="Preflight, collect, resume and inspect expert expansion jobs.",

@@ -1,6 +1,6 @@
 # 遥操轨迹图像序列标注
 
-在浏览器逐帧查看遥操视频、HDF5 相机图像或内存图像序列，为原子技能标注起止帧。支持时间轴定位、动作列表、区间编辑和删除、撤销重做、JSON 自动保存与继续编辑。运行时使用 CPU，不启动仿真。
+在浏览器逐帧查看遥操视频、HDF5 相机图像或内存图像序列，为原子技能标注起止帧。支持时间轴定位、技能列表、区间编辑和删除、撤销重做、JSON 自动保存与继续编辑。标注解码使用 CPU；可选关节拟合复用离线 FK/IK，不启动仿真。
 
 ![原子技能区间标注界面](../../../docs/architecture/images/trajectory-annotation.png)
 
@@ -58,6 +58,54 @@ embodichain annotate-trajectory --hdf5 /data/episode.hdf5 \
 ```bash
 embodichain run-example toolkits/trajectory_annotation
 ```
+
+## 原子技能参数辨识与连续回填
+
+同一网页的时间轴下方提供拟合面板，复用 `fit-trajectory` 的原生技能重建与连续拼接核心，支持
+**Pickup / Slide / Twist / HandOver**。不需要物体 pose、mesh 或仿真；需要与输入机械臂对应的
+URDF、TCP、关节顺序、夹爪命令和关节限制配置。配置与关节格式详见
+[拟合示例](../../../examples/toolkits/skill_fitting/README.md)。
+
+![网页中的参数辨识、关节误差与 FK 对比](../../../docs/architecture/images/trajectory-annotation-fitting.png)
+
+```bash
+embodichain annotate-trajectory --video /data/episode.mp4 \
+  --joints /data/joints.npz --robot-profile /data/robot_profile.json \
+  --qpos-semantics measured_state --time-offset 0 \
+  --annotations /data/labels/episode.segments.json
+```
+
+上述拟合参数均可省略，之后在网页填写或修改本机文件路径。`run-example toolkits/trajectory_annotation`
+支持同样的拟合参数与 `--video` / `--hdf5`。HDF5 内的关节也可直接使用同一文件：
+
+```bash
+embodichain annotate-trajectory --hdf5 /data/episode.hdf5 \
+  --joints /data/episode.hdf5 --qpos-key observations/qpos \
+  --timestamps-key observations/timestamps \
+  --robot-profile /data/robot_profile.json \
+  --qpos-semantics measured_state --time-offset 0
+```
+
+1. 提交并选中右侧的一个原子技能区间。标注名称可自由填写，拟合技能需在下拉框中明确指定。
+2. 填写关节记录、机器人配置、数据语义，以及视频零时刻对应的关节时间（秒）。不会从视频 FPS 推断关节采样周期。
+3. 点击“拟合并回填选中区间”；页面先保存标注，再在后台执行拟合。拟合期间可继续逐帧查看视频。
+4. 查看参数与校验报告，对比原始、原生技能（按源时钟对齐）、连续回填的关节曲线和误差。
+   曲线点击按真实帧时间定位视频，支持 VFR；FK 骨架与 TCP 路径随视频更新，可拖动旋转、滚轮缩放并放大显示几何误差。
+5. “下载完整回填 NPZ”导出全部原始/重建/回填/校正候选关节、时间戳与元数据。原始视频、HDF5、关节记录均不被覆盖。
+
+“数据字段、阶段提示与拟合容差”可设置 `qpos` / `timestamps` 字段、显式 `joint_dt`、PT 环境索引、
+完整阶段分区 JSON，以及 `SkillFitCfg` 覆盖项。也可用 `--phase-hints` / `--fit-config` 从 JSON 文件预填。
+没有可辨识的夹爪开闭或完整阶段提示时会报告失败；RGB 不用于自动判断接触。
+
+每次拟合以输入的原始关节记录为基准，仅替换**选中的一个区间**，保留原始时间戳与区间外采样，
+多次拟合不会自动累积修改。候选未通过独立校验时仍可查看和下载，`patched_qpos` 保持原始值，
+`proposed_qpos` 保留被拒绝的校正候选。标注修订发生变化后旧结果会标记过期并阻止下载，需重新拟合。
+输出语义为设计参考，报告中的物理成功与碰撞状态仍为未知/未验证。
+
+后台最多运行一个拟合任务，不排队；帧解码仍由原先的单一线程持有，只读取选区端点的时间，
+不重新建立视频索引。服务最多保留一个结果，退出时清理临时 NPZ。网页最多预览约 1000 个关节采样、
+128 个关节和 600 个 FK 采样，预览 JSON 上限 16 MiB；下载保留全部采样。
+原生规划的时间预算为协作式检查，不能中断单次原生求解；关闭服务会等待正在执行的拟合结束。
 
 ## 图像帧输入接口
 

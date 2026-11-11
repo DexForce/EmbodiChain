@@ -88,6 +88,43 @@ from embodichain.lab.sim.atomic_skills.trajectory_ops import (
 
 
 @dataclass(frozen=True, slots=True, eq=False)
+class HandOverMotionGoal:
+    """Explicit dual-TCP anchors for effect-free handover reconstruction.
+
+    Args:
+        source_exchange: Source TCP at the exchange.
+        destination_exchange: Receiving TCP at the exchange.
+        source_retreat: Released source TCP retreat target.
+        source_grasp: Optional initial pickup TCP; omission starts closed.
+        destination_place: Optional receiving TCP placement target.
+        destination_retreat: Receiving TCP after release; required with place.
+    """
+
+    goal_kind: ClassVar[str] = "handover_motion"
+    source_exchange: PoseGoalValue
+    destination_exchange: PoseGoalValue
+    source_retreat: PoseGoalValue
+    source_grasp: PoseGoalValue | None = None
+    destination_place: PoseGoalValue | None = None
+    destination_retreat: PoseGoalValue | None = None
+
+    def __post_init__(self) -> None:
+        for name in (
+            "source_exchange",
+            "destination_exchange",
+            "source_retreat",
+            "source_grasp",
+            "destination_place",
+            "destination_retreat",
+        ):
+            value = getattr(self, name)
+            if value is not None:
+                validate_pose_goal(value, name, allow_waypoints=False)
+        if (self.destination_place is None) != (self.destination_retreat is None):
+            raise ValueError("Placement requires both receiving TCP anchors.")
+
+
+@dataclass(frozen=True, slots=True, eq=False)
 class HandOverGoal(ObjectSkillGoal):
     """Object to pick and hand over, plus its final object pose."""
 
@@ -198,7 +235,7 @@ class _DirectionalPlan:
     policy_batching: dict[str, object] | None = None
 
 
-class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
+class HandOver(AtomicSkill[HandOverGoal | HandOverMotionGoal, HandOverOptions]):
     """Pick an object with the nearer arm and transfer it to the other arm.
 
     For each environment, the action chooses the arm whose root link is closer
@@ -230,7 +267,7 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
     """
 
     skill_id: ClassVar[str] = "hand_over"
-    GoalType: ClassVar[type] = HandOverGoal
+    GoalType: ClassVar[tuple[type, ...]] = (HandOverGoal, HandOverMotionGoal)
     OptionsType: ClassVar[type] = HandOverOptions
     open_loop: ClassVar[bool] = True
     _SURFACE_POINT_COUNT: ClassVar[int] = 1000
@@ -273,6 +310,8 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
     ) -> tuple[str, ...]:
         """Track both the initial object and any late-bound final target."""
         dependencies = set(super()._scene_dependencies(request))
+        if isinstance(request.goal, HandOverMotionGoal):
+            return tuple(sorted(dependencies))
         entity_id = request.goal.semantics.entity_id
         if entity_id is not None:
             dependencies.add(entity_id)
@@ -350,6 +389,8 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
     ) -> SkillPlan:
         """Plan pickup and transfer, with optional placement and release."""
         goal = self.require_goal(request)
+        if isinstance(goal, HandOverMotionGoal):
+            return self._plan_motion(request, context)
         options = request.skill_options
         resources = self._resolve_resources(request)
         # Each segment plans one explicitly named arm. The task layer merges
@@ -670,6 +711,145 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
                     goal.semantics.entity_id: segment_lengths["pickup_approach"]
                     + segment_lengths["pickup_reach"]
                 }
+            ),
+        )
+
+    def _plan_motion(
+        self,
+        request: ResolvedSkillRequest[HandOverMotionGoal, HandOverOptions],
+        context: PlanningContext,
+    ) -> SkillPlan:
+        """Compose native arm/hand phases without an object attachment claim."""
+        goal, options = request.goal, request.skill_options
+        if options.arm_selection != "bound":
+            raise ValueError("Handover motion goals require bound participant slots.")
+        if options.release_at_target != (goal.destination_place is not None):
+            raise ValueError(
+                "release_at_target must match the explicit placement anchors."
+            )
+        resources = self._resolve_resources(request)
+        source, destination = resources.first, resources.second
+        count = max(3, request.motion_policy.sample_count // 8)
+        full = context.last_qpos.clone()
+        segments: list[torch.Tensor] = []
+        lengths: dict[str, int] = {}
+        success = torch.ones(context.batch_size, dtype=torch.bool, device=self.device)
+
+        def pose(value: PoseGoalValue) -> torch.Tensor:
+            return resolve_batched_pose(
+                resolve_pose_goal(value, context, name="motion_anchor"),
+                num_envs=context.batch_size,
+                device=self.device,
+                name="motion_anchor",
+            )
+
+        def append(
+            name: str,
+            participant: _Participant | None = None,
+            target: torch.Tensor | None = None,
+            command: torch.Tensor | None = None,
+            n: int = count,
+        ) -> None:
+            nonlocal full, success
+            if participant is not None and target is not None:
+                valid, path = plan_named_arm_trajectory(
+                    self.motion_generator,
+                    participant.arm.control_part,
+                    full[:, list(participant.arm.joint_ids)],
+                    target,
+                    n,
+                    request.motion_policy,
+                    context.require_control_dt(),
+                )
+                success &= valid
+                result = full[:, None].expand(-1, path.shape[1], -1).clone()
+                result[:, :, list(participant.arm.joint_ids)] = path
+            else:
+                result = full[:, None].expand(-1, n, -1).clone()
+            if participant is not None and command is not None:
+                ids = list(participant.hand.joint_ids)
+                result[:, :, ids] = interpolate_hand_qpos(
+                    full[:, ids], command, n_waypoints=result.shape[1]
+                )
+            full = result[:, -1].clone()
+            lengths[name] = result.shape[1]
+            segments.append(result)
+
+        if goal.source_grasp is not None:
+            grasp = pose(goal.source_grasp)
+            pre = translate_pose_world(
+                grasp, -grasp[:, :3, 2] * options.pre_grasp_distance
+            )
+            append(
+                "pickup_approach",
+                source,
+                torch.stack((pre, grasp), dim=1),
+                source.hand_open_qpos,
+            )
+            append(
+                "pickup_close",
+                source,
+                command=source.hand_grasp_qpos,
+                n=options.hand_interp_steps,
+            )
+        else:
+            # Retain the profile's effort-producing command on a closed source.
+            full[:, list(source.hand.joint_ids)] = source.hand_grasp_qpos
+        append("transfer", source, pose(goal.source_exchange)[:, None])
+        receive = pose(goal.destination_exchange)
+        pre = translate_pose_world(
+            receive, -receive[:, :3, 2] * options.pre_grasp_distance
+        )
+        append(
+            "approach",
+            destination,
+            torch.stack((pre, receive), dim=1),
+            destination.hand_open_qpos,
+        )
+        append(
+            "close",
+            destination,
+            command=destination.hand_grasp_qpos,
+            n=options.hand_interp_steps,
+        )
+        append("hold", n=max(1, options.hold_steps))
+        append(
+            "release",
+            source,
+            command=source.hand_open_qpos,
+            n=options.hand_interp_steps,
+        )
+        append(
+            "retreat",
+            source,
+            pose(goal.source_retreat)[:, None],
+            n=options.retreat_steps,
+        )
+        if goal.destination_place is not None:
+            append("place", destination, pose(goal.destination_place)[:, None])
+            append(
+                "receive_release",
+                destination,
+                command=destination.hand_open_qpos,
+                n=options.hand_interp_steps,
+            )
+            append(
+                "receive_retreat", destination, pose(goal.destination_retreat)[:, None]
+            )
+        return self.build_plan(
+            request,
+            context,
+            success=success,
+            trajectory=TimedTrajectory.from_uniform_step(
+                torch.cat(segments, dim=1),
+                env_ids=context.env_ids,
+                step_dt=context.require_control_dt(),
+            ),
+            segment_lengths=lengths,
+            expected_effects=StateDelta(),
+            diagnostics=PlannerDiagnostics(
+                backend=self.planning_services.planner_name,
+                metadata={"grounding": "explicit_tcp", "physical_success": "unknown"},
             ),
         )
 
@@ -2282,4 +2462,4 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
         )
 
 
-__all__ = ["HandOver", "HandOverGoal", "HandOverOptions"]
+__all__ = ["HandOver", "HandOverGoal", "HandOverMotionGoal", "HandOverOptions"]
