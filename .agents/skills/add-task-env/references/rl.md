@@ -13,7 +13,7 @@ decision is which environment boundary the prompt requires.
 | Differentiable dynamics or APG | Differentiable lightweight env | `trainer.learning_env` |
 
 Do not use a simulator Gym config for APG. Differentiable algorithms require a
-`DifferentiableVecEnv` and are rejected on the simulator path.
+`DifferentiableEnvProtocol` and are rejected on the simulator path.
 
 ## Simulator Gym RL
 
@@ -71,7 +71,7 @@ extensions/embodichain_tasks/embodichain_tasks/<category_path>/<task_name>.py
 ```
 
 Register the factory with `@register_learning_env` and implement the
-`LearningVecEnv` structural contract:
+`LearningEnvProtocol` structural contract:
 
 - `num_envs`, `device`, `single_observation_space`, and
   `single_action_space`;
@@ -81,7 +81,7 @@ Register the factory with `@register_learning_env` and implement the
 - `close()`.
 
 For APG or another differentiable algorithm, implement
-`DifferentiableVecEnv.detach_state()` as the truncated-backpropagation
+`DifferentiableEnvProtocol.detach_state()` as the truncated-backpropagation
 boundary. It must detach dynamic state without resetting or resampling the
 task.
 

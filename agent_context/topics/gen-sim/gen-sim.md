@@ -43,6 +43,12 @@ Normal wheel installs discover external profiles through
 bundled JSON and legacy rules. Python configuration overrides discovery. Selected
 external files fail explicitly when invalid; no installed file needs editing.
 `EMBODICHAIN_ENV_FILE` independently supplies referenced variables.
+Bound adapter IDs resolve shipped factories first, then only an installed
+`embodichain.gensim_service_adapters` entry point with the selected ID; unrelated
+plugins are not imported. `gensim services validate` resolves profiles and
+constructs adapters without provider requests, while `services doctor` also
+initializes selected roles and runs their available health checks. The versioned
+wire protocol remains model, port and deployment-framework independent.
 
 Owned transports close when the run exits; explicit legacy clients and supplied
 service runs remain caller-owned. Chat requests own their stateless transport.
