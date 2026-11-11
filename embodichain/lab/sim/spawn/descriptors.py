@@ -69,6 +69,8 @@ from embodichain.lab.sim._inertia import _principal_inertia_matrix
 from embodichain.lab.sim.cfg import (
     _normalize_joint_target_mode,
     ArticulationCfg,
+    CableObjectCfg,
+    CablePhysicsCfg,
     CollisionPropertiesCfg,
     DefaultCollisionPropertiesCfg,
     DefaultRigidBodyPropertiesCfg,
@@ -82,7 +84,13 @@ from embodichain.lab.sim.cfg import (
     SurfaceDeformableObjectCfg,
     VolumeDeformableObjectCfg,
 )
-from embodichain.lab.sim.shapes import CubeCfg, MeshCfg, MeshCollisionCfg, SphereCfg
+from embodichain.lab.sim.shapes import (
+    CubeCfg,
+    MeshCfg,
+    MeshCollisionCfg,
+    PlaneCfg,
+    SphereCfg,
+)
 from embodichain.utils import logger
 from embodichain.utils.string import (
     resolve_matching_names,
@@ -90,6 +98,7 @@ from embodichain.utils.string import (
 )
 
 if TYPE_CHECKING:
+    from dexsim.spawn import CableAttachmentDesc, CableDesc, CablePhysicsDesc
     from embodichain.lab.sim.material import VisualMaterialCfg
     from embodichain.lab.sim.cfg import VisualObjectCfg
 
@@ -98,6 +107,7 @@ __all__ = [
     "configure_articulation_desc",
     "rigid_desc_from_cfg",
     "visual_desc_from_cfg",
+    "cable_desc_from_cfg",
     "surface_deformable_desc_from_cfg",
     "volume_deformable_desc_from_cfg",
 ]
@@ -318,6 +328,8 @@ def visual_desc_from_cfg(
         raise NotImplementedError(
             "Visual objects support MeshCfg, CubeCfg and SphereCfg."
         )
+    if cfg.body_scale is None:
+        cfg.body_scale = (1.0, 1.0, 1.0)
     scale = _vector3(cfg.body_scale, field_name="body_scale")
     material_ref, material_entry = _compile_visual_material(uid, shape.visual_material)
     return ObjectDesc(
@@ -350,6 +362,11 @@ def rigid_desc_from_cfg(
             "USD files describe typed scenes; use rigid_desc_from_usd() to "
             "select one rigid object."
         )
+
+    if cfg.body_type is None:
+        cfg.body_type = "dynamic"
+    if cfg.body_scale is None:
+        cfg.body_scale = (1.0, 1.0, 1.0)
 
     physics = _with_procedural_collision_defaults(
         _resolve_rigid_physics(
@@ -594,6 +611,118 @@ def _explicit_tet_mesh_from_cfg(
     }
 
 
+def cable_desc_from_cfg(
+    cfg: CableObjectCfg,
+    *,
+    per_env: bool = True,
+) -> tuple[CableDesc, dict[str, MaterialDesc]]:
+    """Lower cable authoring through existing pose/material/contact compilers.
+
+    Args:
+        cfg: Cable configuration in EmbodiChain's xyzw convention.
+        per_env: Whether Spawn replicates this asset per environment.
+
+    Returns:
+        The typed descriptor and material entries for the shared Spawn builder.
+
+    Raises:
+        NotImplementedError: The installed DexSim build lacks cable descriptors.
+    """
+    try:
+        from dexsim.spawn import CableAttachmentDesc, CableDesc, CablePhysicsDesc
+    except ImportError as exc:
+        raise NotImplementedError(
+            "Cable creation requires a DexSim build exposing CableDesc, "
+            "CablePhysicsDesc and CableAttachmentDesc."
+        ) from exc
+    cfg.validate()
+    uid = _required_uid(cfg.uid, "Cable object")
+    if not isinstance(cfg.attrs, CablePhysicsCfg):
+        raise TypeError("Cable attrs must be CablePhysicsCfg.")
+    if isinstance(cfg.attrs.collision_props, DefaultCollisionPropertiesCfg):
+        raise NotImplementedError(
+            "Cable contact properties require common or Newton configuration."
+        )
+    contact = _resolve_rigid_physics(
+        RigidBodyPhysicsCfg(
+            collision_props=cfg.attrs.collision_props,
+            material_props=cfg.attrs.material_props,
+        ),
+        newton_solver_type="dexuni",
+    )
+    collision = _compile_newton_collision(
+        contact, newton_solver_type="dexuni", author_shape_defaults=True
+    )
+    quaternions = None
+    if cfg.segment_quaternions is not None:
+        values = np.asarray(cfg.segment_quaternions)
+        if values.ndim != 2 or values.shape[1] != 4:
+            raise ValueError("segment_quaternions must have shape (N - 1, 4).")
+        quaternions = values[:, [3, 0, 1, 2]].copy()  # xyzw -> DexSim authoring wxyz
+    if cfg.visual_shape is not None and cfg.visual_material is not None:
+        raise ValueError("A custom visual_shape owns its visual_material.")
+    visual = cfg.visual_shape
+    if visual is not None and not isinstance(visual, MeshCfg):
+        raise TypeError("Cable visual_shape must be MeshCfg.")
+    if visual is not None and visual.compute_uv:
+        raise NotImplementedError(
+            "Cable handles do not expose projective UV writes; provide authored UVs."
+        )
+    material_ref, material_entry = _compile_visual_material(
+        uid, cfg.visual_material if visual is None else visual.visual_material
+    )
+    renders = []
+    if visual is not None:
+        renders.append(
+            RenderDesc.from_geometry(
+                _mesh_geometry_from_cfg(visual, segment_name=uid),
+                load_option=_compile_load_option(visual),
+                material_ref=material_ref,
+            )
+        )
+    attachments = {}
+    for name in ("start_attachment", "end_attachment"):
+        value = getattr(cfg, name)
+        attachments[name] = (
+            None
+            if value is None
+            else CableAttachmentDesc(
+                target=value.target,
+                position=np.asarray(value.position).copy(),
+                link_name=value.link_name,
+            )
+        )
+    descriptor = CableDesc(
+        name=uid,
+        points=np.asarray(cfg.points).copy(),
+        radius=cfg.radius,
+        pose=_pose_from_cfg(cfg),
+        segment_quaternions=quaternions,
+        closed=cfg.closed,
+        enable_collision=(
+            True if contact.collision_enabled is None else contact.collision_enabled
+        ),
+        fixed_segments=tuple(cfg.fixed_segments),
+        physics=CablePhysicsDesc(
+            **{
+                item.name: getattr(cfg.attrs, item.name)
+                for item in fields(CablePhysicsDesc)
+            }
+        ),
+        collision=collision,
+        collision_filter_span=cfg.collision_filter_span,
+        renders=renders,
+        render_mode=cfg.render_mode,
+        render_material=(
+            None if material_entry is None or renders else material_entry[1]
+        ),
+        per_env=per_env,
+        **attachments,
+    )
+    materials = {} if material_entry is None else {material_entry[0]: material_entry[1]}
+    return descriptor, materials
+
+
 def volume_deformable_desc_from_cfg(
     cfg: VolumeDeformableObjectCfg,
     *,
@@ -811,6 +940,8 @@ def articulation_desc_from_cfg(
             "USD files describe typed scenes; use articulation_desc_from_usd() "
             "to select one articulation."
         )
+    if cfg.body_scale is None:
+        cfg.body_scale = (1.0, 1.0, 1.0)
     if cfg.resolve_asset_physics_mode() == "overlay":
         _validate_articulation_rigid_physics(
             cfg,
@@ -1354,6 +1485,8 @@ def _compile_joint_properties(
             "max_velocity",
             "friction",
             "armature",
+            "limit_stiffness",
+            "limit_damping",
         ):
             configured = getattr(source, property_name)
             if configured is None:
@@ -1374,6 +1507,10 @@ def _compile_joint_properties(
                 default_desc, newton_desc = joint_properties[joint_name]
                 if property_name == "armature":
                     joint_common[joint_name]["armature"] = scalar
+                elif property_name == "limit_stiffness":
+                    newton_desc.limit_ke = scalar
+                elif property_name == "limit_damping":
+                    newton_desc.limit_kd = scalar
                 elif property_name == "max_effort":
                     default_desc.max_force = scalar
                     joint_common[joint_name]["effort_limit"] = scalar
@@ -1891,6 +2028,16 @@ def _compile_geometry(
             raise ValueError("CubeCfg.size must contain three positive values.")
         return GeometryDesc.cube(size), CollisionApproximation.NONE, 1, "coacd"
 
+    if isinstance(shape, PlaneCfg):
+        if cfg.body_type != "static":
+            raise ValueError("PlaneCfg collision requires body_type='static'.")
+        size = tuple(float(value) for value in shape.size)
+        if len(size) != 2 or any(
+            not math.isfinite(value) or value <= 0 for value in size
+        ):
+            raise ValueError("PlaneCfg.size must contain two finite positive values.")
+        return GeometryDesc.plane(size), CollisionApproximation.NONE, 1, "coacd"
+
     if isinstance(shape, SphereCfg):
         if shape.radius <= 0:
             raise ValueError("SphereCfg.radius must be positive.")
@@ -1903,7 +2050,7 @@ def _compile_geometry(
 
     raise NotImplementedError(
         f"RigidObjectCfg shape {type(shape).__name__!r} is not supported by "
-        "the Spawn converter; supported shapes are MeshCfg, CubeCfg, and SphereCfg."
+        "the Spawn converter; supported shapes are MeshCfg, CubeCfg, PlaneCfg, and SphereCfg."
     )
 
 
@@ -2006,7 +2153,7 @@ def _articulation_uid(value: str | None, path: str | None) -> str:
 
 
 def _is_usd_path(path: object) -> bool:
-    return str(path).lower().endswith((".usd", ".usda", ".usdc"))
+    return str(path).lower().endswith((".usd", ".usda", ".usdc", ".usdz"))
 
 
 def _is_missing(value: object) -> bool:

@@ -71,7 +71,7 @@ from embodichain.lab.sim.cfg import (
     VolumeDeformableMeshingCfg,
     VolumeDeformableObjectCfg,
 )
-from embodichain.lab.sim.shapes import CubeCfg, LoadOption, MeshCfg
+from embodichain.lab.sim.shapes import CubeCfg, LoadOption, MeshCfg, PlaneCfg
 from embodichain.lab.sim.objects import Articulation, RigidObject, RigidObjectGroup
 from embodichain.lab.sim.spawn.descriptors import (
     articulation_desc_from_cfg,
@@ -87,8 +87,58 @@ from embodichain.lab.sim.spawn.usd import (
 
 pytestmark = pytest.mark.no_sim
 
+
+def test_packaged_usd_requires_typed_source_translation() -> None:
+    cfg = RigidObjectCfg(uid="packaged", shape=MeshCfg(fpath="source.usdz"))
+    with pytest.raises(NotImplementedError, match="typed scenes"):
+        rigid_desc_from_cfg(cfg)
+
+
 RESTITUTION = 0.25
 DEFORMABLE_MESH_PATH = "/assets/deformable.obj"
+
+
+def test_plane_config_roundtrip_preserves_static_per_environment_surface() -> None:
+    from dexsim.spawn import GeometryType
+
+    width, length, friction = 12.0, 8.0, 0.7
+    cfg = RigidObjectCfg.from_dict(
+        {
+            "uid": "floor",
+            "shape": {"shape_type": "Plane", "size": [width, length]},
+            "body_type": "static",
+            "init_pos": [0.0, 0.0, 0.0],
+            "attrs": {"material_props": {"dynamic_friction": friction}},
+        }
+    )
+    assert isinstance(cfg.shape, PlaneCfg)
+    descriptor, _ = rigid_desc_from_cfg(cfg, newton_solver_type="mujoco_warp")
+    collision = descriptor.collisions[0]
+    assert descriptor.per_env is True
+    assert descriptor.physics.actor_type == RigidBodyPhysicsDesc.static().actor_type
+    assert collision.geometry_type == GeometryType.PLANE
+    assert collision.size == (width, length, 0.0)
+    assert collision.axis == "z"
+    assert collision.approximation == CollisionApproximation.NONE
+    assert collision.newton.mu == pytest.approx(friction)
+    assert descriptor.renders[0].geometry_type == GeometryType.PLANE
+    np.testing.assert_array_equal(descriptor.pose[:3, 3], [0.0, 0.0, 0.0])
+
+
+@pytest.mark.parametrize("body_type", ["dynamic", "kinematic"])
+def test_plane_collision_rejects_moving_body(body_type: str) -> None:
+    cfg = RigidObjectCfg(uid="floor", shape=PlaneCfg(), body_type=body_type)
+    with pytest.raises(ValueError, match="requires body_type='static'"):
+        rigid_desc_from_cfg(cfg)
+
+
+@pytest.mark.parametrize("size", [[1.0], [0.0, 1.0], [1.0, float("inf")]])
+def test_plane_visual_extent_requires_two_finite_positive_dimensions(
+    size: list[float],
+) -> None:
+    cfg = RigidObjectCfg(uid="floor", shape=PlaneCfg(size=size), body_type="static")
+    with pytest.raises(ValueError, match="two finite positive"):
+        rigid_desc_from_cfg(cfg)
 
 
 def test_soft_descriptor_uses_newton_particle_schema() -> None:
@@ -805,7 +855,7 @@ def test_grouped_rigid_physics_overlays_usd_without_erasing_source(
     )
     scene = SimpleNamespace(materials={})
 
-    def parse_singleton(path, collection, label, *, prim_path=None):
+    def parse_singleton(path, collection, label, **kwargs):
         return scene, source
 
     monkeypatch.setattr(
@@ -850,7 +900,7 @@ def test_rigid_usd_can_recompute_source_inertia(
     )
     monkeypatch.setattr(
         "embodichain.lab.sim.spawn.usd._parse_singleton",
-        lambda path, collection, label, *, prim_path=None: (
+        lambda path, collection, label, **kwargs: (
             SimpleNamespace(materials={}),
             source,
         ),
@@ -886,7 +936,7 @@ def test_rigid_usd_preserves_asset_physics_by_default(
     )
     monkeypatch.setattr(
         "embodichain.lab.sim.spawn.usd._parse_singleton",
-        lambda path, collection, label, *, prim_path=None: (
+        lambda path, collection, label, **kwargs: (
             SimpleNamespace(materials={}),
             source,
         ),
@@ -894,8 +944,6 @@ def test_rigid_usd_preserves_asset_physics_by_default(
     cfg = RigidObjectCfg(
         uid="cube",
         shape=MeshCfg(fpath="cube.usd"),
-        body_type="static",
-        body_scale=(1.0, 1.0, 1.0),
         attrs=RigidBodyPhysicsCfg(mass_props=MassPropertiesCfg(mass=1.0)),
     )
 
@@ -1410,11 +1458,19 @@ def test_articulation_root_properties_compile_to_common_descriptor() -> None:
     assert descriptor.enable_self_collision is True
 
 
-def test_articulation_root_defaults_are_resolved_at_import_boundary() -> None:
-    descriptor = articulation_desc_from_cfg(
-        ArticulationCfg(uid="robot", fpath="robot.urdf")
-    )
-
+@pytest.mark.parametrize("cfg_type", [ArticulationCfg, RobotCfg])
+@pytest.mark.parametrize("scale", [None, (2.0, 3.0, 4.0)])
+def test_articulation_root_defaults_are_resolved_at_import_boundary(
+    cfg_type, scale
+) -> None:
+    cfg = cfg_type(uid="robot")
+    # Catalog presets can assemble a URDF after nullable source defaults were decoded.
+    cfg.fpath = "robot.urdf"
+    cfg.body_scale = scale
+    descriptor = articulation_desc_from_cfg(cfg)
+    expected_scale = (1.0, 1.0, 1.0) if scale is None else scale
+    np.testing.assert_array_equal(descriptor.body_scale, expected_scale)
+    assert cfg.body_scale == expected_scale
     assert descriptor.fixed_base is True
     assert descriptor.urdf_fix_root_link is True
     assert descriptor.enable_self_collision is False
@@ -1446,7 +1502,7 @@ def test_explicit_root_properties_override_usd_in_preserve_mode() -> None:
     assert descriptor.enable_self_collision is False
 
 
-def test_default_root_properties_override_usd_values() -> None:
+def test_default_root_properties_preserve_usd_values() -> None:
     source = ArticulationDesc(
         name="source",
         fixed_base=False,
@@ -1464,8 +1520,8 @@ def test_default_root_properties_override_usd_values() -> None:
     ):
         descriptor, _ = articulation_desc_from_usd(cfg)
 
-    assert descriptor.fixed_base is True
-    assert descriptor.enable_self_collision is False
+    assert descriptor.fixed_base is False
+    assert descriptor.enable_self_collision is True
 
 
 def test_explicit_none_root_properties_preserve_usd_values() -> None:
@@ -1808,6 +1864,75 @@ def test_articulation_array_qpos_limits_compile_before_backend_build() -> None:
     joint = descriptor.get_joint_desc("arm_joint")
     assert joint.lower_limit == pytest.approx(-0.5)
     assert joint.upper_limit == pytest.approx(0.75)
+
+
+def test_joint_limit_gains_preserve_source_when_unspecified() -> None:
+    descriptor = _resolved_articulation_desc()
+    joint = descriptor.get_joint_desc("arm_joint")
+    joint.newton = NewtonJointDesc(limit_ke=123.0, limit_kd=4.0)
+    cfg = ArticulationCfg(
+        uid="robot",
+        fpath="robot.urdf",
+        asset_physics_mode="overlay",
+        joint_drive_props=JointDrivePropertiesCfg(stiffness=10.0, damping=2.0),
+    )
+
+    configure_articulation_desc(descriptor, cfg, newton_solver_type="mjwarp")
+
+    assert joint.newton.limit_ke == 123.0
+    assert joint.newton.limit_kd == 4.0
+    assert joint.newton.target_ke == 10.0
+    assert joint.newton.target_kd == 2.0
+
+
+@pytest.mark.parametrize("solver_type", [None, "mjwarp"])
+def test_joint_limit_gains_keep_explicit_zero_and_joint_bounds(
+    solver_type: str | None,
+) -> None:
+    descriptor = _resolved_articulation_desc()
+    joint = descriptor.get_joint_desc("arm_joint")
+    joint.newton = NewtonJointDesc(limit_ke=123.0, limit_kd=4.0)
+    original_bounds = (joint.lower_limit, joint.upper_limit)
+    cfg = ArticulationCfg(
+        uid="robot",
+        fpath="robot.urdf",
+        asset_physics_mode="overlay",
+        joint_drive_props=JointDrivePropertiesCfg(
+            stiffness=10.0, damping=2.0, limit_stiffness=0.0, limit_damping=0.0
+        ),
+    )
+
+    configure_articulation_desc(descriptor, cfg, newton_solver_type=solver_type)
+
+    assert joint.newton.limit_ke == 0.0
+    assert joint.newton.limit_kd == 0.0
+    assert (joint.lower_limit, joint.upper_limit) == original_bounds
+    assert joint.newton.target_ke == joint.dexsim.stiffness == 10.0
+    assert joint.newton.target_kd == joint.dexsim.damping == 2.0
+
+
+def test_joint_limit_gain_rules_round_trip_and_override_control_parts() -> None:
+    properties = JointDrivePropertiesCfg.from_dict(
+        {
+            "limit_stiffness": {"arm": 100.0, "arm_.*": 20.0},
+            "limit_damping": {"arm": 10.0, "arm_joint": 0.0},
+        }
+    )
+    restored = JointDrivePropertiesCfg.from_dict(properties.to_dict())
+    cfg = RobotCfg(
+        uid="robot",
+        fpath="robot.urdf",
+        control_parts={"arm": ["arm_joint"]},
+        joint_drive_props=restored,
+    )
+    descriptor = _resolved_articulation_desc()
+
+    configure_articulation_desc(descriptor, cfg, newton_solver_type="mjwarp")
+
+    joint = descriptor.get_joint_desc("arm_joint")
+    assert joint.newton.limit_ke == 20.0
+    assert joint.newton.limit_kd == 0.0
+    assert restored.to_dict() == properties.to_dict()
 
 
 @pytest.mark.parametrize("solver_type", [None, "dexuni"])

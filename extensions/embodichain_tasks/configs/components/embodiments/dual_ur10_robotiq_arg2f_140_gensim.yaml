@@ -1,0 +1,219 @@
+# Reuse the registered dual-arm preset and Robotiq 2F-140 defaults.
+# Keep only GenSim calibration and task-independent hand services here.
+embodiment_id: dual_ur10_robotiq_arg2f_140_gensim
+simulation:
+  class_type: DualArmRobot
+  base_robot:
+    type: URRobot
+    init:
+      robot_type: ur10
+  mount:
+    preset: side_by_side
+    separation: 0.6
+  uid: DualUR10
+  urdf_cfg:
+    fname: dual_ur10_robotiq_arg2f_140_gensim
+  init_pos:
+  - 0.55
+  - 0.0
+  - 0.0
+  init_rot:
+  - 0.0
+  - 0.0
+  - 180.0
+  init_qpos:
+  - 3.141592653589793
+  - 3.141592653589793
+  - -1.5707963267948966
+  - -1.5707963267948966
+  - 1.5707963267948966
+  - 1.5707963267948966
+  - -1.5707963267948966
+  - -1.5707963267948966
+  - 1.5707963267948966
+  - 1.5707963267948966
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  joint_drive_props:
+    stiffness:
+      left_eef: 50.0
+      right_eef: 50.0
+    damping:
+      left_eef: 5.0
+      right_eef: 5.0
+    max_effort:
+      left_eef: 500.0
+      right_eef: 500.0
+    friction: 0.0
+    armature: 0.0
+sensor:
+- sensor_type: Camera
+  uid: cam_high
+  width: 960
+  height: 540
+  intrinsics:
+  - 420
+  - 420
+  - 480
+  - 270
+  extrinsics:
+    pos:
+    - 0.4
+    - 0.0
+    - 2.2
+    eye:
+    - -0.6
+    - 0.0
+    - 1.8
+    target:
+    - 0.0
+    - 0.0
+    - 0.75
+    up:
+    - 1.0
+    - 0.0
+    - 0.0
+skill_profile:
+  contract_id: dual_arm_parallel_gripper
+  profile_id: dual_ur10_robotiq_arg2f_140_gensim
+  resources:
+  - resource_id: left
+    endpoints:
+    - endpoint_id: motion
+      control_part: left_arm
+      command_preset: left_arm_postures
+      capabilities:
+      - kinematics.inverse
+      - kinematics.batch_inverse
+      - motion.cartesian_pose
+      - motion.joint_position
+      - kinematics.forward
+    - endpoint_id: grasp
+      control_part: left_eef
+      capabilities:
+      - interaction.grasp
+      command_preset: left_parallel_gripper
+      gripper: left_eef
+  - resource_id: right
+    endpoints:
+    - endpoint_id: motion
+      control_part: right_arm
+      command_preset: right_arm_postures
+      capabilities:
+      - kinematics.inverse
+      - kinematics.batch_inverse
+      - motion.cartesian_pose
+      - motion.joint_position
+      - kinematics.forward
+    - endpoint_id: grasp
+      control_part: right_eef
+      capabilities:
+      - interaction.grasp
+      command_preset: right_parallel_gripper
+      gripper: right_eef
+  command_presets:
+  - preset_id: left_arm_postures
+    control_part: left_arm
+    commands:
+      park:
+      - 3.141592653589793
+      - -1.5707963267948966
+      - 1.5707963267948966
+      - -1.5707963267948966
+      - 1.5707963267948966
+      - 0.0
+  - preset_id: right_arm_postures
+    control_part: right_arm
+    commands:
+      park:
+      - 3.141592653589793
+      - -1.5707963267948966
+      - 1.5707963267948966
+      - -1.5707963267948966
+      - 1.5707963267948966
+      - 0.0
+  runtime_services:
+    grasp_pose_generators:
+      left_eef:
+        kind: antipodal_parallel_jaw
+        sample_count: 10000
+        approach_deviation_angle: 0.3490658503988659
+        approach_direction_samples: 4
+        max_candidates: 500
+        center_mode: centroid
+        point_spacing: 0.012
+        filter_ground_collision: false
+      right_eef:
+        kind: antipodal_parallel_jaw
+        sample_count: 10000
+        approach_deviation_angle: 0.3490658503988659
+        approach_direction_samples: 4
+        max_candidates: 500
+        center_mode: centroid
+        point_spacing: 0.012
+        filter_ground_collision: false
+    control_part_evidence:
+      kind: joint_position_constraint
+      control_parts:
+      - left_eef
+      - right_eef
+      open_qpos:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      minimum_displacement: 0.05
+    hand_geometries:
+      left_eef:
+        kind: sampled_parallel_jaw
+        motion_part: left_arm
+        hand_part: left_eef
+        command_preset: left_parallel_gripper
+        hand_root_link: left_robotiq_arg2f_base_link
+        pad_link_names:
+        - left_inner_finger_pad
+        - left_right_inner_finger_pad
+        sample_count: 65
+        body_max_edge: 0.01
+        pad_max_edge: 0.004
+        max_subdivisions: 10
+      right_eef:
+        kind: sampled_parallel_jaw
+        motion_part: right_arm
+        hand_part: right_eef
+        command_preset: right_parallel_gripper
+        hand_root_link: right_robotiq_arg2f_base_link
+        pad_link_names:
+        - right_left_inner_finger_pad
+        - right_inner_finger_pad
+        sample_count: 65
+        body_max_edge: 0.01
+        pad_max_edge: 0.004
+        max_subdivisions: 10
+grippers:
+  left_eef:
+    class_type: RobotiqArg2F140
+    mode: mounted
+    motion_part: left_arm
+    control_part: left_eef
+    component_type: left_hand
+  right_eef:
+    class_type: RobotiqArg2F140
+    mode: mounted
+    motion_part: right_arm
+    control_part: right_eef
+    component_type: right_hand

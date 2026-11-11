@@ -29,6 +29,7 @@ from .material import (
 )
 from .cfg import DenoisingCfg, DenoisingMode, DLSSCfg, NRDCfg
 from .common import BatchEntity
+from .spawn.usd_result import UsdImportResult
 from .profiler import Profiler, ProfilerCfg
 
 from .sim_manager import *
@@ -39,6 +40,7 @@ __all__ = [
     "VisualMaterialInst",
     "ReuseSegmentState",
     "BatchEntity",
+    "UsdImportResult",
     "Profiler",
     "ProfilerCfg",
     "SimulationManager",

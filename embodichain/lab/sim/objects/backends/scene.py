@@ -578,6 +578,61 @@ class SceneArticulationView(_SceneBatchSelectionAdapter, ArticulationViewBase):
     ) -> torch.Tensor:
         return self._articulation_ids[env_ids]
 
+    def _apply_link_property(
+        self,
+        method_name: str,
+        values: torch.Tensor,
+        env_ids: Sequence[int] | torch.Tensor,
+        link_ids: Sequence[int] | torch.Tensor,
+    ) -> None:
+        """Forward selected property writes through the public Scene batch."""
+        rows = self._select_rows(env_ids)
+        if len(rows) and len(link_ids):
+            _checked_batch_call(
+                self.batch.select(rows), method_name, values, link_ids=link_ids
+            )
+
+    def apply_link_mass(
+        self,
+        values: torch.Tensor,
+        env_ids: Sequence[int] | torch.Tensor,
+        link_ids: Sequence[int] | torch.Tensor,
+    ) -> None:
+        """Write masses with shape (selected environments, selected links)."""
+        self._apply_link_property("apply_link_mass", values, env_ids, link_ids)
+
+    def apply_link_inertia(
+        self,
+        values: torch.Tensor,
+        env_ids: Sequence[int] | torch.Tensor,
+        link_ids: Sequence[int] | torch.Tensor,
+    ) -> None:
+        """Write three principal moments per selected environment and link."""
+        self._apply_link_property(
+            "apply_link_inertia_diagonal", values, env_ids, link_ids
+        )
+
+    def apply_link_com_pose(
+        self,
+        values: torch.Tensor,
+        env_ids: Sequence[int] | torch.Tensor,
+        link_ids: Sequence[int] | torch.Tensor,
+    ) -> None:
+        """Write selected COM frames through the batch's row-update interface.
+
+        Inputs use ``xyz + xyzw`` in selection order. Passing rows directly
+        reuses the native batch binding and retains current principal moments.
+        """
+        rows = self._select_rows(env_ids)
+        if len(rows) and len(link_ids):
+            _checked_batch_call(
+                self.batch,
+                "apply_link_com_local_pose",
+                _batch_pose(values),
+                link_ids=link_ids,
+                rows=rows,
+            )
+
     def fetch_link_physical_properties(
         self,
         mass: torch.Tensor,

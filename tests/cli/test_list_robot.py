@@ -125,6 +125,7 @@ def test_list_robot_dispatch_reads_installed_catalogs(
         "TianjiMarvin",
         "DexforceW1",
         "CobotMagic",
+        "AgilexPiperX",
         "Franka",
         "FrankaPanda",
         "FlexivRizon4S",
@@ -248,6 +249,7 @@ main(["list-robot"])
 
     assert "SharpaWave" in result.stdout
     assert "WujiHand" in result.stdout
+    assert "AgilexPiperX" in result.stdout
     assert result.stderr == ""
 
 

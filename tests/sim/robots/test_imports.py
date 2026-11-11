@@ -54,6 +54,7 @@ _CONFIG_CLASSES = (
     "TianjiMarvinCfg",
     "AgibotG2Cfg",
     "CobotMagicCfg",
+    "AgilexPiperXCfg",
     "FrankaPandaCfg",
     "FlexivRizon4SCfg",
     "URRobotCfg",
@@ -123,6 +124,7 @@ module = sys.argv[1]
 importlib.import_module(module)
 for name in (
     "alohamini.aloha_mini.cfg", "tianji.marvin.cfg", "agilex.cobotmagic.cfg",
+    "agilex.piper_x.cfg",
     "franka.panda", "universal_robots.ur_robot", "dexforce.w1.cfg",
     "unitree.go1.cfg",
     "unitree.go2.cfg",

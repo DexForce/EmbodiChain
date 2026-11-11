@@ -73,56 +73,6 @@ def test_throughput_uses_total_time_and_excludes_warmup() -> None:
     assert summary["ppo_sps_cv_pct"] == pytest.approx(100 / 3)
 
 
-@pytest.mark.no_sim
-@pytest.mark.parametrize(
-    "solver_type,use_cpu,cuda_state",
-    [
-        ("mujoco_warp", False, True),
-        ("dexuni", False, True),
-        ("dexuni", True, True),
-        ("dexuni", False, False),
-        ("dexuni", None, None),
-    ],
-)
-def test_newton_backend_checks_the_mujoco_subsolver(
-    monkeypatch: pytest.MonkeyPatch,
-    solver_type: str,
-    use_cpu: bool | None,
-    cuda_state: bool | None,
-) -> None:
-    """DexUni wraps MuJoCo; CPU or missing subsolvers cannot qualify as CUDA."""
-    from dexsim.engine.newton_physics import backend_registry
-
-    mujoco_solver = (
-        None
-        if use_cpu is None
-        else SimpleNamespace(
-            use_mujoco_cpu=use_cpu,
-            mjw_data=SimpleNamespace(
-                qpos=SimpleNamespace(device=SimpleNamespace(is_cuda=cuda_state))
-            ),
-        )
-    )
-    backend = SimpleNamespace(
-        solver_type=solver_type,
-        solver=mujoco_solver if solver_type == "mujoco_warp" else object(),
-        mujoco_solver=mujoco_solver,
-    )
-    env = SimpleNamespace(
-        unwrapped=SimpleNamespace(
-            sim=SimpleNamespace(
-                physics=SimpleNamespace(name="newton"), device="cuda:0", _world=object()
-            )
-        )
-    )
-    monkeypatch.setattr(backend_registry, "get_newton_backend", lambda _: backend)
-    if use_cpu is False and cuda_state:
-        assert benchmark._check_backend(env, "newton") is backend
-    else:
-        with pytest.raises(RuntimeError, match="not using CUDA"):
-            benchmark._check_backend(env, "newton")
-
-
 @pytest.mark.parametrize("second_vram", [1200, None])
 def test_report_separates_process_memory_from_allocator(tmp_path, second_vram) -> None:
     result = _result()
@@ -168,6 +118,52 @@ def test_config_keeps_official_policy_and_scales_minibatches(backend: str) -> No
 def test_config_rejects_incomplete_minibatches(envs: int, steps: int) -> None:
     with pytest.raises(ValueError, match="divisible"):
         _load_config(TASK_DIR, "default", envs, steps)
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize("solver_type", ["mujoco_warp", "dexuni"])
+@pytest.mark.parametrize(
+    "use_cpu,device_is_cuda", [(False, True), (True, False), (False, False)]
+)
+def test_newton_backend_checks_active_mujoco_solver(
+    monkeypatch: pytest.MonkeyPatch,
+    solver_type: str,
+    use_cpu: bool,
+    device_is_cuda: bool,
+) -> None:
+    """Both solver routes must use GPU integration and GPU state buffers."""
+    from dexsim.engine.newton_physics import backend_registry
+
+    mujoco = SimpleNamespace(
+        use_mujoco_cpu=use_cpu,
+        mjw_data=SimpleNamespace(
+            qpos=SimpleNamespace(device=SimpleNamespace(is_cuda=device_is_cuda))
+        ),
+    )
+    backend = SimpleNamespace(
+        solver_type=solver_type,
+        solver=(
+            mujoco
+            if solver_type == "mujoco_warp"
+            else SimpleNamespace(mujoco_solver=mujoco)
+        ),
+        mujoco_solver=mujoco,
+    )
+    monkeypatch.setattr(backend_registry, "get_newton_backend", lambda world: backend)
+    env = SimpleNamespace(
+        unwrapped=SimpleNamespace(
+            sim=SimpleNamespace(
+                physics=SimpleNamespace(name="newton"),
+                device="cuda:0",
+                _world=object(),
+            )
+        )
+    )
+    if not use_cpu and device_is_cuda:
+        assert benchmark._check_backend(env, "newton") is backend
+    else:
+        with pytest.raises(RuntimeError, match="not using CUDA"):
+            benchmark._check_backend(env, "newton")
 
 
 @pytest.mark.parametrize("status", ["passed", "failed"])
@@ -272,8 +268,12 @@ def test_resource_sample_resolves_one_provider_pid(
 @pytest.mark.no_sim
 @pytest.mark.parametrize(
     "renderer,solver_type",
-    [(renderer, "mujoco_warp") for renderer in (None, "auto", "no-render", "hybrid")]
-    + [(None, "dexuni")],
+    [
+        (None, "mujoco_warp"),
+        ("auto", "dexuni"),
+        ("no-render", "mujoco_warp"),
+        ("hybrid", "dexuni"),
+    ],
 )
 def test_creation_failure_retains_resource_samples(
     tmp_path: Path,
@@ -302,6 +302,8 @@ def test_creation_failure_retains_resource_samples(
             str(output),
             "--envs",
             "32",
+            "--solver-iterations",
+            "37",
         ],
     )
     trainer_cfg = {"gym_config": str(env_config)}
@@ -342,13 +344,16 @@ def test_creation_failure_retains_resource_samples(
         import yaml
 
         assert kwargs["renderer"] == renderer
-        solver = yaml.safe_load((output / "env.yaml").read_text())["physics_config"][
-            "solver_cfg"
-        ]
-        if solver_type == "dexuni":
-            assert "iterations" not in solver
-            solver = solver["mujoco_options"]
-        assert solver["iterations"] == 20
+        saved = yaml.safe_load((output / "env.yaml").read_text())
+        expected_options = (
+            {"mujoco_options": {"iterations": 37}}
+            if solver_type == "dexuni"
+            else {"iterations": 37}
+        )
+        assert saved["physics_config"]["solver_cfg"] == {
+            "solver_type": solver_type,
+            **expected_options,
+        }
         raise failure
 
     monkeypatch.setattr(policy_runtime, "build_gym_policy_runtime", fail_creation)
@@ -360,9 +365,7 @@ def test_creation_failure_retains_resource_samples(
     assert result["resources"]["samples"] == [
         {"label": "before_create", "cpu_rss_mib": 50.0}
     ]
-    assert (
-        "| Dexsim Newton/MJWarp CUDA | failed |" in (output / "report.md").read_text()
-    )
+    assert "| Dexsim Newton CUDA | failed |" in (output / "report.md").read_text()
 
 
 @pytest.mark.no_sim
