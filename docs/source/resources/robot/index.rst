@@ -67,6 +67,10 @@ Manufacturers
      - :doc:`Franka Panda <franka/panda>`
      - ``FrankaPandaCfg``
      - Legacy FR3 bare-arm selector; native-hand deployments use the explicit ``franka_panda`` embodiment.
+   * - :doc:`I2RT Robotics <i2rt/index>`
+     - :doc:`YAM dual arms <i2rt/yam>`
+     - ``YamI2rtCfg``
+     - Two six-joint arms with four independent finger joints and per-arm numerical FK/IK.
    * - :doc:`Pollen Robotics <pollen_robotics/index>`
      - :doc:`MicroDuck <pollen_robotics/microduck>`
      - ``MicroDuckCfg``
@@ -121,6 +125,7 @@ Manufacturers
    dexforce/index
    flexiv/index
    franka/index
+   i2rt/index
    pollen_robotics/index
    the_robot_studio/index
    tianji/index
