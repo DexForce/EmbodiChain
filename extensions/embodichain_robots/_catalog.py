@@ -21,6 +21,7 @@ from __future__ import annotations
 from itertools import product
 
 _CONFIG_CLASSES = {
+    "YamI2rt": "embodichain_robots.i2rt.yam:YamI2rtCfg",
     "UnitreeGo1": "embodichain_robots.unitree.go1:UnitreeGo1Cfg",
     "UnitreeGo2": "embodichain_robots.unitree.go2:UnitreeGo2Cfg",
     "UnitreeG1": "embodichain_robots.unitree.g1:UnitreeG1Cfg",
@@ -43,6 +44,10 @@ _CONFIG_CLASSES = {
 }
 
 _DEFAULT_CONTROL_INFO = {
+    "YamI2rt": {
+        "dof": 16,
+        "control_parts": {"right_arm": 6, "left_arm": 6, "right_eef": 2, "left_eef": 2},
+    },
     "UnitreeGo1": {"dof": 12, "control_parts": {"locomotion": 12}},
     "UnitreeGo2": {"dof": 12, "control_parts": {"locomotion": 12}},
     "UnitreeG1": {"dof": 29, "control_parts": {"locomotion": 29}},
@@ -131,6 +136,7 @@ _CONTROL_PART_MIMICS = {
 }
 
 _CLASSIFICATION = {
+    "YamI2rt": ("i2rt", "fixed_manipulator", 2),
     "UnitreeGo1": ("unitree", "quadruped", 0),
     "UnitreeGo2": ("unitree", "quadruped", 0),
     "UnitreeG1": ("unitree", "bipedal_humanoid", 2),

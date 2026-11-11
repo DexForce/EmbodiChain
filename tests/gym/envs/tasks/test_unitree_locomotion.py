@@ -203,19 +203,43 @@ def test_unitree_deployments_preserve_task_physics(
     assert config.sensor[0].articulation_cfg_list[0].link_name_list == []
 
 
-def test_velocity_env_injects_one_ordered_joint_selector(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("backend", ["default", "newton"])
+@pytest.mark.parametrize(
+    ("robot", "env_name"),
+    [
+        ("go1", "UnitreeGo1FlatEnv"),
+        ("go2", "UnitreeGo2FlatEnv"),
+        ("g1", "UnitreeG1FlatEnv"),
+        ("h1_2", "UnitreeH12FlatEnv"),
+        ("anymal_c", "ANYmalCFlatEnv"),
+        ("microduck", "MicroDuckFlatEnv"),
+    ],
+)
+def test_locomotion_env_preserves_ordered_unbounded_joint_actions(
+    robot: str, env_name: str, backend: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Runtime locomotion binding must not combine part and joint selectors."""
+    """Official task configs preserve policy order and actions outside ±1."""
+    from importlib import import_module
+    from types import SimpleNamespace
+
     from embodichain.lab.gym.envs import EmbodiedEnv
+    from embodichain.lab.gym.envs.managers.action_manager import ActionManager
     from embodichain.lab.gym.utils.gym_utils import config_to_cfg
     from embodichain.lab.sim import cfg as sim_cfg
     from embodichain.utils.utility import load_config
-    from embodichain_tasks.locomotion.velocity.go1_flat import UnitreeGo1FlatEnv
+
+    env_type = getattr(
+        import_module(f"embodichain_tasks.locomotion.velocity.{robot}_flat"), env_name
+    )
+    task = env_type.velocity_task_config
 
     monkeypatch.setattr(sim_cfg, "get_data_path", lambda value: value)
-    path = Path(
-        "extensions/embodichain_tasks/configs/tasks/locomotion/velocity/go1_flat/env.yaml"
+    filename = "env.yaml" if backend == "default" else "env.newton.yaml"
+    path = (
+        Path(
+            f"extensions/embodichain_tasks/configs/tasks/locomotion/velocity/{robot}_flat"
+        )
+        / filename
     )
     cfg = config_to_cfg(
         load_config(path),
@@ -233,13 +257,39 @@ def test_velocity_env_injects_one_ordered_joint_selector(
 
     monkeypatch.setattr(EmbodiedEnv, "__init__", capture_init)
 
-    UnitreeGo1FlatEnv(cfg)
+    env_type(cfg)
 
     resolved = captured["cfg"]
     params = resolved.actions.joint_position.params
     assert "part_name" not in params
-    assert params["joint_names"] == go1_config.load_config().joint_names
+    assert params["joint_names"] == task.joint_names
     assert params["preserve_order"] is True
+
+    action_env = SimpleNamespace(
+        num_envs=2,
+        device=torch.device("cpu"),
+        robot=SimpleNamespace(
+            joint_names=list(task.joint_names),
+            cfg=SimpleNamespace(init_qpos=task.default_joint_position),
+        ),
+    )
+    manager = ActionManager(
+        {"joint_position": resolved.actions.joint_position}, action_env
+    )
+    # Values outside ±1 must reach the calibrated offset-and-scale mapping.
+    actions = torch.full((2, task.action_dim), 2.0)
+    actions[1].neg_()
+    manager.process_action(actions)
+
+    term = manager.get_term("joint_position")
+    assert torch.isneginf(torch.as_tensor(term.action_space.low)).all()
+    assert torch.isposinf(torch.as_tensor(term.action_space.high)).all()
+    torch.testing.assert_close(term.raw_actions, actions)
+    torch.testing.assert_close(
+        term.processed_actions,
+        torch.tensor(task.default_joint_position)
+        + actions * torch.tensor(task.action_scale),
+    )
 
 
 @pytest.mark.parametrize("backend", ["default", "newton"])
