@@ -3121,27 +3121,32 @@ class EmbodiedEnv(BaseEnv):
 
     def _setup_background(self) -> None:
         """Setup the static rigid objects in the environment."""
+
+        def validate_resolved(cfg: RigidObjectCfg) -> None:
+            if cfg.body_type == "dynamic":
+                logger.log_error(
+                    "Background object must be kinematic or static rigid object."
+                )
+
         for cfg in self.cfg.visual_object:
             self.sim.add_visual_object(cfg)
         for cfg in self.cfg.background:
-            if cfg.body_type == "dynamic":
-                logger.log_error(
-                    f"Background object must be kinematic or static rigid object."
-                )
-            self.sim.add_rigid_object(cfg=cfg)
+            self.sim.add_rigid_object(cfg=cfg, validate_resolved=validate_resolved)
 
     def _setup_interactive_objects(self) -> None:
         """Setup the interactive objects in the environment."""
+
+        def validate_resolved(cfg: RigidObjectCfg) -> None:
+            if cfg.body_type != "dynamic":
+                logger.log_error(
+                    "Interactive rigid object must be dynamic rigid object."
+                )
 
         for cfg in self.cfg.articulation:
             self.sim.add_articulation(cfg=cfg)
 
         for cfg in self.cfg.rigid_object:
-            if cfg.body_type != "dynamic":
-                logger.log_error(
-                    f"Interactive rigid object must be dynamic rigid object."
-                )
-            self.sim.add_rigid_object(cfg=cfg)
+            self.sim.add_rigid_object(cfg=cfg, validate_resolved=validate_resolved)
 
         for cfg in self.cfg.rigid_object_group:
             self.sim.add_rigid_object_group(cfg=cfg)

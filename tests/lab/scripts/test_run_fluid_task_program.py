@@ -173,6 +173,7 @@ def test_online_runner_commits_last_recording_before_close(
     )
     report = runner._run(args, tmp_path)
     assert report["accepted"] is False
+    assert report["task"] == str(TASK.resolve())
     assert order == (["save", "close"] if renderer == "fast-rt" else ["close"])
     assert len(report["videos"]) == (2 if renderer == "fast-rt" and not stale else 0)
     assert (tmp_path / "fluid_gym_result.json").is_file()

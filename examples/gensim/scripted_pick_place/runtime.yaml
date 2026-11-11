@@ -1,0 +1,14 @@
+# Fixed installation from the scripted reproduction. Physics belongs here.
+physics: default
+seed: 0
+max_episode_steps: 2500
+enable_sensor: false
+render_cfg:
+  renderer: no-render
+env:
+  sim_steps_per_control: 4
+embodiment:
+  component: extensions/embodichain_tasks/configs/components/embodiments/dual_ur5_dh_pgi_140_80.yaml
+  overrides:
+    init_pos: [1.45, 0.0, 0.25]
+    init_rot: [0.0, 0.0, -90.0]

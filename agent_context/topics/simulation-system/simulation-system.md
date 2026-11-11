@@ -7,6 +7,7 @@
 | Public simulation facade | `embodichain/lab/sim/__init__.py` |
 | World, registries, readiness and stepping | `embodichain/lab/sim/sim_manager.py` → `SimulationManager`, `SimulationManagerCfg` |
 | Declaration, source resolution and binding | `embodichain/lab/sim/spawn/scene.py`, `spawn/source.py`, `spawn/descriptors.py` |
+| USD import recipes, preflight and source-path results | `cfg/usd.py`, `spawn/usd_import.py`, `spawn/usd_result.py` |
 | Fresh static USD reads and owned authored link meshes | `embodichain/lab/sim/spawn/source_geometry.py` |
 | Manager-level backend hooks and capabilities | `embodichain/lab/sim/physics/` |
 | Object-level Scene batch adapters | `embodichain/lab/sim/objects/backends/scene.py`, `newton.py` |
@@ -31,15 +32,26 @@ that same object in place. UIDs identify resources in the manager registry.
 `VisualObject` owns render-only root poses, visibility and material assignments,
 with no rigid-body buffers or collision API. Its config lives in
 `cfg/visual_object.py`; mesh files use `MeshCfg.fpath`, as for rigid objects.
-`cfg/source.py:UsdSourceCfg` owns the source file and exact `source_prim_path`;
+`cfg/source.py:UsdSourceCfg` owns the source file, exact singleton
+`source_prim_path` and optional parser subtree/variants;
 visual, rigid and articulation configs accept it through `source`, exclusively
 with their existing shape/file input. `ObjectBaseCfg` keeps runtime identity
 and initial pose independent of file formats. `add_visual_object()` compiles mesh/primitive appearance or
-selects a USD object's appearance. Whole-scene `add_usd()`
-preserves physical types and wraps only objects without physics and colliders
+selects a USD object's appearance. Whole-scene `add_usd(UsdImportCfg(...))`
+owns namespace, scene placement and sparse per-asset overrides keyed by source
+prim paths. Single-asset placement belongs to `source_pose_mode` on the asset
+configuration. Both routes share the fresh DexSim source parser and validate
+before native declaration. `UsdImportResult` maps source paths to facades and
+records logical UIDs for constraints and native-only resources. Unique sources
+retain prim-path keys; multiple resources from one prim receive ordinal keys,
+with `resource_source_paths` retaining the original prim identity. It remaps
+standalone constraint endpoints after UID changes, preserves physical types,
+and wraps only objects without physics and colliders
 as visuals. Conflicting visual UIDs receive the scene-name prefix while returned
 keys preserve source prim paths. Other import UID conflicts fail before declaration.
-Imported facades retain their source address in `cfg.source`. This metadata
+Volume and surface particle sets bind through the existing deformable facades;
+they require Newton/CUDA and retain source topology and physics. Imported
+facades retain their source address in `cfg.source`. This metadata
 does not request a second spawn or bind an unrelated existing scene entity.
 Visuals retain facade-owned pose/visibility/material-assignment state across native
 topology rebuilds, with separate reset baselines. They use the same prepare,
@@ -65,6 +77,17 @@ into manager declarations. Scene replication and collision isolation belong
 to Spawn, not per-object collision-group calculations. Backend differences
 belong in physics hooks/capabilities or object adapters, not task-side native
 access. Contact sensors use the finalized Scene's `ContactQuery` boundary.
+
+Camera and light resources also belong to that existing Scene. Its lightweight
+prepared-Arena phase permits creation before physical finalization. Light
+property setters/reset and multi-field randomization use native property batches;
+global sun/direction lights remain single instances. Manager-created light
+getters retain owned CPU snapshots. Render-batch selections
+are refreshed on topology revision, and unsupported falloff retains only its
+legacy compatibility path; mesh binding preserves scalar sharing/conflict
+behavior. Standalone camera/light pose methods retain their
+per-instance native implementations. See [sensor lifecycle](../sensor-system/lifecycle.md)
+for camera attachment and shared-target release ordering.
 
 `spawn.source_geometry` owns `UsdSourceSnapshot`, `read_usd_source` and
 `LinkMesh` for Object source adapters and static Scene consumers. Reads use fresh

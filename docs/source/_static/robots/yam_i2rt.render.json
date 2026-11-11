@@ -1,0 +1,195 @@
+{
+  "description": "YAM dual-arm assembly",
+  "catalog_id": "YamI2rt",
+  "configuration_commit": "2fe43f9e4a3aa710a873baa559865ada3c4b68c8",
+  "references": [
+    "https://github.com/DexForce/EmbodiChain/pull/1135",
+    "https://github.com/DexForce/EmbodiChain/pull/1141"
+  ],
+  "asset": {
+    "archive": "robot_assets/YamI2rtV1.zip",
+    "archive_sha256": "9125380a6240847f42730b79025aa61cd17b665f90a2586b3c6f061d769c503a",
+    "source_urdf_sha256": "ea4582367a942e6d1d4c5d81cc3a69f8c0aefa55bb924726c87cfca7ff6c239b"
+  },
+  "render_cfg": {
+    "renderer": "rt",
+    "spp": 1,
+    "denoising": {
+      "window": "dlss",
+      "offscreen": "dlss"
+    },
+    "dlss": {
+      "dlss_quality": 2,
+      "upsample_ratio": null,
+      "render_width": 0,
+      "render_height": 0,
+      "target_width": 0,
+      "target_height": 0,
+      "tiled_enabled": true,
+      "exposure_compensation": 1.0
+    },
+    "nrd": {
+      "max_indirect_bounces": 1,
+      "denoising_range": 500000.0,
+      "disocclusion_threshold": 0.01,
+      "disocclusion_threshold_alternate": 0.05,
+      "disocclusion_threshold_mix_enabled": true,
+      "history_confidence_enabled": true,
+      "history_confidence_probe_stride": 5,
+      "history_confidence_sigma_scale": 2.0,
+      "history_confidence_sensitivity": 1.0,
+      "max_accumulated_frame_num": 30,
+      "max_fast_accumulated_frame_num": 6,
+      "history_fix_frame_num": 3,
+      "diffuse_prepass_blur_radius": 30.0,
+      "specular_prepass_blur_radius": 50.0,
+      "anti_firefly_enabled": false,
+      "sh_mode_enabled": false,
+      "validation_enabled": false,
+      "max_stabilized_frame_num": 63,
+      "min_blur_radius": 1.0,
+      "max_blur_radius": 30.0,
+      "antilag_luminance_sigma_scale": 2.0,
+      "antilag_luminance_sensitivity": 3.0,
+      "taa_min_current_weight": 0.0625,
+      "taa_sigma_scale": 2.0,
+      "taa_depth_rejection_enabled": true,
+      "taa_tone_mapping_enabled": false
+    },
+    "tone_mapping_enabled": false,
+    "tone_mapping_exposure": 1.0,
+    "min_bounces": 4,
+    "max_bounces": 8
+  },
+  "camera": {
+    "uid": "yam_assembly_preview",
+    "init_pos": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "init_rot": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "init_local_pose": null,
+    "sensor_type": "Camera",
+    "visualization_role": "sensor",
+    "width": 960,
+    "height": 1200,
+    "near": 0.03,
+    "far": 60.0,
+    "intrinsics": [
+      2350.0,
+      2350.0,
+      480.0,
+      600.0
+    ],
+    "extrinsics": {
+      "pos": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "parent": null,
+      "eye": [
+        1.8017813930041298,
+        -1.2237192184419408,
+        1.2226117179880756
+      ],
+      "target": [
+        0.18376554688908497,
+        -0.04256765077795782,
+        0.23562205185789803
+      ],
+      "up": [
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    "enable_color": true,
+    "enable_depth": false,
+    "enable_mask": false,
+    "enable_normal": false,
+    "enable_position": false,
+    "ground_plane_visible": true,
+    "fx": 600,
+    "fy": 600,
+    "cx": 320.0,
+    "cy": 240.0
+  },
+  "scene": {
+    "presentation": "SimulationManager default ground and environment emission with a rectangular key light",
+    "emission_color": [
+      0.92,
+      0.95,
+      1.0
+    ],
+    "emission_intensity": 80.0,
+    "direct_lights": [
+      {
+        "type": "rect",
+        "location": [
+          1.2,
+          -1.4,
+          1.8
+        ],
+        "direction": [
+          -1.0,
+          1.4,
+          -1.55
+        ],
+        "color": [
+          1.0,
+          0.97,
+          0.93
+        ],
+        "intensity": 65.0,
+        "size": [
+          1.4,
+          1.1
+        ]
+      }
+    ]
+  },
+  "physics_stepped": false,
+  "warmup_frames": 48,
+  "joint_positions": {
+    "left_joint1": 0.0,
+    "right_joint1": 0.0,
+    "left_joint2": 1.399999976158142,
+    "right_joint2": 1.399999976158142,
+    "left_joint3": 1.2000000476837158,
+    "right_joint3": 1.2000000476837158,
+    "left_joint4": 0.0,
+    "right_joint4": 0.0,
+    "left_joint5": 1.100000023841858,
+    "right_joint5": 1.100000023841858,
+    "left_joint6": 0.0,
+    "right_joint6": 0.0,
+    "left_joint7": 0.04749999940395355,
+    "left_joint8": 0.04749999940395355,
+    "right_joint7": 0.04749999940395355,
+    "right_joint8": 0.04749999940395355
+  },
+  "root_position": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "source_materials_preserved": true,
+  "runtime": {
+    "dexsim": "0.6.0rc1",
+    "torch": "2.11.0+cu130"
+  },
+  "image": "yam_i2rt.png",
+  "image_sha256": "7acb9ee8f2950e6da71b5c597b3a1099054b054b994c905bd72c943776f0a8e1"
+}

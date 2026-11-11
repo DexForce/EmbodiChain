@@ -332,7 +332,7 @@ def _resolve_embodiment_component(
         ),
         path="embodiment component",
         required=frozenset({"embodiment_id", "simulation", "sensor"}),
-        optional=frozenset({"skill_profile"}),
+        optional=frozenset({"skill_profile", "grippers"}),
     )
     _identifier(component["embodiment_id"], path="embodiment component.embodiment_id")
     simulation = _owned_mapping(
@@ -358,6 +358,10 @@ def _resolve_embodiment_component(
             component["skill_profile"],
             path="embodiment component.skill_profile",
         )
+    if "grippers" in component:
+        from embodichain.lab.gym.utils._gripper_composition import _expand_grippers
+
+        _expand_grippers(simulation, skill_profile, component["grippers"])
     return simulation, sensors, skill_profile
 
 

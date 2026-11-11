@@ -21,3 +21,4 @@ Official Tianji robot configurations live in the
    :hidden:
 
    marvin
+   marvin_gripper

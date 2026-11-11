@@ -193,16 +193,18 @@ def _run(args: argparse.Namespace, output: Path) -> dict[str, Any]:
             if purpose == "diagnostic":
                 video_root /= "diagnostics"
             existing = {
-                path: (path.stat().st_ino, path.stat().st_mtime_ns)
-                for path in video_root.glob(f"env_*/episode_*_{name}.mp4")
+                video_path: (video_path.stat().st_ino, video_path.stat().st_mtime_ns)
+                for video_path in video_root.glob(f"env_*/episode_*_{name}.mp4")
             }
             recorder.save_and_clear(purpose=purpose)
             for i in range(env.num_envs):
                 matches = []
-                for path in (video_root / f"env_{i:03d}").glob(f"episode_*_{name}.mp4"):
-                    stat = path.stat()
-                    if existing.get(path) != (stat.st_ino, stat.st_mtime_ns):
-                        matches.append(path)
+                for video_path in (video_root / f"env_{i:03d}").glob(
+                    f"episode_*_{name}.mp4"
+                ):
+                    stat = video_path.stat()
+                    if existing.get(video_path) != (stat.st_ino, stat.st_mtime_ns):
+                        matches.append(video_path)
                 if matches:
                     videos.append(str(sorted(matches)[-1].relative_to(output)))
         if args.record_trajectory:

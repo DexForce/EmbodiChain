@@ -19,6 +19,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
+from collections.abc import Mapping
 import hashlib
 import math
 import torch
@@ -124,7 +125,10 @@ class GraspGeometryConstraint:
             )
 
     def accepts(
-        self, poses: torch.Tensor, object_pose: torch.Tensor, model: Any
+        self,
+        poses: torch.Tensor,
+        object_pose: torch.Tensor,
+        model: Mapping[str, object],
     ) -> torch.Tensor:
         """Apply original region/release arithmetic to candidate world poses.
 
@@ -143,13 +147,13 @@ class GraspGeometryConstraint:
                 relative[:, :3, 3] @ poses.new_tensor(self.local_axis)
             ) > self.midpoint
         if self.release_pose is not None:
-            if model.model_id != self.model_id:
+            if model["model_id"] != self.model_id:
                 raise ValueError(
                     "Grasp release envelope model differs from its declaration."
                 )
             reserve = self.hand_envelope
             final = poses.new_tensor(self.release_pose).reshape(4, 4) @ relative
-            opening = float(model.max_opening_width)
+            opening = float(model["max_opening_width"])
             corners = poses.new_tensor(
                 [
                     [side * opening + dx, dy, dz]
@@ -185,8 +189,13 @@ class ConstrainedGraspPoseGenerator(ParallelJawGraspPoseGenerator):
             raise TypeError(
                 "Constrained sampling requires a parallel-jaw provider and typed constraint."
             )
-        super().__init__(delegate.gripper_model)
+        super().__init__(**delegate.gripper_data)
         self._delegate, self.constraint = delegate, constraint
+
+    @property
+    def paired_query_key(self) -> object:
+        """Preserve the identity of the provider owning both paired roles."""
+        return self._delegate.paired_query_key
 
     def _geometry(self, vertices, triangles):
         if (
@@ -226,10 +235,10 @@ class ConstrainedGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                 mesh_vertices,
                 poses[row : row + 1],
                 object_poses[row].to(poses),
-                self.gripper_model.max_opening_width,
+                self.max_opening_width,
             )[0]
             accepted[row] &= self.constraint.accepts(
-                poses[row : row + 1], object_poses[row].to(poses), self.gripper_model
+                poses[row : row + 1], object_poses[row].to(poses), self.gripper_data
             )[0]
         return accepted
 
@@ -294,10 +303,10 @@ class ConstrainedGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                 mesh_vertices,
                 poses,
                 obj_poses[row].to(poses),
-                self.gripper_model.max_opening_width,
+                self.max_opening_width,
             )
             accepted &= self.constraint.accepts(
-                poses, obj_poses[row].to(poses), self.gripper_model
+                poses, obj_poses[row].to(poses), self.gripper_data
             )
             if accepted.any():
                 filtered.append((poses[accepted].clone(), costs[accepted].clone()))
