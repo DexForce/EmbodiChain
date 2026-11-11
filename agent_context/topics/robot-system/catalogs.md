@@ -53,10 +53,13 @@ conversion remains tool-owned and does not select a robot class. PGI fixtures
 remain example/benchmark-owned. Root public class exports remain available.
 
 The `dual_franka_robotiq_arg2f_140` and `dual_ur10_robotiq_arg2f_140`
-embodiment components retain their explicit arm/tool assembly, complete hand
-joints and calibrated TCPs. Their skill profiles declare hand topology and
-GraspKit search settings. Scene placement and operation-specific physical
-overrides remain deployment inputs.
+embodiment components retain their frozen arm/tool calibration. Their separate
+`*_gensim` components select GenSim drive and grasp-search values; the Franka
+variant also selects its arm mounts, ready pose and FEP IK. Gripper bindings
+provide the complete hand joints and calibrated TCPs, while the skill profiles
+keep explicit hand geometry and search settings. The `repeated_pick_place`
+deployments place each variant in its workcell without changing the base
+components.
 
 `resolve_robot_cfg(..., variant=...)` selects a declared profile's defaults
 between catalog defaults and caller overrides. Omitting the variant keeps
