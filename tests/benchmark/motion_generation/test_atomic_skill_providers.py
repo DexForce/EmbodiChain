@@ -1311,10 +1311,18 @@ def test_door_approach_uses_mesh_device_for_axis_and_origin(device):
     assert torch.allclose(actual, torch.tensor([0.0, -1.0, 0.0], device=device))
 
 
-@pytest.mark.parametrize("early_filter", [False, True])
-@pytest.mark.parametrize("skill_id,waypoint_count", [("pour", 5), ("axis_align", 4)])
+@pytest.mark.parametrize(
+    "skill_id,waypoint_count,early_filter,approach_search",
+    [
+        ("pour", 5, False, False),
+        ("pour", 5, True, False),
+        ("pour", 5, True, True),
+        ("axis_align", 4, False, False),
+        ("axis_align", 4, True, False),
+    ],
+)
 def test_object_rotation_providers_screen_every_pose_row(
-    monkeypatch, skill_id, waypoint_count, early_filter
+    monkeypatch, skill_id, waypoint_count, early_filter, approach_search
 ):
     """Freeze independently feasible row grasps and match their reference chains."""
     from types import MethodType
@@ -1454,10 +1462,10 @@ def test_object_rotation_providers_screen_every_pose_row(
     }
     if early_filter:
         config["grasp_filter_before_ranking"] = True
-        if skill_id == "pour":
-            config["grasp_approach_candidates"] = [
-                {"yaw_offset_rad": 0.0, "max_candidates": 2}
-            ]
+    if approach_search:
+        config["grasp_approach_candidates"] = [
+            {"yaw_offset_rad": 0.0, "max_candidates": 2}
+        ]
     case = create_atomic_skill_provider(skill_id).generate_case(
         scenario,
         SimpleNamespace(
@@ -1501,7 +1509,7 @@ def test_object_rotation_providers_screen_every_pose_row(
         case.case_parameters.get("grasp_filter_before_ranking", False) is early_filter
     )
 
-    if early_filter and skill_id == "pour":
+    if approach_search:
         assert (
             case.case_parameters["approach_realisation"]["total_candidate_allocation"]
             == 2

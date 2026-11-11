@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_franka_robotiq_spatial_generalization
-suite_version: atomic_franka_robotiq_spatial_generalization_v13
+suite_version: atomic_franka_robotiq_spatial_generalization_v14
 profile: coverage
 
 # Reusable strict-spatial domain definitions. Every track below selects only
@@ -755,6 +755,7 @@ x-skill-pour: &skill_pour
   grasp_sample_count: 10000
   grasp_max_candidates: 128
   grasp_alignment_max_angle_deg: 10.0
+  grasp_filter_before_ranking: true
   cases:
     - name: spatial_cube_pour_30deg
       object: cube_50mm

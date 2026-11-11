@@ -166,6 +166,13 @@ its smallest accepted declared offset in `alignment_offset_m`, with rejected
 attempts in `alignment_realisation`, before any planner is evaluated. Endpoint
 IK does not certify a collision-free trajectory or physical success.
 
+Spatial Pour enables `grasp_filter_before_ranking` so its existing 10-degree
+approach constraint applies before grasp NMS and candidate truncation. Under
+yaw perturbations the former Robotiq pool can yield no complete-chain witness
+for a row that the PGI pool qualifies. The revised pool retains
+the same approach direction, 10,000 samples, 128-candidate budget and seeded
+object population; its changed selection law requires fresh manifests.
+
 PushObject uses a contact point 5 mm above the cube centre to accommodate the
 closed Robotiq finger-pad geometry. The minimum authored 40 mm cube retains over
 1.8 mm ground clearance even with zero rest-offset allowance. The nominal 50 mm

@@ -227,7 +227,7 @@ def test_spatial_generalization_suite_covers_task_level_single_arm_skills() -> N
         ),
     }
 
-    assert suite.suite_version == "atomic_franka_robotiq_spatial_generalization_v13"
+    assert suite.suite_version == "atomic_franka_robotiq_spatial_generalization_v14"
     assert len(suite.evaluation_tracks()) == 79
     assert set(expected) == {track.id for track in suite.tracks}
     for track in suite.tracks:
