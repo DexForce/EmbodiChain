@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_franka_robotiq_door_pour_align_push
-suite_version: atomic_franka_robotiq_door_pour_align_push_v5
+suite_version: atomic_franka_robotiq_door_pour_align_push_v6
 profile: smoke
 
 # OpenDoor, Pour, AxisAlign and PushObject on the Franka + Robotiq 2F-140 embodiment.
@@ -126,6 +126,8 @@ tracks:
             - name: microwave_door_90deg
               task_difficulty: hard
               open_angle_rad: 1.5708
+              # Preserve the full opening arc; the longer hand needs a shorter release retreat.
+              retract_distance_m: 0.05
         - id: pour
           sample_count: 80
           pick_sample_count: 120

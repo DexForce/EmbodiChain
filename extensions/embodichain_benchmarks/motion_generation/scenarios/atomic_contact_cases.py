@@ -143,6 +143,20 @@ class PressCases(AtomicSkillCaseProvider):
                 "Press articulation geometry did not resolve a contact point."
             )
         press_axis = affordance.press_axis.detach().cpu().tolist()
+        press_surface_position = list(affordance.press_position)
+        # Signed surface-to-TCP distance along the resolved local press axis.
+        # Omission retains the existing contact pose for other embodiments.
+        press_tcp_offset = float(config.get("press_tcp_offset_m", 0.0))
+        if not math.isfinite(press_tcp_offset):
+            raise ValueError("press_tcp_offset_m must be finite.")
+        local_axis = torch.nn.functional.normalize(affordance.press_axis, dim=0)
+        affordance.press_position = tuple(
+            float(value)
+            for value in (
+                torch.tensor(press_surface_position, device=local_axis.device)
+                + local_axis * press_tcp_offset
+            )
+        )
         press_position = list(affordance.press_position)
         options = PressOptions(
             hand_interp_steps=int(config.get("hand_interp_steps", 8)),
@@ -195,6 +209,8 @@ class PressCases(AtomicSkillCaseProvider):
                 "press_target_pose": target_pose.detach().cpu().tolist(),
                 "press_axis": press_axis,
                 "press_position": press_position,
+                "press_surface_position": press_surface_position,
+                "press_tcp_offset_m": press_tcp_offset,
                 "hand_interp_steps": options.hand_interp_steps,
                 "approach_distance_m": options.approach_distance,
                 "press_distance_m": options.press_distance,

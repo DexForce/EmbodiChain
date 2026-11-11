@@ -915,7 +915,7 @@ def _fake_articulation_geometry(*, joint_type: str) -> dict[str, torch.Tensor]:
 def test_atomic_suite_is_franka_robotiq_and_curobo_only():
     suite = load_suite("atomic_franka_robotiq_smoke")
 
-    assert suite.suite_version == "atomic_franka_robotiq_smoke_v6"
+    assert suite.suite_version == "atomic_franka_robotiq_smoke_v7"
     assert suite.robot.id == "franka_robotiq"
     assert suite.robot.provider == "franka_robotiq"
     assert [spec.id for spec in suite.planners if spec.enabled] == ["curobo"]
@@ -946,7 +946,7 @@ def test_atomic_suite_is_franka_robotiq_and_curobo_only():
         "sample_count": 256,
         "hand_interp_steps": 12,
         "approach_distance_m": 0.12,
-        "press_distance_m": 0.03,
+        "press_distance_m": 0.006,
     }
     assert {
         key: skills_by_id["slide"][key]
@@ -1047,7 +1047,7 @@ def test_randomized_atomic_suite_covers_four_interaction_skills_with_fixed_seed_
     suite = load_suite("atomic_franka_robotiq_randomized")
     track = suite.enabled_tracks()[0]
 
-    assert suite.suite_version == "atomic_franka_robotiq_randomized_v4"
+    assert suite.suite_version == "atomic_franka_robotiq_randomized_v5"
     assert track.id == "atomic-skill-randomized"
     assert track.config["seeds"] == list(range(101, 117))
     assert [item["id"] for item in track.config["skills"]] == [
@@ -1424,6 +1424,22 @@ def test_atomic_cube_uses_current_rigid_object_physics_api():
             4,
         ),
         (
+            "press",
+            {
+                "name": "calibrated_microwave_start_button",
+                "sample_count": 256,
+                "hand_interp_steps": 12,
+                "approach_distance_m": 0.12,
+                "press_distance_m": 0.006,
+                "press_tcp_offset_m": -0.02316,
+                "articulation": "microwave",
+                "target_link": "button_link",
+                "target_joint": "button_joint",
+            },
+            "prismatic",
+            4,
+        ),
+        (
             "slide",
             {
                 "name": "drawer_pull",
@@ -1475,6 +1491,11 @@ def test_new_atomic_skill_cases_freeze_reference_waypoints(
     entity.get_qpos_limits.return_value = torch.tensor([[[0.0, 0.006]]])
     articulation_dof = 4 if config["articulation"] == "microwave" else 1
     articulation_pose = torch.eye(4).repeat(batch_size, 1, 1)
+    if config.get("press_tcp_offset_m") is not None:
+        rotations = torch.zeros(batch_size, 3)
+        rotations[:, 0] = torch.linspace(-0.4, 0.4, batch_size)
+        articulation_pose[:, :3, :3] = axis_angle_to_rotation_matrix(rotations)
+        articulation_pose[:, :3, 3] = torch.linspace(-0.03, 0.03, batch_size)[:, None]
     articulation_qpos = torch.zeros(batch_size, articulation_dof)
     entity.get_qpos.return_value = articulation_qpos
     handle = Mock(
@@ -1531,6 +1552,29 @@ def test_new_atomic_skill_cases_freeze_reference_waypoints(
     assert torch.isfinite(case.target_waypoints).all()
     assert case.case_parameters["sample_count"] == config["sample_count"]
     assert case.case_parameters["hand_interp_steps"] == config["hand_interp_steps"]
+    if skill_id == "press":
+        # The fake button's outward surface is z=-.01; its press axis is +Z.
+        expected_position = [0.0, 0.0, -0.01 + config.get("press_tcp_offset_m", 0.0)]
+        assert case.case_parameters["press_position"] == pytest.approx(
+            expected_position
+        )
+        assert case.case_parameters["press_surface_position"] == pytest.approx(
+            [0.0, 0.0, -0.01]
+        )
+        torch.testing.assert_close(
+            case.target_waypoints[:, 1, :3, 3],
+            (articulation_pose[:, :3, :3] @ torch.tensor(expected_position))
+            + articulation_pose[:, :3, 3],
+        )
+        torch.testing.assert_close(
+            case.target_waypoints[:, 2, :3, 3] - case.target_waypoints[:, 1, :3, 3],
+            articulation_pose[:, :3, 2] * config["press_distance_m"],
+        )
+        create_atomic_skill_provider(skill_id).build_invocation(scenario, case, Mock())
+        goal = scenario.require_engine.return_value.make_invocation.call_args.args[1]
+        assert goal.semantics.affordance.press_position == pytest.approx(
+            expected_position
+        )
     assert case.object_id == config["articulation"]
     assert case.case_parameters["target_link"] == config["target_link"]
     assert case.case_parameters["target_joint"] == config["target_joint"]

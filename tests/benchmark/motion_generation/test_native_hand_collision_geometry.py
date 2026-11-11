@@ -317,3 +317,77 @@ def test_robotiq_push_targets_clear_ground_with_closed_native_geometry(suite_nam
                 )
                 clearance = cube_face - (slab @ direction).amax()
                 assert 0.0015 <= float(clearance) <= 0.003
+
+
+@pytest.mark.parametrize(
+    "suite_name",
+    [
+        "atomic_franka_robotiq_smoke",
+        "atomic_franka_robotiq_pose_batch",
+        "atomic_franka_robotiq_randomized",
+        "atomic_franka_robotiq_spatial_generalization",
+    ],
+)
+def test_robotiq_press_calibrates_closed_pads_to_button_surface(suite_name):
+    """Surface contact and the native button stroke must clear the fixed panel."""
+    from copy import deepcopy
+    from xml.etree import ElementTree
+
+    from embodichain.lab.sim.utility.gripper_geometry import (
+        build_gripper_collision_geometry,
+    )
+    from embodichain_benchmarks.motion_generation.config import load_suite
+    from embodichain_benchmarks.motion_generation.registry import create_robot_provider
+    from embodichain_benchmarks.motion_generation import robots as _robots
+
+    suite = load_suite(suite_name)
+    track = next(
+        track
+        for track in suite.tracks
+        if any(skill["id"] == "press" for skill in track.config["skills"])
+    )
+    skill = next(skill for skill in track.config["skills"] if skill["id"] == "press")
+    cfg = create_robot_provider(suite.robot).build_cfg()
+    model = deepcopy(resolve_gripper_defaults(track.config["grasp_model"]))
+    model["joint_commands"]["open"] = dict(
+        zip(
+            cfg.control_parts["eef"], track.config["gripper"]["grasp_qpos"], strict=True
+        )
+    )
+    geometry = build_gripper_collision_geometry(
+        model, root_from_tcp=cfg.solver_cfg["arm"].tcp, point_spacing=0.003
+    )
+    # Meshes are in canonical contact coordinates; read their actual forward
+    # extent in solver TCP coordinates, independently of the declared offset.
+    contact_from_tcp = np.asarray(geometry.provenance["grasp_from_tcp"])
+    tcp_points = (geometry.points.numpy() - contact_from_tcp[:3, 3]) @ contact_from_tcp[
+        :3, :3
+    ]
+    forward_extent = float(tcp_points[:, 2].max())
+    assert forward_extent + skill["press_tcp_offset_m"] == pytest.approx(0.0, abs=1e-6)
+
+    microwave = ElementTree.parse(get_data_path("Microwave/microwave.urdf")).getroot()
+    button_joint = microwave.find("joint[@name='button_joint']")
+    stroke = float(button_joint.find("limit").get("upper"))
+    assert skill["press_distance_m"] == pytest.approx(stroke)
+
+    button_collision = microwave.find("link[@name='button_link']/collision")
+    button_center = np.fromstring(button_collision.find("origin").get("xyz"), sep=" ")
+    button_length = float(button_collision.find("geometry/cylinder").get("length"))
+    button_origin = np.fromstring(button_joint.find("origin").get("xyz"), sep=" ")
+    button_front = button_origin[1] + button_center[1] - button_length / 2
+    panel = microwave.find(
+        "link[@name='body_link']/collision[@name='right_electronics']"
+    )
+    panel_center = np.fromstring(panel.find("origin").get("xyz"), sep=" ")
+    panel_size = np.fromstring(panel.find("geometry/box").get("size"), sep=" ")
+    panel_front = panel_center[1] - panel_size[1] / 2
+    # TCP +Z follows microwave-local +Y. Every closed-hand surface remains
+    # outside the fixed panel even at the full six-millimetre button stroke.
+    terminal_forward_surface = (
+        button_front
+        + skill["press_tcp_offset_m"]
+        + skill["press_distance_m"]
+        + forward_extent
+    )
+    assert panel_front - terminal_forward_surface > 0.03

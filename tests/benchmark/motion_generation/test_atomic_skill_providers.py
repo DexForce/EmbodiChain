@@ -1633,3 +1633,131 @@ def test_robotiq_axis_align_inward_search_restores_franka_edge_reachability() ->
                     atol=2e-5,
                     rtol=0,
                 )
+
+
+def test_robotiq_door_full_opening_retains_reachable_release_retreat() -> None:
+    """A frozen native handle grasp reaches 90 degrees with the shorter retreat."""
+    from embodichain.lab.sim.atomic_skills import OpenDoorOptions
+    from embodichain.robot_registry import resolve_gripper_defaults
+    from embodichain_benchmarks.motion_generation._atomic_fixtures import (
+        _create_franka_pgi_cfg,
+        _create_franka_robotiq_cfg,
+    )
+
+    for suite_name in (
+        "atomic_franka_robotiq_door_pour_align_push",
+        "atomic_franka_robotiq_spatial_generalization",
+    ):
+        suite = load_suite(suite_name)
+        skill = next(
+            skill
+            for track in suite.tracks
+            for skill in track.config["skills"]
+            if skill["id"] == "open_door"
+        )
+        case = next(case for case in skill["cases"] if case["name"].endswith("90deg"))
+        assert case["open_angle_rad"] == pytest.approx(math.pi / 2, abs=4e-6)
+        assert case["retract_distance_m"] == 0.05
+
+    # Frozen seed-11 native grasp, original microwave placement and measured arm
+    # state. Only the mesh centroid enters the approach tangent; preserve that
+    # centroid in a small triangle instead of copying the complete handle mesh.
+    centre = torch.tensor([3.63577e-6, 0.02924815, -3.57606e-5])
+    affordance = OpenDoorAffordance(
+        mesh_vertices=centre
+        + torch.tensor(
+            [[-0.001, -0.001, 0.0], [0.001, -0.001, 0.0], [0.0, 0.002, 0.0]]
+        ),
+        mesh_triangles=torch.tensor([[0, 1, 2]]),
+        rotation_axis=torch.tensor([0.0, 0.0, -1.0]),
+        axis_origin=(-0.367, 0.069, -0.001),
+        joint_name="door_hinge",
+        joint_limits=(0.0, 1.91986215),
+    )
+    link_pose = torch.tensor(
+        [
+            [
+                [0.0, -1.0, 0.0, -0.739],
+                [1.0, 0.0, 0.0, 0.228],
+                [0.0, 0.0, 1.0, 0.551],
+                [0.0, 0.0, 0.0, 1.0],
+            ]
+        ]
+    )
+    robotiq_grasp = torch.tensor(
+        [
+            [
+                [-0.09863508, -0.01445477, -0.99501872, -0.74964237],
+                [-0.98602945, -0.13345146, 0.09968267, 0.22906944],
+                [-0.13422759, 0.99094993, -0.00108983, 0.54902762],
+                [0.0, 0.0, 0.0, 1.0],
+            ]
+        ]
+    )
+    start = torch.tensor([[0.0001, -0.5681, 0.0001, -2.8116, -0.0001, 3.0368, 0.741]])
+    world_from_base = torch.diag(torch.tensor([-1.0, -1.0, 1.0, 1.0]))
+    robotiq_cfg = _create_franka_robotiq_cfg({})
+    world_from_contact = (
+        robotiq_grasp
+        @ pose_inv(torch.tensor(robotiq_cfg.solver_cfg["arm"].tcp))
+        @ torch.tensor(
+            resolve_gripper_defaults("RobotiqArg2F140")["root_from_contact_frame"]
+        )
+    )
+    for catalog, factory, retreats in (
+        ("DHPGI14080", _create_franka_pgi_cfg, (0.1,)),
+        (
+            "RobotiqArg2F140",
+            _create_franka_robotiq_cfg,
+            (0.1, case["retract_distance_m"]),
+        ),
+    ):
+        cfg = factory({})
+        solver_cfg = cfg.solver_cfg["arm"]
+        solver_cfg.urdf_path = cfg._pk_urdf_path
+        solver_cfg.joint_names = cfg.control_parts["arm"]
+        solver = solver_cfg.init_solver(device=CPU)
+        grasp = (
+            world_from_contact
+            @ pose_inv(
+                torch.tensor(
+                    resolve_gripper_defaults(catalog)["root_from_contact_frame"]
+                )
+            )
+            @ torch.tensor(solver_cfg.tcp)
+        )
+        original = None
+        for retreat in retreats:
+            poses = providers._door_poses(
+                link_pose,
+                grasp,
+                affordance,
+                torch.tensor([case["open_angle_rad"]]),
+                OpenDoorOptions(
+                    door_waypoint_count=20,
+                    approach_distance=0.1,
+                    retract_distance=retreat,
+                ),
+            )
+            if original is not None:
+                torch.testing.assert_close(poses[:, :-1], original[:, :-1])
+            original = poses
+            joints = start.clone()
+            successes = []
+            for target in poses.unbind(dim=1):
+                success, solved = solver.get_ik(
+                    world_from_base @ target, qpos_seed=joints
+                )
+                successes.append(bool(success.item()))
+                if bool(success.item()):
+                    joints = solved
+                    torch.testing.assert_close(
+                        world_from_base @ solver.get_fk(joints),
+                        target,
+                        atol=2e-5,
+                        rtol=0,
+                    )
+            expected = [True] * 23
+            if catalog == "RobotiqArg2F140" and retreat == 0.1:
+                expected[-1] = False
+            assert successes == expected

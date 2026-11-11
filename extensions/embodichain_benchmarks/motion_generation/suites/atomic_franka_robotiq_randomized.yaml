@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_franka_robotiq_randomized
-suite_version: atomic_franka_robotiq_randomized_v4
+suite_version: atomic_franka_robotiq_randomized_v5
 profile: coverage
 
 robot:
@@ -165,7 +165,9 @@ tracks:
           sample_count: 256
           hand_interp_steps: 12
           approach_distance_m: 0.12
-          press_distance_m: 0.03
+          # Closed native pads project 23.16 mm ahead of the solver TCP.
+          press_tcp_offset_m: -0.02316
+          press_distance_m: 0.006
           articulation: microwave
           target_link: button_link
           target_joint: button_joint

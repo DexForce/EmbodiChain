@@ -156,7 +156,8 @@ single-arm and placement fixtures use the mounted Robotiq TCP rotation and
 TCP after this change. Handover retains its separately calibrated 0.20 m TCP
 and limited closure described below.
 
-The Robotiq TCP is 6 cm longer than the former single-arm PGI TCP. The
+The Robotiq TCP is 6 cm longer than the former nominal 0.15 m PGI TCP
+(4 cm longer than the randomized suite's 0.17 m TCP). The
 AxisAlign suites try the original object-centre goal first, then inward world-XY
 translations of 2.5, 5, 7.5 and 10 cm toward the arm base when the declared grasp
 pool has no independently solved full endpoint chain. The target axis and grasp
@@ -171,6 +172,22 @@ closed Robotiq finger-pad geometry. The minimum authored 40 mm cube retains over
 cube's lateral and toward-base contact distances are 40.5 and 48 mm, respectively,
 leaving about 2 mm between its face and the closed finger surfaces at approach.
 The two calibrated suites have new versions and require fresh frozen manifests.
+
+Press places the closed Robotiq fingertips at the sampled button surface with
+`press_tcp_offset_m: -0.02316`, measured along the local press axis from surface
+to TCP. Its 6 mm travel matches the microwave button's joint stroke, leaving
+35 mm to the fixed electronics panel at the terminal pose. The frozen case
+records both the sampled surface point and calibrated TCP contact point, so
+replay uses the same calibration under articulation rotations. All four Press
+suites have new versions and require fresh manifests. This geometric check
+does not establish measured button actuation or trajectory tracking.
+
+The 90-degree OpenDoor cases retain their full opening arc and use a 5 cm
+release retreat. With the longer TCP, the nominal grasp pool yields no complete
+IK chain for the former 10 cm retreat, although the opening arc is solved.
+The shorter retreat passes the complete
+endpoint chain; native open-hand surface probes also clear the opened handle
+and door. These checks do not certify continuous motion or physical opening.
 
 The native Franka hand remains available
 for custom robot configurations; packaged Franka Atomic suites use Robotiq.
@@ -565,6 +582,11 @@ provider source. Changed robot configuration or embodiment overrides are rejecte
 before simulation even when the public name and DOF match. Declared performance
 subsets and batch sizes retain that identity without regenerating tasks; keep
 timing replicas separate from quality denominators.
+
+Provider-backed identities also include provider-declared effective defaults.
+In particular, an omitted dual-Franka hand selector resolves to Robotiq before
+hashing, so custom suites cannot reuse former implicit-PGI manifests with the
+same raw configuration. Regenerate those manifests after the migration.
 
 Omitting `sampling_method` retains the legacy `joint_templates` population.
 Its L/S/wrist templates describe joint displacements; those labels do not certify
