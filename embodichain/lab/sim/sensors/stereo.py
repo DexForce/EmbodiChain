@@ -202,6 +202,9 @@ class StereoCamera(Camera):
         self._create_camera_views(config, (config.intrinsics, config.intrinsics_right))
         left_list = [h.native for h in self._camera_handles[: self.num_instances]]
         right_list = [h.native for h in self._camera_handles[self.num_instances :]]
+        self._configure_visual_overlays(
+            left_list + right_list, config.include_visual_overlays
+        )
         for i in range(self.num_instances):
             self._entities[i] = PairCameraView(
                 left_list[i],
