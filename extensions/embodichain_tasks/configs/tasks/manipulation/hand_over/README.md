@@ -8,6 +8,7 @@ embodiment, Task Program integration and verified motion policy.
 | --- | --- | --- |
 | dual_ur5_dh_pgi_140_80 | `task.dual_ur5_dh_pgi_140_80.yaml` | Existing dual-UR5 scene |
 | tianji_marvin | `task.tianji_marvin.yaml` | 750 mm tabletop in front of Marvin |
+| dual_franka_robotiq_arg2f_140 | `task.dual_franka_robotiq_arg2f_140.yaml` | Upright can and 500 mm support |
 
 ## Tianji Marvin
 
@@ -38,3 +39,25 @@ constraint evidence. Sensor-enabled runs expose the robot preset's
 These use D405-equivalent nominal optics and mesh-estimated mounts, not
 hardware calibration. Use `--disable-sensor` to skip camera acquisition;
 `--filter-dataset-saving` disables training-data recording independently.
+
+## Dual Panda and ARG2F-140
+
+`task.dual_franka_robotiq_arg2f_140.yaml` qualifies the ARG2F-140 HandOver variant
+against an upright, uniformly scaled can and a 50 cm support surface. It selects
+explicit left/right participants, uses 40-step hand transitions and a compatible
+280-sample motion budget, and retains the original source hand configuration.
+
+The final target is a release pose. `delivery_rest_pose` accounts for the can's
+source mesh height after release onto the support. Acceptance requires a settled
+can within 4 cm of that rest position and its local Y axis aligned with world Z
+for at least half a second. The can's source longitudinal axis is Y, so a generic
+local-Z upright validator would measure the wrong axis.
+
+Use the corresponding deployment rather than substituting this embodiment into
+Marvin's tabletop scene/integration. Its stretched can, pickup stand and fixed
+handover target describe a different physical setup. Capability-contract
+compatibility alone does not qualify that setup for another robot.
+
+The checked path includes expert execution, semantic effect gates, final physical
+acceptance and dynamic action replay. The hardware, contact/TCP calibration and
+closure commands remain owned by the selected embodiment/gripper configuration.

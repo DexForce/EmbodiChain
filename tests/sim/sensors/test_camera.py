@@ -17,6 +17,9 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
+import subprocess
+import sys
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -36,7 +39,7 @@ from embodichain.lab.sim.sensors import (
 )
 from embodichain.lab.sim.sensors.stereo import PairCameraView
 from embodichain.lab.sim.objects import Articulation
-from embodichain.lab.sim.cfg import ArticulationCfg, RenderCfg
+from embodichain.lab.sim.cfg import ArticulationCfg, DenoisingCfg, RenderCfg
 from embodichain.data import get_data_path
 from scripts.tutorials.sim.create_sensor import create_sensor as create_tutorial_sensor
 
@@ -403,3 +406,381 @@ def test_camera_detaches_all_views_before_parent_removal(stereo: bool) -> None:
     assert not camera.is_attached
     for view in views:
         view.get_node.return_value.detach_parent.assert_called_once_with()
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("stereo", [False, True])
+@pytest.mark.parametrize("input_device", ["cpu", "cuda:0"])
+def test_camera_native_batch_selection_reset_and_owned_reads(stereo, input_device):
+    """Public methods preserve selected rows, stereo calibration and snapshots."""
+    import math
+    from embodichain.lab.sim.cfg import DenoisingCfg
+
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            num_envs=3,
+            device="cuda:0",
+            render_cfg=RenderCfg(
+                renderer="hybrid",
+                denoising=DenoisingCfg(window="optix", offscreen="optix"),
+            ),
+        )
+    )
+    try:
+        cfg_type = StereoCameraCfg if stereo else CameraCfg
+        cfg = cfg_type(
+            uid="batch_camera", width=32, height=32, intrinsics=(40, 42, 16, 15)
+        )
+        camera = sim.add_sensor(cfg)
+        assert not sim._spawn_scene.builder.is_finalized
+        sim.prepare()
+        initial = torch.eye(4, device=sim.device).repeat(3, 1, 1)
+        initial[:, 2, 3] = 2
+        camera.set_local_pose(initial)
+        snapshot = camera.get_local_pose(to_matrix=True)
+        rows = torch.tensor([2, 0], device=input_device)
+        angle = 0.37
+        quaternion = [0, 0, math.sin(angle / 2), math.cos(angle / 2)]
+        values = torch.tensor(
+            [[0.2, 0.1, 3, *quaternion], [-0.2, 0, 4, *quaternion]], device=input_device
+        )
+        camera.set_local_pose(values, env_ids=rows)
+        expected = initial.clone()
+        rotation = torch.tensor(
+            [
+                [math.cos(angle), -math.sin(angle), 0],
+                [math.sin(angle), math.cos(angle), 0],
+                [0, 0, 1],
+            ],
+            device=sim.device,
+        )
+        expected[[2, 0], :3, :3] = rotation
+        expected[[2, 0], :3, 3] = values[:, :3].to(sim.device)
+        torch.testing.assert_close(camera.get_local_pose(to_matrix=True), expected)
+        torch.testing.assert_close(camera.get_arena_pose(to_matrix=True), expected)
+        torch.testing.assert_close(snapshot, initial)
+        left = torch.tensor(
+            [[50.0, 54.0, 14.0, 13.0], [60.0, 64.0, 15.0, 12.0]], device=input_device
+        )
+        if stereo:
+            right = torch.tensor(
+                [[70.0, 0, 12], [0, 72.0, 11], [0, 0, 1]], device=input_device
+            )
+            camera.set_intrinsics(left, right_intrinsics=right, env_ids=rows)
+            left_k, right_k = camera.get_intrinsics()
+            torch.testing.assert_close(
+                right_k[[2, 0]], right.to(sim.device).expand(2, 3, 3)
+            )
+            before = (left_k.clone(), right_k.clone())
+            bad_right = right.clone()
+            bad_right[0, 0] = 0
+            with pytest.raises(ValueError):
+                camera.set_intrinsics(left, right_intrinsics=bad_right, env_ids=rows)
+            for actual, saved in zip(camera.get_intrinsics(), before):
+                torch.testing.assert_close(actual, saved)
+        else:
+            camera.set_intrinsics(left, env_ids=rows)
+            left_k = camera.get_intrinsics()
+        torch.testing.assert_close(left_k[[2, 0], 0, 0], left[:, 0].to(sim.device))
+        assert left_k[1, 0, 0] == 40
+        camera.set_local_pose(
+            torch.empty((0, 7), device=input_device), env_ids=rows[:0]
+        )
+        camera.set_intrinsics(left[:0], env_ids=rows[:0])
+        camera.reset(env_ids=rows)
+        restored = camera.get_local_pose(to_matrix=True)
+        torch.testing.assert_close(restored[1], initial[1])
+        optical_to_gl = torch.diag(
+            torch.tensor([1.0, -1.0, -1.0, 1.0], device=sim.device)
+        )
+        torch.testing.assert_close(restored[[2, 0]], optical_to_gl.expand(2, 4, 4))
+        current_k = camera.get_intrinsics()[0] if stereo else camera.get_intrinsics()
+        torch.testing.assert_close(current_k, left_k)
+        camera.set_intrinsics(
+            torch.tensor([40.0, 42.0, 16.0, 15.0], device=input_device)
+        )
+        for selection, expected_focal in (
+            ([1, 1], [40.0, 60.0, 40.0]),
+            ([-1, 0], [60.0, 60.0, 50.0]),
+        ):
+            camera.set_intrinsics(
+                left, env_ids=torch.tensor(selection, device=input_device)
+            )
+            matrices = camera.get_intrinsics()
+            for matrix in matrices if stereo else (matrices,):
+                torch.testing.assert_close(
+                    matrix[:, 0, 0], torch.tensor(expected_focal, device=sim.device)
+                )
+    finally:
+        sim.destroy()
+        SimulationManager.flush_cleanup_queue()
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("stereo", [False, True])
+def test_batched_camera_depth_matches_known_geometry(stereo):
+    """Rendered depth proves the applied pose/K reach the image consumer."""
+    from embodichain.lab.sim.cfg import DenoisingCfg, VisualObjectCfg
+    from embodichain.lab.sim.shapes import CubeCfg
+
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            device="cuda:0",
+            render_cfg=RenderCfg(
+                renderer="hybrid",
+                denoising=DenoisingCfg(window="optix", offscreen="optix"),
+            ),
+        )
+    )
+    try:
+        sim.add_visual_object(
+            VisualObjectCfg(
+                uid="depth_target", shape=CubeCfg(size=(2, 2, 0.2)), init_pos=(0, 0, 1)
+            )
+        )
+        cfg_type = StereoCameraCfg if stereo else CameraCfg
+        cfg = cfg_type(
+            uid="depth_camera",
+            width=32,
+            height=32,
+            intrinsics=(40, 42, 16, 16),
+            enable_depth=True,
+        )
+        if stereo:
+            cfg.intrinsics_right = cfg.intrinsics
+        camera = sim.add_sensor(cfg)
+        sim.prepare()
+        pose = torch.eye(4, device=sim.device).unsqueeze(0)
+        pose[:, 2, 3] = 3
+        camera.set_local_pose(pose)
+        camera.update()
+        # Camera z=3 minus top surface z=1.1 gives 1.9 metres.
+        for key in (("depth", "depth_right") if stereo else ("depth",)):
+            assert camera.get_data()[key][0, 16, 16].item() == pytest.approx(
+                1.9, abs=2e-3
+            )
+        pose[:, 2, 3] = 4
+        camera.set_local_pose(pose)
+        camera.update()
+        for key in (("depth", "depth_right") if stereo else ("depth",)):
+            assert camera.get_data()[key][0, 16, 16].item() == pytest.approx(
+                2.9, abs=2e-3
+            )
+        sim.add_visual_object(
+            VisualObjectCfg(
+                uid="distant_target",
+                shape=CubeCfg(size=(0.1, 0.1, 0.1)),
+                init_pos=(10, 10, -1),
+            )
+        )
+        sim.prepare()
+        camera.set_intrinsics(torch.tensor(cfg.intrinsics, device=sim.device))
+        camera.update()
+        assert camera.get_data()["depth"][0, 16, 16].item() == pytest.approx(
+            2.9, abs=2e-3
+        )
+        sim.remove_asset(camera.uid)
+        with pytest.raises(RuntimeError, match="destroyed"):
+            camera.set_intrinsics(torch.tensor(cfg.intrinsics))
+        # Reusing the shared target name must not revive the old facade.
+        camera = sim.add_sensor(cfg)
+        camera.set_local_pose(pose)
+        camera.update()
+        assert camera.get_data()["depth"][0, 16, 16].item() == pytest.approx(
+            2.9, abs=2e-3
+        )
+    finally:
+        sim.destroy()
+        SimulationManager.flush_cleanup_queue()
+
+
+@pytest.mark.no_sim
+def test_ground_visibility_preflight_and_selected_reset() -> None:
+    """Invalid batches cannot partially change camera policy or enqueue writes."""
+    camera = object.__new__(Camera)
+    owner = MagicMock()
+    owner._GROUND_RENDER_CATEGORY = 1
+    camera._owner_ref = lambda: owner
+    camera._is_destroyed = False
+    camera.num_instances = 4
+    camera._entities = [MagicMock() for _ in range(4)]
+    camera._ground_plane_visibility = [True] * 4
+    camera._capture_metadata = None
+    camera.cfg = CameraCfg()
+    camera._reset_pose = MagicMock()
+    for ids in ([0, 4], [0, 0], [1.5]):
+        with pytest.raises(ValueError):
+            camera.set_ground_plane_visibility(False, ids)
+    for entity in camera._entities:
+        entity.set_excluded_render_categories.assert_not_called()
+    camera.set_ground_plane_visibility(False, torch.tensor([1, 3]))
+    assert camera._ground_plane_visibility == [True, False, True, False]
+    camera.reset([1])
+    assert camera._ground_plane_visibility == [True, True, True, False]
+    assert camera._entities[3].set_excluded_render_categories.call_args.args == (1,)
+    camera._is_destroyed = True
+    with pytest.raises(RuntimeError, match="destroyed"):
+        camera.set_ground_plane_visibility(True)
+
+
+@pytest.mark.no_sim
+def test_ground_visibility_missing_sdk_fails_before_allocating_camera(
+    monkeypatch,
+) -> None:
+    owner = MagicMock(num_envs=4)
+    owner._require_ground_plane_filtering.side_effect = RuntimeError("SDK capability")
+    with pytest.raises(RuntimeError, match="SDK capability"):
+        Camera(CameraCfg(ground_plane_visible=False), owner=owner)
+    owner.get_world.assert_not_called()
+
+
+@pytest.mark.gpu
+@pytest.mark.subprocess_sim
+@pytest.mark.parametrize("renderer", ["fast-rt", "hybrid"])
+def test_parallel_camera_ground_visibility_rgb_depth_reset_and_rebuild(
+    renderer: str,
+) -> None:
+    """Qualify each native renderer in its own process, independent of DLSS."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import runpy, sys; "
+            "runpy.run_path(sys.argv[1])['_run_camera_ground_visibility_case'](sys.argv[2])",
+            str(Path(__file__).resolve()),
+            renderer,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def _run_camera_ground_visibility_case(renderer: str) -> None:
+    """Mixed policies within a group and between cameras preserve one physical floor."""
+    from dexsim.types import Renderer
+    from embodichain.lab.sim.cfg import VisualObjectCfg
+    from embodichain.lab.sim.shapes import CubeCfg
+
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            device="cpu",
+            num_envs=4,
+            # Ground filtering compares raw RGB/depth; NGX availability and
+            # reconstruction at this tiny resolution are separate contracts.
+            render_cfg=RenderCfg(
+                renderer=renderer,
+                denoising=DenoisingCfg(window="off", offscreen="off"),
+            ),
+        )
+    )
+    try:
+        assert (
+            sim.get_world().get_renderer_type()
+            == {
+                "fast-rt": Renderer.FASTRT,
+                "hybrid": Renderer.HYBRID,
+            }[renderer]
+        )
+        sim.add_visual_object(
+            VisualObjectCfg(
+                uid="under_floor",
+                shape=CubeCfg(size=(1, 1, 1)),
+                init_pos=(0, 0, -2),
+            )
+        )
+        cameras = [
+            sim.add_sensor(
+                CameraCfg(
+                    uid=name,
+                    width=32,
+                    height=32,
+                    intrinsics=(28, 28, 16, 16),
+                    enable_depth=True,
+                    ground_plane_visible=visible,
+                    extrinsics=CameraCfg.ExtrinsicsCfg(
+                        eye=(0, 0, 3),
+                        target=(0, 0, 0),
+                        up=(0, 1, 0),
+                    ),
+                )
+            )
+            for name, visible in (("training", False), ("debug", True))
+        ]
+        sim.prepare()
+        sim.enable_physics(False)
+
+        def capture():
+            sim.render_camera_group([camera.group_id for camera in cameras])
+            for camera in cameras:
+                camera.update(fetch_only=True)
+            return [camera.get_data()["depth"][:, 16, 16].clone() for camera in cameras]
+
+        hidden, shown = capture()
+        torch.testing.assert_close(hidden, torch.full((4,), 4.5), atol=0.04, rtol=0)
+        torch.testing.assert_close(shown, torch.full((4,), 3.0), atol=0.04, rtol=0)
+        rgb_hidden = cameras[0].get_data()["color"].clone().float()
+        rgb_shown = cameras[1].get_data()["color"].clone().float()
+        assert (rgb_hidden[..., :3] - rgb_shown[..., :3]).abs().mean() > 1.0
+        floor_desc = sim._default_plane.object_desc
+        assert floor_desc.physics is not None and floor_desc.collisions
+
+        cameras[0].set_ground_plane_visibility(True, [1, 3])
+        mixed, _ = capture()
+        torch.testing.assert_close(
+            mixed, torch.tensor([4.5, 3.0, 4.5, 3.0]), atol=0.04, rtol=0
+        )
+        metadata = cameras[0].get_capture_metadata()
+        assert metadata["ground_plane_visible"] == (False, True, False, True)
+        cameras[0].reset([1])
+        reset, _ = capture()
+        torch.testing.assert_close(
+            reset, torch.tensor([4.5, 4.5, 4.5, 3.0]), atol=0.04, rtol=0
+        )
+        assert metadata["ground_plane_visible"] == (False, True, False, True)
+
+        sim.add_visual_object(
+            VisualObjectCfg(
+                uid="rebuild_trigger",
+                shape=CubeCfg(),
+                init_pos=(5, 0, 2),
+            )
+        )
+        sim.prepare()
+        rebuilt, _ = capture()
+        torch.testing.assert_close(rebuilt, reset, atol=0.04, rtol=0)
+        sim.set_ground_plane_visibility(False)
+        globally_hidden = capture()
+        for depth in globally_hidden:
+            torch.testing.assert_close(depth, torch.full((4,), 4.5), atol=0.04, rtol=0)
+        assert cameras[1].get_capture_metadata()["ground_plane_visible"] == (False,) * 4
+        assert sim._default_plane.object_desc.physics is not None
+    finally:
+        sim.destroy(exit_process=False)
+        SimulationManager.flush_cleanup_queue()
+
+
+@pytest.mark.no_sim
+def test_stereo_ground_exclusion_updates_both_eyes() -> None:
+    left, right = MagicMock(), MagicMock()
+    pair = PairCameraView(left, right, np.eye(4, dtype=np.float32))
+    pair.set_excluded_render_categories(1)
+    left.set_excluded_render_categories.assert_called_once_with(1)
+    right.set_excluded_render_categories.assert_called_once_with(1)
+
+
+@pytest.mark.no_sim
+def test_failed_image_read_invalidates_capture_metadata() -> None:
+    camera = object.__new__(Camera)
+    camera.cfg = CameraCfg()
+    camera._capture_metadata = {"capture_sequence": 1}
+    camera._pending_capture_metadata = {"capture_sequence": 2}
+    camera._frame_buffer = MagicMock()
+    camera._frame_buffer.get_rgb_gpu_buffer.side_effect = RuntimeError("read failed")
+    with pytest.raises(RuntimeError, match="read failed"):
+        camera.update(fetch_only=True)
+    assert camera.get_capture_metadata() is None

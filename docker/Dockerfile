@@ -25,9 +25,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libdbus-1-3 libnss3 libasound2 fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 COPY docker/locks/conda-*.txt /opt/embodichain/locks/
-RUN curl -fL --retry 3 \
+RUN (curl -fL --retry 3 \
     "https://github.com/conda-forge/miniforge/releases/download/${MINIFORGE_VERSION}/Miniforge3-${MINIFORGE_VERSION}-Linux-x86_64.sh" \
     -o /tmp/miniforge.sh \
+    || curl -fL --retry 3 \
+    "https://github.com/conda-forge/miniforge/releases/download/${MINIFORGE_VERSION}/Miniforge3-Linux-x86_64.sh" \
+    -o /tmp/miniforge.sh) \
     && echo "${MINIFORGE_SHA256}  /tmp/miniforge.sh" | sha256sum -c - \
     && bash /tmp/miniforge.sh -b -p /opt/conda && rm /tmp/miniforge.sh \
     && /opt/conda/bin/python -m pip install --no-cache-dir uv==0.12.5 \

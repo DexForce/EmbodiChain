@@ -75,12 +75,18 @@ def _run_scenario(scenario: str, task: str, report: Path) -> None:
     from embodichain.lab.gym.envs.managers.event_manager import EventManager
     from embodichain.lab.gym.envs.managers.record import record_camera_data
     from embodichain.lab.gym.utils.gym_utils import config_to_cfg, get_manager_modules
-    from embodichain.lab.gym.utils.registration import build_env
+    from embodichain.lab.gym.utils.registration import (
+        build_env,
+        discover_task_packages,
+        execute_init_hooks,
+    )
     from embodichain.lab.sim import SimulationManager, cfg as sim_cfg
     from embodichain.lab.sim.sensors import CameraCfg
     from embodichain.learning.rl.runtime import _build_gym_environment
     from embodichain.utils.utility import load_config
 
+    discover_task_packages()
+    execute_init_hooks()
     importlib.import_module(f"embodichain_tasks.locomotion.velocity.{task}")
     sim_cfg.DEFAULT_RENDERER = "auto"
     task_path = Path(

@@ -25,3 +25,4 @@ Official AgileX robot configurations live in the
 
    cobotmagic
    pika
+   cobotmagic_gripper

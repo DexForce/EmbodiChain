@@ -29,6 +29,33 @@ import pytest
 os.environ.setdefault("EMBODICHAIN_SIM_EXIT_PROCESS", "0")
 
 
+@pytest.fixture
+def requires_dexuni_contact_query() -> None:
+    """Require per-row contact quantities while retaining released MJWarp tests."""
+    from dexsim.scene import ContactBuffer
+
+    if not hasattr(ContactBuffer, "impulse_valid"):
+        pytest.skip("DexUni contacts require per-row quantity validity.")
+
+
+@pytest.fixture
+def requires_particle_contact_material() -> None:
+    """Require the native per-object material descriptor."""
+    import dexsim.spawn
+
+    if not hasattr(dexsim.spawn, "NewtonParticleContactMaterialDesc"):
+        pytest.skip("Per-object particle materials require a supporting DexSim build.")
+
+
+@pytest.fixture
+def requires_dexuni_two_way() -> None:
+    """Qualify dev-only contracts without excluding released-engine coverage."""
+    from dexsim.engine.newton_physics import DexUniSolverCfg
+
+    if "coupling" not in inspect.signature(DexUniSolverCfg).parameters:
+        pytest.skip("DexUni two-way coupling requires DexSim dev f32785317 or newer.")
+
+
 @pytest.fixture(scope="session")
 def _discover_task_packages():
     """Discover all installed task packages once per test session.
@@ -282,6 +309,24 @@ def pytest_runtest_setup(item):
         _initialize_sim_engine(item.config.getoption("--renderer"))
 
 
+def _clear_test_exception() -> None:
+    """Release reported failures before test-owned scene finalizers run."""
+    import sys
+
+    sys.last_traceback = None
+    sys.last_value = None
+    sys.last_type = None
+    if hasattr(sys, "last_exc"):
+        sys.last_exc = None
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_teardown(item: pytest.Item) -> None:
+    """Do not let a prior failure pin native owners through user cleanup."""
+    if _requires_real_sim(item) or item.get_closest_marker("gpu") is not None:
+        _clear_test_exception()
+
+
 @pytest.fixture(autouse=True, scope="function")
 def wait_scene_destruction_after_test(request):
     """Ensure C++ engine scenes are fully destructed globally after each test exits."""
@@ -291,15 +336,8 @@ def wait_scene_destruction_after_test(request):
 
     yield
 
-    # [Improvement - delayed destruction]: top-level dequeue and traceback cleanup.
-    # Pytest retains Tracebacks on failure; breaking the exception stack ensures
-    # that local variables of temporary objects on the stack can be garbage collected.
-    import sys
-    import gc
-
-    sys.last_traceback = None
-    sys.last_value = None
-    sys.last_type = None
+    # Also release exceptions recorded by an earlier teardown callback.
+    _clear_test_exception()
 
     # [Core fix]: drain the cleanup queue to consume SimManager and related objects
     from embodichain.lab.sim.sim_manager import SimulationManager

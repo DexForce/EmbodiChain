@@ -1327,7 +1327,9 @@ def test_resolve_articulation_grasp_broadcasts_one_local_candidate_over_batch(
     scenario = AtomicSkillScenario()
     scenario.robot = robot
     scenario.control_part = "arm"
-    scenario.track = Mock(config={"grasp_model": model_id})
+    scenario.track = Mock(
+        config={"grasp_model": "FrankaPandaHand" if model_id else None}
+    )
 
     grasp = scenario.resolve_articulation_grasp(
         mesh_vertices=torch.zeros(3, 3),
@@ -1347,12 +1349,12 @@ def test_resolve_articulation_grasp_broadcasts_one_local_candidate_over_batch(
     expected = target_pose.clone()
     expected[:, 0, 3] += 0.01
     torch.testing.assert_close(grasp, expected)
-    selected_model = factory.call_args.kwargs["gripper_model"]
+    selected_model = factory.call_args.kwargs["gripper_data"]
     if model_id is None:
         assert selected_model is None
     else:
-        assert selected_model.model_id == model_id
-        assert selected_model.max_opening_width == pytest.approx(0.08)
+        assert selected_model["model_id"] == model_id
+        assert selected_model["max_opening_width"] == pytest.approx(0.08)
     sampled = generator.get_valid_grasp_poses.call_args.kwargs
     assert sampled["obj_poses"].shape == (1, 4, 4)
     assert sampled["approach_direction"].shape == (1, 3)

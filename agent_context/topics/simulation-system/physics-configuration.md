@@ -25,8 +25,16 @@ Newton `solver_cfg=None` preserves DexSim's scene-aware `DexUniSolverCfg`.
 DexUni resolves its ownership and contact paths from the complete Spawn scene;
 the configured solver type is exposed through `NewtonPhysicsBackend.solver_type`.
 Do not guess a solver-specific robot preset while scene ownership is unresolved.
-Gradient mode requires an explicit `semi_implicit` solver. Solver options
-are defined by `cfg/physics.py` and the installed DexSim config types.
+Explicit selection uses `dexuni`; `contact_mode="auto"` retains the native
+contact-path policy. Expert settings use the native option groups
+(`vbd_options`, `mujoco_options`, `collision_options`); unknown solver names
+are rejected for mappings and native config objects, and flat DexUni options
+are rejected by native validation.
+Standalone SPH is not a supported solver family; fluid settings belong under
+[DexUni's nested SPH configuration](fluids.md). Gradient mode requires an explicit
+`semi_implicit` solver. Read exact solver options/defaults in
+`cfg/physics.py` and the installed DexSim config types; do not substitute a
+hardcoded fallback when an expected DexSim API is absent.
 `mesh_bvh_constructor` selects the mesh and heightfield query acceleration
 structure. `None` keeps the native default.
 
@@ -38,6 +46,21 @@ MuJoCo-Warp with `use_mujoco_contacts=True`) need their own configuration;
 external-pipeline tuning does not configure internal contact generation.
 The manual differentiable trajectory requires the external pipeline; see
 [differentiable environment](../differentiable-env/differentiable-env.md).
+
+DexUni preserves its one-way contact policy unless `coupling="two_way"` is
+explicit. Two-way feedback requires dynamically integrated MuJoCo joints and
+supports full-surface rigid-soft feedback in current DexSim builds. Native
+validation owns compatible contact modes and option combinations. Prescribed kinematic trajectories
+cannot respond to contact reactions. Forward solver expert options through
+`NewtonPhysicsCfg.solver_cfg`; DexSim owns their validation and dispatch.
+The current [DFSPH composition](fluids.md) remains one-way even when DexUni's
+rigid/soft coupling options are set to two-way.
+Articulation gravity compensation and passive damping are separate creation
+settings; see [articulation adapters](articulation-adapters.md).
+`async_sync`, `rigid_transform_sync_mode`, `capture_acquire_timeout` and
+`capture_wait_log_interval` pass straight to DexSim `NewtonCfg`. Solver
+diagnostics (graph status, effective VBD options, contact capacity) are read
+from `sim.spawn_result.get_solver_diagnostics()` after `prepare()`.
 
 Capability checks remain explicit: Default owns native rigid constraints and
 Newton deformables are separate. Contact support is rechecked after Newton

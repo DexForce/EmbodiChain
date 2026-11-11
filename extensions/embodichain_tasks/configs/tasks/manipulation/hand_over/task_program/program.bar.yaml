@@ -1,6 +1,5 @@
 program_id: tabletop_hand_over
-instruction: Pass the bar from the left gripper to the right gripper and place it
-  on the table.
+instruction: Pass the bar from the left gripper to the right gripper and place it on the table.
 targets:
   delivery_pose:
     kind: cyclic_pose
@@ -27,18 +26,12 @@ targets:
       - 0.0
       - 1.0
 program:
-  kind: segment
-  name: hand_over_can
-  instruction: Transfer the bar between the grippers and place it at the delivery
-    position.
+  segment: hand_over_can
+  instruction: Transfer the bar between the grippers and place it at the delivery position.
   steps:
-    kind: invoke
-    call:
-      kind: hand_over
+    hand_over:
       object: bar
-      final_target:
-        kind: target_ref
-        target: delivery_pose
+      final_target: delivery_pose
   post:
   - kind: wait_stable
     entity: bar

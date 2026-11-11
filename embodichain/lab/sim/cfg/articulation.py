@@ -104,6 +104,30 @@ class ArticulationRootPropertiesCfg:
     min_velocity_iters: int | None = None
     """Default-only minimum root velocity-solver iterations (0 to 255)."""
 
+    newton_gravity_compensation: float | None = None
+    """MuJoCo link-weight compensation fraction in [0, 1], on Newton only.
+
+    ``None`` preserves the source/default policy; zero retains gravity and one
+    compensates every link in this articulation. Payload gravity and contact
+    reactions remain active. This creation setting applies in both asset
+    physics modes, independently of DexUni's coupling policy. The finalized
+    Newton solver must support MuJoCo gravity compensation.
+    """
+
+    newton_mimic_stabilizer: bool = False
+    """Whether URDF mimic joints are tuned toward Default-backend behavior.
+
+    ``False`` (default) keeps the configured follower drives and Newton's
+    native mimic constraint, as a plain DexSim scene does; reset starts each
+    follower on its mimic relation so the constraint does not kick on the
+    first step. On MuJoCo-Warp and
+    DexUni, ``True`` opts in to a Default-parity stabilizer: each mimic
+    follower's drive becomes one percent of its leader's gains (replacing the
+    follower gains in :attr:`ArticulationCfg.joint_drive_props`), follower
+    targets follow the mimic relation, and the MuJoCo equality ``solref`` is
+    retuned.
+    """
+
     def __post_init__(self) -> None:
         """Require the two values consumed by the atomic Default setter."""
         if (self.min_position_iters is None) != (self.min_velocity_iters is None):
@@ -405,12 +429,23 @@ class JointDrivePropertiesCfg:
 
 @configclass
 class NewtonJointDrivePropertiesCfg(JointDrivePropertiesCfg):
-    """Compatibility subtype for serialized Newton joint-drive configs.
+    """Joint-drive configuration with Newton-specific passive dynamics.
 
     ``target_mode`` is now portable and lives on
     :class:`JointDrivePropertiesCfg`. The subtype remains so existing
-    ``backend="newton"`` dictionaries and round trips retain their type; new
-    robot definitions should use the common class.
+    ``backend="newton"`` dictionaries and round trips retain their type. Use
+    the common class when no Newton-specific dynamics are required.
+    """
+
+    passive_damping: dict[str, float] | float | None = None
+    """Nonnegative passive joint damping, independent of drive damping.
+
+    Uses the same joint-name, regex and robot control-part rules as the drive
+    gains. Apply it with ``asset_physics_mode='overlay'``; ``None`` preserves
+    source damping. Unlike :attr:`damping`, this
+    lowers to Newton's ``JointDofConfig.damping`` and remains active when the
+    drive target mode is ``none`` or ``effort``. It requires Newton and is
+    consumed by MuJoCo-backed solvers, including dynamic DexUni.
     """
 
 

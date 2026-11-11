@@ -25,7 +25,7 @@ import torch
 
 if TYPE_CHECKING:
     from embodichain.lab.sim import SimulationManager
-    from embodichain.lab.sim.atomic_actions.plans import CompiledTrajectory
+    from embodichain.lab.sim.atomic_skills.plans import CompiledTrajectory
     from embodichain.lab.sim.objects import Robot
     from ..models import BenchmarkCase
     from .atomic_objects import AtomicObjectHandle
@@ -93,9 +93,9 @@ class ReplayDiagnostics:
         self.sample_indices: set[int] = set()
         self.segments: list[dict[str, object]] = []
         samples = int(config["samples_per_segment"])
-        for action_index, plan in enumerate(compiled.action_plans):
+        for skill_index, plan in enumerate(compiled.skill_plans):
             for segment in plan.segments:
-                shifted = compiled.segment(action_index, segment.name)
+                shifted = compiled.segment(skill_index, segment.name)
                 if shifted.stop <= shifted.start:
                     continue
                 count = min(samples, shifted.stop - shifted.start)
@@ -113,7 +113,7 @@ class ReplayDiagnostics:
                 self.sample_indices.update(indices)
                 self.segments.append(
                     {
-                        "action_index": action_index,
+                        "skill_index": skill_index,
                         "skill_id": plan.skill_id,
                         "segment": shifted.name,
                         "start": shifted.start,

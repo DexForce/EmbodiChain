@@ -184,6 +184,7 @@ def test_reset_keeps_sensor_uid_exclusions_out_of_physical_registries(
         "_articulations",
         "_rigid_objects",
         "_rigid_object_groups",
+        "_fluid_objects",
         "_deformable_objects",
         "_lights",
     ):

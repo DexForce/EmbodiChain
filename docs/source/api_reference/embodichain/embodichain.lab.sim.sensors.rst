@@ -120,6 +120,17 @@ sparse Warp kernels. The ``dropped_contacts`` diagnostic sums query loss and
 scatter overflow across the current control interval; standalone updates
 without histories or sampling observers report the most recent sample.
 
+Newton force conversion uses the final internal solver substep's duration,
+while history clocks advance by the full World-step duration. Standalone
+``ContactHistory.update`` accepts an explicit ``impulse_dt`` for this conversion.
+Physics-reset-invalidated reports yield invalid observation rows until a new
+solve; a sensor-only reset can still reread a valid current report.
+
+Contact sampling through ``update`` or ``update_physics_step`` must run eagerly
+outside caller-owned CUDA Graph capture. Sample before each replay and establish
+stream dependencies before consuming the stable ``get_data()`` buffers in the
+graph. The sensor's internal reduction graph remains supported.
+
 ``latest_sample_dropped_contacts`` reports the latest fetch's query and scatter
 loss even when observers retain interval counters. Evidence sampling rejects
 either diagnostic and takes their maximum to avoid double counting. Full reset
@@ -139,8 +150,8 @@ adds no observer snapshots or callbacks. Begin and selective-reset notifications
 follow the sensor's own history/counter updates; before/after tokens surround one
 physics-step sample. A prior raw fetch in that same step is reused; repeated
 substep calls do not repeat callbacks. Observation callbacks run outside the
-internal CUDA capture, and external capture with observers is rejected before
-callbacks begin. The observer owns retention limits and diagnostics and must not
+internal CUDA capture, and all sampling in external capture is rejected before
+native queries or callbacks begin. The observer owns retention limits and diagnostics and must not
 step physics or issue commands.
 
 .. currentmodule:: embodichain.lab.sim.sensors.contact.sensor
@@ -162,7 +173,7 @@ sensor configuration, acquisition and history. Its ``sensor``, ``sampling``,
 adaptation kernels live under its private ``_warp`` directory. Generic physical
 evidence remains in ``lab.sim.evidence``; grasp interpretation and Task Program
 bindings remain in their owning layers. Calibrated hand opening used for release
-interpretation belongs to ``atomic_actions.grip_evidence``, not the sensor layer.
+interpretation belongs to ``atomic_skills.grip_evidence``, not the sensor layer.
 
 .. currentmodule:: embodichain.lab.sim.sensors.contact
 
@@ -205,3 +216,24 @@ keep their existing names. The old flat ``sensors.contact_sensor`` and
 Sampling and timeline APIs use ``contact.sampling`` and ``contact.timeline``.
 Regenerate declarations that explicitly seal implementation-qualified type names;
 old identities are not silently rewritten.
+
+
+Stereo implementation exports
+-----------------------------
+
+.. currentmodule:: embodichain.lab.sim.sensors.stereo
+
+The implementation module exposes the stereo sensor and its configuration under
+these import paths. ``PairCameraView`` provides compatibility access to one
+left/right pair: state and attachment operations require a live owning sensor
+and publish through its Scene batch. Its center-pose reads return owned matrices.
+
+.. autosummary::
+
+    StereoCamera
+    StereoCameraCfg
+    PairCameraView
+
+.. autoclass:: PairCameraView
+    :members:
+    :show-inheritance:

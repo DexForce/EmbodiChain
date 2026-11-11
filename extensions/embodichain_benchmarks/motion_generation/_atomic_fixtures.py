@@ -22,6 +22,15 @@ The calibrations and defaults preserve the benchmark's original sample scenes.
 
 from __future__ import annotations
 
+from embodichain.lab.sim.utility.gripper_geometry import grasp_generator_parameters
+
+from pathlib import Path
+
+from embodichain.robot_registry import resolve_gripper_defaults
+from embodichain.lab.sim.utility.gripper_geometry import (
+    build_gripper_collision_geometry,
+)
+
 import math
 from collections.abc import Sequence
 from typing import Any, Literal, TYPE_CHECKING
@@ -30,7 +39,7 @@ import numpy as np
 import torch
 
 from embodichain.data import get_data_path
-from embodichain.lab.sim.atomic_actions import AntipodalAffordance, ObjectSemantics
+from embodichain.lab.sim.atomic_skills import AntipodalAffordance, ObjectSemantics
 from embodichain.lab.sim.cfg import (
     RobotCfg,
     JointDrivePropertiesCfg,
@@ -45,16 +54,12 @@ from embodichain.lab.sim.robots import build_dual_arm_cfg
 from embodichain.lab.sim.motion.solvers import FEPSolverCfg, PytorchSolverCfg
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
 from embodichain.utils import configclass
-from embodichain.toolkits.graspkit import (
-    ParallelJawGraspPoseGenerator,
-    ParallelJawGripperModelCfg,
-)
+from embodichain.toolkits.graspkit import ParallelJawGraspPoseGenerator
 from embodichain.toolkits.graspkit.pg_grasp import (
     AntipodalGraspPoseGenerator,
     AntipodalGraspPoseGeneratorCfg,
     GraspAnnotationCfg,
     FixedGripperCollisionGeometry,
-    get_parallel_jaw_collision_geometry,
     ParallelJawGraspCollisionCfg,
 )
 from embodichain_robots import FrankaPandaCfg, URRobotCfg
@@ -105,11 +110,12 @@ _UR_TUTORIAL_QPOS_LIMITS: tuple[tuple[float, float], ...] = tuple(
 )
 
 
-TUTORIAL_PARALLEL_JAW_MODEL = ParallelJawGripperModelCfg(
-    model_id="dh_pgi_140_80",
-    min_opening_width=0.003,
-    max_opening_width=0.100,
-)
+TUTORIAL_PARALLEL_JAW_MODEL = {
+    "model_id": "dh_pgi_140_80",
+    "catalog_id": "DHPGI14080",
+    "min_opening_width": 0.003,
+    "max_opening_width": 0.100,
+}
 
 
 _FRANKA_TUTORIAL_BASE_ROTATION = (0.0, 0.0, 180.0)
@@ -157,7 +163,7 @@ def create_parallel_jaw_grasp_pose_generator(
     force_refresh: bool,
     max_candidates: int = 50,
     approach_alignment_angle: float | None = None,
-    gripper_model: ParallelJawGripperModelCfg | None = None,
+    gripper_data: dict[str, object] | None = None,
     root_from_tcp: Sequence[Sequence[float]] | None = None,
     grasp_depth_offset_m: float = 0.0,
 ) -> ParallelJawGraspPoseGenerator:
@@ -169,7 +175,7 @@ def create_parallel_jaw_grasp_pose_generator(
         max_candidates: Maximum ranked grasp candidates returned per object.
         approach_alignment_angle: Optional hard contact-Z angle before
             candidate deduplication and ranking; proposal cones are unchanged.
-        gripper_model: Explicit fixture geometry; omission uses the PGI sample.
+        gripper_data: Explicit fixture geometry; omission uses the PGI sample.
         root_from_tcp: Actual fixture TCP relative to the hand root, when it
             differs from the model's default calibration.
         grasp_depth_offset_m: Move the physical contact centre toward the hand
@@ -188,9 +194,9 @@ def create_parallel_jaw_grasp_pose_generator(
         grasp_depth_offset_m
     ):
         raise ValueError("grasp_depth_offset_m must be finite.")
-    model = TUTORIAL_PARALLEL_JAW_MODEL if gripper_model is None else gripper_model
-    geometry = get_parallel_jaw_collision_geometry(
-        model.model_id,
+    model = TUTORIAL_PARALLEL_JAW_MODEL if gripper_data is None else gripper_data
+    geometry = build_gripper_collision_geometry(
+        resolve_gripper_defaults(model["catalog_id"]),
         point_spacing=0.012,
         root_from_tcp=None if root_from_tcp is None else np.asarray(root_from_tcp),
     )
@@ -227,7 +233,7 @@ def create_parallel_jaw_grasp_pose_generator(
             },
         )
     return AntipodalGraspPoseGenerator(
-        model,
+        **grasp_generator_parameters(model),
         collision_geometry=geometry,
         algorithm_cfg=AntipodalGraspPoseGeneratorCfg(
             sample_count=n_sample,
@@ -256,7 +262,7 @@ def create_ur5_gripper_robot_cfg(
     The arm is taken from :class:`~embodichain_robots.universal_robots.ur_robot.URRobotCfg`
     so the URDF, joint names and drive defaults match the canonical UR family
     config. The gripper and tool-center-point offset are added on top to match
-    the existing atomic-action tutorial setups.
+    the existing atomic-skill tutorial setups.
 
     .. attention::
         :class:`~embodichain.lab.sim.cfg.URDFCfg` defaults to upper-casing joint
@@ -513,12 +519,15 @@ class _FrankaPgiCfg(RobotCfg):
 def _create_franka_native_hand_cfg(overrides: dict[str, Any] | None = None) -> RobotCfg:
     """Resolve the official explicit FR3/hand assembly without creating a Gym."""
     from embodichain_tasks.configs import get_config_path
-    from embodichain.utils.utility import load_config
     from embodichain.robot_registry import resolve_robot_cfg
 
-    values = load_config(get_config_path("components/embodiments/franka_panda.yaml"))[
-        "simulation"
-    ]
+    from embodichain.lab.gym.utils.composition import resolve_gym_components
+
+    path = get_config_path("components/embodiments/franka_panda.yaml")
+    physical = resolve_gym_components(
+        {"embodiment": {"component": str(path)}}, base_dir=Path(path).parent
+    )
+    values = dict(physical.config["robot"])
     cfg = resolve_robot_cfg(values.pop("class_type"), values)
     return merge_robot_cfg(cfg, overrides or {})
 
