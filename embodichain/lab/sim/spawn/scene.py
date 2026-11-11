@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, fields, replace
 from typing import TYPE_CHECKING, Any, Callable, Literal
@@ -43,6 +43,7 @@ _AssetKind = Literal[
     "soft_object",
     "cloth_object",
     "fluid_object",
+    "cable_object",
 ]
 
 
@@ -181,6 +182,11 @@ class SpawnScene:
             for member in descriptor:
                 self._bind_resource_materials(member)
             return
+        render_material = getattr(descriptor, "render_material", None)
+        if isinstance(render_material, _AssetMaterialDesc):
+            _, descriptor.render_material = self._material_resources.resolve(
+                render_material
+            )
         reference = getattr(descriptor, "material_ref", None)
         if reference in definitions:
             _, descriptor.material = self._material_resources.resolve(
@@ -199,6 +205,65 @@ class SpawnScene:
     def __contains__(self, uid: str) -> bool:
         return uid in self._assets
 
+    def _require_available_uid(self, uid: str) -> None:
+        if uid in self._assets or any(
+            item.name == uid
+            for collection in ("mesh_objects", "scene_entities")
+            for item in getattr(self.builder, collection, ())
+        ):
+            raise ValueError(f"Spawn asset uid is already declared: {uid!r}.")
+
+    def _require_compatible_particles(self, *, cables: bool, particles: bool) -> None:
+        """Check both the incoming declaration and the native scene inventory."""
+        if (cables and (particles or self._has_particles)) or (
+            particles and self._has_cables
+        ):
+            raise NotImplementedError(
+                "Cable episode reset does not support fluid or deformable particles in the same arena."
+            )
+
+    @property
+    def _has_particles(self) -> bool:
+        return len(getattr(self.builder, "particle_sets", ())) > 0 or any(
+            item.kind in {"soft_object", "cloth_object", "fluid_object"}
+            for item in self._assets.values()
+        )
+
+    @property
+    def _has_cables(self) -> bool:
+        return len(getattr(self.builder, "cables", ())) > 0 or any(
+            item.kind == "cable_object" for item in self._assets.values()
+        )
+
+    def _preflight_declaration(self, kind: _AssetKind, uid: str) -> bool:
+        """Validate a declaration and return whether it is metadata-only."""
+        self._require_available_uid(uid)
+        self._require_compatible_particles(
+            cables=kind == "cable_object",
+            particles=kind in {"soft_object", "cloth_object", "fluid_object"},
+        )
+        declaration_only = (
+            kind == "visual_object"
+            and getattr(getattr(self, "_material_resources", None), "renderer", None)
+            == "no-render"
+        )
+        if not declaration_only:
+            self._require_mutable_topology()
+        return declaration_only
+
+    def _register_material_batches(self, batches: Iterable[dict[str, Any]]) -> None:
+        """Check all material definitions before publishing a declaration batch."""
+        definitions = {}
+        for batch in batches:
+            for uid, desc in batch.items():
+                if uid in definitions and definitions[uid] != desc:
+                    raise ValueError(
+                        f"Conflicting visual material definition for {uid!r}."
+                    )
+                definitions[uid] = desc
+        if definitions:
+            self.builder.materials.update(self._resolve_materials(definitions))
+
     def declare(
         self,
         kind: _AssetKind,
@@ -206,12 +271,14 @@ class SpawnScene:
         descriptor: Any,
         *,
         facade: Any | None = None,
+        materials: dict[str, Any] | None = None,
         configure_source: Callable[[Any], None] | None = None,
         constraints: list[ConstraintDesc] | None = None,
     ) -> None:
         """Add a descriptor and associate it with an EmbodiChain facade."""
-        if uid in self._assets:
-            raise ValueError(f"Spawn asset uid is already declared: {uid!r}.")
+        declaration_only = self._preflight_declaration(kind, uid)
+        if materials:
+            self.builder.materials.update(self._resolve_materials(materials))
         self._bind_resource_materials(descriptor)
         self._initialize_facade_declaration(facade)
         declaration = _AssetDeclaration(
@@ -219,13 +286,9 @@ class SpawnScene:
             descriptor=descriptor,
             facade=facade,
             source_configurator=configure_source,
+            declaration_only=declaration_only,
         )
-        if (
-            kind == "visual_object"
-            and getattr(getattr(self, "_material_resources", None), "renderer", None)
-            == "no-render"
-        ):
-            declaration.declaration_only = True
+        if declaration_only:
             self._assets[uid] = declaration
             return
 
@@ -274,6 +337,7 @@ class SpawnScene:
                 "articulation": "add_articulation",
                 "soft_object": "add_soft_object",
                 "cloth_object": "add_cloth_object",
+                "cable_object": "add_cable",
             }[kind]
             with self._native_material_scope():
                 declaration.descriptor = getattr(self.builder, add_name)(descriptor)
@@ -336,15 +400,11 @@ class SpawnScene:
 
     def remove(self, uid: str) -> None:
         """Remove a declared asset from its DexSim owner."""
+        self._require_removable(uid)
         declaration = self._assets[uid]
         if getattr(declaration, "declaration_only", False):
             del self._assets[uid]
             return
-        if declaration.kind in {"soft_object", "cloth_object", "fluid_object"}:
-            raise NotImplementedError(
-                "DexSim Spawn does not yet expose pending removal for "
-                f"{declaration.kind.replace('_', ' ')}."
-            )
         if declaration.kind == "rigid_object_group":
             for member in declaration.descriptor:
                 self.builder.remove_object(member.name)
@@ -363,6 +423,31 @@ class SpawnScene:
             self._pending_material_assignments = {
                 key: materials for key, materials in pending.items() if key[0] != uid
             }
+
+    def _require_removable(self, uid: str) -> None:
+        """Validate removal before mounted render resources are detached."""
+        declaration = self._assets[uid]
+        if getattr(declaration, "declaration_only", False):
+            return
+        if declaration.kind in {
+            "soft_object",
+            "cloth_object",
+            "fluid_object",
+            "cable_object",
+        }:
+            raise NotImplementedError(
+                "DexSim Spawn does not yet expose pending removal for "
+                f"{declaration.kind.replace('_', ' ')}."
+            )
+        self._require_mutable_topology()
+
+    def _require_mutable_topology(self) -> None:
+        """Reject unsupported Newton rebuilds before changing scene resources."""
+        if self.builder.is_finalized and (self._has_cables or self._has_particles):
+            raise NotImplementedError(
+                "DexSim does not support physical topology changes in finalized "
+                "cable or particle scenes; recreate the simulation."
+            )
 
     def commit(self) -> Any:
         """Finalize once or let the current ``Scene`` consume pending changes."""

@@ -9,7 +9,8 @@ Return to the [simulation overview](simulation-system.md) for ownership.
 readiness; `spawn/scene.py` owns declaration coordination. The ordering is:
 
 1. If unfinalized or dirty, detach parented cameras before rebuilding their
-   native parents. Resolve/configure sources and commit Spawn topology.
+   native parents. Run the backend pre-build validation/initialization hook,
+   then resolve/configure sources and commit Spawn topology.
 2. Apply Default articulation root properties before Direct GPU buffers capture
    them. Delegate runtime setup to `PhysicsBackend.prepare_spawn_runtime()`.
 3. Replay the current per-segment [material assignments](materials.md) captured
@@ -42,6 +43,11 @@ baselines while other assets retain runtime state. Native preparation failure
 propagates without rollback. Randomization requiring the replacements runs
 after this boundary.
 
+Spawn-owned asset removal checks pending-removal and topology restrictions
+before detaching mounted cameras or marker groups. A rejected removal leaves
+the asset, sensors and marker attachments usable. NoRender declaration-only
+visual objects remain removable without rebuilding physical topology.
+
 Pending Newton topology/descriptor changes requiring a new immutable model
 become usable only after preparation. Keep model rebuilding in Spawn; object
 facades must not create a second runtime ownership path.
@@ -61,6 +67,12 @@ external wrenches. MuJoCo-Warp and DexUni cannot safely clear a selected world's
 solver state with only some of its articulations; excluding a subset is rejected
 before any facade state changes.
 Other resource exclusions and environment selections remain honored.
+
+The backend may handle physical reset atomically before the per-object path.
+Newton scenes containing cables use a complete `Scene.reset_arenas()` boundary;
+the manager retains visual-object, light and sensor reset ownership, including
+their environment selections and exclusions. Physical exclusions and runtime property restoration are
+unsupported in this path; see [cable state and reset](deformables.md#cable-objects).
 
 `destroy(exit_process=False)` queues native cleanup. Flush with
 `SimulationManager.flush_cleanup_queue()` after caller scene/object locals
@@ -100,10 +112,10 @@ indexing rules are in [deformables](deformables.md).
 
 Use `sim_manager.py` for lifecycle sequencing, `spawn/scene.py` for commit/bind
 coordination, `physics/base.py` and backend implementations for runtime hooks,
-and `_runtime_controls.py` for nodal controls. `BaseEnv` owns Gym ordering.
+and `_runtime_controls.py` for nodal controls and creation joint-state seeding. `BaseEnv` owns Gym ordering.
 
 `tests/sim/test_sim_manager.py` covers retry without recommit, render sync,
 camera attachment, replacement, control registration, reset and teardown.
 `tests/sim/spawn/test_scene.py` covers declaration/source/binding state;
-`tests/sim/test_runtime_controls.py` covers nodal runtime behavior. Physical
+`tests/sim/test_runtime_controls.py` covers nodal behavior and one-shot joint seeding. Physical
 baseline tests live with the corresponding objects under `tests/sim/objects/`.

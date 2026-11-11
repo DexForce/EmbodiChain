@@ -105,6 +105,9 @@ def _compile_usd_import(
         raise NotImplementedError(
             f"Unsupported USD particle-set types: {unsupported_particles}."
         )
+    manager._spawn_scene._require_compatible_particles(
+        cables=bool(source.cables), particles=bool(source.particle_sets)
+    )
     resources = list(source.iter_entities())
     source_paths_by_id = {id(item): _source_path(item) for item in resources}
     counts = Counter(source_paths_by_id.values())

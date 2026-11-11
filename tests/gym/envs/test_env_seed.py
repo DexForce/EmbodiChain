@@ -30,6 +30,7 @@ import torch
 import embodichain.lab.gym.envs.base_env as base_env_module
 from embodichain.lab.gym.envs import BaseEnv
 from embodichain.lab.sim import SimulationManager
+from embodichain.lab.sim.physics import DefaultPhysicsBackend
 
 # This module calls one unbound manager method on registry stubs; no World is
 # constructed. Keep these reset-contract cases in the fast CPU CI lane.
@@ -178,7 +179,7 @@ def test_reset_keeps_sensor_uid_exclusions_out_of_physical_registries(
     sensor = MagicMock(uid="shared")
     manager_sensor = MagicMock(uid="manager_only")
     env.sensors = {"observation": sensor}
-    env.sim.physics = SimpleNamespace(name="default")
+    env.sim.physics = DefaultPhysicsBackend(env.sim)
     env.sim._robots = {"shared": robot}
     for registry in (
         "_articulations",
