@@ -106,11 +106,16 @@ revisions keep their own solver/hand defaults. Optional Pika assembly belongs to
 drives and cameras are embodiment-owned; body assets/groups/solvers remain
 preset-owned. W1 serialization removes and restores revision offsets exactly once.
 
-Aloha Mini and Marvin use strict Warp SSIK arm defaults, ARX5 uses explicit
+Aloha Mini, Marvin and AgiBot G2 use strict Warp SSIK arm defaults, ARX5 uses explicit
 near-parallel geometry, and Rizon4S uses prepared RR. Aloha's torso retains a
 position-only Pytorch solver. These modes have different geometric and artifact
 requirements; consult [IK boundaries](../ik-solvers/ik-solvers.md) before replacing
 one. Source URDFs, runtime joint names and PK chains must remain aligned.
+
+AgiBot G2 uses seed-local SRS search with its original 18 mm elbow offset and
+mounting-frame TCPs on CPU/CUDA. Its preset derives geometry from the URDF; see
+the [G2 model notes](../../../extensions/embodichain_robots/agibot/g2/README.md)
+before introducing a legacy SRS DH calibration.
 
 Marvin catalog configs preserve source mass, inertia and COM. The bundled
 embodiment's recorded scaling is a demo calibration with unconfirmed source

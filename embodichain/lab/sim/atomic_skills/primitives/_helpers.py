@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+import math
 from typing import TYPE_CHECKING
 
 import torch
@@ -418,6 +419,7 @@ def split_joint_trajectory_at_pose(
     arrival_indices: torch.Tensor | None = None,
     split_target_index: int | None = None,
     env_ids: tuple[int, ...] | None = None,
+    minimum_segment_duration: float | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Split at a declared target visit, or the closest pose when none is supplied.
 
@@ -435,6 +437,9 @@ def split_joint_trajectory_at_pose(
         control_dt: Destination command period, required together with ``dt``.
         arrival_indices: Optional strictly ordered target visits ``(B, K)``.
         split_target_index: Target column identifying the intended occurrence.
+        minimum_segment_duration: Optional minimum duration in seconds for each
+            row's moving segment. Native intervals are stretched before control
+            resampling and batch padding, without speeding up longer segments.
 
     Returns:
         The resampled trajectory segments before and after the split pose.
@@ -445,6 +450,13 @@ def split_joint_trajectory_at_pose(
         raise ValueError("split_pose must have shape (B, 4, 4).")
     if first_sample_count < 2 or second_sample_count < 2:
         raise ValueError("Both split trajectory segments require at least two samples.")
+    if minimum_segment_duration is not None and (
+        dt is None
+        or control_dt is None
+        or not math.isfinite(minimum_segment_duration)
+        or minimum_segment_duration <= 0.0
+    ):
+        raise ValueError("Minimum segment duration requires positive finite timing.")
 
     trajectory_xpos = robot.compute_batch_fk(
         qpos=trajectory,
@@ -575,6 +587,12 @@ def split_joint_trajectory_at_pose(
             0.0,
         ),
     )
+    if minimum_segment_duration is not None:
+        durations = torch.stack((first_dt.sum(dim=1), second_dt.sum(dim=1)))
+        durations = torch.where(durations > 0, durations, 1.0)
+        scales = (minimum_segment_duration / durations).clamp_min(1.0)
+        first_dt = first_dt * scales[0, :, None]
+        second_dt = second_dt * scales[1, :, None]
     return (
         resample_planned_trajectory(
             first,

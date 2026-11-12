@@ -36,12 +36,18 @@ import tqdm
 from embodichain.lab.gym.envs.demo import (
     DemoEpisodeResult,
     DemoExecutionCfg,
+    DemoQualification,
     execute_demo_episode,
 )
 from embodichain.lab.gym.envs.wrapper import ReplayWrapper
+from embodichain.lab.gym.utils.trajectory_state import (
+    FluidTrajectoryReader,
+    FluidTrajectoryRecorder,
+)
 from embodichain.lab.gym.utils.gym_utils import (
     add_env_launcher_args_to_parser,
     build_env_cfg_from_args,
+    configure_fluid_spacing,
     load_trajectory,
     _load_expansion_declaration,
 )
@@ -463,6 +469,61 @@ def generate_and_execute_action_list(
     return True
 
 
+def _save_qualification_report(
+    directory: Path, report: Mapping[str, Any], *, batch: int, attempt: int
+) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(dict(report), indent=2, allow_nan=False) + "\n"
+    (directory / "qualification_result.json").write_text(payload)
+    diagnostics = directory / "diagnostics"
+    diagnostics.mkdir(exist_ok=True)
+    (diagnostics / f"batch_{batch:06d}_attempt_{attempt:02d}.json").write_text(payload)
+
+
+def _save_diagnostic_video(env: Any, selected: Sequence[int]) -> None:
+    event_manager = getattr(_env_target(env), "event_manager", None)
+    if (
+        event_manager is None
+        or getattr(event_manager.cfg, "record_camera", None) is None
+    ):
+        return
+    recorder = event_manager.get_functor("record_camera")
+    if recorder is not None:
+        recorder.save_and_clear(env_ids=list(selected), purpose="diagnostic")
+
+
+def _save_qualified_fluid_trajectory(
+    target: Any,
+    recorder: FluidTrajectoryRecorder,
+    directory: Path,
+    selected: Sequence[int],
+    *,
+    batch: int,
+) -> None:
+    episodes = [target.get_demo_episode_metadata(row) for row in selected]
+    hashes = {episode.get("program_hash") for episode in episodes}
+    if len(hashes) != 1 or not next(iter(hashes)):
+        raise RuntimeError("Accepted fluid source has no common program hash")
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"fluid_batch_{batch:06d}_{recorder.directory.name}.pt"
+    sidecar = recorder.finish(path, target._traj_steps.tolist(), env_ids=selected)
+    target.save_trajectory(
+        str(path),
+        env_ids=selected,
+        extra_meta={
+            "fluid_qualification": {
+                "kind": "task_program",
+                "accepted": True,
+                "program_hash": next(iter(hashes)),
+            },
+            "fluid_state": sidecar,
+        },
+    )
+    recorder.commit()
+    target._set_fluid_trajectory_recorder(None)
+    log_info(f"Qualified fluid replay source: {path}")
+
+
 def generate_function(
     env: Any,
     num_traj: int | None = None,
@@ -472,6 +533,9 @@ def generate_function(
     debug_mode: bool = False,
     save_env_ids: Sequence[int] | torch.Tensor | None = None,
     execution_cfg: DemoExecutionCfg | None = None,
+    fluid_recorder: FluidTrajectoryRecorder | None = None,
+    qualification: Mapping[str, Any] | None = None,
+    qualification_output_dir: Path | None = None,
     **kwargs: Any,
 ) -> bool:
     """Generate, execute, and commit one demonstration collection batch.
@@ -495,6 +559,9 @@ def generate_function(
             rows are explicitly discarded after the selected rows commit.
         execution_cfg: Continuous or independent segment-fragment persistence
             settings. Checkpoint resume is not performed in either mode.
+        fluid_recorder: Optional bounded particle-state spool for this batch.
+        qualification: Configured physical acceptance criteria.
+        qualification_output_dir: Destination for qualification reports and sidecars.
         **kwargs: Additional keyword arguments for data expansion.
 
     Returns:
@@ -559,11 +626,17 @@ def generate_function(
             "path; ordinary run-task recording cannot yet commit this episode"
         )
     normalized_save_env_ids = _normalize_save_env_ids(env, save_env_ids)
+    if fluid_recorder is not None and qualification is None:
+        raise ValueError("Fluid recording requires physical qualification and output")
+    if qualification is not None and qualification_output_dir is None:
+        raise ValueError("Collection qualification requires an output directory")
     save_failed_episodes = _save_failed_episodes_enabled(env)
     if execution_cfg is None:
         execution_cfg = DemoExecutionCfg()
     elif not isinstance(execution_cfg, DemoExecutionCfg):
         raise TypeError("execution_cfg must be a DemoExecutionCfg or None.")
+    if qualification is not None and execution_cfg.mode != "continuous":
+        raise ValueError("Collection qualification requires continuous episodes")
 
     if reset_before:
         _abort_pending_episode(env)
@@ -574,15 +647,39 @@ def generate_function(
             stats["attempts"] = stats.get("attempts", 0) + 1
         commit_succeeded = False
         try:
+            qualifier = (
+                DemoQualification(target, qualification)
+                if qualification is not None
+                else None
+            )
+            if qualifier is not None:
+                qualifier.start()
+
+            def progress(actions: Iterable[Any], description: str) -> Iterator[Any]:
+                for action in _progress_wrapper(actions, description):
+                    yield action
+                    if qualifier is not None:
+                        qualifier.after_step()
+
             result: DemoEpisodeResult = execute_demo_episode(
                 env,
                 episode_index=time_id,
                 execution_cfg=execution_cfg,
                 attempt_id=attempt - 1,
-                progress=_progress_wrapper,
+                progress=progress,
                 **kwargs,
             )
             successful = result.completed and result.all_success
+            if qualifier is not None:
+                report = qualifier.finish(normalized_save_env_ids)
+                report["episode"] = result.to_metadata()
+                successful = successful and report["accepted"]
+                report["accepted"] = successful
+                _save_qualification_report(
+                    qualification_output_dir, report, batch=time_id, attempt=attempt
+                )
+                if not successful:
+                    _save_diagnostic_video(env, normalized_save_env_ids)
             fragment_env_ids = _persistable_fragment_env_ids(
                 env,
                 result,
@@ -591,6 +688,7 @@ def generate_function(
             )
             persistable_failure = (
                 not successful
+                and qualifier is None
                 and save_failed_episodes
                 and _selected_rows_have_frames(result, normalized_save_env_ids)
             )
@@ -614,6 +712,14 @@ def generate_function(
             if execution_cfg.mode == "continuous" and (
                 successful or persistable_failure
             ):
+                if successful and fluid_recorder is not None:
+                    _save_qualified_fluid_trajectory(
+                        target,
+                        fluid_recorder,
+                        qualification_output_dir,
+                        normalized_save_env_ids,
+                        batch=time_id,
+                    )
                 if expansion_record_sink is not None:
                     expansion_record_sink(
                         tuple(
@@ -1132,7 +1238,42 @@ def _run_expansion(
     )
 
 
-def replay(env, trajectory_path: str, mode: str = "kinematic") -> None:
+def _validate_fluid_replay_source(trajectory: Mapping[str, Any]) -> None:
+    """Enforce the collector's accepted Task Program source policy before replay."""
+    meta = trajectory["meta"]
+    source_envs = int(meta["num_envs"])
+    qualification = meta.get("fluid_qualification")
+    if (
+        meta.get("artifact_purpose") != "recording"
+        or not isinstance(qualification, Mapping)
+        or qualification.get("kind") != "task_program"
+        or qualification.get("accepted") is not True
+    ):
+        raise ValueError("Fluid replay requires an accepted Task Program recording.")
+    episodes = meta.get("demo_episodes", [])
+    if len(episodes) != source_envs or not episodes:
+        raise ValueError("Fluid replay source episodes do not match recorded rows.")
+    program_hash = qualification.get("program_hash")
+    if (
+        not isinstance(program_hash, str)
+        or not program_hash
+        or any(
+            episode.get("program_hash") != program_hash
+            or episode.get("completed") is not True
+            or episode.get("success") is not True
+            for episode in episodes
+        )
+    ):
+        raise ValueError("Fluid replay program provenance differs from the source.")
+
+
+def replay(
+    env,
+    trajectory_path: str,
+    mode: str = "kinematic",
+    *,
+    fluid_reader: FluidTrajectoryReader | None = None,
+) -> None:
     """Replay a recorded trajectory.
 
     The caller retains ownership of ``env``. Wrapper-specific replay state is
@@ -1153,8 +1294,25 @@ def replay(env, trajectory_path: str, mode: str = "kinematic") -> None:
         f"num_steps={meta['num_steps']}, mode={mode}",
         color="green",
     )
-    replay_env = ReplayWrapper(env.unwrapped, trajectory_path, mode=mode)
+    replay_env = None
     try:
+        if fluid_reader is not None or getattr(
+            getattr(env.unwrapped, "cfg", None), "fluid_object", ()
+        ):
+            _validate_fluid_replay_source(data)
+            behavior = (
+                "recorded particle states without physics"
+                if mode in {"kinematic", "control"}
+                else "recorded controls with newly simulated fluid"
+            )
+            log_info(
+                f"Accepted Task Program fluid source; replaying {behavior}. "
+                "Source acceptance does not qualify this replay's physical outcome.",
+                color="green",
+            )
+        replay_env = ReplayWrapper(
+            env.unwrapped, trajectory_path, mode=mode, fluid_reader=fluid_reader
+        )
         for row, report in enumerate(replay_env.final_acceptance or ()):
             log_info(
                 f"Replay final acceptance row {row}: {report['status']}, "
@@ -1165,12 +1323,18 @@ def replay(env, trajectory_path: str, mode: str = "kinematic") -> None:
         else:
             replay_auto(replay_env, mode)
     finally:
-        # ReplayWrapper.close() also closes its wrapped environment. Restore
-        # its local state here and leave the single close() to cli().
-        try:
-            replay_env.env.sim.enable_physics(True)
-        finally:
-            replay_env.env._replay_no_auto_reset = False
+        if replay_env is None:
+            if fluid_reader is not None:
+                fluid_reader.close()
+        else:
+            # ReplayWrapper.close() also closes its wrapped environment. Restore
+            # its local state here and leave the single close() to cli().
+            try:
+                replay_env.env.sim.enable_physics(True)
+            finally:
+                replay_env.env._replay_no_auto_reset = False
+                if replay_env._fluid_reader is not None:
+                    replay_env._fluid_reader.close()
 
 
 def replay_auto(replay_env: ReplayWrapper, mode: str) -> None:
@@ -1450,7 +1614,13 @@ def replay_control(replay_env: ReplayWrapper) -> None:
         )
 
 
-def main(args: Any, env: Any, gym_config: dict[str, Any]) -> None:
+def main(
+    args: Any,
+    env: Any,
+    gym_config: dict[str, Any],
+    *,
+    fluid_reader: FluidTrajectoryReader | None = None,
+) -> None:
     """Run the selected workflow without taking ownership of ``env``."""
     if getattr(args, "replay", False):
         log_info("Replay mode.", color="green")
@@ -1458,6 +1628,7 @@ def main(args: Any, env: Any, gym_config: dict[str, Any]) -> None:
             env,
             args.replay_trajectory,
             getattr(args, "replay_mode", "kinematic"),
+            fluid_reader=fluid_reader,
         )
         return
 
@@ -1484,6 +1655,22 @@ def main(args: Any, env: Any, gym_config: dict[str, Any]) -> None:
         return
 
     plan = resolve_collection_plan(args, gym_config)
+    collection = _mapping_or_empty(gym_config.get("collection"), "collection")
+    qualification = collection.get("qualification")
+    if qualification is not None and not isinstance(qualification, Mapping):
+        raise ValueError("collection.qualification must be a mapping")
+    record_fluid_state = bool(getattr(args, "record_fluid_state", False))
+    if record_fluid_state and qualification is None:
+        raise ValueError(
+            "--record-fluid-state requires configured physical qualification"
+        )
+    qualification_output_dir = (
+        Path(
+            getattr(args, "qualification_output_dir", None) or "outputs/task-collection"
+        )
+        if qualification is not None
+        else None
+    )
     if real2sim_owner is not None and real2sim_owner.pending_episode is not None:
         raise RuntimeError(
             "unconfirmed Real2Sim submission must be repaired before reset"
@@ -1537,26 +1724,46 @@ def main(args: Any, env: Any, gym_config: dict[str, Any]) -> None:
         while committed < plan.target_episodes:
             batch_size = min(num_envs, plan.target_episodes - committed)
             stats["prepare_reset_count"] += 1
-            if real2sim_owner is None:
-                env.reset()
-            else:
-                env.reset(options={"save_data": False})
-            collection_kwargs = (
-                {"regenerate": getattr(args, "regenerate", False)}
-                if real2sim_owner is None
-                else {"_real2sim_owner": real2sim_owner}
+            fluid_recorder = (
+                FluidTrajectoryRecorder(
+                    qualification_output_dir,
+                    num_envs,
+                    _env_target(env).step_dt,
+                    enabled_env_ids=tuple(range(batch_size)),
+                )
+                if record_fluid_state
+                else None
             )
-            generated = generate_function(
-                env,
-                time_id=cursor,
-                save_path=getattr(args, "save_path", ""),
-                save_video=getattr(args, "save_video", False),
-                debug_mode=getattr(args, "debug_mode", False),
-                save_env_ids=tuple(range(batch_size)),
-                max_attempts=plan.max_attempts,
-                reset_before=False,
-                **collection_kwargs,
-            )
+            if fluid_recorder is not None:
+                _env_target(env)._set_fluid_trajectory_recorder(fluid_recorder)
+            try:
+                if real2sim_owner is not None or qualification is not None:
+                    env.reset(options={"save_data": False})
+                else:
+                    env.reset()
+                collection_kwargs = (
+                    {"regenerate": getattr(args, "regenerate", False)}
+                    if real2sim_owner is None
+                    else {"_real2sim_owner": real2sim_owner}
+                )
+                generated = generate_function(
+                    env,
+                    time_id=cursor,
+                    save_path=getattr(args, "save_path", ""),
+                    save_video=getattr(args, "save_video", False),
+                    debug_mode=getattr(args, "debug_mode", False),
+                    save_env_ids=tuple(range(batch_size)),
+                    max_attempts=plan.max_attempts,
+                    reset_before=False,
+                    fluid_recorder=fluid_recorder,
+                    qualification=qualification,
+                    qualification_output_dir=qualification_output_dir,
+                    **collection_kwargs,
+                )
+            finally:
+                if fluid_recorder is not None:
+                    _env_target(env)._set_fluid_trajectory_recorder(None)
+                    fluid_recorder.abort()
             stats["batch_count"] += 1
             if not generated:
                 stats["rejected_episodes"] += batch_size
@@ -1574,6 +1781,10 @@ def main(args: Any, env: Any, gym_config: dict[str, Any]) -> None:
             expected_episodes=committed
         )
         log_info(f"Verified Real2Sim collection report: {report_path}")
+    if qualification_output_dir is not None:
+        log_info(
+            f"Collection qualification report: {qualification_output_dir / 'qualification_result.json'}"
+        )
 
     episode_label = "episode" if committed == 1 else "episodes"
     batch_label = "batch" if stats["batch_count"] == 1 else "batches"
@@ -1744,6 +1955,16 @@ def _create_parser() -> argparse.ArgumentParser:
         help="Replay mode: kinematic (exact, default), dynamic (physics), "
         "control (interactive scrubber).",
     )
+    parser.add_argument(
+        "--record-fluid-state",
+        action="store_true",
+        help="Spool full particles beside a physically accepted Task Program trajectory.",
+    )
+    parser.add_argument(
+        "--particle-spacing",
+        type=float,
+        help="Override spacing for one procedurally spawned DexUni fluid.",
+    )
     return parser
 
 
@@ -1804,7 +2025,16 @@ def cli(argv: Sequence[str] | None = None) -> None:
     np.set_printoptions(5, suppress=True)
     torch.set_printoptions(precision=5, sci_mode=False)
 
-    args = _create_parser().parse_args(argv)
+    parser = _create_parser()
+    args = parser.parse_args(argv)
+    if getattr(args, "record_fluid_state", False) and not getattr(
+        args, "record_trajectory", False
+    ):
+        parser.error("--record-fluid-state requires --record_trajectory")
+    if getattr(args, "record_fluid_state", False) and (args.replay or args.preview):
+        parser.error(
+            "--record-fluid-state is only available for Task Program collection"
+        )
 
     if getattr(args, "replay", False):
         if not args.replay_trajectory:
@@ -1821,11 +2051,46 @@ def cli(argv: Sequence[str] | None = None) -> None:
     execute_init_hooks()
 
     env_cfg, gym_config, action_config = build_env_cfg_from_args(args)
+    if getattr(args, "particle_spacing", None) is not None:
+        configure_fluid_spacing(env_cfg, args.particle_spacing)
+    collection = _mapping_or_empty(gym_config.get("collection"), "collection")
+    qualification = collection.get("qualification")
+    if qualification is not None:
+        if not isinstance(qualification, Mapping):
+            raise ValueError("collection.qualification must be a mapping")
+        output = Path(args.trajectory_save_dir or "outputs/task-collection").resolve()
+        args.qualification_output_dir = str(output)
+        camera = getattr(env_cfg.events, "record_camera", None)
+        if camera is not None:
+            camera.params["save_path"] = str(output / "videos")
+            camera.params["max_env_num"] = env_cfg.num_envs
+    if getattr(args, "record_fluid_state", False):
+        if not env_cfg.fluid_object or env_cfg.task_program is None:
+            raise ValueError("Fluid recording requires a fluid Task Program")
+        if qualification is None:
+            raise ValueError(
+                "--record-fluid-state requires configured physical qualification"
+            )
+        if args.expansion_profile is not None or "expansion" in gym_config:
+            raise ValueError("Fluid recording cannot be combined with expansion")
+        env_cfg.trajectory_auto_save = False
+        env_cfg.trajectory_save_dir = args.qualification_output_dir
+        args.trajectory_save_dir = args.qualification_output_dir
+    if (
+        getattr(env_cfg, "fluid_object", None)
+        and env_cfg.sim_cfg.render_cfg.renderer == "no-render"
+    ):
+        if getattr(env_cfg, "events", None) is not None:
+            env_cfg.events.record_camera = None
+        for fluid in env_cfg.fluid_object:
+            fluid.render.mode = "none"
 
     real2sim_profile = None
     real2sim_profile_path = getattr(args, "real2sim_profile", None)
     if real2sim_profile_path is None:
         real2sim_profile_path = gym_config.get("real2sim", {}).get("profile")
+    if getattr(args, "record_fluid_state", False) and real2sim_profile_path is not None:
+        raise ValueError("Fluid recording cannot use a Real2Sim collection owner")
     if real2sim_profile_path is not None:
         from embodichain.lab.task_program.integrations.simulation.real2sim_collection import (
             load_real2sim_tabletop_profile,
@@ -1909,7 +2174,19 @@ def cli(argv: Sequence[str] | None = None) -> None:
     if args.replay and args.replay_mode == "control":
         log_info("Dataset saving disabled for control replay mode.", color="green")
 
-    env = gymnasium.make(id=gym_config["id"], cfg=env_cfg, **action_config)
+    fluid_reader = None
+    if args.replay and env_cfg.fluid_object:
+        replay_source = load_trajectory(args.replay_trajectory)
+        _validate_fluid_replay_source(replay_source)
+        fluid_reader = FluidTrajectoryReader(
+            args.replay_trajectory, replay_source, env_cfg
+        )
+    try:
+        env = gymnasium.make(id=gym_config["id"], cfg=env_cfg, **action_config)
+    except BaseException:
+        if fluid_reader is not None:
+            fluid_reader.close()
+        raise
 
     # Ensure the sim is torn down via env.close() (-> SimulationManager.destroy())
     # before the interpreter shuts down. Without this, C++ resources (dexsim/warp/
@@ -1930,7 +2207,7 @@ def cli(argv: Sequence[str] | None = None) -> None:
             install_real2sim_tabletop_owner(
                 env, real2sim_profile, dataset_dir=args.expansion_dataset_dir
             )
-        main(args, env, gym_config)
+        main(args, env, gym_config, fluid_reader=fluid_reader)
     except BaseException as error:
         body_error = error
         raise
