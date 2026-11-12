@@ -465,7 +465,6 @@ def _resolve_task_program_components(
                     continue
                 field = {
                     "demo_skill": "asset_manifest",
-                    "kinematic_joint_replay": "trajectory",
                 }.get(lowerer.get("kind"))
                 if field is not None and field in lowerer:
                     from embodichain.data._references import _resolve_data_reference

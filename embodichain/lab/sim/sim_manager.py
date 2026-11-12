@@ -1901,6 +1901,14 @@ class SimulationManager:
         scene.prepare_runtime_config(result)
         self._prepare_spawn_runtime(result)
         scene.bind()
+        if (
+            self.num_envs > 1
+            and self._fluid_objects
+            and not self.physics.supports_fluid_worlds
+        ):
+            raise NotImplementedError(
+                "Batched DexUni fluids require world isolation and selected-world reset."
+            )
         for visual in getattr(self, "_visual_objects", {}).values():
             if visual.is_spawn_bound:
                 visual._sync_spawn_state()
@@ -3037,12 +3045,6 @@ class SimulationManager:
             )
         if getattr(self, "_deformable_objects", {}):
             raise NotImplementedError("DexUni fluids cannot coexist with deformables.")
-        if self.num_envs != 1 and not getattr(
-            self.physics, "supports_fluid_worlds", False
-        ):
-            raise NotImplementedError(
-                "Batch fluids require a DexSim SPH build with world isolation and selected-world reset."
-            )
         if self.spawn_result is not None:
             raise NotImplementedError("Declare fluids before prepare().")
         if not isinstance(cfg, FluidObjectCfg):
@@ -3081,9 +3083,11 @@ class SimulationManager:
             if isinstance(configured, Mapping)
             else getattr(configured, "sph_cfg", None)
         )
-        from dexsim.engine.newton_physics import SPHSolverCfg
+        from dexsim.engine.newton_physics import DexUniSolverCfg
 
-        defaults = SPHSolverCfg()
+        # Query defaults through the supported DexUni composition, not a
+        # standalone fluid solver configuration.
+        defaults = DexUniSolverCfg(sph_cfg={"sph_method": "dfsph"}).sph_cfg
         for key, value in (
             ("rest_density", cfg.density),
             ("particle_diameter", cfg.particle_spacing),
@@ -3137,6 +3141,25 @@ class SimulationManager:
             points, pose[:3, :3], on_write=self._invalidate_fluid_state
         )
         self._spawn_scene.declare("fluid_object", cfg.uid, descriptor, facade=fluid)
+        selectors = (
+            "mujoco_articulations",
+            "mujoco_articulation_paths",
+            "mujoco_joints",
+        )
+        solver_cfg = self.sim_config.physics_cfg.solver_cfg
+        if not getattr(self, "_fluid_joint_ownership_control", None) and all(
+            (
+                solver_cfg.get(name)
+                if isinstance(solver_cfg, Mapping)
+                else getattr(solver_cfg, name, None)
+            )
+            is None
+            for name in selectors
+        ):
+            from embodichain.lab.sim._runtime_controls import _DexUniFluidJointOwnership
+
+            self._fluid_joint_ownership_control = _DexUniFluidJointOwnership()
+            self.add_runtime_control(self._fluid_joint_ownership_control)
         self._fluid_objects[cfg.uid] = fluid
         self.notify_visualization_topology_changed()
         return fluid

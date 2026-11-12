@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import os
+import hashlib
 from pathlib import Path
 import subprocess
 import sys
@@ -28,6 +29,7 @@ from unittest.mock import patch
 
 import pytest
 import torch
+import numpy as np
 
 
 @pytest.mark.parametrize("config_first", (True, False))
@@ -64,10 +66,30 @@ else:
 
 spec = get_env_spec(env_id)
 assert spec.cls is EmbodiedEnv
-assert config_to_cfg(load_config(path), source_path=path).final_acceptance == cfg.final_acceptance
+assert config_to_cfg(load_config(path), source_path=path).replay == cfg.replay
 assert cfg.robot.uid == "w1"
 assert cfg.task_program.program_id == "cloth_single_fold"
-assert cfg.kinematic_replay.load()[0].shape == (991, 24)
+assert cfg.replay.load().positions.shape == (991, 24)
+from embodichain.lab.gym.utils.composition import resolve_gym_components
+from embodichain.lab.task_program.integrations.composition import load_configured_task_program_deployment
+physical = resolve_gym_components(load_config(path), base_dir=path.parent)
+composed = load_configured_task_program_deployment(
+    task_program=physical.config["task_program"],
+    skill_profile=physical.embodiment_skill_profile,
+    evaluation=physical.evaluation,
+    base_dir=path.parent,
+)
+assert composed.integration.registration.evaluation_final_refs == ("centroid_pair_0", "centroid_pair_1")
+assert composed.integration.integration_fingerprint == spec.task_program_adapter_factory.integration_fingerprint
+# The normal registration fingerprint protects the rules, with no extra schema.
+from copy import deepcopy
+weakened = deepcopy(physical.evaluation)
+weakened["graph"]["rules"]["centroid_pair_0"]["params"]["tolerance"] = 0.02
+other = load_configured_task_program_deployment(
+    task_program=physical.config["task_program"], skill_profile=physical.embodiment_skill_profile,
+    evaluation=weakened, base_dir=path.parent,
+)
+assert other.integration.integration_fingerprint != composed.integration.integration_fingerprint
 if sys.argv[2] == "True":
     cfg.extensions = {"task_program": None}
     try:
@@ -77,22 +99,6 @@ if sys.argv[2] == "True":
     else:
         raise AssertionError("Extensions bypassed configured acceptance.")
     cfg.extensions = None
-    surface = cfg.replay_surface
-    cfg.replay_surface = replace(surface, mesh_sha256="0" * 64)
-    try:
-        spec.make(cfg=cfg)
-    except ValueError as exc:
-        assert "registered replay mesh" in str(exc)
-    else:
-        raise AssertionError("A different mesh passed construction.")
-    cfg.replay_surface = surface
-cfg.final_acceptance = replace(cfg.final_acceptance, max_distance_m=0.020)
-try:
-    spec.make(cfg=cfg)
-except ValueError as exc:
-    assert "registered final acceptance" in str(exc)
-else:
-    raise AssertionError("A different acceptance passed construction.")
 """
     robot = tmp_path / "w1_v030" / "robot.urdf"
     robot.parent.mkdir()
@@ -109,7 +115,6 @@ else:
 
 def _measured_fold(*, device="cpu", pairs=(((0,), (1,)), ((2,), (3,))), node_count=4):
     from embodichain.lab.gym.envs import EmbodiedEnv
-    from embodichain.lab.gym.envs._final_acceptance import _FinalAcceptance
     from embodichain.lab.gym.envs._physical_replay import _PhysicalReplay
     from embodichain.lab.gym.envs.episode_context import EpisodeContext
     from embodichain.lab.gym.utils.trajectory_state import _evaluation_observation_cfgs
@@ -123,8 +128,21 @@ def _measured_fold(*, device="cpu", pairs=(((0,), (1,)), ((2,), (3,))), node_cou
         device=torch.device(device), get_deformable_object=lambda _: cloth
     )
     env.cfg = SimpleNamespace(task_program=object())
-    declaration = _FinalAcceptance("cloth", pairs, 0.015, "a" * 64)
-    payload = declaration.evaluation()
+    from embodichain.lab.evaluation._deformable import _centroid_field
+
+    rules = {
+        f"centroid_pair_{i}": {
+            "kind": "near_target",
+            "bindings": {
+                "position": _centroid_field("cloth", "a" * 64, source),
+                "target": _centroid_field("cloth", "a" * 64, target),
+            },
+            "params": {"tolerance": 0.015, "axes": [0, 1], "inclusive": True},
+        }
+        for i, (source, target) in enumerate(pairs)
+    }
+    payload = {"graph": {"roots": list(rules), "rules": rules}}
+
     graph = builtin_predicates().compile(EvaluationSpec.from_dict(payload["graph"]))
     conditions = {ref: graph.select(ref) for ref in graph.roots}
     registration = SimpleNamespace(
@@ -140,7 +158,10 @@ def _measured_fold(*, device="cpu", pairs=(((0,), (1,)), ((2,), (3,))), node_cou
     replay.surface_cfg = SimpleNamespace(uid="cloth")
     replay.verified_mesh_sha256 = "a" * 64
     replay._node_shape = None
-    replay.factory = SimpleNamespace(steps=2, fps=60)
+    from embodichain.lab.gym.utils._replay import _ReplayCursor
+
+    replay.snapshot = SimpleNamespace(steps=2, source=SimpleNamespace(fps=60))
+    replay.cursor = _ReplayCursor(torch.tensor([2]))
     env.sim.spawn_result = SimpleNamespace(get_simulation_time=lambda: 2 / 60)
     env._physical_replay = replay
     env._active_task_program_bridge = SimpleNamespace(
@@ -171,13 +192,16 @@ def test_fold_abort_hold_does_not_consume_next_replay_frame() -> None:
     env = object.__new__(EmbodiedEnv)
     replay = object.__new__(_PhysicalReplay)
     env._physical_replay = replay
-    replay.factory = SimpleNamespace(fps=60, steps=2)
-    replay.commands = torch.tensor([[0.0], [0.1], [0.2]])
+    from embodichain.lab.gym.utils._replay import _ReplayCommands, _ReplayCursor
+
+    replay.snapshot = SimpleNamespace(steps=2, source=SimpleNamespace(fps=60))
+    replay.cursor = _ReplayCursor(torch.tensor([2]))
+    replay.commands = _ReplayCommands(torch.tensor([[[0.0], [0.1], [0.2]]]))
     env.sim = SimpleNamespace(
         spawn_result=SimpleNamespace(get_simulation_time=lambda: 1 / 60)
     )
     hold = ControllerAction(
-        replay.commands[None, 1],
+        torch.tensor([[0.1]]),
         metadata={"bridge_action_kind": "runtime_abort_safe_hold"},
     )
 
@@ -279,6 +303,8 @@ def test_cloth_native_mesh_replacement_and_incomplete_cadence_cannot_pass():
     assert env.is_task_success().item()
     env.sim.spawn_result.get_simulation_time = lambda: 1 / 60
     assert not env.is_task_success().item()
+    env.sim.spawn_result.get_simulation_time = lambda: 3 / 60
+    assert not env.is_task_success().item()
     env.sim.spawn_result.get_simulation_time = lambda: 2 / 60
     env.sim.get_deformable_object = lambda uid: SimpleNamespace(
         data=SimpleNamespace(nodal_pos_w=nodes)
@@ -313,34 +339,6 @@ def test_one_canonical_cloth_measurement_reads_nodes_once_and_checks_groups():
     assert not env.is_task_success().item()
 
 
-@pytest.mark.parametrize("factory", ["missing", "weakened"])
-def test_cloth_constructor_requires_matching_registered_final_rules(factory):
-    from embodichain.lab.gym.envs import BaseEnv, EmbodiedEnv, EmbodiedEnvCfg
-    from embodichain.lab.gym.envs._final_acceptance import _FinalAcceptance
-    from embodichain.lab.evaluation import EvaluationSpec, builtin_predicates
-
-    declaration = _FinalAcceptance("cloth", (((0,), (1,)),), 0.015, "a" * 64)
-    cfg = EmbodiedEnvCfg()
-    cfg.task_program = object()
-    cfg.final_acceptance = declaration
-    adapter = None
-    if factory == "weakened":
-        payload = declaration.evaluation()
-        payload["graph"]["rules"]["centroid_pair_0"]["params"]["tolerance"] = 0.02
-        graph = builtin_predicates().compile(EvaluationSpec.from_dict(payload["graph"]))
-        adapter = SimpleNamespace(
-            registration=SimpleNamespace(
-                evaluation_final_refs=tuple(graph.roots),
-                evaluation_conditions={ref: graph.select(ref) for ref in graph.roots},
-            )
-        )
-    with patch.object(
-        BaseEnv, "__init__", side_effect=AssertionError("native setup reached")
-    ):
-        with pytest.raises(ValueError, match="registered final acceptance"):
-            EmbodiedEnv(cfg, task_program_adapter_factory=adapter)
-
-
 def test_malformed_cloth_arena_shape_is_unavailable_without_reacquisition():
     env, nodes = _measured_fold()
     env._active_task_program_bridge.program_completed = True
@@ -370,3 +368,180 @@ def test_shared_cloth_criteria_measure_four_particle_centroids(device):
     nodes[:, 12:16, 1] -= 0.002
     nodes[:, 4, 2] = float("nan")
     assert not env.is_task_success().item()
+
+
+def _native_input(tmp_path):
+    from embodichain.lab.gym.utils._replay import _AuthoredJointStream
+
+    path = tmp_path / "commands.npz"
+    np.savez(
+        path,
+        positions=np.array([[0, 10], [1, 11], [2, 12]], dtype=np.float32),
+        joint_names=np.array(["b", "a"]),
+    )
+    source = _AuthoredJointStream(
+        "commands", str(path), hashlib.sha256(path.read_bytes()).hexdigest(), 60
+    )
+    cfg = SimpleNamespace(
+        num_envs=1,
+        sim_steps_per_control=1,
+        target_control_frequency=None,
+        sim_cfg=SimpleNamespace(
+            physics_dt=1 / 60,
+            physics_cfg=SimpleNamespace(use_cuda_graph=False),
+        ),
+        expert_trajectory=SimpleNamespace(
+            joint_command_mode="position", use_action_manager=False
+        ),
+        replay_surface=SimpleNamespace(
+            mesh_sha256="a" * 64,
+            prepare=lambda cfg: SimpleNamespace(uid="cloth"),
+        ),
+        rl_task=None,
+        robot=SimpleNamespace(uid="robot"),
+        background=[],
+    )
+    return source, cfg, path
+
+
+def test_native_replay_uses_one_snapshot_before_and_after_preparation(tmp_path):
+    from embodichain.lab.gym.envs._physical_replay import _PhysicalReplay
+    from embodichain.lab.task_program.integrations._kinematic_replay import (
+        _KinematicReplayFactory,
+    )
+
+    source, cfg, path = _native_input(tmp_path)
+    prepared = False
+    events = []
+    clock = [0.0]
+    resets = []
+
+    class Robot:
+        uid = "robot"
+        device = torch.device("cpu")
+
+        @property
+        def joint_names(self):
+            assert prepared, "Native joint metadata was read before prepare."
+            return ["a", "b"]
+
+        def set_qpos(self, value, **kwargs):
+            resets.append(value.clone())
+
+        def clear_dynamics(self, **kwargs):
+            pass
+
+    robot = Robot()
+
+    def register(uid, positions, **kwargs):
+        assert not prepared
+        events.append("register")
+        assert kwargs["joint_names"] == ("b", "a")
+        np.testing.assert_array_equal(positions[0], [[0, 10], [1, 11], [2, 12]])
+
+    sim = SimpleNamespace(
+        add_deformable_object=lambda cfg: SimpleNamespace(),
+        register_kinematic_joint_trajectory=register,
+        spawn_result=SimpleNamespace(
+            world=object(), get_simulation_time=lambda: clock[0]
+        ),
+    )
+    env = SimpleNamespace(
+        cfg=cfg,
+        robot=robot,
+        sim=sim,
+        add_detached_uids_for_reset=lambda ids: None,
+    )
+    read_bytes = Path.read_bytes
+    with patch.object(
+        Path, "read_bytes", autospec=True, side_effect=read_bytes
+    ) as read:
+        replay = _PhysicalReplay(cfg, source)
+        replay.prepare_scene(env)
+        events.append("prepare")
+        prepared = True
+        replay.bind(env)
+        env._replay_snapshot = lambda source_id: replay.snapshot
+        path.write_bytes(b"changed after initialization")
+        factory = _KinematicReplayFactory("commands", (("all", 0, 2),))
+        lowerer = factory.create_for_environment(
+            environment=env,
+            simulation=sim,
+            robot=robot,
+            scene_registry=None,
+            engine=SimpleNamespace(robot=robot),
+        )
+        lowered = lowerer.lower(
+            SimpleNamespace(arguments={"phase": "all"}),
+            context=SimpleNamespace(
+                batch_size=1,
+                require_control_dt=lambda: 1 / 60,
+                env_ids=torch.tensor([0]),
+            ),
+            bound=None,
+            option_template=None,
+        )
+        assert read.call_count == 1
+    assert events == ["register", "prepare"]
+    torch.testing.assert_close(
+        lowered.goal.target.positions, torch.tensor([[[11.0, 1.0], [12.0, 2.0]]])
+    )
+    replay.consume(env, torch.tensor([[11.0, 1.0]]))
+    assert replay.cursor.steps.tolist() == [0]
+    clock[0] = 1 / 60
+    replay.consume(env, torch.tensor([[12.0, 2.0]]))
+    clock[0] = 2 / 60
+    with pytest.raises(ValueError, match="differs from native replay"):
+        replay.consume(env, torch.tensor([[12.0, 2.0]]))
+    backend = SimpleNamespace(set_sim_time=lambda *args: clock.__setitem__(0, 0.0))
+    with patch(
+        "dexsim.engine.newton_physics.backend_registry.get_newton_backend",
+        return_value=backend,
+    ):
+        replay.reset(env, [0])
+    assert replay.cursor.steps.tolist() == [0]
+    assert len(resets) == 2
+    torch.testing.assert_close(resets[0], torch.tensor([[10.0, 0.0]]))
+    replay.consume(env, torch.tensor([[11.0, 1.0]]))
+    assert replay.snapshot.metadata()["source_joint_names"] == ["b", "a"]
+    assert replay.snapshot.metadata()["joint_names"] == ["a", "b"]
+    with pytest.raises(ValueError, match="digest"):
+        source.load()
+
+
+def test_native_replay_resolves_frequency_and_rejects_unsupported_modes(tmp_path):
+    from embodichain.lab.gym.envs._physical_replay import _PhysicalReplay
+
+    source, cfg, path = _native_input(tmp_path)
+    cfg.sim_steps_per_control = 4
+    cfg.target_control_frequency = 60
+    _PhysicalReplay(cfg, source)
+    cfg.target_control_frequency = 30
+    with patch.object(type(source), "load", side_effect=AssertionError("loaded")):
+        with pytest.raises(ValueError, match="resolved recorded rate"):
+            _PhysicalReplay(cfg, source)
+        cfg.target_control_frequency = 60
+        cfg.expert_trajectory.joint_command_mode = "position_velocity"
+        with pytest.raises(ValueError, match="position-only"):
+            _PhysicalReplay(cfg, source)
+
+
+@pytest.mark.parametrize("extra", ["qvel", "qf"])
+@pytest.mark.parametrize("hold", [None, "runtime_abort_safe_hold"])
+def test_native_replay_rejects_extra_targets_before_consuming_a_frame(extra, hold):
+    from tensordict import TensorDict
+    from embodichain.lab.gym.envs.types import ControllerAction
+    from embodichain.lab.gym.utils._replay import _ReplayCommands
+
+    env, nodes = _measured_fold()
+    replay = env._physical_replay
+    replay.hold = False
+    replay.commands = _ReplayCommands(torch.tensor([[[0.0], [0.1], [0.2]]]))
+    action = ControllerAction(
+        TensorDict({"qpos": torch.tensor([[0.1]]), extra: torch.tensor([[6.0]])}, [1]),
+        metadata={"bridge_action_kind": hold},
+    )
+    with pytest.raises(ValueError, match="only qpos"):
+        replay.consume(env, action)
+    assert not replay.hold
+    assert replay.cursor.steps.tolist() == [0]

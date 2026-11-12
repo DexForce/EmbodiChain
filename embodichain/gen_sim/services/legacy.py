@@ -21,9 +21,9 @@ from collections.abc import Mapping
 import json
 import os
 from pathlib import Path
-import re
 from typing import Any
 from embodichain.gen_sim.environment import _read_gen_sim_env_values
+from embodichain.gen_sim.env import _iter_env_file
 
 __all__: list[str] = []
 _GEN_SIM_DIR = Path(__file__).resolve().parents[1]
@@ -163,28 +163,7 @@ def _mapping_value(source: Mapping[str, Any], *names: str) -> str:
 def _load_env_file(path: Path) -> dict[str, str]:
     if not path.is_file():
         return {}
-    values: dict[str, str] = {}
-    for line_number, raw_line in enumerate(
-        path.read_text(encoding="utf-8").splitlines(), start=1
-    ):
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith("export "):
-            line = line[len("export ") :].lstrip()
-        if "=" not in line:
-            continue
-        key, raw_value = line.split("=", 1)
-        key = key.strip()
-        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
-            raise ValueError(f"Invalid dotenv key at {path}:{line_number}.")
-        value = raw_value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-            value = value[1:-1]
-        elif " #" in value:
-            value = value.split(" #", 1)[0].rstrip()
-        values[key] = value
-    return values
+    return dict(_iter_env_file(path))
 
 
 def _first_env_value(local_env: Mapping[str, str], *names: str) -> str | None:

@@ -1052,6 +1052,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                 "release_retreat_distance",
                 "rotate_angle",
                 "dwell_duration",
+                "rotation_duration",
                 "mouth_height",
                 "max_mouth_height",
                 "clearance",
@@ -1344,6 +1345,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                 {
                     "rotate_angle",
                     "dwell_duration",
+                    "rotation_duration",
                     "mouth_height",
                     "max_mouth_height",
                     "clearance",
@@ -1363,6 +1365,13 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                 config["dwell_duration"],
                 path=f"{path}.dwell_duration",
                 minimum=0.0,
+            )
+        if "rotation_duration" in config:
+            kwargs["rotation_duration"] = _real(
+                config["rotation_duration"],
+                path=f"{path}.rotation_duration",
+                minimum=0.0,
+                strict_minimum=True,
             )
         for field_name in (
             "mouth_height",

@@ -77,26 +77,10 @@ def inspect_deployment(path: str | Path, *, explain: bool = False) -> dict[str, 
             "physical scene."
         )
 
-    evaluation = physical.evaluation
-    if "acceptance" in physical.config:
-        from embodichain.lab.gym.envs._final_acceptance import (
-            _load_acceptance_evaluation,
-        )
-
-        if evaluation is not None:
-            raise ValueError(
-                "Declare either evaluation or acceptance, not two final gates."
-            )
-        _, _, evaluation = _load_acceptance_evaluation(
-            physical.config["acceptance"],
-            physical.config.get("replay_surface"),
-            base_dir=deployment_path.parent,
-        )
-
     deployment = _load_configured_task_program_deployment(
         task_program=task_program,
         skill_profile=physical.embodiment_skill_profile,
-        evaluation=evaluation,
+        evaluation=physical.evaluation,
         base_dir=deployment_path.parent,
     )
     _validate_scene_binding_targets(

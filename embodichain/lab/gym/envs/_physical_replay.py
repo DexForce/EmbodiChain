@@ -25,9 +25,10 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from tensordict import TensorDict
 
 from embodichain.data import get_data_path
+from embodichain.lab.gym.utils._replay import _ReplayCursor, _ReplayCommands
+from embodichain.lab.gym.utils.control_timing import resolve_control_timing
 from embodichain.lab.gym.envs.types import ControllerAction
 from embodichain.lab.gym.utils._component_composition import _identifier, _mapping
 from embodichain.lab.sim.cfg import MeshCfg, SurfaceDeformableObjectCfg
@@ -102,32 +103,34 @@ def _verified_path(reference, digest):
 
 
 class _PhysicalReplay:
-    def __init__(self, cfg, factory):
+    def __init__(self, cfg, source):
         physics = cfg.sim_cfg.physics_cfg
+        timing = resolve_control_timing(
+            cfg.sim_cfg.physics_dt,
+            cfg.sim_steps_per_control,
+            target_control_frequency=cfg.target_control_frequency,
+        )
+        if (
+            cfg.expert_trajectory.joint_command_mode != "position"
+            or cfg.expert_trajectory.use_action_manager
+        ):
+            raise ValueError(
+                "Native position replay requires position-only expert targets."
+            )
         if (
             cfg.num_envs != 1
-            or cfg.sim_steps_per_control != 1
-            or physics.physics_dt != 1 / factory.fps
+            or timing.sim_steps_per_control != 1
+            or timing.step_dt != 1 / source.fps
             or physics.use_cuda_graph
             or cfg.replay_surface is None
-            or cfg.final_acceptance is None
-            or cfg.task_program is None
             or cfg.rl_task is not None
         ):
             raise ValueError(
-                "Native replay requires one arena, its recorded rate, no CUDA Graph, "
-                "and measured Task Program acceptance."
+                "Native replay requires one arena, its resolved recorded rate, "
+                "no CUDA Graph, and a verified physical replay surface."
             )
-        if (
-            cfg.final_acceptance.mesh_sha256 != cfg.replay_surface.mesh_sha256
-            or cfg.final_acceptance.deformable_uid
-            != cfg.replay_surface.object_config["uid"]
-        ):
-            raise ValueError(
-                "Final acceptance must measure the registered replay mesh."
-            )
-        self.factory = factory
-        self.positions, self.names = factory.load()
+        self.snapshot = source.load()
+        self.cursor = _ReplayCursor(torch.tensor([self.snapshot.steps]))
         self.surface_cfg = cfg.replay_surface.prepare(cfg)
         self.verified_mesh_sha256 = cfg.replay_surface.mesh_sha256
         self._node_shape = None
@@ -135,11 +138,13 @@ class _PhysicalReplay:
 
     def prepare_scene(self, env):
         self.surface = env.sim.add_deformable_object(self.surface_cfg)
+        # Native joint metadata is only available after prepare. The native
+        # registration API accepts the source order explicitly at this stage.
         env.sim.register_kinematic_joint_trajectory(
             env.cfg.robot.uid,
-            self.positions[None],
-            fps=self.factory.fps,
-            joint_names=self.names,
+            self.snapshot.positions[None].numpy(),
+            fps=self.snapshot.source.fps,
+            joint_names=self.snapshot.joint_names,
             initialize_pose=True,
         )
 
@@ -169,7 +174,8 @@ class _PhysicalReplay:
         return self.surface, nodes
 
     def bind(self, env):
-        self.commands = self.factory.ordered(self.positions, self.names, env.robot)
+        self.snapshot = self.snapshot.bind(env.robot)
+        self.commands = self.snapshot.commands()
         env.add_detached_uids_for_reset(
             [env.robot.uid, *(cfg.uid for cfg in env.cfg.background)]
         )
@@ -178,31 +184,32 @@ class _PhysicalReplay:
         if len(env_ids):
             from dexsim.engine.newton_physics.backend_registry import get_newton_backend
 
-            initial = self.commands[None, 0]
+            initial = self.snapshot.positions[None, 0]
             env.robot.set_qpos(initial, target=False, env_ids=env_ids)
             env.robot.set_qpos(initial, target=True, env_ids=env_ids)
             env.robot.clear_dynamics(env_ids=env_ids)
             get_newton_backend(env.sim.spawn_result.world).set_sim_time(0.0, 0)
+            self.cursor.reset()
             self.hold = False
 
     def consume(self, env, action):
         command = action.value if isinstance(action, ControllerAction) else action
-        self.hold = isinstance(action, ControllerAction) and action.metadata.get(
+        # Validate the command kind even for safe holds; native position replay
+        # cannot execute independently supplied velocity or effort targets.
+        _ReplayCommands.position_target(command)
+        hold = isinstance(action, ControllerAction) and action.metadata.get(
             "bridge_action_kind"
         ) in ("runtime_safe_hold", "runtime_abort_safe_hold")
-        if self.hold:
-            return command
-        qpos = command.get("qpos") if isinstance(command, TensorDict) else command
-        frame = self.frame(env) + 1
-        if (
-            frame > self.factory.steps
-            or not isinstance(qpos, torch.Tensor)
-            or not torch.equal(qpos, self.commands[None, frame])
-        ):
-            raise ValueError(
-                f"Task Program command differs from native replay at frame {frame}."
-            )
+        if not hold:
+            self.commands.require_position(self.frame(env) + 1, command)
+        self.hold = hold
         return command
 
     def frame(self, env):
-        return round(env.sim.spawn_result.get_simulation_time() * self.factory.fps)
+        frame = round(
+            env.sim.spawn_result.get_simulation_time() * self.snapshot.source.fps
+        )
+        # Keep the display/progress cursor exhausted, while reporting the actual
+        # clock so final queries revoke completion after an external world step.
+        self.cursor.seek(max(0, min(frame, self.snapshot.steps)))
+        return frame

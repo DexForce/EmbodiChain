@@ -28,7 +28,6 @@ from embodichain.lab.task_program.integrations.configured import (
 )
 
 if TYPE_CHECKING:
-    from embodichain.lab.gym.envs._final_acceptance import _FinalAcceptance
     from embodichain.lab.gym.utils.registration import EnvSpec
 
 __all__: list[str] = []
@@ -41,7 +40,6 @@ def _register_configured_task_program_integration(
     integration: _ConfiguredTaskProgramIntegration,
     *,
     max_episode_steps: object,
-    final_acceptance: _FinalAcceptance | None = None,
 ) -> EnvSpec:
     """Register ``EmbodiedEnv`` under a config-owned ID, idempotently."""
     selected_env_id = _identifier(env_id, path="id")
@@ -77,7 +75,6 @@ def _register_configured_task_program_integration(
                 selected_env_id,
                 max_episode_steps=selected_max_episode_steps,
                 task_program_adapter_factory=integration.adapter_factory,
-                _final_acceptance=final_acceptance,
             )
             return get_env_spec(selected_env_id)
 
@@ -90,7 +87,6 @@ def _register_configured_task_program_integration(
         if (
             existing.cls is not EmbodiedEnv
             or existing.max_episode_steps != selected_max_episode_steps
-            or existing._final_acceptance != final_acceptance
             or existing_fingerprint != integration.integration_fingerprint
         ):
             raise ValueError(

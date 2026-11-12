@@ -58,14 +58,17 @@ from its supplied component snapshot. See
 | `configs/components/execution_policies/*.yaml` | Reusable execution policy | Physical environment/embodiment ownership |
 | `<task>/agents/<algorithm>.{json,yaml}` | Optional RL training configuration | Task identity or Python registration ownership |
 | `<task>/catalog.yaml` | Logical task key, presentation metadata and named deployment references | Gym registration or duplicated runtime settings |
-| Optional `acceptance.component` | Verified deformable declarations converted to shared evaluation rules | A second evaluator, scene setup, actions, or arbitrary callbacks |
+| Optional `evaluation.component` | Shared measured predicates and final/process rule selections | Scene setup, actions, or a second evaluator |
 | Optional `objective.component` | Independent physical evaluation declaration | Program completion, segment acceptance or persistence authority |
 
-A configured kinematic replay may declare `acceptance: {component: ...}`
-for particle-centroid pairs. The closed adapter requires its digest-verified
-replay mesh and compiles the declaration into ordinary shared final rules.
-Declaring `evaluation` alongside `acceptance` is rejected. Registration and
-construction verify the same normalized rules; the
+A native joint replay declares `simulation.replay` with
+`kind: native_joint_positions`, a source ID, trajectory path, SHA-256 and FPS in
+the physical environment. Gym reads the authored positions once into its own
+snapshot; `replay_surface` qualifies the associated mesh and robot assets.
+Final particle-centroid criteria use the ordinary `evaluation.component` path.
+Public component composition, static inspection and runtime therefore receive
+the same compiled rules and registration identity. Mesh SHA and canonical
+particle groups remain part of observation identity. The
 [shared policy and outcome contract](../task-programs/configuration.md)
 owns capture, completion qualification and terminal evidence.
 

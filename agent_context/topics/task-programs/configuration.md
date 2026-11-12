@@ -202,17 +202,21 @@ relative Place and coordinated transport. Their declarations in
 `integrations/_configured_services.py` select exact Atomic Skill descriptors;
 the closed decoder in `configured.py` owns accepted options and route fields.
 
-The configured `kinematic_joint_replay` lowerer binds named phases to
-contiguous ranges of a digest-pinned, fixed-rate full-joint command stream.
-The Newton kinematic control interpolates inside each physics step. The
-environment checks each timed `MoveJoints` command against the corresponding
-sample. The legacy acceptance component is a closed declaration adapter: it
-compiles particle-centroid pairs into shared `near_target` final rules. Canonical
-world-space centroid fields carry the verified mesh SHA and sorted particle
-selection; source identity, topology, and floating coordinates qualify evidence.
-The verified native replay facade owns mesh binding, and `frame == steps` limits
-execution completion. Shared final measurement/sealing and offline replay own
-physical outcomes; no separate boolean gate remains.
+The configured `kinematic_joint_replay` lowerer selects a physical replay source
+by ID and maps named phases to contiguous intervals. It obtains the environment's
+already verified and ordered command snapshot and emits `TimedTrajectory` /
+`JointPositionGoal` for `MoveJoints`; it owns no file reader or playback cursor.
+The optional `create_for_environment` factory hook receives the live host through
+standard registration assembly, including selected-row factories, without
+changing existing factories' `create` contract. The host is weakly referenced.
+
+The physical `simulation.replay` declaration owns the digest and cadence.
+Newton interpolates registered source positions inside each physics step while
+cloth physics continues. Canonical world-space centroid fields carry the verified
+mesh SHA and sorted particle selection. Ordinary `evaluation.component` supplies
+`near_target` rules; source identity, topology and finite coordinates qualify
+evidence. Reaching the final replay frame qualifies completion. Shared final
+measurement, sealing and offline replay own physical outcomes.
 Relative Place resolves a live reference plus world-axis displacement and
 requires the verified held-object transform. Coordinated transport must select
 the real primitive's release mode. Do not install frontend skill replacements.

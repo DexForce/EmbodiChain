@@ -39,8 +39,16 @@ The deployment uses one CUDA arena at 60 Hz, ten substeps, `surface-fast` at
 current particle positions and checks that both paired free-edge corner
 centroids are within 15 mm in XY after the program completes.
 
-The corner tolerance and particle pairs live in `task_program/acceptance.yaml`.
-The loader translates this declaration into shared `near_target` final rules.
+The corner tolerance and particle pairs live in `task_program/evaluation.yaml`
+as ordinary shared `near_target` final rules.
+The physical `simulation.replay` declaration owns the command file, digest and
+cadence. Gym reads it once, registers native controls before physics preparation,
+and shares the bound command snapshot with the phase lowerer. This replay keeps
+cloth physics enabled and requires position-only commands; additional velocity
+or effort targets are rejected. Its cadence is checked after resolving
+`target_control_frequency` or `sim_steps_per_control`. Episode metadata includes
+the source digest, joint orders and rate.
+
 Mesh-qualified world-centroid samples are captured once per query and sealed in
 `final_acceptance_observations`; offline replay uses the same measured criteria.
 Program completion additionally requires reaching the final replay frame. Invalid
