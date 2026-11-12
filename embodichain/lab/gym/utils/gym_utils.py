@@ -512,7 +512,13 @@ def _decode_rl_task(value: object, modules: Sequence[str]) -> RLTaskCfg:
     return RLTaskCfg(**groups)
 
 
-def _register_configured_rl(config: Mapping[str, Any], max_episode_steps: int) -> None:
+def _register_configured_rl(
+    config: Mapping[str, Any],
+    max_episode_steps: int,
+    *,
+    integration=None,
+    program_identity=None,
+) -> None:
     from gymnasium.envs.registration import registry as gym_registry
     from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
     from embodichain.lab.gym.utils.registration import (
@@ -546,6 +552,13 @@ def _register_configured_rl(config: Mapping[str, Any], max_episode_steps: int) -
         "physics": config["physics"],
         "max_episode_steps": max_episode_steps,
     }
+    if integration is not None:
+        signature["task_program"] = {
+            "integration": integration.integration_fingerprint,
+            "program": program_identity,
+            "execution": config["task_program"].get("execution", "expert"),
+            "action_owners": config["task_program"].get("action_owners"),
+        }
     signature["manager_order"] = {
         name: list(config["env"].get(name, {}))
         for name in ("events", "observations", "rewards", "actions")
@@ -594,6 +607,9 @@ def _register_configured_rl(config: Mapping[str, Any], max_episode_steps: int) -
             env_id,
             max_episode_steps=max_episode_steps,
             supports_rl=True,
+            task_program_adapter_factory=(
+                None if integration is None else integration.adapter_factory
+            ),
         )
         REGISTERED_ENVS[env_id]._configured_rl_fingerprint = fingerprint
 
@@ -606,6 +622,7 @@ def config_to_cfg(
     task_program_path_override: str | os.PathLike[str] | None = None,
     component_sources: Mapping[str, Mapping[str, object]] | None = None,
     evaluation_registry: PredicateRegistry | None = None,
+    _register_env: bool = True,
 ) -> "EmbodiedEnvCfg":
     """Parser configuration file into cfgs for env initialization.
 
@@ -617,6 +634,9 @@ def config_to_cfg(
     policy. Inline ``robot``, ``sensor``, and scene fields remain valid when
     their corresponding component selector is absent. A resolved config
     containing ``task_program`` composes its semantic and policy components.
+    Explicit ``task_program.execution: policy`` loads those declarations with
+    complete policy action ownership and an ``rl_task``, without activating the
+    expert adapter. The default expert execution remains exclusive with RL.
     Set ``enable_sensor`` to ``False`` to keep an embodiment's sensor
     declaration while skipping sensor acquisition.
     Every resolved environment explicitly owns one ``physics`` backend and an
@@ -631,6 +651,7 @@ def config_to_cfg(
         config (dict): The configuration dictionary containing an optional
             environment component plus an embodiment component or inline robot.
         evaluation_registry: Optional trusted registry for the selected rule library.
+        _register_env: Internal preflight switch; False validates without registering.
         manager_modules (list): List of module paths for dataset, event, observation, and reward managers.
             If not provided, uses default module paths.
         source_path: Optional path of the Gym configuration source file.
@@ -697,10 +718,22 @@ def config_to_cfg(
         pass
 
     if "rl_task" in config:
-        if "task_program" in config or task_program_path_override is not None:
+        if ("task_program" in config or task_program_path_override is not None) and (
+            not isinstance(config.get("task_program"), Mapping)
+            or config["task_program"].get("execution", "expert") != "policy"
+        ):
             raise ValueError("rl_task and task_program cannot share one deployment.")
 
     env_cfg = EmbodiedEnvCfg()
+    if isinstance(config.get("task_program"), Mapping):
+        env_cfg.task_program_execution = config["task_program"].get(
+            "execution", "expert"
+        )
+        env_cfg.task_program_action_owners = deepcopy(
+            config["task_program"].get("action_owners", {})
+        )
+        if env_cfg.task_program_execution == "policy" and "rl_task" not in config:
+            raise ValueError("Policy Task Program declarations require rl_task.")
 
     removed_task_program_fields = sorted(
         field
@@ -1287,9 +1320,32 @@ def config_to_cfg(
                 raise ValueError(
                     "Configured RL virtual targets must be sampled in reset mode."
                 )
-        _register_configured_rl(config, env_cfg.max_episode_steps)
+        if env_cfg.task_program_execution == "policy":
+            from embodichain.lab.task_program.integrations.progress import (
+                _validate_policy_deployment,
+            )
+            from embodichain.lab.task_program.integrations import (
+                task_program_fingerprint,
+            )
 
-    if configured_task_program_integration is not None:
+            compiled_policy_program = _validate_policy_deployment(
+                env_cfg, configured_task_program_integration.registration
+            )
+            if _register_env:
+                _register_configured_rl(
+                    config,
+                    env_cfg.max_episode_steps,
+                    integration=configured_task_program_integration,
+                    program_identity=task_program_fingerprint(compiled_policy_program),
+                )
+        elif _register_env:
+            _register_configured_rl(config, env_cfg.max_episode_steps)
+
+    if (
+        _register_env
+        and configured_task_program_integration is not None
+        and "rl_task" not in config
+    ):
         from embodichain.lab.gym.envs.task_program.registration import (
             _register_configured_task_program_integration,
         )

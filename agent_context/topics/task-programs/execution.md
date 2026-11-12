@@ -337,3 +337,47 @@ exact inclusive source slots and receiver slots at the first maximum tilt.
 Raw validity/errors, episode and written-boundary identity remain authoritative.
 Geometry functions live in Compute and choose no Pour thresholds or release
 verdicts. The collector does not read live poses or acquire new sensor samples.
+
+
+## Policy stage progress
+
+`integrations/progress.py::TaskProgramProgress` composes trusted condition nodes
+and ordered `MilestoneRule` achievements in one `RuleSession`; it does not own
+an executor or acquire observations. Configured policy mode still selects the
+integration, embodiment skill profile and execution-policy metadata for static
+semantic binding; `EmbodiedEnv` never creates their expert adapter. All declared
+resources must be policy-owned and covered by actuated ActionManager joints.
+Mimic followers are not separate action producers. Extensions cannot override
+host-owned configuration or runtime state in this mode.
+
+The first supported subset is explicit sequential segments and finite expanded
+repeats, with instructions, contracts, named instantaneous condition validators
+and condition-only prerequisites. Parallel/implicit segments, expert post-policies,
+required symbolic/call-effect outcomes, temporal condition graphs and expert
+segment-start baselines fail preflight. Use measured scene references or explicit
+absolute thresholds for policy criteria; do not silently convert expert baselines.
+The strict deployment inspector uses the same production validator.
+
+After the canonical post-step acquisition, the host advances progress once before
+RewardManager and TerminationManager consume cached results. Reset observations
+and queries never advance progress. Original row IDs, expected episode IDs and
+acquisition revisions qualify evidence; foreign/missing/stale rows cannot establish
+achievements. Unstarted rows expect episode 0 and remain NOT_RUN until reset.
+Current truth may revoke; ordered achievements remain sticky within that episode.
+A later occurrence can achieve only on a transition after its predecessor.
+
+`program_stage_reward` explicitly selects `satisfied`, `rising`, `metric` or
+`first_achievement`. A first bonus requires `scope: occurrence|episode`; episode
+scope pays once per authored stage name across repeats. Reads do not consume
+triggers. RewardCfg weight and an explicit linear scale define shaping or a
+negative penalty; metrics require one scalar per environment. Missing evidence
+contributes zero. `program_stage_condition` explicitly selects `state: achieved`
+or `current`; an omitted stage means every occurrence. Neither adapter invokes
+expert validators or accepts expert demo metadata.
+
+Policy success requires an explicit stage condition in `rl_task.success` and
+retains deployment final/process requirements. Terminal reports keep RL execution,
+physical progress, acceptance, Gym flags and persistence separate; no expert
+bridge completion is required. Selected resets clear progress and bonus identity
+only after terminal reports are sealed. The runnable example and limitations live
+in `examples/learning/task_program_progress/README.md`.
