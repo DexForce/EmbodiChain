@@ -227,7 +227,7 @@ def test_config_to_cfg_rejects_conflicting_action_declarations() -> None:
         config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
 
 
-@pytest.mark.parametrize("backend", (None, True, "physx", " newton"))
+@pytest.mark.parametrize("backend", (None, True, "Default", " newton"))
 def test_config_to_cfg_rejects_invalid_physics_backend(backend: object) -> None:
     """Only the two exact public backend names are accepted."""
     config = {
