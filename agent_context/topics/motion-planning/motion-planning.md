@@ -144,6 +144,11 @@ compliance certificate.
 
 `retime_to_control_grid()` maps source trajectories onto a fixed command clock
 without shortening their durations and recomputes velocity references.
+Linear retiming keeps a saturated acceleration limit only when the command
+period is an integer multiple of the source sample period; 0.025 s onto 0.04 s
+reads about 9% high. Upsampling a path first resampled to a fixed count
+concentrates each coarse velocity change into one command step. Sample planners
+at a divisor of the compiled clock and keep their native samples.
 [Planner details](planner-details.md#retiming-and-playback) describe the execution
 boundary. Standalone `play_joint_trajectory()` advances unchanged physics
 substeps; Gym experts use the environment-owned command period and

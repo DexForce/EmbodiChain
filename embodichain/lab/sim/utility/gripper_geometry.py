@@ -202,15 +202,18 @@ def attach_closure_samples(
         samples: Number of closing states between the open and grasp commands.
 
     Returns:
-        The same geometry with closure apertures and pad surfaces attached, or
-        the unchanged geometry when the description declares no pad pair.
+        A geometry with closure apertures and pad surfaces attached, or the
+        unchanged geometry when the description declares no pad pair.
+
+    Raises:
+        ValueError: If ``samples`` is less than two.
     """
     from embodichain.toolkits.graspkit.pg_grasp.fixed_geometry import (
         FixedGripperCollisionGeometry,
     )
 
     if samples < 2:
-        raise ValueError("closure_samples must be at least two.")
+        raise ValueError("samples must be at least two.")
     apertures, points = _closure_samples(geometry, defaults, samples=samples)
     if apertures is None or points is None:
         return geometry

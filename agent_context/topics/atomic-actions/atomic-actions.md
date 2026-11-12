@@ -132,6 +132,9 @@ pre-grasp translation follows each realized TCP +Z after object rotation.
 The default retains the world-vector contract. A benchmark
 that freezes per-row grasp realisations must forward their directions to the
 actual action; replacing them with one shared vector changes the request.
+`approach_waypoints` adds evenly spaced poses on the straight pre-grasp line
+to the same motion-policy call, so a free-space backend cannot sweep the target
+on a diagonal approach. Zero keeps the three-pose plan.
 
 `AxisAlignOptions.alignment_twist_rad` selects a scalar or per-row rotation
 about the aligned target axis. Zero keeps shortest-arc behavior; an independent

@@ -196,6 +196,30 @@ The shorter retreat passes the complete
 endpoint chain; native open-hand surface probes also clear the opened handle
 and door. These checks do not certify continuous motion or physical opening.
 
+Measured replay calibrates the Robotiq grasp and its cuRobo timing:
+
+- cuRobo samples at 0.02 s, a divisor of the 0.04 s and 0.16 s compiled
+  command clocks, and preserves those native samples. Linear retiming from
+  0.025 s aliases saturated acceleration up to about 9%; resampling a long
+  plan to a fixed count before upsampling concentrates each coarse velocity
+  change into one command step. Both report dynamic violations for plans
+  that meet their limits.
+- The linkage mimic is rigid and closing torque is limited to 5 N·m. The
+  native compliant mimic folds under a held load, so the pads lose parallel
+  contact and the object slips. A rigid mimic at the former 40 N·m loads
+  the wrist with linkage reaction torque.
+- Antipodal ray deviation is limited to 2 degrees. Flat pads rotate an
+  object onto a contact face by the closing-axis offset; the 15-degree
+  default produced up to 14.6 degrees of in-hand rotation.
+- The arm servo stiffness is 1e5, matching the Panda preset. Position-only
+  replay of a 1e4 servo still lags about 50 mrad when a transport ends.
+- PickUp plans its approach through five intermediate poses on the
+  straight pre-grasp line (`pick_approach_waypoints`). A free-space approach
+  can leave a diagonal line and sweep the target before closing.
+
+The PGI fixture keeps its former drives and grasp sampling. All Franka
+Robotiq suites have new versions and require fresh manifests.
+
 The native Franka hand remains available
 for custom robot configurations; packaged Franka Atomic suites use Robotiq.
 
