@@ -199,6 +199,18 @@ diverged into arm postures that failed the paper-cup release gate or rode over
 the handle while closing.
 
 ```bash
+task=extensions/embodichain_tasks/configs/tasks/manipulation/drawer_storage
+for seed in {0..9}; do
+  python -m scripts.benchmark.task_program.demo_success --run-simulation \
+    --gym-config "$task/task.ur5.long_horizon.yaml" \
+    --task-program "$task/task_program/program.long_horizon.yaml" \
+    --case-id drawer-storage-ur5-long-horizon --seeds "$seed" \
+    --raw-json "ur5-long-horizon-$seed.json" --headless --device cpu \
+    --renderer no-render --disable-sensor --filter-dataset-saving
+done
+```
+
+```bash
 python -m pytest -q tests/gym/envs/task_program/test_drawer_storage_long_horizon_sim.py \
   -m slow --run-gpu
 ```
