@@ -931,3 +931,63 @@ def test_invalid_default_user_file_is_not_ignored(tmp_path, monkeypatch):
     p.write_text("{}")
     with pytest.raises(ServiceConfigurationError):
         load_services_config()
+
+
+@pytest.mark.parametrize(
+    "mesh_url,redirect,authorized",
+    [
+        ("/mesh.glb", None, [True]),
+        ("http://service.test:80/mesh.glb", None, [True]),
+        ("http://files.test/mesh.glb", None, [False]),
+        ("http://service.test:8080/mesh.glb", None, [False]),
+        ("/mesh.glb", "http://files.test/mesh.glb", [True, False]),
+        ("/mesh.glb", "https://service.test/mesh.glb", [True, False]),
+        ("/mesh.glb", "/download.glb", [True, True]),
+    ],
+)
+def test_geometry_download_keeps_profile_key_on_service_origin(
+    tmp_path, mesh_url, redirect, authorized
+):
+    import io
+    import requests
+    from embodichain.gen_sim.services.runtime import _http_adapter
+
+    observed = []
+
+    class Transport(requests.adapters.BaseAdapter):
+        def send(self, request, **kwargs):
+            observed.append(request.headers.get("Authorization"))
+            response = requests.Response()
+            response.status_code = 302 if redirect and len(observed) == 1 else 200
+            if response.status_code == 302:
+                response.headers["Location"] = redirect
+            response._content = b"glTFtest"
+            response.raw = io.BytesIO(response._content)
+            response.url, response.request = request.url, request
+            return response
+
+        def close(self):
+            pass
+
+    client = _http_adapter(
+        "geometry_reconstruction",
+        {
+            "base_url": "http://service.test",
+            "api_key": "test-service-token",
+            "timeout_s": 1,
+            "max_attempts": 1,
+            "options": {"health_path": "/health", "generate_objects_path": "/objects"},
+        },
+    )
+    client._session.trust_env = False
+    transport = Transport()
+    client._session.mount("http://", transport)
+    client._session.mount("https://", transport)
+    try:
+        client._download_glb(mesh_url, tmp_path / "mesh.glb")
+        assert observed == [
+            "Bearer test-service-token" if value else None for value in authorized
+        ]
+        assert (tmp_path / "mesh.glb").read_bytes() == b"glTFtest"
+    finally:
+        client.close()
