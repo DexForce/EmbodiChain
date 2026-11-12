@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_ur5_embodiment
-suite_version: atomic_ur5_embodiment_v5
+suite_version: atomic_ur5_embodiment_v6
 profile: smoke
 
 embodiment:
@@ -13,7 +13,8 @@ planners:
     role: primary_baseline
     enabled: true
     config:
-      interpolation_dt: 0.025
+      # Divides the compiled control period, so retiming keeps solved acceleration.
+      interpolation_dt: 0.02
       max_attempts: 5
       use_cuda_graph: true
       cuda_graph_fallback: true

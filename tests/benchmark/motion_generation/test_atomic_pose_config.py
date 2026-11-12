@@ -58,7 +58,7 @@ def test_pose_batch_suite_declares_translation_only_batched_trials() -> None:
     track = suite.enabled_tracks()[0]
 
     settings = resolve_atomic_pose_randomization(track)
-    assert suite.suite_version == "atomic_franka_robotiq_pose_batch_v7"
+    assert suite.suite_version == "atomic_franka_robotiq_pose_batch_v9"
     assert settings.enabled is True
     assert settings.mode == "translation"
     assert settings.pose_batch_size == 8
@@ -76,7 +76,7 @@ def test_pose_batch_suite_declares_translation_only_batched_trials() -> None:
         "twist",
     }
     assert skills["pick_up"]["grasp_source"] == "fixed"
-    assert skills["press"]["press_distance_m"] == pytest.approx(0.008)
+    assert skills["press"]["press_distance_m"] == pytest.approx(0.006)
     assert {
         skill_id: (
             skills[skill_id]["sample_count"],
@@ -227,7 +227,7 @@ def test_spatial_generalization_suite_covers_task_level_single_arm_skills() -> N
         ),
     }
 
-    assert suite.suite_version == "atomic_franka_robotiq_spatial_generalization_v11"
+    assert suite.suite_version == "atomic_franka_robotiq_spatial_generalization_v15"
     assert len(suite.evaluation_tracks()) == 79
     assert set(expected) == {track.id for track in suite.tracks}
     for track in suite.tracks:

@@ -972,6 +972,37 @@ def _pour_poses(
     return torch.stack((pre_grasp, grasp_pose, lift, poured, lift), dim=1)
 
 
+def _yaw_following_approach(
+    approach: torch.Tensor, object_pose: torch.Tensor
+) -> torch.Tensor:
+    """Rotate a world approach by each object's yaw, folded onto its nearest face.
+
+    A box repeats every quarter turn about world Z, so the yaw offset is folded
+    into [-45, 45) degrees before rotating the configured direction. Parallel
+    flat pads then close along a face normal for every sampled yaw.
+
+    Args:
+        approach: Configured world approach direction with shape ``(3,)``.
+        object_pose: Settled object poses with shape ``(B, 4, 4)``.
+
+    Returns:
+        Per-row world approach directions with shape ``(B, 3)``.
+    """
+    x_axis = object_pose[:, :3, 0]
+    yaw = torch.atan2(x_axis[:, 1], x_axis[:, 0])
+    quarter = math.pi / 2.0
+    folded = torch.remainder(yaw + quarter / 2.0, quarter) - quarter / 2.0
+    cos, sin = torch.cos(folded), torch.sin(folded)
+    return torch.stack(
+        (
+            cos * approach[0] - sin * approach[1],
+            sin * approach[0] + cos * approach[1],
+            approach[2].expand_as(cos),
+        ),
+        dim=1,
+    )
+
+
 def _pour_approach_candidates(
     config: Mapping[str, object],
 ) -> tuple[tuple[float, int], ...] | None:
@@ -1158,6 +1189,11 @@ class _PourCases(AtomicSkillCaseProvider):
             dtype=torch.float32,
             device=device,
         )
+        follow_yaw = config.get("approach_follows_object_yaw", False)
+        if type(follow_yaw) is not bool:
+            raise TypeError("approach_follows_object_yaw must be a bool.")
+        if follow_yaw:
+            approach = _yaw_following_approach(approach, object_pose)
         internal_axis = torch.tensor(
             _unit_vector(
                 config.get("internal_axis"),

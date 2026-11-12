@@ -154,8 +154,79 @@ with the URDF mimic signs, and two actual finger-pad links per hand. The
 single-arm and placement fixtures use the mounted Robotiq TCP rotation and
 0.21 m offset. NMG mappings preserve the policy's original flange-relative
 TCP after this change. Handover retains its separately calibrated 0.20 m TCP
-and limited closure described below. Task motion parameters retain their
-existing values; physical skill calibration and qualification are follow-up work.
+and limited closure described below.
+
+The Robotiq TCP is 6 cm longer than the former nominal 0.15 m PGI TCP
+(4 cm longer than the randomized suite's 0.17 m TCP). The
+AxisAlign suites try the original object-centre goal first, then inward world-XY
+translations of 2.5, 5, 7.5 and 10 cm toward the arm base when the declared grasp
+pool has no independently solved full endpoint chain. The target axis and grasp
+remain constrained; this does not relax the alignment tolerance. Each row freezes
+its smallest accepted declared offset in `alignment_offset_m`, with rejected
+attempts in `alignment_realisation`, before any planner is evaluated. Endpoint
+IK does not certify a collision-free trajectory or physical success.
+
+Spatial Pour enables `grasp_filter_before_ranking` so its existing 10-degree
+approach constraint applies before grasp NMS and candidate truncation. Under
+yaw perturbations the former Robotiq pool can yield no complete-chain witness
+for a row that the PGI pool qualifies. The revised pool retains
+the same approach direction, 10,000 samples, 128-candidate budget and seeded
+object population; its changed selection law requires fresh manifests.
+
+PushObject uses a contact point 5 mm above the cube centre to accommodate the
+closed Robotiq finger-pad geometry. The minimum authored 40 mm cube retains over
+1.8 mm ground clearance even with zero rest-offset allowance. The nominal 50 mm
+cube's lateral and toward-base contact distances are 40.5 and 48 mm, respectively,
+leaving about 2 mm between its face and the closed finger surfaces at approach.
+The two calibrated suites have new versions and require fresh frozen manifests.
+
+Press places the closed Robotiq fingertips at the sampled button surface with
+`press_tcp_offset_m: -0.02316`, measured along the local press axis from surface
+to TCP. Its 6 mm travel matches the microwave button's joint stroke, leaving
+35 mm to the fixed electronics panel at the terminal pose. The frozen case
+records both the sampled surface point and calibrated TCP contact point, so
+replay uses the same calibration under articulation rotations. All four Press
+suites have new versions and require fresh manifests. This geometric check
+does not establish measured button actuation or trajectory tracking.
+
+The 90-degree OpenDoor cases retain their full opening arc and use a 5 cm
+release retreat. With the longer TCP, the nominal grasp pool yields no complete
+IK chain for the former 10 cm retreat, although the opening arc is solved.
+The shorter retreat passes the complete
+endpoint chain; native open-hand surface probes also clear the opened handle
+and door. These checks do not certify continuous motion or physical opening.
+
+Measured replay calibrates the Robotiq grasp and its cuRobo timing:
+
+- cuRobo samples at 0.04 s, a divisor of the 0.04 s and 0.16 s compiled
+  command clocks, and preserves those native samples. At 0.02 s, long slow
+  plans under the 0.2 rad/s budget exceed cuRobo's interpolation buffer and
+  fail planning. Linear retiming from
+  0.025 s aliases saturated acceleration up to about 9%; resampling a long
+  plan to a fixed count before upsampling concentrates each coarse velocity
+  change into one command step. Both report dynamic violations for plans
+  that meet their limits.
+- The linkage mimic is rigid and closing torque is limited to 5 N·m. The
+  native compliant mimic folds under a held load, so the pads lose parallel
+  contact and the object slips. A rigid mimic at the former 40 N·m loads
+  the wrist with linkage reaction torque.
+- Antipodal ray deviation is limited to 2 degrees. Flat pads rotate an
+  object onto a contact face by the closing-axis offset; the 15-degree
+  default produced up to 14.6 degrees of in-hand rotation.
+- The arm servo stiffness is 1e5, matching the Panda preset. Position-only
+  replay of a 1e4 servo still lags about 50 mrad when a transport ends.
+- PickUp and AxisAlign plan their approach through five intermediate poses
+  on the straight pre-grasp line (`pick_approach_waypoints`). A free-space approach
+  can leave a diagonal line and sweep the target before closing.
+
+Spatial Pour sets `approach_follows_object_yaw`, turning its diagonal approach
+with each cube's yaw folded onto the nearest face. With a fixed world approach,
+flat pads have no face-normal closing axis once a cube is yawed beyond about
+10 degrees.
+
+The PGI fixture keeps its former drives and grasp sampling. All Franka
+Robotiq suites have new versions and require fresh manifests.
+
 The native Franka hand remains available
 for custom robot configurations; packaged Franka Atomic suites use Robotiq.
 
@@ -550,6 +621,11 @@ before simulation even when the public name and DOF match. Declared performance
 subsets and batch sizes retain that identity without regenerating tasks; keep
 timing replicas separate from quality denominators.
 
+Provider-backed identities also include provider-declared effective defaults.
+In particular, an omitted dual-Franka hand selector resolves to Robotiq before
+hashing, so custom suites cannot reuse former implicit-PGI manifests with the
+same raw configuration. Regenerate those manifests after the migration.
+
 Omitting `sampling_method` retains the legacy `joint_templates` population.
 Its L/S/wrist templates describe joint displacements; those labels do not certify
 Cartesian geometry or measured singularity. Keep its results under their original
@@ -585,7 +661,10 @@ sample's maximum interval, with shorter rows holding; completion time includes
 the actual scheduled ticks and terminal settling. Segment indices remain
 unchanged. Legacy `fixed_samples` is retained when the clock is omitted and
 uses `steps_per_waypoint` physics ticks for every sample. The clock and command
-period are recorded in trial metadata. Use `randomization.pose_batch_size: K` with `batch_sizes: [K]`
+period are recorded in trial metadata. Packaged Atomic suites that declare
+cuRobo sample it at 0.02 s, which divides each packaged command period, so
+linear retiming keeps a limit-saturated plan within its acceleration budget.
+Use `randomization.pose_batch_size: K` with `batch_sizes: [K]`
 for one vectorized skill request over `K` independently perturbed environment
 rows. The supplied pose-batch suite uses fixed cube grasps; articulated Slide
 shares one target-local grasp across its translated rows. Track configs may

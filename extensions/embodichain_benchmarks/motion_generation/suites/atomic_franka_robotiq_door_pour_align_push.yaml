@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_franka_robotiq_door_pour_align_push
-suite_version: atomic_franka_robotiq_door_pour_align_push_v4
+suite_version: atomic_franka_robotiq_door_pour_align_push_v7
 profile: smoke
 
 # OpenDoor, Pour, AxisAlign and PushObject on the Franka + Robotiq 2F-140 embodiment.
@@ -24,12 +24,15 @@ planners:
     config:
       max_attempts: 5
       max_planning_time: null
-      interpolation_dt: 0.025
+      # Divides the compiled control period, so retiming keeps solved acceleration;
+      # coarser samples keep long slow plans within cuRobo's interpolation buffer.
+      interpolation_dt: 0.04
       collision_activation_distance: 0.01
       use_cuda_graph: true
       cuda_graph_fallback: true
       warmup_iterations: 1
-      preserve_plan_samples: false
+      # Native samples avoid resampling the solved timing before compilation.
+      preserve_plan_samples: true
       world:
         obstacle_representation: sphere
         multi_env: false
@@ -61,6 +64,8 @@ tracks:
     enabled: true
     config:
       grasp_model: RobotiqArg2F140
+      # Straight-line poses keep the open hand from sweeping the target.
+      pick_approach_waypoints: 5
       batch_sizes: [1]
       seeds: [11]
       physics:
@@ -126,6 +131,8 @@ tracks:
             - name: microwave_door_90deg
               task_difficulty: hard
               open_angle_rad: 1.5708
+              # Preserve the full opening arc; the longer hand needs a shorter release retreat.
+              retract_distance_m: 0.05
         - id: pour
           sample_count: 80
           pick_sample_count: 120
@@ -152,6 +159,8 @@ tracks:
               task_difficulty: medium
               rotate_angle_rad: 1.5708
         - id: axis_align
+          # Keep the original centre when reachable; otherwise try bounded inward goals.
+          alignment_inward_candidates_m: [0.0, 0.025, 0.05, 0.075, 0.10]
           sample_count: 180
           hand_interp_steps: 12
           pre_grasp_distance_m: 0.15
@@ -178,18 +187,19 @@ tracks:
           approach_height_m: 0.10
           retract_height_m: 0.10
           push_overshoot_m: 0.0
-          # Push 1 cm below the cube centre so the closed fingers do not tip it.
-          object_contact_offset_m: [0.0, 0.0, -0.01]
-          # Existing task contact parameters are retained for this gripper swap.
-          # Robotiq-specific push calibration is separate follow-up work.
+          # Closed Robotiq pads need clearance above the support plane.
+          # A 5 mm upward offset clears the 40 mm cube support by >1.8 mm,
+          # even without extra clearance from native rest offsets.
+          object_contact_offset_m: [0.0, 0.0, 0.005]
+          # Nominal 50 mm cube: closed-hand face extent plus 2 mm approach clearance.
           cases:
             - name: cube_push_lateral_10cm
               object: cube_50mm
               task_difficulty: simple
-              contact_distance_m: 0.042
+              contact_distance_m: 0.0405
               target_object_offset_m: [0.0, 0.10, 0.0]
             - name: cube_push_toward_base_8cm
               object: cube_50mm
               task_difficulty: simple
-              contact_distance_m: 0.052
+              contact_distance_m: 0.048
               target_object_offset_m: [0.08, 0.0, 0.0]

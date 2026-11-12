@@ -67,6 +67,101 @@ def _surface_points(triangles: np.ndarray, spacing: float) -> np.ndarray:
     return np.unique(np.concatenate(pieces), axis=0)
 
 
+def _resolved_joint_positions(
+    named_joints: Mapping[str, ET.Element],
+    joint_positions: Mapping[str, float],
+    joint_limits: Mapping[str, Sequence[float]],
+) -> dict[str, float]:
+    """Resolve one explicit joint state, including declared mimic relations."""
+    resolved: dict[str, float] = {}
+    resolving: set[str] = set()
+
+    def joint_position(joint: ET.Element) -> float:
+        name = joint.attrib["name"]
+        if name in resolved:
+            return resolved[name]
+        if name in resolving:
+            raise ValueError(f"Cyclic mimic relation at joint {name!r}.")
+        resolving.add(name)
+        mimic = joint.find("mimic")
+        if mimic is None:
+            if name not in joint_positions:
+                raise ValueError(f"Explicit state required for joint {name!r}.")
+            value = float(joint_positions[name])
+        else:
+            value = joint_position(named_joints[mimic.attrib["joint"]]) * float(
+                mimic.get("multiplier", "1")
+            ) + float(mimic.get("offset", "0"))
+            if name in joint_positions and not np.isclose(
+                joint_positions[name], value, rtol=0, atol=1e-9
+            ):
+                raise ValueError(f"Declared state contradicts mimic joint {name!r}.")
+        limit = joint.find("limit")
+        if name in joint_limits:
+            lower, upper = joint_limits[name]
+        elif joint.attrib["type"] == "continuous":
+            lower, upper = -np.inf, np.inf
+        elif limit is not None:
+            lower = float(limit.attrib["lower"])
+            upper = float(limit.attrib["upper"])
+        else:
+            lower, upper = np.nan, np.nan
+        if not np.isfinite(value) or not lower <= value <= upper:
+            raise ValueError(f"Invalid state for joint {name!r}.")
+        resolving.remove(name)
+        resolved[name] = value
+        return value
+
+    for name in joint_positions:
+        if name not in named_joints:
+            raise ValueError(f"Unknown state joint {name!r}.")
+        joint_position(named_joints[name])
+    return resolved
+
+
+def _link_transform_resolver(
+    child_joints: Mapping[str, ET.Element],
+    root_link: str,
+    position_of,
+):
+    """Return memoized root-from-link transforms for one declared state."""
+    transforms = {root_link: np.eye(4)}
+
+    def root_from_link(name: str) -> np.ndarray:
+        if name in transforms:
+            return transforms[name]
+        if name not in child_joints:
+            raise ValueError(f"Link {name!r} is not below gripper root {root_link!r}.")
+        joint = child_joints[name]
+        transform = _origin_transform(joint.find("origin"))
+        kind = joint.attrib["type"]
+        if kind in {"prismatic", "revolute", "continuous"}:
+            position = position_of(joint)
+            axis_element = joint.find("axis")
+            axis = np.fromstring(
+                "1 0 0" if axis_element is None else axis_element.attrib["xyz"],
+                sep=" ",
+            )
+            if axis.shape != (3,) or not np.isfinite(axis).all():
+                raise ValueError(f"Invalid joint axis for {joint.attrib['name']!r}.")
+            axis = axis / np.linalg.norm(axis)
+            if kind == "prismatic":
+                transform[:3, 3] += transform[:3, :3] @ (axis * position)
+            else:
+                transform[:3, :3] = (
+                    transform[:3, :3]
+                    @ Rotation.from_rotvec(axis * position).as_matrix()
+                )
+        elif kind != "fixed":
+            raise ValueError("Fixed templates require fixed/prismatic/revolute joints.")
+        transforms[name] = (
+            root_from_link(joint.find("parent").attrib["link"]) @ transform
+        )
+        return transforms[name]
+
+    return root_from_link
+
+
 @dataclass(frozen=True)
 class FixedGripperCollisionGeometry:
     """Owned CPU surface samples in the canonical contact/grasp frame.
@@ -75,10 +170,17 @@ class FixedGripperCollisionGeometry:
     caller. Antipodal widths do not reposition these surfaces. Closing contacts
     and arm/environment collisions are separate. ``grasp_from_tcp`` in the
     provenance maps runtime TCP coordinates into canonical contact coordinates.
+
+    Optional closure samples describe the declared finger surfaces at closing
+    apertures, so a caller can qualify support clearance during closure instead
+    of at the open command alone. Apertures are ascending and aligned with the
+    leading axis of ``closure_points``.
     """
 
     points: torch.Tensor
     provenance: dict[str, Any]
+    closure_apertures: torch.Tensor | None = None
+    closure_points: torch.Tensor | None = None
 
     def __post_init__(self) -> None:
         points = self.points
@@ -99,6 +201,38 @@ class FixedGripperCollisionGeometry:
         )
         object.__setattr__(self, "points", points.detach().clone().contiguous())
         object.__setattr__(self, "provenance", deepcopy(self.provenance))
+        apertures = self.closure_apertures
+        closure = self.closure_points
+        if apertures is None or closure is None:
+            object.__setattr__(self, "closure_apertures", None)
+            object.__setattr__(self, "closure_points", None)
+            return
+        if (
+            apertures.device.type != "cpu"
+            or closure.device.type != "cpu"
+            or apertures.dtype != points.dtype
+            or closure.dtype != points.dtype
+            or apertures.ndim != 1
+            or closure.ndim != 3
+            or closure.shape[2] != 3
+            or closure.shape[0] != apertures.shape[0]
+            or closure.shape[1] < 1
+            or not len(apertures)
+            or not bool(torch.isfinite(apertures).all())
+            or not bool(torch.isfinite(closure).all())
+        ):
+            raise ValueError(
+                "Closure samples require finite CPU apertures (S,) and points "
+                "(S, N, 3) in the same dtype."
+            )
+        if bool((apertures < 0).any()) or bool((apertures[1:] <= apertures[:-1]).any()):
+            raise ValueError("Closure apertures must be nonnegative and ascending.")
+        object.__setattr__(
+            self, "closure_apertures", apertures.detach().clone().contiguous()
+        )
+        object.__setattr__(
+            self, "closure_points", closure.detach().clone().contiguous()
+        )
 
     def canonical_to_tcp_poses(self, poses: torch.Tensor) -> torch.Tensor:
         """Map canonical contact poses to the declared runtime TCP exactly once.
@@ -110,6 +244,69 @@ class FixedGripperCollisionGeometry:
             Runtime TCP poses with the same batch shape, dtype and device.
         """
         return poses @ poses.new_tensor(self.provenance["grasp_from_tcp"])
+
+    def surface_points_at(self, joint_positions: Mapping[str, float]) -> torch.Tensor:
+        """Return this hand's complete surfaces at another declared state.
+
+        The sampled mesh points and their collision origins are reused; only the
+        declared URDF kinematics are re-evaluated. Closure states therefore add
+        no mesh sampling and keep the exact geometry of this fixture.
+
+        Args:
+            joint_positions: Explicit active joint state in native joint names.
+
+        Returns:
+            Canonical-frame surface points with shape ``(N, 3)``.
+
+        Raises:
+            ValueError: The state is incomplete, invalid or contradicts a mimic.
+        """
+        document = ET.fromstring(Path(self.provenance["urdf_path"]).read_bytes())
+        named_joints = {
+            joint.attrib["name"]: joint for joint in document.findall("joint")
+        }
+        child_joints = {
+            joint.find("child").attrib["link"]: joint
+            for joint in document.findall("joint")
+        }
+        positions = _resolved_joint_positions(
+            named_joints,
+            joint_positions,
+            {
+                name: tuple(bounds)
+                for name, bounds in self.provenance.get("joint_limits", {}).items()
+            },
+        )
+        root_from_link = _link_transform_resolver(
+            child_joints,
+            self.provenance["root_link"],
+            lambda joint: positions[joint.attrib["name"]],
+        )
+        tcp_from_root = np.linalg.inv(
+            root_from_link(self.provenance["tcp_link"])
+            @ np.asarray(self.provenance["link_from_tcp"], dtype=np.float64)
+        )
+        fixed = np.asarray(self.provenance["grasp_from_tcp"], dtype=np.float64) @ (
+            tcp_from_root
+        )
+        open_points = self.points.numpy()
+        chunks = []
+        offset = 0
+        for part in self.provenance["parts"]:
+            count = int(part["surface_point_count"])
+            part_points = open_points[offset : offset + count]
+            offset += count
+            open_transform = np.asarray(part["grasp_from_mesh"], dtype=np.float64)
+            transform = (
+                fixed
+                @ root_from_link(part["link"])
+                @ np.asarray(part["collision_origin"], dtype=np.float64)
+            )
+            local = (part_points - open_transform[:3, 3]) @ open_transform[:3, :3]
+            chunks.append(local @ transform[:3, :3].T + transform[:3, 3])
+        if offset != len(open_points):
+            raise ValueError("Surface parts do not account for every stored point.")
+        return torch.from_numpy(np.concatenate(chunks).astype(np.float32))
 
     @classmethod
     def from_urdf(
@@ -322,6 +519,7 @@ class FixedGripperCollisionGeometry:
                             "mesh" if mesh_path is not None else "urdf_box"
                         ),
                         "grasp_from_mesh": transform.tolist(),
+                        "collision_origin": origin.tolist(),
                         "bounds_m": [
                             vertices.min(0).tolist(),
                             vertices.max(0).tolist(),

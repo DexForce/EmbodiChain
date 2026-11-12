@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_franka_robotiq_spatial_generalization
-suite_version: atomic_franka_robotiq_spatial_generalization_v11
+suite_version: atomic_franka_robotiq_spatial_generalization_v15
 profile: coverage
 
 # Reusable strict-spatial domain definitions. Every track below selects only
@@ -667,7 +667,9 @@ x-skill-press: &skill_press
   sample_count: 256
   hand_interp_steps: 12
   approach_distance_m: 0.12
-  press_distance_m: 0.008
+  # Closed native pads project 23.16 mm ahead of the solver TCP.
+  press_tcp_offset_m: -0.02316
+  press_distance_m: 0.006
   articulation: microwave
   target_link: button_link
   target_joint: button_joint
@@ -737,6 +739,8 @@ x-skill-open-door: &skill_open_door
     - name: spatial_microwave_door_90deg
       task_difficulty: hard
       open_angle_rad: 1.5708
+      # Preserve the full opening arc; the longer hand needs a shorter release retreat.
+      retract_distance_m: 0.05
 
 x-skill-pour: &skill_pour
   id: pour
@@ -746,11 +750,15 @@ x-skill-pour: &skill_pour
   pre_grasp_distance_m: 0.15
   lift_height_m: 0.16
   approach_direction: [-0.7071, 0.0, -0.7071]
+  # Flat Robotiq pads close along a face normal only if the approach turns
+  # with the cube's yaw; a fixed world approach leaves yawed rows no grasp.
+  approach_follows_object_yaw: true
   internal_axis: [1.0, 0.0, 0.0]
   grasp_source: antipodal
   grasp_sample_count: 10000
   grasp_max_candidates: 128
   grasp_alignment_max_angle_deg: 10.0
+  grasp_filter_before_ranking: true
   cases:
     - name: spatial_cube_pour_30deg
       object: cube_50mm
@@ -767,6 +775,8 @@ x-skill-pour: &skill_pour
 
 x-skill-axis-align: &skill_axis_align
   id: axis_align
+  # Keep the original centre when reachable; otherwise try bounded inward goals.
+  alignment_inward_candidates_m: [0.0, 0.025, 0.05, 0.075, 0.10]
   sample_count: 180
   hand_interp_steps: 12
   pre_grasp_distance_m: 0.15
@@ -795,17 +805,17 @@ x-skill-push-object: &skill_push_object
   approach_height_m: 0.10
   retract_height_m: 0.10
   push_overshoot_m: 0.0
-  object_contact_offset_m: [0.0, 0.0, -0.01]
+  object_contact_offset_m: [0.0, 0.0, 0.005]
   cases:
     - name: spatial_cube_push_lateral_10cm
       object: cube_50mm
       task_difficulty: simple
-      contact_distance_m: 0.042
+      contact_distance_m: 0.0405
       target_object_offset_m: [0.0, 0.10, 0.0]
     - name: spatial_cube_push_toward_base_8cm
       object: cube_50mm
       task_difficulty: simple
-      contact_distance_m: 0.052
+      contact_distance_m: 0.048
       target_object_offset_m: [0.08, 0.0, 0.0]
 
 robot:
@@ -825,12 +835,15 @@ planners:
     config:
       max_attempts: 5
       max_planning_time: null
-      interpolation_dt: 0.025
+      # Divides the compiled control period, so retiming keeps solved acceleration;
+      # coarser samples keep long slow plans within cuRobo's interpolation buffer.
+      interpolation_dt: 0.04
       collision_activation_distance: 0.01
       use_cuda_graph: true
       cuda_graph_fallback: true
       warmup_iterations: 1
-      preserve_plan_samples: false
+      # Native samples avoid resampling the solved timing before compilation.
+      preserve_plan_samples: true
       world:
         obstacle_representation: sphere
         multi_env: false
@@ -881,6 +894,8 @@ tracks:
         scene_layout: franka_robotiq_cube_table_v1
     config:
       grasp_model: RobotiqArg2F140
+      # Straight-line poses keep the open hand from sweeping the target.
+      pick_approach_waypoints: 5
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -924,6 +939,8 @@ tracks:
         scene_layout: franka_robotiq_cube_table_v1
     config:
       grasp_model: RobotiqArg2F140
+      # Straight-line poses keep the open hand from sweeping the target.
+      pick_approach_waypoints: 5
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -961,6 +978,8 @@ tracks:
         scene_layout: franka_robotiq_cube_table_v1
     config:
       grasp_model: RobotiqArg2F140
+      # Straight-line poses keep the open hand from sweeping the target.
+      pick_approach_waypoints: 5
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -995,6 +1014,8 @@ tracks:
         scene_layout: franka_robotiq_cube_table_v1
     config:
       grasp_model: RobotiqArg2F140
+      # Straight-line poses keep the open hand from sweeping the target.
+      pick_approach_waypoints: 5
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -1028,6 +1049,8 @@ tracks:
         scene_layout: franka_robotiq_cube_table_v1
     config:
       grasp_model: RobotiqArg2F140
+      # Straight-line poses keep the open hand from sweeping the target.
+      pick_approach_waypoints: 5
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -1059,6 +1082,8 @@ tracks:
         scene_layout: franka_robotiq_cube_table_v1
     config:
       grasp_model: RobotiqArg2F140
+      # Straight-line poses keep the open hand from sweeping the target.
+      pick_approach_waypoints: 5
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -1090,6 +1115,8 @@ tracks:
         scene_layout: franka_robotiq_cube_table_v1
     config:
       grasp_model: RobotiqArg2F140
+      # Straight-line poses keep the open hand from sweeping the target.
+      pick_approach_waypoints: 5
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -1121,6 +1148,8 @@ tracks:
         scene_layout: franka_robotiq_cube_table_v1
     config:
       grasp_model: RobotiqArg2F140
+      # Straight-line poses keep the open hand from sweeping the target.
+      pick_approach_waypoints: 5
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -1158,6 +1187,8 @@ tracks:
         scene_layout: franka_robotiq_microwave_controls_v1
     config:
       grasp_model: RobotiqArg2F140
+      # Straight-line poses keep the open hand from sweeping the target.
+      pick_approach_waypoints: 5
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -1195,6 +1226,8 @@ tracks:
         scene_layout: franka_robotiq_drawer_v1
     config:
       grasp_model: RobotiqArg2F140
+      # Straight-line poses keep the open hand from sweeping the target.
+      pick_approach_waypoints: 5
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -1232,6 +1265,8 @@ tracks:
         scene_layout: franka_robotiq_microwave_door_v1
     config:
       grasp_model: RobotiqArg2F140
+      # Straight-line poses keep the open hand from sweeping the target.
+      pick_approach_waypoints: 5
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics

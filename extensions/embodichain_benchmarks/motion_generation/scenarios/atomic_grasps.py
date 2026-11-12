@@ -397,6 +397,7 @@ def parallel_jaw_sampler(
     gripper_data: dict[str, object] | None = None,
     root_from_tcp: Sequence[Sequence[float]] | None = None,
     grasp_depth_offset_m: float = 0.0,
+    ray_deviation_angle: float | None = None,
 ) -> ParallelJawGraspPoseGenerator:
     """Build a case sampler with the selected physical hand and runtime TCP.
 
@@ -406,6 +407,8 @@ def parallel_jaw_sampler(
         root_from_tcp: The bound fixture's calibrated hand-root-to-TCP transform.
         grasp_depth_offset_m: Physical contact-centre shift toward the hand,
             applied to collision geometry before candidate qualification.
+        ray_deviation_angle: Maximum antipodal ray deviation in radians;
+            ``None`` keeps the generator default.
 
     Returns:
         A sampler configured for the selected hand.
@@ -420,6 +423,7 @@ def parallel_jaw_sampler(
         gripper_data=gripper_data,
         root_from_tcp=root_from_tcp,
         grasp_depth_offset_m=grasp_depth_offset_m,
+        ray_deviation_angle=ray_deviation_angle,
     )
 
 

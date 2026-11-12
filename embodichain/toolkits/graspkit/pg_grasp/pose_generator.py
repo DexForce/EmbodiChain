@@ -243,12 +243,22 @@ class ParallelJawGraspCollisionCfg:
     filter_ground_collision: bool = True
     """Whether candidates intersecting the inferred support plane are removed."""
 
+    filter_closure_support: bool = False
+    """Whether closure surfaces are checked against the inferred support plane.
+
+    Requires collision geometry that owns closure samples. Candidates are
+    checked at the closing aperture their antipodal width reaches, before
+    near-duplicate compression and ranking.
+    """
+
     def __post_init__(self) -> None:
         self.max_decomposition_hulls = _positive_int(
             self.max_decomposition_hulls, field_name="max_decomposition_hulls"
         )
         if type(self.filter_ground_collision) is not bool:
             raise TypeError("filter_ground_collision must be a bool.")
+        if type(self.filter_closure_support) is not bool:
+            raise TypeError("filter_closure_support must be a bool.")
 
 
 @configclass
@@ -440,6 +450,7 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                 annotation.use_largest_connected_component
             ),
             filter_ground_collision=collision.filter_ground_collision,
+            filter_closure_support=collision.filter_closure_support,
             check_collision=not proposals_only,
             prepared=prepared,
         )

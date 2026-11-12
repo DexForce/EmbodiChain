@@ -915,7 +915,7 @@ def _fake_articulation_geometry(*, joint_type: str) -> dict[str, torch.Tensor]:
 def test_atomic_suite_is_franka_robotiq_and_curobo_only():
     suite = load_suite("atomic_franka_robotiq_smoke")
 
-    assert suite.suite_version == "atomic_franka_robotiq_smoke_v6"
+    assert suite.suite_version == "atomic_franka_robotiq_smoke_v8"
     assert suite.robot.id == "franka_robotiq"
     assert suite.robot.provider == "franka_robotiq"
     assert [spec.id for spec in suite.planners if spec.enabled] == ["curobo"]
@@ -946,7 +946,7 @@ def test_atomic_suite_is_franka_robotiq_and_curobo_only():
         "sample_count": 256,
         "hand_interp_steps": 12,
         "approach_distance_m": 0.12,
-        "press_distance_m": 0.03,
+        "press_distance_m": 0.006,
     }
     assert {
         key: skills_by_id["slide"][key]
@@ -1047,7 +1047,7 @@ def test_randomized_atomic_suite_covers_four_interaction_skills_with_fixed_seed_
     suite = load_suite("atomic_franka_robotiq_randomized")
     track = suite.enabled_tracks()[0]
 
-    assert suite.suite_version == "atomic_franka_robotiq_randomized_v4"
+    assert suite.suite_version == "atomic_franka_robotiq_randomized_v6"
     assert track.id == "atomic-skill-randomized"
     assert track.config["seeds"] == list(range(101, 117))
     assert [item["id"] for item in track.config["skills"]] == [
@@ -1424,6 +1424,22 @@ def test_atomic_cube_uses_current_rigid_object_physics_api():
             4,
         ),
         (
+            "press",
+            {
+                "name": "calibrated_microwave_start_button",
+                "sample_count": 256,
+                "hand_interp_steps": 12,
+                "approach_distance_m": 0.12,
+                "press_distance_m": 0.006,
+                "press_tcp_offset_m": -0.02316,
+                "articulation": "microwave",
+                "target_link": "button_link",
+                "target_joint": "button_joint",
+            },
+            "prismatic",
+            4,
+        ),
+        (
             "slide",
             {
                 "name": "drawer_pull",
@@ -1475,6 +1491,11 @@ def test_new_atomic_skill_cases_freeze_reference_waypoints(
     entity.get_qpos_limits.return_value = torch.tensor([[[0.0, 0.006]]])
     articulation_dof = 4 if config["articulation"] == "microwave" else 1
     articulation_pose = torch.eye(4).repeat(batch_size, 1, 1)
+    if config.get("press_tcp_offset_m") is not None:
+        rotations = torch.zeros(batch_size, 3)
+        rotations[:, 0] = torch.linspace(-0.4, 0.4, batch_size)
+        articulation_pose[:, :3, :3] = axis_angle_to_rotation_matrix(rotations)
+        articulation_pose[:, :3, 3] = torch.linspace(-0.03, 0.03, batch_size)[:, None]
     articulation_qpos = torch.zeros(batch_size, articulation_dof)
     entity.get_qpos.return_value = articulation_qpos
     handle = Mock(
@@ -1531,6 +1552,29 @@ def test_new_atomic_skill_cases_freeze_reference_waypoints(
     assert torch.isfinite(case.target_waypoints).all()
     assert case.case_parameters["sample_count"] == config["sample_count"]
     assert case.case_parameters["hand_interp_steps"] == config["hand_interp_steps"]
+    if skill_id == "press":
+        # The fake button's outward surface is z=-.01; its press axis is +Z.
+        expected_position = [0.0, 0.0, -0.01 + config.get("press_tcp_offset_m", 0.0)]
+        assert case.case_parameters["press_position"] == pytest.approx(
+            expected_position
+        )
+        assert case.case_parameters["press_surface_position"] == pytest.approx(
+            [0.0, 0.0, -0.01]
+        )
+        torch.testing.assert_close(
+            case.target_waypoints[:, 1, :3, 3],
+            (articulation_pose[:, :3, :3] @ torch.tensor(expected_position))
+            + articulation_pose[:, :3, 3],
+        )
+        torch.testing.assert_close(
+            case.target_waypoints[:, 2, :3, 3] - case.target_waypoints[:, 1, :3, 3],
+            articulation_pose[:, :3, 2] * config["press_distance_m"],
+        )
+        create_atomic_skill_provider(skill_id).build_invocation(scenario, case, Mock())
+        goal = scenario.require_engine.return_value.make_invocation.call_args.args[1]
+        assert goal.semantics.affordance.press_position == pytest.approx(
+            expected_position
+        )
     assert case.object_id == config["articulation"]
     assert case.case_parameters["target_link"] == config["target_link"]
     assert case.case_parameters["target_joint"] == config["target_joint"]
@@ -1741,6 +1785,119 @@ def test_execute_masks_failed_plan_rows_from_execution_success() -> None:
 
     assert observation is not None
     assert observation.execution_success.tolist() == [True, False]
+
+
+class _BlockedGripperReplayRobot:
+    """Minimal replay robot with a blocked six-joint Robotiq-style closure."""
+
+    def __init__(self, *, arm_error: float = 0.0, gripper_ids=None) -> None:
+        self.device = torch.device("cpu")
+        self.arm_error = arm_error
+        self.gripper_ids = list(range(7, 13)) if gripper_ids is None else gripper_ids
+        self.command = torch.zeros(1, 13)
+
+    def get_joint_ids(self, name=None, remove_mimic=False):
+        if name == "hand":
+            return list(self.gripper_ids)
+        if name == "arm":
+            return list(range(7))
+        raise KeyError(name)
+
+    def set_qpos(self, qpos, *, target=True):
+        self.command = qpos.clone()
+
+    def get_qpos(self, name=None, target=False):
+        observed = self.command.clone()
+        observed[:, :7] += self.arm_error
+        observed[:, 7:13] = 0.5
+        if name is None:
+            return observed
+        return observed[:, self.get_joint_ids(name)]
+
+    def compute_fk(self, qpos=None, name=None, to_matrix=True):
+        return torch.eye(4).unsqueeze(0).repeat(qpos.shape[0], 1, 1)
+
+
+def _blocked_gripper_runtime(robot, *, tolerance: float = 0.05) -> AtomicReplayRuntime:
+    return AtomicReplayRuntime(
+        simulation=Mock(sim_config=Mock(physics_dt=0.01)),
+        robot=robot,
+        control_part="arm",
+        track_config={
+            "physics": {
+                "steps_per_waypoint": 1,
+                "hold_steps": 0,
+                "hold_sim_steps": 1,
+                "joint_tracking_tolerance_rad": tolerance,
+            }
+        },
+        objects={},
+        articulations={},
+        gripper_states={"hand": (torch.zeros(1, 6), torch.ones(1, 6))},
+    )
+
+
+def _blocked_gripper_case() -> BenchmarkCase:
+    return replace(
+        _atomic_case(),
+        batch_size=1,
+        start_qpos=torch.zeros(1, 7),
+        reference_qpos=torch.zeros(1, 1, 7),
+        full_start_qpos=torch.zeros(1, 13),
+    )
+
+
+def _closed_gripper_positions() -> torch.Tensor:
+    positions = torch.zeros(1, 2, 13)
+    positions[:, :, 7:13] = 1.0
+    return positions
+
+
+def test_execution_gate_uses_motion_joints_not_blocked_gripper_preload() -> None:
+    """A held object blocking closure must not fail arm motion tracking."""
+    robot = _BlockedGripperReplayRobot()
+    runtime = _blocked_gripper_runtime(robot)
+    observation = runtime.execute(
+        _compiled_replay_batch([True], _closed_gripper_positions()),
+        _blocked_gripper_case(),
+        None,
+    )
+
+    assert observation is not None
+    assert observation.execution_success.tolist() == [True]
+    # The full-joint diagnostic still reports the blocked closure.
+    assert float(observation.joint_tracking_rmse_rad[0]) > 0.05
+
+
+def test_execution_gate_still_fails_tracking_arm_errors() -> None:
+    """Motion-joint gating must not hide a real arm tracking failure."""
+    robot = _BlockedGripperReplayRobot(arm_error=0.2)
+    runtime = _blocked_gripper_runtime(robot)
+    observation = runtime.execute(
+        _compiled_replay_batch([True], _closed_gripper_positions()),
+        _blocked_gripper_case(),
+        None,
+    )
+
+    assert observation is not None
+    assert observation.execution_success.tolist() == [False]
+
+
+def test_motion_joint_binding_keeps_full_gate_without_part_bindings() -> None:
+    """Robots without explicit part bindings keep the legacy full-joint gate."""
+    robot = SimpleNamespace(device=torch.device("cpu"))
+    runtime = _blocked_gripper_runtime(robot)
+
+    assert runtime._motion_joint_ids(13) == tuple(range(13))
+
+
+def test_motion_joint_binding_rejects_a_vacuous_gate() -> None:
+    """A binding covering every joint must not produce an empty motion gate."""
+    robot = _BlockedGripperReplayRobot(gripper_ids=list(range(13)))
+    runtime = _blocked_gripper_runtime(robot)
+
+    with pytest.raises(ValueError, match="no motion joint"):
+        runtime._motion_joint_ids(13)
 
 
 @pytest.mark.parametrize("skill_id", ["move_held_object", "place"])
@@ -3253,3 +3410,53 @@ def test_franka_panda_pgi_kinematic_chain_matches_the_assembled_solver() -> None
     torch.testing.assert_close(
         solver.get_fk(qpos), chain.forward_kinematics(qpos).get_matrix() @ tcp
     )
+
+
+def test_grasp_closure_sweep_is_limited_to_the_migrated_robotiq_hand() -> None:
+    """Only the Robotiq fixture opts into closure support qualification."""
+    scenario = AtomicSkillScenario()
+    scenario.track = Mock(config={"grasp_model": "RobotiqArg2F140"})
+    assert scenario.grasp_closure_sweep()
+    scenario.track = Mock(config={"grasp_model": "DHPGI14080"})
+    assert not scenario.grasp_closure_sweep()
+    scenario.track = Mock(config={})
+    assert not scenario.grasp_closure_sweep()
+
+
+def test_robotiq_grasp_pool_requires_face_normal_closing_axes() -> None:
+    """Robotiq's flat pads narrow antipodal ray deviation; PGI keeps defaults."""
+    from embodichain.toolkits.graspkit.pg_grasp import (
+        AntipodalGraspPoseGeneratorCfg,
+    )
+    from embodichain_benchmarks.motion_generation._atomic_fixtures import (
+        create_parallel_jaw_grasp_pose_generator,
+    )
+
+    scenario = AtomicSkillScenario()
+    scenario.track = Mock(config={"grasp_model": "RobotiqArg2F140"})
+    angle = scenario.grasp_ray_deviation_angle()
+    assert angle == pytest.approx(math.radians(2.0))
+    scenario.track = Mock(config={"grasp_model": "DHPGI14080"})
+    assert scenario.grasp_ray_deviation_angle() is None
+
+    narrow = create_parallel_jaw_grasp_pose_generator(
+        n_sample=64, force_refresh=False, ray_deviation_angle=angle
+    )
+    default = create_parallel_jaw_grasp_pose_generator(n_sample=64, force_refresh=False)
+    assert narrow.algorithm_cfg.ray_deviation_angle == pytest.approx(angle)
+    assert (
+        default.algorithm_cfg.ray_deviation_angle
+        == AntipodalGraspPoseGeneratorCfg().ray_deviation_angle
+    )
+
+
+def test_pick_approach_waypoints_are_an_opt_in_track_count() -> None:
+    scenario = AtomicSkillScenario()
+    scenario.track = Mock(config={})
+    assert scenario.pick_approach_waypoints() == 0
+    scenario.track = Mock(config={"pick_approach_waypoints": 5})
+    assert scenario.pick_approach_waypoints() == 5
+    for invalid in (True, -1, 2.0):
+        scenario.track = Mock(config={"pick_approach_waypoints": invalid})
+        with pytest.raises(ValueError, match="pick_approach_waypoints"):
+            scenario.pick_approach_waypoints()

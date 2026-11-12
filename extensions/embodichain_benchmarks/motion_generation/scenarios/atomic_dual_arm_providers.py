@@ -92,7 +92,7 @@ from .atomic_evaluation import (
     trace_validity,
 )
 from .atomic_grasps import parallel_jaw_sampler
-from .atomic_policy import with_plan_options
+from .atomic_policy import with_pick_approach_waypoints, with_plan_options
 from ..atomic_skill import register_atomic_skill_provider
 
 if TYPE_CHECKING:
@@ -649,6 +649,10 @@ def _compile_reference(
         sample_interval=scenario.suite.protocol.sample_interval,
     )
     invocations = tuple(with_plan_options(item, plan_opts) for item in build(engine))
+    invocations = tuple(
+        with_pick_approach_waypoints(item, scenario.pick_approach_waypoints())
+        for item in invocations
+    )
     context = engine.initial_context(
         control_dt=float(scenario.simulation.sim_config.physics_dt)
     )
@@ -1103,6 +1107,7 @@ class _HandOverCases(AtomicSkillCaseProvider):
             int(config.get("grasp_sample_count", 10_000)),
             gripper_data=scenario.grasp_model(),
             root_from_tcp=scenario.grasp_root_from_tcp(),
+            ray_deviation_angle=scenario.grasp_ray_deviation_angle(),
             grasp_depth_offset_m=float(parameters["grasp_depth_offset_m"]),
         )
         semantics = _antipodal_semantics(handle)
@@ -1340,6 +1345,7 @@ class _CoordinatedPickmentCases(AtomicSkillCaseProvider):
             int(parameters["grasp_sample_count"]),
             gripper_data=scenario.grasp_model(),
             root_from_tcp=scenario.grasp_root_from_tcp(),
+            ray_deviation_angle=scenario.grasp_ray_deviation_angle(),
         )
         semantics = _antipodal_semantics(handle)
         reference = _compile_reference(

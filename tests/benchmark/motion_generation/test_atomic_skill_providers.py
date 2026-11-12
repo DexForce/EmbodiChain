@@ -1311,10 +1311,18 @@ def test_door_approach_uses_mesh_device_for_axis_and_origin(device):
     assert torch.allclose(actual, torch.tensor([0.0, -1.0, 0.0], device=device))
 
 
-@pytest.mark.parametrize("early_filter", [False, True])
-@pytest.mark.parametrize("skill_id,waypoint_count", [("pour", 5), ("axis_align", 4)])
+@pytest.mark.parametrize(
+    "skill_id,waypoint_count,early_filter,approach_search",
+    [
+        ("pour", 5, False, False),
+        ("pour", 5, True, False),
+        ("pour", 5, True, True),
+        ("axis_align", 4, False, False),
+        ("axis_align", 4, True, False),
+    ],
+)
 def test_object_rotation_providers_screen_every_pose_row(
-    monkeypatch, skill_id, waypoint_count, early_filter
+    monkeypatch, skill_id, waypoint_count, early_filter, approach_search
 ):
     """Freeze independently feasible row grasps and match their reference chains."""
     from types import MethodType
@@ -1454,10 +1462,10 @@ def test_object_rotation_providers_screen_every_pose_row(
     }
     if early_filter:
         config["grasp_filter_before_ranking"] = True
-        if skill_id == "pour":
-            config["grasp_approach_candidates"] = [
-                {"yaw_offset_rad": 0.0, "max_candidates": 2}
-            ]
+    if approach_search:
+        config["grasp_approach_candidates"] = [
+            {"yaw_offset_rad": 0.0, "max_candidates": 2}
+        ]
     case = create_atomic_skill_provider(skill_id).generate_case(
         scenario,
         SimpleNamespace(
@@ -1494,6 +1502,8 @@ def test_object_rotation_providers_screen_every_pose_row(
         force_refresh=False,
         max_candidates=2,
         **({"approach_alignment_angle": math.radians(10)} if early_filter else {}),
+        closure_sweep=False,
+        ray_deviation_angle=None,
     )
     assert case.seed == 43001 and case.batch_size == 8
 
@@ -1501,7 +1511,7 @@ def test_object_rotation_providers_screen_every_pose_row(
         case.case_parameters.get("grasp_filter_before_ranking", False) is early_filter
     )
 
-    if early_filter and skill_id == "pour":
+    if approach_search:
         assert (
             case.case_parameters["approach_realisation"]["total_candidate_allocation"]
             == 2
@@ -1510,6 +1520,32 @@ def test_object_rotation_providers_screen_every_pose_row(
             torch.tensor(case.case_parameters["approach_direction"]),
             torch.tensor([[0.0, 0.0, -1.0]]).repeat(batch_size, 1),
         )
+
+
+def test_pour_approach_follows_object_yaw_onto_nearest_face() -> None:
+    """Yawed cubes keep the configured approach relative to their nearest face."""
+    approach = torch.tensor([-math.sqrt(0.5), 0.0, -math.sqrt(0.5)])
+    yaws = torch.tensor([0.0, 0.3, math.pi / 2 + 0.3, -0.6])
+    poses = torch.eye(4).repeat(len(yaws), 1, 1)
+    poses[:, :3, :3] = axis_angle_to_rotation_matrix(
+        torch.stack([torch.zeros_like(yaws), torch.zeros_like(yaws), yaws], dim=1)
+    )
+
+    directions = providers._yaw_following_approach(approach, poses)
+
+    assert torch.equal(directions[0], approach)
+    # A quarter turn is the same box, so it folds onto the same face offset.
+    torch.testing.assert_close(directions[2], directions[1])
+    folded = torch.tensor([0.0, 0.3, 0.3, -0.6])
+    expected = torch.stack(
+        [
+            approach[0] * torch.cos(folded),
+            approach[0] * torch.sin(folded),
+            approach[2].expand(len(folded)),
+        ],
+        dim=1,
+    )
+    torch.testing.assert_close(directions, expected)
 
 
 def test_pour_requires_full_return_orientation_after_successful_tilt() -> None:
@@ -1550,3 +1586,254 @@ def test_pour_requires_full_return_orientation_after_successful_tilt() -> None:
     assert results[1].stages[1].measurements[
         "return_rotation_error_rad"
     ] == pytest.approx(0.3)
+
+
+def test_franka_robotiq_calibration_couples_linkage_and_bounds_grip() -> None:
+    """Robotiq fixtures hold a rigid linkage; the PGI fixture is unchanged."""
+    from embodichain.lab.sim.cfg import MimicComplianceCfg
+    from embodichain_benchmarks.motion_generation._atomic_fixtures import (
+        _ROBOTIQ_HAND_JOINTS,
+        _create_franka_pgi_cfg,
+        _create_franka_robotiq_cfg,
+        create_dual_tutorial_robot_cfg,
+    )
+
+    rigid = MimicComplianceCfg(0.0, 0.0)
+    single = _create_franka_robotiq_cfg({})
+    assert single.mimic_compliance == {"finger_joint": rigid}
+    drives = single.joint_drive_props
+    assert {drives.max_effort[name] for name in _ROBOTIQ_HAND_JOINTS} == {5.0}
+    assert drives.stiffness["fr3_joint[1-7]"] == 1e5
+
+    pgi = _create_franka_pgi_cfg({})
+    assert pgi.mimic_compliance is None
+    assert pgi.joint_drive_props.stiffness["fr3_joint[1-7]"] == 1e4
+
+    names = {"uid": "calibration_probe", "urdf_name": "calibration_probe"}
+    dual = create_dual_tutorial_robot_cfg(
+        robot_type="franka", gripper="robotiq_2f_140", **names
+    )
+    assert dual.mimic_compliance == {
+        "left_finger_joint": rigid,
+        "right_finger_joint": rigid,
+    }
+    assert {
+        value
+        for name, value in dual.joint_drive_props.max_effort.items()
+        if "finger" in name or "knuckle" in name
+    } == {5.0}
+    explicit = create_dual_tutorial_robot_cfg(
+        robot_type="franka", gripper="robotiq_2f_140", hand_max_effort=20.0, **names
+    )
+    assert explicit.joint_drive_props.max_effort["left_finger_joint"] == 20.0
+
+
+def test_robotiq_axis_align_inward_search_restores_franka_edge_reachability() -> None:
+    """The longer hand loses a PGI-valid target; the declared inner target restores it."""
+    from embodichain.robot_registry import resolve_gripper_defaults
+    from embodichain_benchmarks.motion_generation._atomic_fixtures import (
+        _create_franka_pgi_cfg,
+        _create_franka_robotiq_cfg,
+    )
+
+    skill_configs = []
+    for name in (
+        "atomic_franka_robotiq_door_pour_align_push",
+        "atomic_franka_robotiq_spatial_generalization",
+    ):
+        suite = load_suite(name)
+        skill_configs.append(
+            next(
+                skill
+                for track in suite.tracks
+                for skill in track.config["skills"]
+                if skill["id"] == "axis_align"
+            )
+        )
+    distances = providers._axis_align_inward_distances(skill_configs[0])
+    assert distances is not None
+    assert providers._axis_align_inward_distances(skill_configs[1]) == distances
+    # One ordinary object and one formerly PGI-valid target near the workspace edge.
+    objects = torch.eye(4).repeat(2, 1, 1)
+    objects[:, :3, 3] = torch.tensor([[-0.42, -0.08, 0.027], [-0.57, -0.08, 0.027]])
+    contact_poses = objects.clone()
+    contact_poses[:, :3, :3] = torch.diag(torch.tensor([1.0, -1.0, -1.0]))
+    world_from_base = torch.diag(torch.tensor([-1.0, -1.0, 1.0, 1.0]))
+    inward = torch.nn.functional.normalize(-objects[:, :2, 3], dim=-1)
+    for catalog, factory in (
+        ("DHPGI14080", _create_franka_pgi_cfg),
+        ("RobotiqArg2F140", _create_franka_robotiq_cfg),
+    ):
+        cfg = factory({})
+        solver_cfg = cfg.solver_cfg["arm"]
+        solver_cfg.urdf_path = cfg._pk_urdf_path
+        solver_cfg.joint_names = cfg.control_parts["arm"]
+        solver = solver_cfg.init_solver(device=CPU)
+        root_from_contact = torch.tensor(
+            resolve_gripper_defaults(catalog)["root_from_contact_frame"]
+        )
+        grasps = (
+            contact_poses @ pose_inv(root_from_contact) @ torch.tensor(solver_cfg.tcp)
+        )
+        for distance in distances[:2]:
+            offsets = torch.zeros(2, 3)
+            offsets[:, :2] = inward * distance
+            poses = providers._axis_align_poses(
+                objects,
+                grasps,
+                torch.tensor([0.0, 0.0, -1.0]),
+                pre_grasp_distance=skill_configs[0]["pre_grasp_distance_m"],
+                lift_height=skill_configs[0]["lift_height_m"],
+                internal_axis=torch.tensor([1.0, 0.0, 0.0]),
+                target_axis=torch.tensor([0.0, 0.0, 1.0]),
+                alignment_offset_m=offsets,
+            )
+            joints = torch.tensor(cfg.init_qpos[:7]).repeat(2, 1)
+            valid = torch.ones(2, dtype=torch.bool)
+            for target in poses.unbind(dim=1):
+                success, solved = solver.get_ik(
+                    world_from_base @ target, qpos_seed=joints
+                )
+                valid &= success
+                joints = torch.where(success[:, None], solved, joints)
+            expected = (
+                [True, False]
+                if catalog == "RobotiqArg2F140" and distance == 0
+                else [True, True]
+            )
+            assert valid.tolist() == expected
+            if valid.all():
+                torch.testing.assert_close(
+                    world_from_base @ solver.get_fk(joints),
+                    poses[:, -1],
+                    atol=2e-5,
+                    rtol=0,
+                )
+
+
+def test_robotiq_door_full_opening_retains_reachable_release_retreat() -> None:
+    """A frozen native handle grasp reaches 90 degrees with the shorter retreat."""
+    from embodichain.lab.sim.atomic_skills import OpenDoorOptions
+    from embodichain.robot_registry import resolve_gripper_defaults
+    from embodichain_benchmarks.motion_generation._atomic_fixtures import (
+        _create_franka_pgi_cfg,
+        _create_franka_robotiq_cfg,
+    )
+
+    for suite_name in (
+        "atomic_franka_robotiq_door_pour_align_push",
+        "atomic_franka_robotiq_spatial_generalization",
+    ):
+        suite = load_suite(suite_name)
+        skill = next(
+            skill
+            for track in suite.tracks
+            for skill in track.config["skills"]
+            if skill["id"] == "open_door"
+        )
+        case = next(case for case in skill["cases"] if case["name"].endswith("90deg"))
+        assert case["open_angle_rad"] == pytest.approx(math.pi / 2, abs=4e-6)
+        assert case["retract_distance_m"] == 0.05
+
+    # Frozen seed-11 native grasp, original microwave placement and measured arm
+    # state. Only the mesh centroid enters the approach tangent; preserve that
+    # centroid in a small triangle instead of copying the complete handle mesh.
+    centre = torch.tensor([3.63577e-6, 0.02924815, -3.57606e-5])
+    affordance = OpenDoorAffordance(
+        mesh_vertices=centre
+        + torch.tensor(
+            [[-0.001, -0.001, 0.0], [0.001, -0.001, 0.0], [0.0, 0.002, 0.0]]
+        ),
+        mesh_triangles=torch.tensor([[0, 1, 2]]),
+        rotation_axis=torch.tensor([0.0, 0.0, -1.0]),
+        axis_origin=(-0.367, 0.069, -0.001),
+        joint_name="door_hinge",
+        joint_limits=(0.0, 1.91986215),
+    )
+    link_pose = torch.tensor(
+        [
+            [
+                [0.0, -1.0, 0.0, -0.739],
+                [1.0, 0.0, 0.0, 0.228],
+                [0.0, 0.0, 1.0, 0.551],
+                [0.0, 0.0, 0.0, 1.0],
+            ]
+        ]
+    )
+    robotiq_grasp = torch.tensor(
+        [
+            [
+                [-0.09863508, -0.01445477, -0.99501872, -0.74964237],
+                [-0.98602945, -0.13345146, 0.09968267, 0.22906944],
+                [-0.13422759, 0.99094993, -0.00108983, 0.54902762],
+                [0.0, 0.0, 0.0, 1.0],
+            ]
+        ]
+    )
+    start = torch.tensor([[0.0001, -0.5681, 0.0001, -2.8116, -0.0001, 3.0368, 0.741]])
+    world_from_base = torch.diag(torch.tensor([-1.0, -1.0, 1.0, 1.0]))
+    robotiq_cfg = _create_franka_robotiq_cfg({})
+    world_from_contact = (
+        robotiq_grasp
+        @ pose_inv(torch.tensor(robotiq_cfg.solver_cfg["arm"].tcp))
+        @ torch.tensor(
+            resolve_gripper_defaults("RobotiqArg2F140")["root_from_contact_frame"]
+        )
+    )
+    for catalog, factory, retreats in (
+        ("DHPGI14080", _create_franka_pgi_cfg, (0.1,)),
+        (
+            "RobotiqArg2F140",
+            _create_franka_robotiq_cfg,
+            (0.1, case["retract_distance_m"]),
+        ),
+    ):
+        cfg = factory({})
+        solver_cfg = cfg.solver_cfg["arm"]
+        solver_cfg.urdf_path = cfg._pk_urdf_path
+        solver_cfg.joint_names = cfg.control_parts["arm"]
+        solver = solver_cfg.init_solver(device=CPU)
+        grasp = (
+            world_from_contact
+            @ pose_inv(
+                torch.tensor(
+                    resolve_gripper_defaults(catalog)["root_from_contact_frame"]
+                )
+            )
+            @ torch.tensor(solver_cfg.tcp)
+        )
+        original = None
+        for retreat in retreats:
+            poses = providers._door_poses(
+                link_pose,
+                grasp,
+                affordance,
+                torch.tensor([case["open_angle_rad"]]),
+                OpenDoorOptions(
+                    door_waypoint_count=20,
+                    approach_distance=0.1,
+                    retract_distance=retreat,
+                ),
+            )
+            if original is not None:
+                torch.testing.assert_close(poses[:, :-1], original[:, :-1])
+            original = poses
+            joints = start.clone()
+            successes = []
+            for target in poses.unbind(dim=1):
+                success, solved = solver.get_ik(
+                    world_from_base @ target, qpos_seed=joints
+                )
+                successes.append(bool(success.item()))
+                if bool(success.item()):
+                    joints = solved
+                    torch.testing.assert_close(
+                        world_from_base @ solver.get_fk(joints),
+                        target,
+                        atol=2e-5,
+                        rtol=0,
+                    )
+            expected = [True] * 23
+            if catalog == "RobotiqArg2F140" and retreat == 0.1:
+                expected[-1] = False
+            assert successes == expected

@@ -2371,6 +2371,67 @@ def test_pick_combined_motion_gen_preserves_backend_samples_before_split() -> No
     assert plan.commands.frame_count == sample_count
 
 
+def test_pick_approach_waypoints_lie_on_the_pre_grasp_line() -> None:
+    """One combined plan visits evenly spaced poses on the straight approach."""
+    waypoints = 3
+    generator = _motion_generator()
+    generator.generate = Mock(
+        return_value=PlanResult(
+            success=torch.ones(NUM_ENVS, dtype=torch.bool),
+            positions=torch.zeros(NUM_ENVS, 6, ARM_DOF),
+            dt=torch.zeros(NUM_ENVS, 6),
+        )
+    )
+    action = _bind_action(generator, PickUp())
+    grasp = torch.eye(4)
+    grasp[:3, 3] = torch.tensor([0.4, 0.1, 0.2])
+
+    _plan_action(
+        action,
+        SkillInvocation(
+            skill_id="pick_up",
+            goal=GraspGoal(semantics=_semantics(entity_id="target"), grasp_xpos=grasp),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(strategy="motion_gen", sample_count=20),
+            skill_options=PickUpOptions(
+                approach_waypoints=waypoints,
+                approach_direction=torch.tensor([-0.6, 0.0, -0.8]),
+                pre_grasp_distance=0.12,
+            ),
+        ),
+        _context(
+            scene=_target_scene(
+                torch.eye(4).repeat(NUM_ENVS, 1, 1), timestamp=0.0, version=0
+            )
+        ),
+    )
+
+    generator.generate.assert_called_once()
+    targets = torch.stack(
+        [state.xpos for state in generator.generate.call_args.args[0]]
+    )
+    assert targets.shape[:2] == (waypoints + 3, NUM_ENVS)
+    pre_grasp = grasp[:3, 3] + 0.12 * torch.tensor([0.6, 0.0, 0.8])
+    expected = torch.stack(
+        [
+            torch.lerp(pre_grasp, grasp[:3, 3], i / (waypoints + 1))
+            for i in range(waypoints + 2)
+        ]
+    )
+    assert torch.allclose(
+        targets[: waypoints + 2, :, :3, 3], expected[:, None], atol=1e-6
+    )
+    assert torch.equal(targets[waypoints + 1], grasp.expand(NUM_ENVS, -1, -1))
+    assert torch.allclose(
+        targets[:-1, :, :3, :3], grasp[:3, :3].expand_as(targets[:-1, :, :3, :3])
+    )
+
+
+def test_pick_rejects_negative_approach_waypoints() -> None:
+    with pytest.raises(ValueError, match="approach_waypoints"):
+        PickUpOptions(approach_waypoints=-1)
+
+
 def test_place_releases_only_exclusively_held_rows() -> None:
     generator = _motion_generator()
 
@@ -3596,6 +3657,67 @@ def test_axis_align_plans_two_arm_phases_and_aligns_the_object_axis(
         final_object_rotation[:, :, 0], expected_x, atol=1e-6, rtol=0
     )
     assert torch.all(trajectory.positions[:, -1, ARM_DOF:] == 1.0)
+
+
+def test_axis_align_approach_waypoints_follow_the_pre_grasp_line() -> None:
+    """The open-hand phase visits straight-line poses before the grasp."""
+    generator = _motion_generator()
+
+    def compute_ik(
+        pose: torch.Tensor,
+        name: str,
+        joint_seed: torch.Tensor,
+        **_: object,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        return torch.ones(NUM_ENVS, dtype=torch.bool), joint_seed + 0.1
+
+    generator.robot.compute_ik.side_effect = compute_ik
+    action = _bind_action(generator, AxisAlign())
+    semantics = ObjectSemantics(
+        affordance=AxisAlignAffordance(internal_axis=torch.tensor([0.0, 0.0, 1.0])),
+        geometry={},
+        label="axis-object",
+        entity_id="target",
+    )
+    scene = _target_scene(torch.eye(4).repeat(NUM_ENVS, 1, 1), timestamp=0.0, version=0)
+    context = _context(
+        scene=replace(
+            scene,
+            entities={
+                **scene.entities,
+                "grasp_target": EntityState(torch.eye(4).repeat(NUM_ENVS, 1, 1)),
+            },
+        )
+    )
+
+    plan = _plan_action(
+        action,
+        SkillInvocation(
+            skill_id="axis_align",
+            goal=AxisAlignGoal(
+                semantics=semantics, grasp_xpos=SceneEntityPose("grasp_target")
+            ),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(sample_count=20),
+            skill_options=AxisAlignOptions(
+                target_axis=torch.tensor([1.0, 0.0, 0.0]),
+                approach_waypoints=2,
+                lift_height=0.1,
+            ),
+        ),
+        context,
+    )
+
+    solved_poses = _cartesian_targets(generator)
+    assert plan.plan_success.tolist() == [True, True]
+    # Pre-grasp, two line poses and the grasp, then lift and alignment.
+    assert len(solved_poses) == 6
+    heights = torch.stack([pose[:, 2, 3] for pose in solved_poses[:4]])
+    torch.testing.assert_close(
+        heights, torch.tensor([0.15, 0.10, 0.05, 0.0])[:, None].expand(-1, NUM_ENVS)
+    )
+    for pose in solved_poses[:4]:
+        torch.testing.assert_close(pose[:, :2, 3], torch.zeros(NUM_ENVS, 2))
 
 
 def test_axis_align_upright_prefers_perpendicular_grasp_and_pre_rotates() -> None:

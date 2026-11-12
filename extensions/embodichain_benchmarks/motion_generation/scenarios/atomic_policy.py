@@ -21,7 +21,11 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Literal
 
-from embodichain.lab.sim.atomic_skills import SkillInvocation, MotionPolicy
+from embodichain.lab.sim.atomic_skills import (
+    MotionPolicy,
+    PickUpOptions,
+    SkillInvocation,
+)
 
 from ..config import ProtocolCfg
 
@@ -30,6 +34,7 @@ __all__ = [
     "benchmark_motion_policy",
     "benchmark_motion_attribution",
     "policy_motion_budget",
+    "with_pick_approach_waypoints",
     "with_motion_budget",
     "with_plan_options",
 ]
@@ -143,4 +148,20 @@ def with_plan_options(
     )
     return replace(
         invocation, motion_policy=replace(policy, plan_opts=plan_opts, **limits)
+    )
+
+
+def with_pick_approach_waypoints(
+    invocation: SkillInvocation, waypoints: int
+) -> SkillInvocation:
+    """Plan PickUp approaches through straight-line intermediate poses.
+
+    The invocation's own policy still plans reach, approach and lift in one
+    call. Other skills are returned unchanged.
+    """
+    options = invocation.skill_options
+    if not isinstance(options, PickUpOptions) or waypoints == 0:
+        return invocation
+    return replace(
+        invocation, skill_options=replace(options, approach_waypoints=waypoints)
     )
