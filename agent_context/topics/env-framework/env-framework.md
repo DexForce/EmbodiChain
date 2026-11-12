@@ -23,6 +23,7 @@ managers, demonstration collection and the opt-in Task Program bridge.
 | Raw schema, optional history and exact historical queries | `managers/observation_manager.py`; Env dispatches capture/reset/close boundaries |
 | Optional measured physical objectives | `embodichain/lab/gym/envs/objectives/`; Gym owns observation/reset hooks independently of expert acceptance |
 | Controller-ready commands | `embodichain/lab/gym/envs/types.py`: `ControllerAction` |
+| Cable scene declarations and raw recording | `gym_utils.py` → `EmbodiedEnv._setup_interactive_objects()`; `trajectory_state.py` → `observations.get_entity_state` |
 | Demo segment execution / outcomes / collection qualification | `embodichain/lab/gym/envs/demo.py` |
 | Configured Task Program registration | `embodichain/lab/gym/envs/task_program/registration.py` |
 | Timing instrumentation | `embodichain/lab/gym/utils/profiler.py` |

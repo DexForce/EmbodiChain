@@ -285,6 +285,193 @@ def test_replay_rejects_unknown_mode():
         ReplayWrapper(_FakeEnv(), _trajectory(), mode="unsupported")
 
 
+def _cable_replay_case():
+    env = _FakeEnv()
+    trajectory = _trajectory()
+    cable_state = torch.zeros(1, 3, 13)
+    cable_state[..., 6] = 1
+    trajectory["states"]["cables"] = TensorDict(
+        {
+            "wire": {
+                "segment_state_w": cable_state[:, None].expand(-1, 2, -1, -1).clone()
+            }
+        },
+        batch_size=[1, 2],
+    )
+    env.sim._cable_objects = {
+        "wire": SimpleNamespace(data=SimpleNamespace(segment_state_w=cable_state))
+    }
+    env.sim._articulations = {}
+    env.sim._rigid_objects = {}
+    env.robot.get_qpos = lambda: torch.tensor([[0.0, 1.0]])
+    env.robot.get_local_pose = lambda: torch.zeros(1, 7)
+    return env, trajectory
+
+
+def test_cable_dynamic_replay_uses_reset_without_restoring_observations(fake_restore):
+    env, trajectory = _cable_replay_case()
+    wrapper = ReplayWrapper(env, trajectory, mode="dynamic")
+    wrapper.reset()
+    assert env.last_restored is None
+    assert env.sim.physics_enabled == [True]
+    wrapper.step(None)
+    torch.testing.assert_close(env.received_actions[0], trajectory["actions"][:, 0])
+    with pytest.raises(NotImplementedError, match="scrubbing"):
+        wrapper.go_to_step(1)
+    with pytest.raises(ValueError, match="reset_ids"):
+        wrapper.reset(options={"reset_ids": [0]})
+
+
+def test_cable_dynamic_replay_rejects_a_mid_episode_initial_observation(fake_restore):
+    env, trajectory = _cable_replay_case()
+    trajectory["states"]["cables", "wire", "segment_state_w"][0, 0, 0, 0] = 0.1
+    wrapper = ReplayWrapper(env, trajectory, mode="dynamic")
+    with pytest.raises(ValueError, match="differs from the full reset"):
+        wrapper.reset()
+    assert env.last_restored is None and not env.received_actions
+
+
+@pytest.mark.parametrize("mode", ["kinematic", "control"])
+def test_cable_replay_rejects_history_free_state_modes_before_mutation(mode):
+    env, trajectory = _cable_replay_case()
+    with pytest.raises(NotImplementedError, match="dynamic"):
+        ReplayWrapper(env, trajectory, mode=mode)
+    assert env.sim.physics_enabled == []
+
+
+def test_cable_replay_rejects_broadcast_world_states():
+    env, trajectory = _cable_replay_case()
+    with pytest.raises(ValueError, match="environment counts"):
+        ReplayWrapper(_FakeEnv(num_envs=2), trajectory, mode="dynamic")
+
+
+def test_cable_scene_replay_rejects_recording_without_cable_initial_observations():
+    env, trajectory = _cable_replay_case()
+    del trajectory["states"]["cables"]
+    with pytest.raises(ValueError, match="every scene cable"):
+        ReplayWrapper(env, trajectory, mode="dynamic")
+    assert env.sim.physics_enabled == []
+
+
+def test_cable_replay_preserves_task_context_and_initial_observation_history(
+    fake_restore,
+):
+    from unittest.mock import Mock
+
+    env, trajectory = _cable_replay_case()
+    initial = {"schema_version": 1, "targets": {"goal": [0.0, 0.0, 1.0]}}
+    trajectory["meta"]["demo_episodes"] = [{"task_initial_state": initial}]
+    env.termination_manager = object()
+    env.restore_task_initial_state = Mock()
+    env.get_info = lambda: {"task_context": "restored"}
+    env.observation_manager = SimpleNamespace(has_history=True)
+    frame = SimpleNamespace(policy={"recorded_observation": torch.ones(1, 1)})
+    env._capture_observation = lambda: frame
+    env._record_initial_observation = Mock()
+    env._seed_recording_state = Mock()
+
+    wrapper = ReplayWrapper(env, trajectory, mode="dynamic")
+    obs, info = wrapper.reset()
+
+    assert env.last_restored is None
+    env.restore_task_initial_state.assert_called_once_with(initial)
+    assert obs is frame.policy
+    assert info == {"task_context": "restored"}
+    assert env._record_initial_observation.call_args.args[0] is frame
+    assert env._record_initial_observation.call_args.args[1].tolist() == [0]
+    assert env._seed_recording_state.call_args.args[0] is frame.policy
+
+
+@pytest.mark.parametrize("source_env_id", [0, 1])
+@pytest.mark.parametrize("target_origin", [(0.0, 0.0, 0.0), (10.0, -2.0, 3.0)])
+def test_auto_saved_cable_row_replays_at_target_arena_origin(
+    tmp_path, source_env_id, target_origin
+):
+    from copy import deepcopy
+    from types import MethodType
+
+    from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+    from embodichain.lab.gym.envs.episode_context import EpisodeContext
+    from embodichain.lab.gym.utils.gym_utils import load_trajectory
+
+    target, _ = _cable_replay_case()
+    local_state = target.sim._cable_objects["wire"].data.segment_state_w.clone()
+    local_state[0, :, 0] = torch.tensor([0.1, 0.2, 0.3])
+    local_state[..., 7:] = 0.01
+    target.sim.arena_offsets = torch.tensor([target_origin])
+    target_state = local_state.clone()
+    target_state[..., :3] += target.sim.arena_offsets[:, None, :]
+    target.sim._cable_objects["wire"].data.segment_state_w = target_state
+
+    source = _FakeEnv(num_envs=2)
+    source.robot.uid = "robot"
+    source.physics_dt = 0.01
+    source.control_frequency = 25
+    source.sim._articulations = {}
+    source.sim._rigid_objects = {}
+    source.sim.arena_offsets = torch.tensor([[0.0, 0.0, 0.0], [5.0, 2.0, 1.0]])
+    trajectory = _trajectory(num_envs=2)
+    trajectory["states"]["robot", "qpos"][:] = torch.tensor([0.0, 1.0])
+    states = local_state[:, None].repeat(2, 2, 1, 1)
+    states[..., :3] += source.sim.arena_offsets[:, None, None, :]
+    trajectory["states"]["cables"] = TensorDict(
+        {"wire": {"segment_state_w": states}}, batch_size=[2, 2]
+    )
+    source._traj_buffer = TensorDict(
+        {"states": trajectory["states"], "actions": trajectory["actions"]},
+        batch_size=[2, 2],
+    )
+    source._traj_steps = torch.tensor([2, 2])
+    source.cfg.trajectory_auto_save = True
+    source.cfg.trajectory_save_dir = str(tmp_path)
+    source._traj_save_count = 0
+    source._demo_episode_metadata = [
+        {"env_id": row, "length": 2, "episode_uuid": f"episode-{row}"}
+        for row in range(2)
+    ]
+    source.get_demo_episode_metadata = lambda row: deepcopy(
+        source._demo_episode_metadata[row]
+    )
+    source._trajectory_action_metadata = lambda: {"action_kind": "policy"}
+    source.episode_context = EpisodeContext(2)
+    source.episode_context._begin_episode([0, 1])
+    source.episode_context._finish_initialization([0, 1])
+    source.save_trajectory = MethodType(EmbodiedEnv.save_trajectory, source)
+
+    path = EmbodiedEnv._save_trajectory_for_env(source, source_env_id)
+    saved = load_trajectory(path)
+    assert saved["meta"]["num_envs"] == 1
+    assert saved["meta"]["env_ids"] == [source_env_id]
+    assert saved["meta"]["arena_origins_w"] == [
+        source.sim.arena_offsets[source_env_id].tolist()
+    ]
+    recorded = saved["states"]["cables", "wire", "segment_state_w"].clone()
+    wrapper = ReplayWrapper(target, saved)
+    wrapper.reset()
+    wrapper.step(None)
+    torch.testing.assert_close(
+        target.received_actions[0], trajectory["actions"][[source_env_id], 0]
+    )
+    torch.testing.assert_close(
+        saved["states"]["cables", "wire", "segment_state_w"], recorded
+    )
+    torch.testing.assert_close(
+        target.sim._cable_objects["wire"].data.segment_state_w, target_state
+    )
+    target_state[..., 0] += 0.1
+    with pytest.raises(ValueError, match="differs from the full reset"):
+        wrapper.reset()
+
+
+@pytest.mark.parametrize("origins", [[[0.0, 0.0]], [[float("nan"), 0.0, 0.0]]])
+def test_cable_replay_rejects_invalid_source_origins_before_reset(origins):
+    env, trajectory = _cable_replay_case()
+    trajectory["meta"]["arena_origins_w"] = origins
+    with pytest.raises(ValueError, match="arena_origins_w"):
+        ReplayWrapper(env, trajectory)
+    assert env.sim.physics_enabled == []
+
+
 @pytest.mark.parametrize("mode", ["kinematic", "control"])
 def test_fluid_kinematic_and_control_restore_recorded_frames(fake_restore, mode):
     env = _FakeEnv()

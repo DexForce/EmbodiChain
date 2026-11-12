@@ -134,3 +134,10 @@ EmbodiChain defaults to DexUni when no solver is selected;
 legacy `auto`/`AutoSolverCfg` selections must migrate to `dexuni` or the concrete
 solver needed by the scene. Explicit `semi_implicit` remains required for
 Newton gradient mode.
+
+The [cable Viser demo](sim/demo/cable_viser.py) displays replicated segment
+capsules in the browser:
+
+```bash
+python -m embodichain run-example sim/demo/cable_viser --num-envs 2 --port 8080 --duration 12
+```

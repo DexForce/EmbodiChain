@@ -56,6 +56,7 @@ from embodichain.lab.sim.cfg import (
     VisualObjectCfg,
     RigidObjectGroupCfg,
     ArticulationCfg,
+    CableObjectCfg,
     LightCfg,
 )
 from embodichain.lab.sim.objects import Robot
@@ -307,6 +308,8 @@ class EmbodiedEnvCfg(EnvCfg):
 
     articulation: List[ArticulationCfg] = []
 
+    cable_object: list[CableObjectCfg] = []
+    """Fixed-topology cables declared before simulation preparation."""
     fluid_object: list[FluidObjectCfg] = []
     """Fixed-count fluids owned by the physical environment component."""
 
@@ -3790,6 +3793,8 @@ class EmbodiedEnv(BaseEnv):
         for cfg in self.cfg.rigid_object_group:
             self.sim.add_rigid_object_group(cfg=cfg)
 
+        for cfg in self.cfg.cable_object:
+            self.sim.add_cable_object(cfg=cfg)
         for cfg in self.cfg.fluid_object:
             self.sim.add_fluid_object(cfg)
 
@@ -4297,6 +4302,12 @@ class EmbodiedEnv(BaseEnv):
                 self.get_demo_episode_metadata(int(env_id)) for env_id in env_ids
             ],
         }
+        if "cables" in states.keys():
+            # Cable observations retain world coordinates. Keep each exported
+            # row's origin so action replay can validate another arena placement.
+            meta["arena_origins_w"] = (
+                self.sim.arena_offsets[env_ids_t].detach().cpu().tolist()
+            )
         meta.update(self._trajectory_action_metadata())
         final_observations = _export_final_observations(
             getattr(self, "_final_acceptance_rules", ()),

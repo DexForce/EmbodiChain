@@ -1294,10 +1294,12 @@ def test_start_visualization_rejects_open_native_window() -> None:
         sim.start_visualization()
 
 
-def test_start_visualization_does_not_prepare_an_empty_declaration_phase(
+@pytest.mark.parametrize("has_cable", [False, True], ids=["empty", "cable-only"])
+def test_start_visualization_prepares_only_when_assets_are_declared(
     monkeypatch: pytest.MonkeyPatch,
+    has_cable: bool,
 ) -> None:
-    """Starting Viser must not finalize Newton before assets are declared."""
+    """Viser prepares cable-only scenes but leaves an empty builder open."""
 
     class _Exporter:
         def __init__(self, sim: SimulationManager, cfg: object) -> None:
@@ -1313,6 +1315,7 @@ def test_start_visualization_does_not_prepare_an_empty_declaration_phase(
             self.captures = 0
 
         def start(self) -> None:
+            assert self.exporter.sim.prepare.call_count == int(has_cable)
             self.is_running = True
 
         def capture(self, **_kwargs: object) -> None:
@@ -1336,6 +1339,7 @@ def test_start_visualization_does_not_prepare_an_empty_declaration_phase(
     sim._rigid_object_groups = {}
     sim._fluid_objects = {}
     sim._deformable_objects = {}
+    sim._cable_objects = {"cable": object()} if has_cable else {}
     sim._articulations = {}
     sim._robots = {}
     sim._sensors = {}
@@ -1352,7 +1356,7 @@ def test_start_visualization_does_not_prepare_an_empty_declaration_phase(
 
     runtime = sim.start_visualization()
 
-    sim.prepare.assert_not_called()
+    assert sim.prepare.call_count == int(has_cable)
     sim.sync_render_state.assert_not_called()
     assert runtime is not None
     assert runtime.captures == 1
