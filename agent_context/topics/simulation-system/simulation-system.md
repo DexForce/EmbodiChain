@@ -40,7 +40,7 @@ physical type and supported lifecycle. Single-articulation USD imports via
 `add_robot()`/`add_articulation()` preserve constraints between selected-prim
 links. `spawn/usd.py` maps endpoints/names to the runtime UID while retaining
 body-local frames and scale. Declare constrained assets before prepare on
-Default/PhysX; cross-object/world constraints require `add_usd()`.
+Default; cross-object/world constraints require `add_usd()`.
 Source, texture and visual-rebuild rules
 are in [articulation adapters](articulation-adapters.md),
 [rendering](rendering.md) and [scene geometry](../scene-services/geometry.md).
