@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+
 from dataclasses import fields
 
 import dexsim
@@ -107,8 +108,8 @@ def test_articulation_cfg_uses_grouped_physics_fields_only() -> None:
         "joint_props",
     }.isdisjoint(field_names)
     assert root_props == ArticulationRootPropertiesCfg()
-    assert root_props.fixed_base is True
-    assert root_props.self_collision_enabled is False
+    assert root_props.fixed_base is None
+    assert root_props.self_collision_enabled is None
 
 
 @pytest.mark.parametrize(
@@ -598,7 +599,6 @@ def test_backend_property_groups_track_dexsim_spawn_descriptors() -> None:
         "use_native_mesh_loader",
         "convert_to_heightfield",
         "heightfield_resolution",
-        "preserve_mesh_transform",
         "max_hull_vertices",  # Mesh cooking is outside rigid-body physics.
     }
     assert (
@@ -996,7 +996,11 @@ def test_legacy_mesh_collision_physics_rejects_non_mesh_shape() -> None:
 
 def test_backend_joint_and_articulation_configs_round_trip() -> None:
     drive = NewtonJointDrivePropertiesCfg(target_mode=None)
-    root = ArticulationRootPropertiesCfg(fixed_base=False)
+    root = ArticulationRootPropertiesCfg(
+        fixed_base=False,
+        newton_gravity_compensation=0.5,
+        newton_mimic_stabilizer=True,
+    )
 
     restored_drive = JointDrivePropertiesCfg.from_dict(drive.to_dict())
     restored_root = ArticulationRootPropertiesCfg.from_dict(root.to_dict())
@@ -1004,19 +1008,35 @@ def test_backend_joint_and_articulation_configs_round_trip() -> None:
     assert isinstance(restored_drive, NewtonJointDrivePropertiesCfg)
     assert root.to_dict() == {
         "fixed_base": False,
-        "self_collision_enabled": False,
+        "self_collision_enabled": None,
         "sleep_threshold": None,
         "min_position_iters": None,
         "min_velocity_iters": None,
+        "newton_gravity_compensation": 0.5,
+        "newton_mimic_stabilizer": True,
     }
     assert type(restored_root) is ArticulationRootPropertiesCfg
+    assert restored_root == root
 
 
-def test_articulation_root_config_rejects_backend_discriminator() -> None:
-    with pytest.raises(TypeError, match="backend"):
-        ArticulationRootPropertiesCfg.from_dict(
-            {"backend": "newton", "fixed_base": False}
-        )
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("backend", "newton"),
+        ("newton_kinematic", True),
+        ("newton_sleep_policy", "never"),
+        ("newton_shape_collision", False),
+        ("newton_shape_collision_links", ["tool"]),
+        ("newton_particle_collision_links", ["tool"]),
+        ("newton_mesh_approximation", {"method": "convex_hull"}),
+        ("newton_force_sdf", True),
+    ],
+)
+def test_articulation_root_config_rejects_unsupported_fields(name, value) -> None:
+    with pytest.raises(TypeError, match=name):
+        ArticulationRootPropertiesCfg.from_dict({name: value})
+    with pytest.raises(TypeError, match=name):
+        ArticulationCfg.from_dict({"root_props": {name: value}})
 
 
 def test_articulation_root_config_round_trip() -> None:
@@ -1082,6 +1102,7 @@ def test_newton_physics_inherits_common_gravity_and_collision_config(
     contact_distance: float,
 ) -> None:
     cfg = NewtonPhysicsCfg(
+        solver_cfg=None,
         gravity=[0.0, 0.0, -1.5],
         collision_cfg=NewtonCollisionPipelineCfg(
             broad_phase="sap",
@@ -1133,6 +1154,43 @@ def test_newton_physics_can_disable_the_external_collision_pipeline() -> None:
     assert dexsim_cfg.collision_pipeline_cfg is None
     assert not hasattr(cfg, "enable_collision_pipeline")
     assert not hasattr(cfg, "collision_pipeline_update_interval")
+
+
+def test_newton_physics_forwards_sync_and_capture_options() -> None:
+    defaults = NewtonPhysicsCfg().to_dexsim_cfg(gpu_id=0)
+    assert defaults.async_sync is False
+    assert defaults.rigid_transform_sync_mode == "all"
+    assert defaults.capture_acquire_timeout is None
+    assert defaults.capture_wait_log_interval == 10.0
+
+    dexsim_cfg = NewtonPhysicsCfg(
+        async_sync=True,
+        rigid_transform_sync_mode="dynamic",
+        capture_acquire_timeout=2.5,
+        capture_wait_log_interval=None,
+    ).to_dexsim_cfg(gpu_id=0)
+
+    assert dexsim_cfg.async_sync is True
+    assert dexsim_cfg.rigid_transform_sync_mode == "dynamic"
+    assert dexsim_cfg.capture_acquire_timeout == 2.5
+    assert dexsim_cfg.capture_wait_log_interval is None
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value", "message"),
+    [
+        ("rigid_transform_sync_mode", "static", "rigid_transform_sync_mode"),
+        ("capture_acquire_timeout", -1.0, "capture_acquire_timeout"),
+        ("capture_acquire_timeout", float("inf"), "capture_acquire_timeout"),
+    ],
+)
+def test_newton_physics_rejects_invalid_sync_and_capture_options(
+    field_name: str,
+    value: str | float,
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        NewtonPhysicsCfg(**{field_name: value})
 
 
 @pytest.mark.parametrize(
@@ -1547,3 +1605,60 @@ def test_nrd_rejects_invalid_settings(field_name: str, invalid_value: object) ->
     """Malformed NRD values fail before entering the native renderer."""
     with pytest.raises(ValueError, match=field_name):
         sim_cfg.NRDCfg(**{field_name: invalid_value})
+
+
+@pytest.mark.parametrize("constructor", [None, "sah", "cubql"])
+def test_newton_mesh_bvh_constructor_round_trip(constructor: str | None) -> None:
+    cfg = NewtonPhysicsCfg(mesh_bvh_constructor=constructor)
+    assert cfg.to_dict()["mesh_bvh_constructor"] == constructor
+    assert cfg.to_dexsim_cfg(gpu_id=0).mesh_bvh_constructor == constructor
+
+
+def test_urdf_cfg_preserves_positional_constructor_with_keyword_mounting_flag():
+    from embodichain.lab.sim.cfg import URDFCfg
+
+    cfg = URDFCfg(
+        None, None, None, None, "/tmp", True, "robot_base", force_assembly=True
+    )
+    assert cfg.base_link_name == "robot_base"
+    assert cfg.force_assembly is True
+
+
+@configclass
+class _DexUniRobotPresetCfg(RobotPresetCfg):
+    default: RobotCfg = RobotCfg(uid="portable", control_parts={"arm": ["joint"]})
+    newton_dexuni: RobotCfg | None = RobotCfg(
+        uid="dexuni", control_parts={"arm": ["joint"]}
+    )
+    newton_mujoco_warp: RobotCfg | None = RobotCfg(
+        uid="mujoco", control_parts={"arm": ["joint"]}
+    )
+    newton_mjwarp: RobotCfg | None = RobotCfg(
+        uid="mjwarp", control_parts={"arm": ["joint"]}
+    )
+
+
+@pytest.mark.parametrize(
+    "missing,expected",
+    [
+        ((), "dexuni"),
+        (("newton_dexuni",), "mujoco"),
+        (("newton_dexuni", "newton_mujoco_warp"), "mjwarp"),
+        (("newton_dexuni", "newton_mujoco_warp", "newton_mjwarp"), "portable"),
+    ],
+)
+@pytest.mark.parametrize(
+    "solver_mapping",
+    [None, {}, {"solver_type": "dexuni"}],
+)
+def test_dexuni_preset_priority_and_isolation(
+    missing, expected, solver_mapping
+) -> None:
+    preset = _DexUniRobotPresetCfg()
+    for field in missing:
+        setattr(preset, field, None)
+    physics = NewtonPhysicsCfg(solver_cfg=solver_mapping)
+    resolved = preset.resolve(physics)
+    assert resolved.uid == expected
+    resolved.control_parts["probe"] = ["joint"]
+    assert "probe" not in preset.resolve(physics).control_parts

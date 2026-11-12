@@ -27,23 +27,23 @@ import math
 from _thread import LockType
 from threading import Lock
 from types import MappingProxyType
-from typing import cast
+from typing import Any, cast
 import torch
 
 from embodichain.lab.evaluation import CompiledEvaluation
 from embodichain.lab.evaluation._recording import _is_segment_start_field
 from embodichain.lab.gym.envs.settling import DynamicSettleMonitorCfg
-from embodichain.lab.sim.atomic_actions import (
+from embodichain.lab.sim.atomic_skills import (
     Affordance,
-    AtomicActionEngine,
+    AtomicSkillEngine,
     EndpointTrackingFeedbackAddress,
     GRASP_CAPABILITY,
     JOINT_POSITION_CHANNEL,
     SceneProvider,
     SkillDescriptor,
 )
-from embodichain.lab.sim.atomic_actions.primitives import BUILTIN_ACTION_TYPES
-from embodichain.lab.sim.atomic_actions.tracking import (
+from embodichain.lab.sim.atomic_skills.primitives import BUILTIN_SKILL_TYPES
+from embodichain.lab.sim.atomic_skills.tracking import (
     FeedbackTerminalAcceptance,
     TrackingRuntime,
 )
@@ -59,6 +59,7 @@ from embodichain.lab.task_program.semantics import (
     POSE_RELATION_EFFECT_CHANNEL,
     BoundRobotSkillProfile,
     EffectEvidenceProvider,
+    EffectAssurance,
     Place,
     RobotSkillProfile,
     RegisteredSemanticCall,
@@ -203,7 +204,7 @@ def _canonical_value(value: object) -> object:
             ),
         )
     if is_dataclass(value):
-        from embodichain.lab.sim.atomic_actions.policies import RecoveryPolicy
+        from embodichain.lab.sim.atomic_skills.policies import RecoveryPolicy
 
         metadata = {
             data_field.name: _canonical_value(getattr(value, data_field.name))
@@ -214,9 +215,9 @@ def _canonical_value(value: object) -> object:
                 and getattr(value, data_field.name) is None
             )
         }
-        from embodichain.lab.sim.atomic_actions.policies import MotionPolicy
+        from embodichain.lab.sim.atomic_skills.policies import MotionPolicy
 
-        from embodichain.lab.sim.atomic_actions.core import SkillDescriptor
+        from embodichain.lab.sim.atomic_skills.core import SkillDescriptor
 
         if (
             type(value) is SkillDescriptor
@@ -467,7 +468,7 @@ def _validate_standard_call_catalog(
     lowerer_declarations: Mapping[str, RegisteredSemanticLowererDeclaration],
 ) -> None:
     """Require exact built-ins and factory coverage for every registered call."""
-    builtins = builtin_semantic_call_catalog().descriptors
+    builtins = builtin_semantic_call_catalog(include_transport=True).descriptors
     registered_call_ids: set[str] = set()
     for descriptor in call_catalog.descriptors.values():
         if descriptor.spec_type is RegisteredSemanticCall:
@@ -537,6 +538,54 @@ def _validate_standard_tracking_metrics(profile: RobotSkillProfile) -> None:
                     ) from exc
 
 
+def _planning_contracts(factories):
+    from embodichain.lab.task_program.language.semantic_contracts import (
+        SemanticCallContract,
+    )
+
+    result = {}
+    for factory in factories:
+        declared = getattr(factory, "argument_contract", None)
+        if declared is not None:
+            if type(declared) is not SemanticCallContract:
+                raise TypeError(
+                    "argument_contract must be exactly SemanticCallContract"
+                )
+            result[factory.call_id] = declared
+        elif hasattr(factory, "role_ids"):
+            result[factory.call_id] = SemanticCallContract(
+                {role: "entity" for role in factory.role_ids},
+                {},
+                preconditions=(
+                    ("object_held_by_primary",)
+                    if getattr(factory, "initial_held_role", None) is not None
+                    else (
+                        ("primary_free",)
+                        if hasattr(factory, "initial_held_role")
+                        else ("asset_defined_entry_state",)
+                    )
+                ),
+                effects=(
+                    ("attach:" + factory.terminal_held_role,)
+                    if factory.terminal_held_role
+                    else (("release",) if factory.release_on_exit else ())
+                ),
+            )
+        elif factory.call_id == "simulation.move_held_object":
+            from embodichain.lab.task_program.language.semantic_contracts import (
+                semantic_planning_catalog,
+            )
+
+            declaration = semantic_planning_catalog()["calls"][factory.call_id]
+            result[factory.call_id] = SemanticCallContract(
+                declaration["required"],
+                declaration["optional"] if hasattr(factory, "routes") else {},
+                preconditions=("object_held_by_primary",),
+                effects=("retain_attachment",) if hasattr(factory, "routes") else (),
+            )
+    return MappingProxyType(result)
+
+
 @dataclass(frozen=True, slots=True)
 class TaskProgramIntegrationCatalog:
     """Provider-free integration directory owned by one task registration."""
@@ -570,6 +619,11 @@ class TaskProgramIntegrationCatalog:
         default_factory=frozenset, kw_only=True
     )
     """Native rigid-object identities and affordances resolving to those objects."""
+    call_contracts: Mapping[str, Any] = field(default_factory=dict, kw_only=True)
+    call_declaration_factories: Mapping[str, Any] = field(
+        default_factory=dict, kw_only=True
+    )
+    demo_skill_calls: Mapping[str, str] = field(default_factory=dict, kw_only=True)
     condition_settle_entities: Mapping[str, str] = field(
         default_factory=dict, kw_only=True
     )
@@ -586,6 +640,12 @@ class TaskProgramIntegrationCatalog:
             "evaluation_conditions",
             _snapshot_evaluation_conditions(self.evaluation_conditions),
         )
+        for name in (
+            "call_contracts",
+            "call_declaration_factories",
+            "demo_skill_calls",
+        ):
+            object.__setattr__(self, name, MappingProxyType(dict(getattr(self, name))))
         for field_name in ("scene_registry_id", "robot_profile_id"):
             value = getattr(self, field_name)
             if type(value) is not str or not value or value != value.strip():
@@ -719,6 +779,217 @@ class TaskProgramIntegrationCatalog:
         """Validate that the semantic call is present in the integration catalog."""
         call_id = call.call_id if type(call) is RegisteredSemanticCallCfg else call.kind
         self.call_catalog.discover(call_id)
+        if type(call) is RegisteredSemanticCallCfg and call_id in self.call_contracts:
+            from embodichain.lab.task_program.language.semantic_contracts import (
+                validate_semantic_call_payload,
+            )
+
+            validate_semantic_call_payload(
+                {
+                    "kind": "registered",
+                    "call_id": call_id,
+                    "arguments": dict(call.arguments),
+                    "resources": dict(call.resources),
+                },
+                contracts=self.call_contracts,
+            )
+            contract = self.call_contracts[call_id]
+            for name, rule in {
+                **dict(contract.required),
+                **dict(contract.optional),
+            }.items():
+                if name in call.arguments and rule in {"entity", "part", "affordance"}:
+                    self.scene.resolve(
+                        call.arguments[name],
+                        expected_type=(
+                            SceneAffordanceRef
+                            if rule == "affordance"
+                            else SceneEntityRef
+                        ),
+                        path=(*path, "arguments", name),
+                    )
+            factory = self.call_declaration_factories.get(call_id)
+            if factory is not None and hasattr(factory, "routes"):
+                arguments = call.arguments
+                route = next(
+                    (r for r in factory.routes if r.target_id == arguments["target"]),
+                    None,
+                )
+                if (
+                    route is None
+                    or arguments.get("object", route.object_id) != route.object_id
+                ):
+                    raise ValueError(
+                        "MoveHeldObject call does not match a configured object-target route."
+                    )
+                if "reference" in arguments and arguments["reference"] != getattr(
+                    route.pose, "entity_id", None
+                ):
+                    raise ValueError(
+                        "MoveHeldObject reference does not match the configured target."
+                    )
+            elif factory is not None and hasattr(factory, "target_id"):
+                if call.arguments != {"target": factory.target_id}:
+                    raise ValueError(
+                        "MoveHeldObject must select its configured target."
+                    )
+            elif factory is not None and hasattr(factory, "role_ids"):
+                for role, identifier in call.arguments.items():
+                    self.scene.resolve(
+                        identifier,
+                        expected_type=SceneObjectRef,
+                        path=(*path, "arguments", role),
+                    )
+
+    def semantic_planning_catalog(
+        self, *, preset_id: str | None = None
+    ) -> dict[str, Any]:
+        """Return provider-free contracts for a selected execution policy.
+
+        Args:
+            preset_id: Optional policy selection. Omission uses per-skill/profile
+                defaults, or the sole declared policy when unambiguous.
+
+        Returns:
+            Owned argument rules, availability, effects and extension metadata.
+        """
+        from embodichain.lab.task_program.language.semantic_contracts import (
+            semantic_planning_catalog,
+            SemanticCallContract,
+        )
+
+        defaults = semantic_planning_catalog()["calls"]
+        contracts = dict(self.call_contracts)
+        for cid in self.call_catalog.descriptors:
+            if cid not in contracts and cid in defaults:
+                spec = defaults[cid]
+                contracts[cid] = SemanticCallContract(
+                    spec["required"],
+                    spec["optional"],
+                    tuple(spec["resource_slots"]),
+                    preconditions=tuple(spec.get("preconditions", ())),
+                    effects=(spec["effect"],) if "effect" in spec else (),
+                )
+        result = semantic_planning_catalog(contracts)
+        for cid, descriptor in self.call_catalog.descriptors.items():
+            if cid in result["calls"]:
+                result["calls"][cid].setdefault("skill", descriptor.skill_id)
+                result["calls"][cid].setdefault(
+                    "runtime_bindings", ["resource_profile"]
+                )
+                selected = (
+                    preset_id
+                    or self.robot_profile.skill_presets.get(descriptor.skill_id)
+                    or self.robot_profile.default_preset
+                    or (
+                        next(iter(self.robot_profile.presets))
+                        if len(self.robot_profile.presets) == 1
+                        else None
+                    )
+                )
+                enabled = (
+                    selected is not None
+                    and cid
+                    in self.robot_profile.presets[selected].skill_option_templates
+                )
+                result["calls"][cid]["available"] = enabled
+                if cid == "hand_over" and enabled:
+                    options = self.robot_profile.presets[
+                        selected
+                    ].skill_option_template(cid)
+                    release = options.release_at_target
+                    result["calls"][cid]["required_policy"] = {
+                        "release_at_target": release
+                    }
+                    result["calls"][cid]["planning_restrictions"] = {
+                        "explicit_resources": []
+                    }
+                    if release:
+                        result["calls"][cid]["effect"] = "release"
+                        result["calls"][cid]["effects"] = ["release"]
+                        result["calls"][cid]["preconditions"] = [
+                            "object_unheld",
+                            "source_free",
+                            "destination_free",
+                        ]
+                factory = self.call_declaration_factories.get(cid)
+                if factory is not None:
+                    result["calls"][cid]["revision"] = factory.revision
+                retained_transport = cid == "move_held_object" or (
+                    cid == "simulation.move_held_object" and hasattr(factory, "routes")
+                )
+                demo_effect = (
+                    factory is not None
+                    and hasattr(factory, "role_ids")
+                    and (
+                        factory.terminal_held_role is not None
+                        or factory.release_on_exit
+                    )
+                )
+                if retained_transport or demo_effect:
+                    result["calls"][cid]["required_effect_assurance"] = "verified"
+                    result["calls"][cid]["available"] = bool(
+                        enabled
+                        and self.robot_profile.presets[selected].effect_assurance
+                        is EffectAssurance.VERIFIED
+                        and cid in self.robot_profile.presets[selected].effect_monitors
+                    )
+                if factory is not None and hasattr(factory, "role_ids"):
+                    result["calls"][cid]["runtime_bindings"] = [
+                        "resource_profile",
+                        "demo_skill_asset",
+                        "occurrence_source",
+                        "measured_execution",
+                    ]
+                    result["calls"][cid][
+                        "terminal_held_role"
+                    ] = factory.terminal_held_role
+                    result["calls"][cid]["release_on_exit"] = factory.release_on_exit
+                    if hasattr(factory, "initial_held_role"):
+                        result["calls"][cid][
+                            "initial_held_role"
+                        ] = factory.initial_held_role
+        result["opaque_calls"] = {
+            cid: {
+                "skill": descriptor.skill_id,
+                "resource_slots": list(descriptor.binding_contract.slot_ids),
+                "argument_contract_available": False,
+            }
+            for cid, descriptor in self.call_catalog.descriptors.items()
+            if cid not in result["calls"]
+        }
+        return result
+
+    def validate_call_payload(
+        self, payload: dict[str, Any], *, preset_id: str | None = None
+    ) -> dict[str, Any]:
+        """Validate canonical argument shapes against this deployment's catalog.
+
+        Resource defaults remain profile-owned; program preflight resolves actual
+        scene references, targets and effective resource compatibility.
+        """
+        from embodichain.lab.task_program.language.semantic_contracts import (
+            SemanticCallContract,
+            validate_semantic_call_payload,
+        )
+
+        metadata = self.semantic_planning_catalog(preset_id=preset_id)["calls"]
+        cid = (
+            payload.get("call_id")
+            if payload.get("kind") == "registered"
+            else payload.get("kind")
+        )
+        if cid in metadata and not metadata[cid].get("available", False):
+            raise ValueError(
+                f"Semantic call {cid!r} is not enabled by the selected profile."
+            )
+        contracts = {
+            cid: SemanticCallContract(
+                value["required"], value["optional"], tuple(value["resource_slots"])
+            )
+            for cid, value in metadata.items()
+        }
+        return validate_semantic_call_payload(payload, contracts=contracts)
 
     def _validate_place_relation_grounder(
         self,
@@ -796,6 +1067,11 @@ class TaskProgramIntegrationCatalog:
         path: ConfigPath,
     ) -> None:
         """Validate one registered post-policy kind and named preset."""
+        if policy.kind == "hold":
+            self.scene.resolve(
+                policy.object, expected_type=SceneObjectRef, path=(*path, "object")
+            )
+            return
         if policy.kind not in _POST_POLICY_KINDS:
             raise KeyError(
                 f"Unknown post-policy kind {policy.kind!r}; available kinds are "
@@ -845,6 +1121,31 @@ class TaskProgramIntegrationCatalog:
             )
 
     def preflight(self, program: TaskProgramCfg) -> CompiledTaskProgram:
+        """Compile and statically link with errors located in authored input."""
+        from dataclasses import replace
+        from embodichain.lab.task_program.language.decoder import TaskProgramConfigError
+        from embodichain.lab.task_program.semantics.integration import (
+            SemanticValidationError,
+        )
+
+        normalized = getattr(program, "__authoring_source_map__", None)
+        try:
+            return self._preflight(program)
+        except TaskProgramConfigError as error:
+            if normalized is None or getattr(error, "_authored", False):
+                raise
+            raise type(error)(
+                error.code, normalized.original_path(error.path), error.message
+            ) from error
+        except SemanticValidationError as error:
+            if normalized is None:
+                raise
+            diagnostic = error.diagnostic
+            raise SemanticValidationError(
+                replace(diagnostic, path=normalized.original_path(diagnostic.path))
+            ) from error
+
+    def _preflight(self, program: TaskProgramCfg) -> CompiledTaskProgram:
         """Compile and statically link every expanded semantic call."""
         self.validate_integration(program.integration, path=("integration",))
         compiled = TaskProgramCompiler(
@@ -859,10 +1160,48 @@ class TaskProgramIntegrationCatalog:
         for segment in compiled.iter_segments():
             for policy in segment.post_policies:
                 if (
-                    policy.cfg.preset in self.pose_delta_settle_preset_ids
+                    policy.cfg.kind == "hold"
+                    and self.robot_profile.presets[
+                        program.integration.runtime_preset
+                    ].effect_assurance
+                    is not EffectAssurance.VERIFIED
+                ):
+                    raise TaskProgramValidationError(
+                        "hold_requires_verified_effect",
+                        policy.source_path,
+                        "Hold requires verified effect assurance.",
+                    )
+                if (
+                    policy.cfg.kind == "hold"
+                    or policy.cfg.preset in self.pose_delta_settle_preset_ids
                     or policy.cfg.preset in self.condition_settle_entities
                 ):
                     self.validate_post_policy(policy.cfg, path=policy.source_path)
+            from embodichain.lab.task_program.compiler.program import (
+                CompiledObjectNearTargetValidator,
+            )
+            from embodichain.lab.task_program.semantics.calls import (
+                SemanticRelativePose,
+            )
+
+            for validator in segment.validators:
+                if (
+                    type(validator) is CompiledObjectNearTargetValidator
+                    and type(validator.target_pose) is SemanticRelativePose
+                ):
+                    if segment.parallel_block is not None or not any(
+                        getattr(item.call, "object", None) == validator.object
+                        and any(
+                            selection == validator.target_selection
+                            for selection in item.target_selections
+                        )
+                        for item in segment.calls
+                    ):
+                        raise TaskProgramValidationError(
+                            "unbound_relative_acceptance_target",
+                            validator.source_path,
+                            "Scene-relative acceptance requires a matching sequential call target in this segment.",
+                        )
             if (
                 segment.parallel_block is not None
                 and self.parallel_safety_declaration is None
@@ -875,6 +1214,17 @@ class TaskProgramIntegrationCatalog:
                 )
             for call in segment.calls:
                 linked = manifest.link_call(call.call, path=call.source_path)
+                if call.call.semantic_id == "move_held_object":
+                    preset = self.robot_profile.presets[linked.preset_id]
+                    if (
+                        preset.effect_assurance is not EffectAssurance.VERIFIED
+                        or "move_held_object" not in preset.effect_monitors
+                    ):
+                        raise TaskProgramValidationError(
+                            "transport_requires_verified_effect",
+                            call.source_path,
+                            "Typed transport requires verified assurance and an effect monitor.",
+                        )
                 if type(linked.call) is Place and linked.call.at is None:
                     destination = linked.affordances.get("destination")
                     if destination is None:
@@ -889,12 +1239,12 @@ class TaskProgramIntegrationCatalog:
                     )
         return compiled
 
-    def validate_engine(self, engine: AtomicActionEngine) -> None:
+    def validate_engine(self, engine: AtomicSkillEngine) -> None:
         """Require the live engine to expose every statically selected skill."""
-        if not isinstance(engine, AtomicActionEngine):
-            raise TypeError("engine must be an AtomicActionEngine.")
+        if not isinstance(engine, AtomicSkillEngine):
+            raise TypeError("engine must be an AtomicSkillEngine.")
         for skill_id, expected in self._required_skills.items():
-            actual = engine.skills.get(skill_id)
+            actual = engine.skill_catalog.get(skill_id)
             if actual != expected:
                 raise IntegrationFingerprintMismatch(
                     f"Live skill {skill_id!r} differs from the registered "
@@ -1231,6 +1581,11 @@ def _registration_payload(
                     getattr(type(factory), "call_id")
                 ],
                 "provider": _provider_fingerprint_declaration(factory),
+                **(
+                    {"argument_contract": factory.argument_contract.to_metadata()}
+                    if getattr(factory, "argument_contract", None) is not None
+                    else {}
+                ),
             }
             for factory in sorted(
                 registered_semantic_lowerer_factories,
@@ -1448,7 +1803,7 @@ class SimulationTaskProgramRegistration:
             )
         builtin_skills = {
             descriptor.skill_id: descriptor
-            for action_type in BUILTIN_ACTION_TYPES
+            for action_type in BUILTIN_SKILL_TYPES
             if (descriptor := action_type.descriptor()).agent_visible
             and descriptor.binding_contract is not None
         }
@@ -1492,6 +1847,19 @@ class SimulationTaskProgramRegistration:
             self,
             "catalog",
             TaskProgramIntegrationCatalog(
+                call_contracts=_planning_contracts(
+                    self.registered_semantic_lowerer_factories
+                ),
+                call_declaration_factories=MappingProxyType(
+                    {f.call_id: f for f in self.registered_semantic_lowerer_factories}
+                ),
+                demo_skill_calls=MappingProxyType(
+                    {
+                        f.alias: f.call_id
+                        for f in self.registered_semantic_lowerer_factories
+                        if getattr(f, "alias", None) is not None
+                    }
+                ),
                 scene_registry_id=self.scene_binding.registry_id,
                 robot_profile_id=self.robot_profile_binding.profile_id,
                 scene=scene,
@@ -1657,14 +2025,14 @@ class SimulationTaskProgramRegistration:
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> tuple[RegisteredSemanticLowerer, ...]:
         """Create fresh live lowerers declared by this registration."""
         self.assert_unchanged()
         if type(scene_registry) is not SceneRegistry:
             raise TypeError("scene_registry must be exactly SceneRegistry.")
-        if not isinstance(engine, AtomicActionEngine):
-            raise TypeError("engine must be an AtomicActionEngine.")
+        if not isinstance(engine, AtomicSkillEngine):
+            raise TypeError("engine must be an AtomicSkillEngine.")
         if engine.robot is not robot:
             raise ValueError("engine and factory must reference the exact same robot.")
 
@@ -1720,7 +2088,7 @@ class SimulationTaskProgramRegistration:
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
         scene_provider: SceneProvider,
     ) -> EffectEvidenceProvider | None:
         """Create the registration-owned live control-part evidence provider.
@@ -1741,8 +2109,8 @@ class SimulationTaskProgramRegistration:
             return None
         if type(scene_registry) is not SceneRegistry:
             raise TypeError("scene_registry must be exactly SceneRegistry.")
-        if not isinstance(engine, AtomicActionEngine):
-            raise TypeError("engine must be an AtomicActionEngine.")
+        if not isinstance(engine, AtomicSkillEngine):
+            raise TypeError("engine must be an AtomicSkillEngine.")
         if engine.robot is not robot:
             raise ValueError("engine and factory must reference the exact same robot.")
         if not isinstance(scene_provider, SceneProvider):
@@ -1791,7 +2159,7 @@ class SimulationTaskProgramRegistration:
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> ParallelCommandSafetyValidator | None:
         """Create and strictly validate the registration-owned live safety gate."""
         self.assert_unchanged()
@@ -1800,8 +2168,8 @@ class SimulationTaskProgramRegistration:
             return None
         if type(scene_registry) is not SceneRegistry:
             raise TypeError("scene_registry must be exactly SceneRegistry.")
-        if not isinstance(engine, AtomicActionEngine):
-            raise TypeError("engine must be an AtomicActionEngine.")
+        if not isinstance(engine, AtomicSkillEngine):
+            raise TypeError("engine must be an AtomicSkillEngine.")
         if engine.robot is not robot:
             raise ValueError("engine and factory must reference the exact same robot.")
         with self._parallel_safety_validator_lock:
@@ -1833,7 +2201,7 @@ class SimulationTaskProgramRegistration:
         self.assert_unchanged()
         self.catalog.scene.validate_registry(registry)
 
-    def validate_engine(self, engine: AtomicActionEngine) -> None:
+    def validate_engine(self, engine: AtomicSkillEngine) -> None:
         """Validate live atomic skills against this registration."""
         self.assert_unchanged()
         self.catalog.validate_engine(engine)

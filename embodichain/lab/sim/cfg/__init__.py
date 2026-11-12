@@ -33,13 +33,17 @@ from .articulation import (
     ArticulationRootPropertiesCfg,
     JointDrivePropertiesCfg,
     LinkPhysicsOverrideCfg,
+    MimicComplianceCfg,
     NewtonJointDrivePropertiesCfg,
     _normalize_joint_target_mode,
     _raise_removed_articulation_cfg_fields,
     link_attrs_from_dict,
 )
 from .asset import AssetPhysicsMode, ObjectBaseCfg, _resolve_asset_physics_mode
+from .fluid import FluidObjectCfg, FluidSpawnCfg, FluidRenderCfg
 from .source import UsdSourceCfg
+from .cable import CableAttachmentCfg, CableObjectCfg, CablePhysicsCfg
+from .usd import UsdImportCfg
 from .deformable import (
     SurfaceElementPropertiesCfg,
     VolumeDeformableMeshingCfg,
@@ -86,8 +90,12 @@ DEFAULT_RENDERER: Literal["auto", "no-render", "hybrid", "fast-rt", "rt"] = "aut
 # Robot imports are kept last because SolverCfg discovery imports simulation
 # modules that themselves rely on the public facade above.
 from .robot import RobotCfg, RobotPresetCfg  # noqa: E402
+from .gripper import ParallelJawGripperCfg  # noqa: E402
 
 __all__ = [
+    "FluidObjectCfg",
+    "FluidSpawnCfg",
+    "FluidRenderCfg",
     "DEFAULT_RENDERER",
     "AssetPhysicsMode",
     "DenoisingCfg",
@@ -120,9 +128,13 @@ __all__ = [
     "RigidBodyPhysicsCfg",
     "ObjectBaseCfg",
     "UsdSourceCfg",
+    "UsdImportCfg",
     "LightCfg",
     "RigidObjectCfg",
     "VisualObjectCfg",
+    "CableObjectCfg",
+    "CablePhysicsCfg",
+    "CableAttachmentCfg",
     "DeformableObjectCfg",
     "VolumeDeformableObjectCfg",
     "SurfaceDeformableObjectCfg",
@@ -135,6 +147,7 @@ __all__ = [
     "VolumeDeformablePhysicsCfg",
     "SurfaceDeformablePhysicsCfg",
     "ArticulationRootPropertiesCfg",
+    "MimicComplianceCfg",
     "LinkPhysicsOverrideCfg",
     "link_attrs_from_dict",
     "JointDrivePropertiesCfg",
@@ -143,6 +156,7 @@ __all__ = [
     "URDFCfg",
     "RobotCfg",
     "RobotPresetCfg",
+    "ParallelJawGripperCfg",
     "RobotWorkspaceCfg",
     "get_data_path",
 ]

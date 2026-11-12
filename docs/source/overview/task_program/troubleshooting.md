@@ -35,7 +35,7 @@ it does not implement the launcher's package-resource lookup.
 **Reproduced:** changing the first Pick to `object: missing_cube` raises:
 
 ```text
-TaskProgramValidationError: $.program.body.items[0].steps.call.object: program.body.items[0].steps.call.object: Unknown scene entity 'missing_cube'. [reference_validation_failed]
+TaskProgramValidationError: $.program.repeat.body[0].steps.pick.object: program.body.items[0].steps.call.object: Unknown scene entity 'missing_cube'. [reference_validation_failed]
 ```
 
 **First check:** that exact program path. The bracket index is zero-based.
@@ -106,7 +106,7 @@ or an unavailable grasp/IK solution. Preserve the failure trace from `--debug-mo
 **Repair:** restore a known working target, then change one value at a time. If
 the original deployment fails, inspect installation/assets and robot setup before
 changing the program. See {doc}`robot_profiles` and
-{doc}`/overview/sim/atomic_actions/index` for integration-level planning diagnostics.
+{doc}`/overview/sim/atomic_skills/index` for integration-level planning diagnostics.
 
 ## Motion finishes but position or stability checks fail
 

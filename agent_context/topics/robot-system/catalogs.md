@@ -37,9 +37,14 @@ from being grouped. Never infer these fields from paths or control-group names.
 `Franka` resolves the bare-arm `FrankaCfg` in `franka/cfg.py`. `arm_model`
 selects `fr3` (default) or `panda`; both expose seven joints in `arm`, no finger
 group, and a flange TCP. `FrankaPanda` remains a legacy selector for the
-historical FR3 arm (`robot_type: panda`), now also bare. Native-hand and Robotiq
-embodiments add the hand URDF, group, drives, inertia/contact calibration and
-solver TCP through ordinary RobotCfg overrides, exactly as UR assemblies do.
+historical FR3 arm (`robot_type: panda`), now also bare. Native-hand and Robotiq embodiments select concrete hand Cfg defaults through
+explicit `grippers` bindings. The binding supplies the URDF/control group and
+commands, while deployment physics remains an explicit ordinary override.
+The hand-local TCP and mounting transform determine the effective solver TCP;
+a repeated explicit solver TCP must agree. `existing` binds an integrated hand
+without appending another asset. Robot catalog entries with `description_path`
+expose pure model data through `resolve_gripper_defaults`; complete standalone
+Cfg construction and runtime geometry remain separate.
 The native hand is a pinned subtree derivative of the integrated FR3 asset;
 model-owned asset generation retains the original file and a derivation report.
 Bare dual-arm selection has fourteen arm joints. Tool-equipped benchmark
@@ -48,10 +53,15 @@ conversion remains tool-owned and does not select a robot class. PGI fixtures
 remain example/benchmark-owned. Root public class exports remain available.
 
 The `dual_franka_robotiq_arg2f_140` and `dual_ur10_robotiq_arg2f_140`
-embodiment components retain their explicit arm/tool assembly, complete hand
-joints and calibrated TCPs. Their skill profiles declare hand topology and
-GraspKit search settings. Scene placement and operation-specific physical
-overrides remain deployment inputs.
+embodiment components retain their frozen arm/tool calibration. Their separate
+`*_gensim` components select `DualArmRobot` with the registered `URRobot` UR10
+or `Franka` FR3 arm preset and mounted `RobotiqArg2F140` grippers. The preset
+provides arm assets, joint groups, solvers and arm drives; the component keeps
+GenSim-specific hand drives, friction, initial pose and camera calibration.
+Gripper bindings provide hand joints and calibrated TCPs, while the skill
+profiles keep explicit hand geometry and search settings. The
+`repeated_pick_place` deployments place each variant in its workcell without
+changing the frozen base components.
 
 `resolve_robot_cfg(..., variant=...)` selects a declared profile's defaults
 between catalog defaults and caller overrides. Omitting the variant keeps

@@ -1,0 +1,138 @@
+{
+  "task_interpretation": [
+    {
+      "steps": [
+        {
+          "id": "step_01",
+          "task_type": "E1",
+          "object": {
+            "kind": "scene_ref",
+            "step_id": "",
+            "reference": "cube",
+            "quantifier": "one",
+            "count": 0
+          },
+          "target": {
+            "kind": "scene_ref",
+            "step_id": "",
+            "reference": "table",
+            "quantifier": "one",
+            "count": 0
+          },
+          "relation": "on",
+          "required_arm": "auto",
+          "transfer_arm": "none",
+          "receive_arm": "none",
+          "orientation_goal": "none",
+          "target_state": "none",
+          "target_setting": 0,
+          "layout": "none",
+          "axis": "none",
+          "direction": "none",
+          "terminal_behavior": "none",
+          "depends_on": []
+        }
+      ]
+    }
+  ],
+  "task_image_grounding": [
+    {
+      "objects": [
+        {
+          "id": "source",
+          "description": "red cube",
+          "bbox": [
+            100,
+            200,
+            300,
+            500
+          ],
+          "provenance": "observed"
+        },
+        {
+          "id": "table",
+          "description": "table",
+          "bbox": [
+            100,
+            100,
+            900,
+            900
+          ],
+          "provenance": "observed"
+        }
+      ],
+      "bindings": {
+        "step_01.object": [
+          "source"
+        ],
+        "step_01.target": [
+          "table"
+        ]
+      }
+    },
+    {
+      "objects": {
+        "source": "cube_native",
+        "table": "table"
+      },
+      "resources": {
+        "default_primary": "right"
+      }
+    }
+  ],
+  "task_semantic_planning": [
+    {
+      "nodes": [
+        {
+          "id": "pick_cube",
+          "step_id": "step_01",
+          "call": {
+            "kind": "pick",
+            "object": "source",
+            "resources": {}
+          },
+          "depends_on": [],
+          "semantic": {
+            "object": "source",
+            "reference": "table",
+            "relation": "on",
+            "intent": {
+              "relation": "on"
+            }
+          }
+        },
+        {
+          "id": "place_cube",
+          "step_id": "step_01",
+          "call": {
+            "kind": "place",
+            "object": "source",
+            "on": "table_surface",
+            "resources": {}
+          },
+          "depends_on": [
+            "pick_cube"
+          ],
+          "semantic": {
+            "object": "source",
+            "reference": "table",
+            "relation": "on",
+            "intent": {
+              "relation": "on"
+            }
+          }
+        }
+      ],
+      "requirements": [
+        {
+          "id": "r1",
+          "quote": "Put the cube on the table",
+          "node_ids": [
+            "pick_cube",
+            "place_cube"
+          ]
+        }
+      ]
+    }
+  ]
+}

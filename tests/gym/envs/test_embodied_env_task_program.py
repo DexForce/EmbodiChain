@@ -672,6 +672,27 @@ def test_partial_reset_keeps_manual_completion_for_unreset_rows():
     env.reset(options={"reset_ids": [0]})
     assert env.episode_context.episode_ids == (1, 0)
     assert env.is_task_success().tolist() == [False, True]
+    from copy import deepcopy
+    from embodichain.lab.gym.envs.demo import execute_demo_episode
+
+    peer = deepcopy(env.get_demo_episode_metadata(1))
+    env.bridge = _CompletedDemoBridge(
+        DemoSegment(actions=(torch.zeros(2, 1),), name="retry")
+    )
+    env.bridge.completion_mask = torch.tensor([True, False])
+    env._mask_demo_action = lambda action, active: action
+
+    def step(action):
+        assert env.is_task_success().tolist() == [False, True]
+        env._demo_steps += env._demo_active_mask
+        flags = torch.zeros(2, dtype=torch.bool)
+        return {}, torch.zeros(2), flags, flags, {}
+
+    env.step = step
+    result = execute_demo_episode(env, active_env_ids=[0])
+    assert result.success[0]
+    assert env.is_task_success().tolist() == [True, True]
+    assert env.get_demo_episode_metadata(1) == peer
     env.reset(options={"reset_ids": [1]})
     assert saved == [0, 1]
 

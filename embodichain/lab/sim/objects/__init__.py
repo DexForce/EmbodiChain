@@ -22,6 +22,7 @@ Covers lights, render-only objects, rigid bodies (and groups), articulations, ro
 from __future__ import annotations
 
 from ..common import BatchEntity
+from .cable import CableObject, CableObjectData
 from .rigid_object import CollisionShapeDesc, RigidObject, RigidBodyData, RigidObjectCfg
 from .visual_object import VisualObject, VisualObjectCfg
 from .rigid_object_group import (
@@ -29,6 +30,7 @@ from .rigid_object_group import (
     RigidBodyGroupData,
     RigidObjectGroupCfg,
 )
+from .fluid import FluidObject, FluidObjectData
 from .deformable import (
     DeformableObject,
     DeformableObjectData,

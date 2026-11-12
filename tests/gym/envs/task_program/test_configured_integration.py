@@ -18,6 +18,11 @@
 
 from __future__ import annotations
 
+from embodichain.robot_registry import resolve_gripper_defaults
+from embodichain.lab.sim.utility.gripper_geometry import (
+    build_gripper_collision_geometry,
+)
+
 from collections.abc import Iterator
 from copy import deepcopy
 import importlib.util
@@ -49,11 +54,13 @@ from embodichain.lab.task_program.integrations._configured_services import (
     _RelativePlaceRoute,
 )
 from embodichain.lab.task_program.integrations.configured import (
-    _decode_action_options,
+    _decode_skill_options,
     _decode_configured_task_program_integration,
     _decode_grasp_generator,
     _decode_registered_lowerer,
     _decode_motion_policy,
+    _decode_policy_preset,
+    _decode_recovery_policy,
 )
 from embodichain.lab.task_program.integrations._configured_composition import (
     _compose_integration_payload,
@@ -68,7 +75,7 @@ from embodichain.lab.gym.utils.composition import (
 from embodichain.lab.gym.envs.task_program.registration import (
     _register_configured_task_program_integration,
 )
-from embodichain.lab.sim.atomic_actions import (
+from embodichain.lab.sim.atomic_skills import (
     AntipodalAffordance,
     AxisAlignAffordance,
     AxisAlignGoal,
@@ -97,12 +104,12 @@ from embodichain.lab.sim.atomic_actions import (
     SceneSnapshot,
     TaskState,
 )
-from embodichain.lab.sim.atomic_actions.goals import (
+from embodichain.lab.sim.atomic_skills.goals import (
     collect_scene_dependencies,
     resolve_pose_goal,
 )
-from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
-from embodichain.lab.sim.atomic_actions.runtime_commands import (
+from embodichain.lab.sim.atomic_skills.bindings import JointPositionTarget
+from embodichain.lab.sim.atomic_skills.runtime_commands import (
     EndpointCommand,
     JointPositionPayload,
     RuntimeCommandFrame,
@@ -417,8 +424,12 @@ def test_execution_policy_planner_config_reaches_configured_adapter() -> None:
     )
 
 
+@pytest.mark.parametrize("base_key", ["skill_timeout", "action_timeout"])
+@pytest.mark.parametrize("override_key", ["skill_timeout", "action_timeout"])
 def test_execution_policy_overrides_reach_runtime_without_changing_the_base(
     tmp_path: Path,
+    base_key: str,
+    override_key: str,
 ) -> None:
     """A relative selector patches tuning while retaining the policy contract."""
     path = _config_path("hand_over")
@@ -429,7 +440,12 @@ def test_execution_policy_overrides_reach_runtime_without_changing_the_base(
     )
     from embodichain.utils.utility import save_config
 
-    save_config(tmp_path / "policy.yaml", base_policy)
+    component_policy = deepcopy(base_policy)
+    if base_key == "action_timeout":
+        component_policy["recovery"][base_key] = component_policy["recovery"].pop(
+            "skill_timeout", 30.0
+        )
+    save_config(tmp_path / "policy.yaml", component_policy)
     save_config(tmp_path / "integration.yaml", task)
     original = (tmp_path / "policy.yaml").read_bytes()
     selection = {
@@ -445,7 +461,7 @@ def test_execution_policy_overrides_reach_runtime_without_changing_the_base(
                     "dynamic_collision_mode": "off",
                 },
                 "recovery": {
-                    "action_timeout": 90.0,
+                    override_key: 90.0,
                     "goal_rotation_threshold": 0.75,
                 },
             },
@@ -461,7 +477,7 @@ def test_execution_policy_overrides_reach_runtime_without_changing_the_base(
     assert preset.motion_policy.velocity_limit == 0.35
     assert preset.motion_policy.acceleration_limit == 0.4
     assert preset.motion_policy.dynamic_collision_mode.value == "off"
-    assert preset.recovery_policy.action_timeout == 90.0
+    assert preset.recovery_policy.skill_timeout == 90.0
     assert preset.recovery_policy.goal_rotation_threshold == 0.75
     assert preset.recovery_policy.max_replans == 3
     assert preset.effect_assurance.value == "verified"
@@ -493,7 +509,7 @@ def test_execution_policy_overrides_reach_runtime_without_changing_the_base(
             ValueError,
             "dynamic_collision_mode",
         ),
-        ({"recovery": {"action_timeout": 0.0}}, ValueError, "action_timeout"),
+        ({"recovery": {"skill_timeout": 0.0}}, ValueError, "skill_timeout"),
         (None, TypeError, "overrides must be a mapping"),
     ),
 )
@@ -749,7 +765,7 @@ def test_pour_water_integration_declares_live_transport_and_axis_aware_pour() ->
     registration = integration.registration
     grasp = registration.scene_binding.antipodal_grasps[0]
     preset = registration.robot_profile_binding.presets[0]
-    options = preset.action_option_templates
+    options = preset.skill_option_templates
     factories = registration.registered_semantic_lowerer_factories
 
     grasp_rotation = options["pick"].fixed_object_to_eef[:3, :3]
@@ -781,13 +797,11 @@ def test_pour_water_integration_declares_live_transport_and_axis_aware_pour() ->
         "simulation.move_held_object",
         "simulation.pour",
     }
-    assert integration_payload["runtime_services"]["grasp_pose_generators"] == {
-        f"{side}_eef": {
-            "kind": "antipodal_parallel_jaw",
-            "model": "cobotmagic_v100_gripper",
-        }
-        for side in ("right", "left")
-    }
+    services = integration_payload["runtime_services"]["grasp_pose_generators"]
+    assert set(services) == {"left_eef", "right_eef"}
+    for generator in services.values():
+        assert generator["kind"] == "antipodal_parallel_jaw"
+        assert generator["gripper"]["model_id"] == "cobotmagic_v100_gripper"
 
 
 def test_pour_water_mouth_alignment_and_measured_checkpoints() -> None:
@@ -823,7 +837,7 @@ def test_pour_water_mouth_alignment_and_measured_checkpoints() -> None:
     )
     angle = (
         registration.robot_profile_binding.presets[0]
-        .action_option_templates["simulation.pour"]
+        .skill_option_templates["simulation.pour"]
         .rotate_angle
     )
     mouth = torch.tensor([0.0, 0.0, 0.069724626839], dtype=torch.float64)
@@ -942,7 +956,7 @@ def test_pour_water_registered_lowerers_build_only_typed_goals() -> None:
         picked_object=SceneObjectRef("bottle"),
         bound=SimpleNamespace(
             preset=SimpleNamespace(
-                action_option_template=lambda semantic_id: PourOptions(
+                skill_option_template=lambda semantic_id: PourOptions(
                     rotate_angle=-torch.pi / 3
                 )
             )
@@ -1136,7 +1150,7 @@ def test_relative_place_uses_fresh_reference_pose_and_verified_grasp() -> None:
                 )
             }
         ),
-        preset=SimpleNamespace(action_option_template=lambda _semantic_id: options),
+        preset=SimpleNamespace(skill_option_template=lambda _semantic_id: options),
     )
     lowerer = _RelativePlaceLowerer(
         (
@@ -1289,13 +1303,13 @@ def test_axis_align_and_relative_place_configs_use_closed_decoders() -> None:
         },
         path="integration.runtime_services.registered_semantic_lowerers[1]",
     )
-    axis_options = _decode_action_options(
+    axis_options = _decode_skill_options(
         {
             "kind": "axis_align",
             "target_axis": [0.0, 0.0, 1.0],
             "pre_grasp_distance": 0.12,
         },
-        path="policy.action_options.simulation.axis_align",
+        path="policy.skill_options.simulation.axis_align",
     )
 
     assert axis_factory.call_id == "simulation.axis_align"
@@ -1341,7 +1355,7 @@ def test_coordinated_transport_config_decodes_closed_routes_and_options() -> Non
         },
         path="integration.runtime_services.registered_semantic_lowerers[0]",
     )
-    options = _decode_action_options(
+    options = _decode_skill_options(
         {
             "kind": "coordinated_pickment",
             "release": True,
@@ -1349,7 +1363,7 @@ def test_coordinated_transport_config_decodes_closed_routes_and_options() -> Non
             "retreat_steps": 8,
             "grasp_seed": 17393,
         },
-        path="policy.action_options.simulation.coordinated_transport",
+        path="policy.skill_options.simulation.coordinated_transport",
     )
 
     assert factory.call_id == "simulation.coordinated_transport"
@@ -1361,7 +1375,7 @@ def test_coordinated_transport_config_decodes_closed_routes_and_options() -> Non
 
 
 def test_slide_clearance_options_decode() -> None:
-    options = _decode_action_options(
+    options = _decode_skill_options(
         {
             "kind": "slide",
             "preshape_fraction": 0.85,
@@ -1373,7 +1387,7 @@ def test_slide_clearance_options_decode() -> None:
     assert options.preshape_fraction == 0.85
     assert options.release_retreat_distance == 0.04
     assert options.approach_along_grasp_axis is True
-    default = _decode_action_options({"kind": "slide"}, path="options")
+    default = _decode_skill_options({"kind": "slide"}, path="options")
     assert default.preshape_fraction == 0.0
     assert default.release_retreat_distance == 0.0
     assert default.approach_along_grasp_axis is False
@@ -1392,14 +1406,14 @@ def test_slide_clearance_options_reject_invalid_values(
     field: str, value: object
 ) -> None:
     with pytest.raises((ValueError, TypeError)):
-        _decode_action_options({"kind": "slide", field: value}, path="options")
+        _decode_skill_options({"kind": "slide", field: value}, path="options")
 
 
 def test_move_end_effector_options_decode_without_task_specific_fields() -> None:
-    options = _decode_action_options({"kind": "move_end_effector"}, path="options")
+    options = _decode_skill_options({"kind": "move_end_effector"}, path="options")
     assert type(options) is MoveEndEffectorOptions
     with pytest.raises(ValueError):
-        _decode_action_options(
+        _decode_skill_options(
             {"kind": "move_end_effector", "withdraw_distance": 0.1}, path="options"
         )
 
@@ -1421,9 +1435,9 @@ def test_park_lowerer_and_config_keep_joint_values_in_the_profile() -> None:
         {"kind": "park"},
         path="integration.runtime_services.registered_semantic_lowerers[0]",
     )
-    options = _decode_action_options(
+    options = _decode_skill_options(
         {"kind": "move_joints"},
-        path="policy.action_options.simulation.park",
+        path="policy.skill_options.simulation.park",
     )
 
     assert type(lowering.goal) is JointPositionGoal
@@ -1446,13 +1460,13 @@ def test_park_lowerer_and_config_keep_joint_values_in_the_profile() -> None:
 
 def test_configured_handover_decodes_source_retreat_clearance() -> None:
     """The semantic profile may tune physical source-hand clearance."""
-    options = _decode_action_options(
+    options = _decode_skill_options(
         {
             "kind": "hand_over",
             "retreat_distance": 0.12,
             "retreat_steps": 28,
         },
-        path="policy.action_options.hand_over",
+        path="policy.skill_options.hand_over",
     )
 
     assert type(options) is HandOverOptions
@@ -1474,9 +1488,9 @@ def test_shared_action_decoders_reject_retired_hand_policy_fields(
     key: str,
 ) -> None:
     with pytest.raises(ValueError, match=key):
-        _decode_action_options(
+        _decode_skill_options(
             {"kind": kind, key: "grasp_command"},
-            path="policy.action_options",
+            path="policy.skill_options",
         )
 
 
@@ -1558,7 +1572,7 @@ def test_coordinated_transport_config_decodes_world_displacement() -> None:
 def test_pick_option_rejects_malformed_fixed_object_to_eef() -> None:
     """Configured fixed grasps must contain exactly one SE(3) transform."""
     payload = deepcopy(_tableware_integration_payload("pour_water"))
-    pick_options = payload["robot_profile"]["presets"][0]["action_options"]["pick"]
+    pick_options = payload["robot_profile"]["presets"][0]["skill_options"]["pick"]
     pick_options["fixed_object_to_eef"] = [1.0] * 15
 
     with pytest.raises(ValueError, match="exactly 16 values"):
@@ -1650,7 +1664,7 @@ def test_grasp_generator_resolves_named_model_and_library_defaults() -> None:
     factory = _decode_grasp_generator(
         {
             "kind": "antipodal_parallel_jaw",
-            "model": "dh_pgi_140_80",
+            "gripper": {"class_type": "DHPGI14080"},
         },
         path="generator",
     )
@@ -1672,7 +1686,7 @@ def test_grasp_generator_factory_defers_to_toolkit_policy_defaults() -> None:
     generator = _decode_grasp_generator(
         {
             "kind": "antipodal_parallel_jaw",
-            "model": "dh_pgi_140_80",
+            "gripper": {"class_type": "DHPGI14080"},
         },
         path="generator",
     )()
@@ -1691,25 +1705,30 @@ def test_grasp_generator_factory_defers_to_toolkit_policy_defaults() -> None:
 def test_declared_grasp_search_options_reach_the_existing_generator(monkeypatch):
     from types import SimpleNamespace
     import embodichain.toolkits.graspkit.pg_grasp as grasp
-    import embodichain.toolkits.graspkit.pg_grasp.model_geometry as geometry
+    import embodichain.lab.sim.utility.gripper_geometry as geometry
 
     marker = object()
     geometry_values = {}
     contact = [[0, -1, 0, 0], [1, 0, 0, 0], [0, 0, 1, 0.21], [0, 0, 0, 1]]
     monkeypatch.setattr(
         geometry,
-        "get_parallel_jaw_collision_geometry",
-        lambda *a, **kw: (geometry_values.update(kw), marker)[1],
+        "build_gripper_collision_geometry",
+        lambda defaults, **kw: (geometry_values.update(defaults), marker)[1],
     )
     monkeypatch.setattr(
         grasp,
         "AntipodalGraspPoseGenerator",
-        lambda model, **kw: SimpleNamespace(model=model, **kw),
+        lambda **kw: SimpleNamespace(
+            model={
+                k: kw[k] for k in ("model_id", "min_opening_width", "max_opening_width")
+            },
+            **kw,
+        ),
     )
     generator = _decode_grasp_generator(
         {
             "kind": "antipodal_parallel_jaw",
-            "model": "robotiq_arg2f_140",
+            "gripper": {"class_type": "RobotiqArg2F140"},
             "approach_deviation_angle": 0.3490658503988659,
             "max_candidates": 500,
             "center_mode": "centroid",
@@ -1722,7 +1741,7 @@ def test_declared_grasp_search_options_reach_the_existing_generator(monkeypatch)
     assert generator.algorithm_cfg.max_candidates == 500
     assert generator.algorithm_cfg.center_mode == "centroid"
 
-    assert geometry_values["root_from_contact_frame"].tolist() == contact
+    assert geometry_values["root_from_contact_frame"] == contact
 
 
 @pytest.mark.parametrize(
@@ -1739,7 +1758,11 @@ def test_declared_grasp_search_options_reach_the_existing_generator(monkeypatch)
 def test_grasp_search_declarations_reject_invalid_values_before_construction(value):
     with pytest.raises((TypeError, ValueError)):
         _decode_grasp_generator(
-            {"kind": "antipodal_parallel_jaw", "model": "robotiq_arg2f_140", **value},
+            {
+                "kind": "antipodal_parallel_jaw",
+                "gripper": {"class_type": "RobotiqArg2F140"},
+                **value,
+            },
             path="generator",
         )
 
@@ -1770,14 +1793,77 @@ def test_migrated_robotiq_embodiments_preserve_frozen_physical_declarations(
     actual = deepcopy(physical.config["robot"])
     # Scene placement is an explicit deployment input, separate from the component's reference pose.
     actual["init_pos"] = expected["init_pos"]
-    assert actual == expected
+    bindings = actual.pop("gripper_bindings")
+    for side in ("left", "right"):
+        from embodichain.lab.sim.cfg import RobotCfg
+        from embodichain.lab.sim.utility.gripper_binding import prepare_robot_grippers
+
+        runtime = RobotCfg.from_dict(deepcopy(physical.config["robot"]))
+        prepare_robot_grippers(runtime)
+        import numpy as np
+
+        np.testing.assert_allclose(
+            runtime.solver_cfg[f"{side}_arm"].tcp,
+            expected["solver_cfg"][f"{side}_arm"]["tcp"],
+            rtol=0,
+            atol=1e-6,
+        )
+        expected["solver_cfg"][f"{side}_arm"].pop("tcp")
+
+    def components(values):
+        result = deepcopy(values)
+        result["urdf_cfg"]["components"] = sorted(
+            [
+                {
+                    k: v
+                    for k, v in c.items()
+                    if k not in {"source_root_link", "mesh_paths"}
+                }
+                for c in result["urdf_cfg"]["components"]
+            ],
+            key=lambda c: c["component_type"],
+        )
+        for item in result["urdf_cfg"]["components"]:
+            item.setdefault(
+                "transform",
+                [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0],
+                ],
+            )
+        return json.loads(json.dumps(result))
+
+    expected["joint_drive_props"].setdefault("drive_type", "force")
+    assert components(actual) == components(expected)
     declaration = physical.embodiment_skill_profile
     assert declaration is not None
     services = declaration["runtime_services"]
-    assert (
-        services["grasp_pose_generators"]
-        == frozen["skill_profile"]["runtime_services"]["grasp_pose_generators"]
-    )
+    for part, generator in services["grasp_pose_generators"].items():
+        previous = deepcopy(
+            frozen["skill_profile"]["runtime_services"]["grasp_pose_generators"][part]
+        )
+        previous.pop("model")
+        previous.pop("root_from_tcp", None)
+        previous.pop("root_from_contact_frame", None)
+        assert {
+            key: value
+            for key, value in generator.items()
+            if key not in {"gripper", "min_opening_width", "max_opening_width"}
+        } == previous
+        old_presets = frozen["skill_profile"]["command_presets"]
+        old_commands = next(
+            x["commands"] for x in old_presets if x["control_part"] == part
+        )
+        assert (
+            next(
+                x["commands"]
+                for x in declaration["command_presets"]
+                if x["control_part"] == part
+            )
+            == old_commands
+        )
     for side in ("left", "right"):
         hand = services["hand_geometries"][f"{side}_eef"]
         assert (
@@ -1801,7 +1887,11 @@ def test_migrated_robotiq_embodiments_preserve_frozen_physical_declarations(
 def test_grasp_generator_rejects_removed_box_collision_fields(field: str) -> None:
     with pytest.raises(ValueError, match=f"unsupported fields.*{field}"):
         _decode_grasp_generator(
-            {"kind": "antipodal_parallel_jaw", "model": "dh_pgi_140_80", field: 0.01},
+            {
+                "kind": "antipodal_parallel_jaw",
+                "gripper": {"class_type": "DHPGI14080"},
+                field: 0.01,
+            },
             path="generator",
         )
 
@@ -1809,15 +1899,15 @@ def test_grasp_generator_rejects_removed_box_collision_fields(field: str) -> Non
 def test_inline_builtin_aperture_matches_registered_model_and_rejects_unknown() -> None:
     payload = {
         "kind": "antipodal_parallel_jaw",
-        "model": {"model_id": "franka_panda_hand"},
+        "gripper": {"class_type": "FrankaPandaHand"},
     }
     factory = _decode_grasp_generator(payload, path="generator")
     assert factory.min_opening_width == 0.001
     assert factory.max_opening_width == 0.08
-    payload["model"] = {"model_id": "custom"}
+    payload["gripper"] = {"class_type": "custom"}
     with pytest.raises(
         ValueError,
-        match="unknown parallel-jaw gripper model",
+        match="no parallel-jaw description",
     ):
         _decode_grasp_generator(payload, path="generator")
 
@@ -1847,14 +1937,15 @@ def test_embodiment_grasp_defaults_reach_composed_deployments(
     profile = physical.embodiment_skill_profile
     assert profile is not None
     declaration = profile["runtime_services"]["grasp_pose_generators"][control_part]
-    assert declaration == {"kind": "antipodal_parallel_jaw", "model": model_id}
+    assert declaration["kind"] == "antipodal_parallel_jaw"
+    assert declaration["gripper"]["model_id"] == model_id
 
     deployment = _deployment_from_path(path)
     delegate = deployment.integration.adapter_factory.delegate
     factory = delegate._grasp_pose_generator_factories[control_part]
     generator = factory()
 
-    assert generator.gripper_model.model_id == model_id
+    assert generator.gripper_data["model_id"] == model_id
     assert generator.algorithm_cfg == AntipodalGraspPoseGeneratorCfg()
     assert generator.collision_cfg == ParallelJawGraspCollisionCfg()
     assert generator.collision_geometry.provenance["model_id"] == model_id
@@ -1904,13 +1995,9 @@ def test_marvin_embodiment_grasp_defaults_compose_with_bimanual_task(
     services = profile["runtime_services"]["grasp_pose_generators"]
     assert set(services) == {"left_eef", "right_eef"}
     declaration = services[f"{side}_eef"]
-    assert {
-        key: value for key, value in declaration.items() if key != "root_from_tcp"
-    } == {
-        "kind": "antipodal_parallel_jaw",
-        "model": "tianji_marvin_gripper",
-        "side": side,
-    }
+    assert declaration["kind"] == "antipodal_parallel_jaw"
+    assert declaration["gripper"]["model_id"] == "tianji_marvin_gripper"
+    assert declaration["gripper"]["binding"]["variant"] == side
     deployment = _load_configured_task_program_deployment(
         task_program=physical.config["task_program"],
         skill_profile=profile,
@@ -1926,8 +2013,7 @@ def test_marvin_embodiment_grasp_defaults_compose_with_bimanual_task(
     delegate = deployment.integration.adapter_factory.delegate
     factory = delegate._grasp_pose_generator_factories[f"{side}_eef"]
     generator = factory()
-    assert generator.gripper_model.model_id == "tianji_marvin_gripper"
-    assert generator.collision_geometry.provenance["side"] == side
+    assert generator.gripper_data["model_id"] == "tianji_marvin_gripper"
     assert (
         generator.collision_geometry.provenance["root_link"] == f"{side}_hand_base_link"
     )
@@ -1937,9 +2023,6 @@ def test_marvin_embodiment_grasp_defaults_compose_with_bimanual_task(
     import numpy as np
     from scipy.spatial.transform import Rotation
     from embodichain.data import get_data_path
-    from embodichain.toolkits.graspkit.pg_grasp.model_geometry import (
-        get_parallel_jaw_collision_geometry,
-    )
 
     origin = ET.parse(get_data_path("TianjiMarvin/robot_with_ee_acd.urdf")).find(
         f"./joint[@name='{side.upper()}_HAND_TOOL']/origin"
@@ -1949,12 +2032,15 @@ def test_marvin_embodiment_grasp_defaults_compose_with_bimanual_task(
         "xyz", np.fromstring(origin.attrib["rpy"], sep=" ")
     ).as_matrix()
     root_from_tool[:3, 3] = np.fromstring(origin.attrib["xyz"], sep=" ")
-    root_from_tcp = root_from_tool @ np.asarray(robot.solver_cfg[f"{side}_arm"].tcp)
+    # This embodiment selects its calibrated root TCP through the hand binding.
+    root_from_tcp = np.asarray(declaration["gripper"]["default_root_from_tcp"])
     np.testing.assert_allclose(
-        declaration["root_from_tcp"], root_from_tcp, rtol=0, atol=1e-12
+        root_from_tcp[:3, 3], [0.0, -3.0144258464370744e-09, 0.1125], rtol=0, atol=1e-12
     )
     geometry = generator.collision_geometry
-    default = get_parallel_jaw_collision_geometry("tianji_marvin_gripper", side=side)
+    default = build_gripper_collision_geometry(
+        resolve_gripper_defaults("TianjiMarvinGripper", variant=side)
+    )
     torch.testing.assert_close(geometry.points, default.points, rtol=0, atol=1e-8)
     canonical = torch.eye(4, dtype=torch.float64).unsqueeze(0)
     actual_pose = geometry.canonical_to_tcp_poses(canonical)[0].numpy()
@@ -1974,11 +2060,11 @@ def test_marvin_embodiment_grasp_defaults_compose_with_bimanual_task(
 
 def test_grasp_generator_rejects_unknown_models_and_removed_viser_port() -> None:
     """The integration keeps a closed model catalog and no interactive port."""
-    with pytest.raises(ValueError, match="available.*dh_pgi_140_80"):
+    with pytest.raises(ValueError, match="no parallel-jaw description"):
         _decode_grasp_generator(
             {
                 "kind": "antipodal_parallel_jaw",
-                "model": "missing_gripper",
+                "gripper": {"class_type": "missing_gripper"},
             },
             path="generator",
         )
@@ -1987,7 +2073,7 @@ def test_grasp_generator_rejects_unknown_models_and_removed_viser_port() -> None
         _decode_grasp_generator(
             {
                 "kind": "antipodal_parallel_jaw",
-                "model": "dh_pgi_140_80",
+                "gripper": {"class_type": "DHPGI14080"},
                 "viser_port": 11_801,
             },
             path="generator",
@@ -2313,7 +2399,7 @@ def test_official_generators_use_named_models_without_default_fields() -> None:
         services = _integration_payload(task_name)["runtime_services"]
         generators = services["grasp_pose_generators"]
         for generator in generators.values():
-            assert generator["model"] == "dh_pgi_140_80"
+            assert generator["gripper"]["model_id"] == "dh_pgi_140_80"
             assert forbidden.isdisjoint(generator)
             if task_name == "hand_over":
                 assert generator["approach_direction_samples"] == 1
@@ -2532,10 +2618,10 @@ def test_motion_limit_policy_rejects_nonpositive_or_nonfinite_values(
 
 def test_pour_dwell_duration_decodes() -> None:
     from embodichain.lab.task_program.integrations.configured import (
-        _decode_action_options,
+        _decode_skill_options,
     )
 
-    options = _decode_action_options(
+    options = _decode_skill_options(
         {"kind": "pour", "dwell_duration": 0.75},
         path="options",
     )
@@ -2591,11 +2677,11 @@ def test_pour_dwell_duration_rejects_negative_or_nonfinite_values(
     value: float,
 ) -> None:
     from embodichain.lab.task_program.integrations.configured import (
-        _decode_action_options,
+        _decode_skill_options,
     )
 
     with pytest.raises(ValueError, match="dwell_duration"):
-        _decode_action_options(
+        _decode_skill_options(
             {"kind": "pour", "dwell_duration": value},
             path="options",
         )
@@ -3318,11 +3404,11 @@ def test_generic_planning_budget_decodes_without_source_recovery_factories():
     from embodichain.lab.task_program.integrations.configured import (
         _decode_recovery_policy,
     )
-    from embodichain.lab.sim.atomic_actions import PlanningBudget
+    from embodichain.lab.sim.atomic_skills import PlanningBudget
 
     config = dict(
         max_replans=0,
-        max_action_retries=0,
+        max_skill_retries=0,
         planning_budget={"wall_seconds": 0.25},
         retry_all_failed_plans=False,
     )
@@ -3489,7 +3575,7 @@ def test_final_velocity_rejection_representation_is_explicit_and_default_identit
         _decode_motion_policy,
     )
     from embodichain.lab.task_program.integrations.catalog import _canonical_value
-    from embodichain.lab.sim.atomic_actions import MotionPolicy
+    from embodichain.lab.sim.atomic_skills import MotionPolicy
 
     assert "final_velocity_rejection" not in _canonical_value(MotionPolicy())["fields"]
     selected = _decode_motion_policy(
@@ -3597,7 +3683,7 @@ def test_demo_skill_registered_calls_and_occurrence_sources_are_content_pinned(
     from embodichain.lab.task_program.integrations.configured import (
         _decode_runtime_services,
     )
-    from embodichain.lab.sim.atomic_actions import ExecuteDemoSkill, ActionOptions
+    from embodichain.lab.sim.atomic_skills import ExecuteDemoSkill, SkillOptions
 
     artifact = build_demo_skill(
         RobotDemonstration(
@@ -3682,8 +3768,8 @@ def test_demo_skill_registered_calls_and_occurrence_sources_are_content_pinned(
     assert factory.call_id == "task.contour"
     assert factory.target_descriptor == ExecuteDemoSkill.descriptor()
     assert (
-        type(_decode_action_options({"kind": "execute_demo_skill"}, path="options"))
-        is ActionOptions
+        type(_decode_skill_options({"kind": "execute_demo_skill"}, path="options"))
+        is SkillOptions
     )
     payload = _integration_payload("repeated_pick_place")
     payload.setdefault("runtime_services", {})["registered_semantic_lowerers"] = [
@@ -3704,6 +3790,248 @@ def test_demo_skill_registered_calls_and_occurrence_sources_are_content_pinned(
         _decode_runtime_services(
             {"nominal_motion_sources": [{**source, "asset_sha256": "e" * 64}]}
         )
+
+    # Named registration binds each expanded occurrence automatically.
+    selected_program = {
+        "program_id": task["program_id"],
+        "targets": {},
+        "program": {
+            "repeat": {
+                "count": 2,
+                "body": [{"demo_skill": {"skill": "trace", "roles": {}}}],
+            }
+        },
+    }
+    named_task = deepcopy(task)
+    named_task["runtime_services"] = {
+        "demo_skills": {
+            "trace": {
+                "call_id": declaration["call_id"],
+                "asset_manifest": "skill/demo_skill.json",
+                "asset_sha256": artifact.content_sha256,
+                "contact_sensor_uid": "contacts",
+                "tcp_contact_links": ["left_pad", "right_pad"],
+            }
+        }
+    }
+    physical = _physical_components(config_path, _gym_config("repeated_pick_place"))
+    named_profile = deepcopy(physical.embodiment_skill_profile)
+    named_profile["resources"][0]["endpoints"][0]["capabilities"].append(
+        "motion.joint_position"
+    )
+    selectors = {
+        "program": {"inline": selected_program},
+        "integration": {"inline": named_task},
+        "execution_policy": "policy.yaml",
+    }
+    deployment = load_configured_task_program_deployment(
+        task_program=selectors,
+        skill_profile=named_profile,
+        base_dir=tmp_path,
+    )
+    bound_sources = deployment.integration.adapter_factory.nominal_motion_sources
+    assert [item.call_index for item in bound_sources] == [0, 1]
+    assert all(
+        item.tcp_contact_links == ("left_pad", "right_pad") for item in bound_sources
+    )
+    assert len({item.program_fingerprint for item in bound_sources}) == 1
+    assert all(item.asset_sha256 == artifact.content_sha256 for item in bound_sources)
+    assert all(item.asset_manifest == str(manifest) for item in bound_sources)
+    catalog = deployment.integration.registration.catalog
+    assert catalog.demo_skill_calls == {"trace": declaration["call_id"]}
+    assert (
+        catalog.semantic_planning_catalog()["calls"][declaration["call_id"]]["required"]
+        == {}
+    )
+    assert "demo_skills" in named_task["runtime_services"]
+    selected_program["program"]["repeat"]["count"] = 3
+    second = load_configured_task_program_deployment(
+        task_program=selectors,
+        skill_profile=named_profile,
+        base_dir=tmp_path,
+    )
+    assert [
+        item.call_index
+        for item in second.integration.adapter_factory.nominal_motion_sources
+    ] == [0, 1, 2]
+    named_task["runtime_services"]["nominal_motion_sources"] = [
+        {
+            **source,
+            "call_index": 0,
+            "program_fingerprint": bound_sources[0].program_fingerprint,
+        }
+    ]
+    with pytest.raises(ValueError, match="both automatic and explicit"):
+        load_configured_task_program_deployment(
+            task_program=selectors,
+            skill_profile=named_profile,
+            base_dir=tmp_path,
+        )
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_recovery_policy_migration_normalizes_field_names(legacy: bool) -> None:
+    retry_key = "max_action_retries" if legacy else "max_skill_retries"
+    timeout_key = "action_timeout" if legacy else "skill_timeout"
+    policy = _decode_recovery_policy(
+        {"max_replans": 1, retry_key: 4, timeout_key: 12.5}, path="recovery"
+    )
+    assert policy.max_replans == 1
+    assert policy.max_skill_retries == 4
+    assert policy.skill_timeout == 12.5
+
+
+@pytest.mark.parametrize(
+    "legacy, canonical",
+    [("max_action_retries", "max_skill_retries"), ("action_timeout", "skill_timeout")],
+)
+def test_recovery_policy_rejects_mixed_migration_names(
+    legacy: str, canonical: str
+) -> None:
+    config = {"max_replans": 1, "max_skill_retries": 0, legacy: 2, canonical: 2}
+    with pytest.raises(ValueError, match="cannot specify both"):
+        _decode_recovery_policy(config, path="recovery")
+
+
+def test_legacy_skill_options_key_decodes_without_mutating_input() -> None:
+    payload = _integration_payload("repeated_pick_place")["robot_profile"]["presets"][0]
+    payload["action_options"] = payload.pop("skill_options")
+    preset = _decode_policy_preset(payload, path="preset")
+    assert isinstance(preset.skill_option_template("pick"), PickUpOptions)
+    assert "action_options" in payload
+    assert "skill_options" not in payload
+
+
+def test_skill_options_migration_rejects_both_config_keys() -> None:
+    payload = _integration_payload("repeated_pick_place")["robot_profile"]["presets"][0]
+    payload["action_options"] = payload["skill_options"]
+    with pytest.raises(ValueError, match="cannot specify both"):
+        _decode_policy_preset(payload, path="preset")
+
+
+@pytest.mark.parametrize("mixed", [False, True])
+def test_component_composition_normalizes_legacy_skill_options(mixed: bool) -> None:
+    path = _config_path("repeated_pick_place")
+    physical = _physical_components(path, _gym_config("repeated_pick_place"))
+    _, task, policy = _resolve_task_program_components(
+        physical.config["task_program"], base_dir=path.parent
+    )
+    task = deepcopy(task)
+    profile = task["profile"]
+    profile["action_options"] = deepcopy(profile["skill_options"])
+    if not mixed:
+        profile.pop("skill_options")
+    kwargs = dict(
+        task=task,
+        policy=policy,
+        skill_profile=physical.embodiment_skill_profile,
+        scene=task["scene_binding"],
+    )
+    if mixed:
+        with pytest.raises(ValueError, match="cannot specify both"):
+            _compose_integration_payload(**kwargs)
+    else:
+        payload = _compose_integration_payload(**kwargs)
+        _decode_configured_task_program_integration(payload)
+        assert "skill_options" in payload["robot_profile"]["presets"][0]
+        assert "action_options" in profile
+        assert "skill_options" not in profile
+
+
+def test_demo_skill_can_publish_verified_attachment_without_pick_affordance() -> None:
+    from embodichain.lab.task_program.integrations.demo_skill import (
+        _DemoSkillLowererFactory,
+    )
+    from embodichain.lab.task_program.semantics import (
+        SceneEntityRegistration,
+        SceneRegistry,
+        RegisteredSemanticCall,
+    )
+    from embodichain.lab.sim.atomic_skills import SkillOptions
+
+    native = SimpleNamespace(uid="native_item")
+
+    def never_observe(**kwargs):
+        pytest.fail("lowering observed state")
+
+    scene = SceneRegistry(
+        (
+            SceneEntityRegistration(
+                SceneObjectRef("item"),
+                state_provider=SimpleNamespace(entity=native, observe=never_observe),
+            ),
+        )
+    )
+    robot = object()
+    factory = _DemoSkillLowererFactory("a" * 64, ("item",), terminal_held_role="item")
+    lowerer = factory.create(
+        simulation=SimpleNamespace(get_rigid_object=lambda uid: native),
+        robot=robot,
+        scene_registry=scene,
+        engine=SimpleNamespace(robot=robot),
+    )
+    lowered = lowerer.lower(
+        RegisteredSemanticCall(call_id=factory.call_id, arguments={"item": "item"}),
+        context=None,
+        bound=None,
+        option_template=SkillOptions(),
+    )
+    assert lowered.goal.terminal_semantics.entity_id == "item"
+    assert lowered.registered_effect.held_objects[0].object_id == "item"
+
+
+def test_effective_catalog_uses_the_selected_handover_policy_and_resource_defaults() -> (
+    None
+):
+    deployment = _deployment_from_path(_config_path("hand_over"))
+    catalog = deployment.integration.registration.catalog
+    preset = catalog.robot_profile.presets[deployment.selection.runtime_preset]
+    metadata = catalog.semantic_planning_catalog()["calls"]["hand_over"]
+    assert metadata["available"]
+    assert (
+        metadata["required_policy"]["release_at_target"]
+        == preset.skill_option_template("hand_over").release_at_target
+    )
+    catalog.validate_call_payload(
+        {"kind": "hand_over", "object": "can", "final_target": None}
+    )
+    single = _deployment_from_path(
+        _config_path("repeated_pick_place")
+    ).integration.registration.catalog
+    single.validate_call_payload({"kind": "pick", "object": "cube", "grasp": None})
+    with pytest.raises(ValueError, match="not enabled"):
+        single.validate_call_payload({"kind": "hand_over", "object": "cube"})
+
+
+@pytest.mark.parametrize("assurance", ["projected", "verified"])
+def test_effective_transport_contract_matches_required_assurance(
+    assurance: str,
+) -> None:
+    payload = _integration_payload("repeated_pick_place")
+    preset = payload["robot_profile"]["presets"][0]
+    preset["effect_assurance"] = assurance
+    preset["skill_options"]["move_held_object"] = {"kind": "move_held_object"}
+    if assurance == "verified":
+        preset["effect_monitors"]["move_held_object"] = {
+            "monitor_id": "builtin.composite_effect",
+            "revision": "1",
+            "params": {},
+        }
+    configured = _decode_configured_task_program_integration(payload)
+    catalog = configured.registration.catalog
+    metadata = catalog.semantic_planning_catalog()["calls"]["move_held_object"]
+    assert metadata["required_effect_assurance"] == "verified"
+    assert metadata["available"] == (assurance == "verified")
+    call = {
+        "kind": "move_held_object",
+        "object": "cube",
+        "at": {"kind": "target_ref", "target": "destination"},
+    }
+    if assurance == "verified":
+        catalog.validate_call_payload(call)
+    else:
+        with pytest.raises(ValueError, match="not enabled"):
+            catalog.validate_call_payload(call)
 
 
 @pytest.fixture
@@ -4137,6 +4465,14 @@ def test_typed_evaluation_reads_link_frames_and_native_control_parts():
         ),
     )
     _validate_evaluation_observation_bindings(env, env._evaluation_recording)
+    from embodichain.lab.task_program.integrations.simulation.bindings import (
+        _bind_evaluation_joint_names,
+    )
+
+    unbound_identity = rules[refs[0]].identity
+    rules = _bind_evaluation_joint_names(rules, robot)
+    assert rules[refs[0]].identity != unbound_identity
+    assert rules[refs[0]].parameters["open"]["joint_names"] == ("joint_b", "joint_a")
     measured = _measure_final_conditions(env, tuple((ref, rules[ref]) for ref in refs))
     assert measured.satisfied.tolist() == [True, False]
     assert measured.conditions[0].metrics["inside.inside_count"].tolist() == [2, 1]
@@ -4218,13 +4554,15 @@ def test_legacy_task_program_identities_keep_pre_evaluation_values():
     integration = deployment.integration
     registration = integration.registration
     assert "evaluation" not in registration.fingerprint_payload()
+    # Independently recomputed on upstream main ac714ec8 after its robot/profile
+    # migrations. The evaluation-free payload and program are unchanged here.
     assert (
         registration.fingerprint
-        == "cb43b8a53c1274b2f3241b56e855e2ef97c30530d26e7a8d4e4fab30643ba427"
+        == "61cf38ce9128dfcc7063cec3933d900674863facbc6b244f31dec07ea24ca730"
     )
     assert (
         integration.integration_fingerprint
-        == "1d7405d33ac89638bff05dd33ae5de968a46dff977d8729aa5a328ac4637203a"
+        == "d8d328c33f7149a5ed76b861bead1155977ed7f4ef213c9ceae560b36c20034e"
     )
     compiled = registration.catalog.preflight(deployment.load_program())
     assert (

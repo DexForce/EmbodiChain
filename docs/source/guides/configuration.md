@@ -295,12 +295,14 @@ physics_config:
   gravity: [0.0, 0.0, -9.81]
   num_substeps: 10
   solver_cfg:
-    solver_type: mujoco_warp
+    solver_type: dexuni
+    contact_mode: auto
   use_cuda_graph: true
 ```
 
-Omit `solver_cfg` to let Newton's AutoSolver select from the complete scene at
-`prepare()`. For componentized tasks, place these backend declarations in
+Omit `solver_cfg` to retain the same DexUni defaults: scene-based ownership
+selection at `prepare()` and `contact_mode="auto"`. For componentized tasks,
+place these backend declarations in
 `envs/default.yaml` and `envs/newton.yaml`, then point the
 deployment's `environment.default` and `environment.newton` entries at those
 files. Do not repeat `physics` or `physics_config` in the deployment. Keep the

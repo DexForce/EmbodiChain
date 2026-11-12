@@ -49,6 +49,7 @@ from embodichain.lab.sim.objects.backends.rigid_physics import (
 )
 from embodichain.lab.sim.objects.backends.newton import (
     _stabilize_newton_mimic_target_write,
+    _supports_newton_position_targets,
 )
 from embodichain.lab.sim.objects.backends.lifecycle import (
     apply_rigid_initial_state,
@@ -64,6 +65,29 @@ from embodichain.lab.sim.objects.backends.controls import (
     set_gravity_enabled,
     set_visible,
 )
+
+
+@pytest.mark.parametrize(
+    "fields, expected",
+    [(None, True), (("joint_f",), False), (("joint_target_q",), True)],
+)
+def test_newton_hold_targets_follow_declared_channels(fields, expected) -> None:
+    scene = SimpleNamespace(
+        dynamics_capabilities=lambda: SimpleNamespace(supported_control_fields=fields)
+    )
+    assert _supports_newton_position_targets(scene) is expected
+
+
+def test_newton_hold_targets_distinguish_legacy_and_incomplete_sdks(
+    monkeypatch,
+) -> None:
+    from dexsim.engine import newton_physics
+
+    monkeypatch.delattr(newton_physics, "NewtonSolverExtension", raising=False)
+    assert _supports_newton_position_targets(SimpleNamespace())
+    monkeypatch.setattr(newton_physics, "NewtonSolverExtension", object, raising=False)
+    with pytest.raises(RuntimeError, match="Scene.dynamics_capabilities"):
+        _supports_newton_position_targets(SimpleNamespace())
 
 
 class _RigidEntity:
@@ -490,3 +514,82 @@ def test_rigid_initialization_publishes_without_advancing_physics(
     assert resets == [0.0]
     assert state.elapsed == 0.0
     assert state.other_position == 1.0
+
+
+def test_dexuni_mimic_compliance_maps_scene_constraint_rows(monkeypatch) -> None:
+    from newton import Model
+    from embodichain.lab.sim.objects.backends.newton import (
+        _configure_newton_mimic_compliance,
+    )
+
+    class Array:
+        def __init__(self, value):
+            self.value = np.asarray(value)
+
+        def numpy(self):
+            return self.value
+
+        def assign(self, value):
+            self.value[...] = value
+
+    model = SimpleNamespace(
+        requires_grad=False,
+        joint_target_ke=Array([100.0, 0.0]),
+        joint_target_kd=Array([20.0, 0.0]),
+        joint_target_mode=Array([3, 0]),
+        constraint_mimic_joint0=Array([0, 0, 0, 5, 0, 0, 0, 12]),
+        constraint_mimic_joint1=Array([0, 0, 0, 4, 0, 0, 0, 11]),
+    )
+    runtime = SimpleNamespace(model=model)
+    solref = Array(np.full((1, 3, 2), 9.0, dtype=np.float32))
+    solver = SimpleNamespace(
+        mjc_eq_to_newton_mimic=Array([[0, 1, -1]]),
+        mjw_model=SimpleNamespace(eq_solref=solref),
+        mj_model=None,
+    )
+
+    def index_map(frequency):
+        assert frequency == Model.AttributeFrequency.CONSTRAINT_MIMIC
+        return Array([3, 7])  # Nonidentity mapping into the complete Scene model.
+
+    backend = SimpleNamespace(
+        solver_type="dexuni",
+        cfg=SimpleNamespace(requires_grad=False, dt=0.01, num_substeps=10),
+        model=model,
+        mujoco_solver=solver,
+        get_mujoco_index_map=index_map,
+    )
+    calls = []
+
+    def set_drive(**kwargs):
+        calls.append(kwargs)
+        return 1
+
+    entity = SimpleNamespace(
+        _physics_binding=SimpleNamespace(
+            _runtime=runtime,
+            joints=[
+                SimpleNamespace(name="leader", joint_id=11, qd_size=1, qd_start=0),
+                SimpleNamespace(name="follower", joint_id=12, qd_size=1, qd_start=1),
+            ],
+        ),
+        set_newton_drive=set_drive,
+    )
+    world = object()
+    monkeypatch.setattr(
+        "dexsim.engine.newton_physics.backend_registry.get_newton_backend",
+        lambda value: backend if value is world else None,
+    )
+    assert _configure_newton_mimic_compliance(
+        result=SimpleNamespace(backend="newton", world=world),
+        entities=[entity],
+        state_joint_names=["leader", "follower"],
+        mimic_ids=[1],
+        mimic_parents=[0],
+    )
+    np.testing.assert_allclose(solref.numpy()[0, 1], [0.002, 10.0])
+    np.testing.assert_array_equal(solref.numpy()[0, [0, 2]], 9.0)
+    assert len(calls) == 1
+    np.testing.assert_array_equal(calls[0]["joint_ids"], [1])
+    np.testing.assert_allclose(calls[0]["target_ke"], [1.0])
+    np.testing.assert_allclose(calls[0]["target_kd"], [0.2])

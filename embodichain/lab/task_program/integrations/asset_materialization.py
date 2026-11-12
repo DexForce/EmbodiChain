@@ -400,7 +400,17 @@ def materialize_asset_deployment(
         raise ValueError(
             "Supplied requirements differ from the task integration contract"
         )
-    program = _read(program_path)
+    from embodichain.lab.task_program.language.authoring import normalize_task_program
+
+    aliases = {
+        alias: entry["call_id"]
+        for alias, entry in integration.get("runtime_services", {})
+        .get("demo_skills", {})
+        .items()
+    }
+    program = normalize_task_program(
+        _read(program_path), demo_skills=aliases
+    ).declaration
     embodiment = _read(embodiment_path)
     prepared_pour = None
     if adaptations.pour is not None:
