@@ -102,6 +102,51 @@ with GenSimServices(cfg) as services:
     records = services.records()
 ```
 
+## DeepSeek preset
+
+The complete [DeepSeek example](model_services.deepseek.example.json) binds all
+Task, Scene and Asset chat roles to `deepseek-flash` through the existing
+`openai_compatible` adapter. This model supports the image inputs used by GenSim;
+see [DeepSeek's vision guide](https://api-docs.deepseek.com/guides/vision/).
+The preset disables thinking and sets a 16,384-token output budget through
+adapter `options`. Structured callers continue to select JSON mode per request.
+
+Copy the preset to an operator-owned file. This also works after a wheel install:
+
+```bash
+python - <<'PY'
+from importlib.resources import files
+from pathlib import Path
+
+preset = files("embodichain.gen_sim.services").joinpath("model_services.deepseek.example.json")
+Path("model_services.deepseek.json").write_text(preset.read_text(encoding="utf-8"), encoding="utf-8")
+PY
+export EMBODICHAIN_MODEL_SERVICES_CONFIG="$PWD/model_services.deepseek.json"
+export EMBODICHAIN_ENV_FILE="/absolute/path/to/services.env"
+```
+
+Add `DEEPSEEK_API_KEY` to that deployment dotenv, alongside the existing image,
+segmentation, geometry and optional articulation endpoint settings. Those service
+profiles and their role bindings match the generic example. Configuration files
+are selected as a whole; they are not merged.
+
+```dotenv
+DEEPSEEK_API_KEY="your-deepseek-key"
+```
+
+Validate the configured profiles, then use an ordinary live-model workflow:
+
+```bash
+embodichain gensim services validate
+embodichain gensim task plan --image table.png --instruction "Put the cube on the table" --output outputs/deepseek-plan
+```
+
+The generic example and legacy configuration retain their existing `OPENAI_*`
+selection rules. Select the generic configuration file to use its original API;
+when returning to legacy discovery, unset `EMBODICHAIN_MODEL_SERVICES_CONFIG`
+and ensure the default user configuration does not select another profile.
+DeepSeek is only selected explicitly, and its profile reads `DEEPSEEK_API_KEY`.
+
 ## Implement an adapter
 
 Implement the relevant Protocol; inheritance from shipped clients is unnecessary.

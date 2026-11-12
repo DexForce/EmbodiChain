@@ -235,7 +235,78 @@ def test_json_configuration_is_opt_in(tmp_path, monkeypatch):
     assert load_services_config(path).roles == {"task_interpretation": "one"}
 
 
-def test_multimodal_order_and_provider_options_stay_in_adapter(tmp_path, monkeypatch):
+def test_deepseek_preset_preserves_other_service_profiles() -> None:
+    root = Path(__file__).resolve().parents[3] / "embodichain/gen_sim/services"
+    generic = load_services_config(root / "model_services.example.json")
+    deepseek = load_services_config(root / "model_services.deepseek.example.json")
+    assert generic is not None and deepseek is not None
+    assert deepseek.roles == generic.roles
+    for name, profile in generic.profiles.items():
+        if profile["adapter"] != "openai_compatible":
+            assert deepseek.profiles[name] == profile
+
+
+@pytest.mark.parametrize(
+    ("preset", "model", "endpoint", "credential"),
+    [
+        (
+            "model_services.example.json",
+            "original-model",
+            "https://original.example/v1",
+            "original-key",
+        ),
+        (
+            "model_services.deepseek.example.json",
+            "deepseek-flash",
+            "https://api.deepseek.com",
+            "deepseek-key",
+        ),
+    ],
+)
+def test_chat_presets_use_their_own_credentials_and_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    preset: str,
+    model: str,
+    endpoint: str,
+    credential: str,
+) -> None:
+    from embodichain.gen_sim.services.runtime import CHAT_ROLES
+
+    root = Path(__file__).resolve().parents[3] / "embodichain/gen_sim/services"
+    monkeypatch.setenv("EMBODICHAIN_ENV_FILE", str(tmp_path / "unused.env"))
+    monkeypatch.setenv("OPENAI_API_KEY", "original-key")
+    monkeypatch.setenv("OPENAI_MODEL", "original-model")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://original.example/v1")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek-key")
+    cfg = load_services_config(root / preset)
+    assert cfg is not None
+    with GenSimServices(cfg) as services:
+        for role in CHAT_ROLES:
+            adapter = services.get(role)
+            assert adapter.model == model
+            assert adapter.base_url == endpoint
+            assert adapter.api_key == credential
+
+
+@pytest.mark.parametrize(
+    ("model", "base_url", "options"),
+    [
+        ("mimo-test", "http://test/v1", {}),
+        (
+            "deepseek-flash",
+            "https://api.deepseek.com",
+            {"thinking": {"type": "disabled"}, "max_tokens": 16384},
+        ),
+    ],
+)
+def test_multimodal_order_and_provider_options_stay_in_adapter(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    model: str,
+    base_url: str,
+    options: dict[str, object],
+) -> None:
     from embodichain.gen_sim.services.adapters import chat
 
     image = tmp_path / "view.png"
@@ -253,12 +324,12 @@ def test_multimodal_order_and_provider_options_stay_in_adapter(tmp_path, monkeyp
             return json.dumps({"choices": [{"message": {"content": "ok"}}]}).encode()
 
     def urlopen(request, **kwargs):
-        captured.append(json.loads(request.data))
+        captured.append(request)
         return Response()
 
     monkeypatch.setattr(chat, "urlopen", urlopen)
     adapter = chat.ChatCompletionsAdapter(
-        model="mimo-test", api_key="secret", base_url="http://test/v1"
+        model=model, api_key="secret", base_url=base_url, options=options
     )
     adapter.complete(
         ChatRequest(
@@ -275,7 +346,11 @@ def test_multimodal_order_and_provider_options_stay_in_adapter(tmp_path, monkeyp
             )
         )
     )
-    parts = captured[0]["messages"][0]["content"]
+    assert captured[0].full_url == base_url + "/chat/completions"
+    assert captured[0].get_header("Authorization") == "Bearer secret"
+    payload = json.loads(captured[0].data)
+    assert payload["model"] == model
+    parts = payload["messages"][0]["content"]
     assert [part["type"] for part in parts] == [
         "text",
         "image_url",
@@ -283,7 +358,9 @@ def test_multimodal_order_and_provider_options_stay_in_adapter(tmp_path, monkeyp
         "image_url",
     ]
     assert [parts[0]["text"], parts[2]["text"]] == ["front", "back"]
-    assert captured[0]["thinking"] == {"type": "disabled"}
+    assert payload["thinking"] == {"type": "disabled"}
+    for key, value in options.items():
+        assert payload[key] == value
 
 
 def test_openai_compatible_chat_can_omit_authentication(monkeypatch):
@@ -814,7 +891,11 @@ def test_accepted_geometry_job_is_not_resubmitted(tmp_path, outcome):
     assert session.posts == 1
 
 
-def test_legacy_run_and_simready_imports_do_not_initialize_clients():
+def test_legacy_run_and_simready_imports_do_not_initialize_clients(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("EMBODICHAIN_MODEL_SERVICES_CONFIG", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "empty-home"))
     script = "from embodichain.gen_sim.services import GenSimServices; import sys; run = GenSimServices(); run.close(); assert 'torch' not in sys.modules; import embodichain.gen_sim.asset_engine.utils.simready_utils as module; assert not hasattr(module, 'client'); assert not hasattr(module, 'DEPLOYMENT')"
     result = subprocess.run(
         [sys.executable, "-c", script], text=True, capture_output=True
