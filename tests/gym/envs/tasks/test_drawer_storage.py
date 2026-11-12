@@ -287,9 +287,11 @@ def _run_franka_contact_episode() -> None:
         def sample_substep(_dt):
             nonlocal sample_count
             sample_count += 1
-            buffer = query.fetch()
+            buffer = query.fetch_solver_report()
             assert not buffer.dropped_count
-            # Column 9 contains the normal contact impulse.
+            assert bool(buffer.impulse_valid[: buffer.count].all())
+            # Column 9 contains the measured normal solver impulse. Geometry
+            # detection has no impulses and cannot qualify this contact audit.
             impulses = buffer.data[: buffer.count, 9]
             for left, right in buffer.actor_ids[: buffer.count][impulses > 0].tolist():
                 observed[stage].add(frozenset((names[left], names[right])))
