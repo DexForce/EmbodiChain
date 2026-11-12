@@ -20,6 +20,7 @@ identity and calibrated defaults belong to `embodichain_robots`.
 | Bare Franka arm selection and explicit tool assembly | `extensions/embodichain_robots/franka/cfg.py`, `panda.py` → [catalog contracts](catalogs.md) |
 | W1 variants and serialization | `extensions/embodichain_robots/dexforce/w1/` → `cfg.py`, `specs.py`, `hand_specs.py` |
 | Independent Revo1 hand or shared hand asset names | `extensions/embodichain_robots/brainco/revo1/` → `cfg.py`, `_specs.py` |
+| AgiBot G1 preset and pinned GenieSim USD | `extensions/embodichain_robots/agibot/g1/` → `cfg.py`, `assets.py` |
 | Composed robot frames and joint-name mapping | `embodichain/lab/sim/robots/dual_arm.py` |
 | Shared articulation state and drive properties | `embodichain/lab/sim/objects/articulation.py`, `embodichain/lab/sim/cfg/articulation.py` |
 
@@ -29,6 +30,12 @@ The lightweight catalog is the selection boundary for Gym, preview, workspace
 and dual-arm construction. It imports only the selected preset; see
 [catalog contracts](catalogs.md) for IDs, variants, pure hand descriptions and
 locomotion profiles. Display classification does not grant runtime capabilities.
+
+`AgibotG1` selects the original GenieSim G1_120s USD and driven joints, with one
+driver per gripper part. The [USD import contract](../simulation-system/simulation-system.md#ownership)
+owns closed-loop constraints and backend support. Robot preview resolves local
+`source.file_path` USD and sensor URDF paths relative to the config file before
+World creation; inline sensor definitions and data IDs stay unchanged.
 
 Preset `_build_defaults()` assembles model defaults; base `RobotCfg.from_dict()`
 and `merge_robot_cfg` apply overrides. Do not route the base decoder back into
@@ -42,6 +49,8 @@ loading; body and hand revisions are independent. Dual-arm chains resolve their
 own source URDF root/end, translate assembled names back to source names and
 reject opposite-arm/unknown frames. Mount transforms belong to assembly.
 Model-specific constraints are in [catalog calibration](catalogs.md#model-specific-calibration).
+Dual-arm composition maps base `mimic_compliance` entries to each side's
+assembled master-joint names, including explicitly bound hands.
 
 ## Joint and solver boundaries
 

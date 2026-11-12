@@ -36,7 +36,12 @@ buffers or collision API. Source selectors are exclusive with ordinary file/
 shape inputs. Whole-scene USD imports own namespaces, placement and sparse
 source-path overrides; singleton placement remains asset-owned. Returned source
 identities do not request a second spawn. Imported visuals/deformables keep their
-physical type and supported lifecycle. Source, texture and visual-rebuild rules
+physical type and supported lifecycle. Single-articulation USD imports via
+`add_robot()`/`add_articulation()` preserve constraints between selected-prim
+links. `spawn/usd.py` maps endpoints/names to the runtime UID while retaining
+body-local frames and scale. Declare constrained assets before prepare on
+Default/PhysX; cross-object/world constraints require `add_usd()`.
+Source, texture and visual-rebuild rules
 are in [articulation adapters](articulation-adapters.md),
 [rendering](rendering.md) and [scene geometry](../scene-services/geometry.md).
 

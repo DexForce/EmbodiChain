@@ -1,5 +1,5 @@
 embodichain.lab.sim.cfg
-===================================
+============================
 
 .. automodule:: embodichain.lab.sim.cfg
 
@@ -61,6 +61,7 @@ UV seams and render detail.
    MeshCollisionCfg
    RigidBodyPhysicsCfg
    ArticulationRootPropertiesCfg
+   MimicComplianceCfg
    LinkPhysicsOverrideCfg
    VolumeDeformableMeshingCfg
    VolumeDeformablePhysicsCfg
@@ -269,6 +270,20 @@ It is independent of the drive velocity gain ``damping`` and stays active for
 passive and effort target modes. In dictionaries, select this subtype with
 ``joint_drive_props.backend="newton"``. Both settings require Newton.
 
+``ArticulationCfg.mimic_compliance`` maps exact mimic master joint names to
+DexSim Default compliance settings. The following robot configuration
+requests hard coupling for every follower of ``right_gripper``.
+
+.. code-block:: yaml
+
+   mimic_compliance:
+     right_gripper:
+       natural_frequency: 0.0
+       damping_ratio: 0.0
+
+Preparation applies this configuration to all replicas. Newton rejects a
+nonempty mapping and uses its own mimic configuration.
+
 ``JointDrivePropertiesCfg.limit_stiffness`` and ``limit_damping`` separate
 joint-limit gains from drive gains. Each accepts a scalar or joint-rule mapping;
 ``None`` preserves the source/backend value. With Newton's MuJoCo solver,
@@ -284,6 +299,7 @@ joint bounds.
    link_attrs_from_dict
    JointDrivePropertiesCfg
    NewtonJointDrivePropertiesCfg
+   MimicComplianceCfg
    ArticulationCfg
 
 .. autoclass:: ArticulationRootPropertiesCfg
@@ -292,6 +308,10 @@ joint bounds.
 
 .. autoclass:: NewtonJointDrivePropertiesCfg
    :members:
+   :no-index:
+
+.. autoclass:: MimicComplianceCfg
+   :members: natural_frequency, damping_ratio
    :no-index:
 
 Compatibility facade
