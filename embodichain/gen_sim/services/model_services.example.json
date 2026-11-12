@@ -25,6 +25,24 @@
         "timeout_s": 120,
         "max_attempts": 1
       },
+      "deepseek": {
+        "adapter": "openai_compatible",
+        "model": {
+          "env": "DEEPSEEK_MODEL"
+        },
+        "api_key_env": "DEEPSEEK_API_KEY",
+        "base_url": {
+          "env": "DEEPSEEK_BASE_URL"
+        },
+        "timeout_s": 120,
+        "max_attempts": 1,
+        "options": {
+          "thinking": {
+            "type": "disabled"
+          },
+          "max_tokens": 16384
+        }
+      },
       "images": {
         "adapter": "image_http",
         "base_url": {
