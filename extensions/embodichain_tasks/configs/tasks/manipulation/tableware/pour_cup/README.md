@@ -72,10 +72,12 @@ FastRT 使用蓝色液面材质，并为每个环境生成独立的 960 × 720�
 正常录制保存到 `videos/env_000/episode_000000_fluid_gym.mp4`；未完成或不合格的
 片段保存到 `videos/diagnostics/`。Sim 示例输出 `fluid_sim_env0.mp4`。
 
-Gym 的 `fluid_gym_result.json` 和 Sim 的 `validation.json` 分别记录任务完成情况、
+Gym 的 `qualification_result.json` 和 Sim 的 `validation.json` 分别记录任务完成情况、
 杯子抬升、最大倾角、放回误差和接水量。完整验收要求实际抬升至少 5 cm、倾角
 至少 45°、放回误差不超过 3 cm，且最终接水至少 50 mL；规划成功或部分视频不能
-替代这些物理测量。使用 `--record-trajectory --record-fluid-state` 可在验收通过后
+替代这些物理测量。部署通过 `collection.qualification.object_motion` 声明运动阈值，
+通过 `observations` 声明原始观测上下限；接水量按立方米配置，`0.00005` 为 50 mL。
+`water_summary` 的有效性边界在每次低频采样时检查，接水量在最终采样时检查。使用 `--record-trajectory --record-fluid-state` 可在验收通过后
 保存完整粒子状态；默认任务实测约 1.30 GiB/环境（76,607 粒、757 状态帧）。普通
 `ReplayWrapper` 的 `kinematic`/`control` 模式回填粒子，`dynamic` 模式只回填
 初始粒子状态，之后随录制控制动作重新求解流体。

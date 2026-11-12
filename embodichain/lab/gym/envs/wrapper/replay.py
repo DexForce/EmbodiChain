@@ -27,7 +27,7 @@ from embodichain.lab.gym.envs.expert_trajectory import (
     EXPERT_TRAJECTORY_SCHEMA_VERSION,
     build_expert_action_spec,
 )
-from embodichain.lab.gym.envs._fluid_trajectory import FluidTrajectoryReader
+from embodichain.lab.gym.utils.trajectory_state import FluidTrajectoryReader
 from embodichain.lab.gym.envs.types import ControllerAction
 from embodichain.lab.gym.utils.gym_utils import load_trajectory
 from embodichain.lab.gym.utils.trajectory_state import restore_trajectory_state

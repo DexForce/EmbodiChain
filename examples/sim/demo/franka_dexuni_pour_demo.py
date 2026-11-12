@@ -35,11 +35,8 @@ import imageio.v2 as imageio
 import numpy as np
 import torch
 
-from embodichain.lab.gym.envs._fluid_pour import (
-    configure_fluid_spacing,
-    cup_motion_qualification,
-)
-from embodichain.lab.gym.utils.gym_utils import config_to_cfg
+from embodichain.lab.gym.envs.objectives.conditions import ObjectMotionMetrics
+from embodichain.lab.gym.utils.gym_utils import config_to_cfg, configure_fluid_spacing
 from embodichain.lab.gym.utils.composition import resolve_gym_components
 from embodichain.lab.task_program.integrations import (
     load_configured_task_program_deployment,
@@ -126,7 +123,7 @@ def main() -> None:
     )
     pick_options = preset.skill_option_template("pick")
     qualification = declaration["collection"]["qualification"]
-    volume_observation = getattr(cfg.observations, qualification["volume_observation"])
+    volume_observation = getattr(cfg.observations, "received_volume")
     cfg.num_envs = args.num_envs
     cfg.sim_cfg.headless = True
     cfg.sim_cfg.render_cfg.renderer = args.renderer
@@ -262,7 +259,7 @@ def main() -> None:
             if not args.headless:
                 sim.open_window()
         positions = plan.trajectory.positions
-        poses = [cup.get_local_pose().cpu().numpy().copy()]
+        motion_metrics = ObjectMotionMetrics(cup.get_local_pose())
         samples = []
         started = time.perf_counter()
         count = positions.shape[1] + round(2 / control_dt)
@@ -272,7 +269,7 @@ def main() -> None:
             # Set targets only. Every measured joint/cup pose comes from physics.
             robot.set_qpos(positions[:, min(i, positions.shape[1] - 1)], target=True)
             sim.update(step=cfg.sim_steps_per_control, render_final_step=False)
-            poses.append(cup.get_local_pose().cpu().numpy().copy())
+            motion_metrics.update(cup.get_local_pose())
             if camera is not None:
                 with sim.render_frame():
                     sim.sync_render_state()
@@ -290,20 +287,28 @@ def main() -> None:
                 )
                 sample = {
                     "time_s": (i + 1) * control_dt,
-                    "cup_pose": poses[-1].tolist(),
+                    "cup_pose": cup.get_local_pose().cpu().tolist(),
                     "received_ml": (received[:, 0] * 1e6).cpu().tolist(),
                 }
                 samples.append(sample)
                 print(json.dumps(sample), flush=True)
+        measured_motion = motion_metrics.evaluate(
+            **{
+                key: value
+                for key, value in qualification["object_motion"].items()
+                if key != "uid"
+            }
+        )
         report = {
             "coupling": "online one-way rigid-to-fluid",
             "controller": "fresh Atomic Skill joint targets",
-            "cup": cup_motion_qualification(
-                poses,
-                min_lift_m=qualification["min_lift_m"],
-                min_tilt_deg=qualification["min_tilt_deg"],
-                max_return_error_m=qualification["max_return_error_m"],
-            ),
+            "cup": {
+                **{
+                    key: value.cpu().tolist()
+                    for key, value in measured_motion.metrics.items()
+                },
+                "accepted": measured_motion.satisfied.cpu().tolist(),
+            },
             "num_envs": sim.num_envs,
             "particle_count_per_env": sim.get_fluid_object("water").num_particles,
             "control_dt": control_dt,
@@ -314,7 +319,7 @@ def main() -> None:
         report["accepted"] = bool(
             all(report["cup"]["accepted"])
             and all(
-                v >= qualification["min_received_ml"]
+                v >= qualification["observations"]["received_volume"]["min"][0] * 1e6
                 for v in samples[-1]["received_ml"]
             )
         )

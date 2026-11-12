@@ -3,14 +3,17 @@ seed: 0
 enable_sensor: false
 collection:
   qualification:
-    kind: fluid_pour
-    cup_uid: cup
-    summary_observation: water_summary
-    volume_observation: received_volume
-    min_lift_m: 0.05
-    min_tilt_deg: 45.0
-    max_return_error_m: 0.03
-    min_received_ml: 50.0
+    object_motion:
+      uid: cup
+      min_lift_m: 0.05
+      min_tilt_deg: 45.0
+      max_return_error_m: 0.03
+    observations:
+      water_summary:
+        min: [null, null, null, null, 1.0]
+        when: always
+      received_volume:
+        min: [0.00005]
 environment:
   component: env.fluid.yaml
 task_program:

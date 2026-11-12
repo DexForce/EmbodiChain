@@ -75,7 +75,7 @@ from embodichain.lab.gym.envs.demo import (
     DemoSegment,
     DemoSegmentResult,
 )
-from embodichain.lab.gym.envs._fluid_trajectory import FluidTrajectoryRecorder
+from embodichain.lab.gym.utils.trajectory_state import FluidTrajectoryRecorder
 from embodichain.lab.gym.envs.types import ControllerAction
 from embodichain.lab.gym.envs.expert_trajectory import (
     ExpertTrajectoryCfg,

@@ -25,7 +25,7 @@ import numpy as np
 import pytest
 import torch
 
-from embodichain.lab.gym.envs._fluid_trajectory import (
+from embodichain.lab.gym.utils.trajectory_state import (
     FluidTrajectoryReader,
     FluidTrajectoryRecorder,
 )
@@ -135,18 +135,24 @@ def test_particle_frames_keep_multi_env_rows_independent(tmp_path: Path):
         reader.close()
 
 
-def test_particle_source_rejects_unqualified_and_tampered_frames(tmp_path: Path):
+def test_particle_reader_does_not_require_task_program_metadata(tmp_path: Path):
+    env = _env(1)
+    path, source = _record(tmp_path, env)
+    for key in ("fluid_qualification", "demo_episodes", "artifact_purpose"):
+        source["meta"].pop(key)
+    cfg = SimpleNamespace(num_envs=env.num_envs, fluid_object=env.cfg.fluid_object)
+    reader = FluidTrajectoryReader(path, source, cfg)
+    try:
+        reader.apply(env, torch.tensor([1]))
+        torch.testing.assert_close(env.fluid.written[0, :, 0], torch.full((2,), 0.2))
+    finally:
+        reader.close()
+
+
+def test_particle_source_rejects_malformed_and_tampered_sidecars(tmp_path: Path):
     env = _env(1)
     path, source = _record(tmp_path, env)
     cfg = SimpleNamespace(num_envs=1, fluid_object=env.cfg.fluid_object)
-    source["meta"]["fluid_qualification"]["accepted"] = False
-    with pytest.raises(ValueError, match="accepted"):
-        FluidTrajectoryReader(path, source, cfg)
-    source["meta"]["fluid_qualification"]["accepted"] = True
-    source["meta"]["fluid_qualification"]["program_hash"] = "another-program"
-    with pytest.raises(ValueError, match="provenance"):
-        FluidTrajectoryReader(path, source, cfg)
-    source["meta"]["fluid_qualification"]["program_hash"] = "program"
     sidecar = source["meta"].pop("fluid_state")
     with pytest.raises(ValueError, match="sidecars"):
         FluidTrajectoryReader(path, source, cfg)

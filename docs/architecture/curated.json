@@ -4289,8 +4289,8 @@
         {
           "path": "embodichain/lab/scripts/run_task.py",
           "symbol": "cli",
-          "start_line": 2151,
-          "end_line": 2151,
+          "start_line": 2180,
+          "end_line": 2180,
           "excerpt": "        env = gymnasium.make(id=gym_config[\"id\"], cfg=env_cfg, **action_config)"
         }
       ]

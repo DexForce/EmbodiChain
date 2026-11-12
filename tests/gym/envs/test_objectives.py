@@ -424,3 +424,37 @@ def test_inclusive_bounds_and_speed_limits_use_measurement_precision():
     objective = _runtime()
     objective.update(_state((0.1, -0.1), linear=0.05, angular=0.1), 0.2)
     assert objective.snapshot()["progress"].tolist() == [1, 1]
+
+
+def test_object_motion_retains_invalid_evidence_and_owns_snapshots() -> None:
+    from embodichain.lab.gym.envs.objectives.conditions import ObjectMotionMetrics
+
+    initial = torch.tensor([[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]]).repeat(2, 1)
+    metrics = ObjectMotionMetrics(initial)
+    invalid = initial.clone()
+    invalid[0, 2] = float("nan")
+    metrics.update(invalid)
+    metrics.update(initial)
+    result = metrics.evaluate(min_lift_m=0.0, min_tilt_deg=0.0, max_return_error_m=0.0)
+    assert result.valid.tolist() == [False, True]
+    assert result.satisfied.tolist() == [False, True]
+    result.metrics["return_error_m"].fill_(9.0)
+    fresh = metrics.evaluate(min_lift_m=0.0, min_tilt_deg=0.0, max_return_error_m=0.0)
+    torch.testing.assert_close(fresh.metrics["return_error_m"], torch.zeros(2))
+
+
+def test_object_motion_requires_measured_lift_tilt_and_return():
+    import numpy as np
+    from embodichain.lab.gym.envs.objectives.conditions import ObjectMotionMetrics
+
+    initial = np.array([[0, 0, 0.5, 0, 0, 0, 1], [1, 0, 0.5, 0, 0, 0, 1]], dtype=float)
+    moving = initial.copy()
+    moving[0, 2] += 0.12
+    moving[0, 3] = np.sin(np.deg2rad(35))
+    moving[0, 6] = np.cos(np.deg2rad(35))
+    metrics = ObjectMotionMetrics(torch.from_numpy(initial))
+    metrics.update(torch.from_numpy(moving))
+    metrics.update(torch.from_numpy(initial))
+    result = metrics.evaluate(min_lift_m=0.05, min_tilt_deg=45, max_return_error_m=0.03)
+    assert result.satisfied.tolist() == [True, False]
+    assert result.metrics["max_tilt_deg"].tolist() == pytest.approx([70, 0])

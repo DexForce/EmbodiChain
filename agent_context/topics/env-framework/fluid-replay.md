@@ -7,7 +7,7 @@ owning component. Spawn rigid references are resolved before fluid binding.
 The default pour deployment generates its fill from a local revolved profile;
 no particle asset file is required. Pouring meshes use `PourCupAssets/...`
 references resolved through the [data asset cache](../data-assets/data-assets.md),
-so installed task packages carry configuration without mesh payloads. The `run-task` spacing override resamples the
+so installed task packages carry configuration without mesh payloads. The configuration helper `gym_utils.configure_fluid_spacing` resamples the
 same volume recipe and rejects fixed point imports. It scales explicit render
 radius, mesh cell size and reconstruction kernel radius by the spacing ratio,
 keeping the surface reconstruction consistent with the new particle density. Fill definitions and
@@ -33,11 +33,15 @@ to a receiver-relative pour pose through the existing MoveHeldObject lowerer,
 then pours and returns it. The standalone Sim example uses the same physical
 component and relative pour target with freshly planned Atomic Action targets.
 
-Program completion and physical qualification are separate: the deployment's
-`collection.qualification` selects measured cup lift, maximum tilt, final return
-error and received volume. `run-task` checks these before committing an episode;
-rejected attempts retain diagnostic reports and video. Projected effect
-assurance alone does not prove grasp or pouring success.
+Program completion and physical qualification are separate. The deployment's
+`collection.qualification` declares generic `object_motion` bounds and named
+numeric observation bounds. `demo.DemoQualification` tracks motion extrema on
+the input device without storing every pose; stateless env-only raw observation functions
+are sampled without policy inputs, projection or noise. `when: always` bounds apply at every
+sampled boundary, while default `final` bounds apply to the last sample. The
+collector combines measured truth with episode completion before commit.
+Rejected attempts retain `qualification_result.json` diagnostics and video.
+Projected effect assurance alone does not prove grasp or pouring success.
 
 Accepted Task Program recordings can opt into control-aligned full particle-state
 sidecars with `run-task --record-trajectory --record-fluid-state`. Each source row has a
@@ -45,8 +49,10 @@ bounded, content-verified chunk manifest. Particle positions are arena-local in
 the artifact and converted to the target arena on replay. The ordinary
 `ReplayWrapper` restores particles along with rigid states in `kinematic` and
 `control`; `dynamic` restores only the initial particle frame, then replays
-recorded controls through DexUni. Fluid replay requires qualified sidecars and
-does not infer fluid state from the scene's initial fill.
+recorded controls through DexUni. The adapters in `gym/utils/trajectory_state.py` validate particle data and frame
+alignment independently of task policy. `run-task` checks accepted Task Program
+provenance before creating a World. Replay does not infer fluid state from the
+scene's initial fill.
 
 ## Rendering and recording
 

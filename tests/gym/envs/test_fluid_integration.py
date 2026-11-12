@@ -20,14 +20,10 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
-import numpy as np
 import pytest
 import torch
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
-from embodichain.lab.gym.envs._fluid_pour import (
-    configure_fluid_spacing,
-    cup_motion_qualification,
-)
+from embodichain.lab.gym.utils.gym_utils import configure_fluid_spacing
 from embodichain.utils.utility import load_config
 from embodichain.lab.gym.envs.managers.cfg import SceneEntityCfg
 from embodichain.lab.gym.envs.managers.observations import (
@@ -96,15 +92,16 @@ def test_fluid_deployment_resolves_sources_and_observation_entities():
 def test_fluid_pour_collection_uses_measured_acceptance():
     declaration = load_config(TASK)
     qualification = declaration["collection"]["qualification"]
-    assert qualification == {
-        "kind": "fluid_pour",
-        "cup_uid": "cup",
-        "summary_observation": "water_summary",
-        "volume_observation": "received_volume",
+    assert qualification["object_motion"] == {
+        "uid": "cup",
         "min_lift_m": 0.05,
         "min_tilt_deg": 45.0,
         "max_return_error_m": 0.03,
-        "min_received_ml": 50.0,
+    }
+    assert qualification["observations"]["received_volume"]["min"] == [0.00005]
+    assert qualification["observations"]["water_summary"] == {
+        "min": [None, None, None, None, 1.0],
+        "when": "always",
     }
 
 
@@ -118,22 +115,6 @@ def test_fluid_spacing_override_keeps_solver_and_surface_scale():
     assert cfg.sim_cfg.physics_cfg.solver_cfg["sph_cfg"][
         "particle_support_radius"
     ] == pytest.approx(0.00675)
-
-
-def test_cup_motion_qualification_requires_measured_lift_tilt_and_return():
-    initial = np.array([[0, 0, 0.5, 0, 0, 0, 1], [1, 0, 0.5, 0, 0, 0, 1]], dtype=float)
-    moving = initial.copy()
-    moving[0, 2] += 0.12
-    moving[0, 3] = np.sin(np.deg2rad(35))
-    moving[0, 6] = np.cos(np.deg2rad(35))
-    result = cup_motion_qualification(
-        [initial, moving, initial],
-        min_lift_m=0.05,
-        min_tilt_deg=45,
-        max_return_error_m=0.03,
-    )
-    assert result["accepted"] == [True, False]
-    assert result["max_tilt_deg"] == pytest.approx([70, 0])
 
 
 @pytest.mark.parametrize(
