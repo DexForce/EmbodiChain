@@ -95,3 +95,25 @@ Task programs, affordances, control endpoint meanings and success conditions
 remain explicit configuration. This importer does not infer them from
 AssetRevision semantics or GenSim output directories. Semantic export mapping
 is tracked separately in [#1158](https://github.com/DexForce/EmbodiChain/issues/1158).
+
+## Gaussian integration qualification
+
+Gaussian composition is supplied by [#934](https://github.com/DexForce/EmbodiChain/pull/934).
+The joint regression selection exercises ordinary USD plus Gaussian USD and
+AssetRevision ZIPs containing an external PLY. It includes descriptor-only
+preflight, typed rendering-preset decode, replicated NoRender physics/source
+metadata, and a native single-Arena verified pick/place with same-frame
+RGB/depth capture and package cleanup.
+
+| Input / mode | Joint qualification |
+| --- | --- |
+| Ordinary USD/USDZ/ZIP | Existing explicit bindings and Task Program execution |
+| Native Gaussian USD/ZIP | Default physics, Hybrid, Gaussian enabled, one Arena |
+| Gaussian ZIP with NoRender | Replicated physics and source metadata; appearance omitted |
+
+Task objects retain their independent physical and semantic geometry. Native
+Gaussian rendering uses the existing #934 capability restrictions, including
+its Viser and whole-scene appearance-override limits. Gaussian regression cases
+activate when the Gaussian composition module is available; ordinary USD cases
+remain independent. A joint checkout containing both PRs is required to execute
+the complete Gaussian selection.

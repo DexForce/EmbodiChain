@@ -17,7 +17,9 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from importlib.util import find_spec
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -213,6 +215,141 @@ def _recipe(path: Path) -> UsdImportCfg:
             prefix + "/World/drawer": {"uid": "drawer"},
         },
     )
+
+
+@pytest.fixture
+def gaussian_scene_files(scene_files, tmp_path):
+    """A captured visual and its independent physical/semantic scene resources."""
+    from embodichain.gen_sim.scene_engine.pipeline.utils.scene_package import (
+        _export_scene_package,
+    )
+
+    source = scene_files["usd"]
+    ply = source.parent / "capture.ply"
+    fields = "x y z f_dc_0 f_dc_1 f_dc_2 opacity scale_0 scale_1 scale_2 rot_0 rot_1 rot_2 rot_3".split()
+    values = (0, 0, 0, 1.4, -1.4, -1.4, 4, *([math.log(0.05)] * 3), 1, 0, 0, 0)
+    ply.write_text(
+        "ply\nformat ascii 1.0\nelement vertex 1\n"
+        + "".join(f"property float {name}\n" for name in fields)
+        + "end_header\n"
+        + " ".join(map(str, values))
+        + "\n"
+    )
+    stage = Usd.Stage.Open(str(source))
+    visual = UsdGeom.Xform.Define(stage, "/World/capture")
+    visual.GetPrim().GetReferences().AddReference("./capture.ply")
+    visual.AddTranslateOp().Set(Gf.Vec3d(1.0, 0.6, 0.8))
+    stage.GetRootLayer().Save()
+    package = tmp_path / "gaussian_scene.zip"
+    _export_scene_package(scene_usd_path=source, destination=package)
+    return {"usd": source, "zip": package}
+
+
+@pytest.mark.parametrize("kind", ["usd", "zip"])
+@pytest.mark.skipif(
+    find_spec("embodichain.lab.sim.cfg.visuals") is None,
+    reason="Requires Gaussian visual integration from PR #934",
+)
+def test_gaussian_source_package_and_preset_resolve_without_world(
+    gaussian_scene_files, kind, tmp_path, monkeypatch
+):
+    from unittest.mock import Mock
+    import yaml
+    from embodichain.lab.gym.utils.composition import resolve_gym_components
+    from embodichain.lab.gym.utils.gym_utils import config_to_cfg
+
+    recipe = _recipe(gaussian_scene_files[kind])
+    prefix = "/Asset" if kind == "zip" else ""
+    trap = Mock(
+        side_effect=AssertionError("Static preflight must not allocate a World")
+    )
+    monkeypatch.setattr("dexsim.World", trap)
+    config = {
+        "id": "EmbodiedEnv-v1",
+        "physics": "default",
+        "env": {},
+        "robot": {"uid": "robot"},
+        "render_cfg": {"preset": "gaussian"},
+        "usd_scene": recipe.to_dict(),
+    }
+    resolved = resolve_gym_components(config, base_dir=tmp_path)
+    assert (
+        resolved.usd_scene_inventory["resource_types"][prefix + "/World/capture"]
+        == "visual_object"
+    )
+    resolved.validate_scene_bindings(
+        {"rigid_objects": [{"entity_id": "box", "simulation_uid": "target"}]}
+    )
+    cfg = config_to_cfg(config, source_path=tmp_path / "task.yaml")
+    assert cfg.sim_cfg.render_cfg.renderer == "hybrid"
+    assert cfg.sim_cfg.render_cfg.gaussian.enabled
+    trap.assert_not_called()
+
+
+@pytest.mark.subprocess_sim
+@pytest.mark.gpu
+@pytest.mark.skipif(
+    find_spec("embodichain.lab.sim.cfg.visuals") is None,
+    reason="Requires Gaussian visual integration from PR #934",
+)
+def test_gaussian_zip_no_render_retains_replicated_physics_and_source(
+    gaussian_scene_files,
+):
+    env = dict(os.environ, EMBODICHAIN_SIM_EXIT_PROCESS="0")
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import runpy,sys; from pathlib import Path; "
+            "scope=runpy.run_path(sys.argv[1]); scope['_exercise_gaussian_zip_no_render'](Path(sys.argv[2]))",
+            str(Path(__file__).resolve()),
+            str(gaussian_scene_files["zip"]),
+        ],
+        env=env,
+        check=True,
+        timeout=120,
+    )
+
+
+def _exercise_gaussian_zip_no_render(package):
+    from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+    from embodichain.lab.sim.cfg import RenderCfg
+
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            default_ground=False,
+            render_cfg=RenderCfg(renderer="no-render"),
+            num_envs=2,
+        )
+    )
+    asset = visual = imported = None
+    try:
+        imported = sim.add_usd(_recipe(package))
+        sim.prepare()
+        asset = sim.get_rigid_object("target")
+        visual = next(
+            value for key, value in imported.items() if key.endswith("/capture")
+        )
+        resolved = Path(asset.cfg.source.file_path)
+        assert (resolved.parent / "capture.ply").is_file()
+        assert asset.get_mass().cpu().tolist() == pytest.approx([0.25, 0.25])
+        metadata = visual.get_visual_elements()
+        assert metadata[0]["representation"] == "gaussian_splat"
+        assert metadata[0]["file_path"].endswith("capture.ply")
+        initial = asset.get_local_pose().clone()
+        sim.update(step=5)
+        sim.reset_objects_state(env_ids=[0])
+        assert np.allclose(
+            asset.get_local_pose()[0].cpu().numpy(), initial[0].cpu().numpy(), atol=1e-5
+        )
+        assert asset.get_local_pose()[1, 2] < initial[1, 2]
+    finally:
+        asset = visual = imported = None
+        sim.destroy(exit_process=False)
+        sim = None
+        SimulationManager.flush_cleanup_queue()
+    assert not resolved.exists()
 
 
 @pytest.mark.parametrize("kind", ["usd", "usdz", "zip"])
