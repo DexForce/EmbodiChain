@@ -108,6 +108,15 @@ DexSim retains descriptor updates and solver-constant refresh ownership.
 
 ## Mimic coupling
 
+On DexSim Default, `ArticulationCfg.mimic_compliance` maps exact mimic master
+names to natural-frequency and damping-ratio settings. The articulation
+preparation hook applies them to all replicas on each topology revision,
+before Default Direct GPU initialization. The public
+`Articulation.set_mimic_compliance()` writes the prepared articulation for
+selected environments. Both paths resolve names against each instance's
+native active-joint cache order and keep the authored ratios and offsets.
+Use zero for both parameters for hard coupling. Newton rejects these settings.
+
 MuJoCo-Warp mimic joints retain native equality constraints and contact-force
 coupling. `_configure_newton_mimic_compliance()` adjusts only the selected
 articulation's equality rows, respecting the solver's time-constant safety
