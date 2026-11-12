@@ -2346,6 +2346,8 @@ def test_prepare_initializes_runtime_for_backend_device_matrix(
     spawn_scene.bind.side_effect = lambda: events.append("bind")
 
     sim = object.__new__(SimulationManager)
+    sim._fluid_objects = {}
+    sim.num_envs = 1
     sync_render_state = MagicMock()
     sim.device = device
     sim._world = MagicMock()
@@ -2398,6 +2400,8 @@ def test_prepare_retries_runtime_and_binding_without_recommit() -> None:
     spawn_scene.builder.has_pending_changes = False
 
     sim = object.__new__(SimulationManager)
+    sim._fluid_objects = {}
+    sim.num_envs = 1
     sync_render_state = MagicMock()
     prepare_spawn_runtime = MagicMock(side_effect=[RuntimeError("first attempt"), None])
     sim.physics = SimpleNamespace(
@@ -2436,6 +2440,8 @@ def test_prepare_retries_camera_attachment_without_recommit() -> None:
     spawn_scene.builder.has_pending_changes = False
 
     sim = object.__new__(SimulationManager)
+    sim._fluid_objects = {}
+    sim.num_envs = 1
     sync_render_state = MagicMock()
     sim.physics = SimpleNamespace(
         name="default",
@@ -2475,6 +2481,8 @@ def test_prepare_syncs_render_state_once_per_topology_revision() -> None:
     sync_render_state = MagicMock(side_effect=lambda _result: events.append("sync"))
 
     sim = object.__new__(SimulationManager)
+    sim._fluid_objects = {}
+    sim.num_envs = 1
     sim.physics = SimpleNamespace(
         name="newton",
         prepare_spawn_runtime=MagicMock(),
@@ -2518,6 +2526,8 @@ def test_prepare_retries_render_state_sync_without_recommit() -> None:
     )
 
     sim = object.__new__(SimulationManager)
+    sim._fluid_objects = {}
+    sim.num_envs = 1
     sim.physics = SimpleNamespace(
         name="newton",
         prepare_spawn_runtime=MagicMock(),
@@ -2824,6 +2834,7 @@ def _make_camera_with_fake_views(
 
 def _make_camera_attachment_manager(num_envs: int = 2) -> SimulationManager:
     sim = object.__new__(SimulationManager)
+    sim._fluid_objects = {}
     sim.num_envs = num_envs
     sim.device = torch.device("cpu")
     sim._robots = {}
@@ -3329,6 +3340,8 @@ def test_prepare_detaches_camera_before_rebuilding_parent(rebuild: bool) -> None
 
     scene.commit.side_effect = commit
     sim = object.__new__(SimulationManager)
+    sim._fluid_objects = {}
+    sim.num_envs = 1
     sim._spawn_scene = scene
     sim._sensors = {"camera": camera}
     sim._default_plane = object()
@@ -3997,7 +4010,7 @@ def test_marker_update_in_observer_waits_for_deferred_final_frame() -> None:
     assert runtime.capture_calls[0]["sim_step"] == 1
 
 
-def test_reset_fluid_selects_rows_and_honors_exclusions():
+def test_reset_fluids_selects_rows_and_honors_exclusions():
     sim = object.__new__(SimulationManager)
     sim.physics = NewtonPhysicsBackend(sim)
     sim.num_envs = 2
@@ -4011,10 +4024,10 @@ def test_reset_fluid_selects_rows_and_honors_exclusions():
         "_deformable_objects",
     ):
         setattr(sim, name, {})
-    fluid, excluded = MagicMock(), MagicMock()
-    sim._fluid_objects = {"water": fluid, "other": excluded}
-    sim.reset_objects_state(env_ids=[1], excluded_uids=["other"])
-    excluded.reset.assert_not_called()
+    fluid, excluded_fluid = MagicMock(), MagicMock()
+    sim._fluid_objects = {"water": fluid, "other_fluid": excluded_fluid}
+    sim.reset_objects_state(env_ids=[1], excluded_uids=["other_fluid"])
+    excluded_fluid.reset.assert_not_called()
     fluid.reset.assert_called_once_with([1])
 
 

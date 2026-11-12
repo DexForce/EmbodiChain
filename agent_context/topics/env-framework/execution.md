@@ -331,6 +331,10 @@ not orchestrate multiple experiments or qualify kinematic playback.
   Use `evaluate_recorded_rules` to evaluate a compiled graph directly from a
   trusted trajectory in bounded chunks. It can use a recorded segment
   occurrence to select the matching control slots and acquisition revisions.
+  Qualified fluid recordings carry bounded particle-state sidecars. Kinematic
+  and control replay restore complete particle states at each recorded boundary;
+  dynamic replay restores only the initial particle state and recomputes later
+  fluid motion from recorded actions.
 - **Policy projection**: `rollout_buffer` retains actual policy observations,
   including sampled noise, and its existing obs/action/reward alignment for
   LeRobot/RL. It shares the acquisition boundary with raw history, rather than

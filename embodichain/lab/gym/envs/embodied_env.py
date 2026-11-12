@@ -33,6 +33,8 @@ import torch
 import numpy as np
 import gymnasium as gym
 
+from embodichain.lab.sim.cfg.fluid import FluidObjectCfg
+
 from dataclasses import MISSING, fields
 from typing import (
     TYPE_CHECKING,
@@ -74,6 +76,7 @@ from embodichain.lab.gym.envs.demo import (
     DemoSegmentResult,
     _as_bool_tuple,
 )
+from embodichain.lab.gym.utils.trajectory_state import FluidTrajectoryRecorder
 from embodichain.lab.gym.envs.types import ControllerAction
 from embodichain.lab.gym.envs.expert_trajectory import (
     ExpertTrajectoryCfg,
@@ -303,6 +306,9 @@ class EmbodiedEnvCfg(EnvCfg):
     rigid_object_group: List[RigidObjectGroupCfg] = []
 
     articulation: List[ArticulationCfg] = []
+
+    fluid_object: list[FluidObjectCfg] = []
+    """Fixed-count fluids owned by the physical environment component."""
 
     events: Union[object, None] = None
     """Event settings. Defaults to None, in which case no events are applied through the event manager.
@@ -707,6 +713,7 @@ class EmbodiedEnv(BaseEnv):
                 )
 
             self._traj_buffer: TensorDict | None = None
+            self._fluid_trajectory_recorder: FluidTrajectoryRecorder | None = None
             self._traj_steps: torch.Tensor | None = None
             self._traj_raw_action: EnvAction | None = None
             self._trajectory_action_kind: str | None = None
@@ -962,6 +969,26 @@ class EmbodiedEnv(BaseEnv):
                         policy[key] = storage[key]
                     # Existing consumers retain their transition-length view.
                     self.rollout_buffer = policy[:, : self._max_rollout_steps]
+        recorder = getattr(self, "_fluid_trajectory_recorder", None)
+        if recorder is not None:
+            recorder.capture(self, env_ids.tolist(), reset=True)
+
+    def _set_fluid_trajectory_recorder(
+        self, recorder: FluidTrajectoryRecorder | None
+    ) -> None:
+        """Bind one episode's fluid spool, or detach it after publication."""
+        if recorder is None:
+            self._fluid_trajectory_recorder = None
+            return
+        if not isinstance(recorder, FluidTrajectoryRecorder):
+            raise TypeError("recorder must be a FluidTrajectoryRecorder.")
+        if not self.cfg.record_trajectory or not self.cfg.fluid_object:
+            raise ValueError(
+                "Fluid recording requires trajectory and fluid configuration."
+            )
+        if self._fluid_trajectory_recorder is not None:
+            raise RuntimeError("A fluid trajectory recorder is already attached.")
+        self._fluid_trajectory_recorder = recorder
 
     def set_rollout_buffer(self, rollout_buffer: TensorDict) -> None:
         """Set the rollout buffer for episode data collection.
@@ -2795,17 +2822,27 @@ class EmbodiedEnv(BaseEnv):
                 "Trajectory recording requires an explicit observation frame and action."
             )
         manager._bind_schema(frame)
+        selected = (
+            active if active is not None else getattr(self, "_demo_active_mask", None)
+        )
         _write_raw_rollout(
             self._rollout_storage,
             self.episode_context,
             frame,
             action=self._traj_raw_action,
-            active=(
-                active
-                if active is not None
-                else getattr(self, "_demo_active_mask", None)
-            ),
+            active=selected,
         )
+        recorder = getattr(self, "_fluid_trajectory_recorder", None)
+        if recorder is not None:
+            ids = (
+                list(range(self.num_envs))
+                if selected is None
+                else torch.as_tensor(selected, dtype=torch.bool)
+                .nonzero()
+                .flatten()
+                .tolist()
+            )
+            recorder.capture(self, ids)
         self._traj_raw_action = None
 
     def _write_rl_rollout_step(
@@ -3753,6 +3790,9 @@ class EmbodiedEnv(BaseEnv):
         for cfg in self.cfg.rigid_object_group:
             self.sim.add_rigid_object_group(cfg=cfg)
 
+        for cfg in self.cfg.fluid_object:
+            self.sim.add_fluid_object(cfg)
+
     def preview_sensor_data(
         self,
         name: str,
@@ -4155,6 +4195,7 @@ class EmbodiedEnv(BaseEnv):
         env_ids: Sequence[int] | None = None,
         *,
         purpose: str = "recording",
+        extra_meta: Mapping[str, Any] | None = None,
     ) -> str:
         """Save a causally aligned trajectory to a ``.pt`` file.
 
@@ -4170,6 +4211,7 @@ class EmbodiedEnv(BaseEnv):
             env_ids: Env indices to save (default: all). Each saved env's actual
                 recorded length is stored in ``meta["lengths"]``.
             purpose: Normal recording or explicitly labeled diagnostic export.
+            extra_meta: Additional artifact metadata; standard fields cannot be replaced.
 
         Raises:
             RuntimeError: If trajectory recording was never enabled.
@@ -4277,6 +4319,17 @@ class EmbodiedEnv(BaseEnv):
             meta["episode_uuid"] = meta["episode_uuids"][0]
             meta["source_episode_uuid"] = meta["source_episode_uuids"][0]
             meta["program_hash"] = meta["demo_episodes"][0].get("program_hash")
+        if extra_meta is not None:
+            if not isinstance(extra_meta, Mapping) or not all(
+                type(key) is str for key in extra_meta
+            ):
+                raise TypeError("extra_meta must be a string-keyed mapping.")
+            duplicate = set(extra_meta) & set(meta)
+            if duplicate:
+                raise ValueError(
+                    f"extra_meta cannot replace trajectory fields: {sorted(duplicate)}"
+                )
+            meta.update(copy.deepcopy(dict(extra_meta)))
         replay_path = str(Path(path).resolve())
         for episode in meta["demo_episodes"]:
             episode["trajectory_path"] = replay_path
