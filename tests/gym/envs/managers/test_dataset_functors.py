@@ -2329,7 +2329,15 @@ def test_recording_journal_survives_restart_and_deduplicates_commits(tmp_path) -
         MockEnvForDataset(num_envs=1, has_sensors=False),
     )
     identity = str(uuid4())
-    metadata = {"episode_uuid": identity, "run_uuid": str(uuid4())}
+    metadata = {
+        "episode_uuid": identity,
+        "run_uuid": str(uuid4()),
+        "episode_outcome": {
+            "identity": {"episode_uuid": identity},
+            "acceptance": {"accepted": False},
+            "persistence": None,
+        },
+    }
     observations = TensorDict(
         {
             "robot": {
@@ -2346,6 +2354,14 @@ def test_recording_journal_survives_restart_and_deduplicates_commits(tmp_path) -
     recorder.finalize()
     root = recorder.dataset_full_path
     assert recover_recording(root)["ok"]
+    sidecar = json.loads((root / "meta/embodichain_episodes.jsonl").read_text())
+    assert sidecar["episode_outcome"]["acceptance"] == {"accepted": False}
+    assert sidecar["episode_outcome"]["persistence"] == {
+        "dataset_selected": True,
+        "dataset": [{"status": "persisted", "episode_uuid": identity}],
+        "trajectory": None,
+    }
+    assert metadata["episode_outcome"]["persistence"] is None
 
     # No official SDK reopen is attempted; this exercises persistent duplicate
     # detection with the same root after all SDK writers have been finalized.

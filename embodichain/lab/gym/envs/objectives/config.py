@@ -60,6 +60,7 @@ class OrderedPlacementObjectiveCfg:
     max_linear_speed: float = MISSING
     max_angular_speed: float = MISSING
     type: str = "ordered_stable_regions"
+    condition: str | None = None
 
 
 def _fields(value: object, expected: set[str], label: str) -> Mapping[str, Any]:
@@ -113,6 +114,8 @@ def decode_objective(value: object) -> OrderedPlacementObjectiveCfg:
         "max_linear_speed",
         "max_angular_speed",
     }
+    if isinstance(value, Mapping) and "condition" in value:
+        fields.add("condition")
     data = _fields(value, fields, "objective")
     if data["type"] != "ordered_stable_regions":
         raise ValueError("objective.type must be 'ordered_stable_regions'.")
@@ -140,6 +143,11 @@ def decode_objective(value: object) -> OrderedPlacementObjectiveCfg:
         hold_seconds=_number(data["hold_seconds"], "hold_seconds", positive=True),
         max_linear_speed=_number(data["max_linear_speed"], "max_linear_speed"),
         max_angular_speed=_number(data["max_angular_speed"], "max_angular_speed"),
+        condition=(
+            None
+            if data.get("condition") is None
+            else _text(data["condition"], "objective.condition")
+        ),
     )
     cfg.validate()
     return cfg

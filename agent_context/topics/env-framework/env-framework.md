@@ -150,6 +150,12 @@ metadata before/after copying. It never queries
 live state or substitutes a previous frame. Results own values, validity,
 reasons and temporal identities, without another descriptor model.
 
+Use `advance_observation` to feed a compiled `RuleSession` from explicit
+control slots and qualified host captures. The same graph evaluates recorded
+slots through `evaluate_recorded_rules` in bounded chunks. A row retains
+its own result at its recorded boundary. Missing and foreign evidence cannot
+supply measurements or satisfy a predicate.
+
 `export_observation_history` projects the manager's schema onto one owned numeric
 snapshot. Legacy trajectory state views and raw history share that snapshot's
 storage. The default snapshot is CPU; file export can retain its device for
@@ -192,10 +198,12 @@ opt-in instead processes joint targets through the configured policy terms,
 retaining exact FK targets and expert recording schema. Both paths retain the
 ordinary observation, reward, termination, and rollout lifecycle.
 
-Read final task success before resetting scene/bridge state. A Task Program
-reports success only after its bridge completes normally and combines runtime,
-post-policy and validator acceptance. Segment acceptance and append-only
-dataset persistence are separate contracts; see
+A Task Program's bridge combines runtime, post-policy and segment acceptance.
+For deployments with final predicates, `is_task_success()` combines bridge
+completion with fresh raw physical measurements. The demo executor seals the
+measurement and outcome for each episode row at its terminal boundary.
+Reset-time recording consumes that sealed result before clearing row state.
+Segment acceptance and append-only dataset persistence remain separate; see
 [Task Programs](../task-programs/task-programs.md) and
 [data pipeline](../data-pipeline/data-pipeline.md).
 
