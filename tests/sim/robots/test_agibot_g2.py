@@ -68,7 +68,12 @@ def test_g2_native_joint_and_mimic_contract() -> None:
         for name in cfg.control_parts[f"{side}_eef"]:
             if name in mimics:
                 assert cfg.joint_drive_props.target_mode[f"{side}_eef"] == "none"
-    assert cfg.joint_drive_props.max_effort is None
+    for part, names in cfg.control_parts.items():
+        for name in names:
+            effort = cfg.joint_drive_props.max_effort.get(
+                name, cfg.joint_drive_props.max_effort.get(part)
+            )
+            assert effort == float(moving[name].find("limit").get("effort"))
     assert cfg.joint_drive_props.max_velocity is None
     # Native wheel centers: 0.16675 - 0.13675 m; cylinder radius: 0.07 m.
     # A root at Z=0 penetrates the ground and destabilizes the fixed chassis.
@@ -113,7 +118,11 @@ def test_g2_roundtrip_and_local_overrides_do_not_download(
     assert restored.root_props.fixed_base is False
     assert restored.uid == "local_g2"
     np.testing.assert_array_equal(restored.solver_cfg["left_arm"].tcp, tcp)
-    assert restored.joint_drive_props.max_effort == {"left_arm": 30.0}
+    defaults = AgibotG2Cfg.from_dict({"fpath": str(_URDF)})
+    assert restored.joint_drive_props.max_effort == {
+        **defaults.joint_drive_props.max_effort,
+        "left_arm": 30.0,
+    }
     assert overrides == original
 
 
@@ -286,9 +295,11 @@ class _AgibotG2Simulation:
             reconstructed = robot.compute_fk(solved, name=part, to_matrix=True)
             torch.testing.assert_close(reconstructed, actual, atol=1e-5, rtol=0)
         for part in ("left_eef", "right_eef"):
+            leader_ids = robot.get_joint_ids(name=part, remove_mimic=True)
+            assert robot.get_joint_drive(joint_ids=leader_ids)[2].item() == 10.0
             robot.set_qpos(
                 torch.tensor([[-0.6]]),
-                joint_ids=robot.get_joint_ids(name=part, remove_mimic=True),
+                joint_ids=leader_ids,
             )
         # At Z=0 the wheel cylinders penetrate the ground, producing nonfinite
         # chassis states within eight steps. Exercise a full second plus motion.
