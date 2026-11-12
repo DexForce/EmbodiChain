@@ -6,6 +6,8 @@ embodichain.lab.task_program
    :undoc-members:
    :exclude-members: TaskProgramCfg, TaskProgramIntegrationCfg, PoseCfg, TargetRefCfg,
       CyclicPoseTargetCfg, PickCfg, PlaceCfg, HandOverCfg, RegisteredSemanticCallCfg,
+      PoseTargetCfg, SceneRelativePoseTargetCfg, MoveHeldObjectCfg, HoldPostCfg,
+      NormalizedTaskProgram, normalize_task_program,
       InvokeCfg, SequenceCfg, RepeatCfg, SegmentCfg, ParallelCfg, BarrierCfg,
       WaitStablePostCfg, ObjectNearTargetValidatorCfg,
       ObjectNearRelativeTargetValidatorCfg, ObjectLiftedValidatorCfg,
@@ -24,6 +26,12 @@ embodichain.lab.task_program
       PoseCfg
       TargetRefCfg
       CyclicPoseTargetCfg
+      PoseTargetCfg
+      SceneRelativePoseTargetCfg
+      MoveHeldObjectCfg
+      HoldPostCfg
+      NormalizedTaskProgram
+      normalize_task_program
       PickCfg
       PlaceCfg
       HandOverCfg
@@ -435,4 +443,37 @@ Segment acceptance contracts
    :members:
 
 .. autoclass:: SegmentEvidenceCfg
+Shared targets and duration policies
+------------------------------------
+
+.. py:class:: PoseTargetCfg
+   :module: embodichain.lab.task_program.language.schema
+   :no-typesetting:
+   :no-index-entry:
+
+.. autoclass:: PoseTargetCfg
+   :members:
+
+.. py:class:: SceneRelativePoseTargetCfg
+   :module: embodichain.lab.task_program.language.schema
+   :no-typesetting:
+   :no-index-entry:
+
+.. autoclass:: SceneRelativePoseTargetCfg
+   :members:
+
+.. py:class:: MoveHeldObjectCfg
+   :module: embodichain.lab.task_program.language.schema
+   :no-typesetting:
+   :no-index-entry:
+
+.. autoclass:: MoveHeldObjectCfg
+   :members:
+
+.. py:class:: HoldPostCfg
+   :module: embodichain.lab.task_program.language.schema
+   :no-typesetting:
+   :no-index-entry:
+
+.. autoclass:: HoldPostCfg
    :members:

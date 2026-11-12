@@ -178,6 +178,29 @@ def test_project_metadata_has_no_direct_dependencies() -> None:
     assert direct_dependencies == []
 
 
+@pytest.mark.parametrize(
+    ("version", "supported"),
+    [
+        ("0.6.0.dev11491", False),
+        ("0.6.0rc1", True),
+    ],
+)
+def test_dexsim_dependency_selects_cable_release_wheel(
+    version: str, supported: bool
+) -> None:
+    requirements = [
+        Requirement(value)
+        for value in _read_project_metadata()["project"]["dependencies"]
+    ]
+    dexsim_requirement = next(
+        requirement
+        for requirement in requirements
+        if requirement.name.replace("_", "-") == "dexsim-engine"
+    )
+
+    assert dexsim_requirement.specifier.contains(version) is supported
+
+
 def test_wheel_metadata_accepts_index_dependencies(tmp_path: Path) -> None:
     wheel_path = _write_test_wheel(
         tmp_path,

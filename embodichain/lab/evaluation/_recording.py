@@ -168,6 +168,7 @@ def evaluate_recorded_rules(
     shortest = min(available_ends)
     fields = {}
     descriptors = {}
+    expected_names = compiled._preset_joint_names()
     for field in compiled.required_fields:
         sample = history["fields"].get(field)
         if (
@@ -180,7 +181,7 @@ def evaluate_recorded_rules(
             continue
         values, valid = sample["values"], sample["valid"]
         descriptor = sample["descriptor"]
-        projection = _field_projection(field, descriptor)
+        projection = _field_projection(field, descriptor, expected_names)
         if projection is None:
             continue
         if (
@@ -338,7 +339,7 @@ def _foreign_layouts(descriptors):
     return invalid
 
 
-def _field_projection(field, descriptor):
+def _field_projection(field, descriptor, expected_names=None):
     """Return a projection for qualified channels, or None for foreign evidence."""
 
     def get(name, default=None):
@@ -350,6 +351,10 @@ def _field_projection(field, descriptor):
     shape, names, units = (get(name, ()) for name in ("shape", "joint_names", "units"))
     if not all(isinstance(value, (tuple, list)) for value in (shape, names, units)):
         return None
+    if expected_names is not None and field in expected_names:
+        expected = expected_names[field]
+        if expected is None or tuple(names) != tuple(expected):
+            return None
     if quantity in ("pose", "segment_start_pose"):
         contract = ("arena", "xyz_xyzw", ("m", "unitless"), (7,))
     elif quantity in ("lin_vel", "ang_vel"):

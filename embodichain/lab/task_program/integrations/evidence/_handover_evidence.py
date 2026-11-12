@@ -265,7 +265,7 @@ def transfer_record(
     released = event("trajectory_segment_entered", "handover_release")
     retreat = event("trajectory_segment_entered", "source_retreat")
     finished = event("trajectory_completed", "source_retreat")
-    completed = event("action_completed", "source_retreat")
+    completed = event("skill_completed", "source_retreat")
     if (
         not planned
         <= acquired
@@ -406,7 +406,7 @@ def hold_records(
         _one(
             value
             for value in call["events"]
-            if value["kind"] == "action_completed"
+            if value["kind"] == "skill_completed"
             and value.get("invocation_id") == call["invocation_id"]
             and value.get("invocation_revision") == call["invocation_revision"]
         )["timestamp"]

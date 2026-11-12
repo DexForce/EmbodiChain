@@ -84,8 +84,8 @@ def test_shared_runtime_does_not_import_task_engine():
 
 def test_task_engine_does_not_implement_skills_planners_or_contact_sensors():
     implementations = {
-        "AtomicAction",
-        "AtomicActionEngine",
+        "AtomicSkill",
+        "AtomicSkillEngine",
         "MotionGenerator",
         "BasePlanner",
         "CuroboPlanner",

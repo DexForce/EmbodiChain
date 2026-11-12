@@ -158,6 +158,7 @@ class _BoundPredicate:
     definition: PredicateDefinition
     bindings: Mapping[str, str]
     params: Mapping[str, Any]
+    kind: str
 
 
 def _identifier(value: object) -> bool:
@@ -287,7 +288,10 @@ class PredicateRegistry:
                 key = json.dumps(payload[name], sort_keys=True, separators=(",", ":"))
                 if key not in predicates:
                     predicates[key] = _BoundPredicate(
-                        definition, MappingProxyType(bindings), _freeze(params)
+                        definition,
+                        MappingProxyType(bindings),
+                        _freeze(params),
+                        rule.kind,
                     )
                 nodes[name] = predicates[key]
             elif isinstance(rule, BooleanRule):
@@ -371,12 +375,14 @@ class PredicateRegistry:
                 [1, roots, payload], sort_keys=True, separators=(",", ":")
             ).encode()
         ).hexdigest()
-        return CompiledEvaluation(
+        compiled = CompiledEvaluation(
             roots,
             tuple(sorted(fields)),
             identity,
             tuple((name, nodes[name]) for name in order),
         )
+        compiled._preset_joint_names()
+        return compiled
 
 
 @dataclass(frozen=True, slots=True)
@@ -449,6 +455,54 @@ class CompiledEvaluation:
                 _check_input_contract(
                     name, rule.definition, rule.bindings, field_kinds, field_layouts
                 )
+
+    def _preset_joint_names(self):
+        layouts = {}
+        for _, node in self._nodes:
+            if (
+                isinstance(node, _BoundPredicate)
+                and node.kind == "command_preset_match"
+            ):
+                field, names = node.bindings["position"], node.params["joint_names"]
+                if field in layouts and layouts[field] != names:
+                    raise ValueError(
+                        "Command presets on one field require one native joint layout."
+                    )
+                layouts[field] = names
+        return layouts
+
+    def _bind_joint_names(self, layouts, *, cache=None):
+        """Bind unresolved presets from a trusted native owner, never recorded data."""
+        cache = {} if cache is None else cache
+        nodes = []
+        changed = {}
+        for name, node in self._nodes:
+            if (
+                isinstance(node, _BoundPredicate)
+                and node.kind == "command_preset_match"
+            ):
+                names = tuple(layouts[node.bindings["position"]])
+                expected = node.params["joint_names"]
+                if expected is not None and tuple(expected) != names:
+                    raise ValueError(
+                        "Command preset differs from the native joint layout."
+                    )
+                if expected is None:
+                    key = (id(node), names)
+                    if key not in cache:
+                        params = node.definition.normalize(
+                            {**node.params, "joint_names": names}
+                        )
+                        cache[key] = replace(node, params=_freeze(dict(params)))
+                    node = cache[key]
+                    changed[name] = names
+            nodes.append((name, node))
+        if not changed:
+            return self
+        identity = sha256(
+            json.dumps([self.identity, changed], sort_keys=True).encode()
+        ).hexdigest()
+        return replace(self, identity=identity, _nodes=tuple(nodes))
 
     def _evaluate(self, values, size, device, valid, advance, *, measurements=None):
         import torch

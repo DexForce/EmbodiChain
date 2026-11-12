@@ -44,31 +44,31 @@ from embodichain.lab.gym.envs.expert_trajectory import (
     ExpertActionSpec,
     encode_expert_action,
 )
-from embodichain.lab.sim.atomic_actions.bindings import (
+from embodichain.lab.sim.atomic_skills.bindings import (
     JointPositionTarget,
     RuntimeEndpointTarget,
 )
-from embodichain.lab.sim.atomic_actions.execution import (
+from embodichain.lab.sim.atomic_skills.execution import (
     ExecutionEvent,
     ExecutionEventKind,
 )
-from embodichain.lab.sim.atomic_actions.policies import MotionPolicy, RecoveryPolicy
-from embodichain.lab.sim.atomic_actions.primitives.pick_up import PickUpOptions
-from embodichain.lab.sim.atomic_actions.primitives.place import PlaceOptions
-from embodichain.lab.sim.atomic_actions.runner import ExecutionRunnerCfg
-from embodichain.lab.sim.atomic_actions.runtime_commands import (
+from embodichain.lab.sim.atomic_skills.policies import MotionPolicy, RecoveryPolicy
+from embodichain.lab.sim.atomic_skills.primitives.pick_up import PickUpOptions
+from embodichain.lab.sim.atomic_skills.primitives.place import PlaceOptions
+from embodichain.lab.sim.atomic_skills.runner import ExecutionRunnerCfg
+from embodichain.lab.sim.atomic_skills.runtime_commands import (
     EndpointCommand,
     JointPositionPayload,
     RuntimeCommandFrame,
     RuntimeCommandPayload,
 )
-from embodichain.lab.sim.atomic_actions.state import (
+from embodichain.lab.sim.atomic_skills.state import (
     PlanningContext,
     RobotObservation,
     SceneSnapshot,
     TaskState,
 )
-from embodichain.lab.sim.atomic_actions.tracking import TrackingPolicy
+from embodichain.lab.sim.atomic_skills.tracking import TrackingPolicy
 from embodichain.lab.task_program.semantics.calls import (
     Pick,
     Place,
@@ -522,7 +522,7 @@ class _TerminalFailedRuntime(_FakeRuntime):
             task_state=running.task_state,
             events=(
                 ExecutionEvent(
-                    kind=ExecutionEventKind.ACTION_PLANNING_FAILED,
+                    kind=ExecutionEventKind.SKILL_PLANNING_FAILED,
                     timestamp=self.clock.now(),
                     skill_id="slide",
                     invocation_id="open-drawer-call",
@@ -1068,7 +1068,7 @@ def test_bridge_progress_counts_only_fixed_pick_place_calls(
     )
     policies = {
         "motion_policy": MotionPolicy(sample_count=PROGRESS_SAMPLE_COUNT),
-        "recovery_policy": RecoveryPolicy(max_replans=0, max_action_retries=0),
+        "recovery_policy": RecoveryPolicy(max_replans=0, max_skill_retries=0),
         "tracking_policy": TrackingPolicy.timed(),
         **overrides,
     }
@@ -1076,7 +1076,7 @@ def test_bridge_progress_counts_only_fixed_pick_place_calls(
     compiler.integration.link_call.return_value.preset = SkillPolicyPreset(
         "progress",
         effect_assurance=EffectAssurance.PROJECTED,
-        action_option_templates={"pick": PickUpOptions(), "place": PlaceOptions()},
+        skill_option_templates={"pick": PickUpOptions(), "place": PlaceOptions()},
         **policies,
     )
     runtime.compiler = compiler
@@ -1843,7 +1843,7 @@ def test_zero_command_terminal_runtime_failure_preserves_trace_and_validates_onc
     )
     assert runtime_trace["events"] == [
         {
-            "kind": "action_planning_failed",
+            "kind": "skill_planning_failed",
             "timestamp": 0.0,
             "skill_id": "slide",
             "invocation_id": "open-drawer-call",
@@ -3152,13 +3152,98 @@ def test_segment_contract_filters_incoming_rows_and_reports_unsupported_evidence
         assert blocked_contract["outcomes"][0]["status"] == ["not_run", "not_run"]
 
 
+def test_segment_prerequisite_uses_the_native_bound_preset():
+    from types import SimpleNamespace
+    from embodichain.lab.evaluation import (
+        EvaluationSpec,
+        PredicateSpec,
+        builtin_predicates,
+    )
+    from embodichain.lab.gym.envs.episode_context import EpisodeContext
+    from embodichain.lab.gym.envs.managers.observation_types import (
+        ObservationDescriptor,
+        ObservationFrame,
+        ObservationSample,
+    )
+    from embodichain.lab.gym.envs.task_program._segment_contract import (
+        _check_prerequisites,
+    )
+    from embodichain.lab.task_program.compiler.program import _CompiledSegmentEvidence
+    from embodichain.lab.task_program.integrations.simulation.bindings import (
+        _bind_evaluation_joint_names,
+    )
+
+    field = "robot/hand/qpos"
+    unbound = builtin_predicates().compile(
+        EvaluationSpec(
+            {
+                "open": PredicateSpec(
+                    "command_preset_match",
+                    {"position": field},
+                    {
+                        "preset": "open",
+                        "positions": [0.0, 1.0],
+                        "tolerance": 0.01,
+                    },
+                ),
+            },
+            ("open",),
+        )
+    )
+    robot = SimpleNamespace(
+        control_parts={"hand": ["finger_.*"]},
+        joint_names=["finger_a", "finger_b"],
+        get_joint_ids=lambda *, name: [1, 0],
+    )
+    conditions = _bind_evaluation_joint_names({"open": unbound}, robot)
+    evidence = (_CompiledSegmentEvidence("condition", "open", None, True, unbound),)
+    owner = EpisodeContext(1)
+    owner._begin_episode([0])
+    for names, expected in (
+        (("finger_b", "finger_a"), True),
+        (("finger_a", "finger_b"), False),
+    ):
+        descriptor = ObservationDescriptor(
+            "hand",
+            "qpos",
+            "joint",
+            "joint_order",
+            ("joint_units",),
+            (2,),
+            torch.float32,
+            joint_names=names,
+        )
+        sample = ObservationSample(
+            descriptor,
+            torch.tensor([[0.0, 1.0]]),
+            torch.ones(1, dtype=torch.bool),
+            (None,),
+        )
+        frame = ObservationFrame(
+            None, {field: sample}, owner.episode_ids, 1, episode_owner=owner
+        )
+        accepted, report = _check_prerequisites(
+            evidence,
+            torch.ones(1, dtype=torch.bool),
+            torch.tensor([0]),
+            None,
+            lambda fields: frame,
+            owner,
+            conditions,
+        )
+        assert accepted.tolist() == [expected]
+        assert (
+            report[0]["evidence"]["evaluation_identity"] == conditions["open"].identity
+        )
+
+
 def test_segment_contract_distinguishes_symbolic_hold_release_and_measured_lift():
     from types import SimpleNamespace
 
     from embodichain.lab.gym.envs.task_program._segment_contract import _check_outcomes
-    from embodichain.lab.sim.atomic_actions.affordance import Affordance
-    from embodichain.lab.sim.atomic_actions.core import ObjectSemantics
-    from embodichain.lab.sim.atomic_actions.state import HeldObjectState
+    from embodichain.lab.sim.atomic_skills.affordance import Affordance
+    from embodichain.lab.sim.atomic_skills.core import ObjectSemantics
+    from embodichain.lab.sim.atomic_skills.state import HeldObjectState
     from embodichain.lab.task_program.compiler.program import (
         _CompiledSegmentContract,
         _CompiledSegmentEvidence,

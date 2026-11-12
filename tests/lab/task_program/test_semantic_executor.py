@@ -30,15 +30,15 @@ import pytest
 import torch
 
 import embodichain.lab.task_program.runtime.executor as runtime_module
-from embodichain.lab.sim.atomic_actions import (
-    ActionBinding,
-    ActionInvocation,
-    ActionOptions,
-    ActionPlan,
+from embodichain.lab.sim.atomic_skills import (
+    SkillBinding,
+    SkillInvocation,
+    SkillOptions,
+    SkillPlan,
     Affordance,
     ArticulationJointState,
-    AtomicAction,
-    AtomicActionEngine,
+    AtomicSkill,
+    AtomicSkillEngine,
     CommandAcknowledgement,
     EffectVerificationRequirement,
     EffectVerificationRequest,
@@ -57,7 +57,7 @@ from embodichain.lab.sim.atomic_actions import (
     PhaseEffectGateRequest,
     PlanningContext,
     RecoveryPolicy,
-    ResolvedActionRequest,
+    ResolvedSkillRequest,
     RobotObservation,
     SceneSnapshot,
     SkillBindingContract,
@@ -70,13 +70,13 @@ from embodichain.lab.sim.atomic_actions import (
     TrackingFeedbackSourceRef,
     TrackingProjectorRef,
 )
-from embodichain.lab.sim.atomic_actions.tracking import TrackingPolicy
-from embodichain.lab.sim.atomic_actions.runtime_commands import (
+from embodichain.lab.sim.atomic_skills.tracking import TrackingPolicy
+from embodichain.lab.sim.atomic_skills.runtime_commands import (
     EndpointCommand,
     JointPositionPayload,
     RuntimeCommandFrame,
 )
-from embodichain.lab.sim.atomic_actions.affordance_sampling import (
+from embodichain.lab.sim.atomic_skills.affordance_sampling import (
     AffordanceSamplingContext,
 )
 from embodichain.lab.task_program.semantics.calls import (
@@ -284,7 +284,7 @@ class _EffectGoal:
     target_position: float
 
 
-class _EffectAction(AtomicAction[_EffectGoal, ActionOptions]):
+class _EffectAction(AtomicSkill[_EffectGoal, SkillOptions]):
     """Zero-frame action with an explicit verified articulation effect."""
 
     skill_id: ClassVar[str] = "runtime_test_effect"
@@ -298,16 +298,16 @@ class _EffectAction(AtomicAction[_EffectGoal, ActionOptions]):
 
     def _scene_dependencies(
         self,
-        request: ResolvedActionRequest[_EffectGoal, ActionOptions],
+        request: ResolvedSkillRequest[_EffectGoal, SkillOptions],
     ) -> tuple[str, ...]:
         del request
         return ("fixture",)
 
     def _plan(
         self,
-        request: ResolvedActionRequest[_EffectGoal, ActionOptions],
+        request: ResolvedSkillRequest[_EffectGoal, SkillOptions],
         context: PlanningContext,
-    ) -> ActionPlan:
+    ) -> SkillPlan:
         goal = self.require_goal(request)
         self.plan_count += 1
         self.sampling_contexts.append(context.affordance_sampling)
@@ -342,9 +342,9 @@ class _EffectlessAction(_EffectAction):
 
     def _plan(
         self,
-        request: ResolvedActionRequest[_EffectGoal, ActionOptions],
+        request: ResolvedSkillRequest[_EffectGoal, SkillOptions],
         context: PlanningContext,
-    ) -> ActionPlan:
+    ) -> SkillPlan:
         goal = self.require_goal(request)
         self.plan_count += 1
         return self.build_command_plan(
@@ -372,7 +372,7 @@ class _WorkflowEffectGoal:
             raise TypeError("attach must be exactly bool.")
 
 
-class _WorkflowEffectAction(AtomicAction[_WorkflowEffectGoal, ActionOptions]):
+class _WorkflowEffectAction(AtomicSkill[_WorkflowEffectGoal, SkillOptions]):
     """Zero-frame action that commits only a verified held-object effect."""
 
     skill_id: ClassVar[str] = "runtime_test_workflow_primary"
@@ -389,9 +389,9 @@ class _WorkflowEffectAction(AtomicAction[_WorkflowEffectGoal, ActionOptions]):
 
     def _plan(
         self,
-        request: ResolvedActionRequest[_WorkflowEffectGoal, ActionOptions],
+        request: ResolvedSkillRequest[_WorkflowEffectGoal, SkillOptions],
         context: PlanningContext,
-    ) -> ActionPlan:
+    ) -> SkillPlan:
         goal = self.require_goal(request)
         endpoint = request.binding.endpoint(self.source_slot, "motion")
         task_state_key = endpoint.task_state_key
@@ -486,7 +486,7 @@ class _Workflow:
 @dataclass(frozen=True, slots=True)
 class _Grounded:
     analyzed: object
-    invocation: ActionInvocation
+    invocation: SkillInvocation
     effect_spec: SemanticEffectSpec | None
     effect_monitor: EffectMonitor | None
     eligible_mask: torch.Tensor
@@ -496,13 +496,13 @@ class _Grounded:
 
 @dataclass(frozen=True, slots=True)
 class _Integration:
-    engine: AtomicActionEngine
+    engine: AtomicSkillEngine
     scene_registry: SceneRegistry
 
     @property
     def robot_profile(self) -> object:
         """Expose the production capability surface used by the facade."""
-        return SimpleNamespace(skills=self.engine.skills)
+        return SimpleNamespace(skills=self.engine.skill_catalog)
 
 
 class _Compiler(SemanticCallCompiler):
@@ -510,7 +510,7 @@ class _Compiler(SemanticCallCompiler):
 
     def __init__(
         self,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
         decisions: tuple[EffectMonitorDecision, ...],
         plan_success: tuple[torch.Tensor, ...],
         runner_cfg: ExecutionRunnerCfg,
@@ -545,7 +545,7 @@ class _Compiler(SemanticCallCompiler):
         self.ground_count = 0
         self.ground_timestamps: list[float] = []
         self.ground_task_masks: list[torch.Tensor | None] = []
-        self.invocations: list[ActionInvocation] = []
+        self.invocations: list[SkillInvocation] = []
         self.monitors: list[_DecisionMonitor] = []
 
     @property
@@ -581,7 +581,7 @@ class _Compiler(SemanticCallCompiler):
         state = context.task.get_articulation_joint_state("fixture", "joint")
         self.ground_task_masks.append(None if state is None else state.env_mask.clone())
         call = workflow.calls[call_index]
-        invocation = ActionInvocation(
+        invocation = SkillInvocation(
             skill_id=self._skill_id,
             goal=_EffectGoal(
                 self._plan_success[call_index].clone(),
@@ -597,8 +597,8 @@ class _Compiler(SemanticCallCompiler):
             tracking_policy=TrackingPolicy.timed(),
             recovery_policy=RecoveryPolicy(
                 max_replans=0,
-                max_action_retries=0,
-                action_timeout=100.0,
+                max_skill_retries=0,
+                skill_timeout=100.0,
             ),
             invocation_id=invocation_id or f"{workflow.workflow_id}:{call_index}",
             revision=revision,
@@ -652,7 +652,7 @@ class _Compiler(SemanticCallCompiler):
             effect_monitor_ref=None,
             bound=SimpleNamespace(
                 robot_profile=SimpleNamespace(profile_id="runtime_test_profile"),
-                binding=SimpleNamespace(action_binding=invocation.binding),
+                binding=SimpleNamespace(skill_binding=invocation.binding),
                 linked=SimpleNamespace(
                     descriptor=SimpleNamespace(skill_id=invocation.skill_id)
                 ),
@@ -678,7 +678,7 @@ class _WorkflowRecoveryCompiler(SemanticCallCompiler):
 
     def __init__(
         self,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
         decisions: tuple[_WorkflowEffectDecision, ...],
         *,
         max_recovery_attempts: int,
@@ -689,7 +689,7 @@ class _WorkflowRecoveryCompiler(SemanticCallCompiler):
         self.analysis_windows: list[tuple[str, ...]] = []
         self.grounded_calls: list[SemanticCallSpec] = []
         self.grounded_masks: list[torch.Tensor] = []
-        self.invocations: list[ActionInvocation] = []
+        self.invocations: list[SkillInvocation] = []
 
     @property
     def integration(self) -> _Integration:
@@ -754,7 +754,7 @@ class _WorkflowRecoveryCompiler(SemanticCallCompiler):
                 "Workflow-recovery test compiler accepts Pick, Place, or HandOver."
             )
         object_id = call.object.entity_id
-        binding = ActionBinding(
+        binding = SkillBinding(
             owner_id=self.integration.engine.binding_owner_id,
             endpoints=(
                 EndpointBinding(
@@ -773,10 +773,10 @@ class _WorkflowRecoveryCompiler(SemanticCallCompiler):
         tracking_policy = TrackingPolicy.timed()
         recovery_policy = RecoveryPolicy(
             max_replans=0,
-            max_action_retries=0,
-            action_timeout=100.0,
+            max_skill_retries=0,
+            skill_timeout=100.0,
         )
-        invocation = ActionInvocation(
+        invocation = SkillInvocation(
             skill_id=action_type.skill_id,
             goal=_WorkflowEffectGoal(object_id=object_id, attach=attach),
             binding=binding,
@@ -841,7 +841,7 @@ class _WorkflowRecoveryCompiler(SemanticCallCompiler):
             effect_monitor_ref=None,
             bound=SimpleNamespace(
                 robot_profile=SimpleNamespace(profile_id="runtime_test_profile"),
-                binding=SimpleNamespace(action_binding=binding),
+                binding=SimpleNamespace(skill_binding=binding),
                 linked=SimpleNamespace(
                     descriptor=SimpleNamespace(skill_id=invocation.skill_id)
                 ),
@@ -874,7 +874,7 @@ class _WorkflowRecoveryCompiler(SemanticCallCompiler):
 class _System:
     runtime: SemanticCallExecutor
     compiler: _Compiler
-    engine: AtomicActionEngine
+    engine: AtomicSkillEngine
     action: _EffectAction
     observation: _ObservationProvider
     sink: _CommandSink
@@ -886,7 +886,7 @@ class _System:
 class _WorkflowRecoverySystem:
     runtime: SemanticCallExecutor
     compiler: _WorkflowRecoveryCompiler
-    engine: AtomicActionEngine
+    engine: AtomicSkillEngine
     observation: _ObservationProvider
     sink: _CommandSink
     collector: _Collector
@@ -931,10 +931,10 @@ class _RecordingPlanTransformFactory:
         request: TaskProgramPlanRequest,
         context: PlanningContext,
         *,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> PlanningContext:
         assert isinstance(request, TaskProgramPlanRequest)
-        assert isinstance(engine, AtomicActionEngine)
+        assert isinstance(engine, AtomicSkillEngine)
         self.prepare_calls += 1
         return replace(
             context,
@@ -950,9 +950,9 @@ class _RecordingPlanTransformFactory:
         self,
         request: TaskProgramPlanRequest,
         *,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ):
-        assert isinstance(engine, AtomicActionEngine)
+        assert isinstance(engine, AtomicSkillEngine)
         self.requests.append(request)
 
         def transform(resolved, context, plan):
@@ -994,7 +994,7 @@ def _system(
     generator.robot = robot
     generator.device = torch.device("cpu")
     generator.planner.cfg.planner_type = "runtime_test"
-    engine = AtomicActionEngine(generator, load_builtins=False)
+    engine = AtomicSkillEngine(generator, load_builtins=False)
     action = _EffectlessAction() if effectless_action else _EffectAction()
     engine.register(action)
     selected_plan_success = plan_success or tuple(_mask(True, True) for _ in decisions)
@@ -1118,7 +1118,7 @@ def _workflow_recovery_system(
     generator.robot = robot
     generator.device = torch.device("cpu")
     generator.planner.cfg.planner_type = "runtime_test"
-    engine = AtomicActionEngine(generator, load_builtins=False)
+    engine = AtomicSkillEngine(generator, load_builtins=False)
     engine.register(_WorkflowEffectAction())
     engine.register(_WorkflowSourceEffectAction())
     compiler = _WorkflowRecoveryCompiler(
@@ -1165,7 +1165,7 @@ def test_runtime_analyzes_once_and_uses_one_fresh_session_per_call(
     original_start = system.engine.start
     original_runner = runtime_module.ExecutionRunner
 
-    def counted_start(self: AtomicActionEngine, *args: object, **kwargs: object):
+    def counted_start(self: AtomicSkillEngine, *args: object, **kwargs: object):
         nonlocal session_calls
         del self
         session_calls += 1
@@ -2277,7 +2277,7 @@ def test_registered_acquisition_scheduler_stops_within_action_retry_budget(
                 grounded.invocation,
                 phase_effect_gates=tuple(g.requirement for g in gates),
                 recovery_policy=replace(
-                    grounded.invocation.recovery_policy, max_action_retries=1
+                    grounded.invocation.recovery_policy, max_skill_retries=1
                 ),
             ),
             effect_spec=spec,
@@ -2490,7 +2490,7 @@ def test_result_metadata_is_json_safe_and_contains_typed_runtime_trace() -> None
     assert call["call"]["arguments"]["call_id"] == "test.metadata"
     assert call["active_plan_attempt_generation"] == 0
     attempt = call["plan_attempts"][0]
-    assert attempt["trigger"] == "action_planned"
+    assert attempt["trigger"] == "skill_planned"
     assert attempt["planned_scene_version"] == 1
     assert attempt["planned_collision_world_revision"] == [0, 0]
     assert attempt["scene_dependencies"] == ["fixture"]
@@ -2602,7 +2602,7 @@ def test_endpoint_binding_trace_records_only_stable_binding_choices() -> None:
     target_fingerprint = [
         {
             "__type__": (
-                "embodichain.lab.sim.atomic_actions.bindings." "JointPositionTarget"
+                "embodichain.lab.sim.atomic_skills.bindings." "JointPositionTarget"
             )
         },
         "robot.joint_position",

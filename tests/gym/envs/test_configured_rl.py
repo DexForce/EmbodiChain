@@ -78,7 +78,10 @@ def _env():
     env = object.__new__(EmbodiedEnv)
     env._num_envs = 2
     env.cfg = SimpleNamespace(
-        rl_task=_task(), task_program=None, ignore_terminations=False
+        rl_task=_task(),
+        task_program=None,
+        ignore_terminations=False,
+        episode_context_in_info=True,
     )
     env.pose = torch.eye(4).repeat(2, 1, 1)
     env.sim = SimpleNamespace(
@@ -275,7 +278,7 @@ def test_empty_success_set_never_accepts():
 def test_unconfigured_host_keeps_legacy_and_task_program_acceptance(task_program):
     env = _env()
     env.termination_manager = None
-    env.cfg = SimpleNamespace(task_program=task_program)
+    env.cfg = SimpleNamespace(task_program=task_program, episode_context_in_info=True)
     env.initialize_task_outcome([0])
     info = env.get_info()
     assert "task_outcome" not in info

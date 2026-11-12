@@ -54,11 +54,11 @@ skill owns effect and command construction. Sampled collision evidence is
 separate from a physical outcome; an unverified collision check cannot certify
 the resulting rollout.
 
-.. automodule:: embodichain.lab.sim.atomic_actions.nominal
+.. automodule:: embodichain.lab.sim.atomic_skills.nominal
    :members:
    :no-index:
 
-.. automodule:: embodichain.lab.sim.atomic_actions.prototype_source
+.. automodule:: embodichain.lab.sim.atomic_skills.prototype_source
    :members:
    :no-index:
 

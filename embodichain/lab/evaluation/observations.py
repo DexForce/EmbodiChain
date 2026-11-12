@@ -63,11 +63,12 @@ def _graph_frame_inputs(
 ):
     values, valid = {}, {}
     descriptors = {}
+    expected_names = compiled._preset_joint_names()
     for field in compiled.required_fields:
         sample = frame.fields.get(field)
         if sample is None:
             continue
-        projection = _field_projection(field, sample.descriptor)
+        projection = _field_projection(field, sample.descriptor, expected_names)
         if projection is None:
             continue
         value, mask = sample.values[..., projection], sample.valid
@@ -86,9 +87,17 @@ def _combine_selections(
 ) -> tuple[tuple[tuple[str, ...], CompiledEvaluation], ...]:
     """Share compiled dependencies without changing evidence qualification."""
     groups = []
+    unconstrained = object()
     for ref, spec in selections.items():
         fields = set(spec.required_fields)
-        for members, nodes, required in groups:
+        expected_names = spec._preset_joint_names()
+        for members, nodes, required, layouts in groups:
+            if any(
+                layouts.get(field, unconstrained)
+                != expected_names.get(field, unconstrained)
+                for field in required & fields
+            ):
+                continue
             # A union must not cause a channel to be rejected by a joint-order
             # check that did not apply to it in the original selection.
             if any(
@@ -101,12 +110,13 @@ def _combine_selections(
                 members[ref] = spec
                 nodes.update(spec._nodes)
                 required.update(fields)
+                layouts.update(expected_names)
                 break
         else:
             # Independently compiled libraries may also reuse a local name.
-            groups.append(({ref: spec}, dict(spec._nodes), fields))
+            groups.append(({ref: spec}, dict(spec._nodes), fields, expected_names))
     combined = []
-    for members, nodes, fields in groups:
+    for members, nodes, fields, _ in groups:
         refs = tuple(members)
         spec = members[refs[0]]
         if len(refs) > 1:

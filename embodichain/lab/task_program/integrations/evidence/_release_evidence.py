@@ -210,7 +210,7 @@ def release_window(
         if event.get("kind") == "trajectory_segment_entered"
         and event.get("segment_name") == "release"
     ]
-    completed = [event for event in events if event.get("kind") == "action_completed"]
+    completed = [event for event in events if event.get("kind") == "skill_completed"]
     if (
         len(entries) != 1
         or len(completed) != 1

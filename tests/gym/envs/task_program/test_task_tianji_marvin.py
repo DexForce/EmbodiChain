@@ -237,7 +237,7 @@ def test_marvin_stack_open_fingers_clear_the_cube_support() -> None:
     asset = Path(cfg.robot.fpath)
     robot_xml = ET.parse(asset).getroot()
     preset = deployment.integration.registration.robot_profile_binding.presets[0]
-    grasp = preset.action_option_templates["pick"].fixed_object_to_eef.numpy()
+    grasp = preset.skill_option_templates["pick"].fixed_object_to_eef.numpy()
 
     def origin_pose(origin: ET.Element | None) -> np.ndarray:
         result = np.eye(4)
@@ -365,6 +365,10 @@ def test_marvin_pour_lowers_scene_and_targets_without_changing_program_steps(
     assert scene == original_scene
     program = load_config(path.parent / payload["task_program"]["program"])
     original_program = load_config(path.parent / reference["task_program"]["program"])
+    from embodichain.lab.task_program.language.authoring import normalize_task_program
+
+    program = normalize_task_program(program).declaration
+    original_program = normalize_task_program(original_program).declaration
     targets, original_targets = program.pop("targets"), original_program.pop("targets")
     assert targets.keys() - original_targets.keys() == {"bottle_pour_pose"}
     assert original_targets.keys() <= targets.keys()
@@ -390,6 +394,6 @@ def test_marvin_pour_lowers_scene_and_targets_without_changing_program_steps(
     assert cfg.target_control_frequency == 100
     preset = deployment.integration.registration.robot_profile_binding.presets[0]
     assert preset.motion_policy.sample_count == 160
-    assert preset.action_option_templates[
+    assert preset.skill_option_templates[
         "simulation.pour"
     ].rotate_angle == pytest.approx(-torch.pi / 3)

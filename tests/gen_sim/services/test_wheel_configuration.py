@@ -106,6 +106,17 @@ def test_installed_wheel_cli_reads_external_profiles_without_package_edits(tmp_p
         / f"python{sys.version_info.major}.{sys.version_info.minor}"
         / "site-packages"
     )
+    # A venv created from another venv only inherits the base interpreter's
+    # packages. Append the invoking runtime's installed dependencies as plain
+    # paths, without executing its editable-install hooks.
+    runtime_sites = [
+        path
+        for path in sys.path
+        if path and Path(path).name in {"site-packages", "dist-packages"}
+    ]
+    (site / "runtime-dependencies.pth").write_text(
+        "\n".join(dict.fromkeys(runtime_sites)) + "\n"
+    )
     # Remove inherited editable paths for this consumer, while retaining installed dependencies.
     (site / "sitecustomize.py").write_text(
         "import sys\nfrom pathlib import Path\nsys.meta_path=[x for x in sys.meta_path if '__editable__' not in str(x)]\nsys.path=[x for x in sys.path if x and 'EmbodiChain' not in str(Path(x))]\n"
@@ -114,6 +125,8 @@ def test_installed_wheel_cli_reads_external_profiles_without_package_edits(tmp_p
     bundled = package / "asset_engine/configs/gen_config.json"
     before = hashlib.sha256(bundled.read_bytes()).hexdigest()
     assert (package / "services/model_services.example.json").is_file()
+    assert (package / "services/DEPLOYMENT.md").is_file()
+    assert (package / "services/spec/v1/README.md").is_file()
     assert not (package / ".env").exists()
     from ..task_engine.test_image_planning import _fixture
 
@@ -218,6 +231,40 @@ def test_installed_wheel_cli_reads_external_profiles_without_package_edits(tmp_p
         assert auth == ["Bearer process-key"] * 3 and all(
             b["model"] == "wheel-model" for b in bodies
         )
+        execute(
+            [
+                python,
+                "-I",
+                "-B",
+                "-m",
+                "embodichain",
+                "gensim",
+                "task",
+                "plan",
+                "--image",
+                str(image),
+                "--instruction",
+                "执行测试任务",
+                "--output",
+                str(external / "canonical"),
+            ],
+            external,
+            env,
+        )
+        assert (external / "canonical/semantic_task_graph.html").is_file()
+        assert auth == ["Bearer process-key"] * 6
+        for command in (
+            ["gensim", "run"],
+            ["gensim", "ui"],
+            ["gensim", "scene", "expand"],
+            ["gensim", "services", "validate"],
+            ["gensim", "services", "doctor"],
+        ):
+            execute(
+                [python, "-I", "-B", "-m", "embodichain", *command, "--help"],
+                external,
+                env,
+            )
         # A second installed consumer discovers XDG configuration without the selector.
         user = external / "xdg/embodichain/model_services.json"
         user.parent.mkdir(parents=True)

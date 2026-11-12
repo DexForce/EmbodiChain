@@ -101,6 +101,14 @@ class EnvCfg:
     only end when the task is successfully completed or failed.
     """
 
+    episode_context_in_info: bool = True
+    """Include owned episode-context snapshots in step and reset info.
+
+    Disable for batched RL consumers that do not read per-row provenance.
+    Episode lifecycle tracking, recorder metadata, and explicit
+    ``episode_context.snapshot()`` calls remain available.
+    """
+
     profiler: EnvProfilerCfg | None = None
     """Optional profiler for reset/step wall-time breakdown. ``None`` keeps
     the profiler disabled unless one is configured directly on ``sim_cfg``.
@@ -802,7 +810,8 @@ class BaseEnv(gym.Env):
         evaluate = self.evaluate(**kwargs)
         if evaluate:
             info.update(evaluate)
-        info["episode_context"] = self.episode_context.snapshot()
+        if getattr(self.cfg, "episode_context_in_info", True):
+            info["episode_context"] = self.episode_context.snapshot()
         return info
 
     def check_truncated(self, obs: EnvObs, info: TensorDict[str, Any]) -> torch.Tensor:
@@ -1021,7 +1030,11 @@ class BaseEnv(gym.Env):
                 self._record_initial_observation(observation_frame, reset_ids)
                 with self._profiler.section("get_info"):
                     info = self.get_info(**options)
-                info["episode_context"] = context.snapshot()
+                if (
+                    getattr(self.cfg, "episode_context_in_info", True)
+                    and "episode_context" not in info
+                ):
+                    info["episode_context"] = context.snapshot()
                 if reset_outcomes:
                     info["reset_episode_outcomes"] = reset_outcomes
             except BaseException as error:

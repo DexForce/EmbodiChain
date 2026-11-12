@@ -223,7 +223,7 @@ def test_pouring_rebinds_selected_bottle_and_cup_geometry(
     program = yaml.safe_load(
         (result.deployment_path.parent / "program.yaml").read_text()
     )
-    options = integration["profile"]["action_options"]
+    options = integration["profile"]["skill_options"]
     assert options["pick"]["fixed_object_to_eef"] == np.eye(4).reshape(-1).tolist()
     bottle = next(
         node
@@ -389,7 +389,11 @@ def test_pouring_preserves_schema_default_position_tolerance(pouring, tmp_path):
 
     source, requirements = pouring
     program_path = source.parent / "program.yaml"
-    program = yaml.safe_load(program_path.read_text())
+    from embodichain.lab.task_program.language.authoring import normalize_task_program
+
+    program = normalize_task_program(
+        yaml.safe_load(program_path.read_text())
+    ).declaration
     for segment in program["program"]["items"]:
         for validator in segment.get("validators", []):
             if validator["kind"] == "object_near_target":

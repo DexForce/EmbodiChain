@@ -131,12 +131,12 @@ example is an experimental gradient reference, not a general simulator task.
 
 ### Add a Lightweight Environment
 
-1. Implement `LearningVecEnv`, or `DifferentiableVecEnv` for APG.
+1. Implement `LearningEnvProtocol`, or `DifferentiableEnvProtocol` for APG.
 2. Register the factory with `@register_learning_env`.
 3. Ensure finished rows auto-reset while returning terminal reward/done with
    the next initial observation.
 4. For variable complete APG rollouts, implement
-   `ScheduledDifferentiableVecEnv` and return the full non-truncated horizon.
+   `ScheduledDifferentiableEnvProtocol` and return the full non-truncated horizon.
 5. Expose `observation_normalize_mask` when semantic dimensions must remain
    raw during normalization.
 6. Add an official config under

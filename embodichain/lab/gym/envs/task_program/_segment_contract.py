@@ -74,7 +74,9 @@ def _unrun_outcomes(contract, rows):
     return [_evidence_report(entry, status) for entry in contract.outcomes]
 
 
-def _check_prerequisites(evidence, active, env_ids, task_state, capture, episode_owner):
+def _check_prerequisites(
+    evidence, active, env_ids, task_state, capture, episode_owner, conditions=None
+):
     fields = {
         field
         for entry in evidence
@@ -102,11 +104,12 @@ def _check_prerequisites(evidence, active, env_ids, task_state, capture, episode
                 active, torch.zeros_like(active), otherwise=Status.UNAVAILABLE
             )
         else:
+            spec = entry.spec if conditions is None else conditions[entry.ref]
             result = _evaluate_frame_rule(
-                entry.ref, entry.spec, frame, active.device, measurements, rows=env_ids
+                entry.ref, spec, frame, active.device, measurements, rows=env_ids
             )
             detail = {
-                "evaluation_identity": entry.spec.identity,
+                "evaluation_identity": spec.identity,
                 "observation_revision": frame.revision,
                 "episode_ids": [frame.episode_ids[row] for row in env_ids.tolist()],
                 "result": _rule_report(result),

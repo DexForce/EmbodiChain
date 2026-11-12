@@ -40,10 +40,22 @@ rewards and contact termination rules remain in the task package; robot defaults
 and the distinct asset/contract joint orders are owned by
 [robot-system](../robot-system/robot-system.md).
 
+Reference-motion tracking is owned by
+`extensions/embodichain_tasks/embodichain_tasks/locomotion/tracking/`.
+`g1_motion.py` owns simulator state, reference-frame progress, selected-row resets
+and pre-action/terminal snapshots; unusable nonfinite successors hard-terminate
+and are excluded from WM supervision. `_task.py` owns tensor objectives shared
+with model-driven rollouts. The task's `ReferenceJointPositionAction` records
+policy outputs separately from the reference-combined setpoint and executed
+joint target. Read the task configuration's README for data preparation,
+training and per-clip evaluation commands.
+
 ## Launcher argument ownership
 
-`embodichain run-task` is the sole task execution command, dispatched to
-`embodichain.lab.scripts.run_task:cli`. The former `run-env` command and
+`embodichain run-task` is the standalone launcher for existing task deployments,
+dispatched to `embodichain.lab.scripts.run_task:cli`. The cross-engine
+[`gensim run` workflow](../gen-sim/gen-sim.md) generates and binds a deployment
+before reusing configured Gym/Task Program execution. The former `run-env` command and
 `embodichain.lab.scripts.run_env` module are removed.
 
 `add_env_launcher_args_to_parser()` composes the lightweight simulation options
@@ -212,7 +224,14 @@ physical-objective initialization and final observations; it is not forwarded
 to functors. `BaseEnv` owns `EpisodeContext`; successful initialization seeds recording from
 the final observation. `EmbodiedEnv` consumes old records before physical reset.
 Failed checks remain attached to buffers until the selected rows are consumed
-and a new episode begins. Info and recorder metadata carry owned context snapshots. The concrete preparation/restore host and
+and a new episode begins. Info and recorder metadata carry owned context snapshots.
+`EnvCfg.episode_context_in_info` defaults to true. Batched RL deployments may
+disable automatic info snapshots while retaining context lifecycle, recorder
+metadata and explicit snapshots. Reset retains each row's seed and shared
+provenance snapshot even without a recorder. Demo recording materializes
+independent metadata rows on access; row UUIDs and mutable
+segment lists are owned by each episode. Reset reuses the snapshot from `get_info()`;
+overrides that omit it receive one when the option is enabled. The concrete preparation/restore host and
 snapshot limitations belong to [scene expansion](../scene-expansion/scene-expansion.md).
 
 ## Change sites and focused validation
