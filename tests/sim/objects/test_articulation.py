@@ -1044,6 +1044,13 @@ class BaseArticulationTest:
 
         self.art.set_qpos(qpos=qpos_zero, env_ids=None, target=False)
 
+        # Position tracking requires explicit gains; a sparse drive_type overlay
+        # preserves the drawer's passive source drive.
+        self.art.set_joint_drive(
+            stiffness=torch.full_like(qpos, 1e4),
+            damping=torch.full_like(qpos, 1e3),
+            drive_type="force",
+        )
         # Test setting joint positions with target=True
         self.art.set_qpos(qpos, env_ids=None, target=True)
         self.sim.update(step=100)
