@@ -41,6 +41,7 @@ __all__ = [
     "link_attrs_from_dict",
     "JointDrivePropertiesCfg",
     "NewtonJointDrivePropertiesCfg",
+    "MimicComplianceCfg",
     "ArticulationCfg",
 ]
 
@@ -313,6 +314,24 @@ class JointDrivePropertiesCfg:
     * For angular joints, the unit is kg-m^2/s/rad (N-m-s/rad).
     """
 
+    limit_stiffness: Dict[str, float] | float | None = None
+    """Newton joint-limit restoring gain, separate from the drive stiffness.
+
+    Scalars and joint-rule mappings follow :attr:`stiffness`. ``None`` keeps
+    the source/backend limit gain. With Newton's MuJoCo solver, explicitly
+    setting both limit gains to zero selects MuJoCo's default limit response
+    (``solref=[0.02, 1.0]``); it does not remove the joint limits. Other Newton
+    solvers interpret these gains according to their joint-limit model.
+    """
+
+    limit_damping: Dict[str, float] | float | None = None
+    """Newton joint-limit damping gain, separate from the drive damping.
+
+    ``None`` keeps the source/backend value. See :attr:`limit_stiffness` for
+    the MuJoCo solver's explicit-zero behavior. The Default backend does not
+    consume either Newton limit gain.
+    """
+
     max_effort: Dict[str, float] | float | None = None
     """Maximum drive effort [N for prismatic, N*m for revolute joints].
 
@@ -432,6 +451,58 @@ class NewtonJointDrivePropertiesCfg(JointDrivePropertiesCfg):
 
 
 @configclass
+class MimicComplianceCfg:
+    """DexSim Default compliance for the followers of one mimic master.
+
+    Both parameters must be finite and nonnegative. Use zero for both
+    parameters to request hard coupling. The source multiplier and offset
+    continue to define each follower's relation to the master.
+    """
+
+    natural_frequency: float = field()
+    """Native mimic constraint natural frequency."""
+
+    damping_ratio: float = field()
+    """Dimensionless native mimic constraint damping ratio."""
+
+    def __post_init__(self) -> None:
+        """Validate the parameters before they are converted to native floats."""
+        max_float = float(np.finfo(np.float32).max)
+        for name in ("natural_frequency", "damping_ratio"):
+            value = getattr(self, name)
+            if isinstance(value, (bool, np.bool_)) or not isinstance(
+                value, numbers.Real
+            ):
+                raise TypeError(f"Mimic compliance {name} must be a real number.")
+            if not 0 <= value <= max_float:
+                raise ValueError(
+                    f"Mimic compliance {name} must be finite, nonnegative, "
+                    "and representable as a native float."
+                )
+
+
+def _mimic_compliance_from_dict(
+    value: Mapping[str, MimicComplianceCfg | Mapping[str, float]] | None,
+) -> dict[str, MimicComplianceCfg] | None:
+    """Parse exact joint names and validate their compliance pairs."""
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise TypeError("mimic_compliance must be a mapping keyed by joint name.")
+    settings = {}
+    for name, entry in value.items():
+        if not isinstance(name, str) or not name:
+            raise ValueError("mimic_compliance keys must be nonempty joint names.")
+        if isinstance(entry, MimicComplianceCfg):
+            settings[name] = entry.copy()
+        elif isinstance(entry, Mapping):
+            settings[name] = MimicComplianceCfg(**entry)
+        else:
+            raise TypeError(f"Invalid mimic compliance configuration for {name!r}.")
+    return settings
+
+
+@configclass
 class ArticulationCfg(ObjectBaseCfg):
     """Configuration for an articulation asset in the simulation.
 
@@ -501,6 +572,17 @@ class ArticulationCfg(ObjectBaseCfg):
     a provided config also preserve the corresponding source values.
     """
 
+    mimic_compliance: dict[str, MimicComplianceCfg] | None = field(
+        default=None, kw_only=True
+    )
+    """DexSim Default compliance settings keyed by exact mimic master names.
+
+    During scene preparation, the settings apply to all replicas and are
+    reapplied after topology changes. They apply in both asset physics modes.
+    An omitted or empty mapping keeps native behavior. Newton rejects a
+    nonempty mapping and has its own optional mimic stabilizer.
+    """
+
     init_qpos: torch.Tensor | np.ndarray | Sequence[float] = None
     """Initial joint positions of the articulation.
 
@@ -552,6 +634,8 @@ class ArticulationCfg(ObjectBaseCfg):
                 cfg.source = _usd_source_from_value(value)
             elif key == "link_attrs" and isinstance(value, dict):
                 cfg.link_attrs = link_attrs_from_dict(value)
+            elif key == "mimic_compliance":
+                cfg.mimic_compliance = _mimic_compliance_from_dict(value)
             elif key == "attrs" and isinstance(value, Mapping):
                 cfg.attrs = _rigid_body_physics_from_dict(value)
             elif key == "joint_drive_props" and isinstance(value, Mapping):
