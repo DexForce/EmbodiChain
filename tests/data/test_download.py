@@ -412,3 +412,27 @@ def test_eef_download_descriptors_and_cache_prefix_are_preserved(
         assert list(descriptor.urls) == expected_urls
         assert descriptor.md5 == md5
         assert root == expected_root
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize(
+    "name,category",
+    [
+        ("UnitreeG1Rough", "robot"),
+        ("G1RoughTerrains", "scene"),
+        ("ShadowHandPen", "robot"),
+        ("LeapHandCubeFaceTurn", "robot"),
+        ("LeapHandCube", "robot"),
+    ],
+)
+def test_rl_assets_share_cli_and_dataset_resolution(name: str, category: str) -> None:
+    from embodichain.data.assets import rl_assets
+
+    registry = download.get_registry()
+    expected = getattr(rl_assets, name)
+    assert dict(registry[category])[name] is expected
+    assert get_data_class(name) is expected
+    assert (
+        sum(asset_name == name for rows in registry.values() for asset_name, _ in rows)
+        == 1
+    )

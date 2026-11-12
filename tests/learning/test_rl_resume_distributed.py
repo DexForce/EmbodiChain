@@ -40,6 +40,19 @@ from embodichain_tasks.classic_control.point_mass import PointMassEnv
 
 def _components(rank: int, directory: Path, mode: str) -> Trainer:
     env = PointMassEnv(num_envs=4, max_episode_steps=4)
+    env.level = rank + 2
+    env.get_training_state = lambda: {"rank": rank, "level": env.level}
+
+    def validate(state):
+        if state["rank"] != rank:
+            raise ValueError("Environment state belongs to another rank")
+
+    def load(state):
+        validate(state)
+        env.level = state["level"]
+
+    env.validate_training_state = validate
+    env.load_training_state = load
     policy = ActorCritic(
         14,
         2,
@@ -142,7 +155,9 @@ def _worker(rank: int, group_file: str, directory: str) -> None:
                 else None
             )
             restored = _components(rank, directory / f"{mode}_resumed", mode)
+            restored.env.level = -1
             restored.load_checkpoint(path)
+            assert restored.env.level == rank + 2
             assert restored.best_eval_value == trainer.best_eval_value
             assert restored.best_checkpoint_path is None
             actual_rng = random.random(), np.random.rand(), torch.rand(3)
@@ -172,6 +187,10 @@ def _worker(rank: int, group_file: str, directory: str) -> None:
                     assert Path(restored.best_checkpoint_path).is_file()
                 payload = torch.load(path, weights_only=True)
                 assert len(payload["rng_by_rank"]) == 2
+                assert payload["environment_state_by_rank"] == [
+                    {"rank": 0, "level": 2},
+                    {"rank": 1, "level": 3},
+                ]
                 if mode != "grpo":
                     assert not torch.equal(
                         payload["normalizer_by_rank"][0]["actor_obs_normalizer.mean"],
