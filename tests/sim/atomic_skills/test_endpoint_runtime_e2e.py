@@ -233,7 +233,7 @@ def test_timed_whole_body_replay_uses_each_authored_sample_without_planning() ->
         dt=torch.full((2, 3), context.require_control_dt()),
         env_ids=context.env_ids,
     )
-    invocation = ActionInvocation(
+    invocation = SkillInvocation(
         skill_id="move_joints",
         goal=JointPositionGoal(trajectory),
         motion_policy=MotionPolicy(dynamic_collision_mode="off"),

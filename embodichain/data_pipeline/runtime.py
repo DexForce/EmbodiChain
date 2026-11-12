@@ -115,7 +115,7 @@ class ODSFlowController:
                 "Production limit cannot be smaller than the initial cache"
             )
         if plan is not None or limit is not None:
-            producers = engine.cfg.gym_config.get("num_envs")
+            producers = engine.resolved_gym_config.get("num_envs")
             if (
                 type(producers) is not int
                 or producers < 1

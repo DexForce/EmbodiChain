@@ -181,8 +181,12 @@ against part names (including patterns); it need not configure every part.
 and synchronizes effective robot limits. Check the resolved part and joint
 order before diagnosing an IK algorithm.
 
-Aloha Mini and Marvin use strict Warp SSIK arm defaults on CPU/CUDA; Marvin
-selects seed-local SRS search in both gripper variants. Aloha's torso retains
+Aloha Mini, Marvin and AgiBot G2 use strict Warp SSIK arm defaults on CPU/CUDA.
+Marvin selects seed-local SRS search in both gripper variants; G2's CRS arms
+use the same search with their original 18 mm elbow offset and mounting-frame
+TCPs. The [G2 model notes](../../../extensions/embodichain_robots/agibot/g2/README.md)
+explain why its preset derives geometry from the URDF instead of adding a
+legacy SRS DH calibration. Aloha's torso retains
 its position-only Pytorch solver. Numerical restoration requires a complete
 replacement with the existing root/end/TCP and original Pytorch settings; see
 the [solver guide](../../../docs/source/overview/sim/motion/solvers/ssik_solver.md#selecting-the-numerical-solver).
