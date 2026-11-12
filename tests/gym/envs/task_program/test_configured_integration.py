@@ -2683,6 +2683,34 @@ def test_pour_dwell_duration_decodes() -> None:
     assert options.dwell_duration == pytest.approx(0.75)
 
 
+def test_pour_rotation_duration_decodes() -> None:
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_skill_options,
+    )
+
+    options = _decode_skill_options(
+        {"kind": "pour", "rotation_duration": 3.0},
+        path="options",
+    )
+    assert isinstance(options, PourOptions)
+    assert options.rotation_duration == pytest.approx(3.0)
+
+
+@pytest.mark.parametrize("value", [0.0, -0.1, float("inf")])
+def test_pour_rotation_duration_rejects_nonpositive_or_nonfinite_values(
+    value: float,
+) -> None:
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_skill_options,
+    )
+
+    with pytest.raises(ValueError, match="rotation_duration"):
+        _decode_skill_options(
+            {"kind": "pour", "rotation_duration": value},
+            path="options",
+        )
+
+
 def test_configured_pour_target_lowers_live_geometry_and_is_closed() -> None:
     from embodichain.lab.task_program.integrations.configured import (
         _decode_registered_lowerer,

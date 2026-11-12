@@ -503,7 +503,9 @@ class RigidObject(BatchEntity):
 
     def _apply_spawn_visual_uv(self) -> None:
         """Apply configured projective UV mapping to spawned render bodies."""
-        shape = self.cfg.shape
+        shape = getattr(self.cfg, "visual_shape", None) or getattr(
+            self.cfg, "shape", None
+        )
         if not isinstance(shape, MeshCfg) or not shape.compute_uv:
             return
 

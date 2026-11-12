@@ -18,22 +18,28 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from inspect import signature
 from types import MappingProxyType
 from typing import Any, Literal
+
+import inspect
+import math
+import time
 
 import torch
 
 from embodichain.utils import configclass, logger
 
 from ._json import json_safe_copy as _json_safe_copy
+from .objectives.conditions import ObjectMotionMetrics
 
 __all__ = [
     "DEMO_ANNOTATION_KEYS",
     "DEMO_SCHEMA_VERSION",
     "DemoExecutionCfg",
+    "DemoQualification",
     "DemoEpisodeResult",
     "DemoOutputMode",
     "DemoSegment",
@@ -75,6 +81,253 @@ DemoSegmentOutcomeKind = Literal[
     "not_attempted",
 ]
 """Stable, first-failure-phase outcome for one program segment row."""
+
+
+class DemoQualification:
+    """Measure configured object motion and numeric observation bounds.
+
+    Args:
+        env: Host supplying simulation objects, observations and control timing.
+        declaration: Optional ``object_motion`` bounds and named ``observations``
+            with elementwise ``min``/``max`` lists.
+            Null list entries are unbounded. An observation's ``when`` is
+            ``final`` (default) or ``always`` across the sampled boundaries.
+
+    Sources must be stateless raw functions that read directly from ``env``.
+    They receive an empty observation input; base-policy and cross-term input
+    dependencies are unsupported. Acquisition does not advance history, apply
+    policy noise/projection or invoke a stateful functor twice.
+    Motion extrema stay on the host device with O(B) storage. Raw diagnostic
+    observations are sampled about once per second and at episode boundaries.
+    This monitor reports physical truth; the collector owns episode acceptance.
+    """
+
+    def __init__(self, env: Any, declaration: Mapping[str, Any]) -> None:
+        if not isinstance(declaration, Mapping) or set(declaration) - {
+            "object_motion",
+            "observations",
+        }:
+            raise ValueError("Unknown collection qualification fields.")
+        self._env = env
+        motion = declaration.get("object_motion")
+        self._object = None
+        self._motion_limits = {}
+        if motion is not None:
+            if not isinstance(motion, Mapping) or set(motion) != {
+                "uid",
+                "min_lift_m",
+                "min_tilt_deg",
+                "max_return_error_m",
+            }:
+                raise ValueError("object_motion requires a UID and all three bounds.")
+            if not isinstance(motion["uid"], str) or not motion["uid"]:
+                raise ValueError("object_motion.uid must be a nonempty string.")
+            self._object = env.sim.get_rigid_object(motion["uid"])
+            if self._object is None:
+                raise ValueError("Unknown qualification object.")
+            for name in ("min_lift_m", "min_tilt_deg", "max_return_error_m"):
+                value = motion[name]
+                if (
+                    type(value) not in (int, float)
+                    or not math.isfinite(value)
+                    or value < 0
+                ):
+                    raise ValueError("Motion bounds must be finite and nonnegative.")
+                self._motion_limits[name] = float(value)
+        observations = declaration.get("observations", {})
+        if not isinstance(observations, Mapping):
+            raise ValueError("Qualification observations must be a mapping.")
+        self._sources: dict[str, tuple[Any, torch.Tensor, torch.Tensor, str]] = {}
+        manager = getattr(env, "observation_manager", None)
+        for name, bounds in observations.items():
+            if not isinstance(name, str) or not name:
+                raise ValueError("Qualification observation names must be nonempty.")
+            if not isinstance(bounds, Mapping) or set(bounds) - {"min", "max", "when"}:
+                raise ValueError("Unknown observation qualification bounds.")
+            lower, upper = bounds.get("min"), bounds.get("max")
+            supplied = [value for value in (lower, upper) if value is not None]
+            if not supplied or any(
+                not isinstance(value, (list, tuple)) or not value for value in supplied
+            ):
+                raise ValueError("Observation bounds require nonempty min/max lists.")
+            width = len(supplied[0])
+            if any(len(value) != width for value in supplied):
+                raise ValueError("Observation bounds must have equal widths.")
+            limits = []
+            for values, default in ((lower, -math.inf), (upper, math.inf)):
+                converted = []
+                for value in ([None] * width if values is None else values):
+                    if value is not None and (
+                        type(value) not in (int, float) or not math.isfinite(value)
+                    ):
+                        raise ValueError("Observation bounds must be finite or null.")
+                    converted.append(default if value is None else float(value))
+                limits.append(
+                    torch.tensor(converted, dtype=torch.float64, device=env.device)
+                )
+            if bool((limits[0] > limits[1]).any()):
+                raise ValueError("Observation minimum cannot exceed maximum.")
+            when = bounds.get("when", "final")
+            if when not in ("always", "final"):
+                raise ValueError("Observation when must be 'always' or 'final'.")
+            cfg = (
+                manager.get_functor_cfg(name)
+                if manager is not None
+                else getattr(env.cfg.observations, name, None)
+            )
+            if cfg is None or not inspect.isfunction(cfg.func):
+                raise ValueError(
+                    "Qualification requires stateless observation functions."
+                )
+            self._sources[name] = (cfg, limits[0], limits[1], when)
+        if self._object is None and not self._sources:
+            raise ValueError("Qualification requires motion or observation bounds.")
+        self._stride = max(1, round(1 / env.step_dt))
+        self._motion: ObjectMotionMetrics | None = None
+        self._samples: list[dict[str, Any]] = []
+        self._latest: dict[str, torch.Tensor] = {}
+        self._always_passed: dict[str, torch.Tensor] = {}
+        self._steps = 0
+        self._started: float | None = None
+
+    @staticmethod
+    def _matches_bounds(
+        value: torch.Tensor, lower: torch.Tensor, upper: torch.Tensor
+    ) -> torch.Tensor:
+        dtype = value.dtype if value.is_floating_point() else torch.float64
+        return (
+            (value >= lower.to(dtype=dtype)) & (value <= upper.to(dtype=dtype))
+        ).all(-1)
+
+    def _sample(self) -> dict[str, Any]:
+        from .managers.observation_types import ObservationSample
+
+        observations = {}
+        for name, (cfg, lower, upper, when) in self._sources.items():
+            try:
+                value = cfg.func(self._env, {}, **cfg.params)
+            except KeyError as error:
+                raise ValueError(
+                    f"Cannot acquire qualification observation {name!r}; sources "
+                    "must read raw data directly from env without obs dependencies."
+                ) from error
+            if isinstance(value, ObservationSample):
+                if not bool(value.valid.all()):
+                    raise RuntimeError(
+                        f"Qualification observation {name!r} is unavailable."
+                    )
+                value = value.values
+            if isinstance(value, torch.Tensor) and value.ndim == 1:
+                value = value[:, None]
+            if (
+                not isinstance(value, torch.Tensor)
+                or value.shape != (self._env.num_envs, lower.numel())
+                or value.device != torch.device(self._env.device)
+            ):
+                raise ValueError(
+                    f"Qualification observation {name!r} has an invalid layout."
+                )
+            if not bool(torch.isfinite(value).all()):
+                raise RuntimeError(
+                    f"Qualification observation {name!r} became non-finite."
+                )
+            self._latest[name] = value.detach().clone()
+            if when == "always":
+                self._always_passed[name] &= self._matches_bounds(value, lower, upper)
+            observations[name] = value.detach().cpu().tolist()
+        sample = {
+            "time_s": self._steps * self._env.step_dt,
+            "observations": observations,
+        }
+        if self._object is not None:
+            sample["object_pose"] = (
+                self._object.get_local_pose().detach().cpu().tolist()
+            )
+        return sample
+
+    def start(self) -> None:
+        """Seed one attempt after its reset; no prior attempt state is retained."""
+        self._motion = (
+            ObjectMotionMetrics(self._object.get_local_pose())
+            if self._object is not None
+            else None
+        )
+        self._always_passed = {
+            name: torch.ones(
+                self._env.num_envs, dtype=torch.bool, device=self._env.device
+            )
+            for name in self._sources
+        }
+        self._steps = 0
+        self._latest.clear()
+        self._samples = [self._sample()]
+        self._started = time.perf_counter()
+
+    def after_step(self) -> None:
+        """Update motion at each control boundary and sample configured observations."""
+        if self._started is None:
+            raise RuntimeError("Qualification must start after reset.")
+        if self._motion is not None:
+            self._motion.update(self._object.get_local_pose())
+        self._steps += 1
+        if self._steps % self._stride == 0:
+            self._samples.append(self._sample())
+
+    def finish(self, selected_rows: Sequence[int]) -> dict[str, Any]:
+        """Return physical measurements for selected rows without committing data.
+
+        Args:
+            selected_rows: Nonempty unique environment indices to qualify.
+
+        Returns:
+            Physical acceptance, motion metrics and sampled raw observations.
+        """
+        if self._started is None:
+            raise RuntimeError("Qualification must start after reset.")
+        selected = tuple(selected_rows)
+        if (
+            not selected
+            or len(set(selected)) != len(selected)
+            or any(
+                type(row) is not int or not 0 <= row < self._env.num_envs
+                for row in selected
+            )
+        ):
+            raise ValueError("Qualification must select unique valid rows.")
+        accepted = torch.ones(
+            self._env.num_envs, dtype=torch.bool, device=self._env.device
+        )
+        motion_report = None
+        if self._motion is not None:
+            self._motion.update(self._object.get_local_pose())
+            motion = self._motion.evaluate(**self._motion_limits)
+            if not bool(motion.valid.all()):
+                raise RuntimeError("Qualification object motion became non-finite.")
+            accepted &= motion.satisfied
+            motion_report = {
+                **{
+                    name: value.cpu().tolist() for name, value in motion.metrics.items()
+                },
+                "accepted": motion.satisfied.cpu().tolist(),
+            }
+        self._samples.append(self._sample())
+        for name, (_, lower, upper, when) in self._sources.items():
+            value = self._latest[name]
+            accepted &= (
+                self._always_passed[name]
+                if when == "always"
+                else self._matches_bounds(value, lower, upper)
+            )
+        return {
+            "accepted": bool(accepted[list(selected)].all()),
+            "accepted_rows": accepted.cpu().tolist(),
+            "object_motion": motion_report,
+            "num_envs": self._env.num_envs,
+            "control_dt": self._env.step_dt,
+            "samples": self._samples,
+            "wall_seconds": time.perf_counter() - self._started,
+            "selected_rows": list(selected),
+        }
 
 
 @configclass

@@ -71,7 +71,12 @@ stable online language IDs. Language intent does not establish physical success.
   policy actions.
 - Descriptor-driven policy recording and policy-width trajectory recording do
   not accept `ControllerAction`; mixing those fixed layouts fails before action
-  processing. Expert recording continues to use `ExpertActionSpec`.
+  processing. Expert recording continues to use `ExpertActionSpec`. The position-only
+  `expert_trajectory.use_action_manager` opt-in converts joint targets through the
+  policy terms while retaining exact FK targets. With
+  `rollout_action_semantics="policy_request"`, it instead records the converted
+  ActionManager request and trace independently of expert joint width; unmanaged
+  direct controller commands remain rejected by this recording contract.
 - For raw-policy vector demos with staggered completion, ActionManager masks
   inactive rows after processing: selected qpos resources hold measured values,
   while qvel/qf resources receive zero commands.
@@ -303,7 +308,8 @@ not orchestrate multiple experiments or qualify kinematic playback.
   cursors keep their accepted-versus-diagnostic semantics; there is no independent
   history instance or write lifecycle. Standard state fields use observation functors; the host
   does not perform a separate physics read in its write hook. Full robot state,
-  articulations and selected rigid objects retain their existing action schema.
+  articulations, selected rigid objects and cable segments share that acquisition
+  and retain their existing action schema.
   `cfg.trajectory_uids` restricts non-robot replay fields. Raw channels, T+1
   timing and lifetime queries are owned by the
   [recording contract](env-framework.md#expert-trajectory-contract).
@@ -336,6 +342,10 @@ not orchestrate multiple experiments or qualify kinematic playback.
   Use `evaluate_recorded_rules` to evaluate a compiled graph directly from a
   trusted trajectory in bounded chunks. It can use a recorded segment
   occurrence to select the matching control slots and acquisition revisions.
+  Qualified fluid recordings carry bounded particle-state sidecars. Kinematic
+  and control replay restore complete particle states at each recorded boundary;
+  dynamic replay restores only the initial particle state and recomputes later
+  fluid motion from recorded actions.
 - **Policy projection**: `rollout_buffer` retains actual policy observations,
   including sampled noise, and its existing obs/action/reward alignment for
   LeRobot/RL. It shares the acquisition boundary with raw history, rather than
@@ -343,6 +353,21 @@ not orchestrate multiple experiments or qualify kinematic playback.
   keeps its own cursor and layout. Internally allocated expert policy observations
   include the terminal T+1 slot in the backing store; the public T-transition
   view and existing dataset action/annotation alignment stay compatible.
+- **Cable observations**: `states.cables[uid].segment_state_w` and the matching
+  raw observation field share the T+1 rollout storage. `get_entity_state` describes
+  world segment position, XYZW orientation, COM linear velocity and angular
+  velocity, preserving each cable's segment topology and row validity. The field
+  records observations, not solver history. `ReplayWrapper` accepts dynamic
+  replay only when every recorded initial state matches the full reset; it
+  rejects scrubbing, partial reset and broadcasting world-space cable states.
+  Cable artifacts store `meta.arena_origins_w` in exported row order. Replay
+  translates captured reset positions into the source world frame for comparison,
+  allowing a per-environment export to replay at a different arena origin.
+  Raw observations, orientations and velocities retain their original meaning.
+  Older files without origin metadata require matching world placement.
+  `trajectory_state.restore_trajectory_state()` rejects cable entries before
+  any write. Use action replay to validate a new episode, not a visible-state
+  restore as a history-preserving checkpoint.
 - **Fixed action layout**: an ActionManager-backed trajectory uses the batched
   policy action space; a controller/expert trajectory uses the private
   `ExpertActionSpec` layout. One trajectory cannot mix these schemas.

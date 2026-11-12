@@ -21,6 +21,7 @@ from __future__ import annotations
 from itertools import product
 
 _CONFIG_CLASSES = {
+    "AgibotG2": "embodichain_robots.agibot.g2:AgibotG2Cfg",
     "AgibotG1": "embodichain_robots.agibot.g1:AgibotG1Cfg",
     "YamI2rt": "embodichain_robots.i2rt.yam:YamI2rtCfg",
     "UnitreeGo1": "embodichain_robots.unitree.go1:UnitreeGo1Cfg",
@@ -46,6 +47,19 @@ _CONFIG_CLASSES = {
 }
 
 _DEFAULT_CONTROL_INFO = {
+    "AgibotG2": {
+        "dof": 32,
+        "control_parts": {
+            "torso": 5,
+            "head": 3,
+            "chassis_steering": 4,
+            "chassis_wheels": 4,
+            "left_arm": 7,
+            "right_arm": 7,
+            "left_eef": 8,
+            "right_eef": 8,
+        },
+    },
     "AgibotG1": {
         "dof": 20,
         "control_parts": {
@@ -121,6 +135,19 @@ _DEFAULT_CONTROL_INFO = {
 }
 
 _MIMIC_JOINTS = {
+    "AgibotG2": {
+        f"idx{offset+index}_gripper_{side}_{name}": f"idx{offset+1}_gripper_{side}_inner_joint1"
+        for side, offset in (("l", 30), ("r", 70))
+        for index, name in (
+            (2, "inner_joint3"),
+            (3, "inner_joint4"),
+            (9, "inner_joint0"),
+            (11, "outer_joint1"),
+            (12, "outer_joint3"),
+            (13, "outer_joint4"),
+            (19, "outer_joint0"),
+        )
+    },
     "AgibotG1": {
         "idx31_gripper_l_inner_joint1": "idx41_gripper_l_outer_joint1",
         "idx33_gripper_l_inner_joint4": "idx31_gripper_l_inner_joint1",
@@ -148,6 +175,12 @@ _MIMIC_JOINTS = {
     "URRobot": {},
 }
 _CONTROL_PART_MIMICS = {
+    "AgibotG2": {
+        f"{side}_eef": tuple(
+            joint for joint in _MIMIC_JOINTS["AgibotG2"] if f"gripper_{label}_" in joint
+        )
+        for side, label in (("left", "l"), ("right", "r"))
+    },
     "TianjiMarvin": {
         "left_eef": ("LEFT_HAND_FINGER_2",),
         "right_eef": ("RIGHT_HAND_FINGER_2",),
@@ -158,6 +191,7 @@ _CONTROL_PART_MIMICS = {
 }
 
 _CLASSIFICATION = {
+    "AgibotG2": ("agibot", "wheeled_humanoid", 2),
     "AgibotG1": ("agibot", "wheeled_humanoid", 2),
     "YamI2rt": ("i2rt", "fixed_manipulator", 2),
     "UnitreeGo1": ("unitree", "quadruped", 0),

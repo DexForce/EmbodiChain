@@ -62,6 +62,8 @@ _SCENE_SIMULATION_FIELDS = frozenset(
         "rigid_object",
         "rigid_object_group",
         "articulation",
+        "cable_object",
+        "fluid_object",
     }
 )
 
@@ -152,6 +154,12 @@ def _resolve_local_resource_paths(value: object, *, base_dir: Path) -> None:
     """
     if isinstance(value, dict):
         for key, child in value.items():
+            if key == "fluid_object" and isinstance(child, list):
+                for fluid in child:
+                    spawn = fluid.get("spawn", {})
+                    path = spawn.get("file_path")
+                    if isinstance(path, str) and not Path(path).is_absolute():
+                        spawn["file_path"] = str((base_dir / path).resolve())
             if (
                 key in {"fpath", "urdf_path", "xml_path"}
                 and isinstance(child, str)

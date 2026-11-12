@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import os
+import math
 import hashlib
 import json
 from threading import Lock
@@ -41,6 +42,7 @@ from embodichain.utils.utility import get_class_instance
 from dexsim.utility import log_debug, log_error
 
 if TYPE_CHECKING:
+    from embodichain.lab.gym.envs.embodied_env import EmbodiedEnvCfg
     from embodichain.lab.evaluation import PredicateRegistry
     from embodichain.lab.gym.envs.managers.cfg import RLTaskCfg
     from embodichain.lab.sim.cfg import RobotCfg
@@ -87,6 +89,39 @@ def _declared_physics_backend(config: Mapping[str, object]) -> str:
             f"got {backend!r}."
         )
     return backend
+
+
+def configure_fluid_spacing(cfg: EmbodiedEnvCfg, spacing: float) -> None:
+    """Apply one procedural-fluid spacing override to an assembled Gym config.
+
+    Args:
+        cfg: Environment configuration owning the fluid and DexUni solver.
+        spacing: Positive particle spacing in metres.
+
+    Raises:
+        ValueError: If the source or solver cannot be resampled consistently.
+    """
+    if not math.isfinite(spacing) or spacing <= 0:
+        raise ValueError("particle spacing must be finite and positive")
+    if len(cfg.fluid_object) != 1:
+        raise ValueError("particle spacing override requires one fluid object")
+    fluid = cfg.fluid_object[0]
+    if fluid.spawn.kind == "points":
+        raise ValueError("particle spacing requires a procedural volume source")
+    solver = cfg.sim_cfg.physics_cfg.solver_cfg
+    if solver.get("solver_type") != "dexuni" or not isinstance(
+        solver.get("sph_cfg"), dict
+    ):
+        raise ValueError("fluid spacing override requires DexUni with sph_cfg")
+    scale = spacing / fluid.particle_spacing
+    if fluid.render.render_radius is not None:
+        fluid.render.render_radius *= scale
+    for key in ("cell_size", "kernel_radius"):
+        if key in fluid.render.mesh_surface:
+            fluid.render.mesh_surface[key] *= scale
+    fluid.particle_spacing = spacing
+    fluid.particle_radius = 0.3 * spacing
+    solver["sph_cfg"]["particle_support_radius"] = 2.25 * spacing
 
 
 def register_manager_modules(modules: list[str]) -> None:
@@ -675,6 +710,7 @@ def config_to_cfg(
         MeshCfg,
         RigidObjectGroupCfg,
         ArticulationCfg,
+        CableObjectCfg,
         LightCfg,
         DLSSCfg,
         NRDCfg,
@@ -707,6 +743,16 @@ def config_to_cfg(
             asset.shape.fpath = get_data_path(path)
         elif isinstance(asset, ArticulationCfg) and path is not None:
             asset.fpath = get_data_path(path)
+
+    def _resolve_mesh_asset_paths(obj_dict: dict[str, Any]) -> None:
+        for key in ("visual_shape", "particle_collision_shape"):
+            shape = obj_dict.get(key)
+            if (
+                shape is not None
+                and shape.get("shape_type") == "Mesh"
+                and shape.get("fpath") is not None
+            ):
+                shape["fpath"] = get_data_path(shape["fpath"])
 
     @configclass
     class ComponentCfg:
@@ -1014,6 +1060,12 @@ def config_to_cfg(
         ]
         env_cfg.light.indirect = config["light"].get("indirect", None)
 
+    # Fluids use one typed declaration path for inline and component scenes.
+    from embodichain.lab.sim.cfg import FluidObjectCfg
+
+    env_cfg.fluid_object = [
+        FluidObjectCfg.from_dict(item) for item in config.get("fluid_object", [])
+    ]
     for visual_dict in config.get("visual_object", []):
         visual = VisualObjectCfg.from_dict(visual_dict)
         resolve_asset_paths(visual)
@@ -1022,6 +1074,7 @@ def config_to_cfg(
     # parser background objects config
     if "background" in config:
         for obj_dict in config["background"]:
+            _resolve_mesh_asset_paths(obj_dict)
             # Set to static object if not specified.
             obj_dict["body_type"] = (
                 "static" if "body_type" not in obj_dict else obj_dict["body_type"]
@@ -1033,6 +1086,7 @@ def config_to_cfg(
     # parser scene objects config
     if "rigid_object" in config:
         for obj_dict in config["rigid_object"]:
+            _resolve_mesh_asset_paths(obj_dict)
             cfg = RigidObjectCfg.from_dict(obj_dict)
             resolve_asset_paths(cfg)
             env_cfg.rigid_object.append(cfg)
@@ -1041,6 +1095,8 @@ def config_to_cfg(
         for obj_dict in config["rigid_object_group"]:
             if "folder_path" in obj_dict:
                 obj_dict["folder_path"] = get_data_path(obj_dict["folder_path"])
+            for rigid_obj in obj_dict["rigid_objects"].values():
+                _resolve_mesh_asset_paths(rigid_obj)
             cfg = RigidObjectGroupCfg.from_dict(obj_dict)
             for member in cfg.rigid_objects.values():
                 resolve_asset_paths(member)
@@ -1051,6 +1107,16 @@ def config_to_cfg(
             cfg = ArticulationCfg.from_dict(obj_dict)
             resolve_asset_paths(cfg)
             env_cfg.articulation.append(cfg)
+
+    env_cfg.cable_object = []
+    for value in config.get("cable_object", []):
+        cable = CableObjectCfg.from_dict(value)
+        if (
+            isinstance(cable.visual_shape, MeshCfg)
+            and cable.visual_shape.fpath is not None
+        ):
+            cable.visual_shape.fpath = get_data_path(cable.visual_shape.fpath)
+        env_cfg.cable_object.append(cable)
 
     env_cfg.control_parts = config["env"].get("control_parts", None)
     env_cfg.sim_steps_per_control = config["env"].get("sim_steps_per_control", 4)
@@ -1165,6 +1231,12 @@ def config_to_cfg(
                 )
                 obs_params_modified["params"]["entity_cfg"] = entity_cfg
 
+            if "entity_cfgs" in obs_params_modified["params"]:
+                obs_params_modified["params"]["entity_cfgs"] = [
+                    SceneEntityCfg(**item)
+                    for item in obs_params_modified["params"]["entity_cfgs"]
+                ]
+
             # Find the function from multiple modules using the utility function
             obs_func = find_function_from_modules(
                 obs_params["func"],
@@ -1193,7 +1265,7 @@ def config_to_cfg(
                 name=obs_params_modified["name"],
                 params=obs_params_modified["params"],
                 consumers=tuple(consumers),
-                extra=obs_params_modified.get("extra", {}),
+                extra=deepcopy(obs_params_modified.get("extra", {})),
             )
 
             setattr(env_cfg.observations, obs_name, observation)
@@ -1555,6 +1627,7 @@ def add_env_launcher_args_to_parser(
     )
     parser.add_argument(
         "--record_trajectory",
+        "--record-trajectory",
         help="Whether to record per-object kinematic trajectories (for replay). "
         "Episodes auto-save to --trajectory_save_dir (or "
         "~/.cache/embodichain_data/trajectories/<run_id>/ by default).",
@@ -1563,6 +1636,7 @@ def add_env_launcher_args_to_parser(
     )
     parser.add_argument(
         "--trajectory_save_dir",
+        "--trajectory-save-dir",
         help="Directory for auto-saved trajectories (default: "
         "~/.cache/embodichain_data/trajectories/<run_id>/).",
         default=None,
@@ -1671,7 +1745,9 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
             if cli_visualization.env_ids is None
             else list(cli_visualization.env_ids)
         )
-        visualization["allow_commands"] = cli_visualization.allow_commands
+        # Enabling the viewer must preserve a deployment's explicit read-only
+        # policy, especially while an expert owns the robot drive targets.
+        visualization.setdefault("allow_commands", cli_visualization.allow_commands)
         legacy_server = visualization.pop("server", {})
         viser_server = deepcopy(visualization.get("viser_server", legacy_server))
         viser_server["host"] = cli_visualization.viser_server.host
@@ -2063,6 +2139,7 @@ __all__ = [
     "cat_tensor_with_ids",
     "clip_and_scale_action",
     "config_to_cfg",
+    "configure_fluid_spacing",
     "convert_observation_to_space",
     "dict_array_to_torch_inplace",
     "fetch_data_from_dict",
@@ -2086,6 +2163,8 @@ def init_rollout_buffer_from_config(
     state_dim: int,
     device: Union[str, torch.device] = "cpu",
     action_dim: int | None = None,
+    *,
+    source_path: str | os.PathLike[str] | None = None,
 ) -> TensorDict:
     """Initialize a rollout buffer based on the environment configuration.
 
@@ -2102,6 +2181,8 @@ def init_rollout_buffer_from_config(
         batch_size (int): The batch size for the rollout buffer.
         state_dim (int): The dimension of the flattened state vector.
         action_dim: Stored action width, defaulting to state_dim.
+        source_path: Owning Gym configuration file for relative component paths.
+            None preserves resolution from the current working directory.
 
     Returns:
         TensorDict: A TensorDict containing the initialized rollout buffer with keys 'obs', 'actions' and 'rewards'.
@@ -2113,7 +2194,12 @@ def init_rollout_buffer_from_config(
     if action_dim is not None and (type(action_dim) is not int or action_dim < 1):
         raise ValueError("action_dim must be a positive integer or None")
 
-    config = _resolve_gym_components(config, base_dir=Path.cwd()).config
+    from embodichain.utils.config_paths import resolve_config_path
+
+    base_dir = (
+        resolve_config_path(source_path).resolve().parent if source_path else Path.cwd()
+    )
+    config = _resolve_gym_components(config, base_dir=base_dir).config
 
     # TODO: Currently we use this method to pre-allocate a rollout buffer with fixed size for simplicity.
     # Parse extra observations from observation functors in 'add' mode
@@ -2419,6 +2505,29 @@ def build_trajectory_buffer(
                     device=device,
                 )
                 for uid, obj in rigid_items.items()
+            },
+            batch_size=[num_envs, max_steps],
+            device=device,
+        )
+
+    cables = {
+        uid: obj
+        for uid, obj in getattr(env.sim, "_cable_objects", {}).items()
+        if uids is None or uid in uids
+    }
+    if cables:
+        states["cables"] = TensorDict(
+            {
+                uid: TensorDict(
+                    {
+                        "segment_state_w": _zeros(
+                            num_envs, max_steps, obj.data.num_segments, 13
+                        )
+                    },
+                    batch_size=[num_envs, max_steps],
+                    device=device,
+                )
+                for uid, obj in cables.items()
             },
             batch_size=[num_envs, max_steps],
             device=device,
