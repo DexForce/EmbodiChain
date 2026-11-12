@@ -85,6 +85,10 @@ path and owns its camera lifetime. Headless evaluation may use NoRender; Viewer
 switches a saved NoRender config to Hybrid unless an explicit native renderer
 is selected. Viewer with explicit NoRender rejects before simulation.
 
+Native headless evaluation records the host's terminal outcomes for selected
+episodes beside run/checkpoint identities. Viewer summaries include that
+snapshot when available; both use host step results and retain scalar metrics.
+
 Task camera presets/target poses stay task-owned. `_viewer_camera.py` handles
 framing and tracking/free-view transitions through queued native operations, so
 immediate readback may still be the previous rendered pose. Preserve manual

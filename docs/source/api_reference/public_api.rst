@@ -1007,6 +1007,36 @@ with zero candidates; interrupted writes may leave a run without that manifest.
 
    save_layouts
 
+embodichain.gen_sim.scene_providers
+-----------------------------------
+
+Provider-neutral, durable references for scene generation jobs. A selected
+installed adapter owns transport and provider lifecycle; these contracts do not
+import a model runtime or simulator.
+
+.. currentmodule:: embodichain.gen_sim.scene_providers
+
+.. autosummary::
+
+   CancellationReport
+   SceneGenerationProvider
+   SceneGenerationRequest
+   SceneJobRef
+   SceneJobStatus
+   load_scene_generation_provider
+
+.. autoclass:: CancellationReport
+
+.. autoclass:: SceneGenerationProvider
+
+.. autoclass:: SceneGenerationRequest
+
+.. autoclass:: SceneJobRef
+
+.. autoclass:: SceneJobStatus
+
+.. autofunction:: load_scene_generation_provider
+
 embodichain.gen_sim.services
 ----------------------------
 
@@ -1111,6 +1141,48 @@ semantic and physical validation remain with the consuming owners.
 .. autoclass:: ServiceResponseError
 
 .. autoclass:: SubmissionUnknown
+
+embodichain.gen_sim.workflow
+----------------------------
+
+Artifact-based Task Engine planning, external scene-job control, structured
+scene qualification and deterministic deployment preparation. Simulation
+execution remains with the ordinary task runner.
+
+.. currentmodule:: embodichain.gen_sim.workflow
+
+.. autosummary::
+
+   cancel_scene_generation
+   inspect_scene_generation
+   load_generated_scene
+   load_task_plan
+   materialize_scene_generation
+   plan_image_task
+   prepare_task_deployment
+   qualify_task_scene
+   resume_scene_generation
+   submit_scene_generation
+
+.. autofunction:: cancel_scene_generation
+
+.. autofunction:: inspect_scene_generation
+
+.. autofunction:: load_generated_scene
+
+.. autofunction:: load_task_plan
+
+.. autofunction:: materialize_scene_generation
+
+.. autofunction:: plan_image_task
+
+.. autofunction:: prepare_task_deployment
+
+.. autofunction:: qualify_task_scene
+
+.. autofunction:: resume_scene_generation
+
+.. autofunction:: submit_scene_generation
 
 embodichain.gen_sim.task_engine.evidence
 ----------------------------------------
@@ -1479,6 +1551,48 @@ spellings are aliases of the TaskSpec functions.
    evaluate_task_template
    validate_task_spec
    validate_task_template
+
+embodichain.lab.evaluation
+--------------------------
+
+.. currentmodule:: embodichain.lab.evaluation
+
+Compile trusted predicate registrations and inert rule declarations into an
+immutable graph. A typed deployment binding qualifies the source of each role.
+``RuleSession`` advances bounded windows and milestones for one occurrence.
+Instantaneous queries and snapshots leave history untouched. Replay consumes
+the recorded observations and preserves each row's endpoint and witnesses.
+
+.. autosummary::
+
+   EvaluationStatus
+   PredicateSpec
+   BooleanRule
+   TemporalRule
+   MilestoneRule
+   EvaluationSpec
+   PredicateMeasurement
+   PredicateDefinition
+   PredicateRegistry
+   CompiledEvaluation
+   RuleResult
+   EvaluationSnapshot
+   RuleSession
+   builtin_predicates
+   evaluate_recorded_rules
+
+embodichain.lab.evaluation.observations
+---------------------------------------
+
+.. currentmodule:: embodichain.lab.evaluation.observations
+
+Advance a compiled session with a raw capture and its exact episode owner.
+The adapter checks physical descriptors before projecting raw observations
+into predicate inputs.
+
+.. autosummary::
+
+   advance_observation
 
 embodichain.lab.expansion
 ------------------------
@@ -4796,12 +4910,17 @@ Measured manipulation functors bind rigid objects and validate geometric paramet
 
    object_near_target
    object_below_height
+   evaluation_condition
 
 .. autoclass:: object_near_target
    :members:
    :special-members: __call__
 
 .. autoclass:: object_below_height
+   :members:
+   :special-members: __call__
+
+.. autoclass:: evaluation_condition
    :members:
    :special-members: __call__
 

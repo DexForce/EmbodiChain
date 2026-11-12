@@ -54,6 +54,7 @@ topics:
     sim_steps_per_control, step_dt, environment.component, embodiment.component, file-owned physics backend,
     physics_config, ControllerAction, EnvProfiler, startup_summary, dexsim_startup_info,
     ExpertTrajectoryCfg, joint_command_mode, position_velocity, qpos qvel, expert action schema, ObservationHistorySnapshot, ObservationFrame,
+    EvaluationSpec, RuleSession, evaluate_recorded_rules,
     task_instruction, resolve_demo_instruction,
     show-task, task catalog, task gallery, 任务画廊, physical_objective, 物理目标, RLTaskCfg, rl_task]
   paths: [topics/env-framework/env-framework.md]
@@ -66,6 +67,7 @@ topics:
   - embodichain/cli/_example_runner.py
   - examples/README.md
   - embodichain/lab/gym/envs/objectives/
+  - embodichain/lab/evaluation/
   - embodichain/lab/scripts/evaluate_task_objective.py
   - embodichain/lab/scripts/run_task.py
   - embodichain/lab/gym/utils/gym_utils.py
@@ -82,7 +84,7 @@ topics:
   - embodichain/lab/gym/envs/demo.py
   - embodichain/lab/gym/utils/profiler.py
   watch_paths: [embodichain/lab/gym/utils/, embodichain/lab/gym/envs/task_program/, embodichain/cli/, extensions/embodichain_tasks/,
-    tests/gym/envs/, tests/lab/scripts/test_evaluate_task_objective.py]
+    tests/gym/envs/, embodichain/lab/evaluation/, tests/lab/evaluation/, tests/lab/scripts/test_evaluate_task_objective.py]
   related_topics: [simulation-system, manager-functor, sim-visualization, task-programs, data-pipeline]
   status: active
 - id: manager-functor

@@ -10,6 +10,8 @@ Paths are relative to `embodichain/gen_sim/` unless qualified.
 | Request | Owner |
 |---|---|
 | Model service configuration, adapters and ownership | `services/`; [service guide](../../../embodichain/gen_sim/services/README.md) |
+| External scene-provider lifecycle | `scene_providers.py`: request/job/cancellation contracts and selected entry-point loading |
+| Public staged workflow | `workflow.py`: Task Plan loading, provider job operations, generated-scene validation, qualification and deterministic deployment preparation |
 | Unified command dispatch | `embodichain/cli/gensim.py`: `gensim asset ingest`, `scene generate/edit/expand/preview`, `task plan`, `run`, `ui`; legacy top-level commands remain in `embodichain/cli/main.py` |
 | Image to native execution | `_workflow.py`, `_run_config.py`, `_run_binding.py`, `_run_execution.py`; [command and run guide](../../../embodichain/gen_sim/README.md) |
 | Generate/edit CLI modes | `scene_engine/cli/start.py` |
@@ -34,6 +36,14 @@ articulation, refines placement and exports. Editing imports an existing scene,
 validates a typed plan, generates additions and overwrites the export. Combined
 image/edit mode generates first. [Pipeline details](pipeline-details.md) own
 stage, ingest, resume, UI and grouped-randomization contracts.
+
+Full scene providers are separate from model-service roles. The selected
+`embodichain.gensim_scene_providers` adapter owns external job transport and
+materialization; GenSim owns requirements, qualification and deployment validity.
+Task plans, generated scenes, qualification reports and prepared deployments
+use separate immutable manifests. Expected incompatibility returns structured
+qualification; corrupt artifacts and transport failures remain errors. These
+operations expose durable identity/feedback boundaries for a later agent loop.
 
 `gensim run` binds a generated scene to a trusted embodiment/execution policy,
 preflights Task Program and uses ordinary Gym demo execution. Its source graph
@@ -94,6 +104,12 @@ canonicalization and pose-only playback boundaries.
 
 ## Runtime and extension boundaries
 
+Live generation/execution share a process and retain `hybrid`: renderer
+selection is process-wide and closing a temporary World does not reset it.
+
+`EMBODICHAIN_BLENDER_EXECUTABLE` selects the Blender application for Eevee
+graphics initialization; otherwise `EMBODICHAIN_BLENDER_PYTHON` selects the
+isolated interpreter. Both follow shared-dotenv/process precedence.
 Blender operations run through `_blender_runtime.py` in the separately selected
 worker environment. The worker loads operations/direct dependencies, without
 Torch, DexSim or business-framework initialization. Files cross the boundary;

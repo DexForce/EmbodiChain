@@ -300,7 +300,10 @@ class TestAsyncLeRobotRecorder:
         mock_ds = _MockDataset()
         recorder = _make_recorder(env, mock_ds)
 
-        recorder(env, env_ids=torch.tensor([0, 1]))
+        receipt = recorder(env, env_ids=torch.tensor([0, 1]))
+        assert receipt.status == "queued"
+        assert set(receipt.episode_uuids) == {0, 1}
+        assert receipt.episode_uuids[0] != receipt.episode_uuids[1]
         # In the real flow env.reset() clears current_rollout_step after the
         # save; mirror that so super().finalize() does not re-save the buffer.
         env.current_rollout_step = 0

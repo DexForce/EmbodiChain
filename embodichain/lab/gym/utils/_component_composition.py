@@ -533,6 +533,25 @@ def _resolve_gym_components(
             if field_name in resolved
         }
 
+    evaluation = None
+    if "evaluation" in resolved:
+        if "task_program" not in resolved:
+            raise ValueError("evaluation.component requires a configured Task Program.")
+        selection = _mapping(
+            resolved.pop("evaluation"),
+            path="evaluation",
+            required=frozenset({"component"}),
+        )
+        path = _component_path(
+            selection["component"],
+            base_dir=selected_base_dir,
+            path="evaluation.component",
+            sources=sources,
+        )
+        evaluation = _load_yaml_component(
+            path, field_name="evaluation component", sources=sources
+        )
+
     return _ResolvedGymComponents(
         config=resolved,
         embodiment_selected=embodiment_selected,
@@ -541,4 +560,5 @@ def _resolve_gym_components(
         or scene_config is not None,
         embodiment_skill_profile=embodiment_skill_profile,
         scene_config=scene_config,
+        evaluation=evaluation,
     )

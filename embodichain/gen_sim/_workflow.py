@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from collections.abc import Sequence
 from datetime import datetime, timezone
 import hashlib
@@ -116,10 +117,21 @@ def _run(cfg: _RunCfg, *, services: GenSimServices | None = None) -> dict[str, A
     run = None
     try:
         with service_scope(services) as run:
-            from .task_engine._image_run import _plan_image_task
+            from .workflow import (
+                load_generated_scene,
+                materialize_scene_generation,
+                plan_image_task,
+                prepare_task_deployment,
+                qualify_task_scene,
+                submit_scene_generation,
+            )
+            from .scene_providers import (
+                SceneGenerationRequest,
+                load_scene_generation_provider,
+            )
 
             update("running")
-            task = _plan_image_task(
+            task = plan_image_task(
                 source,
                 cfg.instruction,
                 output / "task",
@@ -131,20 +143,76 @@ def _run(cfg: _RunCfg, *, services: GenSimServices | None = None) -> dict[str, A
             update("running")
             scene = cfg.scene
             if scene is None:
-                from .scene_engine.pipeline.generate import generate_scene_from_image
-
-                scene = output / "scene"
-                generate_scene_from_image(
-                    source, scene, scene_z_rotation_degrees=180.0, services=run
+                requirements = task / "scene_requirements.json"
+                provider_profile = dict(cfg.scene_provider["profile"])
+                if cfg.scene_provider["id"] == "legacy_scene_engine":
+                    provider_profile["_services"] = run
+                provider = load_scene_generation_provider(
+                    cfg.scene_provider["id"], provider_profile
                 )
+                request = SceneGenerationRequest(
+                    task_id=cfg.task_id,
+                    image_path=source,
+                    image_sha256=manifest["image_sha256"],
+                    requirements_path=requirements,
+                    requirements_sha256=hashlib.sha256(
+                        requirements.read_bytes()
+                    ).hexdigest(),
+                    output=output / "scene-job",
+                    options={},
+                )
+                request_key = hashlib.sha256(
+                    (
+                        cfg.scene_provider["id"] + request.request_hash + cfg.task_id
+                    ).encode("utf-8")
+                ).hexdigest()
+                job = submit_scene_generation(
+                    provider, request, idempotency_key=request_key
+                )
+                status = provider.inspect(job)
+                if status.status != "succeeded":
+                    raise RuntimeError(
+                        f"Scene generation {status.status}: {status.reason or job.job_id}"
+                    )
+                scene = materialize_scene_generation(provider, job, output / "scene")
+                write_run_json(output / "scene_job.json", status.to_dict())
             manifest["scene"] = str(scene)
             manifest["task"] = str(task)
             update("succeeded")
             stage = "binding"
             update("running")
-            deployment = _bind_deployment(
-                cfg, scene, task, runtime, policy, profile, services=run
-            )
+            if (scene / "generated_scene.json").is_file():
+                load_generated_scene(scene)
+                qualification = qualify_task_scene(
+                    task,
+                    scene,
+                    cfg.runtime,
+                    cfg.execution_policy,
+                    output / "qualification",
+                    services=run,
+                )
+                qualification_value = json.loads(
+                    (qualification / "scene_qualification.json").read_text()
+                )
+                if qualification_value["status"] != "accepted":
+                    raise ValueError(
+                        "Generated scene qualification "
+                        + qualification_value["status"]
+                        + ": "
+                        + json.dumps(qualification_value["issues"], ensure_ascii=False)
+                    )
+                deployment = prepare_task_deployment(
+                    task,
+                    scene,
+                    qualification,
+                    cfg.runtime,
+                    cfg.execution_policy,
+                    output / "prepared",
+                )
+            else:
+                deployment = _bind_deployment(
+                    cfg, scene, task, runtime, policy, profile, services=run
+                )
             manifest["deployment"] = str(deployment)
             update("succeeded")
             stage = "execution"

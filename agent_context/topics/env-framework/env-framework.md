@@ -82,6 +82,11 @@ live state or substituting older frames. See
 [recording and replay](execution.md#recording--replay) and
 [manager views](../manager-functor/manager-functor.md#raw-observations-and-consumer-views).
 
+Use `advance_observation` to feed a compiled `RuleSession` from explicit
+control slots and qualified host captures; `evaluate_recorded_rules` evaluates
+the same graph in bounded recorded chunks. Results remain row-local at each
+recorded boundary. Missing or foreign evidence cannot satisfy a predicate.
+
 ## Lifecycle and boundaries
 
 Construction seeds before scene setup, acquires enabled sensors, prepares
@@ -95,9 +100,12 @@ terms at substeps; direct ControllerAction commands bypass that refresh path.
 Reset action/event state before reset-mode events. [Sensors](../sensor-system/contact-history.md)
 own interval contact accumulation and selected-row history reset.
 
-Read final success before resetting scene/bridge. Task Program completion
-combines runtime, post-policy and validator acceptance; dataset persistence and
-measured physical objectives remain separate. Source-bound Real2Sim episodes
+Read final success before resetting scene/bridge. Task Program bridges combine
+runtime, post-policy and segment acceptance. With final predicates,
+`is_task_success()` also requires fresh raw physical measurements. The demo
+executor seals each row's terminal measurements/outcome; reset recording consumes
+them before clearing row state. Dataset persistence and optional physical
+objectives remain separate. Source-bound Real2Sim episodes
 use the qualified synchronous receipt owner, not the ordinary reset recorder.
 
 `EpisodeContext` follows reset and recorder eligibility. A trusted B=1

@@ -80,6 +80,7 @@ def inspect_deployment(path: str | Path, *, explain: bool = False) -> dict[str, 
     deployment = _load_configured_task_program_deployment(
         task_program=task_program,
         skill_profile=physical.embodiment_skill_profile,
+        evaluation=physical.evaluation,
         base_dir=deployment_path.parent,
     )
     _validate_scene_binding_targets(
