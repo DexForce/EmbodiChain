@@ -64,6 +64,13 @@ never shortens a scheduled horizon to satisfy `total_timesteps`; without an
 explicit timestep budget, CLI `iterations` maps to an exact optimizer-update
 budget.
 
+Programmatic `APG.accumulate_complete_rollout()` also accepts a graph-connected
+`terminal_value` per environment. It contributes with the full-horizon discount
+only to rows without a hard termination or truncation. The caller owns value
+fitting, freezing estimator parameters while retaining state gradients, and any
+soft survival multiplier. The common trainer does not fit a value function
+automatically.
+
 Complete mode can clamp actions to the environment space and install a
 per-environment action-adjoint norm hook. Non-finite adjoint rows are zeroed;
 finite rows are clipped independently with an overflow-safe norm. APG also has
@@ -146,3 +153,30 @@ example is an experimental gradient reference, not a general simulator task.
 Use `add-task-env` for simulator-backed task environments and
 `manager-functor` for their observation, reward, event, and action
 components.
+
+## Experimental host replay
+
+`learning/rl/experimental/_host_replay.py` owns a private synchronous transport
+boundary around CPU replay storage. The wrapped sampler retains window, mask
+and history rules; only transition/sample transfers move data. Returned device
+samples own storage independently of subsequent host writes, with dtypes
+preserved and gradients detached. Host sampling uses CPU RNG; it does not
+preserve a prior CUDA sampling stream.
+
+Its private ring-checkpoint helpers borrow CPU tensors for synchronous saving
+and validate capacity, fields, dtypes and cursor metadata before restoring owned
+storage. The caller serializes writers, pairs replay with model/RNG receipts,
+and closes sampler sequences across simulator restarts. Restoring replay alone
+does not restore the physical trajectory or justify exact-resume claims.
+
+The Sharpa example's `_native_checkpoint.py` owns synchronous file persistence,
+model/replay pairing checks and resume provenance; `native_full.py` owns the
+fresh simulator and collection schedule. A resumed run uses saved learning
+settings and rejects changed physical sources or adapter snapshots.
+
+The Sharpa native `reference_host` example retains full learning batches and
+capacity, constructs only a small unused GPU replay during learner setup, then
+uses the host store. PyTorch's nonreentrant checkpoint wrapper recomputes only
+the world-model MLP, preserving state-dict keys and optimizer parameter identity.
+It is an eager, single-threaded research path; it does not add distributed
+training or asynchronous shared-buffer ownership.

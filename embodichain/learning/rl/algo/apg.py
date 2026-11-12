@@ -61,6 +61,8 @@ def segmented_discounted_return(
 def complete_discounted_return(
     rollout: DifferentiableRollout,
     gamma: float,
+    *,
+    terminal_value: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Compute per-environment returns up to the first terminal transition.
 
@@ -71,12 +73,16 @@ def complete_discounted_return(
     Args:
         rollout: Complete graph-preserving trajectory.
         gamma: Per-step discount factor.
+        terminal_value: Optional value at the final next state, shaped like
+            one reward row. It retains gradients and contributes with discount
+            ``gamma**num_steps`` only for rows with no termination or truncation.
+            Callers own value estimation and any differentiable soft survival.
 
     Returns:
         One masked discounted return per environment.
 
     Raises:
-        ValueError: If the rollout is empty.
+        ValueError: If the rollout is empty or the terminal value has wrong shape.
     """
     if rollout.num_steps == 0:
         raise ValueError("Cannot compute returns for an empty rollout.")
@@ -84,9 +90,18 @@ def complete_discounted_return(
     discounts = torch.as_tensor(gamma, device=rewards.device, dtype=rewards.dtype) ** (
         torch.arange(rollout.num_steps, device=rewards.device, dtype=rewards.dtype)
     )
-    return (
-        rewards * rollout.alive_mask.to(rewards.dtype) * discounts.unsqueeze(-1)
-    ).sum(dim=0)
+    alive_mask = rollout.alive_mask
+    returns = (rewards * alive_mask.to(rewards.dtype) * discounts.unsqueeze(-1)).sum(
+        dim=0
+    )
+    if terminal_value is not None:
+        if terminal_value.shape != returns.shape:
+            raise ValueError("terminal_value must have one value per environment.")
+        survives = alive_mask[-1] & ~rollout.transitions[-1].done
+        returns = returns + gamma**rollout.num_steps * torch.where(
+            survives, terminal_value, torch.zeros_like(terminal_value)
+        )
+    return returns
 
 
 @configclass
@@ -179,6 +194,7 @@ class APG(BaseAlgorithm[DifferentiableRollout]):
         *,
         objective_scale: float | torch.Tensor = 1.0,
         accumulation_scale: float = 1.0,
+        terminal_value: torch.Tensor | None = None,
     ) -> None:
         """Accumulate one independent full-horizon rollout.
 
@@ -187,6 +203,10 @@ class APG(BaseAlgorithm[DifferentiableRollout]):
             objective_scale: Scalar or per-environment return multiplier.
             accumulation_scale: Loss multiplier, normally reciprocal to the
                 number of independent rollout microbatches in one update.
+            terminal_value: Optional graph-connected final-state value. Hard
+                terminal/truncated rows do not bootstrap; see
+                :func:`complete_discounted_return`. Value fitting and freezing
+                estimator weights remain the caller's responsibility.
 
         Raises:
             RuntimeError: If no APG update is active.
@@ -199,7 +219,9 @@ class APG(BaseAlgorithm[DifferentiableRollout]):
         if accumulation_scale <= 0.0:
             raise ValueError("accumulation_scale must be positive.")
 
-        returns = complete_discounted_return(rollout, self.cfg.gamma)
+        returns = complete_discounted_return(
+            rollout, self.cfg.gamma, terminal_value=terminal_value
+        )
         scale = torch.as_tensor(
             objective_scale,
             dtype=returns.dtype,

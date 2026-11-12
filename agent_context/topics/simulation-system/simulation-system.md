@@ -82,7 +82,18 @@ facade source configs retain the original package address.
 into manager declarations. Scene replication and collision isolation belong
 to Spawn, not per-object collision-group calculations. Backend differences
 belong in physics hooks/capabilities or object adapters, not task-side native
-access. Contact sensors use the finalized Scene's `ContactQuery` boundary.
+access. Contact sensors use the finalized Scene's `ContactQuery` boundary. The private
+`_GeometryNetForceSensor` additionally qualifies native MuJoCo-Warp geometry-pair
+net forces for the Sharpa reference experiment. It resolves named source
+colliders after preparation, rejects ambiguous decompositions and topology
+changes, and closes borrowed buffers before manager teardown. Native material
+scaling and batched joint-gain writes remain physics-owned private views;
+tasks submit row values without accessing solver arrays. These views preserve
+source reset defaults and invalidate solver graphs after parameter changes.
+The private `_shrink_cylinder_variants` initialization helper supports only
+analytic cylinders and ratios in `(0, 1]`, scaling constant-mass inertia while
+retaining enclosing template broad-phase bounds. It does not update render
+geometry or descriptors and must run once before collection.
 
 Camera and light resources also belong to that existing Scene. Its lightweight
 prepared-Arena phase permits creation before physical finalization. Light

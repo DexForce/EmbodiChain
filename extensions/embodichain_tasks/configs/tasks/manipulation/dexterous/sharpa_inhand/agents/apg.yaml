@@ -1,0 +1,42 @@
+trainer:
+  exp_name: sharpa_inhand_model_apg
+  learning_env:
+    name: SharpaInHandModel
+    cfg:
+      model_checkpoint: outputs/sharpa_inhand/world_model.pt
+      max_episode_steps: 16
+  seed: 42
+  device: cuda:0
+  num_envs: 64
+  iterations: 500
+  rollout_mode: complete
+  segment_length: 16
+  update_horizon: 16
+  deterministic_actions: true
+  clip_actions_to_space: true
+  action_adjoint_max_norm: 1.0
+  normalize_observations: false
+  enable_eval: false
+  save_frequency_updates: 50
+  use_wandb: false
+
+policy:
+  name: actor_only
+  initial_log_std: -2.0
+  actor:
+    type: mlp
+    network_cfg:
+      hidden_sizes: [128, 128]
+      activation: elu
+      last_activation: tanh
+
+algorithm:
+  name: apg
+  cfg:
+    optimizer:
+      name: adam
+      learning_rate: 0.00025
+    gamma: 0.99
+    max_grad_norm: 0.5
+    max_grad_norm_before_clip: 1000000.0
+    ent_coef: 0.0

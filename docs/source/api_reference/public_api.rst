@@ -4589,6 +4589,30 @@ reference-state resets and terminal snapshots before automatic row resets.
 .. automodule:: embodichain_tasks.locomotion.tracking.g1_motion
    :members:
 
+embodichain_tasks.manipulation.dexterous.sharpa_inhand
+------------------------------------------------------
+
+Privileged-state cylinder rotation with the fixed-palm robot world model.
+The learned environment preserves action/state gradients and uses measured
+start banks; physical acquisition and evaluation remain simulator-host owned.
+
+.. currentmodule:: embodichain_tasks.manipulation.dexterous.sharpa_inhand
+
+.. autosummary::
+
+   SharpaInHandCfg
+   SharpaInHandWorldModel
+   SharpaInHandModelEnv
+
+.. autoclass:: SharpaInHandCfg
+   :members:
+
+.. autoclass:: SharpaInHandWorldModel
+   :members:
+
+.. autoclass:: SharpaInHandModelEnv
+   :members:
+
 embodichain_tasks.manipulation.push_cube
 ----------------------------------------
 

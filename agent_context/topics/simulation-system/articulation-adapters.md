@@ -69,11 +69,13 @@ are borrowed buffers, not snapshots; clone values that must survive later
 reads. Fetch after reset or direct writes rather than caching across them.
 
 `Articulation.set_state()` writes selected root, joint and drive fields in one
-backend operation. Current joint positions are clipped to joint limits.
-Position targets are also clipped by default; `clamp_target_qpos=False` retains
-raw PD targets while physical joint limits remain enabled. `set_qpos()` exposes
-the same target-only option. Keep this distinction when a task records motor
-commands for learned dynamics.
+backend operation. Current joint positions and position targets are clipped to
+joint limits by default. `clamp_target_qpos=False` retains raw PD targets;
+`clamp_qpos=False` lets cached physical replay restore exact states, including
+compliant limit excursions. Physical joint limits remain enabled in both cases.
+`set_qpos()` exposes only the target option. Keep this distinction when a task
+records motor commands for learned dynamics. The focused contract lives in
+`tests/sim/objects/test_articulation_state.py`.
 
 `Articulation.set_root_velocity()` writes selected world-frame linear and
 angular velocities as `(N, 6)` rows. The Scene adapter validates the complete
