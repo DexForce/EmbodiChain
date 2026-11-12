@@ -102,6 +102,62 @@ with GenSimServices(cfg) as services:
     records = services.records()
 ```
 
+## Configure DeepSeek independently
+
+The shared [configuration example](model_services.example.json) includes an
+optional `deepseek` profile alongside `task_chat` and `scene_chat`. Its default
+role bindings use the existing `OPENAI_*` profiles. Add the `deepseek` profile
+to your operator-owned configuration, or copy the shared example to
+`model_services.json`, and supply its independent settings in your deployment
+dotenv:
+
+```dotenv
+DEEPSEEK_API_KEY="your-deepseek-key"
+DEEPSEEK_MODEL="deepseek-flash"
+DEEPSEEK_BASE_URL="https://api.deepseek.com"
+```
+
+Bind individual chat roles to `deepseek` to choose their API independently.
+For DeepSeek across all Task, Scene and Asset chat roles, update these entries
+within `model_services.roles`, retaining the existing non-chat entries:
+
+```json
+{
+  "task_interpretation": "deepseek",
+  "task_image_grounding": "deepseek",
+  "task_semantic_planning": "deepseek",
+  "graph_localization": "deepseek",
+  "scene_understanding": "deepseek",
+  "scene_edit": "deepseek",
+  "scene_asset_orientation": "deepseek",
+  "scene_asset_dimensions": "deepseek",
+  "asset_orientation": "deepseek",
+  "asset_dimensions": "deepseek",
+  "asset_semantics": "deepseek",
+  "asset_physics": "deepseek"
+}
+```
+
+Use a vision-capable model for roles receiving images; the default
+`deepseek-flash` supports these inputs. See
+[DeepSeek's vision guide](https://api-docs.deepseek.com/guides/vision/).
+The profile disables thinking and sets a 16,384-token output budget through
+adapter `options`. Structured callers select JSON mode per request.
+
+Select your single configuration file, validate it, and run a live-model workflow:
+
+```bash
+export EMBODICHAIN_MODEL_SERVICES_CONFIG="$PWD/model_services.json"
+export EMBODICHAIN_ENV_FILE="$PWD/services.env"
+embodichain gensim services validate
+embodichain gensim task plan --image table.png --instruction "Put the cube on the table" --output outputs/deepseek-plan
+```
+
+Only roles bound to `deepseek` require the `DEEPSEEK_*` variables. Supplying those
+variables alone leaves the original API selected. To switch roles back, restore
+their `task_chat`/`scene_chat` bindings in the same file; image, segmentation,
+geometry and articulation profiles retain their own settings.
+
 ## Implement an adapter
 
 Implement the relevant Protocol; inheritance from shipped clients is unnecessary.

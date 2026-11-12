@@ -245,6 +245,7 @@ def _run_native_headless(
         if args.episodes is not None
         else int(native.trainer.get("num_eval_episodes", 5))
     )
+    episode_outcomes: list[dict[str, Any]] = []
     try:
         metrics = evaluate_episodes(
             policy=native.runtime.policy,
@@ -252,13 +253,14 @@ def _run_native_headless(
             num_episodes=episodes,
             device=native.device,
             seed=native.seed,
+            on_episode=episode_outcomes.append,
         )
     finally:
         native.runtime.close()
         _flush_simulator(native.uses_simulator)
     return write_evaluation_report(
         _output_parent(args.output, resolved),
-        _headless_report(native, resolved, episodes, metrics),
+        _headless_report(native, resolved, episodes, metrics, episode_outcomes),
     )
 
 
@@ -507,6 +509,7 @@ def _headless_report(
     resolved: EvaluationInput,
     episodes: int,
     metrics: Mapping[str, float],
+    episode_outcomes: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any]:
     return {
         "mode": "headless",
@@ -518,7 +521,11 @@ def _headless_report(
             "device": str(native.device),
             "embodichain_version": __version__,
         },
-        "result": {"episodes": episodes, "metrics": metrics},
+        "result": {
+            "episodes": episodes,
+            "metrics": metrics,
+            "episode_outcomes": episode_outcomes,
+        },
     }
 
 

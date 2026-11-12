@@ -18,11 +18,18 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import math
 from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING
 
 import torch
+
+from embodichain.compute.geometry._distance import _measure_near_target, _positions
+from embodichain.lab.evaluation._predicates import _HEIGHT, _near_params
+
+if TYPE_CHECKING:
+    from embodichain.lab.evaluation import RuleResult
 
 __all__ = [
     "ConditionResult",
@@ -40,11 +47,15 @@ class ConditionResult:
         satisfied: Boolean vector of physical predicate values.
         valid: Boolean vector identifying available finite evidence.
         metrics: Named floating measurements with the same leading batch size.
+        rule_results: Optional diagnostics from a compiled rule graph.
+        evaluation_identity: Content identity of the compiled rule graph, if supplied.
     """
 
     satisfied: torch.Tensor
     valid: torch.Tensor
     metrics: Mapping[str, torch.Tensor]
+    rule_results: Mapping[str, RuleResult] = field(default_factory=dict)
+    evaluation_identity: str | None = None
 
     def __post_init__(self) -> None:
         if self.satisfied.dtype != torch.bool or self.satisfied.ndim != 1:
@@ -142,13 +153,6 @@ class ObjectMotionMetrics:
         )
 
 
-def _positions(value: torch.Tensor) -> None:
-    if not isinstance(value, torch.Tensor) or value.ndim != 2 or value.shape[1] != 3:
-        raise ValueError("Positions must have shape (num_envs, 3).")
-    if not value.is_floating_point():
-        raise TypeError("Positions must be floating tensors.")
-
-
 def evaluate_near_target(
     position: torch.Tensor,
     target: torch.Tensor,
@@ -169,33 +173,12 @@ def evaluate_near_target(
     Returns:
         Physical truth, validity and the measured ``distance`` vector.
     """
+    params = _near_params(
+        {"tolerance": tolerance, "axes": axes, "inclusive": inclusive}
+    )
     _positions(position)
-    axes = tuple(axes)
-    if (
-        not axes
-        or any(type(axis) is not int or axis not in (0, 1, 2) for axis in axes)
-        or len(set(axes)) != len(axes)
-    ):
-        raise ValueError("axes must select distinct indices from 0, 1, 2.")
-    if (
-        isinstance(tolerance, bool)
-        or not isinstance(tolerance, (int, float))
-        or not math.isfinite(tolerance)
-        or tolerance <= 0
-    ):
-        raise ValueError("tolerance must be positive and finite.")
-    if type(inclusive) is not bool:
-        raise TypeError("inclusive must be a bool.")
-    target = target.to(device=position.device, dtype=position.dtype)
-    if target.shape == (3,):
-        target = target.unsqueeze(0).expand_as(position)
-    _positions(target)
-    if target.shape != position.shape:
-        raise ValueError("Target batch must match object positions.")
-    valid = torch.isfinite(position).all(dim=-1) & torch.isfinite(target).all(dim=-1)
-    distance = torch.linalg.vector_norm((position - target)[:, axes], dim=-1)
-    satisfied = distance <= tolerance if inclusive else distance < tolerance
-    return ConditionResult(satisfied, valid, {"distance": distance})
+    passed, valid, distance = _measure_near_target(position, target, **params)
+    return ConditionResult(passed, valid, {"distance": distance})
 
 
 def evaluate_below_height(position: torch.Tensor, height: float) -> ConditionResult:
@@ -208,12 +191,7 @@ def evaluate_below_height(position: torch.Tensor, height: float) -> ConditionRes
     Returns:
         Physical truth, validity and measured ``height``.
     """
-    _positions(position)
-    if (
-        isinstance(height, bool)
-        or not isinstance(height, (int, float))
-        or not math.isfinite(height)
-    ):
-        raise ValueError("height must be finite.")
-    valid = torch.isfinite(position).all(dim=-1)
-    return ConditionResult(position[:, 2] < height, valid, {"height": position[:, 2]})
+    result = _HEIGHT.measure(
+        {"position": position}, _HEIGHT.normalize({"height": height})
+    )
+    return ConditionResult(result.satisfied, result.valid, result.metrics)

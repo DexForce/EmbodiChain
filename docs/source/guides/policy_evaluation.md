@@ -215,8 +215,15 @@ and `result.episodes` before interpreting `result.metrics`:
 
 `eval/metrics/*` samples scalar task metrics **at episode completion**, then
 averages across episodes. It does not average each metric over the trajectory.
-The native headless report stores aggregate metrics, without individual episode
-traces or termination reasons. Locomotion's `eval/success_rate: 0.0` should be
+The native headless report stores aggregate metrics and, when the environment
+publishes them, `result.episode_outcomes` for the selected completed episodes.
+Each outcome includes row and episode identities, cached execution and physical
+evidence, acceptance, termination flags and any persistence receipts. The Viewer
+includes the same host snapshot under each episode's `episode_outcome`. A
+`queued` dataset receipt indicates that a background recorder accepted the
+payload. Its committed sidecar reports `persisted`.
+
+Locomotion's `eval/success_rate: 0.0` should be
 recorded as **not applicable** in a qualification assessment. When a task emits
 no success field at all, the report contains `null` for this metric.
 

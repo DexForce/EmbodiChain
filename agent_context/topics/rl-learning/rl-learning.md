@@ -219,6 +219,11 @@ DexSim's Motion Policy Evaluator, preserving the original task's reset, step,
 observation and action path. Supplying an Environment means the adapter owns
 its camera lifecycle; Kit's default flat-ground camera is not applied to it.
 
+Native headless evaluation records the host's terminal outcomes for the
+selected episodes beside the saved run and checkpoint identities. The Viewer
+includes the same snapshot in its completed-episode summary when available.
+Both retain the existing scalar metrics and use the host's step results.
+
 Headless evaluation accepts `--renderer no-render`. When a saved training
 configuration uses NoRender, Viewer evaluation defaults to Hybrid; an explicit
 native renderer overrides that choice. `--viewer --renderer no-render` is

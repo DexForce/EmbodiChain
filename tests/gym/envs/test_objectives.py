@@ -104,6 +104,51 @@ def test_snapshot_queries_are_pure_detached_and_json_compatible():
     json.dumps(row, allow_nan=False)
 
 
+def test_objective_reports_pending_valid_observations_and_row_local_rule_evidence():
+    from embodichain.lab.evaluation import (
+        EvaluationSpec,
+        EvaluationStatus,
+        PredicateSpec,
+        TemporalRule,
+        builtin_predicates,
+    )
+    from embodichain.lab.gym.envs.objectives import OrderedPlacementObjective
+
+    compiled = builtin_predicates().compile(
+        EvaluationSpec(
+            {
+                "low": PredicateSpec(
+                    "below_height", {"position": "position"}, {"height": 1.0}
+                ),
+                "dwell": TemporalRule("hold_for", "low", end=3, steps=2),
+            },
+            ("dwell",),
+        )
+    )
+    objective = OrderedPlacementObjective(_runtime().cfg, 2, "cpu", condition=compiled)
+    objective.update(_state(), 0.1)
+    pending = objective.snapshot()
+    assert pending["metrics"]["measurement_valid"].tolist() == [True, True]
+    assert pending["metrics"]["stable"].tolist() == [False, False]
+    assert pending["condition"]["evaluation_identity"] == compiled.identity
+    assert (
+        pending["condition"]["rules"]["dwell"]["status"].tolist()
+        == [EvaluationStatus.UNKNOWN] * 2
+    )
+    objective.update(_state(), 0.1)
+    row = objective.snapshot_row(1)
+    assert row["condition"]["rules"]["dwell"]["witness_steps"] == [0, 1]
+    json.dumps(row, allow_nan=False)
+    objective.reset([0])
+    reset = objective.snapshot()
+    assert reset["condition"]["rules"]["dwell"]["status"].tolist() == [
+        EvaluationStatus.NOT_RUN,
+        EvaluationStatus.SATISFIED,
+    ]
+    reset["condition"]["rules"]["dwell"]["witness_steps"].zero_()
+    assert objective.snapshot_row(1) == row
+
+
 def test_snapshot_records_milestone_steps_and_elapsed_times():
     objective = _runtime()
     for xs in [(0.0, 0.0), (0.0, 0.0), (1.0, 1.0), (1.0, 1.0), (0.0, 0.0), (0.0, 0.0)]:

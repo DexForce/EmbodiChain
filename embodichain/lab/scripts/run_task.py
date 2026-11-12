@@ -1313,6 +1313,11 @@ def replay(
         replay_env = ReplayWrapper(
             env.unwrapped, trajectory_path, mode=mode, fluid_reader=fluid_reader
         )
+        for row, report in enumerate(replay_env.final_acceptance or ()):
+            log_info(
+                f"Replay final acceptance row {row}: {report['status']}, "
+                f"accepted={report['accepted']}, recorded={report['recorded_accepted']}"
+            )
         if mode == "control":
             replay_control(replay_env)
         else:

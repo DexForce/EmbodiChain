@@ -42,6 +42,9 @@ class _RunCfg:
     device: str | None = None
     headless: bool = True
     binding: dict[str, Any] = field(default_factory=dict)
+    scene_provider: dict[str, Any] = field(
+        default_factory=lambda: {"id": "legacy_scene_engine", "profile": {}}
+    )
 
     def __post_init__(self) -> None:
         for name in ("instruction", "task_id"):
@@ -63,6 +66,14 @@ class _RunCfg:
             raise ValueError(
                 "binding supports profile, runtime_services, scene_binding and segments"
             )
+        if (
+            type(self.scene_provider) is not dict
+            or set(self.scene_provider) != {"id", "profile"}
+            or not isinstance(self.scene_provider["id"], str)
+            or not self.scene_provider["id"].strip()
+            or not isinstance(self.scene_provider["profile"], dict)
+        ):
+            raise ValueError("scene_provider requires id and profile mappings")
 
 
 def _load_run_config(args: argparse.Namespace) -> _RunCfg:
