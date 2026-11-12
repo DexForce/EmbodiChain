@@ -286,6 +286,76 @@ def test_multimodal_order_and_provider_options_stay_in_adapter(tmp_path, monkeyp
     assert captured[0]["thinking"] == {"type": "disabled"}
 
 
+def test_openai_compatible_chat_can_omit_authentication(monkeypatch):
+    from embodichain.gen_sim.services.adapters import chat
+
+    requests = []
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            pass
+
+        def read(self):
+            return b'{"choices":[{"message":{"content":"ok"}}]}'
+
+    def urlopen(request, **_):
+        requests.append(request)
+        return Response()
+
+    monkeypatch.setattr(chat, "urlopen", urlopen)
+    cfg = GenSimServicesCfg(
+        profiles={
+            "local": {
+                "adapter": "openai_compatible",
+                "model": "local-model",
+                "base_url": "http://localhost/v1",
+            }
+        },
+        roles={"task_interpretation": "local"},
+    )
+    with GenSimServices(cfg) as services:
+        result = services.get("task_interpretation").complete(ChatRequest(()))
+    assert result.text == "ok"
+    assert requests[0].get_header("Authorization") is None
+
+
+def test_selected_adapter_entry_point_is_loaded_lazily(monkeypatch):
+    from embodichain.gen_sim.services import runtime
+
+    loaded = []
+
+    class EntryPoint:
+        def __init__(self, name):
+            self.name = name
+
+        def load(self):
+            loaded.append(self.name)
+            if self.name == "unused":
+                pytest.fail("unselected adapter must not be imported")
+
+            def register(registry):
+                registry.register(
+                    "plugin_chat",
+                    lambda _: Chat("plugin"),
+                    roles=("task_interpretation",),
+                )
+
+            return register
+
+    monkeypatch.setattr(
+        runtime,
+        "entry_points",
+        lambda **_: [EntryPoint("plugin_chat"), EntryPoint("unused")],
+    )
+    with GenSimServices(configured("plugin_chat")) as services:
+        result = services.get("task_interpretation").complete(ChatRequest(()))
+    assert result.text == "plugin"
+    assert loaded == ["plugin_chat"]
+
+
 def test_records_count_transport_attempts_without_leaking_credentials(monkeypatch):
     from urllib.error import HTTPError
     from embodichain.gen_sim.services.adapters import chat

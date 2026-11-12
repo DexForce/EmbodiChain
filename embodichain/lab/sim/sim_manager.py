@@ -137,7 +137,7 @@ from embodichain.lab.sim.spawn.descriptors import (
     volume_deformable_desc_from_cfg,
 )
 from embodichain.lab.sim.spawn.usd import (
-    articulation_desc_from_usd,
+    _load_usd_articulation,
     rigid_desc_from_usd,
     visual_desc_from_usd,
 )
@@ -158,6 +158,7 @@ from embodichain.utils.math import (
 )
 
 if TYPE_CHECKING:
+    from dexsim.spawn import GeometryDesc, NewtonCollisionDesc
     from dexsim.engine import PhysicsScene
     from dexsim.scene import Scene
     from dexsim.interaction import EntityGizmoConfig, EntityGizmoManipulator
@@ -1369,6 +1370,24 @@ class SimulationManager:
 
         self._default_resources = SimResources()
 
+    def _register_joint_dc_motor_control(
+        self, uid: str, robot_parameters: dict[str, Any]
+    ) -> Any:
+        """Install one batched explicit motor before scene preparation."""
+        if not self.is_newton_backend:
+            raise RuntimeError("Graph joint motors require the Newton backend.")
+        if uid not in self._robots and uid not in self._articulations:
+            raise KeyError(f"Robot or articulation {uid!r} is not declared.")
+        scene = self._spawn_scene
+        if scene.builder.is_finalized:
+            raise RuntimeError("Joint motors must be registered before prepare().")
+        from embodichain.lab.sim._joint_motor import _BatchedJointDCMotorControl
+
+        paths = tuple(f"{arena}/{uid}" for arena in scene.arena_names)
+        control = _BatchedJointDCMotorControl(robot_parameters, paths)
+        scene.builder.add_runtime_control(control)
+        return control
+
     def register_kinematic_joint_trajectory(
         self,
         uid: str,
@@ -2401,6 +2420,7 @@ class SimulationManager:
             physics=RigidBodyPhysicsDesc.static(),
             per_env=False,
         )
+        self._spawn_default_plane_descriptor = descriptor
 
         if hasattr(descriptor, "render_categories"):
             descriptor.render_categories = self._GROUND_RENDER_CATEGORY
@@ -2419,6 +2439,54 @@ class SimulationManager:
         self._default_plane = plane
         if self.has_native_renderer:
             plane.set_visible(self._spawn_default_plane_visibility)
+
+    def configure_ground_plane_collision(
+        self,
+        *,
+        enabled: bool = True,
+        newton: NewtonCollisionDesc | None = None,
+        geometry: GeometryDesc | None = None,
+    ) -> None:
+        """Configure ground collision before preparing scene physics.
+
+        Args:
+            enabled: Whether the default plane participates in collision.
+            newton: Optional DexSim NewtonCollisionDesc for the plane.
+            geometry: Optional DexSim GeometryDesc replacing the global ground
+                geometry for both collision and rendering.
+
+        Raises:
+            RuntimeError: The scene physics has already been prepared.
+        """
+        if self.spawn_result is not None:
+            raise RuntimeError("Ground collision must be configured before prepare().")
+        if geometry is not None:
+            from dataclasses import fields
+            from dexsim.spawn import GeometryDesc
+
+            for field in fields(GeometryDesc):
+                value = getattr(geometry, field.name)
+                setattr(
+                    self._spawn_default_plane_descriptor.collisions[0],
+                    field.name,
+                    value,
+                )
+                setattr(
+                    self._spawn_default_plane_descriptor.renders[0], field.name, value
+                )
+        collision = self._spawn_default_plane_descriptor.collisions[0]
+        collision.enable_collision = enabled
+        if newton is not None:
+            collision.newton = newton
+        # Default materializes the ground during declaration. Redeclaring also
+        # updates its native collision and render geometry before prepare().
+        self._spawn_scene.remove("default_plane")
+        self._spawn_scene.declare(
+            "rigid_object", "default_plane", self._spawn_default_plane_descriptor
+        )
+        handles = self._spawn_scene.handles("default_plane")
+        if handles:
+            self._bind_default_plane(handles[0])
 
     def set_default_global_lighting(self) -> None:
         """Set default global lighting for the scene.
@@ -3709,6 +3777,9 @@ class SimulationManager:
                 robot is declared. Mounted cameras are created only when
                 ``cfg.enable_sensor`` is True and attach during preparation.
 
+        USD robots with internal scene constraints must be declared before
+        `prepare()` on the Default backend.
+
         Returns:
             Robot | None: The added robot instance handle, or None if failed.
         """
@@ -3736,7 +3807,7 @@ class SimulationManager:
         if source_path is None:
             if cfg.urdf_cfg is None:
                 logger.log_error(
-                    "Robot configuration must have a valid fpath or urdf_cfg."
+                    "Robot configuration must have a valid source, fpath, or urdf_cfg."
                 )
                 return None
 
@@ -3803,8 +3874,9 @@ class SimulationManager:
         """
         cfg = deepcopy(cfg)
         materials = {}
+        constraints = []
         if _is_usd_path(_asset_file_path(cfg)):
-            descriptor, materials = articulation_desc_from_usd(
+            descriptor, materials, constraints = _load_usd_articulation(
                 cfg,
                 per_env=True,
                 newton_solver_type=self._active_newton_solver_type,
@@ -3831,6 +3903,7 @@ class SimulationManager:
             descriptor,
             facade=facade,
             materials=materials,
+            constraints=constraints,
             configure_source=partial(
                 configure_articulation_desc,
                 cfg=cfg,
