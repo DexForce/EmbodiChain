@@ -42,6 +42,7 @@ from embodichain.utils.utility import get_class_instance
 from dexsim.utility import log_debug, log_error
 
 if TYPE_CHECKING:
+    from embodichain.lab.evaluation import PredicateRegistry
     from embodichain.lab.gym.envs.managers.cfg import RLTaskCfg
     from embodichain.lab.sim.cfg import RobotCfg
     from embodichain.lab.sim.sensors import SensorCfg
@@ -605,6 +606,7 @@ def config_to_cfg(
     source_path: str | os.PathLike[str] | None = None,
     task_program_path_override: str | os.PathLike[str] | None = None,
     component_sources: Mapping[str, Mapping[str, object]] | None = None,
+    evaluation_registry: PredicateRegistry | None = None,
 ) -> "EmbodiedEnvCfg":
     """Parser configuration file into cfgs for env initialization.
 
@@ -629,6 +631,7 @@ def config_to_cfg(
     Args:
         config (dict): The configuration dictionary containing an optional
             environment component plus an embodiment component or inline robot.
+        evaluation_registry: Optional trusted registry for the selected rule library.
         manager_modules (list): List of module paths for dataset, event, observation, and reward managers.
             If not provided, uses default module paths.
         source_path: Optional path of the Gym configuration source file.
@@ -788,11 +791,50 @@ def config_to_cfg(
             _load_configured_task_program_deployment,
         )
 
+        program_selectors = deepcopy(config["task_program"])
+        if task_program_path_override is not None:
+            if not isinstance(task_program_path_override, (str, os.PathLike)):
+                raise TypeError("task_program_path must be a string or path.")
+            program_selectors["program"] = str(
+                Path(task_program_path_override).expanduser().resolve()
+            )
+        evaluation = component_resolution.evaluation
+        if "acceptance" in config:
+            from embodichain.lab.gym.envs._final_acceptance import (
+                _load_acceptance_evaluation,
+            )
+
+            if evaluation is not None:
+                raise ValueError(
+                    "Declare either evaluation or acceptance, not two final gates."
+                )
+            env_cfg.final_acceptance, env_cfg.replay_surface, evaluation = (
+                _load_acceptance_evaluation(
+                    config["acceptance"],
+                    config.get("replay_surface"),
+                    base_dir=base_dir,
+                    component_sources=component_sources,
+                )
+            )
         deployment = _load_configured_task_program_deployment(
-            task_program=config["task_program"],
+            task_program=program_selectors,
             skill_profile=component_resolution.embodiment_skill_profile,
+            evaluation=evaluation,
+            evaluation_registry=evaluation_registry,
             base_dir=base_dir,
         )
+        from embodichain.lab.task_program.integrations.demo_skill import (
+            _ConfiguredDemoSkillSource,
+        )
+
+        if (
+            any(
+                isinstance(source, _ConfiguredDemoSkillSource)
+                for source in deployment.integration.adapter_factory.nominal_motion_sources
+            )
+            and config.get("num_envs", 1) != 1
+        ):
+            raise ValueError("configured Demo Skills require num_envs == 1")
         _validate_scene_binding_targets(
             deployment.scene_binding,
             simulation=component_resolution.scene_config,
@@ -802,16 +844,6 @@ def config_to_cfg(
         configured_task_program_selection = deployment.selection
         configured_task_program_id = deployment.program_id
         configured_task_program_path = deployment.program_path
-        if "acceptance" in config:
-            from embodichain.lab.gym.envs._final_acceptance import (
-                _load_final_acceptance,
-            )
-
-            env_cfg.final_acceptance = _load_final_acceptance(
-                config["acceptance"],
-                base_dir=base_dir,
-                component_sources=component_sources,
-            )
 
         from embodichain.lab.task_program.integrations._kinematic_replay import (
             _KinematicReplayFactory,
@@ -845,6 +877,20 @@ def config_to_cfg(
 
     if "replay_surface" in config and env_cfg.kinematic_replay is None:
         raise ValueError("replay_surface requires configured kinematic joint replay.")
+    if env_cfg.objective is not None and env_cfg.objective.condition is not None:
+        from embodichain.lab.gym.envs.objectives.ordered_placement import (
+            _objective_fields,
+            _objective_rule,
+        )
+
+        registration = getattr(
+            configured_task_program_integration, "registration", None
+        )
+        rule = _objective_rule(
+            env_cfg.objective,
+            getattr(registration, "evaluation_conditions", {}),
+        )
+        _objective_fields(env_cfg.objective.object_uid, rule)
 
     if (
         task_program_path_override is not None
@@ -1030,6 +1076,12 @@ def config_to_cfg(
     if type(ignore_terminations) is not bool:
         raise TypeError("env.ignore_terminations must be a bool.")
     env_cfg.ignore_terminations = ignore_terminations
+    episode_context_in_info = config["env"].get(
+        "episode_context_in_info", env_cfg.episode_context_in_info
+    )
+    if type(episode_context_in_info) is not bool:
+        raise TypeError("env.episode_context_in_info must be a bool.")
+    env_cfg.episode_context_in_info = episode_context_in_info
     task_instruction = config["env"].get("task_instruction")
     if task_instruction is not None and (
         type(task_instruction) is not str

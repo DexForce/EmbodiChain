@@ -16,6 +16,12 @@ embodichain.lab.task_program.language
       ConfigPath
       ConfigPathPart
       CyclicPoseTargetCfg
+      PoseTargetCfg
+      SceneRelativePoseTargetCfg
+      MoveHeldObjectCfg
+      HoldPostCfg
+      NormalizedTaskProgram
+      normalize_task_program
       HandOverCfg
       InvokeCfg
       ObjectNearRelativeTargetValidatorCfg
@@ -56,3 +62,17 @@ These exported values describe configuration paths and reference categories.
 .. autodata:: ConfigPathPart
 
 .. autodata:: SceneReferenceRole
+
+Authoring and effective call contracts
+-------------------------------------
+
+The normalizer expands shorthand into the same strict AST and retains original
+source locations. Deployment catalogs supply Demo Skill aliases and effective
+argument contracts; normalization never constructs a simulator.
+
+.. automodule:: embodichain.lab.task_program.language.authoring
+   :members:
+   :no-index:
+
+.. autoclass:: embodichain.lab.task_program.language.semantic_contracts.SemanticCallContract
+   :members:

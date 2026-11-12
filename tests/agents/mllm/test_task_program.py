@@ -39,7 +39,7 @@ from embodichain.lab.task_program.integrations import (
     PlanningObservationPort,
 )
 from embodichain.lab.gym.envs.task_program.bridge import EnvironmentStepClock
-from embodichain.lab.sim.atomic_actions import AtomicActionEngine, EntityState
+from embodichain.lab.sim.atomic_skills import AtomicSkillEngine, EntityState
 from embodichain.lab.task_program.semantics import (
     EffectEvidenceProvider,
     Pick,
@@ -133,10 +133,10 @@ class _CompileOnlyFactory:
         """Reject runtime assembly in this compile-only test factory."""
         raise AssertionError("MLLM frontend compilation must not assemble a runtime.")
 
-    def create_atomic_action_engine(
+    def create_atomic_skill_engine(
         self,
         profile: RobotSkillProfile,
-    ) -> AtomicActionEngine:
+    ) -> AtomicSkillEngine:
         """Reject engine creation in this compile-only test factory."""
         del profile
         raise AssertionError("MLLM frontend compilation must not create an engine.")
@@ -145,7 +145,7 @@ class _CompileOnlyFactory:
         self,
         *,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
         clock: EnvironmentStepClock,
     ) -> PlanningObservationPort:
         """Reject observation-port creation during provider-free compilation."""
@@ -156,7 +156,7 @@ class _CompileOnlyFactory:
         self,
         *,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
         observation_provider: PlanningObservationPort,
     ) -> Iterable[EffectEvidenceProvider]:
         """Reject evidence-provider creation during provider-free compilation."""

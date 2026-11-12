@@ -71,7 +71,7 @@ def _inputs():
         ),
     ]
     compiled = SimpleNamespace(
-        action_plans=plans,
+        skill_plans=plans,
         segment=lambda index, name: SimpleNamespace(
             name=name, start=index * 10, stop=(index + 1) * 10
         ),

@@ -261,7 +261,8 @@ class DemoSuccessTrial:
         gpu_delta_mb: PyTorch GPU allocation delta across execution.
         peak_gpu_mb: Peak PyTorch GPU allocation during execution.
         rows: Normalized per-environment outcomes.
-        episode_result: Owned JSON-compatible executor metadata.
+        episode_result: Owned JSON-compatible executor metadata and available
+            terminal outcomes returned by the host's discard reset.
     """
 
     case_id: str
@@ -628,6 +629,7 @@ def collect_demo_success_trials(
             env.reset(seed=seed, options={"save_data": False})
             executor_error: Exception | None = None
             body_error: BaseException | None = None
+            terminal_outcomes = None
             try:
                 before = memory_sampler(reset_gpu_peak=True)
                 start = clock()
@@ -649,7 +651,13 @@ def collect_demo_success_trials(
                 raise
             finally:
                 try:
-                    env.reset(options={"save_data": False})
+                    discarded = env.reset(options={"save_data": False})
+                    if (
+                        isinstance(discarded, tuple)
+                        and len(discarded) == 2
+                        and isinstance(discarded[1], Mapping)
+                    ):
+                        terminal_outcomes = discarded[1].get("reset_episode_outcomes")
                 except BaseException as discard_error:
                     discard_note = (
                         "Episode discard also failed: "
@@ -677,6 +685,10 @@ def collect_demo_success_trials(
                     error=executor_error,
                     row_count=len(rows),
                 )
+            if terminal_outcomes:
+                episode_result["episode_outcomes"] = [
+                    terminal_outcomes[row] for row in sorted(terminal_outcomes)
+                ]
             trials.append(
                 DemoSuccessTrial(
                     case_id=case.case_id,

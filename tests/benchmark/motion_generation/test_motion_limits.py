@@ -168,9 +168,9 @@ def test_curobo_dual_arm_budget_caps_both_kinematic_chains() -> None:
 
 def test_curobo_atomic_policy_preserves_prepared_backend_budget() -> None:
     """Scenario defaults must not replace suite vectors or invalidate warmup."""
-    from embodichain.lab.sim.atomic_actions import (
-        ActionBinding,
-        ActionInvocation,
+    from embodichain.lab.sim.atomic_skills import (
+        SkillBinding,
+        SkillInvocation,
         MotionPolicy,
     )
     from embodichain.lab.sim.motion.motion_generator import MotionGenerator
@@ -179,10 +179,10 @@ def test_curobo_atomic_policy_preserves_prepared_backend_budget() -> None:
     )
 
     adapter = _adapter(CuroboAdapter, velocity=2.0)
-    invocation = ActionInvocation(
+    invocation = SkillInvocation(
         skill_id="hand_over",
         goal=None,
-        binding=ActionBinding(owner_id="budget_test", endpoints={}),
+        binding=SkillBinding(owner_id="budget_test", endpoints={}),
         motion_policy=MotionPolicy(strategy="motion_gen"),
     )
     updated = with_plan_options(invocation, adapter.atomic_plan_options())

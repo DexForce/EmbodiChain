@@ -40,3 +40,10 @@ current particle positions and checks that both paired free-edge corner
 centroids are within 15 mm in XY after the program completes.
 
 The corner tolerance and particle pairs live in `task_program/acceptance.yaml`.
+The loader translates this declaration into shared `near_target` final rules.
+Mesh-qualified world-centroid samples are captured once per query and sealed in
+`final_acceptance_observations`; offline replay uses the same measured criteria.
+Program completion additionally requires reaching the final replay frame. Invalid
+XYZ measurements are unavailable evidence; the XY distance limit stays inclusive.
+The earlier native qualification matrix predates the shared-final integration and
+is not a new native qualification of this synchronization.

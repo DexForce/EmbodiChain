@@ -29,11 +29,15 @@ from dataclasses import asdict
 import torch
 from tensordict import TensorDictBase
 
+from embodichain.lab.evaluation.observations import _raw_field_kind
 from embodichain.utils import logger
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs.managers.cfg import ObservationCfg
     from embodichain.lab.gym.envs.managers.observation_manager import ObservationManager
+    from embodichain.lab.task_program.integrations import (
+        SimulationTaskProgramRegistration,
+    )
 
 __all__ = [
     "capture_trajectory_state",
@@ -200,6 +204,132 @@ def restore_trajectory_state(
             )
 
 
+def _raw_entity_observation_cfg(name: str, uid: str, quantity: str) -> ObservationCfg:
+    from embodichain.lab.gym.envs.managers.cfg import ObservationCfg, SceneEntityCfg
+    from embodichain.lab.gym.envs.managers.observations import get_entity_state
+
+    return ObservationCfg(
+        func=get_entity_state,
+        mode="add",
+        name=name,
+        params={"entity_cfg": SceneEntityCfg(uid=uid), "quantity": quantity},
+        consumers=("recording",),
+    )
+
+
+def _evaluation_observation_cfgs(
+    registration: SimulationTaskProgramRegistration,
+) -> dict[str, ObservationCfg]:
+    from embodichain.lab.gym.envs.managers.cfg import ObservationCfg
+    from embodichain.lab.gym.envs.managers.observations import (
+        _get_evaluation_state,
+        _get_segment_start_state,
+        _get_deformable_centroid_state,
+    )
+
+    fields = {
+        field
+        for spec in registration.evaluation_conditions.values()
+        for field in spec.required_fields
+    }
+    result = {}
+    for binding in registration.scene_binding.rigid_objects:
+        uid = binding.simulation_uid
+        for quantity in ("pose", "lin_vel", "ang_vel"):
+            name = f"rigid_objects/{uid}/{quantity}"
+            if name in fields:
+                result[f"recording:{name}"] = _raw_entity_observation_cfg(
+                    name, uid, quantity
+                )
+        name = f"rigid_objects/{uid}/frame"
+        if name in fields:
+            result[f"recording:{name}"] = _raw_entity_observation_cfg(name, uid, "pose")
+        name = f"rigid_objects/{uid}/segment_start_frame"
+        if name in fields:
+            result[f"recording:{name}"] = ObservationCfg(
+                func=_get_segment_start_state,
+                mode="add",
+                name=name,
+                params={"uid": uid, "field": name},
+                consumers=("recording",),
+            )
+    for binding in getattr(registration.scene_binding, "articulations", ()):
+        uid = binding.simulation_uid
+        for name in sorted(fields):
+            if name.startswith(f"articulations/{uid}/qpos/"):
+                result[f"recording:{name}"] = _raw_entity_observation_cfg(
+                    name, uid, "qpos"
+                )
+    for name in sorted(fields):
+        if name.startswith("deformables/"):
+            result[f"recording:{name}"] = ObservationCfg(
+                func=_get_deformable_centroid_state,
+                mode="add",
+                name=name,
+                params={"field": name},
+                consumers=("recording",),
+            )
+        elif name.startswith(("links/", "robot/", "robot_links/")):
+            result[f"recording:{name}"] = ObservationCfg(
+                func=_get_evaluation_state,
+                mode="add",
+                name=name,
+                params={"field": name},
+                consumers=("recording",),
+            )
+    if {cfg.name for cfg in result.values()} != fields:
+        raise ValueError("Evaluation requires registered raw physical fields.")
+    kinds = {name: _raw_field_kind(name) for name in fields}
+    layouts = {
+        name: name.rsplit("/", 1)[0] for name in fields if name.startswith("robot/")
+    }
+    for spec in registration.evaluation_conditions.values():
+        spec._check_input_contract(kinds, layouts)
+    return result
+
+
+def _validate_evaluation_observation_bindings(env: _TrajectoryEnv, configs) -> None:
+    from embodichain.lab.task_program.integrations.simulation.bindings import (
+        _require_control_part_dof,
+    )
+
+    for cfg in configs.values():
+        parts = cfg.name.split("/")
+        if parts[0] == "deformables":
+            from embodichain.lab.evaluation._deformable import _centroid_selection
+
+            uid, digest, indices = _centroid_selection(cfg.name)
+            replay = getattr(env, "_physical_replay", None)
+            if replay is None:
+                raise ValueError(
+                    "Deformable evaluation requires a verified replay source."
+                )
+            surface, nodes = replay.require_surface(
+                env.sim, uid=uid, mesh_sha256=digest
+            )
+            if max(indices) >= nodes.shape[1]:
+                raise ValueError(
+                    "Acceptance particle index exceeds the verified mesh size."
+                )
+        elif parts[0] == "articulations":
+            _, uid, _, joint = parts
+            asset = env.sim.get_articulation(uid)
+            if asset is None or joint not in asset.joint_names:
+                raise ValueError(f"Evaluation field {cfg.name!r} has no native joint.")
+        elif parts[0] == "links":
+            _, uid, link, _ = parts
+            asset = env.sim.get_articulation(uid)
+            if asset is None or link not in asset.link_names:
+                raise ValueError(f"Evaluation field {cfg.name!r} has no native link.")
+        elif parts[0] == "robot_links":
+            if parts[1] not in env.robot.link_names:
+                raise ValueError(
+                    f"Evaluation field {cfg.name!r} has no native robot link."
+                )
+        elif parts[0] == "robot":
+            _require_control_part_dof(env.robot, parts[1])
+
+
 def trajectory_observation_cfgs(
     env: _TrajectoryEnv, uids: list[str] | None = None
 ) -> dict[str, ObservationCfg]:
@@ -213,9 +343,6 @@ def trajectory_observation_cfgs(
         Recording-only add functors. No physical state is acquired here; legacy
         trajectory field paths are export names, not another acquisition path.
     """
-    from embodichain.lab.gym.envs.managers.cfg import ObservationCfg, SceneEntityCfg
-    from embodichain.lab.gym.envs.managers.observations import get_entity_state
-
     result = {}
 
     def add(prefix: str, uid: str, quantities: tuple[str, ...]) -> None:
@@ -226,12 +353,10 @@ def trajectory_observation_cfgs(
                 else quantity
             )
             name = f"{prefix}/{uid}/{field}" if prefix != "robot" else f"robot/{field}"
-            result[f"recording:{name}"] = ObservationCfg(
-                func=get_entity_state,
-                mode="add",
-                name=name,
-                params={"entity_cfg": SceneEntityCfg(uid=uid), "quantity": quantity},
-                consumers=("recording",),
+            if prefix == "rigid_objects" and quantity == "pose":
+                name = f"rigid_objects/{uid}/pose"
+            result[f"recording:{name}"] = _raw_entity_observation_cfg(
+                name, uid, quantity
             )
 
     add("robot", env.robot.uid, ("pose", "qpos", "qvel"))

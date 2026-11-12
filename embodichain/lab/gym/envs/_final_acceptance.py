@@ -15,18 +15,16 @@
 # ----------------------------------------------------------------------------
 
 
-"""Closed, measured acceptance for a deformable task deployment."""
+"""Closed deformable declarations translated into shared evaluation rules."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-import torch
 
 from embodichain.lab.gym.utils._component_composition import (
     _component_path,
@@ -34,9 +32,6 @@ from embodichain.lab.gym.utils._component_composition import (
     _load_yaml_component,
     _mapping,
 )
-
-if TYPE_CHECKING:
-    from embodichain.lab.sim import SimulationManager
 
 __all__: list[str] = []
 
@@ -48,22 +43,51 @@ class _FinalAcceptance:
     max_distance_m: float
     mesh_sha256: str | None = None
 
-    def measure(self, simulation: SimulationManager) -> torch.Tensor:
-        deformable = simulation.get_deformable_object(self.deformable_uid)
-        if deformable is None:
+    def require_registration(self, registration) -> None:
+        """Reject declarations whose protected shared final rules were dropped."""
+        from embodichain.lab.evaluation import EvaluationSpec, builtin_predicates
+
+        payload = self.evaluation()
+        graph = builtin_predicates().compile(EvaluationSpec.from_dict(payload["graph"]))
+        references = tuple(payload["final_acceptance"])
+        conditions = getattr(registration, "evaluation_conditions", {})
+        if tuple(
+            getattr(registration, "evaluation_final_refs", ())
+        ) != references or any(
+            ref not in conditions
+            or conditions[ref].identity != graph.select(ref).identity
+            for ref in references
+        ):
             raise ValueError(
-                f"Acceptance deformable {self.deformable_uid!r} is missing."
+                "Deformable acceptance requires matching registered final acceptance rules."
             )
-        nodes = deformable.data.nodal_pos_w
-        accepted = torch.ones(nodes.shape[0], device=nodes.device, dtype=torch.bool)
-        for source, target in self.pairs:
-            if max(*source, *target) >= nodes.shape[1]:
-                raise ValueError("Acceptance particle index exceeds the mesh size.")
-            source_xy = nodes[:, source, :2].mean(dim=1)
-            target_xy = nodes[:, target, :2].mean(dim=1)
-            distance = torch.linalg.vector_norm(source_xy - target_xy, dim=-1)
-            accepted &= torch.isfinite(distance) & (distance <= self.max_distance_m)
-        return accepted
+
+    def evaluation(self) -> dict:
+        """Convert the legacy declaration into shared measured final rules."""
+        from embodichain.lab.evaluation._deformable import _centroid_field
+
+        if self.mesh_sha256 is None:
+            raise ValueError("Deformable acceptance requires a verified replay mesh.")
+        rules = {}
+        for index, (source, target) in enumerate(self.pairs):
+            rules[f"centroid_pair_{index}"] = {
+                "kind": "near_target",
+                "bindings": {
+                    "position": _centroid_field(
+                        self.deformable_uid, self.mesh_sha256, source
+                    ),
+                    "target": _centroid_field(
+                        self.deformable_uid, self.mesh_sha256, target
+                    ),
+                },
+                "params": {
+                    "tolerance": self.max_distance_m,
+                    "axes": [0, 1],
+                    "inclusive": True,
+                },
+            }
+        roots = list(rules)
+        return {"graph": {"roots": roots, "rules": rules}, "final_acceptance": roots}
 
 
 def _load_final_acceptance(
@@ -128,3 +152,23 @@ def _load_final_acceptance(
         tuple(normalized),
         float(tolerance),
     )
+
+
+def _load_acceptance_evaluation(
+    value, surface_value, *, base_dir, component_sources=None
+):
+    """Resolve immutable declarations before the shared integration is compiled."""
+    from ._physical_replay import _load_replay_surface
+
+    if surface_value is None:
+        raise ValueError("Deformable acceptance requires its verified replay surface.")
+    surface = _load_replay_surface(surface_value)
+    declaration = replace(
+        _load_final_acceptance(
+            value, base_dir=base_dir, component_sources=component_sources
+        ),
+        mesh_sha256=surface.mesh_sha256,
+    )
+    if declaration.deformable_uid != surface.object_config.get("uid"):
+        raise ValueError("Final acceptance must measure the registered replay mesh.")
+    return declaration, surface, declaration.evaluation()

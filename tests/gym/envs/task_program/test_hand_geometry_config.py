@@ -27,7 +27,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from embodichain.lab.sim.atomic_actions import AtomicActionEngine
+from embodichain.lab.sim.atomic_skills import AtomicSkillEngine
 from embodichain.lab.sim.utility.grasp_geometry import RobotHandGeometryProvider
 from embodichain.lab.task_program.integrations.configured import (
     _decode_configured_task_program_integration,
@@ -102,7 +102,7 @@ def test_declared_calibration_reaches_owned_engine_services_without_capture(
 
     def adapter(environment, **kwargs):
         cfgs = kwargs["hand_geometry_cfgs"]
-        engine = AtomicActionEngine(
+        engine = AtomicSkillEngine(
             SimpleNamespace(robot=environment, device="cpu"),
             hand_geometry_cfgs=cfgs,
             load_builtins=False,
@@ -238,7 +238,7 @@ def test_omitted_engine_calibration_does_not_load_geometry_provider(monkeypatch)
         return original(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", guarded)
-    engine = AtomicActionEngine(
+    engine = AtomicSkillEngine(
         SimpleNamespace(robot=object(), device="cpu"), load_builtins=False
     )
     assert dict(engine.hand_geometry_cfgs) == {}

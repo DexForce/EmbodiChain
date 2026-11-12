@@ -177,6 +177,66 @@ def test_broadcast_replay_preserves_per_env_lengths():
     assert wrapper._lengths.tolist() == [2, 2]
 
 
+@pytest.mark.parametrize(
+    ("seal", "status", "accepted"),
+    [
+        (None, "not_recorded", None),
+        ({"accepted": True, "observation_revision": 17}, "not_recorded", None),
+        ({"accepted": False, "observation_revision": None}, "not_run", False),
+    ],
+)
+def test_trajectory_replays_without_sealed_observations(
+    fake_restore, seal, status, accepted
+):
+    from embodichain.lab.evaluation import (
+        EvaluationSpec,
+        PredicateSpec,
+        builtin_predicates,
+    )
+
+    env = _FakeEnv(num_envs=2)
+    env._final_acceptance_rules = (
+        (
+            "near",
+            builtin_predicates().compile(
+                EvaluationSpec(
+                    {
+                        "near": PredicateSpec(
+                            "near_target",
+                            {
+                                "position": "rigid_objects/a/pose",
+                                "target": "rigid_objects/b/pose",
+                            },
+                            {"tolerance": 0.5},
+                        )
+                    },
+                    ("near",),
+                )
+            ),
+        ),
+    )
+    trajectory = _trajectory()
+    if seal is not None:
+        trajectory["meta"]["demo_episodes"] = [{"final_acceptance": seal}]
+    wrapper = ReplayWrapper(env, trajectory, mode="kinematic")
+    assert (
+        wrapper.final_acceptance
+        == (
+            {
+                "status": status,
+                "accepted": accepted,
+                "recorded_accepted": seal["accepted"] if seal is not None else None,
+            },
+        )
+        * 2
+    )
+    wrapper.reset()
+    _, _, _, truncated, info = wrapper.step(None)
+    assert not truncated.any()
+    assert info == {}
+    assert trajectory["meta"]["num_envs"] == 1
+
+
 def test_dynamic_replay_decodes_position_velocity_expert_action(fake_restore):
     env = _FakeEnv()
     trajectory = _trajectory(

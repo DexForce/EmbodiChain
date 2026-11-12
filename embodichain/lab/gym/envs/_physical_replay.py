@@ -129,6 +129,8 @@ class _PhysicalReplay:
         self.factory = factory
         self.positions, self.names = factory.load()
         self.surface_cfg = cfg.replay_surface.prepare(cfg)
+        self.verified_mesh_sha256 = cfg.replay_surface.mesh_sha256
+        self._node_shape = None
         self.hold = False
 
     def prepare_scene(self, env):
@@ -140,6 +142,31 @@ class _PhysicalReplay:
             joint_names=self.names,
             initialize_pose=True,
         )
+
+    def require_surface(self, simulation, *, uid, mesh_sha256):
+        """Qualify the native facade created from the verified mesh artifact."""
+        if (
+            uid != self.surface_cfg.uid
+            or mesh_sha256 != self.verified_mesh_sha256
+            or simulation.get_deformable_object(uid) is not self.surface
+        ):
+            raise ValueError(
+                "Deformable evidence does not belong to the verified replay mesh."
+            )
+        nodes = self.surface.data.nodal_pos_w
+        if (
+            nodes.ndim != 3
+            or nodes.shape[0] != 1
+            or nodes.shape[2] != 3
+            or not nodes.is_floating_point()
+        ):
+            raise ValueError("Replay mesh nodes require one arena and XYZ positions.")
+        if self._node_shape is None:
+            self._node_shape = tuple(nodes.shape)
+            self._node_dtype = nodes.dtype
+        elif tuple(nodes.shape) != self._node_shape or nodes.dtype != self._node_dtype:
+            raise ValueError("Replay mesh topology changed after binding.")
+        return self.surface, nodes
 
     def bind(self, env):
         self.commands = self.factory.ordered(self.positions, self.names, env.robot)

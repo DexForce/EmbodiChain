@@ -27,7 +27,7 @@ from typing import ClassVar
 import numpy as np
 import torch
 
-from embodichain.lab.sim.atomic_actions import (
+from embodichain.lab.sim.atomic_skills import (
     JointPositionGoal,
     MoveJoints,
     SkillDescriptor,

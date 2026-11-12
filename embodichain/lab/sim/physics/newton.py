@@ -18,17 +18,22 @@
 from __future__ import annotations
 
 import importlib
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 import weakref
 
 import warp as wp
+import numpy as np
 
 from .base import PhysicsBackend
 
 if TYPE_CHECKING:
     import dexsim
+    import torch
 
     from embodichain.lab.sim.sim_manager import SimulationManagerCfg
+    from embodichain.lab.sim.objects.fluid import FluidObject
+    from embodichain.lab.sim._runtime_controls import _SceneInitialJointStates
 
 __all__ = ["NewtonPhysicsBackend"]
 
@@ -58,6 +63,10 @@ class NewtonPhysicsBackend(PhysicsBackend):
         self._differentiable_runtime = None
         self._runtime_device: str | None = None
         self._configured_solver_type: str | None = None
+        self._fluid_render_clip_key: tuple[object, ...] | None = None
+        self._fluid_render_clip_z: torch.Tensor | None = None
+        self._fluid_render_dirty = False
+        self._joint_defaults: _SceneInitialJointStates | None = None
 
     @property
     def solver_type(self) -> str | None:
@@ -100,6 +109,103 @@ class NewtonPhysicsBackend(PhysicsBackend):
         # SceneBuilder.finalize() completes its model; no second manager-level
         # activation or rebuild domain participates.
 
+    def _prepare_scene_build(self) -> None:
+        """Preflight cable anchors and prepare defaults for the current declarations."""
+        manager = self._manager
+        cables = getattr(manager, "_cable_objects", {})
+        if not cables:
+            return
+        from embodichain.lab.sim._runtime_controls import (
+            _InitialJointState,
+            _SceneInitialJointStates,
+        )
+
+        articulations = {**manager._robots, **manager._articulations}
+        # Normalize the entire input before registration so an invalid config
+        # cannot leave an incomplete set of initialization controls behind.
+        positions = {
+            uid: (
+                None
+                if obj.cfg.init_qpos is None
+                else _InitialJointState.normalize_positions(obj.cfg.init_qpos)
+            )
+            for uid, obj in articulations.items()
+        }
+        attached_articulations: set[str] = set()
+        for cable in cables.values():
+            for anchor in (cable.cfg.start_attachment, cable.cfg.end_attachment):
+                if anchor is not None and anchor.target in positions:
+                    attached_articulations.add(anchor.target)
+                    if positions[anchor.target] is not None and np.any(
+                        positions[anchor.target] != 0
+                    ):
+                        raise NotImplementedError(
+                            f"Cable {cable.uid!r} attachment to {anchor.target!r} "
+                            "with nonzero init_qpos requires a DexSim authoring "
+                            "API that applies initial joint poses before attachment "
+                            "construction; the current model-initialization hook "
+                            "runs too late. No scene has been committed."
+                        )
+        scene = manager._spawn_scene
+        if scene.builder.is_finalized:
+            return
+        seeds = tuple(
+            _InitialJointState(
+                f"{arena_name}/{uid}",
+                values,
+                mimic_stabilizer=articulations[
+                    uid
+                ].cfg.root_props.newton_mimic_stabilizer,
+                has_permanent_attachment=uid in attached_articulations,
+            )
+            for uid, values in positions.items()
+            if values is None or values.size
+            for arena_name in scene.arena_names
+        )
+        # Spawn only accepts additions to its pending control list. Refresh the
+        # group we own, so a failed build can remove or replace any articulation
+        # without duplicating or modifying caller-registered controls.
+        if self._joint_defaults is not None:
+            self._joint_defaults.replace(seeds)
+        elif seeds:
+            control = _SceneInitialJointStates(seeds)
+            scene.builder.add_runtime_control(control)
+            self._joint_defaults = control
+
+    def _reset_scene_state(
+        self, env_ids: Sequence[int] | None, excluded_uids: set[str]
+    ) -> list[int] | None:
+        """Restore cable worlds through the public engine episode boundary."""
+        manager = self._manager
+        cables = getattr(manager, "_cable_objects", {})
+        if not cables:
+            return None
+        physical_uids = (
+            set(manager._robots)
+            | set(manager._articulations)
+            | set(manager._rigid_objects)
+            | set(manager._rigid_object_groups)
+            | set(manager._deformable_objects)
+            | set(cables)
+        )
+        if physical_uids.intersection(excluded_uids):
+            raise NotImplementedError(
+                "Cable episode reset requires every physical asset in selected "
+                "environments; no objects have been reset."
+            )
+        cable = next(iter(cables.values()))
+        cable._require_bound()
+        ids = cable._resolve_env_ids(env_ids)
+        if ids:
+            result = manager.spawn_result
+            if result is None:
+                raise RuntimeError("Cable reset requires a prepared Spawn scene.")
+            arenas = [
+                result.arenas.index(manager._spawn_scene.arena_names[i]) for i in ids
+            ]
+            result.reset_arenas(arenas)
+        return ids
+
     def sync_render_state(self, result: "dexsim.scene.Scene") -> None:
         """Publish Newton state through DexSim's render bridge without stepping."""
         if not self._manager.has_native_renderer:
@@ -111,7 +217,192 @@ class NewtonPhysicsBackend(PhysicsBackend):
             raise RuntimeError(
                 "Newton backend is unavailable for render-state synchronization."
             )
-        backend.sync_to_dexsim(result.world)
+        fluids = getattr(self._manager, "_fluid_objects", {})
+        clipped = [f for f in fluids.values() if f.cfg.render.clip_below_z is not None]
+        native_stream = producer_stream = None
+        if fluids and str(backend.state_0.particle_q.device).startswith("cuda"):
+            import torch
+
+            # DexSim stages fluid positions asynchronously on CUDA's default
+            # stream. Order the Newton step and clipping before that copy, and
+            # complete the copy before a camera consumes the staged geometry.
+            device = torch.device(str(backend.state_0.particle_q.device))
+            producer_stream = torch.cuda.current_stream(device)
+            warp_stream = wp.stream_to_torch(backend.state_0.particle_q.device)
+            if producer_stream.cuda_stream != warp_stream.cuda_stream:
+                producer_stream.wait_stream(warp_stream)
+            native_stream = torch.cuda.default_stream(device)
+            if self._fluid_render_dirty:
+                # A previous staged copy may still occupy the native double
+                # buffer. Drain it before submitting a newer explicit write;
+                # otherwise the renderer can silently discard the new state.
+                flush = getattr(result.world, "_flush_render_updates", None)
+                if not callable(flush):
+                    raise RuntimeError(
+                        "This DexSim build cannot synchronize fluid render updates."
+                    )
+                status = flush()
+                if status is not None and int(status) < 0:
+                    raise RuntimeError("Could not drain previous fluid render updates.")
+        if not clipped:
+            self._fluid_render_clip_key = None
+            self._fluid_render_clip_z = None
+            positions = None
+        else:
+            ranges = []
+            for fluid in clipped:
+                for entity in fluid._entities:
+                    start = entity._physics_binding.particle_start
+                    ranges.append(
+                        (
+                            start,
+                            start + entity.particle_count,
+                            fluid.cfg.render.clip_below_z,
+                        )
+                    )
+            positions = self._clip_fluid_render_positions(
+                wp.to_torch(backend.state_0.particle_q), tuple(ranges)
+            )
+        if native_stream is not None:
+            if native_stream.cuda_stream != producer_stream.cuda_stream:
+                native_stream.wait_stream(producer_stream)
+        try:
+            if positions is None:
+                backend.sync_to_dexsim(result.world)
+            else:
+                backend.render_sync.sync(
+                    result.world,
+                    backend.state_0.body_q,
+                    wp.from_torch(positions, dtype=wp.vec3),
+                    simulation_time=backend.sim_time,
+                )
+        finally:
+            if native_stream is not None:
+                native_stream.synchronize()
+        self._fluid_render_dirty = False
+
+    def _clip_fluid_render_positions(
+        self,
+        positions: torch.Tensor,
+        ranges: tuple[tuple[int, int, float], ...],
+    ) -> torch.Tensor:
+        """Create an owned render copy with one comparison and one selection.
+
+        A full-buffer fluid uses a scalar cutoff. Mixed particle scenes cache
+        immutable per-particle cutoffs; changing layout, dtype, device or CUDA
+        stream replaces that cache. Each output owns fresh storage so a later
+        publication cannot overwrite data still consumed by the render bridge.
+        """
+        import torch
+
+        if len(ranges) == 1 and ranges[0][:2] == (0, len(positions)):
+            self._fluid_render_clip_key = None
+            self._fluid_render_clip_z = None
+            return torch.where(
+                positions[:, 2:3] < ranges[0][2], float("nan"), positions
+            )
+
+        # Cache reads and initialization stay on the same Torch stream. A stream
+        # change gets a new tensor, leaving the old allocation's lifetime ordered
+        # on its creation stream without adding a device-wide synchronization.
+        stream = (
+            torch.cuda.current_stream(positions.device).cuda_stream
+            if positions.is_cuda
+            else None
+        )
+        key = (positions.shape, positions.dtype, positions.device, stream, ranges)
+        if key != self._fluid_render_clip_key:
+            cutoffs = positions.new_full((len(positions), 1), float("-inf"))
+            for start, end, height in ranges:
+                cutoffs[start:end].fill_(height)
+            self._fluid_render_clip_z = cutoffs
+            self._fluid_render_clip_key = key
+        assert self._fluid_render_clip_z is not None
+        return torch.where(
+            positions[:, 2:3] < self._fluid_render_clip_z, float("nan"), positions
+        )
+
+    @property
+    def supports_dexuni_fluids(self) -> bool:
+        """Whether DexSim exposes the composed DexUni/DFSPH configuration."""
+        if self.solver_type != "dexuni":
+            return False
+        from dexsim.engine.newton_physics import DexUniSolverCfg
+
+        return "sph_cfg" in getattr(DexUniSolverCfg, "__dataclass_fields__", {})
+
+    @property
+    def supports_fluid_worlds(self) -> bool:
+        """Whether the loaded SPH artifact supports isolated worlds and reset."""
+        if not self.supports_dexuni_fluids:
+            return False
+        from dexsim.engine.newton_physics.solver_runtime import ensure_solver_available
+
+        solver = ensure_solver_available("sph")
+        return bool(
+            getattr(solver, "supports_world_isolation", False)
+            and getattr(solver, "supports_world_reset", False)
+        )
+
+    def invalidate_fluid_state(self, env_ids: Sequence[int] | None = None) -> None:
+        """Clear selected SPH history after an explicit state write.
+
+        Args:
+            env_ids: Local worlds to clear, or all local worlds when omitted.
+                Shared boundary history remains unchanged. Legacy single-world
+                artifacts rebaseline their optional SDF history directly.
+        """
+        from dexsim.engine.newton_physics.backend_registry import get_newton_backend
+
+        backend = get_newton_backend(self._manager._world)
+        if backend is None or backend.solver_type != "dexuni":
+            raise RuntimeError("Prepared DexUni fluid backend required.")
+        solver = getattr(backend, "sph_solver", None)
+        if solver is None:
+            raise RuntimeError("Prepared DexUni SPH solver required.")
+        backend.invalidate_cuda_graph("fluid state write")
+        self._fluid_render_dirty = True
+        if getattr(solver, "supports_world_reset", False):
+            mask = [
+                env_ids is None or i in env_ids
+                for i in range(backend.model.world_count)
+            ] + [False]
+            solver.reset(
+                backend._runtime.current_state,
+                world_mask=wp.array(mask, dtype=wp.bool, device=backend.model.device),
+                flags=0,
+            )
+            return
+        boundary = solver.sdf_boundary
+        if boundary is not None and boundary._body_q_prev is not None:
+            boundary._body_q_prev.assign(backend.state_0.body_q)
+
+    def fluid_diagnostics(self, fluid: FluidObject) -> dict[str, object]:
+        """Read detached native SPH diagnostics without publishing or stepping."""
+        from dexsim.engine.newton_physics.backend_registry import get_newton_backend
+        import torch
+
+        backend = get_newton_backend(self._manager._world)
+        solver = getattr(backend, "sph_solver", None)
+        if solver is None:
+            raise RuntimeError("Prepared DexUni SPH solver required.")
+        density = wp.to_torch(solver.particle_density)
+        values = []
+        for entity in fluid._entities:
+            start = entity._physics_binding.particle_start
+            values.append(density[start : start + entity.particle_count].clone())
+        return {
+            "particle_density": torch.stack(values),
+            "volume_map_enabled": solver.volume_map_boundary is not None,
+            "sdf_penalty_enabled": solver.sdf_boundary is not None,
+            "boundary_shape_count": (
+                0
+                if solver.volume_map_boundary is None
+                else solver.volume_map_boundary.shape_count
+            ),
+            "rest_density_kg_m3": solver.rest_density,
+            "viscosity": solver.viscosity,
+        }
 
     def _step(self, physics_dt: float) -> None:
         """Let the manager batch window and offscreen consumers after stepping."""
@@ -125,6 +416,10 @@ class NewtonPhysicsBackend(PhysicsBackend):
         """Release Newton render views while Spawn still owns their parents."""
         if self._runtime_device is not None and self._runtime_device.startswith("cuda"):
             wp.synchronize_device(self._runtime_device)
+
+        self._fluid_render_clip_key = None
+        self._fluid_render_clip_z = None
+        self._fluid_render_dirty = False
 
         world = getattr(self._manager, "_world", None)
         if world is None:
@@ -179,6 +474,11 @@ class NewtonPhysicsBackend(PhysicsBackend):
         )
 
     # -- capabilities --------------------------------------------------- #
+    @property
+    def supports_cables(self) -> bool:
+        """Newton supports cables with explicit DexUni on CUDA."""
+        return True
+
     @property
     def supports_volume_deformables(self) -> bool:
         return True
