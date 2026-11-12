@@ -71,7 +71,12 @@ stable online language IDs. Language intent does not establish physical success.
   policy actions.
 - Descriptor-driven policy recording and policy-width trajectory recording do
   not accept `ControllerAction`; mixing those fixed layouts fails before action
-  processing. Expert recording continues to use `ExpertActionSpec`.
+  processing. Expert recording continues to use `ExpertActionSpec`. The position-only
+  `expert_trajectory.use_action_manager` opt-in converts joint targets through the
+  policy terms while retaining exact FK targets. With
+  `rollout_action_semantics="policy_request"`, it instead records the converted
+  ActionManager request and trace independently of expert joint width; unmanaged
+  direct controller commands remain rejected by this recording contract.
 - For raw-policy vector demos with staggered completion, ActionManager masks
   inactive rows after processing: selected qpos resources hold measured values,
   while qvel/qf resources receive zero commands.
