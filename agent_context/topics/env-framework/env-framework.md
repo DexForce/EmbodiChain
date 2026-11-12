@@ -17,7 +17,8 @@ Lightweight RL environments have a separate owner in
 | Config decoding | `embodichain/lab/gym/utils/gym_utils.py` |
 | Robot selector decoding | `robot.class_type` → `embodichain/robot_registry.py`; catalog ownership is in [robot-system](../robot-system/robot-system.md) |
 | Import registration | `embodichain/lab/gym/utils/registration.py`; official task imports under `extensions/embodichain_tasks/embodichain_tasks/` |
-| Environment timing and loop | `embodichain/lab/gym/envs/base_env.py`: `EnvCfg`, `BaseEnv` |
+| Environment cadence resolution | `embodichain/lab/gym/utils/control_timing.py`: `resolve_control_timing`, `ControlTiming` |
+| Environment loop | `embodichain/lab/gym/envs/base_env.py`: `EnvCfg`, `BaseEnv` |
 | Scene, managers, RL outcomes and demonstration integration | `embodichain/lab/gym/envs/embodied_env.py` |
 | Expert trajectory control and stored-action schema | `embodichain/lab/gym/envs/expert_trajectory.py` |
 | Raw schema, optional history and exact historical queries | `managers/observation_manager.py`; Env dispatches capture/reset/close boundaries |
@@ -39,10 +40,22 @@ rewards and contact termination rules remain in the task package; robot defaults
 and the distinct asset/contract joint orders are owned by
 [robot-system](../robot-system/robot-system.md).
 
+Reference-motion tracking is owned by
+`extensions/embodichain_tasks/embodichain_tasks/locomotion/tracking/`.
+`g1_motion.py` owns simulator state, reference-frame progress, selected-row resets
+and pre-action/terminal snapshots; unusable nonfinite successors hard-terminate
+and are excluded from WM supervision. `_task.py` owns tensor objectives shared
+with model-driven rollouts. The task's `ReferenceJointPositionAction` records
+policy outputs separately from the reference-combined setpoint and executed
+joint target. Read the task configuration's README for data preparation,
+training and per-clip evaluation commands.
+
 ## Launcher argument ownership
 
-`embodichain run-task` is the sole task execution command, dispatched to
-`embodichain.lab.scripts.run_task:cli`. The former `run-env` command and
+`embodichain run-task` is the standalone launcher for existing task deployments,
+dispatched to `embodichain.lab.scripts.run_task:cli`. The cross-engine
+[`gensim run` workflow](../gen-sim/gen-sim.md) generates and binds a deployment
+before reusing configured Gym/Task Program execution. The former `run-env` command and
 `embodichain.lab.scripts.run_env` module are removed.
 
 `add_env_launcher_args_to_parser()` composes the lightweight simulation options
@@ -69,7 +82,9 @@ for precedence, manager cameras, Viser and filter ordering.
 
 ## Timing contract
 
-`BaseEnv._configure_timing()` resolves `EnvCfg` before constructing the scene:
+`resolve_control_timing()` resolves the file-owned physics interval and control
+declaration without creating an environment. `BaseEnv._configure_timing()` uses
+this same resolver before constructing the scene:
 
 1. `physics_dt` comes from `cfg.sim_cfg.physics_dt` and must be finite and positive.
 2. Without `target_control_frequency`, `sim_steps_per_control` must be a
@@ -135,6 +150,12 @@ metadata before/after copying. It never queries
 live state or substitutes a previous frame. Results own values, validity,
 reasons and temporal identities, without another descriptor model.
 
+Use `advance_observation` to feed a compiled `RuleSession` from explicit
+control slots and qualified host captures. The same graph evaluates recorded
+slots through `evaluate_recorded_rules` in bounded chunks. A row retains
+its own result at its recorded boundary. Missing and foreign evidence cannot
+supply measurements or satisfy a predicate.
+
 `export_observation_history` projects the manager's schema onto one owned numeric
 snapshot. Legacy trajectory state views and raw history share that snapshot's
 storage. The default snapshot is CPU; file export can retain its device for
@@ -181,10 +202,12 @@ joint width. Unmanaged direct controller commands remain rejected by that
 recording contract. Both paths retain the
 ordinary observation, reward, termination, and rollout lifecycle.
 
-Read final task success before resetting scene/bridge state. A Task Program
-reports success only after its bridge completes normally and combines runtime,
-post-policy and validator acceptance. Segment acceptance and append-only
-dataset persistence are separate contracts; see
+A Task Program's bridge combines runtime, post-policy and segment acceptance.
+For deployments with final predicates, `is_task_success()` combines bridge
+completion with fresh raw physical measurements. The demo executor seals the
+measurement and outcome for each episode row at its terminal boundary.
+Reset-time recording consumes that sealed result before clearing row state.
+Segment acceptance and append-only dataset persistence remain separate; see
 [Task Programs](../task-programs/task-programs.md) and
 [data pipeline](../data-pipeline/data-pipeline.md).
 
@@ -205,14 +228,21 @@ physical-objective initialization and final observations; it is not forwarded
 to functors. `BaseEnv` owns `EpisodeContext`; successful initialization seeds recording from
 the final observation. `EmbodiedEnv` consumes old records before physical reset.
 Failed checks remain attached to buffers until the selected rows are consumed
-and a new episode begins. Info and recorder metadata carry owned context snapshots. The concrete preparation/restore host and
+and a new episode begins. Info and recorder metadata carry owned context snapshots.
+`EnvCfg.episode_context_in_info` defaults to true. Batched RL deployments may
+disable automatic info snapshots while retaining context lifecycle, recorder
+metadata and explicit snapshots. Reset retains each row's seed and shared
+provenance snapshot even without a recorder. Demo recording materializes
+independent metadata rows on access; row UUIDs and mutable
+segment lists are owned by each episode. Reset reuses the snapshot from `get_info()`;
+overrides that omit it receive one when the option is enabled. The concrete preparation/restore host and
 snapshot limitations belong to [scene expansion](../scene-expansion/scene-expansion.md).
 
 ## Change sites and focused validation
 
 | Change | Validation surface |
 |---|---|
-| Timing in `base_env.py` | `tests/gym/envs/test_env_timing.py` |
+| Cadence resolution in `control_timing.py` and BaseEnv timing | `tests/gym/envs/test_env_timing.py` |
 | Seeding and reset | `tests/gym/envs/test_env_seed.py`, `tests/gym/envs/managers/test_event_manager_seed.py` |
 | Scene preparation ordering and saved initial-state restore | `tests/gym/envs/task_program/test_simulation_scene_expansion.py` |
 | Config, registration, or sensor acquisition switch | Relevant tests under `tests/gym/`; use `rg --files tests` to select the component/registration case |

@@ -128,7 +128,9 @@ def validate_historical_claim(
         )
 
 
-def seal_packet(packet: dict[str, Any], step_dt: float) -> dict[str, Any]:
+def seal_packet(
+    packet: dict[str, Any], step_dt: float, *, timestamp: float | None = None
+) -> dict[str, Any]:
     """Reuse owned Lab frame/batch contracts for derived, normalized facts."""
     import torch
     from embodichain.lab.evidence import PhysicalEvidenceBatch, PhysicalEvidenceFrame
@@ -136,14 +138,16 @@ def seal_packet(packet: dict[str, Any], step_dt: float) -> dict[str, Any]:
 
     ids = torch.tensor(packet["env_ids"], dtype=torch.long)
     boundary = packet.get("boundary_frames", [0] * len(ids))
-    timestamp, revision = float(max(boundary) * step_dt), int(max(boundary))
+    revision = int(max(boundary))
+    timestamp = float(max(boundary) * step_dt) if timestamp is None else timestamp
     valid = torch.tensor(packet.pop("valid"), dtype=torch.bool)
     errors = tuple(packet.pop("acquisition_errors"))
     batches = {}
     for name, values in packet.pop("facts").items():
         dtype = (
             torch.bool
-            if name in {"grips", "transfer_complete", "acquired_by_all"}
+            if name
+            in {"grips", "transfer_complete", "acquired_by_all", "control_complete"}
             else torch.float64
         )
         batches[name] = PhysicalEvidenceBatch(

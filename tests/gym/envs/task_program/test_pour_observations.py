@@ -59,7 +59,7 @@ from embodichain.lab.task_program.integrations.simulation.observations import (
     SimulationStateObservationCollector,
 )
 from embodichain.lab.task_program.semantics import SkillPolicyPreset, EffectAssurance
-from embodichain.lab.sim.atomic_actions import CARTESIAN_POSE_CAPABILITY
+from embodichain.lab.sim.atomic_skills import CARTESIAN_POSE_CAPABILITY
 
 _SOURCE = json.loads(
     (Path(__file__).parent / "data/pour_observation_source_reference.json").read_text()
@@ -120,7 +120,7 @@ def _collector_case(name="nominal", *, count=1):
         presets=(
             SkillPolicyPreset(
                 "default",
-                action_option_templates={},
+                skill_option_templates={},
                 effect_assurance=EffectAssurance.PROJECTED,
             ),
         ),
@@ -364,10 +364,19 @@ def test_lab_geometry_and_declared_occurrences_feed_independent_taskspec_reports
         )
         for predicate_id in ("goal_001", "milestone:step_01:0")
     ]
+    from embodichain.lab.task_program.integrations.evidence import (
+        normalize_pour_release_evidence,
+    )
+
     report = evaluate_physical_evidence_report(
         common["spec"],
         bindings,
-        {binding.predicate_id: packet for binding in bindings},
+        {
+            binding.predicate_id: normalize_pour_release_evidence(
+                binding.to_dict(), packet, program=common["program"]
+            )
+            for binding in bindings
+        },
         program=common["program"],
         num_envs=1,
     )[0]

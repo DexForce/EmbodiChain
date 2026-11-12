@@ -154,7 +154,7 @@ class YamlEmbodimentProvider:
         sensor = component.get("sensor", [])
         if not isinstance(sensor, list):
             raise TypeError("embodiment component.sensor must be a list.")
-        skill_profile = component.get("skill_profile", {})
+        skill_profile = profile or {}
         skill_profile = _mapping(
             skill_profile, name="embodiment component.skill_profile"
         )

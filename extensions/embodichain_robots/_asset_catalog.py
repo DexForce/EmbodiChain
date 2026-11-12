@@ -19,6 +19,14 @@
 from __future__ import annotations
 
 ROBOT_ASSETS = {
+    "AgibotG1": {
+        "class_path": "embodichain_robots.agibot.g1.assets:AgibotG1",
+        "category": "robot",
+    },
+    "YamI2rt": {
+        "class_path": "embodichain_robots.i2rt.yam.assets:YamI2rt",
+        "category": "robot",
+    },
     "UnitreeGo1Locomotion": {
         "class_path": "embodichain_robots.unitree.go1.assets:UnitreeGo1Locomotion",
         "category": "robot",
@@ -41,6 +49,10 @@ ROBOT_ASSETS = {
     },
     "MicroDuckLocomotion": {
         "class_path": "embodichain_robots.pollen_robotics.microduck.assets:MicroDuckLocomotion",
+        "category": "robot",
+    },
+    "AgilexPiperX": {
+        "class_path": "embodichain_robots.agilex.piper_x.assets:AgilexPiperX",
         "category": "robot",
     },
     "CobotMagicArm": {
@@ -165,6 +177,10 @@ ROBOT_ASSETS = {
     },
     "SharpaWave": {
         "class_path": "embodichain_robots.sharpa.wave.assets:SharpaWave",
+        "category": "eef",
+    },
+    "AgxGripper": {
+        "class_path": "embodichain_robots.agilex.agx_gripper.assets:AgxGripper",
         "category": "eef",
     },
     "PikaGripper": {

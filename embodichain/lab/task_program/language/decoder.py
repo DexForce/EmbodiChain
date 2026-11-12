@@ -26,9 +26,14 @@ from typing import Literal, Protocol, TypeAlias, runtime_checkable
 from .schema import (
     ArticulationJointPositionValidatorCfg,
     BarrierCfg,
+    ConditionValidatorCfg,
     MAX_PROGRAM_DEPTH,
     MAX_REPEAT_COUNT,
     CyclicPoseTargetCfg,
+    PoseTargetCfg,
+    SceneRelativePoseTargetCfg,
+    MoveHeldObjectCfg,
+    HoldPostCfg,
     TaskProgramCfg,
     TaskProgramIntegrationCfg,
     HandOverCfg,
@@ -451,9 +456,34 @@ def _decode_target(value: object, *, path: ConfigPath) -> TargetCfg:
     kind = _expect_discriminator(
         mapping,
         path=path,
-        supported=("cyclic_pose",),
+        supported=("cyclic_pose", "pose", "scene_relative"),
     )
-    assert kind == "cyclic_pose"
+    if kind in ("pose", "scene_relative"):
+        fields = {"kind", "frame", "position", "quaternion_xyzw"}
+        required = {"kind", "position", "quaternion_xyzw"}
+        if kind == "scene_relative":
+            fields.add("entity")
+            required.add("entity")
+        _validate_fields(
+            mapping, allowed=frozenset(fields), required=frozenset(required), path=path
+        )
+        pose = _decode_pose(
+            {key: mapping[key] for key in ("position", "quaternion_xyzw")}, path=path
+        )
+        kwargs = dict(
+            position=pose.position,
+            quaternion_xyzw=pose.quaternion_xyzw,
+            frame=mapping.get("frame", "world" if kind == "pose" else "parent"),
+        )
+        if kind == "scene_relative":
+            kwargs["entity"] = _expect_identifier(
+                mapping["entity"], path=(*path, "entity")
+            )
+        return _construct(
+            PoseTargetCfg if kind == "pose" else SceneRelativePoseTargetCfg,
+            path=path,
+            **kwargs,
+        )
     _validate_fields(
         mapping,
         allowed=frozenset({"kind", "values"}),
@@ -519,6 +549,7 @@ def _decode_call(
             "pick",
             "place",
             "hand_over",
+            "move_held_object",
             "registered",
         ),
     )
@@ -544,6 +575,22 @@ def _decode_call(
             grasp=grasp,
             resources=resources,
         )  # type: ignore[return-value]
+    if kind == "move_held_object":
+        _validate_fields(
+            mapping,
+            allowed=frozenset({"kind", "object", "at", "resources"}),
+            required=frozenset({"kind", "object", "at"}),
+            path=path,
+        )
+        return _construct(
+            MoveHeldObjectCfg,
+            path=path,
+            object=_expect_identifier(mapping["object"], path=(*path, "object")),
+            at=_decode_target_ref(
+                mapping["at"], path=(*path, "at"), target_ids=target_ids
+            ),
+            resources=resources,
+        )
     if kind == "place":
         _validate_fields(
             mapping,
@@ -620,10 +667,41 @@ def _decode_call(
     )  # type: ignore[return-value]
 
 
-def _decode_post_policy(value: object, *, path: ConfigPath) -> PostPolicyCfg:
+def _decode_post_policy(
+    value: object, *, path: ConfigPath, target_ids: frozenset[str]
+) -> PostPolicyCfg:
     """Decode one segment post-policy shared by the supported schemas."""
     mapping = _expect_mapping(value, path=path)
-    kind = _expect_discriminator(mapping, path=path, supported=("wait_stable",))
+    kind = _expect_discriminator(mapping, path=path, supported=("wait_stable", "hold"))
+    if kind == "hold":
+        _validate_fields(
+            mapping,
+            allowed=frozenset(
+                {
+                    "kind",
+                    "object",
+                    "at",
+                    "duration_s",
+                    "position_tolerance",
+                    "orientation_tolerance",
+                }
+            ),
+            required=frozenset({"kind", "object", "at", "duration_s"}),
+            path=path,
+        )
+        return _construct(
+            HoldPostCfg,
+            path=path,
+            object=_expect_identifier(mapping["object"], path=(*path, "object")),
+            at=_decode_target_ref(
+                mapping["at"], path=(*path, "at"), target_ids=target_ids
+            ),
+            **{
+                key: mapping[key]
+                for key in ("duration_s", "position_tolerance", "orientation_tolerance")
+                if key in mapping
+            },
+        )
     _validate_fields(
         mapping,
         allowed=frozenset({"kind", "entity", "preset"}),
@@ -660,8 +738,17 @@ def _decode_validator(
             "object_lifted",
             "object_relative_position",
             "object_upright",
+            "condition",
         ),
     )
+    if kind == "condition":
+        fields = frozenset({"kind", "ref"})
+        _validate_fields(mapping, allowed=fields, required=fields, path=path)
+        return _construct(
+            ConditionValidatorCfg,
+            path=path,
+            ref=_expect_identifier(mapping["ref"], path=(*path, "ref")),
+        )  # type: ignore[return-value]
     state_validator_types = {
         "object_lifted": (ObjectLiftedValidatorCfg, {"minimum_lift"}),
         "object_relative_position": (
@@ -919,7 +1006,9 @@ def _decode_program_node(
             path=path,
         )
         post = tuple(
-            _decode_post_policy(item, path=(*path, "post", index))
+            _decode_post_policy(
+                item, path=(*path, "post", index), target_ids=target_ids
+            )
             for index, item in enumerate(
                 _expect_list(mapping.get("post", []), path=(*path, "post"))
             )
@@ -1075,6 +1164,14 @@ def validate_task_program(
         config.integration,
         path=("integration",),
     )
+    for target_id, target in config.targets.items():
+        if type(target) is SceneRelativePoseTargetCfg:
+            _call_context(
+                context.validate_scene_reference,
+                target.entity,
+                role="entity",
+                path=("targets", target_id, "entity"),
+            )
     for node, path in _walk_program(config.program, path=("program",)):
         if type(node) is InvokeCfg:
             call = node.call
@@ -1084,7 +1181,7 @@ def validate_task_program(
                 call,
                 path=call_path,
             )
-            if type(call) in (PickCfg, PlaceCfg, HandOverCfg):
+            if type(call) in (PickCfg, PlaceCfg, HandOverCfg, MoveHeldObjectCfg):
                 _call_context(
                     context.validate_scene_reference,
                     call.object,
@@ -1123,7 +1220,7 @@ def validate_task_program(
                 )
                 _call_context(
                     context.validate_scene_reference,
-                    post.entity,
+                    post.object if type(post) is HoldPostCfg else post.entity,
                     role="entity",
                     path=(*post_path, "entity"),
                 )
@@ -1175,7 +1272,7 @@ def validate_task_program(
                     )
 
 
-def decode_task_program(
+def _decode_task_program(
     data: object,
     *,
     validation_context: TaskProgramValidationContext | None = None,
@@ -1271,6 +1368,37 @@ def decode_task_program(
     assert type(config) is TaskProgramCfg
     if validation_context is not None:
         validate_task_program(config, validation_context)
+    return config
+
+
+def decode_task_program(
+    data: object,
+    *,
+    validation_context: TaskProgramValidationContext | None = None,
+) -> TaskProgramCfg:
+    """Normalize shorthand and strictly decode a bounded declarative program.
+
+    Args:
+        data: Untrusted JSON/YAML values.
+        validation_context: Optional trusted catalog, including Demo Skill aliases.
+
+    Returns:
+        Owned typed configuration with an authored diagnostic source map.
+    """
+    from .authoring import normalize_task_program
+
+    normalized = normalize_task_program(
+        data, demo_skills=getattr(validation_context, "demo_skill_calls", None)
+    )
+    try:
+        config = _decode_task_program(
+            normalized.declaration, validation_context=validation_context
+        )
+    except TaskProgramConfigError as error:
+        raise type(error)(
+            error.code, normalized.original_path(error.path), error.message
+        ) from error
+    config.__authoring_source_map__ = normalized
     return config
 
 

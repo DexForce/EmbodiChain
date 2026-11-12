@@ -291,7 +291,40 @@ class CyclicPoseTargetCfg:
         self.values = values  # type: ignore[assignment]
 
 
-TargetCfg: TypeAlias = CyclicPoseTargetCfg
+@configclass
+class PoseTargetCfg(PoseCfg):
+    """A single world-frame object pose, in metres and XYZW order."""
+
+    kind: str = "pose"
+    frame: str = "world"
+
+    def __post_init__(self) -> None:
+        PoseCfg.__post_init__(self)
+        _validate_kind(self.kind, expected="pose", field_name="kind")
+        _validate_kind(self.frame, expected="world", field_name="frame")
+
+
+@configclass
+class SceneRelativePoseTargetCfg(PoseCfg):
+    """A scene-relative pose resolved when its call starts.
+
+    ``parent`` composes the reference transform. ``world_axes`` follows only
+    the reference position and keeps offset and orientation in world axes.
+    """
+
+    entity: str = MISSING
+    frame: str = "parent"
+    kind: str = "scene_relative"
+
+    def __post_init__(self) -> None:
+        PoseCfg.__post_init__(self)
+        _validate_identifier(self.entity, field_name="entity")
+        if self.frame not in ("parent", "world_axes"):
+            raise ValueError("frame must be parent or world_axes.")
+        _validate_kind(self.kind, expected="scene_relative", field_name="kind")
+
+
+TargetCfg: TypeAlias = CyclicPoseTargetCfg | PoseTargetCfg | SceneRelativePoseTargetCfg
 
 
 @configclass
@@ -361,6 +394,23 @@ class HandOverCfg:
 
 
 @configclass
+class MoveHeldObjectCfg:
+    """Transport an explicitly held object to a named task target."""
+
+    object: str = MISSING
+    at: TargetRefCfg = MISSING
+    resources: dict[str, str] = field(default_factory=dict)
+    kind: str = "move_held_object"
+
+    def __post_init__(self) -> None:
+        _validate_identifier(self.object, field_name="object")
+        if type(self.at) is not TargetRefCfg:
+            raise TypeError("at must be exactly TargetRefCfg.")
+        self.resources = _validate_resources(self.resources, field_name="resources")
+        _validate_kind(self.kind, expected="move_held_object", field_name="kind")
+
+
+@configclass
 class RegisteredSemanticCallCfg:
     """Safe declarative payload for one catalog-registered semantic call."""
 
@@ -390,7 +440,7 @@ class RegisteredSemanticCallCfg:
 
 
 SemanticCallCfg: TypeAlias = (
-    PickCfg | PlaceCfg | HandOverCfg | RegisteredSemanticCallCfg
+    PickCfg | PlaceCfg | HandOverCfg | MoveHeldObjectCfg | RegisteredSemanticCallCfg
 )
 
 
@@ -409,7 +459,34 @@ class WaitStablePostCfg:
         _validate_kind(self.kind, expected="wait_stable", field_name="kind")
 
 
-PostPolicyCfg: TypeAlias = WaitStablePostCfg
+@configclass
+class HoldPostCfg:
+    """Require continuous measured attachment and target pose for a duration.
+
+    Time is in seconds, position tolerance in metres and orientation tolerance
+    in radians. Every acknowledged observation must satisfy the declaration.
+    """
+
+    object: str = MISSING
+    at: TargetRefCfg = MISSING
+    duration_s: float = MISSING
+    position_tolerance: float = 0.02
+    orientation_tolerance: float = 0.1
+    kind: str = "hold"
+
+    def __post_init__(self) -> None:
+        _validate_identifier(self.object, field_name="object")
+        if type(self.at) is not TargetRefCfg:
+            raise TypeError("at must be exactly TargetRefCfg.")
+        for name in ("duration_s", "position_tolerance", "orientation_tolerance"):
+            value = _validate_number(getattr(self, name), field_name=name)
+            if value <= 0:
+                raise ValueError(f"{name} must be positive.")
+            setattr(self, name, value)
+        _validate_kind(self.kind, expected="hold", field_name="kind")
+
+
+PostPolicyCfg: TypeAlias = WaitStablePostCfg | HoldPostCfg
 
 
 @configclass
@@ -627,6 +704,19 @@ class ArticulationJointPositionValidatorCfg:
         )
 
 
+@configclass
+class ConditionValidatorCfg:
+    """Reference a named rule owned by the deployment's evaluation component."""
+
+    ref: str = MISSING
+    kind: str = "condition"
+
+    def __post_init__(self) -> None:
+        """Validate the rule identifier and discriminator."""
+        _validate_identifier(self.ref, field_name="ref")
+        _validate_kind(self.kind, expected="condition", field_name="kind")
+
+
 ValidatorCfg: TypeAlias = (
     ObjectNearTargetValidatorCfg
     | ObjectNearRelativeTargetValidatorCfg
@@ -634,6 +724,7 @@ ValidatorCfg: TypeAlias = (
     | ObjectLiftedValidatorCfg
     | ObjectRelativePositionValidatorCfg
     | ObjectUprightValidatorCfg
+    | ConditionValidatorCfg
 )
 
 
@@ -775,9 +866,13 @@ _SEMANTIC_CALL_TYPES = (
     PickCfg,
     PlaceCfg,
     HandOverCfg,
+    MoveHeldObjectCfg,
     RegisteredSemanticCallCfg,
 )
-_POST_POLICY_TYPES = (WaitStablePostCfg,)
+_POST_POLICY_TYPES = (
+    WaitStablePostCfg,
+    HoldPostCfg,
+)
 _VALIDATOR_TYPES = (
     ObjectLiftedValidatorCfg,
     ObjectRelativePositionValidatorCfg,
@@ -785,6 +880,7 @@ _VALIDATOR_TYPES = (
     ObjectNearTargetValidatorCfg,
     ObjectNearRelativeTargetValidatorCfg,
     ArticulationJointPositionValidatorCfg,
+    ConditionValidatorCfg,
 )
 _PROGRAM_NODE_TYPES = (
     SequenceCfg,
@@ -817,7 +913,7 @@ def _validate_program(
         raise ValueError(f"Program exceeds node limit {MAX_PROGRAM_NODES}.")
     if type(node) is InvokeCfg:
         call = node.call
-        if type(call) is PlaceCfg and call.at is not None:
+        if type(call) in (PlaceCfg, MoveHeldObjectCfg) and call.at is not None:
             _validate_target_reference(call.at.target, targets)
         if type(call) is HandOverCfg and call.final_target is not None:
             _validate_target_reference(call.final_target.target, targets)
@@ -847,6 +943,9 @@ def _validate_program(
                 "Parallel branches may contain only Invoke, Sequence, and Repeat "
                 "nodes; wrap the Parallel node in one Segment instead."
             )
+        for post in node.post:
+            if type(post) is HoldPostCfg:
+                _validate_target_reference(post.at.target, targets)
         for validator in node.validators:
             if type(validator) is ObjectNearTargetValidatorCfg:
                 _validate_target_reference(validator.target, targets)
@@ -911,7 +1010,11 @@ class TaskProgramCfg:
                 target_id,
                 field_name="target IDs",
             )
-            if type(target) is not CyclicPoseTargetCfg:
+            if type(target) not in (
+                CyclicPoseTargetCfg,
+                PoseTargetCfg,
+                SceneRelativePoseTargetCfg,
+            ):
                 raise TypeError("targets must contain exact TargetCfg values.")
             targets[normalized_id] = target
         if type(self.program) not in _PROGRAM_NODE_TYPES:

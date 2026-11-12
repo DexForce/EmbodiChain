@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-import inspect
 import math
 
 from collections.abc import Mapping
@@ -302,6 +301,9 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     on CUDA unless the caller explicitly supplies another device.
     """
 
+    mesh_bvh_constructor: Literal["sah", "median", "lbvh", "cubql"] | None = None
+    """Mesh and heightfield query BVH constructor. ``None`` keeps the SDK default."""
+
     num_substeps: int = 10
     """Number of Newton solver substeps per EmbodiChain physics step.
 
@@ -311,8 +313,10 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     requires_grad: bool = False
     """Whether to finalize the Newton model with differentiable state enabled.
 
-    EmbodiChain currently requires the Semi-implicit solver for this mode and
-    disables CUDA graph capture when gradients are enabled.
+    Requires Semi-implicit or a direct/named provider supporting the requested
+    gradient mode. The provider validates native support during model creation;
+    Scene functional calls additionally require its functional dynamics service.
+    CUDA graph capture is disabled when gradients are enabled.
     """
 
     use_cuda_graph: bool = True
@@ -341,14 +345,63 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     Genuine Newton/Warp warnings and errors are not suppressed.
     """
 
+    async_sync: bool = False
+    """Whether Newton-to-render publication returns without waiting for rendering.
+
+    ``True`` removes the render-thread wait from each published step, which
+    mostly matters while a window is open. ``False`` keeps the blocking
+    DexSim default.
+    """
+
+    rigid_transform_sync_mode: Literal["all", "dynamic"] = "all"
+    """Rigid transforms copied from Newton to the renderer after each step.
+
+    ``"all"`` copies every mapped body. ``"dynamic"`` skips static and
+    kinematic bodies, which are already posed by their setters.
+    """
+
+    capture_acquire_timeout: float | None = None
+    """Seconds to wait for CUDA-graph capture rights shared with other users.
+
+    ``None`` waits indefinitely. A finite value lets DexSim fall back to
+    uncaptured stepping when another component holds capture.
+    """
+
+    capture_wait_log_interval: float | None = 10.0
+    """Seconds between progress logs while waiting for capture rights.
+
+    ``None`` or a non-positive value disables the progress log.
+    """
+
     solver_cfg: Mapping[str, Any] | NewtonSolverCfg | None = None
     """Optional Newton solver configuration.
 
     A mapping is converted to the matching DexSim Newton solver config. Include
     ``solver_type`` or ``class_type`` to select the solver, then add any
     parameters accepted by that DexSim solver config. If omitted, EmbodiChain
-    preserves DexSim's scene-aware ``AutoSolverCfg`` default. A DexSim build
-    exporting ``AutoSolverCfg`` is required; no concrete-solver fallback is used.
+    preserves DexSim's ``DexUniSolverCfg`` default and its scene-based dispatch.
+    Native solver config objects use the same supported solver families.
+    Unset ownership selectors retain automatic scene partitioning;
+    ``contact_mode='auto'`` independently selects the native contact path.
+    For ``solver_type='dexuni'``, the current DexSim contract keeps expert
+    options under ``vbd_options``, ``mujoco_options`` and
+    ``collision_options``. ``joint_mode`` controls joint integration.
+    ``coupling='two_way'`` enables contact reactions
+    on dynamically integrated articulations. Optional ``coupling_options``
+    accepts ``mass_scale``, ``proxy_relaxation`` and ``iterations``. Two-way
+    coupling requires ``joint_mode='dynamic'``. Current DexSim supports
+    full-surface rigid-soft feedback; native validation owns the compatible
+    contact modes and option combinations.
+
+    Installed ``dexsim.newton_solvers`` entry-point names are also accepted by
+    DexSim builds with the named-extension API. Extension names are exact;
+    options pass to their provider.
+
+    Python callers can pass DexSim's ``ProviderNewtonSolverCfg`` with a
+    ``provider_factory`` class or zero-argument factory and provider ``options``.
+    That configuration passes through directly without package discovery. The
+    SDK creates a fresh provider for each model build; pass a factory rather
+    than a live provider or solver instance.
     """
 
     collision_cfg: NewtonCollisionPipelineCfg | Mapping[str, Any] | None = field(
@@ -366,6 +419,19 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
         """Normalize dictionary collision settings at the config boundary."""
         if isinstance(self.collision_cfg, Mapping):
             self.collision_cfg = NewtonCollisionPipelineCfg(**self.collision_cfg)
+        if self.rigid_transform_sync_mode not in ("all", "dynamic"):
+            raise ValueError(
+                "NewtonPhysicsCfg.rigid_transform_sync_mode must be 'all' or "
+                f"'dynamic'; got {self.rigid_transform_sync_mode!r}."
+            )
+        if self.capture_acquire_timeout is not None and not (
+            math.isfinite(self.capture_acquire_timeout)
+            and self.capture_acquire_timeout >= 0.0
+        ):
+            raise ValueError(
+                "NewtonPhysicsCfg.capture_acquire_timeout must be None or a "
+                "finite non-negative number of seconds."
+            )
 
     def to_dexsim_cfg(
         self,
@@ -373,7 +439,6 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     ) -> NewtonCfg:
         """Convert this config to ``dexsim.engine.newton_physics.NewtonCfg``."""
         from dexsim.engine.newton_physics import (
-            AutoSolverCfg,
             DexUniSolverCfg,
             FeatherstoneSolverCfg,
             MJWarpSolverCfg,
@@ -394,7 +459,6 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
         )
 
         solver_cfg_map: dict[str, type] = {
-            "auto": AutoSolverCfg,
             "dexuni": DexUniSolverCfg,
             "mujoco_warp": MJWarpSolverCfg,
             "xpbd": XPBDSolverCfg,
@@ -407,13 +471,16 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
             solver_cfg_map=solver_cfg_map,
         )
 
-        if self.requires_grad and (
-            solver_cfg is None or solver_cfg.solver_type != "semi_implicit"
+        solver_name = "dexuni" if solver_cfg is None else str(solver_cfg.solver_type)
+        if (
+            self.requires_grad
+            and solver_name in solver_cfg_map
+            and solver_name != "semi_implicit"
         ):
             logger.log_error(
                 "Newton gradient mode requires an explicit "
-                "solver_type='semi_implicit'; AutoSolver does not select a "
-                "differentiable solver."
+                "solver_type='semi_implicit' or a provider supporting gradients; "
+                "the default does not select a differentiable solver."
             )
 
         collision_pipeline_cfg = None
@@ -423,14 +490,9 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
                 for item in fields(self.collision_cfg)
             }
             collision_values["requires_grad"] = self.requires_grad
-            # Newton 1.6 renamed this field; published DexSim builds also use
-            # Newton 1.4, whose descriptor retains soft_contact_margin.
-            if "soft_contact_gap" in {
-                item.name for item in fields(DexsimNewtonCollisionPipelineCfg)
-            }:
-                collision_values["soft_contact_gap"] = collision_values.pop(
-                    "soft_contact_margin"
-                )
+            collision_values["soft_contact_gap"] = collision_values.pop(
+                "soft_contact_margin"
+            )
             collision_pipeline_cfg = DexsimNewtonCollisionPipelineCfg(
                 **collision_values
             )
@@ -445,7 +507,13 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
             "suppress_warp_kernel_logs": self.suppress_warp_kernel_logs,
             "collision_pipeline_cfg": collision_pipeline_cfg,
             "sync_to_dexsim": self.sync_to_renderer,
+            "async_sync": self.async_sync,
+            "rigid_transform_sync_mode": self.rigid_transform_sync_mode,
+            "capture_acquire_timeout": self.capture_acquire_timeout,
+            "capture_wait_log_interval": self.capture_wait_log_interval,
         }
+        if self.mesh_bvh_constructor is not None:
+            newton_cfg_args["mesh_bvh_constructor"] = self.mesh_bvh_constructor
         if solver_cfg is not None:
             newton_cfg_args["solver_cfg"] = solver_cfg
 
@@ -460,11 +528,6 @@ def _normalize_newton_solver_type(solver_type: str) -> str:
     """Normalize public EmbodiChain and DexSim Newton solver aliases."""
     key = solver_type.replace("-", "_").lower()
     aliases = {
-        "auto": "auto",
-        "autosolver": "auto",
-        "autosolvercfg": "auto",
-        "auto_solver": "auto",
-        "auto_solver_cfg": "auto",
         "mjwarp": "mujoco_warp",
         "mjwarpsolver": "mujoco_warp",
         "mjwarpsolvercfg": "mujoco_warp",
@@ -494,11 +557,16 @@ def _normalize_newton_solver_type(solver_type: str) -> str:
         "vbdsolvercfg": "vbd",
     }
     if key not in aliases:
-        logger.log_error(
-            f"Unsupported Newton solver type '{solver_type}'. "
-            "Expected one of 'auto', 'dexuni', 'mjwarp', 'xpbd', 'semi_implicit', "
-            "'featherstone', or 'vbd'."
-        )
+        try:
+            from dexsim.engine.newton_physics import normalize_newton_solver_name
+        except ImportError as exc:
+            raise ValueError(
+                f"Solver {solver_type!r} requires a DexSim build with named solver extensions"
+            ) from exc
+        try:
+            return normalize_newton_solver_name(solver_type)
+        except ValueError as exc:
+            logger.log_error(f"Unsupported Newton solver type {solver_type!r}. {exc}")
     return aliases[key]
 
 
@@ -516,56 +584,26 @@ def _newton_solver_cfg_to_dexsim(
                 "Newton solver_cfg must be a mapping or a DexSim Newton solver "
                 "config object with a 'solver_type' attribute."
             )
+        from dexsim.engine import newton_physics
+
+        provider_cfg_type = getattr(newton_physics, "ProviderNewtonSolverCfg", None)
+        if provider_cfg_type is not None and isinstance(solver_cfg, provider_cfg_type):
+            return solver_cfg
+        _normalize_newton_solver_type(str(solver_cfg.solver_type))
         return solver_cfg
 
     solver_cfg_data = dict(solver_cfg)
     configured_solver_type = (
         solver_cfg_data.pop("solver_type", None)
         or solver_cfg_data.pop("class_type", None)
-        or "auto"
+        or "dexuni"
     )
     normalized_solver_type = _normalize_newton_solver_type(str(configured_solver_type))
+    if normalized_solver_type not in solver_cfg_map:
+        from dexsim.engine.newton_physics import RegisteredNewtonSolverCfg
+
+        return RegisteredNewtonSolverCfg(normalized_solver_type, solver_cfg_data)
     solver_cfg_type = solver_cfg_map[normalized_solver_type]
-    if normalized_solver_type == "dexuni":
-        try:
-            uses_grouped_options = (
-                "vbd_options" in inspect.signature(solver_cfg_type).parameters
-            )
-        except (TypeError, ValueError):
-            uses_grouped_options = True
-        if not uses_grouped_options:
-            # DexSim 0.5.0 still owns the legacy flat DexUni dataclass.
-            return solver_cfg_type(**solver_cfg_data)
-
-        # DexSim 0.5.0 exposed these options directly on DexUniSolverCfg.  The
-        # 0.5.1rc1 facade groups them by owned solver path, so keep existing
-        # EmbodiChain mappings source-compatible while forwarding the values to
-        # the native option contract.
-        legacy_values: dict[str, Any] = {}
-        vbd_options = dict(solver_cfg_data.get("vbd_options", {}))
-        if "iterations" in solver_cfg_data:
-            legacy_values["iterations"] = solver_cfg_data.pop("iterations")
-            vbd_options.setdefault("iterations", legacy_values["iterations"])
-        if "step_rigid_bodies" in solver_cfg_data:
-            legacy_values["step_rigid_bodies"] = solver_cfg_data.pop(
-                "step_rigid_bodies"
-            )
-            # The new option describes the inverse operation: when true, VBD
-            # integrates rigid state supplied by an external rigid solver.
-            vbd_options.setdefault(
-                "integrate_with_external_rigid_solver",
-                not legacy_values["step_rigid_bodies"],
-            )
-        if vbd_options:
-            solver_cfg_data["vbd_options"] = vbd_options
-
-        native_cfg = solver_cfg_type(**solver_cfg_data)
-        # Preserve read-only compatibility for callers that still inspect the
-        # legacy attributes after conversion.  Native DexSim dataclasses are
-        # not slotted, so these aliases do not affect its option validation.
-        for name, value in legacy_values.items():
-            setattr(native_cfg, name, value)
-        return native_cfg
     return solver_cfg_type(**solver_cfg_data)
 
 

@@ -36,6 +36,7 @@ __all__ = [
     "ShapeCfg",
     "MeshCfg",
     "CubeCfg",
+    "PlaneCfg",
     "SphereCfg",
 ]
 
@@ -460,6 +461,20 @@ class CubeCfg(ShapeCfg):
 
     size: List[float] = [1.0, 1.0, 1.0]
     """Size of the cube (in m) as [length, width, height]."""
+
+
+@configclass
+class PlaneCfg(ShapeCfg):
+    """Infinite static collision plane with a finite visual surface.
+
+    The plane lies in local XY with normal +Z. Use the rigid object's initial
+    pose to position or rotate it. Configure ``body_type="static"``.
+    """
+
+    shape_type: str = "Plane"
+
+    size: List[float] = [1.0, 1.0]
+    """Visual width and length in metres; collision remains infinite."""
 
 
 @configclass

@@ -36,14 +36,14 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 
-from embodichain.lab.sim.atomic_actions import (
+from embodichain.lab.sim.atomic_skills import (
     AntipodalAffordance,
     AxisAlignAffordance,
     ControlPartCommandProfile,
     EntityState,
     create_rigidized_articulation_antipodal_affordance,
 )
-from embodichain.lab.sim.atomic_actions.articulation_geometry import (
+from embodichain.lab.sim.atomic_skills.articulation_geometry import (
     _rigidized_articulation_tolerance,
 )
 from embodichain.lab.task_program.semantics.profiles import (
@@ -1379,6 +1379,27 @@ class ControlPartCommandPreset:
                 for command_id, positions in self.commands.items()
             }
         )
+
+
+def _bind_evaluation_joint_names(conditions, robot):
+    """Resolve preset joint identities through the Robot's expanded control parts."""
+    fields = {
+        field for spec in conditions.values() for field in spec._preset_joint_names()
+    }
+    layouts = {}
+    for field in fields:
+        owner, part, quantity = field.split("/")
+        if owner != "robot" or quantity != "qpos":
+            raise ValueError("Command presets require a native robot qpos channel.")
+        _require_control_part_dof(robot, part)
+        layouts[field] = tuple(
+            robot.joint_names[index] for index in robot.get_joint_ids(name=part)
+        )
+    cache = {}
+    return {
+        ref: spec._bind_joint_names(layouts, cache=cache)
+        for ref, spec in conditions.items()
+    }
 
 
 def _require_control_part_dof(robot: Robot, control_part: str) -> int:

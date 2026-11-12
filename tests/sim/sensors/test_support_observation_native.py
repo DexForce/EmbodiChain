@@ -87,13 +87,13 @@ def test_default_boxes_preserve_native_support_witness_and_clock_domains():
         clock = EnvironmentStepClock(0.04)
         observation.bind_clock(clock)
         calls = []
-        fetch = observation.sensor._query.fetch
+        fetch = observation.sensor._query.fetch_solver_report
 
         def counted_fetch():
             calls.append(True)
             return fetch()
 
-        observation.sensor._query.fetch = counted_fetch
+        observation.sensor._query.fetch_solver_report = counted_fetch
 
         def window():
             before = len(calls)

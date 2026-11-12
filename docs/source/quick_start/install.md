@@ -18,11 +18,16 @@ After installation, continue with the [Quick Start Tutorial](../tutorial/index.r
 |-----------|-------------|
 | **OS** | Linux x86_64 (Ubuntu 20.04+ recommended) |
 | **GPU** | NVIDIA GPU with compute capability 7.0+ |
-| **NVIDIA driver** | ≥ 535 (tested on driver branches up to 595.x) |
+| **NVIDIA driver** | ≥ 580.00 (tested on driver branches up to 595.x) |
 | **CUDA** | 12.x (aligned with the Docker image and `dexsim_engine` wheels) |
 | **Vulkan** | Host ICD/layer files for GPU rendering (see Docker notes) |
-| **Python** | Core / GenSim: 3.10, 3.11, or 3.12; isolated Blender worker: 3.11 |
+| **Python** | Core / GenSim: 3.11 or 3.12; isolated Blender worker: 3.11 |
 | **Display** (optional) | X11 `DISPLAY` for interactive viewer windows |
+
+The current DLSS integration uses SDK and Super Resolution (SR) **310.7.0**
+and the OVRTX-aligned Ray Reconstruction (RR) runtime **310.7.128**. These
+versions require an NVIDIA driver **≥ 580.00** for both local and Docker
+installations. For Docker, this requirement applies to the host driver.
 
 > [!IMPORTANT]
 > GenSim runs in the main EmbodiChain environment, while Blender operations can
@@ -42,7 +47,7 @@ Installation selects the LeRobot SDK by Python version:
 
 | Python | LeRobot | Hugging Face Hub | Torch / torchvision / TorchCodec | TensorDict |
 | --- | --- | --- | --- | --- |
-| 3.10 / 3.11 | 0.4.4 | >=0.35.3, <0.36 | 2.7.x / 0.22.x / 0.5.x | >=0.13, <0.15 |
+| 3.11 | 0.4.4 | >=0.35.3, <0.36 | 2.7.x / 0.22.x / 0.5.x | >=0.13, <0.15 |
 | 3.12 | 0.6.1, including training/dataset dependencies | >=1.6, <2 | 2.11.x / 0.26.x / >=0.11.1, <0.12 | >=0.15.3, <0.16 |
 
 Torch remains a direct dependency because the framework uses it independently
@@ -62,8 +67,10 @@ python -m pip install torch==2.11.0 torchvision==0.26.0 torchcodec==0.11.1 \
 
 The SDK matrix CI checks a clean CPU installation, recording/loading, video
 decoding, and an official ACT update/checkpoint/reset. GPU simulation and full policy learning acceptance
-are separate checks. Python versions above 3.12 select the newer SDK but are not
-part of this validation matrix.
+are separate checks. This release requires Python >=3.11 and pins DexSim
+0.6.0rc1. The DexForce index provides Linux x86_64 wheels for CPython 3.11 and
+3.12; use one of those versions for this release. Python 3.10 is unsupported,
+and versions above 3.12 are outside the current wheel/validation matrix.
 
 Recordings retain the existing task/subtask table and depth-sidecar schema on
 both routes. LeRobot 0.6.1 exposes `subtask_index` but does not automatically
@@ -109,10 +116,15 @@ select `py311` or `py312` with `EMBODICHAIN_ENV`. See the
 for internal registry access, environment selection, source development, and
 dependency locks.
 
+The published image digests in the container guide's validation record belong
+to the earlier DexSim 0.5.1rc1 runtime. For this checkout's DexSim 0.6.0rc1
+requirements, build a candidate from the current source or follow the guide's
+source-development instructions to update the selected environment.
+
 ### Prerequisites
 
 - [Docker](https://docs.docker.com/engine/install/) with [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
-- NVIDIA driver ≥ 535 on the host
+- NVIDIA driver ≥ 580.00 on the host (required by the current DLSS integration)
 - For **GUI** runs: working X11 forwarding (`DISPLAY`, `~/.Xauthority`, `/tmp/.X11-unix`)
 - For **headless** servers: no display required; use `--headless` in tutorial scripts
 
@@ -157,7 +169,7 @@ to preserve the selected environment's dependency locks.
 ## Local installation
 
 Use a dedicated virtual environment to avoid conflicts with system Python packages.
-For the core package, choose Python 3.10, 3.11, or 3.12. The examples below use
+For the core package, choose Python 3.11 or 3.12. The examples below use
 Python 3.12. Check the [compatibility matrix](#python-and-lerobot-compatibility)
 before choosing a version for an existing dataset or learning workflow.
 
@@ -330,13 +342,15 @@ pytest --pyargs curobo.tests
 
 The dependency is installed from NVIDIA's source repository and pinned to the
 cuRobo V2 `v0.8.0` release. cuRobo has stricter requirements than the core
-EmbodiChain installation: Linux, Python 3.10--3.13, a supported NVIDIA GPU with
-at least 4 GB VRAM, and a driver that supports CUDA 12 or newer. See
+EmbodiChain installation: Linux, a supported NVIDIA GPU with at least 4 GB
+VRAM, and a driver that supports CUDA 12 or newer. See
 [NVIDIA's official installation guide](https://nvlabs.github.io/curobo/latest/getting-started/installation.html)
 for the current compatibility requirements, and see
 [cuRobo V2 Planner](../overview/sim/motion/planners/curobo_planner.md) for EmbodiChain
 configuration and usage. cuRobo planning always runs on CUDA, but the
 SimulationManager physics device may be either CPU or CUDA.
+cuRobo's upstream Python range does not expand this release's EmbodiChain
+runtime matrix; use Python 3.11 or 3.12 when installing them together.
 
 ## Optional: generative simulation (`gensim`)
 
@@ -369,7 +383,7 @@ The installer applies the locked Blender dependencies and the wheel metadata
 correction described in the
 [Blender runtime notes](https://github.com/DexForce/EmbodiChain/blob/main/docker/README.md#blender-and-native-library-isolation).
 
-For SimReady pipeline usage and LLM configuration, see [SimReady Asset Pipeline](../features/generative_sim/asset_engine.md).
+For Asset Engine usage and LLM configuration, see [Asset Engine](../features/generative_sim/asset_engine.md).
 
 ## Verify installation
 

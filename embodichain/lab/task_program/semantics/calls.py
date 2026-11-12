@@ -23,11 +23,11 @@ from dataclasses import dataclass, field, fields
 import math
 import re
 from types import MappingProxyType
-from typing import ClassVar, TypeAlias
+from typing import ClassVar, TypeAlias, TYPE_CHECKING
 
 import torch
 
-from embodichain.lab.sim.atomic_actions import (
+from embodichain.lab.sim.atomic_skills import (
     DisjointResourceSlots,
     DisjointSlotEndpoints,
     SkillBindingContract,
@@ -44,6 +44,9 @@ from .scene import (
     SceneObjectRef,
 )
 from ._validation import validate_identifier as _validate_identifier
+
+if TYPE_CHECKING:
+    from embodichain.lab.sim.atomic_skills.goals import SceneEntityPose
 
 
 def _validate_registered_call_id(value: str) -> str:
@@ -304,6 +307,13 @@ def _call_value_to_metadata(value: DeclarativeValue | object) -> object:
             "entity_type": type(value).__name__,
             "entity_id": value.entity_id,
         }
+    if type(value) is SemanticRelativePose:
+        return {
+            "entity_id": value.entity_id,
+            "position": list(value.position),
+            "quaternion_xyzw": list(value.quaternion_xyzw),
+            "frame": value.frame,
+        }
     if type(value) is SemanticPose:
         return value.to_metadata()
     if isinstance(value, Mapping):
@@ -378,6 +388,78 @@ class Pick(SemanticCallSpec):
             raise TypeError("Pick.grasp must be a SceneAffordanceRef or None.")
 
 
+@dataclass(frozen=True, slots=True)
+class SemanticRelativePose:
+    """Immutable scene-relative target resolved from one planning observation.
+
+    Args:
+        entity_id: Canonical reference identity.
+        position: Offset in metres.
+        quaternion_xyzw: Offset orientation in XYZW order.
+        frame: ``parent`` composes SE(3); ``world_axes`` follows position only.
+    """
+
+    entity_id: str
+    position: tuple[float, float, float]
+    quaternion_xyzw: tuple[float, float, float, float]
+    frame: str = "parent"
+
+    def __post_init__(self) -> None:
+        _validate_identifier(self.entity_id, field_name="entity_id")
+        pose = SemanticPose(self.position, self.quaternion_xyzw)
+        object.__setattr__(self, "position", tuple(pose.position.tolist()))
+        object.__setattr__(
+            self, "quaternion_xyzw", tuple(pose.quaternion_xyzw.tolist())
+        )
+        if self.frame not in ("parent", "world_axes"):
+            raise ValueError("frame must be parent or world_axes.")
+
+    def snapshot(self) -> SemanticRelativePose:
+        """Return the immutable, tensor-free target."""
+        return self
+
+    def to_goal(self) -> SceneEntityPose:
+        """Adapt the declaration to the existing late-bound Atomic pose type."""
+        from embodichain.lab.sim.atomic_skills.goals import SceneEntityPose
+
+        offset = SemanticPose(self.position, self.quaternion_xyzw).to_matrix()
+        if self.frame == "parent":
+            return SceneEntityPose(self.entity_id, relative_pose=offset)
+        return SceneEntityPose(
+            self.entity_id,
+            world_displacement=offset[:3, 3],
+            world_orientation=offset[:3, :3],
+        )
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class MoveHeldObjectCall(SemanticCallSpec):
+    """Transport one exact held object while retaining its verified attachment.
+
+    Args:
+        object: Canonical held object.
+        at: World or scene-relative object destination.
+        resources: Optional logical resource selection.
+    """
+
+    call_kind: ClassVar[str] = "move_held_object"
+    object: SceneObjectRef
+    at: SemanticPose | SemanticRelativePose
+
+    def __post_init__(self) -> None:
+        SemanticCallSpec.__post_init__(self)
+        if type(self.object) is not SceneObjectRef:
+            raise TypeError("MoveHeldObjectCall.object must be exactly SceneObjectRef.")
+        if type(self.at) not in (SemanticPose, SemanticRelativePose):
+            raise TypeError("MoveHeldObjectCall.at requires a typed pose target.")
+        object.__setattr__(self, "at", self.at.snapshot())
+
+    @property
+    def call_id(self) -> str:
+        """Return the built-in identity used by the shared retention lowering."""
+        return self.call_kind
+
+
 PlaceRelationTarget: TypeAlias = SceneObjectRef | SceneAffordanceRef
 
 
@@ -387,7 +469,7 @@ class Place(SemanticCallSpec):
 
     Args:
         object: Authoritative held-object reference.
-        at: Absolute object-space pose.
+        at: World or scene-relative object-space pose.
         on: Object or affordance supporting an ``on`` relation.
         inside: Object or affordance supporting an ``inside`` relation.
         resources: Optional skill-local resource overrides.
@@ -396,7 +478,7 @@ class Place(SemanticCallSpec):
     call_kind: ClassVar[str] = "place"
 
     object: SceneObjectRef
-    at: SemanticPose | None = None
+    at: SemanticPose | SemanticRelativePose | None = None
     on: PlaceRelationTarget | None = None
     inside: PlaceRelationTarget | None = None
 
@@ -416,7 +498,7 @@ class Place(SemanticCallSpec):
                 f"{selected}."
             )
         if self.at is not None:
-            if type(self.at) is not SemanticPose:
+            if type(self.at) not in (SemanticPose, SemanticRelativePose):
                 raise TypeError("Place.at must be a SemanticPose or None.")
             object.__setattr__(self, "at", self.at.snapshot())
         for field_name in ("on", "inside"):
@@ -447,14 +529,14 @@ class HandOver(SemanticCallSpec):
     call_kind: ClassVar[str] = "hand_over"
 
     object: SceneObjectRef
-    final_target: SemanticPose | None = None
+    final_target: SemanticPose | SemanticRelativePose | None = None
 
     def __post_init__(self) -> None:
         SemanticCallSpec.__post_init__(self)
         if type(self.object) is not SceneObjectRef:
             raise TypeError("HandOver.object must be a SceneObjectRef.")
         if self.final_target is not None:
-            if type(self.final_target) is not SemanticPose:
+            if type(self.final_target) not in (SemanticPose, SemanticRelativePose):
                 raise TypeError("HandOver.final_target must be a SemanticPose or None.")
             object.__setattr__(
                 self,
@@ -619,6 +701,7 @@ class SemanticCallDescriptor:
             Pick,
             Place,
             HandOver,
+            MoveHeldObjectCall,
             RegisteredSemanticCall,
         ):
             raise TypeError(
@@ -748,6 +831,7 @@ class SemanticCallCatalog:
             Pick,
             Place,
             HandOver,
+            MoveHeldObjectCall,
             RegisteredSemanticCall,
         ):
             call_id = call.semantic_id
@@ -782,16 +866,20 @@ def _builtin_call_target(
     spec_type: type[SemanticCallSpec],
 ) -> SkillDescriptor:
     """Return the non-overridable atomic target for one curated call type."""
-    from embodichain.lab.sim.atomic_actions.primitives.hand_over import (
-        HandOver as HandOverAction,
+    from embodichain.lab.sim.atomic_skills.primitives.hand_over import (
+        HandOver as HandOverSkill,
     )
-    from embodichain.lab.sim.atomic_actions.primitives.pick_up import PickUp
-    from embodichain.lab.sim.atomic_actions.primitives.place import Place as PlaceAction
+    from embodichain.lab.sim.atomic_skills.primitives.pick_up import PickUp
+    from embodichain.lab.sim.atomic_skills.primitives.move_held_object import (
+        MoveHeldObject,
+    )
+    from embodichain.lab.sim.atomic_skills.primitives.place import Place as PlaceSkill
 
     targets = {
         Pick: PickUp.descriptor(),
-        Place: PlaceAction.descriptor(),
-        HandOver: HandOverAction.descriptor(),
+        Place: PlaceSkill.descriptor(),
+        HandOver: HandOverSkill.descriptor(),
+        MoveHeldObjectCall: MoveHeldObject.descriptor(),
     }
     try:
         return targets[spec_type]
@@ -799,8 +887,15 @@ def _builtin_call_target(
         raise TypeError(f"Unsupported curated call type {spec_type!r}.") from exc
 
 
-def builtin_semantic_call_catalog() -> SemanticCallCatalog:
+def builtin_semantic_call_catalog(
+    *, include_transport: bool = False
+) -> SemanticCallCatalog:
     """Build the curated catalog for installed manipulation primitives.
+
+    Args:
+        include_transport: Include the verified held-object transport primitive.
+            The default preserves historical catalog identities; configured
+            deployments opt in when their profile declares its options.
 
     Returns:
         A fresh immutable catalog. Atomic implementations remain uninstalled;
@@ -811,13 +906,19 @@ def builtin_semantic_call_catalog() -> SemanticCallCatalog:
             call_id=spec_type.call_kind,
             spec_type=spec_type,
         )
-        for spec_type in (Pick, Place, HandOver)
+        for spec_type in (
+            (Pick, Place, HandOver, MoveHeldObjectCall)
+            if include_transport
+            else (Pick, Place, HandOver)
+        )
     )
     return SemanticCallCatalog(descriptors)
 
 
 __all__ = [
     "DeclarativeValue",
+    "MoveHeldObjectCall",
+    "SemanticRelativePose",
     "HandOver",
     "Pick",
     "Place",

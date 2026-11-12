@@ -44,6 +44,8 @@ class TransitionReplay:
         device: Storage and sampling device.
         max_bytes: Optional allocation ceiling, checked before allocating.
         seed: Replay-owned sampling RNG seed.
+        extra_fields: Named scalar/vector fields as ``(width, dtype)`` pairs;
+            ``width=None`` denotes a scalar. Values travel with their transition.
 
     Float payloads are FP32. Terminal and truncated transitions are retained;
     their following episode is excluded from a sampled window using a validity
@@ -62,6 +64,7 @@ class TransitionReplay:
         device: str | torch.device = "cpu",
         max_bytes: int | None = None,
         seed: int = 0,
+        extra_fields: Mapping[str, tuple[int | None, torch.dtype]] | None = None,
     ) -> None:
         if any(
             type(value) is not int or value < 1
@@ -91,7 +94,24 @@ class TransitionReplay:
             "episode_id": (None, torch.int64),
             "episode_step": (None, torch.int64),
         }
+        self.extra_fields = dict(extra_fields or {})
+        for name, (width, dtype) in self.extra_fields.items():
+            if (
+                not isinstance(name, str)
+                or not name
+                or name in self._fields
+                or name in {"valid", "history_valid", "history_complete"}
+                or (width is not None and (type(width) is not int or width < 1))
+                or dtype not in (torch.float32, torch.int64, torch.bool)
+            ):
+                raise ValueError(f"Invalid replay extra field: {name}")
+        self._fields.update(self.extra_fields)
         scalar_bytes = 4 * (2 * state_dim + action_dim + context_dim) + 2 + 16
+        scalar_bytes += sum(
+            (1 if width is None else width)
+            * torch.empty((), dtype=dtype).element_size()
+            for width, dtype in self.extra_fields.values()
+        )
         self.allocated_bytes = capacity * num_envs * scalar_bytes + 2 * num_envs * 8
         if max_bytes is not None and (
             type(max_bytes) is not int or max_bytes < self.allocated_bytes
@@ -135,6 +155,7 @@ class TransitionReplay:
         context: torch.Tensor | None = None,
         terminated: torch.Tensor | None = None,
         truncated: torch.Tensor | None = None,
+        extras: Mapping[str, torch.Tensor] | None = None,
     ) -> None:
         """Copy one vector step; flags end episodes after the stored transition.
 
@@ -145,6 +166,7 @@ class TransitionReplay:
             context: Recorded FP32 physical context; required for nonzero width.
             terminated: Hard terminal flags, default false.
             truncated: Time-limit flags, default false, retained separately.
+            extras: All fields declared by ``extra_fields``, aligned with this step.
         """
         if context is None:
             if self.context_dim:
@@ -161,6 +183,10 @@ class TransitionReplay:
             terminated=terminated,
             truncated=truncated,
         )
+        extras = {} if extras is None else extras
+        if extras.keys() != self.extra_fields.keys():
+            raise ValueError("Replay extras must match the declared fields")
+        payload.update(extras)
         for name, value in payload.items():
             self._check(name, value)
         # Validate all fields before mutating a row. copy_ under no_grad owns
@@ -251,7 +277,9 @@ class TransitionReplay:
         Returns:
             ``start`` fields, ``history`` fields and Boolean ``history_valid``.
             Missing history repeats the earliest available state in that same
-            episode. Requests never retry or wait for more data.
+            episode. ``history_complete`` distinguishes padding at a real reset
+            from history lost to ring overwrite. Callers requiring exact history
+            select this mask. Requests never retry or wait for more data.
         """
         if (
             self.size == 0
@@ -276,6 +304,7 @@ class TransitionReplay:
                 for name, value in self._data.items()
             },
             "history_valid": valid,
+            "history_complete": (ages >= history_length - 1) | (steps <= ages),
         }
 
     def state_dict(self) -> dict[str, Any]:
@@ -287,7 +316,8 @@ class TransitionReplay:
             recovery may instead rebuild and refill replay explicitly.
         """
         return {
-            "format": "transition-replay-v1",
+            "format": "transition-replay-v2",
+            "extra_fields": self.extra_fields.copy(),
             "layout": (
                 self.capacity,
                 self.num_envs,
@@ -318,8 +348,9 @@ class TransitionReplay:
             self.context_dim,
         )
         if (
-            state.get("format") != "transition-replay-v1"
+            state.get("format") not in ("transition-replay-v1", "transition-replay-v2")
             or tuple(state.get("layout", ())) != layout
+            or state.get("extra_fields", {}) != self.extra_fields
         ):
             raise ValueError("Replay snapshot layout differs")
         if state["data"].keys() != self._data.keys():

@@ -41,6 +41,11 @@ physical environment component. The production loader resolves mesh assets and
 in selected-environment reset, while physical background/collision semantics stay
 with `background` and `rigid_object`. See the [simulation object boundary](../simulation-system/simulation-system.md).
 
+Configured Task Program deployments may select a named rule library with
+`evaluation.component`. Resolve it relative to the runnable deployment or
+from its supplied component snapshot. See
+[named evaluation rules](../task-programs/configuration.md#named-evaluation-rules).
+
 ### Component ownership
 
 | File / component | Owns | Must not own |
@@ -66,6 +71,14 @@ component expansion without Gym registration or simulator construction. Its
 call. Task Program selectors remain declarations; pass the returned skill
 profile to the public Task Program deployment composer for semantic preflight.
 This is not complete runtime-config validation.
+
+Both `resolve_gym_components` and `config_to_cfg` accept optional
+`component_sources`: a complete mapping of selected physical-component paths to
+owned declarations. Snapshot mode reads no component files and rejects missing
+or duplicate resolved selections; relative asset paths retain their component
+owner. Callers verify snapshot provenance and external assets separately.
+`ResolvedGymComponents.validate_scene_bindings` checks semantic native roots
+against the expanded physical scene without runtime construction.
 
 `config_to_cfg()` resolves optional `environment`,
 `embodiment.component`, and `scene.component` selections before ordinary Gym

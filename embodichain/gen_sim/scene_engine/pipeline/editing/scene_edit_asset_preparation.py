@@ -17,27 +17,25 @@
 
 from __future__ import annotations
 
+__all__: list[str] = []
+
+from embodichain.gen_sim.services.compat import reconstruct
+from embodichain.gen_sim.services.contracts import GeometryRequest
+
+
 from dataclasses import dataclass
 from pathlib import Path
 import shutil
 
 from PIL import Image
 
-from embodichain.gen_sim.scene_engine.clients.geometry_generation import (
-    GeometryGenerationClient,
-)
-from embodichain.gen_sim.scene_engine.clients.image_generation import (
-    ImageGenerationClient,
-)
-from embodichain.gen_sim.scene_engine.clients.image_segmentation import (
-    ImageSegmentationClient,
-)
+from embodichain.gen_sim.services.compat import GeometryClient
+from embodichain.gen_sim.services.compat import ImageClient
+from embodichain.gen_sim.services.compat import SegmentationClient
 from embodichain.gen_sim.scene_engine.core.scene import Scene
 from embodichain.gen_sim.scene_engine.core.scene_edit_plan import SceneEditPlan
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
-from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
-    OpenAICompatibleVLM,
-)
+from embodichain.gen_sim.services.compat import VisionClient
 from embodichain.gen_sim.scene_engine.pipeline.utils.image_segmentation_utils import (
     MaskCandidate,
     build_mask_candidates,
@@ -65,10 +63,10 @@ def prepare_scene_edit_assets(
     *,
     scene_edit_plan: SceneEditPlan,
     output_root: str | Path,
-    image_generation_client: ImageGenerationClient,
-    geometry_generation_client: GeometryGenerationClient,
-    image_segmentation_client: ImageSegmentationClient,
-    vlm_client: OpenAICompatibleVLM | None = None,
+    image_generation_client: ImageClient,
+    geometry_generation_client: GeometryClient,
+    image_segmentation_client: SegmentationClient,
+    vlm_client: VisionClient | None = None,
 ) -> list[SceneObject]:
     """Generate canonical SimReady assets for a scene edit's add operations.
 
@@ -252,7 +250,7 @@ def _generate_added_asset_images(
     *,
     added_asset_descriptions: list[_AddedAssetInfo],
     stage_output_root: Path,
-    image_generation_client: ImageGenerationClient,
+    image_generation_client: ImageClient,
 ) -> list[tuple[str, Path]]:
     """Generate one stable PNG for each new object description."""
     # Prepare a list.
@@ -277,7 +275,7 @@ def _segment_generated_added_asset_images(
     added_asset_descriptions: list[_AddedAssetInfo],
     generated_asset_images: list[tuple[str, Path]],
     stage_output_root: Path,
-    image_segmentation_client: ImageSegmentationClient,
+    image_segmentation_client: SegmentationClient,
 ) -> list[tuple[str, Path]]:
     """Segment each generated image with its description and return binary masks."""
     asset_info_by_id = {
@@ -329,7 +327,7 @@ def _generate_added_assets_coarse_geometry(
     generated_asset_images: list[tuple[str, Path]],
     generated_asset_masks: list[tuple[str, Path]],
     stage_output_root: Path,
-    geometry_generation_client: GeometryGenerationClient,
+    geometry_generation_client: GeometryClient,
 ) -> list[tuple[str, Path]]:
     """Generate one coarse GLB for each generated image and binary mask."""
     masks_by_id = dict(generated_asset_masks)
@@ -345,12 +343,15 @@ def _generate_added_assets_coarse_geometry(
     generated_asset_glbs: list[tuple[str, Path]] = []
     for object_id, image_path in generated_asset_images:
         # Each generated object has its own color image, so it needs an individual request.
-        geometry_generation_client.generate_objects(
-            image_path=image_path,
-            object_masks=[(object_id, masks_by_id[object_id])],
-            output_root=geometry_output_root,
+        result = reconstruct(
+            geometry_generation_client,
+            GeometryRequest(
+                Path(image_path),
+                ((object_id, masks_by_id[object_id]),),
+                Path(geometry_output_root),
+            ),
         )
-        glb_path = geometry_output_root / f"{object_id}.glb"
+        glb_path = result.objects[0].mesh_path
         if not glb_path.is_file():
             raise FileNotFoundError(
                 f"Geometry generation did not produce a GLB for {object_id!r}: {glb_path}"

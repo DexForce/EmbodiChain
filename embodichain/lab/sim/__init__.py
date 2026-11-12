@@ -16,7 +16,7 @@
 
 """EmbodiChain's simulation core.
 
-Organized around the ``SimulationManager`` (the DexSim scene handle), the scene-object hierarchy, sensors, IK solvers, motion planners, the atomic-action layer, and shared configuration types.
+Organized around the ``SimulationManager`` (the DexSim scene handle), the scene-object hierarchy, sensors, IK solvers, motion planners, the atomic-skill layer, and shared configuration types.
 """
 
 from __future__ import annotations
@@ -29,6 +29,7 @@ from .material import (
 )
 from .cfg import DenoisingCfg, DenoisingMode, DLSSCfg, NRDCfg
 from .common import BatchEntity
+from .spawn.usd_result import UsdImportResult
 from .profiler import Profiler, ProfilerCfg
 
 from .sim_manager import *
@@ -39,6 +40,7 @@ __all__ = [
     "VisualMaterialInst",
     "ReuseSegmentState",
     "BatchEntity",
+    "UsdImportResult",
     "Profiler",
     "ProfilerCfg",
     "SimulationManager",

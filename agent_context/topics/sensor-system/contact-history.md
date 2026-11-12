@@ -21,27 +21,39 @@ boundary. Observation reads reuse the sampled sensor buffer.
 `SimulationManager.physics_step_index` and the query's current actor binding.
 Reading a raw sample before its history callback does not consume the history
 update. Query metadata is checked even on cache hits so topology rebuilds cannot
-retain old contacts. Cached CUDA reads wait for the producing stream. Caller-owned
-CUDA graph capture bypasses raw/history deduplication and records the query read
-and reductions on the capture stream. Capture invalidates eager cache keys rather
-than marking unexecuted work as a completed sample; replay does not execute Python
-cache bookkeeping. Callers own replay scheduling and establish stream dependencies before capture
-and replay. Capture skips eager producer waits and never records its stream as
-a completed producer, including control-interval initialization and reset.
+retain old contacts. Cached CUDA reads wait for the producing stream.
+`update()` and `update_physics_step()` require eager calls outside caller-owned
+CUDA graph capture. Native snapshot reads can wait on uncaptured producer events;
+the sensor rejects capture before calling the query or sampling observers.
+Callers sample eagerly before capture/replay and establish stream dependencies,
+then consume the stable `get_data()` buffers inside their graphs. Replays alone
+do not refresh contacts or advance history. The sensor's own reduction graph
+remains supported because native acquisition runs before its capture boundary.
 
 Sensor reset clears only selected rows and invalidates this cache; it does not
 reset the physics solver. An explicit `update()` may therefore refresh a valid
 settled snapshot without advancing history, as scene preparation requires.
-It cannot recompute solved contacts after physical state writes; the backend's
-contact-availability rules still apply. Empty selections do not invalidate the
-cache. `BaseEnv` retains its ordinary acquisition and substep scheduling.
+If DexSim reports that physics reset invalidated its solved snapshot, observation
+reads return invalid contact rows until a new solve. Other query failures still
+propagate. Empty selections do not invalidate the cache. `BaseEnv` retains its
+ordinary acquisition and substep scheduling.
 
-CUDA queries use `fetch_async()` and device-resident counts. Sparse Warp kernels
+CUDA queries use `fetch_solver_report_async()` and device-resident counts. Sparse Warp kernels
 process valid contact rows, using precomputed sorted environment/actor indices;
 no environment-by-contact-by-body tensor is allocated. Per-body force, contact
 flags and timing buffers persist between samples. `current_air_time` measures
 an unfinished flight; `last_air_time` retains its completed duration on landing.
-Selective reset clears only the selected rows.
+Selective reset clears only the selected rows. Force reduction uses only
+components marked available by the sample's normal/friction validity flags.
+Geometry-only rows can count as contact when no force threshold is requested;
+they do not create measured force or satisfy a positive force threshold.
+Native friction is the tangential impulse on actor 0, while the normal points
+toward actor 1: actor-0 force is `(-normal * impulse + friction) / impulse_dt`
+and actor 1 receives the opposite force. Newton reports the final internal
+solver substep's impulse, so the sensor uses the actual World-step duration
+divided by the active backend's `num_substeps` for `impulse_dt`. History clocks
+still advance by the full World-step duration. Standalone `ContactHistory.update`
+accepts `impulse_dt` explicitly and defaults it to the elapsed `dt`.
 
 `dropped_contacts` reports query loss plus separately counted scatter overflow
 across the control interval. Query counts stay on the device until this diagnostic
@@ -64,8 +76,8 @@ and `tests/gym/envs/test_substep_sensors.py`.
 observer to the same lifecycle. It receives begin, before-sample, after-sample and
 selected-row reset notifications. With no observers, the update path does not
 enumerate subscriptions, construct token generators or enter callback loops.
-Hooks run outside the sensor's internal CUDA capture; external capture with
-observers fails before callbacks run. Observer tokens and after-sample callbacks
+Hooks run outside the sensor's internal CUDA capture; all sampling in external
+capture fails before callbacks run. Observer tokens and after-sample callbacks
 run once per physics step alongside history reduction. A raw sample fetched
 earlier in the same step is reused; repeated reads do not advance history or
 repeat callbacks. Removal can supply `expected=observer` to retain a replacement
@@ -140,3 +152,7 @@ evidence window.
 it returns the highest accepted contact or NaN for an unavailable row. It does
 not create a physical window or choose a Task Program verdict. Geometric world
 mesh envelopes are numerical Compute inputs, independent of this contact proof.
+Normal-force-only consumers can use `ContactSensor._reduce_normal_impulses()`
+to reduce packed contact impulses directly into a task-owned snapshot. It
+retains dropped-contact accounting and does not replace the row-buffer/history
+path used by consumers requiring per-contact information.

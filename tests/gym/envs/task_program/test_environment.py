@@ -53,9 +53,9 @@ from embodichain.lab.task_program.integrations.environment import (
     PlanningObservationPort,
 )
 from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
-from embodichain.lab.sim.atomic_actions import (
+from embodichain.lab.sim.atomic_skills import (
     AntipodalAffordance,
-    AtomicActionEngine,
+    AtomicSkillEngine,
     BATCH_INVERSE_KINEMATICS_CAPABILITY,
     CARTESIAN_POSE_CAPABILITY,
     ControlPartCommandProfile,
@@ -214,7 +214,7 @@ def _robot_profile(
         presets={
             "safe": SkillPolicyPreset(
                 "safe",
-                action_option_templates={
+                skill_option_templates={
                     "pick": PickUpOptions(),
                     "place": PlaceOptions(),
                     "hand_over": HandOverOptions(),
@@ -232,7 +232,7 @@ def _robot_profile(
     )
 
 
-def _engine(profile: RobotSkillProfile) -> AtomicActionEngine:
+def _engine(profile: RobotSkillProfile) -> AtomicSkillEngine:
     """Build a CPU-only engine around a minimal typed robot surface."""
     robot = Mock()
     robot.device = torch.device("cpu")
@@ -246,9 +246,9 @@ def _engine(profile: RobotSkillProfile) -> AtomicActionEngine:
     generator.robot = robot
     generator.device = torch.device("cpu")
     generator.planner.cfg.planner_type = "fake_planner"
-    return AtomicActionEngine(
+    return AtomicSkillEngine(
         generator,
-        control_profiles=profile.action_control_profiles(),
+        control_profiles=profile.skill_control_profiles(),
     )
 
 
@@ -282,10 +282,10 @@ class _FakeEnvironmentFactory:
             effect_monitors=self.effect_monitors,
         )
 
-    def create_atomic_action_engine(
+    def create_atomic_skill_engine(
         self,
         profile: RobotSkillProfile,
-    ) -> AtomicActionEngine:
+    ) -> AtomicSkillEngine:
         """Create an engine for exactly the supplied profile."""
         self.calls["engine"] += 1
         return _engine(profile)
@@ -294,7 +294,7 @@ class _FakeEnvironmentFactory:
         self,
         *,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
         clock: EnvironmentStepClock,
     ) -> GymPlanningObservationProvider:
         """Create a callback-backed Gym observation port."""
@@ -326,7 +326,7 @@ class _FakeEnvironmentFactory:
         self,
         *,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
         observation_provider: PlanningObservationPort,
     ) -> tuple[EffectEvidenceProvider, ...]:
         """Return the fake environment's explicit evidence-provider set."""
@@ -341,7 +341,7 @@ class _DynamicCollisionFactory(_FakeEnvironmentFactory):
     def __init__(self) -> None:
         super().__init__()
         self.pose_provider = _PoseProvider()
-        self.last_engine: AtomicActionEngine | None = None
+        self.last_engine: AtomicSkillEngine | None = None
 
     def create_scene_registry(self) -> SceneRegistry:
         self.calls["scene"] += 1
@@ -356,10 +356,10 @@ class _DynamicCollisionFactory(_FakeEnvironmentFactory):
             safe_motion_policy=MotionPolicy(strategy="motion_gen"),
         )
 
-    def create_atomic_action_engine(
+    def create_atomic_skill_engine(
         self,
         profile: RobotSkillProfile,
-    ) -> AtomicActionEngine:
+    ) -> AtomicSkillEngine:
         self.calls["engine"] += 1
         engine = _engine(profile)
         engine.motion_generator.supports_dynamic_collision_world = False
@@ -639,7 +639,7 @@ def test_execution_trace_rejects_vectorized_bridge() -> None:
 
 def test_repeated_skill_occurrences_select_distinct_nominal_sources() -> None:
     from dataclasses import replace
-    from embodichain.lab.sim.atomic_actions import ActionInvocation
+    from embodichain.lab.sim.atomic_skills import SkillInvocation
     from embodichain.lab.task_program.integrations.nominal import (
         BoundTaskProgramNominalSources,
     )
@@ -662,7 +662,7 @@ def test_repeated_skill_occurrences_select_distinct_nominal_sources() -> None:
         item.call for segment in compiled.iter_segments() for item in segment.calls
     ]
     request = TaskProgramPlanRequest(
-        "fake_pick/segment", 0, 0, calls[0], Mock(spec=ActionInvocation)
+        "fake_pick/segment", 0, 0, calls[0], Mock(spec=SkillInvocation)
     )
     engine = _engine(_robot_profile())
     assert bindings.create_nominal_source(request, engine=engine) is first
@@ -674,10 +674,14 @@ def test_repeated_skill_occurrences_select_distinct_nominal_sources() -> None:
     )
 
 
-def test_tracing_source_factory_owns_one_instantiation_per_call() -> None:
-    from embodichain.lab.sim.atomic_actions import (
-        ActionInvocation,
+@pytest.mark.parametrize("monitored", [False, True])
+def test_tracing_source_factory_preserves_monitoring_and_owned_instantiation(
+    monitored: bool,
+) -> None:
+    from embodichain.lab.sim.atomic_skills import (
+        SkillInvocation,
         InstantiatedSkillMotion,
+        MonitoredNominalMotionSource,
         TimedTrajectory,
     )
     from embodichain.lab.task_program.integrations.nominal import (
@@ -704,16 +708,45 @@ def test_tracing_source_factory_owns_one_instantiation_per_call() -> None:
         def instantiate(self, request, context):
             return motion
 
+    observations = []
+    effect_request, effect_result = object(), object()
+
+    class MonitoredSource(Source):
+        def observe_execution(self, context, sample_index, *, terminal):
+            observations.append((context, sample_index, terminal))
+
+        def owns_effect(self, request):
+            return request is effect_request
+
+        def verify_effect(self, context, request):
+            assert request is effect_request
+            return effect_result
+
+    source = MonitoredSource() if monitored else Source()
     adapter = TaskProgramEnvironmentAdapter(_FakeEnvironmentFactory(), step_dt=_STEP_DT)
     program = adapter.compile(_program())
     binding = TracingTaskProgramNominalSources(
-        program, BoundTaskProgramNominalSources(program, {0: Source()})
+        program, BoundTaskProgramNominalSources(program, {0: source})
     )
     call = next(iter(program.iter_segments())).calls[0].call
     request = TaskProgramPlanRequest(
-        "fake_pick/segment", 0, 0, call, Mock(spec=ActionInvocation)
+        "fake_pick/segment", 0, 0, call, Mock(spec=SkillInvocation)
     )
     selected = binding.create_nominal_source(request, engine=_engine(_robot_profile()))
+    assert isinstance(selected, MonitoredNominalMotionSource) is monitored
+    if monitored:
+        # Python 3.12+ runtime protocols use static lookup; __getattr__ cannot
+        # supply these protocol members even on Python 3.11 test hosts.
+        from inspect import getattr_static
+
+        for member in ("observe_execution", "owns_effect", "verify_effect"):
+            assert callable(getattr_static(selected, member))
+        context = Mock()
+        selected.observe_execution(context, 1, terminal=True)
+        assert observations == [(context, 1, True)]
+        assert selected.owns_effect(effect_request)
+        assert not selected.owns_effect(object())
+        assert selected.verify_effect(context, effect_request) is effect_result
     selected.instantiate(Mock(), Mock())
     assert binding.motions[0].unit_id == "pick"
     binding.motions[0].trajectory.positions[0, 0, 0] = 1
@@ -1159,14 +1192,14 @@ class _InvocationPolicyFactory(_FakeEnvironmentFactory):
                     "careful",
                     effect_assurance=baseline.effect_assurance,
                     effect_monitors=baseline.effect_monitors,
-                    action_option_templates=baseline.action_option_templates,
+                    skill_option_templates=baseline.skill_option_templates,
                     motion_policy=MotionPolicy(sample_count=81),
                 ),
                 "projected": SkillPolicyPreset(
                     "projected",
                     effect_assurance=EffectAssurance.PROJECTED,
                     effect_monitors={},
-                    action_option_templates=baseline.action_option_templates,
+                    skill_option_templates=baseline.skill_option_templates,
                 ),
             },
         )

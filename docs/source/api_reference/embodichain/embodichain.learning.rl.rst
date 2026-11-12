@@ -29,9 +29,9 @@ collection logic, policy/model builders, and training entry points.
       DifferentiableTrainer
       DifferentiableTrainerCfg
       DifferentiableRolloutSpec
-      DifferentiableVecEnv
-      LearningVecEnv
-      ScheduledDifferentiableVecEnv
+      DifferentiableEnvProtocol
+      LearningEnvProtocol
+      ScheduledDifferentiableEnvProtocol
       RunningObservationNormalizer
       BatchedGradientNormStats
       build_learning_env
@@ -45,12 +45,26 @@ Algorithms
 ----------
 
 .. automodule:: embodichain.learning.rl.algo
+   :no-index:
    :members:
    :undoc-members:
    :show-inheritance:
 
 Environments
 ------------
+
+The protocols describe batched inputs and outputs through ``num_envs`` and the
+single-row spaces. ``LearningVecEnv``, ``DifferentiableVecEnv`` and
+``ScheduledDifferentiableVecEnv`` remain aliases of the corresponding
+``*EnvProtocol`` classes for existing consumers.
+
+.. currentmodule:: embodichain.learning.rl
+
+.. autosummary::
+
+   LearningVecEnv
+   DifferentiableVecEnv
+   ScheduledDifferentiableVecEnv
 
 .. automodule:: embodichain.learning.rl.env
    :members:

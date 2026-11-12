@@ -18,11 +18,10 @@ from __future__ import annotations
 
 import zlib
 
-import math
 import inspect
 from copy import deepcopy
 from collections.abc import Mapping
-from numbers import Integral, Real
+from numbers import Real
 
 import torch
 import numpy as np
@@ -100,6 +99,14 @@ class EnvCfg:
     max_episode_steps: int = 300
     """The maximum number of steps per episode. If set to -1, there is no limit on the episode length, and the episode will
     only end when the task is successfully completed or failed.
+    """
+
+    episode_context_in_info: bool = True
+    """Include owned episode-context snapshots in step and reset info.
+
+    Disable for batched RL consumers that do not read per-row provenance.
+    Episode lifecycle tracking, recorder metadata, and explicit
+    ``episode_context.snapshot()`` calls remain available.
     """
 
     profiler: EnvProfilerCfg | None = None
@@ -356,62 +363,15 @@ class BaseEnv(gym.Env):
 
     def _configure_timing(self) -> None:
         """Validate and expose the environment's simulation-derived timing."""
-        physics_dt = self.sim_cfg.physics_dt
-        try:
-            physics_dt_value = float(physics_dt)
-        except (TypeError, ValueError):
-            physics_dt_value = math.nan
-        if (
-            isinstance(physics_dt, bool)
-            or not math.isfinite(physics_dt_value)
-            or physics_dt_value <= 0.0
-        ):
-            raise ValueError(
-                f"physics_dt must be a finite positive number, got {physics_dt!r}."
-            )
+        from embodichain.lab.gym.utils.control_timing import resolve_control_timing
 
-        target_frequency = self.cfg.target_control_frequency
-        if target_frequency is not None:
-            try:
-                target_frequency_value = float(target_frequency)
-            except (TypeError, ValueError):
-                target_frequency_value = math.nan
-            if (
-                isinstance(target_frequency, bool)
-                or not math.isfinite(target_frequency_value)
-                or target_frequency_value <= 0.0
-            ):
-                raise ValueError(
-                    "target_control_frequency must be a finite positive number, "
-                    f"got {target_frequency!r}."
-                )
-
-            ideal_steps = 1.0 / (physics_dt_value * target_frequency_value)
-            resolved_steps = max(1, round(ideal_steps))
-            if not math.isclose(
-                ideal_steps, float(resolved_steps), rel_tol=0.0, abs_tol=1e-9
-            ):
-                achievable_frequency = 1.0 / (physics_dt_value * resolved_steps)
-                raise ValueError(
-                    f"target_control_frequency={target_frequency!r} cannot be "
-                    f"represented exactly with physics_dt={physics_dt!r}. The nearest "
-                    f"integer sim_steps_per_control is {resolved_steps}, which gives "
-                    f"{achievable_frequency:g} Hz. Set sim_steps_per_control explicitly "
-                    "or choose an exactly representable target frequency."
-                )
-            self.cfg.sim_steps_per_control = resolved_steps
-
-        sim_steps = self.cfg.sim_steps_per_control
-        if isinstance(sim_steps, bool) or not isinstance(sim_steps, Integral):
-            raise ValueError(
-                "sim_steps_per_control must be a positive integer, "
-                f"got {sim_steps!r}."
-            )
-        if sim_steps <= 0:
-            raise ValueError(
-                "sim_steps_per_control must be a positive integer, "
-                f"got {sim_steps!r}."
-            )
+        timing = resolve_control_timing(
+            self.sim_cfg.physics_dt,
+            self.cfg.sim_steps_per_control,
+            target_control_frequency=self.cfg.target_control_frequency,
+        )
+        if self.cfg.target_control_frequency is not None:
+            self.cfg.sim_steps_per_control = timing.sim_steps_per_control
 
         # Backwards-compatible aliases. Unlike the previous integer division,
         # these values preserve the exact rate implied by the simulation.
@@ -850,7 +810,8 @@ class BaseEnv(gym.Env):
         evaluate = self.evaluate(**kwargs)
         if evaluate:
             info.update(evaluate)
-        info["episode_context"] = self.episode_context.snapshot()
+        if getattr(self.cfg, "episode_context_in_info", True):
+            info["episode_context"] = self.episode_context.snapshot()
         return info
 
     def check_truncated(self, obs: EnvObs, info: TensorDict[str, Any]) -> torch.Tensor:
@@ -1007,7 +968,8 @@ class BaseEnv(gym.Env):
                 observation or event functors.
 
         Returns:
-            A tuple containing the observations and infos.
+            The observations and info. Hosts that publish terminal reports
+            include consumed rows under `reset_episode_outcomes`.
         """
         options = {} if options is None else dict(options)
         prepare = options.pop("episode_prepare", None)
@@ -1035,9 +997,9 @@ class BaseEnv(gym.Env):
 
         with self._profiler.section("reset", is_root=True):
             with self._profiler.section("is_task_success"):
-                self._task_success = self.is_task_success()
+                self._task_success = self._task_success_before_reset(reset_ids)
             # Consume old buffers before any physical state or eligibility changes.
-            self._before_episode_reset(reset_ids, **options)
+            reset_outcomes = self._before_episode_reset(reset_ids, **options)
             context._begin_episode(reset_ids)
             try:
                 with self._profiler.section("reset_objects_state"):
@@ -1068,14 +1030,35 @@ class BaseEnv(gym.Env):
                 self._record_initial_observation(observation_frame, reset_ids)
                 with self._profiler.section("get_info"):
                     info = self.get_info(**options)
-                info["episode_context"] = context.snapshot()
+                if (
+                    getattr(self.cfg, "episode_context_in_info", True)
+                    and "episode_context" not in info
+                ):
+                    info["episode_context"] = context.snapshot()
+                if reset_outcomes:
+                    info["reset_episode_outcomes"] = reset_outcomes
             except BaseException as error:
                 context._abort_initialization(reset_ids, error)
                 raise
         return obs, info
 
-    def _before_episode_reset(self, env_ids: torch.Tensor, **kwargs: Any) -> None:
+    def _task_success_before_reset(self, env_ids: torch.Tensor) -> torch.Tensor:
+        """Return task acceptance for recording the rows about to be reset."""
+        return self.is_task_success()
+
+    def _before_episode_reset(
+        self, env_ids: torch.Tensor, **kwargs: Any
+    ) -> dict[int, dict[str, Any]] | None:
         """Consume old recording buffers before the selected physical rows change."""
+
+    def _seal_step_outcomes(
+        self,
+        env_ids: torch.Tensor,
+        terminated: torch.Tensor,
+        truncated: torch.Tensor,
+        info: dict[str, Any],
+    ) -> None:
+        """Publish completed transition outcomes before a row can reset."""
 
     def _after_episode_reset(self, obs: EnvObs, env_ids: torch.Tensor) -> None:
         """Seed selected recorders from the authoritative post-reset observation."""
@@ -1144,7 +1127,9 @@ class BaseEnv(gym.Env):
                 rollout or segment boundaries.
 
         Returns:
-            A tuple contraining the observation, reward, terminated, truncated, and info dictionary.
+            The observation, reward, termination and truncation flags, and
+            info. Hosts that publish terminal reports include completed rows
+            under `terminal_outcomes`.
         """
 
         if recording_active_mask is not None:
@@ -1210,14 +1195,24 @@ class BaseEnv(gym.Env):
                     **kwargs,
                 )
 
-            if not (
-                getattr(self, "_replay_no_auto_reset", False)
-                or getattr(self, "_demo_no_auto_reset", False)
-            ):
+            replay = getattr(self, "_replay_no_auto_reset", False)
+            no_auto_reset = getattr(self, "_demo_no_auto_reset", False)
+            # The demo executor owns completion after its segment validators run.
+            if not replay and getattr(self, "_demo_instruction_snapshot", None) is None:
                 reset_env_ids = dones.nonzero(as_tuple=False).squeeze(-1)
                 if len(reset_env_ids) > 0:
-                    with self._profiler.section("auto_reset"):
-                        obs, _ = self.reset(options={"reset_ids": reset_env_ids})
+                    self._seal_step_outcomes(
+                        reset_env_ids, terminateds, truncateds, info
+                    )
+                    if not no_auto_reset:
+                        with self._profiler.section("auto_reset"):
+                            obs, reset_info = self.reset(
+                                options={"reset_ids": reset_env_ids}
+                            )
+                        if reset_info.get("reset_episode_outcomes"):
+                            info.setdefault("terminal_outcomes", {}).update(
+                                reset_info["reset_episode_outcomes"]
+                            )
 
         return obs, rewards, terminateds, truncateds, info
 

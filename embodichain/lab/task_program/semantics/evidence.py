@@ -29,7 +29,7 @@ import torch
 
 from embodichain.utils.math import pose_inv
 
-from embodichain.lab.sim.atomic_actions import SceneProvider, SceneSnapshot
+from embodichain.lab.sim.atomic_skills import SceneProvider, SceneSnapshot
 from .effects import (
     ArticulationJointStateExpectation,
     BinaryEffectClause,
