@@ -134,6 +134,7 @@ Manufacturers
    the_robot_studio/index
    tianji/index
    unitree/index
+   agibot/index
    universal_robots/index
 
 End-effector Assets

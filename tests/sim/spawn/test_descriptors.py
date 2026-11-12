@@ -34,6 +34,7 @@ from dexsim.spawn import (
     ClothDesc,
     CollisionDesc,
     CollisionApproximation,
+    ConstraintDesc,
     DexsimCollisionDesc,
     DexsimJointDesc,
     DexsimPhysicsDesc,
@@ -43,6 +44,7 @@ from dexsim.spawn import (
     NewtonJointDesc,
     ObjectDesc,
     RigidBodyPhysicsDesc,
+    SceneDesc,
     SoftBodyDesc,
 )
 
@@ -1259,7 +1261,10 @@ def test_usd_articulation_forwards_gravity_compensation(monkeypatch, mode) -> No
     source = _resolved_articulation_desc()
     monkeypatch.setattr(
         "embodichain.lab.sim.spawn.usd._parse_singleton",
-        lambda *_args, **_kwargs: (SimpleNamespace(materials={}), source),
+        lambda *_args, **_kwargs: (
+            SimpleNamespace(materials={}, constraints=[]),
+            source,
+        ),
     )
     cfg = ArticulationCfg.from_dict(
         {
@@ -1494,7 +1499,7 @@ def test_explicit_root_properties_override_usd_in_preserve_mode() -> None:
 
     with patch(
         "embodichain.lab.sim.spawn.usd._parse_singleton",
-        return_value=(SimpleNamespace(materials={}), source),
+        return_value=(SceneDesc(articulations=[source]), source),
     ):
         descriptor, _ = articulation_desc_from_usd(cfg)
 
@@ -1516,7 +1521,7 @@ def test_default_root_properties_preserve_usd_values() -> None:
 
     with patch(
         "embodichain.lab.sim.spawn.usd._parse_singleton",
-        return_value=(SimpleNamespace(materials={}), source),
+        return_value=(SceneDesc(articulations=[source]), source),
     ):
         descriptor, _ = articulation_desc_from_usd(cfg)
 
@@ -1542,12 +1547,45 @@ def test_explicit_none_root_properties_preserve_usd_values() -> None:
 
     with patch(
         "embodichain.lab.sim.spawn.usd._parse_singleton",
-        return_value=(SimpleNamespace(materials={}), source),
+        return_value=(SceneDesc(articulations=[source]), source),
     ):
         descriptor, _ = articulation_desc_from_usd(cfg)
 
     assert descriptor.fixed_base is False
     assert descriptor.enable_self_collision is True
+
+
+@pytest.mark.parametrize(
+    ("target", "body_scale", "message"),
+    [
+        (None, (1.0, 1.0, 1.0), "external endpoint. Use add_usd"),
+        ("source/tip", (2.0, 2.0, 2.0), "requires the authored body scale"),
+    ],
+)
+def test_single_articulation_usd_rejects_unsupported_constraint_overrides(
+    target: str | None, body_scale: tuple[float, float, float], message: str
+) -> None:
+    source = ArticulationDesc(
+        name="source",
+        links=[LinkDesc(name, "", np.eye(4)) for name in ("base", "tip")],
+    )
+    scene = SceneDesc(
+        articulations=[source],
+        constraints=[
+            ConstraintDesc("closure", "source/base", target, kind="spherical")
+        ],
+    )
+    cfg = ArticulationCfg(
+        uid="robot",
+        fpath="robot.usd",
+        asset_physics_mode="overlay",
+        body_scale=body_scale,
+    )
+    with (
+        patch("dexsim.kit.usd.parse_usd", return_value=scene),
+        pytest.raises(ValueError, match=message),
+    ):
+        articulation_desc_from_usd(cfg)
 
 
 def test_articulation_descriptor_rejects_newton_acceleration_drive() -> None:
@@ -2495,7 +2533,7 @@ def test_usd_articulation_uses_the_same_exact_name_configuration() -> None:
 
     with patch(
         "embodichain.lab.sim.spawn.usd._parse_singleton",
-        return_value=(SimpleNamespace(materials={}), source),
+        return_value=(SceneDesc(articulations=[source]), source),
     ):
         descriptor, _ = articulation_desc_from_usd(
             cfg,
