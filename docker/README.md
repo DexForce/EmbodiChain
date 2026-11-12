@@ -162,6 +162,25 @@ Set `EMBODICHAIN_BLENDER_PYTHON` to that environment's Python executable.
 `.[gensim]` installs the Python-facing GenSim dependencies; Blender is supplied
 by the independent runtime.
 
+If Eevee cannot create a graphics context through the `bpy` module, select the
+standalone Blender application with `EMBODICHAIN_BLENDER_EXECUTABLE`. This takes
+precedence over `EMBODICHAIN_BLENDER_PYTHON` and runs the same worker with Blender's
+background/factory startup, which initializes the graphics context before rendering.
+Install the worker dependencies into the application's bundled Python, keeping
+Torch and DexSim in the business environment:
+
+```bash
+uv pip install --python /opt/blender/4.5/python/bin/python3.11 \
+  --constraint docker/locks/blender311.txt Pillow scipy
+export EMBODICHAIN_BLENDER_EXECUTABLE=/opt/blender/blender
+```
+
+Adjust the paths to the installed Blender application. The selectors can also
+be set in the shared GenSim `.env` or `EMBODICHAIN_ENV_FILE`; process values take
+precedence. The launcher reads these settings without changing the process
+environment. Both launch modes use the same file protocol, error propagation,
+environment isolation and process cleanup.
+
 Each business environment owns its CPython-specific DexSim wheel and Torch
 libraries. Do not globally add either environment's `dexsim/lib` or
 `site-packages` to `LD_LIBRARY_PATH`/`PYTHONPATH`. Shared FFmpeg/HDF5 libraries
