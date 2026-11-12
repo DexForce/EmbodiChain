@@ -6,7 +6,8 @@ seed: 0
 arena_space: 5.0
 enable_sensor: false
 render_cfg:
-  renderer: no-render
+  # Scene generation initializes this process renderer before task execution.
+  renderer: hybrid
 env:
   sim_steps_per_control: 4
 
