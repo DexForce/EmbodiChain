@@ -13,6 +13,13 @@ embodichain run-example sim/atomic_skill --skill place --variants 8
 embodichain run-example sim/atomic_skill/coordinated_pickment --help
 ```
 
+The DexUni pouring example plans a fresh Franka grasp, pour and place sequence
+with live fluid physics. It requires CUDA and a DexSim build with DFSPH support:
+
+```bash
+embodichain run-example sim/demo/franka_dexuni_pour_demo --help
+```
+
 A directory with `__main__.py` can be selected by its directory path. All arguments
 after the path go to the script, including `--help`; an optional `--` separator is
 also accepted. `--list` discovers Python files from the directory without importing
@@ -127,3 +134,10 @@ EmbodiChain defaults to DexUni when no solver is selected;
 legacy `auto`/`AutoSolverCfg` selections must migrate to `dexuni` or the concrete
 solver needed by the scene. Explicit `semi_implicit` remains required for
 Newton gradient mode.
+
+The [cable Viser demo](sim/demo/cable_viser.py) displays replicated segment
+capsules in the browser:
+
+```bash
+python -m embodichain run-example sim/demo/cable_viser --num-envs 2 --port 8080 --duration 12
+```

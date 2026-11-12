@@ -35,6 +35,7 @@ from .program import (
     CompiledTaskProgramCall,
     CompiledTaskProgramSegment,
     CompiledTaskProgramValidator,
+    CompiledConditionValidator,
     TaskProgramCompileError,
     TaskProgramCompiler,
 )
@@ -56,6 +57,7 @@ __all__ = [
     "CompiledTaskProgramCall",
     "CompiledTaskProgramSegment",
     "CompiledTaskProgramValidator",
+    "CompiledConditionValidator",
     "TaskProgramCompileError",
     "TaskProgramCompiler",
 ]

@@ -53,6 +53,9 @@ __all__ = [
     "compute_exteroception",
     "get_rigid_object_physics_attributes",
     "get_articulation_joint_drive",
+    "get_fluid_particle_state",
+    "get_fluid_summary",
+    "get_fluid_volume_in_region",
 ]
 
 if TYPE_CHECKING:
@@ -81,18 +84,29 @@ def _state_descriptor(
     names: tuple[str, ...],
 ) -> ObservationDescriptor:
     # Only immutable schema values are cached; no environment or asset handle.
+    if quantity == "segment_state_w":
+        return ObservationDescriptor(
+            uid,
+            quantity,
+            "world",
+            "xyz_xyzw_com_lin_vel_ang_vel",
+            ("m", "unitless", "m/s", "rad/s"),
+            shape,
+            dtype,
+        )
     joint = quantity in ("qpos", "qvel")
+    pose = quantity in ("pose", "segment_start_pose")
     return ObservationDescriptor(
         uid,
         quantity,
         "joint" if joint else "arena",
-        "joint_order" if joint else "xyz_xyzw" if quantity == "pose" else "xyz",
+        "joint_order" if joint else "xyz_xyzw" if pose else "xyz",
         (
             ("joint_units/s" if quantity == "qvel" else "joint_units",)
             if joint
             else (
                 ("m", "unitless")
-                if quantity == "pose"
+                if pose
                 else ("m/s",) if quantity == "lin_vel" else ("rad/s",)
             )
         ),
@@ -128,7 +142,9 @@ def get_entity_state(
     env: EmbodiedEnv,
     obs: EnvObs,
     entity_cfg: SceneEntityCfg,
-    quantity: Literal["pose", "qpos", "qvel", "lin_vel", "ang_vel"] = "pose",
+    quantity: Literal[
+        "pose", "qpos", "qvel", "lin_vel", "ang_vel", "segment_state_w"
+    ] = "pose",
 ) -> ObservationSample:
     """Acquire a described original state channel for any observation consumer.
 
@@ -136,7 +152,9 @@ def get_entity_state(
     functors. Missing entities remain invalid, even though policy views retain
     the historical zero-fill behavior. Joint channels contain the complete
     asset-defined order, including mimic joints; selectors are rejected rather
-    than silently describing a subset as the complete state.
+    than silently describing a subset as the complete state. Cable
+    ``segment_state_w`` contains each segment's world position, XYZW quaternion,
+    COM linear velocity and angular velocity; it does not include solver history.
 
     Args:
         env: Environment owning the native scene.
@@ -147,7 +165,14 @@ def get_entity_state(
     Returns:
         Raw values and explicit row validity, before policy transformations.
     """
-    if quantity not in ("pose", "qpos", "qvel", "lin_vel", "ang_vel"):
+    if quantity not in (
+        "pose",
+        "qpos",
+        "qvel",
+        "lin_vel",
+        "ang_vel",
+        "segment_state_w",
+    ):
         raise ValueError(f"Unsupported raw state quantity: {quantity!r}.")
     if entity_cfg.joint_names is not None or entity_cfg.joint_ids != slice(None):
         raise ValueError("Raw entity state requires the complete joint order.")
@@ -165,11 +190,14 @@ def _read_entity_state(env: EmbodiedEnv, uid: str, quantity: str) -> Observation
         joint = quantity in ("qpos", "qvel")
         if obj is None:
             width = 0 if joint else 7 if quantity == "pose" else 3
-            values = torch.zeros((env.num_envs, width), device=env.device)
+            shape = (0, 13) if quantity == "segment_state_w" else (width,)
+            values = torch.zeros((env.num_envs, *shape), device=env.device)
             valid = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
             errors = (f"Entity {uid!r} is unavailable.",) * env.num_envs
         else:
-            if quantity == "pose":
+            if quantity == "segment_state_w":
+                values = obj.data.segment_state_w
+            elif quantity == "pose":
                 values = obj.get_local_pose(to_matrix=False)
             elif joint:
                 values = obj.get_qpos() if quantity == "qpos" else obj.get_qvel()
@@ -180,9 +208,9 @@ def _read_entity_state(env: EmbodiedEnv, uid: str, quantity: str) -> Observation
             else:
                 values = getattr(obj.body_data, quantity)
             valid = torch.isfinite(values).reshape(env.num_envs, -1).all(dim=-1)
-            if quantity == "pose":
+            if quantity in ("pose", "segment_state_w"):
                 valid &= (
-                    (torch.linalg.vector_norm(values[..., 3:], dim=-1) > 0)
+                    (torch.linalg.vector_norm(values[..., 3:7], dim=-1) > 0)
                     .reshape(env.num_envs, -1)
                     .all(dim=-1)
                 )
@@ -200,6 +228,73 @@ def _read_entity_state(env: EmbodiedEnv, uid: str, quantity: str) -> Observation
             sample.acquisition_errors,
         )
     return capture.acquire(("entity_state", uid, quantity), produce)
+
+
+def _get_evaluation_state(
+    env: EmbodiedEnv, obs: EnvObs, *, field: str
+) -> ObservationSample:
+    parts = field.split("/")
+    if parts[0] in ("links", "robot_links"):
+        owner = parts[0]
+        link = parts[-2]
+        if owner == "links":
+            asset = env.sim.get_articulation(parts[1])
+            identity = f"{parts[1]}/{link}"
+        else:
+            asset = env.robot
+            identity = link
+        key = (owner, identity)
+
+        def produce() -> ObservationSample:
+            values = asset.get_link_pose(link)
+            valid = torch.isfinite(values).all(-1) & (values[:, 3:] != 0).any(-1)
+            descriptor = _state_descriptor(identity, "pose", (7,), values.dtype, ())
+            return ObservationSample(descriptor, values, valid, (None,) * env.num_envs)
+
+    else:
+        _, part, quantity = parts
+        key = ("evaluation_robot", part, quantity)
+
+        def produce() -> ObservationSample:
+            values = env.robot.get_qpos(name=part, target=quantity == "command")
+            names = tuple(
+                env.robot.joint_names[i] for i in env.robot.get_joint_ids(name=part)
+            )
+            descriptor = ObservationDescriptor(
+                part,
+                quantity,
+                "joint",
+                "joint_order",
+                ("joint_units",),
+                (len(names),),
+                values.dtype,
+                names,
+            )
+            return ObservationSample(
+                descriptor,
+                values,
+                torch.isfinite(values).all(-1),
+                (None,) * env.num_envs,
+            )
+
+    capture = _current_capture.get()
+    return produce() if capture is None else capture.acquire(key, produce)
+
+
+def _get_segment_start_state(
+    env: EmbodiedEnv, obs: EnvObs, *, uid: str, field: str
+) -> ObservationSample:
+    bridge = getattr(env, "_active_task_program_bridge", None)
+    sample = None if bridge is None else bridge._segment_start_observation(field)
+    if sample is not None:
+        return sample
+    source = _read_entity_state(env, uid, "pose")
+    return ObservationSample(
+        _state_descriptor(uid, "segment_start_pose", (7,), source.values.dtype, ()),
+        source.values,
+        torch.zeros_like(source.valid),
+        ("segment_start_not_captured",) * env.num_envs,
+    )
 
 
 def get_object_pose(
@@ -1387,3 +1482,113 @@ class get_articulation_joint_drive(Functor):
         self._cache[uid] = result.clone()
 
         return result
+
+
+def get_fluid_particle_state(
+    env: EmbodiedEnv, obs: EnvObs, entity_cfg: SceneEntityCfg
+) -> torch.Tensor:
+    """Return opt-in world-frame particle state ``(E, N, 6)``.
+
+    Args:
+        env: Owning environment.
+        obs: Current observations, unused.
+        entity_cfg: Fluid selection.
+
+    Returns:
+        Independent positions/velocities; no full-particle recording is enabled implicitly.
+    """
+    del obs
+    fluid = env.sim.get_fluid_object(entity_cfg.uid)
+    if fluid is None:
+        raise ValueError(f"Unknown fluid {entity_cfg.uid!r}.")
+    return fluid.data.particle_state_w
+
+
+def get_fluid_summary(
+    env: EmbodiedEnv, obs: EnvObs, entity_cfg: SceneEntityCfg
+) -> torch.Tensor:
+    """Return mass, nominal volume, mean speed, RMS speed and finite fraction.
+
+    Args:
+        env: Owning environment.
+        obs: Current observations, unused.
+        entity_cfg: Fluid selection.
+
+    Returns:
+        ``(E, 5)`` GPU tensor in kg, cubic metres and metres/second.
+    """
+    state = get_fluid_particle_state(env, obs, entity_cfg)
+    fluid = env.sim.get_fluid_object(entity_cfg.uid)
+    speeds = state[..., 3:].norm(dim=-1)
+    return torch.stack(
+        (
+            speeds.new_full((env.num_envs,), fluid.particle_mass * fluid.num_particles),
+            speeds.new_full((env.num_envs,), fluid.nominal_volume),
+            speeds.mean(-1),
+            speeds.square().mean(-1).sqrt(),
+            torch.isfinite(state).all(-1).float().mean(-1),
+        ),
+        dim=-1,
+    )
+
+
+def get_fluid_volume_in_region(
+    env: EmbodiedEnv,
+    obs: EnvObs,
+    entity_cfgs: list[SceneEntityCfg],
+    lower: list[float],
+    upper: list[float],
+    sphere_center: list[float] | None = None,
+    sphere_radius: float | None = None,
+) -> torch.Tensor:
+    """Measure nominal fluid volume inside a rigid-local region.
+
+    Args:
+        env: Owning environment.
+        obs: Current observations, unused.
+        entity_cfgs: Fluid followed by the rigid reference object.
+        lower: Inclusive local AABB lower corner, metres.
+        upper: Inclusive local AABB upper corner, metres.
+        sphere_center: Optional local sphere centre intersected with the AABB.
+        sphere_radius: Positive sphere radius, metres, paired with sphere_center.
+
+    Returns:
+        ``(E, 1)`` contained rest volume in cubic metres.
+    """
+    from embodichain.utils.math import matrix_from_quat
+    import math
+
+    if len(entity_cfgs) != 2:
+        raise ValueError(
+            "Region measurement requires fluid and rigid-reference selections."
+        )
+    fluid = env.sim.get_fluid_object(entity_cfgs[0].uid)
+    rigid = env.sim.get_rigid_object(entity_cfgs[1].uid)
+    if fluid is None or rigid is None:
+        raise ValueError("Unknown fluid or region reference.")
+    bounds = torch.as_tensor([lower, upper], dtype=torch.float32, device=env.device)
+    if (
+        bounds.shape != (2, 3)
+        or not torch.isfinite(bounds).all()
+        or not (bounds[1] > bounds[0]).all()
+    ):
+        raise ValueError("Region bounds must be finite increasing 3D corners.")
+    pose = rigid.get_local_pose()
+    origin_w = pose[:, :3] + env.sim.arena_offsets
+    local = torch.bmm(
+        fluid.data.particle_pos_w - origin_w[:, None], matrix_from_quat(pose[:, 3:])
+    )
+    inside = ((local >= bounds[0]) & (local <= bounds[1])).all(-1)
+    if (sphere_center is None) != (sphere_radius is None):
+        raise ValueError("sphere_center and sphere_radius must be supplied together.")
+    if sphere_center is not None:
+        center = torch.as_tensor(sphere_center, dtype=torch.float32, device=env.device)
+        if (
+            center.shape != (3,)
+            or not torch.isfinite(center).all()
+            or not math.isfinite(sphere_radius)
+            or sphere_radius <= 0
+        ):
+            raise ValueError("Sphere needs a finite centre and positive radius.")
+        inside &= (local - center).square().sum(-1) <= sphere_radius**2
+    return inside.sum(-1, keepdim=True).float() * fluid.cfg.particle_spacing**3

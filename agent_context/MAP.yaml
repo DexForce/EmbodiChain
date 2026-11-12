@@ -2,9 +2,7 @@
 version: 1
 defaults:
   write_contexts:
-  - conventions/writing-style.md
-  - conventions/naming.md
-  - conventions/topic-lifecycle.md
+  - conventions/maintenance.md
 topics:
 - id: simulation-system
   title: Simulation System
@@ -15,7 +13,7 @@ topics:
     UsdSourceSnapshot, read_usd_source, LinkMesh,
     PhysicalCollisionGeometry, capture_physical_collision_geometry,
     ArticulationJointKinematics, get_parent_joint_chain, asset_physics_mode, joint_drive_props, enable_gravity,
-    fixed-cadence playback, FluidObjectCfg, FluidSpawnCfg, FluidObject, SPHSolverCfg, revolved_volume, fill_level,
+    fixed-cadence playback, FluidObjectCfg, FluidSpawnCfg, FluidObject, sph_cfg, DFSPH, revolved_volume, fill_level,
     粒子采样, fluid, 流体, quaternion, xyzw, cable, CableObject, CableObjectCfg,
     CableObjectData, 线缆对象]
   paths: [topics/simulation-system/simulation-system.md]
@@ -43,8 +41,8 @@ topics:
   - embodichain/lab/sim/objects/cable/
   - embodichain/lab/sim/objects/gizmo.py
   - embodichain/lab/gym/envs/base_env.py
-  watch_paths: [embodichain/lab/sim/sim_manager.py, embodichain/lab/sim/cfg/, embodichain/lab/sim/physics/,
-    embodichain/lab/sim/spawn/, embodichain/lab/sim/material.py, embodichain/lab/sim/_material_presets.py, embodichain/lab/scripts/preview_material.py, tests/lab/scripts/test_preview_material.py, embodichain/lab/sim/objects/, embodichain/compute/geometry/particles.py, tests/compute/test_particles.py, tests/sim/]
+  watch_paths: [tests/lab/scripts/test_preview_material.py, embodichain/lab/sim/objects/, tests/compute/test_particles.py,
+    tests/sim/]
   related_topics: [env-framework, robot-system, sensor-system, sim-visualization, ik-solvers, motion-planning,
     atomic-actions, rl-learning, configclass-pattern, robot-workspace]
   status: active
@@ -55,7 +53,8 @@ topics:
   keywords: [UnitreeG1MotionRL-v1, motion_tracking, BaseEnv, EmbodiedEnv, EpisodeContext, EnvCfg, ControlTiming, resolve_control_timing, register_env, list-task, run-task, run-example, target_control_frequency,
     sim_steps_per_control, step_dt, environment.component, embodiment.component, file-owned physics backend,
     physics_config, ControllerAction, EnvProfiler, startup_summary, dexsim_startup_info,
-    ExpertTrajectoryCfg, joint_command_mode, position_velocity, qpos qvel, expert action schema, ObservationHistorySnapshot, ObservationFrame,
+    fluid Gym, 流体 Gym, fluid replay, 粒子回放, DemoQualification, ObjectMotionMetrics, ExpertTrajectoryCfg, joint_command_mode, position_velocity, qpos qvel, expert action schema, ObservationHistorySnapshot, ObservationFrame,
+    EvaluationSpec, RuleSession, evaluate_recorded_rules,
     task_instruction, resolve_demo_instruction,
     show-task, task catalog, task gallery, 任务画廊, physical_objective, 物理目标, RLTaskCfg, rl_task]
   paths: [topics/env-framework/env-framework.md]
@@ -68,6 +67,7 @@ topics:
   - embodichain/cli/_example_runner.py
   - examples/README.md
   - embodichain/lab/gym/envs/objectives/
+  - embodichain/lab/evaluation/
   - embodichain/lab/scripts/evaluate_task_objective.py
   - embodichain/lab/scripts/run_task.py
   - embodichain/lab/gym/utils/gym_utils.py
@@ -83,11 +83,8 @@ topics:
   - embodichain/lab/gym/envs/managers/observation_types.py
   - embodichain/lab/gym/envs/demo.py
   - embodichain/lab/gym/utils/profiler.py
-  watch_paths: [embodichain/lab/gym/envs/managers/observation_types.py, embodichain/lab/gym/envs/episode_context.py, embodichain/lab/gym/envs/base_env.py, embodichain/lab/gym/envs/embodied_env.py, embodichain/lab/gym/envs/expert_trajectory.py,
-    embodichain/lab/gym/envs/demo.py,
-    embodichain/lab/gym/utils/, embodichain/lab/gym/envs/task_program/, embodichain/cli/, embodichain/lab/scripts/run_task.py,
-    extensions/embodichain_tasks/, tests/gym/envs/, embodichain/lab/gym/envs/objectives/,
-    embodichain/lab/scripts/evaluate_task_objective.py, tests/lab/scripts/test_evaluate_task_objective.py]
+  watch_paths: [embodichain/lab/gym/utils/, embodichain/lab/gym/envs/task_program/, embodichain/cli/, extensions/embodichain_tasks/,
+    tests/gym/envs/, embodichain/lab/evaluation/, tests/lab/evaluation/, tests/lab/scripts/test_evaluate_task_objective.py]
   related_topics: [simulation-system, manager-functor, sim-visualization, task-programs, data-pipeline]
   status: active
 - id: manager-functor
@@ -128,14 +125,13 @@ topics:
   - embodichain/lab/sim/motion/solvers/null_space_posture_task.py
   - embodichain/lab/sim/utility/solver_utils.py
   - embodichain/compute/kinematics/
-  watch_paths: [embodichain/lab/sim/motion/solvers/, embodichain/lab/sim/utility/solver_utils.py, embodichain/compute/kinematics/,
-    tests/sim/motion/solvers/, tests/compute/test_imports.py]
+  watch_paths: [embodichain/lab/sim/motion/solvers/, tests/sim/motion/solvers/, tests/compute/test_imports.py]
   related_topics: [simulation-system, robot-system, motion-planning]
   status: active
 - id: robot-system
   title: Robot System
   aliases: [robot system, robot config, robot catalog, list robot, robot preview, 机器人配置, 机器人系统, 机型解析, 列出机器人, 机器人预览]
-  keywords: [UnitreeGo1Cfg, UnitreeGo2Cfg, UnitreeG1Cfg, UnitreeH12Cfg, ANYmalCCfg, MicroDuckCfg, load_locomotion_robot_profile, RobotCfg, RobotPresetCfg, control_parts, get_qvel_limits, build_pk_serial_chain, DexforceW1Cfg, CobotMagicCfg, ARX5Cfg, ARX5, FlexivRizon4SCfg, FlexivRizon4S,
+  keywords: [AgibotG1, AgibotG1Cfg, UnitreeGo1Cfg, UnitreeGo2Cfg, UnitreeG1Cfg, UnitreeH12Cfg, ANYmalCCfg, MicroDuckCfg, load_locomotion_robot_profile, RobotCfg, RobotPresetCfg, control_parts, get_qvel_limits, build_pk_serial_chain, DexforceW1Cfg, CobotMagicCfg, ARX5Cfg, ARX5, FlexivRizon4SCfg, FlexivRizon4S,
     FrankaCfg, FrankaPandaCfg, YamI2rtCfg, URRobotCfg, BrainCoRevo1Cfg, DualArmRobotCfg, merge_robot_cfg, JointDrivePropertiesCfg,
     asset_physics_mode, target_mode, mimic joint, quaternion, xyzw, embodichain_robots, resolve_robot_cfg, list-robot, preview-robot,
     RobotHandGeometryCfg, RobotHandGeometryProvider, RobotCoordinatedGraspProvider, ParallelJawGripperCfg, resolve_gripper_defaults, 二指夹爪, 机器人手部几何采样]
@@ -152,10 +148,7 @@ topics:
   - extensions/embodichain_robots/
   - embodichain/lab/sim/cfg/
   - embodichain/lab/gym/envs/embodied_env.py
-  watch_paths: [embodichain/lab/sim/robots/, extensions/embodichain_robots/, embodichain/lab/sim/objects/robot.py,
-    embodichain/robot_registry.py, embodichain/lab/sim/cfg/, tests/sim/robots/, tests/test_robot_registry.py,
-    embodichain/cli/list_robot.py, tests/cli/test_list_robot.py, embodichain/lab/scripts/preview_robot.py,
-    tests/lab/scripts/test_preview_robot.py, embodichain/lab/sim/utility/grasp_geometry.py,
+  watch_paths: [tests/sim/robots/, tests/test_robot_registry.py, tests/cli/test_list_robot.py, tests/lab/scripts/test_preview_robot.py,
     tests/sim/utility/test_grasp_geometry.py]
   related_topics: [simulation-system, ik-solvers, motion-planning, sensor-system, sim-visualization, robot-workspace]
   status: active
@@ -179,7 +172,7 @@ topics:
   - embodichain/lab/sim/evidence.py
   - embodichain/lab/sim/sensors/contact/_warp/scatter.py
   - embodichain/compute/image/
-  watch_paths: [embodichain/lab/sim/sensors/, embodichain/compute/image/, tests/sim/sensors/]
+  watch_paths: [embodichain/lab/sim/sensors/, tests/sim/sensors/]
   related_topics: [simulation-system, robot-system, env-framework, sim-visualization]
   status: active
 - id: sim-visualization
@@ -187,7 +180,7 @@ topics:
   aliases: [browser visualization, viser, sim visualization, marker visualization, 标志物可视化, 仿真可视化]
   keywords: [VisualizationCfg, ViserServerCfg, SceneManifest, visualization, EntityGizmoManipulator, robot_ik_gizmo,
     GizmoCfg, MarkerGroup, MarkerPrototypeCfg, RobotMarkers, VisualizationMarkers, robot markers, ghost robot, 机器人可视化, backpressure, capture_visualization, Newton deformable, particle set,
-    render topology, quaternion, xyzw]
+    render topology, quaternion, xyzw, cable visualization, cable capsule]
   paths: [topics/sim-visualization/sim-visualization.md]
   source_of_truth:
   - embodichain/lab/visualization/protocol.py
@@ -199,10 +192,7 @@ topics:
   - embodichain/lab/scripts/preview_asset.py
   - embodichain/lab/scripts/_preview.py
   - embodichain/lab/scripts/preview_joint_control.py
-  watch_paths: [embodichain/lab/visualization/, embodichain/lab/sim/objects/gizmo.py, embodichain/lab/sim/sim_manager.py,
-    tests/visualization/, embodichain/lab/scripts/_preview.py, embodichain/lab/scripts/preview_asset.py,
-    embodichain/lab/scripts/preview_joint_control.py, tests/lab/scripts/test_preview_asset.py,
-    tests/lab/scripts/test_preview_joint_control.py]
+  watch_paths: [tests/visualization/, tests/lab/scripts/test_preview_asset.py, tests/lab/scripts/test_preview_joint_control.py]
   related_topics: [simulation-system, env-framework, sensor-system, robot-system, configclass-pattern]
   status: active
 - id: expansion-engine
@@ -214,7 +204,8 @@ topics:
   - embodichain/lab/expansion/
   - embodichain/cli/expansion.py
   - embodichain/data_pipeline/recording/media.py
-  watch_paths: [embodichain/lab/expansion/, embodichain/cli/expansion.py, embodichain/data_pipeline/recording/media.py, tests/lab/expansion/, tests/data_pipeline/test_media_spool.py, examples/expansion/engine/, scripts/benchmark/expansion/]
+  watch_paths: [tests/lab/expansion/, tests/data_pipeline/test_media_spool.py, examples/expansion/engine/,
+    scripts/benchmark/expansion/]
   related_topics: [motion-planning, scene-expansion, scene-services, task-programs, data-pipeline]
   status: active
 - id: motion-planning
@@ -264,15 +255,11 @@ topics:
   - embodichain/compute/trajectory/
   - embodichain/lab/sim/utility/action_utils.py
   - embodichain/toolkits/graspkit/pg_grasp/
-  watch_paths: [extensions/embodichain_benchmarks/motion_generation/, tests/benchmark/motion_generation/, tests/test_benchmark_package.py, embodichain/lab/sim/motion/motion_generator.py, embodichain/lab/sim/motion/execution.py,
-    embodichain/compute/kinematics/_path_derivatives.py,
-    tests/sim/motion/test_motion_generator.py,
-    tests/sim/motion/test_motion_generator_batched.py, embodichain/lab/sim/motion/planners/, embodichain/lab/sim/motion/expansion/,
-    embodichain/lab/sim/motion/ik.py, embodichain/lab/sim/motion/limits.py, embodichain/lab/sim/motion/search.py,
-    tests/sim/motion/expansion/, embodichain/lab/sim/utility/action_utils.py, embodichain/compute/trajectory/,
-    tests/sim/motion/planners/, tests/compute/, examples/expansion/trajectory/, examples/expansion/README.md,
-    embodichain/toolkits/graspkit/pg_grasp/, tests/toolkits/test_coordinated_grasp.py,
-    tests/toolkits/test_urdf_collision_surfaces.py, tests/toolkits/test_contact_fit.py]
+  watch_paths: [tests/benchmark/motion_generation/, tests/test_benchmark_package.py, tests/sim/motion/test_motion_generator.py,
+    tests/sim/motion/test_motion_generator_batched.py, embodichain/lab/sim/motion/planners/,
+    tests/sim/motion/expansion/, tests/sim/motion/planners/, tests/compute/, examples/expansion/trajectory/,
+    examples/expansion/README.md, tests/toolkits/test_coordinated_grasp.py, tests/toolkits/test_urdf_collision_surfaces.py,
+    tests/toolkits/test_contact_fit.py]
   related_topics: [simulation-system, robot-system, ik-solvers, atomic-actions]
   status: active
 - id: scene-services
@@ -295,8 +282,7 @@ topics:
   - embodichain/compute/geometry/pouring.py
   - embodichain/compute/geometry/projection.py
   - embodichain/lab/sim/objects/backends/_collision_inputs.py
-  watch_paths: [embodichain/lab/sim/scene/, embodichain/compute/geometry/,
-    tests/sim/scene/, tests/compute/geometry/]
+  watch_paths: [tests/sim/scene/, tests/compute/geometry/]
   related_topics: [simulation-system, scene-expansion, gen-sim, task-programs]
   status: active
 - id: scene-expansion
@@ -319,20 +305,10 @@ topics:
   - embodichain/lab/gym/envs/base_env.py
   - embodichain/lab/gym/envs/embodied_env.py
   - embodichain/lab/gym/envs/demo.py
-  watch_paths: [embodichain/lab/sim/scene/feasibility/, embodichain/compute/geometry/planar.py,
-    embodichain/compute/geometry/_warp/contact_query.py,
-    embodichain/lab/task_program/integrations/feasibility.py,
-    embodichain/lab/task_program/integrations/simulation/feasibility.py,
-    embodichain/lab/task_program/integrations/simulation/feasibility_geometry.py,
-    tests/sim/scene/feasibility/, tests/gym/envs/task_program/test_feasibility.py,
-    embodichain/lab/sim/scene/expansion/,
-    embodichain/lab/task_program/integrations/scene_expansion.py,
-    embodichain/lab/task_program/integrations/simulation/scene_expansion.py,
-    embodichain/lab/task_program/integrations/simulation/workspace.py,
-    tests/sim/scene/expansion/, tests/gym/envs/task_program/test_scene_expansion.py,
-    tests/gym/envs/task_program/test_scene_workspace.py,
-    tests/gym/envs/task_program/test_simulation_scene_expansion.py,
-    tests/gym/envs/task_program/test_simulation_environment.py]
+  watch_paths: [embodichain/compute/geometry/planar.py, embodichain/compute/geometry/_warp/contact_query.py,
+    tests/sim/scene/feasibility/, tests/gym/envs/task_program/test_feasibility.py, tests/sim/scene/expansion/,
+    tests/gym/envs/task_program/test_scene_expansion.py, tests/gym/envs/task_program/test_scene_workspace.py,
+    tests/gym/envs/task_program/test_simulation_scene_expansion.py, tests/gym/envs/task_program/test_simulation_environment.py]
   related_topics: [scene-services, simulation-system, task-programs, robot-workspace, motion-planning, gen-sim, data-pipeline]
   status: active
 - id: neural-dynamics
@@ -351,9 +327,8 @@ topics:
   - examples/learning/nerd/configs/
   - extensions/embodichain_models/embodichain_models/dynamics/rigidformer/
   - examples/learning/rigidformer/
-  watch_paths: [extensions/embodichain_models/, examples/learning/nerd/, examples/learning/rigidformer/,
-    docs/source/features/neural_dynamics.md, docs/source/features/neural_dynamics/,
-    docs/source/guides/neural_dynamics.md, docs/source/api_reference/model_catalogs.rst,
+  watch_paths: [extensions/embodichain_models/, examples/learning/nerd/, docs/source/features/neural_dynamics.md,
+    docs/source/features/neural_dynamics/, docs/source/guides/neural_dynamics.md, docs/source/api_reference/model_catalogs.rst,
     docs/source/api_reference/model_rigidformer.rst]
   related_topics: [supervised-learning, robot-world-model, learning-layers, data-pipeline, data-assets]
   status: active
@@ -377,9 +352,7 @@ topics:
   - examples/learning/differentiable_fk/view_pose_reaching.py
   - examples/learning/differentiable_toppra/optimize_path.py
   - examples/learning/differentiable_toppra/view_path_optimization.py
-  watch_paths: [embodichain/compute/kinematics/, embodichain/learning/layers/,
-    embodichain/learning/models/, embodichain/learning/__init__.py,
-    tests/compute/kinematics/, tests/learning/layers/, examples/learning/differentiable_ik/,
+  watch_paths: [embodichain/compute/kinematics/, tests/compute/kinematics/, tests/learning/layers/, examples/learning/differentiable_ik/,
     examples/learning/differentiable_fk/, examples/learning/differentiable_toppra/]
   related_topics: [ik-solvers, rl-learning, supervised-learning]
   status: active
@@ -404,7 +377,7 @@ topics:
   - embodichain/learning/rl/policies/
   - embodichain/learning/models/
   - extensions/embodichain_tasks/configs/tasks/
-  watch_paths: [embodichain/learning/rl/, embodichain/learning/models/, extensions/embodichain_tasks/configs/tasks/, tests/learning/]
+  watch_paths: [embodichain/learning/rl/, tests/learning/]
   related_topics: [simulation-system, env-framework, manager-functor, configclass-pattern]
   status: active
 - id: differentiable-env
@@ -428,7 +401,7 @@ topics:
   paths: [topics/configclass-pattern/configclass-pattern.md]
   source_of_truth:
   - embodichain/utils/configclass.py
-  watch_paths: [embodichain/utils/configclass.py, embodichain/utils/string.py]
+  watch_paths: [embodichain/utils/string.py]
   related_topics: [simulation-system, env-framework, manager-functor, robot-system, sim-visualization]
   status: active
 - id: randomization
@@ -443,9 +416,7 @@ topics:
   - embodichain/lab/gym/envs/managers/cfg.py
   - embodichain/lab/gym/envs/base_env.py
   - embodichain/lab/gym/envs/embodied_env.py
-  watch_paths: [embodichain/lab/gym/envs/managers/randomization/, embodichain/lab/gym/envs/managers/event_manager.py,
-    embodichain/lab/gym/envs/base_env.py, embodichain/lab/gym/envs/embodied_env.py, tests/gym/envs/managers/,
-    tests/gym/envs/test_env_seed.py]
+  watch_paths: [tests/gym/envs/managers/, tests/gym/envs/test_env_seed.py]
   related_topics: [manager-functor, env-framework, robot-workspace]
   status: active
 - id: atomic-actions
@@ -469,8 +440,8 @@ topics:
   - embodichain/lab/sim/atomic_skills/primitives/
   - embodichain/cli/run_example.py
   - examples/sim/atomic_skill/
-  watch_paths: [embodichain/lab/sim/atomic_skills/, embodichain/lab/sim/atomic_actions/, tests/sim/atomic_skills/, scripts/tutorials/atomic_skill/,
-    embodichain/cli/run_example.py, examples/sim/atomic_skill/, tests/examples/atomic_skill/]
+  watch_paths: [embodichain/lab/sim/atomic_skills/, embodichain/lab/sim/atomic_actions/, tests/sim/atomic_skills/,
+    scripts/tutorials/atomic_skill/, tests/examples/atomic_skill/]
   related_topics: [simulation-system, motion-planning, robot-system, ik-solvers, task-programs]
   status: active
 - id: task-programs
@@ -502,11 +473,9 @@ topics:
   - embodichain/lab/task_program/integrations/_configured_composition.py
   - embodichain/lab/gym/envs/task_program/
   - embodichain/agents/mllm/task_program.py
-  watch_paths: [embodichain/lab/task_program/, embodichain/lab/gym/envs/task_program/,
-    extensions/embodichain_tasks/configs/components/embodiments/,
-    extensions/embodichain_tasks/configs/components/execution_policies/,
-    extensions/embodichain_tasks/configs/components/expansion_policies/,
-    extensions/embodichain_tasks/configs/tasks/manipulation/, tests/lab/task_program/]
+  watch_paths: [extensions/embodichain_tasks/configs/components/embodiments/, extensions/embodichain_tasks/configs/components/execution_policies/,
+    extensions/embodichain_tasks/configs/components/expansion_policies/, extensions/embodichain_tasks/configs/tasks/manipulation/,
+    tests/lab/task_program/]
   related_topics: [atomic-actions, env-framework, simulation-system, motion-planning, sensor-system, data-pipeline]
   status: active
 - id: task-engine
@@ -586,14 +555,15 @@ topics:
   - embodichain/gen_sim/gradio_ui/app_processes.py
   - embodichain/gen_sim/gradio_ui/app_env.py
   - embodichain/gen_sim/task_engine/evidence.py
-  watch_paths: [embodichain/gen_sim/, embodichain/cli/main.py, embodichain/cli/gensim.py, tests/gen_sim/, tests/cli/test_gensim.py, examples/gensim/]
+  watch_paths: [embodichain/gen_sim/, embodichain/cli/main.py, tests/gen_sim/, tests/cli/test_gensim.py,
+    examples/gensim/]
   related_topics: [simulation-system, data-assets, env-framework, task-engine]
   status: active
 - id: data-assets
   title: Data Assets
   aliases: [data assets, data path, asset download, 数据资产, 资产下载, 数据路径]
   keywords: [get_data_path, get_data_class, _resolve_data_reference, EmbodiChainDataset, TabletopFourBases, Real2SimCarton, Real2SimCartonV1, demo assets, EMBODICHAIN_DATA_ROOT, EMBODICHAIN_DATASET_ROOT,
-    CATEGORY_MODULES, embodichain.assets, ROBOT_ASSETS, 资产注册, download lock, get_registry, DefaultMaterials, list_default_materials, get_default_material_info]
+    CATEGORY_MODULES, embodichain.assets, ROBOT_ASSETS, 资产注册, download lock, get_registry, DefaultMaterials, list_default_materials, get_default_material_info, task_assets, PourCupAssets, PourCupDemoData]
   paths: [topics/data-assets/data-assets.md]
   source_of_truth:
   - embodichain/data/dataset.py
@@ -610,7 +580,7 @@ topics:
   - embodichain/data/default_materials.py
   - embodichain/data/default_materials.json
   - embodichain/_material_catalog.py
-  watch_paths: [embodichain/data/, extensions/embodichain_robots/, embodichain/_material_catalog.py, embodichain/cli/main.py, tests/data/]
+  watch_paths: [embodichain/data/, extensions/embodichain_robots/, embodichain/cli/main.py, tests/data/]
   related_topics: [gen-sim, robot-system, data-pipeline]
   status: active
 - id: data-pipeline
@@ -655,10 +625,7 @@ topics:
   - tools/lerobot_export/
   - embodichain/lab/scripts/run_task.py
   - examples/ods/simple_bc_demo/
-  watch_paths: [embodichain/data_pipeline/, embodichain/lab/gym/envs/managers/dataset_manager.py, embodichain/lab/gym/envs/managers/datasets.py,
-    embodichain/lab/gym/envs/managers/async_datasets.py, embodichain/lab/gym/envs/embodied_env.py, embodichain/lab/scripts/run_task.py,
-    tests/data_pipeline/, embodichain/cli/dataset.py, tools/lerobot_export/, examples/ods/simple_bc_demo/,
-    docs/source/features/online_data.md, docs/source/features/ods/, docs/architecture/dataset-loading-design.md]
+  watch_paths: [embodichain/data_pipeline/, embodichain/lab/gym/envs/embodied_env.py, tests/data_pipeline/]
   related_topics: [manager-functor, env-framework, task-programs, sensor-system, neural-dynamics, supervised-learning]
   status: active
 - id: robot-workspace
@@ -676,8 +643,7 @@ topics:
   - embodichain/lab/sim/objects/robot.py
   - embodichain/lab/scripts/analyze_workspace.py
   - embodichain/cli/workspace_cache.py
-  watch_paths: [embodichain/lab/sim/motion/workspace/, embodichain/lab/sim/robots/, embodichain/lab/sim/objects/robot.py,
-    embodichain/cli/workspace_cache.py, tests/sim/motion/workspace/]
+  watch_paths: [embodichain/lab/sim/motion/workspace/, embodichain/lab/sim/robots/, tests/sim/motion/workspace/]
   related_topics: [robot-system, ik-solvers, randomization, motion-planning]
   status: active
 
@@ -696,7 +662,9 @@ topics:
   - embodichain/lab/gym/envs/managers/events.py
   - embodichain/lab/task_program/integrations/_asset_pouring.py
   - embodichain/lab/task_program/integrations/simulation/asset_pouring.py
-  watch_paths: [embodichain/data/asset_catalog/, tests/data/asset_catalog/, embodichain/lab/task_program/semantics/asset_requirements.py, tests/lab/task_program/semantics/test_asset_requirements.py, embodichain/lab/task_program/semantics/asset_matching.py, tests/lab/task_program/semantics/test_asset_matching.py, embodichain/lab/task_program/integrations/asset_materialization.py, tests/gym/envs/task_program/test_asset_materialization.py, embodichain/lab/gym/envs/asset_generalization.py, tests/gym/envs/test_asset_generalization.py, examples/expansion/asset_generalization/, examples/expansion/asset_catalog/, examples/expansion/README.md]
+  watch_paths: [tests/data/asset_catalog/, tests/lab/task_program/semantics/test_asset_requirements.py, tests/lab/task_program/semantics/test_asset_matching.py,
+    tests/gym/envs/task_program/test_asset_materialization.py, tests/gym/envs/test_asset_generalization.py,
+    examples/expansion/asset_generalization/, examples/expansion/asset_catalog/, examples/expansion/README.md]
   related_topics: [data-assets, task-programs, gen-sim, scene-services, manager-functor, env-framework]
   status: active
 
@@ -710,7 +678,7 @@ topics:
   - embodichain/cli/main.py
   - extensions/embodichain_models/embodichain_models/policy/act/
   - examples/learning/act/
-  watch_paths: [embodichain/learning/sl/, tests/learning/sl/, extensions/embodichain_models/embodichain_models/policy/act/, examples/learning/act/, tests/models/policy/]
+  watch_paths: [tests/learning/sl/, tests/models/policy/]
   related_topics: [learning-layers, data-pipeline, rl-learning, neural-dynamics, robot-world-model]
   status: active
 - id: robot-world-model
@@ -726,12 +694,8 @@ topics:
   - embodichain/learning/dynamics/schedule.py
   - extensions/embodichain_models/embodichain_models/policies/motion_tracking.py
   - extensions/embodichain_tasks/embodichain_tasks/locomotion/tracking/motion_model.py
-  watch_paths: [extensions/embodichain_models/embodichain_models/dynamics/rwm/,
-    examples/learning/rwm/, examples/learning/motion_tracking/, tests/models/dynamics/rwm/,
-    embodichain/learning/dynamics/, tests/learning/test_online_schedule.py,
-    extensions/embodichain_models/embodichain_models/policies/motion_tracking.py,
-    extensions/embodichain_tasks/embodichain_tasks/locomotion/tracking/motion_model.py,
-    tests/gym/envs/tasks/test_motion_model.py,
-    docs/source/features/neural_dynamics/rwm.md, docs/source/api_reference/rwm.rst]
+  watch_paths: [tests/models/dynamics/rwm/, embodichain/learning/dynamics/, tests/learning/test_online_schedule.py,
+    tests/gym/envs/tasks/test_motion_model.py, docs/source/features/neural_dynamics/rwm.md,
+    docs/source/api_reference/rwm.rst]
   related_topics: [supervised-learning, learning-layers, neural-dynamics]
   status: active

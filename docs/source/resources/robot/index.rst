@@ -27,6 +27,14 @@ Manufacturers
      - Robot
      - Configuration class
      - Current coverage
+   * - :doc:`AgiBot <agibot/index>`
+     - :doc:`G1 <agibot/g1>`
+     - ``AgibotG1Cfg``
+     - Fixed-base USD robot with dual 7-DOF arms and closed-chain grippers on the Default backend.
+   * - :doc:`AgiBot <agibot/index>`
+     - :doc:`G2 <agibot/g2>`
+     - ``AgibotG2Cfg``
+     - Wheeled humanoid with dual 7-DOF CRS arms, OmniPicker grippers and Warp SSIK on CPU/CUDA.
    * - :doc:`AgileX <agilex/index>`
      - :doc:`CobotMagic <agilex/cobotmagic>`
      - ``CobotMagicCfg``
@@ -115,6 +123,7 @@ Manufacturers
    :caption: Manufacturers
    :hidden:
 
+   agibot/index
    agilex/index
    anybotics/index
    arx/index
@@ -134,6 +143,7 @@ Manufacturers
    the_robot_studio/index
    tianji/index
    unitree/index
+   agibot/index
    universal_robots/index
 
 End-effector Assets

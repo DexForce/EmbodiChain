@@ -50,6 +50,10 @@ hold at the same snapshot strictly after its predecessors. Missing evidence and
 incomplete temporal windows cannot certify success. Only an entirely satisfied
 evaluation sets `certificate_ready`; the evaluator does not establish the
 physical authenticity of caller-provided measurements.
+Bounded `always` and `eventually` windows share their per-slot conclusion
+with the batched Lab evaluator through Compute. TaskSpec's Python result
+exposes inclusive witness and violation steps while retaining its canonical
+serialized report and existing evidence authority.
 
 The cache reuses a validated semantic identity across metadata differences.
 It rejects corrupted or mismatched documents and publishes writes atomically.

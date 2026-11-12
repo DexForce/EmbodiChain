@@ -34,6 +34,7 @@ from dexsim.spawn import (
     ClothDesc,
     CollisionDesc,
     CollisionApproximation,
+    ConstraintDesc,
     DexsimCollisionDesc,
     DexsimJointDesc,
     DexsimPhysicsDesc,
@@ -43,6 +44,7 @@ from dexsim.spawn import (
     NewtonJointDesc,
     ObjectDesc,
     RigidBodyPhysicsDesc,
+    SceneDesc,
     SoftBodyDesc,
 )
 
@@ -1259,7 +1261,10 @@ def test_usd_articulation_forwards_gravity_compensation(monkeypatch, mode) -> No
     source = _resolved_articulation_desc()
     monkeypatch.setattr(
         "embodichain.lab.sim.spawn.usd._parse_singleton",
-        lambda *_args, **_kwargs: (SimpleNamespace(materials={}), source),
+        lambda *_args, **_kwargs: (
+            SimpleNamespace(materials={}, constraints=[]),
+            source,
+        ),
     )
     cfg = ArticulationCfg.from_dict(
         {
@@ -1494,7 +1499,7 @@ def test_explicit_root_properties_override_usd_in_preserve_mode() -> None:
 
     with patch(
         "embodichain.lab.sim.spawn.usd._parse_singleton",
-        return_value=(SimpleNamespace(materials={}), source),
+        return_value=(SceneDesc(articulations=[source]), source),
     ):
         descriptor, _ = articulation_desc_from_usd(cfg)
 
@@ -1516,7 +1521,7 @@ def test_default_root_properties_preserve_usd_values() -> None:
 
     with patch(
         "embodichain.lab.sim.spawn.usd._parse_singleton",
-        return_value=(SimpleNamespace(materials={}), source),
+        return_value=(SceneDesc(articulations=[source]), source),
     ):
         descriptor, _ = articulation_desc_from_usd(cfg)
 
@@ -1542,12 +1547,45 @@ def test_explicit_none_root_properties_preserve_usd_values() -> None:
 
     with patch(
         "embodichain.lab.sim.spawn.usd._parse_singleton",
-        return_value=(SimpleNamespace(materials={}), source),
+        return_value=(SceneDesc(articulations=[source]), source),
     ):
         descriptor, _ = articulation_desc_from_usd(cfg)
 
     assert descriptor.fixed_base is False
     assert descriptor.enable_self_collision is True
+
+
+@pytest.mark.parametrize(
+    ("target", "body_scale", "message"),
+    [
+        (None, (1.0, 1.0, 1.0), "external endpoint. Use add_usd"),
+        ("source/tip", (2.0, 2.0, 2.0), "requires the authored body scale"),
+    ],
+)
+def test_single_articulation_usd_rejects_unsupported_constraint_overrides(
+    target: str | None, body_scale: tuple[float, float, float], message: str
+) -> None:
+    source = ArticulationDesc(
+        name="source",
+        links=[LinkDesc(name, "", np.eye(4)) for name in ("base", "tip")],
+    )
+    scene = SceneDesc(
+        articulations=[source],
+        constraints=[
+            ConstraintDesc("closure", "source/base", target, kind="spherical")
+        ],
+    )
+    cfg = ArticulationCfg(
+        uid="robot",
+        fpath="robot.usd",
+        asset_physics_mode="overlay",
+        body_scale=body_scale,
+    )
+    with (
+        patch("dexsim.kit.usd.parse_usd", return_value=scene),
+        pytest.raises(ValueError, match=message),
+    ):
+        articulation_desc_from_usd(cfg)
 
 
 def test_articulation_descriptor_rejects_newton_acceleration_drive() -> None:
@@ -2495,7 +2533,7 @@ def test_usd_articulation_uses_the_same_exact_name_configuration() -> None:
 
     with patch(
         "embodichain.lab.sim.spawn.usd._parse_singleton",
-        return_value=(SimpleNamespace(materials={}), source),
+        return_value=(SceneDesc(articulations=[source]), source),
     ):
         descriptor, _ = articulation_desc_from_usd(
             cfg,
@@ -2701,6 +2739,76 @@ def test_rigid_descriptor_rejects_orientation_without_principal_moments() -> Non
     )
     with pytest.raises(ValueError, match="requires explicit principal inertia"):
         rigid_desc_from_cfg(cfg)
+
+
+@pytest.mark.parametrize("solver", ["dexuni", "mujoco_warp"])
+def test_particle_boundary_shares_body_without_replacing_rigid_contact(solver):
+    from embodichain.lab.sim.cfg import RigidObjectCfg
+    from embodichain.lab.sim.shapes import MeshCollisionCfg
+    from embodichain.lab.sim.spawn.descriptors import rigid_desc_from_cfg
+
+    cfg = RigidObjectCfg(
+        uid="cup",
+        shape=MeshCfg(
+            fpath="/assets/cup.glb",
+            collision=MeshCollisionCfg(
+                approximation="convex_decomposition", max_hulls=32
+            ),
+        ),
+        particle_collision_shape=MeshCfg(
+            fpath="/assets/cavity.obj",
+            collision=MeshCollisionCfg(approximation="sdf", sdf_resolution=192),
+        ),
+        attrs=RigidBodyPhysicsCfg(
+            mass_props=MassPropertiesCfg(mass=0.3, inertia=[0.001, 0.001, 0.001])
+        ),
+    )
+    desc, _ = rigid_desc_from_cfg(cfg, newton_solver_type=solver)
+    assert len(desc.collisions) == 2
+    contact, boundary = desc.collisions
+    assert contact.approximation == CollisionApproximation.CONVEX_DECOMPOSITION
+    assert contact.newton.has_particle_collision is False
+    assert boundary.approximation == CollisionApproximation.SDF
+    assert boundary.enable_collision is False
+    assert boundary.newton.has_particle_collision is True
+    if hasattr(boundary.newton, "contributes_to_mass"):
+        assert boundary.newton.contributes_to_mass is False
+    assert boundary.newton.sdf_max_resolution == 192
+    assert desc.renders[0].file_path == "/assets/cup.glb"
+    assert cfg.shape.collision.approximation == "convex_decomposition"
+
+
+def test_particle_boundary_requires_newton_and_sdf():
+    from embodichain.lab.sim.cfg import RigidObjectCfg
+    from embodichain.lab.sim.spawn.descriptors import rigid_desc_from_cfg
+
+    cfg = RigidObjectCfg(
+        uid="cup",
+        shape=MeshCfg(fpath="/assets/cup.glb"),
+        particle_collision_shape=MeshCfg(fpath="/assets/cavity.obj"),
+    )
+    with pytest.raises(ValueError, match="Newton"):
+        rigid_desc_from_cfg(cfg)
+    with pytest.raises(ValueError, match="sdf"):
+        rigid_desc_from_cfg(cfg, newton_solver_type="dexuni")
+
+
+def test_dynamic_particle_boundary_requires_safe_mass_properties():
+    from dexsim.spawn import NewtonCollisionDesc
+
+    if "contributes_to_mass" in NewtonCollisionDesc.__dataclass_fields__:
+        pytest.skip("This DexSim build can exclude the boundary from mass directly.")
+    cfg = RigidObjectCfg(
+        uid="cup",
+        shape=CubeCfg(size=[0.1, 0.1, 0.1]),
+        particle_collision_shape=MeshCfg(
+            fpath="/assets/cavity.obj",
+            collision=MeshCollisionCfg(approximation="sdf"),
+        ),
+        attrs=RigidBodyPhysicsCfg(mass_props=MassPropertiesCfg(mass=0.3)),
+    )
+    with pytest.raises(NotImplementedError, match="explicit mass and inertia"):
+        rigid_desc_from_cfg(cfg, newton_solver_type="dexuni")
 
 
 @pytest.mark.parametrize(

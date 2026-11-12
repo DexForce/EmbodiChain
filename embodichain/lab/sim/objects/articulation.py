@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import math
+from numbers import Integral
 
 import torch
 import dexsim
@@ -47,12 +48,13 @@ from embodichain.lab.sim.cfg import (
     _normalize_joint_target_mode,
     ArticulationCfg,
     JointDrivePropertiesCfg,
+    MimicComplianceCfg,
     RigidBodyPhysicsCfg,
 )
+from embodichain.lab.sim.cfg.articulation import _mimic_compliance_from_dict
 from dexsim.types import PhysicalAttr
 from embodichain.utils.string import (
     resolve_matching_names,
-    resolve_matching_names_values,
 )
 from embodichain.lab.sim.common import BatchEntity
 from embodichain.lab.sim.cfg.source import _asset_file_path
@@ -63,6 +65,10 @@ from embodichain.lab.sim.objects.backends.articulation_drive import (
 )
 from embodichain.lab.sim.objects.backends.articulation_lifecycle import (
     prepare_default_spawn_runtime_config,
+)
+from embodichain.lab.sim.objects.backends._articulation_mimic import (
+    apply_mimic_compliance,
+    require_mimic_compliance_backend,
 )
 from embodichain.lab.sim.objects.backends.articulation_geometry import (
     get_link_vert_face,
@@ -742,6 +748,7 @@ class Articulation(BatchEntity):
         """
         self._newton_mimic_compliance_configured = False
         self._prepared_default_root_topology_revision = -1
+        self._prepared_mimic_compliance_topology_revision = -1
         self.cfg = deepcopy(cfg)
         self.uid = self.cfg.uid
         self.device = device
@@ -960,7 +967,7 @@ class Articulation(BatchEntity):
                     render_body.set_projective_uv()
 
     def _prepare_spawn_runtime_config(self, result: Scene | None) -> None:
-        """Apply Default root properties before GPU runtime initialization.
+        """Apply Default root properties and mimic compliance before runtime setup.
 
         The Default backend snapshots articulation solver iteration counts when
         its GPU runtime is initialized. Applying these values only during facade
@@ -978,6 +985,21 @@ class Articulation(BatchEntity):
                 self._prepared_default_root_topology_revision,
             )
         )
+        compliance = getattr(self.cfg, "mimic_compliance", None)
+        if result is None or compliance is None:
+            return
+
+        revision = int(result.topology_revision)
+        if self._prepared_mimic_compliance_topology_revision == revision:
+            return
+
+        settings = _mimic_compliance_from_dict(compliance)
+        if not settings:
+            return
+
+        require_mimic_compliance_backend(result.backend)
+        apply_mimic_compliance(self.uid, enumerate(self._entities), settings)
+        self._prepared_mimic_compliance_topology_revision = revision
 
     def __str__(self) -> str:
         if self.is_declared:
@@ -1434,6 +1456,63 @@ class Articulation(BatchEntity):
             List[float]: The mimic joint offsets.
         """
         return self._mimic_info.mimic_offset.tolist()
+
+    def set_mimic_compliance(
+        self,
+        natural_frequency: float,
+        damping_ratio: float,
+        joint_names: str | Sequence[str],
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+    ) -> None:
+        """Set the compliance of the selected mimic masters on DexSim Default.
+
+        Zero for both parameters requests hard coupling. Each master's authored
+        follower multipliers and offsets are preserved. Call after scene
+        preparation. Runtime writes are applied to the current native
+        articulations. Declared :attr:`ArticulationCfg.mimic_compliance`
+        settings are reapplied at the next topology revision.
+
+        Args:
+            natural_frequency: Finite, nonnegative native natural frequency.
+            damping_ratio: Finite, nonnegative native damping ratio.
+            joint_names: Exact name or names of active joints that drive mimic
+                followers.
+            env_ids: Environment indices. None selects all environments.
+
+        Raises:
+            NotImplementedError: If the backend does not support these parameters.
+            ValueError: If a name does not identify a mimic master, a compliance
+                parameter is outside its supported range, or env_ids is not flat.
+            TypeError: If a parameter or environment index has an invalid type.
+            IndexError: If an environment index is out of range.
+            RuntimeError: If the articulation is unprepared or DexSim reports
+                a write failure. Earlier successful writes may already be applied.
+        """
+        if self._spawn_result is None:
+            raise RuntimeError("Prepare the scene before setting mimic compliance.")
+        require_mimic_compliance_backend(self._spawn_result.backend)
+        compliance = MimicComplianceCfg(natural_frequency, damping_ratio)
+        names = [joint_names] if isinstance(joint_names, str) else list(joint_names)
+
+        if env_ids is None:
+            indices = range(self.num_instances)
+        else:
+            if isinstance(env_ids, torch.Tensor) and env_ids.ndim != 1:
+                raise ValueError("env_ids must be one-dimensional.")
+            indices = env_ids.tolist() if isinstance(env_ids, torch.Tensor) else env_ids
+            for index in indices:
+                if isinstance(index, bool) or not isinstance(index, Integral):
+                    raise TypeError("env_ids must contain integer indices.")
+                if not 0 <= index < self.num_instances:
+                    raise IndexError(
+                        f"Articulation environment index {index} is out of range."
+                    )
+
+        apply_mimic_compliance(
+            self.uid,
+            ((index, self._entities[index]) for index in dict.fromkeys(indices)),
+            dict.fromkeys(names, compliance),
+        )
 
     def _set_default_collision_filter(self) -> None:
         collision_filter_data = torch.zeros(
@@ -2933,75 +3012,6 @@ class Articulation(BatchEntity):
         self._data.articulation_view.compute_kinematics(local_env_ids)
         if self.device.type == "cpu" and not self._data.is_newton_backend:
             self._world.update(0.0)
-
-    def _set_default_joint_drive(
-        self,
-        joint_drive_props: JointDrivePropertiesCfg | dict | None = None,
-    ) -> None:
-        """Set default joint drive parameters based on the configuration."""
-        import numbers
-        from embodichain.utils.string import resolve_matching_names_values
-
-        if joint_drive_props is None:
-            joint_drive_props = self.cfg.joint_drive_props
-        if joint_drive_props is None:
-            return
-
-        joint_property_targets = [
-            ("damping", self.default_joint_damping),
-            ("stiffness", self.default_joint_stiffness),
-            ("max_effort", self.default_joint_max_effort),
-            ("max_velocity", self.default_joint_max_velocity),
-            ("friction", self.default_joint_friction),
-            ("armature", self.default_joint_armature),
-        ]
-
-        for prop_name, default_array in joint_property_targets:
-            value = (
-                joint_drive_props.get(prop_name)
-                if isinstance(joint_drive_props, dict)
-                else getattr(joint_drive_props, prop_name, None)
-            )
-            if value is None:
-                continue
-            if isinstance(value, numbers.Number):
-                default_array[:] = value
-            else:
-                try:
-                    indices, _, values = resolve_matching_names_values(
-                        value, self.joint_names
-                    )
-                    default_array[:, indices] = torch.as_tensor(
-                        values, dtype=torch.float32, device=self.device
-                    )
-                except Exception as e:
-                    logger.log_error(f"Failed to set {prop_name}: {e}")
-
-        if isinstance(joint_drive_props, dict):
-            drive_type = joint_drive_props.get("drive_type")
-            target_mode = joint_drive_props.get("target_mode")
-        else:
-            drive_type = getattr(joint_drive_props, "drive_type", None)
-            target_mode = getattr(joint_drive_props, "target_mode", None)
-        if isinstance(target_mode, dict):
-            logger.log_warning(
-                "Per-joint target_mode mappings require a Spawn-bound "
-                "articulation; the retained raw-articulation path preserves "
-                "its current target modes."
-            )
-            target_mode = None
-
-        # Apply drive parameters to all articulations in the batch
-        self.set_joint_drive(
-            stiffness=self.default_joint_stiffness,
-            damping=self.default_joint_damping,
-            max_effort=self.default_joint_max_effort,
-            max_velocity=self.default_joint_max_velocity,
-            friction=self.default_joint_friction,
-            armature=self.default_joint_armature,
-            drive_type=drive_type,
-            target_mode=target_mode,
-        )
 
     def compute_fk(
         self,

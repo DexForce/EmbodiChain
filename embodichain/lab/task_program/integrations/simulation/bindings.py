@@ -1381,6 +1381,27 @@ class ControlPartCommandPreset:
         )
 
 
+def _bind_evaluation_joint_names(conditions, robot):
+    """Resolve preset joint identities through the Robot's expanded control parts."""
+    fields = {
+        field for spec in conditions.values() for field in spec._preset_joint_names()
+    }
+    layouts = {}
+    for field in fields:
+        owner, part, quantity = field.split("/")
+        if owner != "robot" or quantity != "qpos":
+            raise ValueError("Command presets require a native robot qpos channel.")
+        _require_control_part_dof(robot, part)
+        layouts[field] = tuple(
+            robot.joint_names[index] for index in robot.get_joint_ids(name=part)
+        )
+    cache = {}
+    return {
+        ref: spec._bind_joint_names(layouts, cache=cache)
+        for ref, spec in conditions.items()
+    }
+
+
 def _require_control_part_dof(robot: Robot, control_part: str) -> int:
     """Validate one native joint-backed control part and return its width."""
     control_parts = getattr(robot, "control_parts", None)

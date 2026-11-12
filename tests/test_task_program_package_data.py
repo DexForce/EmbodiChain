@@ -31,7 +31,7 @@ import pytest
 from setuptools import Distribution
 from setuptools.command.build_py import build_py
 
-from setup import get_package_dir
+from setup import get_package_data, get_package_dir
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 _SETUP_PATH = _REPOSITORY_ROOT / "setup.py"
@@ -120,6 +120,11 @@ _DEPLOYMENTS = {
         "pour_water_with_right_arm",
         "task_program_pour_water",
         "cobotmagic",
+    ),
+    Path("tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"): (
+        "pick_aim_pour_return_cup",
+        "task_program_pour_cup_fluid",
+        "franka_panda_fast_fluid",
     ),
 }
 _DEPLOYMENTS[
@@ -230,6 +235,14 @@ _DUAL_ARM_RESOURCES = {
 
 _RESOURCE_PATHS = frozenset(
     {
+        Path("tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"),
+        Path("tasks/manipulation/tableware/pour_cup/env.fluid.yaml"),
+        Path("tasks/manipulation/tableware/pour_cup/task_program/program.fluid.yaml"),
+        Path(
+            "tasks/manipulation/tableware/pour_cup/task_program/integration.fluid.yaml"
+        ),
+        Path("components/embodiments/franka_panda_fast_fluid.yaml"),
+        Path("components/execution_policies/trajectory_open_loop_fluid_pour.yaml"),
         Path("components/embodiments/franka_panda_robotiq85_rgbd.yaml"),
         Path(
             "tasks/manipulation/carton_stocking/task_program/integration.ordinary.yaml"
@@ -287,6 +300,9 @@ _RESOURCE_PATHS = frozenset(
         Path("tasks/manipulation/repeated_pick_place/objective.yaml"),
         Path("tasks/manipulation/push_cube/catalog.yaml"),
         Path("tasks/manipulation/push_cube/README.md"),
+        Path(
+            "tasks/manipulation/tableware/stack_blocks_two/task_program/evaluation.yaml"
+        ),
         Path("tasks/manipulation/tableware/stack_cups/catalog.yaml"),
         Path("tasks/manipulation/tableware/stack_cups/README.md"),
         Path("components/execution_policies/motion_gen_verified.yaml"),
@@ -328,6 +344,7 @@ _RESOURCE_PATHS = frozenset(
         Path("tasks/manipulation/tableware/pour_water/env.tianji_marvin.yaml"),
         Path("tasks/manipulation/tableware/pour_water/README.md"),
         Path("tasks/manipulation/tableware/pour_water/task_program/integration.yaml"),
+        Path("tasks/manipulation/tableware/pour_water/task_program/evaluation.yaml"),
         Path(
             "tasks/manipulation/tableware/pour_water/task_program/integration.tianji_marvin.yaml"
         ),
@@ -369,7 +386,7 @@ def _literal_setup_keyword(keyword_name: str) -> object:
 @pytest.fixture
 def staged_config_package(tmp_path: Path) -> _StagedConfigPackage:
     """Stage official Task Program resources through the real build command."""
-    package_data = _literal_setup_keyword("package_data")
+    package_data = get_package_data()
     include_package_data = _literal_setup_keyword("include_package_data")
     assert type(package_data) is dict
     assert type(include_package_data) is bool
@@ -432,6 +449,10 @@ def test_setup_stages_all_official_task_programs(
         for relative_path in _RESOURCE_PATHS
     }
     assert expected_outputs <= staged_config_package.relative_outputs
+    assert not (
+        staged_config_package.build_lib
+        / "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/assets"
+    ).exists()
 
 
 def test_staged_task_program_resources_decode_through_installed_paths(
@@ -483,6 +504,7 @@ for relative_path, expected_ids in expected_deployments.items():
         task_program=physical.config["task_program"],
         skill_profile=physical.embodiment_skill_profile,
         base_dir=env_path.parent,
+        evaluation=physical.evaluation,
     )
     program = load_task_program(
         deployment.program_path,
