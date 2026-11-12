@@ -4262,6 +4262,12 @@ class EmbodiedEnv(BaseEnv):
                 self.get_demo_episode_metadata(int(env_id)) for env_id in env_ids
             ],
         }
+        if "cables" in states.keys():
+            # Cable observations retain world coordinates. Keep each exported
+            # row's origin so action replay can validate another arena placement.
+            meta["arena_origins_w"] = (
+                self.sim.arena_offsets[env_ids_t].detach().cpu().tolist()
+            )
         meta.update(self._trajectory_action_metadata())
         final_observations = _export_final_observations(
             getattr(self, "_final_acceptance_rules", ()),

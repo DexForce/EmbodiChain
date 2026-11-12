@@ -346,6 +346,11 @@ not orchestrate multiple experiments or qualify kinematic playback.
   records observations, not solver history. `ReplayWrapper` accepts dynamic
   replay only when every recorded initial state matches the full reset; it
   rejects scrubbing, partial reset and broadcasting world-space cable states.
+  Cable artifacts store `meta.arena_origins_w` in exported row order. Replay
+  translates captured reset positions into the source world frame for comparison,
+  allowing a per-environment export to replay at a different arena origin.
+  Raw observations, orientations and velocities retain their original meaning.
+  Older files without origin metadata require matching world placement.
   `trajectory_state.restore_trajectory_state()` rejects cable entries before
   any write. Use action replay to validate a new episode, not a visible-state
   restore as a history-preserving checkpoint.

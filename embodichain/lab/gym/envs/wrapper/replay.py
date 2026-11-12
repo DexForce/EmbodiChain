@@ -70,6 +70,8 @@ class ReplayWrapper(gym.Wrapper):
     Cable recordings support dynamic replay from matching full-reset states
     only. Their visible state omits contact/solver history, so state scrubbing,
     partial resets and broadcasting world-space cable recordings are rejected.
+    Source arena origins, when recorded, translate the captured reset positions
+    into the saved frame for validation. Older files require matching placement.
 
     For a deployment with final acceptance rules, ``final_acceptance`` reports
     the offline evaluation of the saved terminal capture, independently of
@@ -98,6 +100,7 @@ class ReplayWrapper(gym.Wrapper):
         self._trajectory = load_trajectory(trajectory)
         meta = self._trajectory["meta"]
         self._cable_replay = "cables" in self._trajectory["states"].keys()
+        self._cable_source_origins: torch.Tensor | None = None
         if (
             getattr(getattr(env, "sim", None), "_cable_objects", {})
             and not self._cable_replay
@@ -114,6 +117,15 @@ class ReplayWrapper(gym.Wrapper):
                 raise ValueError(
                     "World-space cable recordings require matching environment counts."
                 )
+            if "arena_origins_w" in meta:
+                origins = torch.as_tensor(
+                    meta["arena_origins_w"], dtype=torch.float32, device=env.device
+                )
+                if origins.shape != (env.num_envs, 3) or not bool(
+                    torch.isfinite(origins).all()
+                ):
+                    raise ValueError("arena_origins_w must be finite (num_envs, 3).")
+                self._cable_source_origins = origins
         self._controller_spec = None
         self._task_outcome_replay = mode == "dynamic" and (
             getattr(env, "termination_manager", None) is not None
@@ -317,6 +329,15 @@ class ReplayWrapper(gym.Wrapper):
         capture_trajectory_state(
             self.env, current, torch.arange(self.env.num_envs, device=self.env.device)
         )
+        if self._cable_source_origins is not None:
+            translation = self._cable_source_origins - self.env.sim.arena_offsets.to(
+                self._cable_source_origins
+            )
+            # Compare the captured reset in the saved world's frame. The live
+            # scene and the recording keep their original poses and history.
+            for cable in current["cables"].values():
+                state = cable["segment_state_w"]
+                state[..., :3] += translation.to(state)[:, None, :]
         for key, expected in initial.items(include_nested=True, leaves_only=True):
             observed = current[key].to(expected)
             if observed.shape != expected.shape or not torch.allclose(

@@ -681,10 +681,31 @@ def test_cable_manifest_shares_closed_capsules_without_native_render_meshes(
     assert exporter.resolve_node_target(cable_node.node_id) == ("cable/main", "cable")
 
 
-def test_cable_capture_batches_world_poses_for_selected_environments() -> None:
+@pytest.mark.parametrize(
+    "device", ["numpy", "cpu", pytest.param("cuda", marks=pytest.mark.gpu)]
+)
+def test_cable_capture_batches_world_poses_for_selected_environments(
+    monkeypatch: pytest.MonkeyPatch, device: str
+) -> None:
+    import torch
+    from embodichain.lab.visualization import scene_exporter
+
     sim = _CableSimulation()
     sim.cables["second"] = _CableObject(sim.arena_offsets)
     sim.cables["second"].data.poses[..., 0] += 0.75
+    if device != "numpy":
+        for cable in sim.cables.values():
+            cable.data.poses = torch.as_tensor(cable.data.poses, device=device)
+    convert_pose = scene_exporter.pose_to_position_wxyz
+
+    def convert_selected_pose(pose):
+        # Only visible rows may reach the host conversion boundary.
+        assert tuple(pose.shape) == (6, 7)
+        if isinstance(pose, torch.Tensor):
+            assert pose.device.type == device
+        return convert_pose(pose)
+
+    monkeypatch.setattr(scene_exporter, "pose_to_position_wxyz", convert_selected_pose)
     exporter = SceneExporter(sim, VisualizationCfg(backend="viser", env_ids=[2, 0]))
     manifest = exporter.build_manifest()
 
@@ -699,6 +720,8 @@ def test_cable_capture_batches_world_poses_for_selected_environments() -> None:
         uid, _ = exporter.resolve_node_target(node.node_id)
         segment_index = int(node.node_id.rsplit(":", 1)[1])
         pose = sim.cables[uid].data.poses[node.env_id, segment_index]
+        if isinstance(pose, torch.Tensor):
+            pose = pose.cpu().numpy()
         np.testing.assert_allclose(frame.positions[index], pose[:3])
         np.testing.assert_allclose(frame.wxyz[index], pose[[6, 3, 4, 5]], atol=1e-7)
 

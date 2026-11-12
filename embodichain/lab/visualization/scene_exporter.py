@@ -1005,19 +1005,13 @@ class SceneExporter:
                 pose = data.segment_pose_w
             else:
                 pose = batch.asset.body_data.body_link_pose
-            all_positions, all_wxyz = pose_to_position_wxyz(pose)
             if batch.component_indices is None:
-                batch_positions = all_positions[batch.env_ids]
-                batch_wxyz = all_wxyz[batch.env_ids]
+                pose = pose[batch.env_ids]
             else:
-                batch_positions = all_positions[
-                    batch.env_ids,
-                    batch.component_indices,
-                ]
-                batch_wxyz = all_wxyz[
-                    batch.env_ids,
-                    batch.component_indices,
-                ]
+                pose = pose[batch.env_ids, batch.component_indices]
+            # Gather on the source device before CPU conversion and quaternion
+            # normalization, so export scales with the visible node count.
+            batch_positions, batch_wxyz = pose_to_position_wxyz(pose)
             # Cable snapshots already contain world positions, including Arena origins.
             if batch.asset_kind != "cable":
                 batch_positions = batch_positions + self._env_offsets[batch.env_ids]

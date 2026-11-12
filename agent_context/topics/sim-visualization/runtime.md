@@ -82,6 +82,9 @@ Arena offsets are added to rigid, robot, articulation, and camera poses.
 Deformable vertices are stored relative to the corresponding arena node.
 Cable `segment_pose_w` already contains world positions, including Arena
 offsets; export must not add those offsets again.
+Pose export gathers visible environment/component rows on the source device
+before CPU conversion and quaternion normalization. Native state fetching remains
+asset-owned; host conversion scales with the exported node count.
 
 ### Exported content
 
