@@ -66,6 +66,93 @@ def _inertia_tensor(inertia: torch.Tensor, com_pose: torch.Tensor) -> torch.Tens
 
 
 @pytest.mark.requires_sim
+def test_default_sparse_drive_config_preserves_loaded_properties(
+    tmp_path: Path,
+) -> None:
+    """Each configured drive field preserves other loaded fields and joints."""
+    from embodichain.lab.sim.cfg import DefaultPhysicsCfg, RenderCfg
+
+    asset = tmp_path / "sparse_drive.urdf"
+    asset.write_text(
+        """<robot name="sparse_drive">
+      <link name="base"><inertial><mass value="1"/><inertia ixx=".1" ixy="0" ixz="0" iyy=".1" iyz="0" izz=".1"/></inertial></link>
+      <link name="slider"><inertial><mass value="1"/><inertia ixx=".1" ixy="0" ixz="0" iyy=".1" iyz="0" izz=".1"/></inertial></link>
+      <link name="hinge"><inertial><mass value="1"/><inertia ixx=".1" ixy="0" ixz="0" iyy=".1" iyz="0" izz=".1"/></inertial></link>
+      <joint name="slide" type="prismatic"><parent link="base"/><child link="slider"/><axis xyz="1 0 0"/><limit lower="-1" upper="1" effort="101" velocity="5"/><dynamics damping=".2" friction=".1"/></joint>
+      <joint name="hinge" type="revolute"><parent link="slider"/><child link="hinge"/><axis xyz="0 0 1"/><limit lower="-1" upper="1" effort="202" velocity="6"/><dynamics damping=".3" friction=".2"/></joint>
+    </robot>""",
+        encoding="utf-8",
+    )
+    overrides = {
+        "stiffness": 87.0,
+        "damping": 4.0,
+        "max_effort": 31.0,
+        "max_velocity": 2.5,
+        "friction": 0.0,
+        "armature": 0.02,
+    }
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            num_envs=2,
+            headless=True,
+            enable_entity_gizmo=False,
+            robot_ik_gizmo=None,
+            physics_cfg=DefaultPhysicsCfg(device="cpu", gravity=(0, 0, 0)),
+            render_cfg=RenderCfg(renderer="no-render"),
+            startup_summary="off",
+            scene_node_capacity=128,
+        ),
+        requires_native_renderer=False,
+    )
+    articulations = {}
+    art = source = None
+    try:
+        config = {"fpath": str(asset), "build_pk_chain": False, "init_qpos": [0, 0]}
+        source = sim.add_articulation(
+            ArticulationCfg.from_dict({**config, "uid": "source"})
+        )
+        for field, value in overrides.items():
+            articulations[field] = sim.add_articulation(
+                ArticulationCfg.from_dict(
+                    {
+                        **config,
+                        "uid": field,
+                        "asset_physics_mode": "overlay",
+                        "joint_drive_props": {field: {"slide": value}},
+                    }
+                )
+            )
+        sim.prepare()
+        source_values = source.get_joint_drive()
+        source_modes = source.get_joint_drive_type()
+        for configured_field, art in articulations.items():
+            source_columns = [
+                source.joint_names.index(name) for name in art.joint_names
+            ]
+            selected_column = art.joint_names.index("slide")
+            for field, original, actual in zip(
+                overrides, source_values, art.get_joint_drive(), strict=True
+            ):
+                expected = original[:, source_columns].clone()
+                if field == configured_field:
+                    expected[:, selected_column] = overrides[field]
+                torch.testing.assert_close(
+                    actual, expected, msg=f"{configured_field}: {field}"
+                )
+                torch.testing.assert_close(
+                    getattr(art, f"default_joint_{field}"), expected
+                )
+            assert art.get_joint_drive_type() == [
+                [row[column] for column in source_columns] for row in source_modes
+            ]
+    finally:
+        art = source = None
+        articulations.clear()
+        sim.destroy(exit_process=False)
+        SimulationManager.flush_cleanup_queue()
+
+
+@pytest.mark.requires_sim
 def test_newton_initial_hold_targets_for_multiple_articulations(tmp_path: Path) -> None:
     from embodichain.lab.sim.cfg import NewtonPhysicsCfg
 
