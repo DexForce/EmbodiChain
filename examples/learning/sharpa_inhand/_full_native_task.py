@@ -30,7 +30,7 @@ from typing import Any
 import numpy as np
 import torch
 from _native_task import _NativeTask
-from embodichain_tasks.manipulation.dexterous.sharpa_inhand import _JOINT_NAMES
+from _simulation import _JOINT_NAMES
 from unilab.base.torch_env import TorchEnvState
 
 from embodichain.lab.sim.physics._contact_material_view import _ContactMaterialScaleView

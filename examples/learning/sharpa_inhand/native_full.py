@@ -35,7 +35,7 @@ from typing import Any
 
 import numpy as np
 import torch
-from _aligned_apg import _APGLearner
+from _apg_learner import _APGLearner
 from _full_native_task import _FullNativeTask as _NativeTask
 from _native_checkpoint import (
     _ADAPTER_FILES,
@@ -251,7 +251,7 @@ def main() -> None:
         "--min-free-gpu-gib",
         type=float,
         default=None,
-        help="Wait before training/control steps; defaults to6 GiB for reference_eager,4 for reference_host, otherwise1.5",
+        help="Wait before training/control steps; defaults to 6 GiB for reference_eager, 4 for reference_host, otherwise 1.5.",
     )
     args = parser.parse_args()
     if args.resume_replay and not args.resume_native:
@@ -348,8 +348,7 @@ def main() -> None:
         "_native_task.py",
         "_simulation.py",
         "_native_asset.py",
-        "_aligned_apg.py",
-        "_aligned_task.py",
+        "_apg_learner.py",
         "reference.py",
     ]:
         path = Path(__file__).parent / name

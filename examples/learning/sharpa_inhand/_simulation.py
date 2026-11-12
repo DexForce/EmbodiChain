@@ -14,26 +14,18 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Newton/SimulationManager acquisition for the Sharpa APG example."""
+"""Native Sharpa hand/cylinder scene built through SimulationManager."""
 
 from __future__ import annotations
 
 import hashlib
 import xml.etree.ElementTree as ET
+from math import radians
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import torch
-from embodichain_tasks.manipulation.dexterous.sharpa_inhand import (
-    _JOINT_NAMES,
-    _REFERENCE_HAND_POSE,
-    _REFERENCE_OBJECT_POSITION,
-    SharpaInHandCfg,
-    _observation,
-    _reward,
-    _target,
-)
 
 from embodichain.data import get_data_path
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
@@ -50,9 +42,64 @@ from embodichain.lab.sim.cfg import (
     RobotCfg,
     UsdSourceCfg,
 )
-from embodichain.utils.math import matrix_from_quat, quat_mul
+from embodichain.utils.math import matrix_from_quat
 
 __all__ = ["SharpaSimulation"]
+
+_JOINT_NAMES = tuple(
+    [
+        "right_thumb_CMC_FE",
+        "right_thumb_CMC_AA",
+        "right_thumb_MCP_FE",
+        "right_thumb_MCP_AA",
+        "right_thumb_IP",
+    ]
+    + [
+        f"right_{finger}_{joint}"
+        for finger in ("index", "middle", "ring")
+        for joint in ("MCP_FE", "MCP_AA", "PIP", "DIP")
+    ]
+    + [
+        "right_pinky_CMC",
+        "right_pinky_MCP_FE",
+        "right_pinky_MCP_AA",
+        "right_pinky_PIP",
+        "right_pinky_DIP",
+    ]
+)
+# Fixed source-task reward references, recorded with each run's identity.
+_REFERENCE_OBJECT_POSITION = (-0.09559, -0.00517, 0.61906)
+_REFERENCE_HAND_POSE = tuple(
+    radians(value)
+    for value in (
+        95.12771,
+        -3.11244,
+        14.81626,
+        -1.03493,
+        12.23986,
+        65.21091,
+        6.1133,
+        15.58495,
+        5.90325,
+        31.74149,
+        -0.95812,
+        41.88173,
+        12.844,
+        31.72383,
+        9.84458,
+        35.22366,
+        18.02839,
+        10.9712,
+        68.30895,
+        7.99151,
+        5.89626,
+        5.89875,
+    )
+)
+_HAND_STIFFNESS = 3.0
+_HAND_DAMPING = 0.1
+_ACTION_SCALE = 1.0 / 24.0
+_DROP_HEIGHT_BAND = 0.02
 
 
 def _cylinder_source(output: Path, scale: float = 1.0) -> UsdSourceCfg:
@@ -90,15 +137,12 @@ class SharpaSimulation:
         device: str,
         seed: int,
         renderer: str = "no-render",
-        randomize_yaw: bool = False,
         reference_profile: dict[str, Any] | None = None,
     ) -> None:
         self.num_envs, self.device = num_envs, torch.device(device)
         if self.device.type == "cuda" and self.device.index is None:
             self.device = torch.device("cuda", torch.cuda.current_device())
-        self.cfg = SharpaInHandCfg()
         self.reference_profile = reference_profile
-        self.randomize_yaw = randomize_yaw
         armature, friction = {}, {}
         for name in _JOINT_NAMES:
             if "thumb_CMC" in name:
@@ -112,8 +156,8 @@ class SharpaSimulation:
             else:
                 values = (0.0006, 0.01276)
             armature[name], friction[name] = values
-        stiffness: float | dict[str, float] = self.cfg.stiffness
-        damping: float | dict[str, float] = self.cfg.damping
+        stiffness: float | dict[str, float] = _HAND_STIFFNESS
+        damping: float | dict[str, float] = _HAND_DAMPING
         if reference_profile is not None:
             authored = reference_profile["joints"]
             stiffness = {n: authored[n]["kp"] for n in _JOINT_NAMES}
@@ -332,8 +376,8 @@ class SharpaSimulation:
             "object_radius_m": 0.02,
             "object_height_m": 0.032,
             "object_mass_kg": 0.05,
-            "hand_stiffness": self.cfg.stiffness,
-            "hand_damping": self.cfg.damping,
+            "hand_stiffness": _HAND_STIFFNESS,
+            "hand_damping": _HAND_DAMPING,
             "hand_effort_cap_nm": 1.0,
             "joint_armature": armature,
             "joint_passive_friction": friction,
@@ -345,14 +389,10 @@ class SharpaSimulation:
             "hand_self_collision": False,
             "hand_gravity": True,
             "friction": 2.0,
-            "action_scale_rad": self.cfg.action_scale,
-            "drop_height_band_m": self.cfg.drop_height_band,
+            "action_scale_rad": _ACTION_SCALE,
+            "drop_height_band_m": _DROP_HEIGHT_BAND,
             "observation": "privileged-fixed-palm-and-reset-109-v3",
-            "randomization": (
-                "grasp-cache-and-cylinder-32fold-yaw"
-                if randomize_yaw
-                else "grasp-cache-only"
-            ),
+            "randomization": "grasp-cache-only",
         }
         if reference_profile is not None:
             self.identity.update(
@@ -389,10 +429,6 @@ class SharpaSimulation:
             ),
             -1,
         ).clone()
-
-    def observation(self) -> torch.Tensor:
-        """Return the exact same privileged actor inputs used in imagination."""
-        return _observation(self.read_state(), self.context, self.lower, self.upper)
 
     @torch.no_grad()
     def reset(
@@ -432,16 +468,6 @@ class SharpaSimulation:
             env_ids=ids,
         )
         pose = torch.cat((grasp[:, 22:25], grasp[:, 26:29], grasp[:, 25:26]), -1)
-        if self.randomize_yaw:
-            # The native cylinder is axially symmetric. Sample 32 body phases
-            # while preserving its world axis and geometry; every resulting
-            # transition is still measured in simulation.
-            phase = torch.randint(
-                32, (len(ids),), device=self.device, generator=self.generator
-            ) * (2 * torch.pi / 32)
-            twist = torch.zeros(len(ids), 4, device=self.device)
-            twist[:, 2], twist[:, 3] = (phase / 2).sin(), (phase / 2).cos()
-            pose[:, 3:7] = quat_mul(pose[:, 3:7], twist)
         self.object.set_local_pose(pose, env_ids=ids)
         zeros = torch.zeros(len(ids), 3, device=self.device)
         self.object.set_velocity(zeros, zeros, env_ids=ids)
@@ -449,31 +475,6 @@ class SharpaSimulation:
         self.steps[ids] = 0
         self.episode_ids[ids] += 1
         return self.read_state()
-
-    @torch.no_grad()
-    def step(self, action: torch.Tensor) -> dict[str, torch.Tensor]:
-        """Capture current/next physical states before caller-owned reset."""
-        if action.shape != (self.num_envs, 22) or not torch.isfinite(action).all():
-            raise ValueError("Physical actions must have finite shape (num_envs,22)")
-        state, before = self.read_state(), self.context.clone()
-        target = _target(before, action, self.lower, self.upper, self.cfg)
-        self.robot.set_qpos(target, joint_ids=self.joint_ids, target=True)
-        self.sim.update(step=12)
-        next_state = self.read_state()
-        if not torch.isfinite(next_state).all():
-            raise RuntimeError("Nonfinite physical transition")
-        self.context = torch.cat((target, before[:, 22:]), -1)
-        self.steps += 1
-        return {
-            "state": state,
-            "action": target,
-            "next_state": next_state,
-            "context": before,
-            "reward": _reward(next_state, self.context, self.cfg, previous_state=state),
-            "terminated": (next_state[:, 2] - before[:, 24]).abs()
-            > self.cfg.drop_height_band,
-            "truncated": self.steps >= self.cfg.max_episode_steps,
-        }
 
     def close(self) -> None:
         """Drop native children and queue cleanup; flush after caller frames exit."""

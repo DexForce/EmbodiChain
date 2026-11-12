@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Sharpa learned-model APG workflow."""
+"""Sharpa in-hand rotation APG example."""
 
 from __future__ import annotations
 

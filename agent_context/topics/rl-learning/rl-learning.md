@@ -107,58 +107,27 @@ per-environment objective scale, and scalar rollout metadata.
 This path supports both standard algorithms and differentiable algorithms,
 but currently rejects distributed training and environment profiling.
 
-The approximate Sharpa cylinder-rotation experiment registers `SharpaInHandModel` in
-`embodichain_tasks.manipulation.dexterous.sharpa_inhand`. Its
-[online workflow](../../../examples/learning/sharpa_inhand/README.md) owns
-physical collection and independent physical evaluation; the learning environment
-requires a fitted [RWM](../robot-world-model/robot-world-model.md) plus measured
-replay starts and preserves action gradients through frozen model weights.
-Its original MJCF reference reproduction is owned by
-`examples/learning/sharpa_inhand/reference.py`. The separate `_aligned_task.py`
-collection boundary delegates physics, observations, rewards and resets to the
-pinned upstream task; it does not use the approximate Newton scene or the
-109-feature actor. Qualify task/collection parity and match the policy stage
-before comparing algorithms. Reproducing the upstream learner alone does not
-qualify EmbodiChain APG.
-The private `_aligned_apg.py` experiment uses the original teacher/world model
-to compare the shared APG finite-horizon objective with value bootstrapping;
-it is separate from the approximate registered model-only environment.
-The separate `native.py` entry uses `_native_task.py` to collect and evaluate
-through EmbodiChain SimulationManager and ContactSensor, retaining the reference
-HORA/world-model learning code. Its initial fixed-scale calibration is distinct
-from full upstream domain randomization and from the older109-feature native
-approximation. `native_full.py` / `_full_native_task.py` add a single-manager,
-eight-scale randomized workflow with physics-owned parameter writes and exact
-raw-cache replay. Native hand self-contact dimensionality and metal contact
-parameters still differ from upstream; resource profiles also differ.
+The [Sharpa in-hand example](../../../examples/learning/sharpa_inhand/README.md)
+trains cylinder rotation in native EmbodiChain physics. `reference.py` first
+trains the pinned upstream teacher, whose saved training config parameterizes
+the native run. `native_full.py` / `_full_native_task.py` collect eight-scale,
+domain-randomized transitions through `SimulationManager`, physics-owned
+parameter writes and exact raw-cache replay. `_apg_learner.py` keeps the
+upstream HORA teacher, world model and replay while routing actor updates
+through EmbodiChain APG. Native hand self-contact dimensionality and metal
+contact parameters still differ from upstream, so results are not strict
+upstream physics parity or an algorithm comparison.
 `native_full_evaluate.py` checks frozen source receipts before qualifying a
-newly trained checkpoint. Explicit reference/implementation transfer modes are
-diagnostics, not unchanged training/evaluation qualification.
-Qualify a freshly trained native checkpoint with physical traces;
-reference-policy transfer alone is insufficient.
-The sibling `examples/learning/wuji_inhand` workflow adapts the pinned learner
-to actual 20-DOF Wuji state/action dimensions in run-owned source snapshots.
+newly trained checkpoint; reference/implementation transfer modes are
+diagnostics only. Qualify a freshly trained checkpoint with physical traces.
+The sibling [Wuji example](../../../examples/learning/wuji_inhand/README.md)
+adapts the same learner to the 20-DOF Wuji hand in run-owned source snapshots.
 Its native task requires a palm-up root pose (local palmar +X faces world +Z),
 verified initial opposing-pad contacts, authored actuator effort limits and
-fixed physical parameters across eight sizes. The policy learns grasp maintenance
-and rotation; initial contact caches do not qualify long stationary holding.
-Differentiable FK gates rewards by pad geometry and forces, while native
-termination/evaluation checks actual opposing-pad participation. Rotation-only
-statistics cannot qualify display. Evaluation checks frozen source/asset/runtime
-receipts and retains measured trajectories; its
-[README](../../../examples/learning/wuji_inhand/README.md) owns commands and criteria.
-The older Sharpa model-only wrapper derives full predicted cylinder pose as context: canonical RWM
-yaw invariance is invalid relative to the fixed palm. Actor observations retain
-both absolute physical pose and original reset references.
-Its reference reward uses fixed source object/hand poses; sampled reset height
-separately owns drop termination and optional height shaping. Reward rates and
-physical rotation metrics use completed control-period pose differences.
-The native-cylinder workflow can predict world-frame increments and exclude
-body phase while retaining the cylinder's world axis. Checkpoints encode both
-frame and symmetry mode; task fitting matches error axes to that frame and
-retains normalization after initial acquisition.
-The packaged APG config trains only in that exported model. This route does not
-use the simulator's FK-only `DifferentiableEnv` or differentiate contact physics.
+fixed physical parameters across eight sizes. Differentiable FK gates rewards
+by pad geometry and forces, while native termination/evaluation checks actual
+opposing-pad participation. Neither route uses the simulator's FK-only
+`DifferentiableEnv` or differentiates contact physics.
 
 ## Rollout and Trainer Routing
 

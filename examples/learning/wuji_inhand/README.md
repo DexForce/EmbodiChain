@@ -80,12 +80,6 @@ poses, tip positions, forces, rewards and grasp flags. Every size must pass
 20-second survival/failure, full-revolution, positive-speed and final-five-second
 rotation criteria, plus valid opposing-pad grasp during at least 80% of an
 episode. Use development scenes for selection, then validation and an unused
-holdout. `--zero-action` is an unqualified control. Only a passing holdout with
-at least 1,536 episodes can qualify display, and rotation statistics alone are
+holdout. `--zero-action` is an unqualified control. Qualify a result only with
+a passing holdout of at least 1,536 episodes; rotation statistics alone are
 insufficient.
-
-`render.py` additionally requires independent measured-metric, reward, cache and
-geometry audits. It exports fixed-index 20-second clips from measured states
-using source FK only, without physics integration or training overlays. The
-renderer rejects sideways-palm v1 checkpoints. Inspect multiple camera angles
-and actual contacts before adding any result to the public showcase.

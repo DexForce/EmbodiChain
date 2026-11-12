@@ -14,8 +14,9 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Reproduce the pinned upstream task before comparing EmbodiChain algorithms.
+"""Train and evaluate the pinned upstream reference teacher.
 
+The resulting training config parameterizes the native EmbodiChain workflow.
 Run with the standard Python library. The upstream checkout owns its frozen
 virtual environment, physics, task, algorithm, checkpoints and evaluator.
 """
@@ -164,20 +165,6 @@ def main() -> None:
             [python, "-m", "pytest", "-q", "-m", "slow", *_SIM_TESTS],
             "simulation_contracts.log",
         )
-        for backend in ("mujoco", "mjwarp"):
-            run(
-                f"collection_parity_{backend}",
-                [
-                    python,
-                    str(Path(__file__).with_name("_verify_reference.py").resolve()),
-                    "--backend",
-                    backend,
-                    "--output",
-                    str(output / f"parity_{backend}"),
-                    *(["--shared-native-step"] if backend == "mjwarp" else []),
-                ],
-                f"parity_{backend}.log",
-            )
         if not args.verify_only:
             run("training", train, "training.log")
             run(

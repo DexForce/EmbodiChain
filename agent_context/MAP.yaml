@@ -389,8 +389,7 @@ topics:
     Wuji APG, Wuji 掌内转动]
   keywords: [train-rl, Trainer, trainer.gym_config, learning_env, RolloutKind, DifferentiableTrainer,
     PPO, GRPO, APG, APGActorCritic, apg_actor_critic, SyncCollector, ScheduledDifferentiableEnvProtocol, DifferentiableRolloutSpec,
-    complete rollout, full horizon, gradient accumulation, action adjoint, observation normalization,
-    SharpaInHandModel, SharpaInHandWorldModel]
+    complete rollout, full horizon, gradient accumulation, action adjoint, observation normalization]
   paths: [topics/rl-learning/rl-learning.md]
   source_of_truth:
   - embodichain/learning/rl/train.py
@@ -407,11 +406,9 @@ topics:
   - embodichain/learning/rl/experimental/
   - embodichain/learning/models/
   - extensions/embodichain_tasks/configs/tasks/
-  - extensions/embodichain_tasks/embodichain_tasks/manipulation/dexterous/sharpa_inhand.py
   - examples/learning/sharpa_inhand/
   - examples/learning/wuji_inhand/
   watch_paths: [embodichain/learning/rl/, embodichain/learning/models/, extensions/embodichain_tasks/configs/tasks/, tests/learning/,
-    extensions/embodichain_tasks/embodichain_tasks/manipulation/dexterous/sharpa_inhand.py,
     examples/learning/sharpa_inhand/, examples/learning/wuji_inhand/]
   related_topics: [simulation-system, env-framework, manager-functor, configclass-pattern]
   status: active

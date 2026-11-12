@@ -30,7 +30,7 @@ from typing import Any
 import numpy as np
 import torch
 from _native_asset import _compile_usd_hand
-from _simulation import SharpaSimulation
+from _simulation import _JOINT_NAMES, SharpaSimulation
 from sharpa_rl_unilab.algos.supermimic.state import unflatten_state
 from sharpa_rl_unilab.tasks.sharpa_inhand.terms.geometry import (
     torch_quat_angular_velocity_from_pair,
@@ -134,8 +134,6 @@ class _NativeTask:
         self.critic_history = torch.zeros(num_envs, 3, 58, device=self.device)
         self.proprio_history = torch.zeros(num_envs, 30, 49, device=self.device)
         authored = profile["joints"]
-        from embodichain_tasks.manipulation.dexterous.sharpa_inhand import _JOINT_NAMES
-
         ctrl = np.array([authored[n]["ctrl_range"] for n in _JOINT_NAMES])
         self.lower = torch.tensor(
             ctrl[:, 0] * 0.9, device=self.device, dtype=torch.float32

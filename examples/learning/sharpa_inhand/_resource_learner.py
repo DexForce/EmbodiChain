@@ -27,7 +27,7 @@ from __future__ import annotations
 from typing import Any
 
 import torch
-from _aligned_apg import _APGLearner
+from _apg_learner import _APGLearner
 from omegaconf import OmegaConf
 from sharpa_rl_unilab.algos.supermimic.replay import ReplayBuffer
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (

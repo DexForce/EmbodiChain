@@ -154,7 +154,7 @@ def main() -> None:
         "embodichain/lab/sim/physics/_cylinder_variants.py",
         "embodichain/lab/sim/sensors/contact/_geometry_contact_sensor.py",
         "embodichain/lab/sim/sensors/contact/_warp/geometry_contact.py",
-        "examples/learning/sharpa_inhand/_aligned_apg.py",
+        "examples/learning/sharpa_inhand/_apg_learner.py",
         "examples/learning/sharpa_inhand/_resource_learner.py",
         "examples/learning/sharpa_inhand/_native_checkpoint.py",
         "examples/learning/sharpa_inhand/native_full.py",
