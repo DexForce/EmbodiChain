@@ -99,7 +99,7 @@ def create_skill_interval(page: Page) -> None:
 
     go(page, 2)
     page.keyboard.press("i")
-    page.locator("#label").fill("翻转包裹")
+    page.locator("#label").select_option("pick_up")
     page.locator("#label").press("Enter")
     go(page, 5)
     page.keyboard.press("o")
@@ -236,7 +236,7 @@ def test_keyboard_edit_delete_undo_and_resume(
             skill_interval["end_frame"],
         )
         for skill_interval in saved["segments"]
-    ] == [("翻转包裹", 3, 6)]
+    ] == [("pick_up", 3, 6)]
     page.reload()
     expect(page.locator("#skill-interval-count")).to_have_text("1")
     expect(page.locator("#skill-interval-list td").nth(2)).to_have_text("6")
@@ -279,6 +279,11 @@ def test_timeline_frame_geometry_and_free_drag_inside_skill_intervals(
     page.reload()
     expect(page.locator("#skill-interval-count")).to_have_text("4")
     expect(page.locator("#frame-current")).to_have_text("0")
+    # Historical free-text labels remain editable without being silently renamed.
+    page.locator("#skill-interval-list tr").nth(2).click()
+    page.locator("#edit").click()
+    expect(page.locator("#label")).to_have_value("翻转包裹")
+    page.locator("#cancel-draft").click()
 
     def check_geometry() -> dict[str, float]:
         bounds = page.locator("#timeline").bounding_box()
@@ -323,6 +328,54 @@ def test_timeline_frame_geometry_and_free_drag_inside_skill_intervals(
     # The same coordinate rule must hold after zooming and horizontal scrolling.
     page.mouse.click(x_at(30), bounds["y"] + 46)
     expect(page.locator("#frame-current")).to_have_text("30")
+
+
+def test_skill_dropdown_core_persistence_and_demoskill(
+    page: Page, annotation_server: tuple[str, Path]
+) -> None:
+    """Broad annotation boundaries survive independently of the fitted core."""
+    from playwright.sync_api import expect
+
+    url, destination = annotation_server
+    open_project(page, url)
+    expect(page.locator("select#label")).to_be_visible()
+    for identifier in ("pick_up", "twist", "execute_demo_skill", "pour"):
+        expect(page.locator(f'#label option[value="{identifier}"]')).to_have_count(1)
+    create_skill_interval(page)
+    page.locator("#edit").click()
+    page.locator("#label").select_option("twist")
+    page.locator("#use-core").check()
+    page.locator("#core-start-frame").fill("1")
+    expect(page.locator("#commit")).to_be_disabled()
+    page.locator("#core-start-frame").fill("3")
+    page.locator("#core-end-frame").fill("4")
+    page.locator("#commit").click()
+    expect(page.locator("#fit-skill")).to_have_value("twist")
+    expect(page.locator("#fit-skill")).to_be_disabled()
+    expect(page.locator("#fit-selection")).to_contain_text("核心 [3, 4]")
+    page.locator("#save").click()
+    expect(page.locator("#save-status")).to_have_text("已保存")
+    saved = json.loads(destination.read_text())
+    assert saved["schema_version"] == 3
+    assert saved["segments"][0]["start_frame"] == 2
+    assert saved["segments"][0]["end_frame"] == 5
+    assert saved["segments"][0]["core_interval"] == {"start_frame": 3, "end_frame": 4}
+    page.reload()
+    expect(page.locator("#skill-interval-count")).to_have_text("1")
+    page.locator("#skill-interval-list tr").click()
+    page.locator("#edit").click()
+    expect(page.locator("#use-core")).to_be_checked()
+    expect(page.locator("#core-start-frame")).to_have_value("3")
+    page.locator("#label").select_option("execute_demo_skill")
+    page.locator("#commit").click()
+    expect(page.locator("#fit-run")).to_be_disabled()
+    expect(page.locator("#fit-selection-hint")).to_contain_text("DemoSkill")
+    page.locator("#save").click()
+    expect(page.locator("#save-status")).to_have_text("已保存")
+    assert (
+        json.loads(destination.read_text())["segments"][0]["label"]
+        == "execute_demo_skill"
+    )
 
 
 def test_pause_marks_visible_frame_and_latest_seek_wins(

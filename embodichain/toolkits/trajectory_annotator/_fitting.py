@@ -35,6 +35,7 @@ import numpy as np
 from embodichain.toolkits.skill_fitting._pipeline import FitInputs
 from ._frames import FramePreview
 from ._models import ConflictError
+from ._skills import RECONSTRUCTION_SKILLS, _canonical_skill_id
 
 __all__ = []
 
@@ -127,8 +128,13 @@ class FitSession:
         matches = [s for s in document["segments"] if s["id"] == payload["segment_id"]]
         if len(matches) != 1:
             raise ConflictError("请先提交并保存选中的原子技能区间。")
-        if payload["skill_id"] not in ("pick_up", "slide", "twist", "hand_over"):
+        if payload["skill_id"] not in RECONSTRUCTION_SKILLS:
             raise ValueError("仅支持 pick_up、slide、twist、hand_over。")
+        annotated_skill = _canonical_skill_id(matches[0]["label"])
+        if annotated_skill is not None and annotated_skill != payload["skill_id"]:
+            raise ValueError(
+                "拟合技能必须与选中标注一致；DemoSkill 等技能目前仅支持标注。"
+            )
         raw = payload["inputs"]
         if not isinstance(raw, dict) or set(raw) - set(self.defaults):
             raise ValueError("拟合输入字段不符合格式。")
@@ -138,7 +144,8 @@ class FitSession:
         with self._lock:
             if self._closed or self._state["phase"] == "running":
                 raise ConflictError("已有拟合正在运行，请等待当前任务完成。")
-            first, last = matches[0]["start_frame"], matches[0]["end_frame"]
+            core = matches[0].get("core_interval", matches[0])
+            first, last = core["start_frame"], core["end_frame"]
             clock = interval(first, last)
             if self._directory is None:
                 self._directory = tempfile.TemporaryDirectory(
@@ -208,6 +215,10 @@ class FitSession:
                     ).hexdigest(),
                     annotation_digest_kind="canonical_document_json",
                     annotation_segment=self._selection,
+                    annotation_video_interval={
+                        key: self._selection[key]
+                        for key in ("start_frame", "end_frame")
+                    },
                 ),
                 progress=self._progress,
             )

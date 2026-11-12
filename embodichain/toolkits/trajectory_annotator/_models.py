@@ -50,7 +50,7 @@ def validate_skill_intervals(value: object, frame_count: int) -> list[dict[str, 
             raise ValueError(
                 f"第 {position} 段缺少 id、label、start_frame 或 end_frame。"
             )
-        if item.keys() - required - {"note"}:
+        if item.keys() - required - {"note", "core_interval"}:
             raise ValueError(f"第 {position} 段包含未知字段。")
         identifier, label, note = item["id"], item["label"], item.get("note", "")
         if (
@@ -82,6 +82,19 @@ def validate_skill_intervals(value: object, frame_count: int) -> list[dict[str, 
                 note=note,
             )
         )
+        if "core_interval" in item:
+            core = item["core_interval"]
+            if (
+                not isinstance(core, dict)
+                or core.keys() != {"start_frame", "end_frame"}
+                or type(core["start_frame"]) is not int
+                or type(core["end_frame"]) is not int
+                or not start <= core["start_frame"] <= core["end_frame"] <= end
+            ):
+                raise ValueError(
+                    f"第 {position} 段的拟合核心区间必须完整包含在标注区间内。"
+                )
+            result[-1]["core_interval"] = dict(core)
     result.sort(
         key=lambda skill_interval: (
             skill_interval["start_frame"],

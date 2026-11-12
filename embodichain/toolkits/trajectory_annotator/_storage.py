@@ -110,12 +110,12 @@ class AnnotationStore:
                     raise ValueError("标注文件字段不符合格式，不能覆盖原文件。")
                 if (
                     type(version) is not int
-                    or version not in {1, 2}
+                    or version not in {1, 2, 3}
                     or type(loaded["frame_index_base"]) is not int
                     or loaded["frame_index_base"] != 0
                     or loaded["interval"] != "closed"
                 ):
-                    raise ValueError("只支持 schema_version=1/2、0 基帧号和闭区间。")
+                    raise ValueError("只支持 schema_version=1/2/3、0 基帧号和闭区间。")
                 original = loaded[source_key]
                 if version == 1:
                     matching = (
@@ -154,6 +154,7 @@ class AnnotationStore:
                 if type(revision) is not int or revision < 0:
                     raise ValueError("标注 revision 必须为非负整数。")
                 document["revision"] = revision
+                document["schema_version"] = max(2, version)
                 document["segments"] = validate_skill_intervals(
                     loaded["segments"], info.frame_count
                 )
@@ -206,6 +207,8 @@ class AnnotationStore:
             candidate["segments"] = validate_skill_intervals(
                 skill_intervals, candidate["source"]["frame_count"]
             )
+            if any("core_interval" in segment for segment in candidate["segments"]):
+                candidate["schema_version"] = 3
             candidate["revision"] += 1
             encoded = (
                 json.dumps(candidate, ensure_ascii=False, indent=2) + "\n"

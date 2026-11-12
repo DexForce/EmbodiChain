@@ -128,8 +128,16 @@ main { max-width:1680px; padding:22px 28px 12px; margin:auto; }
 @media (max-width:700px) { .fit-grid { grid-template-columns:1fr; }.fit-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }.fit-target,.fit-result-heading { align-items:flex-start; flex-direction:column; }.fit-inputs summary .muted { display:block; margin-left:15px; } }
 .editor-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(48px,.8fr); gap:10px; padding:0 17px; }
 .editor-grid label,.note-field { display:flex; flex-direction:column; gap:6px; font-size:11px; color:var(--muted); }
-.editor-grid input { width:100%; }
+.editor-grid input,.editor-grid select { width:100%; }
 .label-field { grid-column:1/-1; }
+.core-editor { margin:12px 17px 0; font-size:11px; }
+.core-toggle { display:flex; align-items:center; gap:7px; color:var(--muted); }
+.core-toggle input { margin:0; accent-color:var(--accent); }
+.core-editor p { margin:7px 0; line-height:1.6; }
+.core-fields { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.core-fields label { display:flex; flex-direction:column; gap:6px; color:var(--muted); }
+.core-fields input { width:100%; }
+.fitting-card > .fit-footnote { margin:0 17px 12px; }
 .duration-field { display:flex; flex-direction:column; gap:7px; font-size:11px; color:var(--muted); }
 .duration-field strong { font-size:20px; color:var(--accent); font-variant-numeric:tabular-nums; font-weight:500; }
 .duration-field small { font-size:11px; }

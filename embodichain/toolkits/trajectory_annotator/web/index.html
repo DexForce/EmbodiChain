@@ -53,6 +53,7 @@
         <section class="card fitting-card" aria-label="原子技能拟合与轨迹回填">
           <div class="card-heading"><div><h2>原子技能拟合与轨迹回填</h2><p class="muted">选中一段已提交的标注，使用关节数据辨识参数并重建。</p></div><span id="fit-state" class="status-pill">未开始</span></div>
           <div class="fit-target"><span id="fit-selection">请在右侧选择一段已标注区间</span><button id="fit-run" class="primary" disabled>拟合并回填选中区间</button></div>
+          <p id="fit-selection-hint" class="fit-footnote"></p>
           <details id="fit-inputs" class="fit-inputs" open><summary>关节记录与机器人配置 <span class="muted">本机文件路径 · 可从启动参数预填</span></summary>
             <div class="fit-grid">
               <label>关节记录路径<input id="fit-joints" type="text" placeholder="/data/joints.npz、episode.hdf5 或 replay.pt" autocomplete="off"></label>
@@ -101,10 +102,18 @@
         <section class="card skill-editor-card" aria-label="原子技能区间编辑">
           <div class="card-heading"><h2 id="editor-title">新建原子技能区间</h2><span id="draft-status" class="muted">在起点按 I 开始</span></div>
           <div class="editor-grid">
-            <label class="label-field">原子技能名称<input id="label" type="text" list="label-suggestions" maxlength="512" placeholder="例如：翻转包裹" autocomplete="off"><datalist id="label-suggestions"></datalist></label>
+            <label class="label-field">原子技能<select id="label"><option value="">请选择原子技能</option></select></label>
             <label>起点帧<input id="start-frame" type="number" min="0" step="1" placeholder="—" disabled></label>
             <label>终点帧<input id="end-frame" type="number" min="0" step="1" placeholder="—" disabled></label>
             <div class="duration-field"><span>区间长度</span><strong id="skill-interval-length">— <small>帧</small></strong></div>
+          </div>
+          <div class="core-editor">
+            <label class="core-toggle"><input id="use-core" type="checkbox" disabled>单独设置拟合核心区间</label>
+            <p class="muted">标注范围可包含前后过渡动作。仅核心区间参与拟合，其余采样保留；未设置时使用整个标注区间。不规则片段可选择 DemoSkill。</p>
+            <div id="core-fields" class="core-fields" hidden>
+              <label>核心起点帧<input id="core-start-frame" type="number" min="0" step="1" disabled></label>
+              <label>核心终点帧<input id="core-end-frame" type="number" min="0" step="1" disabled></label>
+            </div>
           </div>
           <label class="note-field">备注 <span class="muted">可选</span><input id="note" type="text" maxlength="8192" placeholder="添加标注说明" disabled></label>
           <p id="draft-error" class="draft-error" role="status"></p>
@@ -116,6 +125,6 @@
     <footer class="app-footer"><span id="message" role="status" aria-live="polite">正在连接本地标注服务…</span><span>Space 播放 · I / O 标记 · Enter 提交 · ? 帮助</span></footer>
   </main>
 
-  <dialog id="help-dialog" aria-labelledby="help-title"><div class="dialog-heading"><h2 id="help-title">键盘快捷键</h2><button id="close-help" class="icon-button" aria-label="关闭帮助">×</button></div><dl class="shortcut-list"><dt><kbd>Space</kbd></dt><dd>播放 / 暂停</dd><dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>前一帧 / 后一帧；Shift 跨 10 帧</dd><dt><kbd>Home</kbd> <kbd>End</kbd></dt><dd>首帧 / 末帧</dd><dt><kbd>G</kbd></dt><dd>输入帧号跳转</dd><dt><kbd>I</kbd> <kbd>O</kbd></dt><dd>设置当前显示帧为起点 / 终点</dd><dt><kbd>L</kbd></dt><dd>输入原子技能名称</dd><dt><kbd>Enter</kbd> <kbd>Esc</kbd></dt><dd>提交 / 取消草稿</dd><dt><kbd>E</kbd></dt><dd>编辑选中的标注</dd><dt><kbd>Delete</kbd></dt><dd>删除选中的标注（Backspace 也可）</dd><dt><kbd>Ctrl/Cmd Z</kbd></dt><dd>撤销；加 Shift 重做</dd><dt><kbd>Ctrl/Cmd S</kbd></dt><dd>保存已完成标注</dd></dl><p class="muted">在文本框中输入时，保留文字编辑快捷键。名称输入后按 Enter 返回视频区，再按 Enter 提交区间。起止帧都包含在标注中。</p></dialog>
+  <dialog id="help-dialog" aria-labelledby="help-title"><div class="dialog-heading"><h2 id="help-title">键盘快捷键</h2><button id="close-help" class="icon-button" aria-label="关闭帮助">×</button></div><dl class="shortcut-list"><dt><kbd>Space</kbd></dt><dd>播放 / 暂停</dd><dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>前一帧 / 后一帧；Shift 跨 10 帧</dd><dt><kbd>Home</kbd> <kbd>End</kbd></dt><dd>首帧 / 末帧</dd><dt><kbd>G</kbd></dt><dd>输入帧号跳转</dd><dt><kbd>I</kbd> <kbd>O</kbd></dt><dd>设置当前显示帧为起点 / 终点</dd><dt><kbd>L</kbd></dt><dd>选择原子技能</dd><dt><kbd>Enter</kbd> <kbd>Esc</kbd></dt><dd>提交 / 取消草稿</dd><dt><kbd>E</kbd></dt><dd>编辑选中的标注</dd><dt><kbd>Delete</kbd></dt><dd>删除选中的标注（Backspace 也可）</dd><dt><kbd>Ctrl/Cmd Z</kbd></dt><dd>撤销；加 Shift 重做</dd><dt><kbd>Ctrl/Cmd S</kbd></dt><dd>保存已完成标注</dd></dl><p class="muted">在文本框中输入时，保留文字编辑快捷键。选择技能后按 Enter 返回视频区，再按 Enter 提交区间。起止帧都包含在标注中。</p></dialog>
 </body>
 </html>

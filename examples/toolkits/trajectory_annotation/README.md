@@ -47,7 +47,7 @@ embodichain annotate-trajectory \
   --annotations outputs/trajectory_annotation/episode.cam_high.segments.json
 ```
 
-操作流程：←/→ 逐帧，Space 播放/暂停，I 标起点，O 标终点，填写原子技能名称后 Enter 提交。
+操作流程：←/→ 逐帧，Space 播放/暂停，I 标起点，O 标终点，从下拉菜单选择原子技能后提交。
 右侧显示全部区间，点击帧号跳转，选中后 Delete 删除，Ctrl+Z 撤销，Ctrl+S 保存。
 帧号从 0 开始，起止均包含；例如 `[100, 150]` 包含 51 帧。HDF5 的时间显示按 FPS 推算。
 
@@ -69,11 +69,13 @@ embodichain run-example toolkits/trajectory_annotation \
   --output-dir /tmp/pickup-labels
 ```
 
-在网页中用 **I / O** 选中完整 Pickup，命名并提交，选择拟合技能 **Pickup**，点击
+在网页中用 **I / O** 标注完整 Pickup，从技能下拉菜单选择 **Pickup** 并提交，拟合面板自动选择同一技能，点击
 **“拟合并回填选中区间”**。会显示通过/拒绝状态、参数和误差，以及与视频联动的关节曲线、
 可旋转的 FK 骨架和 TCP 路径；可下载包含完整关节轨迹的 NPZ。此示例辨识出的 `lift_height` 约为 **0.16 m**。
 
 同一面板也支持 Slide、Twist、HandOver。任意真实记录需提供自己的机器人配置，示例 UR5 配置不能直接用于 Piper。
+区间边界较宽时，可勾选“单独设置拟合核心区间”，只重建内部完整技能，保留前后过渡采样；
+不符合现有参数模型的片段可选择 **DemoSkill** 保留为示教标注，当前不执行参数拟合。
 `--joints`、`--robot-profile`、`--qpos-semantics`、`--time-offset` 可省略后在网页中填写；
 `--qpos-key`、`--timestamps-key`、`--joint-dt`、`--env-index`、`--phase-hints`、`--fit-config` 也可预填高级设置。
 默认 HDF5 标注流程保持可独立使用。

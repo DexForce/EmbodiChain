@@ -38,6 +38,16 @@ from embodichain.lab.sim.motion.planners import (
 )
 
 
+def test_annotation_choices_cover_builtin_skills() -> None:
+    """Annotation-only users can choose every built-in skill, including DemoSkill."""
+    from embodichain.lab.sim.atomic_skills.primitives import BUILTIN_SKILL_TYPES
+    from embodichain.toolkits.trajectory_annotator._skills import SKILL_CHOICES
+
+    assert {identifier for identifier, _ in SKILL_CHOICES} == {
+        skill.skill_id for skill in BUILTIN_SKILL_TYPES
+    }
+
+
 class CartesianRobot:
     """Six independent pose coordinates and one hand, with analytic FK/IK."""
 

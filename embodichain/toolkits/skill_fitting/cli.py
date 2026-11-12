@@ -83,6 +83,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     args = parser.parse_args(argv)
     from embodichain.data_pipeline.skill_fitting import file_digest, save_skill_fit
     from embodichain.toolkits.trajectory_annotator._storage import AnnotationStore
+    from embodichain.toolkits.trajectory_annotator._skills import _canonical_skill_id
     from ._pipeline import FitInputs, fit_recording
 
     try:
@@ -111,7 +112,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             raise ValueError("Output must differ from every input file.")
         try:
             info = source.prepare(threading.Event(), lambda **_: None)
-            revision, selected_id = None, None
+            revision, selected_id, selected = None, None, None
             if args.annotations:
                 store = AnnotationStore(args.annotations.resolve(), 8 * 1024**2)
                 store.initialize(info)
@@ -124,7 +125,8 @@ def main(argv: Sequence[str] | None = None) -> None:
                         "--segment-id must select exactly one existing annotation."
                     )
                 selected = matches[0]
-                first, last = selected["start_frame"], selected["end_frame"]
+                core = selected.get("core_interval", selected)
+                first, last = core["start_frame"], core["end_frame"]
                 revision, selected_id = document["revision"], selected["id"]
             else:
                 first = 0 if args.start_frame is None else args.start_frame
@@ -172,6 +174,11 @@ def main(argv: Sequence[str] | None = None) -> None:
         skill = {"pickup": "pick_up", "handover": "hand_over"}.get(
             args.skill, args.skill
         )
+        annotated_skill = (
+            None if selected is None else _canonical_skill_id(selected["label"])
+        )
+        if annotated_skill is not None and annotated_skill != skill:
+            raise ValueError("The fitted skill must match the selected annotation.")
         arrays, report = fit_recording(
             inputs,
             skill_id=skill,
@@ -185,6 +192,12 @@ def main(argv: Sequence[str] | None = None) -> None:
                 annotation_revision=revision,
                 annotation_id=selected_id,
                 annotation_sha256=annotation_digest,
+                annotation_segment=selected,
+                annotation_video_interval=(
+                    None
+                    if selected is None
+                    else {key: selected[key] for key in ("start_frame", "end_frame")}
+                ),
             ),
         )
         source.check_unchanged()

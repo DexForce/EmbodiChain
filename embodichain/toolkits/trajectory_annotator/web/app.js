@@ -167,9 +167,11 @@ function play() {
 
 function skillIntervalError(draft) {
   if (!draft) return "";
-  if (!draft.label.trim()) return "请输入原子技能名称。";
+  if (!draft.label.trim()) return "请选择原子技能。";
   if (!Number.isInteger(draft.start_frame) || !Number.isInteger(draft.end_frame)) return "请设置整数起点和终点。";
   if (!(0 <= draft.start_frame && draft.start_frame <= draft.end_frame && draft.end_frame <= maximum())) return `起止帧需满足 0 ≤ 起点 ≤ 终点 ≤ ${maximum()}。`;
+  const core = draft.core_interval;
+  if (core && (!Number.isInteger(core.start_frame) || !Number.isInteger(core.end_frame) || !(draft.start_frame <= core.start_frame && core.start_frame <= core.end_frame && core.end_frame <= draft.end_frame))) return "拟合核心区间必须完整包含在标注区间内。";
   const conflict = state.skillIntervals.find((skillInterval) => skillInterval.id !== draft.id && draft.start_frame <= skillInterval.end_frame && skillInterval.start_frame <= draft.end_frame);
   return conflict ? `与“${conflict.label}” [${conflict.start_frame}, ${conflict.end_frame}] 重叠。` : "";
 }
@@ -182,11 +184,18 @@ function renderDraft(syncInputs = true) {
   $("end-frame").disabled = !draft;
   $("note").disabled = !draft;
   $("cancel-draft").disabled = !draft;
+  $("use-core").disabled = !draft || !Number.isInteger(draft.end_frame);
+  $("use-core").checked = !!draft?.core_interval;
+  $("core-fields").hidden = !draft?.core_interval;
+  $("core-start-frame").disabled = !draft?.core_interval;
+  $("core-end-frame").disabled = !draft?.core_interval;
   if (syncInputs) {
     $("label").value = draft?.label ?? state.lastLabel;
     $("start-frame").value = draft?.start_frame ?? "";
     $("end-frame").value = draft?.end_frame ?? "";
     $("note").value = draft?.note ?? "";
+    $("core-start-frame").value = draft?.core_interval?.start_frame ?? "";
+    $("core-end-frame").value = draft?.core_interval?.end_frame ?? "";
   }
   const error = skillIntervalError(draft);
   $("draft-error").textContent = error;
@@ -300,7 +309,7 @@ function renderSelection() {
 function renderSkillIntervals() {
   $("skill-interval-list").replaceChildren();
   $("timeline-skill-intervals").replaceChildren();
-  $("label-suggestions").replaceChildren();
+  renderSkillChoices();
   state.skillIntervals.forEach((skillInterval, index) => {
     const row = document.createElement("tr");
     row.className = `annotation-row${state.selected === skillInterval.id ? " selected" : ""}`;
@@ -340,9 +349,6 @@ function renderSkillIntervals() {
     block.title = `${skillInterval.label} [${skillInterval.start_frame}, ${skillInterval.end_frame}]`;
     $("timeline-skill-intervals").append(block);
   });
-  [...new Set(state.skillIntervals.map((skillInterval) => skillInterval.label))].forEach((label) => {
-    const option = document.createElement("option"); option.value = label; $("label-suggestions").append(option);
-  });
   $("empty-list").hidden = state.skillIntervals.length > 0;
   $("skill-interval-count").textContent = state.skillIntervals.length;
   const count = state.skillIntervals.reduce((total, skillInterval) => total + skillInterval.end_frame - skillInterval.start_frame + 1, 0);
@@ -351,6 +357,32 @@ function renderSkillIntervals() {
   $("coverage-percent").textContent = `${percent.toFixed(1)}%`;
   $("coverage-bar").style.width = `${percent}%`;
   renderSelection();
+}
+
+function renderSkillChoices() {
+  const picker = $("label");
+  const value = state.draft?.label ?? state.lastLabel;
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "请选择原子技能";
+  const options = state.project.skills.map((skill) => {
+    const option = document.createElement("option");
+    option.value = skill.id;
+    option.textContent = skill.name;
+    return option;
+  });
+  const ids = new Set(state.project.skills.map((skill) => skill.id));
+  // Keep historical names selectable when reviewing old files. New annotations
+  // use canonical choices; no arbitrary text entry is needed.
+  for (const label of new Set([...state.skillIntervals.map((item) => item.label), value])) {
+    if (!label || ids.has(label)) continue;
+    const option = document.createElement("option");
+    option.value = label;
+    option.textContent = `${label}（已有标注）`;
+    options.push(option);
+  }
+  picker.replaceChildren(placeholder, ...options);
+  picker.value = value;
 }
 
 function renderSave() {
@@ -385,6 +417,7 @@ async function save() {
       }));
       const document = await response.json();
       state.project.document.revision = document.revision;
+      state.project.document.schema_version = document.schema_version;
       state.savedVersion = version;
       state.persisted = true;
       message(state.draft ? "已保存完成标注；当前草稿尚未提交。" : `已保存 ${skillIntervals.length} 段标注。`);
@@ -402,6 +435,7 @@ async function save() {
 function exportJson() {
   if (!state.project) return;
   const document = { ...state.project.document, segments: clone(state.skillIntervals) };
+  if (document.segments.some((segment) => segment.core_interval)) document.schema_version = 3;
   const blob = new Blob([`${JSON.stringify(document, null, 2)}\n`], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const link = window.document.createElement("a");
@@ -462,6 +496,18 @@ function bindControls() {
     });
     $(id).addEventListener("keydown", (event) => {
       if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); $("video-stage").focus({ preventScroll: true }); }
+    });
+  }
+  $("use-core").onchange = () => {
+    if (!state.draft) return;
+    if ($("use-core").checked) state.draft.core_interval = { start_frame: state.draft.start_frame, end_frame: state.draft.end_frame };
+    else delete state.draft.core_interval;
+    renderDraft();
+  };
+  for (const [id, key] of [["core-start-frame", "start_frame"], ["core-end-frame", "end_frame"]]) {
+    $(id).addEventListener("input", () => {
+      if (state.draft?.core_interval) state.draft.core_interval[key] = $(id).value === "" ? null : Number($(id).value);
+      renderDraft(false);
     });
   }
   $("zoom-in").onclick = () => zoom(state.zoom * 2);
@@ -593,7 +639,7 @@ async function initialize() {
       return tick;
     }));
     fittingPanel = createFittingPanel({
-      context: () => ({ selection: selected(), revision: state.project.document.revision, dirty: dirty(), draft: state.draft, token: state.token }),
+      context: () => ({ selection: selected(), skills: state.project.skills, revision: state.project.document.revision, dirty: dirty(), draft: state.draft, token: state.token }),
       saveAnnotations: async () => {
         if (state.draft) throw new Error("请先提交或取消当前标注草稿。");
         while (state.saving) await new Promise((resolve) => setTimeout(resolve, 50));
@@ -610,7 +656,7 @@ async function initialize() {
     });
     fittingPanel.initialize();
     bindControls(); zoom(1); renderSkillIntervals(); renderDraft(); requestFrame(0);
-    message("已就绪。定位起点按 I，终点按 O，填写名称后按 Enter 提交。 ");
+    message("已就绪。定位起点按 I，终点按 O，选择原子技能后提交区间。 ");
     $("video-stage").focus({ preventScroll: true });
   } catch (error) {
     $("init-title").textContent = "连接标注服务失败";

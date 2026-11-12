@@ -44,6 +44,17 @@ of video time zero. The joint sampling clock is never inferred from video FPS.
 Without an annotation file, `--start-frame` and `--end-frame` select an interval;
 their defaults cover the full video.
 
+An annotation may retain a broad real-motion interval and optionally declare
+`core_interval: {"start_frame": 120, "end_frame": 185}` inside it. Both endpoints
+are inclusive absolute video frames. The CLI and website reconstruct only this
+core and preserve all surrounding samples; the report retains both the outer
+annotation and the actual fitted video interval. The core must still contain a
+complete supported skill. Schema 3 stores this optional field; legacy schema 1/2
+files without it remain supported. The annotation menu includes all built-in
+skills, including DemoSkill; parameter reconstruction remains limited to the four
+skills above. A DemoSkill label preserves intent without generating an executable
+demonstration asset or substituting a different fitting model.
+
 For existing HDF5 camera annotations, replace `--video` with `--hdf5` and
 optionally select `--image-key` / `--fps`. This reuses the annotator's source
 identity and explicitly identifies FPS-derived timing.

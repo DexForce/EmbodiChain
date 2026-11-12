@@ -43,6 +43,8 @@ export function createFittingPanel({ context, saveAnnotations, seekTime }) {
   const camera = { yaw: -0.8, pitch: 0.5, zoom: 1, center: [0, 0, 0], radius: 1 };
   const series = () => state.data?.report.accepted ? ["original", "native", "patched"] : ["original", "native", "patched", "proposed"];
   const stale = () => !!state.job && (state.job.stale || context().dirty || state.job.revision !== context().revision);
+  const key = (value) => value.toLowerCase().replace(/[_\s-]/g, "");
+  const selectedSkill = () => context().skills.find((skill) => context().selection && [key(skill.id), key(skill.name)].includes(key(context().selection.label)));
 
   function notify(text, kind = "") {
     $("fit-message").textContent = text;
@@ -51,8 +53,15 @@ export function createFittingPanel({ context, saveAnnotations, seekTime }) {
 
   function selectionChanged() {
     const current = context();
-    $("fit-selection").textContent = current.selection ? `${current.selection.label} · [${current.selection.start_frame}, ${current.selection.end_frame}] 帧` : "请在右侧选择一段已标注区间";
-    $("fit-run").disabled = !current.selection || !!current.draft || state.starting || state.job?.phase === "running";
+    const skill = selectedSkill();
+    const core = current.selection?.core_interval;
+    $("fit-selection").textContent = current.selection ? `${current.selection.label} · 标注 [${current.selection.start_frame}, ${current.selection.end_frame}] 帧${core ? ` · 核心 [${core.start_frame}, ${core.end_frame}]` : ""}` : "请在右侧选择一段已标注区间";
+    $("fit-selection-hint").textContent = skill && !skill.can_fit ? `${skill.name} 可保存为示教标注；当前未提供该技能的参数重建。` : core ? "仅拟合核心区间，保留标注内前后过渡动作的原始采样。" : "标注包含额外过渡动作时，可在编辑区间中单独设置拟合核心范围。";
+    $("fit-skill").disabled = !!skill;
+    if (skill?.can_fit) $("fit-skill").value = skill.id;
+    if (skill && !skill.can_fit) $("fit-skill").value = "";
+    if (!skill && !$("fit-skill").value) $("fit-skill").value = "pick_up";
+    $("fit-run").disabled = !current.selection || !!current.draft || (!!skill && !skill.can_fit) || state.starting || state.job?.phase === "running";
     $("fit-run").textContent = state.starting || state.job?.phase === "running" ? "正在拟合…" : "拟合并回填选中区间";
     if (!state.job) return;
     const outdated = stale();
@@ -82,6 +91,7 @@ export function createFittingPanel({ context, saveAnnotations, seekTime }) {
     state.starting = true;
     selectionChanged();
     try {
+      if (selectedSkill() && !selectedSkill().can_fit) throw new Error("当前技能支持标注，尚不支持参数重建。");
       const inputs = readInputs();
       const selection = structuredClone(context().selection);
       await saveAnnotations();
@@ -137,7 +147,8 @@ export function createFittingPanel({ context, saveAnnotations, seekTime }) {
   function showResult() {
     const { report } = state.data;
     const selection = state.job.selection;
-    $("fit-result-title").textContent = `${selection.label} · ${report.skill_id} · [${selection.start_frame}, ${selection.end_frame}]`;
+    const core = selection.core_interval || selection;
+    $("fit-result-title").textContent = `${selection.label} · ${report.skill_id} · 拟合 [${core.start_frame}, ${core.end_frame}]`;
     $("fit-result").hidden = false;
     $("fit-inputs").open = false;
     $("fit-proposed-legend").hidden = report.accepted;

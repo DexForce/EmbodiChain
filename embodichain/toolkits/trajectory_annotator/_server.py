@@ -39,6 +39,7 @@ from ._models import ConflictError
 from ._storage import AnnotationStore
 from ._frames import SupersededError, FrameWorker
 from ._fitting import FitSession
+from ._skills import RECONSTRUCTION_SKILLS, SKILL_CHOICES
 from .frames import FrameSource
 
 __all__ = ["create_app"]
@@ -133,6 +134,14 @@ def create_app(
             "annotation_path": str(store.path),
             "session_token": token,
             "autosave_ms": cfg.autosave_ms,
+            "skills": [
+                dict(
+                    id=identifier,
+                    name=name,
+                    can_fit=identifier in RECONSTRUCTION_SKILLS,
+                )
+                for identifier, name in SKILL_CHOICES
+            ],
         }
 
     @app.get("/api/frames/{index}")

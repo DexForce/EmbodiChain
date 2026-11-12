@@ -158,7 +158,11 @@ Video-selected reconstruction enters through `embodichain fit-trajectory`
 fitting panel (`toolkits/trajectory_annotator/_fitting.py`). Both hosts reuse
 `toolkits/skill_fitting/_pipeline.py`; the web host retains one background job
 and result, keeps decoding on its existing owner, and invalidates results after
-annotation revisions change. Its bounded joint/FK preview follows video time;
+annotation revisions change. Annotation choices cover all built-in skills without
+importing simulation; only supported reconstruction types enter fitting. A saved
+optional core interval separates loose annotation boundaries from reconstruction,
+preserving surrounding motion; DemoSkill labels do not create executable assets.
+Its bounded joint/FK preview follows video time;
 the downloadable NPZ retains full samples. See the
 [web example](../../../examples/toolkits/trajectory_annotation/README.md).
 `atomic_skills/fitting.py` identifies explicit

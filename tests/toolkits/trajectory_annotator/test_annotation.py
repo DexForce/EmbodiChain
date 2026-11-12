@@ -78,6 +78,10 @@ def test_inclusive_ranges_allow_singletons_adjacency_and_gaps() -> None:
         [skill_interval(1.5, 3)],
         [skill_interval(0, 1), skill_interval(4, 5)],
         [{**skill_interval(), "label": " "}],
+        [{**skill_interval(), "core_interval": {"start_frame": 1, "end_frame": 3}}],
+        [{**skill_interval(), "core_interval": {"start_frame": 3, "end_frame": 5}}],
+        [{**skill_interval(), "core_interval": {"start_frame": 4, "end_frame": 3}}],
+        [{**skill_interval(), "core_interval": {"start_frame": True, "end_frame": 3}}],
     ],
 )
 def test_invalid_intervals_cannot_be_saved(skill_intervals: object) -> None:
@@ -180,9 +184,12 @@ def test_atomic_save_resume_conflict_and_write_failure(
     path = tmp_path / "nested" / "labels.json"
     store = AnnotationStore(path, 1024**2)
     store.initialize(source)
-    saved = store.save([skill_interval()], 0)
+    selected = {**skill_interval(), "core_interval": {"start_frame": 2, "end_frame": 3}}
+    saved = store.save([selected], 0)
     original = path.read_bytes()
     assert saved["revision"] == 1
+    assert saved["schema_version"] == 3
+    assert saved["segments"][0]["core_interval"] == {"start_frame": 2, "end_frame": 3}
     assert json.loads(original)["segments"][0]["label"] == "翻转包裹"
     restored = AnnotationStore(path, 1024**2)
     restored.initialize(source)
@@ -368,7 +375,11 @@ def test_web_fitting_vfr_clock_concurrency_export_and_stale_revisions(
         headers = {
             "X-Annotation-Token": client.get("/api/project").json()["session_token"]
         }
-        selected = skill_interval(5, 20)
+        selected = {
+            **skill_interval(0, 30),
+            "label": "pick_up",
+            "core_interval": {"start_frame": 5, "end_frame": 20},
+        }
         saved = client.put(
             "/api/annotations",
             json=dict(segments=[selected], expected_revision=0),
@@ -386,6 +397,14 @@ def test_web_fitting_vfr_clock_concurrency_export_and_stale_revisions(
             ),
         )
         assert client.post("/api/fitting/jobs", json=payload).status_code == 403
+        assert (
+            client.post(
+                "/api/fitting/jobs",
+                json={**payload, "skill_id": "twist"},
+                headers=headers,
+            ).status_code
+            == 422
+        )
         assert (
             client.post(
                 "/api/fitting/jobs",
@@ -426,6 +445,14 @@ def test_web_fitting_vfr_clock_concurrency_export_and_stale_revisions(
         call = fitting_oracle["calls"][0]
         np.testing.assert_allclose(call["frame_times"], [6 / 30, 24 / 30])
         assert call["frame_durations"][-1] == pytest.approx(1 / 30)
+        assert call["provenance"]["annotation_video_interval"] == {
+            "start_frame": 0,
+            "end_frame": 30,
+        }
+        assert call["provenance"]["annotation_segment"]["core_interval"] == {
+            "start_frame": 5,
+            "end_frame": 20,
+        }
         assert client.get("/api/frame-index?time_seconds=0.2").json() == {"index": 5}
         assert client.get("/api/frame-index?time_seconds=nan").status_code == 422
         preview = client.get(f"/api/fitting/jobs/{job}/preview").json()
@@ -454,3 +481,64 @@ def test_web_fitting_vfr_clock_concurrency_export_and_stale_revisions(
         assert client.get("/api/fitting").json()["stale"]
         for endpoint in ("bundle", "preview"):
             assert client.get(f"/api/fitting/jobs/{job}/{endpoint}").status_code == 409
+
+
+def test_cli_fits_saved_core_and_retains_outer_annotation(
+    make_video: Callable[..., Path], tmp_path: Path, fitting_oracle: dict[str, object]
+) -> None:
+    """CLI and web honor the same core, preserving the broad real-motion label."""
+    import numpy as np
+    from embodichain.toolkits.skill_fitting.cli import main
+    from embodichain.toolkits.trajectory_annotator.video import VideoFrameSource
+    from embodichain.data_pipeline.skill_fitting import load_skill_fit
+
+    video = make_video(variable=True, start=90)
+    annotations = tmp_path / "labels.json"
+    source = VideoFrameSource(video)
+    try:
+        info = source.prepare(threading.Event(), lambda **_: None)
+        store = AnnotationStore(annotations, 1024**2)
+        store.initialize(info)
+        store.save(
+            [
+                {
+                    **skill_interval(0, 30),
+                    "label": "Pickup",
+                    "core_interval": {"start_frame": 5, "end_frame": 20},
+                }
+            ],
+            0,
+        )
+    finally:
+        source.close()
+    output = tmp_path / "fit.npz"
+    main(
+        [
+            "--video",
+            str(video),
+            "--joints",
+            "known.npz",
+            "--robot-profile",
+            "robot.json",
+            "--annotations",
+            str(annotations),
+            "--segment-id",
+            "flip",
+            "--skill",
+            "pick_up",
+            "--qpos-semantics",
+            "measured_state",
+            "--time-offset",
+            "0",
+            "--output",
+            str(output),
+        ]
+    )
+    call = fitting_oracle["calls"][0]
+    np.testing.assert_allclose(call["frame_times"][[0, -1]], [6 / 30, 24 / 30])
+    _, report = load_skill_fit(output)
+    assert report["annotation_video_interval"] == {"start_frame": 0, "end_frame": 30}
+    assert report["annotation_segment"]["core_interval"] == {
+        "start_frame": 5,
+        "end_frame": 20,
+    }
