@@ -648,15 +648,12 @@ def config_to_cfg(
     """
 
     from embodichain.lab.sim.cfg import (
-        DenoisingCfg,
         RigidObjectCfg,
         VisualObjectCfg,
         MeshCfg,
         RigidObjectGroupCfg,
         ArticulationCfg,
         LightCfg,
-        DLSSCfg,
-        NRDCfg,
         RenderCfg,
         physics_cfg_for_backend,
     )
@@ -925,12 +922,6 @@ def config_to_cfg(
     env_cfg.ground_plane_visible = ground_plane_visible
 
     render_config = deepcopy(config.get("render_cfg", {}))
-    if isinstance(render_config.get("denoising"), dict):
-        render_config["denoising"] = DenoisingCfg(**render_config["denoising"])
-    if isinstance(render_config.get("dlss"), dict):
-        render_config["dlss"] = DLSSCfg(**render_config["dlss"])
-    if isinstance(render_config.get("nrd"), dict):
-        render_config["nrd"] = NRDCfg(**render_config["nrd"])
     if "renderer" in config:
         # Keep the existing flat renderer option as the command-line override.
         render_config["renderer"] = config["renderer"]
@@ -959,7 +950,7 @@ def config_to_cfg(
         enable_entity_gizmo=config.get("enable_entity_gizmo", True),
         robot_ik_gizmo=config.get("robot_ik_gizmo", {}),
         device=config.get("device"),
-        render_cfg=RenderCfg(**render_config),
+        render_cfg=RenderCfg.from_dict(render_config),
         gpu_id=config.get("gpu_id", 0),
         arena_space=config.get("arena_space", 5.0),
         physics_cfg=physics_cfg,

@@ -709,7 +709,10 @@ def _mesh_tensor(
     getter = getattr(entity, getter_name, None)
     if not callable(getter):
         raise TypeError(f"Simulation rigid object must provide {getter_name}().")
-    if vertices:
+    semantic_getter = getattr(entity, "get_semantic_mesh", None)
+    if callable(semantic_getter):
+        value = semantic_getter([mesh_env_id])[0 if vertices else 1]
+    elif vertices:
         value = getter(env_ids=[mesh_env_id], scale=True)
     else:
         value = getter(env_ids=[mesh_env_id])

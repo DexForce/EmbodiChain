@@ -71,6 +71,46 @@ tensor batches through the private Scene visual adapter. That boundary converts
 world matrices to arena-local poses and refreshes parent transforms and native
 IDs after topology changes.
 
+Explicit `visuals` replace root/body appearance; `link_visuals` replaces named
+articulation links. Either selection may supply one `GaussianSplatCfg` directly
+or one tagged Gaussian mapping through the decoder. It normalizes to an
+identity-pose element named `appearance`; multiple elements retain explicit
+IDs. `None` and an empty list keep their existing preserve/remove meanings.
+`cfg/visuals.py` owns this normalization and the resource and element configs;
+`spawn/_visuals.py` compiles companion Mesh/Gaussian descriptors under the same
+SpawnScene and publishes their owner-relative transforms at the existing render
+boundary. Default physics is currently required. Source physics is retained;
+`RigidObject.get_semantic_mesh()` preserves its original surface or an explicit
+`semantic_shape` before source render meshes are cleared. Do not use visual
+vertices as an implicit semantic fallback for Gaussian-only appearance.
+The qualified DexSim integration build must supply `Scene.clear_visual_meshes`
+and shared Gaussian template replication; missing APIs fail before creation.
+`BatchEntity.set_gaussian_visual_state` stages per-element/per-environment gains,
+uniform geometry scale, visibility and LoD in the binding; reset baselines stay
+independent from current values across rebuilds. Capture metadata owns copies of
+that state. Flat-PLY point opacity/SH overrides create immutable resource variants
+at birth; selecting prepared elements changes appearance without uploading point
+arrays each frame. Variants remain separately resident and share only within
+their clone group; modifying points with an existing LoD sidecar is rejected.
+DexSim's native USD loader accepts a visual Xform referencing an external
+Gaussian PLY beside independently authored collision geometry. `add_usd()` and
+`source=UsdSourceCfg(...)` retain the USD owner, source prim and local visual
+offset. This path is qualified in one Arena with Default physics and Hybrid
+rendering; native Arena replication of USD Gaussian renders is rejected before
+declaration. Existing explicit Gaussian visuals remain the multi-Arena route.
+`GaussianSplatCfg.file_path` itself still accepts only PLY/GSQ. Standard USD
+ParticleField import and native Gaussian source-appearance replacement are not
+implied by this reference route. NoRender drops the Gaussian render descriptor
+before native materialization while retaining the USD body, collision, source
+configuration and typed authored-visual metadata across Arenas. A Gaussian-only
+USD needs `semantic_shape` for semantic mesh consumers.
+
+The shared whole-scene compiler accepts `manager=None` for descriptor and
+identity inspection without a World or facades. The import plan retains authored
+visual metadata by source resource key; `add_usd()` attaches it when tracking
+runtime facades. Gaussian classification remains available during inspection,
+while native renderer admission and resource creation require the runtime path.
+
 `objects/backends/collision.py` owns physical collision descriptors and strict
 cooked convex/box snapshots through `capture_physical_collision_geometry`.
 Strict snapshots preserve float64 geometry and requested native body offsets;

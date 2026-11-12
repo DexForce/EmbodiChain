@@ -3341,16 +3341,16 @@
         {
           "path": "embodichain/lab/sim/scene/query.py",
           "symbol": "SceneView.__init__",
-          "start_line": 40,
-          "end_line": 44,
-          "excerpt": "        self.sim = sim\n        self.env_ids = tuple(env_ids)\n        self._num_envs = getattr(sim, \"num_envs\", 1)\n        self._validate_selection()\n        self.topology = self.describe_entities()"
+          "start_line": 47,
+          "end_line": 54,
+          "excerpt": "        self.sim = sim\n        self.env_ids = tuple(env_ids)\n        if isinstance(entity_uids, str):\n            raise ValueError(\"entity_uids must be a nonempty sequence of UIDs\")\n        self.entity_uids = None if entity_uids is None else tuple(entity_uids)\n        self._num_envs = getattr(sim, \"num_envs\", 1)\n        self._validate_selection()\n        self.topology = self.describe_entities()"
         },
         {
           "path": "embodichain/lab/sim/scene/operations.py",
           "symbol": "apply_changes_batch",
-          "start_line": 123,
-          "end_line": 130,
-          "excerpt": "def apply_changes_batch(\n    view: SceneView, changes: Mapping[int, SceneChangeSet]\n) -> SceneChangeResult:\n    \"\"\"Apply distinct per-arena changes after preflighting the entire selection.\n\n    Args:\n        view: Ordered set of physical rows to prepare.\n        changes: Exactly one change set for every selected environment index."
+          "start_line": 130,
+          "end_line": 137,
+          "excerpt": "def apply_changes_batch(\n    view: SceneView, changes: Mapping[int, SceneChangeSet]\n) -> SceneChangeResult:\n    \"\"\"Apply distinct per-arena rigid/visual changes after preflighting all rows.\n\n    Args:\n        view: Ordered set of physical rows to prepare.\n        changes: Exactly one change set for every selected environment index."
         },
         {
           "path": "embodichain/lab/sim/scene/validation.py",
@@ -5865,9 +5865,9 @@
         {
           "path": "embodichain/lab/sim/scene/composition.py",
           "symbol": "declare_fragment",
-          "start_line": 205,
-          "end_line": 205,
-          "excerpt": "            sim.add_rigid_object(cfg)"
+          "start_line": 220,
+          "end_line": 221,
+          "excerpt": "    for method, cfg in declarations:\n        getattr(sim, method)(cfg)"
         }
       ]
     },
