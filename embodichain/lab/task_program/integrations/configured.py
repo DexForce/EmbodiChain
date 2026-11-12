@@ -18,6 +18,17 @@
 
 from __future__ import annotations
 
+from embodichain.lab.evaluation import (
+    CompiledEvaluation,
+    EvaluationSpec,
+    PredicateRegistry,
+    PredicateSpec,
+    builtin_predicates,
+)
+
+from embodichain.lab.evaluation.observations import _raw_field_kind
+from embodichain.lab.evaluation._recording import _is_segment_start_field
+
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import asdict, dataclass, fields
@@ -1040,6 +1051,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                 "release_retreat_distance",
                 "rotate_angle",
                 "dwell_duration",
+                "rotation_duration",
                 "mouth_height",
                 "max_mouth_height",
                 "clearance",
@@ -1332,6 +1344,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                 {
                     "rotate_angle",
                     "dwell_duration",
+                    "rotation_duration",
                     "mouth_height",
                     "max_mouth_height",
                     "clearance",
@@ -1351,6 +1364,13 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                 config["dwell_duration"],
                 path=f"{path}.dwell_duration",
                 minimum=0.0,
+            )
+        if "rotation_duration" in config:
+            kwargs["rotation_duration"] = _real(
+                config["rotation_duration"],
+                path=f"{path}.rotation_duration",
+                minimum=0.0,
+                strict_minimum=True,
             )
         for field_name in (
             "mouth_height",
@@ -3328,10 +3348,167 @@ class _ConfiguredTaskProgramAdapterFactory:
         return adapter
 
 
+def _decode_evaluation(
+    value: Mapping[str, object] | None,
+    scene: SimulationSceneBinding,
+    *,
+    robot_profile: SimulationRobotSkillProfileBinding | None = None,
+    robot_links: Mapping[str, str] | None = None,
+    registry: PredicateRegistry | None = None,
+    transport_targets: Mapping[str, _MoveHeldObjectLowererFactory] | None = None,
+) -> tuple[dict[str, CompiledEvaluation], tuple[str, ...], tuple[str, ...]]:
+    if value is None:
+        return {}, (), ()
+    component = _mapping(
+        value,
+        path="evaluation",
+        required=frozenset({"graph"}),
+        optional=frozenset({"final_acceptance", "process_constraints"}),
+    )
+    graph = EvaluationSpec.from_dict(component["graph"])
+    channels = {
+        f"rigid_objects/{binding.entity_id}/{quantity}": f"rigid_objects/{binding.simulation_uid}/{quantity}"
+        for binding in scene.rigid_objects
+        for quantity in ("pose", "frame", "segment_start_frame", "lin_vel", "ang_vel")
+    }
+    articulations = {
+        binding.entity_id: binding.simulation_uid for binding in scene.articulations
+    }
+    for link in scene.links:
+        for quantity in ("position", "frame"):
+            channels[f"links/{link.entity_id}/{quantity}"] = (
+                f"links/{articulations[link.articulation_id]}/{link.native_link_name}/{quantity}"
+            )
+    for alias, link in (robot_links or {}).items():
+        channels[f"robot_links/{alias}/position"] = f"robot_links/{link}/position"
+    endpoint_presets = {}
+    if robot_profile is not None:
+        presets = {preset.preset_id: preset for preset in robot_profile.command_presets}
+        for resource in robot_profile.resources:
+            if not isinstance(resource, ControlPartResourceBinding):
+                continue
+            for endpoint in resource.endpoints:
+                for quantity in ("qpos", "command"):
+                    channels[
+                        f"robot/{resource.resource_id}/{endpoint.endpoint_id}/{quantity}"
+                    ] = f"robot/{endpoint.control_part}/{quantity}"
+                preset = presets.get(endpoint.command_preset)
+                if preset is not None and preset.control_part == endpoint.control_part:
+                    endpoint_presets[
+                        f"robot/{resource.resource_id}/{endpoint.endpoint_id}/qpos"
+                    ] = preset
+    rules = {}
+    field_kinds = {}
+    for name, rule in graph.rules.items():
+        if isinstance(rule, PredicateSpec):
+            inputs = {}
+            for role, field in rule.bindings.items():
+                field = _identifier(
+                    field, path=f"evaluation.graph.rules.{name}.bindings.{role}"
+                )
+                if field in channels:
+                    native = channels[field]
+                    if _is_segment_start_field(native) and (
+                        rule.kind != "lift" or role != "baseline"
+                    ):
+                        raise ValueError(
+                            "A segment-start pose can only bind a lift baseline."
+                        )
+                else:
+                    parts = field.split("/")
+                    if (
+                        len(parts) != 4
+                        or parts[0] != "articulations"
+                        or parts[1] not in articulations
+                        or parts[2] != "qpos"
+                        or not parts[3]
+                    ):
+                        raise ValueError(f"Unresolved evaluation field {field!r}.")
+                    native = f"articulations/{articulations[parts[1]]}/qpos/{parts[3]}"
+                inputs[role] = native
+                field_kinds[native] = _raw_field_kind(native)
+            params = rule.params
+            if rule.kind == "near_frame_target" and "transport_target" in params:
+                raw = _mapping(
+                    params,
+                    path=f"evaluation.graph.rules.{name}.params",
+                    required=frozenset({"transport_target", "tolerance"}),
+                    optional=frozenset({"axes", "inclusive"}),
+                )
+                target_id = _identifier(
+                    raw["transport_target"],
+                    path=f"evaluation.graph.rules.{name}.params.transport_target",
+                )
+                target = (transport_targets or {}).get(target_id)
+                if target is None or rule.bindings.get("reference") != (
+                    f"rigid_objects/{target.reference_entity_id}/frame"
+                ):
+                    raise ValueError(
+                        f"evaluation.graph.rules.{name}.params.transport_target must name a configured "
+                        "transport target with the same reference entity."
+                    )
+                params = {
+                    key: value
+                    for key, value in raw.items()
+                    if key != "transport_target"
+                }
+                params["displacement"] = tuple(
+                    target.relative_pose[i] for i in (3, 7, 11)
+                )
+            if rule.kind == "command_preset_match":
+                raw = _mapping(
+                    params,
+                    path=f"evaluation.graph.rules.{name}.params",
+                    required=frozenset({"preset", "tolerance"}),
+                )
+                command = _identifier(raw["preset"], path="evaluation command preset")
+                preset = endpoint_presets.get(rule.bindings.get("position"))
+                if preset is None or command not in preset.commands:
+                    raise ValueError(
+                        f"Unknown embodiment command {command!r} for rule {name!r}."
+                    )
+                params = {
+                    "tolerance": raw["tolerance"],
+                    "preset": f"{preset.preset_id}/{command}",
+                    "positions": preset.commands[command],
+                }
+            rule = PredicateSpec(rule.kind, inputs, params)
+        rules[name] = rule
+    registry = builtin_predicates() if registry is None else registry
+    if not isinstance(registry, PredicateRegistry):
+        raise TypeError("evaluation_registry must be a trusted PredicateRegistry.")
+    compiled = registry.compile(
+        EvaluationSpec(rules, graph.roots),
+        field_kinds=field_kinds,
+        field_layouts={
+            field: field.rsplit("/", 1)[0]
+            for field in field_kinds
+            if field.startswith("robot/")
+        },
+    )
+    result = {root: compiled.select(root) for root in compiled.roots}
+
+    def refs_for(key: str) -> tuple[str, ...]:
+        if key not in component:
+            return ()
+        raw = component[key]
+        if type(raw) is not list or not raw:
+            raise ValueError(f"evaluation.{key} must be a nonempty list of rule refs.")
+        return tuple(
+            _identifier(ref, path=f"evaluation.{key}[{index}]")
+            for index, ref in enumerate(raw)
+        )
+
+    return result, refs_for("final_acceptance"), refs_for("process_constraints")
+
+
 def _decode_configured_task_program_integration(
     value: object,
     *,
     planner_config: Mapping[str, object] | None = None,
+    evaluation: Mapping[str, object] | None = None,
+    evaluation_registry: PredicateRegistry | None = None,
+    evaluation_robot_links: Mapping[str, str] | None = None,
 ) -> _ConfiguredTaskProgramIntegration:
     """Decode one composable, callable-free Task Program integration.
 
@@ -3368,8 +3545,23 @@ def _decode_configured_task_program_integration(
                 target_descriptor=lowerer_factory.target_descriptor,
             )
         )
+    conditions, final_refs, process_refs = _decode_evaluation(
+        evaluation,
+        scene_binding,
+        robot_profile=robot_profile_binding,
+        robot_links=evaluation_robot_links,
+        registry=evaluation_registry,
+        transport_targets={
+            factory.target_id: factory
+            for factory in services.registered_semantic_lowerers
+            if type(factory) is _MoveHeldObjectLowererFactory
+        },
+    )
     registration = SimulationTaskProgramRegistration(
         scene_binding=scene_binding,
+        evaluation_conditions=conditions,
+        evaluation_final_refs=final_refs,
+        evaluation_process_refs=process_refs,
         robot_profile_binding=robot_profile_binding,
         call_catalog=call_catalog,
         handover_pose_providers=services.handover_pose_providers,

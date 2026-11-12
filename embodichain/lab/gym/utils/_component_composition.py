@@ -62,6 +62,8 @@ _SCENE_SIMULATION_FIELDS = frozenset(
         "rigid_object",
         "rigid_object_group",
         "articulation",
+        "cable_object",
+        "fluid_object",
     }
 )
 
@@ -152,6 +154,12 @@ def _resolve_local_resource_paths(value: object, *, base_dir: Path) -> None:
     """
     if isinstance(value, dict):
         for key, child in value.items():
+            if key == "fluid_object" and isinstance(child, list):
+                for fluid in child:
+                    spawn = fluid.get("spawn", {})
+                    path = spawn.get("file_path")
+                    if isinstance(path, str) and not Path(path).is_absolute():
+                        spawn["file_path"] = str((base_dir / path).resolve())
             if (
                 key in {"fpath", "urdf_path", "xml_path"}
                 and isinstance(child, str)
@@ -533,6 +541,25 @@ def _resolve_gym_components(
             if field_name in resolved
         }
 
+    evaluation = None
+    if "evaluation" in resolved:
+        if "task_program" not in resolved:
+            raise ValueError("evaluation.component requires a configured Task Program.")
+        selection = _mapping(
+            resolved.pop("evaluation"),
+            path="evaluation",
+            required=frozenset({"component"}),
+        )
+        path = _component_path(
+            selection["component"],
+            base_dir=selected_base_dir,
+            path="evaluation.component",
+            sources=sources,
+        )
+        evaluation = _load_yaml_component(
+            path, field_name="evaluation component", sources=sources
+        )
+
     return _ResolvedGymComponents(
         config=resolved,
         embodiment_selected=embodiment_selected,
@@ -541,4 +568,5 @@ def _resolve_gym_components(
         or scene_config is not None,
         embodiment_skill_profile=embodiment_skill_profile,
         scene_config=scene_config,
+        evaluation=evaluation,
     )

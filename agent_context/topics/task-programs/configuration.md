@@ -151,6 +151,8 @@ Ownership is explicit rather than a generic deep merge:
 
 - `program.yaml` owns task flow, targets, post-policies, and validators; it
   contains neither robot IDs nor an `integration` selection;
+- optional `evaluation.component` owns named measured segment rules; the
+  program uses `kind: condition` with a `ref` to select one;
 - task-local `integration.yaml` owns required contracts, its nested semantic
   `scene_binding`, semantic defaults, action options, effect monitors, and
   task-specific runtime services;
@@ -332,6 +334,142 @@ so reference rotation does not rotate their offset or per-axis tolerances.
 Select `reference_frame: parent` to measure both in the live reference frame,
 matching a target whose relative pose composes the complete parent transform.
 
+
+## Named evaluation rules
+
+### Segment acceptance contracts
+
+Use an explicit segment when an outcome can be described and verified at a
+meaningful boundary given its incoming state. For example, grasp and lift a
+bottle as one subgoal. Keep a tightly coupled transport and tilt in one
+segment when the intended outcome is a combined maneuver with no useful
+intermediate acceptance boundary. A segment may contain one call or a
+sequence of calls. It can depend on state produced by earlier segments.
+
+An optional `contract` names incoming `prerequisites` and required or
+diagnostic `outcomes`. The segment's `instruction` remains the language
+label. For example, the transport segment can require
+`{kind: held, ref: bottle}` before dispatch and name
+`{kind: validator, ref: 0}` in its outcomes. The validator can refer to a
+shared named condition. An incoming `condition` selects an instantaneous
+exported rule and acquires its raw fields at the segment boundary. Use a
+named temporal validator for observations acquired during the segment.
+
+`held` and `released` read symbolic TaskState. Report their authority as
+symbolic even when a task also records a measured lift or pose.
+`call_effect` references a local sequential call index and declares
+`assurance: projected|verified`. Verified references require a verifying
+preset and effect monitor. `validator` and `post_policy` reuse existing
+zero-based segment indices and cached results. An `unsupported` capability
+reports unavailable evidence, and blocks acceptance when it is required.
+
+Use `inspect_deployment.py --strict-contracts` to require each segment to
+have an instruction and contract. Contracts work with canonical and shorthand
+segments; strict diagnostics retain the authored configuration paths. Combine
+with `--explain` to inspect the normalized declaration and effective bindings.
+This checks declaration structure,
+bindings and supported authorities. The runtime checks measured truth at
+the incoming or outgoing boundary. Segment reports and dataset fragments
+retain the instruction, separate evidence statuses and the acceptance mask.
+Programs that omit contracts keep the existing execution path.
+
+### Shared rule components
+
+Select the library in the runnable deployment.
+
+```yaml
+evaluation:
+  component: task_program/evaluation.yaml
+```
+
+The selected component exports named roots of one rule graph.
+
+```yaml
+graph:
+  roots: [near_support, hold_near_support]
+  rules:
+    near_support:
+      kind: near_target
+      bindings:
+        position: rigid_objects/payload/pose
+        target: rigid_objects/support_surface/pose
+      params: {tolerance: 0.12}
+    hold_near_support:
+      kind: hold_for
+      ref: near_support
+      end: 3
+      steps: 2
+
+final_acceptance: [near_support]
+```
+
+Pose bindings supply XYZ translation in metres. Optional `axes` and
+`inclusive` select coordinates and the threshold boundary. Typed bindings
+resolve through the integration's scene and embodiment before execution.
+Rigid-body velocities use `lin_vel` and `ang_vel`. Joint predicates select
+`articulations/<entity>/qpos/<joint>`. Link-distance predicates use
+`links/<entity>/position`. Corner containment uses
+`rigid_objects/<entity>/frame` and `links/<entity>/frame` with declared
+object-local corners and link-frame bounds. Command matching uses `qpos`
+and `command` on the same `robot/<resource>/<endpoint>` binding.
+The robot resolves the native joint order. The command channel records the
+current controller target. `command_preset_match` instead takes one measured
+`qpos` input and resolves `params.preset` through that endpoint's embodiment
+command preset. Live assembly binds the Robot-resolved native joint names and
+order into the compiled rule identity. Recorded and live descriptors must match
+that order; an unresolved preset or foreign layout is unavailable. Standalone
+compiled preset rules can declare `joint_names` alongside `positions`.
+An embodiment can declare `skill_profile.evaluation_links`
+as logical aliases to native robot links. Use `robot_links/<alias>/position`
+for measured link distance. Trusted Python hosts can pass an
+`evaluation_registry` when loading the deployment. YAML contains only
+registered kind IDs and inert parameters.
+
+`near_frame_target` compares a measured XYZ position with a target offset in
+an observed object's frame. In a configured deployment its
+`params.transport_target` can select the target ID of an existing
+`move_held_object` lowerer. The rule then uses that lowerer's local offset
+and checks that its reference binding names the same object.
+
+The `lift` predicate can bind its `baseline` to
+`rigid_objects/<entity>/segment_start_frame`. Segment execution captures that
+pose before issuing the first action. Recorded evaluation reads the preceding
+capture stored as a distinct raw channel on the first consumed control slot.
+A missing segment-start capture yields unavailable evidence.
+
+Boolean rules name child rules in `refs`. Temporal rules select one `ref`
+and inclusive slot offsets `start` and `end`. `hold_for` requires
+consecutive `steps`. Milestones name simultaneous `refs` and optional
+predecessors in `after`.
+
+```yaml
+validators:
+  - kind: condition
+    ref: hold_near_support
+```
+
+Each segment occurrence starts at its first consumed control step. The window
+includes post-policy steps within its bound. Missing or invalid observations
+interrupt a hold. Rules that reference the same compiled temporal node with
+the same evidence qualification share its history within the occurrence.
+Validation traces retain each selected rule's identity, measurements,
+thresholds, witness steps and acquisition revisions.
+
+`final_acceptance` and `process_constraints` select instantaneous roots.
+Program overrides keep these deployment-owned selections. The bridge checks
+process constraints after consumed steps and routes rejected rows through its
+existing safe hold. The rules and bindings participate in registration
+identity. Roots sharing a normalized predicate and binding reuse its raw
+measurement within each qualified frame and row cohort. A fresh capture or
+separate evaluation scope measures its own inputs.
+
+An ordered placement objective component can set `condition` to an exported
+root over its object's position and velocities. The objective advances the rule
+with each measured sample and keeps its result independent of termination and
+persistence. The snapshot reports the configured rule's status and witness
+separately from the raw measurement-validity flag. With trajectory recording
+disabled, segment and process checks acquire only their active fields.
+Final-only fields are sampled at final queries and sealing.
 
 ## Asset role requirements
 

@@ -132,8 +132,6 @@ class TableSurfaceLayoutOptimizerConfig:
     max_collision_rounds: int = 8
     max_added_collision_pairs: int = 64
     imported_seed_weight: float = 5.0
-    min_center_distance_m: float = 0.01
-    min_center_distance_weight: float = 0.05
 
     def __post_init__(self) -> None:
         """Reject invalid controls before assembling table-surface constraints."""
@@ -149,6 +147,12 @@ class TableSurfaceLayoutOptimizerConfig:
             raise ValueError("max_collision_rounds must be positive.")
         if self.max_added_collision_pairs <= 0:
             raise ValueError("max_added_collision_pairs must be positive.")
+
+    def _layout_cfg(self) -> LayoutCfg:
+        """Convert the shared numerical controls to the scene solver contract."""
+        from dataclasses import asdict
+
+        return LayoutCfg(**asdict(self), enforce_all_clearances=False)
 
 
 class TableSurfaceLayoutOptimizer:
@@ -196,16 +200,7 @@ class TableSurfaceLayoutOptimizer:
                 ),
                 skip_fixed_collisions=True,
             ),
-            LayoutCfg(
-                relation_clearance_m=self.config.relation_clearance_m,
-                collision_margin_m=self.config.collision_margin_m,
-                max_slsqp_iterations=self.config.max_slsqp_iterations,
-                slsqp_ftol=self.config.slsqp_ftol,
-                max_collision_rounds=self.config.max_collision_rounds,
-                max_added_collision_pairs=self.config.max_added_collision_pairs,
-                imported_seed_weight=self.config.imported_seed_weight,
-                enforce_all_clearances=False,
-            ),
+            self.config._layout_cfg(),
         )
         if solution.status != "solved":
             raise ValueError(

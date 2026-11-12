@@ -34,6 +34,8 @@ embodichain.lab.task_program.language
       RepeatCfg
       SceneReferenceRole
       SegmentCfg
+      SegmentContractCfg
+      SegmentEvidenceCfg
       SequenceCfg
       TargetRefCfg
       TaskProgramCfg

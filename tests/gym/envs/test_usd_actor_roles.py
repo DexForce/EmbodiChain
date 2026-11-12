@@ -55,6 +55,7 @@ def test_role_uses_resolved_usd_actor(role, resolved_type, valid):
             articulation=[],
             visual_object=[],
             rigid_object_group=[],
+            fluid_object=[],
         ),
         sim=SimpleNamespace(add_rigid_object=declare),
     )

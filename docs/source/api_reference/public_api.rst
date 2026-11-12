@@ -1552,6 +1552,48 @@ spellings are aliases of the TaskSpec functions.
    validate_task_spec
    validate_task_template
 
+embodichain.lab.evaluation
+--------------------------
+
+.. currentmodule:: embodichain.lab.evaluation
+
+Compile trusted predicate registrations and inert rule declarations into an
+immutable graph. A typed deployment binding qualifies the source of each role.
+``RuleSession`` advances bounded windows and milestones for one occurrence.
+Instantaneous queries and snapshots leave history untouched. Replay consumes
+the recorded observations and preserves each row's endpoint and witnesses.
+
+.. autosummary::
+
+   EvaluationStatus
+   PredicateSpec
+   BooleanRule
+   TemporalRule
+   MilestoneRule
+   EvaluationSpec
+   PredicateMeasurement
+   PredicateDefinition
+   PredicateRegistry
+   CompiledEvaluation
+   RuleResult
+   EvaluationSnapshot
+   RuleSession
+   builtin_predicates
+   evaluate_recorded_rules
+
+embodichain.lab.evaluation.observations
+---------------------------------------
+
+.. currentmodule:: embodichain.lab.evaluation.observations
+
+Advance a compiled session with a raw capture and its exact episode owner.
+The adapter checks physical descriptors before projecting raw observations
+into predicate inputs.
+
+.. autosummary::
+
+   advance_observation
+
 embodichain.lab.expansion
 ------------------------
 
@@ -1910,11 +1952,16 @@ embodichain.lab.gym.envs.demo
 
 .. currentmodule:: embodichain.lab.gym.envs.demo
 
+Collection qualification combines explicitly configured object-motion bounds and
+raw numeric observations. The collector combines physical truth with program
+completion before persistence.
+
 .. autosummary::
 
    DEMO_ANNOTATION_KEYS
    DEMO_SCHEMA_VERSION
    DemoExecutionCfg
+   DemoQualification
    DemoEpisodeResult
    DemoOutputMode
    DemoSegment
@@ -1922,6 +1969,9 @@ embodichain.lab.gym.envs.demo
    DemoSegmentResult
    execute_demo_episode
    resolve_demo_segments
+
+.. autoclass:: DemoQualification
+   :members:
 
 embodichain.lab.gym.envs.embodied_env
 -------------------------------------
@@ -2597,6 +2647,7 @@ embodichain.lab.gym.utils.gym_utils
    cat_tensor_with_ids
    clip_and_scale_action
    config_to_cfg
+   configure_fluid_spacing
    convert_observation_to_space
    dict_array_to_torch_inplace
    fetch_data_from_dict
@@ -2666,11 +2717,15 @@ functors, preserving full robot/mimic joint order, articulation root states and
 rigid velocities. Declaration assembly performs no physical acquisition.
 The standard environment recorder uses these functors and shares pose acquisition
 with policy ``get_object_pose`` / ``get_rigid_object_pose`` within a boundary.
+Particle adapters share the bounded media spool and preserve arena-local positions,
+particle velocities and control-frame alignment. Recording admission remains host-owned.
 
 .. currentmodule:: embodichain.lab.gym.utils.trajectory_state
 
 .. autosummary::
 
+   FluidTrajectoryRecorder
+   FluidTrajectoryReader
    capture_trajectory_state
    restore_trajectory_state
    trajectory_observation_cfgs
@@ -2679,6 +2734,12 @@ with policy ``get_object_pose`` / ``get_rigid_object_pose`` within a boundary.
 .. autofunction:: trajectory_observation_cfgs
 
 .. autofunction:: export_observation_history
+
+.. autoclass:: FluidTrajectoryRecorder
+   :members:
+
+.. autoclass:: FluidTrajectoryReader
+   :members:
 
 embodichain.lab.scripts.analyze_workspace
 -----------------------------------------
@@ -4868,12 +4929,17 @@ Measured manipulation functors bind rigid objects and validate geometric paramet
 
    object_near_target
    object_below_height
+   evaluation_condition
 
 .. autoclass:: object_near_target
    :members:
    :special-members: __call__
 
 .. autoclass:: object_below_height
+   :members:
+   :special-members: __call__
+
+.. autoclass:: evaluation_condition
    :members:
    :special-members: __call__
 
@@ -4903,10 +4969,14 @@ Typed physical predicates provide shared distance and height measurements for RL
 .. autosummary::
 
    ConditionResult
+   ObjectMotionMetrics
    evaluate_near_target
    evaluate_below_height
 
 .. autoclass:: ConditionResult
+   :members:
+
+.. autoclass:: ObjectMotionMetrics
    :members:
 
 .. autofunction:: evaluate_near_target
@@ -5798,3 +5868,26 @@ embodichain.lab.sim.cfg parallel-jaw facade
 .. autoclass:: ParallelJawGripperCfg
    :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
    :no-index:
+
+Fluid task interfaces
+---------------------
+
+The pouring task supplies downloadable scene assets and a diagnostic fluid
+replay environment. Its runner executes the configured Task Program against
+live one-way rigid-to-fluid simulation.
+
+.. autosummary::
+
+   embodichain.data.assets.task_assets.PourCupAssets
+   embodichain.data.assets.task_assets.PourCupDemoData
+   embodichain.lab.gym.envs.fluid_replay.FluidReplayEnv
+   embodichain.lab.scripts.run_fluid_task_program.main
+
+.. autoclass:: embodichain.data.assets.task_assets.PourCupAssets
+
+.. autoclass:: embodichain.data.assets.task_assets.PourCupDemoData
+
+.. autoclass:: embodichain.lab.gym.envs.fluid_replay.FluidReplayEnv
+   :members:
+
+.. autofunction:: embodichain.lab.scripts.run_fluid_task_program.main

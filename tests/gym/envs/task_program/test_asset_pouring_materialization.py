@@ -36,6 +36,7 @@ from embodichain.data.asset_catalog import (
     PreparationContext,
 )
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
+from embodichain.lab.gym.utils.registration import get_env_spec
 from embodichain.lab.task_program.integrations.asset_materialization import (
     AssetAdaptationCfg,
     AssetPourAdaptationCfg,
@@ -108,6 +109,7 @@ def pouring(tmp_path):
     task = {
         "id": "AssetPourTest-v0",
         "environment": {"component": "env.yaml"},
+        "evaluation": {"component": "evaluation.yaml"},
         "embodiment": {
             "component": str(CONFIGS / "components/embodiments/ur5_dh_pgi_140_80.yaml")
         },
@@ -124,6 +126,10 @@ def pouring(tmp_path):
         ("env", env),
         ("integration", integration),
         ("program", program),
+        (
+            "evaluation",
+            yaml.safe_load((POUR / "task_program/evaluation.yaml").read_text()),
+        ),
     ):
         _dump(source / f"{name}.yaml", document)
     return source / "task.yaml", requirements
@@ -245,9 +251,15 @@ def test_pouring_rebinds_selected_bottle_and_cup_geometry(
     validators = program["program"]["items"][3]["validators"]
     assert all(item["kind"] == "object_relative_position" for item in validators)
     assert all(item["reference_frame"] == "parent" for item in validators)
-    assert (
-        program["program"]["items"][1]["validators"][0]["reference_frame"] == "parent"
+    assert program["program"]["items"][1]["validators"] == [
+        {"kind": "condition", "ref": "bottle_above_cup"}
+    ]
+    registration = get_env_spec(config["id"]).task_program_registration
+    arrival = registration.evaluation_conditions["bottle_above_cup"]
+    assert arrival.parameters["bottle_above_cup"]["displacement"] == pytest.approx(
+        pose[:3, 3].tolist()
     )
+    assert arrival.parameters["bottle_above_cup"]["tolerance"] == 0.01
     assert all(item["reference"] == "bottle_asset_return_table" for item in validators)
     assert validators[0]["position_tolerance"] == pytest.approx(
         [0.05 / math.sqrt(3)] * 3

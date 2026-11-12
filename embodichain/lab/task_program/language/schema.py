@@ -21,7 +21,7 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import MISSING, field
-from typing import TypeAlias
+from typing import Literal, TypeAlias
 
 from embodichain.utils import configclass
 
@@ -704,6 +704,19 @@ class ArticulationJointPositionValidatorCfg:
         )
 
 
+@configclass
+class ConditionValidatorCfg:
+    """Reference a named rule owned by the deployment's evaluation component."""
+
+    ref: str = MISSING
+    kind: str = "condition"
+
+    def __post_init__(self) -> None:
+        """Validate the rule identifier and discriminator."""
+        _validate_identifier(self.ref, field_name="ref")
+        _validate_kind(self.kind, expected="condition", field_name="kind")
+
+
 ValidatorCfg: TypeAlias = (
     ObjectNearTargetValidatorCfg
     | ObjectNearRelativeTargetValidatorCfg
@@ -711,6 +724,7 @@ ValidatorCfg: TypeAlias = (
     | ObjectLiftedValidatorCfg
     | ObjectRelativePositionValidatorCfg
     | ObjectUprightValidatorCfg
+    | ConditionValidatorCfg
 )
 
 
@@ -783,6 +797,83 @@ class RepeatCfg:
 
 
 @configclass
+class SegmentEvidenceCfg:
+    """One evidence source referenced by a segment acceptance contract.
+
+    State and condition references use logical names. Call effects, validators,
+    and post-policies use zero-based indices local to the segment. An unsupported
+    capability produces unavailable evidence and may be diagnostic-only.
+    """
+
+    kind: Literal[
+        "held",
+        "released",
+        "condition",
+        "call_effect",
+        "validator",
+        "post_policy",
+        "unsupported",
+    ] = MISSING
+    ref: str | int = MISSING
+    assurance: Literal["projected", "verified"] | None = None
+    required: bool = True
+
+    def __post_init__(self) -> None:
+        """Validate the reference shape and allowed assurance."""
+        if self.kind in ("held", "released", "condition", "unsupported"):
+            _validate_identifier(self.ref, field_name="ref")
+        elif self.kind in ("call_effect", "validator", "post_policy"):
+            if type(self.ref) is not int or self.ref < 0:
+                raise ValueError("ref must be a nonnegative local index.")
+        else:
+            raise ValueError(f"Unknown segment evidence kind {self.kind!r}.")
+        if self.kind == "call_effect":
+            if self.assurance not in ("projected", "verified"):
+                raise ValueError(
+                    "call_effect requires projected or verified assurance."
+                )
+        elif self.assurance is not None:
+            raise ValueError("Only call_effect can declare assurance.")
+        if type(self.required) is not bool or (
+            not self.required and self.kind != "unsupported"
+        ):
+            raise ValueError("Only unsupported capability evidence may be optional.")
+
+
+@configclass
+class SegmentContractCfg:
+    """Incoming prerequisites and outcome evidence for a described subgoal."""
+
+    prerequisites: tuple[SegmentEvidenceCfg, ...] = field(default_factory=tuple)
+    outcomes: tuple[SegmentEvidenceCfg, ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        """Own the declared prerequisites and outcomes in authoring order."""
+        for field_name in ("prerequisites", "outcomes"):
+            entries = getattr(self, field_name)
+            if type(entries) not in (tuple, list) or any(
+                type(entry) is not SegmentEvidenceCfg for entry in entries
+            ):
+                raise TypeError(
+                    f"{field_name} must contain segment evidence declarations."
+                )
+            setattr(self, field_name, tuple(entries))
+        if any(
+            entry.kind not in ("held", "released", "condition")
+            for entry in self.prerequisites
+        ):
+            raise ValueError(
+                "Prerequisites require symbolic state or a current condition."
+            )
+        if not any(entry.required for entry in self.outcomes):
+            raise ValueError("A segment contract needs at least one required outcome.")
+        if any(entry.kind == "condition" for entry in self.outcomes):
+            raise ValueError(
+                "Outcome conditions must reference an existing validator by index."
+            )
+
+
+@configclass
 class SegmentCfg:
     """Logical transaction with optional segment-specific language instruction.
 
@@ -796,12 +887,17 @@ class SegmentCfg:
     validators: tuple[ValidatorCfg, ...] = field(default_factory=tuple)
     kind: str = "segment"
     instruction: str | None = None
+    contract: SegmentContractCfg | None = field(
+        default=None, metadata={"omit_none_from_provenance": True}
+    )
 
     def __post_init__(self) -> None:
         """Validate the segment boundary and its declarative hooks."""
         _validate_identifier(self.name, field_name="name")
         if self.instruction is not None:
             _validate_identifier(self.instruction, field_name="instruction")
+        if self.contract is not None and type(self.contract) is not SegmentContractCfg:
+            raise TypeError("contract must be exactly SegmentContractCfg or None.")
         if type(self.steps) not in _PROGRAM_NODE_TYPES:
             raise TypeError("steps must be an exact ProgramNodeCfg value.")
         if type(self.post) not in (list, tuple):
@@ -866,6 +962,7 @@ _VALIDATOR_TYPES = (
     ObjectNearTargetValidatorCfg,
     ObjectNearRelativeTargetValidatorCfg,
     ArticulationJointPositionValidatorCfg,
+    ConditionValidatorCfg,
 )
 _PROGRAM_NODE_TYPES = (
     SequenceCfg,
