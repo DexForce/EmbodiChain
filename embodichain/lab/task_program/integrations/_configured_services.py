@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from embodichain.lab.task_program.language.semantic_contracts import (
+    SemanticCallContract,
     validate_semantic_call_payload,
 )
 from .simulation.targets import _pose
@@ -48,6 +49,9 @@ from embodichain.lab.sim.atomic_skills import (
     CoordinatedPickmentOptions,
     HeldObjectPoseGoal,
     JointPositionGoal,
+    EndEffectorPoseGoal,
+    MoveEndEffector,
+    MoveEndEffectorOptions,
     MoveHeldObject,
     MoveHeldObjectOptions,
     MoveJoints,
@@ -113,6 +117,7 @@ __all__: list[str] = []
 _ARTICULATION_LINK_SLIDE_CALL_ID = "simulation.articulation_link_slide"
 _AXIS_ALIGN_CALL_ID = "simulation.axis_align"
 _COORDINATED_TRANSPORT_CALL_ID = "simulation.coordinated_transport"
+_MOVE_END_EFFECTOR_CALL_ID = "simulation.move_end_effector"
 _MOVE_HELD_OBJECT_CALL_ID = "simulation.move_held_object"
 _PARK_CALL_ID = "simulation.park"
 _PLACE_RELATIVE_CALL_ID = "simulation.place_relative"
@@ -1442,6 +1447,98 @@ class _PourTargetBinding:
             receiver_radius=self.receiver_radius,
             mouth_radius=self.mouth_radius,
         )
+
+
+class _MoveEndEffectorLowerer(RegisteredSemanticLowerer):
+    """Lower a configured free-space route to the shared Cartesian skill."""
+
+    call_id: ClassVar[str] = _MOVE_END_EFFECTOR_CALL_ID
+    target_descriptor: ClassVar[SkillDescriptor] = MoveEndEffector.descriptor()
+
+    def __init__(
+        self, routes: tuple[tuple[str, tuple[tuple[float, ...], ...]], ...]
+    ) -> None:
+        self._routes = dict(routes)
+
+    def lower(
+        self,
+        call: RegisteredSemanticCall,
+        *,
+        context: PlanningContext,
+        bound: BoundSemanticCall,
+        option_template: SkillOptions,
+    ) -> SemanticLowering:
+        """Snapshot the declared arena-frame waypoints on the planning device."""
+        del bound
+        if type(option_template) is not MoveEndEffectorOptions:
+            raise TypeError("Cartesian transit requires exact MoveEndEffectorOptions.")
+        arguments = dict(call.arguments)
+        target_id = arguments.get("target")
+        if (
+            set(arguments) != {"target"}
+            or type(target_id) is not str
+            or target_id not in self._routes
+        ):
+            raise ValueError(
+                "Cartesian transit arguments must select the configured target."
+            )
+        poses = torch.tensor(
+            self._routes[target_id],
+            device=context.robot.qpos.device,
+            dtype=context.robot.qpos.dtype,
+        ).reshape(1, -1, 4, 4)
+        return SemanticLowering(
+            goal=EndEffectorPoseGoal(
+                poses.expand(context.batch_size, -1, -1, -1).clone()
+            )
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class _MoveEndEffectorLowererFactory(RegisteredSemanticLowererFactory):
+    """Own immutable, explicitly configured arena-frame transit routes."""
+
+    call_id: ClassVar[str] = _MOVE_END_EFFECTOR_CALL_ID
+    revision: ClassVar[str] = "1"
+    target_descriptor: ClassVar[SkillDescriptor] = MoveEndEffector.descriptor()
+
+    pose_routes: tuple[tuple[str, tuple[tuple[float, ...], ...]], ...]
+
+    @property
+    def argument_contract(self) -> SemanticCallContract:
+        """Expose only this deployment's immutable route selectors."""
+        return SemanticCallContract(
+            {"target": tuple(key for key, _ in self.pose_routes)}, {}
+        )
+
+    def __post_init__(self) -> None:
+        if not self.pose_routes:
+            raise ValueError("Cartesian transit requires at least one route.")
+        normalized = []
+        seen = set()
+        for target_id, poses in self.pose_routes:
+            _identifier(target_id, field_name="target_id")
+            if target_id in seen:
+                raise ValueError("Cartesian transit target IDs must be unique.")
+            seen.add(target_id)
+            if not poses:
+                raise ValueError("Cartesian transit requires at least one pose.")
+            normalized.append((target_id, tuple(_pose(pose) for pose in poses)))
+        object.__setattr__(self, "pose_routes", tuple(normalized))
+
+    def create(
+        self,
+        *,
+        simulation: object,
+        robot: object,
+        scene_registry: SceneRegistry,
+        engine: AtomicSkillEngine,
+    ) -> RegisteredSemanticLowerer:
+        """Create a fresh lowerer without observing or advancing simulation."""
+        del simulation, scene_registry
+        if engine.robot is not robot:
+            raise ValueError("Cartesian transit requires the engine's exact robot.")
+        return _MoveEndEffectorLowerer(self.pose_routes)
 
 
 class _PourLowerer(RegisteredSemanticLowerer):

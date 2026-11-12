@@ -336,3 +336,72 @@ def test_typed_transport_freezes_relative_target_for_acceptance(monkeypatch):
     torch.testing.assert_close(
         system.runtime.resolved_object_target("cube", declaration), frozen
     )
+
+
+@pytest.mark.parametrize("waypoints", [False, True])
+def test_routed_transport_preserves_live_rotation(waypoints: bool) -> None:
+    """Floor insertion preserves rotation without rotating the declared slot offset."""
+    from embodichain.lab.task_program.semantics import SceneObjectRef
+    from embodichain.lab.task_program.integrations.simulation.targets import (
+        SceneEntityTarget,
+    )
+
+    relative = torch.eye(4)
+    relative[:3, 3] = torch.tensor([0.05, -0.04, 0.0391])
+    route = HeldObjectTransportRoute(
+        "cube",
+        "slot",
+        SceneEntityTarget("table", relative_pose=tuple(relative.flatten().tolist())),
+        preserve_current_object_orientation=True,
+        waypoints=(
+            (AbsolutePoseTarget((0.1, 0.2, 0.6), (0.0, 0.0, 0.0, 1.0)),)
+            if waypoints
+            else ()
+        ),
+    )
+    factory = RoutedMoveHeldObjectLowererFactory((route,))
+    registry, _ = _scene_registry()
+    robot = object()
+    lowerer = factory.create(
+        simulation=None,
+        robot=robot,
+        engine=SimpleNamespace(robot=robot),
+        scene_registry=registry,
+    )
+    floor = torch.tensor(
+        [
+            [0.0, -1.0, 0.0, -0.6],
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.4],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    )
+    observed = torch.diag(torch.tensor([1.0, -1.0, -1.0, 1.0]))
+    context = SimpleNamespace(
+        batch_size=2,
+        robot=SimpleNamespace(qpos=torch.zeros(2, 6)),
+        scene=SimpleNamespace(
+            entities={
+                "cube": SimpleNamespace(pose=observed, confidence=1.0),
+                "table": SimpleNamespace(pose=floor, confidence=1.0),
+            }
+        ),
+    )
+    call = RegisteredSemanticCall(call_id=factory.call_id, arguments={"target": "slot"})
+    result = lowerer.lower(
+        call, context=context, bound=None, option_template=MoveHeldObjectOptions()
+    )
+    target = result.goal.object_target_pose
+    if waypoints:
+        torch.testing.assert_close(
+            target[:, 0, :3, 3], torch.tensor([[0.1, 0.2, 0.6], [0.1, 0.2, 0.6]])
+        )
+        target = target[:, -1]
+    torch.testing.assert_close(
+        target[:, :3, 3], torch.tensor([[-0.56, 0.05, 0.4391], [-0.56, 0.05, 0.4391]])
+    )
+    torch.testing.assert_close(target[:, :3, :3], observed[:3, :3].expand(2, -1, -1))
+    lookahead = lowerer.pick_lookahead_targets(
+        call, picked_object=SceneObjectRef("cube"), bound=None, previous_target=None
+    )
+    assert lookahead[0].preserve_current_object_orientation

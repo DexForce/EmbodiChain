@@ -1130,11 +1130,10 @@ def test_place_effect_spec_binds_source_and_verified_detach_baseline() -> None:
     assert isinstance(gate_relation, HeldObjectStateExpectation)
     assert gate_relation.expectation_id == "source"
     assert gate_relation.relation is HeldObjectRelation.DETACHED
-    assert len(gate.effect_spec.clauses) == 2
-    gate_pose, gate_constraint = gate.effect_spec.clauses
-    assert isinstance(gate_pose, PoseRelationClause)
-    assert gate_pose.expectation is PoseRelationExpectation.SEPARATED
-    torch.testing.assert_close(gate_pose.baseline_object_to_endpoint, object_to_eef)
+    # A released object may still be beside the gripper before retraction.
+    # Full pose separation remains required by the terminal effect above.
+    assert len(gate.effect_spec.clauses) == 1
+    (gate_constraint,) = gate.effect_spec.clauses
     assert isinstance(gate_constraint, BinaryEffectClause)
     assert gate_constraint.expected is False
     assert grounded.invocation.phase_effect_gates == (gate.requirement,)

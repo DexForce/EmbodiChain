@@ -209,8 +209,11 @@ gate. Routed held-object transport uses this contract and its named Atomic goal
 requests terminal retained-attachment verification.
 A registered release may retain
 its incoming verified hold through declared approach phases and require measured
-detachment before retracting. Relative Place declares the same checks as ordinary
-Place. Runtime validates every guard phase against each successful final plan,
+detachment before retracting. Built-in Place gates retract on absent grip
+evidence: a supported object remains beside the open hand until retreat. Its
+terminal effect still requires pose separation after retreat. Registered
+relative Place retains its explicitly declared release-gate contract. Runtime
+validates every guard phase against each successful final plan,
 after optional transforms and before dispatch, including retries. Failed plans
 retain their original planning diagnostics. A lowerer may explicitly preserve
 symbolic state only when it declares no effect contract. Declaring a held

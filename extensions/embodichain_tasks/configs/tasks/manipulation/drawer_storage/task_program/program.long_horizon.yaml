@@ -1,0 +1,455 @@
+program_id: drawer_storage_long_horizon
+instruction: Open the cabinet drawer, store a drink can, water bottle, coffee cup and paper cup in their assigned
+  positions, and close the loaded drawer.
+targets: {}
+program:
+  kind: sequence
+  items:
+  - kind: segment
+    name: open_drawer
+    instruction: Pull the drawer open before storing the parts.
+    steps:
+      kind: invoke
+      call:
+        kind: registered
+        call_id: simulation.articulation_link_slide
+        arguments:
+          handle: drawer_handle
+    validators:
+    - kind: articulation_joint_position
+      articulation: drawer
+      joint: cabinet_to_drawer
+      minimum_position: 0.212
+      maximum_position: 0.229
+    post:
+    - kind: wait_stable
+      entity: drawer
+      preset: articulation
+  - kind: segment
+    name: clear_after_open_drawer
+    instruction: Lift the empty gripper above the handle and return to the source-side workspace.
+    steps:
+      kind: invoke
+      call:
+        kind: registered
+        call_id: simulation.move_end_effector
+        arguments:
+          target: clear_open_handle
+    validators:
+    - kind: articulation_joint_position
+      articulation: drawer
+      joint: cabinet_to_drawer
+      minimum_position: 0.212
+      maximum_position: 0.229
+  - kind: segment
+    name: pick_drink_can
+    instruction: Grasp and lift the drink can.
+    steps:
+      kind: invoke
+      call:
+        kind: pick
+        object: drink_can
+        grasp: drink_can_grasp
+    validators:
+    - kind: object_lifted
+      object: drink_can
+      minimum_lift: 0.06
+  - kind: segment
+    name: transport_drink_can
+    instruction: Move the held drink can above the open drawer.
+    steps:
+      kind: invoke
+      call:
+        kind: registered
+        call_id: simulation.move_held_object
+        arguments:
+          target: transport_drink_can
+    validators:
+    - kind: object_relative_position
+      object: drink_can
+      reference: drawer_floor
+      reference_frame: parent
+      position_offset: [-0.09, -0.04, 0.13]
+      position_tolerance: [0.025, 0.025, 0.015]
+  - kind: segment
+    name: support_drink_can
+    instruction: Lower the held object onto the drawer floor with the hand closed; verify floor height before release.
+    steps:
+      kind: invoke
+      call:
+        kind: registered
+        call_id: simulation.move_held_object
+        arguments:
+          target: support_drink_can
+    validators:
+    - kind: object_relative_position
+      object: drink_can
+      reference: drawer_floor
+      reference_frame: parent
+      position_offset: [-0.09, -0.04, 0.026654031999999998]
+      position_tolerance: [0.015, 0.015, 0.003]
+  - kind: segment
+    name: store_drink_can
+    instruction: Put the drink can in its assigned drawer position.
+    steps:
+      kind: invoke
+      call:
+        kind: place
+        object: drink_can
+        inside: drink_can_slot
+    post:
+    - kind: wait_stable
+      entity: drink_can
+    validators:
+    - kind: object_relative_position
+      object: drink_can
+      reference: drawer_floor
+      reference_frame: parent
+      position_offset: [-0.09, -0.04, 0.026654031999999998]
+      position_tolerance: [0.025, 0.025, 0.015]
+  - kind: segment
+    name: clear_after_store_drink_can
+    instruction: Lift the empty gripper above the handle and return to the source-side workspace.
+    steps:
+      kind: invoke
+      call:
+        kind: registered
+        call_id: simulation.move_end_effector
+        arguments:
+          target: clear_loaded_drawer
+    validators:
+    - kind: articulation_joint_position
+      articulation: drawer
+      joint: cabinet_to_drawer
+      minimum_position: 0.212
+      maximum_position: 0.229
+  - kind: segment
+    name: pick_water_bottle
+    instruction: Grasp and lift the water bottle.
+    steps:
+      kind: invoke
+      call:
+        kind: pick
+        object: water_bottle
+        grasp: water_bottle_grasp
+    validators:
+    - kind: object_lifted
+      object: water_bottle
+      minimum_lift: 0.06
+  - kind: segment
+    name: transport_water_bottle
+    instruction: Move the held water bottle above the open drawer.
+    steps:
+      kind: invoke
+      call:
+        kind: registered
+        call_id: simulation.move_held_object
+        arguments:
+          target: transport_water_bottle
+    validators:
+    - kind: object_relative_position
+      object: water_bottle
+      reference: drawer_floor
+      reference_frame: parent
+      position_offset: [-0.03, -0.04, 0.13]
+      position_tolerance: [0.025, 0.025, 0.015]
+  - kind: segment
+    name: support_water_bottle
+    instruction: Lower the held object onto the drawer floor with the hand closed; verify floor height before release.
+    steps:
+      kind: invoke
+      call:
+        kind: registered
+        call_id: simulation.move_held_object
+        arguments:
+          target: support_water_bottle
+    validators:
+    - kind: object_relative_position
+      object: water_bottle
+      reference: drawer_floor
+      reference_frame: parent
+      position_offset: [-0.03, -0.04, 0.03910540237426758]
+      position_tolerance: [0.015, 0.015, 0.003]
+  - kind: segment
+    name: store_water_bottle
+    instruction: Put the water bottle in its assigned drawer position.
+    steps:
+      kind: invoke
+      call:
+        kind: place
+        object: water_bottle
+        inside: water_bottle_slot
+    post:
+    - kind: wait_stable
+      entity: water_bottle
+    validators:
+    - kind: object_relative_position
+      object: water_bottle
+      reference: drawer_floor
+      reference_frame: parent
+      position_offset: [-0.03, -0.04, 0.03910540237426758]
+      position_tolerance: [0.025, 0.025, 0.015]
+  - kind: segment
+    name: clear_after_store_water_bottle
+    instruction: Lift the empty gripper above the handle and return to the source-side workspace.
+    steps:
+      kind: invoke
+      call:
+        kind: registered
+        call_id: simulation.move_end_effector
+        arguments:
+          target: clear_loaded_drawer
+    validators:
+    - kind: articulation_joint_position
+      articulation: drawer
+      joint: cabinet_to_drawer
+      minimum_position: 0.212
+      maximum_position: 0.229
+  - kind: segment
+    name: pick_coffee_cup
+    instruction: Grasp and lift the coffee cup.
+    steps:
+      kind: invoke
+      call:
+        kind: pick
+        object: coffee_cup
+        grasp: coffee_cup_grasp
+    validators:
+    - kind: object_lifted
+      object: coffee_cup
+      minimum_lift: 0.06
+  - kind: segment
+    name: transport_coffee_cup
+    instruction: Move the held coffee cup above the open drawer.
+    steps:
+      kind: invoke
+      call:
+        kind: registered
+        call_id: simulation.move_held_object
+        arguments:
+          target: transport_coffee_cup
+    validators:
+    - kind: object_relative_position
+      object: coffee_cup
+      reference: drawer_floor
+      reference_frame: parent
+      position_offset: [0.03, -0.04, 0.13]
+      position_tolerance: [0.025, 0.025, 0.015]
+  - kind: segment
+    name: support_coffee_cup
+    instruction: Lower the held object onto the drawer floor with the hand closed; verify floor height before release.
+    steps:
+      kind: invoke
+      call:
+        kind: registered
+        call_id: simulation.move_held_object
+        arguments:
+          target: support_coffee_cup
+    validators:
+    - kind: object_relative_position
+      object: coffee_cup
+      reference: drawer_floor
+      reference_frame: parent
+      position_offset: [0.03, -0.04, 0.025648928874731063]
+      position_tolerance: [0.015, 0.015, 0.003]
+  - kind: segment
+    name: store_coffee_cup
+    instruction: Put the coffee cup in its assigned drawer position.
+    steps:
+      kind: invoke
+      call:
+        kind: place
+        object: coffee_cup
+        inside: coffee_cup_slot
+    post:
+    - kind: wait_stable
+      entity: coffee_cup
+    validators:
+    - kind: object_relative_position
+      object: coffee_cup
+      reference: drawer_floor
+      reference_frame: parent
+      position_offset: [0.03, -0.04, 0.025648928874731063]
+      position_tolerance: [0.025, 0.025, 0.015]
+  - kind: segment
+    name: clear_after_store_coffee_cup
+    instruction: Lift the empty gripper above the handle and return to the source-side workspace.
+    steps:
+      kind: invoke
+      call:
+        kind: registered
+        call_id: simulation.move_end_effector
+        arguments:
+          target: clear_loaded_drawer
+    validators:
+    - kind: articulation_joint_position
+      articulation: drawer
+      joint: cabinet_to_drawer
+      minimum_position: 0.212
+      maximum_position: 0.229
+  - kind: segment
+    name: pick_paper_cup
+    instruction: Grasp and lift the paper cup.
+    steps:
+      kind: invoke
+      call:
+        kind: pick
+        object: paper_cup
+        grasp: paper_cup_grasp
+    validators:
+    - kind: object_lifted
+      object: paper_cup
+      minimum_lift: 0.06
+  - kind: segment
+    name: transport_paper_cup
+    instruction: Move the held paper cup above the open drawer.
+    steps:
+      kind: invoke
+      call:
+        kind: registered
+        call_id: simulation.move_held_object
+        arguments:
+          target: transport_paper_cup
+    validators:
+    - kind: object_relative_position
+      object: paper_cup
+      reference: drawer_floor
+      reference_frame: parent
+      position_offset: [0.09, -0.04, 0.13]
+      position_tolerance: [0.025, 0.025, 0.015]
+  - kind: segment
+    name: support_paper_cup
+    instruction: Lower the held object onto the drawer floor with the hand closed; verify floor height before release.
+    steps:
+      kind: invoke
+      call:
+        kind: registered
+        call_id: simulation.move_held_object
+        arguments:
+          target: support_paper_cup
+    validators:
+    - kind: object_relative_position
+      object: paper_cup
+      reference: drawer_floor
+      reference_frame: parent
+      position_offset: [0.09, -0.04, 0.037114635]
+      position_tolerance: [0.015, 0.015, 0.003]
+  - kind: segment
+    name: store_paper_cup
+    instruction: Put the paper cup in its assigned drawer position.
+    steps:
+      kind: invoke
+      call:
+        kind: place
+        object: paper_cup
+        inside: paper_cup_slot
+    post:
+    - kind: wait_stable
+      entity: paper_cup
+    validators:
+    - kind: object_relative_position
+      object: paper_cup
+      reference: drawer_floor
+      reference_frame: parent
+      position_offset: [0.09, -0.04, 0.037114635]
+      position_tolerance: [0.025, 0.025, 0.015]
+  - kind: segment
+    name: clear_after_store_paper_cup
+    instruction: Lift the empty gripper above the handle and return to the source-side workspace.
+    steps:
+      kind: invoke
+      call:
+        kind: registered
+        call_id: simulation.move_end_effector
+        arguments:
+          target: clear_loaded_drawer
+    validators:
+    - kind: object_relative_position
+      object: drink_can
+      reference: drawer_floor
+      reference_frame: parent
+      position_offset: [-0.09, -0.04, 0.026654031999999998]
+      position_tolerance: [0.025, 0.025, 0.015]
+    - kind: object_relative_position
+      object: water_bottle
+      reference: drawer_floor
+      reference_frame: parent
+      position_offset: [-0.03, -0.04, 0.03910540237426758]
+      position_tolerance: [0.025, 0.025, 0.015]
+    - kind: object_relative_position
+      object: coffee_cup
+      reference: drawer_floor
+      reference_frame: parent
+      position_offset: [0.03, -0.04, 0.025648928874731063]
+      position_tolerance: [0.025, 0.025, 0.015]
+    - kind: object_relative_position
+      object: paper_cup
+      reference: drawer_floor
+      reference_frame: parent
+      position_offset: [0.09, -0.04, 0.037114635]
+      position_tolerance: [0.025, 0.025, 0.015]
+  - kind: segment
+    name: approach_close_drawer
+    instruction: Align the fingertips outside the open handle before making contact.
+    steps:
+      kind: invoke
+      call:
+        kind: registered
+        call_id: simulation.move_end_effector
+        arguments:
+          target: approach_drawer_close
+    validators:
+    - kind: articulation_joint_position
+      articulation: drawer
+      joint: cabinet_to_drawer
+      minimum_position: 0.212
+      maximum_position: 0.229
+  - kind: segment
+    name: close_drawer
+    instruction: Contact the outside front panel, push the loaded drawer closed, then lift away.
+    steps:
+      kind: invoke
+      call:
+        kind: registered
+        call_id: simulation.move_end_effector
+        arguments:
+          target: push_drawer_closed
+    post:
+    - kind: wait_stable
+      entity: drink_can
+    - kind: wait_stable
+      entity: water_bottle
+    - kind: wait_stable
+      entity: coffee_cup
+    - kind: wait_stable
+      entity: paper_cup
+    validators:
+    - kind: articulation_joint_position
+      articulation: drawer
+      joint: cabinet_to_drawer
+      minimum_position: -0.003
+      maximum_position: 0.005
+    - kind: object_relative_position
+      object: drink_can
+      reference: drawer_floor
+      reference_frame: parent
+      position_offset: [-0.09, -0.04, 0.026654031999999998]
+      position_tolerance: [0.025, 0.025, 0.015]
+    - kind: object_relative_position
+      object: water_bottle
+      reference: drawer_floor
+      reference_frame: parent
+      position_offset: [-0.03, -0.04, 0.03910540237426758]
+      position_tolerance: [0.025, 0.025, 0.015]
+    - kind: object_relative_position
+      object: coffee_cup
+      reference: drawer_floor
+      reference_frame: parent
+      position_offset: [0.03, -0.04, 0.025648928874731063]
+      position_tolerance: [0.025, 0.025, 0.015]
+    - kind: object_relative_position
+      object: paper_cup
+      reference: drawer_floor
+      reference_frame: parent
+      position_offset: [0.09, -0.04, 0.037114635]
+      position_tolerance: [0.025, 0.025, 0.015]

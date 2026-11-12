@@ -38,6 +38,7 @@ _SETUP_PATH = _REPOSITORY_ROOT / "setup.py"
 _CONFIG_PACKAGE = "embodichain_tasks.configs"
 _CONFIG_SOURCE = _REPOSITORY_ROOT / "extensions" / "embodichain_tasks" / "configs"
 _PROGRAMS = (
+    Path("tasks/manipulation/drawer_storage/task_program/program.long_horizon.yaml"),
     Path("tasks/manipulation/carton_stocking/task_program/program.yaml"),
     Path("tasks/manipulation/hand_over/task_program/program.bar.yaml"),
     Path("tasks/manipulation/repeated_pick_place/task_program/program.tabletop.yaml"),
@@ -56,6 +57,11 @@ _PROGRAMS = (
     ),
 )
 _DEPLOYMENTS = {
+    Path("tasks/manipulation/drawer_storage/task.ur5.long_horizon.yaml"): (
+        "drawer_storage_long_horizon",
+        "task_program_drawer_storage_long_horizon",
+        "ur5_dh_pgi_140_80_full_closure",
+    ),
     Path("tasks/manipulation/repeated_pick_place/task.tianji_marvin.yaml"): (
         "repeated_tabletop_cube_pick_place",
         "repeated_pick_place_tabletop",
@@ -283,6 +289,18 @@ _RESOURCE_PATHS = frozenset(
         ),
         Path("components/execution_policies/real2sim_verified.yaml"),
         *_DUAL_ARM_RESOURCES,
+        Path("components/embodiments/ur5_dh_pgi_140_80_full_closure.yaml"),
+        *(
+            Path("tasks/manipulation/drawer_storage") / name
+            for name in (
+                "env.long_horizon.yaml",
+                "catalog.yaml",
+                "README.md",
+                "assets/bedside_cabinet.urdf",
+                "task_program/integration.long_horizon.yaml",
+                "task_program/execution_policy.long_horizon.yaml",
+            )
+        ),
         *_PROGRAMS,
         *_DEPLOYMENTS,
         *(
@@ -452,6 +470,7 @@ def test_setup_stages_all_official_task_programs(
         "**/*.json",
         "**/*.yaml",
         "**/*.yml",
+        "**/*.urdf",
         "**/README.md",
     ]
     expected_outputs = {
@@ -560,7 +579,7 @@ print(json.dumps(decoded_deployments, sort_keys=True))
 
 
 def test_installed_wheel_registers_drawer_storage(tmp_path: Path) -> None:
-    """Register both drawer deployments from installed YAML and discover the catalog."""
+    """Register the cube deployments from installed YAML and discover all three."""
     source = tmp_path / "source"
     source.mkdir()
     for name in ("setup.py", "pyproject.toml", "README.md", "VERSION", "MANIFEST.in"):
@@ -649,6 +668,7 @@ assert "embodichain_tasks.manipulation.drawer_storage" not in sys.modules
 assert {entry.env_id for entry in _collect_environment_entries()} >= {
     "TaskProgramDrawerStorage-UR5-v1",
     "TaskProgramDrawerStorage-Franka-v1",
+    "TaskProgramDrawerStorage-UR5-LongHorizon-v1",
 }
 
 """,

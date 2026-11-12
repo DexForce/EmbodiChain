@@ -2438,6 +2438,17 @@ class SemanticCallCompiler:
                 expectation_id=expectation_id,
                 relation=relation,
             )
+            if type(call) is Place and relation is HeldObjectRelation.DETACHED:
+                # A supported object stays beside the open hand until retract.
+                # Check physical release first; terminal verification retains
+                # the pose-separation clause after the hand has moved away.
+                release_clauses = tuple(
+                    clause
+                    for clause in gate_spec.clauses
+                    if isinstance(clause, BinaryEffectClause) and not clause.expected
+                )
+                if release_clauses:
+                    gate_spec = replace(gate_spec, clauses=release_clauses)
             try:
                 monitor = self._effect_monitor_registry.create(
                     gate_spec,

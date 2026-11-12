@@ -4774,3 +4774,70 @@ def test_final_acceptance_rejects_invalid_refs_before_registration(
     with pytest.raises(ValueError, match=message):
         config_to_cfg(config, source_path=path)
     assert config["id"] not in REGISTERED_ENVS
+
+
+def test_cartesian_routes_lower_owned_batch_poses_and_reject_unknown_selectors() -> (
+    None
+):
+    """Transit selectors expose closed contracts and retain immutable waypoints."""
+    from embodichain.lab.task_program.integrations._configured_services import (
+        _MoveEndEffectorLowererFactory,
+    )
+
+    first = torch.eye(4)
+    first[:3, 3] = torch.tensor([-0.4, -0.2, 0.7])
+    second = first.clone()
+    second[2, 3] = 0.5
+    factory = _decode_registered_lowerer(
+        {
+            "kind": "move_end_effector",
+            "routes": [
+                {
+                    "target_id": "outside",
+                    "poses": [first.flatten().tolist(), second.flatten().tolist()],
+                }
+            ],
+        },
+        path="lowerer",
+    )
+    assert type(factory) is _MoveEndEffectorLowererFactory
+    assert factory.argument_contract.to_metadata()["required"]["target"] == ["outside"]
+    robot = object()
+    lowerer = factory.create(
+        simulation=None,
+        robot=robot,
+        scene_registry=None,
+        engine=SimpleNamespace(robot=robot),
+    )
+    context = SimpleNamespace(
+        robot=SimpleNamespace(qpos=torch.zeros(2, 6)), batch_size=2
+    )
+    call = RegisteredSemanticCall(
+        call_id="simulation.move_end_effector", arguments={"target": "outside"}
+    )
+    result = lowerer.lower(
+        call, context=context, bound=None, option_template=MoveEndEffectorOptions()
+    )
+    assert result.goal.xpos.shape == (2, 2, 4, 4)
+    torch.testing.assert_close(
+        result.goal.xpos[:, 0, :3, 3],
+        torch.tensor([[-0.4, -0.2, 0.7], [-0.4, -0.2, 0.7]]),
+    )
+    result.goal.xpos[0, 0, 0, 3] = 99.0
+    again = lowerer.lower(
+        call, context=context, bound=None, option_template=MoveEndEffectorOptions()
+    )
+    assert float(again.goal.xpos[0, 0, 0, 3]) == pytest.approx(-0.4)
+    with pytest.raises(ValueError, match="configured target"):
+        lowerer.lower(
+            RegisteredSemanticCall(
+                call_id=call.call_id, arguments={"target": "unknown"}
+            ),
+            context=context,
+            bound=None,
+            option_template=MoveEndEffectorOptions(),
+        )
+    with pytest.raises(ValueError, match="unique"):
+        _MoveEndEffectorLowererFactory(
+            pose_routes=(factory.pose_routes[0], factory.pose_routes[0])
+        )

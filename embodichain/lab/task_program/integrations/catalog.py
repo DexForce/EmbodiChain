@@ -68,6 +68,7 @@ from embodichain.lab.task_program.semantics import (
     SceneAffordanceRef,
     SceneArticulationRef,
     SceneEntityRef,
+    SceneLinkRef,
     SceneManifest,
     SceneObjectRef,
     SceneRegistry,
@@ -1060,6 +1061,7 @@ class TaskProgramIntegrationCatalog:
             "articulation": (SceneArticulationRef,),
             "affordance": (SceneAffordanceRef,),
             "object_or_affordance": (SceneObjectRef, SceneAffordanceRef),
+            "object_or_link": (SceneObjectRef, SceneLinkRef),
         }
         expected_types = expected.get(role)
         if expected_types is None:

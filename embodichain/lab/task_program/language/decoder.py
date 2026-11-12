@@ -70,6 +70,7 @@ SceneReferenceRole: TypeAlias = Literal[
     "articulation",
     "affordance",
     "object_or_affordance",
+    "object_or_link",
 ]
 
 _MAX_INPUT_DEPTH = 128
@@ -1290,7 +1291,7 @@ def validate_task_program(
                         _call_context(
                             context.validate_scene_reference,
                             validator.reference,
-                            role="object",
+                            role="object_or_link",
                             path=(*validator_path, "reference"),
                         )
                 elif type(validator) is ObjectNearRelativeTargetValidatorCfg:

@@ -1,0 +1,12 @@
+id: TaskProgramDrawerStorage-UR5-LongHorizon-v1
+environment:
+  component: env.long_horizon.yaml
+task_program:
+  program: task_program/program.long_horizon.yaml
+  integration: task_program/integration.long_horizon.yaml
+  execution_policy: task_program/execution_policy.long_horizon.yaml
+embodiment:
+  component: ../../../components/embodiments/ur5_dh_pgi_140_80_full_closure.yaml
+  overrides:
+    init_qpos: [0.0, -1.57, 1.57, -3.14, -1.57, 0.0, 0.0, 0.0]
+    init_pos: [0.0, 0.0, 0.24]

@@ -30,6 +30,7 @@ from embodichain.lab.task_program import TaskProgramCompiler, decode_task_progra
 from embodichain.lab.task_program.integrations import (
     RigidizedArticulationAntipodalGraspBinding,
     SimulationArticulationBinding,
+    SimulationArticulationLinkBinding,
     SimulationRigidizedArticulationObjectBinding,
     SimulationRigidObjectBinding,
     SimulationSceneBinding,
@@ -48,6 +49,7 @@ from embodichain.lab.task_program.semantics.scene import (
     SceneAffordanceRef,
     SceneArticulationRef,
     SceneEntityRegistration,
+    SceneLinkRef,
     SceneObjectRef,
     SceneRegistry,
 )
@@ -998,23 +1000,39 @@ def _object_state_payload(validators: list[dict[str, object]]) -> dict[str, obje
     }
 
 
-def _measured_object_segment(validators: list[dict[str, object]]):
+def _measured_object_segment(
+    validators: list[dict[str, object]], *, reference_link: bool = False
+):
     """Resolve both measured object references without constructing a simulator."""
-    registry = SceneRegistry(
-        tuple(
-            SceneEntityRegistration(
-                ref=SceneObjectRef(entity_id), state_provider=_StaticStateProvider()
-            )
-            for entity_id in ("cube", "reference")
+    registrations = [
+        SceneEntityRegistration(
+            ref=SceneObjectRef(entity_id), state_provider=_StaticStateProvider()
         )
-    )
+        for entity_id in (("cube",) if reference_link else ("cube", "reference"))
+    ]
+    if reference_link:
+        registrations.extend(
+            [
+                SceneEntityRegistration(
+                    ref=SceneArticulationRef("drawer"),
+                    state_provider=_StaticStateProvider(),
+                ),
+                SceneEntityRegistration(
+                    ref=SceneLinkRef("reference"),
+                    state_provider=_StaticStateProvider(),
+                    parent=SceneArticulationRef("drawer"),
+                    native_name="drawer_floor",
+                ),
+            ]
+        )
+    registry = SceneRegistry(tuple(registrations))
     compiled = TaskProgramCompiler.from_scene_registry(registry).compile(
         decode_task_program(_object_state_payload(validators))
     )
     return next(compiled.iter_segments())
 
 
-def _measured_object_port(batch_size: int = 2):
+def _measured_object_port(batch_size: int = 2, *, reference_link: bool = False):
     """Keep stable logical IDs distinct from simulator row indices."""
     objects = {
         name: _RigidObject(torch.zeros(batch_size, 3, dtype=torch.float64))
@@ -1023,14 +1041,45 @@ def _measured_object_port(batch_size: int = 2):
     # Use double poses so exact binary tolerance boundaries stay exact.
     for entity in objects.values():
         entity._pose = entity._pose.to(dtype=torch.float64)
+
+    def link_pose(name: str, *, env_ids: list[int], to_matrix: bool) -> torch.Tensor:
+        assert name == "drawer_floor"
+        assert env_ids == list(range(batch_size))
+        assert to_matrix
+        return objects["reference"]._pose.clone()
+
+    articulation = SimpleNamespace(get_link_pose=link_pose)
     port = SimulationSegmentPolicyPort(
-        SimpleNamespace(get_rigid_object=objects.get),
+        SimpleNamespace(
+            get_rigid_object=objects.get,
+            get_articulation=lambda uid: articulation if uid == "drawer" else None,
+        ),
         _Robot(torch.zeros(batch_size, 2)),
         SimulationSceneBinding(
             registry_id="test_scene",
             rigid_objects=tuple(
                 SimulationRigidObjectBinding(entity_id=name, simulation_uid=name)
-                for name in objects
+                for name in (("cube",) if reference_link else objects)
+            ),
+            articulations=(
+                (
+                    SimulationArticulationBinding(
+                        entity_id="drawer", simulation_uid="drawer"
+                    ),
+                )
+                if reference_link
+                else ()
+            ),
+            links=(
+                (
+                    SimulationArticulationLinkBinding(
+                        entity_id="reference",
+                        articulation_id="drawer",
+                        native_link_name="drawer_floor",
+                    ),
+                )
+                if reference_link
+                else ()
             ),
         ),
         env_ids=torch.arange(batch_size - 1, -1, -1),
@@ -1136,7 +1185,10 @@ def test_relative_position_uses_live_world_axes_ignores_disabled_z_and_is_strict
     )
 
 
-def test_relative_position_parent_frame_follows_live_reference_rotation() -> None:
+@pytest.mark.parametrize("reference_link", [False, True])
+def test_relative_position_parent_frame_follows_live_reference_rotation(
+    reference_link: bool,
+) -> None:
     segment = _measured_object_segment(
         [
             {
@@ -1147,9 +1199,10 @@ def test_relative_position_parent_frame_follows_live_reference_rotation() -> Non
                 "position_offset": [0.5, 0.0, 0.0],
                 "position_tolerance": [0.125, 0.125, None],
             }
-        ]
+        ],
+        reference_link=reference_link,
     )
-    port, objects = _measured_object_port()
+    port, objects = _measured_object_port(reference_link=reference_link)
     port.begin_segment(segment=segment, active_mask=None)
     # Local X follows world Y after a quarter turn, including after begin_segment.
     objects["reference"]._pose[:, :3, :3] = torch.tensor(
