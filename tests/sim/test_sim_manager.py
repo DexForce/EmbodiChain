@@ -494,7 +494,6 @@ def _make_runtime_control_sim_manager(
     sim._articulations = {}
     sim._rigid_objects = {"table": object()}
     sim._fluid_objects = {}
-    sim._rigid_trajectory_controls = {}
     sim._deformable_objects = {
         "cloth": SimpleNamespace(
             cfg=SurfaceDeformableObjectCfg(uid="cloth", particle_flags=[0, 1, 0])
@@ -590,7 +589,6 @@ def test_deferred_destroy_prepares_backend_before_releasing_world(
     sim._constraints = {}
     sim._rigid_object_groups = {}
     sim._fluid_objects = {}
-    sim._rigid_trajectory_controls = {}
     sim._deformable_objects = {}
     sim._articulations = {}
     sim._robots = {}
@@ -1337,7 +1335,6 @@ def test_start_visualization_does_not_prepare_an_empty_declaration_phase(
     sim._rigid_objects = {}
     sim._rigid_object_groups = {}
     sim._fluid_objects = {}
-    sim._rigid_trajectory_controls = {}
     sim._deformable_objects = {}
     sim._articulations = {}
     sim._robots = {}
@@ -2349,6 +2346,8 @@ def test_prepare_initializes_runtime_for_backend_device_matrix(
     spawn_scene.bind.side_effect = lambda: events.append("bind")
 
     sim = object.__new__(SimulationManager)
+    sim._fluid_objects = {}
+    sim.num_envs = 1
     sync_render_state = MagicMock()
     sim.device = device
     sim._world = MagicMock()
@@ -2401,6 +2400,8 @@ def test_prepare_retries_runtime_and_binding_without_recommit() -> None:
     spawn_scene.builder.has_pending_changes = False
 
     sim = object.__new__(SimulationManager)
+    sim._fluid_objects = {}
+    sim.num_envs = 1
     sync_render_state = MagicMock()
     prepare_spawn_runtime = MagicMock(side_effect=[RuntimeError("first attempt"), None])
     sim.physics = SimpleNamespace(
@@ -2439,6 +2440,8 @@ def test_prepare_retries_camera_attachment_without_recommit() -> None:
     spawn_scene.builder.has_pending_changes = False
 
     sim = object.__new__(SimulationManager)
+    sim._fluid_objects = {}
+    sim.num_envs = 1
     sync_render_state = MagicMock()
     sim.physics = SimpleNamespace(
         name="default",
@@ -2478,6 +2481,8 @@ def test_prepare_syncs_render_state_once_per_topology_revision() -> None:
     sync_render_state = MagicMock(side_effect=lambda _result: events.append("sync"))
 
     sim = object.__new__(SimulationManager)
+    sim._fluid_objects = {}
+    sim.num_envs = 1
     sim.physics = SimpleNamespace(
         name="newton",
         prepare_spawn_runtime=MagicMock(),
@@ -2521,6 +2526,8 @@ def test_prepare_retries_render_state_sync_without_recommit() -> None:
     )
 
     sim = object.__new__(SimulationManager)
+    sim._fluid_objects = {}
+    sim.num_envs = 1
     sim.physics = SimpleNamespace(
         name="newton",
         prepare_spawn_runtime=MagicMock(),
@@ -2703,7 +2710,6 @@ def test_remove_asset_marks_visualization_topology_dirty() -> None:
     sim._rigid_objects = {"cube": rigid_object}
     sim._rigid_object_groups = {}
     sim._fluid_objects = {}
-    sim._rigid_trajectory_controls = {}
     sim._deformable_objects = {}
     sim._articulations = {}
     sim._robots = {}
@@ -2828,6 +2834,7 @@ def _make_camera_with_fake_views(
 
 def _make_camera_attachment_manager(num_envs: int = 2) -> SimulationManager:
     sim = object.__new__(SimulationManager)
+    sim._fluid_objects = {}
     sim.num_envs = num_envs
     sim.device = torch.device("cpu")
     sim._robots = {}
@@ -3182,7 +3189,6 @@ def test_reset_objects_state_includes_deformable_assets() -> None:
     sim._lights = {}
     sim._sensors = {}
     sim._fluid_objects = {}
-    sim._rigid_trajectory_controls = {}
     sim._visualization_sim_time = 1.25
     sim._deformable_objects = {
         "soft": MagicMock(),
@@ -3242,7 +3248,6 @@ def test_newton_reset_clears_all_articulations_in_selected_worlds_together(
     sim._rigid_objects = {}
     sim._rigid_object_groups = {}
     sim._fluid_objects = {}
-    sim._rigid_trajectory_controls = {}
     sim._deformable_objects = {}
     sim._lights = {}
     sim._sensors = {}
@@ -3270,7 +3275,6 @@ def test_newton_reset_rejects_excluding_one_articulation_from_selected_worlds(
     sim._rigid_objects = {}
     sim._rigid_object_groups = {}
     sim._fluid_objects = {}
-    sim._rigid_trajectory_controls = {}
     sim._deformable_objects = {}
     sim._lights = {}
     sim._sensors = {}
@@ -3302,7 +3306,6 @@ def test_newton_non_mujoco_reset_allows_excluding_an_articulation() -> None:
     sim._rigid_objects = {}
     sim._rigid_object_groups = {}
     sim._fluid_objects = {}
-    sim._rigid_trajectory_controls = {}
     sim._deformable_objects = {}
     sim._lights = {}
     sim._sensors = {}
@@ -3337,6 +3340,8 @@ def test_prepare_detaches_camera_before_rebuilding_parent(rebuild: bool) -> None
 
     scene.commit.side_effect = commit
     sim = object.__new__(SimulationManager)
+    sim._fluid_objects = {}
+    sim.num_envs = 1
     sim._spawn_scene = scene
     sim._sensors = {"camera": camera}
     sim._default_plane = object()
@@ -4005,7 +4010,7 @@ def test_marker_update_in_observer_waits_for_deferred_final_frame() -> None:
     assert runtime.capture_calls[0]["sim_step"] == 1
 
 
-def test_reset_fluid_and_rigid_controls_selects_rows_and_honors_exclusions():
+def test_reset_fluids_selects_rows_and_honors_exclusions():
     sim = object.__new__(SimulationManager)
     sim.physics = NewtonPhysicsBackend(sim)
     sim.num_envs = 2
@@ -4019,17 +4024,9 @@ def test_reset_fluid_and_rigid_controls_selects_rows_and_honors_exclusions():
         "_deformable_objects",
     ):
         setattr(sim, name, {})
-    first, second, excluded_control = MagicMock(), MagicMock(), MagicMock()
     fluid, excluded_fluid = MagicMock(), MagicMock()
-    sim._rigid_trajectory_controls = {
-        "cup": (first, second),
-        "other": (excluded_control, excluded_control),
-    }
     sim._fluid_objects = {"water": fluid, "other_fluid": excluded_fluid}
-    sim.reset_objects_state(env_ids=[1], excluded_uids=["other", "other_fluid"])
-    first.reset.assert_not_called()
-    second.reset.assert_called_once_with()
-    excluded_control.reset.assert_not_called()
+    sim.reset_objects_state(env_ids=[1], excluded_uids=["other_fluid"])
     excluded_fluid.reset.assert_not_called()
     fluid.reset.assert_called_once_with([1])
 

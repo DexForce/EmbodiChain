@@ -2766,6 +2766,45 @@ def test_mesh_asset_paths_resolve_collision_and_visual_geometry(
     assert parsed.visual_shape.fpath == paths["TaskMeshes/visual.glb"]
 
 
+@pytest.mark.parametrize("owner", ["inline", "environment", "scene"])
+def test_fluid_point_files_resolve_from_declaration_owner(
+    owner: str, tmp_path: Path
+) -> None:
+    physical_dir = tmp_path / "physical"
+    physical_dir.mkdir()
+    points = np.array([[0.0, 0.0, 0.0], [0.02, 0.0, 0.0]], dtype=np.float32)
+    np.savez(physical_dir / "water.npz", positions=points)
+    fluid = {"uid": "water", "spawn": {"kind": "points", "file_path": "water.npz"}}
+    config = {
+        "id": "EmbodiedEnv-v1",
+        "physics": "newton",
+        "env": {},
+        "robot": {"uid": "robot"},
+    }
+    source_path = tmp_path / "task.yaml"
+    if owner == "inline":
+        config["fluid_object"] = [fluid]
+        source_path = physical_dir / "task.yaml"
+    else:
+        component = {"simulation": {"fluid_object": [fluid]}}
+        if owner == "environment":
+            component.update(environment_id="fluid_test", physics="newton", env={})
+            del config["physics"], config["env"]
+        else:
+            component["scene_id"] = "fluid_test"
+        save_config(physical_dir / "component.yaml", component)
+        config[owner] = {"component": "physical/component.yaml"}
+
+    cfg = config_to_cfg(
+        config, manager_modules=DEFAULT_MANAGER_MODULES, source_path=source_path
+    )
+
+    spawn = cfg.fluid_object[0].spawn
+    assert spawn.file_path == str(physical_dir / "water.npz")
+    np.testing.assert_array_equal(spawn.sample(0.01), points)
+    assert fluid["spawn"]["file_path"] == "water.npz"
+
+
 def test_config_to_cfg_loads_render_only_objects():
     """The production Gym loader keeps visuals outside the physical registries."""
     from embodichain.lab.sim.cfg import VisualObjectCfg

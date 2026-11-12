@@ -29,6 +29,7 @@ import argparse
 import json
 from pathlib import Path
 import time
+from types import SimpleNamespace
 
 import imageio.v2 as imageio
 import numpy as np
@@ -39,21 +40,20 @@ from embodichain.lab.gym.envs._fluid_pour import (
     cup_motion_qualification,
 )
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
+from embodichain.lab.gym.utils.composition import resolve_gym_components
+from embodichain.lab.task_program.integrations import (
+    load_configured_task_program_deployment,
+)
 from embodichain.lab.sim import SimulationManager
-from embodichain.lab.sim.atomic_actions import (
+from embodichain.lab.sim.atomic_skills import (
     AxisAlignAffordance,
     ControlPartCommandProfile,
     GraspGoal,
     HeldObjectPoseGoal,
-    MoveHeldObjectOptions,
-    MotionPolicy,
     ObjectSemantics,
-    PickUpOptions,
     PlaceGoal,
-    PlaceOptions,
     PourGoal,
-    PourOptions,
-    create_simulation_atomic_action_engine,
+    create_simulation_atomic_skill_engine,
 )
 from embodichain.lab.sim.motion.motion_generator import MotionGenerator, MotionGenCfg
 from embodichain.lab.sim.motion.planners import ToppraPlannerCfg
@@ -111,7 +111,22 @@ def main() -> None:
         parser.error("seconds must be finite and positive")
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
-    cfg = config_to_cfg(load_config(str(TASK)), source_path=TASK)
+    declaration = load_config(str(TASK))
+    cfg = config_to_cfg(declaration, source_path=TASK)
+    components = resolve_gym_components(declaration, base_dir=TASK.parent)
+    deployment = load_configured_task_program_deployment(
+        task_program=declaration["task_program"],
+        skill_profile=components.embodiment_skill_profile,
+        base_dir=TASK.parent,
+    )
+    preset = next(
+        item
+        for item in deployment.integration.registration.robot_profile_binding.presets
+        if item.preset_id == deployment.selection.runtime_preset
+    )
+    pick_options = preset.skill_option_template("pick")
+    qualification = declaration["collection"]["qualification"]
+    volume_observation = getattr(cfg.observations, qualification["volume_observation"])
     cfg.num_envs = args.num_envs
     cfg.sim_cfg.headless = True
     cfg.sim_cfg.render_cfg.renderer = args.renderer
@@ -125,7 +140,7 @@ def main() -> None:
     cfg.sim_cfg.num_envs = cfg.num_envs
     sim = SimulationManager(cfg.sim_cfg)
     writers = []
-    robot = cup = camera = engine = None
+    robot = cup = camera = engine = measurement_env = None
     try:
         robot = sim.add_robot(cfg.robot)
         for object_cfg in [*cfg.background, *cfg.rigid_object]:
@@ -145,10 +160,9 @@ def main() -> None:
         fill_pose = cup.get_local_pose().clone()
         fill_pose[:, :3] += sim.arena_offsets
         sim.get_fluid_object("water").reset_to_pose(fill_pose)
-        object_to_eef = torch.tensor(
-            [[0, 0, -1, 0.065], [0, 1, 0, 0], [1, 0, 0, 0], [0, 0, 0, 1]],
-            dtype=torch.float32,
-            device=sim.device,
+        object_to_eef = pick_options.fixed_object_to_eef.to(sim.device)
+        measurement_env = SimpleNamespace(
+            sim=sim, device=sim.device, num_envs=sim.num_envs
         )
         semantics = ObjectSemantics(
             entity_id="cup",
@@ -167,7 +181,7 @@ def main() -> None:
                 )
             )
         )
-        engine = create_simulation_atomic_action_engine(
+        engine = create_simulation_atomic_skill_engine(
             motion,
             (cup,),
             control_profiles={
@@ -178,9 +192,7 @@ def main() -> None:
             },
         )
         bindings = {"primary": {"motion": "arm", "grasp": "eef"}}
-        policy = MotionPolicy(
-            strategy="ik_interp", sample_count=160, dynamic_collision_mode="off"
-        )
+        policy = preset.motion_policy
         receiver_pose = sim.get_rigid_object("receiver").get_local_pose(to_matrix=True)
         receiver_to_cup = torch.eye(4, device=sim.device)
         receiver_to_cup[:3, 3] = torch.tensor([0.005, 0.09, 0.17], device=sim.device)
@@ -191,37 +203,30 @@ def main() -> None:
                 GraspGoal(semantics),
                 control_parts=bindings,
                 motion_policy=policy,
-                skill_options=PickUpOptions(
-                    fixed_object_to_eef=object_to_eef,
-                    approach_direction=torch.tensor([-1.0, 0, 0], device=sim.device),
-                    pre_grasp_distance=0.08,
-                    lift_height=0.12,
-                    hand_interp_steps=20,
-                    grasp_settle_steps=20,
-                ),
+                skill_options=pick_options,
             ),
             engine.make_invocation(
                 "move_held_object",
                 HeldObjectPoseGoal(pour_pose),
                 control_parts=bindings,
                 motion_policy=policy,
-                skill_options=MoveHeldObjectOptions(),
+                skill_options=preset.skill_option_template(
+                    "simulation.move_held_object"
+                ),
             ),
             engine.make_invocation(
                 "pour",
                 PourGoal(),
                 control_parts=bindings,
                 motion_policy=policy,
-                skill_options=PourOptions(rotate_angle=np.deg2rad(80)),
+                skill_options=preset.skill_option_template("simulation.pour"),
             ),
             engine.make_invocation(
                 "place",
                 PlaceGoal(initial_pose @ object_to_eef),
                 control_parts=bindings,
                 motion_policy=policy,
-                skill_options=PlaceOptions(
-                    hand_interp_steps=20, release_settle_steps=20
-                ),
+                skill_options=preset.skill_option_template("place"),
             ),
         )
         control_dt = cfg.sim_steps_per_control * sim.sim_config.physics_dt
@@ -229,7 +234,7 @@ def main() -> None:
             invocations, engine.initial_context(control_dt=control_dt)
         )
         if not bool(plan.plan_success.all()):
-            raise RuntimeError("Atomic Action planning failed.")
+            raise RuntimeError("Atomic Skill planning failed.")
         if args.renderer != "no-render":
             params = cfg.events.record_camera.params
             camera = sim.add_sensor(
@@ -280,41 +285,24 @@ def main() -> None:
                 state = fluid.data.particle_state_w
                 if not bool(torch.isfinite(state).all()):
                     raise RuntimeError("Non-finite online fluid state.")
-                local = state[..., :3] - sim.arena_offsets[:, None, :]
-                receiver_pose = sim.get_rigid_object("receiver").get_local_pose(
-                    to_matrix=True
-                )
-                receiver = torch.bmm(
-                    local - receiver_pose[:, None, :3, 3], receiver_pose[:, :3, :3]
-                )
-                received = (
-                    (receiver[..., 2] > 0.0045)
-                    & (receiver[..., 2] < 0.0675)
-                    & (
-                        torch.linalg.vector_norm(
-                            receiver - torch.tensor([0, 0, 0.088], device=sim.device),
-                            dim=-1,
-                        )
-                        < 0.093
-                    )
+                received = volume_observation.func(
+                    measurement_env, {}, **volume_observation.params
                 )
                 sample = {
                     "time_s": (i + 1) * control_dt,
                     "cup_pose": poses[-1].tolist(),
-                    "received_ml": (received.sum(dim=1) * args.spacing**3 * 1e6)
-                    .cpu()
-                    .tolist(),
+                    "received_ml": (received[:, 0] * 1e6).cpu().tolist(),
                 }
                 samples.append(sample)
                 print(json.dumps(sample), flush=True)
         report = {
             "coupling": "online one-way rigid-to-fluid",
-            "controller": "fresh Atomic Action joint targets",
+            "controller": "fresh Atomic Skill joint targets",
             "cup": cup_motion_qualification(
                 poses,
-                min_lift_m=0.05,
-                min_tilt_deg=45.0,
-                max_return_error_m=0.03,
+                min_lift_m=qualification["min_lift_m"],
+                min_tilt_deg=qualification["min_tilt_deg"],
+                max_return_error_m=qualification["max_return_error_m"],
             ),
             "num_envs": sim.num_envs,
             "particle_count_per_env": sim.get_fluid_object("water").num_particles,
@@ -325,7 +313,10 @@ def main() -> None:
         }
         report["accepted"] = bool(
             all(report["cup"]["accepted"])
-            and all(v >= 50 for v in samples[-1]["received_ml"])
+            and all(
+                v >= qualification["min_received_ml"]
+                for v in samples[-1]["received_ml"]
+            )
         )
         (output / "validation.json").write_text(json.dumps(report, indent=2) + "\n")
         print(json.dumps(report["cup"]), flush=True)
@@ -336,7 +327,7 @@ def main() -> None:
     finally:
         for writer in writers:
             writer.close()
-        robot = cup = camera = engine = None
+        robot = cup = camera = engine = measurement_env = None
         sim.destroy(exit_process=False)
         del sim
         SimulationManager.flush_cleanup_queue()

@@ -973,11 +973,7 @@ def config_to_cfg(
 
     # Fluids use one typed declaration path for inline and component scenes.
     from embodichain.lab.sim.cfg import FluidObjectCfg
-    from embodichain.lab.gym.utils._component_composition import (
-        _resolve_physical_source_paths,
-    )
 
-    config = _resolve_physical_source_paths(config, base_dir)
     env_cfg.fluid_object = [
         FluidObjectCfg.from_dict(item) for item in config.get("fluid_object", [])
     ]

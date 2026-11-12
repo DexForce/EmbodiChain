@@ -146,9 +146,9 @@ source-body clearance and mouth-compensated approach/tilt/return path from the
 held transform. Omission retains the original local-axis rotation mode.
 Geometry belongs to the goal/integration. `PourOptions.rotation_duration`
 optionally sets a minimum simulated duration for each tilt and return leg on
-the control grid. The local-axis mode time-stretches a shorter moving trajectory
-instead of padding its endpoint; strategy, control period, joint motion limits,
-IK and collision checks remain with the selected planning policy. Validate
+the control grid. The local-axis mode stretches each row's native segment timing
+before control-grid resampling and batch padding; strategy, control period,
+joint motion limits, IK and collision checks remain with the selected planning policy. Validate
 executed mouth alignment and height throughout tilted motion with host
 observations, rather than treating an accepted final pose as evidence of pouring.
 
@@ -210,38 +210,6 @@ they are not world defaults or a guarantee of open-loop physical success.
 Author contact dimensions and material settings before `prepare()`, never by
 rewriting captured solver arrays. The current values live in
 `examples/sim/atomic_skill/support.py` and the selected physical components.
-
-Scene-specific DexUni contact options are authored through
-`create_tutorial_simulation(newton_solver_options=...)` before model construction.
-`add_tutorial_robot` owns optional `newton_gripper_friction` and `arm_damping`
-overrides; `scenario.add_dual_tutorial_robot` owns dual-arm friction and optional
-mimic stabilization.
-Scene modules retain calibrated close targets, fixture TCPs and grippers, including
-Handover's Robotiq 2F-140 fixture. Read those example owners for current values;
-calibration does not establish generic physical success or solver equivalence.
-The coordinated-placement host opts into mimic stabilization and two-way DexUni
-feedback, checks measured
-lift and release placement, and retains commanded jaw preload when reconciling
-measured arm/held-object state. A contact-blocked jaw measurement is not its
-holding command. Its mesh fixtures use
-the authored Z-up frame; shared pan geometry selects the handle and basin along
-local Y. The three original-GLB benchmark suites instead declare
-`support_mesh_frame: native_glb`, selecting along local Z in the native Y-up
-mesh. Propagate this frame through grasp, target and footprint qualification;
-retain each suite's matching asset scale and root pose. Keep these asset-specific
-conventions in the scene/geometry owners.
-The host caches textured OBJ geometry so native renderers and NoRender load the
-same baked asset frame.
-Release checks reuse complete projected mesh-footprint coverage and sampled
-support-surface gaps. The example rejects negative sampled gaps and requires
-an interior-floor witness within 8 mm to reject overhang, penetration, hovering
-and rim-spanning outcomes while permitting curved undersides; the target-input
-audit retains its separate collision-free-proposal semantics. This is finite
-geometric evidence, not a proof of continuous 3D collision freedom or contact load.
-Keep the base-to-table height invariant when raising the fixture.
-Read held poses without resetting them at the replan boundary.
-The launcher preserves an omitted device through simulation configuration so the
-selected backend owns its default; explicit device selections retain priority.
 
 Scene-specific DexUni contact options are authored through
 `create_tutorial_simulation(newton_solver_options=...)` before model construction.

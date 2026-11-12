@@ -104,11 +104,10 @@ the pouring cup authors its COM and body-frame inertia from its contact hulls.
 Static/kinematic boundaries retain their respective motion semantics. Independent
 `visual_shape` settings preserve the render mesh.
 
-Replay may write `RigidObject.set_kinematic_state()` or register a manager-owned
-kinematic rigid trajectory before preparation. These host controls disable graph
-replay and rewind selected clocks on object reset; they do not qualify online
-grasping. Normal Gym reset restores or refills selected fluid rows without
-stepping peer worlds. Online action execution supplies physical settling.
+Normal Gym reset restores or refills selected fluid rows without stepping peer
+worlds. Online action execution supplies physical settling. Replay uses the
+ordinary object-state and fluid-state writers; its modes and artifact contracts
+belong to [fluid Gym integration](../env-framework/fluid-replay.md).
 
 The robot demonstrations, task assets, Gym declarations, observations, recording,
 Task Program runner and replay belong to the pouring task layer. See

@@ -2785,6 +2785,67 @@ def test_pour_rotates_held_object_about_internal_axis_and_returns() -> None:
     )
 
 
+def test_pour_rotation_duration_stretches_each_native_batch_row() -> None:
+    generator = _motion_generator()
+    positions = torch.zeros(NUM_ENVS, 9, ARM_DOF)
+    positions[:, :, 0] = torch.tensor(
+        [
+            [0.0, 0.5, 1.0, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0],
+            [0.0, 0.25, 0.5, 0.75, 1.0, 0.75, 0.5, 0.25, 0.0],
+        ]
+    )
+    # Native tilt/return each take 1 s in row 0 and 3 s in row 1.
+    intervals = torch.tensor(
+        [
+            [0.0, 0.5, 0.5, 0.5, 0.5, 0.0, 0.0, 0.0, 0.0],
+            [0.0, 0.75, 0.75, 0.75, 0.75, 0.75, 0.75, 0.75, 0.75],
+        ]
+    )
+    generator.generate = Mock(
+        return_value=PlanResult(
+            success=torch.ones(NUM_ENVS, dtype=torch.bool),
+            positions=positions,
+            dt=intervals,
+            waypoint_indices=torch.tensor([[2, 4], [4, 8]]),
+        )
+    )
+    action = _bind_action(generator, Pour())
+    semantics = ObjectSemantics(
+        affordance=AxisAlignAffordance(internal_axis=torch.tensor([1.0, 0.0, 0.0])),
+        geometry={},
+        entity_id="cup",
+        label="cup",
+    )
+    task = TaskState(
+        batch_size=NUM_ENVS, device="cpu", held_objects={"arm": _held(semantics)}
+    )
+
+    plan = _plan_action(
+        action,
+        SkillInvocation(
+            skill_id="pour",
+            goal=PourGoal(),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(sample_count=4),
+            skill_options=PourOptions(rotation_duration=2.0, dwell_duration=0.0),
+        ),
+        _context(task),
+    )
+
+    assert plan.plan_success.all()
+    trajectory = _joint_trajectory(plan).positions[:, :, 0]
+    pour_count = plan.segments[0].waypoint_count
+    for row, expected_duration in enumerate((2.0, 3.0)):
+        first_arrival = torch.isclose(trajectory[row, :pour_count], torch.tensor(1.0))
+        arrival_time = first_arrival.nonzero()[0].item() * CONTROL_DT
+        assert arrival_time == pytest.approx(expected_duration, abs=CONTROL_DT)
+        return_path = trajectory[row, pour_count:]
+        return_arrival = torch.isclose(return_path, torch.tensor(0.0)).nonzero()[0]
+        assert (return_arrival.item() + 1) * CONTROL_DT == pytest.approx(
+            expected_duration, abs=CONTROL_DT
+        )
+
+
 def test_pour_reads_held_state_from_the_bound_logical_resource() -> None:
     """Profile resource IDs need not match native motion control-part names."""
     generator = _motion_generator()

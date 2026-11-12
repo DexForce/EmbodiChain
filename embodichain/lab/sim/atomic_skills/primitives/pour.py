@@ -24,7 +24,6 @@ from typing import ClassVar
 
 import torch
 
-from embodichain.compute.trajectory import resample_in_time
 from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
 
 from embodichain.lab.sim.atomic_skills.affordance import AxisAlignAffordance
@@ -95,18 +94,6 @@ def _validate_frame(pose: torch.Tensor, name: str) -> None:
         rtol=0,
     ):
         raise ValueError(f"{name} must have a proper rotation.")
-
-
-def _stretch_rotation(
-    positions: torch.Tensor, minimum_count: int, control_dt: float
-) -> torch.Tensor:
-    """Slow a rotation to its requested duration instead of padding its endpoint."""
-    if positions.shape[1] >= minimum_count:
-        return positions
-    intervals = positions.new_full(positions.shape[:2], control_dt)
-    intervals[:, 0] = 0.0
-    stretched, _ = resample_in_time(positions, intervals, minimum_count)
-    return stretched
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -360,27 +347,19 @@ class Pour(AtomicSkill[PourGoal, PourOptions]):
             rotation_waypoints = math.ceil(options.rotation_duration / control_dt) + 1
             minimum_pour = max(minimum_pour, rotation_waypoints)
             minimum_return = max(minimum_return, rotation_waypoints)
-            # Recover the planner's moving path before applying the requested
-            # duration. A larger split minimum would only add terminal holds.
-            split_minimum_pour = split_minimum_return = 2
-        else:
-            split_minimum_pour = minimum_pour
-            split_minimum_return = minimum_return
         pour_arm, return_arm = split_joint_trajectory_at_pose(
             result.positions,
             poured_eef_pose,
             robot=self.robot,
             control_part=control_part,
-            first_sample_count=split_minimum_pour,
-            second_sample_count=split_minimum_return,
+            first_sample_count=minimum_pour,
+            second_sample_count=minimum_return,
             dt=result.dt,
             control_dt=control_dt,
             arrival_indices=result.waypoint_indices,
             split_target_index=0,
+            minimum_segment_duration=options.rotation_duration,
         )
-        if options.rotation_duration is not None:
-            pour_arm = _stretch_rotation(pour_arm, minimum_pour, control_dt)
-            return_arm = _stretch_rotation(return_arm, minimum_return, control_dt)
         dwell_steps = math.ceil(options.dwell_duration / control_dt)
         dwell_arm = pour_arm[:, -1:].expand(-1, dwell_steps, -1)
         return_arm = return_arm[:, 1:]

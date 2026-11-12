@@ -34,8 +34,8 @@ embodichain run-task \
 流体专用的 `franka_panda_fast_fluid` 组件将仿真夹指最大驱动力设为 160，接触
 动摩擦系数设为 3.0，以在更高加速度下保持抓取；这组任务参数不代表实机标定。
 
-独立 Sim 示例从当前场景规划 Atomic Skill 目标，通过相同的 DexUni/DFSPH 物理场景
-执行并录制视频：
+独立 Sim 示例从当前场景规划 Atomic Skill 目标，复用部署中的运动策略、动作选项、
+接水区域和验收阈值，通过相同的 DexUni/DFSPH 物理场景执行并录制视频：
 
 ```bash
 embodichain run-example sim/demo/franka_dexuni_pour_demo --headless --renderer fast-rt
@@ -47,6 +47,10 @@ embodichain run-example sim/demo/franka_dexuni_pour_demo --headless --renderer f
 默认粒子间距为 1.5 mm，初始填充 76,607 粒。`run-task` 的
 `--particle-spacing 0.003` 或 Sim 的 `--spacing 0.003` 可用于较快的物理检查，
 但会改变流体分辨率。NoRender 仅用于物理检查。
+
+`task.franka.newton.yaml` 是无水、无接水碗的空杯动作基线，用于单独检查
+`Pick → Pour → Place` 的刚体运动。它保留普通夹爪标定和独立物理配置；
+完整流体倒水与接水量验收使用 `task.franka.fluid.yaml`。
 
 ## 求解与碰撞
 

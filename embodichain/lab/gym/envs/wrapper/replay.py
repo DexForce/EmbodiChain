@@ -140,6 +140,8 @@ class ReplayWrapper(gym.Wrapper):
         # Per-env lengths support async vector trajectories.
         lengths = meta["lengths"]
         self._lengths = torch.tensor(lengths, dtype=torch.long, device=self.env.device)
+        # CPU indices also work when stored states and the replay use different GPUs.
+        self._recorded_lengths = self._lengths.cpu()
 
         # Clamp replay length to the wrapped env's horizon.
         max_steps = int(self.env.max_episode_steps)
@@ -207,7 +209,9 @@ class ReplayWrapper(gym.Wrapper):
                 f"Trajectory has {traj_envs} envs but wrapped env has {env_envs}; "
                 "only single-env trajectories can be broadcast."
             )
-        for key in ("states", "actions"):
+        for key in ("states", "actions", "terminal_states"):
+            if key not in self._trajectory:
+                continue
             t = self._trajectory[key]
             self._trajectory[key] = t.expand(env_envs, *t.shape[1:]).clone()
         meta["num_envs"] = env_envs
@@ -312,15 +316,15 @@ class ReplayWrapper(gym.Wrapper):
         max_step = self.control_max_step
         step = max(0, min(int(step), max_step))
         env.sim.enable_physics(False)
-        terminal = step == int(self._lengths.min().item())
-        restore_trajectory_state(
-            env,
-            (
-                self._trajectory["terminal_states"]
-                if terminal
-                else self._trajectory["states"][:, step]
-            ),
-        )
+        terminal = self._recorded_lengths == step
+        if bool(terminal.all()):
+            state = self._trajectory["terminal_states"]
+        else:
+            state = self._trajectory["states"][:, step]
+            if bool(terminal.any()):
+                state = state.clone()
+                state[terminal] = self._trajectory["terminal_states"][terminal]
+        restore_trajectory_state(env, state)
         if self._fluid_reader is not None:
             self._fluid_reader.apply(
                 env, torch.full((env.num_envs,), step, dtype=torch.long)
