@@ -45,8 +45,9 @@ planners:
     config:
       max_attempts: 5
       max_planning_time: null
-      # Divides the compiled control period, so retiming keeps solved acceleration.
-      interpolation_dt: 0.02
+      # Divides the compiled control period, so retiming keeps solved acceleration;
+      # coarser samples keep long slow plans within cuRobo's interpolation buffer.
+      interpolation_dt: 0.04
       collision_activation_distance: 0.01
       use_cuda_graph: true
       cuda_graph_fallback: true

@@ -198,8 +198,10 @@ and door. These checks do not certify continuous motion or physical opening.
 
 Measured replay calibrates the Robotiq grasp and its cuRobo timing:
 
-- cuRobo samples at 0.02 s, a divisor of the 0.04 s and 0.16 s compiled
-  command clocks, and preserves those native samples. Linear retiming from
+- cuRobo samples at 0.04 s, a divisor of the 0.04 s and 0.16 s compiled
+  command clocks, and preserves those native samples. At 0.02 s, long slow
+  plans under the 0.2 rad/s budget exceed cuRobo's interpolation buffer and
+  fail planning. Linear retiming from
   0.025 s aliases saturated acceleration up to about 9%; resampling a long
   plan to a fixed count before upsampling concentrates each coarse velocity
   change into one command step. Both report dynamic violations for plans
@@ -213,8 +215,8 @@ Measured replay calibrates the Robotiq grasp and its cuRobo timing:
   default produced up to 14.6 degrees of in-hand rotation.
 - The arm servo stiffness is 1e5, matching the Panda preset. Position-only
   replay of a 1e4 servo still lags about 50 mrad when a transport ends.
-- PickUp plans its approach through five intermediate poses on the
-  straight pre-grasp line (`pick_approach_waypoints`). A free-space approach
+- PickUp and AxisAlign plan their approach through five intermediate poses
+  on the straight pre-grasp line (`pick_approach_waypoints`). A free-space approach
   can leave a diagonal line and sweep the target before closing.
 
 The PGI fixture keeps its former drives and grasp sampling. All Franka

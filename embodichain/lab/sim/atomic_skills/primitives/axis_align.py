@@ -74,6 +74,7 @@ from embodichain.lab.sim.atomic_skills.requirements import (
 )
 from embodichain.lab.sim.atomic_skills.state import HeldObjectState, PlanningContext
 from embodichain.lab.sim.atomic_skills.trajectory_ops import (
+    axis_translation_keyframes,
     build_pose_plan_states,
     interpolate_hand_qpos,
     resolve_pose_target,
@@ -355,9 +356,20 @@ class AxisAlign(AtomicSkill[AxisAlignGoal, AxisAlignOptions]):
         )
 
         # CuRobo planning is grouped by gripper state.  The open-gripper phase
-        # contains both the pre-grasp and grasp waypoints, so one generate call
-        # replaces the former independent approach and reach calls.
-        pre_close_xpos = torch.stack([pre_grasp_xpos, grasp_xpos], dim=1)
+        # contains the pre-grasp, optional straight-line approach and grasp
+        # waypoints, so one generate call replaces the former independent
+        # approach and reach calls.
+        approach_poses = [pre_grasp_xpos[:, None]]
+        if options.approach_waypoints:
+            approach_poses.append(
+                axis_translation_keyframes(
+                    pre_grasp_xpos,
+                    grasp_xpos,
+                    approach_direction,
+                    n_waypoints=options.approach_waypoints + 1,
+                )[:, :-1]
+            )
+        pre_close_xpos = torch.cat([*approach_poses, grasp_xpos[:, None]], dim=1)
         pre_close_success, pre_close_arm = self._plan_pose_phase(
             pre_close_xpos,
             start_arm_qpos,

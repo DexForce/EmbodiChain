@@ -34,8 +34,9 @@ planners:
   role: primary_baseline
   enabled: true
   config:
-    # Divides the compiled control period, so retiming keeps solved acceleration.
-    interpolation_dt: 0.02
+    # Divides the compiled control period, so retiming keeps solved acceleration;
+    # coarser samples keep long slow plans within cuRobo's interpolation buffer.
+    interpolation_dt: 0.04
     # Native samples avoid resampling the solved timing before compilation.
     preserve_plan_samples: true
 - id: nmg

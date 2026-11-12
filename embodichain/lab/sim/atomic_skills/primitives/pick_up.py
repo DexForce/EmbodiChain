@@ -219,7 +219,8 @@ class PickUpOptions(SkillOptions):
 
     The motion policy plans through them in the same call, which keeps an
     open hand near that line instead of letting the approach sweep the target.
-    ``0`` plans only the pre-grasp, grasp and lift poses.
+    ``0`` plans only the pre-grasp and grasp poses before closing. AxisAlign
+    inherits the same approach.
     """
     approach_along_grasp_axis: bool = False
     """Use the realized calibrated TCP +Z for native pre-grasp translation.
