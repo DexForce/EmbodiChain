@@ -181,6 +181,17 @@ spool:
 python -m pytest tests/gym/envs/tasks/test_route_the_cable_cuda.py --run-gpu -m gpu -q
 ```
 
+The 2026-11-12 synchronization with cable framework commit `6a7a29d5d` passed
+735 focused CPU tests and both existing CUDA regressions in separate NoRender
+processes with seed 73. Maximum grasp slip was 6.07 mm in the first-spool case
+and 3.92 mm in the third carry; the latter reported no robot/spool penetration.
+The 12 mm slip and 1 mm penetration limits were retained. The local runtime
+reports DexSim build `a3daf24edd88b489702c32ccffc7ffa405741ab2`, Torch
+2.11.0+cu130, Newton 1.7.0 and Warp 1.17.0 on an RTX 5090. These checks cover
+the first-spool release and third carry through release and retreat. Complete
+channel insertion, multi-seed success rates and reset repeatability require
+separate qualification.
+
 On 2026-11-08 both CUDA regressions passed in separate NoRender processes with
 seed 73, DexSim `0.6.0.dev11491` (dev commit
 `505ee1b5600ca0b3d0a2c8235930e7684283d049`), Newton 1.7.0, MuJoCo/MuJoCo-Warp
