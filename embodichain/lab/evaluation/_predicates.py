@@ -477,10 +477,45 @@ _CORNERS = PredicateDefinition(
 )
 
 
+def _scalar_range_params(params):
+    _keys(params, ("minimum", "maximum"), ("minimum_inclusive", "maximum_inclusive"))
+    lo, hi = (_finite(params[key], key) for key in ("minimum", "maximum"))
+    if lo > hi:
+        raise ValueError("Scalar range minimum exceeds maximum.")
+    flags = {
+        key: params.get(key, True) for key in ("minimum_inclusive", "maximum_inclusive")
+    }
+    if any(type(value) is not bool for value in flags.values()):
+        raise ValueError("Scalar range boundary flags must be booleans.")
+    return {"minimum": lo, "maximum": hi, **flags}
+
+
+def _scalar_range(arguments, params):
+    value = arguments["value"]
+    if value.ndim != 2 or value.shape[1] != 1:
+        raise ValueError("Scalar observations must have shape (B, 1).")
+    value = value[:, 0]
+    lo, hi = params["minimum"], params["maximum"]
+    import torch
+
+    return PredicateMeasurement(
+        ((value >= lo) if params["minimum_inclusive"] else (value > lo))
+        & ((value <= hi) if params["maximum_inclusive"] else (value < hi)),
+        torch.isfinite(value),
+        {"value": value},
+    )
+
+
 def builtin_predicates() -> PredicateRegistry:
     """Return an independent registry with the shared built-in predicates."""
     registry = PredicateRegistry()
     for kind, definition in (
+        (
+            "scalar_range",
+            PredicateDefinition(
+                1, ("value",), _scalar_range_params, _scalar_range, ("scalar",)
+            ),
+        ),
         ("near_target", _NEAR),
         (
             "near_relative_target",

@@ -35,7 +35,7 @@ from collections.abc import Callable, Iterable, Mapping, MutableMapping
 from copy import deepcopy
 from dataclasses import dataclass, fields
 import math
-from weakref import ReferenceType, ref
+from weakref import ReferenceType, ref, proxy
 from types import MappingProxyType
 from typing import Literal, Protocol, TYPE_CHECKING
 
@@ -915,7 +915,13 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         Non-support factories retain their existing independent assembly behavior.
         """
         self._owner_token.require_open()
-        if self._support_registry is None or self._runtime_bridge_ref is None:
+        has_cable = any(
+            factory.call_id.startswith("simulation.cable_")
+            for factory in self._registration.registered_semantic_lowerer_factories
+        )
+        if (
+            self._support_registry is None and not has_cable
+        ) or self._runtime_bridge_ref is None:
             return
         previous = self._runtime_bridge_ref()
         if previous is not None and not previous.execution_finished:
@@ -938,7 +944,10 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             raise ValueError(
                 "The runtime bridge must use this factory's assembled clock."
             )
-        if self._support_registry is not None:
+        cable = getattr(self, "_pending_cable_runtime", None)
+        if cable is not None:
+            bridge.post_policy_port._cable_runtime = cable
+        if self._support_registry is not None or cable is not None:
             self._runtime_bridge_ref = ref(bridge)
 
     def close_runtime_resources(self) -> None:
@@ -1104,12 +1113,37 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         engine: AtomicSkillEngine,
     ) -> tuple[RegisteredSemanticLowerer, ...]:
         """Create fresh registration-owned lowerers for this runtime assembly."""
-        return self._registration.create_registered_semantic_lowerers(
+        self.validate_runtime_bridge_creation()
+        lowerers = self._registration.create_registered_semantic_lowerers(
             simulation=self._simulation,
             robot=self._robot,
             scene_registry=scene_registry,
             engine=engine,
         )
+
+        from .cable import _CableLowerer, _CableRuntime
+
+        cable_lowerers = tuple(
+            value for value in lowerers if isinstance(value, _CableLowerer)
+        )
+        self._pending_cable_runtime = None
+        if cable_lowerers:
+            cfg = cable_lowerers[0].cfg
+            if any(value.cfg != cfg for value in cable_lowerers):
+                raise ValueError(
+                    "One bridge must use one consistent cable service declaration."
+                )
+            session = cable_lowerers[0].runtime
+            if session is None or not torch.equal(session.env_ids, self._env_ids):
+                raise ValueError(
+                    "Cable service rows must match this factory's explicit selection."
+                )
+            for lowerer in cable_lowerers:
+                # Registration remembers lowerer identities; it must not retain
+                # every episode's live cable service through that history.
+                lowerer.runtime = proxy(session)
+            self._pending_cable_runtime = session
+        return lowerers
 
     def create_scene_registry(self) -> SceneRegistry:
         """Build one fresh authoritative registry from the task registration."""
@@ -1196,6 +1230,11 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             require_open=self._owner_token.require_open,
             runtime_scope_guard=runtime_scope_guard,
         )
+        cable = getattr(self, "_pending_cable_runtime", None)
+        if cable is not None:
+            cable._scope_guard = _runtime_scope_validator(
+                self._owner_token.require_open, runtime_scope_guard
+            )
         self._segment_policy_port.bind_clock(clock)
         self._support_clock = clock
         return SimulationPlanningObservationProvider(
@@ -1206,7 +1245,9 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             owner_token=self._owner_token,
             runtime_scope_guard=runtime_scope_guard,
             capture_root_pose=self._capture_root_pose,
-            hold_qpos_source=self._hold_qpos_source,
+            hold_qpos_source=(
+                "drive_target" if cable is not None else self._hold_qpos_source
+            ),
         )
 
     def create_effect_evidence_providers(

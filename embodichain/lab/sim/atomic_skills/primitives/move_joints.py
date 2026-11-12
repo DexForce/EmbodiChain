@@ -75,6 +75,13 @@ class JointPositionGoal:
 class MoveJointsOptions(SkillOptions):
     """Per-invocation behavior for :class:`MoveJoints`."""
 
+    preserve_samples: bool = False
+    """Consume explicitly sampled joint positions at the host control cadence."""
+
+    def __post_init__(self) -> None:
+        if type(self.preserve_samples) is not bool:
+            raise TypeError("preserve_samples must be a bool.")
+
 
 class MoveJoints(AtomicSkill[JointPositionGoal, MoveJointsOptions]):
     """Plan joint motion from the observed state to one or more waypoints."""
@@ -116,14 +123,34 @@ class MoveJoints(AtomicSkill[JointPositionGoal, MoveJointsOptions]):
             device=self.device,
         )
         start_qpos = context.robot.qpos[:, joint_ids]
-        result = self.motion_generator.generate(
-            build_joint_plan_states(target_qpos),
-            options=request.motion_policy.to_motion_gen_options(
-                start_qpos=start_qpos,
-                control_part=control_part,
-                interpolation_dt=context.control_dt,
-            ),
-        )
+        if request.skill_options.preserve_samples:
+            if request.motion_policy.strategy != "ik_interp":
+                raise ValueError("preserve_samples requires strategy='ik_interp'.")
+            from embodichain.lab.sim.motion.planners import PlanResult
+
+            if target_qpos.ndim != 3:
+                raise ValueError("preserve_samples requires batched joint samples.")
+            dt = torch.full(
+                target_qpos.shape[:2],
+                context.require_control_dt(),
+                dtype=torch.float64,
+                device=target_qpos.device,
+            )
+            dt[:, 0] = 0
+            result = PlanResult(
+                success=torch.isfinite(target_qpos).all(dim=(1, 2)),
+                positions=target_qpos,
+                dt=dt,
+            )
+        else:
+            result = self.motion_generator.generate(
+                build_joint_plan_states(target_qpos),
+                options=request.motion_policy.to_motion_gen_options(
+                    start_qpos=start_qpos,
+                    control_part=control_part,
+                    interpolation_dt=context.control_dt,
+                ),
+            )
         success, trajectory = to_full_robot_trajectory(
             result,
             base_qpos=context.robot.qpos,

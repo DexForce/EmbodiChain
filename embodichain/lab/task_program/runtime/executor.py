@@ -492,6 +492,17 @@ class SemanticCallExecutor:
         """
         return self._last_sent_plan_reference
 
+    def _last_sent_command_phase(self) -> tuple[str, bool, int] | None:
+        reference = self._last_sent_plan_reference
+        if reference is None or self._runner is None:
+            return None
+        plan = self._runner.session._plan
+        if plan is None:
+            return None
+        index = reference[2]
+        segment = plan.segment_at(index)
+        return segment.name, index == segment.stop - 1, index
+
     @property
     def result(self) -> SemanticExecutionResult:
         """Return an immutable snapshot of the current workflow."""

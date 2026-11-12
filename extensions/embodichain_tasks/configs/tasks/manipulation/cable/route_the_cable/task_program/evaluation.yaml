@@ -1,0 +1,104 @@
+graph:
+  roots:
+  - route_success
+  rules:
+    seat_0:
+      kind: scalar_range
+      bindings:
+        value: cables/cable/seat_0
+      params:
+        minimum: 2
+        maximum: 50
+    seat_1:
+      kind: scalar_range
+      bindings:
+        value: cables/cable/seat_1
+      params:
+        minimum: 2
+        maximum: 50
+    port_count:
+      kind: scalar_range
+      bindings:
+        value: cables/cable/port_count
+      params:
+        minimum: 3
+        maximum: 50
+    end_in_port:
+      kind: scalar_range
+      bindings:
+        value: cables/cable/end_in_port
+      params:
+        minimum: 1
+        maximum: 1
+    hands_clearance:
+      kind: scalar_range
+      bindings:
+        value: cables/cable/hands_clearance
+      params:
+        minimum: 0.05
+        maximum: 100
+        minimum_inclusive: false
+    max_speed:
+      kind: scalar_range
+      bindings:
+        value: cables/cable/max_speed
+      params:
+        minimum: 0
+        maximum: 0.05
+    bench_penetration:
+      kind: scalar_range
+      bindings:
+        value: cables/cable/bench_penetration
+      params:
+        minimum: 0
+        maximum: 0.001
+    spool_penetration:
+      kind: scalar_range
+      bindings:
+        value: cables/cable/spool_penetration
+      params:
+        minimum: 0
+        maximum: 0.001
+    port_penetration:
+      kind: scalar_range
+      bindings:
+        value: cables/cable/port_penetration
+      params:
+        minimum: 0
+        maximum: 0.001
+    max_grasp_slip:
+      kind: scalar_range
+      bindings:
+        value: cables/cable/max_grasp_slip
+      params:
+        minimum: 0
+        maximum: 0.012
+    strict_port:
+      kind: inside_region
+      bindings:
+        position: cables/cable/end_position
+      params:
+        lower:
+        - 0.5845
+        - 0.064
+        - 0.753
+        upper:
+        - 0.5875
+        - 0.0896
+        - 0.759
+    route_success:
+      kind: all
+      refs:
+      - seat_0
+      - seat_1
+      - port_count
+      - end_in_port
+      - hands_clearance
+      - max_speed
+      - bench_penetration
+      - spool_penetration
+      - port_penetration
+      - max_grasp_slip
+      - strict_port
+final_acceptance:
+- route_success

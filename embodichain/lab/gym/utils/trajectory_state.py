@@ -285,7 +285,7 @@ def _evaluation_observation_cfgs(
                     name, uid, "qpos"
                 )
     for name in sorted(fields):
-        if name.startswith(("links/", "robot/", "robot_links/")):
+        if name.startswith(("links/", "robot/", "robot_links/", "cables/")):
             result[f"recording:{name}"] = ObservationCfg(
                 func=_get_evaluation_state,
                 mode="add",

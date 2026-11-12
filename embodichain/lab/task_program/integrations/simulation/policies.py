@@ -450,6 +450,23 @@ class SimulationSegmentPolicyPort:
         """Return installed post-policy preset IDs in declaration order."""
         return tuple(self._settle_presets)
 
+    def _observe_consumed_action(
+        self, action: Any, *, runtime: Any
+    ) -> tuple[torch.Tensor, torch.Tensor, str] | None:
+        """Measure provider-owned invariants after a host-acknowledged command.
+
+        Returns row rejection and a proposed hold. The bridge remains the only
+        owner of command encoding and dispatch; this port never steps physics.
+        """
+        cable = getattr(self, "_cable_runtime", None)
+        if cable is None:
+            return None
+        rejected, reason = cable.after_action(action, runtime)
+        if not bool(rejected.any()):
+            return None
+        hold = self._robot.get_qpos(target=True).index_select(0, self._env_ids)
+        return rejected, hold, reason
+
     def new_task_program_session(self) -> SimulationSegmentPolicyPort:
         """Create fresh episode state while retaining the validated scene bindings.
 
@@ -460,6 +477,7 @@ class SimulationSegmentPolicyPort:
         self._require_open()
         session = copy(self)
         session._hold_observer = None
+        session._cable_runtime = None
         session._target_observer = None
         session._post_policy_results = {}
         session._post_policy_success = {}

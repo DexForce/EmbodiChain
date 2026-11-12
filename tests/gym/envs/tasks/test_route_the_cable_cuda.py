@@ -28,7 +28,8 @@ import yaml
 
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
 from embodichain.lab.sim import SimulationManager
-from embodichain_tasks.manipulation.cable.route_the_cable import RouteTheCableEnv
+import gymnasium as gym
+import embodichain_tasks
 
 pytestmark = [
     pytest.mark.subprocess_sim,
@@ -39,6 +40,10 @@ pytestmark = [
     ),
     pytest.mark.usefixtures("requires_dexuni_two_way", "requires_dexuni_contact_query"),
 ]
+
+
+def _material_runtime(env):
+    return env._active_task_program_bridge.post_policy_port._cable_runtime
 
 
 class _SpoolReleaseCUDAScenario:
@@ -55,7 +60,7 @@ class _SpoolReleaseCUDAScenario:
         cfg.seed = 73
         cfg.sim_cfg.render_cfg.renderer = "no-render"
         cfg.sim_cfg.robot_ik_gizmo = None
-        self.env = RouteTheCableEnv(cfg)
+        self.env = gym.make("RouteTheCable-YAM-v1", cfg=cfg).unwrapped
 
     def teardown_method(self) -> None:
         if hasattr(self, "env"):
@@ -88,7 +93,7 @@ class _SpoolReleaseCUDAScenario:
         worst_distance = 0.0
         worst_segment = ""
         env.reset()
-        for segment in env.create_demo_segments(milestone="first_spool"):
+        for segment in env.create_demo_segments():
             for action in segment.actions:
                 env.step(action)
                 contacts = query.fetch_solver_report()
@@ -103,15 +108,17 @@ class _SpoolReleaseCUDAScenario:
                     if distance < worst_distance:
                         worst_distance, worst_segment = distance, segment.name
             assert bool(segment.validator().all()), segment.name
+            if segment.name == "open_clear_of_spool_0":
+                break
 
         # Finite cable states and seated cable alone previously accepted a jaw
         # sweep through the rim with about 16 mm reported penetration.
         assert worst_distance >= -0.001, (worst_segment, worst_distance)
-        max_slip = float(env._episode_slip.max())
+        max_slip = float(_material_runtime(env).max_slip.max())
         record_property("max_grasp_slip_m", max_slip)
         assert max_slip <= 0.012
-        assert bool((env.route_metrics()["seat_0"] >= 2).all())
-        assert bool((env._tool("right")[:, 2, 3] > 0.81).all())
+        assert bool((_material_runtime(env).metrics()["seat_0"] >= 2).all())
+        assert bool((_material_runtime(env).tool("right_arm")[:, 2, 3] > 0.81).all())
         finger_ids = env.robot.get_joint_ids("right_eef")
         assert bool((env.robot.get_qpos()[:, finger_ids] > 0.045).all())
 
@@ -153,7 +160,10 @@ class _SpoolReleaseCUDAScenario:
             for action in segment.actions:
                 env.step(action)
                 if segment.name in third_segments:
-                    max_slip = max(max_slip, float(env._max_slip.max()))
+                    max_slip = max(
+                        max_slip,
+                        float(_material_runtime(env).max_slip.max()),
+                    )
                     contacts = query.fetch_solver_report()
                     assert contacts.dropped_count == 0
                     pairs = contacts.actor_ids[: contacts.count]
@@ -166,17 +176,23 @@ class _SpoolReleaseCUDAScenario:
             assert bool(segment.validator().all()), segment.name
             if segment.name == "raise_2":
                 raised = True
-                assert env._grasp[:2] == ("right", 0.438)
+                assert _material_runtime(env).grasps["right_arm"][0] == 0.438
                 # The gripped centre must clear the 23.5 mm rim plus cable radius.
-                clearance_height = 0.75 + 0.0235 + env.cable.cfg.radius
-                assert bool((env._point(0.438)[0][:, 2] > clearance_height).all())
+                clearance_height = (
+                    0.75 + 0.0235 + env.sim.get_cable_object("cable").cfg.radius
+                )
+                assert bool(
+                    (
+                        _material_runtime(env).point(0.438)[0][:, 2] > clearance_height
+                    ).all()
+                )
             if segment.name == "open_clear_of_spool_2":
                 assert raised
                 record_property("third_carry_slip_m", max_slip)
                 record_property("third_carry_robot_spool_distance_m", worst_distance)
                 assert max_slip <= 0.012
                 assert worst_distance >= -0.001
-                assert bool((env.route_metrics()["seat_1"] >= 2).all())
+                assert bool((_material_runtime(env).metrics()["seat_1"] >= 2).all())
                 return
         pytest.fail("The expert did not complete the third carry")
 

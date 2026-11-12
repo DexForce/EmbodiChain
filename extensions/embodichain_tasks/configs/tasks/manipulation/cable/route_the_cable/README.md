@@ -1,10 +1,11 @@
 # Route the Cable (YAM)
 
-This handwritten expert routes a 600 mm anchored cable around two spools and
+This configured Task Program routes a 600 mm anchored cable around two spools and
 places its free end in a 10 mm channel. It adapts the
 [robosimstudio example](https://github.com/robosimstudio/robosimstudio/tree/73739abe212f963e8a9f5862b27bca370df091a7/examples/08_demos/route_the_cable).
-The task uses EmbodiChain's scene components, motion generator, Atomic Skills,
-`DemoSegment` executor and trajectory recorder. Only the proximal cable segment
+The task uses the common `EmbodiedEnv`, configuration-owned registration,
+Semantic Call lowering to existing Atomic Skills, the standard `DemoSegment`
+bridge and trajectory recorder. Only the proximal cable segment
 is fixed; grasps use collision and friction, with no runtime attachment or
 in-episode state writes.
 
@@ -91,9 +92,10 @@ invalidate grasps. The launcher preserves this read-only policy with `--viser`.
 Use a separately configured, stepping scene without the expert for manual IK
 experiments. Failed motion validators log planning status, TCP position error
 and maximum measured grasp slip with their limits.
-Feedback insertion moves may hold the same target for up to one extra second
-while physical tracking converges. They retain their original position and
-slip tolerances and fail when that bounded settling period is exhausted.
+Every motion is followed by an explicit bounded hold and a measured TCP
+position/orientation check. Insertion corrections read the latest material
+geometry when grounded; the finite correction slots hold the current pose once
+the release corridor is reached. They do not run an unbounded Python loop.
 
 ## Stages and reusable boundaries
 
@@ -135,10 +137,19 @@ avoidance, and contact response is not a substitute for a clear commanded path.
   18.5 mm lift; `MotionPolicy` samples the lift at the previous 0.05 m/s grid.
 - `compute.geometry.cable` owns simulator-independent capsule endpoints,
   material-point observations and TCP-relative slip measurement.
-- `RouteTheCableEnv.create_demo_segments()` owns feedback, staged execution and
-  physical validators. Its `milestone="pinch"` or `"first_spool"` options qualify
-  intermediate stages through `execute_demo_episode`; they do not certify a
-  complete routing episode.
+- `task_program/program.yaml` owns the ordered routing and insertion stages.
+  `integration.yaml` binds declared material targets and the board geometry.
+  `execution_policy.yaml` owns the adaptive Cartesian sampling policy.
+  `evaluation.yaml` requires both spool seats, the strict final channel,
+  clearance, speed, penetration and the 12 mm episode slip limit.
+- The allowlisted `cable_material` service resolves material-coordinate TCP
+  targets. Calls lower to `PickUp(ContactGraspGoal)`, `MoveEndEffector` and
+  `MoveJoints`; no cable-specific Atomic Skill or environment subclass exists.
+  References are captured after the acknowledged close frame, before lift,
+  and belong to one bridge/episode and explicit environment rows.
+- The deployment still uses the original `RouteTheCable-YAM-v1` ID. Loading
+  `task.yam.yaml` registers it as the common `EmbodiedEnv`; importing the task
+  package alone does not register a configuration-owned deployment.
 - `YamI2rtCfg` resolves the versioned robot bundle from the data registry/cache or an explicit
   `fpath`. Its bundle retains the original MIT license and pinned provenance.
   Simulation and FK use
@@ -218,3 +229,16 @@ contact needs separate physical qualification; API state/reset tests alone do
 not prove repeatable frictional routing. Use a fresh process for each trial until
 that reset path is qualified. Raw trajectory recordings may include failed
 attempts; select training data using the segment and final outcomes.
+
+## Task Program migration qualification
+
+The migration preserves the Newton/DexUni two-way cable solver, scene and robot
+contact coefficients. The shared execution policy applies its joint acceleration
+budget to all Cartesian moves, so stage durations may be longer than the former
+handwritten direct-motion path. The episode budget is 12,000 control steps.
+
+Static composition/catalog preflight and intermediate physical qualification do
+not certify a complete cable task. Full acceptance remains strict after release,
+retreat and settling. The comparison report records unsuccessful samples and
+their measured stopping stage; changing orchestration does not by itself solve
+physical insertion.

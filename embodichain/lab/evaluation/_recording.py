@@ -289,6 +289,8 @@ def evaluate_recorded_rules(
 
 
 def _matches_field(field, uid, quantity):
+    if field.startswith("cables/"):
+        return field == f"cables/{uid}/{quantity}"
     if field.startswith("rigid_objects/"):
         if _is_segment_start_field(field):
             return (
@@ -355,7 +357,19 @@ def _field_projection(field, descriptor, expected_names=None):
         expected = expected_names[field]
         if expected is None or tuple(names) != tuple(expected):
             return None
-    if quantity in ("pose", "segment_start_pose"):
+    if field.startswith("cables/"):
+        from embodichain.compute.geometry._cable_route import (
+            _CABLE_METRICS as _METRICS,
+            _CABLE_METRIC_UNITS,
+        )
+
+        if quantity not in _METRICS:
+            return None
+        if quantity == "end_position":
+            contract = ("arena", "xyz", ("m",), (3,))
+        else:
+            contract = ("arena", "scalar", (_CABLE_METRIC_UNITS[quantity],), (1,))
+    elif quantity in ("pose", "segment_start_pose"):
         contract = ("arena", "xyz_xyzw", ("m", "unitless"), (7,))
     elif quantity in ("lin_vel", "ang_vel"):
         unit = "m/s" if quantity == "lin_vel" else "rad/s"

@@ -1,0 +1,1106 @@
+program_id: route_the_cable
+instruction: Route the anchored cable around two spools and seat its free end in the
+  port.
+targets: {}
+program:
+- segment: right_approach_0.162
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: right_approach_0.162
+      resources:
+        primary: right_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: right_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: right_approach_0.162_tracking
+      resources:
+        primary: right_manipulator
+- segment: right_pinch_lift_0.162
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_pick
+      arguments:
+        target: right_grasp_0.162
+      resources:
+        primary: right_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: right_lifted_0.162
+      resources:
+        primary: right_manipulator
+- segment: raise_0
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: raise_0
+      resources:
+        primary: right_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: right_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: raise_0_tracking
+      resources:
+        primary: right_manipulator
+- segment: carry_0
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: carry_0
+      resources:
+        primary: right_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: right_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: carry_0_tracking
+      resources:
+        primary: right_manipulator
+- segment: lower_0
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: lower_0
+      resources:
+        primary: right_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: right_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: lower_0_tracking
+      resources:
+        primary: right_manipulator
+- segment: release_0
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: release_0
+      resources:
+        primary: right_hand
+- segment: retreat_0
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: retreat_0
+      resources:
+        primary: right_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: right_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: retreat_0_tracking
+      resources:
+        primary: right_manipulator
+- segment: open_clear_of_spool_0
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: open_clear_of_spool_0
+      resources:
+        primary: right_hand
+- segment: right_approach_0.282
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: right_approach_0.282
+      resources:
+        primary: right_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: right_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: right_approach_0.282_tracking
+      resources:
+        primary: right_manipulator
+- segment: right_pinch_lift_0.282
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_pick
+      arguments:
+        target: right_grasp_0.282
+      resources:
+        primary: right_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: right_lifted_0.282
+      resources:
+        primary: right_manipulator
+- segment: raise_1
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: raise_1
+      resources:
+        primary: right_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: right_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: raise_1_tracking
+      resources:
+        primary: right_manipulator
+- segment: carry_1
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: carry_1
+      resources:
+        primary: right_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: right_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: carry_1_tracking
+      resources:
+        primary: right_manipulator
+- segment: lower_1
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: lower_1
+      resources:
+        primary: right_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: right_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: lower_1_tracking
+      resources:
+        primary: right_manipulator
+- segment: release_1
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: release_1
+      resources:
+        primary: right_hand
+- segment: retreat_1
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: retreat_1
+      resources:
+        primary: right_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: right_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: retreat_1_tracking
+      resources:
+        primary: right_manipulator
+- segment: open_clear_of_spool_1
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: open_clear_of_spool_1
+      resources:
+        primary: right_hand
+- segment: right_approach_0.438
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: right_approach_0.438
+      resources:
+        primary: right_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: right_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: right_approach_0.438_tracking
+      resources:
+        primary: right_manipulator
+- segment: right_pinch_lift_0.438
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_pick
+      arguments:
+        target: right_grasp_0.438
+      resources:
+        primary: right_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: right_lifted_0.438
+      resources:
+        primary: right_manipulator
+- segment: raise_2
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: raise_2
+      resources:
+        primary: right_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: right_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: raise_2_tracking
+      resources:
+        primary: right_manipulator
+- segment: carry_2
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: carry_2
+      resources:
+        primary: right_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: right_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: carry_2_tracking
+      resources:
+        primary: right_manipulator
+- segment: lower_2
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: lower_2
+      resources:
+        primary: right_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: right_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: lower_2_tracking
+      resources:
+        primary: right_manipulator
+- segment: release_2
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: release_2
+      resources:
+        primary: right_hand
+- segment: retreat_2
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: retreat_2
+      resources:
+        primary: right_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: right_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: retreat_2_tracking
+      resources:
+        primary: right_manipulator
+- segment: open_clear_of_spool_2
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: open_clear_of_spool_2
+      resources:
+        primary: right_hand
+- segment: home_right
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: home_right
+      resources:
+        primary: right_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: right_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: home_right_tracking
+      resources:
+        primary: right_manipulator
+- segment: left_approach_0.57
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: left_approach_0.57
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: left_approach_0.57_tracking
+      resources:
+        primary: left_manipulator
+- segment: left_pinch_lift_0.57
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_pick
+      arguments:
+        target: left_grasp_0.57
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: left_lifted_0.57
+      resources:
+        primary: left_manipulator
+- segment: stage_free_end
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: stage_free_end
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: stage_free_end_tracking
+      resources:
+        primary: left_manipulator
+- segment: align_yaw_0
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: align_yaw_0
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: align_yaw_0_tracking
+      resources:
+        primary: left_manipulator
+- segment: align_lateral_0
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: align_lateral_0
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: align_lateral_0_tracking
+      resources:
+        primary: left_manipulator
+- segment: align_yaw_1
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: align_yaw_1
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: align_yaw_1_tracking
+      resources:
+        primary: left_manipulator
+- segment: align_lateral_1
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: align_lateral_1
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: align_lateral_1_tracking
+      resources:
+        primary: left_manipulator
+- segment: lower_channel_0
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: lower_channel_0
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: lower_channel_0_tracking
+      resources:
+        primary: left_manipulator
+- segment: align_tip_0_0
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: align_tip_0_0
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: align_tip_0_0_tracking
+      resources:
+        primary: left_manipulator
+- segment: align_tip_0_1
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: align_tip_0_1
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: align_tip_0_1_tracking
+      resources:
+        primary: left_manipulator
+- segment: lower_channel_1
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: lower_channel_1
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: lower_channel_1_tracking
+      resources:
+        primary: left_manipulator
+- segment: align_tip_1_0
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: align_tip_1_0
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: align_tip_1_0_tracking
+      resources:
+        primary: left_manipulator
+- segment: align_tip_1_1
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: align_tip_1_1
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: align_tip_1_1_tracking
+      resources:
+        primary: left_manipulator
+- segment: lower_channel_2
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: lower_channel_2
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: lower_channel_2_tracking
+      resources:
+        primary: left_manipulator
+- segment: align_tip_2_0
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: align_tip_2_0
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: align_tip_2_0_tracking
+      resources:
+        primary: left_manipulator
+- segment: align_tip_2_1
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: align_tip_2_1
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: align_tip_2_1_tracking
+      resources:
+        primary: left_manipulator
+- segment: lower_channel_3
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: lower_channel_3
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: lower_channel_3_tracking
+      resources:
+        primary: left_manipulator
+- segment: align_tip_3_0
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: align_tip_3_0
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: align_tip_3_0_tracking
+      resources:
+        primary: left_manipulator
+- segment: align_tip_3_1
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: align_tip_3_1
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: align_tip_3_1_tracking
+      resources:
+        primary: left_manipulator
+- segment: verify_release_alignment
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: release_alignment
+      resources:
+        primary: left_manipulator
+- segment: release_free_end
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: release_free_end
+      resources:
+        primary: left_hand
+- segment: retreat_free_end
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: retreat_free_end
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: retreat_free_end_tracking
+      resources:
+        primary: left_manipulator
+- segment: home_left
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: home_left
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: home_left_tracking
+      resources:
+        primary: left_manipulator
+- segment: settle_and_validate
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_and_validate
+      resources:
+        primary: left_manipulator
+  validators:
+  - kind: condition
+    ref: route_success

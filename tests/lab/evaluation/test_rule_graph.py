@@ -659,3 +659,27 @@ def test_replay_preserves_row_ends_and_rejects_missing_endpoint():
     assert beyond.step == 10
     assert beyond.revisions.tolist() == [-1, -1]
     assert beyond.rules["closed"].status.tolist() == [Status.UNAVAILABLE] * 2
+
+
+def test_scalar_range_preserves_open_boundary_and_missing_evidence():
+    graph = builtin_predicates().compile(
+        EvaluationSpec(
+            {
+                "clear": PredicateSpec(
+                    "scalar_range",
+                    {"value": "clearance"},
+                    {"minimum": 0.05, "maximum": 100, "minimum_inclusive": False},
+                )
+            },
+            ("clear",),
+        ),
+        field_kinds={"clearance": "scalar"},
+    )
+    result = graph.evaluate(
+        {"clearance": torch.tensor([[0.05], [0.051], [float("nan")]])}, batch_size=3
+    )
+    assert result["clear"].status.tolist() == [
+        Status.FAILED,
+        Status.SATISFIED,
+        Status.UNAVAILABLE,
+    ]

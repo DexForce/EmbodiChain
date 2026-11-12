@@ -414,6 +414,7 @@ def _validate_scene_binding_targets(
 ) -> None:
     """Fail before runtime when semantic roots select absent native entities."""
     physical_ids = {
+        "cables": _physical_scene_uids(simulation, field_names=("cable_object",)),
         "rigid_objects": _physical_scene_uids(
             simulation,
             field_names=("background", "rigid_object"),

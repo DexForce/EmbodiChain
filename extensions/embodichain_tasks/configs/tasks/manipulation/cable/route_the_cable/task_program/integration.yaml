@@ -1,0 +1,710 @@
+integration_id: route_the_cable_v1
+program_id: route_the_cable
+requires:
+  scene_contract: cable_board_v1
+  embodiment_contract: dual_arm_parallel_gripper
+scene_binding:
+  contract_id: cable_board_v1
+  registry_id: cable_board
+  cables:
+  - entity_id: cable
+    simulation_uid: cable
+profile:
+  defaults:
+    pick_up:
+      primary: right_manipulator
+    move_end_effector:
+      primary: right_manipulator
+    move_joints:
+      primary: right_manipulator
+  skill_options:
+    simulation.cable_pick:
+      kind: pick_up
+      hand_interp_steps: 48
+      grasp_settle_steps: 21
+      lift_height: 0.0185
+      pre_grasp_distance: 0.0
+    simulation.cable_move:
+      kind: move_end_effector
+      preserve_cartesian_samples: true
+    simulation.cable_joint:
+      kind: move_joints
+      preserve_samples: true
+    simulation.cable_check:
+      kind: move_joints
+      preserve_samples: true
+  effect_monitors: {}
+runtime_services:
+  cable_material:
+    entity_id: cable
+    simulation_uid: cable
+    motion_parts:
+    - right_arm
+    - left_arm
+    slip_limit: 0.012
+    geometry:
+      bench_height: 0.75
+      port_center:
+      - 0.586
+      - 0.08
+      port_stage:
+      - 0.586
+      - 0.047
+      - 0.815
+      port_mouth:
+      - 0.586
+      - 0.064
+      seats:
+      - - 0.525
+        - -0.26
+        - -1
+      - - 0.525
+        - -0.02
+        - 1
+      cylinders:
+      - - 0.525
+        - -0.26
+        - 0.0125
+        - 0
+        - 0.0025
+      - - 0.525
+        - -0.26
+        - 0.00475
+        - 0.0025
+        - 0.019679
+      - - 0.525
+        - -0.26
+        - 0.0125
+        - 0.019679
+        - 0.0235
+      - - 0.525
+        - -0.02
+        - 0.0125
+        - 0
+        - 0.0025
+      - - 0.525
+        - -0.02
+        - 0.00475
+        - 0.0025
+        - 0.019679
+      - - 0.525
+        - -0.02
+        - 0.0125
+        - 0.019679
+        - 0.0235
+      boxes:
+      - - - 0.5755
+          - 0.08
+          - 0.75625
+        - - 0.0055
+          - 0.016
+          - 0.00625
+      - - - 0.5965
+          - 0.08
+          - 0.75625
+        - - 0.0055
+          - 0.016
+          - 0.00625
+      - - - 0.586
+          - 0.0928
+          - 0.75625
+        - - 0.005
+          - 0.0032
+          - 0.00625
+      strict_region:
+      - - 0.5845
+        - 0.064
+        - 0.753
+      - - 0.5875
+        - 0.0896
+        - 0.759
+      release_region:
+      - - 0.585
+        - 0.073
+        - 0.753
+      - - 0.587
+        - 0.085
+        - 0.766
+    targets:
+      right_approach_0.162:
+        kind: material
+        material_distance: 0.162
+        position:
+        - null
+        - null
+        - 0.81
+        speed: 0.12
+        port_screen: false
+      settle_motion:
+        kind: hold
+        samples: 15
+      right_approach_0.162_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.02
+        orientation_tolerance: 0.25
+        stop_when_seated: false
+      right_grasp_0.162:
+        kind: material
+        material_distance: 0.162
+        position:
+        - null
+        - null
+        - 0.7615
+        firm: true
+        port_screen: false
+      right_lifted_0.162:
+        kind: check
+        condition: lift
+      raise_0:
+        kind: measured
+        position:
+        - null
+        - null
+        - 0.78
+      raise_0_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.02
+        orientation_tolerance: 0.25
+        stop_when_seated: false
+      carry_0:
+        kind: command
+        position:
+        - 0.5
+        - -0.255
+        - null
+      carry_0_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.02
+        orientation_tolerance: 0.25
+        stop_when_seated: false
+      lower_0:
+        kind: command
+        position:
+        - null
+        - null
+        - 0.7645
+      lower_0_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.02
+        orientation_tolerance: 0.25
+        stop_when_seated: false
+      release_0:
+        kind: open
+        samples: 36
+        finger_position: 0.008
+        release_part: right_arm
+      retreat_0:
+        kind: command
+        position:
+        - null
+        - null
+        - 0.82
+        speed: 0.08
+      retreat_0_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.02
+        orientation_tolerance: 0.25
+        stop_when_seated: false
+      open_clear_of_spool_0:
+        kind: open
+        samples: 36
+        release_part: right_arm
+      right_approach_0.282:
+        kind: material
+        material_distance: 0.282
+        position:
+        - null
+        - null
+        - 0.81
+        speed: 0.12
+        port_screen: false
+      right_approach_0.282_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.02
+        orientation_tolerance: 0.25
+        stop_when_seated: false
+      right_grasp_0.282:
+        kind: material
+        material_distance: 0.282
+        position:
+        - null
+        - null
+        - 0.7615
+        firm: false
+        port_screen: false
+      right_lifted_0.282:
+        kind: check
+        condition: lift
+      raise_1:
+        kind: measured
+        position:
+        - null
+        - null
+        - 0.78
+      raise_1_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.02
+        orientation_tolerance: 0.25
+        stop_when_seated: false
+      carry_1:
+        kind: command
+        position:
+        - 0.528
+        - -0.14
+        - null
+      carry_1_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.02
+        orientation_tolerance: 0.25
+        stop_when_seated: false
+      lower_1:
+        kind: command
+        position:
+        - null
+        - null
+        - 0.7645
+      lower_1_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.02
+        orientation_tolerance: 0.25
+        stop_when_seated: false
+      release_1:
+        kind: open
+        samples: 36
+        finger_position: 0.008
+        release_part: right_arm
+      retreat_1:
+        kind: command
+        position:
+        - null
+        - null
+        - 0.82
+        speed: 0.08
+      retreat_1_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.02
+        orientation_tolerance: 0.25
+        stop_when_seated: false
+      open_clear_of_spool_1:
+        kind: open
+        samples: 36
+        release_part: right_arm
+      right_approach_0.438:
+        kind: material
+        material_distance: 0.438
+        position:
+        - null
+        - null
+        - 0.81
+        speed: 0.12
+        port_screen: false
+      right_approach_0.438_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.02
+        orientation_tolerance: 0.25
+        stop_when_seated: false
+      right_grasp_0.438:
+        kind: material
+        material_distance: 0.438
+        position:
+        - null
+        - null
+        - 0.7615
+        firm: true
+        port_screen: false
+      right_lifted_0.438:
+        kind: check
+        condition: lift
+      raise_2:
+        kind: measured
+        position:
+        - null
+        - null
+        - 0.8
+      raise_2_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.02
+        orientation_tolerance: 0.25
+        stop_when_seated: false
+      carry_2:
+        kind: command
+        position:
+        - 0.565
+        - 0.008
+        - null
+      carry_2_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.02
+        orientation_tolerance: 0.25
+        stop_when_seated: false
+      lower_2:
+        kind: command
+        position:
+        - null
+        - null
+        - 0.7645
+      lower_2_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.02
+        orientation_tolerance: 0.25
+        stop_when_seated: false
+      release_2:
+        kind: open
+        samples: 36
+        finger_position: 0.008
+        release_part: right_arm
+      retreat_2:
+        kind: command
+        position:
+        - null
+        - null
+        - 0.82
+        speed: 0.08
+      retreat_2_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.02
+        orientation_tolerance: 0.25
+        stop_when_seated: false
+      open_clear_of_spool_2:
+        kind: open
+        samples: 36
+        release_part: right_arm
+      home_right:
+        kind: home
+        speed: 0.15
+      home_right_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.02
+        orientation_tolerance: 0.25
+        stop_when_seated: false
+      left_approach_0.57:
+        kind: material
+        material_distance: 0.57
+        position:
+        - null
+        - null
+        - 0.81
+        speed: 0.12
+        port_screen: true
+      left_approach_0.57_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.02
+        orientation_tolerance: 0.25
+        stop_when_seated: false
+      left_grasp_0.57:
+        kind: material
+        material_distance: 0.57
+        position:
+        - null
+        - null
+        - 0.7615
+        firm: true
+        port_screen: true
+      left_lifted_0.57:
+        kind: check
+        condition: lift
+      stage_free_end:
+        kind: port_stage
+        position:
+        - 0.586
+        - 0.047
+        - 0.815
+      stage_free_end_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.02
+        orientation_tolerance: 0.25
+        stop_when_seated: false
+      align_yaw_0:
+        kind: yaw_align
+        material_distance: 0.57
+      align_yaw_0_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.02
+        orientation_tolerance: 0.25
+        stop_when_seated: false
+      align_lateral_0:
+        kind: ray_align
+        material_distance: 0.57
+        speed: 0.03
+      align_lateral_0_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.02
+        orientation_tolerance: 0.25
+        stop_when_seated: false
+      align_yaw_1:
+        kind: yaw_align
+        material_distance: 0.57
+      align_yaw_1_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.02
+        orientation_tolerance: 0.25
+        stop_when_seated: false
+      align_lateral_1:
+        kind: ray_align
+        material_distance: 0.57
+        speed: 0.03
+      align_lateral_1_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.02
+        orientation_tolerance: 0.25
+        stop_when_seated: false
+      lower_channel_0:
+        kind: command
+        position:
+        - null
+        - null
+        - 0.79
+        speed: 0.025
+        tolerance: 0.006
+        stop_when_seated: true
+      lower_channel_0_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.006
+        orientation_tolerance: 0.25
+        stop_when_seated: true
+      align_tip_0_0:
+        kind: tip_align
+        position:
+        - 0.586
+        - 0.077
+        - null
+        maximum_correction: 0.005
+        maximum_y: 0.047
+        speed: 0.02
+        tolerance: 0.006
+        stop_when_seated: true
+        maximum_z_correction: 0.003
+      align_tip_0_0_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.006
+        orientation_tolerance: 0.25
+        stop_when_seated: true
+      align_tip_0_1:
+        kind: tip_align
+        position:
+        - 0.586
+        - 0.077
+        - null
+        maximum_correction: 0.005
+        maximum_y: 0.047
+        speed: 0.02
+        tolerance: 0.006
+        stop_when_seated: true
+        maximum_z_correction: 0.003
+      align_tip_0_1_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.006
+        orientation_tolerance: 0.25
+        stop_when_seated: true
+      lower_channel_1:
+        kind: command
+        position:
+        - null
+        - null
+        - 0.78
+        speed: 0.025
+        tolerance: 0.006
+        stop_when_seated: true
+      lower_channel_1_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.006
+        orientation_tolerance: 0.25
+        stop_when_seated: true
+      align_tip_1_0:
+        kind: tip_align
+        position:
+        - 0.586
+        - 0.077
+        - null
+        maximum_correction: 0.005
+        maximum_y: 0.047
+        speed: 0.02
+        tolerance: 0.006
+        stop_when_seated: true
+        maximum_z_correction: 0.003
+      align_tip_1_0_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.006
+        orientation_tolerance: 0.25
+        stop_when_seated: true
+      align_tip_1_1:
+        kind: tip_align
+        position:
+        - 0.586
+        - 0.077
+        - null
+        maximum_correction: 0.005
+        maximum_y: 0.047
+        speed: 0.02
+        tolerance: 0.006
+        stop_when_seated: true
+        maximum_z_correction: 0.003
+      align_tip_1_1_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.006
+        orientation_tolerance: 0.25
+        stop_when_seated: true
+      lower_channel_2:
+        kind: command
+        position:
+        - null
+        - null
+        - 0.772
+        speed: 0.025
+        tolerance: 0.006
+        stop_when_seated: true
+      lower_channel_2_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.006
+        orientation_tolerance: 0.25
+        stop_when_seated: true
+      align_tip_2_0:
+        kind: tip_align
+        position:
+        - 0.586
+        - 0.077
+        - null
+        maximum_correction: 0.005
+        maximum_y: 0.047
+        speed: 0.02
+        tolerance: 0.006
+        stop_when_seated: true
+        maximum_z_correction: 0.003
+      align_tip_2_0_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.006
+        orientation_tolerance: 0.25
+        stop_when_seated: true
+      align_tip_2_1:
+        kind: tip_align
+        position:
+        - 0.586
+        - 0.077
+        - null
+        maximum_correction: 0.005
+        maximum_y: 0.047
+        speed: 0.02
+        tolerance: 0.006
+        stop_when_seated: true
+        maximum_z_correction: 0.003
+      align_tip_2_1_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.006
+        orientation_tolerance: 0.25
+        stop_when_seated: true
+      lower_channel_3:
+        kind: command
+        position:
+        - null
+        - null
+        - 0.7645
+        speed: 0.025
+        tolerance: 0.006
+        stop_when_seated: true
+      lower_channel_3_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.006
+        orientation_tolerance: 0.25
+        stop_when_seated: true
+      align_tip_3_0:
+        kind: tip_align
+        position:
+        - 0.586
+        - 0.077
+        - 0.754
+        maximum_correction: 0.005
+        maximum_y: 0.047
+        minimum_z: 0.762
+        speed: 0.02
+        tolerance: 0.006
+        stop_when_seated: true
+        maximum_z_correction: 0.003
+      align_tip_3_0_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.006
+        orientation_tolerance: 0.25
+        stop_when_seated: true
+      align_tip_3_1:
+        kind: tip_align
+        position:
+        - 0.586
+        - 0.077
+        - 0.754
+        maximum_correction: 0.005
+        maximum_y: 0.047
+        minimum_z: 0.762
+        speed: 0.02
+        tolerance: 0.006
+        stop_when_seated: true
+        maximum_z_correction: 0.003
+      align_tip_3_1_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.006
+        orientation_tolerance: 0.25
+        stop_when_seated: true
+      release_alignment:
+        kind: check
+        condition: seated
+      release_free_end:
+        kind: open
+        samples: 36
+        release_part: left_arm
+      retreat_free_end:
+        kind: command
+        position:
+        - null
+        - 0.03
+        - 0.82
+        speed: 0.08
+      retreat_free_end_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.02
+        orientation_tolerance: 0.25
+        stop_when_seated: false
+      home_left:
+        kind: home
+        speed: 0.15
+      home_left_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.02
+        orientation_tolerance: 0.25
+        stop_when_seated: false
+      settle_and_validate:
+        kind: hold
+        samples: 120

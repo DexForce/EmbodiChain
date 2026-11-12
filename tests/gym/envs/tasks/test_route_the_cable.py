@@ -16,8 +16,6 @@
 
 from __future__ import annotations
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import Mock
 import xml.etree.ElementTree as ET
 import math
 import yaml
@@ -28,21 +26,25 @@ from embodichain.lab.gym.utils.gym_utils import (
     build_env_cfg_from_args,
     config_to_cfg,
 )
-from embodichain_tasks.manipulation.cable.route_the_cable import (
-    measure_route,
-    RouteTheCableEnv,
-)
+from embodichain.compute.geometry._cable_route import _measure_cable_route
+
+
 from embodichain.lab.sim.spawn.descriptors import rigid_desc_from_cfg
 from embodichain.lab.sim.cfg import RigidObjectCfg
-from embodichain.lab.sim.cfg import CableObjectCfg
-from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
-from embodichain.lab.gym.envs.expert_trajectory import (
-    ExpertTrajectoryCfg,
-    build_expert_action_spec,
-)
 from embodichain.lab.sim.shapes import CylinderCfg
 
 pytestmark = pytest.mark.no_sim
+
+
+def measure_route(state, lengths, hands, origins):
+    path = (
+        Path(__file__).resolve().parents[4]
+        / "extensions/embodichain_tasks/configs/tasks/manipulation/cable/route_the_cable/task_program/integration.yaml"
+    )
+    geometry = yaml.safe_load(path.read_text())["runtime_services"]["cable_material"][
+        "geometry"
+    ]
+    return _measure_cable_route(state, lengths, hands, origins, geometry, 0.0035)
 
 
 @pytest.fixture(autouse=True)
@@ -236,169 +238,6 @@ def test_strict_channel_rejects_end_that_only_meets_broad_region():
     assert not metrics["strict_port"].item()
 
 
-def test_object_goal_stops_before_writing_an_unexecuted_command():
-    from types import SimpleNamespace
-
-    command = torch.full((1, 3), 0.5)
-    env = SimpleNamespace(
-        _command=command,
-        _grasp=None,
-        _max_slip=torch.zeros(1),
-        cfg=SimpleNamespace(
-            expert_trajectory=SimpleNamespace(joint_command_mode="position")
-        ),
-    )
-    actions = RouteTheCableEnv._execute(
-        env, torch.ones(1, 5, 3), [0, 1, 2], stop_when=lambda: torch.tensor([True])
-    )
-    assert list(actions) == []
-    torch.testing.assert_close(command, torch.full_like(command, 0.5))
-
-
-def _task_cfg(segments=50):
-    return EmbodiedEnvCfg(
-        cable_object=[
-            CableObjectCfg(
-                uid="cable",
-                points=[[0, 0.012 * i, 0] for i in range(segments + 1)],
-                radius=0.0035,
-            )
-        ]
-    )
-
-
-@pytest.mark.parametrize("segments", [0, 49, 51])
-def test_wrong_cable_topology_fails_before_environment_construction(
-    monkeypatch, segments
-):
-    parent_init = Mock()
-    monkeypatch.setattr(EmbodiedEnv, "__init__", parent_init)
-    with pytest.raises(ValueError, match="50-segment"):
-        RouteTheCableEnv(_task_cfg(segments))
-    parent_init.assert_not_called()
-
-
-def test_missing_cable_fails_before_environment_construction(monkeypatch):
-    parent_init = Mock()
-    monkeypatch.setattr(EmbodiedEnv, "__init__", parent_init)
-    with pytest.raises(ValueError, match="named 'cable'"):
-        RouteTheCableEnv(EmbodiedEnvCfg())
-    parent_init.assert_not_called()
-
-
-@pytest.mark.parametrize("cleanup_fails", [False, True])
-def test_post_base_failure_closes_dataset_and_queues_simulator_cleanup(
-    monkeypatch, cleanup_fails
-):
-    simulator, dataset = Mock(), Mock()
-    if cleanup_fails:
-        dataset.finalize.side_effect = RuntimeError("recorder failure")
-
-    def initialize_parent(env, cfg, **kwargs):
-        env.cfg = cfg
-        env.sim = simulator
-        env.dataset_manager = dataset
-        env._profiler = Mock()
-        env._discard_pending_recordings = Mock()
-
-    simulator.get_cable_object.return_value = SimpleNamespace(
-        data=SimpleNamespace(num_segments=49)
-    )
-    monkeypatch.setattr(EmbodiedEnv, "__init__", initialize_parent)
-    with pytest.raises(ValueError, match="50-segment"):
-        RouteTheCableEnv(_task_cfg())
-    dataset.finalize.assert_called_once_with()
-    simulator.destroy.assert_called_once_with(exit_process=False)
-
-
-def _command_env(mode):
-    env = object.__new__(RouteTheCableEnv)
-    env.cfg = EmbodiedEnvCfg(
-        sim_steps_per_control=1,
-        expert_trajectory=ExpertTrajectoryCfg(joint_command_mode=mode),
-    )
-    env.sim_cfg = SimpleNamespace(physics_dt=0.1)
-    env._num_envs = 2
-    env.sim = SimpleNamespace(device=torch.device("cpu"))
-    env._command = torch.zeros(2, 4)
-    env._grasp = None
-    env._max_slip = torch.zeros(2)
-    env.robot = SimpleNamespace(get_qpos=lambda: torch.zeros(2, 4))
-    env.active_joint_ids = [1, 3]
-    env.action_manager = None
-    env._traj_buffer = object()
-    env._trajectory_action_kind = "expert"
-    env._record_raw_actions = False
-    env.expert_action_spec = build_expert_action_spec(
-        joint_names=["a", "b"],
-        joint_command_mode=mode,
-    )
-    return env
-
-
-@pytest.mark.parametrize("mode", ["position", "position_velocity"])
-def test_motion_commands_pass_environment_preprocessing_and_recording(mode):
-    env = _command_env(mode)
-    path = torch.zeros(2, 3, 4)
-    path[:, :, 1] = torch.tensor([0.1, 0.2, 0.3])
-    path[:, :, 3] = torch.tensor([-0.2, -0.4, -0.6])
-    # Non-selected planner columns must not affect the inactive commands.
-    path[:, :, 0] = 9
-    actions = list(env._execute(path, [1, 3]))
-    assert len(actions) == 3
-    for i, action in enumerate(actions):
-        env._preprocess_action(action)
-        expected = path[:, i, [1, 3]]
-        torch.testing.assert_close(env._traj_raw_action[:, :2], expected)
-        if mode == "position_velocity":
-            velocity = (
-                torch.tensor([1.0, -2.0]).expand(2, -1) if i < 2 else torch.zeros(2, 2)
-            )
-            torch.testing.assert_close(env._traj_raw_action[:, 2:], velocity)
-            torch.testing.assert_close(
-                action.value["qvel"][:, [0, 2]], torch.zeros(2, 2)
-            )
-        actual = action.value if mode == "position" else action.value["qpos"]
-        torch.testing.assert_close(actual[:, [0, 2]], torch.zeros(2, 2))
-    # Yielded commands must remain independent when the next frame is emitted.
-    first = actions[0].value if mode == "position" else actions[0].value["qpos"]
-    torch.testing.assert_close(first[:, 1], torch.full((2,), 0.1))
-
-
-def test_hold_emits_zero_velocity_and_can_be_recorded():
-    env = _command_env("position_velocity")
-    env._command.fill_(0.25)
-    actions = list(env._hold(0.2))
-    assert len(actions) == 2
-    for action in actions:
-        env._preprocess_action(action)
-        torch.testing.assert_close(
-            env._traj_raw_action, torch.tensor([[0.25, 0.25, 0, 0]]).expand(2, -1)
-        )
-
-
-def test_grasp_slip_stops_execution_before_mutating_commands():
-    env = _command_env("position_velocity")
-    env._grasp = ("left", 0.57, torch.zeros(2, 3))
-    env._max_slip[1] = 0.013
-    assert list(env._execute(torch.ones(2, 3, 4), [1, 3])) == []
-    torch.testing.assert_close(env._command, torch.zeros(2, 4))
-
-
-def test_close_callback_observes_the_executed_frame():
-    env = _command_env("position")
-    observations = []
-    env._point_in_tool = lambda *_: observations.append("observed") or torch.ones(2, 3)
-    actions = env._execute(
-        torch.ones(2, 2, 4), [1, 3], closed_at=1, grasp_ref=("right", 0.162)
-    )
-    next(actions)
-    assert observations == [] and env._grasp is None
-    next(actions)
-    assert observations == ["observed"]
-    assert env._grasp[:2] == ("right", 0.162)
-
-
 @pytest.mark.parametrize("invalid", ["motion", "nonfinite", "held", "empty_seat"])
 def test_reference_metrics_reject_invalid_or_incomplete_observations(invalid):
     state = _goal_state()
@@ -448,167 +287,3 @@ def test_unknown_cable_fields_are_rejected_by_production_loader(tmp_path):
     data["environment"]["component"] = str(component)
     with pytest.raises((TypeError, ValueError), match="unknown_cable_option"):
         config_to_cfg(data, source_path=p)
-
-
-@pytest.mark.parametrize(
-    "planning_success,tracking_error,object_goal,slip,expected",
-    [
-        (False, 0.0, False, 0.0, False),
-        (False, 0.015, True, 0.0, False),
-        (True, 0.015, False, 0.0, False),
-        (True, 0.001, False, 0.0, True),
-        (True, 0.015, True, 0.0, True),
-        (True, 0.001, True, 0.013, False),
-    ],
-)
-@pytest.mark.parametrize("extra_samples", [0, 7])
-def test_insertion_validator_requires_planning_and_actual_tracking(
-    monkeypatch,
-    planning_success,
-    tracking_error,
-    object_goal,
-    slip,
-    expected,
-    extra_samples,
-):
-    from types import SimpleNamespace
-    from unittest.mock import MagicMock
-
-    warning = Mock()
-    monkeypatch.setattr(
-        "embodichain_tasks.manipulation.cable.route_the_cable.logger.log_warning",
-        warning,
-    )
-
-    actual = torch.eye(4).unsqueeze(0)
-    target = actual.clone()
-    target[:, 2, 3] += tracking_error
-
-    def generate(states, *, options):
-        return SimpleNamespace(
-            positions=(
-                torch.zeros(1, options.sample_count + extra_samples, 3)
-                if planning_success
-                else None
-            ),
-            success=torch.tensor([planning_success]),
-        )
-
-    env = SimpleNamespace(
-        device=torch.device("cpu"),
-        num_envs=1,
-        step_dt=1 / 60,
-        _tool=lambda side: actual,
-        _command=torch.zeros(1, 3),
-        _max_slip=torch.tensor([slip]),
-        _grasp=None,
-        robot=SimpleNamespace(
-            get_joint_ids=lambda name: [0, 1, 2], get_qpos=lambda: torch.zeros(1, 3)
-        ),
-        _motion=SimpleNamespace(generate=generate),
-        _execute=MagicMock(return_value=iter(())),
-        _hold=MagicMock(return_value=iter(())),
-    )
-    segment = RouteTheCableEnv._move(
-        env,
-        "left",
-        target,
-        "insert",
-        tolerance=0.003,
-        goal_reached=lambda: torch.tensor([object_goal]),
-    )
-    assert bool(segment.validator().item()) is expected
-    if expected:
-        warning.assert_not_called()
-    else:
-        message = warning.call_args.args[0]
-        assert "'insert' rejected" in message
-        assert "planning_success=" in message
-        assert "position_error_m=" in message
-        assert "max_grasp_slip_m=" in message
-    if not planning_success:
-        assert list(segment.actions) == []
-        env._execute.assert_not_called()
-    else:
-        list(segment.actions)
-        trajectory = env._execute.call_args.args[0]
-        assert trajectory.shape[1] >= 3 + extra_samples
-        assert trajectory.shape[-1] == 3
-
-
-@pytest.mark.parametrize("settles", [True, False])
-def test_insertion_waits_for_tracking_without_bypassing_timeout(settles):
-    from types import MethodType
-
-    actual = torch.eye(4).unsqueeze(0)
-    target = actual.clone()
-    target[:, 0, 3] = 0.01
-
-    def generate(states, *, options):
-        return SimpleNamespace(
-            positions=torch.zeros(1, options.sample_count, 3),
-            success=torch.tensor([True]),
-        )
-
-    env = SimpleNamespace(
-        device=torch.device("cpu"),
-        num_envs=1,
-        step_dt=1 / 60,
-        cfg=SimpleNamespace(
-            expert_trajectory=SimpleNamespace(joint_command_mode="position")
-        ),
-        _tool=lambda side: actual,
-        _command=torch.zeros(1, 3),
-        _max_slip=torch.zeros(1),
-        _grasp=None,
-        robot=SimpleNamespace(
-            get_joint_ids=lambda name: [0, 1, 2], get_qpos=lambda: torch.zeros(1, 3)
-        ),
-        _motion=SimpleNamespace(generate=generate),
-        _execute=lambda *args, **kwargs: iter(()),
-    )
-    env._hold = MethodType(RouteTheCableEnv._hold, env)
-    segment = RouteTheCableEnv._move(
-        env,
-        "left",
-        target,
-        "insert",
-        tolerance=0.003,
-        goal_reached=lambda: torch.tensor([False]),
-    )
-    frames = 0
-    for _ in segment.actions:
-        frames += 1
-        # The controller reaches tolerance after the initial 0.25 s hold.
-        if settles and frames == 18:
-            actual[:, 0, 3] = 0.009
-
-    assert frames == (18 if settles else 75)
-    assert bool(segment.validator().item()) is settles
-
-
-@pytest.mark.parametrize("success", [True, False])
-def test_final_route_validation_reports_physical_metrics(monkeypatch, success):
-    warning = Mock()
-    monkeypatch.setattr(
-        "embodichain_tasks.manipulation.cable.route_the_cable.logger.log_warning",
-        warning,
-    )
-    metrics = {
-        "success": torch.tensor([success]),
-        "strict_port": torch.tensor([success]),
-        "end_position": torch.tensor([[0.586, 0.077, 0.754]]),
-        "max_grasp_slip": torch.tensor([0.01]),
-    }
-    env = SimpleNamespace(route_metrics=lambda: metrics)
-
-    torch.testing.assert_close(
-        RouteTheCableEnv._validate_route(env), metrics["success"]
-    )
-    if success:
-        warning.assert_not_called()
-    else:
-        message = warning.call_args.args[0]
-        assert "strict_port" in message
-        assert "end_position" in message
-        assert "max_grasp_slip" in message

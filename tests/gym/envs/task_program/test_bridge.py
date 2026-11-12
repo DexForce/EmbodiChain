@@ -980,6 +980,14 @@ def test_execution_trace_records_only_consumed_actions_and_rejects_unknown_frame
     bridge._row_rejection = None
     bridge._row_hold = None
     bridge._pending_rejected_ids = ()
+    from types import SimpleNamespace
+
+    observed = []
+    bridge._validator_port = SimpleNamespace(
+        _observe_consumed_action=lambda action, runtime: observed.append(action)
+    )
+    bridge._runtime = object()
+    bridge._eligible_mask = None
     lifecycle = bridge_module._SegmentLifecycle()
     action = ControllerAction(
         torch.zeros(1, 1),
@@ -995,8 +1003,10 @@ def test_execution_trace_records_only_consumed_actions_and_rejects_unknown_frame
     pending = bridge._yield_and_advance(action, lifecycle)
     next(pending)
     assert bridge.execution_trace == ()
+    assert observed == []
     with pytest.raises(StopIteration):
         next(pending)
+    assert len(observed) == 1
     assert bridge.execution_trace == (
         {
             "step": 0,

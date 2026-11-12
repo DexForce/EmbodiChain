@@ -9769,3 +9769,55 @@ def test_contact_pickup_rejects_rigid_options_before_scene_lookup():
             _dual_context(),
         )
     generator.generate.assert_not_called()
+
+
+def test_move_joints_preserves_authored_samples_and_cadence() -> None:
+    generator = _motion_generator()
+    action = _bind_action(generator, MoveJoints())
+    samples = (
+        torch.tensor([0.0, 0.001, 0.004, 0.005])
+        .view(1, 4, 1)
+        .expand(NUM_ENVS, -1, ARM_DOF)
+        .clone()
+    )
+    invocation = _invocation(action, JointPositionGoal(samples), sample_count=90)
+    invocation = replace(
+        invocation, skill_options=MoveJointsOptions(preserve_samples=True)
+    )
+    plan = _plan_action(action, invocation, _context())
+    torch.testing.assert_close(_joint_command_positions(plan, "arm"), samples)
+    assert _joint_trajectory(plan).duration.tolist() == pytest.approx(
+        [3 * CONTROL_DT] * NUM_ENVS
+    )
+
+
+def test_move_end_effector_preserves_authored_cartesian_samples() -> None:
+    generator = _motion_generator()
+    calls = []
+    generate = generator.generate
+
+    def trace(*args, **kwargs):
+        calls.append(kwargs["options"])
+        return generate(*args, **kwargs)
+
+    generator.generate = trace
+    action = _bind_action(generator, MoveEndEffector())
+    poses = torch.eye(4).repeat(NUM_ENVS, 5, 1, 1)
+    invocation = replace(
+        _invocation(action, EndEffectorPoseGoal(poses), sample_count=90),
+        skill_options=MoveEndEffectorOptions(preserve_cartesian_samples=True),
+    )
+    _plan_action(action, invocation, _context())
+    assert calls[0].preserve_cartesian_samples
+    assert calls[0].sample_count == 6
+
+
+def test_presampled_joint_commands_cannot_bypass_motion_gen_backend():
+    action = _bind_action(_motion_generator(), MoveJoints())
+    invocation = replace(
+        _invocation(action, JointPositionGoal(torch.zeros(NUM_ENVS, 2, ARM_DOF))),
+        motion_policy=MotionPolicy(strategy="motion_gen"),
+        skill_options=MoveJointsOptions(preserve_samples=True),
+    )
+    with pytest.raises(ValueError, match="requires strategy"):
+        _plan_action(action, invocation, _context())

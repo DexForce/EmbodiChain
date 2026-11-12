@@ -203,6 +203,18 @@ def _validate_scene_classification(
 
 
 @dataclass(frozen=True, slots=True)
+class _SimulationCableBinding:
+    """Material-state identity, deliberately without a rigid object pose."""
+
+    entity_id: str
+    simulation_uid: str
+
+    def __post_init__(self) -> None:
+        _identifier(self.entity_id, field_name="entity_id")
+        _identifier(self.simulation_uid, field_name="simulation_uid")
+
+
+@dataclass(frozen=True, slots=True)
 class SimulationRigidObjectBinding:
     """Explicit binding for one simulation rigid object."""
 
@@ -813,6 +825,7 @@ class SimulationSceneBinding:
     """Build one authoritative registry from explicit simulation bindings."""
 
     registry_id: str
+    cables: tuple[_SimulationCableBinding, ...] = field(default=(), kw_only=True)
     rigid_objects: tuple[SimulationRigidObjectBinding, ...] = ()
     rigidized_articulations: tuple[
         SimulationRigidizedArticulationObjectBinding, ...
@@ -830,6 +843,7 @@ class SimulationSceneBinding:
     def __post_init__(self) -> None:
         _identifier(self.registry_id, field_name="registry_id")
         expected_types = {
+            "cables": _SimulationCableBinding,
             "rigid_objects": SimulationRigidObjectBinding,
             "rigidized_articulations": SimulationRigidizedArticulationObjectBinding,
             "articulations": SimulationArticulationBinding,
@@ -1056,6 +1070,11 @@ class SimulationSceneBinding:
         Returns:
             Immutable registry with typed roots, links, and affordances.
         """
+        for binding in self.cables:
+            if simulation.get_cable_object(binding.simulation_uid) is None:
+                raise ValueError(
+                    f"Cable {binding.simulation_uid!r} is absent from the live scene."
+                )
         objects = {item.entity_id: item for item in self.rigid_objects}
         rigidized_articulations = {
             item.entity_id: item for item in self.rigidized_articulations

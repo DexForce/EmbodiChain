@@ -2,7 +2,6 @@ embodiment_id: yam_i2rt
 simulation:
   class_type: YamI2rt
   uid: yam
-  # Preserve the source MJCF gravcomp setting for this Newton embodiment.
   root_props:
     newton_gravity_compensation: 1.0
   joint_drive_props:
@@ -34,3 +33,72 @@ simulation:
       ke: 10000.0
       kd: 0.1
 sensor: []
+skill_profile:
+  contract_id: dual_arm_parallel_gripper
+  profile_id: yam_i2rt
+  resources:
+  - resource_id: right_manipulator
+    endpoints:
+    - endpoint_id: motion
+      control_part: right_arm
+      capabilities:
+      - kinematics.batch_inverse
+      - motion.cartesian_pose
+      - kinematics.forward
+      - motion.joint_position
+    - endpoint_id: grasp
+      control_part: right_eef
+      capabilities:
+      - interaction.grasp
+      - motion.joint_position
+      command_preset: right_jaw
+  - resource_id: right_hand
+    endpoints:
+    - endpoint_id: motion
+      control_part: right_eef
+      capabilities:
+      - motion.joint_position
+    members:
+    - right_manipulator
+  - resource_id: left_manipulator
+    endpoints:
+    - endpoint_id: motion
+      control_part: left_arm
+      capabilities:
+      - kinematics.batch_inverse
+      - motion.cartesian_pose
+      - kinematics.forward
+      - motion.joint_position
+    - endpoint_id: grasp
+      control_part: left_eef
+      capabilities:
+      - interaction.grasp
+      - motion.joint_position
+      command_preset: left_jaw
+  - resource_id: left_hand
+    endpoints:
+    - endpoint_id: motion
+      control_part: left_eef
+      capabilities:
+      - motion.joint_position
+    members:
+    - left_manipulator
+  command_presets:
+  - preset_id: right_jaw
+    control_part: right_eef
+    commands:
+      open:
+      - 0.0475
+      - 0.0475
+      grasp:
+      - 0.003
+      - 0.003
+  - preset_id: left_jaw
+    control_part: left_eef
+    commands:
+      open:
+      - 0.0475
+      - 0.0475
+      grasp:
+      - 0.003
+      - 0.003

@@ -1778,6 +1778,19 @@ class TaskProgramDemoBridge:
             self._record_consumed_action(action)
             self._clock.advance_after_env_step()
             lifecycle.pending_action = None
+        observer = getattr(
+            getattr(self, "_validator_port", None), "_observe_consumed_action", None
+        )
+        decision = None if observer is None else observer(action, runtime=self._runtime)
+        if decision is not None:
+            rejected, hold_qpos, reason = decision
+            if self._eligible_mask is not None:
+                rejected &= self._eligible_mask
+            if bool(rejected.any()):
+                hold = ControllerAction(self._sink.encode_post_policy_hold(hold_qpos))
+                self.request_row_rejection(
+                    tuple(self.env_ids[rejected].tolist()), hold, reason=reason
+                )
         process = getattr(self, "_process_rejection", None)
         if process is not None:
             self._process_rejection = None
