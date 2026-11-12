@@ -31,7 +31,7 @@ import pytest
 from setuptools import Distribution
 from setuptools.command.build_py import build_py
 
-from setup import get_package_dir
+from setup import get_package_data, get_package_dir
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 _SETUP_PATH = _REPOSITORY_ROOT / "setup.py"
@@ -372,7 +372,7 @@ def _literal_setup_keyword(keyword_name: str) -> object:
 @pytest.fixture
 def staged_config_package(tmp_path: Path) -> _StagedConfigPackage:
     """Stage official Task Program resources through the real build command."""
-    package_data = _literal_setup_keyword("package_data")
+    package_data = get_package_data()
     include_package_data = _literal_setup_keyword("include_package_data")
     assert type(package_data) is dict
     assert type(include_package_data) is bool
