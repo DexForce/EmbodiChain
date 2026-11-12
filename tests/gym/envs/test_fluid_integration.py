@@ -117,13 +117,8 @@ def test_fluid_spacing_override_keeps_solver_and_surface_scale():
     ] == pytest.approx(0.00675)
 
 
-@pytest.mark.parametrize(
-    "deployment",
-    ("task.franka.fluid.yaml", "task.franka.newton.yaml"),
-)
-def test_pour_cup_embodiment_mounts_franka_hand(deployment):
-    path = TASK.parent / deployment
-    robot = config_to_cfg(load_config(path), source_path=path).robot
+def test_pour_cup_embodiment_mounts_franka_hand():
+    robot = config_to_cfg(load_config(TASK), source_path=TASK).robot
     assert "hand" in robot.urdf_cfg.components
     assert robot.control_parts["eef"] == [
         "fr3_finger_joint1",

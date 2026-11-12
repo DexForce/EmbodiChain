@@ -241,7 +241,6 @@ _RESOURCE_PATHS = frozenset(
         Path(
             "tasks/manipulation/tableware/pour_cup/task_program/integration.fluid.yaml"
         ),
-        Path("components/embodiments/franka_panda_firm_grip_newton.yaml"),
         Path("components/embodiments/franka_panda_fast_fluid.yaml"),
         Path("components/execution_policies/trajectory_open_loop_fluid_pour.yaml"),
         Path("components/embodiments/franka_panda_robotiq85_rgbd.yaml"),

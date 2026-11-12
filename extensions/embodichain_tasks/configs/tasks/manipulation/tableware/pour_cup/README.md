@@ -25,8 +25,7 @@ embodichain run-task \
 任务的执行节奏由
 [`trajectory_open_loop_fluid_pour.yaml`](../../../../components/execution_policies/trajectory_open_loop_fluid_pour.yaml)
 配置。轨迹最少采样 80 点，任务级规划加速度预算为 1.5 rad/s²；规划器仍遵守
-机器人原有的关节速度上限。流体部署使用独立的加速夹爪组件，不改变普通 Newton
-部署的接触参数。程序的 `wait_stable` 负责放回后的稳定检查。
+机器人原有的关节速度上限。程序的 `wait_stable` 负责放回后的稳定检查。
 
 倾倒和回正各至少运行 4 秒；`simulation.pour` 的 `rotation_duration` 在原规划轨迹
 较短时拉伸整段运动，不再用终点保持帧凑时长。它不改变抓杯与移杯的控制频率。
@@ -47,10 +46,6 @@ embodichain run-example sim/demo/franka_dexuni_pour_demo --headless --renderer f
 默认粒子间距为 1.5 mm，初始填充 76,607 粒。`run-task` 的
 `--particle-spacing 0.003` 或 Sim 的 `--spacing 0.003` 可用于较快的物理检查，
 但会改变流体分辨率。NoRender 仅用于物理检查。
-
-`task.franka.newton.yaml` 是无水、无接水碗的空杯动作基线，用于单独检查
-`Pick → Pour → Place` 的刚体运动。它保留普通夹爪标定和独立物理配置；
-完整流体倒水与接水量验收使用 `task.franka.fluid.yaml`。
 
 ## 求解与碰撞
 
