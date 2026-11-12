@@ -152,6 +152,13 @@ formats such as visualization `*wxyz`, cuRobo poses and GenSim
 `rotation_quaternion_wxyz` must be converted before EmbodiChain math. Adapter
 tests need non-symmetric rotations to expose component-order mistakes.
 
+Spawn-bound Newton articulations write selected COM poses through
+`SceneArticulationView.apply_link_com_pose`, which uses the SDK batch property
+setter. This retains descriptor edits while refreshing the solver once per
+batch; per-link scalar writes cause repeated model refreshes during large
+domain-randomization resets. The batch preserves current principal moments
+when the requested COM orientation changes.
+
 ## Invariants
 
 - Configure arenas, devices, renderer and backend before manager construction.

@@ -8,6 +8,10 @@ uses the repository's `@configclass` and loads only when constructing a run.
 
 The Sphinx [model-service guide](../../../docs/source/features/generative_sim/model_services.md)
 provides the user-facing configuration and workflow overview.
+For service topology, deployment, role configuration and live validation, read
+the [model-service deployment guide](DEPLOYMENT.md).
+The versioned [HTTP protocol](spec/v1/README.md) lets operators deploy any model
+or serving framework without depending on a prescribed server repository.
 
 ## Existing installations
 
@@ -62,6 +66,15 @@ win over the selected dotenv (`EMBODICHAIN_ENV_FILE` or the default GenSim `.env
 Unrelated `OPENAI_*` values never fill missing fields in an explicit profile.
 Unused roles require no credentials, connection or health check. The example's
 optional job-control profile is only needed when using Gradio's remote panel.
+An OpenAI-compatible profile may omit its API key for a trusted local endpoint.
+
+Validate configuration without provider requests, then initialize services and
+run their available health checks:
+
+```bash
+embodichain gensim services validate --config model_services.json --env-file services.env
+embodichain gensim services doctor --config model_services.json --env-file services.env
+```
 
 Python configuration overrides the JSON section. A supplied legacy caller or
 client overrides its role. The Python `model=` override applies to interpretation, image grounding and
@@ -118,6 +131,17 @@ registry = ServiceRegistry.defaults()
 registry.register("my_chat", lambda profile: MyChat(), roles=("task_interpretation",))
 # Bind that ID in a profile and pass registry=registry to GenSimServices.
 ```
+
+CLI users can ship the same registration through an installed entry point whose
+name equals the configured adapter ID:
+
+```toml
+[project.entry-points."embodichain.gensim_service_adapters"]
+my_chat = "my_package.gensim:register"
+```
+
+Only entry points selected by bound profiles are imported. JSON configuration
+cannot name arbitrary Python modules.
 
 Factories receive resolved profile mappings, including timeout/attempt defaults.
 A factory must clean up resources if construction fails before returning. Adapters

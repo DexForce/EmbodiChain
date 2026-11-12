@@ -815,6 +815,8 @@ class MotionGenerator:
             limits = authored_joint_velocity_limits(
                 self.robot, options.control_part
             ).to(raw_result.positions)
+            if getattr(self, "_env_ids", None) is not None:
+                limits = limits[list(self._env_ids)]
             success = torch.as_tensor(
                 raw_result.success, device=raw_result.positions.device, dtype=torch.bool
             )
@@ -1238,6 +1240,11 @@ class MotionGenerator:
                 pose=poses[:, index].to(seed.device),
                 name=control_part,
                 joint_seed=seed,
+                **(
+                    {"env_ids": self._env_ids}
+                    if getattr(self, "_env_ids", None) is not None
+                    else {}
+                ),
             )
             valid = normalize_success_mask(
                 valid,

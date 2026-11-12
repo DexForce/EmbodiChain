@@ -104,3 +104,9 @@ documentation. CI runs this same checker after style checks and before tests.
    :caption: Locomotion robots
 
    locomotion_robots
+
+
+.. toctree::
+   :maxdepth: 1
+
+   kinematics_matrix

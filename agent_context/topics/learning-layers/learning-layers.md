@@ -25,7 +25,9 @@ checkpoint/device protocol. It loads on demand so FK/IK imports do not load Warp
 Callers resolve robot caps and own geometric validation. Gradients are first-order
 and local to fixed filtering, sampling topology and active constraints.
 `learning/models/` owns general MLPs, feature normalization
-and configuration-driven MLP construction. These shared components do not import
+and configuration-driven MLP construction. `EmpiricalNormalizer.scale` exposes
+the configured additive or quadratic epsilon scale; clipping is optional.
+These shared components do not import
 RL, TensorDict or simulation. Concrete NeRD models, codecs and the shared-SL
 recipe live in the bundled `embodichain_models.dynamics.nerd` extension;
 teacher collection, historical training and research belong to
