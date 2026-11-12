@@ -654,7 +654,10 @@ sample's maximum interval, with shorter rows holding; completion time includes
 the actual scheduled ticks and terminal settling. Segment indices remain
 unchanged. Legacy `fixed_samples` is retained when the clock is omitted and
 uses `steps_per_waypoint` physics ticks for every sample. The clock and command
-period are recorded in trial metadata. Use `randomization.pose_batch_size: K` with `batch_sizes: [K]`
+period are recorded in trial metadata. Packaged Atomic suites that declare
+cuRobo sample it at 0.02 s, which divides each packaged command period, so
+linear retiming keeps a limit-saturated plan within its acceleration budget.
+Use `randomization.pose_batch_size: K` with `batch_sizes: [K]`
 for one vectorized skill request over `K` independently perturbed environment
 rows. The supplied pose-batch suite uses fixed cube grasps; articulated Slide
 shares one target-local grasp across its translated rows. Track configs may

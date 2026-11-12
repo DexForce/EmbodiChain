@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -356,7 +357,7 @@ def _saturated_rest_to_rest(
     "path",
     sorted(
         Path("extensions/embodichain_benchmarks/motion_generation/suites").glob(
-            "atomic_*franka_robotiq*.yaml"
+            "atomic_*.yaml"
         )
     ),
     ids=lambda path: path.stem,
@@ -393,10 +394,16 @@ def test_curobo_samples_retime_onto_compiled_clock_within_limits(path: Path) -> 
     if not curobo or not tracks or acceleration is None:
         pytest.skip("No compiled Atomic replay of a cuRobo plan.")
     sample_dt = float(curobo[0].config.get("interpolation_dt", 0.025))
-    preserved = bool(curobo[0].config.get("preserve_plan_samples", False))
+    # Mirrors the CuroboAdapter default for suites that omit the key.
+    preserved = bool(curobo[0].config.get("preserve_plan_samples", True))
     speed_limits = suite.protocol.joint_velocity_limit_rad_s
-    velocity = float(
-        min(speed_limits) if isinstance(speed_limits, list) else speed_limits
+    # A null budget defers to asset caps; an unbounded cruise stays saturated.
+    velocity = (
+        math.inf
+        if speed_limits is None
+        else float(
+            min(speed_limits) if isinstance(speed_limits, list) else speed_limits
+        )
     )
     physics_dt = SimulationManagerCfg().physics_dt
     for track in tracks:
