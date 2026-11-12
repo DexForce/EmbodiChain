@@ -101,6 +101,12 @@ before native materialization while retaining the USD body, collision, source
 configuration and typed authored-visual metadata across Arenas. A Gaussian-only
 USD needs `semantic_shape` for semantic mesh consumers.
 
+The shared whole-scene compiler accepts `manager=None` for descriptor and
+identity inspection without a World or facades. The import plan retains authored
+visual metadata by source resource key; `add_usd()` attaches it when tracking
+runtime facades. Gaussian classification remains available during inspection,
+while native renderer admission and resource creation require the runtime path.
+
 `objects/backends/collision.py` owns physical collision descriptors and strict
 cooked convex/box snapshots through `capture_physical_collision_geometry`.
 Strict snapshots preserve float64 geometry and requested native body offsets;

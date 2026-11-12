@@ -2953,6 +2953,10 @@ class SimulationManager:
         added_by_name = {item.name: item for item in added}
         assets = {}
         for source_path, kind, descriptor, facade in plan.declarations:
+            if source_path in plan.source_visual_elements:
+                facade._source_visual_elements = plan.source_visual_elements[
+                    source_path
+                ]
             self._spawn_scene.track(
                 kind, descriptor.name, added_by_name[descriptor.name], facade=facade
             )
