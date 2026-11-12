@@ -209,6 +209,44 @@ def _run_recording(urdf: str) -> None:
                 rtol=0,
                 atol=0,
             )
+        # Commit the nonzero arena through public reset with auto-save enabled,
+        # then replay that actual artifact in a fresh single-environment scene.
+        from embodichain.lab.gym.envs.wrapper import ReplayWrapper
+        from embodichain.lab.gym.utils.gym_utils import load_trajectory
+
+        env.cfg.trajectory_auto_save = True
+        env.cfg.trajectory_save_dir = str(Path(urdf).parent)
+        source_origin = env.sim.arena_offsets[1].cpu().clone()
+        env.reset(options={"reset_ids": [1]})
+        paths = list(Path(urdf).parent.glob("traj_env1_*.pt"))
+        assert len(paths) == 1
+        saved = load_trajectory(str(paths[0]))
+        assert saved["meta"]["env_ids"] == [1]
+        assert saved["meta"]["arena_origins_w"] == [source_origin.tolist()]
+        for uid, field in fields.items():
+            assert saved["raw_observations"]["fields"][field]["values"].shape[1] == 4
+
+        env.close(exit_process=False)
+        env = None
+        manager = None
+        cables.clear()
+        gc.collect()
+        SimulationManager.flush_cleanup_queue()
+
+        cfg.num_envs = 1
+        cfg.sim_cfg.num_envs = 1
+        cfg.record_trajectory = False
+        env = EmbodiedEnv(cfg)
+        replay = ReplayWrapper(env, saved)
+        replay.reset()
+        for _ in range(saved["meta"]["lengths"][0]):
+            replay.step(None)
+        for uid, field in fields.items():
+            expected_final = latest.values[field][[1]].clone()
+            expected_final[..., :3] -= source_origin
+            observed = env.sim.get_cable_object(uid).data.segment_state_w.cpu()
+            observed[..., :3] -= env.sim.arena_offsets.cpu()[:, None, :]
+            torch.testing.assert_close(observed, expected_final, atol=2e-6, rtol=1e-5)
     finally:
         if env is not None:
             env.close(exit_process=False)

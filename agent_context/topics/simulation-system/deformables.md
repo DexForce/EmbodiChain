@@ -12,10 +12,16 @@ binding. Return to the [simulation overview](simulation-system.md).
 uses one registry and backend dispatch for both topologies.
 
 The supported path is Newton on CUDA, without gradient mode. Declarations
-accept a supported particle solver (`xpbd`,
-`semi_implicit`, `vbd`, `dexuni`); they reject unsupported backends/solvers and
+accept the default DexUni solver or an explicit supported particle solver
+(`xpbd`, `semi_implicit`, `vbd`); they reject unsupported backends/solvers and
 post-finalization additions. Default soft/cloth compatibility is absent.
 Future backend support belongs at dispatch, not inside a monolithic config.
+
+`UsdImportCfg` whole-scene loading and a deformable config's optional `source`
+bind authored soft-body/cloth descriptors through these same facades. Source
+physics and simulation/render topology are retained; the source route accepts
+identity, pose and particle flag/radius overrides rather than regenerating a
+mesh with the procedural meshing defaults.
 
 `spawn/descriptors.py` translates volume/surface configs to typed `SoftBodyDesc`
 and `ClothDesc`; volume meshing uses `SoftBodyMeshingDesc`. Runtime mutation
@@ -50,6 +56,9 @@ parser. Volume-only `meshing` and common `surface_props` preserve topology
 ownership. Volume elasticity uses Young's modulus/Poisson's ratio, translated
 to Lamé coefficients at Spawn; density units differ (kg/m³ volume, kg/m²
 surface). Exact fields and defaults stay in the typed config source.
+Optional `attrs.contact_material` sets DexUni stiffness, damping and dynamic
+friction per soft or cloth object; it is separate from element elasticity and
+replaces removed flat solver-level soft-contact coefficients in examples.
 
 Surface cloth can author a constant signed rest dihedral angle through
 `attrs.edge_rest_angle`; omitting it preserves the mesh-inferred rest geometry.
@@ -57,11 +66,9 @@ The surface descriptor compiler validates and forwards it to native cloth
 physics. This is a rest-shape choice separate from bending stiffness and is not
 a volume-surface material field.
 
-`attrs.contact_material` optionally owns a DexUni particle object's contact
-stiffness, damping and dynamic friction; it is independent of elasticity and
-lowers to the native cloth/soft-body physics descriptor. Native validation and
-pair-material mixing remain DexSim-owned. Older wheels still support omitted
-materials and reject an explicit block if their descriptor API is unavailable.
+The contact material lowers to the native cloth/soft-body physics descriptor.
+Native validation and pair-material mixing remain DexSim-owned. An explicit
+block requires the native per-object material API.
 
 Surface `attrs.pneumatic` optionally lowers a mapping to native
 `PneumaticPhysicsDesc`. Closed-surface topology, pressure-law validation and
@@ -103,6 +110,11 @@ deformables. `SimulationManager.add_cable_object()` lowers through
 `spawn/descriptors.py` into `CableDesc`, declares in the existing `SpawnScene`,
 and binds the same facade in place during `prepare()`. Backend capabilities
 reject Default, CPU, other Newton solvers and gradient mode; use DexUni on CUDA.
+With this backend, an arena containing a cable cannot also contain fluid,
+cloth or soft-body particles: cable episode reset does not support those
+particles. Spawn checks the native cable and particle descriptors for direct
+declarations and USD imports, including mixtures within a single USD source.
+It checks topology and UIDs before publishing declaration materials.
 
 `CableObjectData` uses `Scene.create_cable_batch()` and exposes independent
 world snapshots for equal-topology replicated segments. Public poses are
@@ -127,6 +139,8 @@ registers nonempty `init_qpos` through public model-initialization and batch-tar
 hooks before engine creation defaults are frozen. Input vectors are copied to
 finite host float32 values, including CUDA tensors. The initializer does not
 overwrite runtime commands; episode reset restores nonzero poses and targets.
+When preparation is retried with a changed declaration, the initializer uses
+the current articulation targets and joint values.
 Mimic followers use the same state-order mapping and projection as articulation
 reset. The opt-in MuJoCo mimic stabilizer retains authored positions; unsupported
 solver paths project them before creation defaults are captured.

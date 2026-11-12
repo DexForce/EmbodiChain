@@ -4,47 +4,65 @@ targets:
   drop_pose:
     kind: cyclic_pose
     values:
-      - position: [0.55, 0.05, 0.80]
-        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
-      - position: [0.45, 0.15, 0.80]
-        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+    - position:
+      - 0.55
+      - 0.05
+      - 0.8
+      quaternion_xyzw:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+    - position:
+      - 0.45
+      - 0.15
+      - 0.8
+      quaternion_xyzw:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
   rest_pose:
     kind: cyclic_pose
     values:
-      - position: [0.55, 0.05, 0.775]
-        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
-      - position: [0.45, 0.15, 0.775]
-        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+    - position:
+      - 0.55
+      - 0.05
+      - 0.775
+      quaternion_xyzw:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+    - position:
+      - 0.45
+      - 0.15
+      - 0.775
+      quaternion_xyzw:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
 program:
-  kind: repeat
-  count: 3
-  body:
-    kind: sequence
-    items:
-      - kind: segment
-        name: pick_cube
-        instruction: Grasp and lift the cube.
-        steps:
-          kind: invoke
-          call:
-            kind: pick
-            object: cube
-      - kind: segment
-        name: place_cube
-        instruction: Place the cube at the next tabletop position and release it.
-        steps:
-          kind: invoke
-          call:
-            kind: place
-            object: cube
-            at:
-              kind: target_ref
-              target: drop_pose
-        post:
-          - kind: wait_stable
-            entity: cube
-        validators:
-          - kind: object_near_target
-            object: cube
-            target: rest_pose
-            position_tolerance: 0.04
+  repeat:
+    count: 3
+    body:
+    - segment: pick_cube
+      instruction: Grasp and lift the cube.
+      steps:
+        pick:
+          object: cube
+    - segment: place_cube
+      instruction: Place the cube at the next tabletop position and release it.
+      steps:
+        place:
+          object: cube
+          at: drop_pose
+      post:
+      - kind: wait_stable
+        entity: cube
+      validators:
+      - kind: object_near_target
+        object: cube
+        target: rest_pose
+        position_tolerance: 0.04

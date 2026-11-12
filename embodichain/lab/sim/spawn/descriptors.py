@@ -89,6 +89,7 @@ from embodichain.lab.sim.shapes import (
     CylinderCfg,
     MeshCfg,
     MeshCollisionCfg,
+    PlaneCfg,
     SphereCfg,
 )
 from embodichain.utils import logger
@@ -328,6 +329,8 @@ def visual_desc_from_cfg(
         raise NotImplementedError(
             "Visual objects support MeshCfg, CubeCfg and SphereCfg."
         )
+    if cfg.body_scale is None:
+        cfg.body_scale = (1.0, 1.0, 1.0)
     scale = _vector3(cfg.body_scale, field_name="body_scale")
     material_ref, material_entry = _compile_visual_material(uid, shape.visual_material)
     return ObjectDesc(
@@ -360,6 +363,11 @@ def rigid_desc_from_cfg(
             "USD files describe typed scenes; use rigid_desc_from_usd() to "
             "select one rigid object."
         )
+
+    if cfg.body_type is None:
+        cfg.body_type = "dynamic"
+    if cfg.body_scale is None:
+        cfg.body_scale = (1.0, 1.0, 1.0)
 
     physics = _with_procedural_collision_defaults(
         _resolve_rigid_physics(
@@ -559,18 +567,23 @@ def _explicit_tet_mesh_from_cfg(
         raise ValueError("Volume deformable vertices must have shape (N, 3).")
     if not np.isfinite(positions).all():
         raise ValueError("Volume deformable vertices must be finite.")
-    tetrahedra = np.asarray(cfg.tetrahedra, dtype=np.int32).reshape(-1, 4)
+    tetrahedra = np.asarray(cfg.tetrahedra)
+    if tetrahedra.dtype.kind not in "iu":
+        raise TypeError("Volume deformable tetrahedra must be integer indices.")
+    tetrahedra = tetrahedra.reshape(-1, 4)
     if tetrahedra.min() < 0 or tetrahedra.max() >= len(positions):
         raise ValueError("Volume deformable tetrahedra index outside the vertices.")
+    tetrahedra = tetrahedra.astype(np.int32)
     if shape.triangles is None:
         surface_triangles = extract_tet_surface_triangles(tetrahedra)
     else:
         surface_triangles = np.asarray(shape.triangles)
         if surface_triangles.dtype.kind not in "iu":
             raise TypeError("Volume deformable triangles must be integer indices.")
-        surface_triangles = surface_triangles.astype(np.int32).reshape(-1, 3)
+        surface_triangles = surface_triangles.reshape(-1, 3)
         if surface_triangles.min() < 0 or surface_triangles.max() >= len(positions):
             raise ValueError("Volume deformable triangles index outside the vertices.")
+        surface_triangles = surface_triangles.astype(np.int32)
     if shape.normals is not None or shape.uv_coords is not None:
         raise ValueError(
             "Volume deformable tetrahedra do not support shape normals or uv_coords."
@@ -928,6 +941,8 @@ def articulation_desc_from_cfg(
             "USD files describe typed scenes; use articulation_desc_from_usd() "
             "to select one articulation."
         )
+    if cfg.body_scale is None:
+        cfg.body_scale = (1.0, 1.0, 1.0)
     if cfg.resolve_asset_physics_mode() == "overlay":
         _validate_articulation_rigid_physics(
             cfg,
@@ -1471,6 +1486,8 @@ def _compile_joint_properties(
             "max_velocity",
             "friction",
             "armature",
+            "limit_stiffness",
+            "limit_damping",
         ):
             configured = getattr(source, property_name)
             if configured is None:
@@ -1491,6 +1508,10 @@ def _compile_joint_properties(
                 default_desc, newton_desc = joint_properties[joint_name]
                 if property_name == "armature":
                     joint_common[joint_name]["armature"] = scalar
+                elif property_name == "limit_stiffness":
+                    newton_desc.limit_ke = scalar
+                elif property_name == "limit_damping":
+                    newton_desc.limit_kd = scalar
                 elif property_name == "max_effort":
                     default_desc.max_force = scalar
                     joint_common[joint_name]["effort_limit"] = scalar
@@ -2022,6 +2043,16 @@ def _compile_geometry(
             "coacd",
         )
 
+    if isinstance(shape, PlaneCfg):
+        if cfg.body_type != "static":
+            raise ValueError("PlaneCfg collision requires body_type='static'.")
+        size = tuple(float(value) for value in shape.size)
+        if len(size) != 2 or any(
+            not math.isfinite(value) or value <= 0 for value in size
+        ):
+            raise ValueError("PlaneCfg.size must contain two finite positive values.")
+        return GeometryDesc.plane(size), CollisionApproximation.NONE, 1, "coacd"
+
     if isinstance(shape, SphereCfg):
         if shape.radius <= 0:
             raise ValueError("SphereCfg.radius must be positive.")
@@ -2034,7 +2065,7 @@ def _compile_geometry(
 
     raise NotImplementedError(
         f"RigidObjectCfg shape {type(shape).__name__!r} is not supported by "
-        "the Spawn converter; supported shapes are MeshCfg, CubeCfg, CylinderCfg, and SphereCfg."
+        "the Spawn converter; supported shapes are MeshCfg, CubeCfg, CylinderCfg, PlaneCfg, and SphereCfg."
     )
 
 
@@ -2137,7 +2168,7 @@ def _articulation_uid(value: str | None, path: str | None) -> str:
 
 
 def _is_usd_path(path: object) -> bool:
-    return str(path).lower().endswith((".usd", ".usda", ".usdc"))
+    return str(path).lower().endswith((".usd", ".usda", ".usdc", ".usdz"))
 
 
 def _is_missing(value: object) -> bool:

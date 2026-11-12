@@ -26,8 +26,8 @@ from unittest.mock import Mock
 import pytest
 import torch
 
-from embodichain.lab.sim.atomic_actions import (
-    AtomicActionEngine,
+from embodichain.lab.sim.atomic_skills import (
+    AtomicSkillEngine,
     ControlPartCommandProfile,
     GraspGoal,
     HeldObjectPoseGoal,
@@ -1612,7 +1612,7 @@ def test_nmg_rejects_unknown_motion_validity():
 
 
 def test_seed_override_applies_to_atomic_tracks():
-    suite = load_suite("atomic_franka_pgi_randomized")
+    suite = load_suite("atomic_franka_robotiq_randomized")
 
     _apply_overrides(suite, seeds=[104])
 
@@ -1621,7 +1621,7 @@ def test_seed_override_applies_to_atomic_tracks():
 
 
 def test_seed_override_adds_missing_atomic_track_seeds():
-    suite = load_suite("atomic_franka_pgi_randomized")
+    suite = load_suite("atomic_franka_robotiq_randomized")
     atomic_track = suite.enabled_tracks()[0]
     atomic_track.config.pop("seeds", None)
 
@@ -1789,7 +1789,7 @@ def test_atomic_skill_antipodal_grasp_uses_standalone_generator(
         n_sample=321,
         force_refresh=False,
         max_candidates=8,
-        gripper_model=None,
+        gripper_data=None,
         root_from_tcp=tcp,
     )
     call = generator.get_valid_grasp_poses.call_args.kwargs
@@ -1898,7 +1898,7 @@ def test_atomic_skill_pickup_builds_engine_owned_endpoint_binding():
     )
     motion_generator = Mock(robot=robot, device=torch.device("cpu"))
     motion_generator.planner.cfg.planner_type = "stub"
-    engine = AtomicActionEngine(
+    engine = AtomicSkillEngine(
         motion_generator,
         control_profiles={
             "hand": ControlPartCommandProfile.joint_positions(
@@ -2100,7 +2100,7 @@ def test_atomic_skill_press_invocation_uses_articulated_target_manifest():
     )
     motion_generator = Mock(robot=robot, device=torch.device("cpu"))
     motion_generator.planner.cfg.planner_type = "stub"
-    engine = AtomicActionEngine(
+    engine = AtomicSkillEngine(
         motion_generator,
         control_profiles={
             "hand": ControlPartCommandProfile.joint_positions(
@@ -2170,7 +2170,7 @@ def test_atomic_skill_slide_invocation_uses_tutorial_options():
     )
     motion_generator = Mock(robot=robot, device=torch.device("cpu"))
     motion_generator.planner.cfg.planner_type = "stub"
-    engine = AtomicActionEngine(
+    engine = AtomicSkillEngine(
         motion_generator,
         control_profiles={
             "hand": ControlPartCommandProfile.joint_positions(
@@ -2252,7 +2252,7 @@ def test_atomic_skill_twist_invocation_uses_tutorial_options():
     )
     motion_generator = Mock(robot=robot, device=torch.device("cpu"))
     motion_generator.planner.cfg.planner_type = "stub"
-    engine = AtomicActionEngine(
+    engine = AtomicSkillEngine(
         motion_generator,
         control_profiles={
             "hand": ControlPartCommandProfile.joint_positions(
@@ -2329,7 +2329,7 @@ def test_atomic_skill_move_held_object_uses_current_options_contract():
     )
     motion_generator = Mock(robot=robot, device=torch.device("cpu"))
     motion_generator.planner.cfg.planner_type = "stub"
-    engine = AtomicActionEngine(
+    engine = AtomicSkillEngine(
         motion_generator,
         control_profiles={
             "hand": ControlPartCommandProfile.joint_positions(

@@ -42,20 +42,20 @@ from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg, DemoSegment
 from embodichain.lab.gym.envs.expert_trajectory import prepare_expert_joint_trajectory
 from embodichain.lab.gym.envs.types import ControllerAction
 from embodichain.lab.gym.utils.registration import register_env
-from embodichain.lab.sim.atomic_actions import (
-    AtomicActionEngine,
-    ActionInvocation,
-    ActionControlOverrides,
+from embodichain.lab.sim.atomic_skills import (
+    AtomicSkillEngine,
+    SkillInvocation,
+    SkillControlOverrides,
     JointPositionCommand,
     ControlPartCommandProfile,
     MotionPolicy,
     SceneSnapshot,
 )
-from embodichain.lab.sim.atomic_actions.primitives.grasp_cable import (
+from embodichain.lab.sim.atomic_skills.primitives.grasp_cable import (
     CableGraspGoal,
     GraspCableOptions,
 )
-from embodichain.lab.sim.atomic_actions.trajectory_ops import build_pose_plan_states
+from embodichain.lab.sim.atomic_skills.trajectory_ops import build_pose_plan_states
 from embodichain.lab.sim.motion.motion_generator import (
     MotionGenerator,
     MotionGenCfg,
@@ -246,7 +246,7 @@ class RouteTheCableEnv(EmbodiedEnv):
         self._motion = MotionGenerator(
             MotionGenCfg(planner_cfg=TrapezoidalPlannerCfg(robot_uid=self.robot.uid))
         )
-        self._engine = AtomicActionEngine(
+        self._engine = AtomicSkillEngine(
             self._motion,
             control_profiles={
                 f"{side}_eef": ControlPartCommandProfile.joint_positions(
@@ -634,14 +634,14 @@ class RouteTheCableEnv(EmbodiedEnv):
             {"primary": {"motion": side + "_arm", "grasp": side + "_eef"}},
         )
         plan = self._engine.plan(
-            ActionInvocation(
+            SkillInvocation(
                 skill_id="grasp_cable",
                 goal=goal,
                 binding=binding,
                 motion_policy=MotionPolicy(sample_count=73),
                 skill_options=GraspCableOptions(close_hold_duration=0.35),
                 control_overrides=(
-                    ActionControlOverrides(
+                    SkillControlOverrides(
                         endpoints={
                             "primary": {
                                 "grasp": {
@@ -653,7 +653,7 @@ class RouteTheCableEnv(EmbodiedEnv):
                         }
                     )
                     if firm
-                    else ActionControlOverrides()
+                    else SkillControlOverrides()
                 ),
             ),
             self._engine.initial_context(

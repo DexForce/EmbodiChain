@@ -187,9 +187,9 @@ seed 73, DexSim `0.6.0.dev11491` (dev commit
 3.15.0, Python 3.12 and an RTX 5090 D v2. Maximum grasp slip was 3.32 mm in
 the first-spool test and 2.81 mm during the third carry, with no reported
 robot/spool penetration during the third carry and retreat. The original
-12 mm slip and 1 mm penetration limits were unchanged. See the repository's
-Newton cable example instructions for the internal CI wheel; this build was
-not published to the package index. These tests qualify the first-spool and
+12 mm slip and 1 mm penetration limits were unchanged. These historical measurements used an internal wheel. The current runtime
+installation follows the published DexSim dependency and locks inherited from
+the cable framework. These tests qualify the first-spool and
 third-carry stages, not the later channel insertion or complete routing episode.
 
 The 2026-10-21 CUDA regressions with seed 73 passed for the first-spool
@@ -210,7 +210,9 @@ Recordings contain full robot commands and
 world XYZ + XYZW + COM linear/angular velocity order. Segment outcomes retain
 planning status and material-coordinate identities. A cable observation is not
 a solver-history checkpoint. Construct the replay environment with the same
-configuration and Arena origins. `ReplayWrapper(mode="dynamic")` verifies
+physical configuration. New recordings retain source Arena origins so a selected
+row can replay in a fresh single-environment scene. Older files without origin
+metadata require matching Arena placement. `ReplayWrapper(mode="dynamic")` verifies
 matching full-reset recorded observations and environment counts; it replays
 commands without overwriting cable states. Both `position` and
 `position_velocity` expert command modes use the environment control grid; the

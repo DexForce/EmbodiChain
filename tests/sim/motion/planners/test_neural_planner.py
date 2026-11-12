@@ -35,6 +35,8 @@ from embodichain.lab.sim.motion.planners.toppra_planner import retime_joint_path
 from embodichain.lab.sim.motion.planners.utils import TrajectorySampleMethod
 from embodichain.lab.sim.sim_manager import SimulationManager
 
+pytestmark = pytest.mark.no_sim
+
 NUM_ARM_JOINTS = 7
 NUM_WAYPOINTS = 5
 OBS_DIM = 186

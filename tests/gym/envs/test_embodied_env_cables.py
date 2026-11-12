@@ -134,6 +134,30 @@ def test_cable_visual_mesh_resolves_from_dataset_or_declaring_component(
     assert cable["visual_shape"]["fpath"] == reference
 
 
+def test_cable_visual_mesh_loads_inline_geometry() -> None:
+    vertices = [[0.0, 0.0, 0.0], [0.2, 0.0, 0.0], [0.0, 0.01, 0.0]]
+    triangles = [[0, 1, 2]]
+    cable = {
+        "uid": "wire",
+        "points": [[0, 0, 1], [0.2, 0, 1]],
+        "radius": 0.01,
+        "visual_shape": {"vertices": vertices, "triangles": triangles},
+    }
+    cfg = config_to_cfg(
+        {
+            "id": "EmbodiedEnv-v1",
+            "physics": "newton",
+            "env": {},
+            "robot": {"uid": "robot"},
+            "cable_object": [cable],
+        }
+    )
+    mesh = cfg.cable_object[0].visual_shape
+    assert mesh.fpath is None
+    assert mesh.vertices == vertices
+    assert mesh.triangles == triangles
+
+
 @pytest.mark.parametrize("uids", [None, ["wire"]])
 def test_cable_recording_uses_shared_observation_history_and_t_plus_one_slots(
     uids,

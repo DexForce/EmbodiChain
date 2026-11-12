@@ -139,7 +139,10 @@ def test_kinematic_nodal_control_holds_last_unrated_sample() -> None:
 
 
 def test_initial_joint_seed_uses_source_order_and_never_drives_runtime(monkeypatch):
-    from embodichain.lab.sim._runtime_controls import _InitialJointState
+    from embodichain.lab.sim._runtime_controls import (
+        _InitialJointState,
+        _SceneInitialJointStates,
+    )
 
     initializer = MagicMock()
     factory = MagicMock(return_value=initializer)
@@ -161,7 +164,9 @@ def test_initial_joint_seed_uses_source_order_and_never_drives_runtime(monkeypat
         get_articulation=lambda target: handle,
         create_articulation_batch=MagicMock(return_value=batch),
     )
-    control = _InitialJointState("arena/tool", np.array([0.1, 0.2]))
+    control = _SceneInitialJointStates(
+        (_InitialJointState("arena/tool", np.array([0.1, 0.2])),)
+    )
     control.initialize_model(object(), result)
     np.testing.assert_allclose(factory.call_args.args[1], [[0.2, 0.1]])
     assert factory.call_args.kwargs["initialize_model_pose"] is True
@@ -246,6 +251,9 @@ def test_initial_mimic_defaults_and_targets_match_articulation_reset(
     articulation._entities = [handle]
     articulation._data = SimpleNamespace(
         is_newton_backend=True, articulation_view=MagicMock()
+    )
+    articulation._spawn_result = SimpleNamespace(
+        dynamics_capabilities=lambda: SimpleNamespace(supported_control_fields=None)
     )
     articulation._mimic_info = SimpleNamespace(
         mimic_id=np.array([0]),
@@ -369,7 +377,7 @@ def test_cable_scene_seeds_omitted_joint_defaults_and_checks_attachment(monkeypa
         },
         _spawn_scene=SimpleNamespace(
             arena_names=("arena_0",),
-            builder=SimpleNamespace(add_runtime_control=register),
+            builder=SimpleNamespace(is_finalized=False, add_runtime_control=register),
         ),
     )
     NewtonPhysicsBackend(manager)._prepare_scene_build()

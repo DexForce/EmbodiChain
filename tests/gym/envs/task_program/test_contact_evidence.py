@@ -25,7 +25,7 @@ import pytest
 import torch
 
 from embodichain.lab.gym.envs.base_env import BaseEnv
-from embodichain.lab.sim.atomic_actions.evidence import PhysicalEvidenceRequest
+from embodichain.lab.sim.atomic_skills.evidence import PhysicalEvidenceRequest
 from embodichain.lab.sim.sensors.contact.sensor import ContactSensor
 from embodichain.lab.sim.sensors.contact.sampling import (
     CONTACT_ACTOR_IDS,
@@ -38,7 +38,7 @@ from embodichain.lab.sim.sensors.contact.timeline import (
     ContactTimeline,
     ContactTimelineCfg,
 )
-from embodichain.lab.sim.atomic_actions.grip_evidence import DriverOpeningBinding
+from embodichain.lab.sim.atomic_skills.grip_evidence import DriverOpeningBinding
 from embodichain.lab.task_program.integrations.simulation.grip_evidence import (
     NativeGripEvidenceCfg,
     NativeGripEvidenceFactory,

@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import copy
 import os
 import time
@@ -45,6 +47,7 @@ from embodichain.toolkits.urdf_assembly.sensor import (
 from embodichain.toolkits.urdf_assembly.connection import (
     URDFConnectionManager,
 )
+from embodichain.toolkits.urdf_assembly.name_normalizer import NameNormalizer
 from embodichain.toolkits.urdf_assembly.mesh import URDFMeshManager
 from embodichain.toolkits.urdf_assembly.file_writer import (
     URDFFileWriter,
@@ -153,18 +156,9 @@ class URDFAssemblyManager:
 
         # Processing order for components with their name prefixes
         # Tuple format: (component_name, prefix)
-        self._component_order_and_prefix = [
-            ("chassis", None),
-            ("legs", None),
-            ("torso", None),
-            ("head", None),
-            ("left_arm", "left_"),
-            ("right_arm", "right_"),
-            ("left_hand", "left_"),
-            ("right_hand", "right_"),
-            ("arm", None),
-            ("hand", None),
-        ]
+        self._component_order_and_prefix = list(
+            NameNormalizer.resolve_component_prefixes().items()
+        )
 
         # Attachment position indices for component connections.
         # This dictionary defines which link of each component should be used as the connection point

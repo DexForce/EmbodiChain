@@ -14,16 +14,17 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Compose Lab facts and explicit frozen criteria for the owning regressions."""
+"""Test composition of independent runtime decoding and normative evaluation."""
 
 from __future__ import annotations
-
 import math
 from embodichain.lab.task_program.integrations.evidence import (
     HandOverEvidenceBinding,
     CoordinatedHoldEvidenceBinding,
+    CoordinatedTransportEvidenceBinding,
     normalize_handover_evidence,
     normalize_coordinated_hold_evidence,
+    normalize_coordinated_transport_evidence,
 )
 from embodichain.gen_sim.task_spec.manipulation_evidence import (
     HoldAcceptanceCriteria,
@@ -36,6 +37,75 @@ from embodichain.gen_sim.task_spec.evidence_report import (
 
 
 def normalized(binding, packet, program, spec=None):
+    from embodichain.gen_sim.task_spec import TaskSpec
+
+    if spec is not None:
+        spec = TaskSpec.from_dict(spec)
+    from copy import deepcopy
+    from embodichain.gen_sim.task_spec.evidence import SupportedPlacementEvidenceBinding
+    from embodichain.gen_sim.task_spec.placement_group_evidence import (
+        PlacementEvidenceGroupBinding,
+    )
+    from embodichain.gen_sim.task_spec.pour_evidence import PourEvidenceBinding
+    from embodichain.lab.task_program.integrations.evidence.placement_evidence import (
+        normalize_placement_evidence,
+        normalize_pour_release_evidence,
+    )
+
+    from embodichain.gen_sim.task_spec.control_evidence import ControlEvidenceBinding
+
+    if isinstance(binding, dict) and binding.get("schema_version") in {
+        "task_spec.control_evidence_binding/v1",
+        "task_spec.control_evidence_binding/v2",
+    }:
+        binding = ControlEvidenceBinding.from_dict(binding)
+    if isinstance(binding, ControlEvidenceBinding):
+        from embodichain.lab.task_program.integrations.evidence import (
+            normalize_control_evidence,
+        )
+
+        binding = ControlEvidenceBinding.from_dict(binding)
+        return binding, normalize_control_evidence(
+            binding.to_dict(), packet, program=program
+        )
+    if isinstance(binding, SupportedPlacementEvidenceBinding):
+        predicate = (
+            next(
+                (
+                    p
+                    for p in (
+                        *spec.goal,
+                        *(p for m in spec.milestones for p in m.achieve),
+                    )
+                    if p.id == binding.predicate_id
+                ),
+                None,
+            )
+            if spec is not None
+            else None
+        )
+        return binding, normalize_placement_evidence(
+            binding.to_dict(),
+            packet,
+            program=program,
+            source_family=(
+                None if predicate is None else predicate.arguments.get("task_type")
+            ),
+        )
+    if isinstance(binding, PlacementEvidenceGroupBinding):
+        data = deepcopy(packet)
+        if isinstance(data.get("members"), dict):
+            for member in binding.members:
+                if member.binding_hash in data["members"]:
+                    data["members"][member.binding_hash] = normalized(
+                        member, data["members"][member.binding_hash], program, spec
+                    )[1]
+        return binding, data
+    if isinstance(binding, PourEvidenceBinding):
+        return binding, normalize_pour_release_evidence(
+            binding.to_dict(), packet, program=program
+        )
+
     if type(binding) is HandOverEvidenceBinding:
         kind = {
             "handover_complete": "handover_complete",
@@ -46,6 +116,11 @@ def normalized(binding, packet, program, spec=None):
     elif type(binding) is CoordinatedHoldEvidenceBinding:
         kind = "coordinated_hold"
         sample = normalize_coordinated_hold_evidence(binding, packet, program=program)
+    else:
+        kind = "coordinated_acquisition"
+        sample = normalize_coordinated_transport_evidence(
+            binding, packet, program=program
+        )
     criteria = None
     if kind in {"receiver_hold", "receiver_orientation", "coordinated_hold"}:
         condition = binding.operation["hold_condition"]
@@ -99,11 +174,24 @@ def evaluate(spec, binding, packet, *, program):
 
 evaluate_handover_evidence = evaluate
 evaluate_coordinated_hold_evidence = evaluate
+evaluate_coordinated_transport_evidence = evaluate
 
 
 def evaluate_physical_evidence_report(spec, bindings, evidence, *, program, num_envs):
     pairs = [
-        normalized(binding, evidence.get(binding.predicate_id, {}), program, spec)
+        normalized(
+            binding,
+            evidence.get(
+                (
+                    binding["predicate_id"]
+                    if isinstance(binding, dict)
+                    else binding.predicate_id
+                ),
+                {},
+            ),
+            program,
+            spec,
+        )
         for binding in bindings
     ]
     return normative_report(
@@ -113,3 +201,39 @@ def evaluate_physical_evidence_report(spec, bindings, evidence, *, program, num_
         program=program,
         num_envs=num_envs,
     )
+
+
+def evaluate_supported_placement_evidence(spec, binding, packet, *, program):
+    from embodichain.gen_sim.task_spec.evidence import (
+        evaluate_supported_placement_evidence as compare,
+    )
+
+    bound, normalized_packet = normalized(binding, packet, program, spec)
+    return compare(spec, bound, normalized_packet, program=program)
+
+
+def evaluate_placement_group_evidence(spec, binding, packet, *, program):
+    from embodichain.gen_sim.task_spec.placement_group_evidence import (
+        evaluate_placement_group_evidence as compare,
+    )
+
+    bound, normalized_packet = normalized(binding, packet, program, spec)
+    return compare(spec, bound, normalized_packet, program=program)
+
+
+def evaluate_pour_evidence(spec, binding, packet, *, program):
+    from embodichain.gen_sim.task_spec.pour_evidence import (
+        evaluate_pour_evidence as compare,
+    )
+
+    bound, normalized_packet = normalized(binding, packet, program, spec)
+    return compare(spec, bound, normalized_packet, program=program)
+
+
+def evaluate_control_evidence(spec, binding, packet, *, program):
+    from embodichain.gen_sim.task_spec.control_evidence import (
+        evaluate_control_evidence as compare,
+    )
+
+    norm, sample = normalized(binding, packet, program, spec)
+    return compare(spec, norm, sample, program=program)

@@ -1,7 +1,7 @@
 # Trajectory Variants
 
 Trajectory variants create alternative motions for one task while keeping its
-annotated waypoints. Unlike [affordance sampling](../atomic_actions/affordance_sampling.md),
+annotated waypoints. Unlike [affordance sampling](../atomic_skills/affordance_sampling.md),
 which changes where contact happens, trajectory expansion varies the motion
 between fixed contacts.
 
@@ -64,7 +64,7 @@ Run the Place example with one variant per environment. The variant count
 normally defaults to `--num_envs`, and row zero is the unmodified reference:
 
 ```bash
-embodichain run-example sim/atomic_action/place --num_envs 6 --device cuda
+embodichain run-example sim/atomic_skill/place --num_envs 6 --device cuda
 ```
 
 Use `--trajectory_variants` to request a different number and
@@ -72,7 +72,7 @@ Use `--trajectory_variants` to request a different number and
 requests more variants than are replayed:
 
 ```bash
-embodichain run-example sim/atomic_action/place \
+embodichain run-example sim/atomic_skill/place \
   --headless --auto_play --num_envs 1 --device cuda \
   --trajectory_variants 12 --variant_plot_dir outputs/variants
 ```

@@ -31,7 +31,7 @@ import pytest
 from setuptools import Distribution
 from setuptools.command.build_py import build_py
 
-from setup import get_package_dir
+from setup import get_package_data, get_package_dir
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 _SETUP_PATH = _REPOSITORY_ROOT / "setup.py"
@@ -122,6 +122,27 @@ _DEPLOYMENTS = {
         "cobotmagic",
     ),
 }
+_DEPLOYMENTS[
+    Path("tasks/manipulation/hand_over/task.dual_franka_robotiq_arg2f_140.yaml")
+] = (
+    "upright_can_hand_over",
+    "dual_franka_robotiq140_handover",
+    "dual_franka_robotiq_arg2f_140_handover",
+)
+for _variant in (
+    "dual_franka_robotiq_arg2f_140",
+    "dual_ur10_robotiq_arg2f_140",
+    "dual_franka_robotiq_arg2f_140_gensim",
+    "dual_ur10_robotiq_arg2f_140_gensim",
+):
+    _DEPLOYMENTS[
+        Path(f"tasks/manipulation/repeated_pick_place/task.{_variant}.yaml")
+    ] = ("repeated_cube_pick_place_workbench", "robotiq140_tabletop", _variant)
+_DEPLOYMENTS[Path("tasks/manipulation/carton_stocking/task.panda.rgbd.yaml")] = (
+    "real2sim_carton_stocking",
+    "carton_worktop",
+    "franka_panda_robotiq85",
+)
 _DUAL_ARM_VARIANTS = (
     "dual_ur5_dh_pgi_140_80",
     "tianji_marvin",
@@ -209,6 +230,33 @@ _DUAL_ARM_RESOURCES = {
 
 _RESOURCE_PATHS = frozenset(
     {
+        Path("components/embodiments/franka_panda_robotiq85_rgbd.yaml"),
+        Path(
+            "tasks/manipulation/carton_stocking/task_program/integration.ordinary.yaml"
+        ),
+        Path("tasks/manipulation/repeated_pick_place/README.md"),
+        Path("tasks/manipulation/hand_over/README.md"),
+        Path("components/embodiments/dual_franka_robotiq_arg2f_140_handover.yaml"),
+        Path("components/embodiments/dual_franka_robotiq_arg2f_140.yaml"),
+        Path("components/embodiments/dual_ur10_robotiq_arg2f_140.yaml"),
+        Path("components/embodiments/dual_franka_robotiq_arg2f_140_gensim.yaml"),
+        Path("components/embodiments/dual_ur10_robotiq_arg2f_140_gensim.yaml"),
+        Path(
+            "tasks/manipulation/repeated_pick_place/envs/dual_franka_robotiq140.default.yaml"
+        ),
+        Path(
+            "tasks/manipulation/repeated_pick_place/envs/dual_ur10_robotiq140.default.yaml"
+        ),
+        Path(
+            "tasks/manipulation/repeated_pick_place/task_program/integration.robotiq140.yaml"
+        ),
+        Path(
+            "tasks/manipulation/repeated_pick_place/task_program/program.robotiq_workbench.yaml"
+        ),
+        Path("components/execution_policies/sequential_ik_verified.yaml"),
+        Path("tasks/manipulation/hand_over/envs/dual_franka_robotiq140.default.yaml"),
+        Path("tasks/manipulation/hand_over/task_program/integration.robotiq140.yaml"),
+        Path("tasks/manipulation/hand_over/task_program/program.upright_can.yaml"),
         *(
             Path("tasks/manipulation/carton_stocking") / name
             for name in (
@@ -239,6 +287,9 @@ _RESOURCE_PATHS = frozenset(
         Path("tasks/manipulation/repeated_pick_place/objective.yaml"),
         Path("tasks/manipulation/push_cube/catalog.yaml"),
         Path("tasks/manipulation/push_cube/README.md"),
+        Path(
+            "tasks/manipulation/tableware/stack_blocks_two/task_program/evaluation.yaml"
+        ),
         Path("tasks/manipulation/tableware/stack_cups/catalog.yaml"),
         Path("tasks/manipulation/tableware/stack_cups/README.md"),
         Path("components/execution_policies/motion_gen_verified.yaml"),
@@ -321,7 +372,7 @@ def _literal_setup_keyword(keyword_name: str) -> object:
 @pytest.fixture
 def staged_config_package(tmp_path: Path) -> _StagedConfigPackage:
     """Stage official Task Program resources through the real build command."""
-    package_data = _literal_setup_keyword("package_data")
+    package_data = get_package_data()
     include_package_data = _literal_setup_keyword("include_package_data")
     assert type(package_data) is dict
     assert type(include_package_data) is bool
@@ -435,6 +486,7 @@ for relative_path, expected_ids in expected_deployments.items():
         task_program=physical.config["task_program"],
         skill_profile=physical.embodiment_skill_profile,
         base_dir=env_path.parent,
+        evaluation=physical.evaluation,
     )
     program = load_task_program(
         deployment.program_path,

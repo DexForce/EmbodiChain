@@ -5,9 +5,11 @@
 | Change or question | Start here |
 |---|---|
 | Runtime control parts, FK/IK adaptation, joint ordering | `embodichain/lab/sim/objects/robot.py` → `Robot` |
+| Pure parallel-jaw defaults, mounted/existing bindings and standalone hand configs | `embodichain/robot_registry.py` → `resolve_gripper_defaults`; `embodichain/lab/gym/utils/_gripper_composition.py`; `embodichain/lab/sim/cfg/gripper.py` |
 | Explicit hand geometry capture and lazy paired grasp ownership | `embodichain/lab/sim/utility/grasp_geometry.py` |
 | Config decoding, construction hooks, backend alternatives | `embodichain/lab/sim/cfg/robot.py` → `RobotCfg`, `RobotPresetCfg` |
 | Available robot configs and variants | `extensions/embodichain_robots/_catalog.py`; `extensions/embodichain_robots/__init__.py` owns lazy exports |
+| YAM dual-arm defaults and source-aligned FK/IK | `extensions/embodichain_robots/i2rt/yam/cfg.py` → [model and asset usage](../../../docs/source/resources/robot/i2rt/yam.md) |
 | Locomotion assets, standing poses, drives and reference frames | `extensions/embodichain_robots/locomotion_profiles.py` reads each vendor/model's `profile.json`; model packages own `cfg.py` and `assets.py` |
 | Shared Gym/CLI/dual-arm selection | `embodichain/robot_registry.py` → `list_robot_cfgs`, `resolve_robot_cfg` |
 | Robot listing CLI | `embodichain/cli/list_robot.py` → `embodichain list-robot` |
@@ -15,7 +17,7 @@
 | Bare Franka arm selection and explicit tool assembly | `extensions/embodichain_robots/franka/cfg.py`, `panda.py` → [catalog contracts](catalogs.md) |
 | W1 variants and serialization | `extensions/embodichain_robots/dexforce/w1/` → `cfg.py`, `specs.py`, `hand_specs.py` |
 | Independent Revo1 hand or shared hand asset names | `extensions/embodichain_robots/brainco/revo1/` → `cfg.py`, `_specs.py` |
-| YAM dual arm / asset provenance | `extensions/embodichain_robots/i2rt/yam/`: `cfg.py`, `assets.py`; source conversion in `scripts/tools/prepare_yam_i2rt_assets.py` |
+| AgiBot G1 preset and pinned GenieSim USD | `extensions/embodichain_robots/agibot/g1/` → `cfg.py`, `assets.py` |
 | Composed robot frames and joint-name mapping | `embodichain/lab/sim/robots/dual_arm.py` |
 | Shared articulation state and drive properties | `embodichain/lab/sim/objects/articulation.py`, `embodichain/lab/sim/cfg/articulation.py` |
 
@@ -60,6 +62,20 @@ omission preserves existing construction behavior. See
 Robotiq embodiment explicitly adds its tool asset and all linkage followers.
 Its flange mount/TCP must match the source calibration; an
 existing similarly named Franka/FR3 or Panda-Hand configuration is not equivalent.
+Parallel-jaw model values live beside their assets in `embodichain_robots`.
+`ParallelJawGripperCfg` exposes flat physical fields, native commands and explicit
+`grasp_generators` support declarations; there is no separate model Cfg.
+`resolve_gripper_defaults` reads the same pure data through the existing robot
+catalog without importing Cfg implementations or resolving assets. Embodiment
+`grippers` selects a mounted component or an existing hand and explicitly binds
+motion/control parts. Only endpoints naming that binding receive presets and
+grasp services; names never imply capabilities. Shared endpoints reuse generated
+hand services. Empty generator support retains command presets for fixed-pose
+calls without supplying a sampler. Assembly checks actual geometry,
+command ordering, mimics and fixed references before applying the hand-derived
+solver TCP. Mounted TCP checks require the actual solver-end-to-hand fixed chain;
+the mount transform alone does not identify that frame relationship.
+See [binding and TCP ownership](../../../docs/source/resources/robot/parallel_jaw_grippers.md).
 Observed aperture mapping does not substitute a full-close actuator command for
 measured linkage positions. See [Real2Sim motion](../data-pipeline/real2sim.md)
 for coupled contact prediction and transfer qualification.
@@ -68,10 +84,16 @@ Locomotion presets and pure Torch task contracts share backend-free model
 profiles. For source/contract joint ordering, drive ownership and solver limits,
 see [locomotion model profiles](catalogs.md#locomotion-model-profiles).
 
+`AgibotG1` selects the original GenieSim G1_120s USD and exposes its driven
+joints. Each gripper part commands one driver. The
+[USD import contract](../simulation-system/simulation-system.md#ownership) owns
+the closed-loop constraints and backend support.
+
 `preview-robot` accepts a catalog ID or a standalone JSON/YAML RobotCfg file.
 File `class_type` optionally selects the catalog; local asset paths, including
-`urdf_cfg.sensors[*].sensor_source` URDF files in lists or mappings, resolve
-from the file directory. Inline sensor definitions and data IDs are preserved.
+`source.file_path` USD files and `urdf_cfg.sensors[*].sensor_source` URDF
+files in lists or mappings, resolve from the file directory. Inline sensor
+definitions and data IDs are preserved.
 Configuration decoding and validation precede World
 creation. Native and Viser lifecycle, Gizmo/slider target coordination, and
 cleanup belong to [preview activation](../sim-visualization/configuration.md#robot-preview).
@@ -118,6 +140,9 @@ and its [usage notes](../../../extensions/embodichain_tasks/configs/components/e
 frames against that arm's source URDF. It translates assembled names back to
 source link names, keeps chains arm-local, and rejects opposite-arm/unknown
 frames. Mount transforms belong to assembly, not the serial chain.
+Dual-arm composition also copies base `mimic_compliance` entries to each
+side's assembled master joint names, including joints from explicitly bound
+hands.
 
 ## Joint and solver boundaries
 
@@ -156,8 +181,12 @@ against part names (including patterns); it need not configure every part.
 and synchronizes effective robot limits. Check the resolved part and joint
 order before diagnosing an IK algorithm.
 
-Aloha Mini and Marvin use strict Warp SSIK arm defaults on CPU/CUDA; Marvin
-selects seed-local SRS search in both gripper variants. Aloha's torso retains
+Aloha Mini, Marvin and AgiBot G2 use strict Warp SSIK arm defaults on CPU/CUDA.
+Marvin selects seed-local SRS search in both gripper variants; G2's CRS arms
+use the same search with their original 18 mm elbow offset and mounting-frame
+TCPs. The [G2 model notes](../../../extensions/embodichain_robots/agibot/g2/README.md)
+explain why its preset derives geometry from the URDF instead of adding a
+legacy SRS DH calibration. Aloha's torso retains
 its position-only Pytorch solver. Numerical restoration requires a complete
 replacement with the existing root/end/TCP and original Pytorch settings; see
 the [solver guide](../../../docs/source/overview/sim/motion/solvers/ssik_solver.md#selecting-the-numerical-solver).
@@ -202,7 +231,12 @@ The hand root and solver end link must connect through fixed URDF joints;
 fixed virtual TCP links may lie upstream or downstream. A stationary opposite-arm
 TCP is not a valid hand reference. The declared TCP must also remain fixed
 throughout hand actuation. Model-specific commands and TCP
-calibration remain in concrete robot/embodiment configuration.
+calibration come from the selected concrete hand description and explicit
+embodiment binding. `utility/gripper_geometry.py` resolves native joint bounds
+alongside opening commands, builds collision surfaces and projects scalar inputs.
+Geometry validation uses those effective bounds, including model corrections,
+while retaining the pinned source URDF. GraspKit consumes those numerical inputs; it does not
+import hardware Cfgs or look up hardware by model ID.
 `ordered_pad_line_world` validates the same explicit topology and reads only the
 two live pad poses in declaration order; use it for a jaw line without sampled
 FK or surface capture. This order is distinct from the sampled surfaces' TCP-X order.
@@ -214,8 +248,6 @@ a second robot registry or infer topology from model/control-part names.
 Retain that provider with its owning Robot/environment adapter across bridge,
 engine and episode resets while the model, calibration and commands are unchanged.
 Single-arm facade calls never trigger capture. A different Robot needs its own
-providers; model names are not cache identities. GraspKit receives explicit
-
 providers; model names are not cache identities. The provider's `clear_cache()`
 releases asset-query state without reading the Robot or recapturing its hand
 geometry; it does not replace rebuilding after calibration/command changes.

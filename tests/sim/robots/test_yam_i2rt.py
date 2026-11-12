@@ -79,7 +79,6 @@ def test_default_asset_is_resolved_once_and_shared_with_fk(
     assert cfg.urdf_cfg.components["arm"]["urdf_path"] == str(arm_asset)
     assert cfg._pk_urdf_path == str(arm_asset)
     assert cfg.fpath is None
-    assert cfg.root_props.newton_gravity_compensation is None
     restored = YamI2rtCfg.from_dict(cfg.to_dict())
     assert restored.urdf_cfg.components["arm"]["urdf_path"] == str(arm_asset)
     np.testing.assert_array_equal(
@@ -87,8 +86,17 @@ def test_default_asset_is_resolved_once_and_shared_with_fk(
     )
     assert restored.urdf_cfg.assemble_urdf() == str(arm_asset)
     assert restored.control_parts == cfg.control_parts
-    assert restored.root_props.newton_gravity_compensation is None
     assert restored._pk_urdf_path == cfg._pk_urdf_path
+
+
+def test_missing_asset_reports_download_command(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(
+        yam_i2rt, "get_data_path", lambda _: str(tmp_path / "missing.urdf")
+    )
+    with pytest.raises(FileNotFoundError, match="data download --name YamI2rt"):
+        YamI2rtCfg.from_dict({})
 
 
 def test_local_override_roundtrips_without_network(
@@ -103,7 +111,6 @@ def test_local_override_roundtrips_without_network(
     assert restored.fpath == str(arm_asset)
     assert restored._pk_urdf_path == str(arm_asset)
     assert restored.control_parts == cfg.control_parts
-    assert restored.root_props.newton_gravity_compensation is None
 
 
 def test_per_arm_chain_joint_order_and_solver_fk_match(arm_asset: Path) -> None:
@@ -129,4 +136,5 @@ def test_catalog_preset_lowers_on_default_backend(arm_asset: Path) -> None:
 
     cfg = YamI2rtCfg.from_dict({"fpath": str(arm_asset)})
     descriptor = articulation_desc_from_cfg(cfg, newton_solver_type=None)
-    assert descriptor.newton_gravity_compensation == 0.0
+    assert descriptor.urdf_path == str(arm_asset)
+    assert descriptor.fixed_base

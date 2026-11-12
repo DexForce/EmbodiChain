@@ -25,6 +25,7 @@ from embodichain.lab.visualization import (
     FrameOverlay,
     JointControlSpec,
     JointControlState,
+    MeshMarkerOverlay,
     PointCloudOverlay,
     SceneExporter,
     SceneOverlays,
@@ -406,6 +407,32 @@ class _AxisMarkerHandle:
         return self._visible
 
 
+def _marker_overlay(overlay_id: str, env_id: int | None) -> MeshMarkerOverlay:
+    return MeshMarkerOverlay(
+        overlay_id=overlay_id,
+        vertices=np.array(
+            [[0.0, 0.0, 0.0], [0.1, 0.0, 0.0], [0.0, 0.1, 0.0]],
+            dtype=np.float32,
+        ),
+        faces=np.array([[0, 1, 2]], dtype=np.uint32),
+        position=np.array([2.25, 0.0, 0.5], dtype=np.float32),
+        wxyz=np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32),
+        env_id=env_id,
+    )
+
+
+class _MeshMarkerSimulation(_EmptySimulation):
+    num_envs = 2
+    arena_offsets = np.array([[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]], dtype=np.float32)
+
+    def get_marker_overlays(self) -> tuple[MeshMarkerOverlay, ...]:
+        return (
+            _marker_overlay("shared", 1),
+            _marker_overlay("filtered", 0),
+            _marker_overlay("world", None),
+        )
+
+
 class _AxisMarkerSimulation(_EmptySimulation):
     def __init__(self) -> None:
         pose = np.eye(4, dtype=np.float32)
@@ -654,10 +681,31 @@ def test_cable_manifest_shares_closed_capsules_without_native_render_meshes(
     assert exporter.resolve_node_target(cable_node.node_id) == ("cable/main", "cable")
 
 
-def test_cable_capture_batches_world_poses_for_selected_environments() -> None:
+@pytest.mark.parametrize(
+    "device", ["numpy", "cpu", pytest.param("cuda", marks=pytest.mark.gpu)]
+)
+def test_cable_capture_batches_world_poses_for_selected_environments(
+    monkeypatch: pytest.MonkeyPatch, device: str
+) -> None:
+    import torch
+    from embodichain.lab.visualization import scene_exporter
+
     sim = _CableSimulation()
     sim.cables["second"] = _CableObject(sim.arena_offsets)
     sim.cables["second"].data.poses[..., 0] += 0.75
+    if device != "numpy":
+        for cable in sim.cables.values():
+            cable.data.poses = torch.as_tensor(cable.data.poses, device=device)
+    convert_pose = scene_exporter.pose_to_position_wxyz
+
+    def convert_selected_pose(pose):
+        # Only visible rows may reach the host conversion boundary.
+        assert tuple(pose.shape) == (6, 7)
+        if isinstance(pose, torch.Tensor):
+            assert pose.device.type == device
+        return convert_pose(pose)
+
+    monkeypatch.setattr(scene_exporter, "pose_to_position_wxyz", convert_selected_pose)
     exporter = SceneExporter(sim, VisualizationCfg(backend="viser", env_ids=[2, 0]))
     manifest = exporter.build_manifest()
 
@@ -672,6 +720,8 @@ def test_cable_capture_batches_world_poses_for_selected_environments() -> None:
         uid, _ = exporter.resolve_node_target(node.node_id)
         segment_index = int(node.node_id.rsplit(":", 1)[1])
         pose = sim.cables[uid].data.poses[node.env_id, segment_index]
+        if isinstance(pose, torch.Tensor):
+            pose = pose.cpu().numpy()
         np.testing.assert_allclose(frame.positions[index], pose[:3])
         np.testing.assert_allclose(frame.wxyz[index], pose[[6, 3, 4, 5]], atol=1e-7)
 
@@ -834,6 +884,28 @@ def test_axis_marker_id_does_not_collide_with_caller_frame() -> None:
     np.testing.assert_allclose(frames[1].position, caller_frame.position)
 
 
+def test_mesh_markers_are_filtered_preserved_and_not_offset_twice() -> None:
+    exporter = SceneExporter(
+        _MeshMarkerSimulation(),
+        VisualizationCfg(backend="viser", env_ids=[1]),
+        run_id="mesh-marker-run",
+    )
+    caller = _marker_overlay("shared", 1)
+
+    exporter.build_manifest()
+    result = exporter.capture(
+        sim_step=1,
+        sim_time=0.01,
+        overlays=SceneOverlays(meshes=(caller,)),
+    )
+
+    meshes = result.frame.overlays.meshes
+    assert [mesh.overlay_id for mesh in meshes] == ["shared#1", "world", "shared"]
+    assert [mesh.env_id for mesh in meshes] == [1, None, 1]
+    np.testing.assert_allclose(meshes[0].position, [2.25, 0.0, 0.5])
+    assert meshes[-1] is caller
+
+
 def test_camera_frustum_pose_and_low_frequency_rgb_are_exported() -> None:
     simulation = _CameraSimulation()
     exporter = SceneExporter(
@@ -947,6 +1019,29 @@ def test_rigid_groups_and_deformable_meshes_are_exported() -> None:
         ),
         atol=1.0e-6,
     )
+
+
+def test_fluid_point_overlay_is_detached_and_display_filtered_with_markers():
+    import torch
+    from types import SimpleNamespace
+    from embodichain.lab.sim.cfg import FluidObjectCfg, FluidRenderCfg
+
+    sim = _EmptySimulation()
+    sim.get_marker_overlays = lambda: (_marker_overlay("ghost", 0),)
+    original = torch.tensor([[[0.0, 0, -1], [0.0, 0, 1]]])
+    sim._fluid_objects = {
+        "water": SimpleNamespace(
+            is_declared=False,
+            cfg=FluidObjectCfg(render=FluidRenderCfg(clip_below_z=0.0)),
+            data=SimpleNamespace(particle_pos_w=original),
+        )
+    }
+    exporter = SceneExporter(sim, VisualizationCfg(backend="viser", env_ids=[0]))
+    overlays = exporter._prepare_overlays(None)
+    assert [mesh.overlay_id for mesh in overlays.meshes] == ["ghost"]
+    assert len(overlays.point_clouds) == 1
+    np.testing.assert_array_equal(overlays.point_clouds[0].points, [[0, 0, 1]])
+    torch.testing.assert_close(original, torch.tensor([[[0.0, 0, -1], [0.0, 0, 1]]]))
 
 
 def test_visual_objects_export_pose_and_live_visibility_without_topology_refresh():

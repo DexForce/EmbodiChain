@@ -6,6 +6,10 @@ and measured validation between GenSim, explicit recipes and execution hosts.
 They consume existing entity configurations and UIDs; Spawn and
 ``SimulationManager`` remain the owners of native resources and topology.
 
+For architecture, runnable workflows, and production callers, start with
+:doc:`/overview/sim/scene/index`, :doc:`/overview/sim/scene/workflows`, and
+:doc:`/overview/sim/scene/integrations`.
+
 Public poses are arena-local Z-up transforms in metres. Seven-component
 physical poses use position followed by ``xyzw`` quaternion. Layout array geometry
 already includes asset scale and orientation. Input-mesh snapshots retain scaled
@@ -92,8 +96,9 @@ Implementation module: ``embodichain.lab.sim.scene.workspace``
 
 The implemented layout is fixed-orientation XY placement using AABB proxies.
 It does not establish exact mesh collision freedom, vertical support, robot
-reachability or task success. Physical state services currently reject worlds
-other than B=1 and selections other than ``env_ids=(0,)`` before writing.
+reachability or task success. Basic physical state services support explicit,
+ordered environment selections with fixed topology. The separate Task Program
+scene expansion host remains B=1.
 
 Installation and runnable recipe
 --------------------------------
@@ -156,12 +161,14 @@ caller-owned. ``SceneFragment`` and ``SceneRecipe`` provide a separate explicit
 construction path; the existing image/edit pipelines do not run through that
 recipe interface or use the physical snapshot-restoration workflow.
 
-Physical mutation and restoration currently support B=1 with fixed topology.
-Parallel tensor geometry does not extend that runtime scope. Mesh support
-detection selects one main horizontal outer contour, and layout uses fixed-
-orientation XY AABBs. Changed orientations require measured footprints for
-post-settle layout checks. General room construction, batched physical writes,
-exact mesh collision and full solver checkpoints remain future work.
+Physical capture, restoration and rigid pose changes support selected rows with
+fixed topology. ``apply_changes`` broadcasts one change set;
+``apply_changes_batch`` takes one change set per selected environment ID.
+Settling requires a full-world selection because the host callback advances
+every row. Mesh support detection selects a main horizontal contour, optionally
+preserving holes, and layout uses fixed-orientation XY AABBs. Changed orientations
+require measured footprints for post-settle layout checks. These services do not
+provide general room construction, exact mesh collision, or full solver checkpoints.
 
 CPU strategies and tensor kernels
 ---------------------------------
@@ -173,7 +180,8 @@ this does not move SLSQP, polygon search or physical hosts to GPU.
 Kernel batching distinguishes independent leading layouts ``B`` from the
 objects ``N`` within each layout. For example, ``(B, N, 2, 3)`` contains B sets
 of N 3D boxes. Object masks belong to that object axis; masking padding does not
-select simulation environments. Scene runtime services still require B=1.
+select simulation environments. Physical row selection and host execution have
+separate contracts; see :doc:`/overview/sim/scene/index`.
 
 See :doc:`embodichain.compute.scene_geometry` for tensor shape, mask, dtype and
 device contracts. The :download:`geometry kernel benchmark
@@ -218,9 +226,11 @@ that package's normal simulation dependency requirements.
    SceneState
    capture_state
    restore_state
+   restore_render_state
    SceneChangeSet
    SceneChangeResult
    apply_changes
+   apply_changes_batch
    SceneCheck
    SceneCheckReport
    SettlingCfg
@@ -268,7 +278,7 @@ Recipes consume resolved assets, a versioned recipe identity and explicit geomet
 embodichain.lab.sim.scene.geometry
 ----------------------------------
 
-Support regions identify a supporting entity and its arena-local polygon. Direct polygon inputs may include holes and disconnected components. Mesh detection currently selects one main horizontal outer contour and its inscribed optimization rectangle, preserving the legacy GenSim selection policy.
+Support regions identify a supporting entity and its arena-local polygon. Direct polygon inputs may include holes and disconnected components. Mesh detection selects one main horizontal contour and its inscribed optimization rectangle. The default retains the legacy outer-contour policy; ``SupportSurfaceConfig.preserve_holes`` retains openings, and shared scene expansion enables it during preparation.
 
 .. currentmodule:: embodichain.lab.sim.scene.geometry
 
@@ -353,6 +363,7 @@ Snapshots own immutable arena-local physical state, including velocities, joints
    SceneState
    capture_state
    restore_state
+   restore_render_state
 
 .. automodule:: embodichain.lab.sim.scene.state
    :members:
@@ -361,7 +372,7 @@ Snapshots own immutable arena-local physical state, including velocities, joints
 embodichain.lab.sim.scene.operations
 ------------------------------------
 
-Change sets require an explicit movable-entity allowlist. Application preflights all rigid-body changes, clears their dynamics and publishes render state. Returned invalidations must be handled by the host; observations and planner bindings cannot be reused solely because simulation time is unchanged.
+Change sets require an explicit movable-entity allowlist. Application preflights all rigid-body changes, clears their dynamics and publishes render state. ``apply_changes`` applies the same poses to every selected row; ``apply_changes_batch`` takes distinct change sets keyed by exactly the selected environment IDs and preflights every row before writes. Returned invalidations must be handled by the host; observations and planner bindings cannot be reused solely because simulation time is unchanged.
 
 .. currentmodule:: embodichain.lab.sim.scene.operations
 
@@ -371,6 +382,7 @@ Change sets require an explicit movable-entity allowlist. Application preflights
    SceneChangeSet
    SceneChangeResult
    apply_changes
+   apply_changes_batch
 
 .. automodule:: embodichain.lab.sim.scene.operations
    :members:
@@ -379,7 +391,7 @@ Change sets require an explicit movable-entity allowlist. Application preflights
 embodichain.lab.sim.scene.validation
 ------------------------------------
 
-A report passes only when its nonempty required checks all pass. Fixed-step settling returns unverified stability; optional convergence mode measures velocity thresholds over consecutive samples. The caller owns stepping and advances the entire world. State comparison treats quaternion signs equivalently and retains the existing restore tolerances.
+A report passes only when its nonempty required checks all pass. Fixed-step settling returns unverified stability; optional convergence mode measures velocity thresholds over consecutive samples. The caller owns stepping and advances the entire world, so settling requires a full-world view and measures every row. State comparison treats quaternion signs equivalently and retains the existing restore tolerances.
 
 .. currentmodule:: embodichain.lab.sim.scene.validation
 
@@ -397,6 +409,31 @@ A report passes only when its nonempty required checks all pass. Fixed-step sett
    :members:
    :imported-members:
 
+embodichain.lab.sim.scene.physics
+--------------------------------
+
+Capture and restore measured mass, principal inertia and friction baselines for
+selected dynamic rigid bodies on Default or Newton. Mass scaling also scales
+inertia from the original baseline, so repeated application does not accumulate.
+All values are preflighted before writes and checked against backend readback.
+These operations do not step physics; native or readback failures require the
+host to stop the batch. ``capture_physics_properties`` separately measures
+broader material, mass and joint-drive properties for host invariant checks.
+
+.. currentmodule:: embodichain.lab.sim.scene.physics
+
+.. autosummary::
+   :nosignatures:
+
+   RigidPhysicsState
+   capture_rigid_physics
+   apply_rigid_physics
+   restore_rigid_physics
+   capture_physics_properties
+
+.. automodule:: embodichain.lab.sim.scene.physics
+   :members:
+
 embodichain.lab.sim.scene.native_hand
 --------------------------------------
 
@@ -408,7 +445,7 @@ subsequent rigid reads reject replaced owners. No query, grasp policy or
 experiment revision is selected here.
 
 GraspKit owns discrete geometric qualification through an injected collision
-backend. ``ActionPlanningServices`` binds an explicitly supplied geometric policy
+backend. ``SkillPlanningServices`` binds an explicitly supplied geometric policy
 and owns query lifetimes. Captured geometry does not establish physical acquisition or release.
 
 .. currentmodule:: embodichain.lab.sim.scene.native_hand

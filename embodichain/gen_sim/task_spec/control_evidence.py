@@ -34,10 +34,10 @@ __all__ = ["ControlEvidenceBinding", "evaluate_control_evidence"]
 class ControlEvidenceBinding:
     """Seal an exact control route and occurrence independently of live factories.
 
-    The original operation-window receipt is a different contract from a final
-    joint position. Historical replay must be selected explicitly. Raw control
-    acquisition is rejected until its complete operation-window channel is
-    implemented; adding a legacy record cannot silently select this verifier.
+    The original operation-window declaration differs from final joint state.
+    It retains its v1/v2 serialized identity for Lab's explicit historical/raw
+    normalization. Actor rosters and completed policy phases are interpreted by
+    that adapter; normative evaluation consumes only source-bound physical facts.
     """
 
     task_spec_digest: str
@@ -51,6 +51,8 @@ class ControlEvidenceBinding:
     env_ids: tuple[int, ...] = (0,)
     episode_ids: tuple[int, ...] | None = None
     binding_hash: str = ""
+    control_identity: Mapping[str, Any] | None = None
+    policy_occurrences: tuple[Mapping[str, Any], ...] = ()
 
     def __post_init__(self) -> None:
         for name in ("task_spec_digest", "program_digest"):
@@ -64,9 +66,19 @@ class ControlEvidenceBinding:
             raise ValueError(
                 "Control evidence needs an explicit supported kind and observation scope."
             )
-        if self.evidence_format != "historical_record":
+        if self.evidence_format not in {"historical_record", "raw_snapshot"}:
+            raise ValueError("Control evidence requires an explicit input format.")
+        if self.evidence_format == "raw_snapshot" and (
+            self.control_identity is None or not self.policy_occurrences
+        ):
             raise ValueError(
-                "Raw control evidence requires the complete operation-window acquisition contract, which is not yet available."
+                "Raw control evidence requires the complete operation-window acquisition contract."
+            )
+        if self.evidence_format == "historical_record" and (
+            self.control_identity is not None or self.policy_occurrences
+        ):
+            raise ValueError(
+                "Historical control cannot borrow raw acquisition declarations."
             )
         ids = tuple(self.env_ids)
         if (
@@ -143,6 +155,22 @@ class ControlEvidenceBinding:
                 "Control prefix must identify unique occurrences and its exact terminal boundary."
             )
         object.__setattr__(self, "operation", operation)
+        if self.evidence_format == "raw_snapshot":
+            object.__setattr__(
+                self, "control_identity", json_snapshot(self.control_identity)
+            )
+            object.__setattr__(
+                self,
+                "policy_occurrences",
+                tuple(json_snapshot(item) for item in self.policy_occurrences),
+            )
+            # Runtime actor, contact-window and policy-phase validation belongs
+            # to Lab. TaskSpec seals the independent acquisition declaration.
+            if self.env_ids != (0,) or self.episode_ids is None:
+                raise ValueError(
+                    "Raw control declarations require an explicit B=1 episode."
+                )
+
         expected = canonical_hash(self._payload())
         if self.binding_hash and self.binding_hash != expected:
             raise ValueError(
@@ -152,11 +180,19 @@ class ControlEvidenceBinding:
 
     def _payload(self) -> dict[str, Any]:
         return {
-            "schema_version": "task_spec.control_evidence_binding/v1",
+            "schema_version": (
+                "task_spec.control_evidence_binding/v2"
+                if self.evidence_format == "raw_snapshot"
+                else "task_spec.control_evidence_binding/v1"
+            ),
             **{
                 item.name: json_snapshot(getattr(self, item.name))
                 for item in fields(self)
                 if item.name != "binding_hash"
+                and (
+                    self.evidence_format == "raw_snapshot"
+                    or item.name not in {"control_identity", "policy_occurrences"}
+                )
             },
         }
 
@@ -177,11 +213,28 @@ class ControlEvidenceBinding:
             Independently owned normalized binding; changed data is never re-signed.
         """
         raw = value.to_dict() if isinstance(value, cls) else json_snapshot(value)
-        if (
-            not isinstance(raw, dict)
-            or raw.pop("schema_version", None)
-            != "task_spec.control_evidence_binding/v1"
-        ):
+        if not isinstance(raw, dict):
+            raise ValueError("Control binding must be a serialized mapping.")
+        version = raw.pop("schema_version", None)
+        if version == "task_spec.control_evidence_binding/v1":
+            if (
+                raw.get("evidence_format") != "historical_record"
+                or "control_identity" in raw
+                or "policy_occurrences" in raw
+            ):
+                raise ValueError(
+                    "Historical control bindings cannot be automatically upgraded to raw acquisition."
+                )
+        elif version == "task_spec.control_evidence_binding/v2":
+            if (
+                raw.get("evidence_format") != "raw_snapshot"
+                or raw.get("control_identity") is None
+                or not raw.get("policy_occurrences")
+            ):
+                raise ValueError(
+                    "Raw control bindings require their complete acquisition declaration."
+                )
+        else:
             raise ValueError("Unsupported control evidence binding version.")
         return cls(**raw)
 
@@ -193,23 +246,23 @@ def evaluate_control_evidence(
     *,
     program: Mapping[str, Any],
 ) -> tuple[PredicateEvaluation, ...]:
-    """Qualify original control operation receipts without inferring activation.
+    """Compare normalized control facts without interpreting execution protocols.
 
     Args:
         spec: Frozen normative TaskSpec.
-        binding: Explicit historical format and exact source route/occurrence.
-        evidence: Original record plus runtime segments, or unavailable reason.
+        binding: Explicit raw/historical format and exact source route/occurrence.
+        evidence: Source-bound normalized physical evidence from Lab.
         program: Complete serialized program matching the binding digest.
 
     Returns:
-        Per-environment predicate outcomes. The original control qualification
-        requires all active rows to complete; absent or rejected operation proof
-        remains unavailable. A Press contact event is not device activation, and
-        a coarse Twist is not silently promoted to calibrated-setting success.
+        Per-environment outcomes. Missing acquisition remains unavailable;
+        a valid negative fact fails the declared predicate. Lab retains the
+        original all-active operation-proof requirement. Press contact does not
+        establish device activation or upgrade a coarse Twist to strict setting.
     """
     from .spec import TaskSpec
     from .expressions import EvaluationStatus, PredicateEvaluation
-    from ._control_evidence import qualified_control_record
+    from ._control_evidence import control_value
 
     selected = ControlEvidenceBinding.from_dict(binding)
     normalized = TaskSpec.from_dict(spec)
@@ -243,60 +296,57 @@ def evaluate_control_evidence(
         raise ValueError(
             "Control proof differs from its declared predicate or boundary scope."
         )
-    reason = None
-    refs = ()
-    try:
-        role = next(
-            role
-            for role in normalized.roles
-            if role.name == predicate.arguments["subject"]
-        )
-        if role.quantifier != "one":
-            raise ValueError("Complete selector-universe evidence was not provided.")
-        snapshot = json_snapshot(evidence)
-        refs = (selected.binding_hash, canonical_hash(snapshot))
-        if "unavailable" in snapshot:
-            raise ValueError(str(snapshot["unavailable"]))
-        if "record" not in snapshot or any(
-            name in snapshot
-            for name in ("acquisition", "control_acquisition", "physical_evidence")
-        ):
-            raise ValueError(
-                "Historical control replay cannot consume a new raw acquisition overlay."
+    outcomes = []
+    for row in range(len(selected.env_ids)):
+        reason = None
+        refs = ()
+        observed = None
+        try:
+            role = next(
+                role
+                for role in normalized.roles
+                if role.name == predicate.arguments["subject"]
             )
-        if selected.episode_ids is not None and snapshot.get("episode_ids") != list(
-            selected.episode_ids
-        ):
-            raise ValueError("Control snapshots belong to another declared episode.")
-        expected_record = qualified_control_record(
-            {"control_kind": selected.control_kind, **selected.operation},
-            {"segments": snapshot["segments"]},
-            program,
-            len(selected.env_ids),
-        )
-        if snapshot["record"] != expected_record:
-            raise ValueError(
-                "Historical control claims differ from their exact measured operation receipts."
+            if not role.is_single_member:
+                raise ValueError(
+                    "Complete selector-universe evidence was not provided."
+                )
+            snapshot = json_snapshot(evidence)
+            refs = tuple(snapshot.get("evidence_refs", ()))
+            observed = control_value(selected, snapshot, row)
+        except (
+            KeyError,
+            ValueError,
+            TypeError,
+            AttributeError,
+            IndexError,
+            StopIteration,
+            RuntimeError,
+            OverflowError,
+        ) as error:
+            reason = str(error) or type(error).__name__
+        outcomes.append(
+            PredicateEvaluation(
+                predicate.id,
+                predicate.name,
+                (
+                    EvaluationStatus.UNAVAILABLE
+                    if reason
+                    else (
+                        EvaluationStatus.SATISFIED
+                        if observed
+                        else EvaluationStatus.FAILED
+                    )
+                ),
+                observed=None if reason else observed,
+                expected=True,
+                reason=reason
+                or (
+                    "The declared original operation criterion is supported by its own complete physical receipts."
+                    if observed
+                    else "The normalized physical control effect was not observed."
+                ),
+                evidence_refs=refs,
             )
-    except (
-        KeyError,
-        ValueError,
-        TypeError,
-        AttributeError,
-        IndexError,
-        StopIteration,
-    ) as error:
-        reason = str(error) or type(error).__name__
-    return tuple(
-        PredicateEvaluation(
-            predicate.id,
-            predicate.name,
-            EvaluationStatus.UNAVAILABLE if reason else EvaluationStatus.SATISFIED,
-            observed=None if reason else True,
-            expected=True,
-            reason=reason
-            or "The declared original operation criterion is supported by its own complete physical receipts.",
-            evidence_refs=refs,
         )
-        for _ in selected.env_ids
-    )
+    return tuple(outcomes)

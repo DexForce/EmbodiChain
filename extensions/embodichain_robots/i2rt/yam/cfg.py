@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""YAM i2rt dual-arm configuration, using the reference routing embodiment."""
+"""YAM i2rt dual-arm configuration and source-aligned kinematic chains."""
 
 from __future__ import annotations
 
@@ -49,12 +49,20 @@ class YamI2rtCfg(RobotCfg):
 
     @classmethod
     def from_dict(cls, init_dict: dict[str, Any]) -> YamI2rtCfg:
-        """Construct source defaults and apply explicit robot overrides."""
+        """Construct source defaults and apply explicit robot overrides.
+
+        Args:
+            init_dict: Robot configuration overrides, including an optional
+                local ``fpath`` for both simulation and kinematics.
+
+        Returns:
+            The configured dual-arm robot.
+        """
         cfg = cls()
         cfg._build_defaults(init_dict)
         return merge_robot_cfg(cfg, init_dict)
 
-    def _build_defaults(self, init_dict: dict | None = None) -> None:
+    def _build_defaults(self, init_dict: dict[str, Any] | None = None) -> None:
         self.uid = "yam"
         self.fpath = (init_dict or {}).get("fpath") or self.fpath
         urdf_path = self._pk_urdf_path

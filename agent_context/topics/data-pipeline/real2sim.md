@@ -3,6 +3,47 @@
 `data_pipeline.real2sim` owns source units, explicit joint/frame/time conversion,
 event maps, frozen reference prototypes and hash-checked JSON/NPZ bundles.
 
+## Task-specific demonstration skills
+
+`demo_skill.py` owns `RobotDemonstration`, `DemoSkillSpec`, and immutable
+`DemoSkillArtifact` / `DemoSkillReference` values. `demo_skill_io.py` persists
+bounded, hash-checked bundles. `real2sim build-demo-skill|validate-demo-skill`
+prepares or verifies assets without simulation. These recordings need no standard
+skill label; existing `Real2SimTrajectory` and prototype formats remain strict.
+
+Raw observed joints, actual submitted commands and explicitly adapted nominal
+references have separate ownership. A reference retains raw-frame brackets,
+hard events and a source mask for generated connections; it cannot widen source
+phase permissions. Preparation establishes no physical-success credit. A skill
+requires declared measured terminal predicates, and missing contact evidence
+cannot establish no-contact. Asset time maps hash their complete typed fields,
+independent of NumPy print options. Prepared assets using the prior printed
+representation require rebuilding and updated pinned integration digests. Qpos replay freezes scene references within explicit
+entry tolerances; XY/yaw transfer requires calibrated TCP poses, unchanged physical
+geometry, compatible authority and declared displacement limits.
+
+`atomic_skills.ExecuteDemoSkill` consumes `DemoSkillMotionProvider` through the
+ordinary nominal-source interface. Its optional per-observation monitor runs
+before the next runner command and owns only evidence, not task-state commits.
+The terminal effect boundary commits verified held-state changes only after
+host approval; absent host results remain pending even if the source accepts. Free entry
+connections require explicit permission and independent full-plan collision
+validation; contact entry never gains an automatic approach. Source phases and
+events are monitoring/edit boundaries, not independent recovery boundaries.
+
+Configured registered calls use the allowlisted `demo_skill` lowerer and
+occurrence-bound `demo_skill` source declarations, sealed to asset content and
+compiled-program identity. Task Program's optional named `demo_skills` registry
+generates these same declarations for every expanded occurrence; explicit
+legacy bindings remain strict. See the [configuration contract](../task-programs/configuration.md)
+for ownership. Native calls remain unbound. The Expansion Engine
+owns qualified collection; its source adapter retains standard prototype guards
+for explicitly selected occurrences when a program mixes source families.
+See `examples/expansion/demo_skill/` for migration of the existing real DROID
+carton case, with original state and prepared nominal commands stored separately.
+
+## Standard manipulation prototypes
+
 Normalization preflights output sample count and estimated numeric working
 memory before allocating its grid or casting event indices. Preparation,
 prototype readers and CLI accept caller-owned budgets; bundle metadata cannot
@@ -26,7 +67,7 @@ The qualified sink requires both the original recording and typed evidence for
 DROID sources, verifies their imported crop, and archives them with the prototype.
 
 `sim.motion.expansion.Real2SimSourceAdapter` exports fixed-scene qpos templates.
-`atomic_actions.PrototypeMotionProvider` supplies qpos, EEF or explicitly
+`atomic_skills.PrototypeMotionProvider` supplies qpos, EEF or explicitly
 phase-bound hybrid nominal motion. Cartesian transfer is limited to B=1,
 tabletop XY/yaw and compatible geometry; it checks IK/FK and sampled joint limits.
 Hybrid qpos phases retain their recorded joints without a fresh IK solve;
@@ -90,7 +131,7 @@ prototype rebuilding, refinement comparisons and collection through the official
 `carton_stocking` task.
 Its local `_audit.py` independently verifies persisted real-source episode evidence.
 
-`AtomicActionEngine` accepts a call-scoped nominal source before native planning;
+`AtomicSkillEngine` accepts a call-scoped nominal source before native planning;
 only PickUp, MoveHeldObject and Place opt in. Their skill-owned assembly retains
 effects, tracking, segments and scene dependencies. Source plans reject retries
 and replans. Pick requires the configured grasp command by the end of closure
@@ -173,7 +214,7 @@ Failed attempts retain available actual T+1
 partial rollouts without becoming successful episodes.
 
 Focused coverage: `tests/data_pipeline/test_real2sim_normalize.py`,
-`tests/sim/motion/expansion/test_mapped_timing.py`, and matching Atomic Action
+`tests/sim/motion/expansion/test_mapped_timing.py`, and matching Atomic Skill
 and Task Program source-binding tests. Synthetic fixtures establish software
 contracts, not real-data physical qualification.
 

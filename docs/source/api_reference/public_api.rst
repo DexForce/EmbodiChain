@@ -1,5 +1,6 @@
 Public API Supplement
-==============
+=====================
+
 .. This page is maintained by the update-api-docs agent skill.
    docs/scripts/check_api_docs.py reads it but never writes it.
 
@@ -31,6 +32,31 @@ Offline job preflight, run, resume and verified inspection commands.
 .. autosummary::
 
    main
+
+embodichain.compute.geometry.cable
+----------------------------------
+
+Pure tensor geometry for ordered cable endpoints, material-coordinate sampling
+and slip of the same material point in a moving tool frame.
+
+.. currentmodule:: embodichain.compute.geometry.cable
+
+.. autosummary::
+
+   sample_cable_material
+   cable_endpoints
+   cable_grasp_slip
+
+embodichain.compute.geometry.particles
+--------------------------------------
+
+Deterministic lattice sampling for primitive, revolved and closed mesh fill volumes.
+
+.. autosummary::
+
+   embodichain.compute.geometry.particles.sample_volume_particles
+
+.. autofunction:: embodichain.compute.geometry.particles.sample_volume_particles
 
 embodichain.compute.geometry.shading
 ------------------------------------
@@ -172,6 +198,34 @@ the exact repository and revision used for evaluation.
    download_pretrained_policy
 
 .. autofunction:: download_pretrained_policy
+
+embodichain.data.assets.scene_assets
+------------------------------------
+
+Download scene bundles through the shared asset registry. The four SimReady
+rooms retain their original GLB visuals and separate static USD floor collision.
+For example, ``get_data_path("WoodLab/wood_lab/wood_lab.usda")`` resolves the
+portable USD entry; keep its sibling ``visual`` and ``collision`` directories.
+The new bundles use the shared download lock, verify the archive MD5 and
+respect the configured download host, with the official Hub as fallback.
+
+.. currentmodule:: embodichain.data.assets.scene_assets
+
+.. autosummary::
+
+   SceneData
+   EmptyRoom
+   WoodLab
+   IndustrialWorkshop
+   DemoStudio
+   CleanLab
+
+.. autoclass:: SceneData
+.. autoclass:: EmptyRoom
+.. autoclass:: WoodLab
+.. autoclass:: IndustrialWorkshop
+.. autoclass:: DemoStudio
+.. autoclass:: CleanLab
 
 embodichain.data.assets.solver_assets
 -------------------------------------
@@ -354,8 +408,14 @@ Simulation-independent camera dimensions used to reconstruct recording features 
 
    RecordedCamera
 
+.. _simready_asset_api:
+
 embodichain.gen_sim.asset_engine.cli.start
 -----------------------------------------------
+
+Single-directory entry point for the :doc:`/features/generative_sim/asset_engine`.
+Mesh inputs run normalization and parser
+stages; configured direct-copy formats preserve raw files without those stages.
 
 .. currentmodule:: embodichain.gen_sim.asset_engine.cli.start
 
@@ -391,8 +451,10 @@ of returned articulation artifacts before publication.
 embodichain.gen_sim.asset_engine.configs
 ----------------------------------------
 
-Read Asset Engine settings from the shared GenSim dotenv file. Legacy Scene
-Engine articulation keys remain accepted as aliases.
+Read articulated-asset service settings from the shared GenSim dotenv file.
+Legacy Scene Engine articulation keys remain accepted as aliases. These service
+settings are separate from the general mesh pipeline's ``OPENAI_*`` and JSON
+configuration; see :doc:`/features/generative_sim/asset_engine`.
 
 .. currentmodule:: embodichain.gen_sim.asset_engine.configs
 
@@ -403,7 +465,7 @@ Engine articulation keys remain accepted as aliases.
 embodichain.gen_sim.asset_engine.configs.environment
 ----------------------------------------------------
 
-Resolves requested Asset Engine dotenv keys and reports missing configuration
+Resolves requested asset-service dotenv keys and reports missing configuration
 without mutating process environment variables.
 
 .. currentmodule:: embodichain.gen_sim.asset_engine.configs.environment
@@ -427,7 +489,7 @@ updates their USDC path and scale metadata after normalization.
 embodichain.gen_sim.asset_engine.pipeline.articulation
 ------------------------------------------------------
 
-Materializes functional articulated records through the Asset Engine client.
+Materializes functional articulated records through the articulated-asset client.
 Records provide source observations and coarse scales; the owning scene pipeline
 continues to control layout and export.
 
@@ -623,6 +685,35 @@ embodichain.gen_sim.gradio_ui.gradio_app
 
    main
 
+embodichain.gen_sim.asset_engine.parser.base
+--------------------------------------------
+
+Parser capability dispatch and optional run-scoped model-service injection.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.parser.base
+
+.. autosummary::
+
+   AssetParser
+   ParserManager
+
+.. autoclass:: AssetParser
+
+.. autoclass:: ParserManager
+
+embodichain.gen_sim.asset_engine.pipeline.ingest
+------------------------------------------------
+
+Asset ingestion with optional borrowed model services and unchanged parser ownership.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.pipeline.ingest
+
+.. autosummary::
+
+   ingest_one_asset
+
+.. autofunction:: ingest_one_asset
+
 embodichain.gen_sim.scene_engine.asset_normalization
 -----------------------------------------------------
 
@@ -658,6 +749,22 @@ baseline and saves successful candidates with a completion manifest.
 .. autosummary::
 
    main
+
+embodichain.gen_sim.scene_engine.cli.start
+------------------------------------------
+
+Scene generation and editing command dispatch sharing one model-service run.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.cli.start
+
+.. autosummary::
+
+   cli_scene_engine
+   main
+
+.. autofunction:: cli_scene_engine
+
+.. autofunction:: main
 
 embodichain.gen_sim.scene_engine.configs.environment
 ----------------------------------------------------
@@ -914,6 +1021,183 @@ with zero candidates; interrupted writes may leave a run without that manifest.
 
    save_layouts
 
+embodichain.gen_sim.scene_providers
+-----------------------------------
+
+Provider-neutral, durable references for scene generation jobs. A selected
+installed adapter owns transport and provider lifecycle; these contracts do not
+import a model runtime or simulator.
+
+.. currentmodule:: embodichain.gen_sim.scene_providers
+
+.. autosummary::
+
+   CancellationReport
+   SceneGenerationProvider
+   SceneGenerationRequest
+   SceneJobRef
+   SceneJobStatus
+   load_scene_generation_provider
+
+.. autoclass:: CancellationReport
+
+.. autoclass:: SceneGenerationProvider
+
+.. autoclass:: SceneGenerationRequest
+
+.. autoclass:: SceneJobRef
+
+.. autoclass:: SceneJobStatus
+
+.. autofunction:: load_scene_generation_provider
+
+embodichain.gen_sim.services
+----------------------------
+
+Run-scoped, replaceable model capabilities, explicit role configuration,
+provider-independent artifacts and classified failures. Contracts import lazily;
+semantic and physical validation remain with the consuming owners.
+
+.. currentmodule:: embodichain.gen_sim.services
+
+.. autosummary::
+
+   GenSimServicesCfg
+   load_services_config
+   GenSimServices
+   ServiceRegistry
+   TextPart
+   ImagePart
+   ChatMessage
+   ChatRequest
+   ChatResponse
+   ImageGenerationRequest
+   ImageArtifact
+   SegmentationRequest
+   SegmentationResult
+   GeometryRequest
+   ReconstructedObject
+   GeometryResult
+   ArticulationRequest
+   ArticulationResult
+   ChatService
+   ImageGenerationService
+   SegmentationService
+   GeometryReconstructionService
+   ArticulationService
+   ArticulationJobService
+   ServiceError
+   ServiceConfigurationError
+   CapabilityError
+   ServiceTimeout
+   ServiceTransportError
+   ServiceResponseError
+   SubmissionUnknown
+
+.. autoclass:: GenSimServicesCfg
+
+.. autofunction:: load_services_config
+
+.. autoclass:: GenSimServices
+
+.. autoclass:: ServiceRegistry
+
+.. autoclass:: TextPart
+
+.. autoclass:: ImagePart
+
+.. autoclass:: ChatMessage
+
+.. autoclass:: ChatRequest
+
+.. autoclass:: ChatResponse
+
+.. autoclass:: ImageGenerationRequest
+
+.. autoclass:: ImageArtifact
+
+.. autoclass:: SegmentationRequest
+
+.. autoclass:: SegmentationResult
+
+.. autoclass:: GeometryRequest
+
+.. autoclass:: ReconstructedObject
+
+.. autoclass:: GeometryResult
+
+.. autoclass:: ArticulationRequest
+
+.. autoclass:: ArticulationResult
+
+.. autoclass:: ChatService
+
+.. autoclass:: ImageGenerationService
+
+.. autoclass:: SegmentationService
+
+.. autoclass:: GeometryReconstructionService
+
+.. autoclass:: ArticulationService
+
+.. autoclass:: ArticulationJobService
+
+.. autoclass:: ServiceError
+
+.. autoclass:: ServiceConfigurationError
+
+.. autoclass:: CapabilityError
+
+.. autoclass:: ServiceTimeout
+
+.. autoclass:: ServiceTransportError
+
+.. autoclass:: ServiceResponseError
+
+.. autoclass:: SubmissionUnknown
+
+embodichain.gen_sim.workflow
+----------------------------
+
+Artifact-based Task Engine planning, external scene-job control, structured
+scene qualification and deterministic deployment preparation. Simulation
+execution remains with the ordinary task runner.
+
+.. currentmodule:: embodichain.gen_sim.workflow
+
+.. autosummary::
+
+   cancel_scene_generation
+   inspect_scene_generation
+   load_generated_scene
+   load_task_plan
+   materialize_scene_generation
+   plan_image_task
+   prepare_task_deployment
+   qualify_task_scene
+   resume_scene_generation
+   submit_scene_generation
+
+.. autofunction:: cancel_scene_generation
+
+.. autofunction:: inspect_scene_generation
+
+.. autofunction:: load_generated_scene
+
+.. autofunction:: load_task_plan
+
+.. autofunction:: materialize_scene_generation
+
+.. autofunction:: plan_image_task
+
+.. autofunction:: prepare_task_deployment
+
+.. autofunction:: qualify_task_scene
+
+.. autofunction:: resume_scene_generation
+
+.. autofunction:: submit_scene_generation
+
 embodichain.gen_sim.task_engine.evidence
 ----------------------------------------
 
@@ -1059,19 +1343,26 @@ and semantic hash; it does not qualify a partial binding or physical evidence.
 embodichain.gen_sim.task_spec.control_evidence
 ----------------------------------------------
 
-Control bindings seal a plain source route payload and explicit terminal policy,
-source path and complete execution prefix. Historical Press/Twist replay checks
-the same operation/source-asset/route digest, sampling window, cleanup, clearance
-and declared coarse or calibrated criterion as the original source observer.
-There are no imports of live factories, sensors or Task Engine objects.
+Control bindings seal their normative/program identities and source declaration.
+Versions 1 (``historical_record``) and 2 (``raw_snapshot``) retain their serialized
+fields and hashes. The source declaration is interpreted by the Lab adapter;
+TaskSpec imports no Lab, simulator, native SDK or skill event implementation.
 
-Only explicitly selected ``historical_record`` inputs are currently qualified;
-raw input is rejected at binding construction until its complete operation-window
-acquisition contract is available. Missing or failed receipt qualification stays
-unavailable. A contact-backed Press event is not device activation, and the
-coarse Twist criterion is not silently upgraded to calibrated-setting success.
-The common physical report assembler accepts these bindings without filling
-missing final goals, past milestones or continuous trajectory requirements.
+First call
+:func:`embodichain.lab.task_program.integrations.evidence.normalize_control_evidence`
+with the serialized binding, original evidence and program. It validates the
+original actor, occurrence, sampling-window and control-event protocol, then
+returns source-bound ``PhysicalEvidenceFrame``/``Batch`` JSON. Supply that packet
+to :func:`evaluate_control_evidence` or the common physical evidence report.
+Direct raw receipts must be normalized before normative evaluation.
+
+The normative evaluator checks the measurement hash, declared source, row and
+episode identities, channel validity and the requested physical-effect fact.
+Valid negative observations fail; unavailable acquisition stays unavailable.
+The Lab adapter retains the original all-active proof requirement, Press event
+threshold and coarse-turn versus calibrated-setting rules. A Press event does
+not establish device activation. Bindings and historical certificates are never
+automatically upgraded or re-signed.
 
 .. currentmodule:: embodichain.gen_sim.task_spec.control_evidence
 
@@ -1100,23 +1391,25 @@ Raw snapshots require the complete ``support.com_patch`` acquisition channel,
 including values, validity/errors, timestamp, environment IDs, observation
 revision and clock domain. Values must agree with the native measurements.
 Adding a ``record`` cannot downgrade raw validation, and reports reject mixed
-raw/historical input contracts. Raw sampled-timeline collection is not yet
-implemented and cannot be substituted with the COM-patch channel.
+raw/historical input contracts. Explicit version-4 raw sampled timelines seal
+the native/program acquisition universe and original substep lineage; a
+COM-patch sample cannot substitute for that timeline.
 
-Legacy ``native_contact_support`` and explicit
-``native_stable_reference_support/v2`` sampled windows retain their scopes.
-``native_supported_placement`` requires revision 1 and rechecks release-phase
-windows, actor/episode identity, original stable clocks and raw contact patches.
-Its declared ``supported_region`` variant checks complete planar footprints for
-``on`` and ``inside`` without claiming general volume containment. Stronger
-measurements never select a stronger scope implicitly. E4/E5 still require
-separate transfer/coordinated-transport proofs and reject in this slice.
+Rigid ``on`` relations retain their explicit legacy ``native_contact_support``
+or ``native_stable_reference_support/v2`` sampled-window contract. The separate
+``native_supported_placement`` scope requires revision 1 and rechecks the exact
+release phase, actor/episode provenance, original stable-clock trace and raw
+contact COM patch. Its explicitly declared ``supported_region`` variant also
+checks complete planar-footprint measurements for ``on`` or ``inside``; it does
+not claim general volume containment. A stronger payload never selects a scope
+implicitly. Operation-linked version-3 E4/E5 declarations require the independent
+transfer/coordinated-transport proof before the receiver/coordinated release.
+Version-5 planar and version-6 directional declarations preserve their explicit
+native geometry mode, owners, bounds and unavailable cases. Finite-count
+version-7 placement groups retain every declared member/occurrence.
 
-Recorded region geometry is recomputed from the ObservationManager's exact,
-available history slots and the original owned geometry/support snapshot.
-It cannot borrow the old footprint after a boundary pose changes, resample
-contacts or substitute a live pose. Import is standard-library-only; numerical
-proof re-evaluation lazily uses shared Torch/NumPy/Shapely algorithms.
+Imports and binding validation use only the standard library; numerical proof
+re-evaluation lazily loads the existing shared Torch/NumPy/Shapely algorithms.
 
 The verifier distinguishes unavailable acquisition from measured negatives and
 checks measured release receipts independently of plan/segment success. Raw Lab
@@ -1148,10 +1441,12 @@ invariants. The ordinary TaskSpec evaluator remains the certificate authority.
 
 .. autofunction:: evaluate_placement_evidence_report
 
+
+
 embodichain.gen_sim.task_spec.evidence_report
 ---------------------------------------------
 
-Combine verified placement, orientation and joint evidence using the existing
+Combine verified placement, orientation, joint and historical control evidence using the existing
 TaskSpec evaluator. Bindings must share the native row, episode and input-format
 contract. Final observations cannot fill past milestones; sparse boundary
 observations cannot establish continuous invariants or complete temporal windows.
@@ -1163,7 +1458,6 @@ observations cannot establish continuous invariants or complete temporal windows
    evaluate_physical_evidence_report
 
 .. autofunction:: evaluate_physical_evidence_report
-
 
 embodichain.gen_sim.task_spec.expressions
 -----------------------------------------
@@ -1271,6 +1565,48 @@ spellings are aliases of the TaskSpec functions.
    evaluate_task_template
    validate_task_spec
    validate_task_template
+
+embodichain.lab.evaluation
+--------------------------
+
+.. currentmodule:: embodichain.lab.evaluation
+
+Compile trusted predicate registrations and inert rule declarations into an
+immutable graph. A typed deployment binding qualifies the source of each role.
+``RuleSession`` advances bounded windows and milestones for one occurrence.
+Instantaneous queries and snapshots leave history untouched. Replay consumes
+the recorded observations and preserves each row's endpoint and witnesses.
+
+.. autosummary::
+
+   EvaluationStatus
+   PredicateSpec
+   BooleanRule
+   TemporalRule
+   MilestoneRule
+   EvaluationSpec
+   PredicateMeasurement
+   PredicateDefinition
+   PredicateRegistry
+   CompiledEvaluation
+   RuleResult
+   EvaluationSnapshot
+   RuleSession
+   builtin_predicates
+   evaluate_recorded_rules
+
+embodichain.lab.evaluation.observations
+---------------------------------------
+
+.. currentmodule:: embodichain.lab.evaluation.observations
+
+Advance a compiled session with a raw capture and its exact episode owner.
+The adapter checks physical descriptors before projecting raw observations
+into predicate inputs.
+
+.. autosummary::
+
+   advance_observation
 
 embodichain.lab.expansion
 ------------------------
@@ -1653,6 +1989,23 @@ embodichain.lab.gym.envs.embodied_env
    EmbodiedEnvCfg
    EmbodiedEnv
 
+embodichain.lab.sim.cfg.fluid
+-----------------------------
+
+Fixed-count fluid sources, physical properties and native particle or surface display.
+
+.. autosummary::
+
+   embodichain.lab.sim.cfg.fluid.FluidSpawnCfg
+   embodichain.lab.sim.cfg.fluid.FluidRenderCfg
+   embodichain.lab.sim.cfg.fluid.FluidObjectCfg
+
+.. autoclass:: embodichain.lab.sim.cfg.fluid.FluidSpawnCfg
+
+.. autoclass:: embodichain.lab.sim.cfg.fluid.FluidRenderCfg
+
+.. autoclass:: embodichain.lab.sim.cfg.fluid.FluidObjectCfg
+
 embodichain.lab.sim.motion.expansion.session_coverage
 -----------------------------------------------------
 
@@ -1663,52 +2016,6 @@ Adapt legacy phase-aligned geometry, timing and measured manipulability to the c
 .. autosummary::
 
    TrajectorySessionCoverage
-
-embodichain.lab.sim.scene.operations
-----------------------------------
-
-.. currentmodule:: embodichain.lab.sim.scene.operations
-
-``apply_changes_batch`` accepts an environment-indexed change set for each row
-of a scene view. It preflights every row before any mutation, then batches writes
-by entity. Neighboring rows remain untouched; no operation steps physics.
-
-.. autosummary::
-
-   apply_changes_batch
-
-.. currentmodule:: embodichain.lab.sim.scene
-
-.. autosummary::
-
-   apply_changes_batch
-
-.. autosummary::
-
-   restore_render_state
-
-embodichain.lab.sim.scene.physics
--------------------------------
-
-.. currentmodule:: embodichain.lab.sim.scene.physics
-
-Capture and restore measured mass, principal inertia and friction for explicitly
-selected dynamic rigid bodies on Default or Newton. Applying a mass scale also
-scales inertia from the original baseline, so repeated application does not
-accumulate. Every parameter is preflighted before writes; actual backend readback
-must match the request. These operations do not step physics or verify task success.
-Native failures may leave partial changes, requiring the host to stop execution.
-
-.. autosummary::
-
-   RigidPhysicsState
-   capture_rigid_physics
-   apply_rigid_physics
-   restore_rigid_physics
-
-.. autosummary::
-
-   capture_physics_properties
 
 embodichain.lab.sim.motion.planners.curobo.payload
 --------------------------------------------------
@@ -1736,6 +2043,20 @@ separate checker does not own those attachments.
    CuroboPayload
    CuroboQuerySnapshot
    curobo_motion_generator
+
+embodichain.lab.sim.objects.fluid
+---------------------------------
+
+Scene-owned fluid state snapshots, explicit writes and initial-state restoration.
+
+.. autosummary::
+
+   embodichain.lab.sim.objects.fluid.FluidObject
+   embodichain.lab.sim.objects.fluid.FluidObjectData
+
+.. autoclass:: embodichain.lab.sim.objects.fluid.FluidObject
+
+.. autoclass:: embodichain.lab.sim.objects.fluid.FluidObjectData
 
 embodichain.lab.sim.scene.collision_sources
 -------------------------------------------
@@ -2532,6 +2853,7 @@ embodichain.lab.sim
    VisualMaterialInst
    ReuseSegmentState
    BatchEntity
+   UsdImportResult
    SimulationManager
    SimulationManagerCfg
    SIM_CACHE_DIR
@@ -2539,21 +2861,21 @@ embodichain.lab.sim
    CONVEX_DECOMP_DIR
    REACHABLE_XPOS_DIR
 
-embodichain.lab.sim.atomic_actions
+embodichain.lab.sim.atomic_skills
 ----------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions
+.. currentmodule:: embodichain.lab.sim.atomic_skills
 
 .. autosummary::
 
-   ActionPlanningServices
+   SkillPlanningServices
    Affordance
    AffordancePoseCandidates
    AffordanceSample
    AffordanceSamplingContext
    AntipodalAffordance
    AssembleAffordance
-   BUILTIN_ACTION_TYPES
+   BUILTIN_SKILL_TYPES
    CoordinatedPickmentOptions
    CoordinatedPlacementOptions
    DynamicCollisionMode
@@ -2565,7 +2887,7 @@ embodichain.lab.sim.atomic_actions
    MoveEndEffectorOptions
    MoveHeldObjectOptions
    MoveJointsOptions
-   ObjectActionGoal
+   ObjectSkillGoal
    OPEN_COMMAND
    PickUpOptions
    PlaceOptions
@@ -2580,10 +2902,10 @@ embodichain.lab.sim.atomic_actions
    SceneProvider
    SceneSnapshotSupplier
 
-embodichain.lab.sim.atomic_actions.affordance
+embodichain.lab.sim.atomic_skills.affordance
 ---------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.affordance
+.. currentmodule:: embodichain.lab.sim.atomic_skills.affordance
 
 .. autosummary::
 
@@ -2596,14 +2918,14 @@ embodichain.lab.sim.atomic_actions.affordance
    InteractionPoints
    AssembleAffordance
 
-.. automodule:: embodichain.lab.sim.atomic_actions.affordance
+.. automodule:: embodichain.lab.sim.atomic_skills.affordance
    :members:
    :no-index:
 
-embodichain.lab.sim.atomic_actions.affordance_sampling
+embodichain.lab.sim.atomic_skills.affordance_sampling
 -------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.affordance_sampling
+.. currentmodule:: embodichain.lab.sim.atomic_skills.affordance_sampling
 
 .. autosummary::
 
@@ -2611,30 +2933,30 @@ embodichain.lab.sim.atomic_actions.affordance_sampling
    AffordanceSample
    AffordanceSamplingContext
 
-.. automodule:: embodichain.lab.sim.atomic_actions.affordance_sampling
+.. automodule:: embodichain.lab.sim.atomic_skills.affordance_sampling
    :members:
    :no-index:
 
-embodichain.lab.sim.atomic_actions.bindings
+embodichain.lab.sim.atomic_skills.bindings
 -------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.bindings
+.. currentmodule:: embodichain.lab.sim.atomic_skills.bindings
 
 .. autosummary::
 
-   ActionBinding
+   SkillBinding
    EndpointBinding
    JointPositionTarget
    RuntimeEndpointTarget
 
-embodichain.lab.sim.atomic_actions.control
+embodichain.lab.sim.atomic_skills.control
 ------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.control
+.. currentmodule:: embodichain.lab.sim.atomic_skills.control
 
 .. autosummary::
 
-   ActionControlOverrides
+   SkillControlOverrides
    ControlCommand
    ControlPartCommandProfile
    GRASP_COMMAND
@@ -2642,14 +2964,14 @@ embodichain.lab.sim.atomic_actions.control
    OPEN_COMMAND
    PARK_COMMAND
 
-embodichain.lab.sim.atomic_actions.core
+embodichain.lab.sim.atomic_skills.core
 ---------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.core
+.. currentmodule:: embodichain.lab.sim.atomic_skills.core
 
 .. autosummary::
 
-   AtomicAction
+   AtomicSkill
    CompletePlanBuilder
    ObjectSemantics
    SkillDescriptor
@@ -2670,32 +2992,32 @@ finalization transforms once and cannot replace the logical recovery proposal.
    :members:
 
 
-embodichain.lab.sim.atomic_actions.effects
+embodichain.lab.sim.atomic_skills.effects
 ------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.effects
+.. currentmodule:: embodichain.lab.sim.atomic_skills.effects
 
 .. autosummary::
 
    StateDelta
 
-embodichain.lab.sim.atomic_actions.engine
+embodichain.lab.sim.atomic_skills.engine
 -----------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.engine
+.. currentmodule:: embodichain.lab.sim.atomic_skills.engine
 
 .. autosummary::
 
-   AtomicActionEngine
+   AtomicSkillEngine
 
-embodichain.lab.sim.atomic_actions.execution
+embodichain.lab.sim.atomic_skills.execution
 --------------------------------------------
 
 An explicit host lifecycle observes owned installed plans before dispatch. A
 rejected installation blocks ticks and revisions until the runner completes its
 ordinary safe stop and invalidates the lifecycle. Omission preserves execution.
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.execution
+.. currentmodule:: embodichain.lab.sim.atomic_skills.execution
 
 .. autosummary::
 
@@ -2708,10 +3030,10 @@ ordinary safe stop and invalidates the lifecycle. Omission preserves execution.
 
    ExecutionPlanLifecycle
 
-embodichain.lab.sim.atomic_actions.verification
+embodichain.lab.sim.atomic_skills.verification
 ------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.verification
+.. currentmodule:: embodichain.lab.sim.atomic_skills.verification
 
 .. autosummary::
 
@@ -2723,14 +3045,14 @@ embodichain.lab.sim.atomic_actions.verification
    PhaseEffectGateRequest
    PhaseEffectGateResult
 
-embodichain.lab.sim.atomic_actions.goals
+embodichain.lab.sim.atomic_skills.goals
 ----------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.goals
+.. currentmodule:: embodichain.lab.sim.atomic_skills.goals
 
 .. autosummary::
 
-   ObjectActionGoal
+   ObjectSkillGoal
    PoseGoalValue
    SceneEntityPose
    collect_scene_dependencies
@@ -2738,36 +3060,36 @@ embodichain.lab.sim.atomic_actions.goals
    validate_pose_goal
    validate_pose_tensor
 
-.. automodule:: embodichain.lab.sim.atomic_actions.goals
+.. automodule:: embodichain.lab.sim.atomic_skills.goals
    :members:
    :no-index:
 
-embodichain.lab.sim.atomic_actions.invocation
+embodichain.lab.sim.atomic_skills.invocation
 ---------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.invocation
+.. currentmodule:: embodichain.lab.sim.atomic_skills.invocation
 
 .. autosummary::
 
-   ActionInvocation
-   ActionOptions
+   SkillInvocation
+   SkillOptions
    GoalT
    OptionsT
    PhaseEffectGateRequirement
-   ResolvedActionRequest
+   ResolvedSkillRequest
 
-embodichain.lab.sim.atomic_actions.plans
+embodichain.lab.sim.atomic_skills.plans
 ----------------------------------------
 
 Qualification masks and immutable recovery proposals carry planned information.
 A proposal identifies its invocation and plan, and is never a physical effect
-or an automatic state commit. ActionPlan snapshots own these values.
+or an automatic state commit. SkillPlan snapshots own these values.
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.plans
+.. currentmodule:: embodichain.lab.sim.atomic_skills.plans
 
 .. autosummary::
 
-   ActionPlan
+   SkillPlan
    CompiledTrajectory
    EffectVerificationRequirement
    PlannerDiagnostics
@@ -2779,7 +3101,7 @@ or an automatic state commit. ActionPlan snapshots own these values.
    PlanQualification
    PlanningRecoveryOutcome
 
-embodichain.lab.sim.atomic_actions.policies
+embodichain.lab.sim.atomic_skills.policies
 -------------------------------------------
 
 PlanningRecovery is immutable finite scalar/tuple data for an exact skill and
@@ -2795,7 +3117,7 @@ Segment recovery requires fixed-grid sequential IK; unsupported Atomic skills
 reject it before request/provider preparation. Final speed rejection retains
 its explicit hold or mask-only representation and cannot promote failed rows.
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.policies
+.. currentmodule:: embodichain.lab.sim.atomic_skills.policies
 
 .. autosummary::
 
@@ -2806,19 +3128,33 @@ its explicit hold or mask-only representation and cannot promote failed rows.
    PlanningRecovery
    PlanningBudget
 
-embodichain.lab.sim.atomic_actions.primitives
----------------------------------------------
+embodichain.lab.sim.atomic_skills.primitives.grasp_cable
+--------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.primitives
+Plan a contact-only pinch, close and lift. The caller verifies measured lift
+and material-point retention after execution.
+
+.. currentmodule:: embodichain.lab.sim.atomic_skills.primitives.grasp_cable
 
 .. autosummary::
 
-   BUILTIN_ACTION_TYPES
+   CableGraspGoal
+   GraspCableOptions
+   GraspCable
 
-embodichain.lab.sim.atomic_actions.requirements
+embodichain.lab.sim.atomic_skills.primitives
+---------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.atomic_skills.primitives
+
+.. autosummary::
+
+   BUILTIN_SKILL_TYPES
+
+embodichain.lab.sim.atomic_skills.requirements
 -----------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.requirements
+.. currentmodule:: embodichain.lab.sim.atomic_skills.requirements
 
 .. autosummary::
 
@@ -2834,24 +3170,10 @@ embodichain.lab.sim.atomic_actions.requirements
    SkillEndpointRequirement
    SkillResourceSlot
 
-embodichain.lab.sim.atomic_actions.primitives.grasp_cable
----------------------------------------------------------
-
-Plan a contact-only pinch, close and lift. The caller measures actual lift and
-slip after execution; the plan creates no rigid attachment.
-
-.. currentmodule:: embodichain.lab.sim.atomic_actions.primitives.grasp_cable
-
-.. autosummary::
-
-   CableGraspGoal
-   GraspCableOptions
-   GraspCable
-
-embodichain.lab.sim.atomic_actions.runner
+embodichain.lab.sim.atomic_skills.runner
 -----------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.runner
+.. currentmodule:: embodichain.lab.sim.atomic_skills.runner
 
 .. autosummary::
 
@@ -2872,19 +3194,19 @@ embodichain.lab.sim.atomic_actions.runner
    RunnerStep
    RunnerStepCallback
 
-embodichain.lab.sim.atomic_actions.runtime
+embodichain.lab.sim.atomic_skills.runtime
 ------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.runtime
+.. currentmodule:: embodichain.lab.sim.atomic_skills.runtime
 
 .. autosummary::
 
-   ActionPlanningServices
+   SkillPlanningServices
 
-embodichain.lab.sim.atomic_actions.runtime_commands
+embodichain.lab.sim.atomic_skills.runtime_commands
 ---------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.runtime_commands
+.. currentmodule:: embodichain.lab.sim.atomic_skills.runtime_commands
 
 .. autosummary::
 
@@ -2894,34 +3216,34 @@ embodichain.lab.sim.atomic_actions.runtime_commands
    RuntimeCommandPayload
    TimedCommandSequence
 
-embodichain.lab.sim.atomic_actions.scene
+embodichain.lab.sim.atomic_skills.scene
 ----------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.scene
+.. currentmodule:: embodichain.lab.sim.atomic_skills.scene
 
 .. autosummary::
 
    SceneProvider
 
-embodichain.lab.sim.atomic_actions.sim_adapter
+embodichain.lab.sim.atomic_skills.sim_adapter
 ----------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.sim_adapter
+.. currentmodule:: embodichain.lab.sim.atomic_skills.sim_adapter
 
 .. autosummary::
 
    create_rigidized_articulation_antipodal_semantics
-   create_simulation_atomic_action_engine
+   create_simulation_atomic_skill_engine
    RigidObjectSceneProvider
    RigidObjectSceneProviderCfg
    SceneEntity
    SceneSnapshotSupplier
    SimulationExecutionAdapter
 
-embodichain.lab.sim.atomic_actions.state
+embodichain.lab.sim.atomic_skills.state
 ----------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.state
+.. currentmodule:: embodichain.lab.sim.atomic_skills.state
 
 .. autosummary::
 
@@ -2932,14 +3254,14 @@ embodichain.lab.sim.atomic_actions.state
    SceneSnapshot
    TaskState
 
-.. automodule:: embodichain.lab.sim.atomic_actions.state
+.. automodule:: embodichain.lab.sim.atomic_skills.state
    :members:
    :no-index:
 
-embodichain.lab.sim.atomic_actions.trajectory_ops
+embodichain.lab.sim.atomic_skills.trajectory_ops
 -------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.trajectory_ops
+.. currentmodule:: embodichain.lab.sim.atomic_skills.trajectory_ops
 
 .. autosummary::
 
@@ -2954,10 +3276,10 @@ embodichain.lab.sim.atomic_actions.trajectory_ops
    to_full_robot_trajectory
    translate_pose_world
 
-embodichain.lab.sim.atomic_actions.transports
+embodichain.lab.sim.atomic_skills.transports
 ---------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.transports
+.. currentmodule:: embodichain.lab.sim.atomic_skills.transports
 
 .. autosummary::
 
@@ -3328,6 +3650,24 @@ embodichain.lab.sim.sensors.contact.sensor
    ContactSensor
    ContactSensorCfg
 
+embodichain.lab.sim.sensors.stereo
+---------------------------------
+
+.. currentmodule:: embodichain.lab.sim.sensors.stereo
+
+Stereo cameras share an environment-level pose and ground visibility policy
+across both eyes. ``PairCameraView`` forwards those operations to the borrowed
+native views; ``StereoCamera`` owns their sensor lifecycle and image buffers.
+
+.. autosummary::
+
+   StereoCamera
+   StereoCameraCfg
+   PairCameraView
+
+.. autoclass:: PairCameraView
+   :members:
+
 embodichain.lab.sim.sim_manager
 -------------------------------
 
@@ -3584,6 +3924,23 @@ embodichain.lab.sim.spawn.usd
    articulation_desc_from_usd
    rigid_desc_from_usd
    visual_desc_from_usd
+
+embodichain.lab.sim.spawn.usd_result
+-------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.spawn.usd_result
+
+USD import results retain stable source keys for declared facades and logical
+resource UIDs. A unique source keeps its prim path as its key. If one prim emits
+several resources, keys append ``#0``, ``#1``, and so on in parser order;
+``resource_source_paths`` maps each key back to its exact source prim path.
+The UID, type and source-path maps use the same keys, independently of namespace
+and runtime UID changes. Results share the manager's ``prepare()`` lifecycle and
+do not own another object registry or native-resource lifetime.
+
+.. autosummary::
+
+   UsdImportResult
 
 embodichain.lab.sim.utility.dynamic_pybind
 ----------------------------------------
@@ -3893,6 +4250,7 @@ embodichain.lab.visualization.protocol
    JointControlSpec
    JointControlState
    MeshGeometry
+   MeshMarkerOverlay
    PickCommand
    PointCloudOverlay
    SceneFrame
@@ -3905,6 +4263,39 @@ embodichain.lab.visualization.protocol
    estimate_frame_bytes
    estimate_manifest_bytes
    pose_to_position_wxyz
+
+embodichain.lab.visualization.markers
+------------------------------------
+
+Render-only marker groups share validated geometry and instance state between
+native simulation windows and browser visualization.
+
+.. currentmodule:: embodichain.lab.visualization.markers
+
+.. autosummary::
+
+   MarkerGroupCfg
+   MarkerPrototypeCfg
+   MarkerGroup
+
+embodichain.lab.visualization.markers.cfg
+----------------------------------------
+
+.. currentmodule:: embodichain.lab.visualization.markers.cfg
+
+.. autosummary::
+
+   MarkerPrototypeCfg
+   MarkerGroupCfg
+
+embodichain.lab.visualization.markers.group
+------------------------------------------
+
+.. currentmodule:: embodichain.lab.visualization.markers.group
+
+.. autosummary::
+
+   MarkerGroup
 
 embodichain.lab.visualization.runtime
 -------------------------------------
@@ -3944,6 +4335,21 @@ embodichain.learning.rl.algo.apg
    APGCfg
    complete_discounted_return
    segmented_discounted_return
+
+embodichain.learning.rl.algo.apg_actor_critic
+-------------------------------------------
+
+.. currentmodule:: embodichain.learning.rl.algo.apg_actor_critic
+
+Short differentiable trajectories use terminal values for actor optimization
+and detached lambda returns for critic regression. Actor and critic optimizers
+retain separate state in checkpoints.
+
+.. autosummary::
+
+   APGActorCritic
+   APGActorCriticCfg
+   differentiable_lambda_returns
 
 embodichain.learning.rl.algo.base
 ---------------------------------
@@ -4173,20 +4579,27 @@ embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker
    GripperCollisionCfg
    GripperCollisionChecker
 
-embodichain.toolkits.graspkit.pg_grasp.model_geometry
+embodichain.lab.sim.utility.gripper_geometry
 ---------------------------------------------------
 
-.. currentmodule:: embodichain.toolkits.graspkit.pg_grasp.model_geometry
+Resolve source geometry and project numerical generator inputs at the Sim boundary.
+
+.. currentmodule:: embodichain.lab.sim.utility.gripper_geometry
 
 .. autosummary::
    :nosignatures:
 
-   get_parallel_jaw_collision_geometry
+   build_gripper_collision_geometry
+   grasp_generator_parameters
 
-embodichain.toolkits.graspkit.scripts.annotate_grasp
+.. autofunction:: build_gripper_collision_geometry
+
+.. autofunction:: grasp_generator_parameters
+
+embodichain.lab.scripts.annotate_grasp
 ----------------------------------------------------
 
-.. currentmodule:: embodichain.toolkits.graspkit.scripts.annotate_grasp
+.. currentmodule:: embodichain.lab.scripts.annotate_grasp
 
 .. autosummary::
 
@@ -4290,29 +4703,6 @@ Differentiable lightweight point-mass task and learning-environment registration
 
    PointMassEnv
 
-embodichain_robots
------------------
-
-Official robot configurations are loaded lazily from the bundled catalog.
-The YAM preset uses a prepared external asset cache for simulation and FK.
-
-.. currentmodule:: embodichain_robots
-
-.. autosummary::
-
-   YamI2rtCfg
-
-embodichain_robots.i2rt.yam.cfg
--------------------------
-
-YAM dual-arm defaults, including independent finger drives and local FK chains.
-
-.. currentmodule:: embodichain_robots.i2rt.yam.cfg
-
-.. autosummary::
-
-   YamI2rtCfg
-
 embodichain_tasks.configs
 -------------------------
 
@@ -4322,11 +4712,30 @@ embodichain_tasks.configs
 
    get_config_path
 
+embodichain_tasks.locomotion.managers.actions
+----------------------------------------------
+
+The reference position action combines a policy output with the next motion
+frame using the task's per-joint reference weights, then applies encoder bias.
+
+.. automodule:: embodichain_tasks.locomotion.managers.actions
+   :members:
+
+embodichain_tasks.locomotion.tracking.g1_motion
+-----------------------------------------------
+
+The G1 motion task connects reference data and differentiable tracking
+calculations to the simulator Gym loop. It owns frame progress, history,
+reference-state resets and terminal snapshots before automatic row resets.
+
+.. automodule:: embodichain_tasks.locomotion.tracking.g1_motion
+   :members:
+
 embodichain_tasks.manipulation.cable.route_the_cable
 ----------------------------------------------------
 
-Two-spool routing task with lazy expert stages and measured cable geometry.
-Intermediate grasp validators reject excessive slip before continuing.
+Two-spool routing with observed material geometry and measured grasp-slip,
+penetration and end-insertion acceptance.
 
 .. currentmodule:: embodichain_tasks.manipulation.cable.route_the_cable
 
@@ -4542,12 +4951,17 @@ Measured manipulation functors bind rigid objects and validate geometric paramet
 
    object_near_target
    object_below_height
+   evaluation_condition
 
 .. autoclass:: object_near_target
    :members:
    :special-members: __call__
 
 .. autoclass:: object_below_height
+   :members:
+   :special-members: __call__
+
+.. autoclass:: evaluation_condition
    :members:
    :special-members: __call__
 
@@ -4623,14 +5037,14 @@ and impulses. Invalid or ambiguous data remains distinct from a measured negativ
 
    classify_contacts
 
-embodichain.lab.sim.atomic_actions.grip_evidence
+embodichain.lab.sim.atomic_skills.grip_evidence
 ------------------------------------------------
 
 Shared physical grip interpretation consumes a PhysicalEvidenceRequest and
 explicit actor bindings, without Semantic Call or Task Program types. Results
 are PhysicalEvidenceBatch values; semantic clause adaptation belongs to integrations.
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.grip_evidence
+.. currentmodule:: embodichain.lab.sim.atomic_skills.grip_evidence
 
 .. autosummary::
 
@@ -4688,7 +5102,7 @@ embodichain.lab.task_program.runtime.lifecycle
 Provider-free runtime factory interfaces select one explicit lifecycle for a
 grounded occurrence. Composite factories reject duplicate or competing owners;
 construction does not plan, transform commands or start a simulator. Hosts can
-pass the selected port to AtomicActionEngine.start.
+pass the selected port to AtomicSkillEngine.start.
 
 .. currentmodule:: embodichain.lab.task_program.runtime.lifecycle
 
@@ -4724,9 +5138,99 @@ substituted, and recorded joint claims require the original executed policy.
 
 .. autofunction:: embodichain.gen_sim.task_engine.evidence.project_pour_evidence_binding
 
+embodichain.gen_sim.task_spec.condition_group_evidence
+------------------------------------------------------
+
+Finite-count orientation and articulation-state proofs retain the unchanged
+full TaskSpec and program. The group requires a complete bijection between the
+declared count, execution groups and logical/native member channels; articulation
+members are identified by both entity and part/joint. No synthetic child spec,
+subset selection or unobserved ``all`` universe can stand in for that proof.
+
+Every required member retains its row, episode, occurrence and input-format
+identity. Missing members or historical failures remain unavailable; complete
+valid negative final measurements remain failed. E1 final upright/vertical facts
+are independent of placement, while its original recorded scope remains upright
+only. E6 normal multi-part milestone availability is unchanged. Single-member
+binding serialization, semantic identity and successful-case hashes remain stable.
+The common physical report accepts these condition-group bindings without adding
+support for unrelated held/transport evidence.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.condition_group_evidence
+
+.. autosummary::
+
+   ConditionEvidenceGroupBinding
+   evaluate_condition_group_evidence
+
+.. autoclass:: ConditionEvidenceGroupBinding
+   :members:
+
+.. autofunction:: evaluate_condition_group_evidence
 
 embodichain.gen_sim.task_spec.coordinated_evidence
 --------------------------------------------------
+
+Normalized coordinated acceptance uses the sealed manipulation binding.
+Lab validates raw actor/query/execution protocols before this evaluator runs.
+No runtime monitor output defines normative criteria.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.coordinated_evidence
+
+.. autofunction:: evaluate_coordinated_hold_evidence
+
+embodichain.gen_sim.task_spec.handover_evidence
+-----------------------------------------------
+
+Normalized handover acceptance uses the sealed manipulation binding.
+Lab validates raw actor/query/execution protocols before this evaluator runs.
+No runtime monitor output defines normative criteria.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.handover_evidence
+
+.. autofunction:: evaluate_handover_evidence
+
+
+embodichain.gen_sim.task_spec.placement_group_evidence
+------------------------------------------------------
+
+A complete finite-count declaration binds every member to its exact release,
+settle and boundary occurrence. All member outcomes contribute without filling
+missing evidence or collapsing native environment identity. This layer evaluates
+facts; Lab owns collection and the frontend owns semantic projection.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.placement_group_evidence
+
+.. autoclass:: PlacementEvidenceGroupBinding
+   :members:
+
+.. autofunction:: evaluate_placement_group_evidence
+
+embodichain.gen_sim.task_spec.transport_evidence
+------------------------------------------------
+
+Normalized transport acceptance uses the sealed manipulation binding.
+Lab validates raw actor/query/execution protocols before this evaluator runs.
+No runtime monitor output defines normative criteria.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.transport_evidence
+
+.. autofunction:: evaluate_coordinated_transport_evidence
+
+
+
+embodichain.compute.geometry.directional
+----------------------------------------
+
+Fixed world-axis relation operands are shared by geometric observation adapters.
+
+.. currentmodule:: embodichain.compute.geometry.directional
+
+.. autosummary::
+
+   DIRECTIONAL_RELATION_AXES
+
+.. autodata:: DIRECTIONAL_RELATION_AXES
 
 This normative entry point evaluates normalized held-object facts using an explicit manipulation binding. Raw actor, query, receipt and phase validation belongs to the Lab adapter.
 
@@ -4756,6 +5260,8 @@ This normative entry point evaluates normalized held-object facts using an expli
 embodichain.gen_sim.task_spec.manipulation_evidence
 ---------------------------------------------------
 
+Explicit task criteria are compared with normalized measurements, independently of execution-monitor thresholds. Missing evidence remains unavailable.
+
 Explicit task acceptance compares normalized measurements with sealed bounds. Missing acquisition remains unavailable; valid measured negatives fail. Runtime monitor output never defines task thresholds.
 
 .. currentmodule:: embodichain.gen_sim.task_spec.manipulation_evidence
@@ -4778,6 +5284,8 @@ Explicit task acceptance compares normalized measurements with sealed bounds. Mi
 embodichain.lab.evidence
 ------------------------
 
+Owned physical values preserve explicit environment rows, validity, errors and observation revisions without importing a simulator.
+
 Owned physical values retain row identity, validity, missing reasons and observation revisions. JSON snapshots are independent and encode nonfinite observations as null without discarding validity.
 
 .. currentmodule:: embodichain.lab.evidence
@@ -4792,6 +5300,7 @@ Owned physical values retain row identity, validity, missing reasons and observa
 .. autoclass:: PhysicalObservationStamp
    :members:
 
+
 .. autoclass:: PhysicalEvidenceBatch
    :members:
 
@@ -4805,6 +5314,8 @@ Owned physical values retain row identity, validity, missing reasons and observa
 embodichain.lab.task_program.integrations.evidence
 --------------------------------------------------
 
+Offline runtime adapters validate exact raw acquisition and execution identities, then return normalized facts. They import no normative frontend and acquire no live state.
+
 Offline held-object adapters validate exact execution and acquisition identities, including world-position/orientation receipt consistency and historical boundaries. They emit source-bound measurements and acquire no live state. Task acceptance is evaluated separately.
 
 .. currentmodule:: embodichain.lab.task_program.integrations.evidence
@@ -4815,6 +5326,18 @@ Offline held-object adapters validate exact execution and acquisition identities
    normalize_handover_evidence
    CoordinatedHoldEvidenceBinding
    normalize_coordinated_hold_evidence
+   CoordinatedTransportEvidenceBinding
+   normalize_coordinated_transport_evidence
+   held_observation_request
+   resolve_hold_observation_condition
+   sampled_support_window
+   directional_observation_axes
+   normalize_control_evidence
+   validate_control_declaration
+   normalize_placement_evidence
+   normalize_pour_release_evidence
+   validate_placement_declaration
+
    held_observation_request
    resolve_hold_observation_condition
 
@@ -4828,13 +5351,51 @@ Offline held-object adapters validate exact execution and acquisition identities
 
 .. autofunction:: normalize_coordinated_hold_evidence
 
+.. autoclass:: CoordinatedTransportEvidenceBinding
+   :members:
+
+.. autofunction:: normalize_coordinated_transport_evidence
+
 .. autofunction:: held_observation_request
 
 .. autofunction:: resolve_hold_observation_condition
 
+.. autofunction:: sampled_support_window
+
+.. autofunction:: directional_observation_axes
+
+.. autofunction:: normalize_control_evidence
+.. autofunction:: validate_control_declaration
+.. autofunction:: normalize_placement_evidence
+
+.. autofunction:: normalize_pour_release_evidence
+
+.. autofunction:: validate_placement_declaration
+
+
+embodichain.lab.task_program.integrations.evidence.control_evidence
+-----------------------------------------------------------------
+
+Offline control adapters validate sealed source declarations, recheck original
+Press/Twist receipts against their acquired channels and emit normalized physical
+facts. Declaration preflight is standard-library-only and reads no physical state.
+Normalization uses the existing Lab evidence value contract without importing
+TaskSpec, Task Engine or simulator packages.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.evidence.control_evidence
+
+.. autosummary::
+
+   normalize_control_evidence
+   validate_control_declaration
+
+.. autofunction:: normalize_control_evidence
+.. autofunction:: validate_control_declaration
 
 embodichain.lab.task_program.integrations.evidence.coordinated_evidence
 -----------------------------------------------------------------------
+
+Offline runtime adapters validate exact raw acquisition and execution identities, then return normalized facts. They import no normative frontend and acquire no live state.
 
 Offline held-object adapters validate exact execution and acquisition identities, including world-position/orientation receipt consistency and historical boundaries. They emit source-bound measurements and acquire no live state. Task acceptance is evaluated separately.
 
@@ -4854,6 +5415,8 @@ Offline held-object adapters validate exact execution and acquisition identities
 embodichain.lab.task_program.integrations.evidence.handover_evidence
 --------------------------------------------------------------------
 
+Offline runtime adapters validate exact raw acquisition and execution identities, then return normalized facts. They import no normative frontend and acquire no live state.
+
 Offline held-object adapters validate exact execution and acquisition identities, including world-position/orientation receipt consistency and historical boundaries. They emit source-bound measurements and acquire no live state. Task acceptance is evaluated separately.
 
 .. currentmodule:: embodichain.lab.task_program.integrations.evidence.handover_evidence
@@ -4872,11 +5435,64 @@ Offline held-object adapters validate exact execution and acquisition identities
 embodichain.lab.task_program.integrations.evidence.observation_requests
 -----------------------------------------------------------------------
 
+Offline runtime adapters validate exact raw acquisition and execution identities, then return normalized facts. They import no normative frontend and acquire no live state.
+
 Offline held-object adapters validate exact execution and acquisition identities, including world-position/orientation receipt consistency and historical boundaries. They emit source-bound measurements and acquire no live state. Task acceptance is evaluated separately.
 
 .. currentmodule:: embodichain.lab.task_program.integrations.evidence.observation_requests
 
 .. autosummary::
+
+   resolve_hold_observation_condition
+   held_observation_request
+   sampled_support_window
+   directional_observation_axes
+
+.. autofunction:: resolve_hold_observation_condition
+
+.. autofunction:: held_observation_request
+
+.. autofunction:: sampled_support_window
+
+.. autofunction:: directional_observation_axes
+
+
+embodichain.lab.task_program.integrations.evidence.placement_evidence
+---------------------------------------------------------------------
+
+Offline runtime adapters validate exact raw acquisition and execution identities, then return normalized facts. They import no normative frontend and acquire no live state.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.evidence.placement_evidence
+
+.. autosummary::
+
+   normalize_placement_evidence
+   normalize_pour_release_evidence
+   validate_placement_declaration
+
+.. autofunction:: normalize_placement_evidence
+
+.. autofunction:: normalize_pour_release_evidence
+
+.. autofunction:: validate_placement_declaration
+
+
+embodichain.lab.task_program.integrations.evidence.transport_evidence
+---------------------------------------------------------------------
+
+Offline runtime adapters validate exact raw acquisition and execution identities, then return normalized facts. They import no normative frontend and acquire no live state.
+
+.. currentmodule:: embodichain.lab.task_program.integrations.evidence.transport_evidence
+
+.. autosummary::
+
+   CoordinatedTransportEvidenceBinding
+   normalize_coordinated_transport_evidence
+
+.. autoclass:: CoordinatedTransportEvidenceBinding
+   :members:
+
+.. autofunction:: normalize_coordinated_transport_evidence
 
    held_observation_request
    resolve_hold_observation_condition
@@ -4885,29 +5501,388 @@ Offline held-object adapters validate exact execution and acquisition identities
 
 .. autofunction:: resolve_hold_observation_condition
 
-Cable material geometry
------------------------
 
-Pure tensor helpers observe ordered segment endpoints and stable cable material
-coordinates. Slip compares the same material point in the moving tool frame.
+embodichain.data_pipeline.real2sim.demo_skill
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. currentmodule:: embodichain.compute.geometry.cable
+Task-specific demonstration contracts preserve raw observed state, submitted commands, manually confirmed interaction events and source mappings. Prepared assets require measured execution qualification before they can count as successful episodes.
+
+.. currentmodule:: embodichain.data_pipeline.real2sim.demo_skill
 
 .. autosummary::
 
-   sample_cable_material
-   cable_endpoints
-   cable_grasp_slip
+   RobotDemonstration
+   DemoSkillRole
+   DemoSkillPhase
+   DemoSkillEvent
+   DemoSkillConstraint
+   DemoSkillSpec
+   DemoSkillArtifact
+   DemoSkillReference
+   build_demo_skill
+   decode_demo_skill_spec
+   retarget_demo_skill
 
-.. automodule:: embodichain.compute.geometry.cable
-   :members: sample_cable_material, cable_endpoints, cable_grasp_slip
+.. autoclass:: RobotDemonstration
+   :members:
 
-I2RT YAM model and assets
--------------------------
+.. autoclass:: DemoSkillRole
+   :members:
 
-The model package loads configuration lazily; asset discovery can import the
-versioned dataset independently of robot construction.
+.. autoclass:: DemoSkillPhase
+   :members:
 
-.. autoclass:: embodichain_robots.i2rt.yam.YamI2rtCfg
-.. autoclass:: embodichain_robots.i2rt.yam.cfg.YamI2rtCfg
-.. autoclass:: embodichain_robots.i2rt.yam.assets.YamI2rt
+.. autoclass:: DemoSkillEvent
+   :members:
+
+.. autoclass:: DemoSkillConstraint
+   :members:
+
+.. autoclass:: DemoSkillSpec
+   :members:
+
+.. autoclass:: DemoSkillArtifact
+   :members:
+
+.. autoclass:: DemoSkillReference
+   :members:
+
+.. autofunction:: build_demo_skill
+
+.. autofunction:: decode_demo_skill_spec
+
+.. autofunction:: retarget_demo_skill
+
+
+embodichain.data_pipeline.real2sim.demo_skill_io
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Portable, bounded JSON/NPZ bundles retain the raw recording separately from explicitly adapted nominal references. Loading verifies content identity and reconstructs preparation without simulation.
+
+.. currentmodule:: embodichain.data_pipeline.real2sim.demo_skill_io
+
+.. autosummary::
+
+   save_robot_demonstration
+   load_robot_demonstration
+   save_demo_skill
+   load_demo_skill
+
+.. autofunction:: save_robot_demonstration
+
+.. autofunction:: load_robot_demonstration
+
+.. autofunction:: save_demo_skill
+
+.. autofunction:: load_demo_skill
+
+
+embodichain.lab.sim.atomic_skills.demo_skill
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Scene grounding and per-observation monitoring for one demonstration invocation. Evidence must match the physical row and observation timestamp; absent contact or task evidence cannot establish success.
+
+.. currentmodule:: embodichain.lab.sim.atomic_skills.demo_skill
+
+.. autosummary::
+
+   DemoSkillObservation
+   DemoSkillEvidenceProvider
+   DemoSkillMonitor
+   DemoSkillMotionProvider
+
+.. autoclass:: DemoSkillObservation
+   :members:
+
+.. autoclass:: DemoSkillEvidenceProvider
+   :members:
+
+.. autoclass:: DemoSkillMonitor
+   :members:
+
+.. autoclass:: DemoSkillMotionProvider
+   :members:
+
+
+embodichain.lab.sim.atomic_skills.primitives.execute_demo_skill
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+One Atomic Skill executes a pinned demonstration asset through the ordinary planning, command, tracking and effect-verification lifecycle. Logical roles are resolved through the selected robot profile and scene integration.
+
+.. currentmodule:: embodichain.lab.sim.atomic_skills.primitives.execute_demo_skill
+
+.. autosummary::
+
+   DemoSkillGoal
+   ExecuteDemoSkill
+
+.. autoclass:: DemoSkillGoal
+   :members:
+
+.. autoclass:: ExecuteDemoSkill
+   :members:
+
+Image semantic planning
+-----------------------
+
+See :doc:`/features/generative_sim/task_engine` for the image-to-graph workflow
+and :doc:`embodichain/embodichain.gen_sim.task_engine` for the curated image
+planning and CLI API entries. Plans use the full canonical call catalog and
+retain explicit pending bindings before runtime scene/robot integration.
+
+Deferred image semantic planning
+--------------------------------
+
+Image-plan validation is documented in
+:doc:`embodichain/embodichain.gen_sim.task_engine`. Semantic validity remains
+independent of physical acceptance and runtime readiness.
+
+Semantic Call planning catalog
+------------------------------
+
+The following declarations are JSON-only and import without a simulator. They
+are shared by the image planner and configured Semantic Call lowerers; live
+lowering still validates calibrated scene and route bindings.
+
+.. currentmodule:: embodichain.lab.task_program.language.semantic_contracts
+
+.. autofunction:: semantic_planning_catalog
+
+.. autofunction:: validate_semantic_call_payload
+
+
+Parallel-jaw hand configuration and composition
+----------------------------------------------
+
+Concrete hand configs own physical values. The lightweight catalog resolver
+returns detached declarations; collision surfaces and runtime TCP validation
+are constructed only by their explicit asset/runtime consumers.
+
+embodichain.data.urdf
+~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.data.urdf
+
+.. autosummary::
+   :nosignatures:
+
+   materialize_urdf_subtree
+
+.. autofunction:: materialize_urdf_subtree
+
+embodichain.lab.sim.cfg.gripper
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.lab.sim.cfg.gripper
+
+.. autosummary::
+   :nosignatures:
+
+   ParallelJawGripperCfg
+
+.. autoclass:: ParallelJawGripperCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+embodichain.lab.sim.utility.gripper_binding
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.lab.sim.utility.gripper_binding
+
+.. autosummary::
+   :nosignatures:
+
+   prepare_robot_grippers
+
+.. autofunction:: prepare_robot_grippers
+
+embodichain.robot_registry
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.robot_registry
+
+.. autosummary::
+   :nosignatures:
+
+   resolve_gripper_defaults
+
+.. autofunction:: resolve_gripper_defaults
+
+embodichain_robots
+~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain_robots
+
+.. autosummary::
+   :nosignatures:
+
+   FrankaPandaHandCfg
+   DHPGI14080Cfg
+   CobotMagicV100GripperCfg
+   PikaGripperCfg
+   TianjiMarvinGripperCfg
+   RobotiqArg2F85Cfg
+   RobotiqArg2F140Cfg
+
+.. autoclass:: FrankaPandaHandCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+.. autoclass:: DHPGI14080Cfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+.. autoclass:: CobotMagicV100GripperCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+.. autoclass:: PikaGripperCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+.. autoclass:: TianjiMarvinGripperCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+.. autoclass:: RobotiqArg2F85Cfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+.. autoclass:: RobotiqArg2F140Cfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+embodichain_robots.agilex.cobotmagic.gripper.cfg
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain_robots.agilex.cobotmagic.gripper.cfg
+
+.. autosummary::
+   :nosignatures:
+
+   CobotMagicV100GripperCfg
+
+.. autoclass:: CobotMagicV100GripperCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+embodichain_robots.agilex.pika.cfg
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain_robots.agilex.pika.cfg
+
+.. autosummary::
+   :nosignatures:
+
+   PikaGripperCfg
+
+.. autoclass:: PikaGripperCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+embodichain_robots.dh_robotics.pgi_140_80.cfg
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain_robots.dh_robotics.pgi_140_80.cfg
+
+.. autosummary::
+   :nosignatures:
+
+   DHPGI14080Cfg
+
+.. autoclass:: DHPGI14080Cfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+embodichain_robots.franka.hand.cfg
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain_robots.franka.hand.cfg
+
+.. autosummary::
+   :nosignatures:
+
+   FrankaPandaHandCfg
+
+.. autoclass:: FrankaPandaHandCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+embodichain_robots.robotiq.arg2f140.cfg
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain_robots.robotiq.arg2f140.cfg
+
+.. autosummary::
+   :nosignatures:
+
+   RobotiqArg2F140Cfg
+
+.. autoclass:: RobotiqArg2F140Cfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+embodichain_robots.robotiq.arg2f85.cfg
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain_robots.robotiq.arg2f85.cfg
+
+.. autosummary::
+   :nosignatures:
+
+   RobotiqArg2F85Cfg
+
+.. autoclass:: RobotiqArg2F85Cfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+embodichain_robots.tianji.marvin.gripper.cfg
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain_robots.tianji.marvin.gripper.cfg
+
+.. autosummary::
+   :nosignatures:
+
+   TianjiMarvinGripperCfg
+
+.. autoclass:: TianjiMarvinGripperCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+URDF mounting and name normalization
+-----------------------------------
+
+Single-component standalone hands can request an explicit fixed mounting root.
+Physical and semantic bindings share the assembler's native naming policy.
+
+.. currentmodule:: embodichain.lab.sim.cfg.urdf
+
+.. autosummary::
+   :nosignatures:
+
+   URDFCfg
+
+.. autoclass:: URDFCfg
+   :members:
+   :no-index:
+
+.. currentmodule:: embodichain.toolkits.urdf_assembly.name_normalizer
+
+.. autosummary::
+   :nosignatures:
+
+   NameNormalizer
+
+.. autoclass:: NameNormalizer
+   :members:
+
+
+embodichain.lab.sim.cfg parallel-jaw facade
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.lab.sim.cfg
+
+.. autoclass:: ParallelJawGripperCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :no-index:

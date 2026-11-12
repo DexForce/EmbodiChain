@@ -44,12 +44,89 @@ from embodichain.utils.math import matrix_from_quat
 DUCK_PATH = "ToyDuck/toy_duck.glb"
 TABLE_PATH = "ShopTableSimple/shop_table_simple.ply"
 CHAIR_PATH = "Chair/chair.glb"
+# These small scenes do not inspect pixels; leave room for all tested links.
+TEST_SCENE_NODE_CAPACITY = 512
+TEST_VIEWPORT_SIZE = 64
+
 NUM_ARENAS = 2
 Z_TRANSLATION = 2.0
 # Newton stores a full inertia tensor and converts it to/from the principal-frame
 # diagonal in float32. The two quaternion rotations introduce small round-trip
 # error for imported meshes whose COM frame is not axis-aligned.
 NEWTON_INERTIA_ROUND_TRIP_ATOL = 2e-4
+
+
+@pytest.mark.requires_sim
+@pytest.mark.gpu
+@pytest.mark.parametrize("backend", ["default", "newton"])
+def test_static_friction_preserves_selected_rows_across_rebuild(backend: str) -> None:
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            device="cuda:0",
+            num_envs=3,
+            physics_cfg=physics_cfg_for_backend(backend),
+        )
+    )
+    surface = extra = None
+    try:
+        surface = sim.add_rigid_object(
+            RigidObjectCfg(uid="surface", body_type="static", shape=CubeCfg())
+        )
+        sim.prepare()
+        expected = surface.get_friction().clone()
+        selected = torch.tensor([0.7, 0.2], device=sim.device)
+        surface.set_friction(selected, env_ids=[2, 0])
+        expected[[2, 0]] = selected
+        torch.testing.assert_close(surface.get_friction(), expected)
+        torch.testing.assert_close(surface.get_friction([2, 0]), selected)
+        extra = sim.add_rigid_object(
+            RigidObjectCfg(uid="extra", shape=CubeCfg(), init_pos=(0, 0, 2))
+        )
+        sim.prepare()
+        torch.testing.assert_close(surface.get_friction(), expected)
+    finally:
+        surface = extra = None
+        sim.destroy(exit_process=False)
+        SimulationManager.flush_cleanup_queue()
+
+
+@pytest.mark.requires_sim
+@pytest.mark.gpu
+@pytest.mark.parametrize("backend", ["default", "newton"])
+@pytest.mark.parametrize("change", ["disabled", "geometry"])
+def test_ground_configuration_changes_live_collision(backend: str, change: str) -> None:
+    from dexsim.spawn import GeometryDesc
+
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            device="cuda:0",
+            physics_cfg=physics_cfg_for_backend(backend),
+        )
+    )
+    falling = None
+    try:
+        if change == "disabled":
+            sim.configure_ground_plane_collision(enabled=False)
+        else:
+            sim.configure_ground_plane_collision(geometry=GeometryDesc.cube((2, 2, 1)))
+        falling = sim.add_rigid_object(
+            RigidObjectCfg(
+                uid="falling", shape=CubeCfg(size=(0.1, 0.1, 0.1)), init_pos=(0, 0, 1)
+            )
+        )
+        sim.prepare()
+        sim.update(step=240)
+        height = float(falling.get_local_pose()[0, 2])
+        if change == "disabled":
+            assert height < -1.0
+        else:
+            assert height == pytest.approx(0.55, abs=0.02)
+    finally:
+        falling = None
+        sim.destroy(exit_process=False)
+        SimulationManager.flush_cleanup_queue()
 
 
 @pytest.mark.parametrize("device", ["cpu", "cuda:0"])
@@ -152,6 +229,9 @@ class BaseRigidObjectTest:
             device=device,
             num_envs=NUM_ARENAS,
             physics_cfg=physics_cfg_for_backend(physics),
+            scene_node_capacity=TEST_SCENE_NODE_CAPACITY,
+            width=TEST_VIEWPORT_SIZE,
+            height=TEST_VIEWPORT_SIZE,
         )
         self.sim = SimulationManager(config)
         self.physics = physics
@@ -498,17 +578,18 @@ class BaseRigidObjectTest:
             self.duck.uid not in self.sim.asset_uids
         ), "Duck UID still present after removal"
 
-    def test_set_physical_visible(self):
+    def test_visibility_controls(self):
+        """Collision debug and render visibility accept both toggle states."""
+        self.table.set_visible(visible=True)
+        self.table.set_visible(visible=False)
+        # Restore the initial render state before creating collision overlays.
+        self.table.set_visible(visible=True)
         self.table.set_physical_visible(
             visible=True,
             rgba=(0.1, 0.1, 0.9, 0.4),
         )
         self.table.set_physical_visible(visible=True)
         self.table.set_physical_visible(visible=False)
-
-    def test_set_visible(self):
-        self.table.set_visible(visible=True)
-        self.table.set_visible(visible=False)
 
     def test_body_data(self):
         """Test the body_data property for dynamic objects."""
@@ -1173,13 +1254,11 @@ class BaseRigidObjectTest:
     def teardown_method(self):
         """Clean up resources after each test method."""
         self.sim.destroy()
+        # Drop test-owned views before queued child/parent destruction runs.
+        self.__dict__.clear()
         import embodichain.lab.sim as om
 
         om.SimulationManager.flush_cleanup_queue()
-        self.__dict__.clear()
-        import gc
-
-        gc.collect()
 
 
 class TestRigidObjectCPU(BaseRigidObjectTest):
@@ -1289,6 +1368,9 @@ class TestRigidObjectNewtonMujoco:
                 device="cuda",
                 num_envs=1,
                 physics_cfg=physics_cfg,
+                scene_node_capacity=TEST_SCENE_NODE_CAPACITY,
+                width=TEST_VIEWPORT_SIZE,
+                height=TEST_VIEWPORT_SIZE,
             )
         )
         self.obj = self.sim.add_rigid_object(

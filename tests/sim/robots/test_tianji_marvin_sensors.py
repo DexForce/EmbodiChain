@@ -29,7 +29,7 @@ from embodichain.robot_registry import resolve_robot_cfg
 from embodichain.lab.sim.material import VisualMaterialCfg
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain_robots import TianjiMarvinCfg
-from embodichain.utils.utility import load_config
+from embodichain.lab.gym.utils.composition import resolve_gym_components
 
 
 @pytest.mark.gpu
@@ -150,7 +150,10 @@ class TestDexforceW1PikaSensors(TestTianjiMarvinSensors):
             / "extensions/embodichain_tasks/configs/components/embodiments"
             / "dexforce_w1_030_pika.yaml"
         )
-        payload = load_config(component)["simulation"]
+        physical = resolve_gym_components(
+            {"embodiment": {"component": str(component)}}, base_dir=component.parent
+        )
+        payload = physical.config["robot"]
         payload.update(
             enable_sensor=True,
             uid="camera_test_w1_pika",

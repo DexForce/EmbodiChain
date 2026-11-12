@@ -1,33 +1,20 @@
 [build-system]
-# Use the legacy setuptools backend so the existing `setup.py` (which dynamically
-# detects torch and builds C/CUDA extensions via torch.utils.cpp_extension)
-# is still executed during build. This is a minimal, non-opinionated pyproject
-# that modernizes the package while preserving the custom extension build steps.
+# setup.py supplies package discovery, source mappings and bundled resources.
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
-
-# Note:
-# - Building the torch extensions requires a working PyTorch installation
-#   available at build time (or FORCE_CUDA=1 for cross-compilation). We keep
-#   the extension-building logic in `setup.py` because it needs to import
-#   `torch` at build time to select CUDA/Cpp extension classes.
-# - If you prefer a pure PEP 517 build without a legacy setup.py, we can
-#   refactor the extension-building logic into a custom build backend plugin.
 
 [project]
 name = "embodichain"
 description = "An end-to-end, GPU-accelerated, and modular platform for building generalized Embodied Intelligence."
 readme = "README.md"
 authors = [ { name = "EmbodiChain Developers" } ]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dynamic = ["version"]
 
 # Core install dependencies (kept from requirements.txt).
 dependencies = [
-  # Solver contact reports use the DexSim 0.6 API.
-  # Cable qualification: DexVerse dev pipeline 77665, commit 505ee1b5.
-  "dexsim_engine==0.6.0.dev11491",
+  "dexsim_engine==0.6.0rc1",
   # DexSim and LeRobot require different OpenCV distributions sharing cv2.
   # Keep their bindings on the same release to avoid mixed Python/native APIs.
   "opencv-python==4.12.0.88; python_version < '3.12'",
@@ -54,7 +41,7 @@ dependencies = [
   "ortools",
   "prettytable",
   "psutil>=5.9",
-  "black==26.3.1",
+  "black==26.10.1",
   "fvcore",
   "h5py",
   "tensordict>=0.13,<0.15; python_version < '3.12'",
@@ -128,7 +115,7 @@ version = { file = ["VERSION"] }
 
 [tool.setuptools]
 include-package-data = false
-license-files = ["LICEN[CS]E*", "COPYING*", "NOTICE*", "AUTHORS*", "licenses/*.txt"]
+license-files = ["LICENSE", "NOTICE", "licenses/*.txt"]
 
 [tool.black]
 

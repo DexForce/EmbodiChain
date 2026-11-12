@@ -26,7 +26,7 @@ import numpy as np
 import torch
 
 from embodichain.data_pipeline.real2sim import SkillMotionPrototype
-from embodichain.lab.sim.atomic_actions import JointPositionTarget
+from embodichain.lab.sim.atomic_skills import JointPositionTarget
 from embodichain.lab.sim.motion.expansion.real2sim_collision import (
     BoxCollisionBody,
     CollisionPhase,
@@ -42,15 +42,18 @@ from embodichain.lab.sim.motion.expansion.gripper_contact import (
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.motion.refinement import MotionRefinementCfg
-    from embodichain.lab.sim.atomic_actions import (
-        ActionPlan,
-        AtomicActionEngine,
+    from embodichain.lab.sim.atomic_skills import (
+        SkillPlan,
+        AtomicSkillEngine,
         PlanTransform,
         PlanningContext,
-        ResolvedActionRequest,
+        ResolvedSkillRequest,
     )
     from embodichain.lab.sim.objects import Robot
     from embodichain.lab.task_program.runtime.expansion import TaskProgramPlanRequest
+    from embodichain.lab.task_program.integrations.expansion import (
+        CombinedTaskProgramExpansionFactory,
+    )
 
 __all__ = ["TabletopPrototypeCollisionValidator", "TabletopCollisionGuardFactory"]
 
@@ -85,12 +88,12 @@ def _support_errors(
 
 
 def _semantic_release_pose(
-    request: ResolvedActionRequest, context: PlanningContext
+    request: ResolvedSkillRequest, context: PlanningContext
 ) -> np.ndarray:
     """Resolve the requested object pose independently of approximate IK/FK."""
-    from embodichain.lab.sim.atomic_actions.goals import resolve_pose_goal
-    from embodichain.lab.sim.atomic_actions.primitives.place import PlaceGoal
-    from embodichain.lab.sim.atomic_actions.trajectory_ops import resolve_pose_target
+    from embodichain.lab.sim.atomic_skills.goals import resolve_pose_goal
+    from embodichain.lab.sim.atomic_skills.primitives.place import PlaceGoal
+    from embodichain.lab.sim.atomic_skills.trajectory_ops import resolve_pose_target
 
     if not isinstance(request.goal, PlaceGoal):
         raise ValueError("source-backed tabletop Place requires a direct PlaceGoal")
@@ -435,9 +438,9 @@ class TabletopPrototypeCollisionValidator:
 
     def validate(
         self,
-        request: ResolvedActionRequest,
+        request: ResolvedSkillRequest,
         context: PlanningContext,
-        plan: ActionPlan,
+        plan: SkillPlan,
     ) -> SampledCollisionReport:
         """Check source identity, contact permissions and sampled geometry."""
         if context.batch_size != 1 or plan.joint_trajectory is None:
@@ -573,9 +576,9 @@ class TabletopPrototypeCollisionValidator:
 
     def __call__(
         self,
-        request: ResolvedActionRequest,
+        request: ResolvedSkillRequest,
         context: PlanningContext,
-        plan: ActionPlan,
+        plan: SkillPlan,
     ) -> bool:
         """Implement the Task Program plan-transform collision callback."""
         return self.validate(request, context, plan).accepted
@@ -598,6 +601,7 @@ class TabletopCollisionGuardFactory:
         validator: TabletopPrototypeCollisionValidator,
         delegate: object | None = None,
         *,
+        call_indices: tuple[int, ...] | None = None,
         velocity_limits: Sequence[float] | None = None,
         acceleration_limits: Sequence[float] | None = None,
         ik_smoothing_trigger_fraction: float | None = None,
@@ -624,6 +628,16 @@ class TabletopCollisionGuardFactory:
             raise ValueError(
                 "velocity and acceleration limits must be supplied together"
             )
+        if call_indices is not None and (
+            type(call_indices) is not tuple
+            or not call_indices
+            or len(set(call_indices)) != len(call_indices)
+            or any(type(index) is not int or index < 0 for index in call_indices)
+        ):
+            raise ValueError(
+                "guard call_indices must be unique nonnegative occurrences"
+            )
+        self._call_indices = None if call_indices is None else frozenset(call_indices)
         self._velocity_limits = (
             None
             if velocity_limits is None
@@ -704,8 +718,41 @@ class TabletopCollisionGuardFactory:
 
         return MappingProxyType(dict(self._phase_samples))
 
+    def prepare_planning_context(
+        self,
+        request: TaskProgramPlanRequest,
+        context: PlanningContext,
+        *,
+        engine: AtomicSkillEngine,
+    ) -> PlanningContext:
+        """Forward explicit delegate preparation without changing source ownership.
+
+        Args:
+            request: Grounded occurrence selected by the Task Program.
+            context: Source planning observation before any trajectory is built.
+            engine: Exact engine that owns planning resources.
+
+        Returns:
+            Delegate-prepared context, or the unchanged context without a delegate.
+        """
+        prepare = getattr(self.delegate, "prepare_planning_context", None)
+        return context if prepare is None else prepare(request, context, engine=engine)
+
+    @property
+    def expansion_trace_provider(self) -> CombinedTaskProgramExpansionFactory | None:
+        """Expose the existing combined recipe trace when composing that factory."""
+        from embodichain.lab.task_program.integrations.expansion import (
+            CombinedTaskProgramExpansionFactory,
+        )
+
+        return (
+            self.delegate
+            if isinstance(self.delegate, CombinedTaskProgramExpansionFactory)
+            else None
+        )
+
     def create_plan_transform(
-        self, request: TaskProgramPlanRequest, *, engine: AtomicActionEngine
+        self, request: TaskProgramPlanRequest, *, engine: AtomicSkillEngine
     ) -> PlanTransform:
         """Build one call's validator and optional expansion transform."""
         downstream = (
@@ -713,6 +760,12 @@ class TabletopCollisionGuardFactory:
             if self.delegate is None
             else self.delegate.create_plan_transform(request, engine=engine)
         )
+
+        if (
+            self._call_indices is not None
+            and request.analysis_call_index not in self._call_indices
+        ):
+            return downstream
 
         def checked(resolved, context, plan):
             motion_metrics = None

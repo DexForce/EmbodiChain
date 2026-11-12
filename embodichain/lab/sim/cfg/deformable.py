@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import MISSING
+from dataclasses import MISSING, field
 from typing import Any
 from typing import Literal, Sequence
 
@@ -29,6 +29,7 @@ from embodichain.utils import configclass
 
 from ..shapes import MeshCfg
 from .asset import ObjectBaseCfg
+from .source import UsdSourceCfg, _usd_source_from_value
 
 __all__: list[str] = []
 
@@ -217,6 +218,9 @@ class DeformableObjectCfg(ObjectBaseCfg):
     shape: MeshCfg = MeshCfg()
     """Render and source-mesh configuration."""
 
+    source: UsdSourceCfg | None = field(default=None, kw_only=True)
+    """Optional authored USD particle-set source; source physics is retained."""
+
     particle_radius: float | None = None
     """Newton particle radius; ``None`` uses the active solver default."""
 
@@ -235,6 +239,7 @@ class DeformableObjectCfg(ObjectBaseCfg):
     """Whether Newton reports source-mesh quality validation warnings."""
 
     def __post_init__(self) -> None:
+        self.source = _usd_source_from_value(self.source)
         if isinstance(self.shape, Mapping):
             self.shape = _mesh_cfg_from_dict(self.shape)
         visual_shape = getattr(self, "visual_shape", None)
@@ -261,6 +266,11 @@ class DeformableObjectCfg(ObjectBaseCfg):
         )
         cfg.init_pos, cfg.init_rot = pose.init_pos, pose.init_rot
         cfg.init_local_pose = pose.init_local_pose
+        if cfg.source is not None and (
+            ("init_local_pose" in init_dict and init_dict["init_local_pose"] is None)
+            or not {"init_pos", "init_rot", "init_local_pose"}.intersection(init_dict)
+        ):
+            cfg.init_local_pose = None
         return cfg
 
 
@@ -301,6 +311,10 @@ class VolumeDeformableObjectCfg(DeformableObjectCfg):
                 raise TypeError("tetrahedra must contain integer indices.")
             if raw.ndim != 2 or raw.shape[1:] != (4,) or len(raw) == 0:
                 raise ValueError("tetrahedra must have non-empty shape (M, 4).")
+            if np.any(raw < 0) or np.any(raw > np.iinfo(np.int32).max):
+                raise ValueError(
+                    "tetrahedra indices must be nonnegative and fit int32."
+                )
             self.tetrahedra = raw.astype(np.int32)
 
 

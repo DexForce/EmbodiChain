@@ -14,11 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Download pinned YAM assets and reproduce the cable demo's derived robot.
+"""Download pinned YAM assets and reproduce the versioned dual-arm model.
 
 Run with Python dependencies coacd==1.0.14, trimesh, numpy and scipy. Original
 MIT assets are fetched from a fixed robosimstudio commit. Generated files are
-verified against the robot used to qualify RouteTheCable before installation.
+verified against the published YamI2rtV1 bundle before installation.
 """
 
 from __future__ import annotations

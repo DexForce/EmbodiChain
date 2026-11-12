@@ -145,36 +145,6 @@ def test_cli_returns_failure_for_an_invalid_asset_directory(
     assert "Asset preparation failed" in capsys.readouterr().err
 
 
-def test_robot_uses_cache_and_accepts_an_explicit_offline_urdf(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from embodichain_robots.i2rt.yam import cfg as yam_i2rt
-
-    cached = tmp_path / "YamI2rt/yam_i2rt.urdf"
-    requested = []
-
-    def resolve(path):
-        requested.append(path)
-        return str(cached)
-
-    monkeypatch.setattr(yam_i2rt, "get_data_path", resolve)
-    with pytest.raises(FileNotFoundError, match="data download --name YamI2rt"):
-        yam_i2rt.YamI2rtCfg.from_dict({})
-    custom = tmp_path / "offline.urdf"
-    custom.write_text('<robot name="fixture"/>')
-    cfg = yam_i2rt.YamI2rtCfg.from_dict({"fpath": str(custom)})
-    assert cfg.fpath == str(custom)
-    assert cfg._pk_urdf_path == str(custom)
-    assert cfg.urdf_cfg.components["arm"]["urdf_path"] == str(custom)
-    assert requested == ["YamI2rt/yam_i2rt.urdf"]
-    cached.parent.mkdir()
-    cached.write_text(custom.read_text())
-    cfg = yam_i2rt.YamI2rtCfg.from_dict({})
-    assert cfg.fpath is None
-    assert cfg._pk_urdf_path == str(cached)
-    assert cfg.urdf_cfg.components["arm"]["urdf_path"] == str(cached)
-
-
 def test_archive_is_reproducible_and_preserves_license_and_sources(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

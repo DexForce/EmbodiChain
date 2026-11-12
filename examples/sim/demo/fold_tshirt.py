@@ -367,9 +367,7 @@ def initialize_simulation(
                     "particle_edge_contact_buffer_size": 128,
                     "particle_collision_detection_interval": -1,
                 },
-                "collision_options": {
-                    "soft_contact_margin": 0.008,
-                },
+                "collision_options": {"soft_contact_margin": 0.008},
             },
             # DexUni owns its particle-shape contacts and collision detection.
             collision_cfg=None,

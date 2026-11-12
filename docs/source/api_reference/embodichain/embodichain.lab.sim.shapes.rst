@@ -8,9 +8,9 @@ Overview
 
 Geometry configuration objects used to build collision, visual, and deformable
 simulation shapes. :class:`ShapeCfg` is the common base; :class:`MeshCfg`,
-:class:`CubeCfg`, :class:`SphereCfg`, and :class:`CylinderCfg` describe meshes,
-boxes, spheres, and cylinders respectively. Cylinders use full height along
-local Z and native cylinder collision geometry. :class:`MeshCollisionCfg` explicitly selects
+:class:`CubeCfg`, :class:`PlaneCfg`, :class:`SphereCfg`, and :class:`CylinderCfg`
+describe boxes, planes, spheres and cylinders. Cylinders use full height along
+local Z. :class:`MeshCollisionCfg` explicitly selects
 the collision representation and its cooking settings, while
 :class:`LoadOption` controls mesh loading.
 
@@ -18,6 +18,10 @@ the collision representation and its cooking settings, while
 surface deformables, the array-backed form preserves node order for particle
 flags and kinematic trajectories. Volume deformables generate a separate
 tetrahedral simulation mesh during voxelization.
+
+``PlaneCfg`` creates an infinite collision plane on a static rigid object.
+Its ``size`` controls only the visual width and length. The plane's local normal
+is +Z; the rigid object's initial pose sets its world position and orientation.
 
 .. rubric:: Type aliases
 
@@ -34,6 +38,7 @@ tetrahedral simulation mesh during voxelization.
    LoadOption
    MeshCollisionCfg
    MeshCfg
+   PlaneCfg
    ShapeCfg
    SphereCfg
 
@@ -58,6 +63,12 @@ tetrahedral simulation mesh during voxelization.
    :exclude-members: __init__, copy, replace, to_dict, validate
 
 .. autoclass:: CubeCfg
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :exclude-members: __init__, copy, replace, to_dict, validate
+
+.. autoclass:: PlaneCfg
    :members:
    :undoc-members:
    :show-inheritance:
