@@ -19,7 +19,10 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 
 import gymnasium as gym
 import numpy as np
@@ -32,12 +35,30 @@ from embodichain.lab.gym.utils.gym_utils import config_to_cfg
 from embodichain.lab.sim import SimulationManager
 from embodichain.utils.utility import load_config
 
-pytestmark = [pytest.mark.requires_sim, pytest.mark.gpu]
+pytestmark = [pytest.mark.subprocess_sim, pytest.mark.gpu]
 
 
 def test_imported_scene_completes_verified_pick_place_and_resets(
     tmp_path: Path,
 ) -> None:
+    env = dict(os.environ, EMBODICHAIN_SIM_EXIT_PROCESS="0")
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import runpy,sys; from pathlib import Path; "
+            "scope=runpy.run_path(sys.argv[1]); "
+            "scope['_exercise_imported_scene_verified_pick_place'](Path(sys.argv[2]))",
+            str(Path(__file__).resolve()),
+            str(tmp_path),
+        ],
+        env=env,
+        check=True,
+        timeout=180,
+    )
+
+
+def _exercise_imported_scene_verified_pick_place(tmp_path: Path) -> None:
     source = tmp_path / "scene.usda"
     stage = Usd.Stage.CreateNew(str(source))
     stage.SetDefaultPrim(UsdGeom.Xform.Define(stage, "/World").GetPrim())

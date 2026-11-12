@@ -8,6 +8,10 @@ uses the repository's `@configclass` and loads only when constructing a run.
 
 The Sphinx [model-service guide](../../../docs/source/features/generative_sim/model_services.md)
 provides the user-facing configuration and workflow overview.
+For service topology, deployment, role configuration and live validation, read
+the [model-service deployment guide](DEPLOYMENT.md).
+The versioned [HTTP protocol](spec/v1/README.md) lets operators deploy any model
+or serving framework without depending on a prescribed server repository.
 
 ## Existing installations
 
@@ -62,6 +66,15 @@ win over the selected dotenv (`EMBODICHAIN_ENV_FILE` or the default GenSim `.env
 Unrelated `OPENAI_*` values never fill missing fields in an explicit profile.
 Unused roles require no credentials, connection or health check. The example's
 optional job-control profile is only needed when using Gradio's remote panel.
+An OpenAI-compatible profile may omit its API key for a trusted local endpoint.
+
+Validate configuration without provider requests, then initialize services and
+run their available health checks:
+
+```bash
+embodichain gensim services validate --config model_services.json --env-file services.env
+embodichain gensim services doctor --config model_services.json --env-file services.env
+```
 
 Python configuration overrides the JSON section. A supplied legacy caller or
 client overrides its role. The Python `model=` override applies to interpretation, image grounding and
@@ -88,6 +101,62 @@ with GenSimServices(cfg) as services:
     candidates = TaskAgent(services=services).generate("example", "Pick up the cup")
     records = services.records()
 ```
+
+## Configure DeepSeek independently
+
+The shared [configuration example](model_services.example.json) includes an
+optional `deepseek` profile alongside `task_chat` and `scene_chat`. Its default
+role bindings use the existing `OPENAI_*` profiles. Add the `deepseek` profile
+to your operator-owned configuration, or copy the shared example to
+`model_services.json`, and supply its independent settings in your deployment
+dotenv:
+
+```dotenv
+DEEPSEEK_API_KEY="your-deepseek-key"
+DEEPSEEK_MODEL="deepseek-flash"
+DEEPSEEK_BASE_URL="https://api.deepseek.com"
+```
+
+Bind individual chat roles to `deepseek` to choose their API independently.
+For DeepSeek across all Task, Scene and Asset chat roles, update these entries
+within `model_services.roles`, retaining the existing non-chat entries:
+
+```json
+{
+  "task_interpretation": "deepseek",
+  "task_image_grounding": "deepseek",
+  "task_semantic_planning": "deepseek",
+  "graph_localization": "deepseek",
+  "scene_understanding": "deepseek",
+  "scene_edit": "deepseek",
+  "scene_asset_orientation": "deepseek",
+  "scene_asset_dimensions": "deepseek",
+  "asset_orientation": "deepseek",
+  "asset_dimensions": "deepseek",
+  "asset_semantics": "deepseek",
+  "asset_physics": "deepseek"
+}
+```
+
+Use a vision-capable model for roles receiving images; the default
+`deepseek-flash` supports these inputs. See
+[DeepSeek's vision guide](https://api-docs.deepseek.com/guides/vision/).
+The profile disables thinking and sets a 16,384-token output budget through
+adapter `options`. Structured callers select JSON mode per request.
+
+Select your single configuration file, validate it, and run a live-model workflow:
+
+```bash
+export EMBODICHAIN_MODEL_SERVICES_CONFIG="$PWD/model_services.json"
+export EMBODICHAIN_ENV_FILE="$PWD/services.env"
+embodichain gensim services validate
+embodichain gensim task plan --image table.png --instruction "Put the cube on the table" --output outputs/deepseek-plan
+```
+
+Only roles bound to `deepseek` require the `DEEPSEEK_*` variables. Supplying those
+variables alone leaves the original API selected. To switch roles back, restore
+their `task_chat`/`scene_chat` bindings in the same file; image, segmentation,
+geometry and articulation profiles retain their own settings.
 
 ## Implement an adapter
 
@@ -122,6 +191,17 @@ registry = ServiceRegistry.defaults()
 registry.register("my_chat", lambda profile: MyChat(), roles=("task_interpretation",))
 # Bind that ID in a profile and pass registry=registry to GenSimServices.
 ```
+
+CLI users can ship the same registration through an installed entry point whose
+name equals the configured adapter ID:
+
+```toml
+[project.entry-points."embodichain.gensim_service_adapters"]
+my_chat = "my_package.gensim:register"
+```
+
+Only entry points selected by bound profiles are imported. JSON configuration
+cannot name arbitrary Python modules.
 
 Factories receive resolved profile mappings, including timeout/attempt defaults.
 A factory must clean up resources if construction fails before returning. Adapters

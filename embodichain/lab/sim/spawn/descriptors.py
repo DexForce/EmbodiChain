@@ -88,6 +88,7 @@ from embodichain.lab.sim.shapes import (
     CubeCfg,
     MeshCfg,
     MeshCollisionCfg,
+    PlaneCfg,
     SphereCfg,
 )
 from embodichain.utils import logger
@@ -1484,6 +1485,8 @@ def _compile_joint_properties(
             "max_velocity",
             "friction",
             "armature",
+            "limit_stiffness",
+            "limit_damping",
         ):
             configured = getattr(source, property_name)
             if configured is None:
@@ -1504,6 +1507,10 @@ def _compile_joint_properties(
                 default_desc, newton_desc = joint_properties[joint_name]
                 if property_name == "armature":
                     joint_common[joint_name]["armature"] = scalar
+                elif property_name == "limit_stiffness":
+                    newton_desc.limit_ke = scalar
+                elif property_name == "limit_damping":
+                    newton_desc.limit_kd = scalar
                 elif property_name == "max_effort":
                     default_desc.max_force = scalar
                     joint_common[joint_name]["effort_limit"] = scalar
@@ -2021,6 +2028,16 @@ def _compile_geometry(
             raise ValueError("CubeCfg.size must contain three positive values.")
         return GeometryDesc.cube(size), CollisionApproximation.NONE, 1, "coacd"
 
+    if isinstance(shape, PlaneCfg):
+        if cfg.body_type != "static":
+            raise ValueError("PlaneCfg collision requires body_type='static'.")
+        size = tuple(float(value) for value in shape.size)
+        if len(size) != 2 or any(
+            not math.isfinite(value) or value <= 0 for value in size
+        ):
+            raise ValueError("PlaneCfg.size must contain two finite positive values.")
+        return GeometryDesc.plane(size), CollisionApproximation.NONE, 1, "coacd"
+
     if isinstance(shape, SphereCfg):
         if shape.radius <= 0:
             raise ValueError("SphereCfg.radius must be positive.")
@@ -2033,7 +2050,7 @@ def _compile_geometry(
 
     raise NotImplementedError(
         f"RigidObjectCfg shape {type(shape).__name__!r} is not supported by "
-        "the Spawn converter; supported shapes are MeshCfg, CubeCfg, and SphereCfg."
+        "the Spawn converter; supported shapes are MeshCfg, CubeCfg, PlaneCfg, and SphereCfg."
     )
 
 

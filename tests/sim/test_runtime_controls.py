@@ -252,6 +252,9 @@ def test_initial_mimic_defaults_and_targets_match_articulation_reset(
     articulation._data = SimpleNamespace(
         is_newton_backend=True, articulation_view=MagicMock()
     )
+    articulation._spawn_result = SimpleNamespace(
+        dynamics_capabilities=lambda: SimpleNamespace(supported_control_fields=None)
+    )
     articulation._mimic_info = SimpleNamespace(
         mimic_id=np.array([0]),
         mimic_parent=np.array([1]),

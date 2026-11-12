@@ -10,6 +10,8 @@ embodichain gensim scene edit --scene outputs/scene --prompt "Move the cup to th
 embodichain gensim scene expand --scene outputs/scene --config layouts.yaml
 embodichain gensim scene preview --usd-file outputs/scene/scene_usd/scene.usda --viser
 embodichain gensim task plan --image table.png --instruction "Put the cup on the tray" --output outputs/task
+embodichain gensim services validate --config model_services.json --env-file services.env
+embodichain gensim services doctor --config model_services.json --env-file services.env
 embodichain gensim ui --host 127.0.0.1 --port 7860
 ```
 
@@ -48,6 +50,18 @@ is not restored by preview.
 The UI launcher uses the active Python interpreter, preserves the selected SDK
 import root, and retains the existing UI's process cleanup and authentication.
 Install the `embodichain[gensim]` extra for its optional dependencies.
+Model implementations and serving frameworks remain operator-selected; see the
+[deployment and BYOS guide](services/DEPLOYMENT.md) and the versioned
+[HTTP protocol](services/spec/v1/README.md).
+
+External whole-scene generators use the independent
+`embodichain.gensim_scene_providers` contract. Public operations in
+`embodichain.gen_sim.workflow` publish a Task Plan and scene requirements, retain
+durable provider job identities, validate a provider-neutral generated scene,
+publish a structured qualification report, and prepare an execution-ready
+deployment. The default remains the in-package Scene Engine; an external provider
+must be selected explicitly and never silently falls back. Simulation execution
+continues through the ordinary task runner.
 
 ## Generate, bind and execute
 

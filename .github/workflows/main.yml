@@ -460,6 +460,8 @@ jobs:
 
       - name: Upload test phase metrics
         if: always()
+        # Diagnostic uploads must not turn passing tests into a failed test gate.
+        continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: test-phase-metrics

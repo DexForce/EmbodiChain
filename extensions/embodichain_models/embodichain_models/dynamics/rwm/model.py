@@ -26,7 +26,10 @@ from __future__ import annotations
 
 from contextlib import contextmanager, nullcontext
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .kinematic import KinematicWorldModel
 
 import torch
 from torch import nn
@@ -35,6 +38,7 @@ from .robot_state import (
     integrate_robot_state,
     robot_state_features,
     robot_state_increment,
+    robot_state_error,
 )
 from embodichain.learning.models.mlp import MLP
 from embodichain.learning.models.normalizer import EmpiricalNormalizer
@@ -223,6 +227,16 @@ class RobotWorldModel(nn.Module):
             robot_state_increment(state, next_state).reshape(-1, self.increment_dim)
         )
 
+    def state_error(
+        self, predicted: torch.Tensor, target: torch.Tensor
+    ) -> torch.Tensor:
+        """Measure prediction error in the target body's local frame."""
+        return robot_state_error(predicted, target)
+
+    def error_scale(self) -> torch.Tensor:
+        """Return measured increment standard deviations before the objective floor."""
+        return self.output_normalizer.standard_deviation
+
     def get_extra_state(self) -> dict[str, Any]:
         """Return model layout and action identity saved beside tensor weights.
 
@@ -242,7 +256,7 @@ class RobotWorldModel(nn.Module):
 
 
 @contextmanager
-def frozen_world_model(model: RobotWorldModel) -> Iterator[None]:
+def frozen_world_model(model: RobotWorldModel | KinematicWorldModel) -> Iterator[None]:
     """Freeze parameters and statistics while retaining state/action autograd.
 
     Args:

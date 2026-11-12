@@ -17,7 +17,11 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 import zipfile
 
 import numpy as np
@@ -277,6 +281,40 @@ def test_plain_zip_is_not_a_standard_scene(tmp_path):
             pass
 
 
+def test_usd_inventory_and_evaluation_component_coexist(scene_files, tmp_path):
+    import yaml
+    from embodichain.lab.gym.utils.composition import resolve_gym_components
+
+    evaluation = {
+        "graph": {
+            "roots": ["near"],
+            "rules": {
+                "near": {
+                    "kind": "near_target",
+                    "bindings": {
+                        "position": "rigid_objects/box/pose",
+                        "target": "rigid_objects/reference/pose",
+                    },
+                    "params": {"tolerance": 0.1},
+                }
+            },
+        }
+    }
+    (tmp_path / "evaluation.yaml").write_text(yaml.safe_dump(evaluation))
+    resolved = resolve_gym_components(
+        {
+            "physics": "default",
+            "usd_scene": _recipe(scene_files["usd"]).to_dict(),
+            "task_program": {},
+            "evaluation": {"component": "evaluation.yaml"},
+        },
+        base_dir=tmp_path,
+    )
+    assert resolved.evaluation == evaluation
+    assert resolved.usd_scene_inventory["resource_uids"]["/World/frame/box"] == "target"
+    assert "evaluation" not in resolved.config
+
+
 def test_component_paths_binding_types_and_default_ground(
     scene_files, tmp_path, monkeypatch
 ):
@@ -390,10 +428,31 @@ def test_changed_source_rejects_environment_before_world(scene_files, monkeypatc
     factory.assert_not_called()
 
 
-@pytest.mark.requires_sim
+@pytest.mark.subprocess_sim
 @pytest.mark.gpu
 @pytest.mark.parametrize("kind", ["usd", "usdz", "zip"])
 def test_native_import_reset_and_package_lifetime(scene_files, kind):
+    """NoRender owns a fresh engine independently of CI's Hybrid test engine."""
+    env = dict(os.environ, EMBODICHAIN_SIM_EXIT_PROCESS="0")
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import json,runpy,sys; from pathlib import Path; "
+            "scope=runpy.run_path(sys.argv[1]); "
+            "scope['_exercise_native_import_reset_and_package_lifetime']"
+            "({k:Path(v) for k,v in json.loads(sys.argv[2]).items()},sys.argv[3])",
+            str(Path(__file__).resolve()),
+            json.dumps({k: str(v) for k, v in scene_files.items()}),
+            kind,
+        ],
+        env=env,
+        check=True,
+        timeout=120,
+    )
+
+
+def _exercise_native_import_reset_and_package_lifetime(scene_files, kind):
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
     from embodichain.lab.sim.cfg import RenderCfg
 

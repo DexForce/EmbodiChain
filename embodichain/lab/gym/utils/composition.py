@@ -37,6 +37,7 @@ class ResolvedGymComponents:
         embodiment_skill_profile: Optional detached profile for the public Task
             Program deployment composer.
         scene_config: Optional physical scene projection for semantic binding checks.
+        evaluation: Optional owned evaluation component declaration.
         usd_scene_inventory: Optional preflighted USD source/resource identity.
 
     Resolver calls own their nested data independently. The mappings remain
@@ -48,6 +49,7 @@ class ResolvedGymComponents:
     scene_selected: bool
     embodiment_skill_profile: dict[str, object] | None
     scene_config: dict[str, object] | None
+    evaluation: dict[str, object] | None = None
     usd_scene_inventory: dict[str, object] | None = None
 
     def validate_scene_bindings(self, binding: Mapping[str, object]) -> None:

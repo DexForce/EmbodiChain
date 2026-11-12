@@ -599,7 +599,6 @@ def test_backend_property_groups_track_dexsim_spawn_descriptors() -> None:
         "use_native_mesh_loader",
         "convert_to_heightfield",
         "heightfield_resolution",
-        "preserve_mesh_transform",
         "max_hull_vertices",  # Mesh cooking is outside rigid-body physics.
     }
     assert (
@@ -1606,6 +1605,13 @@ def test_nrd_rejects_invalid_settings(field_name: str, invalid_value: object) ->
     """Malformed NRD values fail before entering the native renderer."""
     with pytest.raises(ValueError, match=field_name):
         sim_cfg.NRDCfg(**{field_name: invalid_value})
+
+
+@pytest.mark.parametrize("constructor", [None, "sah", "cubql"])
+def test_newton_mesh_bvh_constructor_round_trip(constructor: str | None) -> None:
+    cfg = NewtonPhysicsCfg(mesh_bvh_constructor=constructor)
+    assert cfg.to_dict()["mesh_bvh_constructor"] == constructor
+    assert cfg.to_dexsim_cfg(gpu_id=0).mesh_bvh_constructor == constructor
 
 
 def test_urdf_cfg_preserves_positional_constructor_with_keyword_mounting_flag():
