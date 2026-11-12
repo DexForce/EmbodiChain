@@ -21,6 +21,20 @@ import { join } from "node:path";
 import type { ViewerData } from "../src/types";
 
 const root = fileURLToPath(new URL("../.browser-fixtures", import.meta.url));
+test("unified canvas opens measured evidence by clicking the action itself", async ({
+  page,
+}) => {
+  await page.goto(pathToFileURL(join(root, "unified.html")).href);
+  const node = page.locator('button[data-key="call:step_01__call_02"]');
+  await node.click();
+  await expect(page.locator(".rv-detail")).toContainText(
+    "fixture measured failure",
+  );
+  await expect(page.locator(".rv-state")).toContainText("Not evaluated");
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".rv-detail")).toHaveCount(0);
+  await expect(node).toBeFocused();
+});
 const cases = [
   "static-absent",
   "static-spec",

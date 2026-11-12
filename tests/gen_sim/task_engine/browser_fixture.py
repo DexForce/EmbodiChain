@@ -387,6 +387,56 @@ def build_fixtures(output: Path, reference: Path | None = None) -> None:
         )
         assert match is not None
         data = json.loads(match[2])
+        if name == "failed":
+            from embodichain.gen_sim.task_spec import TaskSpec
+            from embodichain.gen_sim.task_spec.publication import freeze_task_spec
+            from embodichain.gen_sim.task_engine.semantic_graph_html import (
+                _viewer_document,
+            )
+
+            review_spec = freeze_task_spec(
+                TaskSpec.from_dict(spec),
+                image_sha256="a" * 64,
+                image_ref="source.png",
+                role_descriptions={"role_001": "can"},
+                interpretation=[],
+                generalization=[],
+            )
+            call_id = graph["nodes"][1]["id"]
+            review = dict(
+                spec=review_spec,
+                pairing={
+                    "role_entities": {"role_001": ["a"]},
+                    "goal_groups": spec["metadata"]["goal_sources"],
+                    "milestone_groups": spec["metadata"]["milestone_sources"],
+                },
+                pending=0,
+                attempt={
+                    "status": "failed",
+                    "physical": "unavailable",
+                    "verdict": "not_evaluated",
+                    "calls": {
+                        call_id: {
+                            "success": False,
+                            "start_step": 2,
+                            "end_step": 7,
+                            "issues": [
+                                {
+                                    "kind": "session_failed",
+                                    "message": "fixture measured failure",
+                                    "timestamp": 1.0,
+                                }
+                            ],
+                            "env_ids": [0],
+                            "successes": [False],
+                            "active": [True],
+                        }
+                    },
+                },
+            )
+            (output / "unified.html").write_text(
+                _viewer_document({**data, "review": review})
+            )
         (output / f"{name}.html").write_text(html)
         (output / f"{name}.json").write_text(
             json.dumps(data, ensure_ascii=False, indent=2)

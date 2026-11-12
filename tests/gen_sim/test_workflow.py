@@ -279,6 +279,34 @@ def test_workflow_generates_binds_and_preserves_actual_execution_verdict(
     assert manifest["task_spec_verdict"] == "not_evaluated"
     receipt = json.loads((run_cfg.output / "execution_report.json").read_text())
     assert receipt["all_success"] is success
+    import re
+
+    def review_payload(path):
+        return json.loads(
+            re.search(
+                r'<script id="graph-data" type="application/json">(.*?)</script>',
+                path.read_text(),
+                re.S,
+            )[1]
+        )["review"]
+
+    assert (
+        review_payload(run_cfg.output / "task_review.html")["attempt"]["status"]
+        == receipt["status"]
+    )
+    assert (
+        review_payload(run_cfg.output / "task" / "semantic_task_graph.html")["attempt"]
+        is None
+    )
+    from embodichain.gen_sim.task_engine._review import write_review
+
+    feedback_path = run_cfg.output / "attempt_feedback.json"
+    feedback = json.loads(feedback_path.read_text())
+    feedback["attempt_id"] = "stale"
+    feedback_path.write_text(json.dumps(feedback))
+    alternate = run_cfg.output / "stale-review.html"
+    write_review(run_cfg.output / "task", alternate, run_cfg.output)
+    assert "error" in review_payload(alternate)["attempt"]
     unbound = json.loads((run_cfg.output / "task/run_manifest.json").read_text())
     assert unbound["execution_ready"] is False
     binding = yaml.safe_load(

@@ -302,6 +302,13 @@ def _run(cfg: _RunCfg, *, services: GenSimServices | None = None) -> dict[str, A
                 else "failed"
             )
             update(manifest["status"])
+            from .task_engine._review import write_review
+
+            try:
+                write_review(task, output / "task_review.html", output)
+            except (ValueError, OSError, KeyError, TypeError) as error:
+                manifest["review_error"] = str(error)
+                write_run_json(output / "run_manifest.json", manifest)
     except BaseException as error:
         manifest["status"] = (
             "interrupted" if isinstance(error, KeyboardInterrupt) else "failed"

@@ -103,6 +103,13 @@ Use `load_task_plan` to verify the publication. Scene providers receive
 `scene_agent_messages.json`. Expansion clients read `expansion_requirements.json`
 or project a frozen document against supported dimensions in Python.
 
+Open `task/semantic_task_graph.html` for the plan and `task_review.html` beside
+the run manifest for measured call evidence. Click an action in the canvas
+to inspect its step interval and recorded failure events. Existing runs can
+publish a fresh offline view with
+`embodichain gensim task view --plan RUN/task --run RUN --output review.html`.
+Omit `--run` to review only the frozen task and graph.
+
 To revise graph calls against a published spec and its original grounding:
 
 ```bash

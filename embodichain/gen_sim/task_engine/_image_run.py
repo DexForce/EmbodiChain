@@ -36,7 +36,7 @@ from .image_planning import (
     SemanticPlanningError,
 )
 from .orchestration.workflow_artifacts import WorkflowRunArtifacts, write_run_json
-from .semantic_graph_html import render_semantic_task_graph_html
+from .semantic_graph_html import _graph_data, _viewer_document
 
 __all__ = ["plan_image_task"]
 
@@ -182,7 +182,11 @@ _plan_image_task = plan_image_task
 
 
 def _image_preview(
-    result: dict[str, Any], image_path: Path, summary: dict[str, Any]
+    result: dict[str, Any],
+    image_path: Path,
+    summary: dict[str, Any],
+    *,
+    attempt: dict[str, Any] | None = None,
 ) -> str:
     from PIL import Image
 
@@ -195,6 +199,13 @@ def _image_preview(
                 uid = result["image_grounding"]["bindings"][ref["reference_id"]][0]
                 names.setdefault(uid, ref["reference"])
     with Image.open(image_path) as source:
+        overview = source.convert("RGB")
+        overview.thumbnail((640, 480))
+        buffer = BytesIO()
+        overview.save(buffer, "JPEG")
+        source_preview = (
+            "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode()
+        )
         for item in result["image_grounding"]["objects"]:
             if item["bbox"] is None:
                 assets.append(
@@ -233,7 +244,7 @@ def _image_preview(
                     "cutout_source": f"source image crop: {item['bbox']}",
                 }
             )
-    return render_semantic_task_graph_html(
+    data = _graph_data(
         result["semantic_task_graph"],
         task_spec=result["task_spec"],
         validation=result["semantic_graph_validation"],
@@ -245,3 +256,12 @@ def _image_preview(
             "wall_source": summary["elapsed_scope"],
         },
     )
+    if "task_spec_v1" in result:
+        data["review"] = {
+            "source_image": source_preview,
+            "spec": result["task_spec_v1"],
+            "pairing": result["plan_coverage"],
+            "attempt": attempt,
+            "pending": summary["pending_bindings"],
+        }
+    return _viewer_document(data)

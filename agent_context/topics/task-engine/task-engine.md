@@ -100,6 +100,13 @@ semantic review and never qualify physical execution.
 
 ## Read-only graph display
 
+Version-2 plans and revisions embed the frozen v1 specification and its pairing
+report in the offline viewer. The grouped action canvas links milestones, final
+goals and roles. Native run review is published separately at `task_review.html`;
+`gensim task view --plan PLAN [--run RUN] --output NEW.html` also renders
+existing artifacts. Only matching attempt identities and execution-report digests
+supply native call evidence. Archived graph-only views retain their existing renderer.
+
 `semantic_graph_html.py` renders an existing graph and optional TaskSpec,
 recomputed coverage and recorded execution report. `reporting.py` owns the
 read-only report validator; `bundle_spec.py` recognizes explicit TaskSpec absence.

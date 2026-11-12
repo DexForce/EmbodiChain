@@ -64,6 +64,10 @@ _DOMAINS = {
         ),
     },
     "task": {
+        "view": (
+            "embodichain.gen_sim.task_engine._review:main",
+            "Render a verified offline plan or execution review.",
+        ),
         "revise": (
             "embodichain.gen_sim.task_engine.cli:_revise",
             "Validate and publish a graph revision against a frozen TaskSpec.",

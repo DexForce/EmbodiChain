@@ -295,7 +295,12 @@ def revise_task_plan(
             **revised,
             **{
                 k: _load_json(target / (k + ".json"), k)
-                for k in ("task_spec", "task_candidates", "image_grounding")
+                for k in (
+                    "task_spec",
+                    "task_spec_v1",
+                    "task_candidates",
+                    "image_grounding",
+                )
             },
         }
         summary = _load_json(target / "run_manifest.json", "summary")
