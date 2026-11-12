@@ -3128,20 +3128,6 @@ its explicit hold or mask-only representation and cannot promote failed rows.
    PlanningRecovery
    PlanningBudget
 
-embodichain.lab.sim.atomic_skills.primitives.grasp_cable
---------------------------------------------------------
-
-Plan a contact-only pinch, close and lift. The caller verifies measured lift
-and material-point retention after execution.
-
-.. currentmodule:: embodichain.lab.sim.atomic_skills.primitives.grasp_cable
-
-.. autosummary::
-
-   CableGraspGoal
-   GraspCableOptions
-   GraspCable
-
 embodichain.lab.sim.atomic_skills.primitives
 ---------------------------------------------
 
@@ -3150,6 +3136,22 @@ embodichain.lab.sim.atomic_skills.primitives
 .. autosummary::
 
    BUILTIN_SKILL_TYPES
+
+embodichain.lab.sim.atomic_skills.primitives.pick_up
+--------------------------------------------------
+
+PickUp shares motion assembly between rigid-object pickup and contact-only
+pickup. Contact goals require explicit physical verification and retain no
+fixed object-to-tool relation.
+
+.. currentmodule:: embodichain.lab.sim.atomic_skills.primitives.pick_up
+
+.. autosummary::
+
+   GraspGoal
+   ContactGraspGoal
+   PickUp
+   PickUpOptions
 
 embodichain.lab.sim.atomic_skills.requirements
 -----------------------------------------------

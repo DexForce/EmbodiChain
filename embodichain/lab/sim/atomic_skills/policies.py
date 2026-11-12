@@ -75,6 +75,13 @@ class MotionPolicy:
     plan_opts: PlanOptions | None = None
     """Optional typed planner-specific options."""
 
+    interpolate_position_step: float = field(default=0.002, kw_only=True)
+    """Cartesian sampling distance in metres, forwarded to motion generation.
+
+    PickUp contact motions also use this distance to sample their lift on the
+    control grid. Joint-limit qualification can lengthen the resulting path.
+    """
+
     velocity_limit: float | None = None
     """Optional scalar speed request, capped by effective Robot joint limits."""
 
@@ -205,9 +212,13 @@ class MotionPolicy:
             raise ValueError("velocity_targets must be auto or zero.")
         if self.sample_count < 2:
             raise ValueError("sample_count must be at least 2.")
-        for name in ("velocity_limit", "acceleration_limit"):
+        for name in (
+            "velocity_limit",
+            "acceleration_limit",
+            "interpolate_position_step",
+        ):
             value = getattr(self, name)
-            if value is None:
+            if value is None and name != "interpolate_position_step":
                 if (
                     name == "velocity_limit"
                     or self.strategy == "motion_gen"
@@ -301,6 +312,7 @@ class MotionPolicy:
             interpolation_dt=interpolation_dt,
             is_linear=cartesian_linear or cartesian_keyframes,
             preserve_cartesian_samples=cartesian_linear,
+            interpolate_position_step=self.interpolate_position_step,
             cartesian_path_sampler=cartesian_path_sampler,
             interpolation_mode=self.interpolation_mode,
             ik_seed_mode=self.ik_seed_mode,

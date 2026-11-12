@@ -188,9 +188,6 @@ from .tracking import (
     WholeBodyPoseTrackingState,
 )
 from .primitives import (
-    CableGraspGoal,
-    GraspCable,
-    GraspCableOptions,
     AssembleGoal,
     AxisAlign,
     AxisAlignGoal,
@@ -203,6 +200,7 @@ from .primitives import (
     CoordinatedPlacementGoal,
     CoordinatedPlacementOptions,
     EndEffectorPoseGoal,
+    ContactGraspGoal,
     GraspGoal,
     HandOver,
     HandOverGoal,
@@ -288,9 +286,6 @@ from .state import (
 )
 
 __all__ = [
-    "CableGraspGoal",
-    "GraspCable",
-    "GraspCableOptions",
     "DemoSkillObservation",
     "DemoSkillEvidenceProvider",
     "DemoSkillMonitor",
@@ -393,6 +388,7 @@ __all__ = [
     "FeedbackTerminalAcceptance",
     "GRASP_COMMAND",
     "GRASP_CAPABILITY",
+    "ContactGraspGoal",
     "GraspGoal",
     "HandOver",
     "HandOverGoal",

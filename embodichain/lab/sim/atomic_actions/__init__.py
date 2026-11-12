@@ -30,9 +30,6 @@ import sys as _sys
 import warnings as _warnings
 
 __all__ = [
-    "CableGraspGoal",
-    "GraspCable",
-    "GraspCableOptions",
     "DemoSkillObservation",
     "DemoSkillEvidenceProvider",
     "DemoSkillMonitor",
@@ -135,6 +132,7 @@ __all__ = [
     "FeedbackTerminalAcceptance",
     "GRASP_COMMAND",
     "GRASP_CAPABILITY",
+    "ContactGraspGoal",
     "GraspGoal",
     "HandOver",
     "HandOverGoal",

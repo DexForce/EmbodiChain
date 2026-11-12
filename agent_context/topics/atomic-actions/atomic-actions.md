@@ -96,13 +96,17 @@ gate, or held-object guard. Evidence acquisition stays outside planning and
 does not mutate symbolic task state; verification results are the only path
 that commits or invalidates observed effects.
 
-`GraspCable` directly extends `AtomicSkill`: its caller
-supplies an observed material-coordinate pinch pose, and its plan declares no
-rigid attachment. An optional stationary closed-command hold belongs to the
-`close` phase on the control grid; its end precedes lifting and is the routing
-host's grasp-reference sampling boundary. The routing expert validates actual
-lift and tool-frame material slip; numerical cable observations live in
-`compute/geometry/cable.py`.
+`PickUp` accepts a rigid `GraspGoal` or an explicit `ContactGraspGoal`.
+The rigid path projects its existing held-object relation. Contact pickup
+requires a free task-state resource, shares the approach/close/lift command
+assembly and declares `EffectVerificationRequirement(kind="contact_grasp")`
+without a rigid held-object update. Hosts supply physical evidence such as
+material-point lift and tool-frame retention before accepting that boundary.
+The routing host samples its material reference at the end of the `close`
+phase, including `grasp_settle_steps`, before lifting. Native contact IK paths
+use `MotionPolicy.interpolate_position_step` for lift sampling on the control
+grid; joint limits can lengthen them. Numerical material-coordinate geometry
+belongs to `compute/geometry/cable.py`.
 
 `MoveHeldObject` accepts ordered object-pose waypoints without rebasing the
 verified grasp. Its goal optionally frees only the final world yaw; default

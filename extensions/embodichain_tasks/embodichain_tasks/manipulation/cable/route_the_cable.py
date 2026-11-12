@@ -51,9 +51,9 @@ from embodichain.lab.sim.atomic_skills import (
     MotionPolicy,
     SceneSnapshot,
 )
-from embodichain.lab.sim.atomic_skills.primitives.grasp_cable import (
-    CableGraspGoal,
-    GraspCableOptions,
+from embodichain.lab.sim.atomic_skills.primitives.pick_up import (
+    ContactGraspGoal,
+    PickUpOptions,
 )
 from embodichain.lab.sim.atomic_skills.trajectory_ops import build_pose_plan_states
 from embodichain.lab.sim.motion.motion_generator import (
@@ -626,20 +626,25 @@ class RouteTheCableEnv(EmbodiedEnv):
             speed=0.12,
         )
         before = self._point(distance)[0].clone()
-        goal = CableGraspGoal(
-            "cable", distance, self._grasp_pose(distance, side, 0.0115, port=port)
-        )
+        goal = ContactGraspGoal(self._grasp_pose(distance, side, 0.0115, port=port))
         binding = self._engine.bind_control_parts(
-            "grasp_cable",
+            "pick_up",
             {"primary": {"motion": side + "_arm", "grasp": side + "_eef"}},
         )
         plan = self._engine.plan(
             SkillInvocation(
-                skill_id="grasp_cable",
+                skill_id="pick_up",
                 goal=goal,
                 binding=binding,
-                motion_policy=MotionPolicy(sample_count=73),
-                skill_options=GraspCableOptions(close_hold_duration=0.35),
+                motion_policy=MotionPolicy(
+                    sample_count=73, interpolate_position_step=0.05 * self.step_dt
+                ),
+                skill_options=PickUpOptions(
+                    hand_interp_steps=48,
+                    grasp_settle_steps=math.ceil(0.35 / self.step_dt),
+                    lift_height=0.0185,
+                    pre_grasp_distance=0.0,
+                ),
                 control_overrides=(
                     SkillControlOverrides(
                         endpoints={

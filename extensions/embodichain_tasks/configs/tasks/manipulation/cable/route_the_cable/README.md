@@ -128,9 +128,11 @@ stroke beside the first spool sweeps a finger through its rim. These explicit
 waypoints are task geometry: joint interpolation does not provide obstacle
 avoidance, and contact response is not a substitute for a clear commanded path.
 
-- `GraspCable`, `CableGraspGoal` and `GraspCableOptions` are registered Atomic
-  Skills. Planning generates descend/close/lift joint commands on the control
-  grid and declares no rigid-object attachment effect.
+- `PickUp` accepts `ContactGraspGoal` for the observed pinch pose. It shares
+  approach/close/lift command assembly with rigid pickup and requests physical
+  contact verification. The routing host verifies material-point lift and slip.
+  `PickUpOptions` retains the 48-frame close, 0.35-second closed hold and
+  18.5 mm lift; `MotionPolicy` samples the lift at the previous 0.05 m/s grid.
 - `compute.geometry.cable` owns simulator-independent capsule endpoints,
   material-point observations and TCP-relative slip measurement.
 - `RouteTheCableEnv.create_demo_segments()` owns feedback, staged execution and
@@ -181,40 +183,22 @@ spool:
 python -m pytest tests/gym/envs/tasks/test_route_the_cable_cuda.py --run-gpu -m gpu -q
 ```
 
-The 2026-11-12 synchronization with cable framework commit `6a7a29d5d` passed
-735 focused CPU tests and both existing CUDA regressions in separate NoRender
-processes with seed 73. Maximum grasp slip was 6.07 mm in the first-spool case
-and 3.92 mm in the third carry; the latter reported no robot/spool penetration.
-The 12 mm slip and 1 mm penetration limits were retained. The local runtime
-reports DexSim build `a3daf24edd88b489702c32ccffc7ffa405741ab2`, Torch
-2.11.0+cu130, Newton 1.7.0 and Warp 1.17.0 on an RTX 5090. These checks cover
-the first-spool release and third carry through release and retreat. Complete
-channel insertion, multi-seed success rates and reset repeatability require
-separate qualification.
+The contact-pickup migration is covered by 1349 CPU tests spanning the Atomic
+Skill and semantic-planning contracts and by both existing NoRender CUDA
+regressions with seed 73. Maximum grasp slip was 5.26 mm in the first-spool
+case and 4.37 mm in the third carry, with no reported robot/spool penetration
+in the latter. The original 12 mm slip and 1 mm penetration limits are retained.
+The local runtime reports DexSim build `a3daf24edd88b489702c32ccffc7ffa405741ab2`,
+Torch 2.11.0+cu130, Newton 1.7.0 and Warp 1.17.0 on an RTX 5090.
 
-On 2026-11-08 both CUDA regressions passed in separate NoRender processes with
-seed 73, DexSim `0.6.0.dev11491` (dev commit
-`505ee1b5600ca0b3d0a2c8235930e7684283d049`), Newton 1.7.0, MuJoCo/MuJoCo-Warp
-3.15.0, Python 3.12 and an RTX 5090 D v2. Maximum grasp slip was 3.32 mm in
-the first-spool test and 2.81 mm during the third carry, with no reported
-robot/spool penetration during the third carry and retreat. The original
-12 mm slip and 1 mm penetration limits were unchanged. These historical measurements used an internal wheel. The current runtime
-installation follows the published DexSim dependency and locks inherited from
-the cable framework. These tests qualify the first-spool and
-third-carry stages, not the later channel insertion or complete routing episode.
-
-The 2026-10-21 CUDA regressions with seed 73 passed for the first-spool
-release and the third carry through release and retreat. Maximum measured
-grasp slip was 8.72 mm in the first-spool test and 9.60 mm during the third
-carry, with no reported robot/spool penetration during the third carry and
-retreat. This qualifies the retained 50 mm third-carry change through that
-intermediate stage only. Earlier 2026-10-22 development reruns passed both CUDA
-regressions, but qualification of that older branch failed both routing regressions at
-`carry_0`. A separate fresh-process full collector trial at seed
-73 rejected `carry_0` at 12.035 mm slip and 67.38 mm TCP error. Full-episode
-reliability remains unqualified, particularly later channel insertion; the
-new development-build regressions above do not qualify the complete routing demo.
-Success rates across seeds and reset-based batches remain unqualified.
+The synchronized FastRT comparison runs the old `GraspCable` implementation at
+`df8e304f0` and the unified `PickUp(ContactGraspGoal)` with identical seed 73,
+physical configuration, camera and control settings. Its old run stops during
+the left-hand pinch at 12.28 mm episode slip; the new run reaches final settling
+with 6.96 mm slip but fails the strict port predicate after release. Both report
+no robot/spool penetration. These are individual full-task trials. Complete
+channel insertion, multi-seed success rates and repeated-reset reliability
+require further work.
 
 Recordings contain full robot commands and
 `states.cables.cable.segment_state_w`, shaped `(environments, time, 50, 13)` in

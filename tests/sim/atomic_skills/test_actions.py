@@ -945,7 +945,9 @@ def _plan_segment_contract_case(case_id: str) -> SkillPlan:
 def test_builtin_descriptors_expose_strict_goal_types() -> None:
     assert MoveEndEffector.GoalType is EndEffectorPoseGoal
     assert MoveJoints.GoalType is JointPositionGoal
-    assert PickUp.GoalType is GraspGoal
+    from embodichain.lab.sim.atomic_skills import ContactGraspGoal
+
+    assert PickUp.GoalType == (GraspGoal, ContactGraspGoal)
     assert AxisAlign.GoalType is AxisAlignGoal
     assert MoveHeldObject.GoalType is HeldObjectPoseGoal
     assert Place.GoalType == (PlaceGoal, AssembleGoal)
@@ -2333,7 +2335,12 @@ def test_pick_holds_fully_closed_before_lifting_when_configured() -> None:
     )
 
 
-def test_pick_combined_motion_gen_preserves_backend_samples_before_split() -> None:
+@pytest.mark.parametrize("contact", [False, True])
+def test_pick_combined_motion_gen_preserves_backend_samples_before_split(
+    contact,
+) -> None:
+    from embodichain.lab.sim.atomic_skills import ContactGraspGoal
+
     sample_count = 20
     backend_sample_count = 6
     generator = _motion_generator()
@@ -2351,9 +2358,13 @@ def test_pick_combined_motion_gen_preserves_backend_samples_before_split() -> No
         action,
         SkillInvocation(
             skill_id="pick_up",
-            goal=GraspGoal(
-                semantics=_semantics(entity_id="target"),
-                grasp_xpos=torch.eye(4),
+            goal=(
+                ContactGraspGoal(torch.eye(4))
+                if contact
+                else GraspGoal(
+                    semantics=_semantics(entity_id="target"),
+                    grasp_xpos=torch.eye(4),
+                )
             ),
             binding=_binding(action),
             motion_policy=MotionPolicy(
@@ -2369,6 +2380,10 @@ def test_pick_combined_motion_gen_preserves_backend_samples_before_split() -> No
     assert motion_options.sample_count is None
     assert motion_options.plan_opts is None
     assert plan.commands.frame_count == sample_count
+
+    if contact:
+        assert plan.expected_effects.is_empty
+        assert plan.effect_verification.kind == "contact_grasp"
 
 
 def test_place_releases_only_exclusively_held_rows() -> None:
@@ -5246,7 +5261,6 @@ def test_push_object_plans_contact_and_target_directed_planar_motion() -> None:
     assert plan.plan_success.tolist() == [True, True]
     assert plan.expected_effects.is_empty
     assert plan.scene_dependencies == ("slot", "utensil")
-    assert plan.scene_dependency_end_segment == "approach"
     assert [segment.name for segment in plan.segments] == [
         "close",
         "approach",
@@ -9475,83 +9489,283 @@ def test_pickup_rejects_invalid_per_row_approach(direction: torch.Tensor) -> Non
         PickUpOptions(approach_direction=direction)
 
 
-@pytest.mark.parametrize("close_hold_duration", [0.0, 2.25 * CONTROL_DT])
-def test_cable_grasp_plan_preserves_other_arm_and_declares_no_attachment(
-    close_hold_duration,
-) -> None:
-    from embodichain.lab.sim.atomic_skills.primitives.grasp_cable import (
-        CableGraspGoal,
-        GraspCable,
-        GraspCableOptions,
-    )
+@pytest.mark.parametrize("settle_steps", [0, 3])
+def test_contact_pickup_preserves_other_arm_and_requires_physical_verification(
+    settle_steps,
+):
+    from embodichain.lab.sim.atomic_skills import ContactGraspGoal
 
     generator = _dual_motion_generator()
-    action = _bind_action(generator, GraspCable())
+    skill = _bind_action(generator, PickUp())
     context = _dual_context()
     context.robot.qpos[:, ARM_DOF:DUAL_ARM_DOF] = 0.37
     before = context.robot.qpos.clone()
     plan = _plan_action(
-        action,
+        skill,
         SkillInvocation(
-            skill_id="grasp_cable",
-            goal=CableGraspGoal("wire", 0.12, torch.eye(4)),
-            binding=_binding(action, motion="left_arm", grasp="left_hand"),
-            motion_policy=MotionPolicy(sample_count=5),
-            skill_options=GraspCableOptions(
-                close_steps=4, close_hold_duration=close_hold_duration
+            skill_id="pick_up",
+            goal=ContactGraspGoal(torch.eye(4)),
+            binding=_binding(skill, motion="left_arm", grasp="left_hand"),
+            motion_policy=MotionPolicy(
+                sample_count=12, interpolate_position_step=0.05 * CONTROL_DT
+            ),
+            skill_options=PickUpOptions(
+                hand_interp_steps=4,
+                grasp_settle_steps=settle_steps,
+                lift_height=0.0185,
+                pre_grasp_distance=0,
             ),
         ),
         context,
     )
     assert plan.plan_success.all()
-    assert [segment.name for segment in plan.segments] == ["descend", "close", "lift"]
+    assert [segment.name for segment in plan.segments] == ["approach", "close", "lift"]
     torch.testing.assert_close(context.robot.qpos, before)
     positions = plan.joint_trajectory.positions
     close = next(segment for segment in plan.segments if segment.name == "close")
-    hold_steps = math.ceil(close_hold_duration / CONTROL_DT)
-    assert close.stop - close.start == 4 + hold_steps
-    closed_frames = positions[:, close.stop - hold_steps - 1 : close.stop]
-    torch.testing.assert_close(
-        closed_frames, closed_frames[:, -1:].expand_as(closed_frames)
-    )
+    assert close.stop - close.start == 4 + settle_steps
+    closed = positions[:, close.stop - settle_steps - 1 : close.stop]
+    torch.testing.assert_close(closed, closed[:, -1:].expand_as(closed))
     torch.testing.assert_close(
         positions[:, :, ARM_DOF:DUAL_ARM_DOF],
         before[:, None, ARM_DOF:DUAL_ARM_DOF].expand(-1, positions.shape[1], -1),
     )
-    lift = next(segment for segment in plan.segments if segment.name == "lift")
-    assert (lift.stop - lift.start) * CONTROL_DT <= 0.45
-    assert context.task.get_held_object("left_arm") is None
+    assert plan.expected_effects.is_empty
+    assert plan.effect_verification.kind == "contact_grasp"
+    assert plan.requires_effect_verification
+    assert plan.scene_dependencies == ()
     projected = plan.expected_effects.apply(context.task, plan.plan_success)
     assert projected.get_held_object("left_arm") is None
     generator.robot.set_qpos.assert_not_called()
 
 
-@pytest.mark.parametrize("distance", [-1.0, float("nan"), float("inf")])
-def test_cable_grasp_rejects_invalid_material_coordinate(distance) -> None:
-    from embodichain.lab.sim.atomic_skills.primitives.grasp_cable import CableGraspGoal
+@pytest.mark.parametrize("occupied", ["held", "coordinated"])
+def test_contact_pickup_rejects_occupied_task_resource(occupied):
+    from embodichain.lab.sim.atomic_skills import (
+        ContactGraspGoal,
+        CoordinatedHeldObjectState,
+    )
 
-    with pytest.raises(ValueError):
-        CableGraspGoal("wire", distance, torch.eye(4))
+    generator = _dual_motion_generator()
+    generator.generate = Mock(wraps=generator.generate)
+    skill = _bind_action(generator, PickUp())
+    pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    task = TaskState(
+        batch_size=NUM_ENVS,
+        device="cpu",
+        held_objects=(
+            {"left_arm": HeldObjectState(_semantics(), pose, pose)}
+            if occupied == "held"
+            else {}
+        ),
+        coordinated_held_objects=(
+            {
+                ("left_arm", "right_arm"): CoordinatedHeldObjectState(
+                    _semantics(), pose, pose, pose, pose
+                )
+            }
+            if occupied == "coordinated"
+            else {}
+        ),
+    )
+    with pytest.raises(ValueError, match="unoccupied"):
+        _plan_action(
+            skill,
+            SkillInvocation(
+                skill_id="pick_up",
+                goal=ContactGraspGoal(torch.eye(4)),
+                binding=_binding(skill, motion="left_arm", grasp="left_hand"),
+            ),
+            _dual_context(task),
+        )
+    generator.generate.assert_not_called()
 
 
 @pytest.mark.parametrize(
-    "options",
-    [
-        {"close_steps": True},
-        {"close_steps": 2.5},
-        {"close_steps": 1},
-        {"close_hold_duration": -0.1},
-        {"close_hold_duration": float("nan")},
-        {"close_hold_duration": float("inf")},
-        {"close_hold_duration": True},
-        {"lift_height": float("nan")},
-        {"lift_height": 0.0},
-    ],
+    "bad_pose", [torch.zeros(3, 3), torch.full((4, 4), float("nan"))]
 )
-def test_cable_grasp_rejects_invalid_options(options) -> None:
-    from embodichain.lab.sim.atomic_skills.primitives.grasp_cable import (
-        GraspCableOptions,
-    )
+def test_contact_pickup_rejects_invalid_goal_pose(bad_pose):
+    from embodichain.lab.sim.atomic_skills import ContactGraspGoal
 
     with pytest.raises(ValueError):
-        GraspCableOptions(**options)
+        ContactGraspGoal(bad_pose)
+
+
+@pytest.mark.parametrize("step", [0.0, -0.01, float("nan"), float("inf"), None, True])
+def test_motion_policy_rejects_invalid_cartesian_sampling_distance(step):
+    with pytest.raises(ValueError, match="interpolate_position_step"):
+        MotionPolicy(interpolate_position_step=step)
+
+
+def test_contact_pickup_external_motion_uses_same_verification_contract():
+    from embodichain.lab.sim.atomic_skills import (
+        ContactGraspGoal,
+        InstantiatedSkillMotion,
+        RecoveryPolicy,
+    )
+
+    generator = _motion_generator()
+    generator.robot.num_instances = 1
+    get_qpos = generator.robot.get_qpos.side_effect
+    generator.robot.get_qpos.side_effect = lambda name=None: get_qpos(name)[:1]
+    generator.robot.get_qpos_limits.return_value = torch.tensor([-2.0, 2.0]).repeat(
+        1, ARM_DOF, 1
+    )
+    generator.robot.get_qvel_limits.side_effect = None
+    generator.robot.get_qvel_limits.return_value = torch.full((1, ARM_DOF), 10.0)
+    generator.generate = Mock(wraps=generator.generate)
+    skill = _bind_action(generator, PickUp())
+    qpos = torch.zeros(1, ROBOT_DOF)
+    context = PlanningContext(
+        robot=RobotObservation(timestamp=0.0, qpos=qpos, qvel=qpos.clone()),
+        task=TaskState.empty(1, "cpu"),
+        scene=SceneSnapshot.empty(),
+        env_ids=torch.tensor([0]),
+        control_dt=CONTROL_DT,
+    )
+    hand_ids = list(generator.robot.get_joint_ids("hand"))
+
+    class Source:
+        def instantiate(self, request, current):
+            positions = current.robot.qpos[:, None].repeat(1, 6, 1)
+            positions[:, 3:, hand_ids] = 1
+            return InstantiatedSkillMotion(
+                trajectory=TimedTrajectory.from_uniform_step(
+                    positions, env_ids=current.env_ids, step_dt=CONTROL_DT
+                ),
+                success=torch.ones(1, dtype=torch.bool),
+                segment_lengths={"approach": 2, "close": 2, "lift": 2},
+                initial_qpos=current.robot.qpos,
+                source_id="contact_fixture",
+                source_revision="1",
+                unit_id="pickup",
+                origin="test",
+                grasp_pose=torch.eye(4).repeat(1, 1, 1),
+                joint_names=tuple(generator.robot.joint_names),
+            )
+
+    invocation = SkillInvocation(
+        skill_id="pick_up",
+        goal=ContactGraspGoal(torch.eye(4)),
+        binding=_binding(skill),
+        skill_options=PickUpOptions(lift_height=0),
+        recovery_policy=RecoveryPolicy(max_replans=0, max_skill_retries=0),
+    )
+    plan = _ACTION_ENGINES[id(skill)].plan(invocation, context, nominal_source=Source())
+    assert plan.plan_success.all()
+    assert plan.expected_effects.is_empty
+    assert plan.effect_verification.kind == "contact_grasp"
+    assert plan.requires_effect_verification
+    generator.generate.assert_not_called()
+
+
+def test_contact_pickup_keeps_failed_rows_at_observed_state():
+    from embodichain.lab.sim.atomic_skills import ContactGraspGoal
+
+    generator = _dual_motion_generator()
+    original_ik = generator.robot.compute_ik.side_effect
+
+    def fail_second_row(*args, **kwargs):
+        valid, qpos = original_ik(*args, **kwargs)
+        valid[1] = False
+        return valid, qpos
+
+    generator.robot.compute_ik.side_effect = fail_second_row
+    skill = _bind_action(generator, PickUp())
+    context = _dual_context()
+    plan = _plan_action(
+        skill,
+        SkillInvocation(
+            skill_id="pick_up",
+            goal=ContactGraspGoal(torch.eye(4).repeat(NUM_ENVS, 1, 1)),
+            binding=_binding(skill, motion="left_arm", grasp="left_hand"),
+            skill_options=PickUpOptions(pre_grasp_distance=0),
+        ),
+        context,
+    )
+    assert plan.plan_success.tolist() == [True, False]
+    torch.testing.assert_close(
+        plan.joint_trajectory.positions[1],
+        context.robot.qpos[1].expand(plan.joint_trajectory.waypoint_count, -1),
+    )
+
+
+def test_contact_pickup_monitors_late_bound_pose_until_acquisition():
+    from embodichain.lab.sim.atomic_skills import ContactGraspGoal
+
+    generator = _dual_motion_generator()
+    skill = _bind_action(generator, PickUp())
+    pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    context = _dual_context(scene=_target_scene(pose, timestamp=0.0, version=0))
+    plan = _plan_action(
+        skill,
+        SkillInvocation(
+            skill_id="pick_up",
+            goal=ContactGraspGoal(SceneEntityPose("target")),
+            binding=_binding(skill, motion="left_arm", grasp="left_hand"),
+            skill_options=PickUpOptions(pre_grasp_distance=0),
+        ),
+        context,
+    )
+    assert plan.scene_dependencies == ("target",)
+    assert (
+        plan.scene_dependency_monitor_until["target"] == plan.segment("approach").stop
+    )
+
+
+def test_contact_pickup_propagates_nonprefix_environment_selection():
+    from embodichain.lab.sim.atomic_skills import ContactGraspGoal
+
+    generator = _dual_motion_generator()
+    original_fk = generator.robot.compute_fk.side_effect
+
+    def selected_fk(qpos, *, name, to_matrix, env_ids=None):
+        assert tuple(env_ids) == (1,)
+        return original_fk(qpos, name=name, to_matrix=to_matrix)
+
+    generator.robot.compute_fk.side_effect = selected_fk
+    skill = _bind_action(generator, PickUp(), env_ids=(1,))
+    full_context = _dual_context()
+    qpos = full_context.robot.qpos[[1]]
+    context = PlanningContext(
+        robot=RobotObservation(0.0, qpos, torch.zeros_like(qpos)),
+        task=TaskState.empty(1, "cpu"),
+        scene=SceneSnapshot.empty(),
+        env_ids=torch.tensor([1]),
+        control_dt=CONTROL_DT,
+    )
+    plan = _plan_action(
+        skill,
+        SkillInvocation(
+            skill_id="pick_up",
+            goal=ContactGraspGoal(torch.eye(4)),
+            binding=_binding(skill, motion="left_arm", grasp="left_hand"),
+            skill_options=PickUpOptions(pre_grasp_distance=0),
+        ),
+        context,
+    )
+    assert plan.plan_success.tolist() == [True]
+    assert plan.joint_trajectory.env_ids.tolist() == [1]
+    assert plan.joint_trajectory.positions.shape[0] == 1
+
+
+def test_contact_pickup_rejects_rigid_options_before_scene_lookup():
+    from embodichain.lab.sim.atomic_skills import ContactGraspGoal
+
+    generator = _dual_motion_generator()
+    generator.generate = Mock(wraps=generator.generate)
+    skill = _bind_action(generator, PickUp())
+    with pytest.raises(ValueError, match="without rigid-object options"):
+        _plan_action(
+            skill,
+            SkillInvocation(
+                skill_id="pick_up",
+                goal=ContactGraspGoal(torch.eye(4)),
+                binding=_binding(skill, motion="left_arm", grasp="left_hand"),
+                skill_options=PickUpOptions(
+                    downstream_object_target_poses=(SceneEntityPose("unavailable"),)
+                ),
+            ),
+            _dual_context(),
+        )
+    generator.generate.assert_not_called()

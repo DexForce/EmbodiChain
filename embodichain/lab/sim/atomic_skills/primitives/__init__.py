@@ -44,7 +44,7 @@ from .move_held_object import (
 )
 from .move_joints import JointPositionGoal, MoveJoints, MoveJointsOptions
 from .open_door import OpenDoor, OpenDoorGoal, OpenDoorOptions
-from .pick_up import GraspGoal, PickUp, PickUpOptions
+from .pick_up import ContactGraspGoal, GraspGoal, PickUp, PickUpOptions
 from .place import AssembleGoal, Place, PlaceGoal, PlaceOptions
 from .press import (
     Press,
@@ -59,7 +59,6 @@ from .push_object import (
     PushObjectOptions,
     PushObjectToolCalibration,
 )
-from .grasp_cable import CableGraspGoal, GraspCable, GraspCableOptions
 from .pour import Pour, PourGoal, PourOptions, PourTarget
 from .slide import (
     Slide,
@@ -71,7 +70,6 @@ from .twist import Twist, TwistGoal, TwistOptions
 
 BUILTIN_SKILL_TYPES: tuple[type[AtomicSkill], ...] = (
     ExecuteDemoSkill,
-    GraspCable,
     MoveEndEffector,
     MoveJoints,
     PickUp,
@@ -98,9 +96,6 @@ __all__ = [
     "AxisAlignGoal",
     "AxisAlignOptions",
     "BUILTIN_SKILL_TYPES",
-    "CableGraspGoal",
-    "GraspCable",
-    "GraspCableOptions",
     "CoordinatedPickGoal",
     "CoordinatedPickment",
     "CoordinatedPickmentOptions",
@@ -108,6 +103,7 @@ __all__ = [
     "CoordinatedPlacementGoal",
     "CoordinatedPlacementOptions",
     "EndEffectorPoseGoal",
+    "ContactGraspGoal",
     "GraspGoal",
     "HandOver",
     "HandOverGoal",
