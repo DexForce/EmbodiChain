@@ -150,6 +150,12 @@ metadata before/after copying. It never queries
 live state or substitutes a previous frame. Results own values, validity,
 reasons and temporal identities, without another descriptor model.
 
+Use `advance_observation` to feed a compiled `RuleSession` from explicit
+control slots and qualified host captures. The same graph evaluates recorded
+slots through `evaluate_recorded_rules` in bounded chunks. A row retains
+its own result at its recorded boundary. Missing and foreign evidence cannot
+supply measurements or satisfy a predicate.
+
 `export_observation_history` projects the manager's schema onto one owned numeric
 snapshot. Legacy trajectory state views and raw history share that snapshot's
 storage. The default snapshot is CPU; file export can retain its device for
@@ -189,13 +195,19 @@ resources. `ControllerAction` stays wrapped through preprocessing and normally v
 qpos/qvel/qf keys, batch, joint width, floating dtype and device at the direct
 controller boundary. The position-only `expert_trajectory.use_action_manager`
 opt-in instead processes joint targets through the configured policy terms,
-retaining exact FK targets and expert recording schema. Both paths retain the
+retaining exact FK targets and the default expert recording schema. With
+`rollout_action_semantics="policy_request"`, the managed route instead records
+the converted ActionManager request and its trace, independently of expert
+joint width. Unmanaged direct controller commands remain rejected by that
+recording contract. Both paths retain the
 ordinary observation, reward, termination, and rollout lifecycle.
 
-Read final task success before resetting scene/bridge state. A Task Program
-reports success only after its bridge completes normally and combines runtime,
-post-policy and validator acceptance. Segment acceptance and append-only
-dataset persistence are separate contracts; see
+A Task Program's bridge combines runtime, post-policy and segment acceptance.
+For deployments with final predicates, `is_task_success()` combines bridge
+completion with fresh raw physical measurements. The demo executor seals the
+measurement and outcome for each episode row at its terminal boundary.
+Reset-time recording consumes that sealed result before clearing row state.
+Segment acceptance and append-only dataset persistence remain separate; see
 [Task Programs](../task-programs/task-programs.md) and
 [data pipeline](../data-pipeline/data-pipeline.md).
 

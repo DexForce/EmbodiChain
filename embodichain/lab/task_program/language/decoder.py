@@ -26,6 +26,7 @@ from typing import Literal, Protocol, TypeAlias, runtime_checkable
 from .schema import (
     ArticulationJointPositionValidatorCfg,
     BarrierCfg,
+    ConditionValidatorCfg,
     MAX_PROGRAM_DEPTH,
     MAX_REPEAT_COUNT,
     CyclicPoseTargetCfg,
@@ -737,8 +738,17 @@ def _decode_validator(
             "object_lifted",
             "object_relative_position",
             "object_upright",
+            "condition",
         ),
     )
+    if kind == "condition":
+        fields = frozenset({"kind", "ref"})
+        _validate_fields(mapping, allowed=fields, required=fields, path=path)
+        return _construct(
+            ConditionValidatorCfg,
+            path=path,
+            ref=_expect_identifier(mapping["ref"], path=(*path, "ref")),
+        )  # type: ignore[return-value]
     state_validator_types = {
         "object_lifted": (ObjectLiftedValidatorCfg, {"minimum_lift"}),
         "object_relative_position": (

@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TypeAlias
 
+from embodichain.lab.evaluation import CompiledEvaluation
 from embodichain.lab.task_program.semantics.calls import (
     DeclarativeValue,
     HandOver,
@@ -49,6 +50,7 @@ from ..language.schema import (
     MAX_REPEAT_COUNT,
     ArticulationJointPositionValidatorCfg,
     BarrierCfg,
+    ConditionValidatorCfg,
     CyclicPoseTargetCfg,
     PoseTargetCfg,
     SceneRelativePoseTargetCfg,
@@ -540,13 +542,41 @@ class CompiledObjectStateValidator:
         object.__setattr__(self, "object", _copy_scene_ref(self.object))
 
 
+@dataclass(frozen=True, slots=True)
+class _ConditionValues:
+    ref: str
+    kind: str = "condition"
+
+
+@dataclass(frozen=True, slots=True)
+class CompiledConditionValidator:
+    """An immutable reference resolved against the deployment rule library."""
+
+    cfg: ConditionValidatorCfg | _ConditionValues
+    spec: CompiledEvaluation
+    source_path: ConfigPath
+
+    def __post_init__(self) -> None:
+        if type(self.cfg) not in (ConditionValidatorCfg, _ConditionValues):
+            raise TypeError("cfg must be a condition validator.")
+        if (
+            type(self.spec) is not CompiledEvaluation
+            or type(self.source_path) is not tuple
+        ):
+            raise TypeError("Expected a bound rule and a ConfigPath tuple.")
+        cfg = ConditionValidatorCfg(ref=self.cfg.ref, kind=self.cfg.kind)
+        object.__setattr__(self, "cfg", _ConditionValues(cfg.ref))
+
+
 CompiledTaskProgramValidator: TypeAlias = (
     CompiledObjectNearTargetValidator
     | CompiledObjectNearRelativeTargetValidator
     | CompiledArticulationJointPositionValidator
     | CompiledObjectStateValidator
+    | CompiledConditionValidator
 )
 _COMPILED_VALIDATOR_TYPES = (
+    CompiledConditionValidator,
     CompiledObjectStateValidator,
     CompiledObjectNearTargetValidator,
     CompiledObjectNearRelativeTargetValidator,
@@ -841,6 +871,7 @@ _ValidatorTemplate: TypeAlias = (
     | _ObjectNearRelativeTargetValidatorTemplate
     | _ArticulationJointPositionValidatorTemplate
     | _ObjectStateValidatorTemplate
+    | CompiledConditionValidator
 )
 
 
@@ -1255,6 +1286,12 @@ def _iter_segments(
                     source_path=validator.source_path,
                 )
             )
+        elif type(validator) is CompiledConditionValidator:
+            validators.append(
+                CompiledConditionValidator(
+                    validator.cfg, validator.spec, validator.source_path
+                )
+            )
         else:
             raise TypeError(
                 f"Unsupported internal validator template {type(validator).__name__}."
@@ -1527,15 +1564,22 @@ def _materialize_program(
 class TaskProgramCompiler:
     """Compile validated Task Program ASTs through one static scene manifest."""
 
-    def __init__(self, scene_manifest: SceneManifest) -> None:
+    def __init__(
+        self,
+        scene_manifest: SceneManifest,
+        *,
+        evaluation_conditions: Mapping[str, CompiledEvaluation] | None = None,
+    ) -> None:
         """Create one provider-free compiler.
 
         Args:
             scene_manifest: Canonical provider-free scene identity catalog.
+            evaluation_conditions: Bound rules from the selected deployment.
         """
         if type(scene_manifest) is not SceneManifest:
             raise TypeError("scene_manifest must be exactly SceneManifest.")
         self._scene_manifest = scene_manifest
+        self._evaluation_conditions = dict(evaluation_conditions or {})
 
     @classmethod
     def from_scene_registry(cls, registry: SceneRegistry) -> TaskProgramCompiler:
@@ -1877,6 +1921,18 @@ class TaskProgramCompiler:
             validators: list[_ValidatorTemplate] = []
             for index, cfg in enumerate(node.validators):
                 validator_path = (*path, "validators", index)
+                if type(cfg) is ConditionValidatorCfg:
+                    spec = self._evaluation_conditions.get(cfg.ref)
+                    if spec is None:
+                        raise TaskProgramCompileError(
+                            "unknown_evaluation_condition",
+                            (*validator_path, "ref"),
+                            f"Unknown deployment evaluation condition {cfg.ref!r}.",
+                        )
+                    validators.append(
+                        CompiledConditionValidator(cfg, spec, validator_path)
+                    )
+                    continue
                 if type(cfg) is ObjectNearTargetValidatorCfg:
                     if cfg.kind != "object_near_target":
                         raise TaskProgramCompileError(

@@ -139,7 +139,7 @@ from embodichain.lab.sim.spawn.descriptors import (
 from embodichain.lab.sim.spawn.usd import (
     _has_native_gaussian_renders,
     _source_visual_elements,
-    articulation_desc_from_usd,
+    _load_usd_articulation,
     rigid_desc_from_usd,
     visual_desc_from_usd,
 )
@@ -4055,6 +4055,9 @@ class SimulationManager:
                 robot is declared. Mounted cameras are created only when
                 ``cfg.enable_sensor`` is True and attach during preparation.
 
+        USD robots with internal scene constraints must be declared before
+        `prepare()` on the Default backend.
+
         Returns:
             Robot | None: The added robot instance handle, or None if failed.
         """
@@ -4082,7 +4085,7 @@ class SimulationManager:
         if source_path is None:
             if cfg.urdf_cfg is None:
                 logger.log_error(
-                    "Robot configuration must have a valid fpath or urdf_cfg."
+                    "Robot configuration must have a valid source, fpath, or urdf_cfg."
                 )
                 return None
 
@@ -4149,8 +4152,9 @@ class SimulationManager:
         """
         cfg = deepcopy(cfg)
         materials = {}
+        constraints = []
         if _is_usd_path(_asset_file_path(cfg)):
-            descriptor, materials = articulation_desc_from_usd(
+            descriptor, materials, constraints = _load_usd_articulation(
                 cfg,
                 per_env=True,
                 newton_solver_type=self._active_newton_solver_type,
@@ -4178,6 +4182,7 @@ class SimulationManager:
             descriptor,
             facade=facade,
             materials=materials,
+            constraints=constraints,
             configure_source=partial(
                 configure_articulation_desc,
                 cfg=cfg,

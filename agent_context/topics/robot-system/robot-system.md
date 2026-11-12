@@ -17,6 +17,7 @@
 | Bare Franka arm selection and explicit tool assembly | `extensions/embodichain_robots/franka/cfg.py`, `panda.py` → [catalog contracts](catalogs.md) |
 | W1 variants and serialization | `extensions/embodichain_robots/dexforce/w1/` → `cfg.py`, `specs.py`, `hand_specs.py` |
 | Independent Revo1 hand or shared hand asset names | `extensions/embodichain_robots/brainco/revo1/` → `cfg.py`, `_specs.py` |
+| AgiBot G1 preset and pinned GenieSim USD | `extensions/embodichain_robots/agibot/g1/` → `cfg.py`, `assets.py` |
 | Composed robot frames and joint-name mapping | `embodichain/lab/sim/robots/dual_arm.py` |
 | Shared articulation state and drive properties | `embodichain/lab/sim/objects/articulation.py`, `embodichain/lab/sim/cfg/articulation.py` |
 
@@ -83,10 +84,16 @@ Locomotion presets and pure Torch task contracts share backend-free model
 profiles. For source/contract joint ordering, drive ownership and solver limits,
 see [locomotion model profiles](catalogs.md#locomotion-model-profiles).
 
+`AgibotG1` selects the original GenieSim G1_120s USD and exposes its driven
+joints. Each gripper part commands one driver. The
+[USD import contract](../simulation-system/simulation-system.md#ownership) owns
+the closed-loop constraints and backend support.
+
 `preview-robot` accepts a catalog ID or a standalone JSON/YAML RobotCfg file.
 File `class_type` optionally selects the catalog; local asset paths, including
-`urdf_cfg.sensors[*].sensor_source` URDF files in lists or mappings, resolve
-from the file directory. Inline sensor definitions and data IDs are preserved.
+`source.file_path` USD files and `urdf_cfg.sensors[*].sensor_source` URDF
+files in lists or mappings, resolve from the file directory. Inline sensor
+definitions and data IDs are preserved.
 Configuration decoding and validation precede World
 creation. Native and Viser lifecycle, Gizmo/slider target coordination, and
 cleanup belong to [preview activation](../sim-visualization/configuration.md#robot-preview).
@@ -133,6 +140,9 @@ and its [usage notes](../../../extensions/embodichain_tasks/configs/components/e
 frames against that arm's source URDF. It translates assembled names back to
 source link names, keeps chains arm-local, and rejects opposite-arm/unknown
 frames. Mount transforms belong to assembly, not the serial chain.
+Dual-arm composition also copies base `mimic_compliance` entries to each
+side's assembled master joint names, including joints from explicitly bound
+hands.
 
 ## Joint and solver boundaries
 
@@ -171,8 +181,12 @@ against part names (including patterns); it need not configure every part.
 and synchronizes effective robot limits. Check the resolved part and joint
 order before diagnosing an IK algorithm.
 
-Aloha Mini and Marvin use strict Warp SSIK arm defaults on CPU/CUDA; Marvin
-selects seed-local SRS search in both gripper variants. Aloha's torso retains
+Aloha Mini, Marvin and AgiBot G2 use strict Warp SSIK arm defaults on CPU/CUDA.
+Marvin selects seed-local SRS search in both gripper variants; G2's CRS arms
+use the same search with their original 18 mm elbow offset and mounting-frame
+TCPs. The [G2 model notes](../../../extensions/embodichain_robots/agibot/g2/README.md)
+explain why its preset derives geometry from the URDF instead of adding a
+legacy SRS DH calibration. Aloha's torso retains
 its position-only Pytorch solver. Numerical restoration requires a complete
 replacement with the existing root/end/TCP and original Pytorch settings; see
 the [solver guide](../../../docs/source/overview/sim/motion/solvers/ssik_solver.md#selecting-the-numerical-solver).

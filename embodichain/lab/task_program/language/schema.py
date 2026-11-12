@@ -704,6 +704,19 @@ class ArticulationJointPositionValidatorCfg:
         )
 
 
+@configclass
+class ConditionValidatorCfg:
+    """Reference a named rule owned by the deployment's evaluation component."""
+
+    ref: str = MISSING
+    kind: str = "condition"
+
+    def __post_init__(self) -> None:
+        """Validate the rule identifier and discriminator."""
+        _validate_identifier(self.ref, field_name="ref")
+        _validate_kind(self.kind, expected="condition", field_name="kind")
+
+
 ValidatorCfg: TypeAlias = (
     ObjectNearTargetValidatorCfg
     | ObjectNearRelativeTargetValidatorCfg
@@ -711,6 +724,7 @@ ValidatorCfg: TypeAlias = (
     | ObjectLiftedValidatorCfg
     | ObjectRelativePositionValidatorCfg
     | ObjectUprightValidatorCfg
+    | ConditionValidatorCfg
 )
 
 
@@ -866,6 +880,7 @@ _VALIDATOR_TYPES = (
     ObjectNearTargetValidatorCfg,
     ObjectNearRelativeTargetValidatorCfg,
     ArticulationJointPositionValidatorCfg,
+    ConditionValidatorCfg,
 )
 _PROGRAM_NODE_TYPES = (
     SequenceCfg,

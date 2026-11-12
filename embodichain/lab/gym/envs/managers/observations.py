@@ -82,17 +82,18 @@ def _state_descriptor(
 ) -> ObservationDescriptor:
     # Only immutable schema values are cached; no environment or asset handle.
     joint = quantity in ("qpos", "qvel")
+    pose = quantity in ("pose", "segment_start_pose")
     return ObservationDescriptor(
         uid,
         quantity,
         "joint" if joint else "arena",
-        "joint_order" if joint else "xyz_xyzw" if quantity == "pose" else "xyz",
+        "joint_order" if joint else "xyz_xyzw" if pose else "xyz",
         (
             ("joint_units/s" if quantity == "qvel" else "joint_units",)
             if joint
             else (
                 ("m", "unitless")
-                if quantity == "pose"
+                if pose
                 else ("m/s",) if quantity == "lin_vel" else ("rad/s",)
             )
         ),
@@ -200,6 +201,73 @@ def _read_entity_state(env: EmbodiedEnv, uid: str, quantity: str) -> Observation
             sample.acquisition_errors,
         )
     return capture.acquire(("entity_state", uid, quantity), produce)
+
+
+def _get_evaluation_state(
+    env: EmbodiedEnv, obs: EnvObs, *, field: str
+) -> ObservationSample:
+    parts = field.split("/")
+    if parts[0] in ("links", "robot_links"):
+        owner = parts[0]
+        link = parts[-2]
+        if owner == "links":
+            asset = env.sim.get_articulation(parts[1])
+            identity = f"{parts[1]}/{link}"
+        else:
+            asset = env.robot
+            identity = link
+        key = (owner, identity)
+
+        def produce() -> ObservationSample:
+            values = asset.get_link_pose(link)
+            valid = torch.isfinite(values).all(-1) & (values[:, 3:] != 0).any(-1)
+            descriptor = _state_descriptor(identity, "pose", (7,), values.dtype, ())
+            return ObservationSample(descriptor, values, valid, (None,) * env.num_envs)
+
+    else:
+        _, part, quantity = parts
+        key = ("evaluation_robot", part, quantity)
+
+        def produce() -> ObservationSample:
+            values = env.robot.get_qpos(name=part, target=quantity == "command")
+            names = tuple(
+                env.robot.joint_names[i] for i in env.robot.get_joint_ids(name=part)
+            )
+            descriptor = ObservationDescriptor(
+                part,
+                quantity,
+                "joint",
+                "joint_order",
+                ("joint_units",),
+                (len(names),),
+                values.dtype,
+                names,
+            )
+            return ObservationSample(
+                descriptor,
+                values,
+                torch.isfinite(values).all(-1),
+                (None,) * env.num_envs,
+            )
+
+    capture = _current_capture.get()
+    return produce() if capture is None else capture.acquire(key, produce)
+
+
+def _get_segment_start_state(
+    env: EmbodiedEnv, obs: EnvObs, *, uid: str, field: str
+) -> ObservationSample:
+    bridge = getattr(env, "_active_task_program_bridge", None)
+    sample = None if bridge is None else bridge._segment_start_observation(field)
+    if sample is not None:
+        return sample
+    source = _read_entity_state(env, uid, "pose")
+    return ObservationSample(
+        _state_descriptor(uid, "segment_start_pose", (7,), source.values.dtype, ()),
+        source.values,
+        torch.zeros_like(source.valid),
+        ("segment_start_not_captured",) * env.num_envs,
+    )
 
 
 def get_object_pose(
