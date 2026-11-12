@@ -159,6 +159,15 @@ class AtomicSkillScenario(ScenarioProvider):
             raise ValueError("track.config.grasp_model must be a non-empty model id.")
         return resolve_gripper_defaults(model_id)
 
+    def grasp_closure_sweep(self) -> bool:
+        """Whether the mounted hand qualifies closure against the support plane.
+
+        Only the migrated six-joint Robotiq hand opts in. The PGI fixture keeps
+        its legacy open-hand qualification so existing baselines are unchanged.
+        """
+        model = self.grasp_model()
+        return bool(model is not None and model.get("model_id") == "robotiq_arg2f_140")
+
     def grasp_root_from_tcp(self) -> list[list[float]] | None:
         """Bind flange-mounted hand geometry to this fixture's solver TCP.
 
@@ -1562,6 +1571,7 @@ class AtomicSkillScenario(ScenarioProvider):
                 max_candidates=max_candidates,
                 gripper_data=self.grasp_model(),
                 root_from_tcp=self.grasp_root_from_tcp(),
+                closure_sweep=self.grasp_closure_sweep(),
                 **(
                     {"approach_alignment_angle": math.radians(alignment_max_angle_deg)}
                     if alignment_max_angle_deg is not None
@@ -1843,6 +1853,7 @@ class AtomicSkillScenario(ScenarioProvider):
                 max_candidates=max_candidates,
                 gripper_data=self.grasp_model(),
                 root_from_tcp=self.grasp_root_from_tcp(),
+                closure_sweep=self.grasp_closure_sweep(),
             )
             candidates, costs = generator.get_valid_grasp_poses(
                 mesh_vertices=mesh_vertices,

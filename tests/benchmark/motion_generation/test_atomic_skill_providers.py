@@ -1502,6 +1502,7 @@ def test_object_rotation_providers_screen_every_pose_row(
         force_refresh=False,
         max_candidates=2,
         **({"approach_alignment_angle": math.radians(10)} if early_filter else {}),
+        closure_sweep=False,
     )
     assert case.seed == 43001 and case.batch_size == 8
 

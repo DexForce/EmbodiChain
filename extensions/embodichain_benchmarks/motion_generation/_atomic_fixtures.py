@@ -28,6 +28,7 @@ from pathlib import Path
 
 from embodichain.robot_registry import resolve_gripper_defaults
 from embodichain.lab.sim.utility.gripper_geometry import (
+    attach_closure_samples,
     build_gripper_collision_geometry,
 )
 
@@ -166,6 +167,7 @@ def create_parallel_jaw_grasp_pose_generator(
     gripper_data: dict[str, object] | None = None,
     root_from_tcp: Sequence[Sequence[float]] | None = None,
     grasp_depth_offset_m: float = 0.0,
+    closure_sweep: bool = False,
 ) -> ParallelJawGraspPoseGenerator:
     """Create a standalone generator for the sample's mounted gripper.
 
@@ -181,6 +183,8 @@ def create_parallel_jaw_grasp_pose_generator(
         grasp_depth_offset_m: Move the physical contact centre toward the hand
             by this distance along canonical approach Z. Collision surfaces and
             output poses are rebuilt in that contact frame before sampling.
+        closure_sweep: Also sample closing pad surfaces and reject candidates
+            whose blocked closure intersects the inferred support plane.
 
     Returns:
         A generator with actual open hand collision surfaces and runtime TCP
@@ -195,10 +199,12 @@ def create_parallel_jaw_grasp_pose_generator(
     ):
         raise ValueError("grasp_depth_offset_m must be finite.")
     model = TUTORIAL_PARALLEL_JAW_MODEL if gripper_data is None else gripper_data
+    defaults = resolve_gripper_defaults(model["catalog_id"])
     geometry = build_gripper_collision_geometry(
-        resolve_gripper_defaults(model["catalog_id"]),
+        defaults,
         point_spacing=0.012,
         root_from_tcp=None if root_from_tcp is None else np.asarray(root_from_tcp),
+        closure_sweep=closure_sweep,
     )
     if grasp_depth_offset_m != 0.0:
         # A TCP calibration alone preserves physical contact geometry. Rebase
@@ -232,6 +238,8 @@ def create_parallel_jaw_grasp_pose_generator(
                 "grasp_depth_offset_m": grasp_depth_offset_m,
             },
         )
+        if closure_sweep:
+            geometry = attach_closure_samples(geometry, defaults)
     return AntipodalGraspPoseGenerator(
         **grasp_generator_parameters(model),
         collision_geometry=geometry,
@@ -240,7 +248,10 @@ def create_parallel_jaw_grasp_pose_generator(
             max_candidates=max_candidates,
             approach_alignment_angle=approach_alignment_angle,
         ),
-        collision_cfg=ParallelJawGraspCollisionCfg(filter_ground_collision=False),
+        collision_cfg=ParallelJawGraspCollisionCfg(
+            filter_ground_collision=False,
+            filter_closure_support=closure_sweep,
+        ),
         annotation_cfg=GraspAnnotationCfg(
             selection_mode="whole_mesh",
             viser_port=11801,

@@ -53,6 +53,8 @@ class _ReplayMetrics:
 
     squared_tracking_error: torch.Tensor
     tracking_value_count: int
+    motion_squared_tracking_error: torch.Tensor | None = None
+    motion_tracking_value_count: int = 0
     physics_steps: int | None = None
     articulation_joint_initial: torch.Tensor | None = None
     articulation_joint_final: torch.Tensor | None = None
@@ -152,6 +154,8 @@ class AtomicReplayRuntime:
         self._articulations = articulations
         self._gripper_states = gripper_states
         self._grasp_contacts: GraspContacts | None = None
+        self._motion_joint_selection: tuple[int, ...] | None = None
+        self._motion_joint_dof: int | None = None
 
     def execute(
         self,
@@ -195,6 +199,7 @@ class AtomicReplayRuntime:
             replay_metrics.squared_tracking_error
             / max(replay_metrics.tracking_value_count, 1)
         )
+        execution_tracking = self._execution_tracking_rmse(replay_metrics, tracking)
         trajectory = compiled.trajectory.positions
         physics_steps = replay_metrics.physics_steps
         if physics_steps is None:
@@ -226,7 +231,7 @@ class AtomicReplayRuntime:
             execution_success=(
                 compiled.plan_success.to(device=observed.device)
                 & torch.isfinite(observed).all(dim=1)
-                & (tracking <= settings.joint_tracking_tolerance_rad)
+                & (execution_tracking <= settings.joint_tracking_tolerance_rad)
             ),
             final_tcp_pose=final_tcp,
             joint_tracking_rmse_rad=tracking,
@@ -291,6 +296,76 @@ class AtomicReplayRuntime:
         ):
             raise ValueError("Atomic Skill physics step counts are invalid.")
         return settings
+
+    def _motion_joint_ids(self, dof: int) -> tuple[int, ...]:
+        """Return the joints whose command error measures motion tracking.
+
+        Configured gripper parts are grasp actuators, not motion bindings: a
+        held object legitimately blocks their commanded closure, so their
+        command error is contact preload. Every joint outside those explicit
+        part bindings is a motion joint and gates execution. The full-joint
+        tracking diagnostic is unchanged. Robots without part bindings keep the
+        full-joint gate, and a binding that would exclude every joint is
+        rejected so the gate can never become vacuous.
+
+        Args:
+            dof: Full commanded joint count of the replayed trajectory.
+
+        Returns:
+            Ascending motion-joint indices used by the execution gate.
+        """
+        if self._motion_joint_selection is not None and self._motion_joint_dof == dof:
+            return self._motion_joint_selection
+        gripper_ids: set[int] = set()
+        for part in self._gripper_states:
+            try:
+                resolved = tuple(
+                    int(index) for index in self.robot.get_joint_ids(name=part)
+                )
+            except KeyError as exc:
+                raise ValueError(
+                    f"Configured gripper part {part!r} has no bound joint ids."
+                ) from exc
+            except (AttributeError, TypeError, ValueError):
+                # Robots without explicit part bindings keep the full-joint gate.
+                resolved = ()
+            if resolved and any(index < 0 or index >= dof for index in resolved):
+                raise ValueError(
+                    f"Gripper part {part!r} binds joints outside the replayed {dof}-DOF command."
+                )
+            gripper_ids.update(resolved)
+        if not gripper_ids:
+            selection = tuple(range(dof))
+        elif len(gripper_ids) >= dof:
+            raise ValueError(
+                "Configured gripper parts bind every replayed joint, so no motion "
+                "joint would remain for the execution gate."
+            )
+        else:
+            selection = tuple(index for index in range(dof) if index not in gripper_ids)
+        self._motion_joint_selection = selection
+        self._motion_joint_dof = dof
+        return selection
+
+    @staticmethod
+    def _execution_tracking_rmse(
+        metrics: _ReplayMetrics,
+        full_rmse: torch.Tensor,
+    ) -> torch.Tensor:
+        """Return the motion-joint RMSE that gates execution.
+
+        The full-joint diagnostic remains available to callers; only explicit
+        motion bindings decide whether the robot tracked its commanded motion.
+        """
+        motion_squared = getattr(metrics, "motion_squared_tracking_error", None)
+        motion_count = getattr(metrics, "motion_tracking_value_count", 0)
+        if (
+            isinstance(motion_squared, torch.Tensor)
+            and isinstance(motion_count, int)
+            and motion_count > 0
+        ):
+            return torch.sqrt(motion_squared / motion_count)
+        return full_rmse
 
     @staticmethod
     def is_replayable(compiled: CompiledTrajectory) -> bool:
@@ -493,6 +568,9 @@ class AtomicReplayRuntime:
         dynamics_cleared = False
         squared_tracking_error: torch.Tensor | None = None
         tracking_value_count = 0
+        motion_squared_tracking_error: torch.Tensor | None = None
+        motion_tracking_value_count = 0
+        motion_joint_ids: tuple[int, ...] = ()
         articulation_initial: torch.Tensor | None = None
         articulation_final: torch.Tensor | None = None
         articulation_peak: torch.Tensor | None = None
@@ -528,6 +606,8 @@ class AtomicReplayRuntime:
             squared_tracking_error = torch.zeros(
                 case.batch_size, dtype=trajectory.dtype, device=trajectory.device
             )
+            motion_squared_tracking_error = torch.zeros_like(squared_tracking_error)
+            motion_joint_ids = self._motion_joint_ids(trajectory.shape[2])
             if articulation_handle is not None:
                 joint_value = case.case_parameters.get("target_joint")
                 if not isinstance(joint_value, str) or not joint_value:
@@ -693,8 +773,14 @@ class AtomicReplayRuntime:
                 )
             if squared_tracking_error is not None:
                 observed = self.robot.get_qpos()
-                squared_tracking_error += ((observed - positions) ** 2).sum(dim=1)
+                squared_error = (observed - positions) ** 2
+                squared_tracking_error += squared_error.sum(dim=1)
                 tracking_value_count += observed.shape[1]
+                if motion_squared_tracking_error is not None:
+                    motion_squared_tracking_error += squared_error[
+                        :, motion_joint_ids
+                    ].sum(dim=1)
+                    motion_tracking_value_count += len(motion_joint_ids)
             elapsed_steps += arrival_steps[waypoint_index]
             if diagnostics is not None and waypoint_index in diagnostics.sample_indices:
                 diagnostics.capture(
@@ -740,8 +826,14 @@ class AtomicReplayRuntime:
                 )
             if squared_tracking_error is not None:
                 observed = self.robot.get_qpos()
-                squared_tracking_error += ((observed - final_command) ** 2).sum(dim=1)
+                squared_error = (observed - final_command) ** 2
+                squared_tracking_error += squared_error.sum(dim=1)
                 tracking_value_count += observed.shape[1]
+                if motion_squared_tracking_error is not None:
+                    motion_squared_tracking_error += squared_error[
+                        :, motion_joint_ids
+                    ].sum(dim=1)
+                    motion_tracking_value_count += len(motion_joint_ids)
             self._capture_replay_samples(
                 settling,
                 object_handle=object_handle,
@@ -769,6 +861,8 @@ class AtomicReplayRuntime:
             return _ReplayMetrics(
                 squared_tracking_error=squared_tracking_error,
                 tracking_value_count=tracking_value_count,
+                motion_squared_tracking_error=motion_squared_tracking_error,
+                motion_tracking_value_count=motion_tracking_value_count,
                 physics_steps=sum(arrival_steps)
                 + settings.hold_steps * settings.hold_sim_steps,
                 articulation_joint_initial=articulation_initial,

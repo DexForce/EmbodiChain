@@ -391,3 +391,113 @@ def test_robotiq_press_calibrates_closed_pads_to_button_surface(suite_name):
         + forward_extent
     )
     assert panel_front - terminal_forward_surface > 0.03
+
+
+def _robotiq_closure_geometry():
+    from embodichain.lab.sim.utility.gripper_geometry import (
+        build_gripper_collision_geometry,
+    )
+
+    return build_gripper_collision_geometry(
+        resolve_gripper_defaults("RobotiqArg2F140"),
+        closure_sweep=True,
+    )
+
+
+def _pad_surfaces(geometry):
+    offset = 0
+    groups = {}
+    for part in geometry.provenance["parts"]:
+        groups[part["link"]] = geometry.points[
+            offset : offset + part["surface_point_count"]
+        ]
+        offset += part["surface_point_count"]
+    return torch.cat(
+        [
+            groups["left_inner_finger_pad"],
+            groups["right_inner_finger_pad"],
+        ]
+    )
+
+
+def test_native_robotiq_closure_sweep_spans_the_declared_opening() -> None:
+    """Closure samples must cover the physical aperture range, not one pose."""
+    geometry = _robotiq_closure_geometry()
+    apertures = geometry.closure_apertures
+    samples = geometry.closure_points
+
+    assert apertures is not None and samples is not None
+    assert len(apertures) == geometry.provenance["closure_sweep_samples"]
+    assert len(apertures) >= 32
+    assert bool((apertures[1:] > apertures[:-1]).all())
+    assert float(apertures[-1]) == pytest.approx(0.128535, abs=5e-4)
+    assert float(apertures[0]) < 0.005
+    assert samples.shape[0] == len(apertures)
+    # Pads close by several centimetres between the open and grasp commands,
+    # which a single open-hand pose cannot represent.
+    assert float(samples[0][:, 2].max() - samples[-1][:, 2].max()) > 0.01
+    # Every blocked aperture resolves to a sampled state at or below it.
+    blocked = torch.tensor([0.050, 0.080])
+    index = torch.searchsorted(apertures, blocked, right=True) - 1
+    assert bool((apertures[index] <= blocked).all())
+
+
+def test_closure_support_filter_rejects_penetration_the_open_pose_misses() -> None:
+    """A grasp whose pads sweep into the support must be rejected by closure."""
+    from embodichain.toolkits.graspkit.pg_grasp import GripperCollisionChecker
+
+    geometry = _robotiq_closure_geometry()
+    pads = _pad_surfaces(geometry)
+    plate = trimesh.creation.box(extents=[0.4, 0.4, 0.01])
+    plate.apply_translation([0.0, 0.0, -0.005])
+    checker = GripperCollisionChecker(
+        object_mesh_verts=torch.as_tensor(plate.vertices, dtype=torch.float32),
+        object_mesh_faces=torch.as_tensor(plate.faces, dtype=torch.int64),
+        collision_geometry=geometry,
+    )
+    # A top grasp with canonical +Z pointing at the support, as the fixtures use.
+    pose = torch.eye(4)
+    pose[1, 1] = -1.0
+    pose[2, 2] = -1.0
+    open_height = float(-pads[:, 2].max())
+    apertures = torch.tensor([0.080])
+    penetrating = pose.clone()
+    penetrating[2, 3] = open_height + 0.005
+    lifted = pose.clone()
+    lifted[2, 3] = open_height + 0.055
+    # Object collision needs the native Warp kernel; this regression isolates
+    # the support-closure rule, so the object query reports no collision.
+    checker._checker.query_batch_points = lambda points, **kwargs: (
+        torch.zeros(points.shape[:2], dtype=torch.bool),
+        torch.ones(points.shape[:2]),
+    )
+
+    distance = checker._closure_support_distance(
+        penetrating.unsqueeze(0), apertures, -0.005
+    )
+    assert distance is not None and float(distance[0]) < 0.0
+    collided, _ = checker.query(
+        torch.eye(4),
+        penetrating.unsqueeze(0),
+        is_filter_ground_collision=False,
+        filter_closure_support=True,
+        apertures=apertures,
+    )
+    assert bool(collided[0])
+    # The open pads alone clear the support, so without the closure rule the
+    # same candidate is still accepted.
+    legacy, _ = checker.query(
+        torch.eye(4),
+        penetrating.unsqueeze(0),
+        is_filter_ground_collision=False,
+        apertures=apertures,
+    )
+    assert not bool(legacy[0])
+    raised, _ = checker.query(
+        torch.eye(4),
+        lifted.unsqueeze(0),
+        is_filter_ground_collision=False,
+        filter_closure_support=True,
+        apertures=apertures,
+    )
+    assert not bool(raised[0])
