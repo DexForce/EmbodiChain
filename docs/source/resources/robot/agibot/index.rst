@@ -12,6 +12,9 @@ Official AgiBot robot configurations live in the
    * - Robot
      - Configuration class
      - Current coverage
+   * - :doc:`AgiBot G1 <g1>`
+     - ``AgibotG1Cfg``
+     - Dual 7-DOF arms and closed-chain grippers.
    * - :doc:`AgiBot G2 <g2>`
      - ``AgibotG2Cfg``
      - Dual 7-DOF CRS arms, OmniPicker grippers and explicit chassis joint control.
@@ -20,4 +23,5 @@ Official AgiBot robot configurations live in the
    :maxdepth: 1
    :hidden:
 
+   g1
    g2

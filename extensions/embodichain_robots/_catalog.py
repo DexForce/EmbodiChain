@@ -22,6 +22,7 @@ from itertools import product
 
 _CONFIG_CLASSES = {
     "AgibotG2": "embodichain_robots.agibot.g2:AgibotG2Cfg",
+    "AgibotG1": "embodichain_robots.agibot.g1:AgibotG1Cfg",
     "YamI2rt": "embodichain_robots.i2rt.yam:YamI2rtCfg",
     "UnitreeGo1": "embodichain_robots.unitree.go1:UnitreeGo1Cfg",
     "UnitreeGo2": "embodichain_robots.unitree.go2:UnitreeGo2Cfg",
@@ -57,6 +58,17 @@ _DEFAULT_CONTROL_INFO = {
             "right_arm": 7,
             "left_eef": 8,
             "right_eef": 8,
+        },
+    },
+    "AgibotG1": {
+        "dof": 20,
+        "control_parts": {
+            "torso": 2,
+            "head": 2,
+            "left_arm": 7,
+            "right_arm": 7,
+            "left_eef": 1,
+            "right_eef": 1,
         },
     },
     "YamI2rt": {
@@ -136,6 +148,14 @@ _MIMIC_JOINTS = {
             (19, "outer_joint0"),
         )
     },
+    "AgibotG1": {
+        "idx31_gripper_l_inner_joint1": "idx41_gripper_l_outer_joint1",
+        "idx33_gripper_l_inner_joint4": "idx31_gripper_l_inner_joint1",
+        "idx43_gripper_l_outer_joint4": "idx41_gripper_l_outer_joint1",
+        "idx71_gripper_r_inner_joint1": "idx81_gripper_r_outer_joint1",
+        "idx73_gripper_r_inner_joint4": "idx71_gripper_r_inner_joint1",
+        "idx83_gripper_r_outer_joint4": "idx81_gripper_r_outer_joint1",
+    },
     "AlohaMini": {},
     "TianjiMarvin": {
         "LEFT_HAND_FINGER_2": "LEFT_HAND_FINGER_1",
@@ -172,6 +192,7 @@ _CONTROL_PART_MIMICS = {
 
 _CLASSIFICATION = {
     "AgibotG2": ("agibot", "wheeled_humanoid", 2),
+    "AgibotG1": ("agibot", "wheeled_humanoid", 2),
     "YamI2rt": ("i2rt", "fixed_manipulator", 2),
     "UnitreeGo1": ("unitree", "quadruped", 0),
     "UnitreeGo2": ("unitree", "quadruped", 0),

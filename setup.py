@@ -160,7 +160,7 @@ def get_package_data() -> dict[str, list[str]]:
             "data/*.json",
         ],
         "embodichain.gen_sim.asset_engine.configs": ["*.json"],
-        "embodichain.gen_sim.services": ["README.md", "*.example.json"],
+        "embodichain.gen_sim.services": ["*.md", "*.example.json", "spec/**/*.md"],
         "embodichain.gen_sim.task_engine": [
             "defaults.yaml",
             "_semantic_graph_viewer.html",

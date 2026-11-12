@@ -14,8 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""AgiBot robot models and model-owned assets."""
+"""AgiBot robot models bundled with EmbodiChain."""
 
 from __future__ import annotations
 
-__all__ = []
+__all__: list[str] = []
