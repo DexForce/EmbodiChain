@@ -47,6 +47,14 @@ embodichain_robots
 
 Concrete robot configurations, exposed lazily from the bundled robot package.
 
+.. py:class:: embodichain_robots.YamI2rtCfg
+
+   Configure the source-aligned YAM dual-arm assembly with sixteen independent
+   arm/finger joints. ``from_dict()`` applies caller overrides and supports a
+   local URDF through ``fpath``. ``build_pk_serial_chain()`` returns each
+   six-joint arm's base-to-TCP chain from the same simulation URDF.
+   See :doc:`/resources/robot/i2rt/yam`.
+
 .. py:class:: embodichain_robots.BrainCoRevo1Cfg
 
    Standalone fixed-base left/right BrainCo Revo 1 hand. Construct with
@@ -100,6 +108,13 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
    Construct with ``from_dict()``; ``build_pk_serial_chain()`` provides
    the robot-specific differentiable kinematic chains. Generic runtime
    fields and backend selection follow ``RobotCfg``.
+
+.. py:class:: embodichain_robots.AgilexPiperXCfg
+
+   Fixed-base PiPER-X bare arm with six joints in the ``arm`` control group.
+   Construct with ``from_dict()`` to apply the catalog defaults.
+   ``build_pk_serial_chain()`` builds the arm chain through the tool flange.
+   The AGX gripper embodiment supplies the mount, gripper control and TCP.
 
 .. py:class:: embodichain_robots.FrankaPandaCfg
 
@@ -442,6 +457,36 @@ and cache prefixes while using the shared core download and locking services.
    Dataset class for the Cobot Magic Arm robot.
 
 
+embodichain_robots.agilex.piper_x
+---------------------------------
+
+.. py:class:: embodichain_robots.agilex.piper_x.AgilexPiperXCfg
+   :no-index:
+
+   Lazy model-level export of :class:`embodichain_robots.AgilexPiperXCfg`.
+
+
+embodichain_robots.agilex.piper_x.cfg
+-------------------------------------
+
+.. py:class:: embodichain_robots.agilex.piper_x.cfg.AgilexPiperXCfg
+   :no-index:
+
+   Implementation of :class:`embodichain_robots.AgilexPiperXCfg`. The arm
+   solver uses the same portable URDF as simulation.
+
+
+embodichain_robots.agilex.piper_x.assets
+----------------------------------------
+
+.. py:class:: embodichain_robots.agilex.piper_x.assets.AgilexPiperX(data_root=None)
+   :no-index:
+
+   Resolve the official bare-arm meshes and portable URDF, including the
+   fixed mounting flange from the AgileX tool Xacro. The dataset verifies
+   the source files by SHA-256 and exposes ``piper_x.urdf`` under ``extract_dir``.
+
+
 embodichain_robots.alohamini.aloha_mini
 ---------------------------------------
 
@@ -585,6 +630,35 @@ and cache prefixes while using the shared core download and locking services.
 .. autoclass:: embodichain_robots.franka.assets.FrankaPandaArm
 
 .. autofunction:: embodichain_robots.robotiq.two_finger.robotiq85_joint_positions
+
+
+embodichain_robots.i2rt.yam
+---------------------------
+
+.. py:class:: embodichain_robots.i2rt.yam.YamI2rtCfg
+   :no-index:
+
+   Lazy model-level export of :class:`embodichain_robots.YamI2rtCfg`.
+
+.. py:class:: embodichain_robots.i2rt.yam.cfg.YamI2rtCfg
+   :no-index:
+
+   Implementation of the dual-arm preset with source joint names and numerical
+   arm solvers. Shared runtime fields follow ``RobotCfg``.
+
+.. automethod:: embodichain_robots.i2rt.yam.cfg.YamI2rtCfg.from_dict
+
+.. automethod:: embodichain_robots.i2rt.yam.cfg.YamI2rtCfg.build_pk_serial_chain
+
+
+embodichain_robots.i2rt.yam.assets
+----------------------------------
+
+.. py:class:: embodichain_robots.i2rt.yam.assets.YamI2rt
+   :no-index:
+
+   Download the checked ``YamI2rtV1`` archive through the shared download/cache
+   services, preserving its MIT license and conversion provenance.
 
 
 embodichain_robots.the_robot_studio.so101

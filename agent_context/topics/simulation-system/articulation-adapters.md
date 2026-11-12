@@ -68,6 +68,13 @@ DexSim's batch fetch and converts the root-pose layout once. Returned tensors
 are borrowed buffers, not snapshots; clone values that must survive later
 reads. Fetch after reset or direct writes rather than caching across them.
 
+`Articulation.set_state()` writes selected root, joint and drive fields in one
+backend operation. Current joint positions are clipped to joint limits.
+Position targets are also clipped by default; `clamp_target_qpos=False` retains
+raw PD targets while physical joint limits remain enabled. `set_qpos()` exposes
+the same target-only option. Keep this distinction when a task records motor
+commands for learned dynamics.
+
 `Articulation.set_root_velocity()` writes selected world-frame linear and
 angular velocities as `(N, 6)` rows. The Scene adapter validates the complete
 input before writing one selected batch; other environment rows are preserved.
@@ -94,8 +101,21 @@ output tensors. Public inertia/COM remain principal moments plus `xyz + xyzw`;
 scalar descriptors expose body-frame mat33. Runtime writes compose the pair
 before DexSim, and reset restores the saved pair together to avoid reordering
 principal axes between two writes.
+COM writes pass environment rows and link columns directly to
+`ArticulationBatch.apply_link_com_local_pose(rows=..., link_ids=...)`. Property
+selection does not need a selected batch's joint/link state routing buffers;
+DexSim retains descriptor updates and solver-constant refresh ownership.
 
 ## Mimic coupling
+
+On DexSim Default, `ArticulationCfg.mimic_compliance` maps exact mimic master
+names to natural-frequency and damping-ratio settings. The articulation
+preparation hook applies them to all replicas on each topology revision,
+before Default Direct GPU initialization. The public
+`Articulation.set_mimic_compliance()` writes the prepared articulation for
+selected environments. Both paths resolve names against each instance's
+native active-joint cache order and keep the authored ratios and offsets.
+Use zero for both parameters for hard coupling. Newton rejects these settings.
 
 MuJoCo-Warp mimic joints retain native equality constraints and contact-force
 coupling. `_configure_newton_mimic_compliance()` adjusts only the selected
@@ -120,7 +140,7 @@ lifetime ends with the asset. Camera name resolution belongs to sensors.
 
 `get_link_vert_face()` and named-state `compute_fk()` stay deterministic and
 domain-neutral; stochastic affordance sampling and semantic keys belong to
-Atomic Action adapters. Newton link mesh export concatenates every render mesh
+Atomic Skill adapters. Newton link mesh export concatenates every render mesh
 with triangle offsets, and returns empty arrays for zero-mesh links.
 
 USD `build_pk_chain` uses resolved Spawn descriptors in

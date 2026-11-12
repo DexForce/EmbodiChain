@@ -31,10 +31,18 @@ from embodichain.lab.sim.cfg import (
     CableAttachmentCfg,
     CableObjectCfg,
     CablePhysicsCfg,
+    FluidObjectCfg,
     JointDrivePropertiesCfg,
     NewtonPhysicsCfg,
     RenderCfg,
+    RigidObjectCfg,
+    RobotCfg,
+    UsdImportCfg,
+    UsdSourceCfg,
+    VisualObjectCfg,
 )
+from embodichain.lab.sim.material import VisualMaterialCfg
+from embodichain.lab.sim.shapes import CubeCfg
 
 pytestmark = [
     pytest.mark.subprocess_sim,
@@ -43,6 +51,11 @@ pytestmark = [
         not torch.cuda.is_available(), reason="CableObject requires CUDA"
     ),
 ]
+
+
+def _volume_import(tmp_path: Path) -> UsdImportCfg:
+    path = tmp_path / "volume_particle.usda"
+    return UsdImportCfg(name="volume", source=UsdSourceCfg(file_path=str(path)))
 
 
 class _CableObjectCUDAScenario:
@@ -100,11 +113,40 @@ class _CableObjectCUDAScenario:
                 attrs=CablePhysicsCfg(bend_stiffness=0.1, twist_stiffness=0.1),
             )
         )
+        with pytest.raises(NotImplementedError, match="same arena"):
+            self.sim.add_fluid_object(FluidObjectCfg(uid="water"))
+        with pytest.raises(NotImplementedError, match="(?i)cable"):
+            self.sim.add_usd(_volume_import(tmp_path))
+        assert "water" not in self.sim.asset_uids
         assert cable.data is None and cable.num_instances == 2
         assert self.sim.get_asset("wire") is cable
         assert "wire" in self.sim.asset_uids
         self.sim.prepare()
         assert cable.is_spawn_bound and cable.data.num_segments == 2
+        with pytest.raises(NotImplementedError, match="topology changes"):
+            self.sim.add_rigid_object(
+                RigidObjectCfg(
+                    uid="blocked",
+                    shape=CubeCfg(
+                        size=(0.1, 0.1, 0.1),
+                        visual_material=VisualMaterialCfg(
+                            uid="reserved", base_color=(1, 0, 0, 1)
+                        ),
+                    ),
+                )
+            )
+        visual = self.sim.add_visual_object(
+            VisualObjectCfg(
+                uid="allowed",
+                shape=CubeCfg(
+                    size=(0.1, 0.1, 0.1),
+                    visual_material=VisualMaterialCfg(
+                        uid="reserved", base_color=(0, 1, 0, 1)
+                    ),
+                ),
+            )
+        )
+        assert self.sim.get_visual_object("allowed") is visual
         initial = cable.data.segment_state_w
         assert initial.shape == (2, 2, 13)
         assert torch.isfinite(initial).all()
@@ -142,16 +184,16 @@ class _CableObjectCUDAScenario:
         assert displacement[1] > displacement[0] + 1e-6
         cable.clear_wrenches(env_ids=[1])
         torch.testing.assert_close(cable.data.default_segment_state_w, initial)
-        self.sim.reset_objects_state(env_ids=[0])
+        self.sim.reset_objects_state(env_ids=[1])
         reset = cable.data.segment_state_w
-        torch.testing.assert_close(reset[0], initial[0], rtol=0, atol=0)
-        torch.testing.assert_close(reset[1], after[1], rtol=0, atol=0)
+        torch.testing.assert_close(reset[0], after[0], rtol=0, atol=0)
+        torch.testing.assert_close(reset[1], initial[1], rtol=0, atol=0)
         state = reset[[0]].clone()
         state[..., 0] += 0.025
         cable.write_segment_state_to_sim(state, env_ids=[0])
         torch.testing.assert_close(cable.data.segment_state_w[0], state[0])
         torch.testing.assert_close(
-            cable.data.segment_state_w[1], after[1], rtol=0, atol=0
+            cable.data.segment_state_w[1], initial[1], rtol=0, atol=0
         )
         with pytest.raises(ValueError, match="finite"):
             cable.write_segment_state_to_sim(torch.full_like(state, float("nan")), [0])
@@ -163,6 +205,26 @@ class _CableObjectCUDAScenario:
         with pytest.raises(RuntimeError, match="invalid"):
             _ = data.segment_state_w
         del self.sim
+
+    def test_imported_particles_survive_rejected_cable(self, tmp_path: Path) -> None:
+        imported = self.sim.add_usd(_volume_import(tmp_path))
+        soft = imported["/World/Soft"]
+        with pytest.raises(NotImplementedError, match="(?i)cable"):
+            self.sim.add_cable_object(
+                CableObjectCfg(uid="wire", points=[[0, 0, 0], [0, 0, 0.1]], radius=0.01)
+            )
+        assert self.sim.get_cable_object("wire") is None
+        assert self.sim.get_deformable_object(soft.uid) is soft
+        self.sim.prepare()
+        initial = soft.data.nodal_state_w.clone()
+        assert initial.shape == (2, 4, 6)
+        self.sim.update(step=3, render_final_step=False)
+        moved = soft.data.nodal_state_w.clone()
+        assert torch.all(moved[..., 2] < initial[..., 2])
+        self.sim.reset_objects_state(env_ids=[1])
+        reset = soft.data.nodal_state_w
+        torch.testing.assert_close(reset[0], moved[0], rtol=0, atol=0)
+        torch.testing.assert_close(reset[1], initial[1])
 
     def test_attached_articulation_expert_trajectory_repeats_after_reset(
         self, tmp_path: Path
@@ -265,8 +327,44 @@ class _CableObjectCUDAScenario:
 <joint name="slide" type="prismatic"><parent link="base"/><child link="tool"/><axis xyz="0 1 0"/><limit lower="-.2" upper=".2" effort="100" velocity="1"/></joint>
 </robot>""")
 
-        robot = self.sim.add_articulation(
-            ArticulationCfg(
+        from dexsim.engine.newton_physics.runtime_control import RuntimeControl
+
+        initialized = []
+
+        class CallerControl(RuntimeControl):
+            graph_safe = True
+
+            def initialize(self, context):
+                initialized.append(self)
+
+            def __call__(self, context, substep_index, substep_count, substep_dt):
+                pass
+
+            def prepare_episode_reset(self, arena_indices):
+                return lambda: None
+
+        caller_control = CallerControl()
+        self.sim.add_runtime_control(caller_control)
+        # The discarded robot supplies two qpos values for a one-joint URDF.
+        # Retry with one UID removed and the other carrying a new initial pose.
+        self.sim.add_robot(
+            RobotCfg(uid="discarded", fpath=str(urdf), init_qpos=[0.09, 0.10])
+        )
+        self.sim.add_robot(RobotCfg(uid="tool", fpath=str(urdf), init_qpos=[0.05]))
+        self.sim.add_cable_object(
+            CableObjectCfg(
+                uid="wire",
+                points=[[0, 0, 0], [0.1, 0, 0]],
+                init_pos=(1, 0, 1),
+                radius=0.005,
+            )
+        )
+        with pytest.raises(ValueError, match="discarded.*expects 1 .*got 2"):
+            self.sim.prepare()
+        assert self.sim.remove_asset("discarded")
+        assert self.sim.remove_asset("tool")
+        robot = self.sim.add_robot(
+            RobotCfg(
                 uid="tool",
                 fpath=str(urdf),
                 init_pos=(0, 0, 1),
@@ -277,16 +375,13 @@ class _CableObjectCUDAScenario:
                 ),
             )
         )
-        self.sim.add_cable_object(
-            CableObjectCfg(
-                uid="wire",
-                points=[[0, 0, 0], [0.1, 0, 0]],
-                init_pos=(1, 0, 1),
-                radius=0.005,
-            )
-        )
         self.sim.prepare()
+        assert initialized == [caller_control]
         expected = torch.full_like(robot.get_qpos(), 0.025)
+        torch.testing.assert_close(robot.get_qpos(), expected, rtol=0, atol=1e-7)
+        torch.testing.assert_close(
+            robot.get_qpos(target=True), expected, rtol=0, atol=1e-7
+        )
         self.sim.reset_objects_state()
         torch.testing.assert_close(robot.get_qpos(), expected, rtol=0, atol=1e-7)
         torch.testing.assert_close(
@@ -342,9 +437,18 @@ def _assert_cable_case_in_subprocess(case_name: str, tmp_path: Path) -> None:
 class TestCableObjectCUDA:
     """NoRender cable lifecycle coverage, with a fresh native process per case."""
 
-    def test_replicated_state_force_and_cleanup(self, tmp_path: Path) -> None:
+    def test_replicated_state_force_and_cleanup(
+        self, volume_particle_usd: Path
+    ) -> None:
         _assert_cable_case_in_subprocess(
-            "test_replicated_state_force_and_cleanup", tmp_path
+            "test_replicated_state_force_and_cleanup", volume_particle_usd.parent
+        )
+
+    def test_imported_particles_survive_rejected_cable(
+        self, volume_particle_usd: Path
+    ) -> None:
+        _assert_cable_case_in_subprocess(
+            "test_imported_particles_survive_rejected_cable", volume_particle_usd.parent
         )
 
     @pytest.mark.usefixtures("requires_dexuni_two_way")

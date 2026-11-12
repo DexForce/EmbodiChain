@@ -34,6 +34,23 @@ def is_newton_scene(scene: object) -> bool:
     return isinstance(scene, Scene) and scene.backend == "newton"
 
 
+def _supports_newton_position_targets(scene: Scene) -> bool:
+    """Query the finalized solver contract while preserving legacy SDK support."""
+    query = getattr(scene, "dynamics_capabilities", None)
+    if query is None:
+        from dexsim.engine import newton_physics
+
+        if hasattr(newton_physics, "NewtonSolverExtension"):
+            raise RuntimeError(
+                "Newton solver extensions require a compatible DexSim SDK with "
+                "Scene.dynamics_capabilities() for articulation initialization."
+            )
+        # Released SDKs predating extensions accept the existing target channels.
+        return True
+    fields = query().supported_control_fields
+    return fields is None or "joint_target_q" in fields
+
+
 def _create_newton_standalone_state_sync(
     model: Any,
     body_ids: Sequence[int],
@@ -90,6 +107,7 @@ def _stabilize_newton_mimic_target_write(
     qvel_limits: torch.Tensor,
     articulation_view: Any,
     device: torch.device,
+    clamp_target_qpos: bool = True,
 ) -> None:
     """Keep Newton mimic follower-drive targets on the commanded relation."""
     if not configured:
@@ -137,8 +155,9 @@ def _stabilize_newton_mimic_target_write(
         )
         return
 
-    limits = qpos_limits[env_ids][:, follower_ids_tensor, :]
-    targets = targets.clamp(limits[..., 0], limits[..., 1])
+    if clamp_target_qpos:
+        limits = qpos_limits[env_ids][:, follower_ids_tensor, :]
+        targets = targets.clamp(limits[..., 0], limits[..., 1])
     articulation_view.apply_qpos(
         targets,
         env_ids,
@@ -218,7 +237,16 @@ def _configure_newton_mimic_compliance(
     from dexsim.engine.newton_physics.backend_registry import get_newton_backend
 
     backend = get_newton_backend(result.world)
+    if (
+        backend is None
+        or backend.solver_type not in {"mujoco_warp", "dexuni"}
+        or backend.cfg.requires_grad
+        or (backend.model is not None and backend.model.requires_grad)
+    ):
+        return False
     solver = backend.mujoco_solver
+    if solver is None:
+        return False
 
     relation_names = [
         (state_joint_names[child_id], state_joint_names[parent_id])

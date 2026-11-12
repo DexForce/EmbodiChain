@@ -16,6 +16,11 @@
 
 from __future__ import annotations
 
+__all__ = ["ingest_one_asset"]
+
+from embodichain.gen_sim.services.runtime import GenSimServices, service_entry
+
+
 from pathlib import Path
 import json
 import os
@@ -75,6 +80,7 @@ def _resolve_source_preparation_mode(source_preparation_mode: str | None) -> str
     return mode
 
 
+@service_entry
 def ingest_one_asset(
     asset_dir: str | Path,
     category: str,
@@ -82,6 +88,8 @@ def ingest_one_asset(
     store: JsonStore,
     manager: ParserManager,
     source_preparation_mode: str | None = None,
+    *,
+    services: GenSimServices | None = None,
 ) -> Optional[Asset]:
 
     asset_dir = Path(asset_dir)  # source path
@@ -175,7 +183,7 @@ def ingest_one_asset(
 
     inject_semantic_from_config(asset_dir, asset)
     inject_user_extra_info(asset_dir, asset)
-    manager.parse(asset, asset_root)
+    manager.parse(asset, asset_root, services=services)
     store.save_asset(asset)
 
     return asset

@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import traceback
 import numpy as np
 from pathlib import Path
@@ -174,7 +176,7 @@ class URDFComponentManager:
                     new_name = self._apply_case(
                         "link",
                         self._generate_unique_name(
-                            orig_name, prefix, global_link_names
+                            orig_name, prefix, global_link_names, kind="link"
                         ),
                     )
                 else:
@@ -292,7 +294,7 @@ class URDFComponentManager:
             self.logger.error(f"Traceback: {traceback.format_exc()}")
 
     def _generate_unique_name(
-        self, orig_name: str, prefix: str, existing_names: set
+        self, orig_name: str, prefix: str, existing_names: set, *, kind: str = "joint"
     ) -> str:
         r"""Generate a unique name by adding a prefix and ensuring no conflicts.
 
@@ -310,9 +312,7 @@ class URDFComponentManager:
         # For uniqueness checks we always operate on a normalized form that is
         # consistent with the link case policy. This keeps collisions and
         # generated names aligned with how names are written back to the URDF.
-        base_name = orig_name
-        if prefix and not orig_name.lower().startswith(prefix.lower()):
-            base_name = f"{prefix}{orig_name}"
+        base_name = self.name_normalizer.component_name(kind, orig_name, prefix)
 
         new_name = base_name
 

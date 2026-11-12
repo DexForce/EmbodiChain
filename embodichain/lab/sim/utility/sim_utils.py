@@ -686,7 +686,6 @@ def spawn_rigid_object_entities(
     if clone_options is None:
         clone_options = default_rigid_object_clone_options()
 
-    body_type = cfg.to_dexsim_body_type()
     is_newton_backend = _is_newton_backend_active()
     if is_newton_backend:
         raise TypeError(
@@ -709,7 +708,7 @@ def spawn_rigid_object_entities(
                 source_env,
                 cfg,
                 cache_dir=cache_dir,
-                body_type=body_type,
+                body_type=cfg.to_dexsim_body_type(),
                 is_newton_backend=is_newton_backend,
             )
             prototype.set_name(prototype_name)
@@ -721,7 +720,7 @@ def spawn_rigid_object_entities(
         _configure_primitive_rigidbody(
             prototype,
             cfg,
-            body_type,
+            cfg.to_dexsim_body_type(),
             is_newton_backend=is_newton_backend,
             shape_type=RigidBodyShape.BOX,
         )
@@ -731,7 +730,7 @@ def spawn_rigid_object_entities(
         _configure_primitive_rigidbody(
             prototype,
             cfg,
-            body_type,
+            cfg.to_dexsim_body_type(),
             is_newton_backend=is_newton_backend,
             shape_type=RigidBodyShape.SPHERE,
         )

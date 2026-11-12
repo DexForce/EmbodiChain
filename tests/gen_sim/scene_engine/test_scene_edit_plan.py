@@ -361,7 +361,13 @@ def test_scene_edit_asset_preparation_generates_one_image_per_add(
             output_root.mkdir(parents=True, exist_ok=True)
             for object_id, _ in object_masks:
                 trimesh.creation.box().export(output_root / f"{object_id}.glb")
-            return {}, [{"scale": [1.25, 1.5, 1.75]}]
+            return {}, [
+                {
+                    "scale": [1.25, 1.5, 1.75],
+                    "translation": [0.0, 0.0, 0.0],
+                    "rotation_quaternion_wxyz": [1.0, 0.0, 0.0, 0.0],
+                }
+            ]
 
     scene, scene_graph = _scene_and_graph()
     plan = SceneEditPlan(

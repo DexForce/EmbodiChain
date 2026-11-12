@@ -222,6 +222,34 @@ def test_surface_coefficients_compile_without_changing_values(topology: str) -> 
         assert getattr(desc.physics, native_field) == value
 
 
+@pytest.mark.parametrize("topology", ["volume", "surface"])
+def test_deformable_contact_material_reaches_native_descriptor(topology: str) -> None:
+    cfg_type = (
+        VolumeDeformableObjectCfg
+        if topology == "volume"
+        else SurfaceDeformableObjectCfg
+    )
+    compile_cfg = (
+        volume_deformable_desc_from_cfg
+        if topology == "volume"
+        else surface_deformable_desc_from_cfg
+    )
+    material = {"stiffness": 3000.0, "damping": 0.2, "dynamic_friction": 0.7}
+    cfg = cfg_type.from_dict(
+        {
+            "uid": "body",
+            "shape": {"fpath": "mesh.obj"},
+            "attrs": {"contact_material": material},
+        }
+    )
+
+    desc, _ = compile_cfg(cfg_type.from_dict(cfg.to_dict()))
+    native = desc.physics.contact_material
+    assert native.stiffness == pytest.approx(material["stiffness"])
+    assert native.damping == pytest.approx(material["damping"])
+    assert native.dynamic_friction == pytest.approx(material["dynamic_friction"])
+
+
 def test_volume_elasticity_uses_short_names() -> None:
     cfg = VolumeDeformableObjectCfg.from_dict(
         {
@@ -383,6 +411,8 @@ def test_volume_explicit_tetrahedra_accept_authored_surface() -> None:
         ({"tetrahedra": [[0, 1, 2, 9]]}, ValueError, "outside the vertices"),
         ({"tetrahedra": [[0.0, 1.0, 2.0, 3.0]]}, TypeError, "integer"),
         ({"tetrahedra": [[0, 1, 2]]}, ValueError, r"\(M, 4\)"),
+        ({"tetrahedra": [[2**32, 1, 2, 3]]}, ValueError, "fit int32"),
+        ({"tetrahedra": [[-(2**32), 1, 2, 3]]}, ValueError, "fit int32"),
     ],
 )
 def test_volume_explicit_tetrahedra_reject_invalid_input(
@@ -397,3 +427,25 @@ def test_volume_explicit_tetrahedra_reject_invalid_input(
     }
     with pytest.raises(error, match=message):
         volume_deformable_desc_from_cfg(VolumeDeformableObjectCfg.from_dict(data))
+
+
+@pytest.mark.parametrize("index", [2**32, -(2**32)])
+@pytest.mark.parametrize("field", ["tetrahedra", "triangles"])
+def test_explicit_mesh_indices_are_checked_before_native_integer_narrowing(
+    index, field
+):
+    import numpy as np
+
+    vertices, tetrahedra = _two_tet_mesh()
+    cfg = VolumeDeformableObjectCfg(
+        uid="block",
+        shape={"vertices": vertices, "triangles": None},
+        tetrahedra=tetrahedra,
+    )
+    if field == "tetrahedra":
+        # Mutating a config must not bypass validation at the native boundary.
+        cfg.tetrahedra = np.array([[index, 1, 2, 3]], dtype=np.int64)
+    else:
+        cfg.shape.triangles = np.array([[index, 1, 2]], dtype=np.int64)
+    with pytest.raises(ValueError, match="outside the vertices"):
+        volume_deformable_desc_from_cfg(cfg)

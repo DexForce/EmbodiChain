@@ -43,6 +43,11 @@ baselines while other assets retain runtime state. Native preparation failure
 propagates without rollback. Randomization requiring the replacements runs
 after this boundary.
 
+Spawn-owned asset removal checks pending-removal and topology restrictions
+before detaching mounted cameras or marker groups. A rejected removal leaves
+the asset, sensors and marker attachments usable. NoRender declaration-only
+visual objects remain removable without rebuilding physical topology.
+
 Pending Newton topology/descriptor changes requiring a new immutable model
 become usable only after preparation. Keep model rebuilding in Spawn; object
 facades must not create a second runtime ownership path.
@@ -114,3 +119,18 @@ camera attachment, replacement, control registration, reset and teardown.
 `tests/sim/spawn/test_scene.py` covers declaration/source/binding state;
 `tests/sim/test_runtime_controls.py` covers nodal behavior and one-shot joint seeding. Physical
 baseline tests live with the corresponding objects under `tests/sim/objects/`.
+
+## Batched RL controls and property writes
+
+`_register_joint_dc_motor_control()` installs a graph-compatible motor before
+scene preparation, resolving public joint names in Arena order. Effort is held
+through solver substeps and refreshed at the next outer physics step.
+`configure_ground_plane_collision()` sets ground geometry and Newton collision
+options before preparation; calls after preparation fail.
+
+Spawn-bound Newton articulations forward unique selected mass, principal
+inertia and COM-pose writes through Scene batches. Public COM poses remain
+XYZ + XYZW; the adapter converts the batch pose convention. Duplicate selections
+retain ordered per-entity behavior. Matching DexSim selected-link batch methods
+are required. `preserve_mesh_transform` retains authored collision mesh pose
+and scale when explicitly selected in Newton collision configuration.

@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import threading
+from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
 import pytest
@@ -55,6 +56,8 @@ class _MockDataset:
     """Minimal LeRobotDataset stand-in that records save calls."""
 
     def __init__(self):
+        self._save_root = TemporaryDirectory(prefix="test_async_recorder-")
+        self.save_path = self._save_root.name
         self.image_writer = None
         self.meta = Mock()
         self.meta.info = {"fps": 30}
@@ -187,7 +190,7 @@ def _make_recorder(
     from embodichain.lab.gym.envs.managers.cfg import DatasetFunctorCfg
 
     params = {
-        "save_path": "/tmp/test_async_recorder",
+        "save_path": mock_dataset.save_path,
         "robot_meta": {"robot_type": "test"},
         "instruction": {"lang": "test"},
         "extra": {"scene_type": "s", "task_description": "t"},
@@ -297,7 +300,10 @@ class TestAsyncLeRobotRecorder:
         mock_ds = _MockDataset()
         recorder = _make_recorder(env, mock_ds)
 
-        recorder(env, env_ids=torch.tensor([0, 1]))
+        receipt = recorder(env, env_ids=torch.tensor([0, 1]))
+        assert receipt.status == "queued"
+        assert set(receipt.episode_uuids) == {0, 1}
+        assert receipt.episode_uuids[0] != receipt.episode_uuids[1]
         # In the real flow env.reset() clears current_rollout_step after the
         # save; mirror that so super().finalize() does not re-save the buffer.
         env.current_rollout_step = 0

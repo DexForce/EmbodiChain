@@ -36,6 +36,7 @@ import pytest
 import torch
 
 import embodichain.lab.sim.sim_manager as sim_manager_module
+from embodichain.lab.sim.cfg import CableObjectCfg
 from embodichain.lab.sim.physics import (
     DefaultPhysicsBackend,
     NewtonPhysicsBackend,
@@ -43,12 +44,15 @@ from embodichain.lab.sim.physics import (
 )
 from embodichain.lab.sim.sim_manager import SimulationManager
 
+pytestmark = pytest.mark.no_sim
+
 # ---------------------------------------------------------------------------
 # The parity matrix — edit this table when a backend gains/loses a feature.
 # ---------------------------------------------------------------------------
 # feature -> {backend -> supported}
 BACKEND_CAPABILITIES: dict[str, dict[str, bool]] = {
     "robot": {"default": True, "newton": True},
+    "cables": {"default": False, "newton": True},
     "volume_deformables": {"default": False, "newton": True},
     "surface_deformables": {"default": False, "newton": True},
     "rigid_object_group": {"default": True, "newton": True},
@@ -66,16 +70,13 @@ BACKENDS: dict[str, type[PhysicsBackend]] = {
 # elsewhere rather than an add_* guard.
 CAPABILITY_TO_ADD_METHOD: dict[str, str | None] = {
     "robot": "add_robot",
+    "cables": "add_cable_object",
     "volume_deformables": "add_deformable_object",
     "surface_deformables": "add_deformable_object",
     "rigid_object_group": "add_rigid_object_group",
     "rigid_constraints": None,
     "contact_sensor": None,
 }
-
-
-# This module exercises capability guards using mock managers only.
-pytestmark = pytest.mark.no_sim
 
 
 def _make_backend(name: str) -> PhysicsBackend:
@@ -260,6 +261,15 @@ def test_add_method_guard_maps_to_capability(
     cfg = SimpleNamespace(uid=None)
     if feature in deformable_types:
         cfg.deformable_type = deformable_types[feature]
+    elif feature == "cables":
+        cfg = CableObjectCfg(uid=None, points=[[0, 0, 0], [0, 0, 0.2]], radius=0.01)
+        sim.device = torch.device("cuda:0")
+        sim.sim_config = SimpleNamespace(
+            physics_cfg=SimpleNamespace(requires_grad=False)
+        )
+        sim._fluid_objects = {}
+        if supported:
+            backend._configured_solver_type = "dexuni"
 
     if supported:
         # Past the guard it will hit missing-world attrs; assert the failure is

@@ -126,7 +126,7 @@ class _KinematicNodalTrajectoryControl(RuntimeControl):
         self._initial_positions = None
 
 
-class _InitialJointState(RuntimeControl):
+class _InitialJointState:
     """Seed creation defaults through engine public initialization hooks only.
 
     Unlike a realtime controller this never writes targets during stepping.
@@ -134,8 +134,6 @@ class _InitialJointState(RuntimeControl):
     Omitted positions resolve to zeros from finalized joint metadata, matching
     articulation binding before applying the same mimic projection.
     """
-
-    graph_safe = True
 
     @staticmethod
     def normalize_positions(positions: Any) -> np.ndarray:
@@ -238,6 +236,35 @@ class _InitialJointState(RuntimeControl):
                 "before attachment construction; initialization was rejected."
             )
 
+    def close(self) -> None:
+        if self._initializer is not None:
+            self._initializer.close()
+            self._initializer = None
+        self._public_positions = None
+        self._mimic_info = None
+
+
+class _SceneInitialJointStates(RuntimeControl):
+    """Seed all articulation defaults of a cable scene during its build."""
+
+    graph_safe = True
+
+    def __init__(self, seeds: tuple[_InitialJointState, ...]) -> None:
+        self.seeds = seeds
+
+    def replace(self, seeds: tuple[_InitialJointState, ...]) -> None:
+        """Discard resources from an unsuccessful build before retrying."""
+        self.close()
+        self.seeds = seeds
+
+    def initialize_model(self, model: Any, result: Any) -> None:
+        for seed in self.seeds:
+            seed.initialize_model(model, result)
+
+    def initialize(self, context: Any) -> None:
+        for seed in self.seeds:
+            seed.initialize(context)
+
     def __call__(
         self, context: Any, substep_index: int, substep_count: int, substep_dt: float
     ) -> None:
@@ -249,5 +276,5 @@ class _InitialJointState(RuntimeControl):
         return lambda: None
 
     def close(self) -> None:
-        if self._initializer is not None:
-            self._initializer.close()
+        for seed in self.seeds:
+            seed.close()

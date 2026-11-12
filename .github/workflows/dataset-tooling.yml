@@ -36,7 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python: ['3.10', '3.11', '3.12']
+        python: ['3.11', '3.12']
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
@@ -61,11 +61,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - python: '3.10'
-            torch: '2.7.0'
-            torchvision: '0.22.0'
-            torchcodec: '0.5.0'
-            tensordict: '0.13.0'
           - python: '3.11'
             torch: '2.7.0'
             torchvision: '0.22.0'

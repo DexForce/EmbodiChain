@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import math
+from copy import deepcopy
 from typing import TYPE_CHECKING, Any
 
 import gymnasium as gym
@@ -26,6 +27,9 @@ from tensordict import TensorDict
 from embodichain.lab.gym.envs.expert_trajectory import (
     EXPERT_TRAJECTORY_SCHEMA_VERSION,
     build_expert_action_spec,
+)
+from embodichain.lab.gym.envs.task_program._final_acceptance import (
+    _replay_final_acceptance,
 )
 from embodichain.lab.gym.envs.types import ControllerAction
 from embodichain.lab.gym.utils.gym_utils import load_trajectory
@@ -66,6 +70,10 @@ class ReplayWrapper(gym.Wrapper):
     Cable recordings support dynamic replay from matching full-reset states
     only. Their visible state omits contact/solver history, so state scrubbing,
     partial resets and broadcasting world-space cable recordings are rejected.
+
+    For a deployment with final acceptance rules, ``final_acceptance`` reports
+    the offline evaluation of the saved terminal capture, independently of
+    physics replay and Gym termination flags.
 
     Args:
         env: The environment to wrap (constructed without ``record_trajectory``).
@@ -144,10 +152,13 @@ class ReplayWrapper(gym.Wrapper):
                 f"robot_dof={env_robot_dof} / active_joint_ids={env_active_joint_ids}."
             )
 
+        self._final_acceptance = _replay_final_acceptance(
+            getattr(env, "_final_acceptance_rules", ()), self._trajectory
+        )
         self._expand_to_env_count()
 
         # Per-env lengths support async vector trajectories.
-        lengths = meta["lengths"]
+        lengths = self._trajectory["meta"]["lengths"]
         self._lengths = torch.tensor(lengths, dtype=torch.long, device=self.env.device)
 
         # Clamp replay length to the wrapped env's horizon.
@@ -216,11 +227,29 @@ class ReplayWrapper(gym.Wrapper):
                 f"Trajectory has {traj_envs} envs but wrapped env has {env_envs}; "
                 "only single-env trajectories can be broadcast."
             )
+        self._trajectory = dict(self._trajectory)
         for key in ("states", "actions"):
             t = self._trajectory[key]
             self._trajectory[key] = t.expand(env_envs, *t.shape[1:]).clone()
-        meta["num_envs"] = env_envs
-        meta["lengths"] = list(meta["lengths"]) * env_envs
+        self._trajectory["meta"] = dict(
+            meta, num_envs=env_envs, lengths=list(meta["lengths"]) * env_envs
+        )
+        if self._final_acceptance is not None:
+            self._final_acceptance *= env_envs
+
+    @property
+    def final_acceptance(self) -> tuple[dict[str, Any], ...] | None:
+        """Return owned, per-row final acceptance reports from the trajectory.
+
+        Reports are available before stepping. A ``recomputed`` report contains
+        the recomputed predicates, acceptance, and the separately recorded
+        acceptance. ``not_recorded`` has no recomputed acceptance. ``not_run``
+        represents an episode sealed before the physical gate ran. Deployments
+        without final acceptance rules return None.
+        """
+        if self._final_acceptance is None:
+            return None
+        return tuple(deepcopy(row) for row in self._final_acceptance)
 
     def reset(
         self, *, seed: int | None = None, options: dict | None = None

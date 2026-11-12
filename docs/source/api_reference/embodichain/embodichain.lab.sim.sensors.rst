@@ -54,6 +54,10 @@ Camera
     :show-inheritance:
     :exclude-members: __init__, copy, replace, to_dict, validate
 
+Camera and stereo captures exclude native markers by default. Set
+``include_visual_overlays=True`` on an explicit preview camera to include
+both scene-lit markers and overlays.
+
 Attachment resolution
 ---------------------
 
@@ -173,7 +177,7 @@ sensor configuration, acquisition and history. Its ``sensor``, ``sampling``,
 adaptation kernels live under its private ``_warp`` directory. Generic physical
 evidence remains in ``lab.sim.evidence``; grasp interpretation and Task Program
 bindings remain in their owning layers. Calibrated hand opening used for release
-interpretation belongs to ``atomic_actions.grip_evidence``, not the sensor layer.
+interpretation belongs to ``atomic_skills.grip_evidence``, not the sensor layer.
 
 .. currentmodule:: embodichain.lab.sim.sensors.contact
 
@@ -216,3 +220,24 @@ keep their existing names. The old flat ``sensors.contact_sensor`` and
 Sampling and timeline APIs use ``contact.sampling`` and ``contact.timeline``.
 Regenerate declarations that explicitly seal implementation-qualified type names;
 old identities are not silently rewritten.
+
+
+Stereo implementation exports
+-----------------------------
+
+.. currentmodule:: embodichain.lab.sim.sensors.stereo
+
+The implementation module exposes the stereo sensor and its configuration under
+these import paths. ``PairCameraView`` provides compatibility access to one
+left/right pair: state and attachment operations require a live owning sensor
+and publish through its Scene batch. Its center-pose reads return owned matrices.
+
+.. autosummary::
+
+    StereoCamera
+    StereoCameraCfg
+    PairCameraView
+
+.. autoclass:: PairCameraView
+    :members:
+    :show-inheritance:

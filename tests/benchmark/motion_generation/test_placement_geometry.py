@@ -90,6 +90,152 @@ def test_empty_basin_selection_preserves_full_mesh() -> None:
     torch.testing.assert_close(get_pan_basin_vertices(pan), pan)
 
 
+def test_explicit_glb_frame_preserves_the_authored_handle_and_basin_geometry():
+    pan = torch.tensor(
+        [
+            [-0.1, -0.1, 0.0],
+            [0.1, 0.03, 0.048],
+            [-0.01, 0.1, 0.04],
+            [0.01, 0.2, 0.05],
+        ]
+    )
+    frame = torch.tensor([[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]])
+    native = pan @ frame.T
+    pose = torch.eye(4)
+    pose[:3, :3] = frame.T
+    torch.testing.assert_close(
+        get_pan_basin_vertices(native, pan_frame="native_glb") @ frame,
+        get_pan_basin_vertices(pan),
+    )
+    torch.testing.assert_close(
+        build_pan_handle_grasp_pose(pose, native, _CPU, pan_frame="native_glb"),
+        build_pan_handle_grasp_pose(torch.eye(4), pan, _CPU),
+    )
+
+
+@pytest.mark.parametrize(
+    "condition", ["resting", "curved", "floating", "rim", "overhang", "penetrating"]
+)
+def test_settled_placement_requires_full_footprint_and_bounded_surface_gaps(condition):
+    floor = torch.tensor(
+        [[-0.1, -0.03, 0.0], [0.1, -0.03, 0.0], [0.1, 0.03, 0.0], [-0.1, 0.03, 0.0]]
+    )
+    faces = torch.tensor([[0, 1, 2], [0, 2, 3]])
+    bread = floor.clone() * 0.8
+    pan, pan_faces = floor, faces
+    placing = torch.eye(4)[None]
+    placing[:, 2, 3] = 0.006
+    if condition == "curved":
+        bread[:, 2] = 0.02
+        bread = torch.cat((bread, torch.zeros(1, 3)))
+        faces = torch.tensor([[0, 1, 4], [1, 2, 4], [2, 3, 4], [3, 0, 4]])
+    elif condition == "floating":
+        placing[:, 2, 3] = 0.03
+    elif condition == "penetrating":
+        placing[:, 2, 3] = -0.001
+    elif condition == "overhang":
+        placing[:, 0, 3] = 0.025
+    elif condition == "rim":
+        # A loaf spanning the rim has contact at its edges but floats over
+        # the interior floor. A minimum-gap-only check would accept it.
+        bread = floor.clone()
+        rim = torch.cat((floor, floor * 0.9)) + torch.tensor([0.0, 0.0, 0.04])
+        pan = torch.cat((floor, rim))
+        rim_faces = (
+            torch.tensor(
+                [[i, (i + 1) % 4, 4 + (i + 1) % 4] for i in range(4)]
+                + [[i, 4 + (i + 1) % 4, 4 + i] for i in range(4)]
+            )
+            + 4
+        )
+        pan_faces = torch.cat((faces, rim_faces))
+        placing[:, 2, 3] = 0.04
+    result = _placement_input_geometry(
+        bread,
+        faces,
+        pan,
+        pan_faces,
+        placing,
+        torch.eye(4)[None],
+        maximum_support_gap_m=0.008,
+    )
+    row = result["rows"][0]
+    assert row["qualified"] is (condition in {"resting", "curved"})
+    if condition in {"floating", "rim"}:
+        assert row["maximum_sampled_vertical_gap_m"] > 0.008
+
+
+@pytest.mark.requires_sim
+@pytest.mark.gpu
+@pytest.mark.parametrize("backend", ["default", "newton"])
+@pytest.mark.parametrize(
+    "suite_name",
+    [
+        "atomic_dual_franka_robotiq_coordinated_placement",
+        "atomic_dual_ur5_pgi_coordinated_placement",
+        "atomic_dual_ur5_pgi_coordinated_placement_spatial_generalization",
+    ],
+)
+def test_suite_pan_frame_matches_actual_native_glb_loading(suite_name, backend):
+    from embodichain_benchmarks.motion_generation.config import (
+        BENCHMARK_ROOT,
+        load_suite,
+    )
+    from embodichain_benchmarks.motion_generation.scenarios.atomic_objects import (
+        create_atomic_object,
+    )
+    from embodichain_benchmarks.motion_generation._atomic_fixtures import (
+        get_local_vertices,
+    )
+    from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+    from embodichain.lab.sim.cfg import DefaultPhysicsCfg, NewtonPhysicsCfg
+
+    suite = load_suite(BENCHMARK_ROOT / "suites" / f"{suite_name}.yaml")
+    config = suite.tracks[0].config
+    pan_cfg = next(obj for obj in config["objects"] if obj["id"] == "pan")
+    skill = next(
+        skill for skill in config["skills"] if skill["id"] == "coordinated_placement"
+    )
+    assert skill["support_mesh_frame"] == "native_glb"
+    physics = (
+        DefaultPhysicsCfg()
+        if backend == "default"
+        else NewtonPhysicsCfg(num_substeps=1, use_cuda_graph=False)
+    )
+    sim = SimulationManager(SimulationManagerCfg(headless=True, physics_cfg=physics))
+    try:
+        pan = create_atomic_object(sim, pan_cfg, initialize=False).entity
+        sim.prepare()
+        vertices = get_local_vertices(pan)
+        # Exercise the suite's unchanged GLB, scale and native loader. Its
+        # handle extends along local Z, while Y contains only thickness.
+        handle = vertices[vertices[:, 2] >= 0.04]
+        basin = get_pan_basin_vertices(vertices, pan_frame=skill["support_mesh_frame"])
+        assert 0 < len(handle) < len(vertices)
+        assert 0 < len(basin) < len(vertices)
+        assert vertices[:, 1].max() <= 1e-6
+        pose = pan.get_local_pose(to_matrix=True)[0]
+        grasp = build_pan_handle_grasp_pose(
+            pose, vertices, sim.device, pan_frame=skill["support_mesh_frame"]
+        )
+        assert torch.isfinite(grasp).all()
+        grasp_in_pan = pose[:3, :3].T @ (grasp[:3, 3] - pose[:3, 3])
+        assert grasp_in_pan[2] >= 0.04
+        torch.testing.assert_close(
+            grasp[:3, :3].T @ grasp[:3, :3],
+            torch.eye(3, device=sim.device),
+            atol=1e-5,
+            rtol=0,
+        )
+    finally:
+        sim.destroy(exit_process=False)
+        SimulationManager.flush_cleanup_queue()
+        if backend == "newton":
+            from dexsim.engine.newton_physics import teardown_newton_physics
+
+            teardown_newton_physics()
+
+
 def test_placing_target_centers_offset_mesh_footprints_on_the_basin() -> None:
     # The bread's asset origin is displaced 0.3m along X from its mesh center.
     bread = torch.tensor([[0.2, -0.04, 0.0], [0.4, 0.04, 0.02]])

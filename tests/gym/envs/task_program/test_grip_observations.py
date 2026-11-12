@@ -44,11 +44,11 @@ from embodichain.lab.gym.utils.gym_utils import (
     _init_raw_rollout,
     _write_raw_rollout,
 )
-from embodichain.lab.sim.atomic_actions import (
-    AtomicActionEngine,
+from embodichain.lab.sim.atomic_skills import (
+    AtomicSkillEngine,
     CARTESIAN_POSE_CAPABILITY,
 )
-from embodichain.lab.sim.atomic_actions.grip_evidence import GripEvidenceObservationPort
+from embodichain.lab.sim.atomic_skills.grip_evidence import GripEvidenceObservationPort
 from embodichain.lab.sim.motion.motion_generator import MotionGenerator
 from embodichain.lab.task_program import TaskProgramCompiler, decode_task_program
 from embodichain.lab.task_program.integrations import (
@@ -146,7 +146,7 @@ def _case(monkeypatch, *, configured=True):
         presets=(
             SkillPolicyPreset(
                 "default",
-                action_option_templates={},
+                skill_option_templates={},
                 effect_assurance=EffectAssurance.PROJECTED,
             ),
         ),
@@ -205,7 +205,7 @@ def _case(monkeypatch, *, configured=True):
         if not runtime_scope["current"]:
             raise ValueError("Runtime invocation scope replaced.")
 
-    engine = AtomicActionEngine(generator, load_builtins=False)
+    engine = AtomicSkillEngine(generator, load_builtins=False)
     registry = factory.create_scene_registry()
     observation = factory.create_planning_observation_provider(
         scene_registry=registry,

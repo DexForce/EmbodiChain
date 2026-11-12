@@ -67,6 +67,15 @@ class GymCohortExecutor:
         bridges, services = {}, {}
         ctx.bridges, ctx.services = bridges, services
         phase_started = time.monotonic()
+        prototype_profile = None
+        if cfg.prototype_validation_profile is not None:
+            from embodichain.lab.task_program.integrations.simulation.real2sim_collection import (
+                load_real2sim_tabletop_profile,
+            )
+
+            prototype_profile = load_real2sim_tabletop_profile(
+                cfg.prototype_validation_profile
+            )
         for row, (
             identity,
             episode_id,
@@ -76,7 +85,28 @@ class GymCohortExecutor:
         ) in assignments.items():
             ordinal = ctx.requests[row].recipe.context.ordinal
             if profile is None:
-                pass
+                from embodichain.lab.task_program.integrations.demo_skill import (
+                    _ConfiguredDemoSkillSource,
+                )
+
+                if env.task_program_adapter.configured_nominal_sources:
+                    from .sources import _OccurrenceSourceRow
+
+                    service = _OccurrenceSourceRow(
+                        env,
+                        row,
+                        program,
+                        expansion_profile=motion_profile,
+                        candidate_index=(
+                            (ordinal % len(motion_recipes)) if motion_recipes else 0
+                        ),
+                        duration_scale=cfg.demo_skill_duration_scale,
+                        velocity_limits=cfg.demo_skill_velocity_limits,
+                        acceleration_limits=cfg.demo_skill_acceleration_limits,
+                        prototype_profile=prototype_profile,
+                    )
+                    services[row] = service
+                    bridges[row] = service.bridge
             else:
                 from .real2sim import _Real2SimRow
 
@@ -108,7 +138,7 @@ class GymCohortExecutor:
         executor = TaskProgramBatchExecutor(
             env,
             program,
-            row_bridges=bridges if profile is not None else None,
+            row_bridges=bridges or None,
             expansion_profile=motion_profile,
             recipe_indices=(
                 tuple(

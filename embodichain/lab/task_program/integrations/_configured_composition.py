@@ -21,7 +21,12 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from embodichain.lab.evaluation import PredicateRegistry
+    from embodichain.lab.task_program.language.schema import TaskProgramCfg
+    from .catalog import TaskProgramIntegrationCatalog
 
 from embodichain.lab.task_program.language.schema import TaskProgramIntegrationCfg
 from embodichain.utils.config_paths import resolve_config_path
@@ -37,6 +42,9 @@ from .configured import (
     _decode_motion_policy,
     _decode_recovery_policy,
     _identifier,
+    _identifier_mapping,
+    _normalize_skill_options_key,
+    _normalize_recovery_policy_keys,
     _mapping,
 )
 
@@ -74,7 +82,7 @@ _EXECUTION_POLICY_OVERRIDE_FIELDS = {
             "dynamic_collision_mode",
         }
     ),
-    "recovery": frozenset({"action_timeout", "goal_rotation_threshold"}),
+    "recovery": frozenset({"skill_timeout", "goal_rotation_threshold"}),
 }
 
 
@@ -282,12 +290,15 @@ def _resolve_execution_policy(
     value: object,
     *,
     base_dir: Path,
-) -> tuple[Path, dict[str, object]]:
+) -> tuple[Path | None, dict[str, object]]:
     """Load a policy path or component selector with bounded scalar overrides."""
     selection_path = "task_program.execution_policy"
     overrides: Mapping[str, object] = {}
     component_field = selection_path
-    if isinstance(value, str):
+    inline = isinstance(value, Mapping) and "inline" in value
+    if inline:
+        component = None
+    elif isinstance(value, str):
         component = value
     else:
         selection = _mapping(
@@ -304,15 +315,24 @@ def _resolve_execution_policy(
             required=frozenset(),
             optional=frozenset(_EXECUTION_POLICY_OVERRIDE_FIELDS),
         )
-    policy_path = _component_path(
-        component,
-        base_dir=base_dir,
-        path=component_field,
-        suffixes=frozenset({".yaml", ".yml"}),
+    policy_path = (
+        None
+        if inline
+        else _component_path(
+            component,
+            base_dir=base_dir,
+            path=component_field,
+            suffixes=frozenset({".yaml", ".yml"}),
+        )
+    )
+    raw_policy = (
+        _inline_component(value, path=selection_path)
+        if inline
+        else _load_yaml_component(policy_path, field_name="execution policy")
     )
     policy = dict(
         _mapping(
-            _load_yaml_component(policy_path, field_name="execution policy"),
+            raw_policy,
             path="execution policy",
             required=frozenset(
                 {
@@ -331,7 +351,14 @@ def _resolve_execution_policy(
         )
     )
     _identifier(policy["policy_id"], path="execution policy.policy_id")
+    policy["recovery"] = _normalize_recovery_policy_keys(
+        policy["recovery"], path="execution policy.recovery"
+    )
     for group, values in overrides.items():
+        if group == "recovery":
+            values = _normalize_recovery_policy_keys(
+                values, path=f"{selection_path}.overrides.recovery"
+            )
         patch = _mapping(
             values,
             path=f"{selection_path}.overrides.{group}",
@@ -366,27 +393,41 @@ def _resolve_task_program_components(
     value: object,
     *,
     base_dir: Path,
-) -> tuple[Path, Mapping[str, object], Mapping[str, object]]:
+) -> tuple[Path | Mapping[str, object], Mapping[str, object], Mapping[str, object]]:
     """Resolve program, task integration, and execution policy selections."""
     declaration = _mapping(
         value,
         path="task_program",
         required=frozenset({"program", "integration", "execution_policy"}),
     )
-    program_path = _component_path(
-        declaration["program"],
-        base_dir=base_dir,
-        path="task_program.program",
-        suffixes=frozenset({".json", ".yaml", ".yml"}),
+    program_path = (
+        _inline_component(declaration["program"], path="task_program.program")
+        if isinstance(declaration["program"], Mapping)
+        else _component_path(
+            declaration["program"],
+            base_dir=base_dir,
+            path="task_program.program",
+            suffixes=frozenset({".json", ".yaml", ".yml"}),
+        )
     )
-    integration_path = _component_path(
-        declaration["integration"],
-        base_dir=base_dir,
-        path="task_program.integration",
-        suffixes=frozenset({".yaml", ".yml"}),
-    )
+    if isinstance(declaration["integration"], Mapping):
+        integration_path = None
+        integration_source = _inline_component(
+            declaration["integration"], path="task_program.integration"
+        )
+    else:
+        integration_path = _component_path(
+            declaration["integration"],
+            base_dir=base_dir,
+            path="task_program.integration",
+            suffixes=frozenset({".yaml", ".yml"}),
+        )
+        integration_source = _load_yaml_component(
+            integration_path, field_name="task integration"
+        )
+    integration_base = base_dir if integration_path is None else integration_path.parent
     integration = _mapping(
-        _load_yaml_component(integration_path, field_name="task integration"),
+        integration_source,
         path="task integration",
         required=frozenset(
             {
@@ -404,6 +445,30 @@ def _resolve_task_program_components(
         runtime_services = _owned_mapping(
             integration["runtime_services"], path="integration.runtime_services"
         )
+        if "demo_skills" in runtime_services:
+            from embodichain.data._references import _resolve_data_reference
+
+            runtime_services["demo_skills"] = _owned_mapping(
+                runtime_services["demo_skills"], path="runtime_services.demo_skills"
+            )
+            for alias, entry in runtime_services["demo_skills"].items():
+                if not isinstance(entry, dict) or "asset_manifest" not in entry:
+                    raise ValueError(f"Demo Skill {alias!r} requires asset_manifest")
+                entry["asset_manifest"] = str(
+                    _resolve_data_reference(
+                        entry["asset_manifest"], base_dir=integration_base
+                    )
+                )
+        if "registered_semantic_lowerers" in runtime_services:
+            for lowerer in runtime_services["registered_semantic_lowerers"]:
+                if isinstance(lowerer, dict) and lowerer.get("kind") == "demo_skill":
+                    from embodichain.data._references import _resolve_data_reference
+
+                    lowerer["asset_manifest"] = str(
+                        _resolve_data_reference(
+                            lowerer["asset_manifest"], base_dir=integration_base
+                        )
+                    )
         if "nominal_motion_sources" in runtime_services:
             sources = _owned_sequence(
                 runtime_services["nominal_motion_sources"],
@@ -415,20 +480,25 @@ def _resolve_task_program_components(
                     item,
                     path=f"integration.runtime_services.nominal_motion_sources[{index}]",
                 )
-                if "prototype_manifest" not in value:
-                    raise ValueError("nominal source requires prototype_manifest")
+                manifest_key = (
+                    "asset_manifest"
+                    if value.get("provider_id") == "demo_skill"
+                    else "prototype_manifest"
+                )
+                if manifest_key not in value:
+                    raise ValueError(f"nominal source requires {manifest_key}")
                 from embodichain.data._references import _resolve_data_reference
 
-                value["prototype_manifest"] = str(
+                value[manifest_key] = str(
                     _component_path(
                         str(
                             _resolve_data_reference(
-                                value["prototype_manifest"],
-                                base_dir=integration_path.parent,
+                                value[manifest_key],
+                                base_dir=integration_base,
                             )
                         ),
-                        base_dir=integration_path.parent,
-                        path=f"integration.runtime_services.nominal_motion_sources[{index}].prototype_manifest",
+                        base_dir=integration_base,
+                        path=f"integration.runtime_services.nominal_motion_sources[{index}].{manifest_key}",
                         suffixes=frozenset({".json"}),
                     )
                 )
@@ -502,14 +572,14 @@ def _compose_integration_payload(
         )
 
     profile = _mapping(
-        task["profile"],
+        _normalize_skill_options_key(task["profile"], path="task integration.profile"),
         path="task integration.profile",
-        required=frozenset({"defaults", "action_options", "effect_monitors"}),
+        required=frozenset({"defaults", "skill_options", "effect_monitors"}),
         optional=frozenset({"skill_presets", "grounding_providers"}),
     )
     preset = {
         "preset_id": deepcopy(policy["preset_id"]),
-        "action_options": deepcopy(profile["action_options"]),
+        "skill_options": deepcopy(profile["skill_options"]),
         "motion": deepcopy(policy["motion"]),
         "tracking": deepcopy(policy["tracking"]),
         "recovery": deepcopy(policy["recovery"]),
@@ -554,6 +624,8 @@ def _load_configured_task_program_deployment(
     task_program: object,
     skill_profile: object,
     base_dir: str | Path,
+    evaluation: Mapping[str, object] | None = None,
+    evaluation_registry: PredicateRegistry | None = None,
 ) -> _ConfiguredTaskProgramDeployment:
     """Compose Task Program metadata after Gym resolves physical components."""
     selected_base_dir = Path(base_dir).expanduser()
@@ -561,13 +633,16 @@ def _load_configured_task_program_deployment(
         task_program,
         base_dir=selected_base_dir,
     )
+    from .demo_skill import _prepare_named_demo_skills, _bind_named_demo_sources
+
+    named_demo_sources = _prepare_named_demo_skills(task)
     selected_skill_profile = _mapping(
         skill_profile,
         path="embodiment component.skill_profile",
         required=frozenset(
             {"contract_id", "profile_id", "resources", "command_presets"}
         ),
-        optional=frozenset({"runtime_services"}),
+        optional=frozenset({"runtime_services", "evaluation_links"}),
     )
     scene_binding = _mapping(
         task["scene_binding"],
@@ -593,6 +668,12 @@ def _load_configured_task_program_deployment(
     integration = _decode_configured_task_program_integration(
         payload,
         planner_config=planner_config,
+        evaluation=evaluation,
+        evaluation_registry=evaluation_registry,
+        evaluation_robot_links=_identifier_mapping(
+            selected_skill_profile.get("evaluation_links", {}),
+            path="embodiment component.skill_profile.evaluation_links",
+        ),
     )
     integration_id = _identifier(
         task["integration_id"],
@@ -611,26 +692,99 @@ def _load_configured_task_program_deployment(
         ),
     )
     factory = cast(_ConfiguredTaskProgramAdapterFactory, integration.adapter_factory)
-    if factory.nominal_motion_sources:
-        from embodichain.lab.task_program import load_task_program
+    if (
+        factory.nominal_motion_sources
+        or named_demo_sources
+        or isinstance(program_path, Mapping)
+    ):
         from .nominal import _ConfiguredTaskProgramNominalSources
 
         catalog = integration.registration.catalog
-        program = load_task_program(
-            program_path, integration=selection, validation_context=catalog
+        program = _load_deployment_program(
+            program_path, selection=selection, catalog=catalog
         )
         if program.program_id != program_id:
             raise ValueError(
                 "configured nominal sources require the integration's program_id"
             )
         compiled = catalog.preflight(program)
-        _ConfiguredTaskProgramNominalSources(compiled, factory.nominal_motion_sources)
+        if named_demo_sources:
+            from dataclasses import replace
+
+            factory = replace(
+                factory,
+                nominal_motion_sources=_bind_named_demo_sources(
+                    compiled, named_demo_sources, factory.nominal_motion_sources
+                ),
+            )
+            from dataclasses import asdict
+            import hashlib
+            import json
+
+            source_identity = [
+                {
+                    key: value
+                    for key, value in asdict(item).items()
+                    if key not in {"asset_manifest", "prototype_manifest"}
+                }
+                for item in factory.nominal_motion_sources
+            ]
+            fingerprint = hashlib.sha256(
+                json.dumps(
+                    {
+                        "integration": integration.integration_fingerprint,
+                        "nominal_motion_sources": source_identity,
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                ).encode()
+            ).hexdigest()
+            factory = replace(factory, integration_fingerprint=fingerprint)
+            integration = replace(
+                integration,
+                adapter_factory=factory,
+                integration_fingerprint=fingerprint,
+            )
+        if factory.nominal_motion_sources:
+            _ConfiguredTaskProgramNominalSources(
+                compiled, factory.nominal_motion_sources
+            )
     return _ConfiguredTaskProgramDeployment(
         integration_id=integration_id,
         program_id=program_id,
-        program_path=program_path,
+        program_path=program_path if isinstance(program_path, Path) else None,
+        program_declaration=(
+            deepcopy(dict(program_path)) if isinstance(program_path, Mapping) else None
+        ),
         selection=selection,
         integration=integration,
         scene_binding=deepcopy(dict(scene_binding)),
         planner_config=planner_config,
     )
+
+
+def _inline_component(value: object, *, path: str) -> dict[str, object]:
+    """Own an explicit inline declaration without reading a component file."""
+    selection = _mapping(value, path=path, required=frozenset({"inline"}))
+    return _owned_mapping(selection["inline"], path=f"{path}.inline")
+
+
+def _load_deployment_program(
+    source: Path | Mapping[str, object],
+    *,
+    selection: TaskProgramIntegrationCfg,
+    catalog: TaskProgramIntegrationCatalog,
+) -> TaskProgramCfg:
+    """Use the same strict decoder for inline and file-backed programs."""
+    from embodichain.lab.task_program import decode_task_program, load_task_program
+    from embodichain.lab.task_program.language.loader import (
+        _bind_task_program_integration,
+    )
+
+    if isinstance(source, Mapping):
+        return decode_task_program(
+            _bind_task_program_integration(dict(source), selection),
+            validation_context=catalog,
+        )
+    return load_task_program(source, integration=selection, validation_context=catalog)

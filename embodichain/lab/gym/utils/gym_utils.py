@@ -41,6 +41,7 @@ from embodichain.utils.utility import get_class_instance
 from dexsim.utility import log_debug, log_error
 
 if TYPE_CHECKING:
+    from embodichain.lab.evaluation import PredicateRegistry
     from embodichain.lab.gym.envs.managers.cfg import RLTaskCfg
     from embodichain.lab.sim.cfg import RobotCfg
     from embodichain.lab.sim.sensors import SensorCfg
@@ -604,6 +605,7 @@ def config_to_cfg(
     source_path: str | os.PathLike[str] | None = None,
     task_program_path_override: str | os.PathLike[str] | None = None,
     component_sources: Mapping[str, Mapping[str, object]] | None = None,
+    evaluation_registry: PredicateRegistry | None = None,
 ) -> "EmbodiedEnvCfg":
     """Parser configuration file into cfgs for env initialization.
 
@@ -628,6 +630,7 @@ def config_to_cfg(
     Args:
         config (dict): The configuration dictionary containing an optional
             environment component plus an embodiment component or inline robot.
+        evaluation_registry: Optional trusted registry for the selected rule library.
         manager_modules (list): List of module paths for dataset, event, observation, and reward managers.
             If not provided, uses default module paths.
         source_path: Optional path of the Gym configuration source file.
@@ -762,6 +765,7 @@ def config_to_cfg(
     configured_task_program_selection = None
     configured_task_program_id: str | None = None
     configured_task_program_path: Path | None = None
+    configured_task_program_deployment = None
     if "task_program" in config:
         if not component_resolution.embodiment_selected:
             raise ValueError(
@@ -787,15 +791,37 @@ def config_to_cfg(
             _load_configured_task_program_deployment,
         )
 
+        program_selectors = deepcopy(config["task_program"])
+        if task_program_path_override is not None:
+            if not isinstance(task_program_path_override, (str, os.PathLike)):
+                raise TypeError("task_program_path must be a string or path.")
+            program_selectors["program"] = str(
+                Path(task_program_path_override).expanduser().resolve()
+            )
         deployment = _load_configured_task_program_deployment(
-            task_program=config["task_program"],
+            task_program=program_selectors,
             skill_profile=component_resolution.embodiment_skill_profile,
+            evaluation=component_resolution.evaluation,
+            evaluation_registry=evaluation_registry,
             base_dir=base_dir,
         )
+        from embodichain.lab.task_program.integrations.demo_skill import (
+            _ConfiguredDemoSkillSource,
+        )
+
+        if (
+            any(
+                isinstance(source, _ConfiguredDemoSkillSource)
+                for source in deployment.integration.adapter_factory.nominal_motion_sources
+            )
+            and config.get("num_envs", 1) != 1
+        ):
+            raise ValueError("configured Demo Skills require num_envs == 1")
         _validate_scene_binding_targets(
             deployment.scene_binding,
             simulation=component_resolution.scene_config,
         )
+        configured_task_program_deployment = deployment
         configured_task_program_integration = deployment.integration
         configured_task_program_selection = deployment.selection
         configured_task_program_id = deployment.program_id
@@ -803,25 +829,48 @@ def config_to_cfg(
     elif "robot" not in config:
         log_error("Missing required config key: robot")
 
+    if env_cfg.objective is not None and env_cfg.objective.condition is not None:
+        from embodichain.lab.gym.envs.objectives.ordered_placement import (
+            _objective_fields,
+            _objective_rule,
+        )
+
+        registration = getattr(
+            configured_task_program_integration, "registration", None
+        )
+        rule = _objective_rule(
+            env_cfg.objective,
+            getattr(registration, "evaluation_conditions", {}),
+        )
+        _objective_fields(env_cfg.objective.object_uid, rule)
+
     if (
         task_program_path_override is not None
-        or configured_task_program_path is not None
+        or configured_task_program_deployment is not None
     ):
-        if task_program_path_override is not None:
+        inline_deployment = (
+            task_program_path_override is None
+            and configured_task_program_deployment is not None
+            and configured_task_program_deployment.program_path is None
+        )
+        if inline_deployment:
+            task_program_path_text = None
+        elif task_program_path_override is not None:
             task_program_path = task_program_path_override
             if not isinstance(task_program_path, (str, os.PathLike)):
                 raise TypeError("task_program_path must be a string or path.")
         else:
             assert configured_task_program_path is not None
             task_program_path = configured_task_program_path
-        task_program_path_text = os.fspath(task_program_path)
-        if not task_program_path_text or (
-            task_program_path_text != task_program_path_text.strip()
-        ):
-            raise ValueError(
-                "task_program_path must be a non-empty string without outer "
-                "whitespace."
-            )
+        if not inline_deployment:
+            task_program_path_text = os.fspath(task_program_path)
+            if not task_program_path_text or (
+                task_program_path_text != task_program_path_text.strip()
+            ):
+                raise ValueError(
+                    "task_program_path must be a non-empty string without outer "
+                    "whitespace."
+                )
         from embodichain.lab.task_program.language.loader import (
             load_task_program,
         )
@@ -834,11 +883,16 @@ def config_to_cfg(
             registration = configured_task_program_integration.registration
         if registration is not None:
             registration.assert_unchanged()
-        task_program = load_task_program(
-            task_program_path_text,
-            integration=configured_task_program_selection,
-            validation_context=(None if registration is None else registration.catalog),
-        )
+        if inline_deployment:
+            task_program = configured_task_program_deployment.load_program()
+        else:
+            task_program = load_task_program(
+                task_program_path_text,
+                integration=configured_task_program_selection,
+                validation_context=(
+                    None if registration is None else registration.catalog
+                ),
+            )
         if (
             configured_task_program_id is not None
             and task_program.program_id != configured_task_program_id
@@ -984,6 +1038,12 @@ def config_to_cfg(
     if type(ignore_terminations) is not bool:
         raise TypeError("env.ignore_terminations must be a bool.")
     env_cfg.ignore_terminations = ignore_terminations
+    episode_context_in_info = config["env"].get(
+        "episode_context_in_info", env_cfg.episode_context_in_info
+    )
+    if type(episode_context_in_info) is not bool:
+        raise TypeError("env.episode_context_in_info must be a bool.")
+    env_cfg.episode_context_in_info = episode_context_in_info
     task_instruction = config["env"].get("task_instruction")
     if task_instruction is not None and (
         type(task_instruction) is not str
@@ -1983,6 +2043,8 @@ def init_rollout_buffer_from_config(
     state_dim: int,
     device: Union[str, torch.device] = "cpu",
     action_dim: int | None = None,
+    *,
+    source_path: str | os.PathLike[str] | None = None,
 ) -> TensorDict:
     """Initialize a rollout buffer based on the environment configuration.
 
@@ -1999,6 +2061,8 @@ def init_rollout_buffer_from_config(
         batch_size (int): The batch size for the rollout buffer.
         state_dim (int): The dimension of the flattened state vector.
         action_dim: Stored action width, defaulting to state_dim.
+        source_path: Owning Gym configuration file for relative component paths.
+            None preserves resolution from the current working directory.
 
     Returns:
         TensorDict: A TensorDict containing the initialized rollout buffer with keys 'obs', 'actions' and 'rewards'.
@@ -2010,7 +2074,12 @@ def init_rollout_buffer_from_config(
     if action_dim is not None and (type(action_dim) is not int or action_dim < 1):
         raise ValueError("action_dim must be a positive integer or None")
 
-    config = _resolve_gym_components(config, base_dir=Path.cwd()).config
+    from embodichain.utils.config_paths import resolve_config_path
+
+    base_dir = (
+        resolve_config_path(source_path).resolve().parent if source_path else Path.cwd()
+    )
+    config = _resolve_gym_components(config, base_dir=base_dir).config
 
     # TODO: Currently we use this method to pre-allocate a rollout buffer with fixed size for simplicity.
     # Parse extra observations from observation functors in 'add' mode

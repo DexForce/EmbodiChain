@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -245,6 +246,7 @@ def _manager(solver="dexuni", device="cuda", requires_grad=False) -> SimulationM
         "_rigid_objects",
         "_rigid_object_groups",
         "_deformable_objects",
+        "_fluid_objects",
         "_lights",
         "_sensors",
     ):
@@ -260,8 +262,192 @@ def test_manager_declaration_query_and_duplicate_uid() -> None:
     assert sim.get_cable_object("wire") is cable
     assert sim.get_cable_object("missing") is None
     assert sim.get_cable_object_uid_list() == ["wire"]
+    from embodichain.lab.sim.material import VisualMaterialCfg
+
+    scene = sim._spawn_scene
+    del scene._resolve_materials
+    scene._usd_texture_files = SimpleNamespace(resolve=lambda materials: materials)
+    scene._resource_material_definitions = {}
+    scene._material_resources = SimpleNamespace(renderer="no-render")
+    duplicate = _cfg()
+    duplicate.visual_material = VisualMaterialCfg(uid="shared", base_color=[1, 0, 0, 1])
     with pytest.raises(ValueError, match="already declared"):
-        sim.add_cable_object(_cfg())
+        sim.add_cable_object(duplicate)
+
+    other = _cfg()
+    other.uid = "other"
+    other.visual_material = VisualMaterialCfg(uid="shared", base_color=[0, 1, 0, 1])
+    assert sim.add_cable_object(other) is sim.get_cable_object("other")
+    assert sim.get_cable_object("wire") is cable
+    assert cable.cfg.visual_material is None
+
+
+@pytest.mark.parametrize("deformable_type", ["volume", "surface"])
+@pytest.mark.parametrize("cable_first", [True, False])
+def test_particle_and_cable_declarations_preserve_first_asset(
+    deformable_type: str, cable_first: bool
+) -> None:
+    from embodichain.lab.sim.cfg import (
+        SurfaceDeformableObjectCfg,
+        VolumeDeformableObjectCfg,
+    )
+
+    sim = _manager()
+    scene = sim._spawn_scene
+    scene.builder.add_soft_object = scene.builder.add_cloth_object = lambda desc: desc
+    cfg_type = (
+        VolumeDeformableObjectCfg
+        if deformable_type == "volume"
+        else SurfaceDeformableObjectCfg
+    )
+    mesh = {
+        "vertices": [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]],
+        "triangles": [[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]],
+    }
+    deformable_cfg = cfg_type(uid="particles", shape=mesh)
+    add_first = sim.add_cable_object if cable_first else sim.add_deformable_object
+    add_second = sim.add_deformable_object if cable_first else sim.add_cable_object
+    first_cfg, second_cfg = (
+        (_cfg(), deformable_cfg) if cable_first else (deformable_cfg, _cfg())
+    )
+    first = add_first(first_cfg)
+    with pytest.raises(NotImplementedError, match="same arena"):
+        add_second(second_cfg)
+    assert sim.get_asset(first_cfg.uid) is first
+    assert second_cfg.uid not in sim.asset_uids
+    assert second_cfg.uid not in scene
+
+
+def _usd_import_manager() -> SimulationManager:
+    from dexsim.spawn import SceneBuilder, SceneDesc
+
+    sim = _manager()
+    scene = sim._spawn_scene
+    # Keep the SDK's descriptor inventory and add_scene traversal without
+    # allocating a native World or particle solver.
+    builder = object.__new__(SceneBuilder)
+    builder.backend = "newton"
+    builder.scene_desc = SceneDesc(name="usd_particle_regression")
+    builder.result = None
+    builder._finalized = False
+    builder._adapter = SimpleNamespace(backend="newton", add=Mock())
+    builder.replicate_plan = SimpleNamespace(env_names=lambda: ("arena_0", "arena_1"))
+    scene.builder = builder
+    del scene._resolve_materials
+    scene._usd_texture_files = SimpleNamespace(resolve=lambda materials: materials)
+    scene._resource_material_definitions = {}
+    scene._material_resources = SimpleNamespace(renderer="no-render")
+    scene._resolve_materials = Mock(wraps=scene._resolve_materials)
+    sim._visual_objects = {}
+    return sim
+
+
+def _write_cable_usd(tmp_path: Path, *, particle_source: Path | None = None) -> Path:
+    source = (
+        particle_source.read_text() if particle_source is not None else "#usda 1.0\n"
+    )
+    path = tmp_path / "cables.usda"
+    path.write_text(source + """
+def BasisCurves "Cable" (
+    prepend apiSchemas = ["PhysicsCurvesDeformableSimAPI"]
+)
+{
+    uniform token type = "linear"
+    uniform token wrap = "nonperiodic"
+    int[] curveVertexCounts = [2]
+    point3f[] points = [(0, 0, 1), (0.1, 0, 1)]
+}
+""")
+    return path
+
+
+@pytest.mark.parametrize("cable_first", [True, False])
+@pytest.mark.parametrize("cable_source", ["typed", "usd"])
+def test_usd_particles_and_cables_reject_mix_before_scene_mutation(
+    tmp_path: Path, volume_particle_usd: Path, cable_first: bool, cable_source: str
+) -> None:
+    from dexsim.spawn import SoftBodyDesc
+    from embodichain.lab.sim.cfg import UsdImportCfg, UsdSourceCfg
+    from embodichain.lab.sim.material import VisualMaterialCfg
+
+    sim = _usd_import_manager()
+    scene = sim._spawn_scene
+    builder = scene.builder
+    recipe = UsdImportCfg(
+        name="volume", source=UsdSourceCfg(file_path=str(volume_particle_usd))
+    )
+    cable_cfg = _cfg()
+    cable_cfg.visual_material = VisualMaterialCfg(
+        uid="cable_material", base_color=[1, 0, 0, 1]
+    )
+
+    def add_cable():
+        if cable_source == "typed":
+            return sim.add_cable_object(cable_cfg)
+        imported = sim.add_usd(
+            UsdImportCfg(
+                name="cables",
+                source=UsdSourceCfg(file_path=str(_write_cable_usd(tmp_path))),
+            )
+        )
+        assert dict(imported) == {}
+        assert list(imported.resource_types.values()) == ["cable"]
+        assert len(builder.cables) == 1
+        assert not sim._cable_objects and not scene._assets
+        return None
+
+    if cable_first:
+        first = add_cable()
+    else:
+        imported = sim.add_usd(recipe)
+        first = imported["/World/Soft"]
+        assert len(builder.particle_sets) == 1
+        assert isinstance(builder.particle_sets[0], SoftBodyDesc)
+        assert sim.get_asset(first.uid) is first
+
+    initial_entities = [id(item) for item in builder.scene_desc.iter_entities()]
+    initial_materials = dict(builder.materials)
+    initial_definitions = dict(scene._resource_material_definitions)
+    initial_assets = dict(scene._assets)
+    scene._resolve_materials.reset_mock()
+    builder._adapter.add.reset_mock()
+    with pytest.raises(NotImplementedError, match="same arena"):
+        if cable_first:
+            sim.add_usd(recipe)
+        else:
+            add_cable()
+
+    assert [id(item) for item in builder.scene_desc.iter_entities()] == initial_entities
+    assert builder.materials == initial_materials
+    assert scene._resource_material_definitions == initial_definitions
+    assert scene._assets == initial_assets
+    if first is not None:
+        assert sim.get_asset(first.uid) is first
+    scene._resolve_materials.assert_not_called()
+    builder._adapter.add.assert_not_called()
+
+
+def test_one_usd_import_rejects_cables_and_particles_before_scene_mutation(
+    tmp_path: Path,
+    volume_particle_usd: Path,
+) -> None:
+    from dexsim.kit.usd import parse_usd
+    from embodichain.lab.sim.cfg import UsdImportCfg, UsdSourceCfg
+
+    source = _write_cable_usd(tmp_path, particle_source=volume_particle_usd)
+    parsed = parse_usd(str(source))
+    assert len(parsed.cables) == len(parsed.particle_sets) == 1
+    sim = _usd_import_manager()
+    scene = sim._spawn_scene
+    with pytest.raises(NotImplementedError, match="same arena"):
+        sim.add_usd(
+            UsdImportCfg(name="mixed", source=UsdSourceCfg(file_path=str(source)))
+        )
+    assert list(scene.builder.scene_desc.iter_entities()) == []
+    assert not scene._assets and not sim._deformable_objects
+    assert not scene.builder.materials and not scene._resource_material_definitions
+    scene._resolve_materials.assert_not_called()
+    scene.builder._adapter.add.assert_not_called()
 
 
 @pytest.mark.parametrize("renderer", ["rt", "no-render"])
@@ -407,6 +593,125 @@ def test_finalized_cable_scene_rejects_topology_changes_before_builder_mutation(
         sim._spawn_scene.remove("wire")
 
 
+def test_rejected_rigid_declaration_preserves_material_name_for_no_render_visual() -> (
+    None
+):
+    from embodichain.lab.sim.cfg import RigidObjectCfg, VisualObjectCfg
+    from embodichain.lab.sim.material import VisualMaterialCfg
+    from embodichain.lab.sim.shapes import CubeCfg
+
+    sim = _manager(device="cpu")
+    sim._visual_objects = {}
+    scene = sim._spawn_scene
+    del scene._resolve_materials
+    scene._usd_texture_files = SimpleNamespace(resolve=lambda materials: materials)
+    scene._resource_material_definitions = {}
+    scene._material_resources = SimpleNamespace(renderer="no-render")
+    scene.track("cable_object", "wire", SimpleNamespace(name="wire"))
+    scene.builder.is_finalized = True
+    scene.builder.add_object = Mock()
+    with pytest.raises(NotImplementedError, match="topology changes"):
+        sim.add_rigid_object(
+            RigidObjectCfg(
+                uid="blocked",
+                shape=CubeCfg(
+                    size=(0.1, 0.1, 0.1),
+                    visual_material=VisualMaterialCfg(
+                        uid="reserved", base_color=[1, 0, 0, 1]
+                    ),
+                ),
+            )
+        )
+
+    visual = sim.add_visual_object(
+        VisualObjectCfg(
+            uid="allowed",
+            shape=CubeCfg(
+                size=(0.1, 0.1, 0.1),
+                visual_material=VisualMaterialCfg(
+                    uid="reserved", base_color=[0, 1, 0, 1]
+                ),
+            ),
+        )
+    )
+    assert sim.get_visual_object("allowed") is visual
+    assert list(visual.cfg.shape.visual_material.base_color) == [0, 1, 0, 1]
+    assert "blocked" not in scene and "blocked" not in sim._rigid_objects
+    assert scene._assets["allowed"].declaration_only
+    scene.builder.add_object.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "fixed_kind", ["cable_object", "fluid_object", "cloth_object", "soft_object"]
+)
+@pytest.mark.parametrize("finalized", [False, True])
+@pytest.mark.parametrize("mounted_camera", [False, True])
+def test_robot_removal_preserves_mounted_resources_if_scene_is_immutable(
+    fixed_kind: str, finalized: bool, mounted_camera: bool
+) -> None:
+    from embodichain.lab.sim.sensors import Camera, CameraCfg
+    from embodichain.lab.visualization.markers import (
+        MarkerGroup,
+        MarkerGroupCfg,
+        MarkerPrototypeCfg,
+    )
+
+    sim = _manager()
+    scene = sim._spawn_scene
+    camera = Mock(spec=Camera)
+    camera.cfg = CameraCfg(
+        uid="mounted", extrinsics=CameraCfg.ExtrinsicsCfg(parent="robot/tool")
+    )
+    scene.track(fixed_kind, "fixed", SimpleNamespace(name="fixed"))
+    robot = Mock(
+        cfg=SimpleNamespace(
+            enable_sensor=mounted_camera,
+            sensors=[camera.cfg] if mounted_camera else [],
+        )
+    )
+    scene.track("articulation", "robot", SimpleNamespace(name="robot"), facade=robot)
+    sim._robots["robot"] = robot
+    if mounted_camera:
+        sim._sensors["mounted"] = camera
+    parent_poses = np.array([[1, 0, 0, 0, 0, 0, 1]] * 2, dtype=np.float64)
+    group = MarkerGroup(
+        MarkerGroupCfg(name="attached", prototypes={"box": MarkerPrototypeCfg()}),
+        num_envs=2,
+        pose_resolver=lambda parent, link, ids: parent_poses[ids],
+    )
+    group.update(translations=np.zeros((2, 1, 3)))
+    group.attach("robot")
+    sim._marker_groups = {group.name: group}
+    scene.builder.is_finalized = finalized
+    scene.builder.remove_articulation = Mock(
+        return_value=scene._assets["robot"].descriptor
+    )
+    if finalized:
+        with pytest.raises(NotImplementedError, match="topology changes"):
+            sim.remove_asset("robot")
+        assert sim.get_asset("robot") is robot
+        if mounted_camera:
+            assert sim.get_sensor("mounted") is camera
+        camera.destroy.assert_not_called()
+        scene.builder.remove_articulation.assert_not_called()
+        parent_poses[:, 0] = 2
+        group.update(colors=np.ones((2, 1, 4)))
+        np.testing.assert_allclose(
+            [marker.position for marker in group.snapshot()], [[2, 0, 0]] * 2
+        )
+    else:
+        sim._gizmos = {}
+        sim._disabled_robot_gizmos = set()
+        assert sim.remove_asset("robot")
+        assert "robot" not in scene and "mounted" not in sim.get_sensor_uid_list()
+        assert camera.destroy.call_count == int(mounted_camera)
+        parent_poses[:, 0] = 2
+        group.update(colors=np.ones((2, 1, 4)))
+        np.testing.assert_allclose(
+            [marker.position for marker in group.snapshot()], [[1, 0, 0]] * 2
+        )
+
+
 def test_default_backend_does_not_advertise_cables() -> None:
     sim = _manager()
     sim.physics = DefaultPhysicsBackend(SimpleNamespace())
@@ -447,7 +752,8 @@ def test_initial_joint_registration_is_retryable_after_preflight_and_idempotent(
     sim._articulations["tool"].cfg.init_qpos = torch.tensor([0.0], requires_grad=True)
     sim.physics._prepare_scene_build()
     sim.physics._prepare_scene_build()
-    controls = [call.args[0] for call in builder.add_runtime_control.call_args_list]
+    builder.add_runtime_control.assert_called_once()
+    controls = builder.add_runtime_control.call_args.args[0].seeds
     assert [control.target for control in controls] == ["arena_0/tool", "arena_1/tool"]
     for control in controls:
         np.testing.assert_array_equal(control.positions, [[0.0]])
@@ -463,10 +769,9 @@ def test_unattached_nonzero_joint_state_is_seeded_without_rejecting_other_anchor
     builder.add_runtime_control = Mock()
     builder.replicate_plan = SimpleNamespace(env_names=lambda: ("arena_0", "arena_1"))
     sim.physics._prepare_scene_build()
-    assert builder.add_runtime_control.call_count == 2
-    np.testing.assert_allclose(
-        builder.add_runtime_control.call_args.args[0].positions, [[0.025]]
-    )
+    builder.add_runtime_control.assert_called_once()
+    for seed in builder.add_runtime_control.call_args.args[0].seeds:
+        np.testing.assert_allclose(seed.positions, [[0.025]])
 
 
 def test_cable_scene_reset_restores_selected_visuals_lights_and_sensors_once():

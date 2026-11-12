@@ -44,31 +44,31 @@ from embodichain.lab.gym.envs.expert_trajectory import (
     ExpertActionSpec,
     encode_expert_action,
 )
-from embodichain.lab.sim.atomic_actions.bindings import (
+from embodichain.lab.sim.atomic_skills.bindings import (
     JointPositionTarget,
     RuntimeEndpointTarget,
 )
-from embodichain.lab.sim.atomic_actions.execution import (
+from embodichain.lab.sim.atomic_skills.execution import (
     ExecutionEvent,
     ExecutionEventKind,
 )
-from embodichain.lab.sim.atomic_actions.policies import MotionPolicy, RecoveryPolicy
-from embodichain.lab.sim.atomic_actions.primitives.pick_up import PickUpOptions
-from embodichain.lab.sim.atomic_actions.primitives.place import PlaceOptions
-from embodichain.lab.sim.atomic_actions.runner import ExecutionRunnerCfg
-from embodichain.lab.sim.atomic_actions.runtime_commands import (
+from embodichain.lab.sim.atomic_skills.policies import MotionPolicy, RecoveryPolicy
+from embodichain.lab.sim.atomic_skills.primitives.pick_up import PickUpOptions
+from embodichain.lab.sim.atomic_skills.primitives.place import PlaceOptions
+from embodichain.lab.sim.atomic_skills.runner import ExecutionRunnerCfg
+from embodichain.lab.sim.atomic_skills.runtime_commands import (
     EndpointCommand,
     JointPositionPayload,
     RuntimeCommandFrame,
     RuntimeCommandPayload,
 )
-from embodichain.lab.sim.atomic_actions.state import (
+from embodichain.lab.sim.atomic_skills.state import (
     PlanningContext,
     RobotObservation,
     SceneSnapshot,
     TaskState,
 )
-from embodichain.lab.sim.atomic_actions.tracking import TrackingPolicy
+from embodichain.lab.sim.atomic_skills.tracking import TrackingPolicy
 from embodichain.lab.task_program.semantics.calls import (
     Pick,
     Place,
@@ -521,7 +521,7 @@ class _TerminalFailedRuntime(_FakeRuntime):
             task_state=running.task_state,
             events=(
                 ExecutionEvent(
-                    kind=ExecutionEventKind.ACTION_PLANNING_FAILED,
+                    kind=ExecutionEventKind.SKILL_PLANNING_FAILED,
                     timestamp=self.clock.now(),
                     skill_id="slide",
                     invocation_id="open-drawer-call",
@@ -1067,7 +1067,7 @@ def test_bridge_progress_counts_only_fixed_pick_place_calls(
     )
     policies = {
         "motion_policy": MotionPolicy(sample_count=PROGRESS_SAMPLE_COUNT),
-        "recovery_policy": RecoveryPolicy(max_replans=0, max_action_retries=0),
+        "recovery_policy": RecoveryPolicy(max_replans=0, max_skill_retries=0),
         "tracking_policy": TrackingPolicy.timed(),
         **overrides,
     }
@@ -1075,7 +1075,7 @@ def test_bridge_progress_counts_only_fixed_pick_place_calls(
     compiler.integration.link_call.return_value.preset = SkillPolicyPreset(
         "progress",
         effect_assurance=EffectAssurance.PROJECTED,
-        action_option_templates={"pick": PickUpOptions(), "place": PlaceOptions()},
+        skill_option_templates={"pick": PickUpOptions(), "place": PlaceOptions()},
         **policies,
     )
     runtime.compiler = compiler
@@ -1842,7 +1842,7 @@ def test_zero_command_terminal_runtime_failure_preserves_trace_and_validates_onc
     )
     assert runtime_trace["events"] == [
         {
-            "kind": "action_planning_failed",
+            "kind": "skill_planning_failed",
             "timestamp": 0.0,
             "skill_id": "slide",
             "invocation_id": "open-drawer-call",
@@ -2127,8 +2127,9 @@ def test_post_policy_and_validator_ports_stay_at_demo_boundary(mode) -> None:
 
 @pytest.mark.parametrize("mode", ["position", "position_velocity"])
 @pytest.mark.parametrize("reject_tick", [0, 2])
+@pytest.mark.parametrize("process", [False, True])
 def test_row_rejection_holds_commands_without_disrupting_policy_clock(
-    mode, reject_tick
+    mode, reject_tick, process
 ) -> None:
     class ExactClockPolicy(_PostPolicyPort):
         def actions(self, policy, *, segment, active_mask):
@@ -2168,9 +2169,29 @@ def test_row_rejection_holds_commands_without_disrupting_policy_clock(
                 else:
                     hold["qpos"][0] = 9.0
                     hold["qvel"][0] = 0.0
-                bridge.request_row_rejection(
-                    (7,), ControllerAction(hold), reason="measured failure"
-                )
+                if process:
+                    from embodichain.lab.gym.envs.episode_context import EpisodeContext
+                    from embodichain.lab.gym.envs.managers.observation_types import (
+                        ObservationFrame,
+                    )
+
+                    context = EpisodeContext(BATCH_SIZE)
+                    frame = ObservationFrame(
+                        None, {}, context.episode_ids, 31, episode_owner=context
+                    )
+                    bridge._observe_segment_frame(
+                        frame,
+                        episode_owner=context,
+                        process_check=lambda: (
+                            torch.tensor([False, True]),
+                            lambda rows: {"bound": {"rows": rows.tolist()}},
+                        ),
+                        hold_qpos=lambda: hold if mode == "position" else hold["qpos"],
+                    )
+                else:
+                    bridge.request_row_rejection(
+                        (7,), ControllerAction(hold), reason="measured failure"
+                    )
                 stopped = True
     assert holds == 1
     torch.testing.assert_close(
@@ -2178,6 +2199,11 @@ def test_row_rejection_holds_commands_without_disrupting_policy_clock(
         torch.arange(1.0, 4.0)[:, None].expand(3, ROBOT_DOF),
     )
     assert segment.validator().tolist() == [False, True]
+    if process:
+        assert segment.metadata["process_violations"][0]["observation_revision"] == 31
+        assert segment.metadata["process_violations"][0]["conditions"]["bound"][
+            "rows"
+        ] == [0]
 
 
 def test_post_policy_receives_only_rows_surviving_partial_runtime_failure() -> None:
@@ -2696,3 +2722,324 @@ def test_fresh_bridge_reports_physical_binding_before_runtime_grounding():
     owned = bridge.env_ids
     owned.zero_()
     assert runtime.observation_provider.env_ids.tolist() == [7, 3]
+
+
+def test_named_hold_uses_host_frames_and_starts_fresh_for_repeated_segments(
+    monkeypatch,
+):
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    from embodichain.lab.evaluation import (
+        BooleanRule,
+        EvaluationSpec,
+        EvaluationStatus,
+        PredicateDefinition,
+        PredicateMeasurement,
+        PredicateSpec,
+        RuleSession,
+        TemporalRule,
+        builtin_predicates,
+        evaluate_recorded_rules,
+    )
+    from embodichain.lab.gym.envs import EmbodiedEnv
+    from embodichain.lab.gym.envs.episode_context import EpisodeContext
+    from embodichain.lab.gym.envs.managers import ObservationManager
+    from embodichain.lab.gym.utils.gym_utils import (
+        _init_raw_rollout,
+        _write_raw_rollout,
+    )
+    from embodichain.lab.gym.utils.trajectory_state import (
+        _evaluation_observation_cfgs,
+        export_observation_history,
+    )
+    from embodichain.lab.task_program import TaskProgramCompiler, decode_task_program
+    from embodichain.lab.task_program.integrations.simulation.bindings import (
+        SimulationRigidObjectBinding,
+        SimulationSceneBinding,
+    )
+    from embodichain.lab.task_program.integrations.simulation.policies import (
+        SimulationSegmentPolicyPort,
+    )
+
+    scene = SimulationSceneBinding(
+        registry_id="test_scene",
+        rigid_objects=(
+            SimulationRigidObjectBinding(
+                entity_id="cube", simulation_uid="native_cube"
+            ),
+            SimulationRigidObjectBinding(
+                entity_id="goal", simulation_uid="native_goal"
+            ),
+        ),
+    )
+
+    def measure(values, params):
+        distance = torch.linalg.vector_norm(
+            values["position"] - values["target"], dim=-1
+        )
+        return PredicateMeasurement(
+            distance <= params["tolerance"],
+            torch.isfinite(distance),
+            {"distance": distance},
+        )
+
+    measured = Mock(side_effect=measure)
+    advances = []
+    advance_window = RuleSession._advance_window
+
+    def count_advance(session, history, rule, measured, step, revisions, active):
+        if rule.ref == "near":
+            advances.append(step)
+        return advance_window(session, history, rule, measured, step, revisions, active)
+
+    monkeypatch.setattr(RuleSession, "_advance_window", count_advance)
+    registry = builtin_predicates()
+    registry.register(
+        "counted_near", PredicateDefinition(1, ("position", "target"), dict, measured)
+    )
+    graph = registry.compile(
+        EvaluationSpec(
+            {
+                "near": PredicateSpec(
+                    "counted_near",
+                    {
+                        "position": "rigid_objects/native_cube/pose",
+                        "target": "rigid_objects/native_goal/pose",
+                    },
+                    {"tolerance": 0.5},
+                ),
+                "near_goal": TemporalRule("hold_for", "near", 1, steps=2),
+                "ready": BooleanRule("all", ("near_goal", "near")),
+            },
+            ("near_goal", "ready"),
+        )
+    )
+    bound = graph.select("near_goal")
+    raised = builtin_predicates().compile(
+        EvaluationSpec(
+            {
+                "raised": PredicateSpec(
+                    "lift",
+                    {
+                        "pose": "rigid_objects/native_cube/frame",
+                        "baseline": "rigid_objects/native_cube/segment_start_frame",
+                    },
+                    {"minimum_lift": 0.1},
+                )
+            },
+            ("raised",),
+        )
+    )
+    conditions = {"near_goal": bound, "raised": raised, "ready": graph.select("ready")}
+    declaration = {
+        "program_id": "measured_hold",
+        "integration": {
+            "scene_registry": "test_scene",
+            "robot_profile": "test_robot",
+            "runtime_preset": "safe",
+        },
+        "targets": {
+            "drop": {
+                "kind": "cyclic_pose",
+                "values": [
+                    {
+                        "position": [0.0, 0.0, 0.0],
+                        "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
+                    }
+                ],
+            }
+        },
+        "program": {
+            "kind": "repeat",
+            "count": 2,
+            "body": {
+                "kind": "segment",
+                "name": "hold",
+                "steps": {
+                    "kind": "invoke",
+                    "call": {
+                        "kind": "place",
+                        "object": "cube",
+                        "at": {"kind": "target_ref", "target": "drop"},
+                    },
+                },
+                "post": [
+                    {"kind": "wait_stable", "entity": "cube", "preset": "rigid_object"}
+                ],
+                "validators": [
+                    {"kind": "condition", "ref": "near_goal"},
+                    {"kind": "condition", "ref": "raised"},
+                    {"kind": "condition", "ref": "ready"},
+                ],
+            },
+        },
+    }
+    program = TaskProgramCompiler(
+        scene.declare(), evaluation_conditions=conditions
+    ).compile(decode_task_program(declaration))
+    target = torch.zeros(BATCH_SIZE, 7)
+    target[:, 6] = 1
+    position = target.clone()
+    entities = {
+        "native_cube": SimpleNamespace(get_local_pose=lambda **kwargs: position),
+        "native_goal": SimpleNamespace(get_local_pose=lambda **kwargs: target),
+    }
+    sim = SimpleNamespace(
+        asset_uids=entities, get_asset=entities.get, get_rigid_object=entities.get
+    )
+    qpos = torch.zeros(BATCH_SIZE, ROBOT_DOF)
+    clock = EnvironmentStepClock(STEP_DT)
+    sink = BufferedGymCommandSink(
+        RuntimeCommandFrameEncoder(_QposProvider(qpos)), clock
+    )
+    runtime = _FakeRuntime(sink, clock, _joint_frame(duration=STEP_DT))
+    validator = SimulationSegmentPolicyPort(
+        sim,
+        SimpleNamespace(get_qpos=lambda **kwargs: qpos),
+        scene,
+        env_ids=torch.tensor([7, 3]),
+    )
+    validator.bind_clock(clock)
+    bridge = TaskProgramDemoBridge(
+        program,
+        runtime,
+        sink,
+        clock,
+        validator_port=validator,
+        post_policy_port=_PostPolicyPort(qpos),
+        isolate_policy_sessions=True,
+    )
+    context = EpisodeContext(BATCH_SIZE)
+    context._begin_episode([0, 1])
+    context._finish_initialization([0, 1])
+    recording = _evaluation_observation_cfgs(
+        SimpleNamespace(scene_binding=scene, evaluation_conditions=conditions)
+    )
+    env = SimpleNamespace(
+        sim=sim,
+        cfg=SimpleNamespace(record_trajectory=True),
+        num_envs=BATCH_SIZE,
+        device=torch.device("cpu"),
+        episode_context=context,
+        rollout_buffer=None,
+        _evaluation_recording=recording,
+        _active_task_program_bridge=bridge,
+        _profiler=SimpleNamespace(section=lambda name: nullcontext()),
+        _write_trajectory_step=Mock(),
+        _update_episode_success_status=Mock(),
+    )
+    env.observation_manager = ObservationManager({}, env, recording=recording)
+    env.get_obs = lambda: env.observation_manager.compute(
+        TensorDict({}, batch_size=[BATCH_SIZE])
+    )
+    storage = TensorDict({}, batch_size=[BATCH_SIZE])
+    recorded_action = torch.zeros(BATCH_SIZE, 1)
+    _init_raw_rollout(storage, context, {}, torch.zeros(BATCH_SIZE, 4, 1))
+    env.observation_manager.bind_rollout_storage(storage)
+    position[:, 2] = -0.05
+    initial = EmbodiedEnv._capture_observation(env)
+    _write_raw_rollout(
+        storage,
+        context,
+        initial,
+        env_ids=[0, 1],
+        field_ids=tuple(env.observation_manager.field_ids.values()),
+    )
+    # Scene setup can update a pose without consuming another control slot.
+    position[:, 2] = 0
+    env._write_trajectory_step = lambda frame, **kwargs: _write_raw_rollout(
+        storage, context, frame, action=recorded_action
+    )
+    revisions = []
+    reports = []
+    lifts = []
+    for occurrence, segment in enumerate(bridge.iter_segments()):
+        for action in segment.actions:
+            # The first occurrence needs both the runtime command and its
+            # post-policy hold. The second occurrence loses its own hold.
+            position[:, 0] = torch.tensor(
+                [0.4 if occurrence == 0 or clock.step_index == 2 else 0.7, 0.7]
+            )
+            position[:, 2] = 0.2
+            frame = EmbodiedEnv._capture_observation(env)
+            revisions.append(frame.revision)
+            EmbodiedEnv._hook_after_sim_step(
+                env,
+                frame.policy,
+                action,
+                torch.zeros(BATCH_SIZE),
+                torch.zeros(BATCH_SIZE, dtype=torch.bool),
+                {},
+                observation_frame=frame,
+            )
+            bridge._observe_segment_frame(frame, episode_owner=context)
+        assert segment.validator().tolist() == (
+            [True, False] if occurrence == 0 else [False, False]
+        )
+        assert segment.validator().tolist() == (
+            [True, False] if occurrence == 0 else [False, False]
+        )
+        reports.append(segment.metadata["validation"]["validators"][0]["result"])
+        shared = segment.metadata["validation"]["validators"][2]["result"]
+        assert shared["rules"]["near_goal"] == reports[-1]["rules"]["near_goal"]
+        assert "ready" not in reports[-1]["rules"]
+        assert shared["evaluation_identity"] == conditions["ready"].identity
+        lifts.append(
+            segment.metadata["validation"]["validators"][1]["result"]["rules"][
+                "raised"
+            ]["metrics"]["lift"]
+        )
+
+    assert bridge.program_completed
+    assert reports[0]["status"] == ["satisfied", "failed"]
+    assert reports[0]["witness_steps"] == [[1, 2], [-1, -1]]
+    assert reports[0]["witness_revisions"] == [revisions[:2], [-1, -1]]
+    assert reports[1]["status"] == ["failed", "not_run"]
+    assert reports[1]["witness_steps"] == [[-1, -1], [-1, -1]]
+    assert lifts[0] == pytest.approx([0.2, 0.2])
+    assert lifts[1] == pytest.approx([0.0])
+    assert measured.call_count == len(revisions) == 4
+    assert advances == [1, 2, 3, 4]
+    history = {"raw_observations": export_observation_history(env.observation_manager)}
+    result = evaluate_recorded_rules(
+        bound,
+        history,
+        env_ids=(0, 1),
+        episode_ids=(0, 0),
+        scope="pick/0",
+        start_step=1,
+        end_step=2,
+        chunk_steps=1,
+    )
+    offline = result.rules["near_goal"]
+    assert offline.witness_revisions.tolist() == reports[0]["witness_revisions"]
+    assert offline.witness_steps.tolist() == reports[0]["witness_steps"]
+    for start, end, expected in ((1, 2, [0.2, 0.2]), (3, 4, [0.0, 0.0])):
+        offline = evaluate_recorded_rules(
+            raised,
+            history,
+            env_ids=(0, 1),
+            episode_ids=(0, 0),
+            scope=f"pick/{start}",
+            start_step=start,
+            end_step=end,
+            chunk_steps=1,
+        ).rules["raised"]
+        assert offline.metrics["lift"].tolist() == pytest.approx(expected)
+    history["raw_observations"]["fields"][
+        "rigid_objects/native_cube/segment_start_frame"
+    ]["valid"][0, 1] = False
+    unavailable = evaluate_recorded_rules(
+        raised,
+        history,
+        env_ids=(0, 1),
+        episode_ids=(0, 0),
+        scope="pick/0",
+        start_step=1,
+        end_step=2,
+    ).rules["raised"]
+    assert unavailable.status.tolist() == [
+        EvaluationStatus.UNAVAILABLE,
+        EvaluationStatus.SATISFIED,
+    ]
