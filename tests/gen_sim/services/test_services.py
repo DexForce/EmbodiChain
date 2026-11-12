@@ -235,38 +235,37 @@ def test_json_configuration_is_opt_in(tmp_path, monkeypatch):
     assert load_services_config(path).roles == {"task_interpretation": "one"}
 
 
-def test_deepseek_preset_preserves_other_service_profiles() -> None:
-    root = Path(__file__).resolve().parents[3] / "embodichain/gen_sim/services"
-    generic = load_services_config(root / "model_services.example.json")
-    deepseek = load_services_config(root / "model_services.deepseek.example.json")
-    assert generic is not None and deepseek is not None
-    assert deepseek.roles == generic.roles
-    for name, profile in generic.profiles.items():
-        if profile["adapter"] != "openai_compatible":
-            assert deepseek.profiles[name] == profile
-
-
 @pytest.mark.parametrize(
-    ("preset", "model", "endpoint", "credential"),
+    ("bind_deepseek", "configure_deepseek", "model", "endpoint", "credential"),
     [
         (
-            "model_services.example.json",
+            False,
+            False,
             "original-model",
             "https://original.example/v1",
             "original-key",
         ),
         (
-            "model_services.deepseek.example.json",
+            False,
+            True,
+            "original-model",
+            "https://original.example/v1",
+            "original-key",
+        ),
+        (
+            True,
+            True,
             "deepseek-flash",
             "https://api.deepseek.com",
             "deepseek-key",
         ),
     ],
 )
-def test_chat_presets_use_their_own_credentials_and_model(
+def test_shared_chat_profiles_use_their_own_credentials_and_model(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    preset: str,
+    bind_deepseek: bool,
+    configure_deepseek: bool,
     model: str,
     endpoint: str,
     credential: str,
@@ -278,15 +277,28 @@ def test_chat_presets_use_their_own_credentials_and_model(
     monkeypatch.setenv("OPENAI_API_KEY", "original-key")
     monkeypatch.setenv("OPENAI_MODEL", "original-model")
     monkeypatch.setenv("OPENAI_BASE_URL", "https://original.example/v1")
-    monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek-key")
-    cfg = load_services_config(root / preset)
+    for name in ("DEEPSEEK_API_KEY", "DEEPSEEK_MODEL", "DEEPSEEK_BASE_URL"):
+        monkeypatch.delenv(name, raising=False)
+    if configure_deepseek:
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek-key")
+        monkeypatch.setenv("DEEPSEEK_MODEL", "deepseek-flash")
+        monkeypatch.setenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+    cfg = load_services_config(root / "model_services.example.json")
     assert cfg is not None
+    if bind_deepseek:
+        for role in CHAT_ROLES:
+            cfg.roles[role] = "deepseek"
     with GenSimServices(cfg) as services:
         for role in CHAT_ROLES:
             adapter = services.get(role)
             assert adapter.model == model
             assert adapter.base_url == endpoint
             assert adapter.api_key == credential
+            assert adapter.options == (
+                {"thinking": {"type": "disabled"}, "max_tokens": 16384}
+                if bind_deepseek
+                else {}
+            )
 
 
 @pytest.mark.parametrize(

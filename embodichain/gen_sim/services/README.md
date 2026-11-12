@@ -102,50 +102,61 @@ with GenSimServices(cfg) as services:
     records = services.records()
 ```
 
-## DeepSeek preset
+## Configure DeepSeek independently
 
-The complete [DeepSeek example](model_services.deepseek.example.json) binds all
-Task, Scene and Asset chat roles to `deepseek-flash` through the existing
-`openai_compatible` adapter. This model supports the image inputs used by GenSim;
-see [DeepSeek's vision guide](https://api-docs.deepseek.com/guides/vision/).
-The preset disables thinking and sets a 16,384-token output budget through
-adapter `options`. Structured callers continue to select JSON mode per request.
-
-Copy the preset to an operator-owned file. This also works after a wheel install:
-
-```bash
-python - <<'PY'
-from importlib.resources import files
-from pathlib import Path
-
-preset = files("embodichain.gen_sim.services").joinpath("model_services.deepseek.example.json")
-Path("model_services.deepseek.json").write_text(preset.read_text(encoding="utf-8"), encoding="utf-8")
-PY
-export EMBODICHAIN_MODEL_SERVICES_CONFIG="$PWD/model_services.deepseek.json"
-export EMBODICHAIN_ENV_FILE="/absolute/path/to/services.env"
-```
-
-Add `DEEPSEEK_API_KEY` to that deployment dotenv, alongside the existing image,
-segmentation, geometry and optional articulation endpoint settings. Those service
-profiles and their role bindings match the generic example. Configuration files
-are selected as a whole; they are not merged.
+The shared [configuration example](model_services.example.json) includes an
+optional `deepseek` profile alongside `task_chat` and `scene_chat`. Its default
+role bindings use the existing `OPENAI_*` profiles. Add the `deepseek` profile
+to your operator-owned configuration, or copy the shared example to
+`model_services.json`, and supply its independent settings in your deployment
+dotenv:
 
 ```dotenv
 DEEPSEEK_API_KEY="your-deepseek-key"
+DEEPSEEK_MODEL="deepseek-flash"
+DEEPSEEK_BASE_URL="https://api.deepseek.com"
 ```
 
-Validate the configured profiles, then use an ordinary live-model workflow:
+Bind individual chat roles to `deepseek` to choose their API independently.
+For DeepSeek across all Task, Scene and Asset chat roles, update these entries
+within `model_services.roles`, retaining the existing non-chat entries:
+
+```json
+{
+  "task_interpretation": "deepseek",
+  "task_image_grounding": "deepseek",
+  "task_semantic_planning": "deepseek",
+  "graph_localization": "deepseek",
+  "scene_understanding": "deepseek",
+  "scene_edit": "deepseek",
+  "scene_asset_orientation": "deepseek",
+  "scene_asset_dimensions": "deepseek",
+  "asset_orientation": "deepseek",
+  "asset_dimensions": "deepseek",
+  "asset_semantics": "deepseek",
+  "asset_physics": "deepseek"
+}
+```
+
+Use a vision-capable model for roles receiving images; the default
+`deepseek-flash` supports these inputs. See
+[DeepSeek's vision guide](https://api-docs.deepseek.com/guides/vision/).
+The profile disables thinking and sets a 16,384-token output budget through
+adapter `options`. Structured callers select JSON mode per request.
+
+Select your single configuration file, validate it, and run a live-model workflow:
 
 ```bash
+export EMBODICHAIN_MODEL_SERVICES_CONFIG="$PWD/model_services.json"
+export EMBODICHAIN_ENV_FILE="$PWD/services.env"
 embodichain gensim services validate
 embodichain gensim task plan --image table.png --instruction "Put the cube on the table" --output outputs/deepseek-plan
 ```
 
-The generic example and legacy configuration retain their existing `OPENAI_*`
-selection rules. Select the generic configuration file to use its original API;
-when returning to legacy discovery, unset `EMBODICHAIN_MODEL_SERVICES_CONFIG`
-and ensure the default user configuration does not select another profile.
-DeepSeek is only selected explicitly, and its profile reads `DEEPSEEK_API_KEY`.
+Only roles bound to `deepseek` require the `DEEPSEEK_*` variables. Supplying those
+variables alone leaves the original API selected. To switch roles back, restore
+their `task_chat`/`scene_chat` bindings in the same file; image, segmentation,
+geometry and articulation profiles retain their own settings.
 
 ## Implement an adapter
 
