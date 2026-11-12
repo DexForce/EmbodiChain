@@ -1,0 +1,66 @@
+{
+  "model_services": {
+    "profiles": {
+      "vision": {
+        "adapter": "codex_cli",
+        "timeout_s": 300,
+        "options": {},
+        "model": "gpt-6-astra"
+      },
+      "understanding": {
+        "adapter": "codex_cli",
+        "timeout_s": 300,
+        "options": {
+          "prompt_suffix": "Object names are used as segmentation prompts. Use short visual names: color plus a common noun. For unfamiliar toys, use color plus \"object\" as the name, keeping the semantic category and description. Name the main support \"table\". Preserve every visible instance and the requested JSON schema."
+        },
+        "model": "gpt-6-astra"
+      },
+      "segmentation": {
+        "adapter": "segmentation_http",
+        "base_url": {
+          "env": "SAM3_BASE_URL"
+        },
+        "timeout_s": 600,
+        "max_attempts": 1,
+        "options": {
+          "health_path": "/health",
+          "segment_by_prompt_path": "/segment_by_prompt"
+        }
+      },
+      "geometry": {
+        "adapter": "geometry_http",
+        "base_url": {
+          "env": "SAM3D_BASE_URL"
+        },
+        "timeout_s": 1800,
+        "max_attempts": 1,
+        "options": {
+          "health_path": "/health",
+          "generate_objects_path": "/generate_multiple_objects",
+          "poll_timeout_s": 1800,
+          "poll_interval_s": 3
+        }
+      },
+      "articulation": {
+        "adapter": "articulation_http",
+        "base_url": {
+          "env": "ARTICRAFT_BASE_URL"
+        },
+        "timeout_s": 1800,
+        "max_attempts": 1,
+        "options": {
+          "health_path": "/health",
+          "generate_path": "/generate_articulation"
+        }
+      }
+    },
+    "roles": {
+      "scene_understanding": "understanding",
+      "scene_asset_dimensions": "vision",
+      "scene_asset_orientation": "vision",
+      "image_segmentation": "segmentation",
+      "geometry_reconstruction": "geometry",
+      "articulated_generation": "articulation"
+    }
+  }
+}
