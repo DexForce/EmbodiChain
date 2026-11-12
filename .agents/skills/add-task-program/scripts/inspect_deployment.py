@@ -36,11 +36,15 @@ from embodichain.utils.utility import load_config
 __all__ = ["inspect_deployment", "main"]
 
 
-def inspect_deployment(path: str | Path, *, explain: bool = False) -> dict[str, object]:
+def inspect_deployment(
+    path: str | Path, *, explain: bool = False, strict_contracts: bool = False
+) -> dict[str, object]:
     """Decode, compose, and preflight one configured Task Program deployment.
 
     Args:
         path: Runnable Gym deployment containing a `task_program` selection.
+        explain: Include normalized declarations and authored diagnostics.
+        strict_contracts: Require an instruction and acceptance contract on each segment.
 
     Returns:
         JSON-compatible identifiers and compiled program statistics.
@@ -109,7 +113,7 @@ def inspect_deployment(path: str | Path, *, explain: bool = False) -> dict[str, 
             "Task integration expects program_id "
             f"{deployment.program_id!r}, got {program.program_id!r}."
         )
-    compiled = catalog.preflight(program)
+    compiled = catalog.preflight(program, strict_contracts=strict_contracts)
     calls = tuple(
         compiled_call.call
         for segment in compiled.iter_segments()
@@ -199,6 +203,11 @@ def _parser() -> argparse.ArgumentParser:
         help="Runnable task.<embodiment>.yaml deployment paths.",
     )
     parser.add_argument(
+        "--strict-contracts",
+        action="store_true",
+        help="Require a structurally complete segment contract on every segment.",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="Emit one machine-readable result object.",
@@ -225,7 +234,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     errors: list[dict[str, str]] = []
     for path in args.deployments:
         try:
-            summaries.append(inspect_deployment(path, explain=args.explain))
+            summaries.append(
+                inspect_deployment(
+                    path, explain=args.explain, strict_contracts=args.strict_contracts
+                )
+            )
         except Exception as error:
             errors.append(
                 {

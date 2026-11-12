@@ -3984,13 +3984,37 @@ class EmbodiedEnv(BaseEnv):
             kwargs["nominal_source_factory"] = nominal_source_factory
         if plan_transform_factory is not None:
             kwargs["plan_transform_factory"] = plan_transform_factory
-        return self._checked_task_program_adapter().create_bridge(
+        bridge = self._checked_task_program_adapter().create_bridge(
             program,
             expansion_profile=expansion_profile,
             candidate_index=expansion_candidate_index,
             recipe_indices=expansion_recipe_indices,
             **kwargs,
         )
+        if any(
+            segment.contract is not None
+            and any(entry.spec is not None for entry in segment.contract.prerequisites)
+            for segment in program.iter_segments()
+        ):
+            from embodichain.lab.task_program.integrations.simulation.bindings import (
+                _bind_evaluation_joint_names,
+            )
+
+            bridge._contract_conditions = _bind_evaluation_joint_names(
+                {
+                    entry.ref: entry.spec
+                    for segment in program.iter_segments()
+                    if segment.contract is not None
+                    for entry in segment.contract.prerequisites
+                    if entry.spec is not None
+                },
+                self.robot,
+            )
+            bridge._contract_capture = lambda fields: _capture_evaluation_frame(
+                self, fields
+            )
+            bridge._contract_episode_owner = self.episode_context
+        return bridge
 
     @property
     def task_program_expansion_records(

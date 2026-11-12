@@ -344,6 +344,7 @@ _RESOURCE_PATHS = frozenset(
         Path("tasks/manipulation/tableware/pour_water/env.tianji_marvin.yaml"),
         Path("tasks/manipulation/tableware/pour_water/README.md"),
         Path("tasks/manipulation/tableware/pour_water/task_program/integration.yaml"),
+        Path("tasks/manipulation/tableware/pour_water/task_program/evaluation.yaml"),
         Path(
             "tasks/manipulation/tableware/pour_water/task_program/integration.tianji_marvin.yaml"
         ),

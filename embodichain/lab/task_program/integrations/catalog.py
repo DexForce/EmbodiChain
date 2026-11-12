@@ -210,9 +210,14 @@ def _canonical_value(value: object) -> object:
             data_field.name: _canonical_value(getattr(value, data_field.name))
             for data_field in fields(value)
             if not (
-                type(value) is RecoveryPolicy
-                and data_field.name == "planning_budget"
-                and getattr(value, data_field.name) is None
+                getattr(value, data_field.name) is None
+                and (
+                    data_field.metadata.get("omit_none_from_provenance")
+                    or (
+                        type(value) is RecoveryPolicy
+                        and data_field.name == "planning_budget"
+                    )
+                )
             )
         }
         from embodichain.lab.sim.atomic_skills.policies import MotionPolicy
@@ -1120,7 +1125,9 @@ class TaskProgramIntegrationCatalog:
                 f"{sorted(_VALIDATOR_KINDS)}."
             )
 
-    def preflight(self, program: TaskProgramCfg) -> CompiledTaskProgram:
+    def preflight(
+        self, program: TaskProgramCfg, *, strict_contracts: bool = False
+    ) -> CompiledTaskProgram:
         """Compile and statically link with errors located in authored input."""
         from dataclasses import replace
         from embodichain.lab.task_program.language.decoder import TaskProgramConfigError
@@ -1130,7 +1137,7 @@ class TaskProgramIntegrationCatalog:
 
         normalized = getattr(program, "__authoring_source_map__", None)
         try:
-            return self._preflight(program)
+            return self._preflight(program, strict_contracts=strict_contracts)
         except TaskProgramConfigError as error:
             if normalized is None or getattr(error, "_authored", False):
                 raise
@@ -1145,12 +1152,14 @@ class TaskProgramIntegrationCatalog:
                 replace(diagnostic, path=normalized.original_path(diagnostic.path))
             ) from error
 
-    def _preflight(self, program: TaskProgramCfg) -> CompiledTaskProgram:
+    def _preflight(
+        self, program: TaskProgramCfg, *, strict_contracts: bool = False
+    ) -> CompiledTaskProgram:
         """Compile and statically link every expanded semantic call."""
         self.validate_integration(program.integration, path=("integration",))
         compiled = TaskProgramCompiler(
             self.scene, evaluation_conditions=self.evaluation_conditions
-        ).compile(program)
+        ).compile(program, strict_contracts=strict_contracts)
         manifest = SemanticIntegrationManifest(
             scene=self.scene,
             robot_profile=self.robot_profile,
@@ -1212,6 +1221,7 @@ class TaskProgramIntegrationCatalog:
                     "Parallel execution requires a task-registration-owned "
                     "physical safety-validator factory.",
                 )
+            linked_calls = []
             for call in segment.calls:
                 linked = manifest.link_call(call.call, path=call.source_path)
                 if call.call.semantic_id == "move_held_object":
@@ -1225,6 +1235,7 @@ class TaskProgramIntegrationCatalog:
                             call.source_path,
                             "Typed transport requires verified assurance and an effect monitor.",
                         )
+                linked_calls.append(linked)
                 if type(linked.call) is Place and linked.call.at is None:
                     destination = linked.affordances.get("destination")
                     if destination is None:
@@ -1237,6 +1248,27 @@ class TaskProgramIntegrationCatalog:
                         affordance=destination,
                         path=call.source_path,
                     )
+            if segment.contract is not None:
+                for index, evidence in enumerate(segment.contract.outcomes):
+                    if evidence.assurance != "verified":
+                        continue
+                    linked = linked_calls[evidence.ref]
+                    preset = self.robot_profile.presets[linked.preset_id]
+                    if (
+                        preset.effect_assurance.value != "verified"
+                        or linked.call.semantic_id not in preset.effect_monitors
+                    ):
+                        raise TaskProgramValidationError(
+                            "incompatible_segment_assurance",
+                            (
+                                *segment.source_path,
+                                "contract",
+                                "outcomes",
+                                index,
+                                "assurance",
+                            ),
+                            "Verified evidence requires a configured verifying call effect monitor.",
+                        )
         return compiled
 
     def validate_engine(self, engine: AtomicSkillEngine) -> None:

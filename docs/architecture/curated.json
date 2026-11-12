@@ -3712,9 +3712,9 @@
         {
           "path": "embodichain/lab/gym/envs/embodied_env.py",
           "symbol": "EmbodiedEnv.create_task_program_bridge",
-          "start_line": 2242,
-          "end_line": 2242,
-          "excerpt": "        return self._checked_task_program_adapter().create_bridge("
+          "start_line": 3932,
+          "end_line": 3932,
+          "excerpt": "        bridge = self._checked_task_program_adapter().create_bridge("
         }
       ]
     },

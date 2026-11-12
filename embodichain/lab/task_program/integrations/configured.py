@@ -3355,6 +3355,7 @@ def _decode_evaluation(
     robot_profile: SimulationRobotSkillProfileBinding | None = None,
     robot_links: Mapping[str, str] | None = None,
     registry: PredicateRegistry | None = None,
+    transport_targets: Mapping[str, _MoveHeldObjectLowererFactory] | None = None,
 ) -> tuple[dict[str, CompiledEvaluation], tuple[str, ...], tuple[str, ...]]:
     if value is None:
         return {}, (), ()
@@ -3427,6 +3428,33 @@ def _decode_evaluation(
                 inputs[role] = native
                 field_kinds[native] = _raw_field_kind(native)
             params = rule.params
+            if rule.kind == "near_frame_target" and "transport_target" in params:
+                raw = _mapping(
+                    params,
+                    path=f"evaluation.graph.rules.{name}.params",
+                    required=frozenset({"transport_target", "tolerance"}),
+                    optional=frozenset({"axes", "inclusive"}),
+                )
+                target_id = _identifier(
+                    raw["transport_target"],
+                    path=f"evaluation.graph.rules.{name}.params.transport_target",
+                )
+                target = (transport_targets or {}).get(target_id)
+                if target is None or rule.bindings.get("reference") != (
+                    f"rigid_objects/{target.reference_entity_id}/frame"
+                ):
+                    raise ValueError(
+                        f"evaluation.graph.rules.{name}.params.transport_target must name a configured "
+                        "transport target with the same reference entity."
+                    )
+                params = {
+                    key: value
+                    for key, value in raw.items()
+                    if key != "transport_target"
+                }
+                params["displacement"] = tuple(
+                    target.relative_pose[i] for i in (3, 7, 11)
+                )
             if rule.kind == "command_preset_match":
                 raw = _mapping(
                     params,
@@ -3523,6 +3551,11 @@ def _decode_configured_task_program_integration(
         robot_profile=robot_profile_binding,
         robot_links=evaluation_robot_links,
         registry=evaluation_registry,
+        transport_targets={
+            factory.target_id: factory
+            for factory in services.registered_semantic_lowerers
+            if type(factory) is _MoveHeldObjectLowererFactory
+        },
     )
     registration = SimulationTaskProgramRegistration(
         scene_binding=scene_binding,

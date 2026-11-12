@@ -56,6 +56,10 @@ def _canonical(value: Any, ancestors: set[int] | None = None) -> Any:
         return {
             field.name: _canonical(getattr(value, field.name), ancestors)
             for field in dataclasses.fields(value)
+            if not (
+                field.metadata.get("omit_none_from_provenance")
+                and getattr(value, field.name) is None
+            )
         }
     if isinstance(value, Mapping):
         return {str(key): _canonical(item, ancestors) for key, item in value.items()}
