@@ -8,14 +8,15 @@ in 24 segments.
 | --- | --- | --- | --- | --- | --- |
 | `ur5` | `task.ur5.yaml` | UR5, DH PGI-140-80 | 50 mm cube | 4 | Seeds 0–9, 10/10 |
 | `franka` | `task.franka.yaml` | Franka FR3, Panda hand | 50 mm cube | 4 | Seeds 0–9, 10/10 |
-| `ur5_long_horizon` | `task.ur5.long_horizon.yaml` | UR5, DH PGI-140-80 (full closure) | Drink can, water bottle, coffee cup, paper cup | 24 | Seed 0 |
+| `ur5_long_horizon` | `task.ur5.long_horizon.yaml` | UR5, DH PGI-140-80 (full closure) | Drink can, water bottle, coffee cup, paper cup | 24 | Seeds 0–9, 10/10 |
 
 The long-horizon deployment keeps the open → pick → place → close structure.
 It repeats pick and place for four objects in assigned slots, lowers each
 held object onto the moving drawer floor before release, clears the empty
 hand between objects, and closes the loaded drawer with a fingertip contact
-push. It selects its own scene, Task Program, integration and execution
-policy.
+push. It selects its own scene, Task Program, integration, execution policy
+and evaluation component. Only the UR5 runs the long-horizon sequence; see
+[embodiment scope](#embodiment-scope).
 
 ## Single cube
 
@@ -95,8 +96,9 @@ assets.
 ### Scene and embodiment
 
 The selected `ur5_dh_pgi_140_80_full_closure` embodiment uses a 0.040 m
-closure command so the jaws can grip the slender handle against rail damping.
-Larger everyday objects block the fingers before that commanded endpoint.
+closure command and a 3000 N/m finger drive so the jaws hold the slender handle
+against rail damping. Larger everyday objects block the fingers before that
+commanded endpoint.
 The single-cube `ur5` deployment keeps the original `ur5_dh_pgi_140_80`
 calibration.
 
@@ -128,7 +130,10 @@ intended for insertion or liquid simulation.
 
 ### Execution
 
-The slide call pulls the native rail outward by 0.224 m. Four storage positions
+The slide call pulls the native rail outward by 0.224 m. It grasps the handle
+from one canonical approach direction, so every seed uses the same grasp, and
+starts the straight reach 0.1 m in front of the handle so the free approach
+cannot sweep the fingers through it. Four storage positions
 form a single row across the accessible floor, with 60 mm between object origins.
 The robot pedestal and these positions keep its forearm clear of the front
 panel during floor placement. The cabinet and its collisions remain intact.
@@ -146,9 +151,29 @@ separation after retreat. Release occurs at the supported floor height.
 The last Cartesian route contacts the handle with the fingertips,
 tracks the handle inward, withdraws outward, then lifts away. The rail has zero
 position stiffness and a 40 N·s/m zero-velocity damper. This resists inertial
-coasting without pulling the drawer shut. Final acceptance checks every object
-relative to the moving floor and requires the native rail to be within 5 mm
-of zero.
+coasting without pulling the drawer shut. The closing segment checks every
+object relative to the moving floor and requires the native rail to be within
+5 mm of zero.
+
+### Final acceptance
+
+The deployment selects the
+[long-horizon evaluation component](task_program/evaluation.long_horizon.yaml).
+As for the cube deployments, the common `EmbodiedEnv` combines program
+completion with a fresh measurement of these rules on every success query and
+seals the final evidence at episode end. Acceptance requires 14 support points
+of each object's scaled collision hull inside the actual drawer frame, a rail
+position between -3 mm and 5 mm, measured hand joints within 2 mm of their open
+targets, and both finger origins more than 80 mm from every object. The
+interior spans the inner wall faces and runs from the floor top to the
+side-wall top, with 1 mm of contact tolerance. The hand position comes from the
+embodiment's open command preset, and finger link names come from the
+embodiment component.
+
+The support points lie along the hull's six axes and eight diagonals; for a
+cube they are its face centres and corners. Bounding-box corners are not
+surface points of round or tapered objects. A drink can that rolls 11° on the
+floor would put two box corners 3 mm below it.
 
 ### Physical qualification
 
@@ -159,9 +184,19 @@ less than 3 mm of free closing travel. Final positions alone cannot satisfy
 these checks.
 
 This deployment has fixed identities and positions, with no vision-based
-classification, task-level retries, or checkpoint restoration. Qualification
-covers Default physics, CPU, seed 0; it does not establish a multi-seed success
-rate.
+classification, task-level retries, or checkpoint restoration. It ran on
+Default physics on CPU with `dexsim-engine 0.6.0rc1`, NoRender and sensors
+disabled. Seeds 0–9 ran in fresh processes with one attempt per seed, using the
+cube deployments' `demo_success` benchmark.
+
+| Seeds | All 24 segments and final acceptance | Steps per episode | Final rail position (mm) | Minimum finger clearance (mm) |
+| --- | --- | --- | --- | --- |
+| 0–9 | 10/10 | 6660–6670 | 0.021–0.090 | 365.62 |
+
+Before the handle grasp was fixed, the same sweep accepted 5/10: three seeds
+sampled a straight handle grasp that slipped at 53 mm of travel, and two
+diverged into arm postures that failed the paper-cup release gate or rode over
+the handle while closing.
 
 ```bash
 python -m pytest -q tests/gym/envs/task_program/test_drawer_storage_long_horizon_sim.py \
@@ -172,6 +207,19 @@ The native qualification subprocess writes contact evidence and per-segment
 results into its episode report. `--run-gpu` enables this repository's native
 simulation tests; this particular deployment runs on CPU.
 
+### Embodiment scope
+
+Only the UR5 runs this sequence. With top-down grasps, a Franka Panda hand
+cannot store the four objects in this 0.8-scale drawer. Its 208 mm housing
+spans the closing axis and sits 37 mm above the TCP. Closing front to back puts
+the housing on the drawer front panel, whose top is 0.517 m high, before the
+object reaches the floor. Closing along the row puts the 26 mm-thick fingers
+into neighbouring objects at the 60 mm pitch. At the outer slots, the housing
+also reaches over the side walls. Native Franka trials reproduced the panel
+and side-wall contacts: the can stopped 71 mm and 6.8 mm above the floor. The
+PGI-140-80 closes front to back with 85 mm fingers, so its body stays above the
+panel and its fingers stay clear of the row.
+
 ### Preview
 
 ![Loaded drawer before contact-driven closure](media/long_horizon_preview.jpg)
@@ -179,9 +227,9 @@ simulation tests; this particular deployment runs on CPU.
 [Full task at 4× speed](media/long_horizon_preview.mp4) ·
 [Supported releases and contact closure at 1× speed](media/long_horizon_release_and_closure.mp4)
 
-Both videos render the measured
-states from an accepted Default physics episode with DexSim 0.6.0rc1, CPU,
-seed 0. The source episode lasts approximately 265 seconds. The preview uses
+Both videos render the measured states from an accepted Default physics
+episode with DexSim 0.6.0rc1, CPU, seed 0, recorded before the handle-grasp
+fix. The source episode lasts approximately 265 seconds. The preview uses
 state replay for rendering; it is not a live-render capture. All 24 segments
 passed, all four releases had floor contact, and 227.975 mm of closure occurred
 with finger-to-handle contact (0.027 mm without contact).

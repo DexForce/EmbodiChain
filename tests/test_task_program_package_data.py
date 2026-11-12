@@ -297,6 +297,7 @@ _RESOURCE_PATHS = frozenset(
                 "catalog.yaml",
                 "README.md",
                 "assets/bedside_cabinet.urdf",
+                "task_program/evaluation.long_horizon.yaml",
                 "task_program/integration.long_horizon.yaml",
                 "task_program/execution_policy.long_horizon.yaml",
             )
@@ -579,7 +580,7 @@ print(json.dumps(decoded_deployments, sort_keys=True))
 
 
 def test_installed_wheel_registers_drawer_storage(tmp_path: Path) -> None:
-    """Register the cube deployments from installed YAML and discover all three."""
+    """Register every drawer deployment from installed YAML and discover the catalog."""
     source = tmp_path / "source"
     source.mkdir()
     for name in ("setup.py", "pyproject.toml", "README.md", "VERSION", "MANIFEST.in"):
@@ -647,7 +648,11 @@ assert not (installed / "embodichain_tasks/manipulation/drawer_storage.py").exis
 assert (configs / "task_program/evaluation.yaml").is_file()
 assert "embodichain_tasks" not in sys.modules
 
-for name, open_positions in (("ur5", (0.0,)), ("franka", (0.04, 0.04))):
+for name, open_positions, contained, clearance_fields in (
+    ("ur5", (0.0,), "cube_contained", 3),
+    ("franka", (0.04, 0.04), "cube_contained", 3),
+    ("ur5.long_horizon", (0.0,), "paper_cup_contained", 6),
+):
     path = configs / f"task.{name}.yaml"
     raw = load_config(path)
     assert raw["id"] not in registry
@@ -657,8 +662,8 @@ for name, open_positions in (("ur5", (0.0,)), ("franka", (0.04, 0.04))):
     registration = spec.task_program_registration
     rules = registration.evaluation_conditions
     assert rules["hand_open"].parameters["hand_open"]["positions"] == open_positions
-    assert len(rules["fingers_clear"].required_fields) == 3
-    assert "cube_contained" in registration.evaluation_final_refs
+    assert len(rules["fingers_clear"].required_fields) == clearance_fields
+    assert contained in registration.evaluation_final_refs
 
 import embodichain_tasks
 from embodichain.cli.list_task import _collect_environment_entries

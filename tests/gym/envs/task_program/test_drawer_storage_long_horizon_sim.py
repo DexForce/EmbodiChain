@@ -215,6 +215,8 @@ def _run_episode() -> dict[str, Any]:
         return {
             "physical_acceptance": physical,
             "completed": result.completed,
+            # Fresh measurement of the deployment's final acceptance rules.
+            "task_success": bool(env.is_task_success()[0]),
             "all_success": result.all_success,
             "episode": result.to_metadata(),
             "relative_positions": relative.tolist(),
@@ -246,6 +248,7 @@ def test_long_horizon_drawer_storage_completes_with_supported_release_and_contac
     assert report["completed"] and report["all_success"], report["episode"]
     assert len(report["episode"]["segments"]) == 24
     assert all(segment["success"] for segment in report["episode"]["segments"])
+    assert report["task_success"]
     # Mesh-origin heights above the floor: floor half-thickness plus each
     # asset's scaled lower Z bound (can radius, bottle base, and cup bases).
     expected = np.array(

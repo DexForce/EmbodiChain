@@ -102,7 +102,7 @@ profile:
     simulation.articulation_link_slide:
       kind: slide
       hand_interp_steps: 12
-      approach_distance: 0.04
+      approach_distance: 0.1
       translation_distance: 0.224
       release_retreat_distance: 0.0
     simulation.move_end_effector:
@@ -126,6 +126,10 @@ profile:
       params:
         consecutive_samples: 1
 runtime_services:
+  grasp_pose_generator_overrides:
+    eef:
+      # One canonical approach keeps the handle grasp identical across seeds.
+      approach_direction_samples: 1
   registered_semantic_lowerers:
   - kind: articulation_link_slide
     articulation_id: drawer

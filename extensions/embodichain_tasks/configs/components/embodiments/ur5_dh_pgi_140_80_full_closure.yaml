@@ -6,9 +6,9 @@ simulation:
   urdf_cfg: {}
   joint_drive_props:
     stiffness:
-      gripper_finger1_joint_1: 1000.0
+      gripper_finger1_joint_1: 3000.0
     damping:
-      gripper_finger1_joint_1: 100.0
+      gripper_finger1_joint_1: 300.0
     max_effort:
       gripper_finger1_joint_1: 10000.0
   link_attrs:
@@ -38,6 +38,9 @@ sensor:
 skill_profile:
   contract_id: single_arm_parallel_gripper
   profile_id: ur5_dh_pgi_140_80_full_closure
+  evaluation_links:
+    first_grasp_finger: gripper_finger1_link_1
+    second_grasp_finger: gripper_finger2_link_1
   resources:
   - resource_id: primary_manipulator
     endpoints:
