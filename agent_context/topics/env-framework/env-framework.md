@@ -195,7 +195,11 @@ resources. `ControllerAction` stays wrapped through preprocessing and normally v
 qpos/qvel/qf keys, batch, joint width, floating dtype and device at the direct
 controller boundary. The position-only `expert_trajectory.use_action_manager`
 opt-in instead processes joint targets through the configured policy terms,
-retaining exact FK targets and expert recording schema. Both paths retain the
+retaining exact FK targets and the default expert recording schema. With
+`rollout_action_semantics="policy_request"`, the managed route instead records
+the converted ActionManager request and its trace, independently of expert
+joint width. Unmanaged direct controller commands remain rejected by that
+recording contract. Both paths retain the
 ordinary observation, reward, termination, and rollout lifecycle.
 
 A Task Program's bridge combines runtime, post-policy and segment acceptance.
