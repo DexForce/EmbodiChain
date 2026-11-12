@@ -1792,6 +1792,7 @@ def test_atomic_skill_antipodal_grasp_uses_standalone_generator(
         gripper_data=None,
         root_from_tcp=tcp,
         closure_sweep=False,
+        ray_deviation_angle=None,
     )
     call = generator.get_valid_grasp_poses.call_args.kwargs
     assert torch.equal(call["mesh_vertices"], vertices)

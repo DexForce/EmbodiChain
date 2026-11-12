@@ -1503,6 +1503,7 @@ def test_object_rotation_providers_screen_every_pose_row(
         max_candidates=2,
         **({"approach_alignment_angle": math.radians(10)} if early_filter else {}),
         closure_sweep=False,
+        ray_deviation_angle=None,
     )
     assert case.seed == 43001 and case.batch_size == 8
 
@@ -1559,6 +1560,46 @@ def test_pour_requires_full_return_orientation_after_successful_tilt() -> None:
     assert results[1].stages[1].measurements[
         "return_rotation_error_rad"
     ] == pytest.approx(0.3)
+
+
+def test_franka_robotiq_calibration_couples_linkage_and_bounds_grip() -> None:
+    """Robotiq fixtures hold a rigid linkage; the PGI fixture is unchanged."""
+    from embodichain.lab.sim.cfg import MimicComplianceCfg
+    from embodichain_benchmarks.motion_generation._atomic_fixtures import (
+        _ROBOTIQ_HAND_JOINTS,
+        _create_franka_pgi_cfg,
+        _create_franka_robotiq_cfg,
+        create_dual_tutorial_robot_cfg,
+    )
+
+    rigid = MimicComplianceCfg(0.0, 0.0)
+    single = _create_franka_robotiq_cfg({})
+    assert single.mimic_compliance == {"finger_joint": rigid}
+    drives = single.joint_drive_props
+    assert {drives.max_effort[name] for name in _ROBOTIQ_HAND_JOINTS} == {5.0}
+    assert drives.stiffness["fr3_joint[1-7]"] == 1e5
+
+    pgi = _create_franka_pgi_cfg({})
+    assert pgi.mimic_compliance is None
+    assert pgi.joint_drive_props.stiffness["fr3_joint[1-7]"] == 1e4
+
+    names = {"uid": "calibration_probe", "urdf_name": "calibration_probe"}
+    dual = create_dual_tutorial_robot_cfg(
+        robot_type="franka", gripper="robotiq_2f_140", **names
+    )
+    assert dual.mimic_compliance == {
+        "left_finger_joint": rigid,
+        "right_finger_joint": rigid,
+    }
+    assert {
+        value
+        for name, value in dual.joint_drive_props.max_effort.items()
+        if "finger" in name or "knuckle" in name
+    } == {5.0}
+    explicit = create_dual_tutorial_robot_cfg(
+        robot_type="franka", gripper="robotiq_2f_140", hand_max_effort=20.0, **names
+    )
+    assert explicit.joint_drive_props.max_effort["left_finger_joint"] == 20.0
 
 
 def test_robotiq_axis_align_inward_search_restores_franka_edge_reachability() -> None:

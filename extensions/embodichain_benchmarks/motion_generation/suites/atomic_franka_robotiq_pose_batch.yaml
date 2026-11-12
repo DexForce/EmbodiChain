@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_franka_robotiq_pose_batch
-suite_version: atomic_franka_robotiq_pose_batch_v8
+suite_version: atomic_franka_robotiq_pose_batch_v9
 profile: coverage
 
 robot:
@@ -46,12 +46,14 @@ planners:
     config:
       max_attempts: 5
       max_planning_time: null
-      interpolation_dt: 0.025
+      # Divides the compiled control period, so retiming keeps solved acceleration.
+      interpolation_dt: 0.02
       collision_activation_distance: 0.01
       use_cuda_graph: true
       cuda_graph_fallback: true
       warmup_iterations: 1
-      preserve_plan_samples: false
+      # Native samples avoid resampling the solved timing before compilation.
+      preserve_plan_samples: true
       world:
         obstacle_representation: sphere
         multi_env: false
@@ -81,6 +83,8 @@ tracks:
       # One simulator environment row represents one sampled pose.  All eight
       # poses below are therefore planned in one batched Atomic Skill call.
       grasp_model: RobotiqArg2F140
+      # Straight-line poses keep the open hand from sweeping the target.
+      pick_approach_waypoints: 5
       batch_sizes: [8]
       seeds: [11]
       randomization:

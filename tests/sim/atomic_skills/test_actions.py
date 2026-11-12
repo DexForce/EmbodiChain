@@ -2371,6 +2371,67 @@ def test_pick_combined_motion_gen_preserves_backend_samples_before_split() -> No
     assert plan.commands.frame_count == sample_count
 
 
+def test_pick_approach_waypoints_lie_on_the_pre_grasp_line() -> None:
+    """One combined plan visits evenly spaced poses on the straight approach."""
+    waypoints = 3
+    generator = _motion_generator()
+    generator.generate = Mock(
+        return_value=PlanResult(
+            success=torch.ones(NUM_ENVS, dtype=torch.bool),
+            positions=torch.zeros(NUM_ENVS, 6, ARM_DOF),
+            dt=torch.zeros(NUM_ENVS, 6),
+        )
+    )
+    action = _bind_action(generator, PickUp())
+    grasp = torch.eye(4)
+    grasp[:3, 3] = torch.tensor([0.4, 0.1, 0.2])
+
+    _plan_action(
+        action,
+        SkillInvocation(
+            skill_id="pick_up",
+            goal=GraspGoal(semantics=_semantics(entity_id="target"), grasp_xpos=grasp),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(strategy="motion_gen", sample_count=20),
+            skill_options=PickUpOptions(
+                approach_waypoints=waypoints,
+                approach_direction=torch.tensor([-0.6, 0.0, -0.8]),
+                pre_grasp_distance=0.12,
+            ),
+        ),
+        _context(
+            scene=_target_scene(
+                torch.eye(4).repeat(NUM_ENVS, 1, 1), timestamp=0.0, version=0
+            )
+        ),
+    )
+
+    generator.generate.assert_called_once()
+    targets = torch.stack(
+        [state.xpos for state in generator.generate.call_args.args[0]]
+    )
+    assert targets.shape[:2] == (waypoints + 3, NUM_ENVS)
+    pre_grasp = grasp[:3, 3] + 0.12 * torch.tensor([0.6, 0.0, 0.8])
+    expected = torch.stack(
+        [
+            torch.lerp(pre_grasp, grasp[:3, 3], i / (waypoints + 1))
+            for i in range(waypoints + 2)
+        ]
+    )
+    assert torch.allclose(
+        targets[: waypoints + 2, :, :3, 3], expected[:, None], atol=1e-6
+    )
+    assert torch.equal(targets[waypoints + 1], grasp.expand(NUM_ENVS, -1, -1))
+    assert torch.allclose(
+        targets[:-1, :, :3, :3], grasp[:3, :3].expand_as(targets[:-1, :, :3, :3])
+    )
+
+
+def test_pick_rejects_negative_approach_waypoints() -> None:
+    with pytest.raises(ValueError, match="approach_waypoints"):
+        PickUpOptions(approach_waypoints=-1)
+
+
 def test_place_releases_only_exclusively_held_rows() -> None:
     generator = _motion_generator()
 

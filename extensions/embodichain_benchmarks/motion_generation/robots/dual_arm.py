@@ -99,7 +99,11 @@ class DualArmProvider(RobotProvider):
             ),
             hand_stiffness=float(config.get("hand_stiffness", 1.0e3)),
             hand_damping=float(config.get("hand_damping", 1.0e2)),
-            hand_max_effort=float(config.get("hand_max_effort", 1.0e4)),
+            hand_max_effort=(
+                None
+                if config.get("hand_max_effort") is None
+                else float(config["hand_max_effort"])
+            ),
         )
 
 

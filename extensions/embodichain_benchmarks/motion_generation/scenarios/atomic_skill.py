@@ -92,6 +92,7 @@ from .atomic_policy import (
     benchmark_motion_attribution,
     benchmark_motion_policy_strategy,
     policy_motion_budget,
+    with_pick_approach_waypoints,
     with_motion_budget,
     with_plan_options,
 )
@@ -167,6 +168,35 @@ class AtomicSkillScenario(ScenarioProvider):
         """
         model = self.grasp_model()
         return bool(model is not None and model.get("model_id") == "robotiq_arg2f_140")
+
+    def grasp_ray_deviation_angle(self) -> float | None:
+        """Maximum antipodal ray deviation for the mounted hand, in radians.
+
+        Robotiq's flat pads rotate an object onto a contact face when the
+        closing axis leaves that face's normal, so its candidates stay within
+        two degrees. The PGI fixture keeps the generator default.
+        """
+        model = self.grasp_model()
+        if model is None or model.get("model_id") != "robotiq_arg2f_140":
+            return None
+        return math.radians(2.0)
+
+    def pick_approach_waypoints(self) -> int:
+        """Straight-line PickUp approach poses requested by the track.
+
+        Tracks opt in with ``pick_approach_waypoints``; the default ``0`` plans
+        only the pre-grasp, grasp and lift poses.
+        """
+        value = (
+            0
+            if self.track is None
+            else self.track.config.get("pick_approach_waypoints", 0)
+        )
+        if type(value) is not int or value < 0:
+            raise ValueError(
+                "track.config.pick_approach_waypoints must be a non-negative int."
+            )
+        return value
 
     def grasp_root_from_tcp(self) -> list[list[float]] | None:
         """Bind flange-mounted hand geometry to this fixture's solver TCP.
@@ -549,6 +579,7 @@ class AtomicSkillScenario(ScenarioProvider):
                         count,
                         gripper_data=self.grasp_model(),
                         root_from_tcp=self.grasp_root_from_tcp(),
+                        ray_deviation_angle=self.grasp_ray_deviation_angle(),
                     )
                     for count in sorted(sampling_counts)
                 },
@@ -823,6 +854,10 @@ class AtomicSkillScenario(ScenarioProvider):
         if self.suite is not None:
             invocations = tuple(
                 with_motion_budget(item, self.suite.protocol) for item in invocations
+            )
+            invocations = tuple(
+                with_pick_approach_waypoints(item, self.pick_approach_waypoints())
+                for item in invocations
             )
         physics = (
             {} if self.track is None else dict(self.track.config.get("physics", {}))
@@ -1572,6 +1607,7 @@ class AtomicSkillScenario(ScenarioProvider):
                 gripper_data=self.grasp_model(),
                 root_from_tcp=self.grasp_root_from_tcp(),
                 closure_sweep=self.grasp_closure_sweep(),
+                ray_deviation_angle=self.grasp_ray_deviation_angle(),
                 **(
                     {"approach_alignment_angle": math.radians(alignment_max_angle_deg)}
                     if alignment_max_angle_deg is not None
@@ -1854,6 +1890,7 @@ class AtomicSkillScenario(ScenarioProvider):
                 gripper_data=self.grasp_model(),
                 root_from_tcp=self.grasp_root_from_tcp(),
                 closure_sweep=self.grasp_closure_sweep(),
+                ray_deviation_angle=self.grasp_ray_deviation_angle(),
             )
             candidates, costs = generator.get_valid_grasp_poses(
                 mesh_vertices=mesh_vertices,

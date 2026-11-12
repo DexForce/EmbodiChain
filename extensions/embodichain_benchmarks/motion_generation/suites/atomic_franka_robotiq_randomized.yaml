@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_franka_robotiq_randomized
-suite_version: atomic_franka_robotiq_randomized_v5
+suite_version: atomic_franka_robotiq_randomized_v6
 profile: coverage
 
 robot:
@@ -41,12 +41,14 @@ planners:
     config:
       max_attempts: 5
       max_planning_time: null
-      interpolation_dt: 0.025
+      # Divides the compiled control period, so retiming keeps solved acceleration.
+      interpolation_dt: 0.02
       collision_activation_distance: 0.01
       use_cuda_graph: true
       cuda_graph_fallback: true
       warmup_iterations: 1
-      preserve_plan_samples: false
+      # Native samples avoid resampling the solved timing before compilation.
+      preserve_plan_samples: true
       world:
         obstacle_representation: sphere
         multi_env: false
@@ -74,6 +76,8 @@ tracks:
     enabled: true
     config:
       grasp_model: RobotiqArg2F140
+      # Straight-line poses keep the open hand from sweeping the target.
+      pick_approach_waypoints: 5
       batch_sizes: [1]
       seeds: [101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116]
       physics:

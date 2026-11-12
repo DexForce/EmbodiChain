@@ -45,6 +45,7 @@ from embodichain.lab.sim.cfg import (
     RobotCfg,
     JointDrivePropertiesCfg,
     LinkPhysicsOverrideCfg,
+    MimicComplianceCfg,
     NewtonCollisionPropertiesCfg,
     NewtonRigidBodyMaterialCfg,
     RigidBodyPhysicsCfg,
@@ -104,6 +105,10 @@ _ROBOTIQ_HAND_JOINTS = (
     "right_inner_knuckle_joint",
     "right_inner_finger_joint",
 )
+
+# Robotiq closing torque. A rigid mimic transmits linkage constraint loads to
+# the hand root in proportion to grip force; 40 N*m deflected the wrist.
+_ROBOTIQ_MAX_EFFORT = 5.0
 
 
 _UR_TUTORIAL_QPOS_LIMITS: tuple[tuple[float, float], ...] = tuple(
@@ -168,6 +173,7 @@ def create_parallel_jaw_grasp_pose_generator(
     root_from_tcp: Sequence[Sequence[float]] | None = None,
     grasp_depth_offset_m: float = 0.0,
     closure_sweep: bool = False,
+    ray_deviation_angle: float | None = None,
 ) -> ParallelJawGraspPoseGenerator:
     """Create a standalone generator for the sample's mounted gripper.
 
@@ -185,6 +191,8 @@ def create_parallel_jaw_grasp_pose_generator(
             output poses are rebuilt in that contact frame before sampling.
         closure_sweep: Also sample closing pad surfaces and reject candidates
             whose blocked closure intersects the inferred support plane.
+        ray_deviation_angle: Maximum antipodal ray deviation from the sampled
+            surface normal in radians; ``None`` keeps the generator default.
 
     Returns:
         A generator with actual open hand collision surfaces and runtime TCP
@@ -247,6 +255,11 @@ def create_parallel_jaw_grasp_pose_generator(
             sample_count=n_sample,
             max_candidates=max_candidates,
             approach_alignment_angle=approach_alignment_angle,
+            **(
+                {}
+                if ray_deviation_angle is None
+                else {"ray_deviation_angle": ray_deviation_angle}
+            ),
         ),
         collision_cfg=ParallelJawGraspCollisionCfg(
             filter_ground_collision=False,
@@ -557,9 +570,19 @@ def _create_franka_robotiq_cfg(overrides: dict[str, Any]) -> RobotCfg:
     cfg.control_parts["eef"] = list(_ROBOTIQ_HAND_JOINTS)
     cfg.init_qpos = list(cfg.init_qpos[:7]) + [0.0] * 6
     cfg.solver_cfg["arm"].tcp = sample_tool_tcp("franka", gripper="robotiq_2f_140")
-    for field, value in (("stiffness", 1e3), ("damping", 1e2), ("max_effort", 40.0)):
+    for field, value in (
+        ("stiffness", 1e3),
+        ("damping", 1e2),
+        ("max_effort", _ROBOTIQ_MAX_EFFORT),
+    ):
         for joint in _ROBOTIQ_HAND_JOINTS:
             getattr(cfg.joint_drive_props, field)[joint] = value
+    # The native compliant mimic lets the linkage fold under a held load, so the
+    # pads lose parallel contact and the object slips. Couple it rigidly.
+    cfg.mimic_compliance = {"finger_joint": MimicComplianceCfg(0.0, 0.0)}
+    # Position-only replay lags a 1e4 servo by tens of mrad at the end of a
+    # move; this stiffness matches the Panda arm preset.
+    cfg.joint_drive_props.stiffness["fr3_joint[1-7]"] = 1e5
     cfg.link_attrs = {
         **(cfg.link_attrs or {}),
         "newton_gripper_contacts": _newton_gripper_contacts(
@@ -757,7 +780,7 @@ def create_dual_tutorial_robot_cfg(
     right_arm_home: Sequence[float] | None = None,
     hand_stiffness: float = 1e3,
     hand_damping: float = 1e2,
-    hand_max_effort: float = 1e4,
+    hand_max_effort: float | None = None,
 ) -> RobotCfg:
     """Build a dual tutorial robot from the selected arm and hand.
 
@@ -793,7 +816,8 @@ def create_dual_tutorial_robot_cfg(
         right_arm_home: Optional right-arm initial configuration.
         hand_stiffness: Hand joint drive stiffness.
         hand_damping: Hand joint drive damping.
-        hand_max_effort: Hand joint maximum effort.
+        hand_max_effort: Hand joint maximum effort. ``None`` selects the
+            Franka Robotiq closing torque, or 1e4 for other hands.
 
     Returns:
         A dual-arm robot configuration with two matching grippers.
@@ -869,6 +893,12 @@ def create_dual_tutorial_robot_cfg(
     hand_joint_patterns = (
         ["fr3_finger_joint[1-2]"] if native_panda else base_cfg.control_parts["eef"]
     )
+    if hand_max_effort is None:
+        hand_max_effort = (
+            _ROBOTIQ_MAX_EFFORT
+            if gripper == "robotiq_2f_140" and robot_type == "franka"
+            else 1e4
+        )
     for property_name, value in (
         ("stiffness", hand_stiffness),
         ("damping", hand_damping),

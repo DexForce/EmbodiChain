@@ -78,6 +78,7 @@ from embodichain.lab.sim.atomic_skills.requirements import (
 )
 from embodichain.lab.sim.atomic_skills.state import HeldObjectState, PlanningContext
 from embodichain.lab.sim.atomic_skills.trajectory_ops import (
+    axis_translation_keyframes,
     build_pose_plan_states,
     interpolate_hand_qpos,
     resolve_pose_target,
@@ -213,6 +214,13 @@ class PickUpOptions(SkillOptions):
     grasps and ``fixed_object_to_eef`` bypass this sampled-grasp selection.
     """
 
+    approach_waypoints: int = 0
+    """Intermediate poses on the straight pre-grasp to grasp line.
+
+    The motion policy plans through them in the same call, which keeps an
+    open hand near that line instead of letting the approach sweep the target.
+    ``0`` plans only the pre-grasp, grasp and lift poses.
+    """
     approach_along_grasp_axis: bool = False
     """Use the realized calibrated TCP +Z for native pre-grasp translation.
 
@@ -270,6 +278,8 @@ class PickUpOptions(SkillOptions):
         _validate_single_se3(self.grasp_frame_to_eef, "grasp_frame_to_eef")
         if type(self.approach_along_grasp_axis) is not bool:
             raise TypeError("approach_along_grasp_axis must be boolean.")
+        if type(self.approach_waypoints) is not int or self.approach_waypoints < 0:
+            raise ValueError("approach_waypoints must be a non-negative integer.")
         if self.approach_along_grasp_axis and self.fixed_object_to_eef is None:
             raise ValueError("Grasp-axis approach requires fixed_object_to_eef.")
         if self.fixed_object_to_eef is not None:
@@ -393,9 +403,21 @@ class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
             # motion generator resolves backend defaults when no explicit
             # planner options were supplied.
             motion_options.sample_count = None
+        approach_poses = [pre_grasp_xpos[:, None]]
+        if options.approach_waypoints:
+            approach_poses.append(
+                axis_translation_keyframes(
+                    pre_grasp_xpos,
+                    grasp_xpos,
+                    approach_direction.to(grasp_xpos),
+                    n_waypoints=options.approach_waypoints + 1,
+                )[:, :-1]
+            )
         motion_result = self.motion_generator.generate(
             build_pose_plan_states(
-                torch.stack([pre_grasp_xpos, grasp_xpos, lift_xpos], dim=1)
+                torch.cat(
+                    [*approach_poses, grasp_xpos[:, None], lift_xpos[:, None]], dim=1
+                )
             ),
             options=motion_options,
         )
@@ -412,7 +434,7 @@ class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
             dt=motion_result.dt,
             control_dt=interpolation_dt,
             arrival_indices=motion_result.waypoint_indices,
-            split_target_index=1,
+            split_target_index=1 + options.approach_waypoints,
             env_ids=self.planning_services.env_ids,
         )
         n_approach = approach_arm.shape[1]

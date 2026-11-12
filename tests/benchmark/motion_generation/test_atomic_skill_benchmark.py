@@ -915,7 +915,7 @@ def _fake_articulation_geometry(*, joint_type: str) -> dict[str, torch.Tensor]:
 def test_atomic_suite_is_franka_robotiq_and_curobo_only():
     suite = load_suite("atomic_franka_robotiq_smoke")
 
-    assert suite.suite_version == "atomic_franka_robotiq_smoke_v7"
+    assert suite.suite_version == "atomic_franka_robotiq_smoke_v8"
     assert suite.robot.id == "franka_robotiq"
     assert suite.robot.provider == "franka_robotiq"
     assert [spec.id for spec in suite.planners if spec.enabled] == ["curobo"]
@@ -1047,7 +1047,7 @@ def test_randomized_atomic_suite_covers_four_interaction_skills_with_fixed_seed_
     suite = load_suite("atomic_franka_robotiq_randomized")
     track = suite.enabled_tracks()[0]
 
-    assert suite.suite_version == "atomic_franka_robotiq_randomized_v5"
+    assert suite.suite_version == "atomic_franka_robotiq_randomized_v6"
     assert track.id == "atomic-skill-randomized"
     assert track.config["seeds"] == list(range(101, 117))
     assert [item["id"] for item in track.config["skills"]] == [
@@ -3421,3 +3421,42 @@ def test_grasp_closure_sweep_is_limited_to_the_migrated_robotiq_hand() -> None:
     assert not scenario.grasp_closure_sweep()
     scenario.track = Mock(config={})
     assert not scenario.grasp_closure_sweep()
+
+
+def test_robotiq_grasp_pool_requires_face_normal_closing_axes() -> None:
+    """Robotiq's flat pads narrow antipodal ray deviation; PGI keeps defaults."""
+    from embodichain.toolkits.graspkit.pg_grasp import (
+        AntipodalGraspPoseGeneratorCfg,
+    )
+    from embodichain_benchmarks.motion_generation._atomic_fixtures import (
+        create_parallel_jaw_grasp_pose_generator,
+    )
+
+    scenario = AtomicSkillScenario()
+    scenario.track = Mock(config={"grasp_model": "RobotiqArg2F140"})
+    angle = scenario.grasp_ray_deviation_angle()
+    assert angle == pytest.approx(math.radians(2.0))
+    scenario.track = Mock(config={"grasp_model": "DHPGI14080"})
+    assert scenario.grasp_ray_deviation_angle() is None
+
+    narrow = create_parallel_jaw_grasp_pose_generator(
+        n_sample=64, force_refresh=False, ray_deviation_angle=angle
+    )
+    default = create_parallel_jaw_grasp_pose_generator(n_sample=64, force_refresh=False)
+    assert narrow.algorithm_cfg.ray_deviation_angle == pytest.approx(angle)
+    assert (
+        default.algorithm_cfg.ray_deviation_angle
+        == AntipodalGraspPoseGeneratorCfg().ray_deviation_angle
+    )
+
+
+def test_pick_approach_waypoints_are_an_opt_in_track_count() -> None:
+    scenario = AtomicSkillScenario()
+    scenario.track = Mock(config={})
+    assert scenario.pick_approach_waypoints() == 0
+    scenario.track = Mock(config={"pick_approach_waypoints": 5})
+    assert scenario.pick_approach_waypoints() == 5
+    for invalid in (True, -1, 2.0):
+        scenario.track = Mock(config={"pick_approach_waypoints": invalid})
+        with pytest.raises(ValueError, match="pick_approach_waypoints"):
+            scenario.pick_approach_waypoints()
