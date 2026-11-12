@@ -26,6 +26,10 @@ For an existing scene export, add `--scene /absolute/path/to/scene-workspace`
 and supply its corresponding original photograph. The scene stays read-only;
 the new run receives its own task, native assets, deployment and execution report.
 
+The live example keeps the `hybrid` renderer for generation and execution because
+DexSim's renderer selection belongs to the process, even after a temporary World
+is closed. On a server without a display, prefix the command with `xvfb-run -a`.
+
 `runtime.dual_ur5.yaml` supplies the environment timing and an existing robot
 component with declared resources, gripper commands, grasp generation and measured
 grip evidence. Its installation pose is an example: adjust the component's allowed

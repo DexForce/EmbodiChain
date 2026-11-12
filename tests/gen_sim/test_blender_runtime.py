@@ -28,6 +28,13 @@ import pytest
 from embodichain.gen_sim import _blender_runtime as runtime
 
 
+@pytest.fixture(autouse=True)
+def _clear_blender_selection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in ("EMBODICHAIN_BLENDER_EXECUTABLE", "EMBODICHAIN_BLENDER_PYTHON"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("EMBODICHAIN_ENV_FILE", str(tmp_path / "missing.env"))
+
+
 @pytest.mark.parametrize("system_prefix", [False, True])
 def test_worker_uses_files_and_does_not_inherit_business_python(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, system_prefix: bool
@@ -54,6 +61,43 @@ def test_worker_uses_files_and_does_not_inherit_business_python(
     assert result["pythonpath"] is None
     assert result["libraries"] == "/usr/local/nvidia/lib64"
     assert not Path(result["root"]).exists()
+
+
+@pytest.mark.parametrize("selection", ["process", "dotenv"])
+def test_blender_application_runs_the_same_worker_protocol(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selection: str
+) -> None:
+    worker = tmp_path / "worker with spaces.py"
+    worker.write_text(runtime._WORKER.read_text())
+    (tmp_path / "_blender_operations.py").write_text(
+        "def _render_object_front_top_views(*, value):\n"
+        "    return {'value': value}\n"
+    )
+    application = tmp_path / "blender application"
+    application.write_text(
+        f"#!{sys.executable}\n"
+        "import runpy, sys\n"
+        "assert '--background' in sys.argv\n"
+        "assert '--factory-startup' in sys.argv\n"
+        "assert '--disable-autoexec' in sys.argv\n"
+        "assert sys.argv[sys.argv.index('--python-exit-code') + 1] == '1'\n"
+        "runpy.run_path(sys.argv[sys.argv.index('--python') + 1], run_name='__main__')\n"
+    )
+    application.chmod(0o755)
+    monkeypatch.setattr(runtime, "_WORKER", worker)
+    dotenv = tmp_path / "blender.env"
+    monkeypatch.setenv("EMBODICHAIN_ENV_FILE", str(dotenv))
+    if selection == "process":
+        dotenv.write_text("EMBODICHAIN_BLENDER_EXECUTABLE=/unused/blender\n")
+        monkeypatch.setenv("EMBODICHAIN_BLENDER_EXECUTABLE", str(application))
+    else:
+        dotenv.write_text(f'EMBODICHAIN_BLENDER_EXECUTABLE="{application}"\n')
+    monkeypatch.setenv("EMBODICHAIN_BLENDER_PYTHON", str(tmp_path / "unused-python"))
+    assert runtime._run_blender_job(
+        "front_top", {"value": "asset with spaces.glb"}
+    ) == {"value": "asset with spaces.glb"}
+    if selection == "dotenv":
+        assert "EMBODICHAIN_BLENDER_EXECUTABLE" not in os.environ
 
 
 def test_worker_failure_contains_native_diagnostics(
@@ -87,9 +131,12 @@ def test_timed_out_worker_is_reaped(
         os.kill(int(pid_file.read_text()), 0)
 
 
-def test_missing_blender_interpreter_has_an_actionable_error(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    "setting", ["EMBODICHAIN_BLENDER_PYTHON", "EMBODICHAIN_BLENDER_EXECUTABLE"]
+)
+def test_missing_blender_runtime_has_an_actionable_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, setting: str
 ) -> None:
-    monkeypatch.setenv("EMBODICHAIN_BLENDER_PYTHON", str(tmp_path / "missing-python"))
-    with pytest.raises(RuntimeError, match="EMBODICHAIN_BLENDER_PYTHON"):
+    monkeypatch.setenv(setting, str(tmp_path / "missing-runtime"))
+    with pytest.raises(RuntimeError, match=setting):
         runtime._run_blender_job("render", {})

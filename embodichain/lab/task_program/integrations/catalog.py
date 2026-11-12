@@ -30,6 +30,8 @@ from types import MappingProxyType
 from typing import Any, cast
 import torch
 
+from embodichain.lab.evaluation import CompiledEvaluation
+from embodichain.lab.evaluation._recording import _is_segment_start_field
 from embodichain.lab.gym.envs.settling import DynamicSettleMonitorCfg
 from embodichain.lab.sim.atomic_skills import (
     Affordance,
@@ -91,6 +93,7 @@ from embodichain.lab.task_program.runtime.parallel_executor import (
 )
 
 from embodichain.lab.task_program.language.schema import (
+    ConditionValidatorCfg,
     TaskProgramCfg,
     TaskProgramIntegrationCfg,
     PostPolicyCfg,
@@ -164,6 +167,8 @@ def _canonical_value(value: object) -> object:
         if not math.isfinite(value):
             raise ValueError("Fingerprint metadata cannot contain non-finite floats.")
         return value
+    if isinstance(value, CompiledEvaluation):
+        return {"evaluation_graph": value.identity}
     if isinstance(value, Enum):
         return {
             "type": _qualified_name(value),
@@ -624,7 +629,17 @@ class TaskProgramIntegrationCatalog:
     )
     """Immutable preset-to-entity binding for declared geometric conditions."""
 
+    evaluation_conditions: Mapping[str, CompiledEvaluation] = field(
+        default_factory=dict, kw_only=True
+    )
+    """Named deployment rules bound to raw observation fields."""
+
     def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "evaluation_conditions",
+            _snapshot_evaluation_conditions(self.evaluation_conditions),
+        )
         for name in (
             "call_contracts",
             "call_declaration_factories",
@@ -1091,7 +1106,14 @@ class TaskProgramIntegrationCatalog:
         path: ConfigPath,
     ) -> None:
         """Validate one registered segment-validator kind."""
-        del path
+        if type(validator) is ConditionValidatorCfg:
+            if validator.ref not in self.evaluation_conditions:
+                raise TaskProgramValidationError(
+                    "unknown_evaluation_condition",
+                    (*path, "ref"),
+                    f"Unknown deployment evaluation condition {validator.ref!r}.",
+                )
+            return
         if validator.kind not in _VALIDATOR_KINDS:
             raise KeyError(
                 f"Unknown validator kind {validator.kind!r}; available kinds are "
@@ -1126,7 +1148,9 @@ class TaskProgramIntegrationCatalog:
     def _preflight(self, program: TaskProgramCfg) -> CompiledTaskProgram:
         """Compile and statically link every expanded semantic call."""
         self.validate_integration(program.integration, path=("integration",))
-        compiled = TaskProgramCompiler(self.scene).compile(program)
+        compiled = TaskProgramCompiler(
+            self.scene, evaluation_conditions=self.evaluation_conditions
+        ).compile(program)
         manifest = SemanticIntegrationManifest(
             scene=self.scene,
             robot_profile=self.robot_profile,
@@ -1417,6 +1441,21 @@ class TaskProgramIntegrationCatalog:
                     )
 
 
+def _snapshot_evaluation_conditions(
+    value: Mapping[str, CompiledEvaluation],
+) -> Mapping[str, CompiledEvaluation]:
+    snapshot = dict(value)
+    for ref, spec in snapshot.items():
+        _exact_identifier(ref, field_name="evaluation condition ref")
+        if type(spec) is not CompiledEvaluation:
+            raise TypeError(
+                "Evaluation conditions must be bound rules or compiled graphs."
+            )
+        if spec.roots != (ref,):
+            raise ValueError("A compiled condition must export the named root.")
+    return MappingProxyType(snapshot)
+
+
 def _registration_payload(
     *,
     scene_binding: SimulationSceneBinding,
@@ -1439,9 +1478,12 @@ def _registration_payload(
     parallel_safety_factory: ParallelCommandSafetyValidatorFactory | None,
     control_part_evidence_factory: ControlPartEvidenceProviderFactory | None,
     registered_semantic_lowerer_factories: tuple[RegisteredSemanticLowererFactory, ...],
+    evaluation_conditions: Mapping[str, CompiledEvaluation],
+    evaluation_final_refs: tuple[str, ...],
+    evaluation_process_refs: tuple[str, ...],
 ) -> dict[str, object]:
     """Build the versioned canonical fingerprint payload."""
-    return {
+    payload = {
         "schema_version": _CATALOG_FINGERPRINT_SCHEMA_VERSION,
         "scene_binding": scene_binding,
         "scene_manifest": scene.entries,
@@ -1554,6 +1596,21 @@ def _registration_payload(
         "settle_presets": settle_presets,
         "validator_kinds": _VALIDATOR_KINDS,
     }
+    if evaluation_conditions:
+        payload["evaluation"] = {
+            "conditions": evaluation_conditions,
+            **(
+                {"process_constraints": evaluation_process_refs}
+                if evaluation_process_refs
+                else {}
+            ),
+            **(
+                {"final_acceptance": evaluation_final_refs}
+                if evaluation_final_refs
+                else {}
+            ),
+        }
+    return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -1580,6 +1637,14 @@ class SimulationTaskProgramRegistration:
     registered_semantic_lowerer_factories: tuple[
         RegisteredSemanticLowererFactory, ...
     ] = ()
+    evaluation_conditions: Mapping[str, CompiledEvaluation] = field(
+        default_factory=dict, kw_only=True
+    )
+    """Deployment-owned near-target hold rules, keyed by exact reference."""
+    evaluation_final_refs: tuple[str, ...] = field(default=(), kw_only=True)
+    """Rule references whose instantaneous predicates gate final acceptance."""
+    evaluation_process_refs: tuple[str, ...] = field(default=(), kw_only=True)
+    """Deployment-owned instantaneous process constraints checked per control step."""
     catalog: TaskProgramIntegrationCatalog = field(init=False)
     _parallel_safety_validator_history: list[ParallelCommandSafetyValidator] = field(
         init=False,
@@ -1623,6 +1688,28 @@ class SimulationTaskProgramRegistration:
         if type(self.call_catalog) is not SemanticCallCatalog:
             raise TypeError("call_catalog must be exactly SemanticCallCatalog.")
         settle_presets = _snapshot_settle_presets(self.settle_presets)
+        object.__setattr__(
+            self,
+            "evaluation_conditions",
+            _snapshot_evaluation_conditions(self.evaluation_conditions),
+        )
+        for key, refs in (
+            ("final_acceptance", self.evaluation_final_refs),
+            ("process_constraints", self.evaluation_process_refs),
+        ):
+            if type(refs) is not tuple:
+                raise TypeError(f"evaluation.{key} refs must be a tuple.")
+            for ref in refs:
+                _exact_identifier(ref, field_name=f"evaluation.{key} ref")
+                spec = self.evaluation_conditions.get(ref)
+                if spec is None:
+                    raise ValueError(f"Unknown evaluation.{key} ref {ref!r}.")
+                if spec.stateful or any(
+                    _is_segment_start_field(field) for field in spec.required_fields
+                ):
+                    raise ValueError(f"evaluation.{key} requires instantaneous roots.")
+            if len(set(refs)) != len(refs):
+                raise ValueError(f"evaluation.{key} refs must be unique.")
         rigid_ids = {binding.entity_id for binding in self.scene_binding.rigid_objects}
         reference_ids = (
             rigid_ids
@@ -1739,6 +1826,9 @@ class SimulationTaskProgramRegistration:
                 robot_profile_binding=self.robot_profile_binding,
                 robot_profile=profile,
                 call_catalog=self.call_catalog,
+                evaluation_conditions=self.evaluation_conditions,
+                evaluation_final_refs=self.evaluation_final_refs,
+                evaluation_process_refs=self.evaluation_process_refs,
                 settle_presets=settle_presets,
                 relation_grounder_keys=relation_grounder_keys,
                 relation_grounders=relation_grounders,
@@ -1807,6 +1897,7 @@ class SimulationTaskProgramRegistration:
                 ),
                 fingerprint=fingerprint,
                 _required_skills=required_skills,
+                evaluation_conditions=self.evaluation_conditions,
             ),
         )
         object.__setattr__(self, "_parallel_safety_validator_history", [])
@@ -1857,6 +1948,9 @@ class SimulationTaskProgramRegistration:
                 robot_profile_binding=self.robot_profile_binding,
                 robot_profile=profile,
                 call_catalog=self.call_catalog,
+                evaluation_conditions=self.evaluation_conditions,
+                evaluation_final_refs=self.evaluation_final_refs,
+                evaluation_process_refs=self.evaluation_process_refs,
                 settle_presets=self.settle_presets,
                 relation_grounder_keys=relation_grounder_keys,
                 relation_grounders=relation_grounders,

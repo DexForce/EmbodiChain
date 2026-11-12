@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from embodichain.lab.visualization import VisualizationCfg
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -102,6 +102,7 @@ def _build_learning_environment(
     *,
     device: torch.device,
     num_envs: int,
+    resources: Mapping[str, Any] | None = None,
 ) -> tuple[str, Any]:
     """Build the lightweight Environment declared by a training config."""
     env_block = config["trainer"]["learning_env"]
@@ -111,6 +112,13 @@ def _build_learning_environment(
     else:
         env_name = env_block["name"]
         env_config = dict(env_block.get("cfg", {}))
+    if resources is not None:
+        duplicate = env_config.keys() & resources.keys()
+        if duplicate:
+            raise ValueError(
+                f"Learning environment config and resources overlap: {sorted(duplicate)}"
+            )
+        env_config.update(resources)
     return str(env_name), build_learning_env(
         str(env_name),
         num_envs=num_envs,
@@ -149,12 +157,26 @@ def build_learning_policy_runtime(
     *,
     device: torch.device,
     num_envs: int,
+    resources: Mapping[str, Any] | None = None,
 ) -> PolicyRuntime:
-    """Build a lightweight Environment and its configured Policy."""
+    """Build a configured learning Environment and Policy.
+
+    Args:
+        config: Training configuration with trainer and policy blocks.
+        device: Device shared by the environment and policy.
+        num_envs: Learning rollout batch size.
+        resources: Workflow-owned objects injected into the environment factory,
+            such as a trained model and replay start provider. Keys must not
+            overlap the environment configuration. Objects are shared by reference.
+
+    Returns:
+        Environment and policy constructed through their registries.
+    """
     env_name, env = _build_learning_environment(
         config,
         device=device,
         num_envs=num_envs,
+        resources=resources,
     )
     try:
         policy = _build_learning_policy(config["policy"], env, device)

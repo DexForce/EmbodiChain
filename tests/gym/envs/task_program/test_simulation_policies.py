@@ -850,6 +850,19 @@ def test_object_near_target_validates_rows_independently() -> None:
     assert metadata["accepted_mask"] == [True, False]
 
 
+def test_near_target_validator_preserves_inclusive_boundary_and_invalid_pose() -> None:
+    segment = _compiled_segment()
+    boundary = torch.tensor(0.05)
+    above = torch.nextafter(boundary, torch.tensor(float("inf")))
+    port, obj, _ = _port(torch.tensor([[boundary, 0.0, 0.0], [above, 0.0, 0.0]]))
+    validator = segment.validators[0]
+
+    assert port.validate(validator, segment=segment).tolist() == [True, False]
+    obj._pose[1, 0, 3] = float("nan")
+    with pytest.raises(ValueError, match="pose must be finite"):
+        port.validate(validator, segment=segment)
+
+
 def test_object_near_relative_target_observes_both_rows_independently() -> None:
     """The validator derives each target from the current reference pose."""
     segment = _compiled_relative_segment()
@@ -886,6 +899,12 @@ def test_object_near_relative_target_observes_both_rows_independently() -> None:
     assert metadata["accepted_mask"] == [True, False]
     assert obj.pose_reads == 1
     assert reference.pose_reads == 1
+
+    reference._pose = reference._pose.to(torch.float64)
+    obj._pose[0, 0, 3] = 0.0
+    reference._pose[0, 0, 3] = 0.0500000001
+    # The old subtraction promoted to float64 before comparing the inclusive bound.
+    assert port.validate(validator, segment=segment).tolist() == [False, False]
 
 
 def test_articulation_joint_position_validates_measured_rows() -> None:
@@ -1383,13 +1402,16 @@ def test_joint_stability_uses_joint_window_and_original_observed_hold():
     assert not any(robot.qpos_reads)
 
 
-def test_joint_stability_resets_the_full_range_and_does_not_count_tick_zero():
-    port, art, _, segment, policy = _joint_condition_port(torch.tensor([[0.1]]))
+@pytest.mark.parametrize("initial,changed", [(0.1, 0.1011), (0.1304, 0.1296)])
+def test_joint_stability_requires_full_duration_after_drift_or_target_entry(
+    initial, changed
+):
+    port, art, _, segment, policy = _joint_condition_port(torch.tensor([[initial]]))
     steps = 0
     for _ in port.actions(policy, segment=segment, active_mask=torch.tensor([True])):
         steps += 1
         if steps == 10:
-            art._qpos[0, 0] = 0.1011
+            art._qpos[0, 0] = changed
     assert steps == 35
     assert port.post_policy_result(policy, segment=segment).tolist() == [True]
 

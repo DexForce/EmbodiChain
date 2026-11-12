@@ -37,46 +37,6 @@ from scripts.benchmark.rl.locomotion_ppo import (
 from scripts.benchmark.rl.resource_usage import ProcessResources, _process_gpu_mib
 
 
-@pytest.mark.no_sim
-@pytest.mark.parametrize("wrapped", [False, True], ids=["mujoco_warp", "dexuni"])
-@pytest.mark.parametrize(
-    "cpu_fallback,device_active", [(False, True), (True, True), (False, False)]
-)
-def test_newton_backend_check_supports_solver_composition(
-    monkeypatch, wrapped, cpu_fallback, device_active
-) -> None:
-    from dexsim.engine.newton_physics import backend_registry
-
-    solver = SimpleNamespace(
-        use_mujoco_cpu=cpu_fallback,
-        mjw_data=SimpleNamespace(
-            qpos=SimpleNamespace(device=SimpleNamespace(is_cuda=device_active))
-        ),
-    )
-    backend = SimpleNamespace(
-        solver=SimpleNamespace(mujoco_solver=solver) if wrapped else solver
-    )
-    world = object()
-
-    def resolve(actual_world):
-        assert actual_world is world
-        return backend
-
-    monkeypatch.setattr(backend_registry, "get_newton_backend", resolve)
-    env = SimpleNamespace(
-        unwrapped=SimpleNamespace(
-            sim=SimpleNamespace(
-                physics=SimpleNamespace(name="newton"), device="cuda:0", _world=world
-            )
-        )
-    )
-    if cpu_fallback or not device_active:
-        with pytest.raises(RuntimeError, match="not using CUDA"):
-            benchmark._check_backend(env, "newton")
-    else:
-        assert benchmark._check_backend(env, "newton") is backend
-
-
 def _result(status: str = "passed") -> dict:
     def row(warming: bool, rollout: float, update: float) -> dict:
         return {
@@ -158,6 +118,52 @@ def test_config_keeps_official_policy_and_scales_minibatches(backend: str) -> No
 def test_config_rejects_incomplete_minibatches(envs: int, steps: int) -> None:
     with pytest.raises(ValueError, match="divisible"):
         _load_config(TASK_DIR, "default", envs, steps)
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize("solver_type", ["mujoco_warp", "dexuni"])
+@pytest.mark.parametrize(
+    "use_cpu,device_is_cuda", [(False, True), (True, False), (False, False)]
+)
+def test_newton_backend_checks_active_mujoco_solver(
+    monkeypatch: pytest.MonkeyPatch,
+    solver_type: str,
+    use_cpu: bool,
+    device_is_cuda: bool,
+) -> None:
+    """Both solver routes must use GPU integration and GPU state buffers."""
+    from dexsim.engine.newton_physics import backend_registry
+
+    mujoco = SimpleNamespace(
+        use_mujoco_cpu=use_cpu,
+        mjw_data=SimpleNamespace(
+            qpos=SimpleNamespace(device=SimpleNamespace(is_cuda=device_is_cuda))
+        ),
+    )
+    backend = SimpleNamespace(
+        solver_type=solver_type,
+        solver=(
+            mujoco
+            if solver_type == "mujoco_warp"
+            else SimpleNamespace(mujoco_solver=mujoco)
+        ),
+        mujoco_solver=mujoco,
+    )
+    monkeypatch.setattr(backend_registry, "get_newton_backend", lambda world: backend)
+    env = SimpleNamespace(
+        unwrapped=SimpleNamespace(
+            sim=SimpleNamespace(
+                physics=SimpleNamespace(name="newton"),
+                device="cuda:0",
+                _world=object(),
+            )
+        )
+    )
+    if not use_cpu and device_is_cuda:
+        assert benchmark._check_backend(env, "newton") is backend
+    else:
+        with pytest.raises(RuntimeError, match="not using CUDA"):
+            benchmark._check_backend(env, "newton")
 
 
 @pytest.mark.parametrize("status", ["passed", "failed"])
@@ -260,9 +266,20 @@ def test_resource_sample_resolves_one_provider_pid(
 
 
 @pytest.mark.no_sim
-@pytest.mark.parametrize("renderer", [None, "auto", "no-render", "hybrid"])
+@pytest.mark.parametrize(
+    "renderer,solver_type",
+    [
+        (None, "mujoco_warp"),
+        ("auto", "dexuni"),
+        ("no-render", "mujoco_warp"),
+        ("hybrid", "dexuni"),
+    ],
+)
 def test_creation_failure_retains_resource_samples(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, renderer: str | None
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    renderer: str | None,
+    solver_type: str,
 ) -> None:
     """Write failure reports with samples taken before runtime construction."""
     from embodichain.lab.gym.utils import registration
@@ -270,7 +287,9 @@ def test_creation_failure_retains_resource_samples(
     from scripts.benchmark.rl import runtime as benchmark_runtime
 
     env_config = tmp_path / "input.yaml"
-    env_config.write_text("physics_config:\n  solver_cfg: {}\n")
+    env_config.write_text(
+        f"physics_config:\n  solver_cfg:\n    solver_type: {solver_type}\n"
+    )
     output = tmp_path / "result"
     monkeypatch.setattr(
         sys,
@@ -283,6 +302,8 @@ def test_creation_failure_retains_resource_samples(
             str(output),
             "--envs",
             "32",
+            "--solver-iterations",
+            "37",
         ],
     )
     trainer_cfg = {"gym_config": str(env_config)}
@@ -320,7 +341,19 @@ def test_creation_failure_retains_resource_samples(
     failure = RuntimeError("runtime construction failed")
 
     def fail_creation(*args, **kwargs):
+        import yaml
+
         assert kwargs["renderer"] == renderer
+        saved = yaml.safe_load((output / "env.yaml").read_text())
+        expected_options = (
+            {"mujoco_options": {"iterations": 37}}
+            if solver_type == "dexuni"
+            else {"iterations": 37}
+        )
+        assert saved["physics_config"]["solver_cfg"] == {
+            "solver_type": solver_type,
+            **expected_options,
+        }
         raise failure
 
     monkeypatch.setattr(policy_runtime, "build_gym_policy_runtime", fail_creation)
@@ -332,9 +365,7 @@ def test_creation_failure_retains_resource_samples(
     assert result["resources"]["samples"] == [
         {"label": "before_create", "cpu_rss_mib": 50.0}
     ]
-    assert (
-        "| Dexsim Newton/MuJoCo CUDA | failed |" in (output / "report.md").read_text()
-    )
+    assert "| Dexsim Newton CUDA | failed |" in (output / "report.md").read_text()
 
 
 @pytest.mark.no_sim

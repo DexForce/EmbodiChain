@@ -127,6 +127,9 @@ def _resolve_local_assets(config: dict[str, Any], base_dir: Path) -> None:
 
     if "fpath" in config:
         config["fpath"] = local_path(config["fpath"])
+    source = config.get("source")
+    if isinstance(source, dict) and "file_path" in source:
+        source["file_path"] = local_path(source["file_path"])
     urdf = config.get("urdf_cfg")
     if isinstance(urdf, dict):
         components = urdf.get("components", [])
@@ -172,6 +175,7 @@ def build_robot_cfg(args: argparse.Namespace) -> RobotCfg:
         OSError: If the configuration file cannot be read.
     """
     from embodichain.lab.sim.cfg import RobotCfg
+    from embodichain.lab.sim.cfg.source import _asset_file_path
     from embodichain.robot_registry import resolve_robot_cfg
     from embodichain.utils.config_paths import resolve_config_path
     from embodichain.utils.utility import load_config
@@ -208,8 +212,8 @@ def build_robot_cfg(args: argparse.Namespace) -> RobotCfg:
                 fields.pop(field, None)
         cfg = RobotCfg.from_dict(fields)
     cfg.validate()
-    if not cfg.fpath and cfg.urdf_cfg is None:
-        raise ValueError("Robot configuration must define fpath or urdf_cfg.")
+    if not _asset_file_path(cfg) and cfg.urdf_cfg is None:
+        raise ValueError("Robot configuration must define source, fpath, or urdf_cfg.")
     return cfg
 
 

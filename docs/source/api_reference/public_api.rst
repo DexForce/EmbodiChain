@@ -186,6 +186,34 @@ the exact repository and revision used for evaluation.
 
 .. autofunction:: download_pretrained_policy
 
+embodichain.data.assets.scene_assets
+------------------------------------
+
+Download scene bundles through the shared asset registry. The four SimReady
+rooms retain their original GLB visuals and separate static USD floor collision.
+For example, ``get_data_path("WoodLab/wood_lab/wood_lab.usda")`` resolves the
+portable USD entry; keep its sibling ``visual`` and ``collision`` directories.
+The new bundles use the shared download lock, verify the archive MD5 and
+respect the configured download host, with the official Hub as fallback.
+
+.. currentmodule:: embodichain.data.assets.scene_assets
+
+.. autosummary::
+
+   SceneData
+   EmptyRoom
+   WoodLab
+   IndustrialWorkshop
+   DemoStudio
+   CleanLab
+
+.. autoclass:: SceneData
+.. autoclass:: EmptyRoom
+.. autoclass:: WoodLab
+.. autoclass:: IndustrialWorkshop
+.. autoclass:: DemoStudio
+.. autoclass:: CleanLab
+
 embodichain.data.assets.solver_assets
 -------------------------------------
 
@@ -980,6 +1008,36 @@ with zero candidates; interrupted writes may leave a run without that manifest.
 
    save_layouts
 
+embodichain.gen_sim.scene_providers
+-----------------------------------
+
+Provider-neutral, durable references for scene generation jobs. A selected
+installed adapter owns transport and provider lifecycle; these contracts do not
+import a model runtime or simulator.
+
+.. currentmodule:: embodichain.gen_sim.scene_providers
+
+.. autosummary::
+
+   CancellationReport
+   SceneGenerationProvider
+   SceneGenerationRequest
+   SceneJobRef
+   SceneJobStatus
+   load_scene_generation_provider
+
+.. autoclass:: CancellationReport
+
+.. autoclass:: SceneGenerationProvider
+
+.. autoclass:: SceneGenerationRequest
+
+.. autoclass:: SceneJobRef
+
+.. autoclass:: SceneJobStatus
+
+.. autofunction:: load_scene_generation_provider
+
 embodichain.gen_sim.services
 ----------------------------
 
@@ -1084,6 +1142,48 @@ semantic and physical validation remain with the consuming owners.
 .. autoclass:: ServiceResponseError
 
 .. autoclass:: SubmissionUnknown
+
+embodichain.gen_sim.workflow
+----------------------------
+
+Artifact-based Task Engine planning, external scene-job control, structured
+scene qualification and deterministic deployment preparation. Simulation
+execution remains with the ordinary task runner.
+
+.. currentmodule:: embodichain.gen_sim.workflow
+
+.. autosummary::
+
+   cancel_scene_generation
+   inspect_scene_generation
+   load_generated_scene
+   load_task_plan
+   materialize_scene_generation
+   plan_image_task
+   prepare_task_deployment
+   qualify_task_scene
+   resume_scene_generation
+   submit_scene_generation
+
+.. autofunction:: cancel_scene_generation
+
+.. autofunction:: inspect_scene_generation
+
+.. autofunction:: load_generated_scene
+
+.. autofunction:: load_task_plan
+
+.. autofunction:: materialize_scene_generation
+
+.. autofunction:: plan_image_task
+
+.. autofunction:: prepare_task_deployment
+
+.. autofunction:: qualify_task_scene
+
+.. autofunction:: resume_scene_generation
+
+.. autofunction:: submit_scene_generation
 
 embodichain.gen_sim.task_engine.evidence
 ----------------------------------------
@@ -1452,6 +1552,48 @@ spellings are aliases of the TaskSpec functions.
    evaluate_task_template
    validate_task_spec
    validate_task_template
+
+embodichain.lab.evaluation
+--------------------------
+
+.. currentmodule:: embodichain.lab.evaluation
+
+Compile trusted predicate registrations and inert rule declarations into an
+immutable graph. A typed deployment binding qualifies the source of each role.
+``RuleSession`` advances bounded windows and milestones for one occurrence.
+Instantaneous queries and snapshots leave history untouched. Replay consumes
+the recorded observations and preserves each row's endpoint and witnesses.
+
+.. autosummary::
+
+   EvaluationStatus
+   PredicateSpec
+   BooleanRule
+   TemporalRule
+   MilestoneRule
+   EvaluationSpec
+   PredicateMeasurement
+   PredicateDefinition
+   PredicateRegistry
+   CompiledEvaluation
+   RuleResult
+   EvaluationSnapshot
+   RuleSession
+   builtin_predicates
+   evaluate_recorded_rules
+
+embodichain.lab.evaluation.observations
+---------------------------------------
+
+.. currentmodule:: embodichain.lab.evaluation.observations
+
+Advance a compiled session with a raw capture and its exact episode owner.
+The adapter checks physical descriptors before projecting raw observations
+into predicate inputs.
+
+.. autosummary::
+
+   advance_observation
 
 embodichain.lab.expansion
 ------------------------
@@ -2698,6 +2840,7 @@ embodichain.lab.sim
    VisualMaterialInst
    ReuseSegmentState
    BatchEntity
+   UsdImportResult
    SimulationManager
    SimulationManagerCfg
    SIM_CACHE_DIR
@@ -3722,6 +3865,7 @@ embodichain.lab.sim.spawn.descriptors
    configure_articulation_desc
    rigid_desc_from_cfg
    visual_desc_from_cfg
+   cable_desc_from_cfg
    surface_deformable_desc_from_cfg
    volume_deformable_desc_from_cfg
 
@@ -3753,6 +3897,23 @@ embodichain.lab.sim.spawn.usd
    articulation_desc_from_usd
    rigid_desc_from_usd
    visual_desc_from_usd
+
+embodichain.lab.sim.spawn.usd_result
+-------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.spawn.usd_result
+
+USD import results retain stable source keys for declared facades and logical
+resource UIDs. A unique source keeps its prim path as its key. If one prim emits
+several resources, keys append ``#0``, ``#1``, and so on in parser order;
+``resource_source_paths`` maps each key back to its exact source prim path.
+The UID, type and source-path maps use the same keys, independently of namespace
+and runtime UID changes. Results share the manager's ``prepare()`` lifecycle and
+do not own another object registry or native-resource lifetime.
+
+.. autosummary::
+
+   UsdImportResult
 
 embodichain.lab.sim.utility.dynamic_pybind
 ----------------------------------------
@@ -4148,6 +4309,21 @@ embodichain.learning.rl.algo.apg
    complete_discounted_return
    segmented_discounted_return
 
+embodichain.learning.rl.algo.apg_actor_critic
+-------------------------------------------
+
+.. currentmodule:: embodichain.learning.rl.algo.apg_actor_critic
+
+Short differentiable trajectories use terminal values for actor optimization
+and detached lambda returns for critic regression. Actor and critic optimizers
+retain separate state in checkpoints.
+
+.. autosummary::
+
+   APGActorCritic
+   APGActorCriticCfg
+   differentiable_lambda_returns
+
 embodichain.learning.rl.algo.base
 ---------------------------------
 
@@ -4509,6 +4685,25 @@ embodichain_tasks.configs
 
    get_config_path
 
+embodichain_tasks.locomotion.managers.actions
+----------------------------------------------
+
+The reference position action combines a policy output with the next motion
+frame using the task's per-joint reference weights, then applies encoder bias.
+
+.. automodule:: embodichain_tasks.locomotion.managers.actions
+   :members:
+
+embodichain_tasks.locomotion.tracking.g1_motion
+-----------------------------------------------
+
+The G1 motion task connects reference data and differentiable tracking
+calculations to the simulator Gym loop. It owns frame progress, history,
+reference-state resets and terminal snapshots before automatic row resets.
+
+.. automodule:: embodichain_tasks.locomotion.tracking.g1_motion
+   :members:
+
 embodichain_tasks.manipulation.push_cube
 ----------------------------------------
 
@@ -4716,12 +4911,17 @@ Measured manipulation functors bind rigid objects and validate geometric paramet
 
    object_near_target
    object_below_height
+   evaluation_condition
 
 .. autoclass:: object_near_target
    :members:
    :special-members: __call__
 
 .. autoclass:: object_below_height
+   :members:
+   :special-members: __call__
+
+.. autoclass:: evaluation_condition
    :members:
    :special-members: __call__
 

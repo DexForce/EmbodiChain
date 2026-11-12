@@ -251,3 +251,15 @@ def test_active_trainer_cameras_reserve_renderer_before_environment_build(
             )
         ],
     )
+
+
+def test_learning_environment_rejects_config_resource_collision():
+    from embodichain.learning.rl.runtime import _build_learning_environment
+
+    with pytest.raises(ValueError, match="config and resources overlap"):
+        _build_learning_environment(
+            {"trainer": {"learning_env": {"name": "Unused", "cfg": {"model": "file"}}}},
+            device=torch.device("cpu"),
+            num_envs=2,
+            resources={"model": object()},
+        )

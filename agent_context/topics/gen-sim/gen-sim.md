@@ -12,6 +12,8 @@ Paths below are relative to `embodichain/gen_sim/` unless qualified.
 | Request | Owner |
 |---|---|
 | Model service configuration, adapters and ownership | `services/`; [service guide](../../../embodichain/gen_sim/services/README.md) |
+| External scene-provider lifecycle | `scene_providers.py`: request/job/cancellation contracts and selected entry-point loading |
+| Public staged workflow | `workflow.py`: Task Plan loading, provider job operations, generated-scene validation, qualification and deterministic deployment preparation |
 | Unified command dispatch | `embodichain/cli/gensim.py`: `gensim asset ingest`, `scene generate/edit/expand/preview`, `task plan`, `run`, `ui`; legacy top-level commands remain in `embodichain/cli/main.py` |
 | Image to native execution | `_workflow.py`, `_run_config.py`, `_run_binding.py`, `_run_execution.py`; [command and run guide](../../../embodichain/gen_sim/README.md) |
 | Generate/edit CLI modes | `scene_engine/cli/start.py` |
@@ -43,6 +45,22 @@ Normal wheel installs discover external profiles through
 bundled JSON and legacy rules. Python configuration overrides discovery. Selected
 external files fail explicitly when invalid; no installed file needs editing.
 `EMBODICHAIN_ENV_FILE` independently supplies referenced variables.
+Bound adapter IDs resolve shipped factories first, then only an installed
+`embodichain.gensim_service_adapters` entry point with the selected ID; unrelated
+plugins are not imported. `gensim services validate` resolves profiles and
+constructs adapters without provider requests, while `services doctor` also
+initializes selected roles and runs their available health checks. The versioned
+wire protocol remains model, port and deployment-framework independent.
+
+Full scene providers are separate from model-service roles. The selected
+`embodichain.gensim_scene_providers` adapter owns its external job transport and
+materialization, while GenSim owns task requirements, qualification and deployment
+validity. Task plans, generated scenes, qualification reports and prepared
+deployments use separate immutable manifests. Expected scene incompatibility is a
+structured qualification result; artifact corruption and transport failure remain
+errors. These operations reserve the durable identity and feedback boundary needed
+by a later bounded agent loop, but do not implement an agent runtime, MCP transport
+or automatic retry loop.
 
 Owned transports close when the run exits; explicit legacy clients and supplied
 service runs remain caller-owned. Chat requests own their stateless transport.
@@ -174,10 +192,17 @@ without sampling. File/model coordinate adaptation remains owned here.
 
 ## Runtime and extension boundaries
 
+Live scene generation and execution share a process. The live example keeps
+`hybrid` throughout because DexSim's renderer selection is process-wide and
+closing a temporary World does not reset it.
+
 Blender operations use `gen_sim/_blender_runtime.py` to launch the standalone
-worker selected by `EMBODICHAIN_BLENDER_PYTHON`. The worker loads only Blender
-operations and their direct dependencies; it must not import the business
-framework, Torch or DexSim. Input/output files cross this process boundary;
+worker. `EMBODICHAIN_BLENDER_EXECUTABLE` selects the Blender application when
+Eevee needs application graphics initialization; otherwise
+`EMBODICHAIN_BLENDER_PYTHON` selects the isolated interpreter. These selectors
+follow shared-dotenv/process precedence. The worker imports
+only Blender operations and their direct dependencies; it must not import the
+business framework, Torch or DexSim. Input/output files cross this process boundary;
 Blender objects and business-environment Python/native-library paths do not.
 `docker/` owns the py312 public runtime, py311/py312 internal profiles and the
 separate Python 3.11/NumPy 1.26 Blender environment. See

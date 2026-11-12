@@ -129,7 +129,12 @@ _DEPLOYMENTS[
     "dual_franka_robotiq140_handover",
     "dual_franka_robotiq_arg2f_140_handover",
 )
-for _variant in ("dual_franka_robotiq_arg2f_140", "dual_ur10_robotiq_arg2f_140"):
+for _variant in (
+    "dual_franka_robotiq_arg2f_140",
+    "dual_ur10_robotiq_arg2f_140",
+    "dual_franka_robotiq_arg2f_140_gensim",
+    "dual_ur10_robotiq_arg2f_140_gensim",
+):
     _DEPLOYMENTS[
         Path(f"tasks/manipulation/repeated_pick_place/task.{_variant}.yaml")
     ] = ("repeated_cube_pick_place_workbench", "robotiq140_tabletop", _variant)
@@ -234,6 +239,8 @@ _RESOURCE_PATHS = frozenset(
         Path("components/embodiments/dual_franka_robotiq_arg2f_140_handover.yaml"),
         Path("components/embodiments/dual_franka_robotiq_arg2f_140.yaml"),
         Path("components/embodiments/dual_ur10_robotiq_arg2f_140.yaml"),
+        Path("components/embodiments/dual_franka_robotiq_arg2f_140_gensim.yaml"),
+        Path("components/embodiments/dual_ur10_robotiq_arg2f_140_gensim.yaml"),
         Path(
             "tasks/manipulation/repeated_pick_place/envs/dual_franka_robotiq140.default.yaml"
         ),
@@ -280,6 +287,9 @@ _RESOURCE_PATHS = frozenset(
         Path("tasks/manipulation/repeated_pick_place/objective.yaml"),
         Path("tasks/manipulation/push_cube/catalog.yaml"),
         Path("tasks/manipulation/push_cube/README.md"),
+        Path(
+            "tasks/manipulation/tableware/stack_blocks_two/task_program/evaluation.yaml"
+        ),
         Path("tasks/manipulation/tableware/stack_cups/catalog.yaml"),
         Path("tasks/manipulation/tableware/stack_cups/README.md"),
         Path("components/execution_policies/motion_gen_verified.yaml"),
@@ -476,6 +486,7 @@ for relative_path, expected_ids in expected_deployments.items():
         task_program=physical.config["task_program"],
         skill_profile=physical.embodiment_skill_profile,
         base_dir=env_path.parent,
+        evaluation=physical.evaluation,
     )
     program = load_task_program(
         deployment.program_path,

@@ -108,6 +108,7 @@ def test_list_robot_dispatch_reads_installed_catalogs(
     assert "Mimic" in output and "Joints" in output
     assert "Control" in output and "DOF" in output and "Parts" in output
     expected_ids = {
+        "AgibotG1",
         "YamI2rt",
         "FrankaPandaHand",
         "DHPGI14080",
@@ -124,6 +125,7 @@ def test_list_robot_dispatch_reads_installed_catalogs(
         "TianjiMarvin",
         "DexforceW1",
         "CobotMagic",
+        "AgilexPiperX",
         "Franka",
         "FrankaPanda",
         "FlexivRizon4S",
@@ -247,6 +249,7 @@ main(["list-robot"])
 
     assert "SharpaWave" in result.stdout
     assert "WujiHand" in result.stdout
+    assert "AgilexPiperX" in result.stdout
     assert result.stderr == ""
 
 

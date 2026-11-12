@@ -26,12 +26,14 @@ import sys
 import tempfile
 from typing import Any
 
+from .env import load_gen_sim_env
+
 __all__ = []
 
 _WORKER = Path(__file__).with_name("_blender_worker.py")
 
 
-def _worker_environment(python: Path) -> dict[str, str]:
+def _worker_environment(executable: Path) -> dict[str, str]:
     environment = dict(os.environ)
     prefixes = {
         str(Path(value).resolve())
@@ -67,22 +69,37 @@ def _worker_environment(python: Path) -> dict[str, str]:
                 for prefix in prefixes
             )
         )
-    environment["PATH"] = str(python.parent) + os.pathsep + environment.get("PATH", "")
+    environment["PATH"] = (
+        str(executable.parent) + os.pathsep + environment.get("PATH", "")
+    )
     return environment
 
 
 def _run_blender_job(
     operation: str, arguments: dict[str, Any], *, timeout: float = 600.0
 ) -> Any:
-    """Run a file-based Blender job and reap it on failure or cancellation."""
-    python = (
-        Path(os.environ.get("EMBODICHAIN_BLENDER_PYTHON", sys.executable))
+    """Run a file-based Blender job and reap it on failure or cancellation.
+
+    ``EMBODICHAIN_BLENDER_EXECUTABLE`` selects the Blender application, whose
+    startup initializes Eevee's graphics context. Otherwise use the isolated
+    interpreter selected by ``EMBODICHAIN_BLENDER_PYTHON``.
+    """
+    settings = dict(os.environ)
+    load_gen_sim_env(settings)
+    blender = settings.get("EMBODICHAIN_BLENDER_EXECUTABLE", "").strip()
+    executable = (
+        Path(blender or settings.get("EMBODICHAIN_BLENDER_PYTHON", sys.executable))
         .expanduser()
         .absolute()
     )
-    if not python.is_file():
+    if not executable.is_file():
+        if blender:
+            raise RuntimeError(
+                f"Blender executable does not exist: {executable}. "
+                "Set EMBODICHAIN_BLENDER_EXECUTABLE to the Blender application."
+            )
         raise RuntimeError(
-            f"Blender Python does not exist: {python}. "
+            f"Blender Python does not exist: {executable}. "
             "Set EMBODICHAIN_BLENDER_PYTHON to the isolated Blender interpreter."
         )
     with tempfile.TemporaryDirectory(prefix="embodichain-blender-") as directory:
@@ -96,12 +113,34 @@ def _run_blender_job(
             json.dumps({"operation": operation, "arguments": arguments}),
             encoding="utf-8",
         )
+        if blender:
+            command = [
+                str(executable),
+                "--background",
+                "--factory-startup",
+                "--disable-autoexec",
+                "--python-exit-code",
+                "1",
+                "--python",
+                str(_WORKER),
+                "--",
+                str(request),
+                str(response),
+            ]
+        else:
+            command = [
+                str(executable),
+                "-I",
+                str(_WORKER),
+                str(request),
+                str(response),
+            ]
         with log.open("w", encoding="utf-8") as output:
             # Inherit the pipeline's process group so Gradio cancellation also
             # reaches Blender. Never start an unmanaged background worker.
             process = subprocess.Popen(
-                [str(python), "-I", str(_WORKER), str(request), str(response)],
-                env=_worker_environment(python),
+                command,
+                env=_worker_environment(executable),
                 stdout=output,
                 stderr=subprocess.STDOUT,
             )

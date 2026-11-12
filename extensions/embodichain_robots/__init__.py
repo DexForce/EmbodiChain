@@ -26,6 +26,7 @@ from importlib import import_module
 from typing import Any
 
 __all__ = [
+    "AgibotG1Cfg",
     "YamI2rtCfg",
     "UnitreeGo1Cfg",
     "UnitreeGo2Cfg",
@@ -38,6 +39,7 @@ __all__ = [
     "TianjiMarvinCfg",
     "DexforceW1Cfg",
     "CobotMagicCfg",
+    "AgilexPiperXCfg",
     "FrankaCfg",
     "FrankaPandaCfg",
     "FlexivRizon4SCfg",
@@ -56,6 +58,7 @@ __all__ = [
 ]
 
 _EXPORTS = {
+    "AgibotG1Cfg": ".agibot.g1",
     "YamI2rtCfg": ".i2rt.yam",
     "UnitreeGo1Cfg": ".unitree.go1",
     "UnitreeGo2Cfg": ".unitree.go2",
@@ -68,6 +71,7 @@ _EXPORTS = {
     "TianjiMarvinCfg": ".tianji.marvin",
     "DexforceW1Cfg": ".dexforce.w1",
     "CobotMagicCfg": ".agilex.cobotmagic",
+    "AgilexPiperXCfg": ".agilex.piper_x",
     "FrankaCfg": ".franka.cfg",
     "FrankaPandaCfg": ".franka.panda",
     "FlexivRizon4SCfg": ".flexiv.rizon4s",

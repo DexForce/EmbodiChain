@@ -1158,6 +1158,11 @@ def replay(env, trajectory_path: str, mode: str = "kinematic") -> None:
     )
     replay_env = ReplayWrapper(env.unwrapped, trajectory_path, mode=mode)
     try:
+        for row, report in enumerate(replay_env.final_acceptance or ()):
+            log_info(
+                f"Replay final acceptance row {row}: {report['status']}, "
+                f"accepted={report['accepted']}, recorded={report['recorded_accepted']}"
+            )
         if mode == "control":
             replay_control(replay_env)
         else:

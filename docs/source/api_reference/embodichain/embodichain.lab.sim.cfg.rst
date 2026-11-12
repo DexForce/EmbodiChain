@@ -1,5 +1,5 @@
 embodichain.lab.sim.cfg
-===================================
+============================
 
 .. automodule:: embodichain.lab.sim.cfg
 
@@ -61,6 +61,7 @@ UV seams and render detail.
    MeshCollisionCfg
    RigidBodyPhysicsCfg
    ArticulationRootPropertiesCfg
+   MimicComplianceCfg
    LinkPhysicsOverrideCfg
    VolumeDeformableMeshingCfg
    VolumeDeformablePhysicsCfg
@@ -70,9 +71,13 @@ UV seams and render detail.
    NewtonJointDrivePropertiesCfg
    ObjectBaseCfg
    UsdSourceCfg
+   UsdImportCfg
    LightCfg
    VisualObjectCfg
    RigidObjectCfg
+   CableObjectCfg
+   CablePhysicsCfg
+   CableAttachmentCfg
    RigidObjectGroupCfg
    RigidConstraintCfg
    URDFCfg
@@ -107,6 +112,42 @@ existing ``shape``/``fpath`` input. Ordinary mesh files continue to use
 of the requested type; ambiguous sources fail instead of selecting the first
 object. Whole-scene imports preserve this source address on their facades.
 
+USD import recipes
+------------------
+
+``SimulationManager.add_usd(UsdImportCfg(...))`` declares a complete scene
+selection. ``source.root_prim_path`` selects a source subtree and ``variants``
+selects source variants. The import recipe separately owns runtime namespace,
+the optional left-multiplied scene pose and overrides keyed by unchanged source
+prim paths. Unset source properties are retained. Source and override validation
+precedes native declaration; returned facades bind in place at ``prepare()``.
+
+.. code-block:: python
+
+   from embodichain.lab.sim.cfg import UsdImportCfg, UsdSourceCfg
+
+   imported = sim.add_usd(
+       UsdImportCfg(
+           name="workcell",
+           source=UsdSourceCfg(
+               file_path="workcell.usda",
+               root_prim_path="/World/Cell",
+           ),
+           namespace="cell_1",
+       )
+   )
+   sim.prepare()
+   robot = imported["/World/Cell/Robot"]
+
+.. autoclass:: embodichain.lab.sim.cfg.usd.UsdImportCfg
+   :members:
+
+Single-asset configurations retain their exact ``source_prim_path`` selector.
+Their ``source_pose_mode`` chooses automatic, replacement, preservation or
+offset placement. Legacy source-option spellings remain accepted by the
+compatibility adapter. New scene recipes keep namespace and placement on
+``UsdImportCfg``.
+
 Deformable physics and meshing
 -----------------------------
 
@@ -137,6 +178,34 @@ Constructors and ``from_dict()`` accept only the current fields. Surface-element
 properties are grouped under ``attrs.surface_props``. Volume elasticity uses
 ``youngs`` and ``poissons``. Configuration dictionaries serialize this same
 schema; no legacy aliases or field migration are provided.
+
+Cable authoring
+---------------
+
+``CableObjectCfg`` authors an ordered centreline, radius and optional material
+frames in EmbodiChain's ``xyzw`` convention. ``CablePhysicsCfg`` preserves
+unspecified four-mode coefficients as ``None`` and reuses existing collision
+and contact-material schemas. ``CableAttachmentCfg`` describes permanent
+creation-time endpoint welds. Declare cables before ``prepare()`` with explicit
+DexUni on CUDA. Segment writes and complete environment reset require a DexSim
+build exposing ``CableBatch.apply_state`` and ``Scene.reset_arenas``.
+
+.. currentmodule:: embodichain.lab.sim.cfg.cable
+
+.. autosummary::
+
+   CablePhysicsCfg
+   CableAttachmentCfg
+   CableObjectCfg
+
+.. autoclass:: CablePhysicsCfg
+   :members:
+
+.. autoclass:: CableAttachmentCfg
+   :members:
+
+.. autoclass:: CableObjectCfg
+   :members:
 
 Rendering configuration module
 ------------------------------
@@ -201,6 +270,26 @@ It is independent of the drive velocity gain ``damping`` and stays active for
 passive and effort target modes. In dictionaries, select this subtype with
 ``joint_drive_props.backend="newton"``. Both settings require Newton.
 
+``ArticulationCfg.mimic_compliance`` maps exact mimic master joint names to
+DexSim Default compliance settings. The following robot configuration
+requests hard coupling for every follower of ``right_gripper``.
+
+.. code-block:: yaml
+
+   mimic_compliance:
+     right_gripper:
+       natural_frequency: 0.0
+       damping_ratio: 0.0
+
+Preparation applies this configuration to all replicas. Newton rejects a
+nonempty mapping and uses its own mimic configuration.
+
+``JointDrivePropertiesCfg.limit_stiffness`` and ``limit_damping`` separate
+joint-limit gains from drive gains. Each accepts a scalar or joint-rule mapping;
+``None`` preserves the source/backend value. With Newton's MuJoCo solver,
+setting both to zero selects the default MuJoCo limit response while retaining
+joint bounds.
+
 .. currentmodule:: embodichain.lab.sim.cfg.articulation
 
 .. autosummary::
@@ -210,6 +299,7 @@ passive and effort target modes. In dictionaries, select this subtype with
    link_attrs_from_dict
    JointDrivePropertiesCfg
    NewtonJointDrivePropertiesCfg
+   MimicComplianceCfg
    ArticulationCfg
 
 .. autoclass:: ArticulationRootPropertiesCfg
@@ -218,6 +308,10 @@ passive and effort target modes. In dictionaries, select this subtype with
 
 .. autoclass:: NewtonJointDrivePropertiesCfg
    :members:
+   :no-index:
+
+.. autoclass:: MimicComplianceCfg
+   :members: natural_frequency, damping_ratio
    :no-index:
 
 Compatibility facade

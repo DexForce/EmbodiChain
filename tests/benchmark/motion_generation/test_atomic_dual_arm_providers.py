@@ -1584,12 +1584,28 @@ def test_dual_arm_provider_builds_both_arms_and_grippers():
     assert create_robot_provider(suite.robot).control_part == "left_arm"
 
 
-def test_franka_handover_uses_authored_robotiq_linkage_and_finger_contacts(tmp_path):
+@pytest.mark.parametrize(
+    "suite_name,tcp_z,closure",
+    [
+        ("atomic_dual_franka_robotiq_hand_over", 0.20, 0.45),
+        ("atomic_dual_franka_robotiq_coordinated_placement", 0.21, 0.7),
+    ],
+)
+def test_franka_dual_suites_use_authored_robotiq_linkage_and_finger_contacts(
+    tmp_path, suite_name, tcp_z, closure
+):
     """Qualify both hands and limited closure against the real assembled URDF."""
     from embodichain.utils.string import resolve_matching_names
 
-    suite = load_suite("atomic_dual_franka_robotiq_hand_over")
+    suite = load_suite(suite_name)
     cfg = create_robot_provider(suite.robot).build_cfg()
+    # Omitting the selector must retain Robotiq on Franka, too.
+    default_config = dict(suite.robot.config)
+    default_config.pop("gripper_type")
+    default_cfg = create_robot_provider(
+        replace(suite.robot, config=default_config)
+    ).build_cfg()
+    assert default_cfg.to_dict() == cfg.to_dict()
     cfg.urdf_cfg.fpath = str(tmp_path / "franka_robotiq.urdf")
     tree = ET.parse(cfg.urdf_cfg.assemble_urdf())
     joints = {
@@ -1606,7 +1622,7 @@ def test_franka_handover_uses_authored_robotiq_linkage_and_finger_contacts(tmp_p
         )
         np.testing.assert_allclose(
             cfg.solver_cfg[f"{side}_arm"].tcp,
-            [[0, -1, 0, 0], [1, 0, 0, 0], [0, 0, 1, 0.20], [0, 0, 0, 1]],
+            [[0, -1, 0, 0], [1, 0, 0, 0], [0, 0, 1, tcp_z], [0, 0, 0, 1]],
         )
     declared_contacts = set()
     for gripper in suite.enabled_tracks()[0].config["grippers"]:
@@ -1621,7 +1637,7 @@ def test_franka_handover_uses_authored_robotiq_linkage_and_finger_contacts(tmp_p
         robot.get_qpos_limits.return_value = torch.tensor([limits])
         _, opened, closed = AtomicSkillScenario._resolve_gripper(robot, gripper)
         torch.testing.assert_close(opened, torch.zeros(6))
-        assert float(closed[0]) == pytest.approx(0.45)
+        assert float(closed[0]) == pytest.approx(closure)
         assert joints[names[0]].find("mimic") is None
         for name, command in zip(names[1:], closed[1:], strict=True):
             mimic = joints[name].find("mimic")
@@ -1886,7 +1902,7 @@ def test_franka_dual_suites_use_independent_seven_joint_arms(skill_id: str) -> N
     suite = load_suite(
         "atomic_dual_franka_robotiq_hand_over"
         if skill_id == "hand_over"
-        else "atomic_dual_franka_pgi_coordinated_placement"
+        else "atomic_dual_franka_robotiq_coordinated_placement"
     )
     cfg = create_robot_provider(suite.robot).build_cfg()
     for part in ("left_arm", "right_arm"):

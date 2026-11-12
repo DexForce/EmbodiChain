@@ -104,6 +104,51 @@ def test_snapshot_queries_are_pure_detached_and_json_compatible():
     json.dumps(row, allow_nan=False)
 
 
+def test_objective_reports_pending_valid_observations_and_row_local_rule_evidence():
+    from embodichain.lab.evaluation import (
+        EvaluationSpec,
+        EvaluationStatus,
+        PredicateSpec,
+        TemporalRule,
+        builtin_predicates,
+    )
+    from embodichain.lab.gym.envs.objectives import OrderedPlacementObjective
+
+    compiled = builtin_predicates().compile(
+        EvaluationSpec(
+            {
+                "low": PredicateSpec(
+                    "below_height", {"position": "position"}, {"height": 1.0}
+                ),
+                "dwell": TemporalRule("hold_for", "low", end=3, steps=2),
+            },
+            ("dwell",),
+        )
+    )
+    objective = OrderedPlacementObjective(_runtime().cfg, 2, "cpu", condition=compiled)
+    objective.update(_state(), 0.1)
+    pending = objective.snapshot()
+    assert pending["metrics"]["measurement_valid"].tolist() == [True, True]
+    assert pending["metrics"]["stable"].tolist() == [False, False]
+    assert pending["condition"]["evaluation_identity"] == compiled.identity
+    assert (
+        pending["condition"]["rules"]["dwell"]["status"].tolist()
+        == [EvaluationStatus.UNKNOWN] * 2
+    )
+    objective.update(_state(), 0.1)
+    row = objective.snapshot_row(1)
+    assert row["condition"]["rules"]["dwell"]["witness_steps"] == [0, 1]
+    json.dumps(row, allow_nan=False)
+    objective.reset([0])
+    reset = objective.snapshot()
+    assert reset["condition"]["rules"]["dwell"]["status"].tolist() == [
+        EvaluationStatus.NOT_RUN,
+        EvaluationStatus.SATISFIED,
+    ]
+    reset["condition"]["rules"]["dwell"]["witness_steps"].zero_()
+    assert objective.snapshot_row(1) == row
+
+
 def test_snapshot_records_milestone_steps_and_elapsed_times():
     objective = _runtime()
     for xs in [(0.0, 0.0), (0.0, 0.0), (1.0, 1.0), (1.0, 1.0), (0.0, 0.0), (0.0, 0.0)]:
@@ -216,7 +261,8 @@ def test_absent_objective_preserves_info_keys():
     env.episode_context = EpisodeContext(2)
     env.sim = SimpleNamespace(device=torch.device("cpu"))
     env._elapsed_steps = torch.zeros(2, dtype=torch.int32)
-    assert EmbodiedEnvCfg().objective is None
+    env.cfg = EmbodiedEnvCfg()
+    assert env.cfg.objective is None
     assert set(env.get_info()) == {
         "success",
         "fail",
@@ -278,6 +324,7 @@ class _LifecycleEnv(EmbodiedEnv):
         self.max_episode_steps = 100
         self.cfg = SimpleNamespace(
             objective=_runtime().cfg,
+            episode_context_in_info=True,
             sim_steps_per_control=1,
             ignore_terminations=False,
             events=True,
@@ -366,8 +413,12 @@ def test_control_step_samples_after_interval_events_and_info_is_pure():
     assert not info["success"].any()
 
 
-def test_reset_preserves_terminal_snapshot_and_resets_after_recorder_consumption():
+@pytest.mark.parametrize("include_context", [True, False])
+def test_reset_preserves_terminal_snapshot_and_resets_after_recorder_consumption(
+    include_context: bool,
+):
     env = _LifecycleEnv()
+    env.cfg.episode_context_in_info = include_context
     for x in [0.0, 0.0, 1.0, 1.0, 0.0, 0.0]:
         env.interval_x = x
         env.step(None)
@@ -379,6 +430,7 @@ def test_reset_preserves_terminal_snapshot_and_resets_after_recorder_consumption
         apply=lambda **kwargs: saved.append(env.physical_objective.snapshot_row(0)),
     )
     _, info = env.reset(options={"reset_ids": torch.tensor([0])})
+    assert ("episode_context" in info) is include_context
     assert saved[0]["success"] is True
     assert env.reset_snapshot["success"].tolist() == [True, True]
     assert info["physical_objective"]["progress"].tolist() == [0, 3]
