@@ -18,10 +18,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import multiprocessing as mp
 import time
 from types import SimpleNamespace
 from pathlib import Path
+from zipfile import ZipFile
 
 import pytest
 
@@ -32,6 +34,95 @@ from embodichain.data.dataset import _dataset_download_lock
 LOCK_HOLD_SECONDS = 0.2
 PROCESS_JOIN_TIMEOUT_SECONDS = 5.0
 PROCESS_START_TIMEOUT_SECONDS = 60.0
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize(
+    "urls, expected",
+    [
+        (
+            [
+                "https://hf-mirror.com/datasets/DexForceAI/embodichain_data/resolve/v1/model.zip"
+            ],
+            [
+                "https://hf-mirror.com/datasets/DexForceAI/embodichain_data/resolve/v1/model.zip",
+                "https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/v1/model.zip",
+            ],
+        ),
+        (
+            ["https://assets.example/model.zip"],
+            ["https://assets.example/model.zip"],
+        ),
+        (
+            ["https://hf-mirror.com/datasets/Other/data/resolve/main/model.zip"],
+            ["https://hf-mirror.com/datasets/Other/data/resolve/main/model.zip"],
+        ),
+        (
+            [
+                "https://hf-mirror.com/datasets/DexForceAI/embodichain_data/resolve/main/model.zip",
+                "https://assets.example/model.zip",
+                "https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/main/model.zip",
+            ],
+            [
+                "https://hf-mirror.com/datasets/DexForceAI/embodichain_data/resolve/main/model.zip",
+                "https://assets.example/model.zip",
+                "https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/main/model.zip",
+            ],
+        ),
+    ],
+)
+def test_asset_origin_fallback_preserves_sources_and_metadata(urls, expected) -> None:
+    """Only the known asset mirror gains an origin, without changing its revision."""
+    descriptor = dataset_module.o3d.data.DataDescriptor(urls, "a" * 32, "mounted")
+    result = dataset_module._with_asset_origin_fallback(descriptor)
+
+    assert result.urls == expected
+    assert result.md5 == "a" * 32
+    assert result.extract_in_subdir == "mounted"
+    assert descriptor.urls == urls
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize(
+    "mirror_content, origin_valid",
+    [(None, True), (b"corrupt", True), (b"corrupt", False)],
+)
+def test_dataset_download_falls_back_with_integrity_checks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mirror_content, origin_valid: bool
+) -> None:
+    """The real downloader recovers missing/corrupt mirrors and rejects bad origins."""
+    mirror = tmp_path / "mirror"
+    origin = tmp_path / "origin"
+    mirror.mkdir()
+    origin.mkdir()
+    archive = origin / "model.zip"
+    with ZipFile(archive, "w") as bundle:
+        bundle.writestr("model.urdf", "verified model")
+    expected_md5 = hashlib.md5(archive.read_bytes()).hexdigest()
+    if mirror_content is not None:
+        (mirror / "model.zip").write_bytes(mirror_content)
+    if not origin_valid:
+        archive.write_bytes(b"invalid origin")
+    monkeypatch.setattr(dataset_module, "_HF_ASSET_MIRROR", mirror.as_uri() + "/")
+    monkeypatch.setattr(dataset_module, "_HF_ASSET_ORIGIN", origin.as_uri() + "/")
+    descriptor = dataset_module.o3d.data.DataDescriptor(
+        (mirror / "model.zip").as_uri(), expected_md5, "mounted"
+    )
+    cache = str(tmp_path / "cache")
+
+    if not origin_valid:
+        with pytest.raises(RuntimeError, match="Downloading failed"):
+            dataset_module.EmbodiChainDataset("Model", descriptor, cache)
+        return
+
+    dataset = dataset_module.EmbodiChainDataset("Model", descriptor, cache)
+    model = Path(dataset.extract_dir) / "mounted/model.urdf"
+    assert model.read_text() == "verified model"
+    archive.unlink()
+    cached = dataset_module.EmbodiChainDataset("Model", descriptor, cache)
+    assert (
+        Path(cached.extract_dir) / "mounted/model.urdf"
+    ).read_text() == "verified model"
 
 
 @pytest.mark.no_sim
