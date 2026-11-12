@@ -28,15 +28,20 @@ The first level describes the model's prediction contract:
 | `policy` | Observations/history to actions, action distributions or action chunks. |
 | `dynamics` | State/history, with optional controls and physical context, to future robot/environment states, geometry, observations or latent transitions. |
 
-Use the following canonical packages for the four current model directions:
+Use the following canonical packages for the current model directions:
 
 | Model family | Public package | Landing status |
 | --- | --- | --- |
 | Ordinary state/visual BC | `embodichain_models.policy.bc` | Target for the BC follow-up; not created yet. |
 | WorldParticle | `embodichain_models.dynamics.worldparticle` | Official frozen particle models; native solver integration owned by `lab/sim/physics/worldparticle.py`. |
+| Visual ACT | `embodichain_models.policy.act` | Official LeRobot ACT configuration, provenance and simulator inference. |
 | NeRD | `embodichain_models.dynamics.nerd` | Implemented in this change. |
 | Robot world model (RWM) | `embodichain_models.dynamics.rwm` | Implemented. |
 | RigidFormer | `embodichain_models.dynamics.rigidformer` | Native author architecture, official weights and shared-SL recipe. |
+
+Visual ACT's configuration and inference adapters are documented in the
+[API reference](../../docs/source/api_reference/visual_act.rst); its runnable
+workflow lives in [examples/learning/act](../../examples/learning/act/README.md).
 
 RWM predicts action-conditioned robot state transitions, so it belongs to
 `dynamics`. World models also describe future-state/observation prediction;
@@ -55,12 +60,15 @@ action input and does not qualify action gradients.
 
 A family owns its model/configuration, portable-checkpoint support where
 available, codecs, model-format data adapters and model-specific objectives.
-Its `sl_recipe.py` owns the installable trainer factory. Shared training,
+Shared-SL families use `sl_recipe.py` for their installable trainer factory. The
+ACT family delegates training to the upstream LeRobot workflow. Shared training,
 checkpoint/recovery and distributed orchestration belong to `learning.sl`;
 model packages do not introduce parallel trainer frameworks.
 
 Collection, task/controller integration, reference research and downloadable
 resources remain in the corresponding example. Shared MLPs and normalizers
-remain in core. All four directions use the same SL contracts regardless of
+remain in core. Shared-SL families use the same SL contracts regardless of
 their domain. Create a family only when its implementation lands, without empty
 placeholder directories, eager cross-family imports or a new registry.
+
+For third-party training ownership and dependency profiles, see the [LeRobot guide](../../docs/source/guides/lerobot.md) and [training framework comparison](../../docs/source/guides/training_frameworks.md).

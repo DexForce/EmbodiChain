@@ -1,10 +1,18 @@
 # Trajectory augmentation showcases
 
+## Real2Sim motion prototypes and data collection
+
+The [directional-carton example](real2sim_carton/README.md) rebuilds prototypes from a DROID
+real demonstration using the official carton task templates, refines them, and collects
+spatial, trajectory and time variants through Task Program execution. Launch
+it with `embodichain run-example expansion/trajectory/real2sim_carton`, or use
+its `--prepare-only` output directly with `embodichain run-task`.
+
 ## Interactive pure-trajectory augmentation laboratory
 
 Build one self-contained browser page that compares all implemented trajectory
 augmentation routes against the same 7-DoF Franka Panda reference used by the
-official Atomic Action example:
+official Atomic Skill example:
 
 ```bash
 python examples/expansion/trajectory/trajectory_augmentation_visualizer.py \
@@ -146,7 +154,7 @@ python examples/expansion/trajectory/task_environment_augmentation_showcase.py \
   --headless
 ```
 
-The showcase uses the existing Atomic Action task scene and MotionGenerator
+The showcase uses the existing Atomic Skill task scene and MotionGenerator
 planning path. By default it builds the augmentation reference with bounded IK
 interpolation on a 40 ms command grid, while simulation continues to integrate
 at its 10 ms physics period. This avoids turning the planner's internal 2 mm

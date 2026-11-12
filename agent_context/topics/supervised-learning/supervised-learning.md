@@ -37,6 +37,14 @@ operations remain in `compute`; source storage belongs to data adapters.
 - The [RWM recipe](../robot-world-model/robot-world-model.md) is
   `embodichain_models.dynamics.rwm.sl_recipe:build_rwm_trainer`. Its model,
   state codec, objective, predictor and replay belong to that model family.
+- Visual ACT belongs to `embodichain_models.policy.act` and invokes LeRobot
+  0.6.1's official trainer rather than this SL trainer. `build_act_train_config`
+  validates ordered data/control contracts; `load_act_policy` loads native
+  weights and processors with a portable task/data manifest. The runtime uses
+  the official temporal ensemble and resets it per episode. `examples/learning/act/`
+  owns collection, training invocation, independent checkpoint selection and
+  physical evaluation. Historical custom ACT checkpoints require retraining.
+
 
 Objectives own loss masks, normalization, integration and multi-step graph
 construction. The optimizer does not infer action semantics or detach histories.

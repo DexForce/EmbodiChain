@@ -24,7 +24,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from embodichain.lab.sim.atomic_actions.plans import CompiledTrajectory, TimedTrajectory
+from embodichain.lab.sim.atomic_skills.plans import CompiledTrajectory, TimedTrajectory
 from embodichain.lab.sim.motion.planners.utils import PlanResult
 from embodichain_benchmarks.motion_generation.config import ProtocolCfg, SuiteCfg
 from embodichain_benchmarks.motion_generation.metrics.trajectory import (
@@ -88,7 +88,7 @@ def _compiled() -> CompiledTrajectory:
         trajectory=TimedTrajectory.from_uniform_step(
             positions, env_ids=torch.tensor([0]), step_dt=0.1
         ),
-        action_plans=(),
+        skill_plans=(),
         projected_context=SimpleNamespace(),
     )
 
@@ -246,13 +246,13 @@ def test_coordinated_placement_keeps_the_selected_planner_attribution() -> None:
 
 
 def _budget_invocation(skill_id: str, strategy: str):
-    from embodichain.lab.sim.atomic_actions import ActionInvocation, MotionPolicy
-    from embodichain.lab.sim.atomic_actions.bindings import ActionBinding
+    from embodichain.lab.sim.atomic_skills import SkillInvocation, MotionPolicy
+    from embodichain.lab.sim.atomic_skills.bindings import SkillBinding
 
-    return ActionInvocation(
+    return SkillInvocation(
         skill_id=skill_id,
         goal=None,
-        binding=ActionBinding(owner_id="test", endpoints={}),
+        binding=SkillBinding(owner_id="test", endpoints={}),
         motion_policy=MotionPolicy(strategy=strategy),
     )
 
@@ -315,3 +315,14 @@ def test_policy_budget_keeps_unset_defaults_and_selected_backend_vectors() -> No
         joint_acceleration_limit_rad_s2=[3.0, 2.0],
     )
     assert with_motion_budget(selected, protocol) is selected
+
+
+def test_scenario_owned_ik_keeps_scalar_budget_when_options_are_injected() -> None:
+    from embodichain.lab.sim.motion.planners import ToppraPlanOptions
+    from embodichain_benchmarks.motion_generation.scenarios.atomic_policy import (
+        with_plan_options,
+    )
+
+    invocation = _budget_invocation("coordinated_pickment", "motion_gen")
+    updated = with_plan_options(invocation, ToppraPlanOptions())
+    assert updated.motion_policy.acceleration_limit == 0.5

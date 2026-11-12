@@ -78,7 +78,7 @@ _JOINT_LIMITS = torch.tensor(
     dtype=torch.float64,
 )
 _FRANKA_JOINT_NAMES = tuple(f"fr3_joint{index}" for index in range(1, 8))
-# Serial chain from the official PandaWithHand URDF used by FrankaPandaCfg.
+# Serial chain from the official integrated PandaWithHand reference asset.
 # Entries are (name, type, origin xyz, origin rpy, axis).
 _FRANKA_KINEMATIC_JOINTS = (
     ("fr3_base_joint", "fixed", (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (0.0, 0.0, 1.0)),

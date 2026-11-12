@@ -25,7 +25,7 @@ import sys
 from setuptools import Distribution
 from setuptools.command.build_py import build_py
 
-from setup import get_package_dir, get_packages
+from setup import get_package_data, get_package_dir, get_packages
 
 
 def test_w1_script_resolves_core_and_robots_without_editable_install(
@@ -80,13 +80,16 @@ def test_main_distribution_stages_robot_package_without_legacy_modules(tmp_path)
         name
         for name in get_packages()
         if name == "embodichain"
-        or name.startswith(("embodichain_robots", "embodichain.lab.sim.robots"))
+        or name.startswith(
+            ("embodichain_robots", "embodichain.lab.sim.robots", "embodichain.data")
+        )
     ]
     distribution = Distribution(
         {
             "packages": packages,
             "package_dir": get_package_dir(),
-            "package_data": {"": ["profile.json"]},
+            "package_data": get_package_data(),
+            "include_package_data": False,
             "script_name": "setup.py",
         }
     )
@@ -100,8 +103,20 @@ def test_main_distribution_stages_robot_package_without_legacy_modules(tmp_path)
         "embodichain_robots/__init__.py",
         "embodichain_robots/_catalog.py",
         "embodichain_robots/_asset_catalog.py",
+        "embodichain_robots/agibot/g2/cfg.py",
+        "embodichain_robots/agibot/g2/assets.py",
+        "embodichain_robots/agibot/g2/g2.urdf",
+        "embodichain_robots/agibot/g2/source.lock.json",
+        "embodichain_robots/agibot/g2/LICENSE",
+        "embodichain_robots/agibot/g2/preview.png",
+        "embodichain_robots/agibot/g2/preview.render.json",
+        "embodichain_robots/i2rt/yam/cfg.py",
+        "embodichain_robots/i2rt/yam/assets.py",
         "embodichain_robots/_locomotion.py",
         "embodichain_robots/locomotion_profiles.py",
+        "embodichain_robots/agibot/g1/assets.py",
+        "embodichain_robots/agibot/g1/cfg.py",
+        "embodichain_robots/agibot/g1/README.md",
         "embodichain_robots/franka/assets.py",
         "embodichain_robots/universal_robots/assets.py",
         "embodichain_robots/dexforce/w1/assets.py",
@@ -123,6 +138,22 @@ def test_main_distribution_stages_robot_package_without_legacy_modules(tmp_path)
         "dual_arm.py",
     }
     assert not (legacy / "dexforce_w1").exists()
+    assert not (output / "embodichain/data/assets/eef_assets.py").exists()
+
+    # Provenance accompanies every migrated archive in the installed package.
+    from embodichain_robots._asset_catalog import ROBOT_ASSETS
+
+    for spec in ROBOT_ASSETS.values():
+        if spec["category"] != "eef":
+            continue
+        module = spec["class_path"].partition(":")[0]
+        owner = output.joinpath(*module.split(".")[:-1])
+        assert (owner / "assets.py").is_file()
+        assert (owner / "README.md").is_file()
+    assert (output / "embodichain_robots/sharpa/wave/cfg.py").is_file()
+    assert (output / "embodichain_robots/wuji/hand/cfg.py").is_file()
+    for filename in ("cfg.py", "_specs.py"):
+        assert (output / "embodichain_robots/brainco/revo1" / filename).is_file()
     for retired in ("franka_panda.py", "ur_robot.py", "so101.py", "dexforce_w1"):
         assert not (output / "embodichain_robots" / retired).exists()
 

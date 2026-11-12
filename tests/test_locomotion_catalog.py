@@ -50,7 +50,9 @@ def test_locomotion_deployments_resolve_matching_ppo(
     locomotion_catalog: list, task_path: str
 ) -> None:
     task = catalog._select_task(locomotion_catalog, Path(task_path).name)
-    assert task.default_deployment == "default"
+    assert task.default_deployment == (
+        "newton" if task_path.startswith("locomotion/") else "default"
+    )
     assert task.readme == _CONFIG_ROOT / task_path / "README.md"
     assert task.readme.is_file()
     assert {deployment.name for deployment in task.deployments} == {"default", "newton"}
@@ -85,6 +87,7 @@ def test_locomotion_details_and_gallery(
         )
         detail = capsys.readouterr().out
         assert task.title in detail and task.title in gallery
+        assert f"Default deployment: {task.default_deployment}" in detail
         assert detail.count("Supported uses: RL") == 2
         assert detail.count("Qualification: unavailable") == 2
         assert task.readme.as_uri() in gallery

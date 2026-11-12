@@ -116,7 +116,13 @@ Frozen source revisions, budgets and gates live in the
 Historical evidence remains bound to its recorded source, data and runtime;
 relocating code does not rerun it. NeRD validation uses the runnable showcase
 and its reference/acceptance workflows; `tests/learning/sl/` covers the common
-training contracts. The [feature guide](../../../docs/source/features/neural_dynamics.md)
-owns user commands; the [model API](../../../docs/source/api_reference/model_catalogs.rst)
-owns exported definitions. Transition error, accumulated rollout error and
-paper-scale accuracy remain separate claims.
+training contracts. The [feature overview](../../../docs/source/features/neural_dynamics.md)
+owns model selection and the shared training entry point; the
+[NeRD guide](../../../docs/source/features/neural_dynamics/nerd.md) and
+[RigidFormer guide](../../../docs/source/features/neural_dynamics/rigidformer.md)
+own their model principles and user workflows; the
+[RWM guide](../../../docs/source/features/neural_dynamics/rwm.md) covers prediction
+and replay under the linked robot-world-model contract. The
+[model API](../../../docs/source/api_reference/model_catalogs.rst) owns exported
+definitions. Transition error, accumulated rollout error and paper-scale
+accuracy remain separate claims.

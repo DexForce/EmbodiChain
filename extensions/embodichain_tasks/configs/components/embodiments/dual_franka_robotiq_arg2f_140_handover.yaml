@@ -1,0 +1,407 @@
+# HandOver calibration qualified against the frozen #948 Robotiq 140 profile.
+# Operation-specific drives are scoped to this variant; use the original
+# dual_franka_robotiq_arg2f_140 component for the frozen source calibration.
+embodiment_id: dual_franka_robotiq_arg2f_140_handover
+simulation:
+  uid: DualFrankaPanda
+  urdf_cfg:
+    fname: dual_franka_robotiq_arg2f_140
+    name_case:
+      joint: original
+      link: original
+    components:
+    - component_type: left_arm
+      urdf_path: Franka/Panda/Panda.urdf
+      transform:
+      - - 1.0
+        - 0.0
+        - 0.0
+        - -1.25
+      - - 0.0
+        - 1.0
+        - 0.0
+        - 0.3
+      - - 0.0
+        - 0.0
+        - 1.0
+        - 0.4
+      - - 0.0
+        - 0.0
+        - 0.0
+        - 1.0
+    - component_type: right_arm
+      urdf_path: Franka/Panda/Panda.urdf
+      transform:
+      - - 1.0
+        - 0.0
+        - 0.0
+        - -1.25
+      - - 0.0
+        - 1.0
+        - 0.0
+        - -0.3
+      - - 0.0
+        - 0.0
+        - 1.0
+        - 0.4
+      - - 0.0
+        - 0.0
+        - 0.0
+        - 1.0
+  init_pos:
+  - -0.7
+  - 0.0
+  - 0.322894
+  init_rot:
+  - 0.0
+  - 0.0
+  - 180.0
+  init_qpos:
+  - 0.0
+  - 0.0
+  - -0.569
+  - -0.569
+  - 0.0
+  - 0.0
+  - -2.81
+  - -2.81
+  - 0.0
+  - 0.0
+  - 3.037
+  - 3.037
+  - 0.741
+  - 0.741
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  joint_drive_props:
+    stiffness:
+      left_arm: 10000.0
+      right_arm: 10000.0
+      left_eef: 1000.0
+      right_eef: 1000.0
+    damping:
+      left_arm: 1000.0
+      right_arm: 1000.0
+      left_eef: 100.0
+      right_eef: 100.0
+    max_effort:
+      left_arm: 100000.0
+      right_arm: 100000.0
+      left_eef: 10000.0
+      right_eef: 10000.0
+  control_parts:
+    left_arm:
+    - left_fr3_joint1
+    - left_fr3_joint2
+    - left_fr3_joint3
+    - left_fr3_joint4
+    - left_fr3_joint5
+    - left_fr3_joint6
+    - left_fr3_joint7
+    right_arm:
+    - right_fr3_joint1
+    - right_fr3_joint2
+    - right_fr3_joint3
+    - right_fr3_joint4
+    - right_fr3_joint5
+    - right_fr3_joint6
+    - right_fr3_joint7
+    dual_arm:
+    - left_fr3_joint1
+    - left_fr3_joint2
+    - left_fr3_joint3
+    - left_fr3_joint4
+    - left_fr3_joint5
+    - left_fr3_joint6
+    - left_fr3_joint7
+    - right_fr3_joint1
+    - right_fr3_joint2
+    - right_fr3_joint3
+    - right_fr3_joint4
+    - right_fr3_joint5
+    - right_fr3_joint6
+    - right_fr3_joint7
+  solver_cfg:
+    left_arm:
+      class_type: FEPSolver
+      end_link_name: left_fr3_link8
+      root_link_name: left_base
+      redundancy_search: true
+    right_arm:
+      class_type: FEPSolver
+      end_link_name: right_fr3_link8
+      root_link_name: right_base
+      redundancy_search: true
+sensor:
+- sensor_type: Camera
+  uid: cam_high
+  width: 960
+  height: 540
+  intrinsics:
+  - 420
+  - 420
+  - 480
+  - 270
+  extrinsics:
+    pos:
+    - 0.4
+    - 0.0
+    - 2.2
+    eye:
+    - -0.6
+    - 0.0
+    - 1.8
+    target:
+    - 0.0
+    - 0.0
+    - 0.75
+    up:
+    - 1.0
+    - 0.0
+    - 0.0
+skill_profile:
+  contract_id: dual_arm_parallel_gripper
+  profile_id: dual_franka_robotiq_arg2f_140_handover
+  resources:
+  - resource_id: left
+    endpoints:
+    - endpoint_id: motion
+      control_part: left_arm
+      command_preset: left_arm_postures
+      capabilities:
+      - kinematics.inverse
+      - kinematics.batch_inverse
+      - motion.cartesian_pose
+      - motion.joint_position
+      - kinematics.forward
+    - endpoint_id: grasp
+      control_part: left_eef
+      capabilities:
+      - interaction.grasp
+      command_preset: left_parallel_gripper
+      gripper: left_eef
+  - resource_id: right
+    endpoints:
+    - endpoint_id: motion
+      control_part: right_arm
+      command_preset: right_arm_postures
+      capabilities:
+      - kinematics.inverse
+      - kinematics.batch_inverse
+      - motion.cartesian_pose
+      - motion.joint_position
+      - kinematics.forward
+    - endpoint_id: grasp
+      control_part: right_eef
+      capabilities:
+      - interaction.grasp
+      command_preset: right_parallel_gripper
+      gripper: right_eef
+  command_presets:
+  - preset_id: left_arm_postures
+    control_part: left_arm
+    commands:
+      park:
+      - 0
+      - -0.569
+      - 0
+      - -2.81
+      - 0
+      - 3.037
+      - 0.741
+  - preset_id: right_arm_postures
+    control_part: right_arm
+    commands:
+      park:
+      - 0
+      - -0.569
+      - 0
+      - -2.81
+      - 0
+      - 3.037
+      - 0.741
+  runtime_services:
+    grasp_pose_generators:
+      left_eef:
+        kind: antipodal_parallel_jaw
+        sample_count: 10000
+        approach_deviation_angle: 0.5235987755982988
+        approach_direction_samples: 4
+        max_candidates: 50
+        center_mode: bounds
+        filter_ground_collision: false
+        point_spacing: 0.012
+        min_opening_width: 0.005
+        max_opening_width: 0.14
+      right_eef:
+        kind: antipodal_parallel_jaw
+        sample_count: 10000
+        approach_deviation_angle: 0.5235987755982988
+        approach_direction_samples: 4
+        max_candidates: 50
+        center_mode: bounds
+        filter_ground_collision: false
+        point_spacing: 0.012
+        min_opening_width: 0.005
+        max_opening_width: 0.14
+    control_part_evidence:
+      kind: joint_position_constraint
+      control_parts:
+      - left_eef
+      - right_eef
+      open_qpos:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      minimum_displacement: 0.05
+    hand_geometries:
+      left_eef:
+        kind: sampled_parallel_jaw
+        motion_part: left_arm
+        hand_part: left_eef
+        command_preset: left_parallel_gripper
+        hand_root_link: left_robotiq_arg2f_base_link
+        pad_link_names:
+        - left_inner_finger_pad
+        - left_right_inner_finger_pad
+        sample_count: 65
+        body_max_edge: 0.01
+        pad_max_edge: 0.004
+        max_subdivisions: 10
+      right_eef:
+        kind: sampled_parallel_jaw
+        motion_part: right_arm
+        hand_part: right_eef
+        command_preset: right_parallel_gripper
+        hand_root_link: right_robotiq_arg2f_base_link
+        pad_link_names:
+        - right_left_inner_finger_pad
+        - right_inner_finger_pad
+        sample_count: 65
+        body_max_edge: 0.01
+        pad_max_edge: 0.004
+        max_subdivisions: 10
+grippers:
+  left_eef:
+    class_type: RobotiqArg2F140
+    mode: mounted
+    motion_part: left_arm
+    control_part: left_eef
+    component_type: left_hand
+    root_from_tcp:
+    - - 0.0
+      - -1.0
+      - 0.0
+      - 0.0
+    - - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 1.0
+      - 0.21
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+    root_from_contact_frame:
+    - - 0.0
+      - -1.0
+      - 0.0
+      - 0.0
+    - - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 1.0
+      - 0.21
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+    commands:
+      open:
+        finger_joint: 0.0
+        left_inner_knuckle_joint: 0.0
+        left_inner_finger_joint: 0.0
+        right_outer_knuckle_joint: 0.0
+        right_inner_knuckle_joint: 0.0
+        right_inner_finger_joint: 0.0
+      grasp:
+        finger_joint: 0.5
+        left_inner_knuckle_joint: -0.5
+        left_inner_finger_joint: 0.5
+        right_outer_knuckle_joint: -0.5
+        right_inner_knuckle_joint: -0.5
+        right_inner_finger_joint: 0.5
+  right_eef:
+    class_type: RobotiqArg2F140
+    mode: mounted
+    motion_part: right_arm
+    control_part: right_eef
+    component_type: right_hand
+    root_from_tcp:
+    - - 0.0
+      - -1.0
+      - 0.0
+      - 0.0
+    - - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 1.0
+      - 0.21
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+    root_from_contact_frame:
+    - - 0.0
+      - -1.0
+      - 0.0
+      - 0.0
+    - - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 1.0
+      - 0.21
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+    commands:
+      open:
+        finger_joint: 0.0
+        left_inner_knuckle_joint: 0.0
+        left_inner_finger_joint: 0.0
+        right_outer_knuckle_joint: 0.0
+        right_inner_knuckle_joint: 0.0
+        right_inner_finger_joint: 0.0
+      grasp:
+        finger_joint: 0.5
+        left_inner_knuckle_joint: -0.5
+        left_inner_finger_joint: 0.5
+        right_outer_knuckle_joint: -0.5
+        right_inner_knuckle_joint: -0.5
+        right_inner_finger_joint: 0.5

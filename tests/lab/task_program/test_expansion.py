@@ -26,18 +26,18 @@ from unittest.mock import Mock, patch
 import pytest
 import torch
 
-from embodichain.lab.sim.atomic_actions import (
-    ActionInvocation,
-    ActionOptions,
-    ActionPlan,
-    ActionPlanTemplateAdapter,
-    AtomicAction,
-    AtomicActionEngine,
+from embodichain.lab.sim.atomic_skills import (
+    SkillInvocation,
+    SkillOptions,
+    SkillPlan,
+    SkillPlanTemplateAdapter,
+    AtomicSkill,
+    AtomicSkillEngine,
     JointPositionGoal,
     JOINT_POSITION_CAPABILITY,
     MotionPolicy,
     PlanningContext,
-    ResolvedActionRequest,
+    ResolvedSkillRequest,
     SkillBindingContract,
     SkillEndpointRequirement,
     SkillResourceSlot,
@@ -52,6 +52,8 @@ from embodichain.lab.sim.motion.expansion import (
 )
 from embodichain.lab.task_program.integrations import (
     CombinedTaskProgramExpansionFactory,
+    TaskProgramMappedRetimeFactory,
+    TaskProgramSameGridExpansionFactory,
     TaskProgramSourceAdapter,
 )
 from embodichain.lab.task_program.runtime import TaskProgramPlanRequest
@@ -60,7 +62,7 @@ from embodichain.lab.task_program.semantics.calls import RegisteredSemanticCall
 CONTROL_DT = 0.1
 
 
-class _ThreePhasePlaceAction(AtomicAction[JointPositionGoal, ActionOptions]):
+class _ThreePhasePlaceAction(AtomicSkill[JointPositionGoal, SkillOptions]):
     """Seven-sample Place stand-in with one editable retract interior sample."""
 
     skill_id: ClassVar[str] = "place"
@@ -81,9 +83,9 @@ class _ThreePhasePlaceAction(AtomicAction[JointPositionGoal, ActionOptions]):
 
     def _plan(
         self,
-        request: ResolvedActionRequest[JointPositionGoal, ActionOptions],
+        request: ResolvedSkillRequest[JointPositionGoal, SkillOptions],
         context: PlanningContext,
-    ) -> ActionPlan:
+    ) -> SkillPlan:
         samples = torch.tensor(
             [0.0, 0.2, 0.4, 0.4, 0.6, 0.8, 1.0],
             device=context.robot.qpos.device,
@@ -118,9 +120,9 @@ class _WaypointHandOverAction(_ThreePhasePlaceAction):
 
     def _plan(
         self,
-        request: ResolvedActionRequest[JointPositionGoal, ActionOptions],
+        request: ResolvedSkillRequest[JointPositionGoal, SkillOptions],
         context: PlanningContext,
-    ) -> ActionPlan:
+    ) -> SkillPlan:
         lengths = {
             "pickup_approach": 25,
             "pickup_reach": 10,
@@ -151,7 +153,7 @@ class _WaypointHandOverAction(_ThreePhasePlaceAction):
         )
 
 
-def _engine(batch_size: int = 1) -> tuple[AtomicActionEngine, _ThreePhasePlaceAction]:
+def _engine(batch_size: int = 1) -> tuple[AtomicSkillEngine, _ThreePhasePlaceAction]:
     robot = Mock()
     robot.device = torch.device("cpu")
     robot.dof = 3
@@ -165,16 +167,16 @@ def _engine(batch_size: int = 1) -> tuple[AtomicActionEngine, _ThreePhasePlaceAc
     generator.robot = robot
     generator.device = torch.device("cpu")
     generator.planner.cfg.planner_type = "stub_planner"
-    engine = AtomicActionEngine(generator, load_builtins=False)
+    engine = AtomicSkillEngine(generator, load_builtins=False)
     action = _ThreePhasePlaceAction()
     engine.register(action)
     return engine, action
 
 
 def _place_invocation(
-    engine: AtomicActionEngine, batch_size: int = 1
-) -> ActionInvocation:
-    return ActionInvocation(
+    engine: AtomicSkillEngine, batch_size: int = 1
+) -> SkillInvocation:
+    return SkillInvocation(
         skill_id="place",
         goal=JointPositionGoal(torch.ones(batch_size, 3)),
         binding=engine.bind_control_parts(
@@ -187,11 +189,11 @@ def _place_invocation(
 
 
 def _planned_place() -> tuple[
-    AtomicActionEngine,
-    ActionInvocation,
-    ResolvedActionRequest,
+    AtomicSkillEngine,
+    SkillInvocation,
+    ResolvedSkillRequest,
     PlanningContext,
-    ActionPlan,
+    SkillPlan,
 ]:
     engine, action = _engine()
     invocation = _place_invocation(engine)
@@ -201,7 +203,7 @@ def _planned_place() -> tuple[
 
 
 def _plan_request(
-    invocation: ActionInvocation,
+    invocation: SkillInvocation,
     *,
     skill_id: str = "place",
 ) -> TaskProgramPlanRequest:
@@ -242,6 +244,262 @@ def _combined_profile_with_spatial(
     return CombinedExpansionProfile.from_mapping(payload)
 
 
+@pytest.mark.parametrize("physical_row", [0, 7])
+def test_mapped_retime_factory_respects_source_permissions_and_collision_evidence(
+    physical_row,
+) -> None:
+    class LongPlace(_ThreePhasePlaceAction):
+        binding_contract = _ThreePhasePlaceAction.binding_contract
+
+        def _plan(self, request, context):
+            positions = torch.linspace(0, 1, 32)[None, :, None].expand(1, -1, 3)
+            trajectory = TimedTrajectory.from_uniform_step(
+                positions, env_ids=context.env_ids, step_dt=CONTROL_DT
+            )
+            return self.build_plan(
+                request,
+                context,
+                success=True,
+                trajectory=trajectory,
+                segment_lengths={"approach": 12, "release": 8, "retract": 12},
+            )
+
+    engine, _ = _engine()
+    action = LongPlace()
+    engine._skills.pop("place")
+    engine.register(action)
+    invocation = replace(
+        _place_invocation(engine),
+        motion_policy=MotionPolicy(sample_count=7, acceleration_limit=1000.0),
+    )
+    context = engine.initial_context(control_dt=CONTROL_DT)
+    if physical_row:
+        context = replace(context, env_ids=torch.tensor([physical_row]))
+        limits = torch.tensor([[[-0.01, 0.01]] * 3] * 8)
+        limits[physical_row] = torch.tensor([[-2.0, 2.0]] * 3)
+        engine.robot.body_data.qpos_limits = limits
+    plan = engine.plan(invocation, context)
+    request = action.resolve_request(invocation)
+    source = {
+        "source_id": "demo",
+        "source_revision": "1",
+        "unit_id": "place-unit",
+        "prototype_phase_permissions": {
+            "approach": ("retime",),
+            "release": (),
+            "retract": (),
+        },
+    }
+    plan = replace(plan, diagnostics=replace(plan.diagnostics, metadata=source))
+    kwargs = dict(
+        duration_scale=1.5,
+        velocity_limits=(100.0,) * 3,
+        acceleration_limits=(1000.0,) * 3,
+        call_indices=(0,),
+    )
+    with pytest.raises(ValueError, match="collision validator"):
+        TaskProgramMappedRetimeFactory(**kwargs)
+
+    factory = TaskProgramMappedRetimeFactory(**kwargs, diagnostic_unchecked=True)
+    transform = factory.create_plan_transform(_plan_request(invocation), engine=engine)
+    rebuilt = transform(request, context, plan)
+    assert rebuilt.commands.frame_count > plan.commands.frame_count
+    assert factory.records[0].collision_evidence == "unverified"
+    assert rebuilt.diagnostics.metadata["collision_evidence"] == "unverified"
+    assert factory.records[0].source_unit_id == "place-unit"
+    mapping = factory.records[0].result.time_map
+    detached = factory.records[0]
+    detached.result.template.positions.fill_(99)
+    assert not bool((factory.records[0].result.template.positions == 99).any())
+    event_map = dict(zip(mapping.source_event_indices, mapping.execution_event_indices))
+    for index in range(12, 32):
+        assert torch.equal(
+            rebuilt.joint_trajectory.positions[0, event_map[index]],
+            plan.joint_trajectory.positions[0, index],
+        )
+
+    failing = TaskProgramMappedRetimeFactory(
+        **kwargs, collision_validator=lambda *_: False
+    )
+    with pytest.raises(ValueError, match="collision"):
+        failing.create_plan_transform(_plan_request(invocation), engine=engine)(
+            request, context, plan
+        )
+    assert failing.records == ()
+    disallowed = replace(
+        plan,
+        diagnostics=replace(
+            plan.diagnostics,
+            metadata={
+                **source,
+                "prototype_phase_permissions": {
+                    name: () for name in source["prototype_phase_permissions"]
+                },
+            },
+        ),
+    )
+    with pytest.raises(ValueError, match="authorize retiming"):
+        transform(request, context, disallowed)
+    restricted = TaskProgramMappedRetimeFactory(
+        **kwargs, diagnostic_unchecked=True, phase_allowlist={"place": ("retract",)}
+    )
+    with pytest.raises(ValueError, match="authorize retiming"):
+        restricted.create_plan_transform(_plan_request(invocation), engine=engine)(
+            request, context, plan
+        )
+
+    spatial_permissions = {
+        "approach": ("joint_residual", "task_space_residual"),
+        "release": (),
+        "retract": (),
+    }
+    spatial_plan = replace(
+        plan,
+        diagnostics=replace(
+            plan.diagnostics,
+            metadata={**source, "prototype_phase_permissions": spatial_permissions},
+        ),
+    )
+    spatial_kwargs = dict(
+        seed=7,
+        geometry_family_id="geometry-fixture",
+        initial_state_id="initial-fixture",
+        velocity_limits=(100.0,) * 3,
+        acceleration_limits=(1000.0,) * 3,
+        call_indices=(0,),
+        diagnostic_unchecked=True,
+    )
+    spatial = TaskProgramSameGridExpansionFactory(
+        operator="joint_residual", **spatial_kwargs
+    )
+    modified = spatial.create_plan_transform(_plan_request(invocation), engine=engine)(
+        request, context, spatial_plan
+    )
+    assert not torch.equal(
+        modified.joint_trajectory.positions, spatial_plan.joint_trajectory.positions
+    )
+    assert torch.equal(
+        modified.joint_trajectory.positions[:, :2],
+        spatial_plan.joint_trajectory.positions[:, :2],
+    )
+    assert torch.equal(
+        modified.joint_trajectory.positions[:, 10:],
+        spatial_plan.joint_trajectory.positions[:, 10:],
+    )
+    assert torch.equal(modified.joint_trajectory.dt, spatial_plan.joint_trajectory.dt)
+    assert spatial.records[0].collision_evidence == "unverified"
+    spatial_snapshot = spatial.records[0]
+    spatial_snapshot.template.positions.fill_(99)
+    assert not bool((spatial.records[0].template.positions == 99).any())
+    assert spatial.records[0].geometry_family_id == "geometry-fixture"
+    both_phases = replace(
+        spatial_plan,
+        diagnostics=replace(
+            spatial_plan.diagnostics,
+            metadata={
+                **source,
+                "prototype_phase_permissions": {
+                    "approach": ("joint_residual",),
+                    "release": (),
+                    "retract": ("joint_residual",),
+                },
+            },
+        ),
+    )
+    retract_only = TaskProgramSameGridExpansionFactory(
+        operator="joint_residual",
+        phase_allowlist={"place": ("retract",)},
+        **spatial_kwargs,
+    )
+    restricted_plan = retract_only.create_plan_transform(
+        _plan_request(invocation), engine=engine
+    )(request, context, both_phases)
+    assert torch.equal(
+        restricted_plan.joint_trajectory.positions[:, :22],
+        both_phases.joint_trajectory.positions[:, :22],
+    )
+    assert not torch.equal(
+        restricted_plan.joint_trajectory.positions,
+        both_phases.joint_trajectory.positions,
+    )
+    replay = TaskProgramSameGridExpansionFactory(
+        operator="joint_residual", **spatial_kwargs
+    )
+    varied_context = replace(
+        context, robot=replace(context.robot, qpos=context.robot.qpos + 1e-6)
+    )
+    replayed = replay.create_plan_transform(_plan_request(invocation), engine=engine)(
+        request, varied_context, spatial_plan
+    )
+    assert replay.records[0].candidate_id == spatial.records[0].candidate_id
+    assert torch.equal(
+        replayed.joint_trajectory.positions, modified.joint_trajectory.positions
+    )
+
+    def kinematics_factory(_request, _context, template):
+        def kinematics(q):
+            poses = torch.eye(4, dtype=q.dtype).repeat(len(q), 1, 1)
+            poses[:, :3, 3] = q
+            jacobian = torch.zeros(len(q), 6, 3, dtype=q.dtype)
+            jacobian[:, :3, :] = torch.eye(3, dtype=q.dtype)
+            return poses, jacobian
+
+        return kinematics
+
+    task = TaskProgramSameGridExpansionFactory(
+        operator="task_space_residual",
+        kinematics_factory=kinematics_factory,
+        max_translation_m=0.02,
+        dedup_tolerance=0.00001,
+        **spatial_kwargs,
+    )
+    task_plan = task.create_plan_transform(_plan_request(invocation), engine=engine)(
+        request, context, spatial_plan
+    )
+    assert not torch.equal(
+        task_plan.joint_trajectory.positions, spatial_plan.joint_trajectory.positions
+    )
+    assert torch.equal(
+        task_plan.joint_trajectory.positions[:, :2],
+        spatial_plan.joint_trajectory.positions[:, :2],
+    )
+    assert torch.equal(
+        task_plan.joint_trajectory.positions[:, 10:],
+        spatial_plan.joint_trajectory.positions[:, 10:],
+    )
+
+
+def test_headroom_selection_locks_only_near_saturated_motion_joints() -> None:
+    from embodichain.lab.task_program.integrations.expansion import (
+        _headroom_joint_selection,
+    )
+
+    # At 0.1 s intervals these positions have accelerations 0.99 and 0.4.
+    q = torch.tensor(
+        [[0.0, 0.0], [0.00495, 0.002], [0.0198, 0.008], [0.04455, 0.018]],
+        dtype=torch.float64,
+    )
+    dt = torch.tensor([0.0, 0.1, 0.1, 0.1], dtype=torch.float64)
+    editable, locked = _headroom_joint_selection(
+        q,
+        dt,
+        velocity_limits=torch.ones(2),
+        acceleration_limits=torch.ones(2),
+        joint_ids=(0, 1),
+        fraction=0.95,
+    )
+    assert editable == (1,) and locked == (0,)
+    with pytest.raises(ValueError, match="no authorized motion joint"):
+        _headroom_joint_selection(
+            q,
+            dt,
+            velocity_limits=torch.ones(2),
+            acceleration_limits=torch.ones(2),
+            joint_ids=(0,),
+            fraction=0.95,
+        )
+
+
 def test_combined_factory_pins_recipe_affordance_before_atomic_planning() -> None:
     engine, invocation, _, context, _ = _planned_place()
     factory = CombinedTaskProgramExpansionFactory(
@@ -257,6 +515,19 @@ def test_combined_factory_pins_recipe_affordance_before_atomic_planning() -> Non
     assert prepared.affordance_sampling is not None
     assert prepared.affordance_sampling.branch_overrides == (1,)
     assert prepared.affordance_sampling.episode_id == 7
+
+
+def test_combined_factory_rejects_unwired_timing_instead_of_ignoring_it() -> None:
+    profile = _combined_profile().to_dict()
+    profile["trajectory"]["timing"]["enabled"] = True
+    with pytest.raises(ValueError, match="timing recipes are not wired"):
+        CombinedTaskProgramExpansionFactory(
+            CombinedExpansionProfile.from_mapping(profile),
+            candidate_index=0,
+            program_id="repeated_cube_pick_place",
+            integration_id="integration",
+            robot_profile_id="robot",
+        )
 
 
 def test_combined_factory_expands_place_on_requested_cycle_variant() -> None:
@@ -454,11 +725,11 @@ def test_combined_factory_allows_padded_recipe_indices_for_discarded_rows() -> N
 
 
 def _planned_place_batch(*, batch_size: int) -> tuple[
-    AtomicActionEngine,
-    ActionInvocation,
-    ResolvedActionRequest,
+    AtomicSkillEngine,
+    SkillInvocation,
+    ResolvedSkillRequest,
     PlanningContext,
-    ActionPlan,
+    SkillPlan,
 ]:
     engine, action = _engine(batch_size=batch_size)
     invocation = _place_invocation(engine, batch_size=batch_size)
@@ -587,7 +858,7 @@ def test_handover_variants_fix_waypoints_held_phases_and_stationary_arm(
     engine.robot.body_data.qpos_limits = torch.tensor([[[-2.0, 2.0]] * 5])
     action = _WaypointHandOverAction()
     engine.register(action)
-    invocation = ActionInvocation(
+    invocation = SkillInvocation(
         skill_id="hand_over",
         goal=JointPositionGoal(torch.ones(2, 5)),
         binding=engine.bind_control_parts("hand_over", {"primary": {"motion": "all"}}),
@@ -674,7 +945,7 @@ def test_handover_expansion_skips_failed_rows_and_keeps_valid_row_provenance(
     engine.robot.body_data.qpos_limits = torch.tensor([[[-2.0, 2.0]] * 5])
     action = PartiallyFailedHandOver()
     engine.register(action)
-    invocation = ActionInvocation(
+    invocation = SkillInvocation(
         skill_id="hand_over",
         goal=JointPositionGoal(torch.ones(2, 5)),
         binding=engine.bind_control_parts("hand_over", {"primary": {"motion": "all"}}),
@@ -758,11 +1029,17 @@ def test_same_logical_recipe_has_identical_geometry_on_different_physical_rows()
     assert [record.env_id for record in factory.records] == [7, 3]
 
 
-def test_each_row_uses_its_own_joint_limits_for_normalized_residuals() -> None:
+@pytest.mark.parametrize("physical_rows", [(0, 1), (1, 0), (7, 3)])
+def test_each_row_uses_its_own_joint_limits_for_normalized_residuals(
+    physical_rows,
+) -> None:
     engine, invocation, resolved, context, plan = _planned_place_batch(batch_size=2)
-    engine.robot.body_data.qpos_limits = torch.tensor(
-        [[[-2.0, 2.0]] * 3, [[-4.0, 4.0]] * 3]
-    )
+    context = replace(context, env_ids=torch.tensor(physical_rows))
+    plan = engine.plan(invocation, context)
+    limits = torch.tensor([[[-1.0, 1.0]] * 3] * (max(physical_rows) + 1))
+    limits[physical_rows[0]] = torch.tensor([[-2.0, 2.0]] * 3)
+    limits[physical_rows[1]] = torch.tensor([[-4.0, 4.0]] * 3)
+    engine.robot.body_data.qpos_limits = limits
     payload = _combined_profile_with_spatial(scale=0.005, tolerance=0.002).to_dict()
     payload["trajectory"]["spatial"]["operators"] = ["joint_residual"]
     factory = CombinedTaskProgramExpansionFactory(

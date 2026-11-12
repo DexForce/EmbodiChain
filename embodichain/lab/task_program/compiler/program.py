@@ -23,9 +23,12 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TypeAlias
 
+from embodichain.lab.evaluation import CompiledEvaluation
 from embodichain.lab.task_program.semantics.calls import (
     DeclarativeValue,
     HandOver,
+    MoveHeldObjectCall,
+    SemanticRelativePose,
     Pick,
     Place,
     RegisteredSemanticCall,
@@ -47,11 +50,17 @@ from ..language.schema import (
     MAX_REPEAT_COUNT,
     ArticulationJointPositionValidatorCfg,
     BarrierCfg,
+    ConditionValidatorCfg,
     CyclicPoseTargetCfg,
+    PoseTargetCfg,
+    SceneRelativePoseTargetCfg,
+    MoveHeldObjectCfg,
+    HoldPostCfg,
     TaskProgramCfg,
     TaskProgramIntegrationCfg,
     HandOverCfg,
     InvokeCfg,
+    ObjectNearRelativeTargetValidatorCfg,
     ObjectNearTargetValidatorCfg,
     ObjectLiftedValidatorCfg,
     ObjectRelativePositionValidatorCfg,
@@ -74,6 +83,7 @@ _SEMANTIC_CALL_TYPES = (
     Pick,
     Place,
     HandOver,
+    MoveHeldObjectCall,
     RegisteredSemanticCall,
 )
 _SCENE_REF_TYPES = (
@@ -148,6 +158,12 @@ def _snapshot_semantic_call(call: SemanticCallSpec) -> SemanticCallSpec:
         return Pick(
             object=_copy_scene_ref(call.object),
             grasp=(None if call.grasp is None else _copy_scene_ref(call.grasp)),
+            resources=dict(call.resources),
+        )
+    if type(call) is MoveHeldObjectCall:
+        return MoveHeldObjectCall(
+            object=_copy_scene_ref(call.object),
+            at=call.at.snapshot(),
             resources=dict(call.resources),
         )
     if type(call) is Place:
@@ -230,6 +246,17 @@ class _ObjectNearTargetValues:
 
 
 @dataclass(frozen=True, slots=True)
+class _ObjectNearRelativeTargetValues:
+    """Immutable live-relative object-position acceptance parameters."""
+
+    object: str
+    reference: str
+    displacement: tuple[float, float, float]
+    position_tolerance: float
+    kind: str
+
+
+@dataclass(frozen=True, slots=True)
 class _ArticulationJointPositionValues:
     """Immutable articulation-position acceptance parameters."""
 
@@ -256,6 +283,66 @@ class _ObjectStateValues:
     )
     maximum_tilt_degrees: float | None = None
     reference_frame: str = "world_axes"
+
+
+@dataclass(frozen=True, slots=True)
+class _HoldValues:
+    object: str
+    at: str
+    duration_s: float
+    position_tolerance: float
+    orientation_tolerance: float
+    kind: str = "hold"
+
+
+@dataclass(frozen=True, slots=True)
+class CompiledHoldPostPolicy:
+    """Immutable duration, pose and attachment acceptance declaration."""
+
+    cfg: HoldPostCfg | _HoldValues
+    entity: SceneObjectRef
+    target_pose: SemanticPose | SemanticRelativePose
+    target_selection: CompiledTargetSelection
+    source_path: ConfigPath
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.cfg) not in (HoldPostCfg, _HoldValues)
+            or type(self.entity) is not SceneObjectRef
+        ):
+            raise TypeError(
+                "Hold requires an exact config and canonical SceneObjectRef."
+            )
+        if (
+            type(self.target_pose) not in (SemanticPose, SemanticRelativePose)
+            or type(self.target_selection) is not CompiledTargetSelection
+        ):
+            raise TypeError("Hold requires a typed target and its compiled selection.")
+        if type(self.source_path) is not tuple:
+            raise TypeError("source_path must be a ConfigPath tuple.")
+        target_id = self.cfg.at.target if type(self.cfg) is HoldPostCfg else self.cfg.at
+        HoldPostCfg(
+            object=self.entity.entity_id,
+            at=TargetRefCfg(target=target_id),
+            duration_s=self.cfg.duration_s,
+            position_tolerance=self.cfg.position_tolerance,
+            orientation_tolerance=self.cfg.orientation_tolerance,
+        )
+        if self.target_selection.target_id != target_id:
+            raise ValueError("Hold target selection does not match its declaration.")
+        object.__setattr__(
+            self,
+            "cfg",
+            _HoldValues(
+                object=self.entity.entity_id,
+                at=target_id,
+                duration_s=self.cfg.duration_s,
+                position_tolerance=self.cfg.position_tolerance,
+                orientation_tolerance=self.cfg.orientation_tolerance,
+            ),
+        )
+        object.__setattr__(self, "entity", _copy_scene_ref(self.entity))
+        object.__setattr__(self, "target_pose", self.target_pose.snapshot())
 
 
 @dataclass(frozen=True, slots=True)
@@ -286,7 +373,7 @@ class CompiledObjectNearTargetValidator:
 
     cfg: ObjectNearTargetValidatorCfg | _ObjectNearTargetValues
     object: SceneObjectRef
-    target_pose: SemanticPose
+    target_pose: SemanticPose | SemanticRelativePose
     target_selection: CompiledTargetSelection
     source_path: ConfigPath
 
@@ -298,7 +385,7 @@ class CompiledObjectNearTargetValidator:
             raise TypeError("cfg must be exactly ObjectNearTargetValidatorCfg.")
         if type(self.object) is not SceneObjectRef:
             raise TypeError("object must be exactly SceneObjectRef.")
-        if type(self.target_pose) is not SemanticPose:
+        if type(self.target_pose) not in (SemanticPose, SemanticRelativePose):
             raise TypeError("target_pose must be exactly SemanticPose.")
         if type(self.target_selection) is not CompiledTargetSelection:
             raise TypeError("target_selection must be exactly CompiledTargetSelection.")
@@ -313,6 +400,41 @@ class CompiledObjectNearTargetValidator:
         object.__setattr__(self, "cfg", _ObjectNearTargetValues(**validated.to_dict()))
         object.__setattr__(self, "object", _copy_scene_ref(self.object))
         object.__setattr__(self, "target_pose", self.target_pose.snapshot())
+
+
+@dataclass(frozen=True, slots=True)
+class CompiledObjectNearRelativeTargetValidator:
+    """Owned validator with canonical object and live reference identities."""
+
+    cfg: ObjectNearRelativeTargetValidatorCfg | _ObjectNearRelativeTargetValues
+    object: SceneObjectRef
+    reference: SceneObjectRef
+    source_path: ConfigPath
+
+    def __post_init__(self) -> None:
+        if type(self.cfg) not in (
+            ObjectNearRelativeTargetValidatorCfg,
+            _ObjectNearRelativeTargetValues,
+        ):
+            raise TypeError("cfg must be exactly ObjectNearRelativeTargetValidatorCfg.")
+        if type(self.object) is not SceneObjectRef:
+            raise TypeError("object must be exactly SceneObjectRef.")
+        if type(self.reference) is not SceneObjectRef:
+            raise TypeError("reference must be exactly SceneObjectRef.")
+        if type(self.source_path) is not tuple:
+            raise TypeError("source_path must be a ConfigPath tuple.")
+        validated = ObjectNearRelativeTargetValidatorCfg(
+            object=self.cfg.object,
+            reference=self.cfg.reference,
+            displacement=self.cfg.displacement,
+            position_tolerance=self.cfg.position_tolerance,
+            kind=self.cfg.kind,
+        )
+        object.__setattr__(
+            self, "cfg", _ObjectNearRelativeTargetValues(**validated.to_dict())
+        )
+        object.__setattr__(self, "object", _copy_scene_ref(self.object))
+        object.__setattr__(self, "reference", _copy_scene_ref(self.reference))
 
 
 @dataclass(frozen=True, slots=True)
@@ -420,14 +542,44 @@ class CompiledObjectStateValidator:
         object.__setattr__(self, "object", _copy_scene_ref(self.object))
 
 
+@dataclass(frozen=True, slots=True)
+class _ConditionValues:
+    ref: str
+    kind: str = "condition"
+
+
+@dataclass(frozen=True, slots=True)
+class CompiledConditionValidator:
+    """An immutable reference resolved against the deployment rule library."""
+
+    cfg: ConditionValidatorCfg | _ConditionValues
+    spec: CompiledEvaluation
+    source_path: ConfigPath
+
+    def __post_init__(self) -> None:
+        if type(self.cfg) not in (ConditionValidatorCfg, _ConditionValues):
+            raise TypeError("cfg must be a condition validator.")
+        if (
+            type(self.spec) is not CompiledEvaluation
+            or type(self.source_path) is not tuple
+        ):
+            raise TypeError("Expected a bound rule and a ConfigPath tuple.")
+        cfg = ConditionValidatorCfg(ref=self.cfg.ref, kind=self.cfg.kind)
+        object.__setattr__(self, "cfg", _ConditionValues(cfg.ref))
+
+
 CompiledTaskProgramValidator: TypeAlias = (
     CompiledObjectNearTargetValidator
+    | CompiledObjectNearRelativeTargetValidator
     | CompiledArticulationJointPositionValidator
     | CompiledObjectStateValidator
+    | CompiledConditionValidator
 )
 _COMPILED_VALIDATOR_TYPES = (
+    CompiledConditionValidator,
     CompiledObjectStateValidator,
     CompiledObjectNearTargetValidator,
+    CompiledObjectNearRelativeTargetValidator,
     CompiledArticulationJointPositionValidator,
 )
 
@@ -508,7 +660,7 @@ class CompiledTaskProgramSegment:
     calls: tuple[CompiledTaskProgramCall, ...]
     source_path: ConfigPath
     repeat_frames: tuple[CompiledRepeatFrame, ...] = ()
-    post_policies: tuple[CompiledPostPolicy, ...] = ()
+    post_policies: tuple[CompiledPostPolicy | CompiledHoldPostPolicy, ...] = ()
     validators: tuple[CompiledTaskProgramValidator, ...] = ()
     parallel_block: CompiledParallelBlock | None = None
     implicit: bool = False
@@ -545,7 +697,10 @@ class CompiledTaskProgramSegment:
         validators = tuple(self.validators)
         if not all(type(frame) is CompiledRepeatFrame for frame in frames):
             raise TypeError("repeat_frames must contain CompiledRepeatFrame values.")
-        if not all(type(value) is CompiledPostPolicy for value in post):
+        if not all(
+            type(value) in (CompiledPostPolicy, CompiledHoldPostPolicy)
+            for value in post
+        ):
             raise TypeError("post_policies must contain CompiledPostPolicy values.")
         if not all(type(value) in _COMPILED_VALIDATOR_TYPES for value in validators):
             raise TypeError("validators must contain compiled validator values.")
@@ -671,7 +826,7 @@ class _ParallelTemplate:
 
 @dataclass(frozen=True, slots=True)
 class _PostTemplate:
-    cfg: WaitStablePostCfg
+    cfg: WaitStablePostCfg | HoldPostCfg
     entity: SceneEntityRef
     source_path: ConfigPath
 
@@ -681,6 +836,14 @@ class _ObjectNearTargetValidatorTemplate:
     cfg: ObjectNearTargetValidatorCfg
     object: SceneObjectRef
     target_id: str
+    source_path: ConfigPath
+
+
+@dataclass(frozen=True, slots=True)
+class _ObjectNearRelativeTargetValidatorTemplate:
+    cfg: ObjectNearRelativeTargetValidatorCfg
+    object: SceneObjectRef
+    reference: SceneObjectRef
     source_path: ConfigPath
 
 
@@ -705,8 +868,10 @@ class _ObjectStateValidatorTemplate:
 
 _ValidatorTemplate: TypeAlias = (
     _ObjectNearTargetValidatorTemplate
+    | _ObjectNearRelativeTargetValidatorTemplate
     | _ArticulationJointPositionValidatorTemplate
     | _ObjectStateValidatorTemplate
+    | CompiledConditionValidator
 )
 
 
@@ -751,9 +916,9 @@ class _ExpansionState:
 def _resolve_target(
     target_id: str,
     *,
-    targets: Mapping[str, tuple[SemanticPose, ...]],
+    targets: Mapping[str, tuple[SemanticPose | SemanticRelativePose, ...]],
     repeat_frames: tuple[CompiledRepeatFrame, ...],
-) -> tuple[SemanticPose, CompiledTargetSelection]:
+) -> tuple[SemanticPose | SemanticRelativePose, CompiledTargetSelection]:
     """Select one cyclic target from the nearest lexical repeat frame."""
     values = targets[target_id]
     repeat = repeat_frames[-1] if repeat_frames else None
@@ -772,7 +937,7 @@ def _instantiate_call(
     *,
     call_index: int,
     segment_call_index: int,
-    targets: Mapping[str, tuple[SemanticPose, ...]],
+    targets: Mapping[str, tuple[SemanticPose | SemanticRelativePose, ...]],
     repeat_frames: tuple[CompiledRepeatFrame, ...],
 ) -> CompiledTaskProgramCall:
     """Instantiate one semantic call occurrence from static templates."""
@@ -784,6 +949,15 @@ def _instantiate_call(
             object=_copy_scene_ref(template.object),
             grasp=(None if template.grasp is None else _copy_scene_ref(template.grasp)),
             resources=resources,
+        )
+    elif template.kind == "move_held_object":
+        assert template.object is not None and template.at_target_id is not None
+        at, selection = _resolve_target(
+            template.at_target_id, targets=targets, repeat_frames=repeat_frames
+        )
+        selections.append(selection)
+        call = MoveHeldObjectCall(
+            object=_copy_scene_ref(template.object), at=at, resources=resources
         )
     elif template.kind == "place":
         assert template.object is not None
@@ -867,7 +1041,7 @@ def _iter_call_templates(
 def _instantiate_parallel_block(
     template: _ParallelTemplate,
     *,
-    targets: Mapping[str, tuple[SemanticPose, ...]],
+    targets: Mapping[str, tuple[SemanticPose | SemanticRelativePose, ...]],
     repeat_frames: tuple[CompiledRepeatFrame, ...],
     state: _ExpansionState,
 ) -> tuple[CompiledParallelBlock, tuple[CompiledTaskProgramCall, ...]]:
@@ -935,7 +1109,7 @@ def _iter_segments(
     template: _NodeTemplate,
     *,
     program_id: str,
-    targets: Mapping[str, tuple[SemanticPose, ...]],
+    targets: Mapping[str, tuple[SemanticPose | SemanticRelativePose, ...]],
     repeat_frames: tuple[CompiledRepeatFrame, ...],
     state: _ExpansionState,
 ) -> Iterator[CompiledTaskProgramSegment]:
@@ -1044,10 +1218,28 @@ def _iter_segments(
             )
             state.call_index += 1
     post_policies = tuple(
-        CompiledPostPolicy(
-            cfg=post.cfg,
-            entity=post.entity,
-            source_path=post.source_path,
+        (
+            CompiledHoldPostPolicy(
+                cfg=_HoldValues(
+                    object=post.cfg.object,
+                    at=post.cfg.at.target,
+                    duration_s=post.cfg.duration_s,
+                    position_tolerance=post.cfg.position_tolerance,
+                    orientation_tolerance=post.cfg.orientation_tolerance,
+                ),
+                entity=post.entity,
+                target_pose=_resolve_target(
+                    post.cfg.at.target, targets=targets, repeat_frames=repeat_frames
+                )[0],
+                target_selection=_resolve_target(
+                    post.cfg.at.target, targets=targets, repeat_frames=repeat_frames
+                )[1],
+                source_path=post.source_path,
+            )
+            if type(post.cfg) is HoldPostCfg
+            else CompiledPostPolicy(
+                cfg=post.cfg, entity=post.entity, source_path=post.source_path
+            )
         )
         for post in template.post
     )
@@ -1068,6 +1260,15 @@ def _iter_segments(
                     source_path=validator.source_path,
                 )
             )
+        elif type(validator) is _ObjectNearRelativeTargetValidatorTemplate:
+            validators.append(
+                CompiledObjectNearRelativeTargetValidator(
+                    cfg=validator.cfg,
+                    object=validator.object,
+                    reference=validator.reference,
+                    source_path=validator.source_path,
+                )
+            )
         elif type(validator) is _ArticulationJointPositionValidatorTemplate:
             validators.append(
                 CompiledArticulationJointPositionValidator(
@@ -1083,6 +1284,12 @@ def _iter_segments(
                     object=validator.object,
                     reference=validator.reference,
                     source_path=validator.source_path,
+                )
+            )
+        elif type(validator) is CompiledConditionValidator:
+            validators.append(
+                CompiledConditionValidator(
+                    validator.cfg, validator.spec, validator.source_path
                 )
             )
         else:
@@ -1118,6 +1325,9 @@ class CompiledTaskProgram:
     program_id: str
     instruction: str | None
     _integration: TaskProgramIntegrationCfg = field(repr=False, compare=False)
+    _authored_paths: tuple[tuple[ConfigPath, ConfigPath], ...] = field(
+        repr=False, compare=False
+    )
     _segments: tuple[CompiledTaskProgramSegment, ...] = field(
         repr=False,
         compare=False,
@@ -1186,6 +1396,7 @@ class CompiledTaskProgram:
             ),
         )
         object.__setattr__(instance, "_segments", values)
+        object.__setattr__(instance, "_authored_paths", ())
         return instance
 
     @property
@@ -1201,6 +1412,14 @@ class CompiledTaskProgram:
     def segment_count(self) -> int:
         """Return the number of materialized logical segments."""
         return len(self._segments)
+
+    def authored_path(self, path: ConfigPath) -> ConfigPath:
+        """Return an original authoring location without changing call identity."""
+        locations = dict(self._authored_paths)
+        for size in range(len(path), -1, -1):
+            if path[:size] in locations:
+                return (*locations[path[:size]], *path[size:])
+        return path
 
     def iter_segments(self) -> Iterator[CompiledTaskProgramSegment]:
         """Iterate the already materialized provider-free segments."""
@@ -1312,7 +1531,7 @@ def _materialize_program(
     program_id: str,
     instruction: str | None,
     integration: TaskProgramIntegrationCfg,
-    targets: Mapping[str, tuple[SemanticPose, ...]],
+    targets: Mapping[str, tuple[SemanticPose | SemanticRelativePose, ...]],
     root: _NodeTemplate,
 ) -> CompiledTaskProgram:
     """Expand one internal template directly into the public bounded snapshot."""
@@ -1345,15 +1564,22 @@ def _materialize_program(
 class TaskProgramCompiler:
     """Compile validated Task Program ASTs through one static scene manifest."""
 
-    def __init__(self, scene_manifest: SceneManifest) -> None:
+    def __init__(
+        self,
+        scene_manifest: SceneManifest,
+        *,
+        evaluation_conditions: Mapping[str, CompiledEvaluation] | None = None,
+    ) -> None:
         """Create one provider-free compiler.
 
         Args:
             scene_manifest: Canonical provider-free scene identity catalog.
+            evaluation_conditions: Bound rules from the selected deployment.
         """
         if type(scene_manifest) is not SceneManifest:
             raise TypeError("scene_manifest must be exactly SceneManifest.")
         self._scene_manifest = scene_manifest
+        self._evaluation_conditions = dict(evaluation_conditions or {})
 
     @classmethod
     def from_scene_registry(cls, registry: SceneRegistry) -> TaskProgramCompiler:
@@ -1395,7 +1621,7 @@ class TaskProgramCompiler:
     def _target_id(
         reference: TargetRefCfg,
         *,
-        targets: Mapping[str, tuple[SemanticPose, ...]],
+        targets: Mapping[str, tuple[SemanticPose | SemanticRelativePose, ...]],
         path: ConfigPath,
     ) -> str:
         """Resolve one statically registered target ID."""
@@ -1417,7 +1643,7 @@ class TaskProgramCompiler:
         self,
         cfg: object,
         *,
-        targets: Mapping[str, tuple[SemanticPose, ...]],
+        targets: Mapping[str, tuple[SemanticPose | SemanticRelativePose, ...]],
         path: ConfigPath,
     ) -> _CallTemplate:
         """Lower one config call into a provider-free canonical template."""
@@ -1445,6 +1671,18 @@ class TaskProgramCompiler:
                 source_path=path,
                 object=object_ref,
                 grasp=grasp_ref,
+                resources=tuple(sorted(cfg.resources.items())),
+            )
+        if type(cfg) is MoveHeldObjectCfg:
+            return _CallTemplate(
+                kind="move_held_object",
+                source_path=path,
+                object=self._resolve_scene(
+                    cfg.object, expected_types=(SceneObjectRef,), path=(*path, "object")
+                ),
+                at_target_id=self._target_id(
+                    cfg.at, targets=targets, path=(*path, "at")
+                ),
                 resources=tuple(sorted(cfg.resources.items())),
             )
         if type(cfg) is PlaceCfg:
@@ -1550,7 +1788,7 @@ class TaskProgramCompiler:
         self,
         node: ProgramNodeCfg,
         *,
-        targets: Mapping[str, tuple[SemanticPose, ...]],
+        targets: Mapping[str, tuple[SemanticPose | SemanticRelativePose, ...]],
         path: ConfigPath,
         inside_segment: bool,
         inside_parallel: bool,
@@ -1638,6 +1876,26 @@ class TaskProgramCompiler:
             post: list[_PostTemplate] = []
             for index, cfg in enumerate(node.post):
                 post_path = (*path, "post", index)
+                if type(cfg) is HoldPostCfg:
+                    self._target_id(cfg.at, targets=targets, path=(*post_path, "at"))
+                    post.append(
+                        _PostTemplate(
+                            cfg=HoldPostCfg(
+                                object=cfg.object,
+                                at=TargetRefCfg(target=cfg.at.target),
+                                duration_s=cfg.duration_s,
+                                position_tolerance=cfg.position_tolerance,
+                                orientation_tolerance=cfg.orientation_tolerance,
+                            ),
+                            entity=self._resolve_scene(
+                                cfg.object,
+                                expected_types=(SceneObjectRef,),
+                                path=(*post_path, "object"),
+                            ),
+                            source_path=post_path,
+                        )
+                    )
+                    continue
                 if type(cfg) is not WaitStablePostCfg or cfg.kind != "wait_stable":
                     raise TaskProgramCompileError(
                         "unsupported_post_policy",
@@ -1663,6 +1921,18 @@ class TaskProgramCompiler:
             validators: list[_ValidatorTemplate] = []
             for index, cfg in enumerate(node.validators):
                 validator_path = (*path, "validators", index)
+                if type(cfg) is ConditionValidatorCfg:
+                    spec = self._evaluation_conditions.get(cfg.ref)
+                    if spec is None:
+                        raise TaskProgramCompileError(
+                            "unknown_evaluation_condition",
+                            (*validator_path, "ref"),
+                            f"Unknown deployment evaluation condition {cfg.ref!r}.",
+                        )
+                    validators.append(
+                        CompiledConditionValidator(cfg, spec, validator_path)
+                    )
+                    continue
                 if type(cfg) is ObjectNearTargetValidatorCfg:
                     if cfg.kind != "object_near_target":
                         raise TaskProgramCompileError(
@@ -1692,6 +1962,39 @@ class TaskProgramCompiler:
                             ),
                             object=object_ref,
                             target_id=cfg.target,
+                            source_path=validator_path,
+                        )
+                    )
+                    continue
+                if type(cfg) is ObjectNearRelativeTargetValidatorCfg:
+                    if cfg.kind != "object_near_relative_target":
+                        raise TaskProgramCompileError(
+                            "unsupported_validator",
+                            validator_path,
+                            "ObjectNearRelativeTargetValidatorCfg must use kind "
+                            "'object_near_relative_target'.",
+                        )
+                    object_ref = self._resolve_scene(
+                        cfg.object,
+                        expected_types=(SceneObjectRef,),
+                        path=(*validator_path, "object"),
+                    )
+                    reference_ref = self._resolve_scene(
+                        cfg.reference,
+                        expected_types=(SceneObjectRef,),
+                        path=(*validator_path, "reference"),
+                    )
+                    validators.append(
+                        _ObjectNearRelativeTargetValidatorTemplate(
+                            cfg=ObjectNearRelativeTargetValidatorCfg(
+                                object=cfg.object,
+                                reference=cfg.reference,
+                                displacement=cfg.displacement,
+                                position_tolerance=cfg.position_tolerance,
+                                kind=cfg.kind,
+                            ),
+                            object=object_ref,
+                            reference=reference_ref,
                             source_path=validator_path,
                         )
                     )
@@ -1846,14 +2149,43 @@ class TaskProgramCompiler:
             f"Unsupported program node {type(node).__name__}.",
         )
 
-    @staticmethod
     def _compile_targets(
-        targets: Mapping[str, CyclicPoseTargetCfg],
-    ) -> Mapping[str, tuple[SemanticPose, ...]]:
+        self,
+        targets: Mapping[
+            str, CyclicPoseTargetCfg | PoseTargetCfg | SceneRelativePoseTargetCfg
+        ],
+    ) -> Mapping[str, tuple[SemanticPose | SemanticRelativePose, ...]]:
         """Compile static pose providers without selecting repeat values."""
-        compiled: dict[str, tuple[SemanticPose, ...]] = {}
+        compiled: dict[str, tuple[SemanticPose | SemanticRelativePose, ...]] = {}
         for target_id, target in targets.items():
             path = ("targets", target_id)
+            if type(target) in (PoseTargetCfg, SceneRelativePoseTargetCfg):
+                reference = None
+                if type(target) is SceneRelativePoseTargetCfg:
+                    reference = self._resolve_scene(
+                        target.entity,
+                        expected_types=_SCENE_REF_TYPES,
+                        path=(*path, "entity"),
+                    )
+                    if type(reference) is SceneAffordanceRef:
+                        raise TaskProgramCompileError(
+                            "unsupported_target_frame",
+                            (*path, "entity"),
+                            "Scene-relative targets require an observed entity frame; affordance frames are not supported.",
+                        )
+                compiled[target_id] = (
+                    (
+                        SemanticPose(target.position, target.quaternion_xyzw)
+                        if type(target) is PoseTargetCfg
+                        else SemanticRelativePose(
+                            reference.entity_id,
+                            target.position,
+                            target.quaternion_xyzw,
+                            target.frame,
+                        )
+                    ),
+                )
+                continue
             if type(target) is not CyclicPoseTargetCfg or target.kind != "cyclic_pose":
                 raise TaskProgramCompileError(
                     "unsupported_target",
@@ -1879,6 +2211,32 @@ class TaskProgramCompiler:
         return MappingProxyType(compiled)
 
     def compile(self, config: TaskProgramCfg) -> CompiledTaskProgram:
+        """Compile a bounded program and retain its authored diagnostic locations.
+
+        Args:
+            config: Strictly validated declarative program.
+
+        Returns:
+            Immutable calls, targets and segment acceptance declarations.
+        """
+        normalized = getattr(config, "__authoring_source_map__", None)
+        try:
+            program = self._compile(config)
+        except TaskProgramConfigError as error:
+            if normalized is None:
+                raise
+            mapped = type(error)(
+                error.code, normalized.original_path(error.path), error.message
+            )
+            mapped._authored = True
+            raise mapped from error
+        if normalized is not None:
+            object.__setattr__(
+                program, "_authored_paths", tuple(normalized.source_map.items())
+            )
+        return program
+
+    def _compile(self, config: TaskProgramCfg) -> CompiledTaskProgram:
         """Compile one validated AST into a bounded provider-free program.
 
         Args:

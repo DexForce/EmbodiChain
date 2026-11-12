@@ -26,8 +26,8 @@ from unittest.mock import Mock
 import pytest
 import torch
 
-from embodichain.lab.sim.atomic_actions import (
-    AtomicActionEngine,
+from embodichain.lab.sim.atomic_skills import (
+    AtomicSkillEngine,
     ControlPartCommandProfile,
     GraspGoal,
     HeldObjectPoseGoal,
@@ -303,6 +303,144 @@ def _valid_motion_case_and_positions() -> tuple[BenchmarkCase, torch.Tensor]:
     positions = torch.zeros(1, 2, 7)
     positions[0, 1, 0] = 0.1
     return case, positions
+
+
+@pytest.mark.parametrize(
+    "validity", ["ordered_cartesian_waypoints", "ordered_joint_waypoints"]
+)
+def test_validity_preserves_threshold_hit_at_an_interior_command(validity):
+    # A distance grid of 1024 points omits the actual middle command: its
+    # 9.990 mm Cartesian hit becomes a 10.080 mm miss. Joint validity likewise
+    # must retain the interior command instead of replacing its sampling grid.
+    case, _ = _valid_motion_case_and_positions()
+    positions = torch.zeros(1, 3, 7, dtype=torch.float64)
+    positions[0, :, :2] = torch.tensor([[-0.2, 0.0], [0.0, 0.09001], [0.2, 0.0]])
+    case.target_waypoints[0, 0, :3, 3] = torch.tensor([0.0, 0.1, 0.0])
+    case = replace(
+        case,
+        start_qpos=positions[:, 0].clone(),
+        reference_qpos=positions[:, 1:2].clone(),
+        case_parameters={
+            **case.case_parameters,
+            "motion_validity": validity,
+            "joint_threshold_rad": 1.0e-6,
+        },
+    )
+    outcome = compute_case_outcomes(
+        _timed_plan_result(positions, success=True),
+        case,
+        _MetricRobot(),
+        "arm",
+        validation_samples=1024,
+        position_threshold_m=0.01,
+        rotation_threshold_rad=0.1,
+        joint_limit_tolerance_rad=1.0e-6,
+        timing_is_solved=False,
+    )[0]
+    assert outcome.geometry_valid
+    assert outcome.ordered_waypoints_reached
+
+
+@pytest.mark.parametrize("hold_samples", [0, 600])
+def test_validity_keeps_distance_grid_hits_between_commands(hold_samples):
+    # A native/index grid can miss a legitimate interpolated hit. Long action
+    # holds make its motion intervals particularly coarse. Retain the old
+    # distance witnesses as well as every actual command, in path order.
+    case, _ = _valid_motion_case_and_positions()
+    positions = torch.zeros(1, 3 + 2 * hold_samples, 7, dtype=torch.float64)
+    positions[0, hold_samples + 1, 0] = 0.2
+    positions[0, hold_samples + 2 :, 0] = 1.0
+    case.target_waypoints[0, 0, :3, 3] = torch.tensor([512 / 1023, 0.00999, 0.0])
+    case = replace(case, start_qpos=positions[:, 0].clone())
+    outcome = compute_case_outcomes(
+        _timed_plan_result(positions, success=True),
+        case,
+        _MetricRobot(),
+        "arm",
+        validation_samples=1024,
+        position_threshold_m=0.01,
+        rotation_threshold_rad=0.1,
+        joint_limit_tolerance_rad=1e-6,
+        timing_is_solved=False,
+    )[0]
+    assert outcome.geometry_valid
+
+
+@pytest.mark.parametrize("validation_samples", [2, 17])
+@pytest.mark.parametrize(
+    "validity", ["ordered_cartesian_waypoints", "ordered_joint_waypoints", "semantic"]
+)
+def test_validity_excludes_terminal_padding_but_keeps_timed_holds(
+    validation_samples, validity
+):
+    positions = torch.zeros(4, 3, 7, dtype=torch.float64)
+    positions[:, :, 0] = torch.tensor(
+        [[0.0, 1.0, 1.0], [0.0, 1.0, 1.0], [1.0, 1.0, 1.0], [0.0, 1.0, 0.0]]
+    )
+    dt = torch.tensor(
+        [[0.0, 1.0, 0.0], [0.0, 1.0, 1.0], [0.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+    )
+    targets = positions[:, 1:].clone()
+    poses = torch.eye(4).repeat(4, 2, 1, 1)
+    poses[..., :3, 3] = targets[..., :3]
+    parameters = {"motion_validity": validity, "joint_threshold_rad": 1e-6}
+    if validity == "semantic":
+        parameters["constraint_modalities"] = ["joint", "joint"]
+    case = replace(
+        _case(),
+        batch_size=4,
+        num_waypoints=2,
+        start_qpos=positions[:, 0].clone(),
+        reference_qpos=targets,
+        target_waypoints=poses,
+        case_parameters=parameters,
+    )
+    outcomes = compute_case_outcomes(
+        PlanResult(positions=positions, dt=dt, success=False),
+        case,
+        _MetricRobot(),
+        "arm",
+        validation_samples=validation_samples,
+        position_threshold_m=1e-6,
+        rotation_threshold_rad=0.1,
+        joint_limit_tolerance_rad=1e-6,
+    )
+    # No time passes in padding. A timed hold supplies a distinct visit; an
+    # illegal zero-time position change must remain visible to validation.
+    assert [o.ordered_waypoints_reached for o in outcomes] == [False, True, False, True]
+    assert [o.geometry_valid for o in outcomes] == [False, True, False, True]
+    assert all(not o.planning_success for o in outcomes)
+
+
+def test_arrival_grid_union_is_row_local_and_keeps_repeated_visits_ordered():
+    from embodichain.compute.trajectory import resample_with_distance
+    from embodichain_benchmarks.motion_generation.metrics.trajectory import (
+        _arrival_validation_grid,
+    )
+
+    positions = torch.tensor(
+        [[[0.0], [0.2], [1.0]], [[0.0], [1.0], [0.0]]], dtype=torch.float64
+    )
+    distance = resample_with_distance(positions, 5, device="cpu", backend="torch")
+    union, lengths = _arrival_validation_grid(positions, distance)
+    assert lengths.tolist() == [8, 5]
+    torch.testing.assert_close(
+        union[0, :8, 0],
+        torch.tensor([0.0, 0.1, 0.2, 0.25, 0.5, 0.6, 0.75, 1.0], dtype=torch.float64),
+    )
+    torch.testing.assert_close(
+        union[1, :5, 0], torch.tensor([0.0, 0.5, 1.0, 0.5, 0.0], dtype=torch.float64)
+    )
+
+    padded = torch.cat((positions, positions[:, -1:].expand(-1, 4, -1)), dim=1)
+    padded_dt = torch.tensor([[0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0]]).expand(2, -1)
+    padded_distance = resample_with_distance(padded, 5, device="cpu", backend="torch")
+    padded_union, padded_lengths = _arrival_validation_grid(
+        padded, padded_distance, dt=padded_dt
+    )
+    torch.testing.assert_close(padded_lengths, lengths)
+    for row, length in enumerate(lengths.tolist()):
+        torch.testing.assert_close(padded_union[row, :length], union[row, :length])
 
 
 def _timed_plan_result(
@@ -1421,6 +1559,23 @@ def test_curobo_joint_case_uses_reference_joint_waypoints():
     assert torch.equal(targets[1].qpos, joint_targets[:, 1])
 
 
+def test_curobo_prepares_both_named_atomic_arms():
+    adapter = _curobo_adapter()
+    case = replace(
+        _case(),
+        case_parameters={
+            "control_parts": {
+                "source": {"motion": "left_arm", "grasp": "left_eef"},
+                "destination": {"motion": "right_arm", "grasp": "right_eef"},
+            }
+        },
+    )
+    adapter.prepare_cases([case, replace(case, case_id="duplicate")])
+    calls = adapter.motion_generator.planner.prepare_backend.call_args_list
+    assert [call.kwargs["control_part"] for call in calls] == ["left_arm", "right_arm"]
+    assert all(call.kwargs["move_type"] is MoveType.EEF_MOVE for call in calls)
+
+
 def test_nmg_rejects_unknown_motion_validity():
     from embodichain_benchmarks.motion_generation.config import PlannerSpecCfg
     from embodichain_benchmarks.motion_generation.planners.base import PlannerContext
@@ -1457,7 +1612,7 @@ def test_nmg_rejects_unknown_motion_validity():
 
 
 def test_seed_override_applies_to_atomic_tracks():
-    suite = load_suite("atomic_franka_pgi_randomized")
+    suite = load_suite("atomic_franka_robotiq_randomized")
 
     _apply_overrides(suite, seeds=[104])
 
@@ -1466,7 +1621,7 @@ def test_seed_override_applies_to_atomic_tracks():
 
 
 def test_seed_override_adds_missing_atomic_track_seeds():
-    suite = load_suite("atomic_franka_pgi_randomized")
+    suite = load_suite("atomic_franka_robotiq_randomized")
     atomic_track = suite.enabled_tracks()[0]
     atomic_track.config.pop("seeds", None)
 
@@ -1591,7 +1746,14 @@ def test_atomic_skill_antipodal_grasp_uses_standalone_generator(
             success[unreachable_row] = False
         return success, solved
 
+    tcp = [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.15],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
     robot = SimpleNamespace(
+        cfg=SimpleNamespace(solver_cfg={"arm": SimpleNamespace(tcp=tcp)}),
         device=torch.device("cpu"),
         _all_indices=torch.arange(batch_size),
         _solvers={"arm": SimpleNamespace(root_link_name="base", get_ik=solve)},
@@ -1624,7 +1786,11 @@ def test_atomic_skill_antipodal_grasp_uses_standalone_generator(
         )
 
     generator_factory.assert_called_once_with(
-        n_sample=321, force_refresh=False, max_candidates=8
+        n_sample=321,
+        force_refresh=False,
+        max_candidates=8,
+        gripper_data=None,
+        root_from_tcp=tcp,
     )
     call = generator.get_valid_grasp_poses.call_args.kwargs
     assert torch.equal(call["mesh_vertices"], vertices)
@@ -1687,7 +1853,14 @@ def test_atomic_screen_selects_its_robot_environments(monkeypatch, env_ids):
         solved.append(target_xpos.clone())
         return torch.ones(len(qpos_seed), dtype=torch.bool), qpos_seed.clone()
 
+    tcp = [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.15],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
     robot = SimpleNamespace(
+        cfg=SimpleNamespace(solver_cfg={"arm": SimpleNamespace(tcp=tcp)}),
         device=torch.device("cpu"),
         _all_indices=torch.arange(8),
         _solvers={"arm": SimpleNamespace(root_link_name="base", get_ik=solve)},
@@ -1725,7 +1898,7 @@ def test_atomic_skill_pickup_builds_engine_owned_endpoint_binding():
     )
     motion_generator = Mock(robot=robot, device=torch.device("cpu"))
     motion_generator.planner.cfg.planner_type = "stub"
-    engine = AtomicActionEngine(
+    engine = AtomicSkillEngine(
         motion_generator,
         control_profiles={
             "hand": ControlPartCommandProfile.joint_positions(
@@ -1927,7 +2100,7 @@ def test_atomic_skill_press_invocation_uses_articulated_target_manifest():
     )
     motion_generator = Mock(robot=robot, device=torch.device("cpu"))
     motion_generator.planner.cfg.planner_type = "stub"
-    engine = AtomicActionEngine(
+    engine = AtomicSkillEngine(
         motion_generator,
         control_profiles={
             "hand": ControlPartCommandProfile.joint_positions(
@@ -1997,7 +2170,7 @@ def test_atomic_skill_slide_invocation_uses_tutorial_options():
     )
     motion_generator = Mock(robot=robot, device=torch.device("cpu"))
     motion_generator.planner.cfg.planner_type = "stub"
-    engine = AtomicActionEngine(
+    engine = AtomicSkillEngine(
         motion_generator,
         control_profiles={
             "hand": ControlPartCommandProfile.joint_positions(
@@ -2079,7 +2252,7 @@ def test_atomic_skill_twist_invocation_uses_tutorial_options():
     )
     motion_generator = Mock(robot=robot, device=torch.device("cpu"))
     motion_generator.planner.cfg.planner_type = "stub"
-    engine = AtomicActionEngine(
+    engine = AtomicSkillEngine(
         motion_generator,
         control_profiles={
             "hand": ControlPartCommandProfile.joint_positions(
@@ -2156,7 +2329,7 @@ def test_atomic_skill_move_held_object_uses_current_options_contract():
     )
     motion_generator = Mock(robot=robot, device=torch.device("cpu"))
     motion_generator.planner.cfg.planner_type = "stub"
-    engine = AtomicActionEngine(
+    engine = AtomicSkillEngine(
         motion_generator,
         control_profiles={
             "hand": ControlPartCommandProfile.joint_positions(
@@ -2958,8 +3131,7 @@ def test_report_includes_workload_and_measured_difficulty_tables(tmp_path):
     report = write_markdown_report(tmp_path / "report.md", suite, aggregates)
     text = report.read_text(encoding="utf-8")
 
-    assert text.count("\n| ---") == 6
-    assert "### Common Joint / FullPose comparison" in text
+    assert text.count("\n| ---") == 5
     assert "### Workload Success & Uncertainty" in text
     assert "### Measured Start Difficulty" in text
     assert text.count("## Time & Memory") == 1

@@ -1,35 +1,31 @@
 [build-system]
-# Use the legacy setuptools backend so the existing `setup.py` (which dynamically
-# detects torch and builds C/CUDA extensions via torch.utils.cpp_extension)
-# is still executed during build. This is a minimal, non-opinionated pyproject
-# that modernizes the package while preserving the custom extension build steps.
+# setup.py supplies package discovery, source mappings and bundled resources.
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
-
-# Note:
-# - Building the torch extensions requires a working PyTorch installation
-#   available at build time (or FORCE_CUDA=1 for cross-compilation). We keep
-#   the extension-building logic in `setup.py` because it needs to import
-#   `torch` at build time to select CUDA/Cpp extension classes.
-# - If you prefer a pure PEP 517 build without a legacy setup.py, we can
-#   refactor the extension-building logic into a custom build backend plugin.
 
 [project]
 name = "embodichain"
 description = "An end-to-end, GPU-accelerated, and modular platform for building generalized Embodied Intelligence."
 readme = "README.md"
 authors = [ { name = "EmbodiChain Developers" } ]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dynamic = ["version"]
 
 # Core install dependencies (kept from requirements.txt).
 dependencies = [
-  "dexsim_engine==0.5.1rc1",
+  "dexsim_engine==0.6.0rc1",
+  # DexSim and LeRobot require different OpenCV distributions sharing cv2.
+  # Keep their bindings on the same release to avoid mixed Python/native APIs.
+  "opencv-python==4.12.0.88; python_version < '3.12'",
+  "opencv-python-headless==4.12.0.88; python_version < '3.12'",
+  "opencv-python==4.13.0.92; python_version >= '3.12'",
+  "opencv-python-headless==4.13.0.92; python_version >= '3.12'",
   "shapely>=2.0",
   "setuptools>=78.1.1",
   "gymnasium>=0.29.1",
-  "huggingface_hub>=0.35.3,<1.0",
+  "huggingface_hub>=0.35.3,<0.36; python_version < '3.12'",
+  "huggingface_hub>=1.6,<2; python_version >= '3.12'",
   "langchain",
   "langchain-openai",
   "scipy",
@@ -48,12 +44,19 @@ dependencies = [
   "black==26.10.1",
   "fvcore",
   "h5py",
-  # Keep the tested 0.13 baseline; 0.15+ requires a newer torch stack.
-  "tensordict>=0.13,<0.15",
+  "tensordict>=0.13,<0.15; python_version < '3.12'",
+  "tensordict>=0.15.3,<0.16; python_version >= '3.12'",
   "viser==1.0.21",
-  "lerobot>=0.4.4,<0.5",
-  # torch 2.7 compatibility; newer TorchCodec releases target newer torch ABIs.
-  "torchcodec>=0.5,<0.6"
+  "lerobot==0.4.4; python_version < '3.12'",
+  "lerobot[training]==0.6.1; python_version >= '3.12'",
+  # TorchCodec's binary interface follows torch, not the LeRobot SDK version.
+  # Keep each Python profile's torch/torchvision/TorchCodec versions paired.
+  "torch>=2.7,<2.8; python_version < '3.12'",
+  "torchvision>=0.22,<0.23; python_version < '3.12'",
+  "torchcodec>=0.5,<0.6; python_version < '3.12'",
+  "torch>=2.11,<2.12; python_version >= '3.12'",
+  "torchvision>=0.26,<0.27; python_version >= '3.12'",
+  "torchcodec>=0.11.1,<0.12; python_version >= '3.12'"
 ]
 
 [project.optional-dependencies]
@@ -66,6 +69,10 @@ worldparticle = [
     "open3d @ http://192.168.3.43:8080/packages/open3d-0.19.0%2B1e7b174-1torch271cu128sm120-cp312-cp312-manylinux_2_35_x86_64.whl#sha256=209bcee758d25953bcc4cab284ad4fb17f5aace0a3e1e3c296750511bf4257ad ; sys_platform == 'linux' and platform_machine == 'x86_64' and python_version == '3.12'",
     "flash-attn @ http://192.168.3.43:8080/packages/flash_attn-2.8.3%2Bcu12torch2.7cxx11abiTRUE-cp312-cp312-linux_x86_64.whl#sha256=cafd4f708725e1be95495a86cbf418cfada08e707c8a797def61488a2a3c4f72 ; sys_platform == 'linux' and platform_machine == 'x86_64' and python_version == '3.12'",
 ]
+geometry = [
+  # Optional mesh inputs for pure numerical geometry; no simulation/FCL backend.
+  "trimesh>=4.9",
+]
 rigidformer = [
   "einops>=0.8.1",
   "roma==1.5.4",
@@ -77,7 +84,7 @@ policy-deploy = [
   "onnxruntime-gpu>=1.20,<1.27",
 ]
 gensim = [
-  "bpy",
+  # Blender runs in a separate Python 3.11 runtime; see docker/README.md.
   "gradio>=6.17.3,<6.18",
   "pyrender==0.1.45",
   "requests",
@@ -113,12 +120,14 @@ bpy = { index = "blender" }
 [[tool.uv.index]]
 name = "blender"
 url = "https://download.blender.org/pypi/"
+explicit = true
 
 [tool.setuptools.dynamic]
 version = { file = ["VERSION"] }
 
 [tool.setuptools]
 include-package-data = false
+license-files = ["LICENSE", "NOTICE", "licenses/*.txt"]
 
 [tool.black]
 

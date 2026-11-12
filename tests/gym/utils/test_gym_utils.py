@@ -227,7 +227,7 @@ def test_config_to_cfg_rejects_conflicting_action_declarations() -> None:
         config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
 
 
-@pytest.mark.parametrize("backend", (None, True, "physx", " newton"))
+@pytest.mark.parametrize("backend", (None, True, "Default", " newton"))
 def test_config_to_cfg_rejects_invalid_physics_backend(backend: object) -> None:
     """Only the two exact public backend names are accepted."""
     config = {
@@ -870,6 +870,24 @@ def test_viser_launcher_flag_implies_headless_viser_commands():
     assert merged_config["headless"] is True
     assert merged_config["visualization"]["backend"] == "viser"
     assert merged_config["visualization"]["allow_commands"] is True
+
+
+@pytest.mark.parametrize("allow_commands", [False, True])
+def test_viser_launcher_preserves_explicit_command_policy(allow_commands):
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser)
+    config = {
+        "id": "Dummy-v0",
+        "physics": "default",
+        "visualization": {"allow_commands": allow_commands},
+    }
+    original = deepcopy(config)
+
+    merged = merge_args_with_gym_config(parser.parse_args(["--viser"]), config)
+
+    assert merged["visualization"]["backend"] == "viser"
+    assert merged["visualization"]["allow_commands"] is allow_commands
+    assert config == original
 
 
 def test_sensor_and_extra_obs_together():
@@ -2586,6 +2604,24 @@ def test_build_trajectory_buffer_uids_filter():
     assert "ball" not in buf["states"]["rigid_objects"].keys()
 
 
+@pytest.mark.parametrize("uids", [None, ["wire"], ["other"]])
+def test_cable_trajectory_buffer_preserves_topology_and_uid_selection(uids):
+    env = _stub_env()
+    env.sim._cable_objects = {
+        "wire": SimpleNamespace(data=SimpleNamespace(num_segments=3)),
+        "other": SimpleNamespace(data=SimpleNamespace(num_segments=5)),
+    }
+    buffer = build_trajectory_buffer(
+        env, max_steps=4, num_envs=2, device="cpu", uids=uids
+    )
+    cables = buffer["states", "cables"]
+    assert set(cables.keys()) == set(uids or env.sim._cable_objects)
+    for uid in cables.keys():
+        state = cables[uid, "segment_state_w"]
+        assert state.shape == (2, 4, env.sim._cable_objects[uid].data.num_segments, 13)
+        assert state.dtype == torch.float32
+
+
 def test_load_trajectory_validates_and_returns_dict(tmp_path):
     data = {
         "states": TensorDict({"a": torch.zeros(1, 4)}, batch_size=[1, 4]),
@@ -2642,6 +2678,58 @@ def test_launcher_omissions_preserve_runtime_configuration() -> None:
     assert merge_args_with_gym_config(args, config) == config
 
 
+def test_configured_real2sim_profile_resolves_from_task_before_dataset_override(
+    tmp_path, monkeypatch
+) -> None:
+    """The launch selector survives parsing without becoming an EnvCfg field."""
+    path = tmp_path / "deployment/task.yaml"
+    path.parent.mkdir()
+    save_config(
+        path,
+        {
+            "id": "ConfiguredSource-v0",
+            "physics": "default",
+            "real2sim": {"profile": "profiles/collection.yaml"},
+            "env": {"dataset": {}},
+        },
+    )
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser, require_gym_config=True)
+    args = parser.parse_args(["--gym-config", str(path)])
+    args.expansion_dataset_dir = str(tmp_path / "data")
+    observed = {}
+
+    def parse(config, **kwargs):
+        observed.update(config)
+        return SimpleNamespace()
+
+    monkeypatch.setattr("embodichain.lab.gym.utils.gym_utils.config_to_cfg", parse)
+    monkeypatch.chdir(tmp_path)
+    _, resolved, _ = build_env_cfg_from_args(args)
+    assert resolved["real2sim"]["profile"] == str(
+        path.parent / "profiles/collection.yaml"
+    )
+    assert resolved["env"]["dataset"] == {}
+    assert "real2sim" not in observed
+
+
+@pytest.mark.parametrize(
+    "binding",
+    [None, {}, {"profile": ""}, {"profile": "a.yaml", "provider": "arbitrary"}],
+)
+def test_configured_real2sim_rejects_invalid_launch_selection(
+    tmp_path, binding
+) -> None:
+    path = tmp_path / "task.yaml"
+    save_config(
+        path, {"id": "InvalidSource-v0", "physics": "default", "real2sim": binding}
+    )
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser, require_gym_config=True)
+    with pytest.raises(ValueError, match="real2sim"):
+        build_env_cfg_from_args(parser.parse_args(["--gym-config", str(path)]))
+
+
 def test_launcher_explicit_runtime_overrides_win() -> None:
     parser = argparse.ArgumentParser()
     add_env_launcher_args_to_parser(parser, require_gym_config=True)
@@ -2675,6 +2763,82 @@ def test_launcher_can_explicitly_disable_configured_headless() -> None:
     args = parser.parse_args(["--gym_config", "task.yaml", "--no-headless"])
     merged = merge_args_with_gym_config(args, {"physics": "default", "headless": True})
     assert merged["headless"] is False
+
+
+@pytest.mark.parametrize(
+    "collection", ["background", "rigid_object", "rigid_object_group"]
+)
+def test_mesh_asset_paths_resolve_collision_and_visual_geometry(
+    collection: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Separate render meshes use the same asset resolver as collision meshes."""
+    paths = {
+        "TaskMeshes/collision.obj": str(tmp_path / "collision.obj"),
+        "TaskMeshes/visual.glb": str(tmp_path / "visual.glb"),
+    }
+    monkeypatch.setattr("embodichain.data.get_data_path", paths.__getitem__)
+    obj = {
+        "uid": "cup",
+        "shape": {"shape_type": "Mesh", "fpath": "TaskMeshes/collision.obj"},
+        "visual_shape": {"shape_type": "Mesh", "fpath": "TaskMeshes/visual.glb"},
+    }
+    entries = [obj]
+    if collection == "rigid_object_group":
+        entries = [{"uid": "cups", "rigid_objects": {"cup": obj}}]
+    cfg = config_to_cfg(
+        {
+            "id": "EmbodiedEnv-v1",
+            "physics": "default",
+            "env": {},
+            "robot": {"uid": "robot"},
+            collection: entries,
+        },
+        manager_modules=DEFAULT_MANAGER_MODULES,
+    )
+    parsed = getattr(cfg, collection)[0]
+    if collection == "rigid_object_group":
+        parsed = parsed.rigid_objects["cup"]
+    assert parsed.shape.fpath == paths["TaskMeshes/collision.obj"]
+    assert parsed.visual_shape.fpath == paths["TaskMeshes/visual.glb"]
+
+
+@pytest.mark.parametrize("owner", ["inline", "environment", "scene"])
+def test_fluid_point_files_resolve_from_declaration_owner(
+    owner: str, tmp_path: Path
+) -> None:
+    physical_dir = tmp_path / "physical"
+    physical_dir.mkdir()
+    points = np.array([[0.0, 0.0, 0.0], [0.02, 0.0, 0.0]], dtype=np.float32)
+    np.savez(physical_dir / "water.npz", positions=points)
+    fluid = {"uid": "water", "spawn": {"kind": "points", "file_path": "water.npz"}}
+    config = {
+        "id": "EmbodiedEnv-v1",
+        "physics": "newton",
+        "env": {},
+        "robot": {"uid": "robot"},
+    }
+    source_path = tmp_path / "task.yaml"
+    if owner == "inline":
+        config["fluid_object"] = [fluid]
+        source_path = physical_dir / "task.yaml"
+    else:
+        component = {"simulation": {"fluid_object": [fluid]}}
+        if owner == "environment":
+            component.update(environment_id="fluid_test", physics="newton", env={})
+            del config["physics"], config["env"]
+        else:
+            component["scene_id"] = "fluid_test"
+        save_config(physical_dir / "component.yaml", component)
+        config[owner] = {"component": "physical/component.yaml"}
+
+    cfg = config_to_cfg(
+        config, manager_modules=DEFAULT_MANAGER_MODULES, source_path=source_path
+    )
+
+    spawn = cfg.fluid_object[0].spawn
+    assert spawn.file_path == str(physical_dir / "water.npz")
+    np.testing.assert_array_equal(spawn.sample(0.01), points)
+    assert fluid["spawn"]["file_path"] == "water.npz"
 
 
 def test_config_to_cfg_loads_render_only_objects():
@@ -2726,3 +2890,55 @@ def test_config_to_cfg_resolves_usd_source_files(monkeypatch, tmp_path):
         assert isinstance(asset.source, UsdSourceCfg)
         assert asset.source.file_path == str(tmp_path / "scene.usda")
         assert asset.source.source_prim_path == "/World/Asset"
+
+
+def test_recording_only_observation_does_not_expand_policy_rollout_schema():
+    config = {
+        "sensor": [],
+        "env": {
+            "observations": {
+                "pose": {
+                    "mode": "add",
+                    "name": "private_pose",
+                    "consumers": ["recording"],
+                    "extra": {"shape": [7]},
+                },
+            }
+        },
+    }
+    buffer = init_rollout_buffer_from_config(
+        config=config, max_episode_steps=2, batch_size=1, state_dim=3, device="cpu"
+    )
+    assert "private_pose" not in buffer["obs"]
+
+
+@pytest.mark.parametrize(
+    "consumers",
+    [["recording"], "recording", ["evidence"], ["unknown"], ["policy", "policy"]],
+)
+def test_configured_observation_consumers_decode_and_validate(consumers):
+    config = {
+        "id": "RawObservation-v1",
+        "physics": "default",
+        "robot": {"uid": "robot"},
+        "env": {
+            "observations": {
+                "pose": {
+                    "func": "get_entity_state",
+                    "mode": "add",
+                    "name": "cube_pose",
+                    "consumers": consumers,
+                    "params": {"entity_cfg": {"uid": "cube"}},
+                    "extra": {"shape": [7]},
+                },
+            }
+        },
+    }
+    if consumers == ["recording"]:
+        cfg = config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+        assert cfg.observations.pose.consumers == ("recording",)
+        assert cfg.observations.pose.extra == {"shape": [7]}
+        assert cfg.observations.pose.params["entity_cfg"].uid == "cube"
+    else:
+        with pytest.raises(ValueError, match="Invalid observation consumers"):
+            config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)

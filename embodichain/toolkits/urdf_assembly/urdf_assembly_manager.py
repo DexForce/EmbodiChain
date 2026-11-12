@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import copy
 import os
 import time
@@ -21,9 +23,9 @@ import logging
 import numpy as np
 from pathlib import Path
 from functools import wraps
+from copy import deepcopy
 import xml.etree.ElementTree as ET
 
-from scipy.spatial.transform import Rotation as R
 from typing import Union, Tuple
 
 from embodichain.toolkits.urdf_assembly.logging_utils import (
@@ -45,6 +47,7 @@ from embodichain.toolkits.urdf_assembly.sensor import (
 from embodichain.toolkits.urdf_assembly.connection import (
     URDFConnectionManager,
 )
+from embodichain.toolkits.urdf_assembly.name_normalizer import NameNormalizer
 from embodichain.toolkits.urdf_assembly.mesh import URDFMeshManager
 from embodichain.toolkits.urdf_assembly.file_writer import (
     URDFFileWriter,
@@ -143,28 +146,29 @@ class URDFAssemblyManager:
         self.sensor_registry = sensor_registry or SensorRegistry()
 
         # Initialize mesh manager
-        self.mesh_manager = mesh_manager or URDFMeshManager(output_dir=".")
+        self.mesh_manager = (
+            mesh_manager
+            if mesh_manager is not None
+            else URDFMeshManager(output_dir=".")
+        )
 
         # Initialize managers for components and sensors
-        self.component_manager = component_manager or URDFComponentManager(
-            self.mesh_manager, name_case=self._name_case
+        self.component_manager = (
+            component_manager
+            if component_manager is not None
+            else URDFComponentManager(self.mesh_manager, name_case=self._name_case)
         )
-        self.sensor_manager = sensor_manager or URDFSensorManager(self.mesh_manager)
+        self.sensor_manager = (
+            sensor_manager
+            if sensor_manager is not None
+            else URDFSensorManager(self.mesh_manager)
+        )
 
         # Processing order for components with their name prefixes
         # Tuple format: (component_name, prefix)
-        self._component_order_and_prefix = [
-            ("chassis", None),
-            ("legs", None),
-            ("torso", None),
-            ("head", None),
-            ("left_arm", "left_"),
-            ("right_arm", "right_"),
-            ("left_hand", "left_"),
-            ("right_hand", "right_"),
-            ("arm", None),
-            ("hand", None),
-        ]
+        self._component_order_and_prefix = list(
+            NameNormalizer.resolve_component_prefixes().items()
+        )
 
         # Attachment position indices for component connections.
         # This dictionary defines which link of each component should be used as the connection point
@@ -243,30 +247,8 @@ class URDFAssemblyManager:
         self._name_case = new_name_case
 
     def _apply_case(self, kind: str, name: str | None) -> str | None:
-        """Normalize a name according to the assembly-wide case policy.
-
-        This helper mirrors the behavior of the managers' own case helpers so
-        that any name sets computed here (e.g. for sensors) stay consistent
-        with how names are written into the URDF.
-
-        Args:
-            kind (str): One of ``"joint"`` or ``"link"``.
-            name (str | None): The original name.
-
-        Returns:
-            str | None: The normalized name, or the original value if the
-            kind is unknown or its mode is ``"none"``.
-        """
-
-        if name is None:
-            return None
-
-        mode = self._name_case.get(kind, "none")
-        if mode == "lower":
-            return name.lower()
-        if mode == "upper":
-            return name.upper()
-        return name
+        """Use the component writer's name policy for collision checks."""
+        return self.component_manager.name_normalizer.normalize(kind, name)
 
     @property
     def component_order_and_prefix(self):
@@ -467,123 +449,6 @@ class URDFAssemblyManager:
         """
         return self.sensor_registry.all()
 
-    def _load_urdf(self, urdf_path: str) -> ET.Element | None:
-        r"""Load a URDF file and return its root element.
-
-        Args:
-            urdf_path (str): Path to the URDF file.
-
-        Returns:
-            ET.Element: The root element of the parsed URDF XML.
-        """
-        try:
-            tree = ET.parse(urdf_path)
-            return tree.getroot()
-        except Exception as e:
-            self.logger.error(f"Failed to load URDF {urdf_path}: {e}")
-            return None
-
-    def _apply_transformation(
-        self, urdf: ET.Element, transform: np.ndarray, link_name: str
-    ):
-        r"""Applies a transformation matrix to the 'xyz' attributes of the origins of the specified link and its first joint in the URDF.
-
-        Args:
-            urdf (ET.Element): The root element of the URDF to transform.
-            transform (np.ndarray): A 4x4 transformation matrix to apply.
-            link_name (str): The name of the link to apply the transformation to.
-        """
-        # Now handle the first joint connected to this link
-        for joint in urdf.findall("joint"):
-            origin = joint.find("origin")
-            if origin is not None:
-                # Check if the joint connects to the specified link
-                child_link = joint.find("child").get("link")
-                if child_link == link_name:
-                    xyz = np.array([float(val) for val in origin.get("xyz").split()])
-                    transformed_xyz = np.dot(transform[:3, :3], xyz) + transform[:3, 3]
-                    origin.set("xyz", " ".join(map(str, transformed_xyz)))
-
-                    # Apply transformation to rpy
-                    if "rpy" in origin.attrib:
-                        rpy = np.array(
-                            [float(val) for val in origin.get("rpy").split()]
-                        )
-                        rotation = R.from_euler("xyz", rpy)
-                        transformed_rotation = (
-                            R.from_matrix(transform[:3, :3]) * rotation
-                        )
-                        transformed_rpy = transformed_rotation.as_euler("xyz")
-                        origin.set("rpy", " ".join(map(str, transformed_rpy)))
-                    elif "quat" in origin.attrib:
-                        quat = np.array(
-                            [float(val) for val in origin.get("quat").split()]
-                        )
-                        rotation = R.from_euler("xyz", quat)
-                        transformed_rotation = (
-                            R.from_matrix(transform[:3, :3]) * rotation
-                        )
-                        transformed_rpy = transformed_rotation.as_euler("xyz")
-                        origin.set("rpy", " ".join(map(str, transformed_rpy)))
-
-                    break  # Stop after processing the first joint
-
-    def _create_base_link(self) -> ET.Element:
-        r"""Creates a base link and returns it.
-
-        Returns:
-            ET.Element: The base link element.
-        """
-        base_link = ET.Element("link", name=self.base_link_name)
-
-        return base_link
-
-    def _validate_urdf_file(self, urdf_path: str) -> bool:
-        r"""Validate URDF file integrity and format compliance
-
-        Args:
-            urdf_path (str): Path to the URDF file to validate
-
-        Returns:
-            bool: True if file is valid, False otherwise
-        """
-        try:
-            # Check if file exists
-            if not os.path.exists(urdf_path):
-                self.logger.error(f"URDF file not found: {urdf_path}")
-                return False
-
-            # Check file size to ensure it's not empty
-            if os.path.getsize(urdf_path) == 0:
-                self.logger.error(f"URDF file is empty: {urdf_path}")
-                return False
-
-            # Attempt to parse XML structure
-            root = ET.parse(urdf_path).getroot()
-            if root.tag != "robot":
-                self.logger.error(f"Invalid URDF root element: {root.tag}")
-                return False
-
-            # Check for presence of basic link elements
-            if not root.findall("link"):
-                self.logger.error(f"No links found in URDF: {urdf_path}")
-                return False
-
-            # Check robot name attribute
-            robot_name = root.get("name")
-            if not robot_name:
-                self.logger.warning(f"URDF robot has no name attribute: {urdf_path}")
-
-            self.logger.debug(f"URDF file validation passed: {urdf_path}")
-            return True
-
-        except ET.ParseError as e:
-            self.logger.error(f"XML parse error in {urdf_path}: {e}")
-            return False
-        except Exception as e:
-            self.logger.error(f"Validation error for {urdf_path}: {e}")
-            return False
-
     def _generate_connection_rules(self) -> list:
         r"""Dynamically generate connection rules based on available components.
 
@@ -740,6 +605,17 @@ class URDFAssemblyManager:
         Returns:
             ET.Element: The root element of the merged URDF.
         """
+        # Sensor processing rewrites XML and mesh references. Keep the injected
+        # manager's source templates separate from one merge's working cache.
+        sources = self.sensor_manager.attached_sensors
+        self.sensor_manager.attached_sensors = deepcopy(sources)
+        try:
+            return self._merge_urdfs(output_path, use_signature_check)
+        finally:
+            self.sensor_manager.attached_sensors = sources
+
+    def _merge_urdfs(self, output_path: str, use_signature_check: bool) -> ET.Element:
+        """Build one output from the assembly registries and isolated sensor cache."""
         output_path = os.path.abspath(output_path)
         assembly_signature = None
 
@@ -870,17 +746,25 @@ class URDFAssemblyManager:
         # Initialize managers for mesh handling and component processing
         output_dir = os.path.dirname(output_path) or "."
         ensure_directory_exists(output_dir, self.logger)
-        mesh_manager = URDFMeshManager(output_dir)
-        mesh_manager.ensure_dirs()
-        component_manager = URDFComponentManager(
-            mesh_manager, name_case=self._name_case
+        mesh_managers = (
+            self.mesh_manager,
+            self.component_manager.mesh_manager,
+            self.sensor_manager.mesh_manager,
         )
+        for mesh_manager in {
+            id(manager): manager for manager in mesh_managers
+        }.values():
+            mesh_manager.output_dir = output_dir
+            mesh_manager.ensure_dirs()
+        component_manager = self.component_manager
+        for kind, mode in self._name_case.items():
+            component_manager.name_normalizer.set_case(kind, mode)
         connection_manager = URDFConnectionManager(
             self.base_link_name, name_case=self._name_case
         )
 
         # Initialize sensor manager with mesh_manager
-        sensor_manager = URDFSensorManager(mesh_manager)
+        sensor_manager = self.sensor_manager
 
         # Process any pending enhanced sensors
         if hasattr(self, "_pending_sensors"):

@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from embodichain.data_pipeline.recording.schema import RecordedCamera
+
 import copy
 import json
 import math
@@ -60,6 +62,7 @@ from embodichain.lab.gym.envs.expert_trajectory import encode_expert_action
 from .action_types import ActionDescriptor
 from .manager_base import Functor
 from .cfg import DatasetFunctorCfg
+from .dataset_manager import _DatasetSaveReceipts
 
 __all__ = ["LeRobotRecorder"]
 
@@ -121,10 +124,27 @@ except ImportError:
     __all__ = []
 
 
+def _get_dataset_writer(dataset: Any) -> Any:
+    """Resolve the episode owner; 0.4.4's ``writer`` is only a Parquet writer."""
+    writer = getattr(dataset, "writer", None)
+    return writer if hasattr(writer, "episode_buffer") else dataset
+
+
 if LEROBOT_AVAILABLE:
 
     class _ImageCompressionLeRobotDataset(LeRobotDataset):
         """LeRobot dataset that overrides image PNG compression on request."""
+
+        @classmethod
+        def create(cls, *args: Any, **kwargs: Any) -> _ImageCompressionLeRobotDataset:
+            """Create a dataset with compression applied at its write owner."""
+            dataset = super().create(*args, **kwargs)
+            # In 0.6.1, DatasetWriter owns image persistence. Redirect only this
+            # instance's hook; never patch the upstream class globally.
+            writer = _get_dataset_writer(dataset)
+            if writer is not dataset:
+                writer._save_image = dataset._save_image
+            return dataset
 
         def _save_image(self, image: Any, fpath: Path, compress_level: int = 1) -> None:
             # LeRobot passes level 6 for image features and level 1 for the
@@ -134,7 +154,11 @@ if LEROBOT_AVAILABLE:
             image_compress_level = getattr(self, "image_compress_level", None)
             if image_compress_level is not None and compress_level == 6:
                 compress_level = image_compress_level
-            super()._save_image(image, fpath, compress_level)
+            writer = _get_dataset_writer(self)
+            if writer is self:
+                super()._save_image(image, fpath, compress_level)
+            else:
+                type(writer)._save_image(writer, image, fpath, compress_level)
 
 else:
     _ImageCompressionLeRobotDataset = None
@@ -626,7 +650,7 @@ class LeRobotRecorder(Functor):
         extra: Optional[Dict] = None,
         use_videos: bool = False,
         **kwargs,
-    ) -> None:
+    ) -> _DatasetSaveReceipts | None:
         """Main entry point for the recorder functor.
 
         This method is called by DatasetManager.apply(mode="save") to save completed episodes.
@@ -663,12 +687,12 @@ class LeRobotRecorder(Functor):
 
             # Save episodes for specified environments
             if len(env_ids) > 0:
-                self._save_episodes(env_ids)
+                return self._save_episodes(env_ids)
 
     def _save_episodes(
         self,
         env_ids: torch.Tensor,
-    ) -> None:
+    ) -> _DatasetSaveReceipts:
         """Save completed episodes for specified environments.
 
         This reads each env's slice from the rollout buffer and delegates to
@@ -677,6 +701,7 @@ class LeRobotRecorder(Functor):
         clone the slice and defer the actual conversion/disk-write to a
         background worker without racing the buffer reuse on reset.
         """
+        receipts: dict[int, list[str]] = {}
         for env_id in env_ids.cpu().tolist():
             step = self._episode_length(env_id)
             # The first env.reset() can request a dataset save before any
@@ -741,6 +766,9 @@ class LeRobotRecorder(Functor):
                     raise RuntimeError(f"Committed {label} was not persisted.")
                 if fragment_id is not None:
                     resolved_fragment_ids.append(fragment_id)
+                if payload[-1] is not None and "episode_uuid" in payload[-1]:
+                    receipts.setdefault(env_id, []).append(payload[-1]["episode_uuid"])
+        return _DatasetSaveReceipts("persisted", receipts)
 
     def _episode_payloads(
         self,
@@ -970,6 +998,32 @@ class LeRobotRecorder(Functor):
         if not hasattr(self, "_partial_fragment_commits"):
             self._partial_fragment_commits = {}
 
+    def persist_episode_payload(
+        self,
+        env_id: int,
+        obs_list: Sequence[Mapping[str, Any]],
+        action_list: torch.Tensor | Sequence[torch.Tensor],
+        annotations: Mapping[str, Any] | None = None,
+        episode_metadata: Mapping[str, Any] | None = None,
+    ) -> bool:
+        """Persist recorded evidence through the canonical writer lifecycle.
+
+        Args:
+            env_id: Recorder environment row whose schema is used.
+            obs_list: Indexable observations; streaming views may load one frame
+                at a time. The writer consumes the pre-action observations.
+            action_list: Actual submitted controller commands in recorded order.
+            annotations: Optional segment annotations aligned to the episode.
+            episode_metadata: Frozen provenance and stable episode identity.
+
+        Returns:
+            Whether an episode was committed. Repeated completed fragments use
+            the existing journal deduplication; ambiguous commits remain errors.
+        """
+        return self._persist_episode_payload(
+            env_id, obs_list, action_list, annotations, episode_metadata
+        )
+
     def _persist_episode_payload(
         self,
         env_id: int,
@@ -1198,6 +1252,14 @@ class LeRobotRecorder(Functor):
         )
         journal = getattr(self, "_recording_journal", None)
         identity = sidecar_metadata["episode_uuid"]
+        if "episode_outcome" in sidecar_metadata:
+            # Prepare the intended sidecar for recovery. It is published only
+            # after the dataset and depth commits below have succeeded.
+            sidecar_metadata["episode_outcome"]["persistence"] = {
+                "dataset_selected": True,
+                "dataset": [{"status": "persisted", "episode_uuid": identity}],
+                "trajectory": sidecar_metadata.get("trajectory_path"),
+            }
         commit_started = False
         journal_prepared = False
         try:
@@ -1363,13 +1425,14 @@ class LeRobotRecorder(Functor):
     def _normalize_scalar_episode_buffer(self) -> None:
         """Collapse single-value arrays before LeRobot serializes an episode.
 
-        LeRobot 0.4.4 validates a scalar feature declared with shape ``(1,)``
+        LeRobot validates a scalar feature declared with shape ``(1,)``
         as a one-dimensional NumPy array when :meth:`add_frame` is called, but
         maps that same feature to a Hugging Face ``Value`` during
         :meth:`save_episode`. Without normalization, LeRobot stacks the frame
         arrays into shape ``(frames, 1)`` and ``datasets`` converts each
         ``array([value])`` to a Python scalar. NumPy 2.4 rejects that implicit
-        conversion.
+        conversion. Version 0.6.1 also normalizes scalars internally; applying
+        this step to its writer buffer retains the same input contract.
 
         This method runs after per-frame validation and replaces buffered
         one-element numeric arrays with dtype-preserving NumPy scalars. The
@@ -1383,7 +1446,8 @@ class LeRobotRecorder(Functor):
         if self.dataset is None:
             return
 
-        episode_buffer = getattr(self.dataset, "episode_buffer", None)
+        writer = _get_dataset_writer(self.dataset)
+        episode_buffer = getattr(writer, "episode_buffer", None)
         features = getattr(self.dataset, "features", None)
         if not isinstance(episode_buffer, dict) or not isinstance(features, Mapping):
             return
@@ -1576,9 +1640,10 @@ class LeRobotRecorder(Functor):
                 # Flush + stop the async image writer (if enabled) so every
                 # explicitly committed frame lands on disk before metadata is
                 # finalized.
-                if self.dataset.image_writer is not None:
+                writer = _get_dataset_writer(self.dataset)
+                if writer.image_writer is not None:
                     try:
-                        self.dataset.stop_image_writer()
+                        writer.stop_image_writer()
                     except Exception as error:  # noqa: BLE001 - aggregate cleanup
                         errors.append(f"image writer: {error}")
                 try:
@@ -1834,7 +1899,7 @@ class LeRobotRecorder(Functor):
             for sensor_name, value in sensor_obs_space.items():
                 sensor = self._env.get_sensor(sensor_name)
 
-                if isinstance(sensor, Camera):
+                if isinstance(sensor, (Camera, RecordedCamera)):
                     for frame_name, space in value.items():
                         if frame_name in CAMERA_IMAGE_FRAMES:
                             feature_key = self._camera_feature_key(
@@ -2170,7 +2235,7 @@ class LeRobotRecorder(Functor):
             for sensor_name, value in sensor_obs_space.items():
                 sensor = self._env.get_sensor(sensor_name)
 
-                if isinstance(sensor, Camera):
+                if isinstance(sensor, (Camera, RecordedCamera)):
                     for frame_name in value:
                         if (
                             frame_name not in CAMERA_IMAGE_FRAMES

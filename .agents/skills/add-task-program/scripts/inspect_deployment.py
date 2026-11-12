@@ -28,7 +28,6 @@ from embodichain.lab.gym.utils._component_composition import (
     _resolve_gym_components,
     _validate_scene_binding_targets,
 )
-from embodichain.lab.task_program import load_task_program
 from embodichain.lab.task_program.integrations._configured_composition import (
     _load_configured_task_program_deployment,
 )
@@ -37,7 +36,7 @@ from embodichain.utils.utility import load_config
 __all__ = ["inspect_deployment", "main"]
 
 
-def inspect_deployment(path: str | Path) -> dict[str, object]:
+def inspect_deployment(path: str | Path, *, explain: bool = False) -> dict[str, object]:
     """Decode, compose, and preflight one configured Task Program deployment.
 
     Args:
@@ -81,6 +80,7 @@ def inspect_deployment(path: str | Path) -> dict[str, object]:
     deployment = _load_configured_task_program_deployment(
         task_program=task_program,
         skill_profile=physical.embodiment_skill_profile,
+        evaluation=physical.evaluation,
         base_dir=deployment_path.parent,
     )
     _validate_scene_binding_targets(
@@ -88,14 +88,22 @@ def inspect_deployment(path: str | Path) -> dict[str, object]:
         simulation=physical.scene_config,
     )
 
+    from embodichain.lab.task_program.integrations.demo_skill import (
+        _ConfiguredDemoSkillSource,
+    )
+
+    if (
+        any(
+            isinstance(source, _ConfiguredDemoSkillSource)
+            for source in deployment.integration.adapter_factory.nominal_motion_sources
+        )
+        and physical.config.get("num_envs", 1) != 1
+    ):
+        raise ValueError("configured Demo Skills require num_envs == 1")
     registration = deployment.integration.registration
     registration.assert_unchanged()
     catalog = registration.catalog
-    program = load_task_program(
-        deployment.program_path,
-        integration=deployment.selection,
-        validation_context=catalog,
-    )
+    program = deployment.load_program()
     if program.program_id != deployment.program_id:
         raise ValueError(
             "Task integration expects program_id "
@@ -112,7 +120,7 @@ def inspect_deployment(path: str | Path) -> dict[str, object]:
     environment_id = physical.config.get("id")
     if type(environment_id) is not str or not environment_id:
         raise ValueError("Runnable deployment must declare a non-empty string id.")
-    return {
+    summary = {
         "deployment": str(deployment_path),
         "environment_id": environment_id,
         "program_id": program.program_id,
@@ -124,6 +132,57 @@ def inspect_deployment(path: str | Path) -> dict[str, object]:
         "call_count": len(calls),
         "semantic_calls": semantic_calls,
     }
+    if explain:
+        from embodichain.lab.task_program.integrations.catalog import _canonical_value
+        from embodichain.lab.task_program.integrations._program_identity import (
+            task_program_fingerprint,
+        )
+
+        source_map = getattr(program, "__authoring_source_map__", None)
+        summary["normalized_program"] = (
+            None if source_map is None else source_map.declaration
+        )
+        summary["program_fingerprint"] = task_program_fingerprint(compiled)
+        summary["contracts"] = catalog.semantic_planning_catalog(
+            preset_id=deployment.selection.runtime_preset
+        )
+        summary["targets"] = _canonical_value(program.targets)
+        summary["calls"] = [
+            dict(
+                index=c.call_index,
+                segment=s.segment_id,
+                source_path=list(c.source_path),
+                authored_path=(
+                    list(source_map.original_path(c.source_path))
+                    if source_map
+                    else list(c.source_path)
+                ),
+                call=c.call.to_metadata(),
+                resource_ids={
+                    **(
+                        dict(
+                            catalog.robot_profile.defaults[
+                                catalog.call_catalog.discover(c.call).skill_id
+                            ].resources
+                        )
+                        if catalog.call_catalog.discover(c.call).skill_id
+                        in catalog.robot_profile.defaults
+                        else {}
+                    ),
+                    **dict(c.call.resources),
+                },
+            )
+            for s in compiled.iter_segments()
+            for c in s.calls
+        ]
+        summary["nominal_sources"] = _canonical_value(
+            deployment.integration.adapter_factory.nominal_motion_sources
+        )
+        summary["limitations"] = {
+            "demo_skill_batch_size": 1,
+            "configured_sources_require_sequential": True,
+        }
+    return summary
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -144,6 +203,11 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Emit one machine-readable result object.",
     )
+    parser.add_argument(
+        "--explain",
+        action="store_true",
+        help="Include normalized declarations, contracts, sources and authored locations.",
+    )
     return parser
 
 
@@ -161,7 +225,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     errors: list[dict[str, str]] = []
     for path in args.deployments:
         try:
-            summaries.append(inspect_deployment(path))
+            summaries.append(inspect_deployment(path, explain=args.explain))
         except Exception as error:
             errors.append(
                 {

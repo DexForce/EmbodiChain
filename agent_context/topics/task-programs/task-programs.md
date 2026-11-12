@@ -12,7 +12,7 @@ embodichain.lab.task_program
 Use these terms consistently:
 
 - **Atomic Skill**: an executable low-level capability implemented under
-  `embodichain.lab.sim.atomic_actions`.
+  `embodichain.lab.sim.atomic_skills`.
 - **Semantic Call**: a high-level Task Program instruction such as `Pick`,
   `Place`, `HandOver`, or an allowlisted registered call.
 - **Task Program**: a bounded declarative program that orchestrates Semantic
@@ -27,6 +27,7 @@ Semantic Calls and their scene/profile/effect contracts live inside
 |---|---|
 | Stable public language API | `embodichain/lab/task_program/__init__.py` |
 | Schema and AST values | `embodichain/lab/task_program/language/schema.py` |
+| Offline planning call contracts shared with configured lowerers | `embodichain/lab/task_program/language/semantic_contracts.py` |
 | Strict decoding and reference validation | `embodichain/lab/task_program/language/decoder.py` |
 | JSON/YAML loading and input bounds | `embodichain/lab/task_program/language/loader.py` |
 | Compiled program model and AST expansion | `embodichain/lab/task_program/compiler/program.py` |
@@ -36,19 +37,45 @@ Semantic Calls and their scene/profile/effect contracts live inside
 | Parallel scheduling and safety boundary | `embodichain/lab/task_program/runtime/parallel.py`, `parallel_executor.py` |
 | Semantic Calls, scene, profile, effects, evidence | `embodichain/lab/task_program/semantics/` |
 | Immutable catalog and extension declarations | `embodichain/lab/task_program/integrations/catalog.py`, `extensions.py` |
+| Program-bound call and post-policy preset selection | `embodichain/lab/task_program/integrations/invocation_policy.py` |
+| Bridge-owned runtime service identity | `embodichain/lab/task_program/integrations/runtime_services.py` |
+| Declared control operations, physical policy and grounding | `embodichain/lab/task_program/integrations/simulation/control_assembly.py`, `control_policy.py`, `control_lowering.py` |
 | Environment adapter and runtime assembly | `embodichain/lab/task_program/integrations/environment.py` |
 | Expansion source adapter, candidate transform and records | `embodichain/lab/task_program/integrations/expansion.py` |
 | Physical Gym component composition | `embodichain/lab/gym/utils/_component_composition.py` |
-| Configured semantic/policy composition | `embodichain/lab/task_program/integrations/_configured_composition.py` |
+| Public configured deployment composition | `embodichain/lab/task_program/integrations/composition.py` |
+| Component resolution and policy composition | `embodichain/lab/task_program/integrations/_configured_composition.py` |
+| Native planning declarations, providers and one-compiler continuations | `embodichain/lab/task_program/integrations/simulation/planning_services.py`, `pick_closing.py`, `measured_rigid.py`, `place_continuation.py`, `released_continuation.py` |
+| Route-bound retained alignment, released clearance and paired idle lowering | `embodichain/lab/task_program/integrations/simulation/held_alignment.py`, `release_clearance.py`, `idle_clearance.py` |
+| Declared geometry planning services and native receiver assembly | `embodichain/lab/task_program/integrations/simulation/planning_services.py`, `handover_scene.py` |
 | Callable-free configured runtime decode | `embodichain/lab/task_program/integrations/configured.py` |
 | Simulation bindings and live assembly | `embodichain/lab/task_program/integrations/simulation/` |
+| Pure source physical reset/cadence declarations | `embodichain/lab/task_program/integrations/simulation/source_deployment.py` |
+| Physical acquisition, history and support observations | `embodichain/lab/sim/sensors/contact/sampling.py`, `contact/timeline.py`, `support_observation.py` |
+| Physical grip interpretation | `embodichain/lab/sim/atomic_skills/grip_evidence.py` |
+| Offline receipt/query/actor normalization and observation requests | `embodichain/lab/task_program/integrations/evidence/` |
+| SDK-independent shared physical value contracts | `embodichain/lab/evidence.py`; `lab/sim/evidence.py` re-exports the same classes |
+| Evidence declarations and semantic adaptation | `embodichain/lab/task_program/integrations/simulation/grip_evidence.py` |
 | Gym `DemoSegment` / `env.step()` bridge | `embodichain/lab/gym/envs/task_program/bridge.py` |
 | Dynamic Gym ID registration | `embodichain/lab/gym/envs/task_program/registration.py` |
 | Episode selection, recording, final success | `embodichain/lab/gym/envs/embodied_env.py`, `demo.py` |
 | MLLM untrusted-JSON frontend | `embodichain/agents/mllm/task_program.py` |
 
 The core `language`, `semantics`, `compiler`, and `runtime` packages must not
-import Gym. Provider-specific dependencies are confined to `integrations`.
+import Gym. Provider-specific dependencies are confined to `integrations`. Both public
+package roots resolve exports lazily, allowing offline evidence declarations to
+load without a simulator or a normative frontend.
+
+The offline evidence adapter validates raw execution, actor, query, clock and
+release protocols, then emits source-bound measurements through the existing
+physical frame/batch contract. It imports neither TaskSpec nor Task Engine and
+decides no task predicate. Held observation requests select exact parts and fresh
+query revisions here. Normative criteria are supplied separately by the consumer;
+mutable runtime receipts never define task acceptance thresholds.
+
+Invalid capture boundaries remain unavailable evidence. Runtime receipts never
+supply normative acceptance thresholds; observations keep their original time
+and source identity.
 Gym retains only lifecycle coupling; it does not own schemas, compilers,
 catalogs, lowerers, or simulation assembly.
 
@@ -72,6 +99,15 @@ generates no controller action. Live grounding occurs only after
 `TaskProgramEnvironmentAdapter` matches the compiled scene/profile/catalog
 snapshot to the exact integration registration.
 
+Catalog fingerprints omit exact inactive defaults only for named migration
+extensions. Existing schema fields, nondefault choices and realized skill
+capabilities remain part of the registration identity.
+
+Catalog preflight checks the effective Place option/recovery combination after
+occurrence preset selection. The same waypoint-scope rule is used by Atomic
+planning; a contradictory selected declaration rejects without live resources.
+Unused preset templates do not change ordinary calls.
+
 Expansion is optional and episode-scoped, not part of compilation.
 `EmbodiedEnv.create_demo_segments()` passes a separate Expansion Profile and
 candidate ordinal into a fresh bridge. After a matching Semantic Call is
@@ -79,6 +115,34 @@ grounded, the runtime asks `TaskProgramPlanTransformFactory` for that call's
 Atomic plan transform; the bridge exposes immutable
 `TaskProgramExpansionRecord` provenance. Nonmatching calls and episodes
 without a profile keep the ordinary path.
+
+Source-bound bridges request independent session state from the simulation
+post-policy/validator port while retaining its registered scene bindings. This
+isolates lift baselines and policy results across episodes. Native bridges and
+ports without the optional session factory retain their existing ownership.
+
+Declared Press/Twist controls assemble real per-bridge operations before runtime-bound
+lowerers. The factory uses the public initialized EpisodeContext, the ordinary
+sensor suite and one acknowledged bridge clock. Catalog preflight validates exact
+sequential targets, occurrence budgets and physical post-policy phases. Source
+prismatic calls also bind their authored endpoints, typed recovery and exact
+fixed-grid segment policies during this static preflight, before live assembly.
+Twist and
+prismatic registries connect the existing Atomic lifecycle port; bridge cleanup
+closes owned hooks/cursors without issuing or acknowledging commands. Source control
+bridges keep their explicit B1 scope and reject external nominal plans and expansion.
+
+Simulation settling defaults to reported native velocities. An explicit
+`simulation.policies.SimulationSettleMonitorCfg(measurement="pose_delta")`
+retains the shared monitor's cadence and per-row timeout rules while deriving
+speed from consecutive rigid poses. The runtime supplies its control `step_dt`;
+the first observation is unresolved. Registration/catalog preflight rejects
+non-rigid targets before live assembly. Preset names do not select algorithms,
+and plain settle configurations preserve existing defaults and fingerprints.
+
+An optional nominal source is selected separately before Atomic planning and
+is bound to a compiled sequential call occurrence. Its configured declaration
+and verification boundary are described in [Real2Sim motion](../data-pipeline/real2sim.md).
 
 The configured combined transform supplies each selected call's Affordance
 context before planning and delegates trajectory adaptation and rebuilding to
@@ -110,6 +174,10 @@ For a minimal projected workflow, start with
 [repeated pick/place](../../../extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/README.md).
 For measured handover, inspect the selected deployment and execution policy in
 `extensions/embodichain_tasks/configs/tasks/manipulation/hand_over/`.
+For fixed real-motion source binding and qualified expansion, use
+`extensions/embodichain_tasks/configs/tasks/manipulation/carton_stocking/task.panda.yaml`.
+It selects three real-source prototypes through verified asset references and
+the existing Real2Sim recorder owner; the example rebuilds sources from the same templates.
 Assurance belongs to that policy, not the task name or backend. Read the
 [environment selection contract](../env-framework/configuration.md#reusable-gym-deployment-components)
 for backend variants: selecting a physical component does not rename a Gym ID.
@@ -123,23 +191,10 @@ receipt-confirmed coverage.
 
 ## Recommended change sites
 
-| Requested change | Start here |
-|---|---|
-| Language shape or limits | `language/schema.py`, then decoder/loader tests |
-| Untrusted input behavior | `language/decoder.py`, `language/loader.py` |
-| AST expansion or compiled structure | `compiler/program.py` |
-| Call-to-Atomic-Skill lowering | `compiler/lowering.py` |
-| Semantic Call, scene, robot, effect contracts | `semantics/` |
-| Runtime sequencing or parallel behavior | `runtime/` |
-| Grounded call transform protocol | `runtime/expansion.py`, then `runtime/executor.py` |
-| Registration fingerprint/extensions | `integrations/catalog.py`, `extensions.py` |
-| Configured integration format | `integrations/configured.py` |
-| Live simulation binding | `integrations/simulation/` |
-| Task Program candidate adaptation and provenance | `integrations/expansion.py` |
-| Gym action/segment lifecycle | `gym/envs/task_program/bridge.py` |
-| Episode program/expansion selection and final success | `gym/envs/embodied_env.py` |
-| Outcome annotations and persistence mode | `gym/envs/demo.py`, `gym/envs/embodied_env.py` |
-| LeRobot fragment slicing/idempotency | `gym/envs/managers/datasets.py`, `async_datasets.py` |
+Use the package map's owning layer. Language/decoder edits use offline tests;
+lowering/runtime edits follow a full call through grounding and execution;
+integration edits preserve registration identity and the Gym lifecycle boundary.
+Dataset slicing/idempotency remains with the data-pipeline owner.
 
 ## Focused validation
 
@@ -149,7 +204,7 @@ pytest -q tests/gym/envs/task_program
 pytest -q tests/gym/envs/test_embodied_env_task_program.py
 pytest -q tests/gym/envs/test_demo.py tests/gym/envs/managers
 pytest -q tests/agents/mllm/test_task_program.py
-pytest -q tests/sim/atomic_actions
+pytest -q tests/sim/atomic_skills
 python docs/scripts/check_api_docs.py
 ```
 
@@ -157,3 +212,17 @@ Public API changes also require the docs checker tests and a Sphinx dummy
 build. Physical qualification requires real environment runs with measured
 evidence, controlled seeds/randomization, explicit validators, and persisted
 completion metadata.
+
+## Control evidence normalization
+
+`integrations/evidence/control_evidence.py` owns offline Press/Twist protocol
+normalization. `validate_control_declaration` checks the sealed actor roster and
+compiled policy selectors without importing Sim or numeric backends.
+`normalize_control_evidence` validates the original raw/historical input contract,
+replays contact-backed events and cleanup, and emits the existing Lab physical
+evidence frame/batch JSON with source hashes and exact episode/boundary identities.
+The measured operation-window timestamp is retained independently of its step
+index. Event rules and legacy receipt adapters remain private to this owner;
+Compute exposes no skill event APIs. TaskSpec consumes the normalized facts and
+separately evaluates its declared predicate. Missing acquisition remains
+unavailable; historical measurements are not re-signed as new physical evidence.

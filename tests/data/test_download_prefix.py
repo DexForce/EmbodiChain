@@ -36,8 +36,12 @@ MIRROR = "https://mirror.example.com/embodichain_data/resolve/main/"
 _COLLECT_URLS = """
 import json
 from embodichain.data import dataset
-from embodichain.data.assets import CobotMagicArm, FlexivRizon4S, UnitreeGo2Locomotion, UniversalRobots
+from embodichain.data.assets import CobotMagicArm, FlexivRizon4S, UnitreeGo2Locomotion, UniversalRobots, PourCupAssets, PourCupDemoData
 from embodichain.data.assets.w1_assets import DexforceW1V030
+from embodichain_robots.agilex.pika.assets import PikaGripper
+from embodichain_robots.sharpa.wave.assets import SharpaWave
+from embodichain_robots.wuji.hand.assets import WujiHand
+from embodichain_robots.i2rt.yam.assets import YamI2rt
 
 urls = {}
 
@@ -49,7 +53,7 @@ def capture(self, prefix, descriptor, path):
     raise Captured  # stop before anything is downloaded
 
 dataset.EmbodiChainDataset.__init__ = capture
-for cls in (CobotMagicArm, FlexivRizon4S, UnitreeGo2Locomotion, UniversalRobots, DexforceW1V030):
+for cls in (CobotMagicArm, FlexivRizon4S, UnitreeGo2Locomotion, UniversalRobots, DexforceW1V030, PourCupAssets, PourCupDemoData, PikaGripper, SharpaWave, WujiHand, YamI2rt):
     try:
         cls()
     except Captured:
@@ -107,7 +111,24 @@ def test_download_prefix_gets_a_trailing_slash(monkeypatch, reload_constants) ->
 @pytest.mark.parametrize("prefix", [MIRROR, MIRROR.rstrip("/")])
 def test_assets_download_from_the_configured_prefix(prefix: str) -> None:
     urls = _consumer_urls(prefix)
+    assert urls["WujiHandV2"] == [
+        f"{MIRROR}eef_assets/WujiHandV2.zip",
+        f"{HF_PREFIX}eef_assets/WujiHandV2.zip",
+    ]
+    assert urls["SharpaWaveV1"] == [
+        f"{MIRROR}eef_assets/SharpaWaveV1.zip",
+        f"{HF_PREFIX}eef_assets/SharpaWaveV1.zip",
+    ]
+    assert urls["PikaGripper"] == [
+        f"{MIRROR}eef_assets/PikaGripper.zip",
+        f"{HF_PREFIX}eef_assets/PikaGripper.zip",
+    ]
     assert urls["CobotMagicArm"] == [f"{MIRROR}robot_assets/CobotMagicArmV4.zip"]
+    for name in ("PourCupAssets", "PourCupDemoData"):
+        assert urls[name] == [
+            f"{MIRROR}task_assets/{name}.zip",
+            f"{HF_PREFIX}task_assets/{name}.zip",
+        ]
     # Locomotion tries the configured source first and keeps the Hub as fallback.
     assert urls["UnitreeGo2Locomotion"] == [
         f"{MIRROR}robot_assets/UnitreeGo2Locomotion.zip",
@@ -124,15 +145,25 @@ def test_assets_download_from_the_configured_prefix(prefix: str) -> None:
     ]
     # Corrected W1 visuals overwrite the existing V030 archive and cache.
     assert urls["DexforceW1V030"] == [f"{MIRROR}dexforce_w1/v030/w1.zip"]
+    assert urls["YamI2rt"] == [
+        f"{MIRROR}robot_assets/YamI2rtV1.zip",
+        f"{HF_PREFIX}robot_assets/YamI2rtV1.zip",
+    ]
 
 
 @pytest.mark.no_sim
 def test_assets_do_not_repeat_the_hub_url() -> None:
     urls = _consumer_urls(HF_PREFIX)
+    assert urls["WujiHandV2"] == [f"{HF_PREFIX}eef_assets/WujiHandV2.zip"]
+    assert urls["SharpaWaveV1"] == [f"{HF_PREFIX}eef_assets/SharpaWaveV1.zip"]
     assert urls["UnitreeGo2Locomotion"] == [
         f"{HF_PREFIX}robot_assets/UnitreeGo2Locomotion.zip"
     ]
+    for name in ("PourCupAssets", "PourCupDemoData"):
+        assert urls[name] == [f"{HF_PREFIX}task_assets/{name}.zip"]
     assert urls["UniversalRobotsV4"] == [
         f"{HF_PREFIX}robot_assets/UniversalRobots_v4.zip"
     ]
     assert urls["FlexivRizon4S_v1"] == [f"{HF_PREFIX}robot_assets/FlexivRizon4S_v1.zip"]
+    assert urls["PikaGripper"] == [f"{HF_PREFIX}eef_assets/PikaGripper.zip"]
+    assert urls["YamI2rt"] == [f"{HF_PREFIX}robot_assets/YamI2rtV1.zip"]

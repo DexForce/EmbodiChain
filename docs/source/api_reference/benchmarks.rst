@@ -4,7 +4,7 @@ Motion generation benchmarks
 The bundled ``embodichain_benchmarks.motion_generation`` extension evaluates
 Motion Planning and Atomic Skills suites from another Python project. The
 benchmark owns case generation, simulation, lifecycle timing, evaluation and
-artifact persistence. It consumes the simulation, planning and Atomic Action
+artifact persistence. It consumes the simulation, planning and Atomic Skill
 APIs in ``embodichain`` and ships in the main wheel with the same version and
 dependencies. Callers select a suite and provide planner configuration.
 
@@ -42,7 +42,7 @@ another repository. The mapping applies to one call, including overrides of
 registered adapter names. Implement ``build()``, ``plan(case)`` and ``close()``;
 use ``prepare()`` for distinct lazy initialization. Declare supported
 capabilities and return a canonical batched ``PlanResult``. Atomic Skills also
-require an exposed ``MotionGenerator`` and the ``atomic_action`` capability.
+require an exposed ``MotionGenerator`` and the ``atomic_skill`` capability.
 
 Calls own their simulation and return structured results after teardown. Run
 host calls serially within a process. ``workers>1`` uses isolated spawned
@@ -74,12 +74,15 @@ Public entry points
    run_all_benchmarks
    run_benchmark
    prepare_case_manifest
+   resolve_quality_devices
 
 .. autofunction:: embodichain_benchmarks.motion_generation.run_benchmark
 
 .. autofunction:: embodichain_benchmarks.motion_generation.prepare_case_manifest
 
 .. autofunction:: embodichain_benchmarks.motion_generation.load_suite
+
+.. autofunction:: embodichain_benchmarks.motion_generation.resolve_quality_devices
 
 .. autoclass:: embodichain_benchmarks.motion_generation.BenchmarkRunResult
 
@@ -262,6 +265,18 @@ embodichain_benchmarks.motion_generation.models
    :undoc-members:
 
 
+embodichain_benchmarks.motion_generation.parallel
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Validate explicit visible CUDA devices before creating quality workers or a
+simulator. The package-level ``resolve_quality_devices`` export is the public
+entry point for external benchmark hosts.
+
+.. automodule:: embodichain_benchmarks.motion_generation.parallel
+   :members:
+   :undoc-members:
+
+
 embodichain_benchmarks.motion_generation.planners
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -354,6 +369,7 @@ embodichain_benchmarks.motion_generation.robots
    DualArmProvider
    FrankaPandaProvider
    FrankaPgiProvider
+   FrankaRobotiqProvider
    RobotProvider
    UR5PgiProvider
    UR5Provider

@@ -246,6 +246,12 @@ class NewtonCollisionPropertiesCfg(CollisionPropertiesCfg):
     can allocate the corresponding constraint storage.
     """
 
+    contype: int | None = None
+    """MuJoCo collision-type bitmask; None preserves the source value."""
+
+    conaffinity: int | None = None
+    """MuJoCo collision-affinity bitmask; None preserves the source value."""
+
     has_particle_collision: bool | None = None
     """Whether Newton particles collide with this shape.
 
@@ -271,6 +277,13 @@ class NewtonCollisionPropertiesCfg(CollisionPropertiesCfg):
 
     Gaps from both shapes are added.  Broad phase expands each shape by
     ``margin + gap``; increasing the gap detects approaching contact earlier.
+    """
+
+    preserve_mesh_transform: bool | None = None
+    """Keep authored mesh pose and scale separate from collision vertices.
+
+    ``None`` preserves the source setting. Set before scene preparation when
+    reproducing a reference solver model built from authored USD meshes.
     """
 
 
@@ -322,6 +335,19 @@ class NewtonRigidBodyMaterialCfg(RigidBodyMaterialCfg):
 
     kd: float | None = None
     """Normal contact damping coefficient."""
+
+    solref: tuple[float, float] | None = None
+    """Raw MuJoCo contact reference, overriding stiffness/damping conversion.
+
+    Both positive time-constant/damping-ratio and non-positive direct modes
+    retain their native meaning. Unsupported solvers reject explicit values.
+    """
+
+    solimp: tuple[float, float, float, float, float] | None = None
+    """Raw MuJoCo contact impedance; None preserves the source value."""
+
+    solmix: float | None = None
+    """MuJoCo weight for mixing contact parameters between colliding shapes."""
 
     kf: float | None = None
     """Tangential/friction damping coefficient."""

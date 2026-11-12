@@ -78,7 +78,7 @@ class AtomicPoseRandomizationCfg:
 
     The benchmark represents each random pose as one simulator environment
     row.  Consequently ``pose_batch_size`` is both the number of independently
-    perturbed poses sent to a batched Atomic Action goal and the default
+    perturbed poses sent to a batched Atomic Skill goal and the default
     simulator batch size when a track does not declare ``batch_sizes``.
 
     The nested ``randomization`` mapping is intentionally small and limited
@@ -129,6 +129,14 @@ class ProtocolCfg:
     measured_trials: int = 3
     sample_interval: int = 40
     validation_samples: int = 128
+    validity_sampling: str = "native_linear_and_distance_subdivision"
+    """Retain all commanded states for arrival checks; subdivide between them.
+
+    The ordered union also retains the normalized distance-grid witnesses,
+    avoiding density loss in moving intervals next to long stationary holds.
+    Geometric path metrics keep their original normalized distance grid.
+    This explicit contract participates in benchmark protocol fingerprints.
+    """
     position_threshold_m: float = 0.01
     rotation_threshold_rad: float = 0.1
     joint_error_norm: str = "linf"
@@ -472,6 +480,10 @@ class SuiteCfg:
             raise ValueError("rotation_threshold_rad must be > 0.")
         if self.protocol.joint_error_norm != "linf":
             raise ValueError("joint_error_norm must be linf; L2 is diagnostic only.")
+        if self.protocol.validity_sampling != "native_linear_and_distance_subdivision":
+            raise ValueError(
+                "validity_sampling must be native_linear_and_distance_subdivision."
+            )
         if self.protocol.joint_limit_tolerance_rad < 0.0:
             raise ValueError("joint_limit_tolerance_rad must be >= 0.")
         if (

@@ -19,10 +19,11 @@
 from __future__ import annotations
 
 from abc import abstractmethod
+from collections.abc import Callable
 from dataclasses import replace
 from functools import cached_property
 import inspect
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, Sequence
 
 import gymnasium as gym
 import numpy as np
@@ -50,6 +51,7 @@ class ActionTerm(Functor):
     """
 
     contract_id: ClassVar[str | None] = None
+    requires_substep_update: ClassVar[bool] = False
 
     def __init__(self, cfg: ActionTermCfg, env: EmbodiedEnv):
         """Initialize an action term.
@@ -77,6 +79,22 @@ class ActionTerm(Functor):
                 f"{type(self).__name__} contract {implementation_contract!r}."
             )
         return self.cfg.contract or self.contract_id
+
+    def update_substep(self) -> None:
+        """Refresh a processed command from current physical state."""
+
+    def process_joint_targets(self, qpos: torch.Tensor) -> None:
+        """Process full-joint expert targets through this term's controller.
+
+        Args:
+            qpos: Full robot joint targets, shaped ``(num_envs, dof)``.
+
+        Raises:
+            NotImplementedError: If the term has no expert-target conversion.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} cannot process joint targets."
+        )
 
     @property
     @abstractmethod
@@ -152,6 +170,13 @@ class ActionManager(ManagerBase):
             device=env.device,
         )
         self._previous_action = torch.zeros_like(self._action)
+        self._substep_terms = tuple(
+            term for term in self._terms.values() if term.requires_substep_update
+        )
+        self._substep_active_mask: torch.Tensor | None = None
+        self._snapshot_joint_indices: dict[
+            tuple[str, str], tuple[tuple[int, ...], torch.Tensor]
+        ] = {}
 
     def __str__(self) -> str:
         """Return a table describing the ordered flat action layout."""
@@ -193,6 +218,67 @@ class ActionManager(ManagerBase):
     def previous_action(self) -> torch.Tensor:
         """Return previous complete raw policy actions."""
         return self._previous_action
+
+    def get_substep_callback(self, num_substeps: int) -> Callable[[float], None] | None:
+        """Create action refresh scheduling for one control interval.
+
+        Args:
+            num_substeps: Positive number of physics steps in the interval.
+
+        Returns:
+            An after-substep callback, or None when no refresh is needed.
+            The initial command must already be applied; the callback refreshes
+            only when another physics step remains.
+
+        Raises:
+            ValueError: If num_substeps is less than one.
+        """
+        if num_substeps < 1:
+            raise ValueError(f"Expected positive num_substeps, found {num_substeps}.")
+        if not self._substep_terms or num_substeps == 1:
+            return None
+        remaining = num_substeps
+
+        def refresh_actions(dt: float) -> None:
+            nonlocal remaining
+            del dt
+            remaining -= 1
+            if remaining <= 0:
+                return
+            for term in self._substep_terms:
+                term.update_substep()
+            if self._substep_active_mask is not None:
+                self.mask_inactive(self._substep_active_mask)
+            for term in self._substep_terms:
+                term.apply_actions()
+
+        return refresh_actions
+
+    def process_joint_targets(self, qpos: torch.Tensor) -> None:
+        """Process expert targets while preserving exact FK target poses.
+
+        Args:
+            qpos: Finite full-joint position targets on the environment device.
+        """
+        expected = self._env.robot.get_qpos().shape
+        if (
+            not isinstance(qpos, torch.Tensor)
+            or not qpos.is_floating_point()
+            or qpos.shape != expected
+            or qpos.device != torch.device(self._env.device)
+            or not bool(torch.isfinite(qpos).all())
+        ):
+            raise ValueError(
+                f"Expected finite joint targets with shape {expected} on {self._env.device}."
+            )
+
+        self._previous_action.copy_(self._action)
+        self._substep_active_mask = None
+        for term in self._terms.values():
+            term.process_joint_targets(qpos)
+        self._action.copy_(
+            torch.cat([term.raw_actions for term in self._terms.values()], dim=-1)
+        )
 
     @property
     def descriptors(self) -> tuple[ActionDescriptor, ...]:
@@ -277,6 +363,7 @@ class ActionManager(ManagerBase):
             )
 
         self._previous_action.copy_(self._action)
+        self._substep_active_mask = None
         self._action.copy_(action)
         for name, term in self._terms.items():
             term.process_actions(self._action[:, self._slices[name]])
@@ -295,15 +382,33 @@ class ActionManager(ManagerBase):
         in active-joint order without exposing the removed pre/post protocol.
         """
         qpos = self._env.robot.get_qpos().clone()
-        for term in self._terms.values():
+        for name, term in self._terms.items():
             if term.command_type != "qpos":
                 raise ValueError(
                     "Default joint-position dataset recording requires every "
                     "action term to produce qpos commands; declare a policy "
                     "action_contract for non-qpos actions."
                 )
-            qpos[:, list(term.controlled_joint_ids)] = term.processed_actions
-        return qpos[:, self._env.active_joint_ids]
+            columns = self._snapshot_columns(("term", name), term.controlled_joint_ids)
+            qpos[:, columns] = term.processed_actions
+        columns = self._snapshot_columns(("active", ""), self._env.active_joint_ids)
+        return qpos[:, columns]
+
+    def _snapshot_columns(
+        self, key: tuple[str, str], values: Sequence[int] | torch.Tensor
+    ) -> torch.Tensor:
+        """Reuse device selectors while retaining live host selection changes."""
+        if isinstance(values, torch.Tensor):
+            return values.to(device=self._action.device, dtype=torch.long)
+        indices = tuple(int(index) for index in values)
+        cached = self._snapshot_joint_indices.get(key)
+        if cached is None or cached[0] != indices:
+            cached = (
+                indices,
+                torch.tensor(indices, device=self._action.device, dtype=torch.long),
+            )
+            self._snapshot_joint_indices[key] = cached
+        return cached[1]
 
     def mask_inactive(self, active_mask: torch.Tensor) -> None:
         """Replace inactive vector rows with resource-safe commands.
@@ -333,6 +438,7 @@ class ActionManager(ManagerBase):
             raise ValueError(
                 f"active_mask must be on {expected_device}, got {active_mask.device}."
             )
+        self._substep_active_mask = active_mask.clone()
 
         measured_qpos: torch.Tensor | None = None
         for name, term in self._terms.items():
@@ -371,6 +477,8 @@ class ActionManager(ManagerBase):
         ids = slice(None) if env_ids is None else env_ids
         self._action[ids] = 0
         self._previous_action[ids] = 0
+        if self._substep_active_mask is not None:
+            self._substep_active_mask[ids] = True
         for term in self._terms.values():
             term.reset(env_ids=env_ids)
         return {}

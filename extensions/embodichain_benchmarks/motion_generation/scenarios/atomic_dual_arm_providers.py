@@ -27,6 +27,11 @@ without a fixed seed are frozen from the same reference compile.
 
 from __future__ import annotations
 
+from embodichain.robot_registry import resolve_gripper_defaults
+from embodichain.lab.sim.utility.gripper_geometry import (
+    build_gripper_collision_geometry,
+)
+
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
@@ -34,9 +39,10 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from embodichain.lab.sim.atomic_actions import (
-    ActionInvocation,
-    AtomicActionEngine,
+from embodichain.compute.kinematics import pose_error
+from embodichain.lab.sim.atomic_skills import (
+    SkillInvocation,
+    AtomicSkillEngine,
     ControlPartCommandProfile,
     CoordinatedPickGoal,
     CoordinatedPickmentOptions,
@@ -48,9 +54,9 @@ from embodichain.lab.sim.atomic_actions import (
     MotionPolicy,
     ObjectSemantics,
     PickUpOptions,
-    create_simulation_atomic_action_engine,
+    create_simulation_atomic_skill_engine,
 )
-from embodichain.lab.sim.atomic_actions.plans import CompiledTrajectory
+from embodichain.lab.sim.atomic_skills.plans import CompiledTrajectory
 from embodichain.lab.sim.motion.planners import ToppraPlanOptions
 from embodichain.lab.sim.motion.planners.utils import TrajectorySampleMethod
 from embodichain.toolkits.graspkit import GraspPoseGenerator
@@ -96,12 +102,6 @@ if TYPE_CHECKING:
 
 __all__: list[str] = []
 
-# A parallel-jaw gripper closing on an object stops at the object's width; one
-# that misses runs to its grasp command.  The tutorial PGI holding the plastic
-# tray stops about 3.4 mm short of its 0.026 command and reaches the command
-# within 0.1 mm when it closes on nothing.
-_GRIPPER_HOLD_GAP = 0.001
-
 
 class _HandOverEvaluator:
     """Evaluate measured pickup, transfer, handover, and placement stages."""
@@ -124,25 +124,27 @@ class _HandOverEvaluator:
         batches: list[Sequence[Mapping[str, StageEvidence]]] = []
         if pickup is not None:
             grasped = gripper_holding(
-                pickup, observation, source, gap=_GRIPPER_HOLD_GAP
+                pickup, observation, source, object_id=case.object_id
             )
             if grasped is not None:
                 batches.append(
                     stage_evidence_batch(
-                        valid_mask=trace_validity(pickup, observation=observation),
+                        valid_mask=trace_validity(
+                            pickup, observation=observation, contact_parts=(source,)
+                        ),
                         stage_id="grasped",
                         window="grasp_end",
                         measurements={"grasp_established": grasped},
-                        method="source_gripper_joint_state",
-                        source="measured_proxy",
+                        method="target_finger_contacts_and_state",
+                        source="contact_sensor",
                     )
                 )
         if transfer is not None:
             source_held = gripper_holding(
-                transfer, observation, source, gap=_GRIPPER_HOLD_GAP
+                transfer, observation, source, object_id=case.object_id
             )
             destination_held = gripper_holding(
-                transfer, observation, destination, gap=_GRIPPER_HOLD_GAP
+                transfer, observation, destination, object_id=case.object_id
             )
             min_height = minimum_height_above_initial_support(transfer, case)
             if (
@@ -152,21 +154,25 @@ class _HandOverEvaluator:
             ):
                 batches.append(
                     stage_evidence_batch(
-                        valid_mask=trace_validity(transfer, observation=observation),
+                        valid_mask=trace_validity(
+                            transfer,
+                            observation=observation,
+                            contact_parts=(source, destination),
+                        ),
                         stage_id="transferred",
                         window="transfer_end",
                         measurements={
                             "both_grasps_established": source_held & destination_held,
                             "min_height_above_support_m": min_height,
                         },
-                        method="dual_gripper_and_object_trace",
-                        source="measured_proxy",
+                        method="target_finger_contacts_and_state",
+                        source="contact_sensor",
                     )
                 )
         if exchange is not None:
             giver_released = gripper_released(exchange, observation, source)
             receiver_retained = gripper_holding(
-                exchange, observation, destination, gap=_GRIPPER_HOLD_GAP
+                exchange, observation, destination, object_id=case.object_id
             )
             min_height = minimum_height_above_initial_support(exchange, case)
             if (
@@ -176,7 +182,11 @@ class _HandOverEvaluator:
             ):
                 batches.append(
                     stage_evidence_batch(
-                        valid_mask=trace_validity(exchange, observation=observation),
+                        valid_mask=trace_validity(
+                            exchange,
+                            observation=observation,
+                            contact_parts=(destination,),
+                        ),
                         stage_id="handed_over",
                         window="handover_end",
                         measurements={
@@ -184,8 +194,8 @@ class _HandOverEvaluator:
                             "receiver_retained": receiver_retained,
                             "min_height_above_support_m": min_height,
                         },
-                        method="dual_gripper_and_object_trace",
-                        source="measured_proxy",
+                        method="target_finger_contacts_and_state",
+                        source="contact_sensor",
                     )
                 )
         if settle is not None and settle.object_pose is not None:
@@ -251,22 +261,26 @@ class _CoordinatedPickmentEvaluator:
         settle = replay_trace(observation, "dual_pick_settle")
         batches: list[Sequence[Mapping[str, StageEvidence]]] = []
         if grasp is not None:
-            left_held = gripper_holding(grasp, observation, left, gap=_GRIPPER_HOLD_GAP)
+            left_held = gripper_holding(
+                grasp, observation, left, object_id=case.object_id
+            )
             right_held = gripper_holding(
-                grasp, observation, right, gap=_GRIPPER_HOLD_GAP
+                grasp, observation, right, object_id=case.object_id
             )
             if left_held is not None and right_held is not None:
                 batches.append(
                     stage_evidence_batch(
-                        valid_mask=trace_validity(grasp, observation=observation),
+                        valid_mask=trace_validity(
+                            grasp, observation=observation, contact_parts=(left, right)
+                        ),
                         stage_id="dual_grasped",
                         window="grasp_end",
                         measurements={
                             "left_grasp_established": left_held,
                             "right_grasp_established": right_held,
                         },
-                        method="dual_gripper_joint_state",
-                        source="measured_proxy",
+                        method="target_finger_contacts_and_state",
+                        source="contact_sensor",
                     )
                 )
         if lift is not None and lift.object_pose is not None:
@@ -314,10 +328,10 @@ class _CoordinatedPickmentEvaluator:
                 )
         if settle is not None and settle.object_pose is not None:
             left_held = gripper_holding(
-                settle, observation, left, gap=_GRIPPER_HOLD_GAP
+                settle, observation, left, object_id=case.object_id
             )
             right_held = gripper_holding(
-                settle, observation, right, gap=_GRIPPER_HOLD_GAP
+                settle, observation, right, object_id=case.object_id
             )
             min_height = minimum_height_above_initial_support(settle, case)
             final = settle.object_pose[-1]
@@ -343,15 +357,19 @@ class _CoordinatedPickmentEvaluator:
                 if left_held is not None and right_held is not None:
                     batches.append(
                         stage_evidence_batch(
-                            valid_mask=trace_validity(settle, observation=observation),
+                            valid_mask=trace_validity(
+                                settle,
+                                observation=observation,
+                                contact_parts=(left, right),
+                            ),
                             stage_id="held",
                             window="terminal_settle",
                             measurements={
                                 "object_retained": left_held & right_held,
                                 "min_height_above_support_m": min_height,
                             },
-                            method="dual_gripper_and_object_settle_trace",
-                            source="measured_proxy",
+                            method="target_finger_contacts_and_state",
+                            source="contact_sensor",
                         )
                     )
         evidence = (
@@ -438,20 +456,24 @@ class _CoordinatedPlacementEvaluator:
         if release is not None:
             placing_released = gripper_released(release, observation, placing_part)
             support_retained = gripper_holding(
-                release, observation, support_part, gap=_GRIPPER_HOLD_GAP
+                release, observation, support_part, object_id=support_id
             )
             if placing_released is not None and support_retained is not None:
                 batches.append(
                     stage_evidence_batch(
-                        valid_mask=trace_validity(release, observation=observation),
+                        valid_mask=trace_validity(
+                            release,
+                            observation=observation,
+                            contact_parts=(support_part,),
+                        ),
                         stage_id="released",
                         window="release_end",
                         measurements={
                             "placing_release_established": placing_released,
                             "support_retained": support_retained,
                         },
-                        method="role_gripper_joint_state",
-                        source="measured_proxy",
+                        method="target_finger_contacts_and_state",
+                        source="contact_sensor",
                     )
                 )
         if (
@@ -596,7 +618,7 @@ def _record_requests(scenario: "AtomicSkillScenario", plan: _ReferencePlan):
 
 def _compile_reference(
     scenario: "AtomicSkillScenario",
-    build: Callable[[AtomicActionEngine], tuple[ActionInvocation, ...]],
+    build: Callable[[AtomicSkillEngine], tuple[SkillInvocation, ...]],
     *,
     scene_entities: Sequence[object],
     grasp_generators: Mapping[str, GraspPoseGenerator] | None = None,
@@ -611,7 +633,7 @@ def _compile_reference(
         generators[part] = _RecordingGraspPoseGenerator(
             generators[part], part, plan.grasp_requests
         )
-    engine = create_simulation_atomic_action_engine(
+    engine = create_simulation_atomic_skill_engine(
         motion_generator=scenario.reference_motion_generator(),
         scene_entities=tuple(scene_entities),
         control_profiles={
@@ -633,6 +655,78 @@ def _compile_reference(
     with _record_requests(scenario, plan):
         plan.compiled = engine.compile(invocations, context=context)
     return plan
+
+
+def _require_hand_over_samples(reference: _ReferencePlan, *, batch_size: int) -> None:
+    """Reject placeholder grasps before qualifying the recorded arm endpoints.
+
+    New HandOver input generation requires explicit legal-sample evidence from
+    its reference compile. Generic planner diagnostics remain optional, and
+    replay of already frozen cases does not enter this preparation-only check.
+    Reference planning success is deliberately not an eligibility condition.
+    """
+    plans = [
+        plan for plan in reference.compiled.skill_plans if plan.skill_id == "hand_over"
+    ]
+    if len(plans) != 1:
+        raise RuntimeError(
+            "Reference HandOver input sampling requires one action plan."
+        )
+    samples = plans[0].diagnostics.metadata.get("affordance_sample")
+    if not isinstance(samples, Mapping):
+        raise RuntimeError("Reference HandOver input sampling metadata is missing.")
+    expected_env_ids = reference.compiled.trajectory.env_ids.detach().cpu().tolist()
+    failures = []
+    for name in ("pickup_grasp", "receive_grasp"):
+        sample = samples.get(name)
+        if not isinstance(sample, Mapping):
+            raise RuntimeError(
+                f"Reference HandOver input sampling {name!r} is missing."
+            )
+        success = sample.get("success")
+        parts = sample.get("control_parts")
+        if (
+            not isinstance(success, list)
+            or len(success) != batch_size
+            or any(type(value) is not bool for value in success)
+            or len(expected_env_ids) != batch_size
+            or sample.get("env_ids") != expected_env_ids
+            or not isinstance(parts, list)
+            or len(parts) != batch_size
+            or any(not isinstance(part, str) or not part for part in parts)
+        ):
+            raise RuntimeError(
+                f"Reference HandOver input sampling {name!r} has invalid row metadata."
+            )
+        diagnostic_rows = {}
+        for key in ("valid_candidate_counts", "candidate_ids"):
+            values = sample.get(key)
+            if values is not None and (
+                not isinstance(values, list) or len(values) != batch_size
+            ):
+                raise RuntimeError(
+                    f"Reference HandOver input sampling {name!r} has invalid {key}."
+                )
+            diagnostic_rows[key] = values
+        failed = [index for index, valid in enumerate(success) if not valid]
+        if failed:
+            failures.append(
+                {
+                    "sample": name,
+                    "rows": failed,
+                    "env_ids": [expected_env_ids[index] for index in failed],
+                    "control_parts": [parts[index] for index in failed],
+                    **{
+                        key: None if values is None else [values[i] for i in failed]
+                        for key, values in diagnostic_rows.items()
+                    },
+                }
+            )
+    if failures:
+        raise RuntimeError(
+            "Reference HandOver input sampling failed; invalid grasp placeholders "
+            f"cannot enter independent endpoint qualification: {failures}."
+        )
 
 
 def _antipodal_semantics(handle: AtomicObjectHandle) -> ObjectSemantics:
@@ -811,7 +905,15 @@ def _case(
     full_start_qpos: torch.Tensor,
     parameters: dict[str, object],
 ) -> BenchmarkCase:
-    """Assemble a coordinated case whose primary waypoints were recorded."""
+    """Freeze a coordinated case only after both arms have endpoint evidence."""
+    references, evidence = _arm_endpoint_evidence(
+        scenario,
+        suite,
+        targets,
+        start_qpos,
+        full_start_qpos,
+        parameters["arm_waypoints"],
+    )
     return BenchmarkCase(
         suite_version=suite.suite_version,
         track=track.id,
@@ -830,7 +932,7 @@ def _case(
         start_state_bin="pre_action",
         start_qpos=start_qpos,
         target_waypoints=targets,
-        reference_qpos=scenario.solve_reference_qpos(start_qpos, targets),
+        reference_qpos=references,
         robot_id=suite.robot.id,
         skill_id=provider.skill_id,
         object_id=object_id,
@@ -839,10 +941,98 @@ def _case(
         full_start_qpos=full_start_qpos,
         case_parameters={
             **parameters,
+            "endpoint_qualification": evidence,
             "randomization": randomization_parameters(config, seed=seed),
             "difficulty_factors": dict(config.get("difficulty_factors", {})),
         },
     )
+
+
+def _arm_endpoint_evidence(
+    scenario: AtomicSkillScenario,
+    suite: SuiteCfg,
+    targets: torch.Tensor,
+    start_qpos: torch.Tensor,
+    full_start_qpos: torch.Tensor,
+    other_arm_waypoints: Mapping[str, list],
+) -> tuple[torch.Tensor, dict[str, object]]:
+    """Validate all frozen rows without selecting or resampling candidate cases."""
+    robot = scenario.robot
+    if robot is None:
+        raise RuntimeError("Atomic Skill runtime is not configured.")
+    protocol = suite.protocol
+    arm_targets = {scenario.control_part: targets}
+    arm_targets.update(
+        {
+            arm: torch.as_tensor(poses, dtype=targets.dtype, device=targets.device)
+            for arm, poses in other_arm_waypoints.items()
+        }
+    )
+    references = {}
+    arms = {}
+    for arm, requested in arm_targets.items():
+        # Use the original full snapshot, never a state left by the reference
+        # compile. Named Robot IK/FK share arena-frame TCP and base semantics.
+        start = (
+            start_qpos.clone()
+            if arm == scenario.control_part
+            else full_start_qpos[:, robot.get_joint_ids(name=arm)].clone()
+        )
+        qpos = scenario.solve_reference_qpos(start, requested, control_part=arm)
+        lower, upper = robot.get_qpos_limits(name=arm).to(qpos).unbind(-1)
+        violation = (
+            torch.maximum(lower[:, None] - qpos, qpos - upper[:, None])
+            .clamp_min(0)
+            .amax(-1)
+        )
+        qualified = torch.isfinite(qpos).all(-1) & (
+            violation <= protocol.joint_limit_tolerance_rad
+        )
+        if not bool(qualified.all()):
+            raise RuntimeError(
+                f"Independent endpoint qualification failed for arm {arm!r} at "
+                f"[row, waypoint] {(~qualified).nonzero().cpu().tolist()}: "
+                "nonfinite or out-of-bounds joint witness."
+            )
+        actual = torch.stack(
+            [
+                robot.compute_fk(qpos=qpos[:, index], name=arm, to_matrix=True)
+                for index in range(requested.shape[1])
+            ],
+            dim=1,
+        )
+        dp, dr = pose_error(actual, requested)
+        position_error = dp.norm(dim=-1)
+        rotation_error = dr.norm(dim=-1)
+        qualified &= (
+            torch.isfinite(actual).all(dim=(-1, -2))
+            & (position_error <= protocol.position_threshold_m)
+            & (rotation_error <= protocol.rotation_threshold_rad)
+        )
+        if not bool(qualified.all()):
+            raise RuntimeError(
+                f"Independent endpoint qualification failed for arm {arm!r} at "
+                f"[row, waypoint] {(~qualified).nonzero().cpu().tolist()}: "
+                "FK witness misses the original request; no case rows were removed."
+            )
+        references[arm] = qpos
+        arms[arm] = {
+            "start_qpos": start.detach().cpu().tolist(),
+            "reference_qpos": qpos.detach().cpu().tolist(),
+            "position_error_m": position_error.detach().cpu().tolist(),
+            "rotation_error_rad": rotation_error.detach().cpu().tolist(),
+            "max_joint_limit_violation_rad": violation.detach().cpu().tolist(),
+            "qualified": qualified.detach().cpu().tolist(),
+        }
+    return references[scenario.control_part], {
+        "method": "independent_per_arm_sequential_ik_fk",
+        "scope": "endpoint_reference_only_not_path_or_physical_success",
+        "frame": "arena_tcp",
+        "position_threshold_m": protocol.position_threshold_m,
+        "rotation_threshold_rad": protocol.rotation_threshold_rad,
+        "joint_limit_tolerance_rad": protocol.joint_limit_tolerance_rad,
+        "arms": arms,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -905,10 +1095,16 @@ class _HandOverCases(AtomicSkillCaseProvider):
             "hold_steps": int(config.get("hold_steps", 4)),
             "retreat_steps": int(config.get("retreat_steps", 20)),
             "retreat_distance_m": float(config.get("retreat_distance_m", 0.10)),
+            "grasp_depth_offset_m": float(config.get("grasp_depth_offset_m", 0.0)),
             "control_parts": parts,
         }
         grasp_parts = [values["grasp"] for values in parts.values()]
-        sampler = parallel_jaw_sampler(int(config.get("grasp_sample_count", 10_000)))
+        sampler = parallel_jaw_sampler(
+            int(config.get("grasp_sample_count", 10_000)),
+            gripper_data=scenario.grasp_model(),
+            root_from_tcp=scenario.grasp_root_from_tcp(),
+            grasp_depth_offset_m=float(parameters["grasp_depth_offset_m"]),
+        )
         semantics = _antipodal_semantics(handle)
         reference = _compile_reference(
             scenario,
@@ -928,6 +1124,7 @@ class _HandOverCases(AtomicSkillCaseProvider):
             grasp_generators={part: sampler for part in grasp_parts},
             record_grasp_parts=grasp_parts,
         )
+        _require_hand_over_samples(reference, batch_size=batch_size)
         # HandOver samples one grasp per gripper: the pickup grasp on the
         # settled object, then the receiving grasp on the predicted handover
         # pose.  Each arm's first request ends at its grasp.
@@ -972,7 +1169,7 @@ class _HandOverCases(AtomicSkillCaseProvider):
         scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
-    ) -> ActionInvocation:
+    ) -> SkillInvocation:
         del adapter
         handle = scenario.object_handle(case.object_id)
         return scenario.require_engine().make_invocation(
@@ -1021,19 +1218,19 @@ class _HandOverCases(AtomicSkillCaseProvider):
                 "handover_pickup",
                 pickup.start,
                 pickup.stop,
-                frozenset({"gripper_qpos"}),
+                frozenset({"gripper_contact", "gripper_qpos"}),
             ),
             ReplayObservationWindow(
                 "handover_transfer",
                 transfer_start.start,
                 transfer_end.stop,
-                frozenset({"object_pose", "gripper_qpos"}),
+                frozenset({"gripper_contact", "object_pose", "gripper_qpos"}),
             ),
             ReplayObservationWindow(
                 "handover_exchange",
                 exchange.start,
                 exchange.stop,
-                frozenset({"object_pose", "gripper_qpos"}),
+                frozenset({"gripper_contact", "object_pose", "gripper_qpos"}),
             ),
             ReplayObservationWindow(
                 "handover_settle",
@@ -1139,7 +1336,11 @@ class _CoordinatedPickmentCases(AtomicSkillCaseProvider):
             "left_to_right_arm_direction": _left_to_right_direction(scenario, parts),
             "control_parts": parts,
         }
-        sampler = parallel_jaw_sampler(int(parameters["grasp_sample_count"]))
+        sampler = parallel_jaw_sampler(
+            int(parameters["grasp_sample_count"]),
+            gripper_data=scenario.grasp_model(),
+            root_from_tcp=scenario.grasp_root_from_tcp(),
+        )
         semantics = _antipodal_semantics(handle)
         reference = _compile_reference(
             scenario,
@@ -1193,7 +1394,7 @@ class _CoordinatedPickmentCases(AtomicSkillCaseProvider):
         scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
-    ) -> ActionInvocation:
+    ) -> SkillInvocation:
         del adapter
         device = scenario.robot.device
         handle = scenario.object_handle(case.object_id)
@@ -1228,7 +1429,7 @@ class _CoordinatedPickmentCases(AtomicSkillCaseProvider):
                 "dual_pick_grasp",
                 close.start,
                 close.stop,
-                frozenset({"gripper_qpos"}),
+                frozenset({"gripper_contact", "gripper_qpos"}),
             ),
             ReplayObservationWindow(
                 "dual_pick_lift",
@@ -1246,7 +1447,7 @@ class _CoordinatedPickmentCases(AtomicSkillCaseProvider):
                 "dual_pick_settle",
                 waypoint_count,
                 waypoint_count,
-                frozenset({"object_pose", "gripper_qpos"}),
+                frozenset({"gripper_contact", "object_pose", "gripper_qpos"}),
                 include_settle=True,
             ),
         )
@@ -1272,6 +1473,7 @@ def _placement_pose_row(
     *,
     placing_target_frame_pose: torch.Tensor | None = None,
     support_target_frame_pose: torch.Tensor | None = None,
+    support_triangles: torch.Tensor | None = None,
 ) -> dict[str, torch.Tensor]:
     """Build one row of coordinated-placement grasps and targets."""
     from . import _placement_geometry as placement_geometry
@@ -1290,6 +1492,7 @@ def _placement_pose_row(
         support_vertices,
         device,
         z_clearance=float(config.get("support_grasp_z_clearance_m", 0.0)),
+        pan_frame=str(config.get("support_mesh_frame", "authored_z_up")),
     )
     if placing_target_frame_pose is None:
         placing_target_frame_pose = placing_pose
@@ -1304,6 +1507,8 @@ def _placement_pose_row(
         support_vertices,
         support_target,
         device,
+        pan_triangles=support_triangles,
+        pan_frame=str(config.get("support_mesh_frame", "authored_z_up")),
     )
     return {
         "placing_grasp_pose": placing_grasp,
@@ -1351,6 +1556,7 @@ def _placement_poses(
     world_to_task_frame = pose_inv(task_frame_pose)
     placing_target_frame_pose = torch.bmm(world_to_task_frame, placing_pose)
     support_target_frame_pose = torch.bmm(world_to_task_frame, support_pose)
+    support_triangles = support.entity.get_triangles(env_ids=[0])[0].to(device)
     rows = [
         _placement_pose_row(
             placing_pose[row],
@@ -1362,6 +1568,7 @@ def _placement_poses(
             config,
             placing_target_frame_pose=placing_target_frame_pose[row],
             support_target_frame_pose=support_target_frame_pose[row],
+            support_triangles=support_triangles,
         )
         for row in range(placing_pose.shape[0])
     ]
@@ -1395,16 +1602,16 @@ def _placement_poses(
 
 
 def _pick_invocation(
-    engine: AtomicActionEngine,
+    engine: AtomicSkillEngine,
     handle: AtomicObjectHandle,
     grasp_pose: torch.Tensor,
     object_pose: torch.Tensor,
     parts: Mapping[str, str],
     parameters: Mapping[str, object],
     prefix: str,
-) -> ActionInvocation:
+) -> SkillInvocation:
     """Build the explicit-grasp PickUp that loads one arm before placement."""
-    from embodichain.lab.sim.atomic_actions import Affordance
+    from embodichain.lab.sim.atomic_skills import Affordance
 
     return engine.make_invocation(
         "pick_up",
@@ -1433,10 +1640,10 @@ def _pick_invocation(
 
 
 def _placement_invocation(
-    engine: AtomicActionEngine,
+    engine: AtomicSkillEngine,
     parameters: Mapping[str, object],
     poses: Mapping[str, torch.Tensor],
-) -> ActionInvocation:
+) -> SkillInvocation:
     """Build the coordinated placement of the held object onto the held support."""
     return engine.make_invocation(
         "coordinated_placement",
@@ -1503,6 +1710,30 @@ class _CoordinatedPlacementCases(AtomicSkillCaseProvider):
         poses = _placement_poses(
             placing, support, placing_pose, support_pose, config, seed=seed
         )
+        from .._atomic_fixtures import TUTORIAL_PARALLEL_JAW_MODEL
+
+        grasp_model = scenario.grasp_model() or TUTORIAL_PARALLEL_JAW_MODEL
+        hand_geometry = build_gripper_collision_geometry(
+            resolve_gripper_defaults(grasp_model["catalog_id"]),
+            point_spacing=0.012,
+            root_from_tcp=scenario.grasp_root_from_tcp(),
+        )
+        # Calibrated top/handle poses are canonical contact frames. Freeze each
+        # actual runtime TCP once; frozen replay never transforms them again.
+        for name in ("placing_grasp_pose", "support_grasp_pose"):
+            poses[name] = hand_geometry.canonical_to_tcp_poses(poses[name])
+        from .._atomic_fixtures import get_local_vertices
+        from ._placement_qualification import _placement_input_geometry
+
+        geometry_evidence = _placement_input_geometry(
+            get_local_vertices(placing.entity),
+            placing.entity.get_triangles(env_ids=[0])[0],
+            get_local_vertices(support.entity),
+            support.entity.get_triangles(env_ids=[0])[0],
+            poses["placing_target_pose"],
+            poses["support_target_pose"],
+            pan_frame=str(config.get("support_mesh_frame", "authored_z_up")),
+        )
         parts = _control_parts(config, ("placing", "support"))
         parameters: dict[str, object] = {
             "sample_count": int(config.get("sample_count", 120)),
@@ -1540,7 +1771,7 @@ class _CoordinatedPlacementCases(AtomicSkillCaseProvider):
             "control_parts": parts,
         }
 
-        def invocations(engine: AtomicActionEngine) -> tuple[ActionInvocation, ...]:
+        def invocations(engine: AtomicSkillEngine) -> tuple[SkillInvocation, ...]:
             return (
                 _pick_invocation(
                     engine,
@@ -1597,6 +1828,7 @@ class _CoordinatedPlacementCases(AtomicSkillCaseProvider):
                 },
                 **{name: pose.detach().cpu().tolist() for name, pose in poses.items()},
                 "placing_relative_target_pose": relative_target.detach().cpu().tolist(),
+                "placement_input_geometry": geometry_evidence,
                 "arm_waypoints": other_arms,
                 "reference_plan_success": reference.compiled.plan_success.tolist(),
             },
@@ -1604,7 +1836,7 @@ class _CoordinatedPlacementCases(AtomicSkillCaseProvider):
 
     def prefix_invocations(
         self, scenario: "AtomicSkillScenario", case: BenchmarkCase
-    ) -> tuple[ActionInvocation, ...]:
+    ) -> tuple[SkillInvocation, ...]:
         """Load each arm with the frozen explicit-grasp PickUp."""
         device = scenario.robot.device
         parameters = case.case_parameters
@@ -1641,7 +1873,7 @@ class _CoordinatedPlacementCases(AtomicSkillCaseProvider):
         scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
-    ) -> ActionInvocation:
+    ) -> SkillInvocation:
         del adapter
         device = scenario.robot.device
         return _placement_invocation(
@@ -1678,7 +1910,7 @@ class _CoordinatedPlacementCases(AtomicSkillCaseProvider):
                 "coordinated_place_release",
                 release.start,
                 release.stop,
-                frozenset({"gripper_qpos"}),
+                frozenset({"gripper_contact", "gripper_qpos"}),
             ),
             ReplayObservationWindow(
                 "coordinated_place_settle",

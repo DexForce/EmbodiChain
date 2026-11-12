@@ -1,0 +1,43 @@
+id: TaskProgramRepeatedPickPlace-DualUR10Robotiq140GenSim-v1
+environment:
+  component: envs/dual_ur10_robotiq140.default.yaml
+embodiment:
+  component: ../../../components/embodiments/dual_ur10_robotiq_arg2f_140_gensim.yaml
+  overrides:
+    init_pos:
+    - -0.55
+    - 0
+    - 0.4
+    # Native interleaved joint order; both arms use the collision-clear elbow-up home.
+    init_qpos:
+    - 3.141592653589793
+    - 3.141592653589793
+    - -1.5707963267948966
+    - -1.5707963267948966
+    - -1.5707963267948966
+    - -1.5707963267948966
+    - -1.5707963267948966
+    - -1.5707963267948966
+    - 1.5707963267948966
+    - 1.5707963267948966
+    - 0
+    - 0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+task_program:
+  program: task_program/program.robotiq_workbench.yaml
+  integration: task_program/integration.robotiq140.yaml
+  execution_policy: ../../../components/execution_policies/sequential_ik_verified.yaml
+collection:
+  target_episodes: 1
+device: cpu

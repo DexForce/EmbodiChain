@@ -47,6 +47,24 @@ embodichain_robots
 
 Concrete robot configurations, exposed lazily from the bundled robot package.
 
+.. py:class:: embodichain_robots.YamI2rtCfg
+
+   Configure the source-aligned YAM dual-arm assembly with sixteen independent
+   arm/finger joints. ``from_dict()`` applies caller overrides and supports a
+   local URDF through ``fpath``. ``build_pk_serial_chain()`` returns each
+   six-joint arm's base-to-TCP chain from the same simulation URDF.
+   See :doc:`/resources/robot/i2rt/yam`.
+
+.. py:class:: embodichain_robots.BrainCoRevo1Cfg
+
+   Standalone fixed-base left/right BrainCo Revo 1 hand. Construct with
+   ``from_dict({"side": "left"})`` or select catalog ID ``BrainCoRevo1`` with
+   variant ``left`` / ``right``; right is the default. ``eef`` has six active
+   joint commands and four additional source mimic followers. The default
+   solver and serial-chain mappings are empty. Drive defaults are simulation
+   values, not manufacturer specifications.
+   See :doc:`/resources/robot/brainco/revo1`.
+
 .. py:class:: embodichain_robots.ARX5Cfg
 
    Configure the X5A arm and its two independently actuated parallel fingers.
@@ -91,9 +109,26 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
    the robot-specific differentiable kinematic chains. Generic runtime
    fields and backend selection follow ``RobotCfg``.
 
+.. py:class:: embodichain_robots.AgilexPiperXCfg
+
+   Fixed-base PiPER-X bare arm with six joints in the ``arm`` control group.
+   Construct with ``from_dict()`` to apply the catalog defaults.
+   ``build_pk_serial_chain()`` builds the arm chain through the tool flange.
+   The AGX gripper embodiment supplies the mount, gripper control and TCP.
+
 .. py:class:: embodichain_robots.FrankaPandaCfg
 
-   Configuration for the Franka Emika Panda robot with Panda hand.
+   Legacy selector for the historical bare seven-DOF FR3 arm.
+
+   Compatibility entry retaining the historical FR3 model and legacy
+   ``robot_type`` selector. Mount tools explicitly; new model selections use
+   :class:`embodichain_robots.FrankaCfg`.
+
+.. py:class:: embodichain_robots.FrankaCfg
+
+   Bare seven-DOF Franka configuration selected by ``arm_model``:
+   ``fr3`` (default) or ``panda``. End effectors use ordinary URDF component,
+   control-group, drive and solver-TCP overrides in the embodiment.
 
    Construct with ``from_dict()``; ``build_pk_serial_chain()`` provides
    the robot-specific differentiable kinematic chains. Generic runtime
@@ -165,6 +200,30 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
    Construct with ``from_dict()``; ``build_pk_serial_chain()`` provides
    the robot-specific differentiable kinematic chains. Generic runtime
    fields and backend selection follow ``RobotCfg``.
+
+
+embodichain_robots.brainco.revo1
+--------------------------------
+
+.. py:class:: embodichain_robots.brainco.revo1.BrainCoRevo1Cfg
+   :no-index:
+
+   Model-local lazy export of :class:`embodichain_robots.BrainCoRevo1Cfg`.
+   Importing its asset module does not load the configuration class.
+
+
+embodichain_robots.brainco.revo1.cfg
+------------------------------------
+
+.. py:class:: embodichain_robots.brainco.revo1.cfg.BrainCoRevo1Cfg
+   :no-index:
+
+   Implementation of :class:`embodichain_robots.BrainCoRevo1Cfg`; native model
+   information is shared with the W1 mounting adapter.
+
+.. automethod:: embodichain_robots.brainco.revo1.cfg.BrainCoRevo1Cfg.from_dict
+
+.. automethod:: embodichain_robots.brainco.revo1.cfg.BrainCoRevo1Cfg.build_pk_serial_chain
 
 
 embodichain_robots.dexforce.w1
@@ -307,6 +366,19 @@ embodichain_robots.flexiv.rizon4s.cfg
    An explicit URDF ``fpath`` is shared by simulation and serial-chain FK/IK.
 
 
+embodichain_robots.franka.cfg
+-----------------------------
+
+.. py:class:: embodichain_robots.franka.cfg.FrankaCfg
+   :no-index:
+
+   Implementation of :class:`embodichain_robots.FrankaCfg`.
+   ``from_dict()`` selects the bare arm model before applying ordinary
+   robot overrides. ``build_pk_serial_chain()`` shares that arm's source URDF;
+   the solver applies the configured mounted-tool TCP once.
+   See :doc:`/resources/robot/franka/cfg` for selections and calibration.
+
+
 embodichain_robots.franka.panda
 -------------------------------
 
@@ -315,7 +387,7 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
 .. py:class:: embodichain_robots.franka.panda.FrankaPandaCfg
    :no-index:
 
-   Configuration for the Franka Emika Panda robot with Panda hand.
+   Legacy selector for the historical bare seven-DOF FR3 arm.
 
    Construct with ``from_dict()``; ``build_pk_serial_chain()`` provides
    the robot-specific differentiable kinematic chains. Generic runtime
@@ -383,6 +455,36 @@ and cache prefixes while using the shared core download and locking services.
    :no-index:
 
    Dataset class for the Cobot Magic Arm robot.
+
+
+embodichain_robots.agilex.piper_x
+---------------------------------
+
+.. py:class:: embodichain_robots.agilex.piper_x.AgilexPiperXCfg
+   :no-index:
+
+   Lazy model-level export of :class:`embodichain_robots.AgilexPiperXCfg`.
+
+
+embodichain_robots.agilex.piper_x.cfg
+-------------------------------------
+
+.. py:class:: embodichain_robots.agilex.piper_x.cfg.AgilexPiperXCfg
+   :no-index:
+
+   Implementation of :class:`embodichain_robots.AgilexPiperXCfg`. The arm
+   solver uses the same portable URDF as simulation.
+
+
+embodichain_robots.agilex.piper_x.assets
+----------------------------------------
+
+.. py:class:: embodichain_robots.agilex.piper_x.assets.AgilexPiperX(data_root=None)
+   :no-index:
+
+   Resolve the official bare-arm meshes and portable URDF, including the
+   fixed mounting flange from the AgileX tool Xacro. The dataset verifies
+   the source files by SHA-256 and exposes ``piper_x.urdf`` under ``extract_dir``.
 
 
 embodichain_robots.alohamini.aloha_mini
@@ -525,6 +627,39 @@ and cache prefixes while using the shared core download and locking services.
 
    Dataset class for the Franka robots.
 
+.. autoclass:: embodichain_robots.franka.assets.FrankaPandaArm
+
+.. autofunction:: embodichain_robots.robotiq.two_finger.robotiq85_joint_positions
+
+
+embodichain_robots.i2rt.yam
+---------------------------
+
+.. py:class:: embodichain_robots.i2rt.yam.YamI2rtCfg
+   :no-index:
+
+   Lazy model-level export of :class:`embodichain_robots.YamI2rtCfg`.
+
+.. py:class:: embodichain_robots.i2rt.yam.cfg.YamI2rtCfg
+   :no-index:
+
+   Implementation of the dual-arm preset with source joint names and numerical
+   arm solvers. Shared runtime fields follow ``RobotCfg``.
+
+.. automethod:: embodichain_robots.i2rt.yam.cfg.YamI2rtCfg.from_dict
+
+.. automethod:: embodichain_robots.i2rt.yam.cfg.YamI2rtCfg.build_pk_serial_chain
+
+
+embodichain_robots.i2rt.yam.assets
+----------------------------------
+
+.. py:class:: embodichain_robots.i2rt.yam.assets.YamI2rt
+   :no-index:
+
+   Download the checked ``YamI2rtV1`` archive through the shared download/cache
+   services, preserving its MIT license and conversion provenance.
+
 
 embodichain_robots.the_robot_studio.so101
 -----------------------------------------
@@ -584,3 +719,51 @@ and cache prefixes while using the shared core download and locking services.
    :no-index:
 
    Dataset class for the Universal Robots.
+
+
+embodichain_robots.sharpa.wave
+-------------------------------
+
+.. py:class:: embodichain_robots.SharpaWaveCfg
+   :no-index:
+
+   Standalone fixed-base Sharpa Wave 01, with left/right variants and 22
+   independent joint commands. No serial-chain solver or single TCP is declared.
+
+.. py:class:: embodichain_robots.sharpa.wave.SharpaWaveCfg
+   :no-index:
+
+   Model-local lazy export of :class:`embodichain_robots.SharpaWaveCfg`.
+
+.. py:class:: embodichain_robots.sharpa.wave.cfg.SharpaWaveCfg
+   :no-index:
+
+   Implementation of the source-preserving standalone hand configuration.
+
+.. automethod:: embodichain_robots.sharpa.wave.cfg.SharpaWaveCfg.from_dict
+
+.. automethod:: embodichain_robots.sharpa.wave.cfg.SharpaWaveCfg.build_pk_serial_chain
+
+
+embodichain_robots.wuji.hand
+-----------------------------
+
+.. py:class:: embodichain_robots.WujiHandCfg
+   :no-index:
+
+   Standalone fixed-base Wuji Hand, with left/right variants and 20
+   independent joint commands. No serial-chain solver or single TCP is declared.
+
+.. py:class:: embodichain_robots.wuji.hand.WujiHandCfg
+   :no-index:
+
+   Model-local lazy export of :class:`embodichain_robots.WujiHandCfg`.
+
+.. py:class:: embodichain_robots.wuji.hand.cfg.WujiHandCfg
+   :no-index:
+
+   Implementation of the source-preserving standalone hand configuration.
+
+.. automethod:: embodichain_robots.wuji.hand.cfg.WujiHandCfg.from_dict
+
+.. automethod:: embodichain_robots.wuji.hand.cfg.WujiHandCfg.build_pk_serial_chain

@@ -264,7 +264,7 @@ def write_markdown_report(
         if view == "atomic_skills":
             lines.extend(
                 [
-                    "`cost_time_ms` measures Atomic Action compilation; it is reported as `compile_time_ms` and never ranked with bare planner-call latency. "
+                    "`cost_time_ms` measures Atomic Skill compilation; it is reported as `compile_time_ms` and never ranked with bare planner-call latency. "
                     "Physical execution, end-to-end latency, physical stage success, and end-to-end success remain distinct. "
                     "Scenario-owned motion is attributed to its effective algorithm.",
                     "",
@@ -379,22 +379,6 @@ def write_markdown_report(
         )
         lines.extend(_format_table(leaderboard, _VIEW_LEADERBOARD_COLUMNS))
         lines.append("")
-        if view == "motion_planning":
-            lines.extend(
-                [
-                    "### Common Joint / FullPose comparison",
-                    "",
-                    "This table uses only homogeneous Joint and FullPose requests. Partial and mixed constraints remain in the detailed coverage tables.",
-                    "",
-                ]
-            )
-            lines.extend(
-                _format_table(
-                    aggregates.get("motion_planning_common_leaderboard", []),
-                    _VIEW_LEADERBOARD_COLUMNS,
-                )
-            )
-            lines.append("")
     domain_rows = aggregates.get("generalization", [])
     if domain_rows:
         lines.extend(

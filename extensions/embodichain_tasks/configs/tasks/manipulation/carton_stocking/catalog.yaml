@@ -1,0 +1,16 @@
+task_key: carton_stocking
+title: Directional Carton Stocking
+summary: Place a carton at a requested position and yaw using source-backed or camera-enabled
+  Task Program deployments.
+tags:
+- pick_place
+- single_arm
+- task_program
+- real2sim
+- trajectory_expansion
+default_deployment: panda
+deployments:
+  panda:
+    config: task.panda.yaml
+  panda_rgbd:
+    config: task.panda.rgbd.yaml

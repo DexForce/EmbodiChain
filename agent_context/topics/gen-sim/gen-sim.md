@@ -1,150 +1,137 @@
 # Generative simulation
 
-Scene Engine turns images into editable scenes and portable exports; the
-general SimReady pipeline ingests individual assets. Neither output is by
-itself a complete runnable Gym task deployment.
+GenSim owns image/text understanding, asset generation, editable scene graphs
+and portable outputs. Generated scenes are not complete Gym deployments.
 
 ## Entry points and resolution
 
-Paths below are relative to `embodichain/gen_sim/` unless qualified.
+Paths are relative to `embodichain/gen_sim/` unless qualified.
 
 | Request | Owner |
 |---|---|
-| Unified command dispatch | `embodichain/cli/main.py`: `scene-engine`, `scene-randomization`, `preview-scene`, `simready` |
+| Model service configuration, adapters and ownership | `services/`; [service guide](../../../embodichain/gen_sim/services/README.md) |
+| External scene-provider lifecycle | `scene_providers.py`: request/job/cancellation contracts and selected entry-point loading |
+| Public staged workflow | `workflow.py`: Task Plan loading, provider job operations, generated-scene validation, qualification and deterministic deployment preparation |
+| Unified command dispatch | `embodichain/cli/gensim.py`: `gensim asset ingest`, `scene generate/edit/expand/preview`, `task plan`, `run`, `ui`; legacy top-level commands remain in `embodichain/cli/main.py` |
+| Image to native execution | `_workflow.py`, `_run_config.py`, `_run_binding.py`, `_run_execution.py`; [command and run guide](../../../embodichain/gen_sim/README.md) |
 | Generate/edit CLI modes | `scene_engine/cli/start.py` |
 | Image → scene | `scene_engine/pipeline/generate.py`: `generate_scene_from_image()` |
 | Edit portable scene | `scene_engine/pipeline/edit.py`: `edit_scene()` |
+| Audited image/edit stages | `scene_engine/pipeline/api.py`: `analyze_image()`, `analyze_edit()`, and their materialization functions |
+| Prepare source GLB geometry before publication | `scene_engine/asset_normalization.py`: `normalize_source_scene_assets()`; owned declarations and content-addressed output, no simulator |
 | Portable scene contract | `scene_engine/pipeline/utils/scene_exporter.py`, `scene_importer.py` |
 | Grouped layouts from an existing export | `scene_engine/cli/randomization.py`, `scene_engine/randomization/generation.py` |
 | Baseline cache, saved runs and pose playback | `scene_engine/randomization/baseline.py`, `persistence.py`, `loading.py` |
 | Whole-scene USD package | `scene_engine/pipeline/utils/scene_usd.py`: `build_scene_usd()`, direct preview loading; `usd_scene.py`: entity index |
-| General asset ingest | `simready_pipeline/pipeline/ingest.py`: `ingest_one_asset()` |
-| Web app configuration | `gradio_ui/gradio_app.py`, `app_env.py` |
+| General asset ingest | `asset_engine/pipeline/ingest.py`: `ingest_one_asset()` |
+| Asset orientation and scaling orchestration | `asset_engine/utils/_simready_pipeline.py`; `simready_utils.py` and `full_blender.py` retain geometry/render/export adapters and entry points |
+| Articulated asset generation | `asset_engine/pipeline/articulation.py`, `asset_engine/clients/articulated_generation.py` |
+| Web app launch/configuration | `gensim ui` replaces its process with `gradio_ui/gradio_app.py`; `app_env.py` retains auth and allowed-root rules |
+| Shared dotenv syntax | `env.py`; environment and service readers retain key selection, missing-file and precedence policies |
 | Session-owned subprocesses | `gradio_ui/app_processes.py`: `SessionProcessRegistry` |
+| Frozen placement declaration → normative evidence binding | `task_engine/evidence.py` → [TaskSpec evidence boundary](../task-spec/task-spec.md#physical-evidence-boundary) |
 
-Generate: validate input → VLM understanding → geometry/articulation generation
-→ placement refinement → export. Segmentation, geometry and articulation
-clients are closed in `finally` blocks; VLM lifetime is separate.
-Edit: import export → validate graph/typed edit plan → generate additions
-→ change layout → overwrite export. Combined image/edit mode generates first.
+Generation validates input, understands the scene, materializes geometry and
+articulation, refines placement and exports. Editing imports an existing scene,
+validates a typed plan, generates additions and overwrites the export. Combined
+image/edit mode generates first. [Pipeline details](pipeline-details.md) own
+stage, ingest, resume, UI and grouped-randomization contracts.
 
-Read [pipeline details](pipeline-details.md) for stage contracts, parser resume
-behavior, Gradio artifact ownership and focused failure diagnosis.
+Full scene providers are separate from model-service roles. The selected
+`embodichain.gensim_scene_providers` adapter owns external job transport and
+materialization; GenSim owns requirements, qualification and deployment validity.
+Task plans, generated scenes, qualification reports and prepared deployments
+use separate immutable manifests. Expected incompatibility returns structured
+qualification; corrupt artifacts and transport failures remain errors. These
+operations expose durable identity/feedback boundaries for a later agent loop.
+
+`gensim run` binds a generated scene to a trusted embodiment/execution policy,
+preflights Task Program and uses ordinary Gym demo execution. Its source graph
+stays unbound; bound graph/deployment have separate run-owned paths. Ambiguous
+references reject and failures retain stage artifacts. Native success and
+normative TaskSpec certification remain distinct. See the
+[command guide](../../../embodichain/gen_sim/README.md) and provider-free
+[scripted reproduction](../../../examples/gensim/scripted_pick_place/README.md).
+
+One `GenSimServices` run lazily resolves selected model capabilities and closes
+owned transports; injected clients/runs remain borrowed. Python configuration
+overrides external-file discovery, then environment/user/bundled/legacy sources
+follow their declared priority. Invalid selected files fail instead of falling
+through. Only the selected installed adapter entry point loads. `services validate`
+constructs without provider requests; `doctor` also initializes roles and health
+checks. The [service guide](../../../embodichain/gen_sim/services/README.md) owns
+configuration, adapter and wire contracts. Dotenv syntax is shared; caller
+selection and process-environment precedence stay separate.
+
+Staged analysis persists versioned blueprints before generation. Materialization
+checks source/mask hashes, copies supplied scene/graph state and closes only
+owned clients. Move/delete-only edits need no generation client. Blueprint audit
+documents are not runnable deployments. Whole-scene rotation also rotates graph
+relations/table regions; directional vocabularies require quarter turns.
+[Task Engine](../task-engine/task-engine.md) owns unbound instruction planning.
 
 ## Durable scene boundary
 
-The `scene_export/` directory contains `scene.json`, `scene_config.json`,
-`scene_graph.json`, `mesh_assets/` and `articulated_assets/`.
-Generation and editing also produce an optional `scene_usd/` delivery package
-with a schema-v2 `scene.usda` carrying EmbodiChain entity metadata and a
-relocatable `scene.usdz` single-file package. DexSim preview loads schema-v2
-stages directly through `preview-scene --usd-file`; the manifest and native GLTF/USDC assets remain legacy
-compatibility data. Build it only after the complete simulation scene is
-prepared; validate UIDs and keep every packaged asset path inside the output
-root.
-
-glTF image-origin conversion is baked into the copied USD textures. Mesh UVs
-remain authored as exported, and materials use ordinary USD texture nodes so
-loading does not require development-only DexSim texture metadata or UV-transform
-support. The packaged native glTF textures retain their original pixels.
-
-- Scene object IDs and graph node IDs must be equal sets on import and export.
-- Editable scene state is Y-up; portable runtime output is Z-up. Convert world
-  pose at this boundary, and preserve `body_scale` separately from mesh geometry.
-- A generated scene includes a rigid table. Articulated assets need both a
-  runtime USDC and a GLB proxy for editing.
-- Overwrite validates/writes new scene state before deleting stale assets.
-- The internal Scene Engine SimReady processor and general asset-ingest CLI
-  are separate flows; change the selected owner rather than assuming one pipeline.
+- `scene_export/` contains scene/config/graph JSON and mesh/articulation assets;
+  imported/exported graph node IDs must equal object IDs.
+- Editable state is Y-up and runtime output Z-up. Preserve `body_scale` separately.
+  Native execution bakes scale/axis conversion into run-owned OBJ vertices and
+  isolated material sidecars; GLB node transforms alone are insufficient.
+- Every generated scene contains a rigid table. Articulations retain runtime
+  USDC plus edit-proxy GLB, with distinct native-root and proxy placement.
+- Optional `scene_usd/` carries schema-v2 entity metadata; `scene.usdz` is its
+  relocatable package. Preview loads the stage directly. Build after preparation,
+  validate UIDs and keep packaged paths inside the output root.
+- USD texture copies bake image-origin conversion while retaining authored UVs;
+  native glTF textures keep original pixels. Use ordinary USD texture nodes.
+- Overwrite validates/writes before stale deletion. Scene Engine's internal
+  SimReady and general asset ingest remain separate flows.
 
 ## Shared scene services
 
-Geometric support detection, group translation/alignment and AABB separation
-use private CPU strategies under `sim.scene`; tabletop and parent-surface
-optimization adapt `sim.scene.layout`. These strategies reuse Torch geometry
-kernels from `compute.geometry`, while Shapely, Trimesh and SLSQP stay on CPU. Existing adapters keep Y-up conversion and debug output;
-`SceneLayoutConstructor` retains hierarchy traversal and edit-specific pose
-propagation. `GravitySettler` owns its temporary simulator and fixed-step default;
-optional convergence checks use shared scene validation. See
-[scene services](../scene-services/scene-services.md) for frames, supported
-geometry and physical-state boundaries.
+GenSim adapters retain Y-up conversion, hierarchy traversal and edit propagation.
+`sim.scene` owns shared support/group/layout/state operations and their CPU
+strategies; `compute.geometry` owns pure tensor proposals. Shapely/Trimesh/SLSQP
+remain CPU algorithms. `GravitySettler` owns its temporary simulator and optional
+convergence checks. General services consume explicit UID/geometry, not GenSim
+models, masks or output directories.
 
-GenSim owns scene understanding, asset generation, VLM orientation, its editable
-scene graph and file formats. General services consume explicit UID/geometry
-inputs rather than `SceneObject`, image masks or generation output directories.
-
-Grouped randomization consumes one rigid-GLB table export and its explicit
-support graph. The default SLSQP path retains the shared procedural solver;
-the optional batched backend uses CPU/CUDA counter-addressed rejection sampling
-from `compute.geometry._sampling`. Rejection has a different distribution and
-acceptance rate from SLSQP repair. Batch boundaries do not change logical
-proposal ordinals or the consumed attempt budget. CUDA selection is explicit.
-
-The adapter owns group/member transforms, source/configuration snapshots and
-canonical CPU float64 pose expansion for persisted identities. Version-3 policies
-add explicit non-root XY/yaw targets and optional fixed group roots; empty targets
-retain the original group path. `_intra.py` composes numeric postorder subtree
-proposals with dynamic outer AABBs. UID-addressed streams retain the logical
-prefix across batch sizes, and each failed layout consumes one whole attempt.
-Hierarchical generator v2 samples outer roots from free center rectangles rather
-than retrying collisions; version-1 hierarchical runs remain replayable.
-Free-region temporaries use obstacle chunks and an adaptive batch ceiling;
-resolved policies record the effective batch size without changing the prefix.
-
-`_intra_geometry.py` adapts scaled assets and graph topology to the shared
-parent-local support-grid strategy. Child bottom geometry guides plane selection;
-ambiguous layers require evidence-checked overrides. Immutable content-addressed
-caches include source/extractor/settings identities and leave the original
-baseline unchanged. Cache v2 records the upper height deviation of the selected
-layer so shallow bumps do not consume the support gap. Preserve earlier cache
-height semantics when replaying old runs. Do mesh loading, plane extraction and polygon rasterization
-only during preparation; do not call scene construction or SLSQP per candidate.
-
-Batch candidates and loaded variants own lazy numeric sequences; consuming an
-item constructs typed poses/configurations while saving validates numeric evidence.
-Runtime collision settings are preserved. V3 layouts store root XY translations,
-selected parent-relative full poses and cache references, then validate all source,
-geometry, accounting and identities before exposing variants. Playback reconstructs
-saved results without sampling or stepping physics. Existing v1 individual and
-v2 packed group runs remain readable; complete resolved policies can be reused.
-
-JSON remains the default storage; packed writes one atomic candidate container.
-Both revalidate source/baseline and the exact cache snapshot before publishing
-the completion manifest last. Concurrent cache writers use distinct staging files. Geometric
-support/AABB acceptance does not establish physical or task success. See
-[`scripts/tutorials/scene/README.md`](../../../scripts/tutorials/scene/README.md)
-for policy settings, demo and end-to-end CPU/CUDA benchmarks and the
-[public API supplement](../../../docs/source/api_reference/public_api.rst).
-
-`randomization/adapter.py` projects rigid exports into the shared scene-layout
-input. `generate_scene_from_image` and `edit_scene` accept an optional post-export
-job; the CLI's combined generation/edit flow triggers it once after the final
-export. New runs use source-independent v4 storage and retain the original
-export for preview. `convert_layouts` preserves validated legacy poses and IDs
-without sampling. File/model coordinate adaptation remains owned here.
+Grouped layouts retain explicit support graphs, source snapshots, logical
+proposal identity and attempt accounting. Rejection sampling differs from SLSQP
+repair; CUDA selection is explicit and batch boundaries cannot change prefixes.
+See [pipeline details](pipeline-details.md#grouped-layouts) for hierarchy,
+canonicalization and pose-only playback boundaries.
 
 ## Runtime and extension boundaries
 
-Keep parser capabilities idempotent so recorded stages support resume.
-Provider configuration belongs to its loader/client, while coordinate and graph
-contracts belong to importer/exporter. Task registration and physical/semantic
-composition belong to [env-framework](../env-framework/env-framework.md).
+Live generation/execution share a process and retain `hybrid`: renderer
+selection is process-wide and closing a temporary World does not reset it.
 
-Gradio uses explicit allowed roots and per-session process ownership. A
-replacement run terminates the previous process for that session. Remote
-access requires complete basic auth; repository/dotenv path restrictions belong
-to `app_env.py`. Existing process environment values take precedence over loaded
-environment files.
+`EMBODICHAIN_BLENDER_EXECUTABLE` selects the Blender application for Eevee
+graphics initialization; otherwise `EMBODICHAIN_BLENDER_PYTHON` selects the
+isolated interpreter. Both follow shared-dotenv/process precedence.
+Blender operations run through `_blender_runtime.py` in the separately selected
+worker environment. The worker loads operations/direct dependencies, without
+Torch, DexSim or business-framework initialization. Files cross the boundary;
+Blender objects and business native-library paths do not. Runtime profiles belong
+to [docker](../../../docker/README.md).
+
+Gradio owns allowed roots, auth, UUID artifacts and session-owned subprocesses.
+Replacement runs terminate the prior process for that session. Remote access
+requires complete basic auth; existing process env values retain priority.
+Asset/source registry and task composition remain owned by their existing
+subsystems. Frozen placement/control evidence normalizes through Task Program;
+TaskSpec separately applies normative criteria.
 
 ## Focused validation
 
-| Change | Tests |
+| Boundary | Coverage |
 |---|---|
-| Portable scene/pose/overwrite contract | `tests/gen_sim/scene_engine/test_scene_core_and_export.py` |
-| Grouped layout generation, provenance and playback | `tests/gen_sim/scene_engine/test_randomization_*.py` |
-| Edit plans and graph | `tests/gen_sim/scene_engine/test_scene_edit.py`, `test_scene_edit_plan.py`, `test_scene_graph.py` |
-| Ingest formats and metadata | `tests/gen_sim/simready_pipeline/` |
-| UI roots/auth/session workflow | `tests/gen_sim/gradio_ui/` |
+| Scene/graph/pose/overwrite and staged API | `tests/gen_sim/scene_engine/` |
+| Ingest metadata and backend orchestration | `tests/gen_sim/asset_engine/` |
+| Service discovery, parsing and lifetime | `tests/gen_sim/services/`, `tests/gen_sim/test_gen_sim_env.py` |
+| UI roots, auth and process ownership | `tests/gen_sim/gradio_ui/` |
+| CLI and execution handoff | `tests/cli/test_gensim.py`, `tests/test_main.py`, `tests/gen_sim/test_workflow.py` |
 
-Select provider-backed or simulator conversion tests only when that runtime
-boundary changes; source/unit checks do not establish remote service quality.
+Choose provider/simulator tests for the changed boundary; unit checks alone do
+not establish remote model quality or native task success.

@@ -8,7 +8,7 @@ After installation, continue with the [Quick Start Tutorial](../tutorial/index.r
 
 | Path | Best for | Notes |
 |------|----------|-------|
-| **Docker** | First run, reproducible GPU sim | Pre-built image with CUDA 12.8, Vulkan, and Python 3.11 |
+| **Docker** | First run, reproducible GPU sim | Pre-built Python 3.12 runtime with CUDA 12.8 and an isolated Blender worker |
 | **Local + [uv](https://github.com/astral-sh/uv)** | Day-to-day development | Fast installs; recommended with a virtual environment |
 | **Local + pip** | Simple environments | Use a virtual environment |
 
@@ -18,18 +18,22 @@ After installation, continue with the [Quick Start Tutorial](../tutorial/index.r
 |-----------|-------------|
 | **OS** | Linux x86_64 (Ubuntu 20.04+ recommended) |
 | **GPU** | NVIDIA GPU with compute capability 7.0+ |
-| **NVIDIA driver** | ≥ 535 (tested on driver branches up to 595.x) |
+| **NVIDIA driver** | ≥ 580.00 (tested on driver branches up to 595.x) |
 | **CUDA** | 12.x (aligned with the Docker image and `dexsim_engine` wheels) |
 | **Vulkan** | Host ICD/layer files for GPU rendering (see Docker notes) |
-| **Python** | Core: 3.10, 3.11, or 3.12; `gensim` / `bpy`: 3.11 |
+| **Python** | Core / GenSim: 3.11 or 3.12; isolated Blender worker: 3.11 |
 | **Display** (optional) | X11 `DISPLAY` for interactive viewer windows |
 
+The current DLSS integration uses SDK and Super Resolution (SR) **310.7.0**
+and the OVRTX-aligned Ray Reconstruction (RR) runtime **310.7.128**. These
+versions require an NVIDIA driver **≥ 580.00** for both local and Docker
+installations. For Docker, this requirement applies to the host driver.
+
 > [!IMPORTANT]
-> Python 3.12 is supported for the core EmbodiChain installation. The optional
-> `gensim` extra includes Blender's ABI-specific `bpy` package and must run in a
-> Python 3.11 environment. If your core installation uses Python 3.12, create a
-> separate Python 3.11 environment for `gensim` and start its commands from that
-> environment; there is no automatic cross-environment handoff.
+> GenSim runs in the main EmbodiChain environment, while Blender operations can
+> run in an isolated Python 3.11 worker selected by `EMBODICHAIN_BLENDER_PYTHON`.
+> The public Docker image configures this worker automatically. For local
+> installs, see [generative simulation](#optional-generative-simulation-gensim).
 
 NVIDIA drivers are backward compatible with applications built against older
 CUDA toolkits. A 595-series host driver therefore works with the current CUDA
@@ -37,27 +41,61 @@ CUDA toolkits. A 595-series host driver therefore works with the current CUDA
 required. See NVIDIA's [CUDA compatibility documentation](https://docs.nvidia.com/deploy/cuda-compatibility/latest/index.html)
 for details.
 
-> [!NOTE]
-> **PyTorch:** EmbodiChain depends on PyTorch transitively (for example via `dexsim_engine` and `pytorch_kinematics`). If you install or upgrade PyTorch separately, match the wheel to your CUDA version using the [official PyTorch install selector](https://pytorch.org/get-started/locally/).
+## Python and LeRobot compatibility
+
+Installation selects the LeRobot SDK by Python version:
+
+| Python | LeRobot | Hugging Face Hub | Torch / torchvision / TorchCodec | TensorDict |
+| --- | --- | --- | --- | --- |
+| 3.11 | 0.4.4 | >=0.35.3, <0.36 | 2.7.x / 0.22.x / 0.5.x | >=0.13, <0.15 |
+| 3.12 | 0.6.1, including training/dataset dependencies | >=1.6, <2 | 2.11.x / 0.26.x / >=0.11.1, <0.12 | >=0.15.3, <0.16 |
+
+Torch remains a direct dependency because the framework uses it independently
+of LeRobot. TorchCodec must match the Torch binary interface; LeRobot's wider
+dependency ranges alone do not enforce that pairing. CI pins exact patch
+versions within each supported profile; package metadata allows patch updates
+within those version lines. Further qualification is tracked in
+[#883](https://github.com/DexForce/EmbodiChain/issues/883).
+Select matching CPU or CUDA wheels when installing the Torch stack. For the
+Python 3.12 GPU profile, select the CUDA 12.8 wheels explicitly when using the
+existing CUDA 12.8 runtime; PyPI's default Torch wheel may select CUDA 13:
+
+```bash
+python -m pip install torch==2.11.0 torchvision==0.26.0 torchcodec==0.11.1 \
+  --index-url https://download.pytorch.org/whl/cu128
+```
+
+The SDK matrix CI checks a clean CPU installation, recording/loading, video
+decoding, and an official ACT update/checkpoint/reset. GPU simulation and full policy learning acceptance
+are separate checks. This release requires Python >=3.11 and pins DexSim
+0.6.0rc1. The DexForce index provides Linux x86_64 wheels for CPython 3.11 and
+3.12; use one of those versions for this release. Python 3.10 is unsupported,
+and versions above 3.12 are outside the current wheel/validation matrix.
+
+Recordings retain the existing task/subtask table and depth-sidecar schema on
+both routes. LeRobot 0.6.1 exposes `subtask_index` but does not automatically
+resolve `meta/subtasks.parquet`; the EmbodiChain preview resolves it explicitly.
+Use the [standalone exporter](https://github.com/DexForce/EmbodiChain/blob/main/tools/lerobot_export/README.md) for native 0.6.1
+persistent-language annotations and depth features. The [ACT example](https://github.com/DexForce/EmbodiChain/blob/main/examples/learning/act/README.md) uses the official LeRobot
+0.6.1 trainer and policy on Python 3.12. Historical custom ACT checkpoints require
+retraining.
 
 ## Package indexes
 
-EmbodiChain and its simulation backend are published on a DexForce package index. Generative-simulation extras also need Blender's index for the `bpy` wheel.
+EmbodiChain and its simulation backend are published on a DexForce package index. The isolated Blender worker uses Blender's index for the `bpy` wheel.
 
 | Index | URL | Used for |
 |-------|-----|----------|
 | **DexForce (required)** | `http://pyp.open3dv.site:2345/simple/` | `embodichain`, `dexsim_engine`, and related wheels |
-| **Blender (gensim only)** | `https://download.blender.org/pypi/` | `bpy` |
+| **Blender (worker only)** | `https://download.blender.org/pypi/` | `bpy` |
 
-Reuse these flags on every `pip` / `uv pip` install command:
+Use these flags when installing EmbodiChain or its extras:
 
 ```bash
 DEXFORCE_INDEX="http://pyp.open3dv.site:2345/simple/"
 DEXFORCE_TRUSTED_HOST="pyp.open3dv.site"
-BLENDER_INDEX="https://download.blender.org/pypi/"
 
 PIP_EXTRA_ARGS="--extra-index-url ${DEXFORCE_INDEX} --trusted-host ${DEXFORCE_TRUSTED_HOST}"
-GENSIM_EXTRA_ARGS="${PIP_EXTRA_ARGS} --extra-index-url ${BLENDER_INDEX}"
 ```
 
 > [!TIP]
@@ -67,12 +105,26 @@ GENSIM_EXTRA_ARGS="${PIP_EXTRA_ARGS} --extra-index-url ${BLENDER_INDEX}"
 
 ## Docker (recommended for first run)
 
-The pre-configured image includes CUDA 12.8, Vulkan-related mounts, and dependencies needed for GPU simulation and rendering.
+The public image provides a Python 3.12 runtime with GPU simulation, GenSim,
+cuRobo, and ONNX CUDA deployment. Blender runs in an isolated Python 3.11
+worker. The `ubuntu22.04-cuda12.8` and `ubuntu22.04-cuda12.8-py312` tags refer
+to the same public image.
+
+The internal image additionally provides a Python 3.11 business environment;
+select `py311` or `py312` with `EMBODICHAIN_ENV`. See the
+[container guide](https://github.com/DexForce/EmbodiChain/blob/main/docker/README.md)
+for internal registry access, environment selection, source development, and
+dependency locks.
+
+The published image digests in the container guide's validation record belong
+to the earlier DexSim 0.5.1rc1 runtime. For this checkout's DexSim 0.6.0rc1
+requirements, build a candidate from the current source or follow the guide's
+source-development instructions to update the selected environment.
 
 ### Prerequisites
 
 - [Docker](https://docs.docker.com/engine/install/) with [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
-- NVIDIA driver ≥ 535 on the host
+- NVIDIA driver ≥ 580.00 on the host (required by the current DLSS integration)
 - For **GUI** runs: working X11 forwarding (`DISPLAY`, `~/.Xauthority`, `/tmp/.X11-unix`)
 - For **headless** servers: no display required; use `--headless` in tutorial scripts
 
@@ -97,7 +149,8 @@ cd EmbodiChain
 | `container_name` | Name for the new container |
 | `data_path` | Host directory mounted at `/root/workspace` inside the container |
 
-The script checks for Vulkan ICD/layer and EGL vendor JSON files on the host. Warnings usually mean reduced rendering support; the script exits only when required driver paths are missing entirely.
+The script mounts available Vulkan ICD/layer and EGL vendor JSON files from
+`/etc` and `/usr/share`. Headless startup does not require X11 files.
 
 **3. Attach to the running container:**
 
@@ -105,17 +158,20 @@ The script checks for Vulkan ICD/layer and EGL vendor JSON files on the host. Wa
 docker exec -it <container_name> bash
 ```
 
-Inside the container, install or update EmbodiChain with the [local installation](#local-installation) commands if needed, then [verify](#verify-installation).
+EmbodiChain is already installed in the container; continue with
+[verification](#verify-installation). For editable source development, follow the
+[container guide](https://github.com/DexForce/EmbodiChain/blob/main/docker/README.md#install-and-run)
+to preserve the selected environment's dependency locks.
 
 > [!NOTE]
-> The script uses `--network=host`, `--gpus all`, and a large `--shm-size` for simulation workloads. Adjust mounts in `docker/docker_run.sh` if your driver files live under `/etc` instead of `/usr/share`.
+> The script uses `--network=host`, `--gpus all`, and a large `--shm-size` for simulation workloads. Set `EMBODICHAIN_DOCKER_IMAGE` to select a different image.
 
 ## Local installation
 
 Use a dedicated virtual environment to avoid conflicts with system Python packages.
-For the core package, choose Python 3.10, 3.11, or 3.12. The examples below use
-Python 3.12; choose Python 3.11 instead if you plan to install `gensim` in the
-same environment.
+For the core package, choose Python 3.11 or 3.12. The examples below use
+Python 3.12. Check the [compatibility matrix](#python-and-lerobot-compatibility)
+before choosing a version for an existing dataset or learning workflow.
 
 ### 1. Create a virtual environment
 
@@ -137,7 +193,11 @@ python -m pip install --upgrade pip
 
 ### 2. Install EmbodiChain
 
-Set the index variables from [Package indexes](#package-indexes), then pick one row:
+Set the index variables from [Package indexes](#package-indexes), then pick one row.
+For a Python 3.12 / CUDA 12.8 environment, install the matching Torch stack
+from the [compatibility section](#python-and-lerobot-compatibility) first.
+With uv, add `--torch-backend cu128` to the installation command to select that
+CUDA wheel source explicitly.
 
 | Source | Tool | Command |
 |--------|------|---------|
@@ -152,7 +212,7 @@ Set the index variables from [Package indexes](#package-indexes), then pick one 
 git clone https://github.com/DexForce/EmbodiChain.git
 cd EmbodiChain
 uv venv --python 3.12 .venv && source .venv/bin/activate
-uv pip install -e . \
+uv pip install -e . --torch-backend cu128 \
   --extra-index-url http://pyp.open3dv.site:2345/simple/ \
   --trusted-host pyp.open3dv.site
 ```
@@ -225,6 +285,18 @@ python -m pip install "embodichain[policy-deploy]" ${PIP_EXTRA_ARGS}
 
 For an editable checkout, use `-e ".[policy-deploy]"` in the second command.
 
+## Newton planning geometry
+
+Native convex planning queries reuse the isolated Newton collision pipeline.
+They require the supported Newton runtime and do not require `python-fcl` or
+an additional FCL extra. Queries run on CPU independently of the live physics
+backend; missing Newton entry points fail before native scene capture.
+
+Distance diagnostics are capped contact-band estimates, not global exact
+minimum distances. Precision intervals spanning a requested contact threshold
+remain unavailable. CPU query tests do not establish GPU or physical-task
+qualification.
+
 ## Optional: cuRobo V2 motion planning
 
 Install cuRobo separately to use EmbodiChain's CUDA-accelerated,
@@ -270,47 +342,48 @@ pytest --pyargs curobo.tests
 
 The dependency is installed from NVIDIA's source repository and pinned to the
 cuRobo V2 `v0.8.0` release. cuRobo has stricter requirements than the core
-EmbodiChain installation: Linux, Python 3.10--3.13, a supported NVIDIA GPU with
-at least 4 GB VRAM, and a driver that supports CUDA 12 or newer. See
+EmbodiChain installation: Linux, a supported NVIDIA GPU with at least 4 GB
+VRAM, and a driver that supports CUDA 12 or newer. See
 [NVIDIA's official installation guide](https://nvlabs.github.io/curobo/latest/getting-started/installation.html)
 for the current compatibility requirements, and see
 [cuRobo V2 Planner](../overview/sim/motion/planners/curobo_planner.md) for EmbodiChain
 configuration and usage. cuRobo planning always runs on CUDA, but the
 SimulationManager physics device may be either CPU or CUDA.
+cuRobo's upstream Python range does not expand this release's EmbodiChain
+runtime matrix; use Python 3.11 or 3.12 when installing them together.
 
 ## Optional: generative simulation (`gensim`)
 
-Install the `gensim` extra for SimReady asset pipelines, Blender-based mesh
-processing, and `pyrender`. It requires a Python 3.11 environment because its
-`bpy` wheel is ABI-specific. Use the Blender index in the install command.
+Install the `gensim` extra in your main EmbodiChain environment for the
+Python-facing GenSim dependencies. Blender is supplied by a separate runtime;
+the extra does not install `bpy`.
 
-If your core installation uses Python 3.12, create and activate a separate
-Python 3.11 environment before running any of the commands below. The current
-GenSim launchers use the interpreter that starts them, so start Blender-based
-commands from this Python 3.11 environment.
+Use the index variables from [Package indexes](#package-indexes):
 
 | Source | Tool | Command |
 |--------|------|---------|
-| PyPI | uv | `uv pip install "embodichain[gensim]" ${GENSIM_EXTRA_ARGS}` |
-| PyPI | pip | `pip install "embodichain[gensim]" ${GENSIM_EXTRA_ARGS}` |
-| Git clone | uv | `uv pip install -e ".[gensim]" ${GENSIM_EXTRA_ARGS}` |
-| Git clone | pip | `pip install -e ".[gensim]" ${GENSIM_EXTRA_ARGS}` |
+| Published package | uv | `uv pip install "embodichain[gensim]" ${PIP_EXTRA_ARGS}` |
+| Published package | pip | `pip install "embodichain[gensim]" ${PIP_EXTRA_ARGS}` |
+| Git clone | uv | `uv pip install -e ".[gensim]" ${PIP_EXTRA_ARGS}` |
+| Git clone | pip | `pip install -e ".[gensim]" ${PIP_EXTRA_ARGS}` |
 
-**Example — separate Python 3.11 environment:**
+The Docker images already configure the isolated Blender worker. For a local
+installation, run the following from a source checkout with `uv` installed:
 
 ```bash
-uv venv --python 3.11 .venv-gensim
-source .venv-gensim/bin/activate
-pip install -e ".[gensim]" \
-  --extra-index-url http://pyp.open3dv.site:2345/simple/ \
-  --trusted-host pyp.open3dv.site \
-  --extra-index-url https://download.blender.org/pypi/
+uv venv --python 3.11 .venv-blender
+EMBODICHAIN_CONSTRAINTS_DIR="$PWD/docker/locks" \
+  bash docker/install-profile.sh blender311 "$PWD/.venv-blender"
+export EMBODICHAIN_BLENDER_PYTHON="$PWD/.venv-blender/bin/python"
 ```
 
-> [!TIP]
-> When using **uv** from a source checkout, `pyproject.toml` already defines the Blender index under `[tool.uv.index]` for the `bpy` source. You still need the DexForce index flags for `dexsim_engine`.
+Keep your main EmbodiChain environment active when launching GenSim. Blender
+mesh and rendering jobs are handed off to the selected worker automatically.
+The installer applies the locked Blender dependencies and the wheel metadata
+correction described in the
+[Blender runtime notes](https://github.com/DexForce/EmbodiChain/blob/main/docker/README.md#blender-and-native-library-isolation).
 
-For SimReady pipeline usage and LLM configuration, see [SimReady Asset Pipeline](../features/generative_sim/simready_pipeline.md).
+For Asset Engine usage and LLM configuration, see [Asset Engine](../features/generative_sim/asset_engine.md).
 
 ## Verify installation
 
@@ -358,7 +431,7 @@ and forward the port:
 ssh -N -L 8080:127.0.0.1:8080 user@worker-host
 ```
 
-See [Browser visualization with Viser](../overview/sim/viser_visualization.md)
+See [Browser visualization with Viser](../overview/sim/visualization/viser.md)
 for supported objects, camera preview, update-rate options, and remote-access
 guidance.
 
@@ -370,15 +443,15 @@ Press `Ctrl+C` to stop; the script cleans up the simulation on exit.
 |---------|-------------|
 | `Could not find a version` / `No matching distribution` for `embodichain` or `dexsim_engine` | Add the DexForce index and `--trusted-host pyp.open3dv.site` (see [Package indexes](#package-indexes)). |
 | `No module named 'dexsim'` after install | Reinstall with the DexForce index; `dexsim` is provided by the `dexsim_engine` package. |
-| Docker Vulkan / EGL warnings from `docker_run.sh` | Install host NVIDIA drivers and Vulkan user-space packages; paths must be files under `/etc` or `/usr/share`, not directories. |
+| Docker Vulkan / EGL rendering errors | Check NVIDIA Container Toolkit and host driver installation; the run script mounts available JSON files under `/etc` and `/usr/share`. |
 | Viewer does not open | Export `DISPLAY`, allow X11 access (`xhost +local:` on the host), and ensure `~/.Xauthority` is mounted (the run script does this by default). |
 | PyTorch / CUDA errors at runtime | Reinstall a PyTorch build that matches your driver/CUDA from [pytorch.org](https://pytorch.org/get-started/locally/). |
 | `No module named 'curobo'` | Install the CUDA-matched cuRobo source requirement separately, such as `uv pip install "nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@v0.8.0"`. |
-| `bpy` install fails | Include the Blender index (`https://download.blender.org/pypi/`) and use Python 3.11. `bpy` is not available for the core Python 3.12 environment. |
+| Blender worker fails or `bpy` is missing | Install the isolated Python 3.11 worker and set `EMBODICHAIN_BLENDER_PYTHON` to its interpreter (see [GenSim setup](#optional-generative-simulation-gensim)). |
 
 ## Next steps
 
 - [Quick Start Tutorial](../tutorial/index.rst)
 - [Simulation Manager](../overview/sim/sim_manager.md)
-- [Browser visualization with Viser](../overview/sim/viser_visualization.md)
+- [Browser visualization with Viser](../overview/sim/visualization/viser.md)
 - [Build documentation](docs.md)

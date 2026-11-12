@@ -23,8 +23,8 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from embodichain.lab.sim.atomic_actions import (
-    ActionInvocation,
+from embodichain.lab.sim.atomic_skills import (
+    SkillInvocation,
     Affordance,
     GraspGoal,
     HeldObjectPoseGoal,
@@ -36,7 +36,7 @@ from embodichain.lab.sim.atomic_actions import (
     PlaceOptions,
     TaskState,
 )
-from embodichain.lab.sim.atomic_actions.plans import CompiledTrajectory
+from embodichain.lab.sim.atomic_skills.plans import CompiledTrajectory
 
 from ..atomic_skill import AtomicSkillCaseProvider, register_atomic_skill_provider
 from ..contracts import ReplayObservationWindow
@@ -243,7 +243,7 @@ class PickUpCases(AtomicSkillCaseProvider):
         scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
-    ) -> ActionInvocation:
+    ) -> SkillInvocation:
         handle = scenario.object_handle(case.object_id)
         if scenario.end_effector_part is None:
             raise RuntimeError(
@@ -310,7 +310,7 @@ class PickUpCases(AtomicSkillCaseProvider):
                 "pickup_grasp",
                 close.start,
                 close.stop,
-                frozenset({"gripper_qpos"}),
+                frozenset({"gripper_contact", "gripper_qpos"}),
             ),
             ReplayObservationWindow(
                 "pickup_lift",
@@ -322,7 +322,9 @@ class PickUpCases(AtomicSkillCaseProvider):
                 "pickup_settle",
                 waypoint_count,
                 waypoint_count,
-                frozenset({"object_pose", "tcp_pose", "gripper_qpos"}),
+                frozenset(
+                    {"gripper_contact", "object_pose", "tcp_pose", "gripper_qpos"}
+                ),
                 include_settle=True,
             ),
         )
@@ -599,7 +601,7 @@ class MoveHeldObjectCases(HeldObjectCases):
         scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
-    ) -> ActionInvocation:
+    ) -> SkillInvocation:
         return scenario.require_engine().make_invocation(
             self.skill_id,
             HeldObjectPoseGoal(
@@ -636,7 +638,7 @@ class MoveHeldObjectCases(HeldObjectCases):
                 "held_object_settle",
                 waypoint_count,
                 waypoint_count,
-                frozenset({"object_pose", "gripper_qpos"}),
+                frozenset({"gripper_contact", "object_pose", "gripper_qpos"}),
                 include_settle=True,
             ),
         )
@@ -769,7 +771,7 @@ class PlaceCases(HeldObjectCases):
         scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
-    ) -> ActionInvocation:
+    ) -> SkillInvocation:
         return scenario.require_engine().make_invocation(
             self.skill_id,
             PlaceGoal(case_pose(case, "release_pose", device=scenario.robot.device)),

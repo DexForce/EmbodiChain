@@ -71,7 +71,12 @@ stable online language IDs. Language intent does not establish physical success.
   policy actions.
 - Descriptor-driven policy recording and policy-width trajectory recording do
   not accept `ControllerAction`; mixing those fixed layouts fails before action
-  processing. Expert recording continues to use `ExpertActionSpec`.
+  processing. Expert recording continues to use `ExpertActionSpec`. The position-only
+  `expert_trajectory.use_action_manager` opt-in converts joint targets through the
+  policy terms while retaining exact FK targets. With
+  `rollout_action_semantics="policy_request"`, it instead records the converted
+  ActionManager request and trace independently of expert joint width; unmanaged
+  direct controller commands remain rejected by this recording contract.
 - For raw-policy vector demos with staggered completion, ActionManager masks
   inactive rows after processing: selected qpos resources hold measured values,
   while qvel/qf resources receive zero commands.
@@ -96,17 +101,56 @@ stable online language IDs. Language intent does not establish physical success.
 - `create_demo_segments()` retains the active `TaskProgramDemoBridge` while its lazy
   segments execute.
 - For an enabled program, `is_task_success()` returns all false until the bridge
-  iterator completes normally. It then returns the bridge's final row-local
-  acceptance mask, which already combines runtime, post-policy, and validator
-  results.
-- `reset()` lets `BaseEnv` read that final mask before clearing the active
-  bridge, preventing completed state from leaking into the next episode.
+  iterator completes normally. The bridge's row-local acceptance mask combines
+  runtime, post-policy, and validator results. When the deployment selects
+  `evaluation.final_acceptance`, each query also checks the selected predicates
+  against fresh physical observations.
+- Demo completion seals each row's execution, measured outcome, acceptance and
+  termination under `episode_outcome`. Segment entries include cached runtime,
+  post-policy and validator decisions when available. The same report is
+  sealed from RL's cached state at the done transition and is exposed through
+  step info's `terminal_outcomes`. Reset consumes selected reports before
+  clearing rows and returns them with receipts in `reset_episode_outcomes`.
+  A manually driven completed bridge is sealed before saving. An aborted
+  deployment-gated attempt cannot seal success from a Gym flag. Reset a
+  sealed gated row before retrying it. A preplanned segment iterable can use
+  a fresh bound bridge for its attempt.
+- An explicitly configured RL `evaluation_condition` uses the shared
+  `RuleSession` for temporal roots. Only transition computation consumes a
+  slot. Pending windows remain nonterminal, and row resets restart their
+  windows without clearing peer evidence.
 - `DemoSegmentResult.successes` is the persisted segment acceptance authority.
   `DemoExecutionCfg` keeps continuous episodes as the default and can instead
   make each eligible natural segment an independent dataset fragment. This
   mode does not restore state or resume after failure.
+- `execute_demo_episode(on_segment_completed=...)` observes each finalized result
+  after segment recording and before the next lazy segment, including ordinary
+  failure and cancellation boundaries. The optional callback must not step or
+  reset the environment; its exceptions propagate without changing acceptance.
 - Environments without a Task Program keep the ordinary `BaseEnv.is_task_success()`
   behavior and task-specific overrides.
+
+### Configured manipulation RL outcomes
+
+`EmbodiedEnvCfg.rl_task` optionally enables RL outcomes on `EmbodiedEnv`.
+Its ordinary loop calls `TerminationManager.compute()` once after physics and
+interval events, supplying this transition's time-limit mask before observations
+and rewards. `BaseEnv._get_termination_flags()` lets the configured host return
+those cached Gym flags; recording does not finalize or recompute acceptance.
+Queries return owned tensors and never sample stateful conditions. No declared
+success terms means no default success; invalid evidence fails only its own rows.
+Failure or truncation excludes accepted success while retaining raw physical
+truth. `ignore_terminations` suppresses Gym termination flags without changing
+measured acceptance or disabling time limits. Legacy environments and Task
+Program keep their existing info-based termination and success rules.
+
+Reset consumes old buffers first, then clears selected condition rows and
+captures virtual targets after reset events and trusted preparation. Explicit
+mid-episode exports derive labels from the configured outcome rather than the
+previous reset-time success cache. Trajectories retain initial virtual
+targets in episode metadata; single-row dynamic replay restores them after
+physical state and before observations/recording initialization. Missing context
+is an error. Replay exhaustion is a playback boundary, not new measured evidence.
 
 ### Segment terminal progress (`demo.py`, `run_task.py`)
 
@@ -158,7 +202,7 @@ EmbodiedEnv.__init__(cfg)
 ```
 reset(options)
   ├── validate selections and episode_prepare callback
-  ├── is_task_success() → capture old task outcome
+  ├── _task_success_before_reset() → capture old task outcome
   ├── _before_episode_reset() → existing save policy × EpisodeContext eligibility
   ├── begin selected context episodes only after old buffers are consumed
   ├── sim.reset_objects_state(env_ids, excluded_uids)
@@ -254,20 +298,24 @@ not orchestrate multiple experiments or qualify kinematic playback.
 
 `EmbodiedEnv` can record per-object kinematic trajectories and replay them later.
 
-- **Recording**: set `cfg.record_trajectory = True`. A dedicated per-env
-  `self._traj_buffer` (TensorDict: `states` = robot root_pose+qpos, articulations,
-  rigid objects; `actions` = the flat raw policy action when ActionManager is
-  configured, active qpos for position-mode experts, or effective flat
-  `[qpos, qvel]` targets in position-velocity expert mode) is written each step via
-  `_write_trajectory_step` (called from `_hook_after_sim_step`). A per-env
-  `self._traj_steps` counter means **async parallel envs** (different reset times)
-  don't corrupt each other. `cfg.trajectory_uids` restricts which non-robot objects
-  are recorded.
-- **Persistence**: `env.save_trajectory(path, env_ids=None)` writes a `.pt` with
-  `states`, `actions`, and `meta` (incl. per-env `lengths`). With
-  `cfg.trajectory_auto_save = True` (default), trajectories auto-save to
-  `<EMBODICHAIN_DEFAULT_DATA_ROOT>/trajectories/<run_id>/` at episode end and on
-  `close()` (best-effort: IO errors warn + skip, never crash the episode).
+- **Recording**: set `cfg.record_trajectory = True`. the existing host rollout writer
+  fills the shared store's raw observation group and metadata. Policy and raw
+  cursors keep their accepted-versus-diagnostic semantics; there is no independent
+  history instance or write lifecycle. Standard state fields use observation functors; the host
+  does not perform a separate physics read in its write hook. Full robot state,
+  articulations, selected rigid objects and cable segments share that acquisition
+  and retain their existing action schema.
+  `cfg.trajectory_uids` restricts non-robot replay fields. Raw channels, T+1
+  timing and lifetime queries are owned by the
+  [recording contract](env-framework.md#expert-trajectory-contract).
+- **Persistence**: `env.save_trajectory(path, env_ids=None)` retains legacy
+  `states`, `actions` and `meta` (`lengths`), adding `terminal_states` and versioned
+  `raw_observations`. A measured deployment final acceptance includes a separate
+  `final_acceptance_observations` capture tied to the episode row and seal revision.
+  The capture may occur after the last recorded control step. Auto-save
+  participates in an explicitly committed reset. `close()` discards uncommitted
+  data and finalizes writes. Persistence failures propagate through the durability
+  barrier. Defaults and paths live in `EmbodiedEnvCfg`/`save_trajectory`.
 - **Replay**: `ReplayWrapper(env, trajectory, mode)` wraps any `EmbodiedEnv`.
   `kinematic` disables physics and writes recorded states (obs only, exact
   reproduction); `dynamic` feeds raw-policy actions through `env.step` so the
@@ -276,10 +324,45 @@ not orchestrate multiple experiments or qualify kinematic playback.
   decodes `ControllerAction`; the legacy `expert_controller` marker remains
   accepted. Objective-enabled dynamic replay requires one row and a full reset.
   `control` exposes `go_to_step(step)` for O(1) scrubbing. The replay env must
-  use the same robot/objects/`actions` config as the recording env.
-- **Decoupled from `rollout_buffer`**: the trajectory buffer is separate from the
-  shared `rollout_buffer` (obs/actions/rewards) used by LeRobot/RL.
-  `current_rollout_step`, LeRobot recorder, and RL mode are untouched.
+  use the same robot/objects/`actions` config as the recording env. For a deployment
+  with `evaluation.final_acceptance`, `ReplayWrapper.final_acceptance` recomputes
+  each row's physical predicates from its sealed capture before stepping. It
+  combines them with the recorded execution eligibility and program completion.
+  Live final queries, sealing and replay use the same CPU evaluation backend
+  for threshold parity. Process constraints stay on the control device.
+  A mismatch in rules, evidence identity or physical descriptors yields
+  `unavailable` for the affected report. Legacy trajectories without the
+  capture report `not_recorded`. A seal created before physical evaluation
+  reports `not_run`.
+  Use `evaluate_recorded_rules` to evaluate a compiled graph directly from a
+  trusted trajectory in bounded chunks. It can use a recorded segment
+  occurrence to select the matching control slots and acquisition revisions.
+  Qualified fluid recordings carry bounded particle-state sidecars. Kinematic
+  and control replay restore complete particle states at each recorded boundary;
+  dynamic replay restores only the initial particle state and recomputes later
+  fluid motion from recorded actions.
+- **Policy projection**: `rollout_buffer` retains actual policy observations,
+  including sampled noise, and its existing obs/action/reward alignment for
+  LeRobot/RL. It shares the acquisition boundary with raw history, rather than
+  being used as a substitute for physical state. Learner-owned rollout storage
+  keeps its own cursor and layout. Internally allocated expert policy observations
+  include the terminal T+1 slot in the backing store; the public T-transition
+  view and existing dataset action/annotation alignment stay compatible.
+- **Cable observations**: `states.cables[uid].segment_state_w` and the matching
+  raw observation field share the T+1 rollout storage. `get_entity_state` describes
+  world segment position, XYZW orientation, COM linear velocity and angular
+  velocity, preserving each cable's segment topology and row validity. The field
+  records observations, not solver history. `ReplayWrapper` accepts dynamic
+  replay only when every recorded initial state matches the full reset; it
+  rejects scrubbing, partial reset and broadcasting world-space cable states.
+  Cable artifacts store `meta.arena_origins_w` in exported row order. Replay
+  translates captured reset positions into the source world frame for comparison,
+  allowing a per-environment export to replay at a different arena origin.
+  Raw observations, orientations and velocities retain their original meaning.
+  Older files without origin metadata require matching world placement.
+  `trajectory_state.restore_trajectory_state()` rejects cable entries before
+  any write. Use action replay to validate a new episode, not a visible-state
+  restore as a history-preserving checkpoint.
 - **Fixed action layout**: an ActionManager-backed trajectory uses the batched
   policy action space; a controller/expert trajectory uses the private
   `ExpertActionSpec` layout. One trajectory cannot mix these schemas.
@@ -304,3 +387,11 @@ All normal output selections also intersect context eligibility. Explicit
 and are never dataset commits. Closing only drains committed writes and discards
 live buffers. Camera recordings use independent row buffers and files, with owned
 context sidecars; asynchronous jobs do not wait for another row or a mosaic.
+
+## Recording cost during RL rollouts
+
+`EmbodiedEnv` allocates raw/controller action histories on the first recording
+sample. Demo provenance is created when recording metadata is requested;
+episode initialization refreshes it once it has been used. Ordinary RL resets
+do not enumerate empty recording histories on the host. Metadata snapshots
+retain deep-copy and episode-context ownership.

@@ -421,6 +421,8 @@ def test_compact_windows_preserve_scene_stride_and_boundaries(random_sampling):
 
 @pytest.mark.gpu
 def test_recipe_resume_crosses_epoch_and_warmup_with_exact_ema(tmp_path):
+    pytest.importorskip("roma")
+    pytest.importorskip("einops")
     from embodichain_models.dynamics.rigidformer.sl_recipe import (
         build_rigidformer_trainer,
     )

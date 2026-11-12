@@ -17,6 +17,12 @@
 
 from __future__ import annotations
 
+__all__: list[str] = []
+
+from embodichain.gen_sim.services.compat import reconstruct
+from embodichain.gen_sim.services.contracts import GeometryRequest
+
+
 from collections import deque
 import json
 from pathlib import Path
@@ -33,21 +39,15 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 
-from embodichain.gen_sim.scene_engine.clients.geometry_generation import (
-    GeometryGenerationClient,
-)
-from embodichain.gen_sim.scene_engine.clients.articulated_generation import (
-    ArticulatedGenerationClient,
-)
+from embodichain.gen_sim.services.compat import GeometryClient
+from embodichain.gen_sim.services.compat import ArticulationClient
 from embodichain.gen_sim.scene_engine.core.scene import Scene
 from embodichain.gen_sim.scene_engine.core.scene_graph import (
     TABLE_OBJECT_ID,
     SceneGraph,
 )
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
-from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
-    OpenAICompatibleVLM,
-)
+from embodichain.gen_sim.services.compat import VisionClient
 from embodichain.gen_sim.scene_engine.pipeline.utils.assets_group_support_clamp import (
     AssetsGroupSupportClamp,
 )
@@ -57,8 +57,11 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.assets_group_table_aligner 
 from embodichain.gen_sim.scene_engine.pipeline.utils.assets_group_layout_optimizer import (
     AssetsSupportLayoutOptimizer,
 )
-from embodichain.gen_sim.scene_engine.pipeline.utils.articulated_usdc_utils import (
+from embodichain.gen_sim.asset_engine.utils.articulated_usdc_utils import (
     _canonicalize_articulated_usdc_bottom_center,
+)
+from embodichain.gen_sim.asset_engine.pipeline.articulation import (
+    generate_articulated_usdcs,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.gravity_settler import (
     GravitySettleBody,
@@ -71,7 +74,6 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.parent_surface_layout_optim
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_generation_utils import (
     layout_object_to_transform_matrix,
     load_glb_mesh,
-    quaternion_wxyz_to_euler_xyz_degrees,
     transform_matrix_to_layout_object,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_layout_utils import (
@@ -97,9 +99,9 @@ def generate_scene_and_refine(
     scene: Scene,
     scene_graph: SceneGraph,
     *,
-    geometry_generation_client: GeometryGenerationClient,
-    vlm_client: OpenAICompatibleVLM,
-    articulated_generation_client: ArticulatedGenerationClient | None = None,
+    geometry_generation_client: GeometryClient,
+    vlm_client: VisionClient,
+    articulated_generation_client: ArticulationClient | None = None,
 ) -> Scene:
 
     resolved_image_path = _validate_image_path(image_path)
@@ -205,7 +207,7 @@ def _optimize_simready_asset_visual_yaws(
     scene: Scene,
     simready_assets_layout: list[dict[str, object]],
     coarse_layout_by_id: dict[str, dict[str, object]],
-    vlm_client: OpenAICompatibleVLM,
+    vlm_client: VisionClient,
     debug_output_root: str | Path,
 ) -> dict[str, float]:
     """Query one absolute canonical z-up yaw for every observed SimReady asset."""
@@ -286,7 +288,7 @@ def _generate_coarse_results_from_masks(
     coarse_geometry_output_root: str | Path,
     scene: Scene,
     *,
-    geometry_generation_client: GeometryGenerationClient,
+    geometry_generation_client: GeometryClient,
 ) -> dict[str, list[float]]:
 
     # Parse whether the scene has each assets' binary masks.
@@ -313,28 +315,28 @@ def _generate_coarse_results_from_masks(
         )  # id + mask, for avoiding the download glbs order confusion.
 
     # Sent the request, wait, then save the intermediate results.
-    response_data, response_objects = geometry_generation_client.generate_objects(
-        image_path=image_path,
-        object_masks=object_masks,
-        output_root=coarse_geometry_output_root,  # Keep the coarse geometries
+    result = reconstruct(
+        geometry_generation_client,
+        GeometryRequest(
+            Path(image_path), tuple(object_masks), Path(coarse_geometry_output_root)
+        ),
     )
-    # Write the response JSON which contains all the layout info the server gave us.
-    # Keep original response for getting the sam3d coarse layout matrix.
-    (Path(debug_output_root) / "geometry_generation_response.json").write_text(
-        json.dumps(response_data, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
-    # Write the coarse layout JSON as one of the results in this step.
+    if result.audit_path is not None:
+        import shutil
+
+        destination = Path(debug_output_root) / "geometry_generation_response.json"
+        if result.audit_path.resolve() != destination.resolve():
+            shutil.copyfile(result.audit_path, destination)
     coarse_layout = [
         {
-            "id": object_id,
-            "rot": quaternion_wxyz_to_euler_xyz_degrees(
-                response_object["rotation_quaternion_wxyz"]
-            ),
-            "pos": response_object["translation"],
-            "scale": response_object["scale"],
+            "id": obj.object_id,
+            "rot": Rotation.from_quat(obj.quaternion_xyzw)
+            .as_euler("xyz", degrees=True)
+            .tolist(),
+            "pos": list(obj.position),
+            "scale": list(obj.scale),
         }
-        for (object_id, _), response_object in zip(object_masks, response_objects)
+        for obj in result.objects
     ]
     (Path(coarse_geometry_output_root) / "coarse_layout.json").write_text(
         json.dumps(coarse_layout, indent=2, ensure_ascii=False) + "\n",
@@ -351,51 +353,16 @@ def _generate_articulated_usdcs(
     scene: Scene,
     output_root: str | Path,
     coarse_scales_y_up_by_id: dict[str, list[float]],
-    articulated_generation_client: ArticulatedGenerationClient | None,
+    articulated_generation_client: ArticulationClient | None,
 ) -> None:
-    """Generate and persist one articulation USDC for every articulated object."""
-    articulated_objects = [
-        scene_object for scene_object in scene.objects if scene_object.is_articulated
-    ]
-    if not articulated_objects:
-        return
-    if articulated_generation_client is None:
-        raise ValueError(
-            "Articulated scene objects require an articulated-generation client."
-        )
-
-    resolved_output_root = Path(output_root).expanduser().resolve()
-    resolved_output_root.mkdir(parents=True, exist_ok=True)
-    for scene_object in articulated_objects:
-        if scene_object.visible_rgba_path is None:
-            raise ValueError(
-                "Articulated scene object "
-                f"{scene_object.id!r} has no visible RGBA observation."
-            )
-        coarse_scale_y_up = coarse_scales_y_up_by_id.get(scene_object.id)
-        if (
-            not isinstance(coarse_scale_y_up, list)
-            or len(coarse_scale_y_up) != 3
-            or not np.all(np.isfinite(coarse_scale_y_up))
-            or any(scale <= 0.0 for scale in coarse_scale_y_up)
-        ):
-            raise ValueError(
-                "Articulated scene object "
-                f"{scene_object.id!r} has no valid coarse-layout scale."
-            )
-        # Run serially so the stage ends only after every required USDC is saved.
-        generated_usdc_path = articulated_generation_client.generate_articulated_usdc(
-            prompt=scene_object.description,
-            image_path=scene_object.visible_rgba_path,
-            output_path=resolved_output_root / f"{scene_object.id}.usdc",
-        )
-        # Canonicalize the runtime USDC so it shares the SimReady GLB origin.
-        scene_object.articulated_usdc_path = str(
-            _canonicalize_articulated_usdc_bottom_center(generated_usdc_path)
-        )
-        # USDC is y-up like GLB; SimulationManager performs the shared z-up conversion.
-        scene_object.articulated_usdc_scale = list(coarse_scale_y_up)
-        log_info(f"Created articulated USDC: {scene_object.id!r}.")
+    """Delegate articulated asset generation to the Asset Engine."""
+    generate_articulated_usdcs(
+        asset_objects=scene.objects,
+        output_root=output_root,
+        coarse_scales_y_up_by_id=coarse_scales_y_up_by_id,
+        articulated_generation_client=articulated_generation_client,
+        canonicalize_fn=_canonicalize_articulated_usdc_bottom_center,
+    )
 
 
 def _update_scene_final_y_up_layout_and_z_up_centers(

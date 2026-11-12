@@ -1,0 +1,22 @@
+{
+  "schema": "real2sim-carton-distribution/v1",
+  "asset_id": "Real2SimCarton",
+  "cache_prefix": "Real2SimCartonV1",
+  "repo_id": "DexForceAI/embodichain_data",
+  "repo_type": "dataset",
+  "revision": "3c340238f6acc29a50272c33f79264764d0704ff",
+  "path": "demo/real2sim_carton/real2sim_carton_v1.zip",
+  "sha256": "169fff766e6c9e4af1ef3b890a52203867e75fd60f20c4ee5dedb0f6fcf6a11a",
+  "md5": "cef38008a3bae2d17a422bf2698cb4fb",
+  "size": 14512913,
+  "manifest_sha256": "f29a4a60f14ba450a251d2ddd3642bfc73e2e3e383a211bea3f0ac3fa3084d06",
+  "url": "https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/3c340238f6acc29a50272c33f79264764d0704ff/demo/real2sim_carton/real2sim_carton_v1.zip",
+  "upstream_provenance": "source.lock.json",
+  "scene_assets": "Real2SimCarton/scene",
+  "measured_inputs": "Real2SimCarton/inputs/measured",
+  "synthetic_inputs": "Real2SimCarton/inputs/synthetic_reference",
+  "licenses": {
+    "original_and_measured_derivatives": "CC-BY-4.0",
+    "independent_synthetic": "Apache-2.0"
+  }
+}

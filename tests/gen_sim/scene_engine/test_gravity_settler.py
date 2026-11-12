@@ -106,6 +106,7 @@ def test_gravity_settler_normalizes_legacy_hull_budget(
 
     assert collision.approximation == expected_approximation
     assert collision.max_hulls == expected_max_hulls
+    assert collision.acd_method == ("visacd" if max_hulls > 1 else None)
 
 
 @pytest.mark.parametrize("mode", ["fixed", "converged", "timeout"])

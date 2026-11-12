@@ -14,6 +14,7 @@ cube's resting position, and save one trajectory.**
 :hidden:
 
 quickstart
+authoring
 recipes
 troubleshooting
 validation
@@ -48,6 +49,7 @@ checkout is only needed for the separate maintainer checks.
 
 | Your goal | Start here | Continue with |
 |---|---|---|
+| Interpret an instruction and photograph into an unbound semantic task graph | {doc}`/features/generative_sim/task_engine` | {doc}`scene_registry` and {doc}`robot_profiles` for runtime binding |
 | Customize a trajectory in an existing task | {doc}`quickstart` | {doc}`recipes`, then {doc}`troubleshooting` |
 | Learn the language without starting simulation | {doc}`/tutorial/task_program_python` | {doc}`architecture` |
 | Bind a new scene, robot or skill | {doc}`/tutorial/task_program` | {doc}`scene_registry`, {doc}`robot_profiles` |
@@ -66,6 +68,12 @@ the saved episode can be read. Passing these checks establishes position and
 stability for that run; it does not establish every possible physical property.
 See [assurance and acceptance](architecture.md#effect-assurance-is-mandatory).
 
+## Concise programs and demonstration skills
+
+See [configuration authoring](authoring.md) for the list/action shorthand,
+shared world and scene-relative targets, measured duration holds, and named
+Demo Skill registrations with automatic occurrence-bound sources.
+
 ## What stays with the integration?
 
 Programs can only name objects and calls supported by their selected integration.
@@ -73,6 +81,10 @@ Changing an `instruction` changes the description and language annotation;
 the structured calls determine the actions. A new object, robot, unregistered
 call or different motion policy needs integration/deployment work. Follow
 {doc}`/tutorial/task_program` for those changes.
+
+Task Engine produces candidate declarations and a semantic graph for inspection.
+Its image workflow requires a later scene/robot integration before Task Program
+execution; declaration coverage does not establish physical task success.
 
 For later workflows, see {doc}`/guides/offline_expert_datasets` for recording and
 consumption, {doc}`/guides/run_task` for expansion and launcher options, and

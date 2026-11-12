@@ -1327,7 +1327,7 @@ def benchmark_differentiable_solver() -> (
         damped_least_squares_step,
         pose_error,
     )
-    from embodichain.learning.layers import DifferentiableIKLayer, KinematicsLayer
+    from embodichain.learning.layers import DifferentiableIKLayer, DifferentiableFKLayer
 
     perf_rows: list[dict[str, object]] = []
     metric_rows: list[dict[str, object]] = []
@@ -1395,7 +1395,7 @@ def benchmark_differentiable_solver() -> (
 
     for device in devices:
         model = cpu_model.to(device, torch.float32)
-        kinematics = KinematicsLayer(model)
+        kinematics = DifferentiableFKLayer(model)
         common_cfg = dict(
             urdf_path=path,
             root_link_name="base",

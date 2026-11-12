@@ -21,11 +21,13 @@ from __future__ import annotations
 from .program import (
     CompiledArticulationJointPositionValidator,
     CompiledBarrier,
+    CompiledObjectNearRelativeTargetValidator,
     CompiledObjectNearTargetValidator,
     CompiledObjectStateValidator,
     CompiledParallelBlock,
     CompiledParallelBranch,
     CompiledPostPolicy,
+    CompiledHoldPostPolicy,
     CompiledRepeatFrame,
     CompiledTargetSelection,
     CompiledTaskProgram,
@@ -33,13 +35,16 @@ from .program import (
     CompiledTaskProgramCall,
     CompiledTaskProgramSegment,
     CompiledTaskProgramValidator,
+    CompiledConditionValidator,
     TaskProgramCompileError,
     TaskProgramCompiler,
 )
 
 __all__ = [
+    "CompiledHoldPostPolicy",
     "CompiledArticulationJointPositionValidator",
     "CompiledBarrier",
+    "CompiledObjectNearRelativeTargetValidator",
     "CompiledObjectNearTargetValidator",
     "CompiledObjectStateValidator",
     "CompiledParallelBlock",
@@ -52,6 +57,7 @@ __all__ = [
     "CompiledTaskProgramCall",
     "CompiledTaskProgramSegment",
     "CompiledTaskProgramValidator",
+    "CompiledConditionValidator",
     "TaskProgramCompileError",
     "TaskProgramCompiler",
 ]

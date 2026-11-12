@@ -87,6 +87,13 @@ class PlannerAdapter(ABC):
     """Uniform lifecycle around a motion-planning implementation."""
 
     capabilities: frozenset[str] = frozenset()
+    configuration_features: frozenset[str] = frozenset()
+    """Optional configuration contracts understood by this implementation.
+
+    Hosts can query these before creating a simulator or constructing an
+    adapter. They describe accepted configuration semantics, while instance
+    ``capabilities`` describes case support under the selected configuration.
+    """
     model_revision: str = "N/A"
     fixed_batch_size: int | None = None
     """Required execution batch size, if the loaded model fixes it."""
@@ -236,7 +243,7 @@ class PlannerAdapter(ABC):
 
     @property
     def motion_policy_planner(self) -> str:
-        """Return the backend name pinned into Atomic Action motion policies."""
+        """Return the backend name pinned into Atomic Skill motion policies."""
         return self.spec.adapter
 
     def require_motion_generator(self) -> "MotionGenerator":
@@ -244,7 +251,7 @@ class PlannerAdapter(ABC):
 
         Atomic Skill scenarios use this boundary instead of reaching into a
         backend implementation.  Every planner that opts into the
-        ``atomic_action`` capability must expose its generator here.
+        ``atomic_skill`` capability must expose its generator here.
         """
         motion_generator = getattr(self, "motion_generator", None)
         if motion_generator is None:

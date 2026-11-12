@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -39,9 +40,10 @@ from embodichain.lab.gym.envs.task_program.bridge import (
 )
 from embodichain.lab.task_program.integrations.simulation.policies import (
     SimulationSegmentPolicyPort,
+    SimulationSettleMonitorCfg,
 )
 from embodichain.lab.gym.envs.settling import DynamicSettleMonitorCfg
-from embodichain.lab.sim.atomic_actions import EntityState
+from embodichain.lab.sim.atomic_skills import EntityState
 from embodichain.lab.task_program.semantics.scene import (
     SceneAffordanceRef,
     SceneArticulationRef,
@@ -104,6 +106,15 @@ class _Robot:
         self.qpos_reads.append(target)
         return (self.target_qpos if target else self.current_qpos).clone()
 
+    def get_joint_ids(self, *, name: str) -> list[int]:
+        if name != "arm":
+            raise KeyError(name)
+        return [0]
+
+    def compute_fk(self, *, qpos, name, to_matrix):
+        assert name == "arm" and to_matrix
+        return torch.eye(4).repeat(qpos.shape[0], 1, 1)
+
 
 class _Articulation:
     """Small articulation double with one measured prismatic joint."""
@@ -136,13 +147,19 @@ class _Simulation:
     def __init__(
         self,
         entity: _RigidObject | None = None,
+        reference: _RigidObject | None = None,
         articulation: _Articulation | None = None,
     ) -> None:
         self.entity = entity
+        self.reference = reference
         self.articulation = articulation
 
     def get_rigid_object(self, uid: str) -> _RigidObject | None:
-        return self.entity if uid == "native_cube" else None
+        if uid == "native_cube":
+            return self.entity
+        if uid == "native_reference":
+            return self.reference
+        return None
 
     def get_articulation(self, uid: str) -> _Articulation | None:
         return (
@@ -214,7 +231,7 @@ def _compiled_segment(*, settle_preset: str = "fast"):
     return next(compiled.iter_segments())
 
 
-def _compiled_articulation_segment():
+def _compiled_articulation_segment(*, settle_preset=None):
     """Compile one standard joint-position validator."""
     payload = {
         "program_id": "joint_policy_test",
@@ -245,10 +262,60 @@ def _compiled_articulation_segment():
             ],
         },
     }
+    if settle_preset is not None:
+        payload["program"]["post"] = [
+            {"kind": "wait_stable", "entity": "drawer", "preset": settle_preset}
+        ]
     registry = SceneRegistry(
         (
             SceneEntityRegistration(
                 ref=SceneArticulationRef("drawer"),
+                state_provider=_StaticStateProvider(),
+            ),
+        )
+    )
+    compiled = TaskProgramCompiler.from_scene_registry(registry).compile(
+        decode_task_program(payload)
+    )
+    return next(compiled.iter_segments())
+
+
+def _compiled_relative_segment():
+    """Compile one validator with two late-observed object identities."""
+    payload = {
+        "program_id": "relative_policy_test",
+        "integration": {
+            "robot_profile": "test_robot",
+            "scene_registry": "test_scene",
+            "runtime_preset": "safe",
+        },
+        "targets": {},
+        "program": {
+            "kind": "segment",
+            "name": "place_relative",
+            "steps": {
+                "kind": "invoke",
+                "call": {"kind": "pick", "object": "cube"},
+            },
+            "validators": [
+                {
+                    "kind": "object_near_relative_target",
+                    "object": "cube",
+                    "reference": "reference",
+                    "displacement": [0.0, -0.1, 0.04],
+                    "position_tolerance": 0.05,
+                }
+            ],
+        },
+    }
+    registry = SceneRegistry(
+        (
+            SceneEntityRegistration(
+                ref=SceneObjectRef("cube"),
+                state_provider=_StaticStateProvider(),
+            ),
+            SceneEntityRegistration(
+                ref=SceneObjectRef("reference"),
                 state_provider=_StaticStateProvider(),
             ),
         )
@@ -264,6 +331,7 @@ def _port(
     *,
     preset: DynamicSettleMonitorCfg | None = None,
     target_qpos: torch.Tensor | None = None,
+    step_dt: float | None = None,
 ) -> tuple[SimulationSegmentPolicyPort, _RigidObject, _Robot]:
     """Build one policy port and expose its mutable test doubles."""
     entity = _RigidObject(positions)
@@ -292,8 +360,99 @@ def _port(
                 required_stable_checks=2,
             )
         },
+        step_dt=step_dt,
     )
     return port, entity, robot
+
+
+def test_pose_delta_is_explicit_unresolved_first_and_preserves_partial_rows() -> None:
+    cfg = SimulationSettleMonitorCfg(
+        measurement="pose_delta",
+        min_steps=0,
+        max_steps=3,
+        check_interval_steps=1,
+        required_stable_checks=2,
+    )
+    port, entity, _ = _port(torch.zeros(2, 3), preset=cfg, step_dt=0.02)
+    # Backend velocity-cache values do not select or override explicit pose evidence.
+    entity.body_data.lin_vel.fill_(100)
+    cfg.measurement = "reported_velocity"
+    segment = _compiled_segment()
+    policy = segment.post_policies[0]
+    actions = port.actions(
+        policy, segment=segment, active_mask=torch.ones(2, dtype=torch.bool)
+    )
+    count = 0
+    for action in actions:
+        count += 1
+        assert action.shape == (2, 2)
+        metadata = port.post_policy_metadata(policy, segment=segment)
+        if count == 1:
+            assert metadata["state"]["max_linear_speed"] == [None, None]
+            assert metadata["state"]["settled_mask"] == [False, False]
+        entity._pose[1, 0, 3] += 0.1
+    assert count == 3
+    assert port.post_policy_result(policy, segment=segment).tolist() == [True, False]
+    metadata = port.post_policy_metadata(policy, segment=segment)
+    assert metadata["measurement_source"] == "pose_delta"
+    assert metadata["status"] == "timed_out"
+    assert metadata["state"]["max_linear_speed"] == pytest.approx([0.0, 5.0])
+    json.dumps(metadata, allow_nan=False)
+    # A new episode starts with fresh temporal evidence; the old last pose is not reused.
+    fresh = port.new_task_program_session()
+    iterator = fresh.actions(
+        policy, segment=segment, active_mask=torch.ones(2, dtype=torch.bool)
+    )
+    next(iterator)
+    assert fresh.post_policy_metadata(policy, segment=segment)["state"][
+        "max_linear_speed"
+    ] == [None, None]
+    iterator.close()
+
+
+def test_pose_delta_requires_cadence_and_preserves_explicit_snapshot() -> None:
+    cfg = SimulationSettleMonitorCfg(measurement="pose_delta")
+    assert cfg.snapshot().measurement == "pose_delta"
+    with pytest.raises(ValueError, match="step_dt"):
+        _port(torch.zeros(2, 3), preset=cfg)
+    cfg.measurement = "implicit_by_name"
+    with pytest.raises(ValueError, match="measurement"):
+        cfg.snapshot()
+
+
+def test_pose_delta_wait_matches_frozen_b0_command_and_evidence_trace() -> None:
+    frozen = json.loads(
+        (Path(__file__).parent / "data/pose_delta_settle_b0.json").read_text()
+    )
+    port, entity, _ = _port(
+        torch.zeros(2, 3),
+        step_dt=0.02,
+        preset=SimulationSettleMonitorCfg(
+            measurement="pose_delta",
+            min_steps=0,
+            max_steps=3,
+            check_interval_steps=1,
+            required_stable_checks=2,
+        ),
+    )
+    entity.body_data.lin_vel.fill_(100)
+    segment = _compiled_segment()
+    policy = segment.post_policies[0]
+    actions = port.actions(
+        policy, segment=segment, active_mask=torch.ones(2, dtype=torch.bool)
+    )
+    commands = []
+    for pose, expected in zip(frozen["poses"], frozen["trace"], strict=True):
+        entity._pose = torch.tensor(pose)
+        try:
+            commands.append(next(actions).tolist())
+        except StopIteration:
+            pass
+        # The arbitrary preset name is the only declaration difference.
+        expected["preset"] = "fast"
+        assert port.post_policy_metadata(policy, segment=segment) == expected
+    assert commands == frozen["commands"]
+    assert port.post_policy_result(policy, segment=segment).tolist() == frozen["result"]
 
 
 def _rigidized_port(
@@ -691,6 +850,63 @@ def test_object_near_target_validates_rows_independently() -> None:
     assert metadata["accepted_mask"] == [True, False]
 
 
+def test_near_target_validator_preserves_inclusive_boundary_and_invalid_pose() -> None:
+    segment = _compiled_segment()
+    boundary = torch.tensor(0.05)
+    above = torch.nextafter(boundary, torch.tensor(float("inf")))
+    port, obj, _ = _port(torch.tensor([[boundary, 0.0, 0.0], [above, 0.0, 0.0]]))
+    validator = segment.validators[0]
+
+    assert port.validate(validator, segment=segment).tolist() == [True, False]
+    obj._pose[1, 0, 3] = float("nan")
+    with pytest.raises(ValueError, match="pose must be finite"):
+        port.validate(validator, segment=segment)
+
+
+def test_object_near_relative_target_observes_both_rows_independently() -> None:
+    """The validator derives each target from the current reference pose."""
+    segment = _compiled_relative_segment()
+    obj = _RigidObject(torch.tensor([[0.01, -0.1, 0.04], [0.20, -0.1, 0.04]]))
+    reference = _RigidObject(torch.tensor([[0.0, 0.0, 0.0], [0.10, 0.0, 0.0]]))
+    port = SimulationSegmentPolicyPort(
+        _Simulation(entity=obj, reference=reference),
+        _Robot(torch.zeros(2, 2)),
+        SimulationSceneBinding(
+            registry_id="test_scene",
+            rigid_objects=(
+                SimulationRigidObjectBinding(
+                    entity_id="cube",
+                    simulation_uid="native_cube",
+                ),
+                SimulationRigidObjectBinding(
+                    entity_id="reference",
+                    simulation_uid="native_reference",
+                ),
+            ),
+        ),
+    )
+
+    validator = segment.validators[0]
+    result = port.validate(validator, segment=segment)
+    metadata = port.validator_metadata(validator, segment=segment)
+
+    assert result.tolist() == [True, False]
+    assert metadata["kind"] == "object_near_relative_target"
+    assert metadata["object_id"] == "cube"
+    assert metadata["reference_id"] == "reference"
+    assert metadata["displacement"] == pytest.approx([0.0, -0.1, 0.04])
+    assert metadata["position_error"] == pytest.approx([0.01, 0.10])
+    assert metadata["accepted_mask"] == [True, False]
+    assert obj.pose_reads == 1
+    assert reference.pose_reads == 1
+
+    reference._pose = reference._pose.to(torch.float64)
+    obj._pose[0, 0, 3] = 0.0
+    reference._pose[0, 0, 3] = 0.0500000001
+    # The old subtraction promoted to float64 before comparing the inclusive bound.
+    assert port.validate(validator, segment=segment).tolist() == [False, False]
+
+
 def test_articulation_joint_position_validates_measured_rows() -> None:
     """The joint validator applies its inclusive bound to each simulator row."""
     segment = _compiled_articulation_segment()
@@ -842,6 +1058,33 @@ def test_lift_requires_segment_start_and_uses_observed_row_baselines() -> None:
     json.dumps(trace, allow_nan=False)
 
 
+def test_segment_policy_sessions_keep_lift_baselines_independent() -> None:
+    segment = _measured_object_segment(
+        [{"kind": "object_lifted", "object": "cube", "minimum_lift": 0.05}]
+    )
+    validator = segment.validators[0]
+    owner, objects = _measured_object_port()
+    first = owner.new_task_program_session()
+    second = owner.new_task_program_session()
+    objects["cube"]._pose[:, 2, 3] = 0.0
+    first.begin_segment(segment=segment, active_mask=None)
+    objects["cube"]._pose[:, 2, 3] = 0.5
+    second.begin_segment(segment=segment, active_mask=None)
+    objects["cube"]._pose[:, 2, 3] = torch.tensor([0.56, 0.53])
+    assert first.validate(validator, segment=segment).tolist() == [True, True]
+    assert second.validate(validator, segment=segment).tolist() == [True, False]
+    assert first.validator_metadata(validator, segment=segment)["initial_height"] == [
+        0.0,
+        0.0,
+    ]
+    assert second.validator_metadata(validator, segment=segment)["initial_height"] == [
+        0.5,
+        0.5,
+    ]
+    with pytest.raises(RuntimeError, match="already captured"):
+        first.begin_segment(segment=segment, active_mask=None)
+
+
 def test_lift_rejects_nonfinite_baseline_per_row_and_preserves_inactive_mask() -> None:
     segment = _measured_object_segment([{"kind": "object_lifted", "object": "cube"}])
     port, objects = _measured_object_port(3)
@@ -955,3 +1198,681 @@ def test_measured_validator_rejects_a_different_segment_and_missing_binding() ->
     other = _measured_object_segment([{"kind": "object_lifted", "object": "cube"}])
     with pytest.raises(ValueError, match="does not belong"):
         port.validate_validator(other.validators[0], segment=segment)
+
+
+def test_declared_condition_keeps_duration_grid_and_resets_anchor_after_drift():
+    from embodichain.lab.task_program.integrations.simulation.stability import (
+        SimulationStabilityConditionCfg,
+    )
+
+    cfg = SimulationStabilityConditionCfg(
+        entity="cube",
+        kind="placement",
+        target_position=(0.0, 0.0, 0.0),
+        duration=0.08,
+        timeout=0.24,
+        position_tolerance=1.0,
+        translation_drift=0.02,
+    )
+    port, entity, robot = _port(torch.zeros(2, 3), preset=cfg, step_dt=0.04)
+    cfg.duration = 9.0  # The port owns a normalized independent snapshot.
+    segment = _compiled_segment()
+    policy = segment.post_policies[0]
+    actions = port.actions(
+        policy, segment=segment, active_mask=torch.tensor([True, False])
+    )
+    next(actions)
+    entity._pose[0, 0, 3] = 0.03
+    next(actions)
+    assert port.post_policy_metadata(policy, segment=segment)["stable_seconds"] == [
+        0.0,
+        0.0,
+    ]
+    next(actions)
+    with pytest.raises(StopIteration):
+        next(actions)
+    assert port.post_policy_result(policy, segment=segment).tolist() == [True, False]
+    metadata = port.post_policy_metadata(policy, segment=segment)
+    assert metadata["elapsed_seconds"] == 0.12
+    assert metadata["required_seconds"] == 0.08
+    assert metadata["stable_seconds"] == pytest.approx([0.08, 0.0])
+
+
+def test_held_condition_latches_loss_and_holds_failed_rows_at_observed_qpos():
+    from embodichain.lab.task_program.integrations.simulation.stability import (
+        SimulationStabilityConditionCfg,
+    )
+
+    cfg = SimulationStabilityConditionCfg(
+        entity="cube",
+        kind="hold",
+        target_position=(0.0, 0.0, 0.0),
+        motion_parts=("arm",),
+        duration=0.12,
+        timeout=0.24,
+        position_tolerance=0.2,
+    )
+    port, entity, robot = _port(
+        torch.zeros(2, 3), preset=cfg, step_dt=0.04, target_qpos=torch.ones(2, 2)
+    )
+    segment = _compiled_segment()
+    policy = segment.post_policies[0]
+    actions = port.actions(
+        policy, segment=segment, active_mask=torch.ones(2, dtype=torch.bool)
+    )
+    assert next(actions).tolist() == [[1.0, 1.0], [1.0, 1.0]]
+    entity._pose[0, 0, 3] = 0.03
+    command = next(actions)
+    assert torch.equal(command[0], robot.current_qpos[0])
+    assert command[1].tolist() == [1.0, 1.0]
+    entity._pose[0, 0, 3] = 0.0
+    next(actions)
+    with pytest.raises(StopIteration):
+        next(actions)
+    assert port.post_policy_result(policy, segment=segment).tolist() == [False, True]
+    assert port.post_policy_metadata(policy, segment=segment)["failed_mask"] == [
+        True,
+        False,
+    ]
+
+
+def test_condition_session_cleanup_stops_incomplete_sampling_without_success():
+    from embodichain.lab.task_program.integrations.simulation.stability import (
+        SimulationStabilityConditionCfg,
+    )
+
+    cfg = SimulationStabilityConditionCfg(
+        entity="cube",
+        kind="upright",
+        local_axis=(0.0, 0.0, 2.0),
+        duration=0.08,
+        timeout=0.2,
+    )
+    port, _, _ = _port(torch.zeros(2, 3), preset=cfg, step_dt=0.04)
+    session = port.new_task_program_session()
+    segment = _compiled_segment()
+    policy = segment.post_policies[0]
+    actions = session.actions(
+        policy, segment=segment, active_mask=torch.ones(2, dtype=torch.bool)
+    )
+    next(actions)
+    port.close_runtime_resources()
+    port.close_runtime_resources()
+    with pytest.raises(RuntimeError, match="closed"):
+        next(actions)
+    assert not session.post_policy_result(policy, segment=segment).any()
+
+
+def test_observation_clock_scope_is_local_idempotent_and_does_not_change_default_execution():
+    from embodichain.lab.gym.envs.task_program.bridge import EnvironmentStepClock
+
+    template, _, _ = _port(torch.zeros(2, 3), step_dt=0.04)
+    assert template.observation_clock is None
+    first = template.new_task_program_session()
+    clock = EnvironmentStepClock(0.04)
+    first.bind_clock(clock)
+    assert first.observation_clock is clock
+    first.bind_clock(clock)
+    first.validate_observation_scope(clock)
+    second = template.new_task_program_session()
+    other_clock = EnvironmentStepClock(0.04)
+    second.bind_clock(other_clock)
+    with pytest.raises(ValueError, match="another runtime/session"):
+        first.validate_observation_scope(clock)
+    with pytest.raises(ValueError, match="another runtime/session"):
+        _ = first.observation_clock
+    assert second.observation_clock is other_clock
+    independent, _, _ = _port(torch.zeros(2, 3), step_dt=0.04)
+    independent.bind_clock(clock)
+    assert independent.observation_clock is clock
+    segment = _compiled_segment()
+    policy = segment.post_policies[0]
+    list(
+        first.actions(
+            policy, segment=segment, active_mask=torch.ones(2, dtype=torch.bool)
+        )
+    )
+    assert first.post_policy_result(policy, segment=segment).all()
+    template.close_runtime_resources()
+    with pytest.raises(RuntimeError, match="closed"):
+        _ = second.observation_clock
+    assert independent.observation_clock is clock
+
+
+def _joint_condition_port(qpos, *, duration=1.0, timeout=5.0, **options):
+    from embodichain.lab.task_program.integrations.simulation.stability import (
+        SimulationJointStabilityConditionCfg,
+    )
+
+    art = _Articulation(qpos)
+    robot = _Robot(
+        torch.zeros(qpos.shape[0], 2), target_qpos=torch.ones(qpos.shape[0], 2)
+    )
+    cfg = SimulationJointStabilityConditionCfg(
+        entity="drawer",
+        joint="cabinet_to_drawer",
+        target=0.1,
+        tolerance=0.03,
+        duration=duration,
+        timeout=timeout,
+        **options,
+    )
+    port = SimulationSegmentPolicyPort(
+        _Simulation(articulation=art),
+        robot,
+        SimulationSceneBinding(
+            registry_id="test_scene",
+            articulations=(
+                SimulationArticulationBinding(
+                    entity_id="drawer", simulation_uid="native_drawer"
+                ),
+            ),
+        ),
+        settle_presets={"joint": cfg},
+        step_dt=0.04,
+    )
+    segment = _compiled_articulation_segment(settle_preset="joint")
+    return port, art, robot, segment, segment.post_policies[0]
+
+
+def test_joint_stability_uses_joint_window_and_original_observed_hold():
+    port, art, robot, segment, policy = _joint_condition_port(
+        torch.tensor([[0.1], [0.2]])
+    )
+    commands = []
+    for command in port.actions(
+        policy, segment=segment, active_mask=torch.tensor([True, True])
+    ):
+        commands.append(command)
+        robot.current_qpos.add_(0.01)
+    assert len(commands) == 125
+    assert all(torch.equal(command, torch.zeros(2, 2)) for command in commands)
+    assert port.post_policy_result(policy, segment=segment).tolist() == [True, False]
+    metadata = port.post_policy_metadata(policy, segment=segment)
+    assert metadata == {
+        "joint": "cabinet_to_drawer",
+        "target": 0.1,
+        "observed": art.get_qpos()[:, 0].tolist(),
+        "tolerance": 0.03,
+        "stable_seconds": 1.0,
+        "accepted": [True, False],
+        "evidence": "joint_position_and_stability",
+        "contact_qualification": "not_provided",
+    }
+    assert not any(robot.qpos_reads)
+
+
+@pytest.mark.parametrize("initial,changed", [(0.1, 0.1011), (0.1304, 0.1296)])
+def test_joint_stability_requires_full_duration_after_drift_or_target_entry(
+    initial, changed
+):
+    port, art, _, segment, policy = _joint_condition_port(torch.tensor([[initial]]))
+    steps = 0
+    for _ in port.actions(policy, segment=segment, active_mask=torch.tensor([True])):
+        steps += 1
+        if steps == 10:
+            art._qpos[0, 0] = changed
+    assert steps == 35
+    assert port.post_policy_result(policy, segment=segment).tolist() == [True]
+
+
+def test_joint_stability_unavailable_rows_and_inactive_rows_preserve_source_boundary():
+    port, art, _, segment, policy = _joint_condition_port(
+        torch.tensor([[0.1], [float("nan")]])
+    )
+    actions = list(
+        port.actions(policy, segment=segment, active_mask=torch.tensor([True, False]))
+    )
+    assert len(actions) == 25
+    assert port.post_policy_result(policy, segment=segment).tolist() == [True, False]
+    assert port.post_policy_metadata(policy, segment=segment)["observed"][1] is None
+    actions = list(
+        port.actions(policy, segment=segment, active_mask=torch.tensor([True, True]))
+    )
+    assert actions == []
+    assert not port.post_policy_result(policy, segment=segment).any()
+
+
+def test_joint_stability_clocked_raw_channel_uses_actual_scope_and_sample_sequence():
+    from embodichain.lab.gym.envs.task_program.bridge import EnvironmentStepClock
+
+    port, _, _, segment, policy = _joint_condition_port(torch.tensor([[0.1]]))
+    clock = EnvironmentStepClock(0.04)
+    port.bind_clock(clock)
+    for _ in port.actions(policy, segment=segment, active_mask=torch.tensor([True])):
+        clock.advance_after_env_step()
+    record = port.post_policy_metadata(policy, segment=segment)
+    raw = record["joint_observation"]
+    assert raw["evidence_id"] == "articulation.joint_position"
+    assert raw["timestamp"] == clock.now() == 1.0
+    assert raw["observation_revision"] == 26
+    assert raw["valid"] == [True] and raw["env_ids"] == [0]
+    assert raw["acquisition_errors"] == [None]
+    assert raw["start_step"] == 0 and raw["end_step"] == 25
+    assert record["evidence"] == "joint_position_and_stability"
+    # No successful receipt from this same compiled policy can survive a
+    # later incomplete/cancelled execution.
+    actions = port.actions(policy, segment=segment, active_mask=torch.tensor([True]))
+    next(actions)
+    actions.close()
+    with pytest.raises(RuntimeError, match="unavailable"):
+        port.post_policy_result(policy, segment=segment)
+
+
+def test_joint_stability_rejects_unacknowledged_steps_before_claiming_duration():
+    from embodichain.lab.gym.envs.task_program.bridge import EnvironmentStepClock
+
+    port, _, _, segment, policy = _joint_condition_port(torch.tensor([[0.1]]))
+    clock = EnvironmentStepClock(0.04)
+    port.bind_clock(clock)
+    actions = port.actions(policy, segment=segment, active_mask=torch.tensor([True]))
+    next(actions)
+    with pytest.raises(ValueError, match="acknowledged"):
+        next(actions)
+    with pytest.raises(RuntimeError, match="unavailable"):
+        port.post_policy_result(policy, segment=segment)
+
+
+def test_joint_window_records_distinguish_same_terminal_sample_histories():
+    from embodichain.lab.gym.envs.task_program.bridge import EnvironmentStepClock
+
+    records = []
+    for transient in (False, True):
+        port, art, _, segment, policy = _joint_condition_port(
+            torch.tensor([[0.1]]), timeout=1.0
+        )
+        clock = EnvironmentStepClock(0.04)
+        port.bind_clock(clock)
+        for _ in port.actions(
+            policy, segment=segment, active_mask=torch.tensor([True])
+        ):
+            clock.advance_after_env_step()
+            # A transient stays inside the target tolerance but violates the
+            # candidate window's 1 mm range; the final coordinate is unchanged.
+            art._qpos[0, 0] = 0.102 if transient and clock.step_index == 10 else 0.1
+        records.append(port.post_policy_metadata(policy, segment=segment))
+    assert records[0]["joint_observation"] == records[1]["joint_observation"]
+    assert [record["accepted"] for record in records] == [[True], [False]]
+    good, bad = [record["joint_window"] for record in records]
+    assert good["values"] != bad["values"]
+    assert good["steps"] == bad["steps"] == list(range(26))
+    assert good["record_complete"] and bad["record_complete"]
+    assert good["termination"] == "satisfied"
+    assert bad["termination"] == "timed_out"
+    assert bad["condition_status"] == ["not_satisfied"]
+    assert good["policy_source_path"] == list(policy.source_path)
+    assert good["native_uid"] == "native_drawer"
+    # Independent consumer can recompute the rule from the emitted facts.
+    from embodichain.compute.trajectory import PositionRangeMonitor
+
+    for record in records:
+        window = record["joint_window"]
+        values = torch.tensor(window["values"])
+        monitor = PositionRangeMonitor(
+            torch.tensor(window["monitor_initial_values"]),
+            required_steps=25,
+            position_drift=0.001,
+        )
+        for step in window["steps"]:
+            observed = values[:, step]
+            replayed = monitor.observe(
+                observed,
+                (observed - record["target"]).abs() <= record["tolerance"],
+                elapsed_steps=step,
+            )
+        assert replayed.tolist() == record["accepted"]
+
+
+def test_joint_window_replay_retains_pre_sample_range_anchor():
+    from embodichain.compute.trajectory import PositionRangeMonitor
+    from embodichain.lab.gym.envs.task_program.bridge import EnvironmentStepClock
+
+    port, art, _, segment, policy = _joint_condition_port(
+        torch.tensor([[0.1]]), timeout=1.0
+    )
+    clock = EnvironmentStepClock(0.04)
+    port.bind_clock(clock)
+    original = art.get_qpos
+    reads = 0
+
+    def anchored_read():
+        nonlocal reads
+        reads += 1
+        return torch.tensor([[0.1008]]) if reads == 1 else original()
+
+    art.get_qpos = anchored_read
+    for _ in port.actions(policy, segment=segment, active_mask=torch.tensor([True])):
+        clock.advance_after_env_step()
+        art._qpos[0, 0] = 0.0997 if clock.step_index >= 10 else 0.1
+    record = port.post_policy_metadata(policy, segment=segment)
+    window = record["joint_window"]
+    values = torch.tensor(window["values"])
+    assert window["monitor_initial_values"] != values[:, 0].tolist()
+    monitor = PositionRangeMonitor(
+        torch.tensor(window["monitor_initial_values"]),
+        required_steps=25,
+        position_drift=0.001,
+    )
+    for step, sample in enumerate(values.T):
+        accepted = monitor.observe(
+            sample,
+            (sample - record["target"]).abs() <= record["tolerance"],
+            elapsed_steps=step,
+        )
+    assert accepted.tolist() == record["accepted"] == [False]
+
+
+def test_joint_window_explicitly_isolates_unavailable_rows():
+    from embodichain.lab.gym.envs.task_program.bridge import EnvironmentStepClock
+
+    port, _, _, segment, policy = _joint_condition_port(
+        torch.tensor([[0.1], [float("nan")]]), invalid_observation_policy="isolate_rows"
+    )
+    clock = EnvironmentStepClock(0.04)
+    port.bind_clock(clock)
+    for _ in port.actions(
+        policy, segment=segment, active_mask=torch.tensor([True, True])
+    ):
+        clock.advance_after_env_step()
+    assert clock.step_index == 25
+    assert port.post_policy_result(policy, segment=segment).tolist() == [True, False]
+    record = port.post_policy_metadata(policy, segment=segment)
+    assert record["joint_window"]["condition_status"] == ["satisfied", "unavailable"]
+    assert record["joint_observation"]["valid"] == [True, False]
+    assert record["joint_window"]["values"][1] == [None] * 26
+    json.dumps(record, allow_nan=False)
+
+
+def test_joint_window_partial_receipt_is_not_success_or_complete_duration():
+    from embodichain.lab.gym.envs.task_program.bridge import EnvironmentStepClock
+
+    port, _, _, segment, policy = _joint_condition_port(torch.tensor([[0.1]]))
+    clock = EnvironmentStepClock(0.04)
+    port.bind_clock(clock)
+    actions = port.actions(policy, segment=segment, active_mask=torch.tensor([True]))
+    next(actions)
+    actions.close()
+    with pytest.raises(RuntimeError, match="unavailable"):
+        port.post_policy_result(policy, segment=segment)
+    window = port.post_policy_metadata(policy, segment=segment)["joint_window"]
+    assert window["termination"] == "cancelled"
+    assert not window["execution_complete"]
+    assert window["condition_status"] == ["pending"]
+    assert window["steps"] == [0]
+
+
+def test_joint_window_rejects_clock_changes_during_acquisition_without_raw_fact():
+    from embodichain.lab.gym.envs.task_program.bridge import EnvironmentStepClock
+
+    port, art, _, segment, policy = _joint_condition_port(torch.tensor([[0.1]]))
+    clock = EnvironmentStepClock(0.04)
+    port.bind_clock(clock)
+    original = art.get_qpos
+    reads = 0
+
+    def changing_clock():
+        nonlocal reads
+        reads += 1
+        if reads == 2:  # Anchor read is followed by the first policy sample.
+            clock.advance_after_env_step()
+        return original()
+
+    art.get_qpos = changing_clock
+    with pytest.raises(ValueError, match="clock changed during"):
+        next(port.actions(policy, segment=segment, active_mask=torch.tensor([True])))
+    record = port.post_policy_metadata(policy, segment=segment)
+    assert "joint_observation" not in record
+    assert record["joint_window"]["sample_count"] == 0
+    assert record["joint_window"]["termination"] == "interrupted"
+
+
+def test_joint_window_trace_capacity_never_silently_certifies_full_record():
+    from embodichain.lab.gym.envs.task_program.bridge import EnvironmentStepClock
+
+    port, _, _, segment, policy = _joint_condition_port(
+        torch.tensor([[0.1]]), max_observation_samples=3
+    )
+    clock = EnvironmentStepClock(0.04)
+    port.bind_clock(clock)
+    for _ in port.actions(policy, segment=segment, active_mask=torch.tensor([True])):
+        clock.advance_after_env_step()
+    assert port.post_policy_result(policy, segment=segment).tolist() == [True]
+    window = port.post_policy_metadata(policy, segment=segment)["joint_window"]
+    assert window["sample_count"] == 26 and window["retained_sample_count"] == 3
+    assert window["dropped_samples"] == 23 and not window["record_complete"]
+    assert window["steps"] == [23, 24, 25]
+
+
+def test_support_height_uses_highest_qualified_contact_without_averaging():
+    from embodichain.compute.geometry.contact_support import (
+        contact_support_heights as _contact_support_heights,
+    )
+
+    row = {
+        "contacts_world": [[-0.01, 0.0, 0.08], [0.01, 0.0, 0.12]],
+        "center_of_mass_world": [0.0, 0.0, 0.2],
+        "com_patch_distance_m": 0.0,
+        "com_tolerance_m": 0.003,
+        "upward_impulse": 0.1,
+    }
+    heights = _contact_support_heights(
+        torch.tensor([True, False]),
+        {"scope": "native_contact_support", "rows": [row, row]},
+        torch.zeros(2),
+    )
+    assert heights[0].item() == pytest.approx(0.12)
+    assert torch.isnan(heights[1])
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    ["success", "lost", "lost_all", "pose", "missing", "cancelled", "clock_gap"],
+)
+def test_hold_requires_the_complete_measured_window(outcome):
+    from embodichain.lab.gym.envs.task_program.bridge import EnvironmentStepClock
+    from types import SimpleNamespace
+    from embodichain.lab.task_program.semantics.integration import SceneManifest
+
+    registry = SceneRegistry(
+        (
+            SceneEntityRegistration(
+                SceneObjectRef("cube"), state_provider=_StaticStateProvider()
+            ),
+        )
+    )
+    program = decode_task_program(
+        dict(
+            program_id="hold",
+            integration=dict(
+                robot_profile="r", scene_registry="s", runtime_preset="safe"
+            ),
+            targets={
+                "destination": dict(
+                    kind="pose",
+                    position=[0.0, 0.0, 0.0],
+                    quaternion_xyzw=[0.0, 0.0, 0.0, 1.0],
+                )
+            },
+            program=[
+                dict(
+                    segment="hold",
+                    steps=[dict(pick=dict(object="cube"))],
+                    post=[
+                        dict(
+                            hold=dict(
+                                object="cube",
+                                at="destination",
+                                duration_s=0.21,
+                                position_tolerance=0.02,
+                                orientation_tolerance=0.1,
+                            )
+                        )
+                    ],
+                )
+            ],
+        )
+    )
+    segment = next(
+        TaskProgramCompiler(SceneManifest.from_registry(registry))
+        .compile(program)
+        .iter_segments()
+    )
+    policy = segment.post_policies[0]
+    targets = torch.tensor([[5.0, 6.0], [7.0, 8.0]])
+    port, entity, robot = _port(torch.zeros(2, 3), step_dt=0.1, target_qpos=targets)
+    clock = EnvironmentStepClock(0.1)
+    port.bind_clock(clock)
+
+    def observe(object_id, active_mask):
+        assert object_id == "cube"
+        pose = torch.eye(4).repeat(2, 1, 1)
+        attached = active_mask.clone()
+        if clock.step_index == 1:
+            if outcome in ("lost", "missing", "lost_all"):
+                attached[0] = False
+                if outcome == "lost_all":
+                    attached[:] = False
+            elif outcome == "pose":
+                pose[0, 0, 3] = 0.1
+        return (
+            SimpleNamespace(
+                scene=SimpleNamespace(entities={"cube": SimpleNamespace(pose=pose)})
+            ),
+            attached,
+            None,
+        )
+
+    port.bind_hold_observer(observe)
+    actions = port.actions(
+        policy, segment=segment, active_mask=torch.ones(2, dtype=torch.bool)
+    )
+    action = next(actions)
+    torch.testing.assert_close(action, targets)
+    if outcome == "cancelled":
+        actions.close()
+        assert port.post_policy_result(policy, segment=segment).tolist() == [
+            False,
+            False,
+        ]
+        assert (
+            port.post_policy_metadata(policy, segment=segment)["status"] == "cancelled"
+        )
+        return
+    if outcome == "clock_gap":
+        clock.advance_after_env_step()
+        clock.advance_after_env_step()
+        with pytest.raises(ValueError, match="consecutive"):
+            next(actions)
+        assert not port.post_policy_result(policy, segment=segment).any()
+        return
+    count = 1
+    while True:
+        clock.advance_after_env_step()
+        try:
+            next(actions)
+            count += 1
+        except StopIteration:
+            break
+    assert count == (1 if outcome == "lost_all" else 3)
+    assert port.post_policy_result(policy, segment=segment).tolist() == [
+        outcome == "success",
+        outcome != "lost_all",
+    ]
+    metadata = port.post_policy_metadata(policy, segment=segment)
+    assert metadata["elapsed_s"] == pytest.approx(0.1 if outcome == "lost_all" else 0.3)
+    assert metadata["required_steps"] == 3
+    assert metadata["observation_count"][1] == (2 if outcome == "lost_all" else 4)
+    if outcome == "success":
+        assert metadata["max_position_error"] == [0.0, 0.0]
+        assert metadata["attachment_verified_observations"] == [4, 4]
+    if outcome == "pose":
+        assert metadata["max_position_error"][0] == pytest.approx(0.1)
+
+
+def test_relative_target_validator_consumes_the_frozen_call_target() -> None:
+    from dataclasses import replace
+    from embodichain.lab.task_program.compiler import CompiledObjectNearTargetValidator
+    from embodichain.lab.task_program.semantics.calls import SemanticRelativePose
+
+    segment = _compiled_segment()
+    validator = next(
+        item
+        for item in segment.validators
+        if type(item) is CompiledObjectNearTargetValidator
+    )
+    validator = replace(
+        validator,
+        target_pose=SemanticRelativePose(
+            "reference", (1.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0)
+        ),
+    )
+    segment = replace(segment, validators=(validator,))
+    port, entity, _ = _port(torch.tensor([[1.0, 0.0, 0.0], [1.2, 0.0, 0.0]]))
+    with pytest.raises(ValueError, match="observer"):
+        port.validate(validator, segment=segment)
+    frozen = torch.eye(4).repeat(2, 1, 1)
+    frozen[:, 0, 3] = 1.0
+    # No live reference is bound to this port. Acceptance must consume the
+    # target captured at grounding rather than resampling that reference.
+    port.bind_target_observer(lambda object_id, declaration: frozen.clone())
+    assert port.validate(validator, segment=segment).tolist() == [True, False]
+
+
+def test_hold_does_not_reuse_another_objects_target_selection() -> None:
+    from embodichain.lab.gym.envs.task_program.bridge import EnvironmentStepClock
+    from embodichain.lab.task_program.semantics.integration import SceneManifest
+    from types import SimpleNamespace
+
+    scene = SceneRegistry(
+        tuple(
+            SceneEntityRegistration(
+                SceneObjectRef(name), state_provider=_StaticStateProvider()
+            )
+            for name in ("cube", "reference")
+        )
+    )
+    data = dict(
+        program_id="hold",
+        integration=dict(robot_profile="r", scene_registry="s", runtime_preset="safe"),
+        targets={
+            "target": dict(
+                kind="pose",
+                position=[0.0, 0.0, 0.0],
+                quaternion_xyzw=[0.0, 0.0, 0.0, 1.0],
+            )
+        },
+        program=[
+            dict(
+                segment="two_objects",
+                steps=[dict(move_held_object=dict(object="reference", at="target"))],
+                post=[dict(hold=dict(object="cube", at="target", duration_s=0.1))],
+            )
+        ],
+    )
+    segment = next(
+        TaskProgramCompiler(SceneManifest.from_registry(scene))
+        .compile(decode_task_program(data))
+        .iter_segments()
+    )
+    policy = segment.post_policies[0]
+    port, _, _ = _port(torch.zeros(2, 3), step_dt=0.1)
+    clock = EnvironmentStepClock(0.1)
+    port.bind_clock(clock)
+    old_cube_target = torch.eye(4).repeat(2, 1, 1)
+    old_cube_target[:, 0, 3] = 1.0
+    current = SimpleNamespace(
+        scene=SimpleNamespace(
+            entities={"cube": SimpleNamespace(pose=torch.eye(4).repeat(2, 1, 1))}
+        )
+    )
+    port.bind_hold_observer(
+        lambda object_id, active: (current, active.clone(), old_cube_target)
+    )
+    actions = port.actions(
+        policy, segment=segment, active_mask=torch.ones(2, dtype=torch.bool)
+    )
+    next(actions)
+    clock.advance_after_env_step()
+    with pytest.raises(StopIteration):
+        next(actions)
+    assert port.post_policy_result(policy, segment=segment).tolist() == [True, True]

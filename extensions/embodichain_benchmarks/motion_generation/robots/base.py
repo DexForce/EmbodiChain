@@ -153,7 +153,7 @@ class EmbodimentRobotProvider(RobotProvider):
             }
 
     def build_cfg(self) -> "RobotCfg":
-        """Return a fresh component-owned robot configuration, including its TCP."""
+        """Return a fresh config; bound tool TCPs finalize during robot assembly."""
         return deepcopy(self._cfg)
 
     def configure_track(self, track: "TrackCfg") -> None:
@@ -165,6 +165,23 @@ class EmbodimentRobotProvider(RobotProvider):
         if track.scenario != "atomic_skill" or self.gripper_config is None:
             return
         declared = track.config.get("gripper")
-        if declared is not None and declared != self.gripper_config:
-            raise ValueError("track.gripper conflicts with the selected embodiment.")
-        track.config["gripper"] = deepcopy(self.gripper_config)
+        contacts = {}
+        if declared is not None:
+            if not isinstance(declared, Mapping) or any(
+                key in declared and declared[key] != value
+                for key, value in self.gripper_config.items()
+            ):
+                raise ValueError(
+                    "track.gripper conflicts with the selected embodiment."
+                )
+            contacts = {
+                key: value
+                for key, value in declared.items()
+                if key not in self.gripper_config
+            }
+            if set(contacts) - {"finger_links", "contact_distance_threshold_m"}:
+                raise ValueError("Unknown embodiment gripper contact settings.")
+        track.config["gripper"] = {
+            **deepcopy(self.gripper_config),
+            **deepcopy(contacts),
+        }

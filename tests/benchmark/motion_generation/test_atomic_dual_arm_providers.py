@@ -18,23 +18,26 @@
 
 from __future__ import annotations
 
+from embodichain.robot_registry import resolve_gripper_defaults
+
+
 import math
+import xml.etree.ElementTree as ET
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 import torch
+import numpy as np
 
 from embodichain_benchmarks.motion_generation.scenarios._atomic_pose_sampling import (
     apply_task_frame_randomization,
 )
 
 from embodichain.lab.sim.motion.planners import PlanState
-from embodichain.toolkits.graspkit import (
-    ParallelJawGraspPoseGenerator,
-    ParallelJawGripperModelCfg,
-)
+from embodichain.toolkits.graspkit import ParallelJawGraspPoseGenerator
 from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
 from embodichain_benchmarks.motion_generation.config import (
     AtomicPoseRandomizationCfg,
@@ -71,6 +74,26 @@ def _pose(x: float, y: float = 0.0, z: float = 0.0) -> torch.Tensor:
     pose = torch.eye(4)
     pose[:3, 3] = torch.tensor([x, y, z])
     return pose
+
+
+def _contact_trace(
+    *, contact_distances=None, contact_target="object", contact_targets=None, **channels
+):
+    """Fixture contacts are 1 mm on both fingers, independent of joint values."""
+    if contact_distances is None:
+        contact_distances = {
+            part: torch.full((*qpos.shape[:2], 2), 0.001)
+            for part, qpos in channels.get("gripper_qpos", {}).items()
+        }
+    return ReplayObservationTrace(
+        **channels,
+        gripper_contact_distances=contact_distances,
+        gripper_contact_targets=(
+            contact_targets
+            if contact_targets is not None
+            else {part: contact_target for part in contact_distances}
+        ),
+    )
 
 
 def _case(skill_id: str, **parameters: object) -> BenchmarkCase:
@@ -171,14 +194,14 @@ def test_hand_over_physical_evaluator_uses_phase_local_observations(
             "right_hand": torch.tensor([1.0]),
         },
         replay_traces={
-            "handover_pickup": ReplayObservationTrace(
+            "handover_pickup": _contact_trace(
                 gripper_qpos={"left_hand": holding, "right_hand": released}
             ),
-            "handover_transfer": ReplayObservationTrace(
+            "handover_transfer": _contact_trace(
                 object_pose=object_trace,
                 gripper_qpos={"left_hand": holding, "right_hand": holding},
             ),
-            "handover_exchange": ReplayObservationTrace(
+            "handover_exchange": _contact_trace(
                 object_pose=object_trace,
                 gripper_qpos={"left_hand": released, "right_hand": holding},
             ),
@@ -231,14 +254,14 @@ def test_hand_over_requires_receiver_release_at_terminal_target() -> None:
             "right_hand": torch.tensor([1.0]),
         },
         replay_traces={
-            "handover_pickup": ReplayObservationTrace(
+            "handover_pickup": _contact_trace(
                 gripper_qpos={"left_hand": holding, "right_hand": released}
             ),
-            "handover_transfer": ReplayObservationTrace(
+            "handover_transfer": _contact_trace(
                 object_pose=object_trace,
                 gripper_qpos={"left_hand": holding, "right_hand": holding},
             ),
-            "handover_exchange": ReplayObservationTrace(
+            "handover_exchange": _contact_trace(
                 object_pose=object_trace,
                 gripper_qpos={"left_hand": released, "right_hand": holding},
             ),
@@ -261,22 +284,22 @@ def test_hand_over_requires_receiver_release_at_terminal_target() -> None:
 
 
 @pytest.mark.parametrize(
-    ("offset", "yaw", "left_qpos", "right_qpos", "failure_stage"),
+    ("offset", "yaw", "left_distance", "right_distance", "failure_stage"),
     [
-        (0.005, 0.0, 0.02, 0.02, None),
-        (0.02, 0.0, 0.02, 0.02, "moved"),
-        (0.0, math.pi / 2, 0.02, 0.02, "moved"),
-        (0.0, 0.0, 0.02, 0.026, "dual_grasped"),
-        (0.0, 0.0, 0.0255, 0.02, "dual_grasped"),
-        (0.0, 0.0, 0.0, 0.02, "dual_grasped"),
-        (0.0, 0.0, None, 0.02, "dual_grasped"),
+        (0.005, 0.0, 0.001, 0.001, None),
+        (0.02, 0.0, 0.001, 0.001, "moved"),
+        (0.0, math.pi / 2, 0.001, 0.001, "moved"),
+        (0.0, 0.0, 0.001, float("inf"), "dual_grasped"),
+        (0.0, 0.0, 0.005, 0.001, "dual_grasped"),
+        (0.0, 0.0, float("inf"), 0.001, "dual_grasped"),
+        (0.0, 0.0, None, 0.001, "dual_grasped"),
     ],
 )
 def test_coordinated_pickment_evaluator_uses_all_physical_stages(
     offset: float,
     yaw: float,
-    left_qpos: float | None,
-    right_qpos: float,
+    left_distance: float | None,
+    right_distance: float,
     failure_stage: str | None,
 ) -> None:
     initial = _pose(0.0).unsqueeze(0)
@@ -286,9 +309,11 @@ def test_coordinated_pickment_evaluator_uses_all_physical_stages(
     final[:, 0, 3] += offset
     final[:, :3, :3] = axis_angle_to_rotation_matrix(torch.tensor([0.0, 0.0, yaw]))
     move = torch.stack((lift[-1], final))
-    grippers = {"right_hand": torch.full((2, 1, 1), right_qpos)}
-    if left_qpos is not None:
-        grippers["left_hand"] = torch.full((2, 1, 1), left_qpos)
+    grippers = {"right_hand": torch.full((2, 1, 1), 0.02)}
+    contacts = {"right_hand": torch.full((2, 1, 2), right_distance)}
+    if left_distance is not None:
+        grippers["left_hand"] = torch.full((2, 1, 1), 0.02)
+        contacts["left_hand"] = torch.full((2, 1, 2), left_distance)
     case = _case(
         "coordinated_pickment",
         control_parts={
@@ -308,12 +333,15 @@ def test_coordinated_pickment_evaluator_uses_all_physical_stages(
             "right_hand": torch.tensor([0.026]),
         },
         replay_traces={
-            "dual_pick_grasp": ReplayObservationTrace(gripper_qpos=grippers),
+            "dual_pick_grasp": _contact_trace(
+                gripper_qpos=grippers, contact_distances=contacts
+            ),
             "dual_pick_lift": ReplayObservationTrace(object_pose=lift),
             "dual_pick_move": ReplayObservationTrace(object_pose=move),
-            "dual_pick_settle": ReplayObservationTrace(
+            "dual_pick_settle": _contact_trace(
                 object_pose=final.unsqueeze(0).repeat(2, 1, 1, 1),
                 gripper_qpos=grippers,
+                contact_distances=contacts,
             ),
         },
     )
@@ -361,12 +389,12 @@ def test_coordinated_pickment_rechecks_target_after_settle() -> None:
             "right_hand": torch.tensor([1.0]),
         },
         replay_traces={
-            "dual_pick_grasp": ReplayObservationTrace(
+            "dual_pick_grasp": _contact_trace(
                 gripper_qpos={"left_hand": holding, "right_hand": holding}
             ),
             "dual_pick_lift": ReplayObservationTrace(object_pose=lift),
             "dual_pick_move": ReplayObservationTrace(object_pose=move),
-            "dual_pick_settle": ReplayObservationTrace(
+            "dual_pick_settle": _contact_trace(
                 object_pose=settled_wrong,
                 gripper_qpos={"left_hand": holding, "right_hand": holding},
             ),
@@ -442,11 +470,12 @@ def test_coordinated_placement_evaluator_uses_named_support_pose_trace(
                 object_pose=pose_trace,
                 scene_object_poses=support_traces,
             ),
-            "coordinated_place_release": ReplayObservationTrace(
+            "coordinated_place_release": _contact_trace(
+                contact_targets={"left_hand": "object", "right_hand": "support"},
                 gripper_qpos={
                     "left_hand": placing_released,
                     "right_hand": support_held,
-                }
+                },
             ),
             "coordinated_place_settle": ReplayObservationTrace(
                 object_pose=pose_trace,
@@ -519,11 +548,12 @@ def test_coordinated_placement_alignment_uses_world_height_offsets() -> None:
                 object_pose=aligned_placing_trace,
                 scene_object_poses={"support": aligned_support_trace},
             ),
-            "coordinated_place_release": ReplayObservationTrace(
+            "coordinated_place_release": _contact_trace(
+                contact_targets={"left_hand": "object", "right_hand": "support"},
                 gripper_qpos={
                     "left_hand": placing_released,
                     "right_hand": support_held,
-                }
+                },
             ),
             "coordinated_place_settle": ReplayObservationTrace(
                 object_pose=resting_placing_trace,
@@ -583,11 +613,12 @@ def test_coordinated_placement_rechecks_relative_target_after_release() -> None:
                 object_pose=aligned_trace,
                 scene_object_poses={"support": support_trace},
             ),
-            "coordinated_place_release": ReplayObservationTrace(
+            "coordinated_place_release": _contact_trace(
+                contact_targets={"left_hand": "object", "right_hand": "support"},
                 gripper_qpos={
                     "left_hand": placing_released,
                     "right_hand": support_held,
-                }
+                },
             ),
             "coordinated_place_settle": ReplayObservationTrace(
                 object_pose=settled_wrong,
@@ -773,6 +804,281 @@ def test_reference_recorder_keeps_requested_poses_but_not_internal_ik():
         plan.arm_poses("third_arm")
 
 
+class _EndpointRobot:
+    """Two prismatic chains with distinct rotated bases and TCP offsets."""
+
+    def __init__(self, batch: int, failure: str | None = None) -> None:
+        self.batch = batch
+        self.failure = failure
+        self.seeds = {"left_arm": [], "right_arm": []}
+        self.bases = {}
+        self.tcp = {}
+        for arm, sign in (("left_arm", 1.0), ("right_arm", -1.0)):
+            base = _pose(sign * 0.5, 0.0, 0.2).repeat(batch, 1, 1)
+            base[:, :3, :3] = axis_angle_to_rotation_matrix(
+                torch.tensor([0.0, 0.0, sign * math.pi / 2])
+            )
+            base[:, 1, 3] = torch.arange(batch) * 2.0
+            self.bases[arm] = base
+            self.tcp[arm] = _pose(0.0, 0.0, sign * 0.1)
+
+    def get_joint_ids(self, *, name):
+        return [0, 2, 4] if name == "left_arm" else [1, 3, 5]
+
+    def get_qpos_limits(self, *, name, env_ids=None):
+        count = self.batch if env_ids is None else len(env_ids)
+        return torch.tensor([[[-1.0, 1.0]]]).repeat(count, 3, 1)
+
+    def forward(self, qpos, name, env_ids=None):
+        ids = list(range(self.batch)) if env_ids is None else env_ids
+        local = torch.eye(4).repeat(len(qpos), 1, 1)
+        local[:, :3, 3] = qpos
+        return self.bases[name][ids] @ local @ self.tcp[name]
+
+    def compute_ik(self, *, pose, joint_seed, name, env_ids=None):
+        ids = list(range(self.batch)) if env_ids is None else env_ids
+        self.seeds[name].append(joint_seed.clone())
+        local = pose_inv(self.bases[name][ids]) @ pose @ pose_inv(self.tcp[name])
+        qpos = local[:, :3, 3].clone()
+        success = torch.ones(len(ids), dtype=torch.bool)
+        if name == "right_arm" and 1 in ids:
+            row = ids.index(1)
+            if self.failure == "ik":
+                success[row] = False
+            elif self.failure == "joint_bounds":
+                qpos[row, 0] = 2.0
+            elif self.failure == "nonfinite":
+                qpos[row, 0] = float("nan")
+        return success, qpos
+
+    def compute_fk(self, *, qpos, name, to_matrix, env_ids=None):
+        assert to_matrix
+        result = self.forward(qpos, name, env_ids)
+        if name == "right_arm" and self.failure == "position":
+            result[1, 0, 3] += 0.02  # Outside the unchanged 1cm arrival ball.
+        elif name == "right_arm" and self.failure == "rotation":
+            result[1, :3, :3] = result[1, :3, :3] @ axis_angle_to_rotation_matrix(
+                torch.tensor([0.2, 0.0, 0.0])  # Outside the 0.1rad threshold.
+            )
+        return result
+
+
+def _prepared_endpoint_case(batch=8, failure=None):
+    suite = load_suite("atomic_dual_franka_robotiq_hand_over")
+    scenario = AtomicSkillScenario()
+    scenario.robot = robot = _EndpointRobot(batch, failure)
+    scenario.control_part = "left_arm"
+    scenario.suite = suite
+    full_start = torch.arange(batch * 6, dtype=torch.float32).reshape(batch, 6) / 100
+    left_qpos = torch.arange(batch * 2 * 3).reshape(batch, 2, 3).float() / 100
+    right_qpos = -torch.arange(batch * 3 * 3).reshape(batch, 3, 3).float() / 100
+    left = torch.stack([robot.forward(q, "left_arm") for q in left_qpos.unbind(1)], 1)
+    right = torch.stack(
+        [robot.forward(q, "right_arm") for q in right_qpos.unbind(1)], 1
+    )
+    before = (full_start.clone(), left.clone(), right.clone())
+    case = dual._case(
+        create_atomic_skill_provider("hand_over"),
+        scenario,
+        suite,
+        suite.tracks[0],
+        {"name": "endpoint_contract"},
+        seed=11,
+        batch_size=batch,
+        path_shape="test",
+        object_id="object",
+        targets=left,
+        start_qpos=full_start[:, [0, 2, 4]].clone(),
+        full_start_qpos=full_start,
+        parameters={"arm_waypoints": {"right_arm": right.tolist()}},
+    )
+    for actual, original in zip((full_start, left, right), before, strict=True):
+        torch.testing.assert_close(actual, original, rtol=0, atol=0)
+    return case, robot, left_qpos, right_qpos
+
+
+def test_dual_case_freezes_both_arm_endpoint_witnesses_from_the_full_start():
+    """B8 rows retain each arm's own frame, TCP, joint indices and waypoint count."""
+    case, robot, left, right = _prepared_endpoint_case()
+    evidence = case.case_parameters["endpoint_qualification"]
+    assert evidence["scope"] == "endpoint_reference_only_not_path_or_physical_success"
+    assert set(evidence["arms"]) == {"left_arm", "right_arm"}
+    torch.testing.assert_close(case.reference_qpos, left)
+    for arm, expected in (("left_arm", left), ("right_arm", right)):
+        row = evidence["arms"][arm]
+        torch.testing.assert_close(torch.tensor(row["reference_qpos"]), expected)
+        torch.testing.assert_close(
+            torch.tensor(row["start_qpos"]),
+            case.full_start_qpos[:, robot.get_joint_ids(name=arm)],
+        )
+        torch.testing.assert_close(robot.seeds[arm][0], torch.tensor(row["start_qpos"]))
+        torch.testing.assert_close(robot.seeds[arm][1], expected[:, 0])
+        assert torch.tensor(row["qualified"]).shape == expected.shape[:2]
+        assert torch.tensor(row["qualified"]).all()
+        assert torch.tensor(row["position_error_m"]).max() < 1e-5
+        assert torch.tensor(row["rotation_error_rad"]).max() < 1e-5
+
+
+@pytest.mark.parametrize(
+    "failure", ["position", "rotation", "joint_bounds", "nonfinite", "ik"]
+)
+def test_dual_case_does_not_freeze_when_only_the_primary_arm_is_qualified(failure):
+    """A secondary-arm failure keeps the case incomplete, never dropping a row."""
+    with pytest.raises(RuntimeError, match="right_arm") as error:
+        _prepared_endpoint_case(batch=2, failure=failure)
+    assert "1" in str(error.value)
+    if failure == "ik":
+        assert "does not establish unreachability" in str(error.value)
+
+
+def _hand_over_generation(monkeypatch, *, endpoint_failure=None):
+    """Prepare real case/endpoint qualification around a CPU reference result."""
+    batch = 8
+    suite = load_suite("atomic_dual_franka_robotiq_hand_over")
+    scenario = AtomicSkillScenario()
+    scenario.robot = robot = _EndpointRobot(batch, endpoint_failure)
+    scenario.control_part = "left_arm"
+    scenario.suite = suite
+    object_pose = _pose(0.0, 0.0, 0.6).repeat(batch, 1, 1)
+    full_start = torch.zeros(batch, 6)
+    samples = {}
+    poses = {}
+    for name, arm in (("pickup_grasp", "left_arm"), ("receive_grasp", "right_arm")):
+        samples[name] = {
+            "success": [True] * batch,
+            "env_ids": list(range(batch)),
+            "control_parts": [arm] * batch,
+            "valid_candidate_counts": [3] * batch,
+            "candidate_ids": [0] * batch,
+        }
+        poses[arm] = [
+            robot.forward(torch.full((batch, 3), offset), arm) for offset in (0.1, 0.2)
+        ]
+    reference = dual._ReferencePlan(
+        compiled=SimpleNamespace(
+            plan_success=torch.zeros(batch, dtype=torch.bool),
+            trajectory=SimpleNamespace(env_ids=torch.arange(batch)),
+            skill_plans=(
+                SimpleNamespace(
+                    skill_id="hand_over",
+                    diagnostics=SimpleNamespace(
+                        metadata={"affordance_sample": samples}
+                    ),
+                ),
+            ),
+        ),
+        planned_poses=poses,
+        grasp_requests=[("left_eef", object_pose), ("right_eef", object_pose)],
+    )
+    scenario.activate_object = Mock(
+        return_value=SimpleNamespace(object_id="object", entity=object())
+    )
+    scenario.restore_base_robot = Mock()
+    scenario.open_grippers = Mock()
+    scenario.grasp_model = Mock(
+        return_value=resolve_gripper_defaults("FrankaPandaHand")
+    )
+    monkeypatch.setattr(dual, "_settled_pose", Mock(return_value=(object_pose, 0)))
+    monkeypatch.setattr(
+        dual, "snapshot_case_qpos", Mock(return_value=(full_start[:, :3], full_start))
+    )
+    monkeypatch.setattr(dual, "_randomized_target_pose", Mock(return_value=object_pose))
+    monkeypatch.setattr(dual, "parallel_jaw_sampler", Mock())
+    monkeypatch.setattr(dual, "_antipodal_semantics", Mock())
+    monkeypatch.setattr(dual, "_compile_reference", Mock(return_value=reference))
+
+    def generate():
+        return create_atomic_skill_provider("hand_over").generate_case(
+            scenario,
+            suite,
+            suite.tracks[0],
+            {"name": "sampling_contract", "object": "object"},
+            seed=65001,
+            batch_size=batch,
+        )
+
+    return generate, reference, robot
+
+
+@pytest.mark.parametrize("sample_name", ["pickup_grasp", "receive_grasp"])
+def test_hand_over_rejects_invalid_grasp_rows_before_endpoint_ik(
+    monkeypatch, sample_name
+):
+    """Finite placeholder transforms must not be misreported as unreachable IK."""
+    generate, reference, robot = _hand_over_generation(monkeypatch)
+    sample = reference.compiled.skill_plans[0].diagnostics.metadata[
+        "affordance_sample"
+    ][sample_name]
+    failed = [1, 2, 6, 7]
+    arm = sample["control_parts"][0]
+    for index in failed:
+        sample["success"][index] = False
+        sample["valid_candidate_counts"][index] = 0
+        sample["candidate_ids"][index] = -1
+        for pose in reference.planned_poses[arm]:
+            pose[index] = torch.eye(4)
+    with pytest.raises(RuntimeError, match="input sampling failed") as error:
+        generate()
+    message = str(error.value)
+    assert sample_name in message and arm in message
+    assert "'rows': [1, 2, 6, 7]" in message
+    assert "'env_ids': [1, 2, 6, 7]" in message
+    assert "'valid_candidate_counts': [0, 0, 0, 0]" in message
+    assert "'candidate_ids': [-1, -1, -1, -1]" in message
+    assert robot.seeds == {"left_arm": [], "right_arm": []}
+
+
+@pytest.mark.parametrize("candidate_diagnostics", [True, False])
+def test_hand_over_valid_samples_allow_failed_reference_plan(
+    monkeypatch, candidate_diagnostics
+):
+    """Independent witnesses, not reference-plan success, qualify valid grasps."""
+    generate, reference, robot = _hand_over_generation(monkeypatch)
+    if not candidate_diagnostics:
+        for sample in (
+            reference.compiled.skill_plans[0]
+            .diagnostics.metadata["affordance_sample"]
+            .values()
+        ):
+            sample.pop("valid_candidate_counts")
+            sample.pop("candidate_ids")
+    case = generate()
+    assert case.case_parameters["reference_plan_success"] == [False] * 8
+    assert set(case.case_parameters["frozen_grasps"]) == {"left_eef", "right_eef"}
+    evidence = case.case_parameters["endpoint_qualification"]["arms"]
+    for arm in ("left_arm", "right_arm"):
+        assert robot.seeds[arm]
+        assert torch.tensor(evidence[arm]["qualified"]).all()
+        torch.testing.assert_close(
+            torch.tensor(evidence[arm]["reference_qpos"]),
+            torch.tensor([0.1, 0.2]).reshape(1, 2, 1).expand(8, 2, 3),
+        )
+
+
+@pytest.mark.parametrize("missing", ["affordance_sample", "receive_grasp", "success"])
+def test_hand_over_missing_sampling_evidence_is_not_accepted(monkeypatch, missing):
+    """Optional generic planner diagnostics cannot certify new grasp inputs."""
+    generate, reference, robot = _hand_over_generation(monkeypatch)
+    metadata = reference.compiled.skill_plans[0].diagnostics.metadata
+    if missing == "affordance_sample":
+        metadata.clear()
+    elif missing == "receive_grasp":
+        metadata["affordance_sample"].pop(missing)
+    else:
+        metadata["affordance_sample"]["receive_grasp"].pop(missing)
+    with pytest.raises(RuntimeError, match="input sampling"):
+        generate()
+    assert robot.seeds == {"left_arm": [], "right_arm": []}
+
+
+def test_hand_over_valid_samples_retain_independent_ik_failure(monkeypatch):
+    generate, _, robot = _hand_over_generation(monkeypatch, endpoint_failure="ik")
+    with pytest.raises(RuntimeError, match="right_arm") as error:
+        generate()
+    assert "does not establish unreachability" in str(error.value)
+    assert robot.seeds["right_arm"]
+
+
 def test_control_parts_default_to_left_then_right_and_validate():
     assert dual._control_parts({}, ("source", "destination")) == {
         "source": {"motion": "left_arm", "grasp": "left_eef"},
@@ -890,11 +1196,13 @@ def test_coordinated_placement_builds_each_pose_row_independently(monkeypatch):
         "target_object_offset_jitter_m": [0.03, 0.02, 0.01],
         "_pose_batch": AtomicPoseRandomizationCfg(seed_stride=1),
     }
+    support = Mock()
+    support.entity.get_triangles.return_value = torch.tensor([[[0, 1, 2], [1, 2, 3]]])
     poses = dual._placement_poses(
-        Mock(), Mock(), placing_pose, support_pose, config, seed=11
+        Mock(), support, placing_pose, support_pose, config, seed=11
     )
     repeated = dual._placement_poses(
-        Mock(), Mock(), placing_pose, support_pose, config, seed=11
+        Mock(), support, placing_pose, support_pose, config, seed=11
     )
 
     torch.testing.assert_close(poses["placing_grasp_pose"], placing_pose)
@@ -955,11 +1263,13 @@ def test_coordinated_placement_transforms_fixed_targets_with_task_frame(monkeypa
     )
     monkeypatch.setattr(dual, "_placement_geometry", lambda *args: geometry)
 
+    support = Mock()
+    support.entity.get_triangles.return_value = torch.tensor([[[0, 1, 2], [1, 2, 3]]])
     poses = dual._placement_poses(
-        Mock(), Mock(), placing_pose, support_pose, config, seed=11
+        Mock(), support, placing_pose, support_pose, config, seed=11
     )
     nominal = dual._placement_poses(
-        Mock(), Mock(), nominal_placing_pose, nominal_support_pose, {}, seed=11
+        Mock(), support, nominal_placing_pose, nominal_support_pose, {}, seed=11
     )
     task_frame_pose = torch.eye(4).repeat(batch_size, 1, 1)
     apply_task_frame_randomization(task_frame_pose, config, seed=11)
@@ -979,6 +1289,15 @@ def test_coordinated_placement_transforms_fixed_targets_with_task_frame(monkeypa
 
 def test_scenario_configures_every_gripper_and_freezes_each_hand_over_grasp():
     robot = Mock(device=CPU, dof=16)
+    pgi_tcp = [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.15],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+    robot.cfg.solver_cfg = {
+        part: SimpleNamespace(tcp=pgi_tcp) for part in ("left_arm", "right_arm")
+    }
     robot.control_parts = {
         "left_arm": object(),
         "right_arm": object(),
@@ -1044,9 +1363,28 @@ def test_scenario_configures_every_gripper_and_freezes_each_hand_over_grasp():
 class _CountingSampler(ParallelJawGraspPoseGenerator):
     """Report the sample count it was built with instead of sampling."""
 
-    def __init__(self, n_sample: int) -> None:
-        super().__init__(ParallelJawGripperModelCfg())
+    def __init__(
+        self,
+        n_sample: int,
+        *,
+        gripper_data: dict[str, object] | None = None,
+        root_from_tcp: list[list[float]] | None = None,
+    ) -> None:
+        super().__init__(
+            **{
+                key: (
+                    gripper_data
+                    or {
+                        "model_id": "parallel_jaw",
+                        "min_opening_width": 0.001,
+                        "max_opening_width": 0.1,
+                    }
+                )[key]
+                for key in ("model_id", "min_opening_width", "max_opening_width")
+            }
+        )
         self.n_sample = n_sample
+        self.root_from_tcp = root_from_tcp
 
     def get_valid_grasp_poses(self, **kwargs: object) -> list:
         return []
@@ -1058,9 +1396,19 @@ class _CountingSampler(ParallelJawGraspPoseGenerator):
         return [self.n_sample]
 
 
-def test_each_self_sampling_case_compiles_with_its_own_sample_count(monkeypatch):
+@pytest.mark.parametrize("model_id", [None, "franka_panda_hand"])
+def test_each_self_sampling_case_compiles_with_its_own_sample_count(
+    monkeypatch, model_id
+):
     monkeypatch.setattr(atomic_skill, "parallel_jaw_sampler", _CountingSampler)
     robot = Mock(device=CPU)
+    pgi_tcp = [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.15],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+    robot.cfg.solver_cfg = {"left_arm": SimpleNamespace(tcp=pgi_tcp)}
     robot.control_parts = {"left_eef": object(), "right_eef": object()}
     robot.get_joint_ids.side_effect = lambda name: {
         "left_eef": [12],
@@ -1068,7 +1416,11 @@ def test_each_self_sampling_case_compiles_with_its_own_sample_count(monkeypatch)
     }[name]
     robot.get_qpos_limits.side_effect = lambda name: torch.tensor([[[0.0, 0.04]]])
     scenario = AtomicSkillScenario()
+    scenario.track = SimpleNamespace(
+        config={"grasp_model": "FrankaPandaHand" if model_id else None}
+    )
     scenario.robot = robot
+    scenario.control_part = "left_arm"
     scenario.simulation = Mock(sim_config=Mock(physics_dt=0.01))
     scenario._gripper_states = {
         part: (torch.tensor([0.0]), torch.tensor([0.026]))
@@ -1103,6 +1455,9 @@ def test_each_self_sampling_case_compiles_with_its_own_sample_count(monkeypatch)
 
     sampler = scenario.require_engine().grasp_pose_generators["left_eef"]
     assert isinstance(sampler, CaseSampleCountGraspPoseGenerator)
+    if model_id is not None:
+        assert sampler.gripper_data["model_id"] == model_id
+        assert sampler.gripper_data["max_opening_width"] == pytest.approx(0.08)
     assert scenario.require_engine().grasp_pose_generators["right_eef"] is sampler
     engine = Mock(motion_generator=motion_generator)
     engine.compile.side_effect = lambda *args, **kwargs: (
@@ -1230,6 +1585,293 @@ def test_dual_arm_provider_builds_both_arms_and_grippers():
 
 
 @pytest.mark.parametrize(
+    "suite_name,tcp_z,closure",
+    [
+        ("atomic_dual_franka_robotiq_hand_over", 0.20, 0.45),
+        ("atomic_dual_franka_robotiq_coordinated_placement", 0.21, 0.7),
+    ],
+)
+def test_franka_dual_suites_use_authored_robotiq_linkage_and_finger_contacts(
+    tmp_path, suite_name, tcp_z, closure
+):
+    """Qualify both hands and limited closure against the real assembled URDF."""
+    from embodichain.utils.string import resolve_matching_names
+
+    suite = load_suite(suite_name)
+    cfg = create_robot_provider(suite.robot).build_cfg()
+    # Omitting the selector must retain Robotiq on Franka, too.
+    default_config = dict(suite.robot.config)
+    default_config.pop("gripper_type")
+    default_cfg = create_robot_provider(
+        replace(suite.robot, config=default_config)
+    ).build_cfg()
+    assert default_cfg.to_dict() == cfg.to_dict()
+    cfg.urdf_cfg.fpath = str(tmp_path / "franka_robotiq.urdf")
+    tree = ET.parse(cfg.urdf_cfg.assemble_urdf())
+    joints = {
+        joint.get("name"): joint
+        for joint in tree.findall("joint")
+        if joint.get("type") != "fixed"
+    }
+    links = [link.get("name") for link in tree.findall("link")]
+    assert len(joints) == len(cfg.init_qpos) == 26
+    assert cfg.init_qpos[-12:] == [0.0] * 12
+    for side in ("left", "right"):
+        assert Path(cfg.urdf_cfg.components[f"{side}_hand"]["urdf_path"]).name == (
+            "robotiq_arg2f_140.urdf"
+        )
+        np.testing.assert_allclose(
+            cfg.solver_cfg[f"{side}_arm"].tcp,
+            [[0, -1, 0, 0], [1, 0, 0, 0], [0, 0, 1, tcp_z], [0, 0, 0, 1]],
+        )
+    declared_contacts = set()
+    for gripper in suite.enabled_tracks()[0].config["grippers"]:
+        part = gripper["control_part"]
+        names = cfg.control_parts[part]
+        assert len(names) == 6
+        limits = [
+            [float(joints[name].find("limit").get(key)) for key in ("lower", "upper")]
+            for name in names
+        ]
+        robot = Mock(device=CPU)
+        robot.get_qpos_limits.return_value = torch.tensor([limits])
+        _, opened, closed = AtomicSkillScenario._resolve_gripper(robot, gripper)
+        torch.testing.assert_close(opened, torch.zeros(6))
+        assert float(closed[0]) == pytest.approx(closure)
+        assert joints[names[0]].find("mimic") is None
+        for name, command in zip(names[1:], closed[1:], strict=True):
+            mimic = joints[name].find("mimic")
+            assert mimic.get("joint") == names[0]
+            assert float(command) == pytest.approx(
+                float(closed[0]) * float(mimic.get("multiplier"))
+                + float(mimic.get("offset", "0"))
+            )
+        assert len(gripper["finger_links"]) == 2
+        assert set(gripper["finger_links"]) <= set(links)
+        declared_contacts.update(gripper["finger_links"])
+    assert len(declared_contacts) == 4
+    assert (
+        set(
+            resolve_matching_names(
+                cfg.link_attrs["newton_gripper_contacts"].link_names_expr, links
+            )[1]
+        )
+        == declared_contacts
+    )
+    for rules in (
+        cfg.joint_drive_props.stiffness,
+        cfg.joint_drive_props.damping,
+        cfg.joint_drive_props.max_effort,
+    ):
+        resolve_matching_names(list(rules), list(joints))
+
+
+def test_native_panda_dual_provider_preserves_real_fingers_and_stock_tcp(tmp_path):
+    """Check actual assembled geometry/kinematics, including the native mimic."""
+    from embodichain.utils.string import resolve_matching_names
+    from embodichain_robots import FrankaPandaCfg
+
+    suite = load_suite("atomic_dual_franka_robotiq_hand_over")
+    values = {
+        **suite.robot.config,
+        "gripper_type": "panda_hand",
+        "uid": "native_panda_dual_test",
+        "urdf_name": "native_panda_dual_test",
+    }
+    values.pop("tcp_z", None)
+    cfg = create_robot_provider(replace(suite.robot, config=values)).build_cfg()
+    assert Path(cfg.urdf_cfg.fpath).name == "native_panda_dual_test.urdf"
+    cfg.urdf_cfg.fpath = str(tmp_path / "native_panda_dual.urdf")
+    assembled_path = cfg.urdf_cfg.assemble_urdf()
+    tree = ET.parse(assembled_path)
+    links = [link.get("name") for link in tree.findall("link")]
+    joints = {
+        joint.get("name"): joint
+        for joint in tree.findall("joint")
+        if joint.get("type") != "fixed"
+    }
+    assert len(joints) == 18
+    assert len(cfg.init_qpos) == 18
+    assert cfg.init_qpos[-4:] == [0.04] * 4
+    assert [Path(c["urdf_path"]).name for c in cfg.urdf_cfg.components.values()] == [
+        "Panda.urdf",
+        "Panda.urdf",
+        "Fr3HandV1.urdf",
+        "Fr3HandV1.urdf",
+    ]
+    contact_links = resolve_matching_names(
+        cfg.link_attrs["newton_gripper_contacts"].link_names_expr, links
+    )[1]
+    assert set(contact_links) == {
+        f"{side}_fr3_{finger}finger"
+        for side in ("left", "right")
+        for finger in ("left", "right")
+    }
+    for rules in (
+        cfg.joint_drive_props.stiffness,
+        cfg.joint_drive_props.damping,
+        cfg.joint_drive_props.max_effort,
+    ):
+        resolve_matching_names(list(rules), list(joints))
+
+    stock = FrankaPandaCfg.from_dict({})
+    qpos = torch.tensor(
+        [stock.init_qpos[:7], [0.3, -0.2, 0.1, -2.0, 0.2, 2.5, 0.4]],
+        dtype=torch.float32,
+    )
+    from embodichain.data import get_data_path
+    from embodichain.lab.sim.utility.solver_utils import create_pk_serial_chain
+
+    source = create_pk_serial_chain(
+        urdf_path=get_data_path("Franka/Panda/PandaWithHand.urdf"),
+        device=CPU,
+        root_link_name="base",
+        end_link_name="fr3_hand_tcp",
+    )
+    expected_fk = source.forward_kinematics(qpos).get_matrix()
+    from embodichain.lab.sim.utility.gripper_binding import prepare_robot_grippers
+
+    prepare_robot_grippers(cfg)
+    chains = cfg.build_pk_serial_chain(device=CPU)
+    for side in ("left", "right"):
+        arm = f"{side}_arm"
+        fingers = [f"{side}_fr3_finger_joint{i}" for i in (1, 2)]
+        assert cfg.control_parts[f"{side}_eef"] == fingers
+        assert joints[fingers[1]].find("mimic").get("joint") == fingers[0]
+        limits = []
+        for name in fingers:
+            assert joints[name].get("type") == "prismatic"
+            limit = joints[name].find("limit")
+            limits.append([float(limit.get("lower")), float(limit.get("upper"))])
+        robot = Mock(device=CPU)
+        robot.get_qpos_limits.return_value = torch.tensor([limits])
+        _, opened, closed = AtomicSkillScenario._resolve_gripper(
+            robot,
+            {
+                "control_part": f"{side}_eef",
+                "open_qpos": [0.04, 0.04],
+                "grasp_qpos": [0.0, 0.0],
+            },
+        )
+        torch.testing.assert_close(opened, torch.full((2,), 0.04))
+        torch.testing.assert_close(closed, torch.zeros(2))
+        solver_cfg = cfg.solver_cfg[arm]
+        assert solver_cfg.end_link_name == f"{side}_fr3_link8"
+        assert np.asarray(solver_cfg.tcp)[2, 3] == pytest.approx(0.1034)
+        solver_cfg.urdf_path = assembled_path
+        solver_cfg.joint_names = cfg.control_parts[arm]
+        solver = solver_cfg.init_solver(device=CPU)
+        torch.testing.assert_close(solver.get_fk(qpos), expected_fk)
+        torch.testing.assert_close(
+            chains[arm].forward_kinematics(qpos).get_matrix()
+            @ torch.tensor(solver_cfg.tcp, dtype=qpos.dtype),
+            expected_fk,
+        )
+
+    # Hardware replacement retains both arm base transforms in the world.
+    root = np.eye(4)
+    root[:3, :3] = [[0, 1, 0], [-1, 0, 0], [0, 0, 1]]
+    root[:3, 3] = cfg.init_pos
+    for side, y in (("left", 0.3), ("right", -0.3)):
+        world_from_arm = root @ cfg.urdf_cfg.components[f"{side}_arm"]["transform"]
+        expected = np.diag([-1.0, -1.0, 1.0, 1.0])
+        expected[:3, 3] = [0.5, y, 0.5]
+        np.testing.assert_allclose(world_from_arm, expected, atol=1e-6)
+
+
+@pytest.mark.parametrize(
+    "overrides, message",
+    [({"robot_type": "ur5"}, "requires robot_type"), ({"tcp_z": 0.15}, "omit tcp_z")],
+)
+def test_native_panda_dual_rejects_incompatible_arm_or_tool_override(
+    overrides, message
+):
+    suite = load_suite("atomic_dual_franka_robotiq_hand_over")
+    values = {**suite.robot.config, "gripper_type": "panda_hand"}
+    values.pop("tcp_z", None)
+    values.update(overrides)
+    with pytest.raises(ValueError, match=message):
+        create_robot_provider(replace(suite.robot, config=values)).build_cfg()
+
+
+def test_native_grasp_sampling_maps_closing_axis_once_before_frozen_replay(monkeypatch):
+    """Every sampler API preserves metadata and native replay retains the pose."""
+
+    from embodichain_benchmarks.motion_generation import _atomic_fixtures
+
+    canonical = _pose(0.2, 0.3, 0.4).unsqueeze(0)
+    canonical[:, :3, :3] = axis_angle_to_rotation_matrix(torch.tensor([0.2, -0.1, 0.3]))
+    before = canonical.clone()
+    costs, widths, success = (
+        torch.tensor([0.25]),
+        torch.tensor([0.03]),
+        torch.tensor([True]),
+    )
+    model = resolve_gripper_defaults("FrankaPandaHand")
+    source = Mock(device=torch.device("cpu"))
+    source.get_valid_grasp_poses.return_value = (True, canonical, widths, costs)
+    source.get_grasp_poses.return_value = (True, canonical[0], float(widths[0]))
+    source.get_dual_arm_valid_grasp_poses.side_effect = [
+        {
+            part: {"grasp_poses": canonical, "open_lengths": widths, "costs": costs}
+            for part in ("left", "right")
+        },
+        None,
+    ]
+    sampler = _atomic_fixtures.create_parallel_jaw_grasp_pose_generator(
+        n_sample=32, force_refresh=False, gripper_data=model
+    )
+    monkeypatch.setattr(sampler, "_backend", lambda *_: source)
+    arguments = dict(
+        mesh_vertices=torch.zeros((3, 3)),
+        mesh_triangles=torch.tensor([[0, 1, 2]]),
+        obj_poses=torch.eye(4).unsqueeze(0),
+        approach_direction=canonical[:, :3, 2],
+    )
+    valid, actual_costs = sampler.get_valid_grasp_poses(**arguments)[0]
+    candidates, actual_widths, candidate_costs = sampler.get_grasp_candidates(
+        **arguments
+    )[0]
+    actual_success, best, best_widths = sampler.get_best_grasp_poses(**arguments)
+    paired_arguments = {
+        **arguments,
+        "obj_poses": torch.eye(4).repeat(2, 1, 1),
+        "approach_direction": canonical[0, :3, 2],
+    }
+    paired = sampler.get_dual_arm_valid_grasp_poses(
+        **paired_arguments, left_to_right_arm_direction=torch.tensor([1.0, 0.0, 0.0])
+    )
+    assert paired[1] is None
+    for actual in (
+        valid,
+        candidates,
+        best,
+        *(v["grasp_poses"] for v in paired[0].values()),
+    ):
+        # Native finger translation follows TCP +Y; sampler closing follows +X.
+        torch.testing.assert_close(actual[:, :3, 1], canonical[:, :3, 0])
+        torch.testing.assert_close(actual[:, :3, 2], canonical[:, :3, 2])
+        torch.testing.assert_close(actual[:, :3, 3], canonical[:, :3, 3])
+    for actual in (actual_costs, candidate_costs):
+        torch.testing.assert_close(actual, costs)
+    for actual in (actual_widths, best_widths):
+        torch.testing.assert_close(actual, widths)
+    torch.testing.assert_close(actual_success, success)
+    torch.testing.assert_close(canonical, before, rtol=0, atol=0)
+
+    frozen = ActiveCaseGraspPoseGenerator()
+    object_pose = torch.eye(4).unsqueeze(0)
+    frozen.activate(object_pose, best)
+    _, replayed, _ = frozen.get_best_grasp_poses(
+        mesh_vertices=torch.zeros(3, 3),
+        mesh_triangles=torch.tensor([[0, 1, 2]]),
+        obj_poses=object_pose,
+        approach_direction=canonical[:, :3, 2],
+    )
+    torch.testing.assert_close(replayed, best, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize(
     ("suite_name", "skill_id"),
     [
         ("atomic_dual_ur5_pgi_hand_over", "hand_over"),
@@ -1252,3 +1894,26 @@ def test_dual_arm_suites_plan_with_toppra_and_declare_both_grippers(
     ]
     assert track.config["physics"]["steps_per_waypoint"] == 16
     assert track.config["fixtures"]
+
+
+@pytest.mark.parametrize("skill_id", ["hand_over", "coordinated_placement"])
+def test_franka_dual_suites_use_independent_seven_joint_arms(skill_id: str) -> None:
+    """Decode the published suites through their production robot provider."""
+    suite = load_suite(
+        "atomic_dual_franka_robotiq_hand_over"
+        if skill_id == "hand_over"
+        else "atomic_dual_franka_robotiq_coordinated_placement"
+    )
+    cfg = create_robot_provider(suite.robot).build_cfg()
+    for part in ("left_arm", "right_arm"):
+        assert len(cfg.control_parts[part]) == 7
+        assert cfg.solver_cfg[part].root_link_name.startswith(part.split("_")[0])
+    assert set(cfg.control_parts["left_arm"]).isdisjoint(cfg.control_parts["right_arm"])
+    assert {spec.id for spec in suite.planners if spec.enabled} == (
+        {"toppra"}
+        if skill_id == "hand_over"
+        else {"toppra", "curobo", "nmg", "nmg_retimed"}
+    )
+    track = suite.enabled_tracks()[0]
+    assert [skill["id"] for skill in track.config["skills"]] == [skill_id]
+    assert track.config["batch_sizes"] == [1]

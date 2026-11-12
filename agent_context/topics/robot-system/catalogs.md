@@ -34,10 +34,34 @@ arm count and simulation anchoring. Missing variant fields inherit the parent;
 explicit `None` stays unknown. Classification differences prevent variant rows
 from being grouped. Never infer these fields from paths or control-group names.
 
-Only the stock `FrankaPanda` hand is an official Panda preset. The former PGI
-preset is removed; examples and benchmark fixtures own their explicit Panda/PGI
-assemblies, including flange FK, TCP, drives and finger contacts. Flat concrete
-robot configuration module paths are retired; root class exports remain stable.
+`Franka` resolves the bare-arm `FrankaCfg` in `franka/cfg.py`. `arm_model`
+selects `fr3` (default) or `panda`; both expose seven joints in `arm`, no finger
+group, and a flange TCP. `FrankaPanda` remains a legacy selector for the
+historical FR3 arm (`robot_type: panda`), now also bare. Native-hand and Robotiq embodiments select concrete hand Cfg defaults through
+explicit `grippers` bindings. The binding supplies the URDF/control group and
+commands, while deployment physics remains an explicit ordinary override.
+The hand-local TCP and mounting transform determine the effective solver TCP;
+a repeated explicit solver TCP must agree. `existing` binds an integrated hand
+without appending another asset. Robot catalog entries with `description_path`
+expose pure model data through `resolve_gripper_defaults`; complete standalone
+Cfg construction and runtime geometry remain separate.
+The native hand is a pinned subtree derivative of the integrated FR3 asset;
+model-owned asset generation retains the original file and a derivation report.
+Bare dual-arm selection has fourteen arm joints. Tool-equipped benchmark
+providers append separate left/right hand components. Robotiq observed-aperture
+conversion remains tool-owned and does not select a robot class. PGI fixtures
+remain example/benchmark-owned. Root public class exports remain available.
+
+The `dual_franka_robotiq_arg2f_140` and `dual_ur10_robotiq_arg2f_140`
+embodiment components retain their frozen arm/tool calibration. Their separate
+`*_gensim` components select `DualArmRobot` with the registered `URRobot` UR10
+or `Franka` FR3 arm preset and mounted `RobotiqArg2F140` grippers. The preset
+provides arm assets, joint groups, solvers and arm drives; the component keeps
+GenSim-specific hand drives, friction, initial pose and camera calibration.
+Gripper bindings provide hand joints and calibrated TCPs, while the skill
+profiles keep explicit hand geometry and search settings. The
+`repeated_pick_place` deployments place each variant in its workcell without
+changing the frozen base components.
 
 `resolve_robot_cfg(..., variant=...)` selects a declared profile's defaults
 between catalog defaults and caller overrides. Omitting the variant keeps
@@ -68,3 +92,35 @@ unselected joints keep their defaults. Runtime direct-rule priority and caller
 ambiguity validation remain unchanged. Keep source-ordered `asset.init_qpos`
 separate from `robot.joint_names` / `robot.default_joint_position`. These are
 simulation PD presets, without external learned actuator implementations.
+
+## Model-specific calibration
+
+Concrete defaults remain in each vendor/model package, with asset provenance and
+usage links beside it. `FrankaCfg` supports bare FR3/Panda arms; hand embodiments
+add tools explicitly. The original-Panda and historical FR3 asset identities are
+not interchangeable. Tool mount and hand-local TCP must agree with solver TCP.
+
+W1 V030 is a bare-body profile with flange TCPs and FEP defaults; older body
+revisions keep their own solver/hand defaults. Optional Pika assembly belongs to
+`dexforce_w1_030_pika.yaml`, not a new catalog variant. Its ready pose, tool/head
+drives and cameras are embodiment-owned; body assets/groups/solvers remain
+preset-owned. W1 serialization removes and restores revision offsets exactly once.
+
+Aloha Mini, Marvin and AgiBot G2 use strict Warp SSIK arm defaults, ARX5 uses explicit
+near-parallel geometry, and Rizon4S uses prepared RR. Aloha's torso retains a
+position-only Pytorch solver. These modes have different geometric and artifact
+requirements; consult [IK boundaries](../ik-solvers/ik-solvers.md) before replacing
+one. Source URDFs, runtime joint names and PK chains must remain aligned.
+
+AgiBot G2 uses seed-local SRS search with its original 18 mm elbow offset and
+mounting-frame TCPs on CPU/CUDA. Its preset derives geometry from the URDF; see
+the [G2 model notes](../../../extensions/embodichain_robots/agibot/g2/README.md)
+before introducing a legacy SRS DH calibration.
+
+Marvin catalog configs preserve source mass, inertia and COM. The bundled
+embodiment's recorded scaling is a demo calibration with unconfirmed source
+units, not a manufacturer-verified SI conversion. Its source revision and
+fingerprint remain explicit. Nominal wrist optics and mesh-derived mounts are
+not hardware calibration. Runtime sensor overrides replace the suite; standalone
+and Gym acquisition switches still apply. Initial positions retain source order,
+and deployment files should reuse the embodiment's ready pose.

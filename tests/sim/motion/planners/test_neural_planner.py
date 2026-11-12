@@ -35,6 +35,8 @@ from embodichain.lab.sim.motion.planners.toppra_planner import retime_joint_path
 from embodichain.lab.sim.motion.planners.utils import TrajectorySampleMethod
 from embodichain.lab.sim.sim_manager import SimulationManager
 
+pytestmark = pytest.mark.no_sim
+
 NUM_ARM_JOINTS = 7
 NUM_WAYPOINTS = 5
 OBS_DIM = 186
@@ -76,9 +78,11 @@ class FakeOnnxPolicy:
         NUM_WAYPOINTS, NUM_ARM_JOINTS, True, True
     ).onnx_metadata
 
-    def __init__(self, path, providers=None):
+    def __init__(self, path, providers=None, *, cuda_use_tf32=None, device=None):
         self.path = path
         self.providers = providers
+        self.cuda_use_tf32 = cuda_use_tf32
+        self.device = device
         self.last_obs = None
 
     def __call__(self, obs: torch.Tensor) -> torch.Tensor:
@@ -560,6 +564,95 @@ def test_retime_joint_paths_rejects_malformed_input():
         )
 
 
+def test_arrival_retiming_keeps_event_stop_after_control_grid_and_hold():
+    from embodichain.compute.trajectory._arrival_timing import _resample_at_arrivals
+
+    path = torch.tensor(
+        [[[0.0, 0.0], [0.2, 0.1], [0.4, 0.2], [0.6, 0.3], [0.8, 0.4]]],
+        dtype=torch.float64,
+    )
+    limits = {"velocity": 2.0, "acceleration": 4.0}
+    options = dict(
+        constraints=limits,
+        sample_method=TrajectorySampleMethod.TIME,
+        sample_interval=0.01,
+    )
+    original = retime_joint_paths(path, **options)
+    stopped = retime_joint_paths(
+        path, arrival_indices=torch.tensor([[2, 4]]), **options
+    )
+    assert stopped.success.tolist() == [True]
+    assert stopped.dt.sum() > original.dt.sum()
+    output = _resample_at_arrivals(
+        stopped.positions, stopped.dt, 0.04, stopped.waypoint_indices
+    )
+    arrivals = output["waypoint_indices"][0]
+    torch.testing.assert_close(output["positions"][0, arrivals], path[0, [2, 4]])
+    split = int(arrivals[0])
+    q = output["positions"]
+    compiled = (
+        torch.cat(
+            (
+                q[:, : split + 1],
+                q[:, split : split + 1].expand(-1, 3, -1),
+                q[:, split:],
+            ),
+            dim=1,
+        )
+        .float()
+        .double()
+    )
+    velocity = compiled.diff(dim=1) / 0.04
+    acceleration = velocity.diff(dim=1) / 0.04
+    assert velocity.abs().max() <= 2.002
+    assert acceleration.abs().max() <= 4.004
+
+
+def test_arrival_retiming_preserves_distinct_stationary_visits():
+    result = retime_joint_paths(
+        torch.zeros(1, 4, 2),
+        constraints={"velocity": 2.0, "acceleration": 4.0},
+        arrival_indices=torch.tensor([[1, 2, 3]]),
+        sample_method=TrajectorySampleMethod.TIME,
+        sample_interval=0.01,
+    )
+    assert result.success.tolist() == [True]
+    assert result.waypoint_indices.tolist() == [[1, 2, 3]]
+    torch.testing.assert_close(
+        result.dt, torch.tensor([[0.0, 0.01, 0.01, 0.01]], dtype=torch.float64)
+    )
+
+
+def test_arrival_retiming_keeps_failed_rows_and_tail_derivatives_zero():
+    paths = torch.tensor(
+        [
+            [[0.0], [0.1], [0.2], [0.2]],
+            [[0.0], [0.5], [1.0], [1.5]],
+            [[1.0], [2.0], [3.0], [float("nan")]],
+        ],
+        dtype=torch.float64,
+    )
+    result = retime_joint_paths(
+        paths,
+        constraints={"velocity": 2.0, "acceleration": 4.0},
+        sample_method=TrajectorySampleMethod.TIME,
+        sample_interval=0.1,
+        arrival_indices=torch.tensor([[2], [2], [2]]),
+    )
+    assert result.success.tolist() == [True, True, False]
+    short_length = int((result.dt[0] > 0).sum()) + 1
+    assert short_length < result.positions.shape[1]
+    torch.testing.assert_close(
+        result.positions[0, short_length:],
+        paths[0, -1].expand_as(result.positions[0, short_length:]),
+    )
+    for name in ("velocities", "accelerations", "dt"):
+        assert torch.count_nonzero(getattr(result, name)[0, short_length:]) == 0
+    for name in ("positions", "velocities", "accelerations", "dt"):
+        assert torch.count_nonzero(getattr(result, name)[2]) == 0
+    assert result.waypoint_indices[2].tolist() == [-1]
+
+
 def test_retime_joint_paths_slices_a_single_cpu_path_to_its_valid_prefix():
     path = torch.zeros(1, 4, NUM_ARM_JOINTS, dtype=torch.float64)
     path[0, :, 0] = torch.tensor([0.0, 0.05, 0.1, 0.1])
@@ -621,12 +714,14 @@ def test_retime_joint_paths_solves_a_cpu_batch_in_one_call(monkeypatch):
     monkeypatch.setattr(
         toppra_module,
         "_retime_toppra_warp",
-        lambda *args, **kwargs: calls.append(1) or original(*args, **kwargs),
+        lambda *args, **kwargs: calls.append(args[0].shape)
+        or original(*args, **kwargs),
     )
     batched = retime_joint_paths(paths, constraints=limits)
 
-    # Rows are no longer solved one after another on the CPU.
-    assert len(calls) == 1
+    # The compute backend receives the whole batch, without allocating the
+    # fixed-width learning output in this native planner adapter.
+    assert calls == [paths.shape]
     assert bool(batched.success.all())
     for index, row in enumerate(rows):
         assert float(batched.dt[index].sum()) == pytest.approx(
@@ -644,7 +739,7 @@ def test_retime_joint_paths_promotes_half_precision_before_warp():
     )
 
     assert result.success.tolist() == [True, True]
-    assert result.positions.dtype == torch.float32
+    assert result.positions.dtype == torch.float64
 
 
 def test_retiming_samples_on_the_control_period_not_the_rollout_step_count(
@@ -745,7 +840,7 @@ def test_retimed_waypoint_check_keeps_order_and_runs_once_per_waypoint(
     assert len(calls) == 2
 
 
-def test_retimed_waypoint_check_allows_repeated_stationary_targets(
+def test_retimed_waypoint_check_requires_distinct_repeated_target_visits(
     tmp_path, monkeypatch
 ):
     model_path = _create_fake_onnx_model(tmp_path)
@@ -783,6 +878,10 @@ def test_retimed_waypoint_check_allows_repeated_stationary_targets(
 
     reached = planner._retimed_reaches_waypoints(positions, poses, waypoints, 3)
 
+    assert reached.tolist() == [False]
+    positions = torch.cat((positions, positions[:, -1:].expand(-1, 2, -1)), dim=1)
+    poses = torch.eye(4).repeat(1, 4, 1, 1)
+    reached = planner._retimed_reaches_waypoints(positions, poses, waypoints, 3)
     assert reached.tolist() == [True]
 
 
@@ -1566,3 +1665,455 @@ def test_onnx_runtime_respects_host_thread_budget(monkeypatch, tmp_path):
     assert messages == ["NMG ONNX execution providers: CPUExecutionProvider"]
     assert received["options"].intra_op_num_threads == 3
     assert received["options"].inter_op_num_threads == 1
+
+
+@pytest.mark.parametrize("retime", [False, True])
+def test_shared_policy_uses_each_arms_frame_for_targets_and_rollout(
+    tmp_path, monkeypatch, retime
+):
+    """Equivalent local requests have identical policy inputs after arm switches."""
+    bases = {
+        "left_arm": torch.tensor(
+            [
+                [-1.0, 0.0, 0.0, 0.5],
+                [0.0, -1.0, 0.0, 0.3],
+                [0.0, 0.0, 1.0, 0.5],
+                [0.0, 0.0, 0.0, 1.0],
+            ]
+        ),
+        "right_arm": torch.tensor(
+            [
+                [0.0, -1.0, 0.0, -0.4],
+                [1.0, 0.0, 0.0, -0.2],
+                [0.0, 0.0, 1.0, 0.8],
+                [0.0, 0.0, 0.0, 1.0],
+            ]
+        ),
+    }
+    local_pose = torch.eye(4)
+    local_pose[:3, 3] = torch.tensor([0.3, 0.1, 0.2])
+
+    class MountedRobot(FakeRobot):
+        def compute_fk(self, qpos, name=None, to_matrix=False, **kwargs):
+            return (bases[name] @ local_pose).expand(qpos.shape[0], -1, -1).clone()
+
+        def compute_batch_fk(self, qpos, name=None, **kwargs):
+            return (bases[name] @ local_pose).expand(*qpos.shape[:2], -1, -1).clone()
+
+    manager = FakeSimulationManager()
+    manager.robot = MountedRobot()
+    monkeypatch.setattr(SimulationManager, "get_instance", lambda *args: manager)
+    planner = NeuralPlanner(
+        NeuralPlannerCfg(
+            robot_uid="fake_robot",
+            onnx_model_path=_create_fake_onnx_model(tmp_path),
+            num_waypoints=NUM_WAYPOINTS,
+            max_steps=1,
+            policy_frame_from_world_by_control_part={
+                part: torch.linalg.inv(base).tolist() for part, base in bases.items()
+            },
+            constraints={"velocity": 0.2, "acceleration": 0.5} if retime else None,
+        )
+    )
+    observations = []
+    for part in ("left_arm", "right_arm", "left_arm"):
+        target = (bases[part] @ local_pose).unsqueeze(0)
+        result = planner.plan(
+            [PlanState.from_xpos(target)],
+            NeuralPlanOptions(control_part=part, start_qpos=torch.zeros(1, 7)),
+        )
+        assert result.success.tolist() == [True]
+        torch.testing.assert_close(result.xpos_list[:, -1], target)
+        observations.append(planner._policy.last_obs)
+    torch.testing.assert_close(observations[0], observations[1], atol=1e-6, rtol=1e-6)
+    torch.testing.assert_close(observations[0], observations[2], atol=1e-6, rtol=1e-6)
+    # EEF translation is expressed in the original single-arm training frame.
+    torch.testing.assert_close(observations[0][0, 7:10], local_pose[:3, 3])
+
+    with pytest.raises(ValueError, match="No NMG policy-frame transform"):
+        planner.plan(
+            [PlanState.from_xpos(torch.eye(4).unsqueeze(0))],
+            NeuralPlanOptions(
+                control_part="unmapped_arm", start_qpos=torch.zeros(1, 7)
+            ),
+        )
+
+
+@pytest.mark.parametrize("retime", [False, True])
+@pytest.mark.parametrize("preserve_arrivals", [False, True])
+def test_packed_arms_share_inference_and_match_independent_rollouts(
+    tmp_path, monkeypatch, retime, preserve_arrivals
+):
+    """Two scene rows × two arms preserve different goals, budgets and failures."""
+    bases = {
+        "left_arm": torch.tensor(
+            [
+                [-1.0, 0.0, 0.0, 0.5],
+                [0.0, -1.0, 0.0, 0.3],
+                [0.0, 0.0, 1.0, 0.5],
+                [0.0, 0.0, 0.0, 1.0],
+            ]
+        ),
+        "right_arm": torch.tensor(
+            [
+                [0.0, -1.0, 0.0, -0.4],
+                [1.0, 0.0, 0.0, -0.2],
+                [0.0, 0.0, 1.0, 0.8],
+                [0.0, 0.0, 0.0, 1.0],
+            ]
+        ),
+    }
+
+    class StepPolicy(FakeOnnxPolicy):
+        fixed_batch_size = None
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.observations = []
+
+        def __call__(self, obs):
+            self.observations.append(obs.clone())
+            return torch.full((obs.shape[0], 7), 0.5)
+
+    class MountedRobot(FakeRobot):
+        num_instances = 2
+
+        def compute_fk(self, qpos, name=None, **kwargs):
+            # The simulator has two scene rows, not four packed actor rows.
+            assert qpos.shape == (2, 7)
+            local = torch.eye(4).repeat(2, 1, 1)
+            local[:, :3, 3] = qpos[:, :3]
+            return bases[name] @ local
+
+        def compute_batch_fk(self, qpos, name=None, **kwargs):
+            assert qpos.shape[0] == 2
+            local = torch.eye(4).repeat(*qpos.shape[:2], 1, 1)
+            local[..., :3, 3] = qpos[..., :3]
+            return bases[name] @ local
+
+    monkeypatch.setattr(neural_planner_module, "_OnnxPolicy", StepPolicy)
+    manager = FakeSimulationManager()
+    manager.robot = MountedRobot()
+    monkeypatch.setattr(SimulationManager, "get_instance", lambda *args: manager)
+    planner = NeuralPlanner(
+        NeuralPlannerCfg(
+            robot_uid="fake_robot",
+            onnx_model_path=_create_fake_onnx_model(tmp_path),
+            batch_control_parts=True,
+            preserve_waypoint_arrivals=preserve_arrivals,
+            num_waypoints=NUM_WAYPOINTS,
+            action_scale=0.2,
+            policy_frame_from_world_by_control_part={
+                part: torch.linalg.inv(base).tolist() for part, base in bases.items()
+            },
+            constraints={"velocity": 2.0, "acceleration": 4.0} if retime else None,
+        )
+    )
+    pose_goals = torch.eye(4).repeat(2, 1, 1)
+    pose_goals[:, :3, 3] = torch.tensor([[0.4, 0.4, 0.4], [0.6, 0.6, 0.6]])
+    targets = {
+        "left_arm": [PlanState.from_qpos(torch.tensor([[0.1] * 7, [0.3] * 7]))],
+        "right_arm": [
+            PlanState.from_qpos(torch.tensor([[0.2] * 7, [0.1] * 7])),
+            PlanState.from_xpos(bases["right_arm"] @ pose_goals),
+        ],
+    }
+    options = {
+        "left_arm": NeuralPlanOptions(
+            control_part="left_arm", start_qpos=torch.zeros(2, 7), max_steps=2
+        ),
+        "right_arm": NeuralPlanOptions(
+            control_part="right_arm", start_qpos=torch.zeros(2, 7), max_steps=4
+        ),
+    }
+    packed = planner.plan_multi_part(targets, options)
+    observed = planner._policy.observations
+    assert len(observed) == 4
+    assert all(obs.shape == (4, OBS_DIM) for obs in observed)
+    torch.testing.assert_close(
+        observed[0][:, 7:10], torch.zeros(4, 3), atol=1e-6, rtol=0
+    )
+    # The left arm's converged first row holds at .1; its exhausted second row
+    # holds at .2 while the right arm continues through its fourth policy step.
+    torch.testing.assert_close(
+        observed[-1][:, :7], torch.tensor([[0.1] * 7, [0.2] * 7, [0.3] * 7, [0.3] * 7])
+    )
+    for result in packed.values():
+        assert result.policy_batching == {
+            "scene_batch_size": 2,
+            "control_part_count": 2,
+            "actor_batch_size": 4,
+            "policy_forward_calls": 4,
+        }
+        assert result.success.tolist() == [True, False]
+    assert packed["left_arm"].policy_rollout_lengths.tolist() == [2, 3]
+    assert packed["right_arm"].policy_rollout_lengths.tolist() == [5, 5]
+    assert packed["left_arm"].policy_rollout_positions.shape == (2, 3, 7)
+    assert packed["right_arm"].policy_rollout_positions.shape == (2, 5, 7)
+
+    planner._policy.observations.clear()
+    separate = {part: planner.plan(targets[part], options[part]) for part in targets}
+    assert len(planner._policy.observations) == 6
+    for part in targets:
+        for name in (
+            "success",
+            "positions",
+            "velocities",
+            "accelerations",
+            "dt",
+            "xpos_list",
+            "policy_rollout_positions",
+            "policy_rollout_lengths",
+        ):
+            torch.testing.assert_close(
+                getattr(packed[part], name), getattr(separate[part], name)
+            )
+
+
+def test_packed_arms_reject_fixed_single_row_policy(tmp_path, monkeypatch):
+    manager = FakeSimulationManager()
+    monkeypatch.setattr(SimulationManager, "get_instance", lambda *args: manager)
+    planner = NeuralPlanner(
+        NeuralPlannerCfg(
+            robot_uid="fake_robot",
+            onnx_model_path=_create_fake_onnx_model(tmp_path),
+            batch_control_parts=True,
+        )
+    )
+    targets = {
+        part: [PlanState.from_qpos(torch.zeros(1, 7))]
+        for part in ("left_arm", "right_arm")
+    }
+    options = {
+        part: NeuralPlanOptions(start_qpos=torch.zeros(1, 7)) for part in targets
+    }
+    with pytest.raises(ValueError, match="Export a dynamic-batch policy"):
+        planner.plan_multi_part(targets, options)
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize(
+    "providers,use_tf32,device,expected_providers,expected_options",
+    [
+        (None, None, None, None, None),
+        (
+            ["CUDAExecutionProvider", "CPUExecutionProvider"],
+            None,
+            None,
+            ["CUDAExecutionProvider", "CPUExecutionProvider"],
+            None,
+        ),
+        (
+            ["CUDAExecutionProvider", "CPUExecutionProvider"],
+            False,
+            None,
+            ["CUDAExecutionProvider", "CPUExecutionProvider"],
+            [{"use_tf32": "0"}, {}],
+        ),
+        (
+            ["CPUExecutionProvider", "CUDAExecutionProvider"],
+            True,
+            None,
+            ["CPUExecutionProvider", "CUDAExecutionProvider"],
+            [{}, {"use_tf32": "1"}],
+        ),
+        (
+            ["CPUExecutionProvider"],
+            False,
+            None,
+            ["CPUExecutionProvider"],
+            [{}],
+        ),
+        (
+            None,
+            False,
+            None,
+            ["CUDAExecutionProvider", "CPUExecutionProvider"],
+            [{"use_tf32": "0"}, {}],
+        ),
+        (
+            ["CUDAExecutionProvider", "CPUExecutionProvider"],
+            False,
+            torch.device("cuda:0"),
+            ["CUDAExecutionProvider", "CPUExecutionProvider"],
+            [{"device_id": "0", "use_tf32": "0"}, {}],
+        ),
+        (
+            ["CPUExecutionProvider", "CUDAExecutionProvider"],
+            False,
+            torch.device("cuda:3"),
+            ["CPUExecutionProvider", "CUDAExecutionProvider"],
+            [{}, {"device_id": "3", "use_tf32": "0"}],
+        ),
+        (
+            None,
+            False,
+            torch.device("cuda:2"),
+            ["CUDAExecutionProvider", "CPUExecutionProvider"],
+            [{"device_id": "2", "use_tf32": "0"}, {}],
+        ),
+        (
+            None,
+            None,
+            torch.device("cuda:4"),
+            ["CUDAExecutionProvider", "CPUExecutionProvider"],
+            [{"device_id": "4"}, {}],
+        ),
+        (
+            ["CPUExecutionProvider"],
+            False,
+            torch.device("cuda:2"),
+            ["CPUExecutionProvider"],
+            [{}],
+        ),
+        (
+            None,
+            False,
+            torch.device("cuda"),
+            ["CUDAExecutionProvider", "CPUExecutionProvider"],
+            [{"device_id": "2", "use_tf32": "0"}, {}],
+        ),
+        (None, None, torch.device("cpu"), None, None),
+    ],
+)
+def test_onnx_precision_is_explicit_and_provider_scoped(
+    monkeypatch,
+    tmp_path,
+    providers,
+    use_tf32,
+    device,
+    expected_providers,
+    expected_options,
+):
+    """Freeze CUDA arithmetic without changing CPU options or historical defaults."""
+    import sys
+    from types import SimpleNamespace
+
+    session = SimpleNamespace(
+        get_inputs=lambda: [SimpleNamespace(name="obs", shape=[None, 32])],
+        get_outputs=lambda: [SimpleNamespace(name="action", shape=[None, 7])],
+        get_modelmeta=lambda: SimpleNamespace(custom_metadata_map={}),
+        get_providers=lambda: expected_providers or ["CPUExecutionProvider"],
+    )
+    received = {}
+
+    def create_session(path, **kwargs):
+        received.update(kwargs)
+        return session
+
+    monkeypatch.setitem(
+        sys.modules,
+        "onnxruntime",
+        SimpleNamespace(
+            SessionOptions=SimpleNamespace,
+            GraphOptimizationLevel=SimpleNamespace(ORT_ENABLE_ALL="all"),
+            InferenceSession=create_session,
+            get_available_providers=lambda: [
+                "TensorrtExecutionProvider",
+                "CUDAExecutionProvider",
+                "CPUExecutionProvider",
+            ],
+        ),
+    )
+    monkeypatch.setattr(torch.cuda, "current_device", lambda: 2)
+    _REAL_ONNX_POLICY(
+        tmp_path / "policy.onnx", providers, cuda_use_tf32=use_tf32, device=device
+    )
+    assert received["providers"] == expected_providers
+    assert received.get("provider_options") == expected_options
+    if expected_options is None:
+        assert "provider_options" not in received
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize("invalid", [0, 1, "false", 1.0])
+def test_onnx_precision_rejects_non_boolean_values(tmp_path, invalid):
+    with pytest.raises(TypeError, match="onnx_cuda_use_tf32 must be a bool or None"):
+        _REAL_ONNX_POLICY(tmp_path / "policy.onnx", cuda_use_tf32=invalid)
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize(
+    "device",
+    ["cpu", "cuda:0", "cuda:3"],
+    ids=["host", "default_device", "other_device"],
+)
+def test_neural_planner_forwards_explicit_precision_and_device(
+    tmp_path, monkeypatch, device
+):
+    manager = FakeSimulationManager()
+    manager.robot.device = torch.device(device)
+    monkeypatch.setattr(SimulationManager, "get_instance", lambda *args: manager)
+    # Device propagation needs no CUDA tensors; frame conversion is covered
+    # independently by the planner's CPU geometry tests.
+    monkeypatch.setattr(
+        NeuralPlanner, "_as_transform", lambda self, value, name: torch.eye(4)
+    )
+    planner = NeuralPlanner(
+        NeuralPlannerCfg(
+            robot_uid="fake_robot",
+            onnx_model_path=_create_fake_onnx_model(tmp_path),
+            control_part="main_arm",
+            onnx_cuda_use_tf32=False,
+        )
+    )
+    assert planner._policy.cuda_use_tf32 is False
+    assert planner._policy.device == torch.device(device)
+
+
+@pytest.mark.no_sim
+def test_retimed_rollout_retains_limit_waypoints_on_a_coarse_clock(
+    tmp_path, monkeypatch
+):
+    model_path = _create_fake_onnx_model(tmp_path)
+    fake_sim = FakeSimulationManager()
+    monkeypatch.setattr(
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
+    )
+    planner = NeuralPlanner(
+        NeuralPlannerCfg(
+            robot_uid="fake_robot",
+            onnx_model_path=model_path,
+            control_part="main_arm",
+            dt=1.0,
+            constraints={"velocity": 2.0, "acceleration": 4.0},
+        )
+    )
+    positions = torch.zeros(1, 3, NUM_ARM_JOINTS, dtype=torch.float64)
+    positions[0, :, 0] = torch.tensor([0.8, 1.0, 1.0])
+    positions[0, :, 1] = torch.tensor([0.0, 0.02, 0.04])
+    # Both a plateau at the position cap and an interior goal must survive.
+    joint_targets = torch.zeros(1, NUM_WAYPOINTS, NUM_ARM_JOINTS, dtype=torch.float64)
+    joint_targets[:, :2] = positions[:, 1:]
+    joint_mask = torch.zeros(1, NUM_WAYPOINTS)
+    joint_mask[:, :2] = 1.0
+    no_mask = torch.zeros_like(joint_mask)
+    quaternions = torch.zeros(1, NUM_WAYPOINTS, 4)
+    quaternions[..., 3] = 1.0
+    waypoints = (
+        torch.zeros(1, NUM_WAYPOINTS, 3),
+        quaternions,
+        joint_targets,
+        no_mask,
+        no_mask,
+        joint_mask,
+    )
+    lower, upper = torch.full((NUM_ARM_JOINTS,), -1.0), torch.ones(NUM_ARM_JOINTS)
+    result = planner._retimed_result(
+        torch.tensor([True]),
+        positions,
+        "main_arm",
+        path_lengths=torch.tensor([3]),
+        arrival_indices=torch.tensor([[1, 2]]),
+        waypoints=waypoints,
+        episode_k=2,
+        qpos_limits=(lower, upper),
+    )
+    assert result.success.tolist() == [True]
+    torch.testing.assert_close(result.positions, positions)
+    assert result.positions.max() == 1.0
+    assert result.dt[0, 1:].min() > 0
+    assert result.velocities.abs().max() <= 2.0 + 1e-8
+    assert result.accelerations.abs().max() <= 4.0 + 1e-8

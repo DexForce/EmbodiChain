@@ -27,6 +27,8 @@ from ._prepare import FOLDERS, download, prepare, sha256
 
 
 def main() -> None:
+    from embodichain.lab.visualization.cli import add_viser_args_to_parser
+
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("prepare")
@@ -42,6 +44,7 @@ def main() -> None:
         help="Debug subset only; zero prepares the full frozen corpus",
     )
     p = sub.add_parser("demo", help="Compare live Newton dynamics with RigidFormer")
+    add_viser_args_to_parser(p)
     p.add_argument(
         "--checkpoint",
         type=Path,
@@ -161,7 +164,6 @@ def evaluate(args: argparse.Namespace) -> None:
     from embodichain_models.dynamics.rigidformer import load_rigidformer_checkpoint
     from embodichain_models.dynamics.rigidformer.data import _verified_manifest
     from ._support._evidence import evidence
-    from ._support._evaluator import Evaluator
 
     if args.output.exists():
         raise FileExistsError(args.output)
@@ -169,6 +171,8 @@ def evaluate(args: argparse.Namespace) -> None:
     try:
         root = args.data_root.resolve()
         manifest = _verified_manifest(root)
+        from ._support._evaluator import Evaluator
+
         model = load_rigidformer_checkpoint(
             args.checkpoint,
             device=args.device,

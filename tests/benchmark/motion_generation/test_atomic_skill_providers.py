@@ -26,16 +26,16 @@ from unittest.mock import Mock
 import pytest
 import torch
 
-from embodichain.lab.sim.atomic_actions import (
-    ActionBinding,
-    ActionInvocation,
+from embodichain.lab.sim.atomic_skills import (
+    SkillBinding,
+    SkillInvocation,
     AxisAlign,
     JointPositionGoal,
     MotionPolicy,
     OpenDoor,
     OpenDoorAffordance,
 )
-from embodichain.lab.sim.atomic_actions.primitives._helpers import (
+from embodichain.lab.sim.atomic_skills.primitives._helpers import (
     find_symmetric_nearest_xpos,
 )
 from embodichain.lab.sim.motion.planners import MoveType, ToppraPlanOptions
@@ -74,6 +74,20 @@ from embodichain_benchmarks.motion_generation.atomic_skill import (
 )
 
 CPU = torch.device("cpu")
+
+
+def _contact_trace(*, contact_distances=None, contact_target="cube", **channels):
+    """Fixture contacts are 1 mm on both fingers, independent of joint values."""
+    if contact_distances is None:
+        contact_distances = {
+            part: torch.full((*qpos.shape[:2], 2), 0.001)
+            for part, qpos in channels.get("gripper_qpos", {}).items()
+        }
+    return ReplayObservationTrace(
+        **channels,
+        gripper_contact_distances=contact_distances,
+        gripper_contact_targets={part: contact_target for part in contact_distances},
+    )
 
 
 def _case(skill_id: str, batch_size: int, **parameters: object) -> BenchmarkCase:
@@ -149,6 +163,9 @@ def test_open_door_physical_evaluator_uses_hinge_and_release_windows() -> None:
         gripper_open_qpos={"hand": torch.tensor([0.0])},
         gripper_grasp_qpos={"hand": torch.tensor([1.0])},
         replay_traces={
+            "door_grasp": _contact_trace(
+                gripper_qpos={"hand": torch.full((2, 2, 1), 0.5)}
+            ),
             "door_actuation": ReplayObservationTrace(
                 articulation_joint=torch.tensor([[0.0, 0.0], [0.5, 0.5], [0.5, 0.3]])
             ),
@@ -191,7 +208,7 @@ def test_pour_physical_evaluator_uses_object_pose_interval(sign: float) -> None:
         gripper_grasp_qpos={"hand": torch.tensor([1.0])},
         replay_traces={
             "pour_actuation": ReplayObservationTrace(object_pose=poses),
-            "pour_settle": ReplayObservationTrace(
+            "pour_settle": _contact_trace(
                 object_pose=settle,
                 gripper_qpos={"hand": torch.full((2, 2, 1), 0.5)},
             ),
@@ -233,9 +250,14 @@ def test_pour_requires_terminal_lift_and_retention() -> None:
         gripper_grasp_qpos={"hand": torch.tensor([1.0])},
         replay_traces={
             "pour_actuation": ReplayObservationTrace(object_pose=actuation),
-            "pour_settle": ReplayObservationTrace(
+            "pour_settle": _contact_trace(
                 object_pose=settle,
                 gripper_qpos={"hand": terminal_gripper},
+                contact_distances={
+                    "hand": torch.tensor(
+                        [[[0.001, 0.001], [float("inf"), float("inf")]]]
+                    ).repeat(2, 1, 1)
+                },
             ),
         },
     )
@@ -267,11 +289,11 @@ def test_axis_align_physical_evaluator_keeps_terminal_retention_separate() -> No
         gripper_open_qpos={"hand": torch.tensor([0.0])},
         gripper_grasp_qpos={"hand": torch.tensor([1.0])},
         replay_traces={
-            "axis_align_grasp": ReplayObservationTrace(
+            "axis_align_grasp": _contact_trace(
                 gripper_qpos={"hand": torch.full((2, 2, 1), 0.5)},
             ),
             "axis_align_actuation": ReplayObservationTrace(object_pose=actuation),
-            "axis_align_settle": ReplayObservationTrace(
+            "axis_align_settle": _contact_trace(
                 object_pose=settle,
                 gripper_qpos={"hand": torch.full((2, 2, 1), 0.5)},
             ),
@@ -308,11 +330,11 @@ def test_axis_align_requires_lift_and_terminal_alignment() -> None:
         gripper_open_qpos={"hand": torch.tensor([0.0])},
         gripper_grasp_qpos={"hand": torch.tensor([1.0])},
         replay_traces={
-            "axis_align_grasp": ReplayObservationTrace(
+            "axis_align_grasp": _contact_trace(
                 gripper_qpos={"hand": torch.full((2, 2, 1), 0.5)},
             ),
             "axis_align_actuation": ReplayObservationTrace(object_pose=actuation),
-            "axis_align_settle": ReplayObservationTrace(
+            "axis_align_settle": _contact_trace(
                 object_pose=settle,
                 gripper_qpos={"hand": torch.full((2, 2, 1), 0.5)},
             ),
@@ -452,7 +474,7 @@ def test_door_geometry_matches_the_open_door_primitive() -> None:
 
 
 def test_door_poses_cover_approach_grasp_every_arc_keyframe_and_retract() -> None:
-    from embodichain.lab.sim.atomic_actions import OpenDoorOptions
+    from embodichain.lab.sim.atomic_skills import OpenDoorOptions
 
     affordance = _door_affordance()
     link_pose = torch.eye(4).unsqueeze(0)
@@ -985,22 +1007,29 @@ def test_backend_plan_options_fill_only_unset_motion_generation_policies() -> No
     options = ToppraPlanOptions(sample_interval=40)
     explicit = ToppraPlanOptions(sample_interval=10)
 
-    def invocation(policy: MotionPolicy) -> ActionInvocation:
-        return ActionInvocation(
+    def invocation(policy: MotionPolicy) -> SkillInvocation:
+        return SkillInvocation(
             skill_id="move_joints",
             goal=JointPositionGoal(torch.zeros(1, 7)),
-            binding=Mock(spec=ActionBinding),
+            binding=Mock(spec=SkillBinding),
             motion_policy=policy,
         )
 
     filled = with_plan_options(invocation(MotionPolicy(strategy="motion_gen")), options)
     kept = with_plan_options(
-        invocation(MotionPolicy(strategy="motion_gen", plan_opts=explicit)), options
+        invocation(
+            MotionPolicy(
+                strategy="motion_gen", plan_opts=explicit, acceleration_limit=0.7
+            )
+        ),
+        options,
     )
     interpolated = with_plan_options(invocation(MotionPolicy()), options)
 
     assert filled.motion_policy.plan_opts.sample_interval == 40
+    assert filled.motion_policy.acceleration_limit is None
     assert kept.motion_policy.plan_opts.sample_interval == 10
+    assert kept.motion_policy.acceleration_limit == 0.7
     assert interpolated.motion_policy.plan_opts is None
 
 
@@ -1032,7 +1061,7 @@ def test_toppra_adapter_serves_atomic_skills_and_joint_cases() -> None:
     adapter.plan(case)
 
     targets, options = adapter.motion_generator.generate.call_args.args
-    assert {"atomic_action", "joint_waypoint"} <= adapter.capabilities
+    assert {"atomic_skill", "joint_waypoint"} <= adapter.capabilities
     assert targets[0].move_type is MoveType.JOINT_MOVE
     assert torch.equal(targets[0].qpos, case.reference_qpos[:, 0])
     assert options.plan_opts.constraints == {
@@ -1127,7 +1156,7 @@ def test_replay_measures_hinge_at_segment_end_and_peak_object_rotation() -> None
 
 
 def test_door_pour_align_push_suite_declares_the_four_skills() -> None:
-    suite = load_suite("atomic_franka_pgi_door_pour_align_push")
+    suite = load_suite("atomic_franka_robotiq_door_pour_align_push")
     track = suite.enabled_tracks()[0]
 
     assert [spec.id for spec in suite.planners if spec.enabled] == ["curobo", "toppra"]
@@ -1163,9 +1192,9 @@ def test_axis_align_accepts_already_aligned_measured_grasp() -> None:
         gripper_open_qpos={"hand": torch.tensor([0.0])},
         gripper_grasp_qpos={"hand": torch.tensor([1.0])},
         replay_traces={
-            "axis_align_grasp": ReplayObservationTrace(gripper_qpos={"hand": holding}),
+            "axis_align_grasp": _contact_trace(gripper_qpos={"hand": holding}),
             "axis_align_actuation": ReplayObservationTrace(object_pose=poses),
-            "axis_align_settle": ReplayObservationTrace(
+            "axis_align_settle": _contact_trace(
                 object_pose=poses, gripper_qpos={"hand": holding}
             ),
         },
@@ -1351,6 +1380,18 @@ def test_object_rotation_providers_screen_every_pose_row(
         return success, qpos_seed + 0.01
 
     robot = SimpleNamespace(
+        cfg=SimpleNamespace(
+            solver_cfg={
+                "arm": SimpleNamespace(
+                    tcp=[
+                        [1.0, 0.0, 0.0, 0.0],
+                        [0.0, 1.0, 0.0, 0.0],
+                        [0.0, 0.0, 1.0, 0.15],
+                        [0.0, 0.0, 0.0, 1.0],
+                    ]
+                )
+            }
+        ),
         device=CPU,
         _all_indices=torch.arange(batch_size),
         _solvers={"arm": SimpleNamespace(root_link_name="base", get_ik=solve)},
@@ -1447,6 +1488,8 @@ def test_object_rotation_providers_screen_every_pose_row(
     for index, call in enumerate(references):
         torch.testing.assert_close(call[2], case.start_qpos + index * 0.01)
     generator_factory.assert_called_once_with(
+        gripper_data=None,
+        root_from_tcp=robot.cfg.solver_cfg["arm"].tcp,
         n_sample=321,
         force_refresh=False,
         max_candidates=2,
@@ -1494,7 +1537,7 @@ def test_pour_requires_full_return_orientation_after_successful_tilt() -> None:
         gripper_grasp_qpos={"hand": torch.tensor([1.0])},
         replay_traces={
             "pour_actuation": ReplayObservationTrace(object_pose=actuation),
-            "pour_settle": ReplayObservationTrace(
+            "pour_settle": _contact_trace(
                 object_pose=settle,
                 gripper_qpos={"hand": torch.full((2, 2, 1), 0.5)},
             ),

@@ -36,6 +36,7 @@ __all__ = [
     "run_all_benchmarks",
     "run_benchmark",
     "prepare_case_manifest",
+    "resolve_quality_devices",
 ]
 
 _EXPORT_MODULES = {
@@ -49,6 +50,7 @@ _EXPORT_MODULES = {
     "run_all_benchmarks": ".cli",
     "run_benchmark": ".api",
     "prepare_case_manifest": ".api",
+    "resolve_quality_devices": ".parallel",
 }
 
 

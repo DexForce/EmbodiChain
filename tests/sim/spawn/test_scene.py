@@ -26,6 +26,7 @@ from embodichain.lab.sim.cfg import ArticulationRootPropertiesCfg, RigidObjectCf
 from embodichain.lab.sim.objects import (
     Articulation,
     DeformableObject,
+    FluidObject,
     RigidObject,
     RigidObjectGroup,
     Robot,
@@ -47,6 +48,29 @@ def test_material_resolution_rejects_conflicting_explicit_definitions():
         scene._resolve_materials({"shared": MaterialDesc(name="shared", roughness=0.9)})
 
     assert scene.builder.materials["shared"] is original
+
+
+def test_no_render_preserves_authored_alpha_recipe_without_native_alpha_write():
+    scene = object.__new__(SpawnScene)
+    scene.builder = SimpleNamespace(materials={})
+    scene._usd_texture_files = SimpleNamespace(resolve=lambda materials: materials)
+    scene._material_resources = SimpleNamespace(renderer="no-render")
+    original = MaterialDesc(
+        name="glass", alpha_mode="BLEND", base_color_map="authored.png"
+    )
+
+    native = scene._resolve_materials({"glass": original})
+
+    assert native["glass"].alpha_mode is None
+    assert native["glass"].base_color_map is None
+    assert original.alpha_mode == "BLEND"
+    assert original.base_color_map == "authored.png"
+    scene.builder.materials.update(native)
+    assert scene._material_definition("glass") is original
+    with pytest.raises(ValueError, match="Conflicting visual material"):
+        scene._resolve_materials(
+            {"glass": MaterialDesc(name="glass", alpha_mode="MASK")}
+        )
 
 
 def _make_scene(handles: dict[str, object]) -> SpawnScene:
@@ -279,7 +303,7 @@ def test_rigid_object_receives_instance_count_only_when_declared() -> None:
 
 @pytest.mark.parametrize(
     "facade_type",
-    [RigidObject, Articulation, Robot, RigidObjectGroup, DeformableObject],
+    [RigidObject, Articulation, Robot, RigidObjectGroup, DeformableObject, FluidObject],
 )
 def test_object_constructors_hide_spawn_lifecycle_parameters(
     facade_type: type[object],
@@ -288,6 +312,9 @@ def test_object_constructors_hide_spawn_lifecycle_parameters(
 
     assert "declared_num_instances" not in parameters
     assert "spawn_result" not in parameters
+    assert "positions" not in parameters
+    assert "pose" not in parameters
+    assert "on_write" not in parameters
 
 
 def test_runtime_config_attaches_articulation_before_preparing_it() -> None:
@@ -649,3 +676,36 @@ def test_no_render_retains_visual_declaration_without_native_transform_binding()
     assert "visual" in scene._assets
     scene.remove("visual")
     assert "visual" not in scene._assets
+
+
+def test_no_render_excludes_visual_materials_during_native_spawn() -> None:
+    scene = object.__new__(SpawnScene)
+    material = MaterialDesc(name="textured", base_color_map="texture.png")
+    observed_materials = []
+
+    def add_object(descriptor):
+        observed_materials.append(dict(scene.builder.materials))
+        return descriptor
+
+    def finalize():
+        observed_materials.append(dict(scene.builder.materials))
+        return SimpleNamespace(handles={})
+
+    scene.builder = SimpleNamespace(
+        materials={"texture": material},
+        is_finalized=False,
+        result=None,
+        backend="dexsim",
+        add_object=add_object,
+        finalize=finalize,
+    )
+    scene._num_envs = 1
+    scene._assets = {}
+    scene._material_resources = SimpleNamespace(renderer="no-render")
+    scene._resource_material_definitions = {}
+
+    scene.declare("rigid_object", "box", SimpleNamespace(name="box", per_env=False))
+    scene.commit()
+
+    assert observed_materials == [{}, {}]
+    assert scene.builder.materials == {"texture": material}

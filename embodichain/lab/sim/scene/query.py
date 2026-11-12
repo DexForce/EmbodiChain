@@ -31,7 +31,7 @@ class SceneView:
 
     Args:
         sim: Existing prepared simulation manager.
-        env_ids: Explicit arena selection. Only a B=1 world is supported initially.
+        env_ids: Nonempty unique arena indices, in the desired output order.
     """
 
     def __init__(
@@ -39,13 +39,20 @@ class SceneView:
     ) -> None:
         self.sim = sim
         self.env_ids = tuple(env_ids)
-        if (
-            getattr(sim, "num_envs", 1) != 1
-            or self.env_ids != (0,)
-            or any(type(i) is not int for i in self.env_ids)
-        ):
-            raise ValueError("Scene services currently require B=1 and env_ids=(0,)")
+        self._num_envs = getattr(sim, "num_envs", 1)
+        self._validate_selection()
         self.topology = self.describe_entities()
+
+    def _validate_selection(self) -> None:
+        count = getattr(self.sim, "num_envs", 1)
+        if (
+            type(count) is not int
+            or count < 1
+            or not self.env_ids
+            or any(type(i) is not int or not 0 <= i < count for i in self.env_ids)
+            or len(set(self.env_ids)) != len(self.env_ids)
+        ):
+            raise ValueError("Scene env_ids must be nonempty, unique and in range")
 
     def entities(self) -> tuple[tuple[str, str, object], ...]:
         """Return current supported physical bindings, ordered by kind and UID."""
@@ -85,12 +92,11 @@ class SceneView:
 
     def check_topology(self) -> None:
         """Reject changed bindings before reads or writes."""
-        if (
-            getattr(self.sim, "num_envs", 1) != 1
-            or self.env_ids != (0,)
-            or any(type(i) is not int for i in self.env_ids)
-        ):
-            raise ValueError("Scene services currently require B=1 and env_ids=(0,)")
+        self._validate_selection()
+        if getattr(self.sim, "num_envs", 1) != self._num_envs:
+            raise ValueError(
+                "Scene environment count changed; reconstruct the scene host"
+            )
         if self.describe_entities() != self.topology:
             raise ValueError(
                 "Scene entity set or bindings changed; reconstruct the scene host"
@@ -114,7 +120,9 @@ class SceneView:
         self.check_topology()
         for _, entity_uid, entity in self.entities():
             if entity_uid == uid:
-                return entity.get_local_pose(to_matrix=to_matrix).clone()
+                return entity.get_local_pose(to_matrix=to_matrix)[
+                    list(self.env_ids)
+                ].clone()
         raise KeyError(f"Unknown scene entity {uid!r}")
 
 

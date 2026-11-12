@@ -47,13 +47,13 @@ from embodichain.lab.gym.envs.task_program.bridge import (
 )
 from embodichain.lab.gym.envs.types import ControllerAction
 from embodichain.lab.gym.envs.wrapper.no_fail import NoFailWrapper
-from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
-from embodichain.lab.sim.atomic_actions.runtime_commands import (
+from embodichain.lab.sim.atomic_skills.bindings import JointPositionTarget
+from embodichain.lab.sim.atomic_skills.runtime_commands import (
     EndpointCommand,
     JointPositionPayload,
     RuntimeCommandFrame,
 )
-from embodichain.lab.sim.atomic_actions.state import (
+from embodichain.lab.sim.atomic_skills.state import (
     PlanningContext,
     RobotObservation,
     SceneSnapshot,
@@ -519,6 +519,21 @@ def test_batch_and_legacy_expert_inputs_fail_before_scene_preparation() -> None:
             env, _variant(), prepare_scene=env.prepare, measured_validator=env.measure
         )
     assert env.bridge_initial_positions == []
+
+
+def test_conflicting_episode_expansion_owners_fail_before_scene_preparation() -> None:
+    env = _CandidateEnv()
+    prepare = Mock(side_effect=env.prepare)
+    with pytest.raises(ValueError, match="only one expansion owner"):
+        execute_scene_variant(
+            env,
+            _variant(),
+            prepare_scene=prepare,
+            measured_validator=env.measure,
+            expansion_profile=object(),
+            plan_transform_factory=object(),
+        )
+    prepare.assert_not_called()
 
 
 def test_episode_program_override_uses_the_same_task_program_path() -> None:

@@ -18,6 +18,9 @@
 
 from __future__ import annotations
 
+from embodichain.robot_registry import resolve_gripper_defaults
+
+
 import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
@@ -27,20 +30,20 @@ from typing import Literal, TYPE_CHECKING
 
 import torch
 
-from embodichain.lab.sim.atomic_actions import (
-    ActionInvocation,
+from embodichain.lab.sim.atomic_skills import (
+    SkillInvocation,
     Affordance,
-    AtomicActionEngine,
+    AtomicSkillEngine,
     ControlPartCommandProfile,
     GraspGoal,
     MotionPolicy,
     ObjectSemantics,
     PickUpOptions,
     TaskState,
-    create_simulation_atomic_action_engine,
+    create_simulation_atomic_skill_engine,
     sample_initial_articulation_geometry,
 )
-from embodichain.lab.sim.atomic_actions.plans import CompiledTrajectory
+from embodichain.lab.sim.atomic_skills.plans import CompiledTrajectory
 from embodichain.lab.sim.motion.planners.utils import PlanResult
 from embodichain.toolkits.graspkit import GraspPoseGenerator
 from embodichain.utils.math import pose_inv
@@ -65,6 +68,8 @@ from .atomic_objects import (
 )
 from .base import ScenarioEvaluation, ScenarioProvider
 from .atomic_replay import AtomicReplayRuntime
+from ._replay_diagnostics import resolve_diagnostics_config
+from ._grasp_contacts import contact_configuration
 from .atomic_grasps import (
     _AntipodalGraspSearchError,
     ActiveCaseGraspPoseGenerator,
@@ -101,10 +106,10 @@ __all__ = ["AtomicSkillScenario"]
 
 
 class AtomicSkillScenario(ScenarioProvider):
-    """Run fixed Atomic Actions through an adapter-owned MotionGenerator."""
+    """Run fixed Atomic Skills through an adapter-owned MotionGenerator."""
 
     required_capabilities = frozenset(
-        {"eef_waypoint", "joint_waypoint", "atomic_action"}
+        {"eef_waypoint", "joint_waypoint", "atomic_skill"}
     )
 
     def __init__(self) -> None:
@@ -126,7 +131,7 @@ class AtomicSkillScenario(ScenarioProvider):
         self._gripper_grasp: torch.Tensor | None = None
         self._gripper_states: dict[str, tuple[torch.Tensor, torch.Tensor]] = {}
         self._fixtures: dict[str, AtomicObjectHandle] = {}
-        self._engine: AtomicActionEngine | None = None
+        self._engine: AtomicSkillEngine | None = None
         self._case_grasp_generators: dict[str, ActiveCaseGraspPoseGenerator] = {}
         self._case_grasp_sampler: CaseSampleCountGraspPoseGenerator | None = None
         self._reference_motion_generator: object | None = None
@@ -137,13 +142,61 @@ class AtomicSkillScenario(ScenarioProvider):
         del suite
         return resolve_atomic_batch_sizes(track)
 
+    def grasp_model(self) -> dict[str, object] | None:
+        """Resolve the track's mounted-hand geometry for preparation and replay.
+
+        Returns:
+            The explicit ``track.config.grasp_model`` catalogue entry, or
+            ``None`` to retain the existing PGI fixture geometry.
+
+        Raises:
+            ValueError: If an explicit model identifier is invalid.
+        """
+        model_id = None if self.track is None else self.track.config.get("grasp_model")
+        if model_id is None:
+            return None
+        if not isinstance(model_id, str) or not model_id:
+            raise ValueError("track.config.grasp_model must be a non-empty model id.")
+        return resolve_gripper_defaults(model_id)
+
+    def grasp_root_from_tcp(self) -> list[list[float]] | None:
+        """Bind flange-mounted hand geometry to this fixture's solver TCP.
+
+        PGI and Robotiq fixture roots attach at the arm flange, the solver end
+        link. Their configured tool points can differ from GraspKit defaults.
+        Native Panda instead uses its actual named hand TCP from the asset;
+        no flange-relative offset is applied to it.
+        """
+        model = self.grasp_model()
+        if model is not None and model["model_id"] not in {
+            "dh_pgi_140_80",
+            "robotiq_arg2f_140",
+        }:
+            return None
+        if self.robot is None:
+            raise RuntimeError("A bound robot is required for the mounted hand TCP.")
+        solver = self.robot.cfg.solver_cfg[self.control_part]
+        tcp = solver.get("tcp") if isinstance(solver, Mapping) else solver.tcp
+        if tcp is None:
+            raise ValueError(
+                "The mounted hand fixture requires an explicit solver TCP."
+            )
+        return [[float(value) for value in row] for row in tcp]
+
     def trial_metadata(self, case: BenchmarkCase) -> dict[str, object]:
         """Expose planner attribution before planning or evaluation can fail."""
         attribution = benchmark_motion_attribution(case.skill_id)
-        values = {"timing_scope": "atomic_action_compile", **attribution}
+        values = {"timing_scope": "atomic_skill_compile", **attribution}
         if self.track is not None:
             physics = dict(self.track.config.get("physics", {}))
             values["replay_clock"] = physics.get("clock", "fixed_samples")
+            values["physical_replay_diagnostics"] = resolve_diagnostics_config(physics)
+            values["grasp_contact_configuration"] = {
+                part: {"finger_links": list(links), "distance_threshold_m": threshold}
+                for part, (links, threshold) in contact_configuration(
+                    self.track.config
+                ).items()
+            }
             if self.simulation is not None:
                 values["replay_control_period_s"] = float(
                     self.simulation.sim_config.physics_dt
@@ -273,6 +326,7 @@ class AtomicSkillScenario(ScenarioProvider):
                 if part in self._gripper_states:
                     raise ValueError(f"Gripper {part!r} is configured twice.")
                 self._gripper_states[part] = (open_state, grasp_state)
+            contact_configuration(track.config)
             self.end_effector_part = next(iter(self._gripper_states))
             self._gripper_open, self._gripper_grasp = self._gripper_states[
                 self.end_effector_part
@@ -456,7 +510,7 @@ class AtomicSkillScenario(ScenarioProvider):
     def prepare_planner(
         self, adapter: PlannerAdapter, first_case: BenchmarkCase
     ) -> None:
-        """Bind one AtomicActionEngine to the adapter-owned MotionGenerator."""
+        """Bind one AtomicSkillEngine to the adapter-owned MotionGenerator."""
         del first_case
         control_profiles = None
         grippers = self._configured_grippers()
@@ -482,7 +536,11 @@ class AtomicSkillScenario(ScenarioProvider):
         if sampling_counts:
             self._case_grasp_sampler = CaseSampleCountGraspPoseGenerator(
                 {
-                    count: parallel_jaw_sampler(count)
+                    count: parallel_jaw_sampler(
+                        count,
+                        gripper_data=self.grasp_model(),
+                        root_from_tcp=self.grasp_root_from_tcp(),
+                    )
                     for count in sorted(sampling_counts)
                 },
                 default_count=max(sampling_counts),
@@ -537,14 +595,14 @@ class AtomicSkillScenario(ScenarioProvider):
                 **self._case_grasp_generators,
             }
         if scene_entities:
-            self._engine = create_simulation_atomic_action_engine(
+            self._engine = create_simulation_atomic_skill_engine(
                 motion_generator=motion_generator,
                 scene_entities=scene_entities,
                 control_profiles=control_profiles,
                 grasp_pose_generators=grasp_pose_generators,
             )
         else:
-            self._engine = AtomicActionEngine(
+            self._engine = AtomicSkillEngine(
                 motion_generator=motion_generator,
                 control_profiles=control_profiles,
                 grasp_pose_generators=grasp_pose_generators,
@@ -569,8 +627,8 @@ class AtomicSkillScenario(ScenarioProvider):
         self._case_grasp_generators = {}
         self._case_grasp_sampler = None
 
-    def require_engine(self) -> AtomicActionEngine:
-        """Return the prepared Atomic Action engine."""
+    def require_engine(self) -> AtomicSkillEngine:
+        """Return the prepared Atomic Skill engine."""
         if self._engine is None:
             raise RuntimeError("Atomic Skill planner resources were not prepared.")
         return self._engine
@@ -683,7 +741,7 @@ class AtomicSkillScenario(ScenarioProvider):
         robot.clear_dynamics()
 
     def plan_case(self, adapter: PlannerAdapter, case: BenchmarkCase) -> object:
-        """Compile one Atomic Action with an explicitly pinned motion backend."""
+        """Compile one Atomic Skill with an explicitly pinned motion backend."""
         engine = self.require_engine()
         if self.simulation is None:
             raise RuntimeError("Atomic Skill simulation is not configured.")
@@ -701,7 +759,7 @@ class AtomicSkillScenario(ScenarioProvider):
                 "Atomic Skill engine must own the selected adapter's MotionGenerator."
             )
         task = provider.initial_task_state(self, case)
-        invocations: tuple[ActionInvocation, ...] = (invocation,)
+        invocations: tuple[SkillInvocation, ...] = (invocation,)
         if case.skill_id in {"move_held_object", "place"}:
             if self.end_effector_part is None:
                 raise RuntimeError("Place requires a configured end-effector part.")
@@ -797,7 +855,7 @@ class AtomicSkillScenario(ScenarioProvider):
                 sampler.deactivate()
 
     def plan_contract_error(self, result: object) -> str | None:
-        """Accept compiled Atomic Action trajectories instead of raw plans."""
+        """Accept compiled Atomic Skill trajectories instead of raw plans."""
         if isinstance(result, CompiledTrajectory):
             return None
         return f"Expected CompiledTrajectory, got {type(result).__name__}."
@@ -1026,6 +1084,11 @@ class AtomicSkillScenario(ScenarioProvider):
         trajectory_duration = (
             float(durations.mean().item()) if durations.numel() else None
         )
+        packed_motion_groups = [
+            {"skill_index": index, "skill_id": plan.skill_id, **group}
+            for index, plan in enumerate(result.skill_plans)
+            for group in plan.diagnostics.metadata.get("packed_motion_groups", ())
+        ]
         return ScenarioEvaluation(
             outcomes=tuple(outcomes),
             execution_time_ms=execution_time_ms,
@@ -1037,9 +1100,24 @@ class AtomicSkillScenario(ScenarioProvider):
             trajectory_duration_s=trajectory_duration,
             trajectory_waypoints=result.trajectory.waypoint_count,
             metadata={
-                "timing_scope": "atomic_action_compile",
+                "timing_scope": "atomic_skill_compile",
                 **benchmark_motion_attribution(case.skill_id),
                 "physics_validation": "common_joint_target_replay",
+                **(
+                    {"grasp_contacts": dict(observation.grasp_contact_metadata)}
+                    if observation is not None and observation.grasp_contact_metadata
+                    else {}
+                ),
+                **(
+                    {"physical_replay_trace": dict(observation.replay_diagnostics)}
+                    if observation is not None and observation.replay_diagnostics
+                    else {}
+                ),
+                **(
+                    {"packed_motion_groups": packed_motion_groups}
+                    if packed_motion_groups
+                    else {}
+                ),
                 "constraint_information": (
                     "exact Cartesian samples through sequential IK; selected "
                     "planner backend bypassed"
@@ -1235,25 +1313,40 @@ class AtomicSkillScenario(ScenarioProvider):
         return record_with_window(self.simulation, video, video_path, _replay)
 
     def solve_reference_qpos(
-        self, start_qpos: torch.Tensor, target_waypoints: torch.Tensor
+        self,
+        start_qpos: torch.Tensor,
+        target_waypoints: torch.Tensor,
+        *,
+        control_part: str | None = None,
     ) -> torch.Tensor:
         """Build independent sequential-IK validity evidence for a case.
 
         Failed exact IK may recover a joint witness inside the suite's arrival
-        tolerances. FK always checks the original request; target poses and
+        tolerances. Recovery FK checks the original request; target poses and
         accepted exact solutions remain unchanged. This does not certify a path
         or a physical task outcome.
+
+        Args:
+            start_qpos: Frozen arm state with shape ``(B, dof)``.
+            target_waypoints: Requested TCP poses in arena coordinates, shaped
+                ``(B, K, 4, 4)``. Named Robot IK owns the arm-base transform.
+            control_part: Arm to solve, defaulting to the scenario's primary arm.
+
+        Returns:
+            Canonical joint witnesses with shape ``(B, K, dof)``. Callers needing
+            independent certification must also verify exact IK successes by FK.
         """
         if self.robot is None:
             raise RuntimeError("Atomic Skill runtime is not configured.")
-        seed = start_qpos
+        arm = self.control_part if control_part is None else control_part
+        seed = start_qpos.clone()
         references: list[torch.Tensor] = []
         for index in range(target_waypoints.shape[1]):
-            target = target_waypoints[:, index]
+            target = target_waypoints[:, index].clone()
             success, solved = self.robot.compute_ik(
                 pose=target,
                 joint_seed=seed,
-                name=self.control_part,
+                name=arm,
             )
             if (
                 not bool(torch.as_tensor(success).all().item())
@@ -1265,12 +1358,20 @@ class AtomicSkillScenario(ScenarioProvider):
                     seed,
                     success,
                     solved,
-                    control_part=self.control_part,
+                    control_part=arm,
                     protocol=self.suite.protocol,
                 )
             if not bool(torch.as_tensor(success).all().item()):
+                rows = (
+                    (~torch.as_tensor(success, dtype=torch.bool).reshape(-1))
+                    .nonzero()
+                    .flatten()
+                    .tolist()
+                )
                 raise RuntimeError(
-                    f"Independent IK rejected atomic target waypoint {index}."
+                    f"Independent IK rejected atomic target waypoint {index} for "
+                    f"arm {arm!r}, rows {rows}: no qualified witness found; "
+                    "this does not establish unreachability."
                 )
             seed = canonical_case_qpos(solved)
             references.append(seed.clone())
@@ -1290,7 +1391,7 @@ class AtomicSkillScenario(ScenarioProvider):
         max_candidates: int,
         alignment_max_angle_deg: float,
     ) -> torch.Tensor:
-        """Freeze one geometry-aware, independently reachable PGI grasp pose.
+        """Freeze one geometry-aware, independently reachable mounted-hand grasp.
 
         Grasp sampling and sequential IK screening happen once while the case
         manifest is built, before any planner adapter is evaluated.  Every
@@ -1459,6 +1560,8 @@ class AtomicSkillScenario(ScenarioProvider):
                 n_sample=n_sample,
                 force_refresh=False,
                 max_candidates=max_candidates,
+                gripper_data=self.grasp_model(),
+                root_from_tcp=self.grasp_root_from_tcp(),
                 **(
                     {"approach_alignment_angle": math.radians(alignment_max_angle_deg)}
                     if alignment_max_angle_deg is not None
@@ -1635,7 +1738,7 @@ class AtomicSkillScenario(ScenarioProvider):
         max_candidates: int,
         alignment_max_angle_deg: float,
     ) -> torch.Tensor:
-        """Freeze a geometry-aware PGI grasp that can complete a Slide path."""
+        """Freeze a mounted-hand grasp that can complete a Slide path."""
         translation_sign = -1.0 if direction == "pull" else 1.0
 
         def slide_poses(grasp: torch.Tensor) -> list[torch.Tensor]:
@@ -1738,6 +1841,8 @@ class AtomicSkillScenario(ScenarioProvider):
                 n_sample=n_sample,
                 force_refresh=False,
                 max_candidates=max_candidates,
+                gripper_data=self.grasp_model(),
+                root_from_tcp=self.grasp_root_from_tcp(),
             )
             candidates, costs = generator.get_valid_grasp_poses(
                 mesh_vertices=mesh_vertices,

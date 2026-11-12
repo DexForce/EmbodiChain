@@ -20,6 +20,8 @@ import torch
 import numpy as np
 
 from copy import deepcopy
+from contextlib import contextmanager
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, List, Sequence
 from functools import cached_property
@@ -35,6 +37,7 @@ from embodichain.lab.sim.objects.backends import (
 )
 from embodichain.lab.sim.objects.backends.base import RigidBodyViewBase
 from embodichain.lab.sim.objects.backends.rigid_physics import (
+    _set_default_spawn_friction,
     apply_legacy_physical_attr,
     can_use_newton_entity_dynamics_fallback,
     get_legacy_damping,
@@ -92,11 +95,13 @@ __all__ = ["CollisionShapeDesc", "RigidBodyData", "RigidObject", "RigidObjectCfg
 
 @dataclass
 class CollisionShapeDesc:
-    """Planner-independent snapshot of one DexSim physical collision shape.
+    """Planner-independent description of one owner-local collision shape.
 
-    Geometry values are copied from DexSim's runtime collision descriptor and
-    therefore already include its geometry scale. Consumers must not apply
-    :attr:`RigidObjectCfg.body_scale` again.
+    ``RigidObject`` snapshots copy values from DexSim's runtime collision
+    descriptor, including geometry scale. Explicit planning providers may also
+    construct input envelopes; their provenance belongs to that provider and
+    must not be confused with native cooked geometry. Consumers must not apply
+    :attr:`RigidObjectCfg.body_scale` again to either already-scaled description.
 
     Attributes:
         name: Stable shape name within the owning rigid object.
@@ -468,6 +473,7 @@ class RigidObject(BatchEntity):
 
         cfg = deepcopy(self.cfg)
         self.__dict__.pop("user_ids", None)
+        self.__dict__.pop("_static_friction_batch", None)
         self._spawn_result = result
         self.body_type = cfg.body_type
         self._world = result.world
@@ -497,7 +503,9 @@ class RigidObject(BatchEntity):
 
     def _apply_spawn_visual_uv(self) -> None:
         """Apply configured projective UV mapping to spawned render bodies."""
-        shape = self.cfg.shape
+        shape = getattr(self.cfg, "visual_shape", None) or getattr(
+            self.cfg, "shape", None
+        )
         if not isinstance(shape, MeshCfg) or not shape.compute_uv:
             return
 
@@ -1190,6 +1198,14 @@ class RigidObject(BatchEntity):
 
         return torch.as_tensor(masses, dtype=torch.float32, device=self.device)
 
+    def _static_friction_view(self) -> SceneRigidBodyView:
+        """Create a shape-property view for Spawn bodies without dynamic state."""
+        if not hasattr(self, "_static_friction_batch"):
+            self._static_friction_batch = SceneRigidBodyView.from_entities(
+                self._spawn_result, self._entities, self.device
+            )
+        return self._static_friction_batch
+
     def set_friction(
         self, friction: torch.Tensor, env_ids: Sequence[int] | None = None
     ) -> None:
@@ -1205,6 +1221,17 @@ class RigidObject(BatchEntity):
             logger.log_error(
                 f"Length of env_ids {len(local_env_ids)} does not match friction length {len(friction)}."
             )
+
+        if self.is_spawn_bound and self._data is None:
+            if self._spawn_result.backend != "newton":
+                for env_id, value in zip(local_env_ids, friction.tolist()):
+                    _set_default_spawn_friction(self._entities[env_id], float(value))
+                return
+            ids = torch.as_tensor(local_env_ids, dtype=torch.int32, device=self.device)
+            self._static_friction_view().apply_friction(
+                friction.to(dtype=torch.float32, device=self.device).unsqueeze(-1), ids
+            )
+            return
 
         if self._data is not None and self._data.body_view.is_ready:
             body_ids = self._data.body_ids_for(local_env_ids)
@@ -1237,13 +1264,20 @@ class RigidObject(BatchEntity):
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
-        if self.is_spawn_bound and self.is_static:
-            return torch.full(
-                (len(local_env_ids),),
-                float(self.cfg.attrs.to_dexsim_physical_attr().dynamic_friction),
-                dtype=torch.float32,
-                device=self.device,
-            )
+        if self.is_spawn_bound and self._data is None:
+            if self._spawn_result.backend != "newton":
+                return torch.tensor(
+                    [
+                        self._entities[env_id].get_physical_attr().dynamic_friction
+                        for env_id in local_env_ids
+                    ],
+                    dtype=torch.float32,
+                    device=self.device,
+                )
+            ids = torch.as_tensor(local_env_ids, dtype=torch.int32, device=self.device)
+            result = torch.empty((len(local_env_ids), 1), device=self.device)
+            self._static_friction_view().fetch_friction(result, ids)
+            return result.squeeze(-1)
 
         if self._data is not None and self._data.body_view.is_ready:
             body_ids = self._data.body_ids_for(local_env_ids)
@@ -1512,6 +1546,32 @@ class RigidObject(BatchEntity):
             if wrapped is not None:
                 self._visual_material[env_idx] = wrapped
                 self._original_visual_material_inst[env_idx] = wrapped
+
+    @contextmanager
+    def preserve_visual_material(self) -> Iterator[None]:
+        """Restore exact current segmented materials after temporary appearance edits.
+
+        This preserves runtime appearance, including textures and transparency,
+        rather than replacing it with configuration defaults. Native bindings
+        must stay unchanged while the context is active.
+        """
+        entities = tuple(self._entities)
+        originals = [
+            _capture_render_materials(entity.get_render_body()) for entity in entities
+        ]
+        wrappers = list(self._visual_material)
+        shared = self.is_shared_visual_material
+        try:
+            yield
+        finally:
+            if tuple(self._entities) != entities:
+                raise RuntimeError(
+                    "Cannot restore materials after native bindings changed"
+                )
+            for entity, materials in zip(entities, originals):
+                _restore_render_materials(entity.get_render_body(), materials)
+            self._visual_material[:] = wrappers
+            self.is_shared_visual_material = shared
 
     def restore_visual_material(self, env_ids: Sequence[int] | None = None) -> None:
         """Restore the visual materials captured when the rigid object was created.

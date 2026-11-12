@@ -49,6 +49,7 @@ _REPLAY_CHANNELS = frozenset(
         "scene_object_pose",
         "articulation_joint",
         "gripper_qpos",
+        "gripper_contact",
     }
 )
 
@@ -118,6 +119,14 @@ class ReplayObservationTrace:
     articulation_joint: torch.Tensor | None = None
     gripper_qpos: Mapping[str, torch.Tensor] = field(default_factory=dict)
     scene_object_poses: Mapping[str, torch.Tensor] = field(default_factory=dict)
+    gripper_contact_distances: Mapping[str, torch.Tensor] = field(default_factory=dict)
+    """Minimum signed separation per finger, shaped (S, B, fingers).
+
+    Positive infinity means a valid query found no target contact. NaN means
+    evidence is unavailable, including query overflow or unresolved actors.
+    """
+    gripper_contact_targets: Mapping[str, str] = field(default_factory=dict)
+    """Target object ID for each gripper's filtered contact samples."""
 
     def __post_init__(self) -> None:
         tensors = [
@@ -127,8 +136,11 @@ class ReplayObservationTrace:
         ]
         grippers = dict(self.gripper_qpos)
         scene_objects = dict(self.scene_object_poses)
+        contacts = dict(self.gripper_contact_distances)
+        contact_targets = dict(self.gripper_contact_targets)
         tensors.extend(grippers.values())
         tensors.extend(scene_objects.values())
+        tensors.extend(contacts.values())
         if not tensors:
             raise ValueError(
                 "A replay observation trace requires at least one channel."
@@ -157,6 +169,19 @@ class ReplayObservationTrace:
             raise ValueError("Scene-object trace keys must be non-empty strings.")
         if any(value.shape[2:] != (4, 4) for value in scene_objects.values()):
             raise ValueError("scene_object_poses traces must have shape (S, B, 4, 4).")
+        if set(contacts) != set(contact_targets) or any(
+            not isinstance(part, str)
+            or not part
+            or not isinstance(target, str)
+            or not target
+            for part, target in contact_targets.items()
+        ):
+            raise ValueError("Gripper contact samples require matching target IDs.")
+        if any(
+            value.dim() != 3 or value.shape[2] < 2 or not value.is_floating_point()
+            for value in contacts.values()
+        ):
+            raise ValueError("Gripper contacts require (S, B, fingers>=2) distances.")
         object.__setattr__(
             self, "tcp_pose", None if self.tcp_pose is None else self.tcp_pose.clone()
         )
@@ -185,6 +210,14 @@ class ReplayObservationTrace:
             MappingProxyType(
                 {object_id: value.clone() for object_id, value in scene_objects.items()}
             ),
+        )
+        object.__setattr__(
+            self,
+            "gripper_contact_distances",
+            MappingProxyType({part: value.clone() for part, value in contacts.items()}),
+        )
+        object.__setattr__(
+            self, "gripper_contact_targets", MappingProxyType(contact_targets)
         )
 
 
@@ -371,6 +404,11 @@ class ExecutionObservation:
     gripper_open_qpos: Mapping[str, torch.Tensor] = field(default_factory=dict)
     gripper_grasp_qpos: Mapping[str, torch.Tensor] = field(default_factory=dict)
     replay_traces: Mapping[str, ReplayObservationTrace] = field(default_factory=dict)
+    replay_diagnostics: Mapping[str, object] = field(default_factory=dict)
+    """Optional bounded JSON-native measurements persisted with the trial."""
+    gripper_contact_thresholds_m: Mapping[str, float] = field(default_factory=dict)
+    grasp_contact_metadata: Mapping[str, object] = field(default_factory=dict)
+    """Contact bindings, thresholds and unavailable-evidence reasons for replay."""
 
 
 class PhysicalStageEvaluator(Protocol):

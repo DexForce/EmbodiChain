@@ -17,20 +17,22 @@
 """Tests for segment-aware demonstration execution and annotations."""
 
 from __future__ import annotations
+from embodichain.lab.gym.utils.gym_utils import _init_raw_rollout
+from tensordict import TensorDict
 
 from embodichain.lab.gym.envs.episode_context import EpisodeContext
 
 import threading
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
 from typing import Any
 from unittest.mock import Mock
 
 import pytest
 import torch
-from tensordict import TensorDict
 
 from embodichain.lab.gym.envs.demo import (
     DemoExecutionCfg,
+    DemoQualification,
     DemoSegment,
     DemoSegmentResult,
     execute_demo_episode,
@@ -227,6 +229,25 @@ def test_controller_action_refreshes_executed_qpos_snapshot() -> None:
     torch.testing.assert_close(env._last_action_manager_qpos, torch.ones(2, 3))
 
 
+@pytest.mark.parametrize("expert_recording", [False, True])
+def test_action_snapshot_requires_a_recorder(expert_recording: bool) -> None:
+    """Training processes actions without reading an unused qpos snapshot."""
+    env = _controller_action_env()
+    env.dataset_manager = None
+    env.rollout_buffer = object() if expert_recording else None
+    env._rollout_buffer_mode = "expert"
+    env.action_manager._processed_qpos.return_value = torch.ones(2, 3)
+
+    env._preprocess_action(torch.ones(2, 3))
+
+    env.action_manager.process_action.assert_called_once()
+    assert env.action_manager._processed_qpos.call_count == int(expert_recording)
+    if expert_recording:
+        torch.testing.assert_close(env._last_action_manager_qpos, torch.ones(2, 3))
+    else:
+        assert env._last_action_manager_qpos is None
+
+
 def test_policy_history_snapshots_manager_owned_flat_action() -> None:
     """Dataset history captures manager state after validation and owns it."""
     env = _controller_action_env()
@@ -252,6 +273,30 @@ def test_controller_action_does_not_append_policy_history() -> None:
     env._preprocess_action(ControllerAction(torch.ones(2, 3)))
 
     assert env.get_raw_action_history(0).shape == (0, 0)
+
+
+def test_action_histories_allocate_on_first_recorded_sample() -> None:
+    """Disabled recording stays empty; first samples retain owned snapshots."""
+    env = _controller_action_env()
+    env._raw_action_history = None
+    env._expert_controller_qpos_history = None
+    env._record_raw_actions = False
+    action = torch.arange(6, dtype=torch.float32).reshape(2, 3)
+    env._record_raw_action(action)
+    env._record_expert_controller_qpos(None, torch.tensor([1]))
+    assert env._raw_action_history is None
+    assert env._expert_controller_qpos_history is None
+    assert env.get_raw_action_history(0).shape == (0, 0)
+    assert env.get_expert_controller_qpos_history(1).shape == (0, 3)
+
+    env._record_raw_actions = True
+    env._record_raw_action(action)
+    env._record_expert_controller_qpos(action, torch.tensor([1]))
+    expected = action.clone()
+    action.fill_(99)
+    torch.testing.assert_close(env.get_raw_action_history(0), expected[0:1])
+    torch.testing.assert_close(env.get_expert_controller_qpos_history(1), expected[1:2])
+    assert env.get_expert_controller_qpos_history(0).shape == (0, 3)
 
 
 def test_policy_recorder_rejects_controller_action_before_execution() -> None:
@@ -1105,6 +1150,69 @@ def test_cancellation_after_last_action_does_not_advance_lazy_plan() -> None:
     assert result.terminal_reasons == ("interrupted",)
 
 
+@pytest.mark.parametrize("explicit_segments", [False, True])
+@pytest.mark.parametrize(
+    "terminal", ["success", "segment_validation_failed", "interrupted"]
+)
+def test_segment_completion_observer_receives_recorded_terminal_boundaries(
+    explicit_segments: bool, terminal: str
+) -> None:
+    env = (
+        _CancellationEnv()
+        if terminal == "interrupted"
+        else _ValidatedSegmentEnv(validation=terminal == "success")
+    )
+    observed: list[DemoSegmentResult] = []
+    next_requested: list[bool] = []
+
+    def observe(result: DemoSegmentResult) -> None:
+        assert env.segment_results[-1] is result
+        observed.append(result)
+        next_requested.append(env.requested_second_segment)
+
+    result = execute_demo_episode(
+        env,
+        segments=env.create_demo_segments() if explicit_segments else None,
+        should_stop=(lambda: bool(env.actions)) if terminal == "interrupted" else None,
+        on_segment_completed=observe,
+    )
+
+    assert result.terminal_reason == terminal
+    assert len(observed) == len(result.segments)
+    assert all(
+        left is right for left, right in zip(observed, result.segments, strict=True)
+    )
+    assert next_requested == ([False, True] if terminal == "success" else [False])
+    assert env.actions == ([1, 3] if terminal == "success" else [1])
+
+
+def test_segment_completion_observer_rejects_noncallable_before_execution() -> None:
+    env = _SegmentedEnv()
+
+    with pytest.raises(TypeError, match="on_segment_completed must be callable"):
+        execute_demo_episode(env, on_segment_completed=object())
+
+    assert env.actions == []
+    assert env.segment_results == []
+
+
+def test_segment_completion_observer_error_restores_execution_scope() -> None:
+    env = _ValidatedSegmentEnv(validation=True)
+
+    def fail(result: DemoSegmentResult) -> None:
+        assert env.segment_results[-1] is result
+        raise ValueError("boundary acquisition failed")
+
+    with pytest.raises(ValueError, match="boundary acquisition failed"):
+        execute_demo_episode(env, on_segment_completed=fail)
+
+    assert env.actions == [1]
+    assert len(env.segment_results) == 1
+    assert not env.requested_second_segment
+    assert not env._demo_no_auto_reset
+    assert env._demo_instruction_snapshot is None
+
+
 class _LegacyEnv(_SegmentedEnv):
     create_demo_segments = EmbodiedEnv.create_demo_segments
     metadata = {"dataset": {"instruction": {"lang": "Complete the legacy task"}}}
@@ -1505,7 +1613,6 @@ class _TrajectoryRobotStub:
 class _TrajectoryWriterStub:
     num_envs = 2
     device = torch.device("cpu")
-    _seed_trajectory_states = EmbodiedEnv._seed_trajectory_states
 
     def __init__(self) -> None:
         self._traj_buffer = TensorDict(
@@ -1520,7 +1627,74 @@ class _TrajectoryWriterStub:
             },
             batch_size=[2, 4],
         )
-        self._traj_steps = torch.tensor([1, 1])
+        from embodichain.lab.gym.envs.managers.observation_manager import (
+            ObservationManager,
+        )
+        from embodichain.lab.gym.envs.managers.observation_types import (
+            ObservationDescriptor,
+            ObservationSample,
+            ObservationFrame,
+        )
+
+        self.episode_context = EpisodeContext(2)
+        self.episode_context._begin_episode([0, 1])
+        self.episode_context._finish_initialization([0, 1])
+        fields = {"robot/qpos": self._traj_buffer["states"]["robot"]["qpos"]}
+        self.episode_context = self.episode_context
+        self.observation_manager = ObservationManager({}, self)
+        self.observation_manager._env._rollout_storage = getattr(
+            self.observation_manager._env, "_rollout_storage", None
+        )
+        if self.observation_manager._env._rollout_storage is None:
+            self.observation_manager._env._rollout_storage = TensorDict(
+                {},
+                batch_size=[
+                    len(self.observation_manager._env.episode_context.episode_ids)
+                ],
+            )
+        _init_raw_rollout(
+            self.observation_manager._env._rollout_storage,
+            self.observation_manager._env.episode_context,
+            **dict(
+                fields=fields,
+                actions=self._traj_buffer["actions"][:, :3],
+            ),
+        )
+        self.observation_manager.bind_rollout_storage(
+            self.observation_manager._env._rollout_storage
+        )
+        descriptor = ObservationDescriptor(
+            "robot",
+            "qpos",
+            "joint",
+            "joint_order",
+            ("joint_units",),
+            (2,),
+            torch.float32,
+        )
+
+        def frame(values, revision):
+            return ObservationFrame(
+                None,
+                {
+                    "robot/qpos": ObservationSample(
+                        descriptor,
+                        values,
+                        torch.ones(2, dtype=torch.bool),
+                        (None, None),
+                    )
+                },
+                self.episode_context.episode_ids,
+                revision,
+                episode_owner=self.episode_context,
+            )
+
+        self.frame = frame(torch.tensor([[0.1, 0.2], [0.3, 0.4]]), 0)
+        EmbodiedEnv._record_initial_observation(self, self.frame, [0, 1])
+        self.frame = frame(torch.tensor([[0.1, 0.2], [0.3, 0.4]]), 1)
+        _append_fixture(self, self.frame, torch.zeros(2, 2))
+        self.frame = frame(torch.tensor([[0.1, 0.2], [0.3, 0.4]]), 2)
+        self._traj_steps = self._rollout_storage["raw_steps"]
         self._traj_raw_action = torch.tensor([[9.0, 9.0], [8.0, 8.0]])
         self._demo_active_mask = torch.tensor([False, True])
         self.robot = _TrajectoryRobotStub()
@@ -1536,12 +1710,11 @@ def test_trajectory_writer_freezes_inactive_demo_row() -> None:
     """Trajectory cursors obey the same sticky activity mask as rollout rows."""
     env = _TrajectoryWriterStub()
 
-    EmbodiedEnv._write_trajectory_step(env)
+    frozen = env._traj_buffer["states"]["robot"]["qpos"][0, 1].clone()
+    EmbodiedEnv._write_trajectory_step(env, env.frame)
 
     assert env._traj_steps.tolist() == [1, 2]
-    assert torch.equal(
-        env._traj_buffer["states"]["robot"]["qpos"][0, 1], torch.zeros(2)
-    )
+    assert torch.equal(env._traj_buffer["states"]["robot"]["qpos"][0, 1], frozen)
     assert torch.equal(
         env._traj_buffer["states"]["robot"]["qpos"][1, 1],
         torch.tensor([0.3, 0.4]),
@@ -1620,19 +1793,42 @@ def test_legacy_metadata_reports_consistent_episode_success() -> None:
     assert metadata["segments"][0]["instruction"] == task_instruction
 
 
-@pytest.mark.parametrize("seed", (None, 0, 4101))
-def test_demo_metadata_exposes_the_effective_environment_seed(seed: int | None) -> None:
-    """Recorded metadata carries the effective environment seed for provenance."""
+@pytest.mark.parametrize("seed", (None, 0, 12))
+@pytest.mark.parametrize("recorder", ("rollout", "trajectory"))
+def test_demo_metadata_exposes_the_effective_environment_seed(
+    seed: int | None, recorder: str
+) -> None:
+    """Finalizing an episode retains its seed after the next reset reseeds."""
     env = _RolloutWriterStub()
-    env.cfg = SimpleNamespace(seed=seed)
-    env._demo_episode_metadata = [
-        EmbodiedEnv._new_demo_episode_metadata(env, row) for row in range(env.num_envs)
-    ]
-
+    env.cfg = SimpleNamespace(
+        seed=seed, events=None, observations=None, rewards=None, dataset=None
+    )
+    env.dataset_manager = None
+    if recorder == "trajectory":
+        env._traj_buffer = env.rollout_buffer
+        env.rollout_buffer = None
+        env._demo_steps = env.rollout_steps.clone()
+    env._demo_metadata_initialized = False
+    env._demo_episode_metadata = [{} for _ in range(env.num_envs)]
+    env._new_demo_episode_metadata = MethodType(
+        EmbodiedEnv._new_demo_episode_metadata, env
+    )
+    EmbodiedEnv._initialize_episode(env)
+    env.cfg.seed = 35
     metadata = EmbodiedEnv.get_demo_episode_metadata(env, 1)
-
     assert metadata["seed"] == seed
     assert metadata["env_id"] == 1
+    EmbodiedEnv._initialize_episode(env, [1])
+    assert EmbodiedEnv.get_demo_episode_metadata(env, 1)["seed"] == 35
+    assert EmbodiedEnv.get_demo_episode_metadata(env, 0)["seed"] == seed
+
+    env.rollout_buffer = None
+    env._traj_buffer = None
+    env._demo_metadata_initialized = False
+    env._demo_episode_metadata = [{} for _ in range(env.num_envs)]
+    env._new_demo_episode_metadata = Mock(side_effect=AssertionError("unused metadata"))
+    EmbodiedEnv._initialize_episode(env)
+    assert not env._demo_metadata_initialized
 
 
 def test_explicit_segment_instructions_are_preserved() -> None:
@@ -1910,3 +2106,256 @@ def test_unknown_dynamic_snapshot_is_not_relabeled_by_metadata_retrieval() -> No
     metadata = EmbodiedEnv.get_demo_episode_metadata(env, 0)
     assert metadata["instruction"] == "unknown_task"
     assert metadata["instruction_source"] == "unknown"
+
+
+def test_close_incomplete_execution_cleans_runtime_before_sim_without_stepping():
+    env = _CloseEnvStub()
+    order = []
+    env._active_task_program_bridge = SimpleNamespace(is_complete=False)
+    env.discard = lambda: order.append("discard")
+    env.dataset_manager.finalize = lambda: order.append("finalize")
+    env._task_program_adapter = SimpleNamespace(close=lambda: order.append("runtime"))
+    env._profiler.report = lambda: order.append("report")
+    env.sim.destroy = lambda **kwargs: order.append("destroy")
+    env.step = lambda *args: pytest.fail(
+        "close must not step physics or issue commands"
+    )
+    EmbodiedEnv.close(env, exit_process=False)
+    EmbodiedEnv.close(env, exit_process=False)
+    assert order == ["discard", "finalize", "runtime", "report", "destroy"]
+    assert env._active_task_program_bridge.is_complete is False
+
+
+def test_expert_rollout_keeps_terminal_observation_in_shared_backing_storage():
+    env = _RolloutWriterStub()
+    full = _make_rollout_buffer(2, 6)
+    env._rollout_storage = TensorDict({"policy": full}, batch_size=[2])
+    env._expert_obs_buffer = full["obs"]
+    env.rollout_buffer = full[:, :5]
+    env.rollout_steps[:] = 4
+    final = TensorDict(
+        {"state": torch.tensor([[7.0, 8.0], [9.0, 10.0]])}, batch_size=[2]
+    )
+    EmbodiedEnv._write_episode_rollout_step(
+        env,
+        obs=final,
+        action=torch.ones(2, 2),
+        rewards=torch.ones(2),
+        terminateds=torch.ones(2, dtype=torch.bool),
+        truncateds=torch.zeros(2, dtype=torch.bool),
+    )
+    assert env.rollout_steps.tolist() == [5, 5]
+    assert env.rollout_buffer.shape == (2, 5)
+    torch.testing.assert_close(full["obs", "state"][:, 5], final["state"])
+    assert env.rollout_buffer["valid"][:, 4].all()
+    assert not full["valid"][:, 5].any()
+    assert (
+        env.rollout_buffer["obs", "state"].untyped_storage().data_ptr()
+        == full["obs", "state"].untyped_storage().data_ptr()
+    )
+
+
+def test_expert_rollout_exposes_raw_observation_views_from_the_same_store():
+    from embodichain.lab.gym.envs.managers import ObservationManager
+    from embodichain.lab.gym.envs.managers.observation_types import (
+        ObservationDescriptor,
+        ObservationSample,
+        ObservationFrame,
+    )
+
+    env = _RolloutWriterStub()
+    env.episode_context._begin_episode([0, 1])
+    env.episode_context._finish_initialization([0, 1])
+    full = _make_rollout_buffer(2, 6)
+    env._rollout_storage = TensorDict({"policy": full}, batch_size=[2])
+    env._expert_obs_buffer = full["obs"]
+    env.rollout_buffer = full[:, :5]
+    env._rollout_buffer_mode = "expert"
+    env.observation_manager = ObservationManager({}, env)
+    env.observation_manager._env._rollout_storage = env._rollout_storage
+    if env.observation_manager._env._rollout_storage is None:
+        env.observation_manager._env._rollout_storage = TensorDict(
+            {},
+            batch_size=[len(env.observation_manager._env.episode_context.episode_ids)],
+        )
+    _init_raw_rollout(
+        env.observation_manager._env._rollout_storage,
+        env.observation_manager._env.episode_context,
+        **dict(fields={}, actions=torch.zeros(2, 5, 2)),
+    )
+    env.observation_manager.bind_rollout_storage(
+        env.observation_manager._env._rollout_storage
+    )
+    descriptor = ObservationDescriptor(
+        "probe", "value", "sensor", "scalar", ("unit",), (1,), torch.float32
+    )
+    frame = ObservationFrame(
+        None,
+        {
+            "probe": ObservationSample(
+                descriptor,
+                torch.tensor([[4.0], [5.0]]),
+                torch.ones(2, dtype=torch.bool),
+                (None, None),
+            )
+        },
+        env.episode_context.episode_ids,
+        0,
+        episode_owner=env.episode_context,
+    )
+    EmbodiedEnv._record_initial_observation(env, frame, torch.tensor([0, 1]))
+    assert env.rollout_buffer.shape == (2, 5)
+    assert (
+        env.rollout_buffer["raw_obs", "probe"].untyped_storage().data_ptr()
+        == env._rollout_storage["raw_obs", "probe"].untyped_storage().data_ptr()
+    )
+    torch.testing.assert_close(
+        env.rollout_buffer["raw_obs", "probe"][:, 0], frame.fields["probe"].values
+    )
+    assert env.rollout_buffer["raw_valid", "probe"][:, 0].all()
+
+
+def _append_fixture(env, frame, action):
+    from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+
+    env._traj_raw_action = action
+    EmbodiedEnv._write_trajectory_step(env, frame)
+
+
+def test_qualification_separates_final_bounds_from_always_sampled_health() -> None:
+    initial = torch.tensor([[0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 1.0]]).repeat(2, 1)
+    env = SimpleNamespace(
+        num_envs=2,
+        device=torch.device("cpu"),
+        step_dt=1.0,
+        pose=initial.clone(),
+        score=torch.zeros(2, 1),
+        health=torch.ones(2, 1),
+    )
+    env.sim = SimpleNamespace(
+        get_rigid_object=lambda uid: SimpleNamespace(get_local_pose=lambda: env.pose)
+    )
+    env.cfg = SimpleNamespace(
+        observations=SimpleNamespace(
+            score=SimpleNamespace(func=lambda host, obs: host.score, params={}),
+            health=SimpleNamespace(func=lambda host, obs: host.health, params={}),
+        )
+    )
+    qualification = DemoQualification(
+        env,
+        {
+            "object_motion": {
+                "uid": "payload",
+                "min_lift_m": 0.05,
+                "min_tilt_deg": 45.0,
+                "max_return_error_m": 0.03,
+            },
+            "observations": {
+                "score": {"min": [0.5]},
+                "health": {"min": [1.0], "when": "always"},
+            },
+        },
+    )
+    tilted = initial.clone()
+    tilted[:, 2] += 0.12
+    tilted[:, 3] = torch.sin(torch.deg2rad(torch.tensor(35.0)))
+    tilted[:, 6] = torch.cos(torch.deg2rad(torch.tensor(35.0)))
+    qualification.start()
+    env.pose.copy_(tilted)
+    env.health[1] = 0
+    qualification.after_step()
+    env.pose.copy_(initial)
+    env.score.fill_(1.0)
+    env.health.fill_(1.0)
+    qualification.after_step()
+    report = qualification.finish([0])
+    assert report["accepted"]
+    assert report["accepted_rows"] == [True, False]
+    assert report["object_motion"]["max_tilt_deg"] == pytest.approx([70.0, 70.0])
+    assert report["samples"][0]["observations"]["score"] == [[0.0], [0.0]]
+    # A fresh attempt neither inherits the failed health sample nor motion peaks.
+    qualification.start()
+    assert not qualification.finish([0, 1])["accepted"]
+    env.pose.copy_(tilted)
+    qualification.after_step()
+    env.pose.copy_(initial)
+    qualification.after_step()
+    assert qualification.finish([0, 1])["accepted_rows"] == [True, True]
+
+
+@pytest.mark.parametrize(
+    "bounds",
+    [
+        {"min": [0.0], "unknown": True},
+        {"min": [1.0], "max": [0.0]},
+        {"min": [float("nan")]},
+    ],
+)
+def test_qualification_rejects_invalid_observation_bounds(bounds) -> None:
+    env = SimpleNamespace(num_envs=1, device=torch.device("cpu"), step_dt=0.1)
+    with pytest.raises(ValueError):
+        DemoQualification(env, {"observations": {"metric": bounds}})
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+@pytest.mark.parametrize("when", ["always", "final"])
+def test_qualification_preserves_inclusive_floating_boundaries(dtype, when) -> None:
+    env = SimpleNamespace(num_envs=1, device=torch.device("cpu"), step_dt=0.1)
+    env.cfg = SimpleNamespace(
+        observations=SimpleNamespace(
+            positive=SimpleNamespace(
+                func=lambda host, obs: torch.tensor([[0.1]], dtype=dtype), params={}
+            ),
+            negative=SimpleNamespace(
+                func=lambda host, obs: torch.tensor([[-0.1]], dtype=dtype), params={}
+            ),
+        )
+    )
+    qualification = DemoQualification(
+        env,
+        {
+            "observations": {
+                "positive": {"min": [0.1], "when": when},
+                "negative": {"max": [-0.1], "when": when},
+            }
+        },
+    )
+    qualification.start()
+    assert qualification.finish([0])["accepted"]
+
+
+@pytest.mark.parametrize("dtype", [torch.int64, torch.bool])
+@pytest.mark.parametrize("minimum,accepted", [(1.0, True), (1.1, False)])
+def test_qualification_keeps_unbounded_limits_for_discrete_values(
+    dtype, minimum, accepted
+) -> None:
+    env = SimpleNamespace(num_envs=1, device=torch.device("cpu"), step_dt=0.1)
+    env.cfg = SimpleNamespace(
+        observations=SimpleNamespace(
+            flag=SimpleNamespace(
+                func=lambda host, obs: torch.tensor([[1]], dtype=dtype), params={}
+            ),
+        )
+    )
+    qualification = DemoQualification(
+        env, {"observations": {"flag": {"min": [minimum]}}}
+    )
+    qualification.start()
+    assert qualification.finish([0])["accepted"] is accepted
+
+
+def test_qualification_reports_unsupported_policy_input_dependencies() -> None:
+    env = SimpleNamespace(num_envs=1, device=torch.device("cpu"), step_dt=0.1)
+    env.cfg = SimpleNamespace(
+        observations=SimpleNamespace(
+            derived=SimpleNamespace(
+                func=lambda host, obs: obs["robot"]["qpos"], params={}
+            ),
+        )
+    )
+    qualification = DemoQualification(
+        env, {"observations": {"derived": {"min": [0.0]}}}
+    )
+    with pytest.raises(ValueError, match="raw data directly from env") as failure:
+        qualification.start()
+    assert isinstance(failure.value.__cause__, KeyError)

@@ -19,7 +19,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-
 import torch
 
 from embodichain.toolkits.graspkit import (
@@ -392,14 +391,35 @@ class ActiveCaseGraspPoseGenerator(GraspPoseGenerator):
         )
 
 
-def parallel_jaw_sampler(n_sample: int) -> ParallelJawGraspPoseGenerator:
-    """Build the PGI grasp sampler a self-sampling case compiles with."""
+def parallel_jaw_sampler(
+    n_sample: int,
+    *,
+    gripper_data: dict[str, object] | None = None,
+    root_from_tcp: Sequence[Sequence[float]] | None = None,
+    grasp_depth_offset_m: float = 0.0,
+) -> ParallelJawGraspPoseGenerator:
+    """Build a case sampler with the selected physical hand and runtime TCP.
+
+    Args:
+        n_sample: Number of antipodal contact-pair samples.
+        gripper_data: Mounted hand geometry shared by preparation and replay.
+        root_from_tcp: The bound fixture's calibrated hand-root-to-TCP transform.
+        grasp_depth_offset_m: Physical contact-centre shift toward the hand,
+            applied to collision geometry before candidate qualification.
+
+    Returns:
+        A sampler configured for the selected hand.
+    """
     from .._atomic_fixtures import (
         create_parallel_jaw_grasp_pose_generator,
     )
 
     return create_parallel_jaw_grasp_pose_generator(
-        n_sample=n_sample, force_refresh=False
+        n_sample=n_sample,
+        force_refresh=False,
+        gripper_data=gripper_data,
+        root_from_tcp=root_from_tcp,
+        grasp_depth_offset_m=grasp_depth_offset_m,
     )
 
 
@@ -421,10 +441,15 @@ class CaseSampleCountGraspPoseGenerator(ParallelJawGraspPoseGenerator):
     ) -> None:
         if default_count not in samplers:
             raise ValueError("The default sample count needs its own sampler.")
-        super().__init__(samplers[default_count].gripper_model)
+        super().__init__(**samplers[default_count].gripper_data)
         self._samplers = dict(samplers)
         self._default_count = default_count
         self._active_count = default_count
+
+    @property
+    def paired_query_key(self) -> object:
+        """Use the active sample-count provider's paired compatibility identity."""
+        return self._sampler.paired_query_key
 
     def activate(self, sample_count: int) -> None:
         """Use the sampler built with ``sample_count`` for the next compilation."""

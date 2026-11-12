@@ -21,6 +21,8 @@ in a simulated environment using the SimulationManager and grasp planning utilit
 
 from __future__ import annotations
 
+from embodichain.lab.sim.utility.gripper_geometry import grasp_generator_parameters
+
 import argparse
 import numpy as np
 import time
@@ -30,7 +32,7 @@ import torch
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot, RigidObject
 from embodichain.compute.trajectory import interpolate_with_distance
-from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
+from examples.sim.atomic_skill.gripper_geometry import mounted_gripper_geometry
 from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
 from embodichain.lab.sim.motion.solvers import PytorchSolverCfg
 from embodichain.data import get_data_path
@@ -214,19 +216,15 @@ def test_grasp_pose_generator():
         sim.prepare()
 
         # get mug grasp pose
+        gripper_data, collision_geometry = mounted_gripper_geometry(robot.cfg)
         grasp_generator = AntipodalGraspPoseGenerator(
-            ParallelJawGripperModelCfg(
-                model_id="test_parallel_jaw",
-                min_opening_width=0.003,
-                max_opening_width=0.088,
-                finger_length=0.078,
-            ),
+            **grasp_generator_parameters(gripper_data),
+            collision_geometry=collision_geometry,
             algorithm_cfg=AntipodalGraspPoseGeneratorCfg(
                 sample_count=10_000,
                 max_candidates=30,
             ),
             collision_cfg=ParallelJawGraspCollisionCfg(
-                point_sample_density=0.012,
                 filter_ground_collision=True,
             ),
             annotation_cfg=GraspAnnotationCfg(

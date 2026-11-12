@@ -1498,7 +1498,7 @@ def _view_performance(
             row["planner_construct_ms"] = None
             row["backend_prepare_ms"] = None
         row["timing_scope"] = (
-            "atomic_action_compile" if view == "atomic_skills" else "planner_call"
+            "atomic_skill_compile" if view == "atomic_skills" else "planner_call"
         )
         row["planning_time_ms"] = (
             row["cost_time_ms"] if view == "motion_planning" else None
@@ -1761,22 +1761,6 @@ def aggregate_results(
             view_records, metadata, view_cases, measured_trials, view=view
         )
         if view == "motion_planning":
-            common_cases = [
-                case
-                for case in view_cases
-                if (
-                    case.case_parameters.get("target_type", "eef")
-                    in {"joint", "pose", "eef"}
-                )
-            ]
-            common_ids = {case.case_id for case in common_cases}
-            result["motion_planning_common_leaderboard"] = _view_leaderboard(
-                [record for record in view_records if record.case_id in common_ids],
-                metadata,
-                common_cases,
-                measured_trials,
-                view=view,
-            )
             result["motion_planning_workload_summary"] = [
                 {**row, **labels, "view": view}
                 for labels, population, trials in workloads

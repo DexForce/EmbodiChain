@@ -10,6 +10,7 @@ embodichain.learning
       models
       rl
       sl
+      dynamics
 
 Reinforcement Learning
 ----------------------
@@ -32,10 +33,13 @@ Differentiable layers
 ---------------------
 
 ``learning.layers`` composes simulation-independent computation as Torch modules.
-``KinematicsLayer`` owns fixed TCP and limit buffers; its copied PK geometry follows
+``DifferentiableFKLayer.forward`` maps joints to root-frame TCP transforms without
+constructing a geometric Jacobian; ``evaluate`` returns both in one FK pass.
+The layer owns fixed TCP and limit buffers, and its copied PK geometry follows
 ``to(device/dtype)``. Reconstruct the same robot model before loading a checkpoint;
-its geometry fingerprint is checked. ``DifferentiableIKLayer.forward`` returns joints
-for network composition, while ``solve`` returns residuals and a success mask.
+its geometry fingerprint is checked. ``DifferentiableIKLayer`` composes an FK layer:
+its ``forward`` returns joints for network composition, while ``solve`` returns
+residuals and a success mask.
 Both retain input gradients in training and evaluation mode. Callers own rollout
 state, optimizers, and detach boundaries.
 
@@ -43,13 +47,26 @@ state, optimizers, and detach boundaries.
 
 .. autosummary::
 
-   KinematicsLayer
+   DifferentiableFKLayer
    DifferentiableIKLayer
+   DifferentiableRetimingLayer
 
-.. automodule:: embodichain.learning.layers.kinematics
+.. automodule:: embodichain.learning.layers.fk
    :members:
 
 .. automodule:: embodichain.learning.layers.ik
+   :members:
+
+``DifferentiableRetimingLayer`` is a stateless Torch module with numerical
+hyperparameters in its constructor and positions/motion limits in ``forward``.
+It returns ``(q, qd, qdd, dt, success, lengths)`` as ordinary tensors. Compute
+owns fixed-width quantity padding. The layer has no parameters, limit buffers,
+custom device migration or extra checkpoint state; callers reconstruct settings
+and can store fixed robot limits as buffers on their own model. ``eval()`` keeps
+gradients, and duration remains the tensor expression ``dt.sum(-1)``.
+Only first-order derivatives on the current discrete branch are supported.
+
+.. automodule:: embodichain.learning.layers.toppra
    :members:
 
 Shared trainable models
@@ -77,3 +94,21 @@ optimizer updates and committed-update recovery through ``learning.sl``.
    :maxdepth: 1
 
    embodichain.learning.sl
+
+Online dynamics and policy learning
+-----------------------------------
+
+``OnlineModelBasedSchedule`` separates physical prefill, model-only warmup and
+fractional online update credit. Model callbacks finish before a policy callback
+collects and differentiates its trajectory. The schedule checkpoints counters;
+its caller checkpoints models, optimizers, random streams and sampling state.
+
+.. currentmodule:: embodichain.learning.dynamics
+
+.. autosummary::
+
+   OnlineModelBasedScheduleCfg
+   OnlineModelBasedSchedule
+
+.. automodule:: embodichain.learning.dynamics.schedule
+   :members:

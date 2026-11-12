@@ -10,8 +10,10 @@
 | Two-eye transforms and attachment | `embodichain/lab/sim/sensors/stereo.py` → `StereoCameraCfg`, `StereoCamera` |
 | Parent-name resolution | `embodichain/lab/sim/sensors/attachment.py` → `resolve_parent_nodes` |
 | Creation, preparation and attachment coordination | `embodichain/lab/sim/sim_manager.py` → `add_sensor`, `prepare` |
-| Contact query adaptation and actor metadata | `embodichain/lab/sim/sensors/contact_sensor.py` |
-| Fixed contact-buffer scatter | `embodichain/lab/sim/sensors/_warp/contact.py` |
+| Contact query adaptation and actor metadata | `embodichain/lab/sim/sensors/contact/sensor.py` |
+| Joint and contact acquisition windows | `embodichain/lab/sim/sensors/contact/observation.py` |
+| Native support observations and pair ownership | `embodichain/lab/sim/sensors/support_observation.py` |
+| Fixed contact-buffer scatter | `embodichain/lab/sim/sensors/contact/_warp/scatter.py` |
 
 Sensors inherit `BaseSensor`/`BatchEntity` and expose per-environment data through
 a TensorDict buffer. `SensorCfg.from_dict()` resolves `sensor_type + "Cfg"`
@@ -25,7 +27,14 @@ Create sensors through `SimulationManager.add_sensor()`. The explicit manager
 owns the World, ordered Arenas, preparation and semantic parent resolution;
 sensors must not rediscover a singleton manager. Cameras are render features
 on both physics backends. Contact availability is a backend capability checked
-before preparation and again after Newton AutoSolver selection.
+before preparation and again after DexUni's scene-based dispatch.
+
+Camera/StereoCamera intrinsics use Scene camera batches, preserving CPU/CUDA
+input selection order, negative indices and last-write-wins duplicate rows.
+Pose reads/writes, look-at and extrinsics reset retain
+their per-instance native paths. Shared image targets already batch their view
+buffers; ordered publication keeps preceding parameter writes visible to the
+next photograph. Stereo calibration and logical center poses remain sensor-owned.
 
 Robot-mounted cameras are declared in `RobotCfg.sensors` with robot-local
 parent links. `SimulationManager.add_robot()` initializes them only when the
@@ -53,6 +62,27 @@ to the native OpenGL view unchanged (-Z forward, +Y up). Unparented explicit
 poses are converted from optical axes (+Z forward, +Y down) by flipping Y/Z.
 Convert optical-frame mount calibration before storing a parented `pos/quat`;
 do not infer image direction from `get_arena_pose()` without this conversion.
+
+## Camera ground visibility
+
+`CameraCfg.ground_plane_visible` and `Camera.set_ground_plane_visibility(...,
+env_ids=...)` filter the manager-owned shared Mesh ground per camera instance;
+stereo applies the same policy to both eyes. The global manager switch remains
+a master gate. Collision, picking, Viser grids and floor embedded in scanned
+assets are separate. The manager reserves category bit 1 for its default plane.
+
+Filtering requires the DexSim Mesh-category/camera-exclusion APIs; the default
+visible configuration remains usable with older SDKs. Camera reset restores the
+configured policy for selected environments. Parent reattachment resets only
+extrinsics, preserving runtime visibility through topology changes. The ground
+category belongs to the Spawn descriptor, so rematerialization retains it.
+
+`render_camera_group` snapshots policy after rendering; `Camera.update` publishes
+that metadata only after successful image reads. Direct camera updates snapshot
+their own render. `get_capture_metadata()` returns a copy, separately from image
+TensorDict values. A policy change invalidates the camera's published metadata;
+a failed render/read cannot be presented as a new successful capture. Callers
+using `fetch_only=True` should render through the manager to obtain metadata.
 
 ## Camera attachment boundary
 
@@ -104,5 +134,7 @@ quota are integration contracts. Generic image tiling belongs to
 | Backend contact behavior | `tests/sim/sensors/test_contact_default_e2e.py`, `test_contact_newton_e2e.py` in that directory |
 
 For missing camera output, inspect enabled fields and `ViewFlags` together.
+Camera and stereo images exclude visual markers by default. Set
+`include_visual_overlays=True` for an explicit preview camera.
 For missing contacts, inspect backend capabilities, the query filter and quota
 before changing buffer allocation. Pure resolver tests do not require a renderer.

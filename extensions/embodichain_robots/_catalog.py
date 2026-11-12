@@ -21,6 +21,9 @@ from __future__ import annotations
 from itertools import product
 
 _CONFIG_CLASSES = {
+    "AgibotG2": "embodichain_robots.agibot.g2:AgibotG2Cfg",
+    "AgibotG1": "embodichain_robots.agibot.g1:AgibotG1Cfg",
+    "YamI2rt": "embodichain_robots.i2rt.yam:YamI2rtCfg",
     "UnitreeGo1": "embodichain_robots.unitree.go1:UnitreeGo1Cfg",
     "UnitreeGo2": "embodichain_robots.unitree.go2:UnitreeGo2Cfg",
     "UnitreeG1": "embodichain_robots.unitree.g1:UnitreeG1Cfg",
@@ -32,13 +35,46 @@ _CONFIG_CLASSES = {
     "TianjiMarvin": "embodichain_robots.tianji.marvin:TianjiMarvinCfg",
     "DexforceW1": "embodichain_robots.dexforce.w1:DexforceW1Cfg",
     "CobotMagic": "embodichain_robots.agilex.cobotmagic:CobotMagicCfg",
+    "AgilexPiperX": "embodichain_robots.agilex.piper_x:AgilexPiperXCfg",
+    "Franka": "embodichain_robots.franka.cfg:FrankaCfg",
     "FrankaPanda": "embodichain_robots.franka.panda:FrankaPandaCfg",
     "FlexivRizon4S": "embodichain_robots.flexiv.rizon4s:FlexivRizon4SCfg",
     "URRobot": "embodichain_robots.universal_robots.ur_robot:URRobotCfg",
     "SO101Follower": "embodichain_robots.the_robot_studio.so101:SO101FollowerCfg",
+    "BrainCoRevo1": "embodichain_robots.brainco.revo1:BrainCoRevo1Cfg",
+    "SharpaWave": "embodichain_robots.sharpa.wave:SharpaWaveCfg",
+    "WujiHand": "embodichain_robots.wuji.hand:WujiHandCfg",
 }
 
 _DEFAULT_CONTROL_INFO = {
+    "AgibotG2": {
+        "dof": 32,
+        "control_parts": {
+            "torso": 5,
+            "head": 3,
+            "chassis_steering": 4,
+            "chassis_wheels": 4,
+            "left_arm": 7,
+            "right_arm": 7,
+            "left_eef": 8,
+            "right_eef": 8,
+        },
+    },
+    "AgibotG1": {
+        "dof": 20,
+        "control_parts": {
+            "torso": 2,
+            "head": 2,
+            "left_arm": 7,
+            "right_arm": 7,
+            "left_eef": 1,
+            "right_eef": 1,
+        },
+    },
+    "YamI2rt": {
+        "dof": 16,
+        "control_parts": {"right_arm": 6, "left_arm": 6, "right_eef": 2, "left_eef": 2},
+    },
     "UnitreeGo1": {"dof": 12, "control_parts": {"locomotion": 12}},
     "UnitreeGo2": {"dof": 12, "control_parts": {"locomotion": 12}},
     "UnitreeG1": {"dof": 29, "control_parts": {"locomotion": 29}},
@@ -87,16 +123,39 @@ _DEFAULT_CONTROL_INFO = {
             "right_eef": 2,
         },
     },
-    "FrankaPanda": {
-        "dof": 8,
-        "control_parts": {"arm": 7, "eef": 2},
-    },
+    "AgilexPiperX": {"dof": 6, "control_parts": {"arm": 6}},
+    "Franka": {"dof": 7, "control_parts": {"arm": 7}},
+    "FrankaPanda": {"dof": 7, "control_parts": {"arm": 7}},
     "URRobot": {"dof": 6, "control_parts": {"arm": 6}},
     "SO101Follower": {"dof": 6, "control_parts": {"arm": 5, "eef": 1}},
     "FlexivRizon4S": {"dof": 7, "control_parts": {"arm": 7}},
+    "BrainCoRevo1": {"dof": 6, "control_parts": {"eef": 6}},
+    "SharpaWave": {"dof": 22, "control_parts": {"eef": 22}},
+    "WujiHand": {"dof": 20, "control_parts": {"eef": 20}},
 }
 
 _MIMIC_JOINTS = {
+    "AgibotG2": {
+        f"idx{offset+index}_gripper_{side}_{name}": f"idx{offset+1}_gripper_{side}_inner_joint1"
+        for side, offset in (("l", 30), ("r", 70))
+        for index, name in (
+            (2, "inner_joint3"),
+            (3, "inner_joint4"),
+            (9, "inner_joint0"),
+            (11, "outer_joint1"),
+            (12, "outer_joint3"),
+            (13, "outer_joint4"),
+            (19, "outer_joint0"),
+        )
+    },
+    "AgibotG1": {
+        "idx31_gripper_l_inner_joint1": "idx41_gripper_l_outer_joint1",
+        "idx33_gripper_l_inner_joint4": "idx31_gripper_l_inner_joint1",
+        "idx43_gripper_l_outer_joint4": "idx41_gripper_l_outer_joint1",
+        "idx71_gripper_r_inner_joint1": "idx81_gripper_r_outer_joint1",
+        "idx73_gripper_r_inner_joint4": "idx71_gripper_r_inner_joint1",
+        "idx83_gripper_r_outer_joint4": "idx81_gripper_r_outer_joint1",
+    },
     "AlohaMini": {},
     "TianjiMarvin": {
         "LEFT_HAND_FINGER_2": "LEFT_HAND_FINGER_1",
@@ -111,19 +170,30 @@ _MIMIC_JOINTS = {
         "left_joint8": "left_joint7",
         "right_joint8": "right_joint7",
     },
-    "FrankaPanda": {"fr3_finger_joint2": "fr3_finger_joint1"},
+    "Franka": {},
+    "FrankaPanda": {},
     "URRobot": {},
 }
 _CONTROL_PART_MIMICS = {
+    "AgibotG2": {
+        f"{side}_eef": tuple(
+            joint for joint in _MIMIC_JOINTS["AgibotG2"] if f"gripper_{label}_" in joint
+        )
+        for side, label in (("left", "l"), ("right", "r"))
+    },
     "TianjiMarvin": {
         "left_eef": ("LEFT_HAND_FINGER_2",),
         "right_eef": ("RIGHT_HAND_FINGER_2",),
     },
     "CobotMagic": {"left_eef": ("left_joint8",), "right_eef": ("right_joint8",)},
-    "FrankaPanda": {"eef": ("fr3_finger_joint2",)},
+    "Franka": {},
+    "FrankaPanda": {},
 }
 
 _CLASSIFICATION = {
+    "AgibotG2": ("agibot", "wheeled_humanoid", 2),
+    "AgibotG1": ("agibot", "wheeled_humanoid", 2),
+    "YamI2rt": ("i2rt", "fixed_manipulator", 2),
     "UnitreeGo1": ("unitree", "quadruped", 0),
     "UnitreeGo2": ("unitree", "quadruped", 0),
     "UnitreeG1": ("unitree", "bipedal_humanoid", 2),
@@ -135,10 +205,15 @@ _CLASSIFICATION = {
     "TianjiMarvin": ("tianji", "fixed_manipulator", 2),
     "DexforceW1": ("dexforce", "wheeled_humanoid", 2),
     "CobotMagic": ("agilex", "fixed_manipulator", 2),
+    "AgilexPiperX": ("agilex", "fixed_manipulator", 1),
+    "Franka": ("franka", "fixed_manipulator", 1),
     "FrankaPanda": ("franka", "fixed_manipulator", 1),
     "FlexivRizon4S": ("flexiv", "fixed_manipulator", 1),
     "URRobot": ("universal_robots", "fixed_manipulator", 1),
     "SO101Follower": ("the_robot_studio", "fixed_manipulator", 1),
+    "BrainCoRevo1": ("BrainCo", "dexterous_hand", 0),
+    "SharpaWave": ("sharpa", "dexterous_hand", 0),
+    "WujiHand": ("wuji", "dexterous_hand", 0),
 }
 
 ROBOT_CONFIGS = {
@@ -148,7 +223,7 @@ ROBOT_CONFIGS = {
         **_DEFAULT_CONTROL_INFO.get(name, {}),
         "mimic_joints": _MIMIC_JOINTS.get(name, {}),
         "control_part_mimics": _CONTROL_PART_MIMICS.get(name, {}),
-        "supports_dual_arm": name in ("FrankaPanda", "URRobot"),
+        "supports_dual_arm": name in ("Franka", "FrankaPanda", "URRobot"),
     }
     for name, class_path in _CONFIG_CLASSES.items()
 }
@@ -235,6 +310,27 @@ _UR_VARIANTS = {
     for variant in ("ur3", "ur3e", "ur5", "ur5e", "ur10", "ur10e")
 }
 ROBOT_CONFIGS["URRobot"].update(variants=_UR_VARIANTS, default_variant="ur10")
+
+# Native side-specific metadata remains cheap to enumerate without loading cfg.
+_REVO1_VARIANTS = {
+    side: {
+        **_DEFAULT_CONTROL_INFO["BrainCoRevo1"],
+        "defaults": {"side": side},
+        "control_part_mimics": {},
+        "supports_dual_arm": False,
+        "mimic_joints": {
+            f"{side.upper()}_{finger}_PIP": f"{side.upper()}_HAND_{finger}"
+            for finger in ("INDEX", "MIDDLE", "RING", "PINKY")
+        },
+    }
+    for side in ("left", "right")
+}
+ROBOT_CONFIGS["BrainCoRevo1"].update(
+    defaults={"side": "right"},
+    mimic_joints=_REVO1_VARIANTS["right"]["mimic_joints"],
+    variants=_REVO1_VARIANTS,
+    default_variant="right",
+)
 for _variant, _profile in _UR_VARIANTS.items():
     ROBOT_CONFIGS[_variant] = {
         "class_path": _CONFIG_CLASSES["URRobot"],
@@ -242,3 +338,215 @@ for _variant, _profile in _UR_VARIANTS.items():
         **dict(zip(("vendor", "morphology", "arm_count"), _CLASSIFICATION["URRobot"])),
         "variant_of": "URRobot",
     }
+
+
+ROBOT_CONFIGS["Franka"].update(
+    variants={
+        model: {
+            **_DEFAULT_CONTROL_INFO["Franka"],
+            "defaults": {"arm_model": model},
+            "supports_dual_arm": model == "fr3",
+        }
+        for model in ("fr3", "panda")
+    },
+    default_variant="fr3",
+)
+ROBOT_CONFIGS["FrankaPanda"]["variant_of"] = "Franka"
+
+
+ROBOT_CONFIGS["SharpaWave"].update(
+    defaults={"side": "right"},
+    default_variant="right",
+    variants={
+        side: {
+            **_DEFAULT_CONTROL_INFO["SharpaWave"],
+            "defaults": {"side": side},
+            "supports_dual_arm": False,
+        }
+        for side in ("left", "right")
+    },
+)
+
+
+ROBOT_CONFIGS["WujiHand"].update(
+    defaults={"side": "right"},
+    default_variant="right",
+    variants={
+        side: {
+            **_DEFAULT_CONTROL_INFO["WujiHand"],
+            "defaults": {"side": side},
+            "supports_dual_arm": False,
+        }
+        for side in ("left", "right")
+    },
+)
+
+
+# Concrete hand defaults share the existing robot entry-point catalog.
+ROBOT_CONFIGS["FrankaPandaHand"] = {
+    "class_path": "embodichain_robots.franka.hand.cfg:FrankaPandaHandCfg",
+    "description_path": "embodichain_robots.franka.hand._gripper_defaults:get_gripper_defaults",
+    "vendor": "franka",
+    "morphology": "parallel_gripper",
+    "arm_count": 0,
+    "control_parts": {"eef": 2},
+    "supports_dual_arm": False,
+}
+ROBOT_CONFIGS["DHPGI14080"] = {
+    "class_path": "embodichain_robots.dh_robotics.pgi_140_80.cfg:DHPGI14080Cfg",
+    "description_path": "embodichain_robots.dh_robotics.pgi_140_80._gripper_defaults:get_gripper_defaults",
+    "vendor": "dh_robotics",
+    "morphology": "parallel_gripper",
+    "arm_count": 0,
+    "control_parts": {"eef": 2},
+    "supports_dual_arm": False,
+}
+ROBOT_CONFIGS["CobotMagicV100Gripper"] = {
+    "class_path": "embodichain_robots.agilex.cobotmagic.gripper.cfg:CobotMagicV100GripperCfg",
+    "description_path": "embodichain_robots.agilex.cobotmagic.gripper._gripper_defaults:get_gripper_defaults",
+    "vendor": "agilex",
+    "morphology": "parallel_gripper",
+    "arm_count": 0,
+    "control_parts": {"eef": 2},
+    "supports_dual_arm": False,
+}
+ROBOT_CONFIGS["PikaGripper"] = {
+    "class_path": "embodichain_robots.agilex.pika.cfg:PikaGripperCfg",
+    "description_path": "embodichain_robots.agilex.pika._gripper_defaults:get_gripper_defaults",
+    "vendor": "agilex",
+    "morphology": "parallel_gripper",
+    "arm_count": 0,
+    "control_parts": {"eef": 2},
+    "supports_dual_arm": False,
+}
+ROBOT_CONFIGS["TianjiMarvinGripper"] = {
+    "class_path": "embodichain_robots.tianji.marvin.gripper.cfg:TianjiMarvinGripperCfg",
+    "description_path": "embodichain_robots.tianji.marvin.gripper._gripper_defaults:get_gripper_defaults",
+    "vendor": "tianji",
+    "morphology": "parallel_gripper",
+    "arm_count": 0,
+    "control_parts": {"eef": 2},
+    "supports_dual_arm": False,
+    "variants": {
+        "left": {"defaults": {"variant": "left"}},
+        "right": {"defaults": {"variant": "right"}},
+    },
+}
+ROBOT_CONFIGS["RobotiqArg2F85"] = {
+    "class_path": "embodichain_robots.robotiq.arg2f85.cfg:RobotiqArg2F85Cfg",
+    "description_path": "embodichain_robots.robotiq.arg2f85._gripper_defaults:get_gripper_defaults",
+    "vendor": "robotiq",
+    "morphology": "parallel_gripper",
+    "arm_count": 0,
+    "control_parts": {"eef": 6},
+    "supports_dual_arm": False,
+}
+ROBOT_CONFIGS["RobotiqArg2F140"] = {
+    "class_path": "embodichain_robots.robotiq.arg2f140.cfg:RobotiqArg2F140Cfg",
+    "description_path": "embodichain_robots.robotiq.arg2f140._gripper_defaults:get_gripper_defaults",
+    "vendor": "robotiq",
+    "morphology": "parallel_gripper",
+    "arm_count": 0,
+    "control_parts": {"eef": 6},
+    "supports_dual_arm": False,
+}
+
+ROBOT_CONFIGS["DHPGI14080"].update(
+    {
+        "dof": 1,
+        "mimic_joints": {"gripper_finger2_joint_1": "gripper_finger1_joint_1"},
+        "control_part_mimics": {"eef": ["gripper_finger2_joint_1"]},
+        "control_parts": {"eef": 2},
+    }
+)
+
+ROBOT_CONFIGS["TianjiMarvinGripper"]["variants"]["left"].update(
+    {
+        "dof": 1,
+        "mimic_joints": {"LEFT_HAND_FINGER_2": "LEFT_HAND_FINGER_1"},
+        "control_part_mimics": {"eef": ["LEFT_HAND_FINGER_2"]},
+        "control_parts": {"eef": 2},
+    }
+)
+
+ROBOT_CONFIGS["TianjiMarvinGripper"]["variants"]["right"].update(
+    {
+        "dof": 1,
+        "mimic_joints": {"RIGHT_HAND_FINGER_2": "RIGHT_HAND_FINGER_1"},
+        "control_part_mimics": {"eef": ["RIGHT_HAND_FINGER_2"]},
+        "control_parts": {"eef": 2},
+    }
+)
+
+ROBOT_CONFIGS["CobotMagicV100Gripper"].update(
+    {
+        "dof": 1,
+        "mimic_joints": {"joint8": "joint7"},
+        "control_part_mimics": {"eef": ["joint8"]},
+        "control_parts": {"eef": 2},
+    }
+)
+
+ROBOT_CONFIGS["PikaGripper"].update(
+    {
+        "dof": 1,
+        "mimic_joints": {"FINGER2_JOINT": "FINGER1_JOINT"},
+        "control_part_mimics": {"eef": ["FINGER2_JOINT"]},
+        "control_parts": {"eef": 2},
+    }
+)
+
+ROBOT_CONFIGS["FrankaPandaHand"].update(
+    {
+        "dof": 1,
+        "mimic_joints": {"fr3_finger_joint2": "fr3_finger_joint1"},
+        "control_part_mimics": {"eef": ["fr3_finger_joint2"]},
+        "control_parts": {"eef": 2},
+    }
+)
+
+ROBOT_CONFIGS["RobotiqArg2F140"].update(
+    {
+        "dof": 1,
+        "mimic_joints": {
+            "left_inner_knuckle_joint": "finger_joint",
+            "left_inner_finger_joint": "finger_joint",
+            "right_outer_knuckle_joint": "finger_joint",
+            "right_inner_knuckle_joint": "finger_joint",
+            "right_inner_finger_joint": "finger_joint",
+        },
+        "control_part_mimics": {
+            "eef": [
+                "left_inner_knuckle_joint",
+                "left_inner_finger_joint",
+                "right_outer_knuckle_joint",
+                "right_inner_knuckle_joint",
+                "right_inner_finger_joint",
+            ]
+        },
+        "control_parts": {"eef": 6},
+    }
+)
+
+ROBOT_CONFIGS["RobotiqArg2F85"].update(
+    {
+        "dof": 1,
+        "mimic_joints": {
+            "left_inner_knuckle_joint": "finger_joint",
+            "left_inner_finger_joint": "finger_joint",
+            "right_outer_knuckle_joint": "finger_joint",
+            "right_inner_knuckle_joint": "finger_joint",
+            "right_inner_finger_joint": "finger_joint",
+        },
+        "control_part_mimics": {
+            "eef": [
+                "left_inner_knuckle_joint",
+                "left_inner_finger_joint",
+                "right_outer_knuckle_joint",
+                "right_inner_knuckle_joint",
+                "right_inner_finger_joint",
+            ]
+        },
+        "control_parts": {"eef": 6},
+    }
+)

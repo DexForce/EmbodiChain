@@ -5,11 +5,14 @@ This import package shares the repository, version, dependencies, and wheel
 with the core and `embodichain_tasks`; it has no independent release metadata.
 
 ```python
-from embodichain_robots import FrankaPandaCfg
+from embodichain_robots import FrankaCfg
 
-cfg = FrankaPandaCfg.from_dict({"robot_type": "panda"})
+cfg = FrankaCfg.from_dict({"arm_model": "panda"})
 robot = sim.add_robot(cfg=cfg)
 ```
+
+Franka presets contain only seven arm joints. Native-hand and external-tool
+assemblies use explicit embodiment components and generic RobotCfg overrides.
 
 The package owns concrete robot defaults, hardware revisions, calibrated
 transforms, and robot-specific kinematic-chain construction. Generic runtime

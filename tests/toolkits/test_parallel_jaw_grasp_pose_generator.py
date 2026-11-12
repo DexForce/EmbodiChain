@@ -18,9 +18,16 @@
 
 from __future__ import annotations
 
+
 import ast
+import gc
+import importlib
 from pathlib import Path
+import subprocess
+import sys
 from typing import Any, ClassVar
+from unittest.mock import Mock
+import weakref
 
 import pytest
 import torch
@@ -29,20 +36,70 @@ from embodichain.toolkits.graspkit import pg_grasp
 from embodichain.toolkits.graspkit import (
     GraspPoseGenerator,
     ParallelJawGraspPoseGenerator,
-    ParallelJawGripperModelCfg,
-    get_parallel_jaw_gripper_model,
 )
 from embodichain.toolkits.graspkit.pg_grasp import (
     AntipodalGraspPoseGenerator,
     AntipodalGraspPoseGeneratorCfg,
     AntipodalSamplerCfg,
     GraspAnnotationCfg,
+    FixedGripperCollisionGeometry,
     ParallelJawGraspCollisionCfg,
 )
 from embodichain.toolkits.graspkit.pg_grasp._antipodal_backend import (
     _AntipodalMeshBackend,
 )
 from embodichain.toolkits.graspkit.pg_grasp import pose_generator as module
+
+
+def test_public_facade_preserves_canonical_export_identity() -> None:
+    # These are the original star-import owners, including explicit-import names
+    # outside the narrower package __all__ contract.
+    for name in (
+        "embodichain.toolkits.graspkit.pose_generator",
+        "embodichain.toolkits.graspkit.pg_grasp.antipodal_sampler",
+        "embodichain.toolkits.graspkit.pg_grasp.collision_checker",
+        "embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker",
+        "embodichain.toolkits.graspkit.pg_grasp.fixed_geometry",
+        "embodichain.toolkits.graspkit.pg_grasp.pose_generator",
+    ):
+        owner = importlib.import_module(name)
+        for exported in owner.__all__:
+            assert getattr(pg_grasp, exported) is getattr(owner, exported)
+    with pytest.raises(AttributeError, match="has no attribute"):
+        getattr(pg_grasp, "unknown_grasp_backend")
+
+
+def test_numeric_grasp_entries_do_not_import_runtime_backends() -> None:
+    code = """
+import importlib
+import importlib.abc
+import sys
+class BlockRuntime(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        forbidden = (
+            'embodichain.lab', 'embodichain.gen_sim', 'embodichain_robots',
+            'embodichain_tasks', 'dexsim', 'fcl',
+            'embodichain.toolkits.graspkit.pg_grasp._antipodal_backend',
+            'embodichain.toolkits.graspkit.pg_grasp.collision_checker',
+        )
+        if any(fullname == p or fullname.startswith(p + '.') for p in forbidden):
+            raise AssertionError('Unexpected runtime import: ' + fullname)
+sys.meta_path.insert(0, BlockRuntime())
+for suffix in (
+    'hand_envelope', 'pg_grasp.constraints', 'pg_grasp.opening',
+    'pg_grasp.contact_fit', 'pg_grasp.preshape', 'pg_grasp.proposals',
+):
+    module = importlib.import_module('embodichain.toolkits.graspkit.' + suffix)
+    for exported in module.__all__:
+        getattr(module, exported)
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
 
 
 class _Backend:
@@ -112,14 +169,11 @@ def _generator(
     *, force_refresh: bool = False, alignment_angle: float | None = None
 ) -> AntipodalGraspPoseGenerator:
     return AntipodalGraspPoseGenerator(
-        ParallelJawGripperModelCfg(
-            model_id="concrete_test_eef",
-            min_opening_width=0.004,
-            max_opening_width=0.12,
-            finger_length=0.09,
-            finger_width=0.025,
-            finger_thickness=0.008,
-            palm_depth=0.07,
+        model_id="concrete_test_eef",
+        min_opening_width=0.004,
+        max_opening_width=0.12,
+        collision_geometry=FixedGripperCollisionGeometry(
+            torch.zeros((1, 3)), {"grasp_from_tcp": torch.eye(4).tolist()}
         ),
         algorithm_cfg=AntipodalGraspPoseGeneratorCfg(
             sample_count=321,
@@ -127,9 +181,7 @@ def _generator(
             approach_alignment_angle=alignment_angle,
         ),
         collision_cfg=ParallelJawGraspCollisionCfg(
-            point_sample_density=0.02,
             max_decomposition_hulls=5,
-            opening_margin=0.003,
             filter_ground_collision=False,
         ),
         annotation_cfg=GraspAnnotationCfg(force_refresh=force_refresh),
@@ -141,60 +193,9 @@ def test_generic_hierarchy_contains_no_concrete_eef_name() -> None:
 
     assert isinstance(generator, GraspPoseGenerator)
     assert isinstance(generator, ParallelJawGraspPoseGenerator)
-    assert generator.gripper_model.model_id == "concrete_test_eef"
+    assert generator.gripper_data["model_id"] == "concrete_test_eef"
     assert "pgi" not in type(generator).__name__.lower()
-    assert "pgi" not in type(generator.gripper_model).__name__.lower()
-
-
-@pytest.mark.parametrize(
-    ("model_id", "expected"),
-    [
-        ("dh_pgi_140_80", (0.005, 0.1, 0.12, 0.04, 0.01, 0.096)),
-        # Versioned URDF limits and collision-mesh extents;
-        # see graspkit/README.md for the source hashes and axis mapping.
-        ("franka_panda_hand", (0.001, 0.08, 0.054, 0.022, 0.027, 0.092)),
-        ("cobotmagic_v100_gripper", (0.001, 0.1, 0.077, 0.056, 0.025, 0.074)),
-        ("tianji_marvin_gripper", (0.001, 0.095, 0.103, 0.043, 0.034, 0.082)),
-        ("pika_gripper", (0.001, 0.094, 0.113, 0.039, 0.057, 0.085)),
-    ],
-)
-def test_named_gripper_model_returns_reviewed_geometry(
-    model_id: str, expected: tuple[float, ...]
-) -> None:
-    model = get_parallel_jaw_gripper_model(model_id)
-
-    assert model.model_id == model_id
-    assert (
-        model.min_opening_width,
-        model.max_opening_width,
-        model.finger_length,
-        model.finger_width,
-        model.finger_thickness,
-        model.palm_depth,
-    ) == pytest.approx(expected)
-
-
-@pytest.mark.parametrize(
-    "model_id",
-    [
-        "dh_pgi_140_80",
-        "franka_panda_hand",
-        "cobotmagic_v100_gripper",
-        "tianji_marvin_gripper",
-        "pika_gripper",
-    ],
-)
-def test_named_gripper_model_returns_independent_configs(model_id: str) -> None:
-    first = get_parallel_jaw_gripper_model(model_id)
-    second = get_parallel_jaw_gripper_model(model_id)
-    expected = second.to_dict()
-
-    first.palm_depth = 1.0
-    first.max_opening_width = 2.0
-
-    assert first is not second
-    assert second.to_dict() == expected
-    assert get_parallel_jaw_gripper_model(model_id).to_dict() == expected
+    assert "pgi" not in type(generator.gripper_data).__name__.lower()
 
 
 @pytest.mark.parametrize(
@@ -203,37 +204,32 @@ def test_named_gripper_model_returns_independent_configs(model_id: str) -> None:
         ("min_opening_width", -0.001, ValueError),
         ("min_opening_width", 0.08, ValueError),
         ("max_opening_width", float("nan"), ValueError),
-        ("finger_length", float("inf"), ValueError),
-        ("finger_width", 0.0, ValueError),
-        ("finger_thickness", True, TypeError),
-        ("palm_depth", -0.01, ValueError),
     ],
 )
-def test_named_geometry_rejects_invalid_calibration(
+def test_generator_rejects_invalid_opening_bounds(
     field: str, value: float | bool, error: type[Exception]
 ) -> None:
-    values = get_parallel_jaw_gripper_model("franka_panda_hand").to_dict()
-    values[field] = value
-
+    data = {"model_id": "test", "min_opening_width": 0.001, "max_opening_width": 0.08}
+    data[field] = value
     with pytest.raises(error, match=field):
-        ParallelJawGripperModelCfg(**values)
-
-
-def test_named_gripper_model_rejects_unknown_ids() -> None:
-    with pytest.raises(ValueError, match="unknown.*available.*dh_pgi_140_80"):
-        get_parallel_jaw_gripper_model("missing_gripper")
+        AntipodalGraspPoseGenerator(
+            **data,
+            collision_geometry=FixedGripperCollisionGeometry(
+                torch.zeros(1, 3), {"grasp_from_tcp": torch.eye(4).tolist()}
+            ),
+        )
 
 
 def test_package_exposes_only_the_unified_generator_api() -> None:
     assert "AntipodalGraspPoseGenerator" in pg_grasp.__all__
     assert "GraspPoseGenerator" in pg_grasp.__all__
-    assert "ParallelJawGripperModelCfg" in pg_grasp.__all__
+    assert "ParallelJawGripperModelCfg" not in pg_grasp.__all__
     assert "GraspGenerator" not in pg_grasp.__all__
     assert "GraspGeneratorCfg" not in pg_grasp.__all__
 
 
 def test_graspkit_does_not_import_lab() -> None:
-    """The standalone toolkit must not import EmbodiChain's lab layer."""
+    """The standalone toolkit must not import runtime or generated-task layers."""
     graspkit_root = (
         Path(__file__).resolve().parents[2] / "embodichain" / "toolkits" / "graspkit"
     )
@@ -250,8 +246,10 @@ def test_graspkit_does_not_import_lab() -> None:
             forbidden_imports.extend(
                 f"{source_path.relative_to(graspkit_root)}:{module_name}"
                 for module_name in module_names
-                if module_name == "embodichain.lab"
-                or module_name.startswith("embodichain.lab.")
+                if any(
+                    module_name == prefix or module_name.startswith(prefix + ".")
+                    for prefix in ("embodichain.lab", "embodichain.gen_sim")
+                )
             )
 
     assert forbidden_imports == []
@@ -357,8 +355,10 @@ def test_direct_best_grasp_configures_and_reuses_private_mesh_backend(
     assert configured.options["max_candidates"] == 7
     assert configured.options["approach_alignment_angle"] == alignment_angle
     assert configured.options["filter_ground_collision"] is False
-    assert collision_cfg.finger_length == 0.09
-    assert collision_cfg.open_check_margin == 0.003
+    assert collision_cfg.max_decomposition_hulls == 5
+    assert isinstance(
+        configured.options["collision_geometry"], FixedGripperCollisionGeometry
+    )
     assert torch.allclose(
         torch.stack(configured.best_directions[:2]),
         torch.tensor([[0.0, 0.0, -1.0], [0.0, -1.0, 0.0]]),
@@ -385,12 +385,16 @@ def test_failed_candidates_receive_infinite_cost_and_refresh_is_service_owned(
     assert backend.instances[0].annotate_calls == 1
 
 
-def test_rejects_collision_margin_outside_gripper_opening() -> None:
-    with pytest.raises(ValueError, match="opening_margin"):
+def test_rejects_missing_collision_geometry_instead_of_using_a_box() -> None:
+    with pytest.raises(TypeError, match="collision_geometry"):
         AntipodalGraspPoseGenerator(
-            ParallelJawGripperModelCfg(max_opening_width=0.05),
-            collision_cfg=ParallelJawGraspCollisionCfg(opening_margin=0.05),
+            model_id="parallel_jaw",
+            min_opening_width=0.001,
+            max_opening_width=0.1,
+            collision_geometry=None,
         )
+    with pytest.raises(TypeError, match="finger_length"):
+        AntipodalGraspPoseGenerator(finger_length=0.05)
 
 
 def test_backend_cache_key_includes_sampling_and_annotation_policy() -> None:
@@ -431,3 +435,200 @@ def test_backend_cache_key_includes_sampling_and_annotation_policy() -> None:
 def test_hard_approach_angle_rejects_non_angle_values(angle) -> None:
     with pytest.raises((TypeError, ValueError), match="approach_alignment_angle"):
         AntipodalGraspPoseGeneratorCfg(approach_alignment_angle=angle)
+
+
+def test_box_side_region_projects_hint_onto_opposed_faces_without_oracle() -> None:
+    from dataclasses import replace
+    import numpy as np
+    import pytest
+    from scipy.spatial.transform import Rotation
+    from embodichain.toolkits.graspkit.box_region import (
+        BoxSideGraspRegionCfg,
+        project_box_side_grasp,
+    )
+
+    hint = np.eye(4)
+    canonical = np.array([[0.0, -1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, -1.0]])
+    hint[:3, :3] = Rotation.from_euler("z", 12, degrees=True).as_matrix() @ canonical
+    hint[:3, 3] = [0.06, 0.004, 0.008]
+    before = hint.copy()
+    cfg = BoxSideGraspRegionCfg(grasp_height_m=-0.005)
+    result = project_box_side_grasp(hint, np.array([0.10, 0.05, 0.04]), cfg)
+    np.testing.assert_allclose(result[:3, 3], [0.04, 0.0, -0.005], atol=1e-12)
+    np.testing.assert_allclose(result[:3, :3], canonical, atol=1e-12)
+    np.testing.assert_array_equal(hint, before)
+    with pytest.raises(ValueError, match="empty or outside"):
+        project_box_side_grasp(
+            hint, np.array([0.10, 0.05, 0.04]), replace(cfg, grasp_height_m=0.03)
+        )
+    with pytest.raises(ValueError, match="dimensions"):
+        project_box_side_grasp(hint, np.array([0.10, -0.05, 0.04]), cfg)
+
+
+@pytest.mark.parametrize("checked_first", [False, True])
+@pytest.mark.parametrize("force_refresh", [False, True])
+def test_explicit_proposals_skip_fixed_checker_and_keep_validated_queries_isolated(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    checked_first: bool,
+    force_refresh: bool,
+) -> None:
+    from embodichain.toolkits.graspkit.pg_grasp import (
+        _antipodal_backend as implementation,
+    )
+
+    constructions = []
+    annotation_count = 0
+
+    class RejectAll:
+        def __init__(self, **kwargs):
+            constructions.append(kwargs)
+
+        def query(self, obj_pose, poses, **kwargs):
+            return torch.ones(len(poses), dtype=torch.bool), torch.zeros(len(poses))
+
+    def annotate(backend):
+        nonlocal annotation_count
+        annotation_count += 1
+        # Two independent 60 mm antipodal pairs on opposite object sides.
+        backend._hit_point_pairs = torch.tensor(
+            [
+                [[0.0, -0.03, 0.0], [0.0, 0.03, 0.0]],
+                [[0.05, -0.03, 0.0], [0.05, 0.03, 0.0]],
+            ]
+        )
+        return backend._hit_point_pairs
+
+    monkeypatch.setattr(implementation, "GripperCollisionChecker", RejectAll)
+    monkeypatch.setattr(
+        _AntipodalMeshBackend,
+        "_get_cache_dir",
+        lambda *args: str(tmp_path / "unprepared.npy"),
+    )
+    monkeypatch.setattr(_AntipodalMeshBackend, "annotate", annotate)
+    generator = _generator(force_refresh=force_refresh)
+    vertices, triangles = _geometry()
+    query = dict(
+        mesh_vertices=vertices,
+        mesh_triangles=triangles,
+        obj_poses=torch.eye(4)[None],
+        left_to_right_arm_direction=torch.tensor([1.0, 0, 0]),
+        approach_direction=torch.tensor([0.0, 0, -1]),
+    )
+    with torch.random.fork_rng(devices=[]):
+        if checked_first:
+            generator.get_dual_arm_valid_grasp_poses(**query)
+        torch.manual_seed(741)
+        raw = generator.get_dual_arm_grasp_proposals(**query)[0]
+        rng = torch.random.get_rng_state().clone()
+        assert len(constructions) == int(checked_first)
+        assert all(item["is_success"] for item in raw.values())
+        checked = generator.get_dual_arm_valid_grasp_poses(**query)[0]
+        assert len(constructions) == 1
+        assert all(not item["is_success"] for item in checked.values())
+        torch.manual_seed(741)
+        replay = generator.get_dual_arm_grasp_proposals(**query)[0]
+        assert len(constructions) == 1
+        assert torch.equal(torch.random.get_rng_state(), rng)
+        for side in ("left", "right"):
+            torch.manual_seed(741)
+            selected = generator.get_dual_arm_grasp_proposals(**query, role=side)[0]
+            assert set(selected) == {side}
+            assert torch.equal(torch.random.get_rng_state(), rng)
+            for key in ("grasp_poses", "open_lengths", "total_cost"):
+                torch.testing.assert_close(
+                    selected[side][key], raw[side][key], rtol=0, atol=0
+                )
+    for role in ("left", "right"):
+        torch.testing.assert_close(
+            raw[role]["open_lengths"], torch.full_like(raw[role]["open_lengths"], 0.06)
+        )
+        for key in ("grasp_poses", "open_lengths", "total_cost"):
+            torch.testing.assert_close(
+                raw[role][key], replay[role][key], atol=0, rtol=0
+            )
+    assert annotation_count == 1
+    checked_backend = next(iter(generator._backends.values()))
+    raw_backend = next(iter(generator._proposal_backends.values()))
+    assert checked_backend is not raw_backend
+    assert checked_backend.mesh is raw_backend.mesh
+    assert checked_backend._hit_point_pairs is raw_backend._hit_point_pairs
+    old_backends = [weakref.ref(checked_backend), weakref.ref(raw_backend)]
+    del checked_backend, raw_backend
+
+    # Replacing tensor storage also changes shape; logical mesh identity retires
+    # every old mode's backend, not just the mode queried after the mutation.
+    vertices.set_(torch.cat((vertices, vertices.new_zeros((1, 3)))))
+    generator.get_dual_arm_grasp_proposals(**query)
+    gc.collect()
+    assert all(reference() is None for reference in old_backends)
+    assert annotation_count == 2
+    assert len(generator._proposal_backends) == 1 and not generator._backends
+    generator.clear_cache()
+    assert not generator._backends and not generator._proposal_backends
+    generator.get_dual_arm_grasp_proposals(**query)
+    assert annotation_count == 3
+
+
+@pytest.mark.parametrize("missing_side", [None, "left", "right"])
+def test_role_proposals_preserve_seeded_population_and_rng_with_partial_rows(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, missing_side: str | None
+) -> None:
+    from embodichain.toolkits.graspkit.pg_grasp import (
+        _antipodal_backend as implementation,
+    )
+
+    pairs = torch.tensor(
+        [
+            [[0.0, -0.03, 0.0], [0.0, 0.03, 0.0]],
+            [[0.05, -0.03, 0.0], [0.05, 0.03, 0.0]],
+        ]
+    )
+    if missing_side == "left":
+        pairs = pairs[1:]
+    elif missing_side == "right":
+        pairs = pairs[:1]
+
+    def annotate(instance):
+        instance._hit_point_pairs = pairs
+        return pairs
+
+    monkeypatch.setattr(_AntipodalMeshBackend, "annotate", annotate)
+    monkeypatch.setattr(
+        _AntipodalMeshBackend,
+        "_get_cache_dir",
+        lambda *args: str(tmp_path / "absent.npy"),
+    )
+    nms = Mock(wraps=implementation.pose_nms)
+    monkeypatch.setattr(implementation, "pose_nms", nms)
+    generator = _generator()
+    vertices, faces = _geometry()
+    query = dict(
+        mesh_vertices=vertices,
+        mesh_triangles=faces,
+        obj_poses=torch.eye(4).repeat(2, 1, 1),
+        left_to_right_arm_direction=torch.tensor([1.0, 0, 0]),
+        # The second row has no eligible grasp: it must consume no direction
+        # draws for either side and must retain the original failure sentinel.
+        approach_direction=torch.tensor([[0.0, 0, -1], [0.0, 1, 0]]),
+    )
+    with torch.random.fork_rng(devices=[]):
+        for seed in (0, 1):
+            torch.manual_seed(seed)
+            full = generator.get_dual_arm_grasp_proposals(**query)
+            expected_rng = torch.random.get_rng_state()
+            for side in ("left", "right"):
+                torch.manual_seed(seed)
+                nms.reset_mock()
+                selected = generator.get_dual_arm_grasp_proposals(**query, role=side)
+                assert nms.call_count == int(side != missing_side)
+                assert torch.equal(torch.random.get_rng_state(), expected_rng)
+                for got, expected in zip(selected, full, strict=True):
+                    assert set(got) == {side}
+                    assert got[side]["is_success"] == expected[side]["is_success"]
+                    for field in ("grasp_poses", "open_lengths", "total_cost"):
+                        torch.testing.assert_close(
+                            got[side][field], expected[side][field], rtol=0, atol=0
+                        )
+    with pytest.raises(ValueError, match="role"):
+        generator.get_dual_arm_grasp_proposals(**query, role="both")

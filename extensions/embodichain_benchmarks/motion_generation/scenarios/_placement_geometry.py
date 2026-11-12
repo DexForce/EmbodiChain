@@ -41,24 +41,37 @@ __all__ = [
 TABLE_TOP_Z = 0.65
 PAN_TARGET_CENTER_XY = (-0.06, 0.0)
 PAN_TARGET_Z_LIFT = 0.06
-BREAD_PLACE_TARGET_OFFSET_XY = (-0.06, -0.16)
 BREAD_ON_PAN_CLEARANCE = 0.006
-PAN_HANDLE_LOCAL_Z_MIN = 0.04
-PAN_BASIN_LOCAL_Z_MAX = 0.04
+# The authored Z-up pan has its basin at negative Y and handle at positive Y.
+PAN_HANDLE_LOCAL_Y_MIN = 0.06
+PAN_BASIN_LOCAL_Y_MAX = 0.04
 PAN_HANDLE_ROOT_OFFSET = 0.035
 BREAD_TARGET_WORLD_YAW_DEG = 0.0
 
 
-def get_pan_basin_vertices(pan_vertices: torch.Tensor) -> torch.Tensor:
+def _pan_handle_axis(pan_frame: str) -> int:
+    if pan_frame == "authored_z_up":
+        return 1
+    if pan_frame == "native_glb":
+        return 2
+    raise ValueError(f"Unsupported pan mesh frame: {pan_frame!r}.")
+
+
+def get_pan_basin_vertices(
+    pan_vertices: torch.Tensor, *, pan_frame: str = "authored_z_up"
+) -> torch.Tensor:
     """Select basin vertices, falling back to the full mesh for an empty mask.
 
     Args:
         pan_vertices: Local pan mesh vertices with shape ``(N, 3)``.
+        pan_frame: ``authored_z_up`` for the example's OBJ, or ``native_glb``
+            for the benchmark GLB loader's Y-up frame.
 
     Returns:
-        Vertices whose local z is within the configured basin height.
+        Vertices on the basin side of the handle attachment.
     """
-    basin_vertices = pan_vertices[pan_vertices[:, 2] <= PAN_BASIN_LOCAL_Z_MAX]
+    axis = _pan_handle_axis(pan_frame)
+    basin_vertices = pan_vertices[pan_vertices[:, axis] <= PAN_BASIN_LOCAL_Y_MAX]
     if basin_vertices.numel() == 0:
         logger.log_warning("Pan basin vertex mask is empty; falling back to full mesh.")
         return pan_vertices
@@ -78,15 +91,16 @@ def build_top_down_tcp_pose(
         A float32 TCP transform with shape ``(4, 4)``.
     """
     pose = torch.eye(4, dtype=torch.float32, device=device)
-    pose[:3, :3] = torch.tensor(
-        [
-            [-0.0539, -0.9985, -0.0022],
-            [-0.9977, 0.0540, -0.0401],
-            [0.0401, 0.0000, -0.9992],
-        ],
-        dtype=torch.float32,
-        device=device,
-    )
+    # The calibration was recorded to four decimal places. Reconstruct a
+    # right-handed orthonormal frame before passing it to strict IK solvers;
+    # the rounded matrix itself is not an element of SO(3).
+    z_axis = torch.tensor([-0.0022, -0.0401, -0.9992], device=device)
+    z_axis = z_axis / torch.linalg.vector_norm(z_axis)
+    y_hint = torch.tensor([-0.9985, 0.0540, 0.0], device=device)
+    x_axis = torch.cross(y_hint, z_axis, dim=0)
+    x_axis = x_axis / torch.linalg.vector_norm(x_axis)
+    y_axis = torch.cross(z_axis, x_axis, dim=0)
+    pose[:3, :3] = torch.stack((x_axis, y_axis, z_axis), dim=-1)
     pose[:3, 3] = position
     return pose
 
@@ -131,6 +145,7 @@ def build_pan_handle_grasp_pose(
     device: torch.device,
     *,
     z_clearance: float = 0.006,
+    pan_frame: str = "authored_z_up",
 ) -> torch.Tensor:
     """Build a downward-facing grasp displaced toward the pan handle root.
 
@@ -139,11 +154,15 @@ def build_pan_handle_grasp_pose(
         pan_vertices: Local pan mesh vertices with shape ``(N, 3)``.
         device: Device for the output transform.
         z_clearance: TCP clearance above the handle in metres.
+        pan_frame: Authored OBJ or native GLB mesh frame, as in
+            :func:`get_pan_basin_vertices`.
 
     Returns:
         A world TCP transform with shape ``(4, 4)``.
     """
-    handle_vertices = pan_vertices[pan_vertices[:, 2] > PAN_HANDLE_LOCAL_Z_MIN]
+    axis = _pan_handle_axis(pan_frame)
+    threshold = PAN_HANDLE_LOCAL_Y_MIN if axis == 1 else 0.04
+    handle_vertices = pan_vertices[pan_vertices[:, axis] >= threshold]
     if handle_vertices.numel() == 0:
         logger.log_warning(
             "Pan handle vertex mask is empty; falling back to full mesh."
@@ -214,6 +233,9 @@ def build_placing_object_target_pose(
     pan_vertices: torch.Tensor,
     support_target_pose: torch.Tensor,
     device: torch.device,
+    *,
+    pan_triangles: torch.Tensor | None = None,
+    pan_frame: str = "authored_z_up",
 ) -> torch.Tensor:
     """Align the placing object over the pan basin with bottom clearance.
 
@@ -223,6 +245,11 @@ def build_placing_object_target_pose(
         pan_vertices: Local support mesh vertices with shape ``(M, 3)``.
         support_target_pose: World support target with shape ``(4, 4)``.
         device: Device for the output transform.
+        pan_triangles: Optional mesh topology. When provided, intersect the
+            basin-center vertical ray with the actual inner support surface;
+            a bounds-only support uses its upper bound.
+        pan_frame: Authored OBJ or native GLB mesh frame, as in
+            :func:`get_pan_basin_vertices`.
 
     Returns:
         A copied placing-object target with the shared basin-clearance policy.
@@ -232,15 +259,39 @@ def build_placing_object_target_pose(
         BREAD_TARGET_WORLD_YAW_DEG,
     )
     pan_basin_world = transform_points(
-        support_target_pose, get_pan_basin_vertices(pan_vertices)
+        support_target_pose, get_pan_basin_vertices(pan_vertices, pan_frame=pan_frame)
     )
     basin_center_xy = 0.5 * (
         pan_basin_world[:, :2].min(dim=0).values
         + pan_basin_world[:, :2].max(dim=0).values
     )
-    pose[0, 3] = basin_center_xy[0] + BREAD_PLACE_TARGET_OFFSET_XY[0]
-    pose[1, 3] = basin_center_xy[1] + BREAD_PLACE_TARGET_OFFSET_XY[1]
-    pan_top_z = pan_basin_world[:, 2].max()
+    # Align mesh footprints, not object origins or historical world offsets.
+    # Asset origins need not coincide with the placing object's geometric center.
+    bread_min, bread_max = compute_world_bounds(pose, bread_vertices)
+    bread_center_xy = 0.5 * (bread_min[:2] + bread_max[:2])
+    pose[:2, 3] += basin_center_xy - bread_center_xy
+    if pan_triangles is None:
+        pan_top_z = pan_basin_world[:, 2].max()
+    else:
+        # A tray's rim is not its resting surface. The uppermost triangle under
+        # the basin center identifies the interior floor, including floor thickness.
+        world_vertices = transform_points(support_target_pose, pan_vertices)
+        triangles = world_vertices[pan_triangles.to(device=device, dtype=torch.long)]
+        a, b, c = triangles.unbind(dim=1)
+        edge_b, edge_c = b[:, :2] - a[:, :2], c[:, :2] - a[:, :2]
+        delta = basin_center_xy - a[:, :2]
+        determinant = edge_b[:, 0] * edge_c[:, 1] - edge_b[:, 1] * edge_c[:, 0]
+        nondegenerate = determinant.abs() > 1e-10
+        denominator = torch.where(
+            nondegenerate, determinant, torch.ones_like(determinant)
+        )
+        u = (delta[:, 0] * edge_c[:, 1] - delta[:, 1] * edge_c[:, 0]) / denominator
+        v = (edge_b[:, 0] * delta[:, 1] - edge_b[:, 1] * delta[:, 0]) / denominator
+        inside = nondegenerate & (u >= -1e-6) & (v >= -1e-6) & (u + v <= 1.0 + 1e-6)
+        if not bool(inside.any()):
+            raise ValueError("Pan basin center has no supporting mesh surface.")
+        heights = a[:, 2] + u * (b[:, 2] - a[:, 2]) + v * (c[:, 2] - a[:, 2])
+        pan_top_z = heights[inside].max()
     bread_bottom_z = compute_world_bounds(pose, bread_vertices)[0][2]
     pose[2, 3] += pan_top_z + BREAD_ON_PAN_CLEARANCE - bread_bottom_z
     return pose

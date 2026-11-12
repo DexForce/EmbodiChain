@@ -56,13 +56,13 @@ flowchart TD
 
 | 层 | 所有者 | 职责 |
 |---|---|---|
-| 资产 | `gen_sim/simready_pipeline` | 资产 ingest、几何、物理和语义元数据 |
+| 资产 | `gen_sim/asset_engine` | 资产 ingest、几何、物理和语义元数据 |
 | 场景 | `gen_sim/scene_engine` | 图片理解、资产生成、布局编辑、settling、场景导出和 USD 交付 |
 | 任务语言 | `lab/task_program/language` | Task Program schema、decoder、loader 和输入边界 |
 | 任务语义 | `lab/task_program/semantics` | Semantic Call、scene/profile/effect/evidence contract |
 | 编译 | `lab/task_program/compiler` | AST 展开、Semantic Call 分析和 Atomic Skill lowering |
 | 执行 | `lab/task_program/runtime` | 顺序/并行执行、状态、重试、effect verification 和运行结果 |
-| 物理动作 | `lab/sim/atomic_actions` | Pick、Place、HandOver 等 Atomic Skills |
+| 物理动作 | `lab/sim/atomic_skills` | Pick、Place、HandOver 等 Atomic Skills |
 | 运动 | `lab/sim/motion`、`compute/trajectory` | IK、轨迹生成、插值、重定时、碰撞规划和轨迹变体 |
 | 环境 | `lab/gym` | reset、step、观测、奖励、终止、demo、记录和数据生命周期 |
 | 扩增 | `lab/sim/motion/expansion` | candidates、operators、coverage、budget、session 和 receipt |

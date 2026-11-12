@@ -137,6 +137,7 @@ def test_release_tag_preserves_distribution_build() -> None:
 def test_dataset_tools_can_still_run_manually() -> None:
     assert _eligible_jobs("dataset-tooling.yml", "workflow_dispatch") == {
         "offline-tools",
+        "lerobot-sdk",
         "lerobot-export",
     }
 
@@ -293,6 +294,7 @@ def test_test_job_restores_git_access_before_running_selected_tests(
         GIT_CONFIG_NOSYSTEM="1",
         GITHUB_WORKSPACE=str(repository),
         CI_NODE_BIN_DIR="",
+        XDG_RUNTIME_DIR=str(tmp_path / "xdg-runtime"),
     )
     for args in (
         ["init", "-q"],
@@ -336,6 +338,50 @@ def test_test_job_restores_git_access_before_running_selected_tests(
         ).strip()
         == revision
     )
+
+
+def test_gpu_test_job_prepares_headless_sdl_runtime() -> None:
+    job = _load_workflow("main.yml")["jobs"]["test"]
+    assert job["env"]["SDL_VIDEODRIVER"] == "dummy"
+    assert job["env"]["XDG_RUNTIME_DIR"] == "/tmp/embodichain-ci-runtime"
+    selected = next(
+        step for step in job["steps"] if step.get("name") == "Run selected tests"
+    )
+    assert 'install -d -m 0700 "$XDG_RUNTIME_DIR"' in selected["run"]
+
+
+@pytest.mark.parametrize("test_result", ["success", "failure"])
+def test_metrics_upload_is_optional_but_test_failures_still_block(
+    test_result: str,
+) -> None:
+    jobs = _load_workflow("main.yml")["jobs"]
+    steps = jobs["test"]["steps"]
+    upload = next(
+        step for step in steps if step.get("name") == "Upload test phase metrics"
+    )
+    assert upload["if"] == "always()"
+    assert upload["continue-on-error"] == "true"
+    selected = next(step for step in steps if step.get("name") == "Run selected tests")
+    assert selected.get("continue-on-error", "false") == "false"
+    assert jobs["test"].get("continue-on-error", "false") == "false"
+    gate = jobs["test_gate"]["steps"][0]
+    assert gate["env"]["TEST_RESULT"] == "${{ needs.test.result }}"
+    result = subprocess.run(
+        ["bash", "-c", gate["run"]],
+        env={
+            **os.environ,
+            "LINT_RESULT": "success",
+            "PLAN_RESULT": "success",
+            "DOCS_RESULT": "success",
+            "DOCS_NEEDED": "true",
+            "TESTS_NEEDED": "true",
+            "TEST_RESULT": test_result,
+        },
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == (0 if test_result == "success" else 1)
 
 
 @pytest.mark.parametrize(
@@ -386,7 +432,7 @@ def test_release_guard_validates_bundled_runtime_packages(
         entry_points = entry_points.split("[embodichain.assets]", 1)[0]
     members = {
         "embodichain/VERSION": version,
-        "embodichain/gen_sim/simready_pipeline/configs/gen_config.json": "{}",
+        "embodichain/gen_sim/asset_engine/configs/gen_config.json": "{}",
         "embodichain_tasks/__init__.py": "",
         task_config: source.read_text(),
         "embodichain_robots/__init__.py": "",

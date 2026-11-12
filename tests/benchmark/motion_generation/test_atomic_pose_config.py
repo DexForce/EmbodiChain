@@ -54,11 +54,11 @@ from embodichain_benchmarks.motion_generation.scenarios.atomic_dual_arm_provider
 
 def test_pose_batch_suite_declares_translation_only_batched_trials() -> None:
     """The shipped pose-batch suite maps one random pose to one env row."""
-    suite = load_suite("atomic_franka_pgi_pose_batch")
+    suite = load_suite("atomic_franka_robotiq_pose_batch")
     track = suite.enabled_tracks()[0]
 
     settings = resolve_atomic_pose_randomization(track)
-    assert suite.suite_version == "atomic_franka_pgi_pose_batch_v6"
+    assert suite.suite_version == "atomic_franka_robotiq_pose_batch_v7"
     assert settings.enabled is True
     assert settings.mode == "translation"
     assert settings.pose_batch_size == 8
@@ -115,7 +115,7 @@ def test_pose_batch_suite_declares_translation_only_batched_trials() -> None:
 
 def test_spatial_generalization_suite_covers_task_level_single_arm_skills() -> None:
     """Every Franka task skill gets its meaningful spatial or primitive domains."""
-    suite = load_suite("atomic_franka_pgi_spatial_generalization")
+    suite = load_suite("atomic_franka_robotiq_spatial_generalization")
     primitive_domain_ids = {
         "nominal",
         "cube_uniform_40mm",
@@ -227,7 +227,7 @@ def test_spatial_generalization_suite_covers_task_level_single_arm_skills() -> N
         ),
     }
 
-    assert suite.suite_version == "atomic_franka_pgi_spatial_generalization_v10"
+    assert suite.suite_version == "atomic_franka_robotiq_spatial_generalization_v11"
     assert len(suite.evaluation_tracks()) == 79
     assert set(expected) == {track.id for track in suite.tracks}
     for track in suite.tracks:
@@ -239,7 +239,7 @@ def test_spatial_generalization_suite_covers_task_level_single_arm_skills() -> N
 
 def test_cube_primitive_domains_parameterize_only_geometry_for_every_skill() -> None:
     """Every cube skill receives one nominal and five primitive parameters."""
-    suite = load_suite("atomic_franka_pgi_spatial_generalization")
+    suite = load_suite("atomic_franka_robotiq_spatial_generalization")
     expected_sizes = {
         "nominal": [0.05, 0.05, 0.05],
         "cube_uniform_40mm": [0.04, 0.04, 0.04],
@@ -383,7 +383,7 @@ def test_dual_arm_spatial_suites_cover_meaningful_domains(
 def test_spatial_suites_cover_every_non_motion_atomic_skill() -> None:
     """Only pure joint and end-effector moves are outside spatial evaluation."""
     suite_names = (
-        "atomic_franka_pgi_spatial_generalization",
+        "atomic_franka_robotiq_spatial_generalization",
         "atomic_dual_ur5_pgi_hand_over_spatial_generalization",
         "atomic_dual_ur5_pgi_coordinated_pickment_spatial_generalization",
         "atomic_dual_ur5_pgi_coordinated_placement_spatial_generalization",
@@ -405,7 +405,7 @@ def test_spatial_suites_cover_every_non_motion_atomic_skill() -> None:
 def test_every_spatial_domain_matches_its_runtime_randomization() -> None:
     """Declared domain provenance and executable overrides cannot drift."""
     suite_names = (
-        "atomic_franka_pgi_spatial_generalization",
+        "atomic_franka_robotiq_spatial_generalization",
         "atomic_dual_ur5_pgi_hand_over_spatial_generalization",
         "atomic_dual_ur5_pgi_coordinated_pickment_spatial_generalization",
         "atomic_dual_ur5_pgi_coordinated_placement_spatial_generalization",
@@ -466,7 +466,7 @@ def test_every_spatial_domain_matches_its_runtime_randomization() -> None:
 def test_composed_spatial_domains_use_stratified_boundary_sampling() -> None:
     """Every new multi-factor domain exercises all configured pose bounds."""
     suite_names = (
-        "atomic_franka_pgi_spatial_generalization",
+        "atomic_franka_robotiq_spatial_generalization",
         "atomic_dual_ur5_pgi_hand_over_spatial_generalization",
         "atomic_dual_ur5_pgi_coordinated_pickment_spatial_generalization",
         "atomic_dual_ur5_pgi_coordinated_placement_spatial_generalization",
@@ -503,7 +503,7 @@ def test_composed_spatial_domains_use_stratified_boundary_sampling() -> None:
 def test_workspace_shell_domains_declare_radial_buckets() -> None:
     """Every shell domain uses the executable radial sampler and three buckets."""
     suite_names = (
-        "atomic_franka_pgi_spatial_generalization",
+        "atomic_franka_robotiq_spatial_generalization",
         "atomic_dual_ur5_pgi_hand_over_spatial_generalization",
         "atomic_dual_ur5_pgi_coordinated_pickment_spatial_generalization",
         "atomic_dual_ur5_pgi_coordinated_placement_spatial_generalization",
@@ -1279,10 +1279,12 @@ def test_randomize_articulation_root_pose_is_deterministic() -> None:
     scenario.simulation.update.assert_called_with(step=1)
 
 
+@pytest.mark.parametrize("model_id", [None, "franka_panda_hand"])
 def test_resolve_articulation_grasp_broadcasts_one_local_candidate_over_batch(
     monkeypatch: pytest.MonkeyPatch,
+    model_id: str | None,
 ) -> None:
-    """Slide samples PGI once and screens the translated batch together."""
+    """Slide uses the mounted hand and screens one translated grasp pool."""
     from embodichain_benchmarks.motion_generation import _atomic_fixtures
 
     batch_size = 4
@@ -1301,12 +1303,23 @@ def test_resolve_articulation_grasp_broadcasts_one_local_candidate_over_batch(
     generator.get_valid_grasp_poses.return_value = [
         (candidate.unsqueeze(0), torch.zeros(1))
     ]
+    factory = Mock(return_value=generator)
     monkeypatch.setattr(
         _atomic_fixtures,
         "create_parallel_jaw_grasp_pose_generator",
-        lambda **_: generator,
+        factory,
     )
     robot = Mock(device=torch.device("cpu"))
+    robot.cfg.solver_cfg = {
+        "arm": {
+            "tcp": [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.17],
+                [0.0, 0.0, 0.0, 1.0],
+            ]
+        }
+    }
     robot.compute_ik.side_effect = lambda pose, joint_seed, name: (
         torch.ones(batch_size, dtype=torch.bool),
         joint_seed.clone(),
@@ -1314,6 +1327,9 @@ def test_resolve_articulation_grasp_broadcasts_one_local_candidate_over_batch(
     scenario = AtomicSkillScenario()
     scenario.robot = robot
     scenario.control_part = "arm"
+    scenario.track = Mock(
+        config={"grasp_model": "FrankaPandaHand" if model_id else None}
+    )
 
     grasp = scenario.resolve_articulation_grasp(
         mesh_vertices=torch.zeros(3, 3),
@@ -1333,6 +1349,12 @@ def test_resolve_articulation_grasp_broadcasts_one_local_candidate_over_batch(
     expected = target_pose.clone()
     expected[:, 0, 3] += 0.01
     torch.testing.assert_close(grasp, expected)
+    selected_model = factory.call_args.kwargs["gripper_data"]
+    if model_id is None:
+        assert selected_model is None
+    else:
+        assert selected_model["model_id"] == model_id
+        assert selected_model["max_opening_width"] == pytest.approx(0.08)
     sampled = generator.get_valid_grasp_poses.call_args.kwargs
     assert sampled["obj_poses"].shape == (1, 4, 4)
     assert sampled["approach_direction"].shape == (1, 3)
