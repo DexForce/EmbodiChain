@@ -37,6 +37,46 @@ from scripts.benchmark.rl.locomotion_ppo import (
 from scripts.benchmark.rl.resource_usage import ProcessResources, _process_gpu_mib
 
 
+@pytest.mark.no_sim
+@pytest.mark.parametrize("wrapped", [False, True], ids=["mujoco_warp", "dexuni"])
+@pytest.mark.parametrize(
+    "cpu_fallback,device_active", [(False, True), (True, True), (False, False)]
+)
+def test_newton_backend_check_supports_solver_composition(
+    monkeypatch, wrapped, cpu_fallback, device_active
+) -> None:
+    from dexsim.engine.newton_physics import backend_registry
+
+    solver = SimpleNamespace(
+        use_mujoco_cpu=cpu_fallback,
+        mjw_data=SimpleNamespace(
+            qpos=SimpleNamespace(device=SimpleNamespace(is_cuda=device_active))
+        ),
+    )
+    backend = SimpleNamespace(
+        solver=SimpleNamespace(mujoco_solver=solver) if wrapped else solver
+    )
+    world = object()
+
+    def resolve(actual_world):
+        assert actual_world is world
+        return backend
+
+    monkeypatch.setattr(backend_registry, "get_newton_backend", resolve)
+    env = SimpleNamespace(
+        unwrapped=SimpleNamespace(
+            sim=SimpleNamespace(
+                physics=SimpleNamespace(name="newton"), device="cuda:0", _world=world
+            )
+        )
+    )
+    if cpu_fallback or not device_active:
+        with pytest.raises(RuntimeError, match="not using CUDA"):
+            benchmark._check_backend(env, "newton")
+    else:
+        assert benchmark._check_backend(env, "newton") is backend
+
+
 def _result(status: str = "passed") -> dict:
     def row(warming: bool, rollout: float, update: float) -> dict:
         return {
@@ -293,7 +333,7 @@ def test_creation_failure_retains_resource_samples(
         {"label": "before_create", "cpu_rss_mib": 50.0}
     ]
     assert (
-        "| Dexsim Newton/MJWarp CUDA | failed |" in (output / "report.md").read_text()
+        "| Dexsim Newton/MuJoCo CUDA | failed |" in (output / "report.md").read_text()
     )
 
 

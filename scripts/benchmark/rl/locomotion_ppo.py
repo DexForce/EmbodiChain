@@ -31,7 +31,7 @@ __all__ = ["main"]
 
 BACKENDS = {
     "default": "Dexsim Default CUDA",
-    "newton": "Dexsim Newton/MJWarp CUDA",
+    "newton": "Dexsim Newton/MuJoCo CUDA",
 }
 TASK_DIR = (
     Path(__file__).resolve().parents[3]
@@ -90,9 +90,11 @@ def _check_backend(env: Any, name: str) -> Any:
         from dexsim.engine.newton_physics.backend_registry import get_newton_backend
 
         backend = get_newton_backend(sim._world)
+        solver = getattr(backend.solver, "mujoco_solver", backend.solver)
         if (
-            backend.solver.use_mujoco_cpu
-            or not backend.solver.mjw_data.qpos.device.is_cuda
+            solver is None
+            or solver.use_mujoco_cpu
+            or not solver.mjw_data.qpos.device.is_cuda
         ):
             raise RuntimeError("Newton/MJWarp is not using CUDA")
         return backend
@@ -250,9 +252,10 @@ def _run(args: argparse.Namespace, result: dict) -> None:
     env_config = yaml.safe_load(Path(config["trainer"]["gym_config"]).read_text())
     env_config["num_envs"] = args.envs
     if args.backend == "newton":
-        env_config["physics_config"]["solver_cfg"][
-            "iterations"
-        ] = args.solver_iterations
+        solver_config = env_config["physics_config"]["solver_cfg"]
+        if solver_config.get("solver_type") == "dexuni":
+            solver_config = solver_config.setdefault("mujoco_options", {})
+        solver_config["iterations"] = args.solver_iterations
     env_path = args.output / "env.yaml"
     env_path.write_text(yaml.safe_dump(env_config, sort_keys=False))
     config["trainer"]["gym_config"] = str(env_path.resolve())
@@ -312,10 +315,12 @@ def _run(args: argparse.Namespace, result: dict) -> None:
             trainer.num_updates += 1
             if not all(math.isfinite(float(value)) for value in losses.values()):
                 raise RuntimeError("Nonfinite PPO loss")
-            if backend is not None and bool(
-                backend.solver.mjw_data.overflow.numpy().any()
-            ):
-                raise RuntimeError("MJWarp capacity or solver iteration limit reached")
+            if backend is not None:
+                solver = getattr(backend.solver, "mujoco_solver", backend.solver)
+                if bool(solver.mjw_data.overflow.numpy().any()):
+                    raise RuntimeError(
+                        "MJWarp capacity or solver iteration limit reached"
+                    )
             result["updates"].append(
                 {
                     "warmup": warming,
