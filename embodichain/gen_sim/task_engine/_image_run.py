@@ -42,7 +42,7 @@ __all__ = ["plan_image_task"]
 
 
 @service_entry
-def plan_image_task(
+def _plan_image_task(
     image_path: Path,
     instruction: str,
     output: Path,
@@ -167,7 +167,7 @@ def plan_image_task(
     return artifacts.output_dir
 
 
-_plan_image_task = plan_image_task
+plan_image_task = _plan_image_task
 
 
 def _image_preview(
