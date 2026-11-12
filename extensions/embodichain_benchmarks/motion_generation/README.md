@@ -219,6 +219,11 @@ Measured replay calibrates the Robotiq grasp and its cuRobo timing:
   on the straight pre-grasp line (`pick_approach_waypoints`). A free-space approach
   can leave a diagonal line and sweep the target before closing.
 
+Spatial Pour sets `approach_follows_object_yaw`, turning its diagonal approach
+with each cube's yaw folded onto the nearest face. With a fixed world approach,
+flat pads have no face-normal closing axis once a cube is yawed beyond about
+10 degrees.
+
 The PGI fixture keeps its former drives and grasp sampling. All Franka
 Robotiq suites have new versions and require fresh manifests.
 

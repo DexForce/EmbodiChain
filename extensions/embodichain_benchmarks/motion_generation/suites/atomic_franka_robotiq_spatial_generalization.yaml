@@ -750,6 +750,9 @@ x-skill-pour: &skill_pour
   pre_grasp_distance_m: 0.15
   lift_height_m: 0.16
   approach_direction: [-0.7071, 0.0, -0.7071]
+  # Flat Robotiq pads close along a face normal only if the approach turns
+  # with the cube's yaw; a fixed world approach leaves yawed rows no grasp.
+  approach_follows_object_yaw: true
   internal_axis: [1.0, 0.0, 0.0]
   grasp_source: antipodal
   grasp_sample_count: 10000

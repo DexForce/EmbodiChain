@@ -1522,6 +1522,32 @@ def test_object_rotation_providers_screen_every_pose_row(
         )
 
 
+def test_pour_approach_follows_object_yaw_onto_nearest_face() -> None:
+    """Yawed cubes keep the configured approach relative to their nearest face."""
+    approach = torch.tensor([-math.sqrt(0.5), 0.0, -math.sqrt(0.5)])
+    yaws = torch.tensor([0.0, 0.3, math.pi / 2 + 0.3, -0.6])
+    poses = torch.eye(4).repeat(len(yaws), 1, 1)
+    poses[:, :3, :3] = axis_angle_to_rotation_matrix(
+        torch.stack([torch.zeros_like(yaws), torch.zeros_like(yaws), yaws], dim=1)
+    )
+
+    directions = providers._yaw_following_approach(approach, poses)
+
+    assert torch.equal(directions[0], approach)
+    # A quarter turn is the same box, so it folds onto the same face offset.
+    torch.testing.assert_close(directions[2], directions[1])
+    folded = torch.tensor([0.0, 0.3, 0.3, -0.6])
+    expected = torch.stack(
+        [
+            approach[0] * torch.cos(folded),
+            approach[0] * torch.sin(folded),
+            approach[2].expand(len(folded)),
+        ],
+        dim=1,
+    )
+    torch.testing.assert_close(directions, expected)
+
+
 def test_pour_requires_full_return_orientation_after_successful_tilt() -> None:
     initial = torch.eye(4).repeat(2, 1, 1)
     actuation = torch.eye(4).repeat(3, 2, 1, 1)
