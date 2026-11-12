@@ -433,6 +433,40 @@ class EmbodiedEnvCfg(EnvCfg):
     """
 
 
+class _EpisodeMetadataRows(Sequence):
+    """Retain reset-time metadata, materializing row copies when recording uses them."""
+
+    def __init__(self, count: int, template: dict[str, Any]) -> None:
+        pending = (copy.deepcopy(template),)
+        self._rows = [pending] * count
+
+    def __len__(self) -> int:
+        return len(self._rows)
+
+    def __getitem__(self, index: int | slice) -> dict[str, Any] | list[dict[str, Any]]:
+        if isinstance(index, slice):
+            return [self[i] for i in range(*index.indices(len(self)))]
+        record = self._rows[index]
+        if isinstance(record, tuple):
+            record = copy.deepcopy(record[0])
+            episode_uuid = str(uuid4())
+            record.update(
+                env_id=index % len(self),
+                episode_uuid=episode_uuid,
+                source_episode_uuid=episode_uuid,
+            )
+            self._rows[index] = record
+        return record
+
+    def __setitem__(self, index: int, record: dict[str, Any]) -> None:
+        self._rows[index] = record
+
+    def reset_rows(self, ids: Sequence[int], template: dict[str, Any]) -> None:
+        pending = (copy.deepcopy(template),)
+        for index in ids:
+            self._rows[index] = pending
+
+
 @register_env("EmbodiedEnv-v1")
 class EmbodiedEnv(BaseEnv):
     """Embodied AI environment that is used to simulate the Embodied AI tasks.
@@ -548,7 +582,7 @@ class EmbodiedEnv(BaseEnv):
         self._record_raw_actions = self._explicit_policy_rollout
         self._last_action_manager_qpos: torch.Tensor | None = None
         self._last_action_trace: ActionTrace | None = None
-        self._expert_controller_qpos_history: list[list[torch.Tensor]] = []
+        self._expert_controller_qpos_history: list[list[torch.Tensor]] | None = None
 
         registration = getattr(task_program_adapter_factory, "registration", None)
         from embodichain.lab.gym.envs.objectives.ordered_placement import (
@@ -587,6 +621,20 @@ class EmbodiedEnv(BaseEnv):
                 _validate_evaluation_observation_bindings(
                     self, self._evaluation_recording
                 )
+                from embodichain.lab.task_program.integrations.simulation.bindings import (
+                    _bind_evaluation_joint_names,
+                )
+
+                bound = _bind_evaluation_joint_names(
+                    registration.evaluation_conditions, self.robot
+                )
+                self._final_acceptance_rules = tuple(
+                    (ref, bound[ref]) for ref, _ in self._final_acceptance_rules
+                )
+                self._process_evaluation_rules = tuple(
+                    (ref, bound[ref]) for ref, _ in self._process_evaluation_rules
+                )
+                self._physical_objective_rule = _objective_rule(cfg.objective, bound)
             if self._explicit_policy_rollout and self.action_manager is None:
                 raise ValueError(
                     "policy_request rollout recording requires an ActionManager."
@@ -660,10 +708,10 @@ class EmbodiedEnv(BaseEnv):
             self._traj_steps: torch.Tensor | None = None
             self._traj_raw_action: EnvAction | None = None
             self._trajectory_action_kind: str | None = None
-            self._raw_action_history: list[list[EnvAction]] = [
-                [] for _ in range(self.num_envs)
-            ]
-            self._expert_controller_qpos_history = [[] for _ in range(self.num_envs)]
+            # Recording methods allocate row histories on their first sample.
+            # Training resets then avoid downloading IDs to clear empty lists.
+            self._raw_action_history: list[list[EnvAction]] | None = None
+            self._expert_controller_qpos_history = None
             self._traj_save_count = 0
             self._traj_run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
             if self.cfg.record_trajectory:
@@ -723,9 +771,9 @@ class EmbodiedEnv(BaseEnv):
             self._demo_segment_participants = self._demo_active_mask.clone()
             self._demo_active_segment_start_steps = self._demo_steps.clone()
             self._demo_active_rollout_start_steps = self.rollout_steps.clone()
+            self._demo_metadata_initialized = False
             self._demo_episode_metadata: list[dict[str, Any]] = [
-                self._new_demo_episode_metadata(env_id)
-                for env_id in range(self.num_envs)
+                {} for _ in range(self.num_envs)
             ]
 
             self.episode_success_status: torch.Tensor = torch.zeros(
@@ -1901,12 +1949,12 @@ class EmbodiedEnv(BaseEnv):
         active_segment_ids = getattr(self, "_demo_active_segment_ids", None)
         if active_segment_ids is not None:
             demo_ids = env_ids_to_process.to(active_segment_ids.device)
-            active_segment_ids[demo_ids] = 0
-            self._demo_active_mask[demo_ids] = True
-            self._demo_segment_participants[demo_ids] = False
-            self._demo_active_segment_start_steps[demo_ids] = 0
-            self._demo_active_rollout_start_steps[demo_ids] = 0
-            self._demo_steps[demo_ids] = 0
+            active_segment_ids.index_fill_(0, demo_ids, 0)
+            self._demo_active_mask.index_fill_(0, demo_ids, True)
+            self._demo_segment_participants.index_fill_(0, demo_ids, False)
+            self._demo_active_segment_start_steps.index_fill_(0, demo_ids, 0)
+            self._demo_active_rollout_start_steps.index_fill_(0, demo_ids, 0)
+            self._demo_steps.index_fill_(0, demo_ids, 0)
 
         self.episode_success_status.index_fill_(0, env_ids_to_process, False)
         for env_id, outcome in terminal_outcomes.items():
@@ -1921,12 +1969,44 @@ class EmbodiedEnv(BaseEnv):
         self, env_ids: Sequence[int] | torch.Tensor | None = None, **kwargs: Any
     ) -> None:
         env_ids_to_process = self.episode_context._ids(env_ids)
+        # Keep one shared provenance snapshot per seed epoch, even without a
+        # recorder. Individual episode dictionaries and UUIDs stay lazy.
+        seed = getattr(self.cfg, "seed", None)
+        snapshot = getattr(self, "_demo_reset_provenance", None)
+        if snapshot is None or snapshot["seed"] != seed:
+            self._recording_provenance = build_recording_provenance(self)
+            snapshot = {"seed": seed, **self._recording_provenance}
+            self._demo_reset_provenance = snapshot
+        rows = getattr(self, "_demo_episode_provenance", None)
+        if rows is None:
+            rows = self._demo_episode_provenance = [snapshot] * self.num_envs
+        metadata_ids = env_ids_to_process.cpu().tolist()
+        for env_id in metadata_ids:
+            rows[env_id] = snapshot
         episode_metadata = getattr(self, "_demo_episode_metadata", None)
-        if episode_metadata is not None:
-            final_observations = getattr(self, "_sealed_final_observations", {})
-            for env_id in env_ids_to_process.cpu().tolist():
-                episode_metadata[env_id] = self._new_demo_episode_metadata(env_id)
-                final_observations.pop(env_id, None)
+        if not getattr(self, "_demo_metadata_initialized", True) and (
+            self.dataset_manager is not None
+            or getattr(self, "rollout_buffer", None) is not None
+            or getattr(self, "_traj_buffer", None) is not None
+        ):
+            episode_metadata = self._demo_episode_metadata = _EpisodeMetadataRows(
+                self.num_envs, self._new_demo_episode_metadata(0)
+            )
+            self._demo_metadata_initialized = True
+        if episode_metadata is not None and getattr(
+            self, "_demo_metadata_initialized", True
+        ):
+            if isinstance(episode_metadata, _EpisodeMetadataRows):
+                if metadata_ids:
+                    episode_metadata.reset_rows(
+                        metadata_ids, self._new_demo_episode_metadata(metadata_ids[0])
+                    )
+            else:
+                for env_id in metadata_ids:
+                    episode_metadata[env_id] = self._new_demo_episode_metadata(env_id)
+        final_observations = getattr(self, "_sealed_final_observations", {})
+        for env_id in metadata_ids:
+            final_observations.pop(env_id, None)
         # Stateful managers reset selected rows before reset-mode events run.
         action_manager = getattr(self, "action_manager", None)
         if action_manager is not None:
@@ -2057,7 +2137,9 @@ class EmbodiedEnv(BaseEnv):
             "terminal_reason": "unknown",
             "segments": [],
         }
-        metadata.update(copy.deepcopy(self._recording_provenance))
+        rows = getattr(self, "_demo_episode_provenance", None)
+        provenance = rows[env_id] if rows is not None else self._recording_provenance
+        metadata.update(copy.deepcopy(provenance))
         expert_action_spec = getattr(self, "expert_action_spec", None)
         if expert_action_spec is not None:
             metadata.update(expert_action_spec.metadata(step_dt=self.step_dt))
@@ -2085,6 +2167,13 @@ class EmbodiedEnv(BaseEnv):
             raise RuntimeError(
                 "Task Program execution requires a reset before retrying a completed attempt."
             )
+        completion = (
+            self._final_completion_mask().clone()
+            if getattr(self, "_final_acceptance_rules", ())
+            else None
+        )
+        if completion is not None:
+            completion[list(selected)] = False
         if replan:
             # A fresh planner may bind a bridge after recording starts.
             self._active_task_program_bridge = bridge = None
@@ -2097,7 +2186,11 @@ class EmbodiedEnv(BaseEnv):
         self._demo_continuity_id = 0
         self._demo_program_run_id = f"{episode_index}:{attempt_id}"
         self._pending_final_acceptance = None
-        self._final_program_completion = None
+        self._final_program_completion = (
+            None
+            if completion is None
+            else (self.episode_context.episode_ids, completion)
+        )
         final_observations = getattr(self, "_sealed_final_observations", {})
         self._sealed_final_observations = final_observations
         self._demo_active_segment_id = 0
@@ -2106,11 +2199,18 @@ class EmbodiedEnv(BaseEnv):
         self._demo_segment_participants.fill_(False)
         self._demo_active_segment_start_steps = self._demo_steps.clone()
         self._demo_active_rollout_start_steps = self.rollout_steps.clone()
+        self._demo_metadata_initialized = True
+        metadata = self._demo_episode_metadata
+        if isinstance(metadata, _EpisodeMetadataRows):
+            if selected:
+                metadata.reset_rows(
+                    selected, self._new_demo_episode_metadata(selected[0])
+                )
+        else:
+            for env_id in selected:
+                metadata[env_id] = self._new_demo_episode_metadata(env_id)
         for env_id in selected:
             final_observations.pop(env_id, None)
-            self._demo_episode_metadata[env_id] = self._new_demo_episode_metadata(
-                env_id
-            )
         program = getattr(bridge, "_program", None)
         if program is not None:
             from embodichain.data_pipeline.recording import stable_config_hash
@@ -2360,6 +2460,11 @@ class EmbodiedEnv(BaseEnv):
         Returns:
             A JSON-compatible metadata dictionary.
         """
+        if "episode_uuid" not in self._demo_episode_metadata[env_id]:
+            metadata = EmbodiedEnv._new_demo_episode_metadata(self, env_id)
+            metadata.update(self._demo_episode_metadata[env_id])
+            self._demo_episode_metadata[env_id] = metadata
+        self._demo_metadata_initialized = True
         metadata = copy.deepcopy(self._demo_episode_metadata[env_id])
         metadata["episode_context"] = self.episode_context.snapshot([env_id])[0]
         metadata.setdefault("segments", [])
@@ -3167,7 +3272,8 @@ class EmbodiedEnv(BaseEnv):
         outcome = getattr(self, "termination_manager", None)
         if outcome is not None:
             info["task_outcome"] = outcome.snapshot()
-        info["episode_context"] = self.episode_context.snapshot()
+        if getattr(self.cfg, "episode_context_in_info", True):
+            info["episode_context"] = self.episode_context.snapshot()
         return info
 
     def check_truncated(self, obs: EnvObs, info: dict[str, Any]) -> torch.Tensor:
@@ -3294,7 +3400,10 @@ class EmbodiedEnv(BaseEnv):
                     if callable(processed_qpos)
                     else None
                 )
-            else:
+            elif self.dataset_manager is not None or (
+                getattr(self, "rollout_buffer", None) is not None
+                and getattr(self, "_rollout_buffer_mode", None) != "rl"
+            ):
                 processed_qpos = getattr(self.action_manager, "_processed_qpos", None)
                 try:
                     self._last_action_manager_qpos = (
@@ -3604,27 +3713,32 @@ class EmbodiedEnv(BaseEnv):
 
     def _setup_background(self) -> None:
         """Setup the static rigid objects in the environment."""
+
+        def validate_resolved(cfg: RigidObjectCfg) -> None:
+            if cfg.body_type == "dynamic":
+                logger.log_error(
+                    "Background object must be kinematic or static rigid object."
+                )
+
         for cfg in self.cfg.visual_object:
             self.sim.add_visual_object(cfg)
         for cfg in self.cfg.background:
-            if cfg.body_type == "dynamic":
-                logger.log_error(
-                    f"Background object must be kinematic or static rigid object."
-                )
-            self.sim.add_rigid_object(cfg=cfg)
+            self.sim.add_rigid_object(cfg=cfg, validate_resolved=validate_resolved)
 
     def _setup_interactive_objects(self) -> None:
         """Setup the interactive objects in the environment."""
+
+        def validate_resolved(cfg: RigidObjectCfg) -> None:
+            if cfg.body_type != "dynamic":
+                logger.log_error(
+                    "Interactive rigid object must be dynamic rigid object."
+                )
 
         for cfg in self.cfg.articulation:
             self.sim.add_articulation(cfg=cfg)
 
         for cfg in self.cfg.rigid_object:
-            if cfg.body_type != "dynamic":
-                logger.log_error(
-                    f"Interactive rigid object must be dynamic rigid object."
-                )
-            self.sim.add_rigid_object(cfg=cfg)
+            self.sim.add_rigid_object(cfg=cfg, validate_resolved=validate_resolved)
 
         for cfg in self.cfg.rigid_object_group:
             self.sim.add_rigid_object_group(cfg=cfg)
@@ -3876,28 +3990,37 @@ class EmbodiedEnv(BaseEnv):
     ) -> tuple[torch.Tensor, torch.Tensor, _FinalMeasurement | None]:
         completion = self._final_completion_mask()
         bridge = self._active_task_program_bridge
-        if (
-            bridge is None and getattr(self, "_final_program_completion", None) is None
-        ) or (bridge is not None and not bridge.program_completed):
+        if (bridge is None or not bridge.program_completed) and not bool(
+            completion.any()
+        ):
             return completion, completion, None
         measured = _measure_final_conditions(self, self._final_acceptance_rules)
         return completion & measured.satisfied, completion, measured
 
     def _final_completion_mask(self) -> torch.Tensor:
         saved = getattr(self, "_final_program_completion", None)
-        if self._active_task_program_bridge is None and saved is not None:
-            episodes, mask = saved
-        else:
-            episodes = getattr(self, "_final_bridge_episodes", None)
-            mask = self._task_program_completion_mask()
         current = self.episode_context.episode_ids
-        if episodes is None or episodes == current:
-            return mask
-        return mask & torch.tensor(
-            [before == after for before, after in zip(episodes, current, strict=True)],
-            device=mask.device,
-            dtype=torch.bool,
+
+        def qualified(episodes, mask):
+            if episodes is None or episodes == current:
+                return mask
+            return mask & torch.tensor(
+                [
+                    before == after
+                    for before, after in zip(episodes, current, strict=True)
+                ],
+                device=mask.device,
+                dtype=torch.bool,
+            )
+
+        mask = qualified(
+            getattr(self, "_final_bridge_episodes", None),
+            self._task_program_completion_mask(),
         )
+        if saved is not None:
+            episodes, previous = saved
+            mask = mask | qualified(episodes, previous)
+        return mask
 
     def _finalize_demo_task_success(
         self, execution_eligible: tuple[bool, ...]

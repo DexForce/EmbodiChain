@@ -11,11 +11,20 @@ profiles introduced by [PR #911](https://github.com/DexForce/EmbodiChain/pull/91
 RigidFormer extra dependencies and model weights are not preinstalled. Models,
 task assets and remote service credentials remain runtime inputs.
 
+This checkout's profiles select DexSim 0.6.0rc1 and Newton 1.7.0. The published
+tags and image digests recorded in [VALIDATION.md](VALIDATION.md) describe the
+earlier DexSim 0.5.1rc1 runtime. Build and qualify a source-commit candidate for
+the current profiles before promoting a replacement; the historical image
+qualification does not validate the new dependency set.
+
 ## Install and run
 
-Use a Linux amd64 host with an NVIDIA driver compatible with CUDA 12.8,
-Docker and NVIDIA Container Toolkit. Confirm GPU access with `nvidia-smi`
-on the host before starting the container.
+Use a Linux amd64 host with an NVIDIA driver **≥ 580.00**, Docker and NVIDIA
+Container Toolkit. The current DLSS integration uses SDK and Super Resolution
+(SR) **310.7.0** and the OVRTX-aligned Ray Reconstruction (RR) runtime
+**310.7.128**, which require this minimum host driver version. Confirm GPU
+access and the driver version with `nvidia-smi` on the host before starting
+the container.
 
 | Runtime | Published image |
 | --- | --- |
@@ -79,6 +88,9 @@ see [VALIDATION.md](VALIDATION.md) for digests and CI evidence.
 Run on a Linux amd64 Docker host with NVIDIA Container Toolkit, an appropriate
 NVIDIA driver, and access to PyPI, PyTorch's `cu128` index, conda-forge and the
 public DexSim wheel server (`pyp.open3dv.site:2345`). BuildKit is required.
+The Miniforge installer uses a fixed release and SHA256. If its versioned
+download name fails, the build retries the official alias within that same
+release and checks the same SHA256 before execution.
 
 ```bash
 bash docker/build.sh --verify
@@ -150,6 +162,25 @@ Set `EMBODICHAIN_BLENDER_PYTHON` to that environment's Python executable.
 `.[gensim]` installs the Python-facing GenSim dependencies; Blender is supplied
 by the independent runtime.
 
+If Eevee cannot create a graphics context through the `bpy` module, select the
+standalone Blender application with `EMBODICHAIN_BLENDER_EXECUTABLE`. This takes
+precedence over `EMBODICHAIN_BLENDER_PYTHON` and runs the same worker with Blender's
+background/factory startup, which initializes the graphics context before rendering.
+Install the worker dependencies into the application's bundled Python, keeping
+Torch and DexSim in the business environment:
+
+```bash
+uv pip install --python /opt/blender/4.5/python/bin/python3.11 \
+  --constraint docker/locks/blender311.txt Pillow scipy
+export EMBODICHAIN_BLENDER_EXECUTABLE=/opt/blender/blender
+```
+
+Adjust the paths to the installed Blender application. The selectors can also
+be set in the shared GenSim `.env` or `EMBODICHAIN_ENV_FILE`; process values take
+precedence. The launcher reads these settings without changing the process
+environment. Both launch modes use the same file protocol, error propagation,
+environment isolation and process cleanup.
+
 Each business environment owns its CPython-specific DexSim wheel and Torch
 libraries. Do not globally add either environment's `dexsim/lib` or
 `site-packages` to `LD_LIBRARY_PATH`/`PYTHONPATH`. Shared FFmpeg/HDF5 libraries
@@ -190,7 +221,8 @@ free to install their own Torch/codec profile.
 ## CI rollout and rollback
 
 CI defaults to the published internal `v4-py311-py312` image
-and activates `py312`. The image reference and activation command are explicit
+and explicitly activates `py311`. The image's interactive default remains
+`py312`. The image reference and activation command are explicit
 in the existing workflows/shared action; the existing job graph, triggers,
 test selection and installation commands are preserved. The SDK compatibility
 matrix selects Python 3.11 and 3.12 independently of this default.

@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
+from copy import deepcopy
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -312,6 +314,166 @@ class TestUsdCPU(BaseUsdTest):
 class TestUsdCUDA(BaseUsdTest):
     def setup_method(self):
         self.setup_simulation("cuda")
+
+
+def _write_placed_usd(path: Path, kind: str) -> None:
+    from pxr import Usd, UsdGeom, UsdPhysics
+
+    stage = Usd.Stage.CreateNew(str(path))
+    UsdGeom.SetStageMetersPerUnit(stage, 1.0)
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    root = UsdGeom.Xform.Define(stage, "/Asset")
+    stage.SetDefaultPrim(root.GetPrim())
+    root.AddTranslateOp().Set((2.0, -1.0, 3.0))
+    root.AddRotateZOp().Set(35.0)
+    if kind == "articulation":
+        UsdPhysics.ArticulationRootAPI.Apply(root.GetPrim())
+        bodies = [
+            UsdGeom.Xform.Define(stage, "/Asset/base"),
+            UsdGeom.Xform.Define(stage, "/Asset/tip"),
+        ]
+        joint = UsdPhysics.RevoluteJoint.Define(stage, "/Asset/joint")
+        joint.CreateBody0Rel().SetTargets(["/Asset/base"])
+        joint.CreateBody1Rel().SetTargets(["/Asset/tip"])
+        joint.CreateAxisAttr("X")
+    else:
+        bodies = [root]
+    for body in bodies:
+        UsdPhysics.RigidBodyAPI.Apply(body.GetPrim())
+        UsdPhysics.MassAPI.Apply(body.GetPrim()).CreateMassAttr(1.0)
+        cube = UsdGeom.Cube.Define(stage, str(body.GetPath()) + "/mesh")
+        cube.CreateSizeAttr(0.1)
+        UsdPhysics.CollisionAPI.Apply(cube.GetPrim())
+    stage.GetRootLayer().Save()
+
+
+@pytest.mark.parametrize("kind", ["rigid", "articulation"])
+@pytest.mark.parametrize("pose_mode", ["auto", "offset"])
+def test_singleton_authored_pose_survives_binding_and_reset(
+    tmp_path: Path, kind: str, pose_mode: str
+) -> None:
+    """Source placement is the native binding and reset baseline."""
+    from embodichain.lab.sim.cfg import UsdSourceCfg
+
+    path = tmp_path / "placed.usda"
+    _write_placed_usd(path, kind)
+    angle = math.radians(35.0)
+    expected = torch.tensor(
+        [
+            [math.cos(angle), -math.sin(angle), 0, 2],
+            [math.sin(angle), math.cos(angle), 0, -1],
+            [0, 0, 1, 3],
+            [0, 0, 0, 1],
+        ],
+        dtype=torch.float32,
+    ).unsqueeze(0)
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            device="cpu",
+            num_envs=1,
+        )
+    )
+    asset = None
+    try:
+        source = UsdSourceCfg(file_path=str(path))
+        config_type = RigidObjectCfg if kind == "rigid" else ArticulationCfg
+        offset = 1.0 if pose_mode == "offset" else 0.0
+        cfg = config_type(
+            uid="placed",
+            source=source,
+            source_pose_mode=pose_mode,
+            init_pos=(offset, 0, 0),
+        )
+        current = SimpleNamespace(
+            num_envs=1,
+            rigid_object=[cfg],
+            background=[],
+            sim_cfg=sim.sim_config,
+            task_program=SimpleNamespace(program_id="test"),
+            target_control_frequency=10,
+        )
+        selected = deepcopy(current)
+        expected[:, 0, 3] += offset
+        if kind == "rigid":
+            asset = sim.add_rigid_object(cfg)
+        else:
+            asset = sim.add_articulation(cfg)
+        sim.prepare()
+        assert cfg.init_local_pose is None
+        if kind == "rigid":
+            from embodichain.lab.gym.envs._asset_replacement import _check_environment
+
+            _check_environment(current, selected, set())
+        torch.testing.assert_close(asset.get_local_pose(to_matrix=True), expected)
+        moved = expected.clone()
+        moved[:, 0, 3] += 1
+        asset.set_local_pose(moved)
+        asset.reset()
+        torch.testing.assert_close(asset.get_local_pose(to_matrix=True), expected)
+        if kind == "rigid":
+            asset = sim.replace_rigid_object(cfg)
+            torch.testing.assert_close(asset.get_local_pose(to_matrix=True), expected)
+            assert cfg.init_local_pose is None
+            _check_environment(current, selected, set())
+            asset = sim.replace_rigid_object(asset.cfg.copy())
+            torch.testing.assert_close(asset.get_local_pose(to_matrix=True), expected)
+            asset.reset()
+            torch.testing.assert_close(asset.get_local_pose(to_matrix=True), expected)
+    finally:
+        sim.destroy(exit_process=False)
+        asset = None
+        SimulationManager.flush_cleanup_queue()
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_scene_import_returned_cfg_keeps_scene_placement_on_replacement(
+    tmp_path: Path, legacy: bool
+) -> None:
+    import numpy as np
+    from embodichain.lab.sim.cfg import UsdImportCfg, UsdSourceCfg
+
+    path = tmp_path / "scene.usda"
+    _write_placed_usd(path, "rigid")
+    scene_pose = np.eye(4, dtype=np.float32)
+    scene_pose[0, 3] = 1
+    expected = torch.eye(4, dtype=torch.float32).unsqueeze(0)
+    angle = math.radians(35)
+    expected[0, :3, :3] = torch.tensor(
+        [
+            [math.cos(angle), -math.sin(angle), 0],
+            [math.sin(angle), math.cos(angle), 0],
+            [0, 0, 1],
+        ]
+    )
+    expected[0, :3, 3] = torch.tensor([3, -1, 3])
+    sim = SimulationManager(
+        SimulationManagerCfg(headless=True, device="cpu", num_envs=1)
+    )
+    imported = asset = None
+    try:
+        if legacy:
+            imported = sim.add_usd("scene", str(path), pose=scene_pose)
+        else:
+            imported = sim.add_usd(
+                UsdImportCfg(
+                    name="scene",
+                    source=UsdSourceCfg(file_path=str(path)),
+                    pose=scene_pose,
+                )
+            )
+        asset = imported["/Asset"]
+        sim.prepare()
+        torch.testing.assert_close(asset.get_local_pose(to_matrix=True), expected)
+        for _ in range(2):
+            asset = sim.replace_rigid_object(asset.cfg.copy())
+            torch.testing.assert_close(asset.get_local_pose(to_matrix=True), expected)
+            asset.reset()
+            torch.testing.assert_close(asset.get_local_pose(to_matrix=True), expected)
+    finally:
+        sim.destroy(exit_process=False)
+        imported = asset = None
+        SimulationManager.flush_cleanup_queue()
 
 
 if __name__ == "__main__":

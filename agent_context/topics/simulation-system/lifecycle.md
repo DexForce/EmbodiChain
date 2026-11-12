@@ -9,7 +9,8 @@ Return to the [simulation overview](simulation-system.md) for ownership.
 readiness; `spawn/scene.py` owns declaration coordination. The ordering is:
 
 1. If unfinalized or dirty, detach parented cameras before rebuilding their
-   native parents. Resolve/configure sources and commit Spawn topology.
+   native parents. Run the backend pre-build validation/initialization hook,
+   then resolve/configure sources and commit Spawn topology.
 2. Apply Default articulation root properties before Direct GPU buffers capture
    them. Delegate runtime setup to `PhysicsBackend.prepare_spawn_runtime()`.
 3. Replay the current per-segment [material assignments](materials.md) captured
@@ -42,6 +43,11 @@ baselines while other assets retain runtime state. Native preparation failure
 propagates without rollback. Randomization requiring the replacements runs
 after this boundary.
 
+Spawn-owned asset removal checks pending-removal and topology restrictions
+before detaching mounted cameras or marker groups. A rejected removal leaves
+the asset, sensors and marker attachments usable. NoRender declaration-only
+visual objects remain removable without rebuilding physical topology.
+
 Pending Newton topology/descriptor changes requiring a new immutable model
 become usable only after preparation. Keep model rebuilding in Spawn; object
 facades must not create a second runtime ownership path.
@@ -57,9 +63,16 @@ rows before episode initialization events run.
 
 Manager reset restores all selected Newton articulations before one complete
 Scene batch clears drive targets, dynamics, warm-start state, kinematics and
-external wrenches. MuJoCo-Warp cannot safely clear a selected world's solver
-state with only some of its articulations; excluding a subset is rejected.
+external wrenches. MuJoCo-Warp and DexUni cannot safely clear a selected world's
+solver state with only some of its articulations; excluding a subset is rejected
+before any facade state changes.
 Other resource exclusions and environment selections remain honored.
+
+The backend may handle physical reset atomically before the per-object path.
+Newton scenes containing cables use a complete `Scene.reset_arenas()` boundary;
+the manager retains visual-object, light and sensor reset ownership, including
+their environment selections and exclusions. Physical exclusions and runtime property restoration are
+unsupported in this path; see [cable state and reset](deformables.md#cable-objects).
 
 `destroy(exit_process=False)` queues native cleanup. Flush with
 `SimulationManager.flush_cleanup_queue()` after caller scene/object locals
@@ -86,11 +99,12 @@ must not reach into `_spawn_scene.builder`.
 | `register_kinematic_joint_trajectory()` | Declare articulation first; positions `[env, frames, dof]` use public qpos order; optional root poses `[env, frames, 4, 4]` |
 | `register_kinematic_nodal_trajectory()` | Declare deformable with selected nodes inactive; offsets `[env, samples, selected_nodes, 3]` are relative to finalized initial world positions |
 | `register_contact_material_schedule()` | Declared rigid object/robot/articulation; piecewise-constant shape friction/stiffness/damping tracks |
-| `register_particle_contact_material_schedule()` | Scene-wide particle-versus-rigid contact properties |
+| `register_particle_contact_material_schedule()` | Targeted DexUni deformable material via `uid`; omitted UID retains legacy scene-wide particle properties |
+| `add_runtime_control()` | Any DexSim `RuntimeControl` without a dedicated method (for example `RealtimeJointTargetControl`); pass one scene-wide instance or a `factory(arena_name, env_index)`; targets use `f"{arena_name}/{uid}"`; returns the registered controls |
 
-All registrations reject finalized scenes. Joint and shape-material controls
-remain graph-compatible; nodal trajectories and particle-material schedules
-perform host writes and disable CUDA Graph replay. Nodal `fps` enables linear
+All registrations reject finalized scenes. Joint, shape-material and targeted DexUni particle-material controls remain
+graph-compatible; nodal trajectories and legacy scene-wide particle-material
+schedules perform host writes and disable CUDA Graph replay. Nodal `fps` enables linear
 substep interpolation; without it each substep consumes a sample. Particle
 indexing rules are in [deformables](deformables.md).
 
@@ -98,10 +112,25 @@ indexing rules are in [deformables](deformables.md).
 
 Use `sim_manager.py` for lifecycle sequencing, `spawn/scene.py` for commit/bind
 coordination, `physics/base.py` and backend implementations for runtime hooks,
-and `_runtime_controls.py` for nodal controls. `BaseEnv` owns Gym ordering.
+and `_runtime_controls.py` for nodal controls and creation joint-state seeding. `BaseEnv` owns Gym ordering.
 
 `tests/sim/test_sim_manager.py` covers retry without recommit, render sync,
 camera attachment, replacement, control registration, reset and teardown.
 `tests/sim/spawn/test_scene.py` covers declaration/source/binding state;
-`tests/sim/test_runtime_controls.py` covers nodal runtime behavior. Physical
+`tests/sim/test_runtime_controls.py` covers nodal behavior and one-shot joint seeding. Physical
 baseline tests live with the corresponding objects under `tests/sim/objects/`.
+
+## Batched RL controls and property writes
+
+`_register_joint_dc_motor_control()` installs a graph-compatible motor before
+scene preparation, resolving public joint names in Arena order. Effort is held
+through solver substeps and refreshed at the next outer physics step.
+`configure_ground_plane_collision()` sets ground geometry and Newton collision
+options before preparation; calls after preparation fail.
+
+Spawn-bound Newton articulations forward unique selected mass, principal
+inertia and COM-pose writes through Scene batches. Public COM poses remain
+XYZ + XYZW; the adapter converts the batch pose convention. Duplicate selections
+retain ordered per-entity behavior. Matching DexSim selected-link batch methods
+are required. `preserve_mesh_transform` retains authored collision mesh pose
+and scale when explicitly selected in Newton collision configuration.

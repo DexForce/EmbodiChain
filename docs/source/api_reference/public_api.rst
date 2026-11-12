@@ -1,5 +1,6 @@
 Public API Supplement
-==============
+=====================
+
 .. This page is maintained by the update-api-docs agent skill.
    docs/scripts/check_api_docs.py reads it but never writes it.
 
@@ -31,6 +32,17 @@ Offline job preflight, run, resume and verified inspection commands.
 .. autosummary::
 
    main
+
+embodichain.compute.geometry.particles
+--------------------------------------
+
+Deterministic lattice sampling for primitive, revolved and closed mesh fill volumes.
+
+.. autosummary::
+
+   embodichain.compute.geometry.particles.sample_volume_particles
+
+.. autofunction:: embodichain.compute.geometry.particles.sample_volume_particles
 
 embodichain.compute.geometry.shading
 ------------------------------------
@@ -172,6 +184,34 @@ the exact repository and revision used for evaluation.
    download_pretrained_policy
 
 .. autofunction:: download_pretrained_policy
+
+embodichain.data.assets.scene_assets
+------------------------------------
+
+Download scene bundles through the shared asset registry. The four SimReady
+rooms retain their original GLB visuals and separate static USD floor collision.
+For example, ``get_data_path("WoodLab/wood_lab/wood_lab.usda")`` resolves the
+portable USD entry; keep its sibling ``visual`` and ``collision`` directories.
+The new bundles use the shared download lock, verify the archive MD5 and
+respect the configured download host, with the official Hub as fallback.
+
+.. currentmodule:: embodichain.data.assets.scene_assets
+
+.. autosummary::
+
+   SceneData
+   EmptyRoom
+   WoodLab
+   IndustrialWorkshop
+   DemoStudio
+   CleanLab
+
+.. autoclass:: SceneData
+.. autoclass:: EmptyRoom
+.. autoclass:: WoodLab
+.. autoclass:: IndustrialWorkshop
+.. autoclass:: DemoStudio
+.. autoclass:: CleanLab
 
 embodichain.data.assets.solver_assets
 -------------------------------------
@@ -967,6 +1007,36 @@ with zero candidates; interrupted writes may leave a run without that manifest.
 
    save_layouts
 
+embodichain.gen_sim.scene_providers
+-----------------------------------
+
+Provider-neutral, durable references for scene generation jobs. A selected
+installed adapter owns transport and provider lifecycle; these contracts do not
+import a model runtime or simulator.
+
+.. currentmodule:: embodichain.gen_sim.scene_providers
+
+.. autosummary::
+
+   CancellationReport
+   SceneGenerationProvider
+   SceneGenerationRequest
+   SceneJobRef
+   SceneJobStatus
+   load_scene_generation_provider
+
+.. autoclass:: CancellationReport
+
+.. autoclass:: SceneGenerationProvider
+
+.. autoclass:: SceneGenerationRequest
+
+.. autoclass:: SceneJobRef
+
+.. autoclass:: SceneJobStatus
+
+.. autofunction:: load_scene_generation_provider
+
 embodichain.gen_sim.services
 ----------------------------
 
@@ -1071,6 +1141,48 @@ semantic and physical validation remain with the consuming owners.
 .. autoclass:: ServiceResponseError
 
 .. autoclass:: SubmissionUnknown
+
+embodichain.gen_sim.workflow
+----------------------------
+
+Artifact-based Task Engine planning, external scene-job control, structured
+scene qualification and deterministic deployment preparation. Simulation
+execution remains with the ordinary task runner.
+
+.. currentmodule:: embodichain.gen_sim.workflow
+
+.. autosummary::
+
+   cancel_scene_generation
+   inspect_scene_generation
+   load_generated_scene
+   load_task_plan
+   materialize_scene_generation
+   plan_image_task
+   prepare_task_deployment
+   qualify_task_scene
+   resume_scene_generation
+   submit_scene_generation
+
+.. autofunction:: cancel_scene_generation
+
+.. autofunction:: inspect_scene_generation
+
+.. autofunction:: load_generated_scene
+
+.. autofunction:: load_task_plan
+
+.. autofunction:: materialize_scene_generation
+
+.. autofunction:: plan_image_task
+
+.. autofunction:: prepare_task_deployment
+
+.. autofunction:: qualify_task_scene
+
+.. autofunction:: resume_scene_generation
+
+.. autofunction:: submit_scene_generation
 
 embodichain.gen_sim.task_engine.evidence
 ----------------------------------------
@@ -1863,6 +1975,23 @@ embodichain.lab.gym.envs.embodied_env
    EmbodiedEnvCfg
    EmbodiedEnv
 
+embodichain.lab.sim.cfg.fluid
+-----------------------------
+
+Fixed-count fluid sources, physical properties and native particle or surface display.
+
+.. autosummary::
+
+   embodichain.lab.sim.cfg.fluid.FluidSpawnCfg
+   embodichain.lab.sim.cfg.fluid.FluidRenderCfg
+   embodichain.lab.sim.cfg.fluid.FluidObjectCfg
+
+.. autoclass:: embodichain.lab.sim.cfg.fluid.FluidSpawnCfg
+
+.. autoclass:: embodichain.lab.sim.cfg.fluid.FluidRenderCfg
+
+.. autoclass:: embodichain.lab.sim.cfg.fluid.FluidObjectCfg
+
 embodichain.lab.sim.motion.expansion.session_coverage
 -----------------------------------------------------
 
@@ -1900,6 +2029,20 @@ separate checker does not own those attachments.
    CuroboPayload
    CuroboQuerySnapshot
    curobo_motion_generator
+
+embodichain.lab.sim.objects.fluid
+---------------------------------
+
+Scene-owned fluid state snapshots, explicit writes and initial-state restoration.
+
+.. autosummary::
+
+   embodichain.lab.sim.objects.fluid.FluidObject
+   embodichain.lab.sim.objects.fluid.FluidObjectData
+
+.. autoclass:: embodichain.lab.sim.objects.fluid.FluidObject
+
+.. autoclass:: embodichain.lab.sim.objects.fluid.FluidObjectData
 
 embodichain.lab.sim.scene.collision_sources
 -------------------------------------------
@@ -2696,6 +2839,7 @@ embodichain.lab.sim
    VisualMaterialInst
    ReuseSegmentState
    BatchEntity
+   UsdImportResult
    SimulationManager
    SimulationManagerCfg
    SIM_CACHE_DIR
@@ -2703,21 +2847,21 @@ embodichain.lab.sim
    CONVEX_DECOMP_DIR
    REACHABLE_XPOS_DIR
 
-embodichain.lab.sim.atomic_actions
+embodichain.lab.sim.atomic_skills
 ----------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions
+.. currentmodule:: embodichain.lab.sim.atomic_skills
 
 .. autosummary::
 
-   ActionPlanningServices
+   SkillPlanningServices
    Affordance
    AffordancePoseCandidates
    AffordanceSample
    AffordanceSamplingContext
    AntipodalAffordance
    AssembleAffordance
-   BUILTIN_ACTION_TYPES
+   BUILTIN_SKILL_TYPES
    CoordinatedPickmentOptions
    CoordinatedPlacementOptions
    DynamicCollisionMode
@@ -2729,7 +2873,7 @@ embodichain.lab.sim.atomic_actions
    MoveEndEffectorOptions
    MoveHeldObjectOptions
    MoveJointsOptions
-   ObjectActionGoal
+   ObjectSkillGoal
    OPEN_COMMAND
    PickUpOptions
    PlaceOptions
@@ -2744,10 +2888,10 @@ embodichain.lab.sim.atomic_actions
    SceneProvider
    SceneSnapshotSupplier
 
-embodichain.lab.sim.atomic_actions.affordance
+embodichain.lab.sim.atomic_skills.affordance
 ---------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.affordance
+.. currentmodule:: embodichain.lab.sim.atomic_skills.affordance
 
 .. autosummary::
 
@@ -2760,14 +2904,14 @@ embodichain.lab.sim.atomic_actions.affordance
    InteractionPoints
    AssembleAffordance
 
-.. automodule:: embodichain.lab.sim.atomic_actions.affordance
+.. automodule:: embodichain.lab.sim.atomic_skills.affordance
    :members:
    :no-index:
 
-embodichain.lab.sim.atomic_actions.affordance_sampling
+embodichain.lab.sim.atomic_skills.affordance_sampling
 -------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.affordance_sampling
+.. currentmodule:: embodichain.lab.sim.atomic_skills.affordance_sampling
 
 .. autosummary::
 
@@ -2775,30 +2919,30 @@ embodichain.lab.sim.atomic_actions.affordance_sampling
    AffordanceSample
    AffordanceSamplingContext
 
-.. automodule:: embodichain.lab.sim.atomic_actions.affordance_sampling
+.. automodule:: embodichain.lab.sim.atomic_skills.affordance_sampling
    :members:
    :no-index:
 
-embodichain.lab.sim.atomic_actions.bindings
+embodichain.lab.sim.atomic_skills.bindings
 -------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.bindings
+.. currentmodule:: embodichain.lab.sim.atomic_skills.bindings
 
 .. autosummary::
 
-   ActionBinding
+   SkillBinding
    EndpointBinding
    JointPositionTarget
    RuntimeEndpointTarget
 
-embodichain.lab.sim.atomic_actions.control
+embodichain.lab.sim.atomic_skills.control
 ------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.control
+.. currentmodule:: embodichain.lab.sim.atomic_skills.control
 
 .. autosummary::
 
-   ActionControlOverrides
+   SkillControlOverrides
    ControlCommand
    ControlPartCommandProfile
    GRASP_COMMAND
@@ -2806,14 +2950,14 @@ embodichain.lab.sim.atomic_actions.control
    OPEN_COMMAND
    PARK_COMMAND
 
-embodichain.lab.sim.atomic_actions.core
+embodichain.lab.sim.atomic_skills.core
 ---------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.core
+.. currentmodule:: embodichain.lab.sim.atomic_skills.core
 
 .. autosummary::
 
-   AtomicAction
+   AtomicSkill
    CompletePlanBuilder
    ObjectSemantics
    SkillDescriptor
@@ -2834,32 +2978,32 @@ finalization transforms once and cannot replace the logical recovery proposal.
    :members:
 
 
-embodichain.lab.sim.atomic_actions.effects
+embodichain.lab.sim.atomic_skills.effects
 ------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.effects
+.. currentmodule:: embodichain.lab.sim.atomic_skills.effects
 
 .. autosummary::
 
    StateDelta
 
-embodichain.lab.sim.atomic_actions.engine
+embodichain.lab.sim.atomic_skills.engine
 -----------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.engine
+.. currentmodule:: embodichain.lab.sim.atomic_skills.engine
 
 .. autosummary::
 
-   AtomicActionEngine
+   AtomicSkillEngine
 
-embodichain.lab.sim.atomic_actions.execution
+embodichain.lab.sim.atomic_skills.execution
 --------------------------------------------
 
 An explicit host lifecycle observes owned installed plans before dispatch. A
 rejected installation blocks ticks and revisions until the runner completes its
 ordinary safe stop and invalidates the lifecycle. Omission preserves execution.
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.execution
+.. currentmodule:: embodichain.lab.sim.atomic_skills.execution
 
 .. autosummary::
 
@@ -2872,10 +3016,10 @@ ordinary safe stop and invalidates the lifecycle. Omission preserves execution.
 
    ExecutionPlanLifecycle
 
-embodichain.lab.sim.atomic_actions.verification
+embodichain.lab.sim.atomic_skills.verification
 ------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.verification
+.. currentmodule:: embodichain.lab.sim.atomic_skills.verification
 
 .. autosummary::
 
@@ -2887,14 +3031,14 @@ embodichain.lab.sim.atomic_actions.verification
    PhaseEffectGateRequest
    PhaseEffectGateResult
 
-embodichain.lab.sim.atomic_actions.goals
+embodichain.lab.sim.atomic_skills.goals
 ----------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.goals
+.. currentmodule:: embodichain.lab.sim.atomic_skills.goals
 
 .. autosummary::
 
-   ObjectActionGoal
+   ObjectSkillGoal
    PoseGoalValue
    SceneEntityPose
    collect_scene_dependencies
@@ -2902,36 +3046,36 @@ embodichain.lab.sim.atomic_actions.goals
    validate_pose_goal
    validate_pose_tensor
 
-.. automodule:: embodichain.lab.sim.atomic_actions.goals
+.. automodule:: embodichain.lab.sim.atomic_skills.goals
    :members:
    :no-index:
 
-embodichain.lab.sim.atomic_actions.invocation
+embodichain.lab.sim.atomic_skills.invocation
 ---------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.invocation
+.. currentmodule:: embodichain.lab.sim.atomic_skills.invocation
 
 .. autosummary::
 
-   ActionInvocation
-   ActionOptions
+   SkillInvocation
+   SkillOptions
    GoalT
    OptionsT
    PhaseEffectGateRequirement
-   ResolvedActionRequest
+   ResolvedSkillRequest
 
-embodichain.lab.sim.atomic_actions.plans
+embodichain.lab.sim.atomic_skills.plans
 ----------------------------------------
 
 Qualification masks and immutable recovery proposals carry planned information.
 A proposal identifies its invocation and plan, and is never a physical effect
-or an automatic state commit. ActionPlan snapshots own these values.
+or an automatic state commit. SkillPlan snapshots own these values.
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.plans
+.. currentmodule:: embodichain.lab.sim.atomic_skills.plans
 
 .. autosummary::
 
-   ActionPlan
+   SkillPlan
    CompiledTrajectory
    EffectVerificationRequirement
    PlannerDiagnostics
@@ -2943,7 +3087,7 @@ or an automatic state commit. ActionPlan snapshots own these values.
    PlanQualification
    PlanningRecoveryOutcome
 
-embodichain.lab.sim.atomic_actions.policies
+embodichain.lab.sim.atomic_skills.policies
 -------------------------------------------
 
 PlanningRecovery is immutable finite scalar/tuple data for an exact skill and
@@ -2959,7 +3103,7 @@ Segment recovery requires fixed-grid sequential IK; unsupported Atomic skills
 reject it before request/provider preparation. Final speed rejection retains
 its explicit hold or mask-only representation and cannot promote failed rows.
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.policies
+.. currentmodule:: embodichain.lab.sim.atomic_skills.policies
 
 .. autosummary::
 
@@ -2970,19 +3114,19 @@ its explicit hold or mask-only representation and cannot promote failed rows.
    PlanningRecovery
    PlanningBudget
 
-embodichain.lab.sim.atomic_actions.primitives
+embodichain.lab.sim.atomic_skills.primitives
 ---------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.primitives
+.. currentmodule:: embodichain.lab.sim.atomic_skills.primitives
 
 .. autosummary::
 
-   BUILTIN_ACTION_TYPES
+   BUILTIN_SKILL_TYPES
 
-embodichain.lab.sim.atomic_actions.requirements
+embodichain.lab.sim.atomic_skills.requirements
 -----------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.requirements
+.. currentmodule:: embodichain.lab.sim.atomic_skills.requirements
 
 .. autosummary::
 
@@ -2998,10 +3142,10 @@ embodichain.lab.sim.atomic_actions.requirements
    SkillEndpointRequirement
    SkillResourceSlot
 
-embodichain.lab.sim.atomic_actions.runner
+embodichain.lab.sim.atomic_skills.runner
 -----------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.runner
+.. currentmodule:: embodichain.lab.sim.atomic_skills.runner
 
 .. autosummary::
 
@@ -3022,19 +3166,19 @@ embodichain.lab.sim.atomic_actions.runner
    RunnerStep
    RunnerStepCallback
 
-embodichain.lab.sim.atomic_actions.runtime
+embodichain.lab.sim.atomic_skills.runtime
 ------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.runtime
+.. currentmodule:: embodichain.lab.sim.atomic_skills.runtime
 
 .. autosummary::
 
-   ActionPlanningServices
+   SkillPlanningServices
 
-embodichain.lab.sim.atomic_actions.runtime_commands
+embodichain.lab.sim.atomic_skills.runtime_commands
 ---------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.runtime_commands
+.. currentmodule:: embodichain.lab.sim.atomic_skills.runtime_commands
 
 .. autosummary::
 
@@ -3044,34 +3188,34 @@ embodichain.lab.sim.atomic_actions.runtime_commands
    RuntimeCommandPayload
    TimedCommandSequence
 
-embodichain.lab.sim.atomic_actions.scene
+embodichain.lab.sim.atomic_skills.scene
 ----------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.scene
+.. currentmodule:: embodichain.lab.sim.atomic_skills.scene
 
 .. autosummary::
 
    SceneProvider
 
-embodichain.lab.sim.atomic_actions.sim_adapter
+embodichain.lab.sim.atomic_skills.sim_adapter
 ----------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.sim_adapter
+.. currentmodule:: embodichain.lab.sim.atomic_skills.sim_adapter
 
 .. autosummary::
 
    create_rigidized_articulation_antipodal_semantics
-   create_simulation_atomic_action_engine
+   create_simulation_atomic_skill_engine
    RigidObjectSceneProvider
    RigidObjectSceneProviderCfg
    SceneEntity
    SceneSnapshotSupplier
    SimulationExecutionAdapter
 
-embodichain.lab.sim.atomic_actions.state
+embodichain.lab.sim.atomic_skills.state
 ----------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.state
+.. currentmodule:: embodichain.lab.sim.atomic_skills.state
 
 .. autosummary::
 
@@ -3082,14 +3226,14 @@ embodichain.lab.sim.atomic_actions.state
    SceneSnapshot
    TaskState
 
-.. automodule:: embodichain.lab.sim.atomic_actions.state
+.. automodule:: embodichain.lab.sim.atomic_skills.state
    :members:
    :no-index:
 
-embodichain.lab.sim.atomic_actions.trajectory_ops
+embodichain.lab.sim.atomic_skills.trajectory_ops
 -------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.trajectory_ops
+.. currentmodule:: embodichain.lab.sim.atomic_skills.trajectory_ops
 
 .. autosummary::
 
@@ -3104,10 +3248,10 @@ embodichain.lab.sim.atomic_actions.trajectory_ops
    to_full_robot_trajectory
    translate_pose_world
 
-embodichain.lab.sim.atomic_actions.transports
+embodichain.lab.sim.atomic_skills.transports
 ---------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.transports
+.. currentmodule:: embodichain.lab.sim.atomic_skills.transports
 
 .. autosummary::
 
@@ -3478,6 +3622,24 @@ embodichain.lab.sim.sensors.contact.sensor
    ContactSensor
    ContactSensorCfg
 
+embodichain.lab.sim.sensors.stereo
+---------------------------------
+
+.. currentmodule:: embodichain.lab.sim.sensors.stereo
+
+Stereo cameras share an environment-level pose and ground visibility policy
+across both eyes. ``PairCameraView`` forwards those operations to the borrowed
+native views; ``StereoCamera`` owns their sensor lifecycle and image buffers.
+
+.. autosummary::
+
+   StereoCamera
+   StereoCameraCfg
+   PairCameraView
+
+.. autoclass:: PairCameraView
+   :members:
+
 embodichain.lab.sim.sim_manager
 -------------------------------
 
@@ -3702,6 +3864,7 @@ embodichain.lab.sim.spawn.descriptors
    configure_articulation_desc
    rigid_desc_from_cfg
    visual_desc_from_cfg
+   cable_desc_from_cfg
    surface_deformable_desc_from_cfg
    volume_deformable_desc_from_cfg
 
@@ -3733,6 +3896,23 @@ embodichain.lab.sim.spawn.usd
    articulation_desc_from_usd
    rigid_desc_from_usd
    visual_desc_from_usd
+
+embodichain.lab.sim.spawn.usd_result
+-------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.spawn.usd_result
+
+USD import results retain stable source keys for declared facades and logical
+resource UIDs. A unique source keeps its prim path as its key. If one prim emits
+several resources, keys append ``#0``, ``#1``, and so on in parser order;
+``resource_source_paths`` maps each key back to its exact source prim path.
+The UID, type and source-path maps use the same keys, independently of namespace
+and runtime UID changes. Results share the manager's ``prepare()`` lifecycle and
+do not own another object registry or native-resource lifetime.
+
+.. autosummary::
+
+   UsdImportResult
 
 embodichain.lab.sim.utility.dynamic_pybind
 ----------------------------------------
@@ -4042,6 +4222,7 @@ embodichain.lab.visualization.protocol
    JointControlSpec
    JointControlState
    MeshGeometry
+   MeshMarkerOverlay
    PickCommand
    PointCloudOverlay
    SceneFrame
@@ -4054,6 +4235,39 @@ embodichain.lab.visualization.protocol
    estimate_frame_bytes
    estimate_manifest_bytes
    pose_to_position_wxyz
+
+embodichain.lab.visualization.markers
+------------------------------------
+
+Render-only marker groups share validated geometry and instance state between
+native simulation windows and browser visualization.
+
+.. currentmodule:: embodichain.lab.visualization.markers
+
+.. autosummary::
+
+   MarkerGroupCfg
+   MarkerPrototypeCfg
+   MarkerGroup
+
+embodichain.lab.visualization.markers.cfg
+----------------------------------------
+
+.. currentmodule:: embodichain.lab.visualization.markers.cfg
+
+.. autosummary::
+
+   MarkerPrototypeCfg
+   MarkerGroupCfg
+
+embodichain.lab.visualization.markers.group
+------------------------------------------
+
+.. currentmodule:: embodichain.lab.visualization.markers.group
+
+.. autosummary::
+
+   MarkerGroup
 
 embodichain.lab.visualization.runtime
 -------------------------------------
@@ -4093,6 +4307,21 @@ embodichain.learning.rl.algo.apg
    APGCfg
    complete_discounted_return
    segmented_discounted_return
+
+embodichain.learning.rl.algo.apg_actor_critic
+-------------------------------------------
+
+.. currentmodule:: embodichain.learning.rl.algo.apg_actor_critic
+
+Short differentiable trajectories use terminal values for actor optimization
+and detached lambda returns for critic regression. Actor and critic optimizers
+retain separate state in checkpoints.
+
+.. autosummary::
+
+   APGActorCritic
+   APGActorCriticCfg
+   differentiable_lambda_returns
 
 embodichain.learning.rl.algo.base
 ---------------------------------
@@ -4322,20 +4551,27 @@ embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker
    GripperCollisionCfg
    GripperCollisionChecker
 
-embodichain.toolkits.graspkit.pg_grasp.model_geometry
+embodichain.lab.sim.utility.gripper_geometry
 ---------------------------------------------------
 
-.. currentmodule:: embodichain.toolkits.graspkit.pg_grasp.model_geometry
+Resolve source geometry and project numerical generator inputs at the Sim boundary.
+
+.. currentmodule:: embodichain.lab.sim.utility.gripper_geometry
 
 .. autosummary::
    :nosignatures:
 
-   get_parallel_jaw_collision_geometry
+   build_gripper_collision_geometry
+   grasp_generator_parameters
 
-embodichain.toolkits.graspkit.scripts.annotate_grasp
+.. autofunction:: build_gripper_collision_geometry
+
+.. autofunction:: grasp_generator_parameters
+
+embodichain.lab.scripts.annotate_grasp
 ----------------------------------------------------
 
-.. currentmodule:: embodichain.toolkits.graspkit.scripts.annotate_grasp
+.. currentmodule:: embodichain.lab.scripts.annotate_grasp
 
 .. autosummary::
 
@@ -4447,6 +4683,25 @@ embodichain_tasks.configs
 .. autosummary::
 
    get_config_path
+
+embodichain_tasks.locomotion.managers.actions
+----------------------------------------------
+
+The reference position action combines a policy output with the next motion
+frame using the task's per-joint reference weights, then applies encoder bias.
+
+.. automodule:: embodichain_tasks.locomotion.managers.actions
+   :members:
+
+embodichain_tasks.locomotion.tracking.g1_motion
+-----------------------------------------------
+
+The G1 motion task connects reference data and differentiable tracking
+calculations to the simulator Gym loop. It owns frame progress, history,
+reference-state resets and terminal snapshots before automatic row resets.
+
+.. automodule:: embodichain_tasks.locomotion.tracking.g1_motion
+   :members:
 
 embodichain_tasks.manipulation.push_cube
 ----------------------------------------
@@ -4741,14 +4996,14 @@ and impulses. Invalid or ambiguous data remains distinct from a measured negativ
 
    classify_contacts
 
-embodichain.lab.sim.atomic_actions.grip_evidence
+embodichain.lab.sim.atomic_skills.grip_evidence
 ------------------------------------------------
 
 Shared physical grip interpretation consumes a PhysicalEvidenceRequest and
 explicit actor bindings, without Semantic Call or Task Program types. Results
 are PhysicalEvidenceBatch values; semantic clause adaptation belongs to integrations.
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.grip_evidence
+.. currentmodule:: embodichain.lab.sim.atomic_skills.grip_evidence
 
 .. autosummary::
 
@@ -4806,7 +5061,7 @@ embodichain.lab.task_program.runtime.lifecycle
 Provider-free runtime factory interfaces select one explicit lifecycle for a
 grounded occurrence. Composite factories reject duplicate or competing owners;
 construction does not plan, transform commands or start a simulator. Hosts can
-pass the selected port to AtomicActionEngine.start.
+pass the selected port to AtomicSkillEngine.start.
 
 .. currentmodule:: embodichain.lab.task_program.runtime.lifecycle
 
@@ -5281,12 +5536,12 @@ Portable, bounded JSON/NPZ bundles retain the raw recording separately from expl
 .. autofunction:: load_demo_skill
 
 
-embodichain.lab.sim.atomic_actions.demo_skill
+embodichain.lab.sim.atomic_skills.demo_skill
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Scene grounding and per-observation monitoring for one demonstration invocation. Evidence must match the physical row and observation timestamp; absent contact or task evidence cannot establish success.
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.demo_skill
+.. currentmodule:: embodichain.lab.sim.atomic_skills.demo_skill
 
 .. autosummary::
 
@@ -5308,12 +5563,12 @@ Scene grounding and per-observation monitoring for one demonstration invocation.
    :members:
 
 
-embodichain.lab.sim.atomic_actions.primitives.execute_demo_skill
+embodichain.lab.sim.atomic_skills.primitives.execute_demo_skill
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 One Atomic Skill executes a pinned demonstration asset through the ordinary planning, command, tracking and effect-verification lifecycle. Logical roles are resolved through the selected robot profile and scene integration.
 
-.. currentmodule:: embodichain.lab.sim.atomic_actions.primitives.execute_demo_skill
+.. currentmodule:: embodichain.lab.sim.atomic_skills.primitives.execute_demo_skill
 
 .. autosummary::
 
@@ -5353,3 +5608,240 @@ lowering still validates calibrated scene and route bindings.
 .. autofunction:: semantic_planning_catalog
 
 .. autofunction:: validate_semantic_call_payload
+
+
+Parallel-jaw hand configuration and composition
+----------------------------------------------
+
+Concrete hand configs own physical values. The lightweight catalog resolver
+returns detached declarations; collision surfaces and runtime TCP validation
+are constructed only by their explicit asset/runtime consumers.
+
+embodichain.data.urdf
+~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.data.urdf
+
+.. autosummary::
+   :nosignatures:
+
+   materialize_urdf_subtree
+
+.. autofunction:: materialize_urdf_subtree
+
+embodichain.lab.sim.cfg.gripper
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.lab.sim.cfg.gripper
+
+.. autosummary::
+   :nosignatures:
+
+   ParallelJawGripperCfg
+
+.. autoclass:: ParallelJawGripperCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+embodichain.lab.sim.utility.gripper_binding
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.lab.sim.utility.gripper_binding
+
+.. autosummary::
+   :nosignatures:
+
+   prepare_robot_grippers
+
+.. autofunction:: prepare_robot_grippers
+
+embodichain.robot_registry
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.robot_registry
+
+.. autosummary::
+   :nosignatures:
+
+   resolve_gripper_defaults
+
+.. autofunction:: resolve_gripper_defaults
+
+embodichain_robots
+~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain_robots
+
+.. autosummary::
+   :nosignatures:
+
+   FrankaPandaHandCfg
+   DHPGI14080Cfg
+   CobotMagicV100GripperCfg
+   PikaGripperCfg
+   TianjiMarvinGripperCfg
+   RobotiqArg2F85Cfg
+   RobotiqArg2F140Cfg
+
+.. autoclass:: FrankaPandaHandCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+.. autoclass:: DHPGI14080Cfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+.. autoclass:: CobotMagicV100GripperCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+.. autoclass:: PikaGripperCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+.. autoclass:: TianjiMarvinGripperCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+.. autoclass:: RobotiqArg2F85Cfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+.. autoclass:: RobotiqArg2F140Cfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+embodichain_robots.agilex.cobotmagic.gripper.cfg
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain_robots.agilex.cobotmagic.gripper.cfg
+
+.. autosummary::
+   :nosignatures:
+
+   CobotMagicV100GripperCfg
+
+.. autoclass:: CobotMagicV100GripperCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+embodichain_robots.agilex.pika.cfg
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain_robots.agilex.pika.cfg
+
+.. autosummary::
+   :nosignatures:
+
+   PikaGripperCfg
+
+.. autoclass:: PikaGripperCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+embodichain_robots.dh_robotics.pgi_140_80.cfg
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain_robots.dh_robotics.pgi_140_80.cfg
+
+.. autosummary::
+   :nosignatures:
+
+   DHPGI14080Cfg
+
+.. autoclass:: DHPGI14080Cfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+embodichain_robots.franka.hand.cfg
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain_robots.franka.hand.cfg
+
+.. autosummary::
+   :nosignatures:
+
+   FrankaPandaHandCfg
+
+.. autoclass:: FrankaPandaHandCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+embodichain_robots.robotiq.arg2f140.cfg
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain_robots.robotiq.arg2f140.cfg
+
+.. autosummary::
+   :nosignatures:
+
+   RobotiqArg2F140Cfg
+
+.. autoclass:: RobotiqArg2F140Cfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+embodichain_robots.robotiq.arg2f85.cfg
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain_robots.robotiq.arg2f85.cfg
+
+.. autosummary::
+   :nosignatures:
+
+   RobotiqArg2F85Cfg
+
+.. autoclass:: RobotiqArg2F85Cfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+embodichain_robots.tianji.marvin.gripper.cfg
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain_robots.tianji.marvin.gripper.cfg
+
+.. autosummary::
+   :nosignatures:
+
+   TianjiMarvinGripperCfg
+
+.. autoclass:: TianjiMarvinGripperCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :show-inheritance:
+
+URDF mounting and name normalization
+-----------------------------------
+
+Single-component standalone hands can request an explicit fixed mounting root.
+Physical and semantic bindings share the assembler's native naming policy.
+
+.. currentmodule:: embodichain.lab.sim.cfg.urdf
+
+.. autosummary::
+   :nosignatures:
+
+   URDFCfg
+
+.. autoclass:: URDFCfg
+   :members:
+   :no-index:
+
+.. currentmodule:: embodichain.toolkits.urdf_assembly.name_normalizer
+
+.. autosummary::
+   :nosignatures:
+
+   NameNormalizer
+
+.. autoclass:: NameNormalizer
+   :members:
+
+
+embodichain.lab.sim.cfg parallel-jaw facade
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: embodichain.lab.sim.cfg
+
+.. autoclass:: ParallelJawGripperCfg
+   :members: model_id, catalog_id, root_link, collision_links, pad_links, root_from_contact_frame, min_opening_width, max_opening_width, grasp_generators, joint_commands, default_root_from_tcp, variant, get_gripper_defaults, from_dict
+   :no-index:

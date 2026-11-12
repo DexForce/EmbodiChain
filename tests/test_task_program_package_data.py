@@ -122,6 +122,27 @@ _DEPLOYMENTS = {
         "cobotmagic",
     ),
 }
+_DEPLOYMENTS[
+    Path("tasks/manipulation/hand_over/task.dual_franka_robotiq_arg2f_140.yaml")
+] = (
+    "upright_can_hand_over",
+    "dual_franka_robotiq140_handover",
+    "dual_franka_robotiq_arg2f_140_handover",
+)
+for _variant in (
+    "dual_franka_robotiq_arg2f_140",
+    "dual_ur10_robotiq_arg2f_140",
+    "dual_franka_robotiq_arg2f_140_gensim",
+    "dual_ur10_robotiq_arg2f_140_gensim",
+):
+    _DEPLOYMENTS[
+        Path(f"tasks/manipulation/repeated_pick_place/task.{_variant}.yaml")
+    ] = ("repeated_cube_pick_place_workbench", "robotiq140_tabletop", _variant)
+_DEPLOYMENTS[Path("tasks/manipulation/carton_stocking/task.panda.rgbd.yaml")] = (
+    "real2sim_carton_stocking",
+    "carton_worktop",
+    "franka_panda_robotiq85",
+)
 _DUAL_ARM_VARIANTS = (
     "dual_ur5_dh_pgi_140_80",
     "tianji_marvin",
@@ -209,6 +230,33 @@ _DUAL_ARM_RESOURCES = {
 
 _RESOURCE_PATHS = frozenset(
     {
+        Path("components/embodiments/franka_panda_robotiq85_rgbd.yaml"),
+        Path(
+            "tasks/manipulation/carton_stocking/task_program/integration.ordinary.yaml"
+        ),
+        Path("tasks/manipulation/repeated_pick_place/README.md"),
+        Path("tasks/manipulation/hand_over/README.md"),
+        Path("components/embodiments/dual_franka_robotiq_arg2f_140_handover.yaml"),
+        Path("components/embodiments/dual_franka_robotiq_arg2f_140.yaml"),
+        Path("components/embodiments/dual_ur10_robotiq_arg2f_140.yaml"),
+        Path("components/embodiments/dual_franka_robotiq_arg2f_140_gensim.yaml"),
+        Path("components/embodiments/dual_ur10_robotiq_arg2f_140_gensim.yaml"),
+        Path(
+            "tasks/manipulation/repeated_pick_place/envs/dual_franka_robotiq140.default.yaml"
+        ),
+        Path(
+            "tasks/manipulation/repeated_pick_place/envs/dual_ur10_robotiq140.default.yaml"
+        ),
+        Path(
+            "tasks/manipulation/repeated_pick_place/task_program/integration.robotiq140.yaml"
+        ),
+        Path(
+            "tasks/manipulation/repeated_pick_place/task_program/program.robotiq_workbench.yaml"
+        ),
+        Path("components/execution_policies/sequential_ik_verified.yaml"),
+        Path("tasks/manipulation/hand_over/envs/dual_franka_robotiq140.default.yaml"),
+        Path("tasks/manipulation/hand_over/task_program/integration.robotiq140.yaml"),
+        Path("tasks/manipulation/hand_over/task_program/program.upright_can.yaml"),
         *(
             Path("tasks/manipulation/carton_stocking") / name
             for name in (

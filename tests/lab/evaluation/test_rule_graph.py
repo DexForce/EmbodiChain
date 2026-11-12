@@ -492,6 +492,111 @@ def test_recorded_joint_uses_native_order_and_rejects_foreign_field():
     assert replay() == [Status.UNAVAILABLE, Status.UNAVAILABLE]
 
 
+@pytest.mark.parametrize(
+    "names, expected",
+    [
+        (("finger_a", "finger_b"), Status.SATISFIED),
+        (("finger_b", "finger_a"), Status.UNAVAILABLE),
+        (("foreign_a", "foreign_b"), Status.UNAVAILABLE),
+    ],
+)
+def test_recorded_preset_requires_the_bound_native_joint_order(names, expected):
+    field = "robot/hand/qpos"
+    registry = builtin_predicates()
+    spec = EvaluationSpec(
+        {
+            "open": PredicateSpec(
+                "command_preset_match",
+                {"position": field},
+                {"preset": "open", "positions": [0.0, 1.0], "tolerance": 0.01},
+            )
+        },
+        ("open",),
+    )
+    unresolved = registry.compile(spec)
+    graph = unresolved._bind_joint_names({field: ("finger_a", "finger_b")})
+    assert graph.identity != unresolved.identity
+    assert (
+        graph.identity
+        != unresolved._bind_joint_names({field: ("finger_b", "finger_a")}).identity
+    )
+    descriptor = {
+        "quantity": "qpos",
+        "entity_uid": "hand",
+        "coordinate_frame": "joint",
+        "representation": "joint_order",
+        "units": ("joint_units",),
+        "shape": (2,),
+        "dtype": "torch.float32",
+        "joint_names": names,
+    }
+    payload = {
+        "raw_observations": {
+            "schema_version": 1,
+            "env_ids": (0,),
+            "episode_ids": (1,),
+            "lengths": torch.tensor([0]),
+            "revisions": torch.tensor([[10]]),
+            "fields": {
+                field: {
+                    "values": torch.tensor([[[0.0, 1.0]]]),
+                    "valid": torch.ones(1, 1, dtype=torch.bool),
+                    "descriptor": descriptor,
+                }
+            },
+        }
+    }
+    for compiled, status in ((unresolved, Status.UNAVAILABLE), (graph, expected)):
+        result = evaluate_recorded_rules(
+            compiled, payload, env_ids=(0,), episode_ids=(1,), scope="final"
+        )
+        assert result.rules["open"].status.tolist() == [status]
+
+
+def test_preset_layouts_cannot_override_another_roots_evidence():
+    from embodichain.lab.evaluation.observations import _combine_selections
+
+    field = "robot/hand/qpos"
+    first = PredicateSpec(
+        "command_preset_match",
+        {"position": field},
+        {
+            "preset": "open",
+            "positions": [0.0, 1.0],
+            "tolerance": 0.01,
+            "joint_names": ["finger_a", "finger_b"],
+        },
+    )
+    second = PredicateSpec(
+        first.kind,
+        first.bindings,
+        {
+            **first.params,
+            "joint_names": ["finger_b", "finger_a"],
+        },
+    )
+    registry = builtin_predicates()
+    with pytest.raises(ValueError, match="one native joint layout"):
+        registry.compile(EvaluationSpec({"a": first, "b": second}, ("a", "b")))
+    a = registry.compile(EvaluationSpec({"a": first}, ("a",)))
+    b = registry.compile(EvaluationSpec({"b": second}, ("b",)))
+    plain = registry.compile(
+        EvaluationSpec(
+            {
+                "plain": PredicateSpec(
+                    "joint_range", {"position": field}, {"lower": 0.0, "upper": 1.0}
+                ),
+            },
+            ("plain",),
+        )
+    )
+    assert _combine_selections({"a": a, "b": b, "plain": plain}) == (
+        (("a",), a),
+        (("b",), b),
+        (("plain",), plain),
+    )
+
+
 def test_replay_preserves_row_ends_and_rejects_missing_endpoint():
     graph = builtin_predicates().compile(
         EvaluationSpec(

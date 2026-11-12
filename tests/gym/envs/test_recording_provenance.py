@@ -98,6 +98,31 @@ def test_environment_identity_is_unique_per_episode_and_shared_per_run() -> None
     assert first["config_hash"] == second["config_hash"]
 
 
+def test_metadata_request_materializes_only_requested_row() -> None:
+    env = make_env()
+    env.num_envs = 2
+    env.episode_context = EpisodeContext(2)
+    env.rollout_buffer = None
+    env.rollout_steps = torch.zeros(2, dtype=torch.long)
+    env._demo_steps = torch.zeros(2, dtype=torch.long)
+    env.episode_success_status = torch.zeros(2, dtype=torch.bool)
+    env._demo_metadata_initialized = False
+    env._demo_episode_metadata = [{}, {"instruction": "Execute the selected program"}]
+    env._new_demo_episode_metadata = lambda row: EmbodiedEnv._new_demo_episode_metadata(
+        env, row
+    )
+
+    first = EmbodiedEnv.get_demo_episode_metadata(env, 1)
+    second = EmbodiedEnv.get_demo_episode_metadata(env, 1)
+
+    assert first["episode_uuid"] == second["episode_uuid"]
+    assert UUID(first["episode_uuid"])
+    assert first["env_id"] == 1
+    assert first["instruction"] == "Execute the selected program"
+    assert env._demo_episode_metadata[0] == {}
+    assert env._demo_metadata_initialized
+
+
 def test_episode_override_program_hash_uses_executed_program() -> None:
     env = make_env()
     env.cfg.task_program = {"program_id": "configured_default"}
@@ -734,3 +759,25 @@ def test_training_window_reuse_preserves_episode_observation_history(training_de
     assert manager.read_history(
         [1, 1], fields=["measurement"], episode_ids=[0, 0]
     ).values["measurement"].flatten().tolist() == [5.0, 5.0]
+
+
+def test_episode_metadata_rows_preserve_reset_time_context_and_row_isolation():
+    from embodichain.lab.gym.envs.embodied_env import _EpisodeMetadataRows
+
+    template = {"seed": 12, "provenance": {"labels": ["initial"]}, "segments": []}
+    rows = _EpisodeMetadataRows(3, template)
+    original = rows[0]
+    original["segments"].append({"name": "first"})
+    template["seed"] = 35
+    template["provenance"]["labels"].append("reset")
+    rows.reset_rows([0, 2], template)
+    template["seed"] = 99
+    assert [row["seed"] for row in rows] == [35, 12, 35]
+    assert rows[0]["segments"] == [] and rows[1]["segments"] == []
+    assert original["segments"] == [{"name": "first"}]
+    rows[0]["provenance"]["labels"].append("row zero")
+    assert rows[2]["provenance"]["labels"] == ["initial", "reset"]
+    assert len({row["episode_uuid"] for row in rows}) == 3
+    for index, row in enumerate(rows):
+        assert row["env_id"] == index
+        assert row["source_episode_uuid"] == row["episode_uuid"]

@@ -1,0 +1,38 @@
+embodiment_id: piper_x_agx_gripper
+
+simulation:
+  class_type: AgilexPiperX
+  uid: AgilexPiperXWithGripper
+  urdf_cfg:
+    fname: piper_x_agx_gripper
+    components:
+      - component_type: hand
+        urdf_path: AgxGripper/agx_gripper.urdf
+        # AgileX PiPER-X tool Xacro: +4.5 mm along flange Z, +90° about Z.
+        transform:
+          - [0.0, -1.0, 0.0, 0.0]
+          - [1.0, 0.0, 0.0, 0.0]
+          - [0.0, 0.0, 1.0, 0.0045]
+          - [0.0, 0.0, 0.0, 1.0]
+  control_parts:
+    eef: [gripper]
+  init_qpos_joint_names:
+    [joint1, joint2, joint3, joint4, joint5, joint6, gripper, gripper_joint1, gripper_joint2]
+  init_qpos: [0.0, 0.72, -1.25, 0.0, 0.72, 0.0, 0.07, 0.035, -0.035]
+  joint_drive_props:
+    stiffness:
+      gripper: 500.0
+    damping:
+      gripper: 20.0
+    max_velocity:
+      gripper: 0.15
+  solver_cfg:
+    arm:
+      # Fingertip center at nominal zero opening.
+      tcp:
+        - [0.0, -1.0, 0.0, 0.0]
+        - [1.0, 0.0, 0.0, 0.0]
+        - [0.0, 0.0, 1.0, 0.1425]
+        - [0.0, 0.0, 0.0, 1.0]
+
+sensor: []

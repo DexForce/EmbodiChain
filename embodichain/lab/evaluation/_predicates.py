@@ -180,19 +180,33 @@ def _command_match(arguments, params):
 
 
 def _preset_params(params):
-    _keys(params, ("tolerance", "preset", "positions"))
+    _keys(params, ("tolerance", "preset", "positions"), ("joint_names",))
     positions = params["positions"]
     preset = params["preset"]
     if not isinstance(preset, str) or not preset or preset != preset.strip():
         raise ValueError("Command preset requires an exact preset name.")
     if not isinstance(positions, (tuple, list)) or not positions:
         raise ValueError("Command preset requires a nonempty joint vector.")
+    names = params.get("joint_names")
+    if names is not None and (
+        not isinstance(names, (list, tuple))
+        or len(names) != len(positions)
+        or any(
+            not isinstance(name, str) or not name or name != name.strip()
+            for name in names
+        )
+        or len(set(names)) != len(names)
+    ):
+        raise ValueError(
+            "Command preset requires one unique native joint name per position."
+        )
     return {
         **_command_params({"tolerance": params["tolerance"]}),
         "preset": preset,
         "positions": tuple(
             _finite(position, "preset joint position") for position in positions
         ),
+        "joint_names": None if names is None else tuple(names),
     }
 
 
@@ -200,7 +214,11 @@ def _preset_match(arguments, params):
     import torch
 
     position = arguments["position"]
-    if position.ndim != 2 or position.shape[1] != len(params["positions"]):
+    if (
+        params["joint_names"] is None
+        or position.ndim != 2
+        or position.shape[1] != len(params["positions"])
+    ):
         unavailable = torch.zeros(
             len(position), device=position.device, dtype=torch.bool
         )
@@ -440,7 +458,7 @@ _COMMAND = PredicateDefinition(
     shared_layout=True,
 )
 _PRESET = PredicateDefinition(
-    1, ("position",), _preset_params, _preset_match, ("joint_positions",)
+    2, ("position",), _preset_params, _preset_match, ("joint_positions",)
 )
 _STABLE = PredicateDefinition(
     1,

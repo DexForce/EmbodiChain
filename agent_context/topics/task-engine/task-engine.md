@@ -6,7 +6,7 @@ coverage. Importing its front end does not initialize Lab or a simulator.
 
 | Request | Owner under `gen_sim/task_engine/` |
 |---|---|
-| Image + instruction → unbound canonical-call graph | `image_planning.py`; `cli.py` through `embodichain task-engine` |
+| Image + instruction → unbound canonical-call graph | `image_planning.py`; `_image_run.py` publishes artifacts; `cli.py` through `embodichain gensim task plan` (legacy `task-engine`) |
 | Instruction intent and explicit model-caller boundary | `interpretation.py` |
 | Supported task intentions and relations | `ontology.py` |
 | Candidates, drafts, scene requests and success declarations | `contracts.py`, `agent.py` |
@@ -41,7 +41,7 @@ handoff. Public API descriptions are in the
 
 ## Image semantic planning entry
 
-`embodichain task-engine --image IMAGE --instruction TEXT --output DIRECTORY`
+`embodichain gensim task plan --image IMAGE --instruction TEXT --output DIRECTORY`
 uses the configured GenSim model to interpret the complete instruction, ground
 logical image references and plan canonical calls from the data-only Task Program
 catalog. It always ends at the unbound semantic graph; there are no model or

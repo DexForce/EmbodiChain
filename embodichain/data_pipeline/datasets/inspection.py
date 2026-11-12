@@ -1483,7 +1483,7 @@ def _recovery_count(record: Mapping[str, Any]) -> int | None:
         return len(recoveries)
     # Canonical Task Program results contain complete event histories and row
     # identities. "replanned" counts an actual retry or local replan once;
-    # counting both action_retry and replanned would double-count a retry.
+    # counting both skill_retry and replanned would double-count a retry.
     segments = record.get("segments")
     env_id = _integer(record.get("env_id", record.get("source_env_id")))
     if env_id is None or not isinstance(segments, list) or not segments:

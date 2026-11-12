@@ -108,6 +108,15 @@ def _observed_task(embodiment="ur5"):
         get_joint_ids=lambda **kw: tuple(range(len(open_hand))),
         get_link_pose=lambda name, **kw: fingers[name],
     )
+    from embodichain.lab.task_program.integrations.simulation.bindings import (
+        _bind_evaluation_joint_names,
+    )
+
+    env.robot.control_parts = {"eef": list(env.robot.joint_names)}
+    bound = _bind_evaluation_joint_names(registration.evaluation_conditions, env.robot)
+    env._final_acceptance_rules = tuple(
+        (ref, bound[ref]) for ref in registration.evaluation_final_refs
+    )
     return env
 
 

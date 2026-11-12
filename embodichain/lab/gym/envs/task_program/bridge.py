@@ -39,24 +39,24 @@ from embodichain.lab.gym.envs._json import json_safe_copy as _json_safe_copy
 from embodichain.lab.gym.envs.demo import DemoSegment
 from embodichain.lab.gym.envs.expert_trajectory import JointCommandMode
 from embodichain.lab.gym.envs.types import ControllerAction
-from embodichain.lab.sim.atomic_actions.bindings import (
+from embodichain.lab.sim.atomic_skills.bindings import (
     JointPositionTarget,
     RuntimeEndpointTarget,
 )
-from embodichain.lab.sim.atomic_actions.primitives.pick_up import PickUpOptions
-from embodichain.lab.sim.atomic_actions.primitives.place import PlaceOptions
-from embodichain.lab.sim.atomic_actions.runner import (
+from embodichain.lab.sim.atomic_skills.primitives.pick_up import PickUpOptions
+from embodichain.lab.sim.atomic_skills.primitives.place import PlaceOptions
+from embodichain.lab.sim.atomic_skills.runner import (
     CommandAcknowledgement,
     ExecutionClock,
     ExecutionRunnerCfg,
 )
-from embodichain.lab.sim.atomic_actions.runtime_commands import (
+from embodichain.lab.sim.atomic_skills.runtime_commands import (
     EndpointCommand,
     JointPositionPayload,
     RuntimeCommandFrame,
     RuntimeCommandPayload,
 )
-from embodichain.lab.sim.atomic_actions.state import PlanningContext, TaskState
+from embodichain.lab.sim.atomic_skills.state import PlanningContext, TaskState
 from embodichain.lab.task_program.runtime.parallel import ParallelTimingPolicy
 from embodichain.lab.task_program.runtime.parallel_executor import (
     ParallelCommandSafetyValidator,
@@ -1579,13 +1579,13 @@ class TaskProgramDemoBridge:
                     or motion.strategy != "ik_interp"
                     or type(motion.sample_count) is not int
                     or recovery.max_replans != 0
-                    or recovery.max_action_retries != 0
+                    or recovery.max_skill_retries != 0
                     or preset.workflow_recovery_policy.max_recovery_attempts != 0
                     or tracking.in_flight is not None
                     or getattr(tracking.terminal, "settle_duration", None) != 0.0
                 ):
                     return None
-                options = preset.action_option_template(call.semantic_id)
+                options = preset.skill_option_template(call.semantic_id)
                 if type(options) is PickUpOptions:
                     total += motion.sample_count + options.grasp_settle_steps
                 elif type(options) is PlaceOptions:
@@ -1605,6 +1605,17 @@ class TaskProgramDemoBridge:
             "program_segment_index": segment.segment_index,
             "segment_count": getattr(self._program, "segment_count", None),
             "program_segment_source_path": list(segment.source_path),
+            **(
+                {
+                    "program_segment_authored_path": list(
+                        self._program.authored_path(segment.source_path)
+                    )
+                }
+                if type(self._program) is CompiledTaskProgram
+                and self._program.authored_path(segment.source_path)
+                != segment.source_path
+                else {}
+            ),
             "program_segment_implicit": bool(segment.implicit),
             "semantic_call_indices": [call.call_index for call in segment.calls],
             "post_policy_count": len(segment.post_policies),
@@ -2200,6 +2211,16 @@ class TaskProgramDemoBridge:
             )
             if lifecycle.post_policy_success is not None:
                 active_mask &= lifecycle.post_policy_success
+            bind_hold = getattr(self._post_policy_port, "bind_hold_observer", None)
+            if getattr(
+                getattr(policy, "cfg", None), "kind", None
+            ) == "hold" and callable(bind_hold):
+                observer = getattr(self._runtime, "observe_hold", None)
+                if not callable(observer):
+                    raise TaskProgramBridgeError(
+                        "Hold requires a measured semantic runtime."
+                    )
+                bind_hold(observer)
             actions = self._post_policy_port.actions(
                 policy,
                 segment=segment,
@@ -2235,6 +2256,17 @@ class TaskProgramDemoBridge:
                     "policy_index": policy_index,
                     "kind": getattr(cfg, "kind", type(policy).__name__),
                     "source_path": list(getattr(policy, "source_path", ())),
+                    **(
+                        {
+                            "authored_path": list(
+                                self._program.authored_path(policy.source_path)
+                            )
+                        }
+                        if type(self._program) is CompiledTaskProgram
+                        and self._program.authored_path(policy.source_path)
+                        != policy.source_path
+                        else {}
+                    ),
                     "result_mask": result.success_mask.detach().cpu().tolist(),
                     "result": None,
                 }
@@ -2305,6 +2337,13 @@ class TaskProgramDemoBridge:
             validator_traces: list[dict[str, Any]] = []
             for validator_index, validator in enumerate(validators):
                 assert self._validator_port is not None
+                bind_target = getattr(
+                    self._validator_port, "bind_target_observer", None
+                )
+                if callable(bind_target) and callable(
+                    getattr(self._runtime, "resolved_object_target", None)
+                ):
+                    bind_target(self._runtime.resolved_object_target)
                 value = self._validator_port.validate(validator, segment=segment)
                 validator_result = _normalize_validation(
                     value,

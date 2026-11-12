@@ -57,10 +57,10 @@ from embodichain.lab.gym.envs.task_program.bridge import (
     EnvironmentStepClock,
     RuntimeCommandFrameEncoder,
 )
-from embodichain.lab.sim.atomic_actions import (
+from embodichain.lab.sim.atomic_skills import (
     Affordance,
     ArticulationAffordanceGeometry,
-    AtomicActionEngine,
+    AtomicSkillEngine,
     DynamicCollisionMode,
     EntityState,
     ObjectSemantics,
@@ -280,15 +280,16 @@ def test_newton_contact_overlays_are_scoped_in_packaged_manipulation_configs() -
     assert cube_physics.num_substeps == 20
     assert cube_physics.collision_cfg is None
     assert cube_physics.solver_cfg == {
-        "solver_type": "mujoco_warp",
-        "solver": "newton",
-        "integrator": "implicitfast",
-        "iterations": 20,
-        "ls_iterations": 100,
-        "cone": "elliptic",
-        "impratio": 1000.0,
-        "use_mujoco_contacts": True,
-        "enable_multiccd": True,
+        "solver_type": "dexuni",
+        "mujoco_options": {
+            "solver": "newton",
+            "integrator": "implicitfast",
+            "iterations": 20,
+            "ls_iterations": 100,
+            "cone": "elliptic",
+            "impratio": 1000.0,
+            "enable_multiccd": True,
+        },
     }
     cube_collision = cube_cfg.rigid_object[0].attrs.collision_props
     assert isinstance(cube_collision, NewtonCollisionPropertiesCfg)
@@ -480,6 +481,9 @@ def test_cube_variant_extends_by_data_without_motion_generation_code() -> None:
             },
         )
     )
+    from embodichain.lab.task_program.language.authoring import normalize_task_program
+
+    payload = normalize_task_program(payload).declaration
     payload["program"]["count"] = 4
 
     config = _decode_deployed_program(
@@ -530,11 +534,11 @@ def test_open_drawer_config_owns_registered_lowerer_factory() -> None:
     # The joint-target extension must preserve the shipped handle-only deployment.
     assert (
         registration.fingerprint
-        == "2ea6f84818cb0854c66b3b23e715b35f7518cd1b3962329f8acbfd2ad7ab714f"
+        == "c8767354951735e47897e046ba35bc26b8e8f47433915174655d4c5247ec2a88"
     )
     assert (
         integration.integration_fingerprint
-        == "e114b8491e111247a5f949a6708b830bddff771b707f5cdbe622ee47e4ed3d2e"
+        == "aede0eed53368155b3d58bf288188079f9278fd883e342197ee38c101123b7da"
     )
     assert tuple(registration.catalog.registered_semantic_lowerer_declarations) == (
         _OPEN_DRAWER_CALL_ID,
@@ -578,7 +582,7 @@ def test_open_drawer_config_owns_registered_lowerer_factory() -> None:
         )
     )
     robot = object()
-    engine = AtomicActionEngine.__new__(AtomicActionEngine)
+    engine = AtomicSkillEngine.__new__(AtomicSkillEngine)
     engine._planning_services = SimpleNamespace(  # type: ignore[attr-defined]
         robot=robot,
         device=torch.device("cpu"),
@@ -703,7 +707,7 @@ def test_explicit_slide_axis_bypasses_sampling_with_non_unit_scale() -> None:
         )
     )
     robot = object()
-    engine = AtomicActionEngine.__new__(AtomicActionEngine)
+    engine = AtomicSkillEngine.__new__(AtomicSkillEngine)
     engine._planning_services = SimpleNamespace(  # type: ignore[attr-defined]
         robot=robot,
         device=torch.device("cpu"),
@@ -872,7 +876,7 @@ def test_example_profiles_execute_only_open_loop_trajectories(
     assert isinstance(preset.tracking_policy.terminal, TimedTerminalAcceptance)
     assert preset.tracking_policy.terminal.settle_duration == 0.0
     assert preset.recovery_policy.max_replans == 0
-    assert preset.recovery_policy.max_action_retries == 0
+    assert preset.recovery_policy.max_skill_retries == 0
     assert preset.workflow_recovery_policy.max_recovery_attempts == 0
     assert dict(preset.effect_monitors) == {}
     assert preset.runner_cfg.hold_on_completion is False

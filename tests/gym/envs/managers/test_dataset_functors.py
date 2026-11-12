@@ -2974,7 +2974,7 @@ def test_real2sim_execution_trace_accounts_for_holds_and_every_plan_sample() -> 
     from embodichain.lab.gym.envs.managers.real2sim_sink import (
         build_real2sim_execution_trace,
     )
-    from embodichain.lab.sim.atomic_actions import (
+    from embodichain.lab.sim.atomic_skills import (
         InstantiatedSkillMotion,
         TimedTrajectory,
     )
