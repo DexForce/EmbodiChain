@@ -13,6 +13,13 @@ embodichain run-example sim/atomic_skill --skill place --variants 8
 embodichain run-example sim/atomic_skill/coordinated_pickment --help
 ```
 
+The DexUni pouring example plans a fresh Franka grasp, pour and place sequence
+with live fluid physics. It requires CUDA and a DexSim build with DFSPH support:
+
+```bash
+embodichain run-example sim/demo/franka_dexuni_pour_demo --help
+```
+
 A directory with `__main__.py` can be selected by its directory path. All arguments
 after the path go to the script, including `--help`; an optional `--` separator is
 also accepted. `--list` discovers Python files from the directory without importing

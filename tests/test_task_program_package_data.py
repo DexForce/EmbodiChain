@@ -121,6 +121,11 @@ _DEPLOYMENTS = {
         "task_program_pour_water",
         "cobotmagic",
     ),
+    Path("tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"): (
+        "pick_aim_pour_return_cup",
+        "task_program_pour_cup_fluid",
+        "franka_panda_fast_fluid",
+    ),
 }
 _DEPLOYMENTS[
     Path("tasks/manipulation/hand_over/task.dual_franka_robotiq_arg2f_140.yaml")
@@ -230,6 +235,14 @@ _DUAL_ARM_RESOURCES = {
 
 _RESOURCE_PATHS = frozenset(
     {
+        Path("tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"),
+        Path("tasks/manipulation/tableware/pour_cup/env.fluid.yaml"),
+        Path("tasks/manipulation/tableware/pour_cup/task_program/program.fluid.yaml"),
+        Path(
+            "tasks/manipulation/tableware/pour_cup/task_program/integration.fluid.yaml"
+        ),
+        Path("components/embodiments/franka_panda_fast_fluid.yaml"),
+        Path("components/execution_policies/trajectory_open_loop_fluid_pour.yaml"),
         Path("components/embodiments/franka_panda_robotiq85_rgbd.yaml"),
         Path(
             "tasks/manipulation/carton_stocking/task_program/integration.ordinary.yaml"
@@ -435,6 +448,10 @@ def test_setup_stages_all_official_task_programs(
         for relative_path in _RESOURCE_PATHS
     }
     assert expected_outputs <= staged_config_package.relative_outputs
+    assert not (
+        staged_config_package.build_lib
+        / "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/assets"
+    ).exists()
 
 
 def test_staged_task_program_resources_decode_through_installed_paths(

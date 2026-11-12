@@ -28,6 +28,7 @@ from embodichain.lab.gym.envs.expert_trajectory import (
     EXPERT_TRAJECTORY_SCHEMA_VERSION,
     build_expert_action_spec,
 )
+from embodichain.lab.gym.utils.trajectory_state import FluidTrajectoryReader
 from embodichain.lab.gym.envs.task_program._final_acceptance import (
     _replay_final_acceptance,
 )
@@ -48,10 +49,12 @@ __all__ = ["ReplayWrapper"]
 class ReplayWrapper(gym.Wrapper):
     """Replay a recorded environment trajectory.
 
-    In ``kinematic`` mode physics is disabled and every recorded object's
-    pose/qpos is written directly each step, producing observations only (no
-    reward / success / action). In ``dynamic`` mode the recorded robot actions
-    are fed back through :meth:`env.step` so physics re-simulates the scene;
+    In ``kinematic`` mode physics is disabled and recorded robot, rigid and
+    available fluid-particle states are written directly each step, producing
+    observations only (no reward / success / action). In ``dynamic`` mode the
+    recorded robot actions are fed back through :meth:`env.step` so physics
+    re-simulates the scene; a recorded fluid starts at its source state and
+    then evolves through the solver without per-frame state replacement;
     the full ``obs/reward/terminated/truncated/info`` tuple is returned. The
     ``control`` mode uses the same kinematic behavior while exposing
     :meth:`go_to_step` for interactive scrubbing.
@@ -89,6 +92,8 @@ class ReplayWrapper(gym.Wrapper):
         env: gym.Env,
         trajectory: str | dict,
         mode: str = "dynamic",
+        *,
+        fluid_reader: FluidTrajectoryReader | None = None,
     ):
         super().__init__(env)
         if mode not in ("kinematic", "dynamic", "control"):
@@ -126,6 +131,16 @@ class ReplayWrapper(gym.Wrapper):
                 ):
                     raise ValueError("arena_origins_w must be finite (num_envs, 3).")
                 self._cable_source_origins = origins
+        self._fluid_reader = fluid_reader
+        if getattr(getattr(env, "cfg", None), "fluid_object", ()):
+            if self._fluid_reader is None:
+                if not isinstance(trajectory, str):
+                    raise ValueError("Fluid replay requires a trajectory file path.")
+                self._fluid_reader = FluidTrajectoryReader(
+                    trajectory, self._trajectory, env.cfg
+                )
+        elif fluid_reader is not None or "fluid_state" in meta:
+            raise ValueError("A fluid trajectory requires configured fluid objects.")
         self._controller_spec = None
         self._task_outcome_replay = mode == "dynamic" and (
             getattr(env, "termination_manager", None) is not None
@@ -172,6 +187,8 @@ class ReplayWrapper(gym.Wrapper):
         # Per-env lengths support async vector trajectories.
         lengths = self._trajectory["meta"]["lengths"]
         self._lengths = torch.tensor(lengths, dtype=torch.long, device=self.env.device)
+        # CPU indices also work when stored states and the replay use different GPUs.
+        self._recorded_lengths = self._lengths.cpu()
 
         # Clamp replay length to the wrapped env's horizon.
         max_steps = int(self.env.max_episode_steps)
@@ -240,7 +257,9 @@ class ReplayWrapper(gym.Wrapper):
                 "only single-env trajectories can be broadcast."
             )
         self._trajectory = dict(self._trajectory)
-        for key in ("states", "actions"):
+        for key in ("states", "actions", "terminal_states"):
+            if key not in self._trajectory:
+                continue
             t = self._trajectory[key]
             self._trajectory[key] = t.expand(env_envs, *t.shape[1:]).clone()
         self._trajectory["meta"] = dict(
@@ -282,6 +301,10 @@ class ReplayWrapper(gym.Wrapper):
         else:
             self.env.sim.enable_physics(False)
             restore_trajectory_state(self.env, self._trajectory["states"][:, 0])
+            if self._fluid_reader is not None:
+                self._fluid_reader.apply(
+                    self.env, torch.zeros(self.env.num_envs, dtype=torch.long)
+                )
         if self._mode == "dynamic":
             self.env.sim.enable_physics(True)
             self.env._replay_no_auto_reset = True
@@ -360,7 +383,14 @@ class ReplayWrapper(gym.Wrapper):
 
         if self._mode in ("kinematic", "control"):
             restore_trajectory_state(self.env, self._trajectory["states"][idx, st])
-            env.sim.update(env.sim_cfg.physics_dt, env.cfg.sim_steps_per_control)
+            if self._fluid_reader is not None:
+                self._fluid_reader.apply(env, st)
+                # Newton's disabled-physics update can still enter the DexUni
+                # solver. Publish the authored state without a physical step.
+                with env.sim.render_frame(force_visualization=True):
+                    pass
+            else:
+                env.sim.update(env.sim_cfg.physics_dt, env.cfg.sim_steps_per_control)
             obs = env.get_obs()
             self._replay_steps = (self._replay_steps + 1).clamp(max=self._lengths)
             trunc = self._replay_steps >= self._lengths
@@ -404,8 +434,23 @@ class ReplayWrapper(gym.Wrapper):
         max_step = self.control_max_step
         step = max(0, min(int(step), max_step))
         env.sim.enable_physics(False)
-        restore_trajectory_state(env, self._trajectory["states"][:, step])
-        env.sim.update(env.sim_cfg.physics_dt, env.cfg.sim_steps_per_control)
+        terminal = self._recorded_lengths == step
+        if bool(terminal.all()):
+            state = self._trajectory["terminal_states"]
+        else:
+            state = self._trajectory["states"][:, step]
+            if bool(terminal.any()):
+                state = state.clone()
+                state[terminal] = self._trajectory["terminal_states"][terminal]
+        restore_trajectory_state(env, state)
+        if self._fluid_reader is not None:
+            self._fluid_reader.apply(
+                env, torch.full((env.num_envs,), step, dtype=torch.long)
+            )
+            with env.sim.render_frame(force_visualization=True):
+                pass
+        else:
+            env.sim.update(env.sim_cfg.physics_dt, env.cfg.sim_steps_per_control)
         self._replay_steps = torch.full(
             (env.num_envs,), step, dtype=torch.long, device=env.device
         )
@@ -415,10 +460,18 @@ class ReplayWrapper(gym.Wrapper):
     def control_max_step(self) -> int:
         """Largest state index available to interactive control replay."""
         transition_count = int(self._lengths.min().item())
+        if (
+            self._fluid_reader is not None
+            and "terminal_states" in self._trajectory
+            and bool((self._lengths == transition_count).all())
+        ):
+            return transition_count
         return transition_count - 1
 
     def close(self) -> None:
         try:
+            if self._fluid_reader is not None:
+                self._fluid_reader.close()
             self.env.sim.enable_physics(True)
             self.env._replay_no_auto_reset = False
         finally:

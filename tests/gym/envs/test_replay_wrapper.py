@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from contextlib import contextmanager
 
 import gymnasium as gym
 import pytest
@@ -34,12 +35,30 @@ class _FakeSim:
     def __init__(self) -> None:
         self.physics_enabled: list[bool] = []
         self.updates: list[tuple[float, int]] = []
+        self.rendered = 0
 
     def enable_physics(self, enabled: bool) -> None:
         self.physics_enabled.append(enabled)
 
     def update(self, physics_dt: float, substeps: int) -> None:
         self.updates.append((physics_dt, substeps))
+
+    @contextmanager
+    def render_frame(self, *, force_visualization: bool = False):
+        self.rendered += 1
+        yield
+
+
+class _FakeFluidReader:
+    def __init__(self) -> None:
+        self.applied: list[list[int]] = []
+        self.closed = False
+
+    def apply(self, env, steps: torch.Tensor) -> None:
+        self.applied.append(steps.tolist())
+
+    def close(self) -> None:
+        self.closed = True
 
 
 class _FakeEnv(gym.Env):
@@ -451,3 +470,95 @@ def test_cable_replay_rejects_invalid_source_origins_before_reset(origins):
     with pytest.raises(ValueError, match="arena_origins_w"):
         ReplayWrapper(env, trajectory)
     assert env.sim.physics_enabled == []
+
+
+@pytest.mark.parametrize("mode", ["kinematic", "control"])
+def test_fluid_kinematic_and_control_restore_recorded_frames(fake_restore, mode):
+    env = _FakeEnv()
+    env.cfg.fluid_object = [object()]
+    reader = _FakeFluidReader()
+    replay = ReplayWrapper(env, _trajectory(), mode=mode, fluid_reader=reader)
+
+    replay.reset()
+    replay.step(None)
+    if mode == "control":
+        replay.go_to_step(1)
+
+    assert reader.applied == ([[0], [0], [1]] if mode == "control" else [[0], [0]])
+    assert env.sim.updates == []
+    assert env.sim.rendered == (2 if mode == "control" else 1)
+    replay.close()
+    assert reader.closed
+
+
+def test_fluid_dynamic_restores_only_initial_particles(fake_restore):
+    env = _FakeEnv()
+    env.cfg.fluid_object = [object()]
+    reader = _FakeFluidReader()
+    replay = ReplayWrapper(env, _trajectory(), mode="dynamic", fluid_reader=reader)
+
+    replay.reset()
+    replay.step(None)
+
+    assert reader.applied == [[0]]
+    assert len(env.received_actions) == 1
+    replay.close()
+
+
+@pytest.mark.parametrize("num_envs", [1, 2])
+def test_fluid_control_can_seek_recorded_terminal_state(fake_restore, num_envs):
+    env = _FakeEnv(num_envs=num_envs)
+    env.cfg.fluid_object = [object()]
+    reader = _FakeFluidReader()
+    trajectory = _trajectory()
+    trajectory["terminal_states"] = trajectory["states"][:, -1].clone()
+    trajectory["terminal_states"]["robot"]["qpos"].fill_(10.0)
+    replay = ReplayWrapper(env, trajectory, mode="control", fluid_reader=reader)
+
+    replay.reset()
+    replay.go_to_step(2)
+
+    assert replay.control_max_step == 2
+    assert reader.applied == [[0] * num_envs, [2] * num_envs]
+    torch.testing.assert_close(
+        env.last_restored["robot"]["qpos"], torch.full((num_envs, 2), 10.0)
+    )
+    replay.close()
+
+
+@pytest.mark.parametrize(
+    "lengths,expected_qpos",
+    [([2], [[2.0, 3.0]]), ([1, 2], [[10.0, 10.0], [6.0, 7.0]])],
+)
+@pytest.mark.parametrize(
+    "target_device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)]
+)
+def test_fluid_control_horizon_keeps_rigid_and_particle_frames_aligned(
+    fake_restore, lengths, expected_qpos, target_device
+):
+    env = _FakeEnv(num_envs=len(lengths))
+    env.device = torch.device(target_device)
+    env.max_episode_steps = 1
+    env.cfg.fluid_object = [object()]
+    reader = _FakeFluidReader()
+    trajectory = _trajectory(num_envs=len(lengths), meta_updates={"lengths": lengths})
+    trajectory["terminal_states"] = trajectory["states"][:, -1].clone()
+    trajectory["terminal_states"]["robot"]["qpos"].fill_(10.0)
+    replay = ReplayWrapper(env, trajectory, mode="control", fluid_reader=reader)
+
+    replay.reset()
+    replay.go_to_step(99)
+
+    assert replay.control_max_step == 1
+    assert reader.applied[-1] == [1] * len(lengths)
+    torch.testing.assert_close(
+        env.last_restored["robot"]["qpos"], torch.tensor(expected_qpos)
+    )
+    replay.close()
+
+
+def test_fluid_artifact_rejects_scene_without_fluid():
+    trajectory = _trajectory()
+    trajectory["meta"]["fluid_state"] = {"schema_version": 1}
+    with pytest.raises(ValueError, match="configured fluid"):
+        ReplayWrapper(_FakeEnv(), trajectory, mode="kinematic")
