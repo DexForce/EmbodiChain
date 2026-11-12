@@ -192,10 +192,17 @@ without sampling. File/model coordinate adaptation remains owned here.
 
 ## Runtime and extension boundaries
 
+Live scene generation and execution share a process. The live example keeps
+`hybrid` throughout because DexSim's renderer selection is process-wide and
+closing a temporary World does not reset it.
+
 Blender operations use `gen_sim/_blender_runtime.py` to launch the standalone
-worker selected by `EMBODICHAIN_BLENDER_PYTHON`. The worker loads only Blender
-operations and their direct dependencies; it must not import the business
-framework, Torch or DexSim. Input/output files cross this process boundary;
+worker. `EMBODICHAIN_BLENDER_EXECUTABLE` selects the Blender application when
+Eevee needs application graphics initialization; otherwise
+`EMBODICHAIN_BLENDER_PYTHON` selects the isolated interpreter. These selectors
+follow shared-dotenv/process precedence. The worker imports
+only Blender operations and their direct dependencies; it must not import the
+business framework, Torch or DexSim. Input/output files cross this process boundary;
 Blender objects and business-environment Python/native-library paths do not.
 `docker/` owns the py312 public runtime, py311/py312 internal profiles and the
 separate Python 3.11/NumPy 1.26 Blender environment. See
