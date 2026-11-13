@@ -5,6 +5,7 @@ Locomotion environments use the same task registration, configuration loader, ac
 | Task configuration directory | Environment ID | Action / actor / critic dimensions |
 |---|---|---|
 | `locomotion/velocity/g1_flat` | `UnitreeG1FlatRL-v1` | 29 / 98 / 113 |
+| `locomotion/velocity/g1_rough` | `UnitreeG1RoughRL-v1` | 37 / 310 / 325 |
 | `locomotion/velocity/h1_2_flat` | `UnitreeH1_2FlatRL-v1` | 27 / 92 / 107 |
 | `locomotion/velocity/go1_flat` | `UnitreeGo1FlatRL-v1` | 12 / 48 / 72 |
 | `locomotion/velocity/go2_flat` | `UnitreeGo2FlatRL-v1` | 12 / 47 / 74 |
@@ -48,12 +49,14 @@ Humanoid uses clipped effort actions (`[-0.4, 0.4]`) multiplied by per-joint mot
 
 ## G1 rough terrain with DexUni
 
-`g1_rough/agents/ppo.dexuni.yaml` selects the pure MuJoCo branch of
-DexUni with Newton-generated terrain contacts (`UnitreeG1RoughRL-v1`). The paired DexSim build must
-support `mujoco_options.use_mujoco_contacts: false` in this branch and export
-MuJoCo solver contact forces for contact sensors. The MJWarp deployment remains
-`g1_rough/agents/ppo.newton.yaml`; both configurations retain the same terrain and physical
-parameters.
+`g1_rough/env.newton.yaml` (`g1_rough/agents/ppo.newton.yaml`) is the default
+deployment for `UnitreeG1RoughRL-v1` and selects `solver_type: dexuni`
+(`joint_mode: dynamic`, `contact_mode: auto`, `use_mujoco_cpu: false`,
+`use_mujoco_contacts: false`) with Newton explicit heightfield contact generation
+(`broad_phase: explicit`, `reduce_contacts: true`, `max_triangle_pairs: 2500000`).
+`g1_rough/env.mjwarp.yaml` (`g1_rough/agents/ppo.mjwarp.yaml`) provides the direct
+`solver_type: mujoco_warp` deployment under identical terrain, timestep, and
+solver-iteration parameters.
 
 The separate `UnitreeG1Rough` and `G1RoughTerrains` asset packages provide the
 37-joint model and terrain inputs. They do not replace `UnitreeG1Locomotion`.
@@ -73,6 +76,13 @@ building per-row provenance dictionaries on every control step. Episode state,
 curriculum restoration and recorder metadata remain active. Set the option to
 `true` when a consumer needs the context snapshot in step/reset info; this is
 the shared environment default.
+
+On a single NVIDIA RTX PRO 5000 Blackwell (72 GB) GPU at `4096` parallel
+environments, `g1_rough/agents/ppo.newton.yaml` (`150 + 10` resumed updates,
+`15,728,640` transitions) sustains `67,576` steady SPS (`84,131` peak resumed
+SPS), improving `episode_length_avg_100` from `24.0` to `39.09` (`eval-policy`
+over `64` episodes: `avg_length=45.25`, `avg_reward=-3.40`,
+`linear_velocity_error=0.649`, `root_height=0.789 m`).
 
 ## PPO configuration
 

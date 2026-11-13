@@ -362,6 +362,29 @@ def test_ground_replacement_updates_declared_geometry() -> None:
 
 
 @pytest.mark.no_sim
+def test_remove_ground_plane_before_prepare() -> None:
+    """Remove the default ground plane cleanly before prepare and guard post-prepare calls."""
+    from unittest.mock import MagicMock
+
+    sim = object.__new__(SimulationManager)
+    scene = MagicMock()
+    scene.builder.is_finalized = False
+    scene.handles.return_value = ()
+    scene.__contains__.return_value = True
+    sim._spawn_scene = scene
+    sim._spawn_default_plane_descriptor = object()
+    sim.remove_ground_plane()
+    scene.remove.assert_called_once_with("default_plane")
+    assert sim._spawn_default_plane_descriptor is None
+
+    sim._spawn_scene = SimpleNamespace(
+        builder=SimpleNamespace(is_finalized=True, result=object())
+    )
+    with pytest.raises(RuntimeError, match="before prepare"):
+        sim.remove_ground_plane()
+
+
+@pytest.mark.no_sim
 def test_load_rough_env_cfg_resolves_training_and_evaluation_bundles(
     tmp_path: Path,
 ) -> None:
@@ -386,14 +409,14 @@ def test_load_rough_env_cfg_resolves_training_and_evaluation_bundles(
     eval_cfg = load_rough_env_cfg("g1", tmp_path, num_envs=2, seed=7)
     assert eval_cfg.num_envs == 2
     assert eval_cfg.seed == 7
-    assert eval_cfg.extensions["reference_deterministic_reset"] is True
-    assert eval_cfg.extensions["reference_origin"] == [1.0, 2.0, 0.5]
+    assert eval_cfg.extensions["deterministic_reset"] is True
+    assert eval_cfg.extensions["origin"] == [1.0, 2.0, 0.5]
 
     train_cfg = load_rough_env_cfg(
         "g1", tmp_path, num_envs=4, training_randomization=True
     )
-    assert train_cfg.extensions["reference_randomization"] is True
-    assert "terrain_origins" in train_cfg.extensions["reference_terrain_course"]
+    assert train_cfg.extensions["randomization"] is True
+    assert "terrain_origins" in train_cfg.extensions["terrain_course"]
 
 
 @pytest.mark.no_sim
@@ -719,7 +742,7 @@ def test_reference_reset_writes_once_and_preserves_sampled_state(monkeypatch, ta
         env._device = torch.device("cpu")
         env._num_envs = 4
         env.sim = SimpleNamespace(device=env._device)
-        env.cfg = SimpleNamespace(reference_deterministic_reset=False)
+        env.cfg = SimpleNamespace(deterministic_reset=False)
         env.velocity_task_config = config
         env.policy_joint_ids = torch.arange(config.action_dim)
         env._reference_terrain_course = None
