@@ -43,6 +43,7 @@ from dexsim.types import ActorType
 from embodichain.lab.sim.sim_manager import SimulationManager
 from embodichain.lab.sim.spawn.scene import SpawnScene
 from embodichain.lab.sim.cfg import UsdImportCfg, UsdSourceCfg
+from embodichain.lab.sim.objects import CableObject
 
 pytestmark = pytest.mark.no_sim
 
@@ -61,6 +62,7 @@ def _manager():
         "_rigid_object_groups",
         "_deformable_objects",
         "_fluid_objects",
+        "_cable_objects",
         "_articulations",
     ):
         setattr(manager, name, {})
@@ -666,6 +668,11 @@ def test_curve_prim_resources_keep_all_uids_and_stable_source_keys(
     )
     for namespace in (None, "copy"):
         manager = _manager()
+        manager.device = torch.device("cuda:0")
+        manager.physics = SimpleNamespace(
+            name="newton", solver_type="dexuni", supports_cables=True
+        )
+        manager.sim_config.physics_cfg = SimpleNamespace(requires_grad=False)
         result = manager.add_usd(
             UsdImportCfg(
                 name="scene",
@@ -681,7 +688,13 @@ def test_curve_prim_resources_keep_all_uids_and_stable_source_keys(
         assert dict(result.resource_source_paths) == {
             key: "/World/Cable" for key in expected_keys
         }
-        assert len(result) == 0
+        assert list(result) == expected_keys
+        for key in expected_keys:
+            cable = result[key]
+            uid = result.resource_uids[key]
+            assert isinstance(cable, CableObject)
+            assert cable is manager.get_cable_object(uid) is manager.get_asset(uid)
+            assert cable.is_declared and cable.data is None
         with pytest.raises(TypeError):
             result.resource_source_paths[expected_keys[0]] = "/Other"
 

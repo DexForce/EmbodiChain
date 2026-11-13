@@ -30,7 +30,7 @@ import pytest
 pytestmark = [pytest.mark.subprocess_sim, pytest.mark.gpu]
 
 
-def test_cable_recording_keeps_t_plus_one_states_and_partial_reset(
+def test_usd_and_procedural_cables_record_and_replay_across_arenas(
     tmp_path: Path,
 ) -> None:
     # A fresh process preserves NoRender without the shared test engine's
@@ -44,8 +44,32 @@ def test_cable_recording_keeps_t_plus_one_states_and_partial_reset(
 </robot>""",
         encoding="utf-8",
     )
+    usd = tmp_path / "wire.usda"
+    usd.write_text(
+        """#usda 1.0
+(
+    defaultPrim = "World"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+def Xform "World"
+{
+    def BasisCurves "wire" (
+        prepend apiSchemas = ["PhysicsCurvesDeformableSimAPI"]
+    )
+    {
+        int[] curveVertexCounts = [3]
+        point3f[] points = [(0, 0, 1), (0.1, 0, 1), (0.2, 0, 1)]
+        uniform token type = "linear"
+        uniform token wrap = "nonperiodic"
+    }
+}
+""",
+        encoding="utf-8",
+    )
     result = subprocess.run(
-        [sys.executable, str(Path(__file__).resolve()), str(urdf)],
+        [sys.executable, str(Path(__file__).resolve()), str(urdf), str(usd)],
         env=os.environ.copy(),
         capture_output=True,
         text=True,
@@ -54,7 +78,7 @@ def test_cable_recording_keeps_t_plus_one_states_and_partial_reset(
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def _run_recording(urdf: str) -> None:
+def _run_recording(urdf: str, usd: str) -> None:
     import torch
 
     from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
@@ -66,7 +90,17 @@ def _run_recording(urdf: str) -> None:
         NewtonPhysicsCfg,
         RenderCfg,
         RobotCfg,
+        UsdImportCfg,
+        UsdSourceCfg,
     )
+
+    class CableRecordingEnv(EmbodiedEnv):
+        def _prepare_scene(self, **kwargs) -> None:
+            super()._prepare_scene(**kwargs)
+            result = self.sim.add_usd(
+                UsdImportCfg(name="scene", source=UsdSourceCfg(file_path=usd))
+            )
+            assert result["/World/wire"] is self.sim.get_cable_object("wire")
 
     cfg = EmbodiedEnvCfg(
         num_envs=2,
@@ -98,12 +132,11 @@ def _run_recording(urdf: str) -> None:
         ),
         cable_object=[
             CableObjectCfg(
-                uid=uid,
-                points=[[0.1 * index, 0, 0] for index in range(segments + 1)],
+                uid="long_wire",
+                points=[[0.1 * index, 0, 0] for index in range(4)],
                 radius=0.005,
-                init_pos=(0.0, y, 1.0),
+                init_pos=(0.0, 0.5, 1.0),
             )
-            for uid, segments, y in (("wire", 2, 0.0), ("long_wire", 3, 0.5))
         ],
         observations={
             "wire": ObservationCfg(
@@ -120,12 +153,14 @@ def _run_recording(urdf: str) -> None:
     )
     env = None
     try:
-        env = EmbodiedEnv(cfg)
+        env = CableRecordingEnv(cfg)
         assert not env.sim.has_native_renderer
         obs, _ = env.reset(seed=73)
         manager = env.observation_manager
         assert manager is not None and manager.has_history
         cables = {uid: env.sim.get_cable_object(uid) for uid in cfg.trajectory_uids}
+        assert cables["wire"].data.num_segments == 2
+        assert cables["long_wire"].data.num_segments == 3
         fields = {uid: f"cables/{uid}/segment_state_w" for uid in cables}
         episodes = env.episode_context.episode_ids
         expected = {
@@ -225,6 +260,12 @@ def _run_recording(urdf: str) -> None:
         assert saved["meta"]["arena_origins_w"] == [source_origin.tolist()]
         for uid, field in fields.items():
             assert saved["raw_observations"]["fields"][field]["values"].shape[1] == 4
+            torch.testing.assert_close(
+                saved["terminal_states"]["cables", uid, "segment_state_w"].cpu(),
+                latest.values[field][[1]],
+                rtol=0,
+                atol=0,
+            )
 
         env.close(exit_process=False)
         env = None
@@ -236,7 +277,7 @@ def _run_recording(urdf: str) -> None:
         cfg.num_envs = 1
         cfg.sim_cfg.num_envs = 1
         cfg.record_trajectory = False
-        env = EmbodiedEnv(cfg)
+        env = CableRecordingEnv(cfg)
         replay = ReplayWrapper(env, saved)
         replay.reset()
         for _ in range(saved["meta"]["lengths"][0]):
@@ -258,4 +299,4 @@ def _run_recording(urdf: str) -> None:
 if __name__ == "__main__":
     faulthandler.enable()
     faulthandler.dump_traceback_later(120)
-    _run_recording(sys.argv[1])
+    _run_recording(sys.argv[1], sys.argv[2])

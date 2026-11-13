@@ -390,11 +390,10 @@ def test_usd_particles_and_cables_reject_mix_before_scene_mutation(
                 source=UsdSourceCfg(file_path=str(_write_cable_usd(tmp_path))),
             )
         )
-        assert dict(imported) == {}
+        cable = imported["/Cable"]
         assert list(imported.resource_types.values()) == ["cable"]
         assert len(builder.cables) == 1
-        assert not sim._cable_objects and not scene._assets
-        return None
+        return cable
 
     if cable_first:
         first = add_cable()

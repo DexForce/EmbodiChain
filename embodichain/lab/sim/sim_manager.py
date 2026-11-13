@@ -2755,7 +2755,13 @@ class SimulationManager:
     ) -> (
         UsdImportResult
         | dict[
-            str, VisualObject | RigidObject | Articulation | Robot | DeformableObject
+            str,
+            VisualObject
+            | RigidObject
+            | Articulation
+            | Robot
+            | DeformableObject
+            | CableObject,
         ]
     ):
         """Declare a USD import through a validated configuration recipe.
@@ -2777,7 +2783,8 @@ class SimulationManager:
             asset_cfgs: Legacy per-asset overrides; use ``cfg.asset_cfgs``.
 
         Returns:
-            Source-path mapping of declared facades and imported resource UIDs.
+            Source-path mapping of declared facades, including USD cables,
+            and imported resource UIDs.
             Legacy argument forms retain the mutable asset dictionary result.
         """
         from .cfg.usd import _normalize_usd_import
@@ -2816,6 +2823,7 @@ class SimulationManager:
                 ),
                 "soft_object": self._deformable_objects,
                 "cloth_object": self._deformable_objects,
+                "cable_object": self._cable_objects,
             }[kind]
             registry[descriptor.name] = facade
             assets[source_path] = facade
@@ -3180,22 +3188,8 @@ class SimulationManager:
             raise RuntimeError("Fluid diagnostics require prepare().")
         return self.physics.fluid_diagnostics(fluid)
 
-    def add_cable_object(self, cfg: CableObjectCfg) -> CableObject:
-        """Declare a cable before ``prepare()`` using DexSim's public Spawn API.
-
-        Args:
-            cfg: Typed cable geometry, four-mode material and visual configuration.
-
-        Returns:
-            A declared facade whose data becomes available after ``prepare()``.
-
-        Raises:
-            NotImplementedError: Backend/device/solver/gradient mode is unsupported,
-                or the physical scene has already been finalized.
-            ValueError: Required configuration or the asset UID is invalid.
-        """
-        if not isinstance(cfg, CableObjectCfg):
-            raise TypeError("Cable objects require CableObjectCfg.")
+    def _require_cable_declaration(self) -> None:
+        """Check the shared runtime requirements for declaring cables."""
         if not self.physics.supports_cables:
             raise NotImplementedError("Cable objects require the Newton backend.")
         if self.device.type != "cuda":
@@ -3212,6 +3206,24 @@ class SimulationManager:
             raise NotImplementedError(
                 "Declare cable objects before scene finalization."
             )
+
+    def add_cable_object(self, cfg: CableObjectCfg) -> CableObject:
+        """Declare a cable before ``prepare()`` using DexSim's public Spawn API.
+
+        Args:
+            cfg: Typed cable geometry, four-mode material and visual configuration.
+
+        Returns:
+            A declared facade whose data becomes available after ``prepare()``.
+
+        Raises:
+            NotImplementedError: Backend/device/solver/gradient mode is unsupported,
+                or the physical scene has already been finalized.
+            ValueError: Required configuration or the asset UID is invalid.
+        """
+        if not isinstance(cfg, CableObjectCfg):
+            raise TypeError("Cable objects require CableObjectCfg.")
+        self._require_cable_declaration()
         descriptor, materials = cable_desc_from_cfg(cfg, per_env=True)
         if descriptor.name in self.asset_uids or descriptor.name in self._spawn_scene:
             raise ValueError(
