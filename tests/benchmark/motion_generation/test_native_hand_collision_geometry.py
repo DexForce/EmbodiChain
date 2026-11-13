@@ -501,3 +501,143 @@ def test_closure_support_filter_rejects_penetration_the_open_pose_misses() -> No
         apertures=apertures,
     )
     assert not bool(raised[0])
+
+
+def _fixed_pair_closure_generator(monkeypatch, geometry, pairs, *, closure_support):
+    """Serve fixed antipodal pairs through the real generator and mesh backend.
+
+    Object collision needs the native Warp kernel; the stubbed object query
+    isolates the support-closure rule, as in the open-pose regression above.
+    """
+    import embodichain.toolkits.graspkit.pg_grasp._antipodal_backend as backends
+    import embodichain.toolkits.graspkit.pg_grasp.pose_generator as generators
+    from unittest.mock import Mock
+
+    checkers = []
+
+    def checker(*, object_mesh_verts, collision_geometry, **kwargs):
+        result = object.__new__(GripperCollisionChecker)
+        result.device = torch.device("cpu")
+        result.obj_mesh_verts = object_mesh_verts
+        result.cfg = GripperCollisionCfg()
+        result.surface_points = collision_geometry.points
+        result.closure_points = collision_geometry.closure_points
+        result.closure_apertures = collision_geometry.closure_apertures
+        result._checker = SimpleNamespace(
+            query_batch_points=lambda points, **_: (
+                torch.zeros(points.shape[:2], dtype=torch.bool),
+                torch.ones(points.shape[:2]),
+            )
+        )
+        result.query = Mock(wraps=result.query)
+        checkers.append(result)
+        return result
+
+    backend = backends._AntipodalMeshBackend
+    prepared = SimpleNamespace(mesh=None, _hit_point_pairs=pairs)
+    monkeypatch.setattr(backends, "GripperCollisionChecker", checker)
+    monkeypatch.setattr(
+        generators,
+        "_AntipodalMeshBackend",
+        lambda *args, **kwargs: backend(*args, **{**kwargs, "prepared": prepared}),
+    )
+    generator = generators.AntipodalGraspPoseGenerator(
+        min_opening_width=0.002,
+        max_opening_width=0.14,
+        collision_geometry=geometry,
+        algorithm_cfg=generators.AntipodalGraspPoseGeneratorCfg(
+            approach_deviation_angle=0.1, approach_direction_samples=1
+        ),
+        collision_cfg=generators.ParallelJawGraspCollisionCfg(
+            filter_ground_collision=False, filter_closure_support=closure_support
+        ),
+    )
+    return generator, checkers
+
+
+@pytest.mark.parametrize("closure_support", [True, False])
+def test_closure_tcp_rotation_qualifies_the_executed_pre_rotated_closure(
+    monkeypatch, closure_support
+) -> None:
+    """A skill that turns the TCP before closing is qualified where it closes."""
+    from embodichain.toolkits.graspkit.pg_grasp import FixedGripperCollisionGeometry
+
+    base = _robotiq_closure_geometry()
+    # The mounted Franka TCP lies 10 mm along canonical +Z, so turning about
+    # the TCP origin differs from turning about the contact centre.
+    grasp_from_tcp = np.eye(4)
+    grasp_from_tcp[2, 3] = 0.01
+    geometry = FixedGripperCollisionGeometry(
+        base.points,
+        {**base.provenance, "grasp_from_tcp": grasp_from_tcp.tolist()},
+        base.closure_apertures,
+        base.closure_points,
+    )
+    cube = trimesh.creation.box(extents=[0.05, 0.05, 0.05])
+    cube.apply_translation([0.0, 0.0, 0.025])
+    # One top grasp closing along X, 35 mm above the support: its pads clear
+    # the support by 5 mm, while AxisAlign's 45-degree upright pre-rotation
+    # about the TCP drives the lower pad about 12 mm into it.
+    pairs = torch.tensor([[[-0.025, 0.0, 0.035], [0.025, 0.0, 0.035]]])
+    tilt = torch.tensor(
+        Rotation.from_rotvec([0.0, np.pi / 4, 0.0]).as_matrix(), dtype=torch.float32
+    )
+    generator, checkers = _fixed_pair_closure_generator(
+        monkeypatch, geometry, pairs, closure_support=closure_support
+    )
+    query = dict(
+        mesh_vertices=torch.as_tensor(cube.vertices, dtype=torch.float32),
+        mesh_triangles=torch.as_tensor(cube.faces, dtype=torch.int64),
+        obj_poses=torch.eye(4).repeat(2, 1, 1),
+        approach_direction=torch.tensor([0.0, 0.0, -1.0]),
+    )
+
+    legacy = generator.get_grasp_candidates(**query)
+    assert all(bool(torch.isfinite(costs).all()) for _, _, costs in legacy)
+    assert all(
+        "closure_grasp_poses" not in call.kwargs
+        for call in checkers[0].query.call_args_list
+    )
+    for unchanged in (
+        generator.get_grasp_candidates(**query, closure_tcp_rotation=None),
+        generator.get_grasp_candidates(
+            **query, closure_tcp_rotation=torch.eye(3).repeat(2, 1, 1)
+        ),
+    ):
+        for row, legacy_row in zip(unchanged, legacy, strict=True):
+            for value, legacy_value in zip(row, legacy_row, strict=True):
+                assert torch.equal(value, legacy_value)
+
+    checkers[0].query.reset_mock()
+    rows = generator.get_valid_grasp_poses(
+        **query, closure_tcp_rotation=torch.stack((torch.eye(3), tilt))
+    )
+    assert torch.equal(rows[0][0], legacy[0][0])
+    assert torch.equal(rows[0][1], legacy[0][2])
+    if not closure_support:
+        # Without closure qualification the rotation has no effect at all.
+        assert torch.equal(rows[1][0], legacy[1][0])
+        assert torch.equal(rows[1][1], legacy[1][2])
+        assert all(
+            "closure_grasp_poses" not in call.kwargs
+            for call in checkers[0].query.call_args_list
+        )
+        return
+    # The executed, pre-rotated closure meets the support and is rejected.
+    # An identity row keeps the original query exactly.
+    assert bool(torch.isinf(rows[1][1]).all())
+    first, last = checkers[0].query.call_args_list
+    assert "closure_grasp_poses" not in first.kwargs
+    candidate = last.args[1]
+    closure = last.kwargs["closure_grasp_poses"]
+    tcp = geometry.canonical_to_tcp_poses(candidate)
+    turned = geometry.canonical_to_tcp_poses(closure)
+    torch.testing.assert_close(turned[:, :3, :3], tilt @ tcp[:, :3, :3])
+    torch.testing.assert_close(turned[:, :3, 3], tcp[:, :3, 3])
+    for invalid in (
+        torch.eye(3)[None],
+        torch.full((2, 3, 3), float("nan")),
+        2.0 * torch.eye(3).repeat(2, 1, 1),
+    ):
+        with pytest.raises(ValueError, match="closure_tcp_rotation"):
+            generator.get_grasp_candidates(**query, closure_tcp_rotation=invalid)

@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_franka_robotiq_spatial_generalization
-suite_version: atomic_franka_robotiq_spatial_generalization_v15
+suite_version: atomic_franka_robotiq_spatial_generalization_v17
 profile: coverage
 
 # Reusable strict-spatial domain definitions. Every track below selects only
@@ -617,6 +617,9 @@ x-skill-pick-up: &skill_pick_up
   id: pick_up
   sample_count: 120
   grasp_source: fixed
+  # Flat Robotiq pads close along a face normal only if the fixed grasp turns
+  # with the cube's yaw; a world-fixed grasp drops yawed cubes on lift.
+  grasp_follows_object_yaw: true
   hand_interp_steps: 12
   pre_grasp_distance_m: 0.15
   lift_height_m: 0.16
@@ -634,6 +637,9 @@ x-skill-move-held-object: &skill_move_held_object
   sample_count: 120
   pick_sample_count: 120
   grasp_source: fixed
+  # Flat Robotiq pads close along a face normal only if the fixed grasp turns
+  # with the cube's yaw; a world-fixed grasp drops yawed cubes on lift.
+  grasp_follows_object_yaw: true
   target_object_offset_m: [0.08, 0.08, 0.04]
   approach_direction: [0.0, 0.0, -1.0]
   pre_grasp_distance_m: 0.15
@@ -650,6 +656,9 @@ x-skill-place: &skill_place
   sample_count: 120
   pick_sample_count: 120
   grasp_source: fixed
+  # Flat Robotiq pads close along a face normal only if the fixed grasp turns
+  # with the cube's yaw; a world-fixed grasp drops yawed cubes on lift.
+  grasp_follows_object_yaw: true
   target_object_offset_m: [0.10, 0.10, 0.0]
   retract_height_m: 0.10
   approach_direction: [0.0, 0.0, -1.0]
@@ -759,6 +768,13 @@ x-skill-pour: &skill_pour
   grasp_max_candidates: 128
   grasp_alignment_max_angle_deg: 10.0
   grasp_filter_before_ranking: true
+  # Near the workspace edge the nominal oblique approach can leave a row with
+  # no reachable pour chain; the same face-normal approach a quarter turn
+  # around the cube can. The three choices share the original 128 budget.
+  grasp_approach_candidates:
+    - {yaw_offset_rad: 0.0, max_candidates: 64}
+    - {yaw_offset_rad: 1.5707963267948966, max_candidates: 32}
+    - {yaw_offset_rad: -1.5707963267948966, max_candidates: 32}
   cases:
     - name: spatial_cube_pour_30deg
       object: cube_50mm

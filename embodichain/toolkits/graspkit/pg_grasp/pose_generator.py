@@ -527,6 +527,36 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
             )
         return value.to(device=device, dtype=torch.float32)
 
+    @staticmethod
+    def _closure_tcp_rotations(
+        value: torch.Tensor | None,
+        *,
+        batch_size: int,
+        device: torch.device,
+    ) -> torch.Tensor | None:
+        """Validate one optional world TCP rotation per object row."""
+        if value is None:
+            return None
+        if (
+            not isinstance(value, torch.Tensor)
+            or not value.is_floating_point()
+            or value.shape != (batch_size, 3, 3)
+            or not bool(torch.isfinite(value).all().item())
+        ):
+            raise ValueError(
+                "closure_tcp_rotation must be a finite floating tensor with "
+                f"shape ({batch_size}, 3, 3)."
+            )
+        rotations = value.to(device=device, dtype=torch.float32)
+        identity = torch.eye(3, dtype=torch.float32, device=device)
+        if not torch.allclose(
+            rotations @ rotations.transpose(1, 2),
+            identity.expand_as(rotations),
+            atol=1.0e-4,
+        ) or bool((torch.linalg.det(rotations) <= 0.0).any().item()):
+            raise ValueError("closure_tcp_rotation rows must be proper rotations.")
+        return rotations
+
     def get_valid_grasp_poses(
         self,
         *,
@@ -537,13 +567,33 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         obj_longest_axis: torch.Tensor | None = None,
         is_positive_part: bool | torch.Tensor = True,
         axis_region_selector: GraspRegionSelector | None = None,
+        closure_tcp_rotation: torch.Tensor | None = None,
     ) -> list[tuple[torch.Tensor, torch.Tensor]]:
-        """Return candidates with an optional invocation-local region selector."""
+        """Return candidates with optional invocation-local qualification options.
+
+        Args:
+            mesh_vertices: Target-local vertex positions with shape ``(N, 3)``.
+            mesh_triangles: Triangle indices with shape ``(M, 3)``.
+            obj_poses: World object poses with shape ``(B, 4, 4)``.
+            approach_direction: Shared ``(3,)`` or per-row ``(B, 3)`` world
+                approach direction.
+            obj_longest_axis: Optional world axis restricting the graspable
+                region, shared ``(3,)`` or per row ``(B, 3)``.
+            is_positive_part: Which projected half of that axis is graspable.
+            axis_region_selector: Optional fallback region selector.
+            closure_tcp_rotation: Optional per-row world rotation; see
+                :meth:`get_grasp_candidates`.
+
+        Returns:
+            One ``(poses, costs)`` tuple per object row, in runtime TCP poses.
+        """
         region_options = (
             {}
             if axis_region_selector is None
             else {"axis_region_selector": axis_region_selector}
         )
+        if closure_tcp_rotation is not None:
+            region_options["closure_tcp_rotation"] = closure_tcp_rotation
         return [
             (poses, costs)
             for poses, _, costs in self.get_grasp_candidates(
@@ -567,11 +617,42 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         obj_longest_axis: torch.Tensor | None = None,
         is_positive_part: bool | torch.Tensor = True,
         axis_region_selector: GraspRegionSelector | None = None,
+        closure_tcp_rotation: torch.Tensor | None = None,
     ) -> list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
         """Expose aligned candidates without changing configured region defaults.
 
         The selector sees only qualified fallback geometry before top-K.
         Default calls retain the original backend keyword shape.
+
+        Args:
+            mesh_vertices: Target-local vertex positions with shape ``(N, 3)``.
+            mesh_triangles: Triangle indices with shape ``(M, 3)``.
+            obj_poses: World object poses with shape ``(B, 4, 4)``.
+            approach_direction: Shared ``(3,)`` or per-row ``(B, 3)`` world
+                approach direction.
+            obj_longest_axis: Optional world axis restricting the graspable
+                region, shared ``(3,)`` or per row ``(B, 3)``.
+            is_positive_part: Which projected half of that axis is graspable,
+                shared or one bool per row.
+            axis_region_selector: Optional fallback region selector.
+            closure_tcp_rotation: Optional world rotation per object row,
+                shape ``(B, 3, 3)``, for callers that rotate the runtime TCP
+                orientation about the TCP origin before closing the hand. Only
+                the closure support check evaluates each candidate at that
+                rotated pose, with the same apertures; object and open-hand
+                checks, ranking and the returned poses are unchanged. ``None``,
+                an exact identity row, or a generator without
+                ``filter_closure_support`` keeps the original qualification.
+
+        Returns:
+            One ``(poses, widths, costs)`` tuple per object row, with runtime
+            TCP poses ``(K, 4, 4)``. Failed rows carry infinite costs.
+
+        Raises:
+            TypeError: If ``axis_region_selector`` is not callable.
+            ValueError: If an input has an invalid shape or value, including a
+                ``closure_tcp_rotation`` that is not a finite proper rotation
+                per row.
         """
         if axis_region_selector is not None and not callable(axis_region_selector):
             raise TypeError("axis_region_selector must be callable or None.")
@@ -584,6 +665,11 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         poses = self._object_poses(obj_poses, device=backend.device)
         directions = self._approach_directions(
             approach_direction,
+            batch_size=poses.shape[0],
+            device=backend.device,
+        )
+        closure_rotations = self._closure_tcp_rotations(
+            closure_tcp_rotation,
             batch_size=poses.shape[0],
             device=backend.device,
         )
@@ -625,13 +711,23 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                     f"({poses.shape[0]},)."
                 )
         results: list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = []
+        identity = torch.eye(3, dtype=torch.float32, device=backend.device)
         for index, object_pose in enumerate(poses):
+            row_options = (
+                region_options
+                if closure_rotations is None
+                or torch.equal(closure_rotations[index], identity)
+                else {
+                    **region_options,
+                    "closure_tcp_rotation": closure_rotations[index],
+                }
+            )
             success, grasp_poses, widths, costs = backend.get_valid_grasp_poses(
                 object_pose=object_pose,
                 approach_direction=directions[index],
                 obj_longest_axis=None if axes is None else axes[index],
                 is_positive_part=bool(positive_parts[index].item()),
-                **region_options,
+                **row_options,
             )
             if grasp_poses.shape == (4, 4):
                 grasp_poses = grasp_poses.unsqueeze(0)

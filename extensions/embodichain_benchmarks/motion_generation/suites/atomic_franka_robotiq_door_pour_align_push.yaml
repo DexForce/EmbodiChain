@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_franka_robotiq_door_pour_align_push
-suite_version: atomic_franka_robotiq_door_pour_align_push_v7
+suite_version: atomic_franka_robotiq_door_pour_align_push_v8
 profile: smoke
 
 # OpenDoor, Pour, AxisAlign and PushObject on the Franka + Robotiq 2F-140 embodiment.

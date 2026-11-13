@@ -57,10 +57,12 @@ from .atomic_case_utils import (
     case_pose,
     difficulty,
     float_vector,
+    grasp_follows_object_yaw,
     held_object_state,
     randomization_parameters,
     randomized_vector_batch,
     snapshot_case_qpos,
+    yaw_following_grasp_rotation,
 )
 
 if TYPE_CHECKING:
@@ -89,6 +91,8 @@ class PickUpCases(AtomicSkillCaseProvider):
         object_id = config.get("object")
         if not isinstance(object_id, str) or not object_id:
             raise ValueError("PickUp cases must reference a non-empty object id.")
+        grasp_source = str(config.get("grasp_source", "fixed"))
+        follow_yaw = grasp_follows_object_yaw(config, grasp_source=grasp_source)
         handle = scenario.activate_object(object_id)
         scenario.restore_base_robot()
 
@@ -142,7 +146,6 @@ class PickUpCases(AtomicSkillCaseProvider):
         pre_grasp_distance = float(config.get("pre_grasp_distance_m", 0.15))
         lift_height = float(config.get("lift_height_m", 0.16))
 
-        grasp_source = str(config.get("grasp_source", "fixed"))
         if grasp_source == "antipodal":
             grasp_pose = scenario.resolve_antipodal_grasp(
                 handle,
@@ -168,6 +171,9 @@ class PickUpCases(AtomicSkillCaseProvider):
             )
             if rotation.shape != (3, 3):
                 raise ValueError("grasp_rotation must be a 3x3 matrix.")
+            if follow_yaw:
+                # Flat pads close along a face normal of each yawed box.
+                rotation = yaw_following_grasp_rotation(rotation, object_pose)
             grasp_pose[:, :3, :3] = rotation
         else:
             raise ValueError("grasp_source must be 'fixed' or 'antipodal'.")
@@ -367,6 +373,8 @@ class HeldObjectCases(AtomicSkillCaseProvider):
         object_id = config.get("object")
         if not isinstance(object_id, str) or not object_id:
             raise ValueError(f"{self.skill_id} cases require an object id.")
+        grasp_source = str(config.get("grasp_source", "antipodal"))
+        follow_yaw = grasp_follows_object_yaw(config, grasp_source=grasp_source)
         handle = scenario.activate_object(object_id)
         scenario.restore_base_robot()
         table_object_pose = scenario.randomize_object_pose(
@@ -393,7 +401,6 @@ class HeldObjectCases(AtomicSkillCaseProvider):
         approach_direction = approach_direction / direction_norm
         pre_grasp_distance = float(config.get("pre_grasp_distance_m", 0.15))
         lift_height = float(config.get("lift_height_m", 0.16))
-        grasp_source = str(config.get("grasp_source", "antipodal"))
         if grasp_source == "antipodal":
             object_pose = table_object_pose.clone()
             grasp_pose = scenario.resolve_antipodal_grasp(
@@ -417,11 +424,15 @@ class HeldObjectCases(AtomicSkillCaseProvider):
             # either the physical object or the pickup TCP above the table.
             object_pose = table_object_pose.clone()
             grasp_pose = object_pose.clone()
-            grasp_pose[:, :3, :3] = torch.tensor(
+            rotation = torch.tensor(
                 config.get("grasp_rotation", TOP_DOWN_ROTATION),
                 dtype=grasp_pose.dtype,
                 device=grasp_pose.device,
             )
+            if follow_yaw:
+                # ``object_to_eef`` below is derived from this rotated grasp.
+                rotation = yaw_following_grasp_rotation(rotation, object_pose)
+            grasp_pose[:, :3, :3] = rotation
             grasp_pose[:, :3, 3] += randomized_vector_batch(
                 float_vector(
                     config.get("grasp_offset_m"),

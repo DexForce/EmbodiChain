@@ -1580,8 +1580,15 @@ class AtomicSkillScenario(ScenarioProvider):
         row_rank: (
             Callable[[int, torch.Tensor, torch.Tensor], torch.Tensor] | None
         ) = None,
+        closure_tcp_rotation: torch.Tensor | None = None,
     ) -> list[torch.Tensor]:
-        """Sample/rank one frozen pool per row for reuse across goal variants."""
+        """Sample/rank one frozen pool per row for reuse across goal variants.
+
+        ``closure_tcp_rotation`` is an optional ``(B, 3, 3)`` world rotation
+        that a skill applies to each row's TCP orientation before closing. Only
+        the generator's closure support check sees it; ``None`` keeps the
+        original sampling call.
+        """
         assert self.robot is not None
         from .._atomic_fixtures import (
             create_antipodal_semantics,
@@ -1619,6 +1626,11 @@ class AtomicSkillScenario(ScenarioProvider):
                 mesh_triangles=affordance.mesh_triangles,
                 obj_poses=object_pose,
                 approach_direction=approach_direction,
+                **(
+                    {}
+                    if closure_tcp_rotation is None
+                    else {"closure_tcp_rotation": closure_tcp_rotation}
+                ),
             )
         batch_size = object_pose.shape[0]
         if len(candidate_pools) != batch_size:

@@ -79,6 +79,7 @@ from embodichain_benchmarks.motion_generation.scenarios.atomic_replay import (
 )
 from embodichain_benchmarks.motion_generation.contracts import ExecutionObservation
 from embodichain_benchmarks.motion_generation.scenarios.atomic_case_utils import (
+    TOP_DOWN_ROTATION,
     atomic_case_id,
     canonical_case_qpos,
     case_generation_seed,
@@ -1662,6 +1663,130 @@ def test_fixed_held_object_case_keeps_pickup_and_transport_at_table_pose() -> No
     torch.testing.assert_close(grasp_pose[:, 2, 3], table_pose[:, 2, 3])
     torch.testing.assert_close(target_object[:, 2, 3], table_pose[:, 2, 3] + 0.16)
     assert case.target_waypoints.shape == (batch_size, 1, 4, 4)
+
+
+def _about_z(angles_deg: list[float]) -> torch.Tensor:
+    """Return world-Z rotations ``(B, 3, 3)`` for angles in degrees."""
+    angles = torch.deg2rad(torch.tensor(angles_deg, dtype=torch.float32))
+    axis_angles = torch.zeros(len(angles_deg), 3)
+    axis_angles[:, 2] = angles
+    return axis_angle_to_rotation_matrix(axis_angles)
+
+
+def _fixed_grasp_case(skill_id: str, object_pose: torch.Tensor, **config_values):
+    """Generate one fixed-grasp case over mocked kinematics and a settled cube."""
+    batch_size = object_pose.shape[0]
+    robot = Mock(device=torch.device("cpu"))
+    robot.get_qpos.side_effect = lambda name=None: torch.zeros(batch_size, 7)
+    robot.get_joint_ids.return_value = list(range(7))
+    robot.compute_fk.return_value = torch.eye(4).repeat(batch_size, 1, 1)
+    robot.compute_ik.side_effect = lambda pose, joint_seed, name: (
+        torch.ones(batch_size, dtype=torch.bool),
+        joint_seed.clone(),
+    )
+    handle = Mock(object_id="cube", entity=Mock(), config={"id": "cube"})
+    scenario = Mock(robot=robot, control_part="arm", simulation=None)
+    scenario.activate_object.return_value = handle
+    scenario.randomize_object_pose.return_value = object_pose.clone()
+    scenario.solve_reference_qpos.side_effect = lambda start, targets: torch.zeros(
+        targets.shape[0], targets.shape[1], start.shape[-1]
+    )
+    config = {
+        "name": "fixed_cube",
+        "object": "cube",
+        "grasp_source": "fixed",
+        "pre_action_settle_steps": 0,
+        **config_values,
+    }
+    case = create_atomic_skill_provider(skill_id).generate_case(
+        scenario,
+        Mock(
+            suite_version="test_v1",
+            robot=Mock(id="franka_robotiq"),
+            protocol=Mock(rotation_threshold_rad=0.1),
+        ),
+        Mock(id="atomic-skill"),
+        config,
+        seed=11,
+        batch_size=batch_size,
+    )
+    return case
+
+
+def _yawed_cubes(yaws_deg: list[float]) -> torch.Tensor:
+    """Return settled cube poses ``(B, 4, 4)`` yawed about world Z."""
+    poses = torch.eye(4).repeat(len(yaws_deg), 1, 1)
+    poses[:, :3, :3] = _about_z(yaws_deg)
+    poses[:, :3, 3] = torch.tensor([-0.42, -0.08, 0.025]) + torch.tensor(
+        [[0.0, 0.0, 0.0], [0.02, -0.01, 0.0], [-0.01, 0.03, 0.0]]
+    )
+    return poses
+
+
+@pytest.mark.parametrize("skill_id", ["pick_up", "move_held_object", "place"])
+def test_fixed_grasp_follows_object_yaw_folded_onto_nearest_face(skill_id) -> None:
+    """Opted-in fixed grasps turn about world Z by each cube's folded yaw."""
+    object_pose = _yawed_cubes([12.4, -40.0, 50.0])
+    case = _fixed_grasp_case(skill_id, object_pose, grasp_follows_object_yaw=True)
+
+    grasp = torch.tensor(case.case_parameters["grasp_pose"])
+    # A quarter turn repeats the box, so 50 degrees folds onto -40 degrees.
+    expected = _about_z([12.4, -40.0, -40.0]) @ torch.tensor(TOP_DOWN_ROTATION)
+    torch.testing.assert_close(grasp[:, :3, :3], expected)
+    torch.testing.assert_close(grasp[:, :3, 3], object_pose[:, :3, 3])
+    if skill_id == "pick_up":
+        torch.testing.assert_close(case.target_waypoints[:, 1], grasp)
+    else:
+        torch.testing.assert_close(
+            torch.tensor(case.case_parameters["object_to_eef"]),
+            torch.linalg.inv(object_pose) @ grasp,
+        )
+
+
+@pytest.mark.parametrize("skill_id", ["pick_up", "move_held_object", "place"])
+def test_fixed_grasp_without_yaw_opt_in_keeps_world_rotation(skill_id) -> None:
+    """Without the opt-in every yawed row keeps the configured world rotation."""
+    case = _fixed_grasp_case(skill_id, _yawed_cubes([12.4, -40.0, 50.0]))
+
+    grasp = torch.tensor(case.case_parameters["grasp_pose"])
+    assert torch.equal(
+        grasp[:, :3, :3], torch.tensor(TOP_DOWN_ROTATION).expand(3, -1, -1)
+    )
+
+
+@pytest.mark.parametrize("skill_id", ["pick_up", "move_held_object", "place"])
+@pytest.mark.parametrize(
+    ("config_values", "error"),
+    [
+        ({"grasp_follows_object_yaw": "true"}, TypeError),
+        ({"grasp_follows_object_yaw": 1}, TypeError),
+        (
+            {"grasp_follows_object_yaw": True, "grasp_source": "antipodal"},
+            ValueError,
+        ),
+    ],
+)
+def test_fixed_grasp_yaw_opt_in_is_validated_before_scene_work(
+    skill_id, config_values, error
+) -> None:
+    """A malformed or ineffective opt-in fails before any object is activated."""
+    scenario = Mock()
+
+    with pytest.raises(error, match="grasp_follows_object_yaw"):
+        create_atomic_skill_provider(skill_id).generate_case(
+            scenario,
+            Mock(suite_version="test_v1"),
+            Mock(id="atomic-skill"),
+            {
+                "name": "fixed_cube",
+                "object": "cube",
+                "grasp_source": "fixed",
+                **config_values,
+            },
+            seed=11,
+            batch_size=1,
+        )
+    scenario.activate_object.assert_not_called()
 
 
 def test_held_object_composites_clear_dynamics_at_pickup_lift() -> None:

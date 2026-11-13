@@ -69,6 +69,9 @@ __all__ = [
     "case_pose",
     "held_object_state",
     "twist_arc_poses",
+    "folded_object_yaw",
+    "yaw_following_grasp_rotation",
+    "grasp_follows_object_yaw",
 ]
 
 
@@ -290,6 +293,73 @@ def randomization_parameters(
                 }
             )
     return parameters
+
+
+def folded_object_yaw(object_pose: torch.Tensor) -> torch.Tensor:
+    """Return each object's yaw folded onto its nearest box face.
+
+    A box repeats every quarter turn about world Z, so the world yaw of the
+    object's x axis is folded into [-45, 45) degrees.
+
+    Args:
+        object_pose: Object poses with shape ``(B, 4, 4)``.
+
+    Returns:
+        Folded yaw angles in radians with shape ``(B,)``.
+    """
+    x_axis = object_pose[:, :3, 0]
+    yaw = torch.atan2(x_axis[:, 1], x_axis[:, 0])
+    quarter = math.pi / 2.0
+    return torch.remainder(yaw + quarter / 2.0, quarter) - quarter / 2.0
+
+
+def yaw_following_grasp_rotation(
+    rotation: torch.Tensor, object_pose: torch.Tensor
+) -> torch.Tensor:
+    """Turn a world grasp rotation about world Z by each object's folded yaw.
+
+    Parallel flat pads that close along a face normal of the unrotated box then
+    close along the corresponding face normal for every sampled yaw.
+
+    Args:
+        rotation: World grasp rotation with shape ``(3, 3)``.
+        object_pose: Object poses with shape ``(B, 4, 4)``.
+
+    Returns:
+        Per-row world grasp rotations ``Rz(folded yaw) @ rotation`` with shape
+        ``(B, 3, 3)``.
+    """
+    folded = folded_object_yaw(object_pose)
+    cos, sin = torch.cos(folded), torch.sin(folded)
+    zero, one = torch.zeros_like(folded), torch.ones_like(folded)
+    about_z = torch.stack(
+        (cos, -sin, zero, sin, cos, zero, zero, zero, one), dim=-1
+    ).reshape(-1, 3, 3)
+    return torch.matmul(about_z, rotation)
+
+
+def grasp_follows_object_yaw(
+    config: Mapping[str, object], *, grasp_source: str
+) -> bool:
+    """Validate the opt-in that turns a fixed grasp with the object's yaw.
+
+    Args:
+        config: Skill case configuration.
+        grasp_source: The case's resolved grasp source.
+
+    Returns:
+        The configured ``grasp_follows_object_yaw`` value, ``False`` when absent.
+
+    Raises:
+        TypeError: If the value is not a bool.
+        ValueError: If it is enabled for a grasp source other than ``fixed``.
+    """
+    value = config.get("grasp_follows_object_yaw", False)
+    if type(value) is not bool:
+        raise TypeError("grasp_follows_object_yaw must be a bool.")
+    if value and grasp_source != "fixed":
+        raise ValueError("grasp_follows_object_yaw requires fixed grasps.")
+    return value
 
 
 def case_pose(case: BenchmarkCase, name: str, *, device: torch.device) -> torch.Tensor:

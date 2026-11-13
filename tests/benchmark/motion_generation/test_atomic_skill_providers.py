@@ -743,6 +743,109 @@ def test_axis_inward_rule_requires_an_explicit_ordered_bounded_search(values) ->
         )
 
 
+class _StopAfterSampling(Exception):
+    """Stop case generation once the grasp pool request is observed."""
+
+
+@pytest.mark.parametrize(
+    "target_axis,upright_row_zero",
+    [([0.0, 0.0, 1.0], True), ([0.0, 1.0, 0.0], False)],
+)
+def test_axis_align_screen_closes_upright_rows_at_the_pre_rotated_grasp(
+    monkeypatch, target_axis, upright_row_zero
+) -> None:
+    """GraspKit qualifies closure at the TCP rotation AxisAlign executes."""
+    from embodichain_benchmarks.motion_generation import _atomic_fixtures
+
+    objects = torch.eye(4).repeat(2, 1, 1)
+    objects[:, :3, 3] = torch.tensor([[-0.4, 0.0, 0.025], [-0.4, 0.1, 0.025]])
+    # Row 1 already points its internal X up, so it is never an upright row.
+    objects[1, :3, :3] = axis_angle_to_rotation_matrix(
+        torch.tensor([[0.0, -math.pi / 2, 0.0]])
+    )[0]
+    generator = Mock()
+    generator.get_valid_grasp_poses.side_effect = _StopAfterSampling
+    monkeypatch.setattr(
+        _atomic_fixtures,
+        "create_parallel_jaw_grasp_pose_generator",
+        Mock(return_value=generator),
+    )
+    monkeypatch.setattr(
+        _atomic_fixtures,
+        "create_antipodal_semantics",
+        lambda *args, **kwargs: SimpleNamespace(
+            affordance=SimpleNamespace(
+                mesh_vertices=torch.zeros(3, 3), mesh_triangles=torch.zeros(1, 3)
+            )
+        ),
+    )
+    scenario = AtomicSkillScenario()
+    scenario.robot = SimpleNamespace(
+        device=CPU,
+        cfg=SimpleNamespace(solver_cfg={"arm": SimpleNamespace(tcp=torch.eye(4))}),
+        get_qpos=lambda name=None: torch.zeros(2, 7 if name else 9),
+        get_joint_ids=lambda name: list(range(7)),
+        compute_fk=lambda *args, **kwargs: torch.eye(4).repeat(2, 1, 1),
+        compute_ik=lambda *, pose, joint_seed, name: (
+            torch.ones(2, dtype=torch.bool),
+            joint_seed,
+        ),
+        get_control_part_base_pose=lambda **kwargs: torch.eye(4).repeat(2, 1, 1),
+    )
+    handle = SimpleNamespace(object_id="cube", entity=Mock(), config={})
+    scenario.activate_object = lambda object_id: handle
+    scenario.restore_base_robot = lambda: None
+    scenario.randomize_object_pose = lambda *args, **kwargs: objects.clone()
+    scenario.set_robot_start = lambda *args, **kwargs: None
+    config = {
+        "name": "closure_rotation",
+        "object": "cube",
+        "grasp_source": "antipodal",
+        "approach_direction": [0.0, 0.0, -1.0],
+        "internal_axis": [1.0, 0.0, 0.0],
+        "target_axis": target_axis,
+        "alignment_inward_candidates_m": [0.0, 0.05],
+        "pre_action_settle_steps": 0,
+    }
+
+    with pytest.raises(_StopAfterSampling):
+        create_atomic_skill_provider("axis_align").generate_case(
+            scenario,
+            SimpleNamespace(
+                suite_version="test_v1", robot=SimpleNamespace(id="franka_robotiq")
+            ),
+            SimpleNamespace(id="atomic-test"),
+            config,
+            seed=43001,
+            batch_size=2,
+        )
+
+    rotation = generator.get_valid_grasp_poses.call_args.kwargs["closure_tcp_rotation"]
+    expected = torch.eye(3).repeat(2, 1, 1)
+    if upright_row_zero:
+        # Internal X to world Z turns about -Y; the grasp leads by 45 degrees.
+        expected[0] = axis_angle_to_rotation_matrix(
+            torch.tensor([[0.0, math.pi / 4, 0.0]])
+        )[0]
+    torch.testing.assert_close(rotation, expected, atol=1e-6, rtol=0)
+    # The screen rotation is exactly the one the planned grasp waypoint applies.
+    grasp = objects.clone()
+    grasp[:, :3, :3] = torch.diag(torch.tensor([1.0, -1.0, -1.0]))
+    planned = providers._axis_align_poses(
+        objects,
+        grasp,
+        torch.tensor([0.0, 0.0, -1.0]),
+        pre_grasp_distance=0.15,
+        lift_height=0.16,
+        internal_axis=torch.tensor([1.0, 0.0, 0.0]),
+        target_axis=torch.tensor(target_axis),
+    )[:, 1]
+    torch.testing.assert_close(
+        planned[:, :3, :3], rotation @ grasp[:, :3, :3], atol=1e-6, rtol=0
+    )
+    torch.testing.assert_close(planned[:, :3, 3], grasp[:, :3, 3])
+
+
 def test_pour_approach_choices_preserve_elevation_budget_and_frozen_rows() -> None:
     objects = torch.eye(4).repeat(2, 1, 1)
     objects[:, 0, 3] = torch.tensor([0.3, 0.4])
@@ -841,6 +944,64 @@ def test_pour_approach_choices_preserve_elevation_budget_and_frozen_rows() -> No
     torch.testing.assert_close(
         returned[:, :3, :3], torch.eye(3).expand(2, -1, -1), atol=1e-6, rtol=0
     )
+
+
+def test_pour_approach_choices_rotate_each_rows_yaw_following_direction() -> None:
+    objects = torch.eye(4).repeat(2, 1, 1)
+    base = torch.tensor([-1.0, 0.0, -1.0]) / math.sqrt(2)
+    yaws = torch.tensor([math.pi / 6, -math.pi / 9])
+    rows = torch.stack(
+        (
+            torch.cos(yaws) * base[0] - torch.sin(yaws) * base[1],
+            torch.sin(yaws) * base[0] + torch.cos(yaws) * base[1],
+            base[2].expand(2),
+        ),
+        dim=1,
+    )
+    # Row 1 rotated a quarter turn about world Z: (x, y, z) -> (-y, x, z).
+    turned = torch.stack((-rows[1, 1], rows[1, 0], rows[1, 2]))
+    samples = []
+
+    def pools(handle, pose, directions, **kwargs):
+        samples.append(directions.clone())
+        empty = pose.new_empty((0, 4, 4))
+        if len(samples) == 1:
+            return [torch.eye(4)[None], empty]
+        return [empty, torch.eye(4)[None]]
+
+    def screen(pools, directions, start, *, initial_selection, initial_found, **kw):
+        solved = torch.tensor([len(pool) > 0 for pool in pools])
+        return initial_selection, initial_found | solved
+
+    scenario = AtomicSkillScenario()
+    scenario._ranked_antipodal_grasp_pools = pools
+    scenario._screen_antipodal_grasp_rows = screen
+
+    _, directions, evidence = providers._select_pour_approach_grasp(
+        scenario,
+        SimpleNamespace(object_id="cube"),
+        objects,
+        rows,
+        torch.zeros(2, 7),
+        ((0.0, 1), (math.pi / 2, 1)),
+        grasp_parameters={
+            "grasp_sample_count": 10,
+            "grasp_alignment_max_angle_deg": 10.0,
+        },
+        build_poses=lambda *args, **kwargs: None,
+        seed=1,
+    )
+    torch.testing.assert_close(samples[0], rows)
+    torch.testing.assert_close(
+        samples[1], torch.stack((rows[0], turned)), atol=1e-6, rtol=0
+    )
+    torch.testing.assert_close(
+        directions, torch.stack((rows[0], turned)), atol=1e-6, rtol=0
+    )
+    assert [r["selected_yaw_offset_rad"] for r in evidence["rows"]] == [
+        0.0,
+        math.pi / 2,
+    ]
 
 
 @pytest.mark.parametrize(

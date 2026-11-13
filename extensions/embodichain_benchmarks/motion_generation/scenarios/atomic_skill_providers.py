@@ -70,6 +70,7 @@ from .atomic_case_utils import (
     case_pose,
     difficulty,
     float_vector,
+    folded_object_yaw,
     randomization_parameters,
     randomized_vector_batch,
     snapshot_case_qpos,
@@ -988,10 +989,7 @@ def _yaw_following_approach(
     Returns:
         Per-row world approach directions with shape ``(B, 3)``.
     """
-    x_axis = object_pose[:, :3, 0]
-    yaw = torch.atan2(x_axis[:, 1], x_axis[:, 0])
-    quarter = math.pi / 2.0
-    folded = torch.remainder(yaw + quarter / 2.0, quarter) - quarter / 2.0
+    folded = folded_object_yaw(object_pose)
     cos, sin = torch.cos(folded), torch.sin(folded)
     return torch.stack(
         (
@@ -1057,9 +1055,11 @@ def _select_pour_approach_grasp(
 ) -> tuple[torch.Tensor, torch.Tensor, dict[str, object]]:
     """Choose an independent oblique azimuth before any evaluated planning.
 
-    Rotation about world Z retains the configured elevation. Each row visits
-    choices in order and freezes its first complete reference chain. Allocation
-    sums are bounded by the original per-row candidate budget.
+    Rotation about world Z retains the configured elevation. ``base_approach``
+    is one world direction ``(3,)`` or one per row ``(B, 3)``, as produced by
+    yaw-following approaches; each row rotates its own direction. Each row
+    visits choices in order and freezes its first complete reference chain.
+    Allocation sums are bounded by the original per-row candidate budget.
     """
     batch = len(object_pose)
     selected = torch.eye(4, device=object_pose.device, dtype=object_pose.dtype).repeat(
@@ -1074,10 +1074,12 @@ def _select_pour_approach_grasp(
     for angle, allocation in candidates:
         c, s = math.cos(angle), math.sin(angle)
         rotation = object_pose.new_tensor([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
-        candidate_direction = rotation @ base_approach
-        candidate_direction = candidate_direction / candidate_direction.norm()
+        candidate_direction = base_approach @ rotation.T
+        candidate_direction = candidate_direction / candidate_direction.norm(
+            dim=-1, keepdim=True
+        )
         directions = torch.where(
-            found[:, None], selected_directions, candidate_direction[None]
+            found[:, None], selected_directions, candidate_direction.expand(batch, -1)
         )
         pools = scenario._ranked_antipodal_grasp_pools(
             handle,
@@ -1466,6 +1468,42 @@ def _axis_alignment_parameters(
     return source, target, axis, angle
 
 
+def _upright_grasp_pre_rotation(
+    source: torch.Tensor, target: torch.Tensor, rotation_axis: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Mirror AxisAlign's upright rows and their world-frame grasp pre-rotation.
+
+    Args:
+        source: World object axes with shape ``(B, 3)``.
+        target: World target axes with shape ``(B, 3)``.
+        rotation_axis: Shortest-arc alignment axes with shape ``(B, 3)``.
+
+    Returns:
+        The upright row mask ``(B,)`` and the 45-degree rotation opposite each
+        row's alignment axis ``(B, 3, 3)``. Callers apply it to the TCP
+        orientation, about the TCP origin, on upright rows only.
+    """
+    upright = (source[:, 2].abs() <= _UPRIGHT_HORIZONTAL_MAX_ABS_Z) & (
+        target[:, 2] >= _UPRIGHT_TARGET_MIN_Z
+    )
+    rotation = axis_angle_to_rotation_matrix(
+        -rotation_axis * _UPRIGHT_GRASP_PRE_ROTATION
+    )
+    return upright, rotation
+
+
+def _upright_grasp_closure_rotation(
+    source: torch.Tensor, target: torch.Tensor, rotation_axis: torch.Tensor
+) -> torch.Tensor:
+    """Return the TCP rotation each row's executed grasp closes with.
+
+    Upright rows close at the pre-rotated grasp; other rows receive identity.
+    """
+    upright, rotation = _upright_grasp_pre_rotation(source, target, rotation_axis)
+    identity = torch.eye(3, dtype=rotation.dtype, device=rotation.device)
+    return torch.where(upright[:, None, None], rotation, identity.expand_as(rotation))
+
+
 def _axis_align_poses(
     object_pose: torch.Tensor,
     grasp_pose: torch.Tensor,
@@ -1482,14 +1520,9 @@ def _axis_align_poses(
     source, target, rotation_axis, angle = _axis_alignment_parameters(
         object_pose, internal_axis, target_axis
     )
-    upright = (source[:, 2].abs() <= _UPRIGHT_HORIZONTAL_MAX_ABS_Z) & (
-        target[:, 2] >= _UPRIGHT_TARGET_MIN_Z
-    )
+    upright, pre_rotation = _upright_grasp_pre_rotation(source, target, rotation_axis)
     pre_rotated = grasp_pose.clone()
-    pre_rotated[:, :3, :3] = torch.matmul(
-        axis_angle_to_rotation_matrix(-rotation_axis * _UPRIGHT_GRASP_PRE_ROTATION),
-        grasp_pose[:, :3, :3],
-    )
+    pre_rotated[:, :3, :3] = torch.matmul(pre_rotation, grasp_pose[:, :3, :3])
     grasp = torch.where(upright[:, None, None], pre_rotated, grasp_pose)
     pre_grasp = _translate(grasp, -approach * pre_grasp_distance)
     lift = grasp.clone()
@@ -1582,6 +1615,7 @@ def _select_inward_axis_grasp(
     grasp_parameters: Mapping[str, object],
     build_poses: Callable[..., torch.Tensor],
     seed: int,
+    closure_tcp_rotation: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, dict[str, object]]:
     """Freeze the first independently reachable position/grasp for every row.
 
@@ -1589,6 +1623,8 @@ def _select_inward_axis_grasp(
     search reuses the same declared geometry pool and original environment;
     only ordinary exhausted-pool results allow the next offset. No evaluated
     planner or physical policy outcome participates in this preparation rule.
+    ``closure_tcp_rotation`` ``(B, 3, 3)`` is the world TCP rotation each row
+    closes with; the pool's closure support check evaluates candidates there.
     """
     base = scenario.robot.get_control_part_base_pose(
         name=scenario.control_part, to_matrix=True
@@ -1611,6 +1647,7 @@ def _select_inward_axis_grasp(
         row_rank=lambda row, candidates, costs: _axis_align_grasp_order(
             rotation_axis[row], candidates, costs
         ),
+        closure_tcp_rotation=closure_tcp_rotation,
     )
     selected = torch.stack([pool[0] for pool in pools])
     found = torch.zeros(len(object_pose), device=object_pose.device, dtype=torch.bool)
@@ -1769,7 +1806,7 @@ class _AxisAlignCases(AtomicSkillCaseProvider):
                 ),
             )
 
-        _, _, rotation_axis, _ = _axis_alignment_parameters(
+        source_axis, world_target_axis, rotation_axis, _ = _axis_alignment_parameters(
             object_pose, internal_axis, target_axis
         )
 
@@ -1796,6 +1833,10 @@ class _AxisAlignCases(AtomicSkillCaseProvider):
                 grasp_parameters=grasp,
                 build_poses=poses,
                 seed=seed,
+                # Upright rows close at the pre-rotated grasp, not the sample.
+                closure_tcp_rotation=_upright_grasp_closure_rotation(
+                    source_axis, world_target_axis, rotation_axis
+                ),
             )
         elif grasp["grasp_source"] == "antipodal":
             sampled = scenario.screen_antipodal_grasp(

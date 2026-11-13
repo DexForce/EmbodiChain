@@ -166,6 +166,13 @@ its smallest accepted declared offset in `alignment_offset_m`, with rejected
 attempts in `alignment_realisation`, before any planner is evaluated. Endpoint
 IK does not certify a collision-free trajectory or physical success.
 
+AxisAlign turns an upright-row grasp 45 degrees about the TCP, opposite the
+row's alignment axis, before closing. The Robotiq closure qualification checks
+each candidate at that executed orientation (GraspKit `closure_tcp_rotation`),
+so a grasp whose lower pad would close into the support is rejected rather than
+qualified at the unturned sample. Other rows pass identity and keep their former
+pools. Both AxisAlign suites have new versions and require fresh manifests.
+
 Spatial Pour enables `grasp_filter_before_ranking` so its existing 10-degree
 approach constraint applies before grasp NMS and candidate truncation. Under
 yaw perturbations the former Robotiq pool can yield no complete-chain witness
@@ -223,6 +230,13 @@ Spatial Pour sets `approach_follows_object_yaw`, turning its diagonal approach
 with each cube's yaw folded onto the nearest face. With a fixed world approach,
 flat pads have no face-normal closing axis once a cube is yawed beyond about
 10 degrees.
+
+Spatial PickUp, MoveHeldObject and Place set `grasp_follows_object_yaw`, which
+turns their fixed grasp rotation about world Z by each cube's yaw folded onto
+the nearest face. The world-fixed grasp closed 5-27 degrees off the face
+normals of yawed cubes, which then fell out of the hand on lift. Grasp
+positions are unchanged; the option defaults to false and requires
+`grasp_source: fixed`.
 
 The PGI fixture keeps its former drives and grasp sampling. All Franka
 Robotiq suites have new versions and require fresh manifests.

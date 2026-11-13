@@ -92,6 +92,7 @@ class GripperCollisionChecker:
         filter_closure_support: bool = False,
         is_visual: bool = False,
         apertures: torch.Tensor | None = None,
+        closure_grasp_poses: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Reduce finite mesh-surface queries at canonical grasp poses.
 
@@ -111,6 +112,11 @@ class GripperCollisionChecker:
                 qualified at the closing state that aperture reaches. States
                 round down to the next sampled aperture, so a candidate is never
                 credited with more clearance than its physical closure allows.
+            closure_grasp_poses: Optional world canonical poses, shape
+                ``(B, 4, 4)``, used only by the closure support check, for a
+                caller that closes the hand at a different pose than the one
+                it qualifies here. ``None`` checks closure at ``grasp_poses``.
+                Ignored unless ``filter_closure_support`` is enabled.
 
         Returns:
             Per-pose collision mask and minimum signed distance, both ``(B,)``.
@@ -119,6 +125,11 @@ class GripperCollisionChecker:
         """
         if apertures is not None and apertures.shape != (len(grasp_poses),):
             raise ValueError("Closure apertures must contain one value per candidate.")
+        if (
+            closure_grasp_poses is not None
+            and closure_grasp_poses.shape != grasp_poses.shape
+        ):
+            raise ValueError("Closure grasp poses must align with grasp_poses.")
         if filter_closure_support and (
             apertures is None or self.closure_points is None
         ):
@@ -133,6 +144,7 @@ class GripperCollisionChecker:
             filter_closure_support=filter_closure_support,
             is_visual=is_visual,
             apertures=apertures,
+            closure_grasp_poses=closure_grasp_poses,
         )
 
     def _query_chunks(
@@ -145,10 +157,16 @@ class GripperCollisionChecker:
         is_visual: bool,
         filter_closure_support: bool = False,
         apertures: torch.Tensor | None = None,
+        closure_grasp_poses: torch.Tensor | None = None,
         candidate_chunk_size: int = 128,
         point_chunk_size: int = 512,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Reduce all samples with bounded candidate/point/hull intermediates."""
+        closure_poses = (
+            grasp_poses
+            if closure_grasp_poses is None
+            else closure_grasp_poses.to(grasp_poses)
+        )
         relative = torch.linalg.inv(obj_pose).unsqueeze(0) @ grasp_poses
         count = len(grasp_poses)
         collided = torch.zeros(count, dtype=torch.bool, device=self.device)
@@ -185,7 +203,7 @@ class GripperCollisionChecker:
                     display_flags.append(flags[0].cpu().numpy())
             if filter_closure_support and ground is not None and apertures is not None:
                 closure_distance = self._closure_support_distance(
-                    grasp_poses[start:end], apertures[start:end], ground
+                    closure_poses[start:end], apertures[start:end], ground
                 )
                 if closure_distance is not None:
                     collided[start:end] |= closure_distance < collision_threshold
