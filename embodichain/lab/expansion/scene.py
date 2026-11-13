@@ -83,7 +83,10 @@ def apply_joint_scene_candidates(
             for change in candidate.scene.pose_changes
         }
         changes[row] = SceneChangeSet(poses, tuple(poses))
-        _preflight_changes(SceneView(view.sim, env_ids=(row,)), changes[row])
+        _preflight_changes(
+            SceneView(view.sim, env_ids=(row,), entity_uids=view.entity_uids),
+            changes[row],
+        )
         for uid, pose in candidate.deployment.poses.items():
             kind, robot = bindings.get(uid, (None, None))
             if kind != "robot" or not callable(getattr(robot, "set_local_pose", None)):

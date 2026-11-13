@@ -16,7 +16,7 @@ scene graph, generation client or task lifecycle. Its facade loads lazily.
 | Exact native planar footprint observations | `embodichain/lab/sim/scene/planar_observation.py` |
 | Immutable physical capture and restoration | `embodichain/lab/sim/scene/state.py` |
 | Exact native hand/rigid shape and physical-offset capture | `embodichain/lab/sim/scene/native_hand.py` |
-| Preflighted allowed rigid-body pose changes | `embodichain/lab/sim/scene/operations.py` |
+| Preflighted rigid/visual pose changes and static-group transforms | `embodichain/lab/sim/scene/operations.py` |
 | Explicit evidence, state comparison and caller-driven settling | `embodichain/lab/sim/scene/validation.py` |
 | Static USD root/link geometry and explicit proxy fitting | `embodichain/lab/sim/scene/articulation_geometry.py` |
 | Source-declared prismatic, press and revolute physical bindings | `embodichain/lab/sim/scene/articulation_inputs.py`, `press_inputs.py`, `revolute_inputs.py` |
@@ -37,7 +37,8 @@ Resolved configs → owned `SceneFragment` → anchor/frame composition →
 `SceneRecipe` → seeded XY proposal → Spawn declaration or allowed pose changes
 → host physics → measured checks.
 
-Fragments copy configs and preserve scales; composition does not choose physics.
+Fragments copy rigid, visual and articulation configs and preserve scales;
+robots remain embodiment-owned. Composition does not choose physics.
 `declare_fragment` uses the existing manager, whose caller owns preparation and
 native-failure recovery. Seeds and logical ordinals are independent of slots.
 Recipes change XY translations while retaining authored height/orientation.
@@ -56,15 +57,18 @@ establish collision freedom, support, stability, reachability or task success.
 - Geometry is scaled arena-local Z-up metres; poses use proper transforms or
   `xyz + xyzw`. Replication offsets do not enter proposals. GenSim owns Y-up
   conversion and its editable model.
-- `SceneView` supports rigid objects, robots and articulations. Selected
+- `SceneView` defaults to rigid objects, robots and articulations. Explicit
+  ordered `entity_uids` may also select pure visuals: `members()` exposes all
+  selected facades, while `entities()` exposes physical members only. Selected
   `env_ids` are nonempty, unique and ordered; views reject changed capacity or
-  bindings. Rigid groups, deformables and explicit rigid constraints remain
-  unsupported by physical snapshots.
+  selected bindings. Rigid groups, cables, deformables and constraints remain
+  unsupported members. Unrelated entities do not enter explicit selections.
 - Snapshots own poses, velocities, joints, targets and efforts. Restore checks
   original ownership, backend, topology and all selected rows before mutation,
   leaving peers untouched. It is not a solver checkpoint or task-state reset.
   Joint targets stay strict; explicit position tolerance permits bounded
-  clipping followed by host round-trip checks.
+  clipping followed by host round-trip checks. Pure visuals have no physical
+  snapshot rows; their render state is not restored by physical snapshots.
 - `restore_render_state` publishes complete measured states without physics,
   temporarily admitting measured solver excursions and restoring exact limits.
   It must not become a physical reset. Episode/time identity stays host-owned.
@@ -72,10 +76,13 @@ establish collision freedom, support, stability, reachability or task success.
   dynamic rigid bodies on Default/Newton. Changes derive from the original
   snapshot, validate all requests first and verify readback. Damping is outside
   this contract; native/readback failures require stopping the host batch.
-- Change sets preflight permissions, set rigid poses, clear dynamics and publish
+- Change sets preflight permissions, set rigid/visual poses, clear rigid dynamics and publish
   render state without stepping. Native failures have no guaranteed rollback;
   hosts honor planner/observation invalidations even at unchanged simulation time.
   `apply_changes_batch` accepts distinct per-env changes and preflights all rows.
+  `apply_group_transform` requires an explicit static rigid/visual group and
+  applies one arena-local delta to current poses, preserving relative transforms
+  and facade types. Dynamic, kinematic and articulated members are rejected.
 - Checks distinguish passed, failed and unverified. Empty/unverified evidence
   cannot accept a candidate. Fixed-step settling alone does not prove stability;
   convergence uses consecutive measurements across the full-world selection

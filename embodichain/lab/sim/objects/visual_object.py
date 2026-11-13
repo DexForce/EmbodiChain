@@ -325,6 +325,9 @@ class VisualObject(BatchEntity):
         """
         if not isinstance(visible, bool):
             raise TypeError("visible must be a bool.")
+        binding = getattr(self, "_visual_binding", None)
+        if binding is not None:
+            binding.set_visible(visible, env_ids)
         for i in self._indices(env_ids):
             self._entities[i].set_visible(visible)
             self._visibility[i] = visible
@@ -340,6 +343,11 @@ class VisualObject(BatchEntity):
         Returns:
             Boolean tensor shaped ``(M,)``.
         """
+        binding = getattr(self, "_visual_binding", None)
+        if binding is not None:
+            return torch.as_tensor(
+                binding.visibility[binding.indices(env_ids)].copy(), device=self.device
+            )
         return torch.tensor(
             [self._entities[i].is_visible() for i in self._indices(env_ids)],
             dtype=torch.bool,
@@ -357,6 +365,14 @@ class VisualObject(BatchEntity):
         Returns:
             Scale tensor shaped ``(M, 3)``.
         """
+        binding = getattr(self, "_visual_binding", None)
+        if binding is not None:
+            ids = binding.indices(env_ids)
+            return (
+                torch.as_tensor(binding.body_scale, device=self.device)
+                .expand(len(ids), -1)
+                .clone()
+            )
         return torch.as_tensor(
             np.array(
                 [self._entities[i].get_body_scale() for i in self._indices(env_ids)]
@@ -377,6 +393,9 @@ class VisualObject(BatchEntity):
         Returns:
             Vertices shaped ``(M, V, 3)``.
         """
+        binding = getattr(self, "_visual_binding", None)
+        if binding is not None:
+            return binding.mesh(env_ids, scale=scale)[0]
         ids = self._indices(env_ids)
         if not ids:
             return torch.empty(
@@ -401,6 +420,9 @@ class VisualObject(BatchEntity):
         Returns:
             Indices shaped ``(M, F, 3)``.
         """
+        binding = getattr(self, "_visual_binding", None)
+        if binding is not None:
+            return binding.mesh(env_ids)[1]
         ids = self._indices(env_ids)
         if not ids:
             return torch.empty(
@@ -428,6 +450,10 @@ class VisualObject(BatchEntity):
             mat: Material template from the simulation manager.
             env_ids: Selected environments, or all environments.
         """
+        binding = getattr(self, "_visual_binding", None)
+        if binding is not None:
+            binding.set_material(mat, env_ids)
+            return
         for i in self._indices(env_ids):
             instance = mat.create_instance(f"{mat.uid}_{self.uid}_{i}")
             self._entities[i].set_material(instance.mat)
@@ -447,6 +473,9 @@ class VisualObject(BatchEntity):
         Returns:
             One wrapper per selected instance, possibly ``None`` without a material.
         """
+        binding = getattr(self, "_visual_binding", None)
+        if binding is not None:
+            return binding.material_instances(env_ids)
         return [self._visual_materials[i] for i in self._indices(env_ids)]
 
     def reset(self, env_ids: Sequence[int] | torch.Tensor | None = None) -> None:
@@ -455,6 +484,9 @@ class VisualObject(BatchEntity):
         Args:
             env_ids: Selected environments, or all environments.
         """
+        binding = getattr(self, "_visual_binding", None)
+        if binding is not None:
+            binding.reset(env_ids)
         ids = self._indices(env_ids)
         self.set_local_pose(self._default_poses[ids], ids)
         for i in ids:

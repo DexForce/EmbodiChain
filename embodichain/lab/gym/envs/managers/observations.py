@@ -281,6 +281,80 @@ def _get_evaluation_state(
     return produce() if capture is None else capture.acquire(key, produce)
 
 
+def _get_deformable_centroid_state(
+    env: EmbodiedEnv, obs: EnvObs, *, field: str
+) -> ObservationSample:
+    """Acquire a mesh-qualified particle centroid through the canonical capture."""
+    from embodichain.lab.evaluation._deformable import _centroid_selection
+
+    uid, digest, indices = _centroid_selection(field)
+    capture = _current_capture.get()
+    replay = getattr(env, "_physical_replay", None)
+
+    def nodes() -> ObservationSample:
+        try:
+            if replay is None:
+                raise ValueError("Missing verified deformable source.")
+            surface, value = replay.require_surface(
+                env.sim, uid=uid, mesh_sha256=digest
+            )
+            valid = torch.ones(env.num_envs, dtype=torch.bool, device=value.device)
+            reasons = (None,) * env.num_envs
+        except (ValueError, AttributeError):
+            value = torch.zeros(
+                (env.num_envs, 0, 3),
+                device=env.device,
+                dtype=getattr(replay, "_node_dtype", torch.float32),
+            )
+            valid = torch.zeros(env.num_envs, dtype=torch.bool, device=value.device)
+            reasons = ("foreign_or_missing_mesh",) * env.num_envs
+        descriptor = ObservationDescriptor(
+            f"{uid}/{digest}",
+            "nodes",
+            "world",
+            "xyz",
+            ("m",),
+            tuple(value.shape[1:]),
+            value.dtype,
+        )
+        return ObservationSample(descriptor, value, valid, reasons)
+
+    def produce() -> ObservationSample:
+        raw = (
+            nodes()
+            if capture is None
+            else capture.acquire(("deformable_nodes", uid, digest), nodes)
+        )
+        if max(indices) >= raw.values.shape[1]:
+            value = raw.values.new_zeros((env.num_envs, 3))
+            valid = torch.zeros_like(raw.valid)
+            reasons = tuple(
+                reason or "particle_index_out_of_range"
+                for reason in raw.acquisition_errors
+            )
+        else:
+            selected = raw.values[:, indices, :]
+            value = selected.mean(1)
+            valid = raw.valid & torch.isfinite(selected).all(dim=(1, 2))
+            reasons = raw.acquisition_errors
+        descriptor = ObservationDescriptor(
+            "/".join(field.split("/")[1:-1]),
+            "centroid",
+            "world",
+            "xyz",
+            ("m",),
+            (3,),
+            value.dtype,
+        )
+        return ObservationSample(descriptor, value, valid, reasons)
+
+    return (
+        produce()
+        if capture is None
+        else capture.acquire(("deformable_centroid", field), produce)
+    )
+
+
 def _get_segment_start_state(
     env: EmbodiedEnv, obs: EnvObs, *, uid: str, field: str
 ) -> ObservationSample:

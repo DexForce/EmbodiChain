@@ -41,6 +41,11 @@ __all__ = ["advance_observation"]
 def _raw_field_kind(field: str) -> str:
     owner, _, channel = field.partition("/")
     quantity = channel.rsplit("/", 1)[1]
+    if owner == "deformables":
+        from ._deformable import _centroid_selection
+
+        _centroid_selection(field)
+        return "position"
     if owner == "rigid_objects":
         return {
             "pose": "position",

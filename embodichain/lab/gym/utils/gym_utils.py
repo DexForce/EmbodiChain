@@ -683,7 +683,6 @@ def config_to_cfg(
     """
 
     from embodichain.lab.sim.cfg import (
-        DenoisingCfg,
         RigidObjectCfg,
         VisualObjectCfg,
         MeshCfg,
@@ -691,8 +690,6 @@ def config_to_cfg(
         ArticulationCfg,
         CableObjectCfg,
         LightCfg,
-        DLSSCfg,
-        NRDCfg,
         RenderCfg,
         physics_cfg_for_backend,
     )
@@ -871,9 +868,24 @@ def config_to_cfg(
         configured_task_program_selection = deployment.selection
         configured_task_program_id = deployment.program_id
         configured_task_program_path = deployment.program_path
+
     elif "robot" not in config:
         log_error("Missing required config key: robot")
 
+    if "acceptance" in config:
+        raise ValueError("Use evaluation.component for measured final rules.")
+    if "replay" in config:
+        from embodichain.lab.gym.utils._replay import _decode_authored_joint_stream
+
+        env_cfg.replay = _decode_authored_joint_stream(
+            config["replay"], base_dir=base_dir
+        )
+    if "replay_surface" in config:
+        from embodichain.lab.gym.envs._physical_replay import _load_replay_surface
+
+        if env_cfg.replay is None:
+            raise ValueError("replay_surface requires explicit simulation.replay.")
+        env_cfg.replay_surface = _load_replay_surface(config["replay_surface"])
     if env_cfg.objective is not None and env_cfg.objective.condition is not None:
         from embodichain.lab.gym.envs.objectives.ordered_placement import (
             _objective_fields,
@@ -961,12 +973,6 @@ def config_to_cfg(
     env_cfg.ground_plane_visible = ground_plane_visible
 
     render_config = deepcopy(config.get("render_cfg", {}))
-    if isinstance(render_config.get("denoising"), dict):
-        render_config["denoising"] = DenoisingCfg(**render_config["denoising"])
-    if isinstance(render_config.get("dlss"), dict):
-        render_config["dlss"] = DLSSCfg(**render_config["dlss"])
-    if isinstance(render_config.get("nrd"), dict):
-        render_config["nrd"] = NRDCfg(**render_config["nrd"])
     if "renderer" in config:
         # Keep the existing flat renderer option as the command-line override.
         render_config["renderer"] = config["renderer"]
@@ -990,7 +996,7 @@ def config_to_cfg(
         enable_entity_gizmo=config.get("enable_entity_gizmo", True),
         robot_ik_gizmo=config.get("robot_ik_gizmo", {}),
         device=config.get("device"),
-        render_cfg=RenderCfg(**render_config),
+        render_cfg=RenderCfg.from_dict(render_config),
         gpu_id=config.get("gpu_id", 0),
         arena_space=config.get("arena_space", 5.0),
         physics_cfg=physics_cfg,

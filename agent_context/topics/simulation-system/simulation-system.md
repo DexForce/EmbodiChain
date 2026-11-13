@@ -33,7 +33,12 @@ same Scene, including its pre-finalization prepared-Arena phase.
 
 `VisualObject` owns appearance, visibility and pure-visual poses without physics
 buffers or collision API. Source selectors are exclusive with ordinary file/
-shape inputs. Whole-scene USD imports own namespaces, placement and sparse
+shape inputs. Explicit `visuals` and articulation `link_visuals` replace appearance
+through `cfg/visuals.py` and `spawn/_visuals.py`, retaining source physics and an
+independent semantic mesh. Single Gaussian resources normalize to an identity
+element; multi-element composition keeps explicit IDs. Gaussian admission,
+native USD reference limits and capture contracts are in [rendering](rendering.md).
+Whole-scene USD imports own namespaces, placement and sparse
 source-path overrides; singleton placement remains asset-owned. Returned source
 identities do not request a second spawn. Imported visuals/deformables keep their
 physical type and supported lifecycle. Single-articulation USD imports via
@@ -52,6 +57,9 @@ native cooked shapes; collision adapters own strict physical reads. Scene
 services assemble explicit geometry/state without adding registries or topology.
 Their batching is API-specific; physical views support explicit ordered rows,
 while native capture/query adapters retain their declared B1 limits.
+Whole-scene inspection accepts `manager=None` without a World or runtime facades;
+the import plan retains authored visual metadata for runtime tracking, including
+NoRender imports that omit native Gaussian resources.
 
 ## Lifecycle
 
