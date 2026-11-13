@@ -527,6 +527,10 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
 def _normalize_newton_solver_type(solver_type: str) -> str:
     """Normalize public EmbodiChain and DexSim Newton solver aliases."""
     key = solver_type.replace("-", "_").lower()
+    if key in {"sph", "sphsolvercfg", "sph_solver_cfg"}:
+        logger.log_error(
+            "Unsupported Newton solver type 'sph'; configure DexUni with sph_cfg."
+        )
     aliases = {
         "mjwarp": "mujoco_warp",
         "mjwarpsolver": "mujoco_warp",
@@ -587,7 +591,11 @@ def _newton_solver_cfg_to_dexsim(
         from dexsim.engine import newton_physics
 
         provider_cfg_type = getattr(newton_physics, "ProviderNewtonSolverCfg", None)
-        if provider_cfg_type is not None and isinstance(solver_cfg, provider_cfg_type):
+        if (
+            provider_cfg_type is not None
+            and isinstance(solver_cfg, provider_cfg_type)
+            and str(solver_cfg.solver_type) == "provider"
+        ):
             return solver_cfg
         _normalize_newton_solver_type(str(solver_cfg.solver_type))
         return solver_cfg

@@ -33,6 +33,8 @@ import torch
 import numpy as np
 import gymnasium as gym
 
+from embodichain.lab.sim.cfg.fluid import FluidObjectCfg
+
 from dataclasses import MISSING, fields
 from typing import (
     TYPE_CHECKING,
@@ -54,12 +56,15 @@ from embodichain.lab.sim.cfg import (
     VisualObjectCfg,
     RigidObjectGroupCfg,
     ArticulationCfg,
+    CableObjectCfg,
     LightCfg,
 )
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.sensors import BaseSensor, Camera, SensorCfg
 from embodichain.lab.sim.types import EnvObs, EnvAction
 from embodichain.lab.gym.envs import BaseEnv, EnvCfg
+from embodichain.lab.gym.envs._physical_replay import _PhysicalReplay, _ReplaySurface
+from embodichain.lab.gym.utils._replay import _AuthoredJointStream
 from embodichain.lab.gym.envs._startup_summary import format_functor_summary
 from embodichain.lab.gym.envs.objectives import (
     MeasuredRigidObjectState,
@@ -74,6 +79,7 @@ from embodichain.lab.gym.envs.demo import (
     DemoSegmentResult,
     _as_bool_tuple,
 )
+from embodichain.lab.gym.utils.trajectory_state import FluidTrajectoryRecorder
 from embodichain.lab.gym.envs.types import ControllerAction
 from embodichain.lab.gym.envs.expert_trajectory import (
     ExpertTrajectoryCfg,
@@ -304,6 +310,11 @@ class EmbodiedEnvCfg(EnvCfg):
 
     articulation: List[ArticulationCfg] = []
 
+    cable_object: list[CableObjectCfg] = []
+    """Fixed-topology cables declared before simulation preparation."""
+    fluid_object: list[FluidObjectCfg] = []
+    """Fixed-count fluids owned by the physical environment component."""
+
     events: Union[object, None] = None
     """Event settings. Defaults to None, in which case no events are applied through the event manager.
 
@@ -434,6 +445,12 @@ class EmbodiedEnvCfg(EnvCfg):
     hooks. No live provider, planner, or callable is stored in this config.
     """
 
+    replay: _AuthoredJointStream | None = None
+    """Explicit physical command-stream replay, independent of semantic lowerers."""
+
+    replay_surface: _ReplaySurface | None = None
+    """Surface asset used by a configured native replay."""
+
 
 class _EpisodeMetadataRows(Sequence):
     """Retain reset-time metadata, materializing row copies when recording uses them."""
@@ -530,6 +547,9 @@ class EmbodiedEnv(BaseEnv):
         task_program_adapter_factory: TaskProgramAdapterFactory | None = None,
         **kwargs,
     ):
+        replay = getattr(cfg, "replay", None)
+        if replay is not None:
+            cfg = copy.deepcopy(cfg)
         rl_task = getattr(cfg, "rl_task", None)
         if rl_task is not None:
             if not isinstance(rl_task, RLTaskCfg):
@@ -565,11 +585,19 @@ class EmbodiedEnv(BaseEnv):
         self._active_task_program_bridge: TaskProgramDemoBridge | None = None
 
         extensions = getattr(cfg, "extensions", {}) or {}
+        if replay is not None and any(
+            name.startswith("_") or hasattr(cfg, name) or hasattr(self, name)
+            for name in extensions
+        ):
+            raise ValueError(
+                "Extensions cannot override configured acceptance or environment fields."
+            )
 
         for name, value in extensions.items():
             setattr(cfg, name, value)
             setattr(self, name, value)
 
+        self._physical_replay = None if replay is None else _PhysicalReplay(cfg, replay)
         self.event_manager: EventManager | None = None
         self.observation_manager: ObservationManager | None = None
         self.reward_manager: RewardManager | None = None
@@ -707,6 +735,7 @@ class EmbodiedEnv(BaseEnv):
                 )
 
             self._traj_buffer: TensorDict | None = None
+            self._fluid_trajectory_recorder: FluidTrajectoryRecorder | None = None
             self._traj_steps: torch.Tensor | None = None
             self._traj_raw_action: EnvAction | None = None
             self._trajectory_action_kind: str | None = None
@@ -962,6 +991,26 @@ class EmbodiedEnv(BaseEnv):
                         policy[key] = storage[key]
                     # Existing consumers retain their transition-length view.
                     self.rollout_buffer = policy[:, : self._max_rollout_steps]
+        recorder = getattr(self, "_fluid_trajectory_recorder", None)
+        if recorder is not None:
+            recorder.capture(self, env_ids.tolist(), reset=True)
+
+    def _set_fluid_trajectory_recorder(
+        self, recorder: FluidTrajectoryRecorder | None
+    ) -> None:
+        """Bind one episode's fluid spool, or detach it after publication."""
+        if recorder is None:
+            self._fluid_trajectory_recorder = None
+            return
+        if not isinstance(recorder, FluidTrajectoryRecorder):
+            raise TypeError("recorder must be a FluidTrajectoryRecorder.")
+        if not self.cfg.record_trajectory or not self.cfg.fluid_object:
+            raise ValueError(
+                "Fluid recording requires trajectory and fluid configuration."
+            )
+        if self._fluid_trajectory_recorder is not None:
+            raise RuntimeError("A fluid trajectory recorder is already attached.")
+        self._fluid_trajectory_recorder = recorder
 
     def set_rollout_buffer(self, rollout_buffer: TensorDict) -> None:
         """Set the rollout buffer for episode data collection.
@@ -1030,6 +1079,9 @@ class EmbodiedEnv(BaseEnv):
 
         if not self.sim.has_native_renderer:
             self._filter_native_visual_functors()
+
+        if self._physical_replay is not None:
+            self._physical_replay.bind(self)
 
         # create event manager
         self.cfg: EmbodiedEnvCfg
@@ -1408,6 +1460,8 @@ class EmbodiedEnv(BaseEnv):
         self._setup_background()
         self._setup_interactive_objects()
         self._setup_lights()
+        if self._physical_replay is not None:
+            self._physical_replay.prepare_scene(self)
 
     def _update_sim_state(self, **kwargs) -> None:
         """Perform the simulation step and apply events if configured.
@@ -1971,6 +2025,9 @@ class EmbodiedEnv(BaseEnv):
         self, env_ids: Sequence[int] | torch.Tensor | None = None, **kwargs: Any
     ) -> None:
         env_ids_to_process = self.episode_context._ids(env_ids)
+        replay = getattr(self, "_physical_replay", None)
+        if replay is not None:
+            replay.reset(self, env_ids_to_process)
         # Keep one shared provenance snapshot per seed epoch, even without a
         # recorder. Individual episode dictionaries and UUIDs stay lazy.
         seed = getattr(self.cfg, "seed", None)
@@ -2468,6 +2525,9 @@ class EmbodiedEnv(BaseEnv):
             self._demo_episode_metadata[env_id] = metadata
         self._demo_metadata_initialized = True
         metadata = copy.deepcopy(self._demo_episode_metadata[env_id])
+        replay = getattr(self, "_physical_replay", None)
+        if replay is not None:
+            metadata["replay_source"] = replay.snapshot.metadata()
         metadata["episode_context"] = self.episode_context.snapshot([env_id])[0]
         metadata.setdefault("segments", [])
         termination_manager = getattr(self, "termination_manager", None)
@@ -2795,17 +2855,27 @@ class EmbodiedEnv(BaseEnv):
                 "Trajectory recording requires an explicit observation frame and action."
             )
         manager._bind_schema(frame)
+        selected = (
+            active if active is not None else getattr(self, "_demo_active_mask", None)
+        )
         _write_raw_rollout(
             self._rollout_storage,
             self.episode_context,
             frame,
             action=self._traj_raw_action,
-            active=(
-                active
-                if active is not None
-                else getattr(self, "_demo_active_mask", None)
-            ),
+            active=selected,
         )
+        recorder = getattr(self, "_fluid_trajectory_recorder", None)
+        if recorder is not None:
+            ids = (
+                list(range(self.num_envs))
+                if selected is None
+                else torch.as_tensor(selected, dtype=torch.bool)
+                .nonzero()
+                .flatten()
+                .tolist()
+            )
+            recorder.capture(self, ids)
         self._traj_raw_action = None
 
     def _write_rl_rollout_step(
@@ -3146,6 +3216,9 @@ class EmbodiedEnv(BaseEnv):
             The raw policy tensor or applied controller value.
         """
 
+        replay = getattr(self, "_physical_replay", None)
+        if replay is not None:
+            return replay.consume(self, action)
         if isinstance(action, ControllerAction):
             if getattr(self, "_step_uses_action_manager", False):
                 self.action_manager.apply_action()
@@ -3161,8 +3234,18 @@ class EmbodiedEnv(BaseEnv):
             return action
         return EmbodiedEnv._apply_controller_action(self, action)
 
+    def _replay_snapshot(self, source_id: str):
+        """Return the host-owned command source after native robot binding."""
+        replay = self._physical_replay
+        if replay is None or replay.snapshot.source.stream_id != source_id:
+            raise ValueError(f"No physical replay source {source_id!r} is bound.")
+        return replay.snapshot
+
     def _advance_physics(self) -> None:
         """Connect manager callbacks to physics and sensor sampling."""
+        replay = getattr(self, "_physical_replay", None)
+        if replay is not None and replay.hold:
+            return
         manager = getattr(self, "action_manager", None)
         if not getattr(self, "_step_uses_action_manager", False) or manager is None:
             return super()._advance_physics()
@@ -3753,6 +3836,11 @@ class EmbodiedEnv(BaseEnv):
         for cfg in self.cfg.rigid_object_group:
             self.sim.add_rigid_object_group(cfg=cfg)
 
+        for cfg in self.cfg.cable_object:
+            self.sim.add_cable_object(cfg=cfg)
+        for cfg in self.cfg.fluid_object:
+            self.sim.add_fluid_object(cfg)
+
     def preview_sensor_data(
         self,
         name: str,
@@ -3939,13 +4027,37 @@ class EmbodiedEnv(BaseEnv):
             kwargs["nominal_source_factory"] = nominal_source_factory
         if plan_transform_factory is not None:
             kwargs["plan_transform_factory"] = plan_transform_factory
-        return self._checked_task_program_adapter().create_bridge(
+        bridge = self._checked_task_program_adapter().create_bridge(
             program,
             expansion_profile=expansion_profile,
             candidate_index=expansion_candidate_index,
             recipe_indices=expansion_recipe_indices,
             **kwargs,
         )
+        if any(
+            segment.contract is not None
+            and any(entry.spec is not None for entry in segment.contract.prerequisites)
+            for segment in program.iter_segments()
+        ):
+            from embodichain.lab.task_program.integrations.simulation.bindings import (
+                _bind_evaluation_joint_names,
+            )
+
+            bridge._contract_conditions = _bind_evaluation_joint_names(
+                {
+                    entry.ref: entry.spec
+                    for segment in program.iter_segments()
+                    if segment.contract is not None
+                    for entry in segment.contract.prerequisites
+                    if entry.spec is not None
+                },
+                self.robot,
+            )
+            bridge._contract_capture = lambda fields: _capture_evaluation_frame(
+                self, fields
+            )
+            bridge._contract_episode_owner = self.episode_context
+        return bridge
 
     @property
     def task_program_expansion_records(
@@ -3993,7 +4105,11 @@ class EmbodiedEnv(BaseEnv):
                 "Task Program completion mask must be bool with one value per "
                 "environment."
             )
-        return completion.to(device=self.device)
+        completion = completion.to(device=self.device)
+        replay = getattr(self, "_physical_replay", None)
+        if replay is not None and replay.frame(self) != replay.snapshot.steps:
+            return torch.zeros_like(completion)
+        return completion
 
     def _evaluate_final_task_acceptance(
         self,
@@ -4030,6 +4146,9 @@ class EmbodiedEnv(BaseEnv):
         if saved is not None:
             episodes, previous = saved
             mask = mask | qualified(episodes, previous)
+        replay = getattr(self, "_physical_replay", None)
+        if replay is not None and replay.frame(self) != replay.snapshot.steps:
+            return torch.zeros_like(mask)
         return mask
 
     def _finalize_demo_task_success(
@@ -4155,6 +4274,7 @@ class EmbodiedEnv(BaseEnv):
         env_ids: Sequence[int] | None = None,
         *,
         purpose: str = "recording",
+        extra_meta: Mapping[str, Any] | None = None,
     ) -> str:
         """Save a causally aligned trajectory to a ``.pt`` file.
 
@@ -4170,6 +4290,7 @@ class EmbodiedEnv(BaseEnv):
             env_ids: Env indices to save (default: all). Each saved env's actual
                 recorded length is stored in ``meta["lengths"]``.
             purpose: Normal recording or explicitly labeled diagnostic export.
+            extra_meta: Additional artifact metadata; standard fields cannot be replaced.
 
         Raises:
             RuntimeError: If trajectory recording was never enabled.
@@ -4255,6 +4376,12 @@ class EmbodiedEnv(BaseEnv):
                 self.get_demo_episode_metadata(int(env_id)) for env_id in env_ids
             ],
         }
+        if "cables" in states.keys():
+            # Cable observations retain world coordinates. Keep each exported
+            # row's origin so action replay can validate another arena placement.
+            meta["arena_origins_w"] = (
+                self.sim.arena_offsets[env_ids_t].detach().cpu().tolist()
+            )
         meta.update(self._trajectory_action_metadata())
         final_observations = _export_final_observations(
             getattr(self, "_final_acceptance_rules", ()),
@@ -4277,6 +4404,17 @@ class EmbodiedEnv(BaseEnv):
             meta["episode_uuid"] = meta["episode_uuids"][0]
             meta["source_episode_uuid"] = meta["source_episode_uuids"][0]
             meta["program_hash"] = meta["demo_episodes"][0].get("program_hash")
+        if extra_meta is not None:
+            if not isinstance(extra_meta, Mapping) or not all(
+                type(key) is str for key in extra_meta
+            ):
+                raise TypeError("extra_meta must be a string-keyed mapping.")
+            duplicate = set(extra_meta) & set(meta)
+            if duplicate:
+                raise ValueError(
+                    f"extra_meta cannot replace trajectory fields: {sorted(duplicate)}"
+                )
+            meta.update(copy.deepcopy(dict(extra_meta)))
         replay_path = str(Path(path).resolve())
         for episode in meta["demo_episodes"]:
             episode["trajectory_path"] = replay_path

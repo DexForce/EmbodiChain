@@ -210,14 +210,21 @@ def _canonical_value(value: object) -> object:
             data_field.name: _canonical_value(getattr(value, data_field.name))
             for data_field in fields(value)
             if not (
-                type(value) is RecoveryPolicy
-                and data_field.name == "planning_budget"
-                and getattr(value, data_field.name) is None
+                getattr(value, data_field.name) is None
+                and (
+                    data_field.metadata.get("omit_none_from_provenance")
+                    or (
+                        type(value) is RecoveryPolicy
+                        and data_field.name == "planning_budget"
+                    )
+                )
             )
         }
         from embodichain.lab.sim.atomic_skills.policies import MotionPolicy
 
         from embodichain.lab.sim.atomic_skills.core import SkillDescriptor
+        from embodichain.lab.sim.atomic_skills.primitives.pick_up import PickUpOptions
+        from embodichain.lab.sim.atomic_skills.primitives.slide import SlideOptions
 
         if (
             type(value) is SkillDescriptor
@@ -228,6 +235,10 @@ def _canonical_value(value: object) -> object:
             metadata.pop("final_velocity_rejection")
         if type(value) is RecoveryPolicy and value.retry_all_failed_plans is True:
             metadata.pop("retry_all_failed_plans")
+        if isinstance(value, PickUpOptions) and value.initial_lift_height == 0.0:
+            metadata.pop("initial_lift_height")
+        if isinstance(value, SlideOptions) and value.push_approach_offset is None:
+            metadata.pop("push_approach_offset")
         return {"type": _qualified_name(value), "fields": metadata}
     raise TypeError(
         "Registration fingerprint metadata contains unsupported value type "
@@ -1120,7 +1131,9 @@ class TaskProgramIntegrationCatalog:
                 f"{sorted(_VALIDATOR_KINDS)}."
             )
 
-    def preflight(self, program: TaskProgramCfg) -> CompiledTaskProgram:
+    def preflight(
+        self, program: TaskProgramCfg, *, strict_contracts: bool = False
+    ) -> CompiledTaskProgram:
         """Compile and statically link with errors located in authored input."""
         from dataclasses import replace
         from embodichain.lab.task_program.language.decoder import TaskProgramConfigError
@@ -1130,7 +1143,7 @@ class TaskProgramIntegrationCatalog:
 
         normalized = getattr(program, "__authoring_source_map__", None)
         try:
-            return self._preflight(program)
+            return self._preflight(program, strict_contracts=strict_contracts)
         except TaskProgramConfigError as error:
             if normalized is None or getattr(error, "_authored", False):
                 raise
@@ -1145,12 +1158,14 @@ class TaskProgramIntegrationCatalog:
                 replace(diagnostic, path=normalized.original_path(diagnostic.path))
             ) from error
 
-    def _preflight(self, program: TaskProgramCfg) -> CompiledTaskProgram:
+    def _preflight(
+        self, program: TaskProgramCfg, *, strict_contracts: bool = False
+    ) -> CompiledTaskProgram:
         """Compile and statically link every expanded semantic call."""
         self.validate_integration(program.integration, path=("integration",))
         compiled = TaskProgramCompiler(
             self.scene, evaluation_conditions=self.evaluation_conditions
-        ).compile(program)
+        ).compile(program, strict_contracts=strict_contracts)
         manifest = SemanticIntegrationManifest(
             scene=self.scene,
             robot_profile=self.robot_profile,
@@ -1212,6 +1227,7 @@ class TaskProgramIntegrationCatalog:
                     "Parallel execution requires a task-registration-owned "
                     "physical safety-validator factory.",
                 )
+            linked_calls = []
             for call in segment.calls:
                 linked = manifest.link_call(call.call, path=call.source_path)
                 if call.call.semantic_id == "move_held_object":
@@ -1225,6 +1241,7 @@ class TaskProgramIntegrationCatalog:
                             call.source_path,
                             "Typed transport requires verified assurance and an effect monitor.",
                         )
+                linked_calls.append(linked)
                 if type(linked.call) is Place and linked.call.at is None:
                     destination = linked.affordances.get("destination")
                     if destination is None:
@@ -1237,6 +1254,27 @@ class TaskProgramIntegrationCatalog:
                         affordance=destination,
                         path=call.source_path,
                     )
+            if segment.contract is not None:
+                for index, evidence in enumerate(segment.contract.outcomes):
+                    if evidence.assurance != "verified":
+                        continue
+                    linked = linked_calls[evidence.ref]
+                    preset = self.robot_profile.presets[linked.preset_id]
+                    if (
+                        preset.effect_assurance.value != "verified"
+                        or linked.call.semantic_id not in preset.effect_monitors
+                    ):
+                        raise TaskProgramValidationError(
+                            "incompatible_segment_assurance",
+                            (
+                                *segment.source_path,
+                                "contract",
+                                "outcomes",
+                                index,
+                                "assurance",
+                            ),
+                            "Verified evidence requires a configured verifying call effect monitor.",
+                        )
         return compiled
 
     def validate_engine(self, engine: AtomicSkillEngine) -> None:
@@ -2022,12 +2060,26 @@ class SimulationTaskProgramRegistration:
     def create_registered_semantic_lowerers(
         self,
         *,
+        environment: object | None = None,
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
         engine: AtomicSkillEngine,
     ) -> tuple[RegisteredSemanticLowerer, ...]:
-        """Create fresh live lowerers declared by this registration."""
+        """Create fresh live lowerers declared by this registration.
+
+        Args:
+            environment: Optional live host for factories exposing the additional
+                ``create_for_environment`` hook. Existing factories continue to
+                use ``create`` without a host argument.
+            simulation: Simulation owning the bound robot.
+            robot: Exact robot used by the Atomic Skill engine.
+            scene_registry: Exact registered live semantic scene.
+            engine: Bound Atomic Skill engine.
+
+        Returns:
+            Fresh lowerers with matching call descriptors and runtime ownership.
+        """
         self.assert_unchanged()
         if type(scene_registry) is not SceneRegistry:
             raise TypeError("scene_registry must be exactly SceneRegistry.")
@@ -2043,7 +2095,18 @@ class SimulationTaskProgramRegistration:
                     getattr(type(factory), "call_id", None),
                     field_name="RegisteredSemanticLowererFactory.call_id",
                 )
-                lowerer = factory.create(
+                create = factory.create
+                kwargs = {}
+                environment_create = getattr(factory, "create_for_environment", None)
+                if callable(environment_create):
+                    if environment is None:
+                        raise ValueError(
+                            "This lowerer requires an environment-owned runtime source."
+                        )
+                    create = environment_create
+                    kwargs["environment"] = environment
+                lowerer = create(
+                    **kwargs,
                     simulation=simulation,
                     robot=robot,
                     scene_registry=scene_registry,
