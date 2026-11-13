@@ -5915,3 +5915,76 @@ live one-way rigid-to-fluid simulation.
    :members:
 
 .. autofunction:: embodichain.lab.scripts.run_fluid_task_program.main
+
+
+Sensor extension contracts
+--------------------------
+
+Registration and runtime dependencies
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The sensor registry pairs configuration classes with factories for both Python
+and YAML. Installed entry points are discovered by name and loaded only when
+selected. Context-backed factories acquire owned joint-state snapshots and
+read the explicitly selected manager's simulation clock; legacy built-in
+constructors retain their existing signatures.
+
+.. currentmodule:: embodichain.lab.sim.sensors
+
+.. autosummary::
+   :nosignatures:
+
+   SensorClock
+   SensorStateProvider
+   SensorContext
+   SensorRegistration
+   register_sensor
+   discover_sensor_plugins
+   get_sensor_registration
+   list_sensor_types
+
+.. autoclass:: SensorClock
+   :members:
+
+.. autoclass:: SensorStateProvider
+   :members:
+
+.. autoclass:: SensorContext
+   :members:
+
+.. autoclass:: SensorRegistration
+   :members:
+
+.. autofunction:: register_sensor
+
+.. autofunction:: discover_sensor_plugins
+
+.. autofunction:: get_sensor_registration
+
+.. autofunction:: list_sensor_types
+
+Implementation module imports
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+These are the implementation paths for the same public runtime and registry
+contracts. The package-level imports above are the convenient extension API.
+
+.. currentmodule:: embodichain.lab.sim.sensors.context
+
+.. autosummary::
+   :nosignatures:
+
+   SensorClock
+   SensorStateProvider
+   SensorContext
+
+.. currentmodule:: embodichain.lab.sim.sensors.registry
+
+.. autosummary::
+   :nosignatures:
+
+   SensorRegistration
+   register_sensor
+   discover_sensor_plugins
+   get_sensor_registration
+   list_sensor_types

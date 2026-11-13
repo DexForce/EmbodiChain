@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "embodichain-joint-encoder-example"
+version = "0.1.0"
+description = "Independently installable EmbodiChain sensor extension example"
+requires-python = ">=3.11"
+dependencies = ["embodichain"]
+
+[project.entry-points."embodichain.sensors"]
+ExampleJointEncoder = "embodichain_joint_encoder_example:SENSOR"
+
+[tool.setuptools.packages.find]
+where = ["src"]

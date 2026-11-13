@@ -97,8 +97,11 @@ from embodichain.lab.sim.sensors import (
     CameraCfg,
     StereoCamera,
     ContactSensor,
+    SensorContext,
 )
+from embodichain.lab.sim.sensors import _builtin_sensor_factories
 from embodichain.lab.sim.sensors.attachment import resolve_parent_nodes
+from embodichain.lab.sim.sensors.registry import _resolve_sensor_factory
 from embodichain.lab.sim.cfg import (
     CableObjectCfg,
     RenderCfg,
@@ -546,11 +549,9 @@ class SimulationManager:
     _cleanup_queue: queue.Queue = queue.Queue()
     _DEFAULT_PLANE_GIZMO_TARGET_ID = (1 << 64) - 1
 
-    SUPPORTED_SENSOR_TYPES = {
-        "Camera": Camera,
-        "StereoCamera": StereoCamera,
-        "ContactSensor": ContactSensor,
-    }
+    # Compatibility overrides for pre-registry factories. New extensions use
+    # register_sensor()/embodichain.sensors, shared with SensorCfg.from_dict().
+    SUPPORTED_SENSOR_TYPES = dict(_builtin_sensor_factories)
 
     def __new__(
         cls,
@@ -4709,18 +4710,33 @@ class SimulationManager:
         if uid in self._sensors:
             raise ValueError(f"Sensor {uid!r} already exists.")
 
-        sensor_factory = self.SUPPORTED_SENSOR_TYPES.get(sensor_type)
-        if sensor_factory is None:
-            raise ValueError(
-                f"Unsupported sensor type {sensor_type!r}. Supported types: "
-                f"{sorted(self.SUPPORTED_SENSOR_TYPES)}."
-            )
-        if sensor_type == "ContactSensor" and not self.physics.supports_contact_sensor:
+        registration, sensor_factory, legacy_factory = _resolve_sensor_factory(
+            sensor_type, self.SUPPORTED_SENSOR_TYPES
+        )
+        if (
+            legacy_factory
+            and sensor_type == "ContactSensor"
+            and not self.physics.supports_contact_sensor
+        ):
             raise NotImplementedError(
                 f"ContactSensor is not supported by the {self.physics.name} "
                 "physics backend."
             )
-        if isinstance(sensor_factory, type) and issubclass(sensor_factory, Camera):
+        if not legacy_factory:
+            if not isinstance(sensor_cfg, registration.config_cls):
+                raise TypeError(
+                    f"Sensor {sensor_type!r} requires {registration.config_cls.__name__}."
+                )
+            sensor_cfg.validate()
+            self.prepare()
+            sensor = sensor_factory(
+                sensor_cfg, context=SensorContext.from_manager(self)
+            )
+            if not isinstance(sensor, BaseSensor):
+                raise TypeError(
+                    f"Sensor factory {sensor_type!r} must return BaseSensor."
+                )
+        elif isinstance(sensor_factory, type) and issubclass(sensor_factory, Camera):
             if len(self._arenas) != self.num_envs:
                 raise RuntimeError(
                     "Camera creation requires all Spawn Arenas to be "

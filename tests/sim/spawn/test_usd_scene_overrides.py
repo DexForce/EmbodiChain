@@ -330,6 +330,7 @@ def test_import_recipe_selects_subtree_and_namespaces_runtime_identity(tmp_path)
     "parent,sensor_uid,renderer,sensor_type,valid",
     [
         ("base", "wrist", "hybrid", "Camera", True),
+        ("base", "wrist", "hybrid", "ExternalCamera", True),
         ("missing", "wrist", "hybrid", "Camera", False),
         ("base", "Robot", "hybrid", "Camera", False),
         ("base", "wrist", "no-render", "Camera", False),
@@ -343,7 +344,32 @@ def test_robot_metadata_preserves_source_identity_and_preflights_sensor_binding(
 ):
     import dexsim.kit.usd
     from embodichain.lab.sim.cfg import RobotCfg, ArticulationRootPropertiesCfg
-    from embodichain.lab.sim.sensors import CameraCfg
+    from embodichain.lab.sim.sensors import (
+        Camera,
+        CameraCfg,
+        SensorRegistration,
+        register_sensor,
+    )
+    from embodichain.lab.sim.sensors import registry
+    from embodichain.utils import configclass
+
+    camera_cfg_type = CameraCfg
+    if sensor_type == "ExternalCamera":
+
+        @configclass
+        class ExternalCameraCfg(CameraCfg):
+            sensor_type: str = "ExternalCamera"
+
+        class ExternalCamera(Camera):
+            pass
+
+        monkeypatch.setattr(registry, "_registrations", registry._registrations.copy())
+        register_sensor(
+            SensorRegistration(
+                "ExternalCamera", ExternalCameraCfg, ExternalCamera, legacy_factory=True
+            )
+        )
+        camera_cfg_type = ExternalCameraCfg
 
     descriptor = ArticulationDesc(
         name="Robot",
@@ -371,7 +397,7 @@ def test_robot_metadata_preserves_source_identity_and_preflights_sensor_binding(
         build_pk_chain=False,
         enable_sensor=True,
         sensors=[
-            CameraCfg(
+            camera_cfg_type(
                 uid=sensor_uid,
                 sensor_type=sensor_type,
                 extrinsics=CameraCfg.ExtrinsicsCfg(parent=parent),
@@ -404,7 +430,7 @@ def test_robot_metadata_preserves_source_identity_and_preflights_sensor_binding(
     else:
         with pytest.raises(
             (ValueError, RuntimeError, TypeError),
-            match="unknown link|already exists|requires a native renderer|Unsupported mounted|StereoCamera requires",
+            match="unknown link|already exists|requires a native renderer|Unsupported mounted|Unsupported sensor type|StereoCamera requires",
         ):
             manager.add_usd(recipe)
         manager._spawn_scene.builder.add_scene.assert_not_called()
