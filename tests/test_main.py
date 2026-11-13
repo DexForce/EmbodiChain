@@ -41,6 +41,7 @@ EXPECTED_COMMANDS = {
     "decompose-urdf",
     "eval-policy",
     "expansion",
+    "gensim",
     "list-robot",
     "list-task",
     "show-task",
@@ -51,6 +52,7 @@ EXPECTED_COMMANDS = {
     "real2sim",
     "run-task",
     "run-example",
+    "run-atomic-skill",
     "run-atomic-action",
     "scene-engine",
     "scene-randomization",
@@ -583,9 +585,9 @@ def test_benchmark_help_distinguishes_benchmark_domains(
     output = " ".join(capsys.readouterr().out.split())
     assert "motion-generation" in output
     assert "Motion Planning or Atomic Skills suites" in output
-    assert "atomic-action-profile" in output
+    assert "atomic-skill-profile" in output
     assert not re.search(r"\batomic-action\b(?!-profile)", output)
-    assert "Profile individual atomic actions" in output
+    assert "Profile individual atomic skills" in output
     assert "robotics-kinematic-solver" in output
     assert "rendering" in output
 
@@ -598,7 +600,7 @@ def test_benchmark_help_distinguishes_benchmark_domains(
             ["--suite", "motion_ur5_free_space_coverage"],
             "motion_ur5_free_space_coverage",
         ),
-        (["--suite", "atomic_franka_pgi_smoke"], "atomic_franka_pgi_smoke"),
+        (["--suite", "atomic_franka_robotiq_smoke"], "atomic_franka_robotiq_smoke"),
     ],
 )
 def test_motion_generation_dispatch_selects_suite(
@@ -622,27 +624,27 @@ def test_motion_generation_dispatch_selects_suite(
     assert received["algorithms"] == ["toppra"]
 
 
-def test_atomic_action_profile_help_uses_complete_parser(
+def test_atomic_skill_profile_help_uses_complete_parser(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Profiling help exposes the selected action and workload profile."""
     with pytest.raises(SystemExit) as exc_info:
-        cli.main(["benchmark", "atomic-action-profile", "--help"])
+        cli.main(["benchmark", "atomic-skill-profile", "--help"])
 
     assert exc_info.value.code == 0
     output = capsys.readouterr().out
-    assert "usage: embodichain benchmark atomic-action-profile" in output
+    assert "usage: embodichain benchmark atomic-skill-profile" in output
     assert "--action" in output
     assert "--profile" in output
 
 
 @pytest.mark.parametrize("fail", [False, True])
-def test_atomic_action_profile_forwards_arguments_and_restores_argv(
+def test_atomic_skill_profile_forwards_arguments_and_restores_argv(
     monkeypatch: pytest.MonkeyPatch,
     fail: bool,
 ) -> None:
     """Delegated parsing preserves arguments and restores argv on either exit."""
-    from scripts.benchmark.atomic_action import run_benchmark
+    from scripts.benchmark.atomic_skill import run_benchmark
 
     received: dict[str, object] = {}
     original_argv = ["caller", "--unrelated-option"]
@@ -665,19 +667,19 @@ def test_atomic_action_profile_forwards_arguments_and_restores_argv(
 
     if fail:
         with pytest.raises(SystemExit, match="profiling failed"):
-            cli.main(["benchmark", "atomic-action-profile", *forwarded])
+            cli.main(["benchmark", "atomic-skill-profile", *forwarded])
     else:
-        cli.main(["benchmark", "atomic-action-profile", *forwarded])
+        cli.main(["benchmark", "atomic-skill-profile", *forwarded])
 
     assert received == {
         "action": "move_joints",
         "profile": "full",
-        "argv": ["embodichain benchmark atomic-action-profile", *forwarded],
+        "argv": ["embodichain benchmark atomic-skill-profile", *forwarded],
     }
     assert sys.argv is original_argv
 
 
-def test_atomic_action_benchmark_name_is_rejected(
+def test_atomic_skill_benchmark_name_is_rejected(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """The former command is removed rather than retained as an alias."""

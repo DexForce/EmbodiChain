@@ -114,6 +114,9 @@ def _template(root: Path, *, side: float, seed: int, batch_index: int) -> Path:
     support["object_target_pose"][11] = (
         platform["shape"]["size"][2] / 2 + side / 2 + 0.002
     )
+    from embodichain.lab.task_program.language.authoring import normalize_task_program
+
+    program = normalize_task_program(program).declaration
     for segment in program["program"]["items"]:
         for validator in segment.get("validators", []):
             if (

@@ -5,7 +5,7 @@ tags:
 - locomotion
 - reinforcement_learning
 - humanoid
-default_deployment: default
+default_deployment: newton
 deployments:
   default:
     config: env.yaml

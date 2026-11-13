@@ -58,7 +58,7 @@ class ToppraAdapter(PlannerAdapter):
     configuration_features = frozenset({"masked_constraints"})
 
     capabilities = frozenset(
-        {"eef_waypoint", "joint_waypoint", "batched", "empty_world", "atomic_action"}
+        {"eef_waypoint", "joint_waypoint", "batched", "empty_world", "atomic_skill"}
     )
     timing_is_solved = True
     """TOPPRA solves the time parameterization under velocity and acceleration

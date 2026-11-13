@@ -25,9 +25,44 @@ from typing import Any
 
 import torch
 
+from embodichain.compute._evaluation import (
+    _advance_hold,
+    _inside_region,
+    _speeds_within,
+)
+from embodichain.lab.evaluation import CompiledEvaluation, EvaluationStatus, RuleSession
+from embodichain.lab.evaluation.observations import _rule_tensor_report
+
 from .config import OrderedPlacementObjectiveCfg, decode_objective
 
 __all__ = ["MeasuredRigidObjectState", "OrderedPlacementObjective"]
+
+
+def _objective_fields(object_uid, rule):
+    prefix = f"rigid_objects/{object_uid}"
+    fields = {
+        "position": ("position", 0),
+        "linear_velocity": ("linear_velocity", 1),
+        "angular_velocity": ("angular_velocity", 2),
+        f"{prefix}/pose": ("position", 0),
+        f"{prefix}/lin_vel": ("linear_velocity", 1),
+        f"{prefix}/ang_vel": ("angular_velocity", 2),
+    }
+    if len(rule.roots) != 1 or set(rule.required_fields) - fields.keys():
+        raise ValueError(
+            "An objective condition needs one root over its measured object."
+        )
+    rule._check_input_contract({key: kind for key, (kind, _) in fields.items()}, {})
+    return {key: fields[key][1] for key in rule.required_fields}
+
+
+def _objective_rule(cfg, rules):
+    ref = getattr(cfg, "condition", None)
+    if ref is None:
+        return None
+    if ref not in rules:
+        raise ValueError(f"Unknown objective.condition ref {ref!r}.")
+    return rules[ref]
 
 
 @dataclass(frozen=True)
@@ -51,6 +86,8 @@ class OrderedPlacementObjective:
         cfg: OrderedPlacementObjectiveCfg,
         num_envs: int,
         device: torch.device | str,
+        *,
+        condition: CompiledEvaluation | None = None,
     ) -> None:
         """Create isolated progress buffers for the environment batch.
 
@@ -58,6 +95,8 @@ class OrderedPlacementObjective:
             cfg: Ordered regions and physical stability thresholds.
             num_envs: Positive number of independent environment rows.
             device: Device shared by progress buffers and measured state.
+            condition: Optional compiled rule over position and measured
+                linear/angular velocity. It observes each control sample.
         """
         cfg.validate()
         self.cfg = decode_objective(cfg.to_dict())
@@ -65,6 +104,17 @@ class OrderedPlacementObjective:
             raise ValueError("num_envs must be a positive integer.")
         self.num_envs = num_envs
         self.device = torch.device(device)
+        self._condition_session = None
+        self._condition_step = 0
+        if condition is not None:
+            self._condition_fields = _objective_fields(self.cfg.object_uid, condition)
+            self._condition_session = RuleSession(
+                condition,
+                env_ids=range(num_envs),
+                episode_ids=(0,) * num_envs,
+                scope=f"objective:{self.cfg.object_uid}",
+                device=self.device,
+            )
         self._lower = torch.tensor(
             [r.lower for r in self.cfg.regions], device=self.device, dtype=torch.float64
         )
@@ -122,6 +172,10 @@ class OrderedPlacementObjective:
             tensor[ids] = 0
         self._milestone_steps[ids] = -1
         self._milestone_times[ids] = float("nan")
+        if self._condition_session is not None:
+            session = self._condition_session
+            rows = session.env_ids if env_ids is None else tuple(ids.tolist())
+            session.reset(rows, tuple(session.episode_ids[row] + 1 for row in rows))
 
     @torch.no_grad()
     def update(self, measured_state: MeasuredRigidObjectState, dt: float) -> None:
@@ -158,17 +212,41 @@ class OrderedPlacementObjective:
         self._valid.copy_(
             torch.stack([torch.isfinite(t).all(dim=-1) for t in tensors]).all(dim=0)
         )
+        condition_passed = None
+        if self._condition_session is not None:
+            session = self._condition_session
+            session.advance(
+                self._condition_step,
+                {key: tensors[index] for key, index in self._condition_fields.items()},
+                revisions=torch.full_like(self._steps, self._condition_step),
+                episode_ids=session.episode_ids,
+                valid=dict.fromkeys(session.compiled.required_fields, self._valid),
+            )
+            self._condition_step += 1
+            result = session.snapshot().rules[session.compiled.roots[0]]
+            condition_passed = result.status == EvaluationStatus.SATISFIED
         target = self._progress.clamp(max=len(self.cfg.regions) - 1)
         stable = (
             self._valid
-            & (position >= self._lower[target].to(dtype=position.dtype)).all(dim=-1)
-            & (position <= self._upper[target].to(dtype=position.dtype)).all(dim=-1)
-            & (linear_speed <= self.cfg.max_linear_speed)
-            & (angular_speed <= self.cfg.max_angular_speed)
+            & _inside_region(
+                position,
+                self._lower[target].to(dtype=position.dtype),
+                self._upper[target].to(dtype=position.dtype),
+            )
+            & _speeds_within(
+                linear_speed,
+                angular_speed,
+                self.cfg.max_linear_speed,
+                self.cfg.max_angular_speed,
+            )
         )
+        if condition_passed is not None:
+            stable &= condition_passed
         self._stable.copy_(stable)
         self._hold.copy_(
-            torch.where(stable, (self._hold + dt).clamp(max=self.cfg.hold_seconds), 0.0)
+            _advance_hold(
+                self._hold, stable, increment=dt, maximum=self.cfg.hold_seconds
+            )
         )
         # Avoid one extra control step when repeated decimal dt additions land
         # a few floating-point ulps below the configured duration.
@@ -194,10 +272,12 @@ class OrderedPlacementObjective:
         """Return an isolated batch snapshot of history and current physical truth.
 
         Returns:
-            Predicate identity, milestone progress, current success and metrics.
-            All tensor values are clones; reading them does not advance time.
+            Predicate identity, milestone progress, current success and metrics,
+            plus the configured rule evidence when present. Raw measurement
+            validity is independent of pending window status. Reading the
+            owned tensors does not advance time.
         """
-        return {
+        outcome = {
             "predicate": self.cfg.type,
             "object_uid": self.cfg.object_uid,
             "goal_count": len(self.cfg.regions),
@@ -216,6 +296,20 @@ class OrderedPlacementObjective:
                 "angular_speed": self._angular_speed.clone(),
             },
         }
+        if (session := self._condition_session) is not None:
+            snapshot = session.snapshot()
+            outcome["condition"] = {
+                "evaluation_identity": session.compiled.identity,
+                "root": session.compiled.roots[0],
+                "scope": snapshot.scope,
+                "steps": snapshot.steps,
+                "revisions": snapshot.revisions,
+                "rules": {
+                    name: _rule_tensor_report(rule, owned=True)
+                    for name, rule in snapshot.rules.items()
+                },
+            }
+        return outcome
 
     def snapshot_row(self, env_id: int) -> dict[str, Any]:
         """Return one JSON-compatible row; nonfinite measurements become null.

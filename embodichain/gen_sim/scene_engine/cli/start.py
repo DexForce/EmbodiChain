@@ -25,9 +25,6 @@ import argparse
 from collections.abc import Sequence
 from pathlib import Path
 
-from embodichain.gen_sim.scene_engine.pipeline.generate import generate_scene_from_image
-from embodichain.gen_sim.scene_engine.pipeline.edit import edit_scene
-
 _SUPPORTED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
 
 
@@ -51,6 +48,8 @@ def cli_scene_engine(
     if image is None:
         if edit_prompt is None:
             raise ValueError("Provide --image, --edit_prompt, or both.")
+        from embodichain.gen_sim.scene_engine.pipeline.edit import edit_scene
+
         edit_scene(
             output_root=resolved_output_root, edit_prompt=edit_prompt, services=services
         )
@@ -76,6 +75,10 @@ def cli_scene_engine(
 
     resolved_output_root.mkdir(parents=True, exist_ok=True)
     try:
+        from embodichain.gen_sim.scene_engine.pipeline.generate import (
+            generate_scene_from_image,
+        )
+
         generate_scene_from_image(
             image_path=resolved_image_path,
             output_root=resolved_output_root,
@@ -83,6 +86,8 @@ def cli_scene_engine(
             services=services,
         )
         if edit_prompt is not None:
+            from embodichain.gen_sim.scene_engine.pipeline.edit import edit_scene
+
             edit_scene(
                 output_root=resolved_output_root,
                 edit_prompt=edit_prompt,
@@ -99,32 +104,58 @@ def cli_scene_engine(
     print("Successfully completed!")
 
 
-def main(argv: Sequence[str] | None = None) -> None:
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    prog: str = "embodichain scene-engine",
+    operation: str | None = None,
+) -> None:
+    """Parse a scene operation while retaining the combined legacy entry.
+
+    Args:
+        argv: Arguments after the operation or legacy command name.
+        prog: Display name supplied by the unified GenSim dispatcher.
+        operation: Generate/edit selection; None preserves the combined CLI.
+    """
     parser = argparse.ArgumentParser(
-        prog="embodichain scene-engine",
+        prog=prog,
         description="Generate a Scene Engine export, edit one, or do both.",
         epilog="Service settings are read from embodichain/gen_sim/.env.",
     )
+    if operation != "edit":
+        parser.add_argument(
+            "--image",
+            type=str,
+            required=operation == "generate",
+            help="Input image file (.jpg, .jpeg, or .png)",
+        )
+    else:
+        parser.set_defaults(image=None)
     parser.add_argument(
-        "--image",
-        type=str,
-        required=False,
-        help="Optional input image file (.jpg, .jpeg, or .png)",
-    )
-    parser.add_argument(
+        "--scene" if operation == "edit" else "--output",
+        "--output-root",
         "--output_root",
+        dest="output_root",
         type=str,
         required=True,
         help="Path to the output directory",
     )
+    if operation != "generate":
+        parser.add_argument(
+            "--prompt",
+            "--edit-prompt",
+            "--edit_prompt",
+            dest="edit_prompt",
+            type=str,
+            required=operation == "edit",
+            help="Text instruction for editing the scene workspace in place",
+        )
+    else:
+        parser.set_defaults(edit_prompt=None)
     parser.add_argument(
-        "--edit_prompt",
-        type=str,
-        default=None,
-        help="Text instruction for editing an existing or newly generated output root",
-    )
-    parser.add_argument(
+        "--expansion-config",
         "--scene-randomization-config",
+        dest="scene_randomization_config",
         type=Path,
         default=None,
         help="Optional post-export layout policy YAML",

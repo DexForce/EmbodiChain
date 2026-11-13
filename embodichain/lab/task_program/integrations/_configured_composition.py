@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
+    from embodichain.lab.evaluation import PredicateRegistry
     from embodichain.lab.task_program.language.schema import TaskProgramCfg
     from .catalog import TaskProgramIntegrationCatalog
 
@@ -41,6 +42,9 @@ from .configured import (
     _decode_motion_policy,
     _decode_recovery_policy,
     _identifier,
+    _identifier_mapping,
+    _normalize_skill_options_key,
+    _normalize_recovery_policy_keys,
     _mapping,
 )
 
@@ -78,7 +82,7 @@ _EXECUTION_POLICY_OVERRIDE_FIELDS = {
             "dynamic_collision_mode",
         }
     ),
-    "recovery": frozenset({"action_timeout", "goal_rotation_threshold"}),
+    "recovery": frozenset({"skill_timeout", "goal_rotation_threshold"}),
 }
 
 
@@ -347,7 +351,14 @@ def _resolve_execution_policy(
         )
     )
     _identifier(policy["policy_id"], path="execution policy.policy_id")
+    policy["recovery"] = _normalize_recovery_policy_keys(
+        policy["recovery"], path="execution policy.recovery"
+    )
     for group, values in overrides.items():
+        if group == "recovery":
+            values = _normalize_recovery_policy_keys(
+                values, path=f"{selection_path}.overrides.recovery"
+            )
         patch = _mapping(
             values,
             path=f"{selection_path}.overrides.{group}",
@@ -434,14 +445,33 @@ def _resolve_task_program_components(
         runtime_services = _owned_mapping(
             integration["runtime_services"], path="integration.runtime_services"
         )
+        if "demo_skills" in runtime_services:
+            from embodichain.data._references import _resolve_data_reference
+
+            runtime_services["demo_skills"] = _owned_mapping(
+                runtime_services["demo_skills"], path="runtime_services.demo_skills"
+            )
+            for alias, entry in runtime_services["demo_skills"].items():
+                if not isinstance(entry, dict) or "asset_manifest" not in entry:
+                    raise ValueError(f"Demo Skill {alias!r} requires asset_manifest")
+                entry["asset_manifest"] = str(
+                    _resolve_data_reference(
+                        entry["asset_manifest"], base_dir=integration_base
+                    )
+                )
         if "registered_semantic_lowerers" in runtime_services:
             for lowerer in runtime_services["registered_semantic_lowerers"]:
-                if isinstance(lowerer, dict) and lowerer.get("kind") == "demo_skill":
+                if not isinstance(lowerer, dict):
+                    continue
+                field = {
+                    "demo_skill": "asset_manifest",
+                }.get(lowerer.get("kind"))
+                if field is not None and field in lowerer:
                     from embodichain.data._references import _resolve_data_reference
 
-                    lowerer["asset_manifest"] = str(
+                    lowerer[field] = str(
                         _resolve_data_reference(
-                            lowerer["asset_manifest"], base_dir=integration_base
+                            lowerer[field], base_dir=integration_base
                         )
                     )
         if "nominal_motion_sources" in runtime_services:
@@ -547,14 +577,14 @@ def _compose_integration_payload(
         )
 
     profile = _mapping(
-        task["profile"],
+        _normalize_skill_options_key(task["profile"], path="task integration.profile"),
         path="task integration.profile",
-        required=frozenset({"defaults", "action_options", "effect_monitors"}),
+        required=frozenset({"defaults", "skill_options", "effect_monitors"}),
         optional=frozenset({"skill_presets", "grounding_providers"}),
     )
     preset = {
         "preset_id": deepcopy(policy["preset_id"]),
-        "action_options": deepcopy(profile["action_options"]),
+        "skill_options": deepcopy(profile["skill_options"]),
         "motion": deepcopy(policy["motion"]),
         "tracking": deepcopy(policy["tracking"]),
         "recovery": deepcopy(policy["recovery"]),
@@ -599,6 +629,8 @@ def _load_configured_task_program_deployment(
     task_program: object,
     skill_profile: object,
     base_dir: str | Path,
+    evaluation: Mapping[str, object] | None = None,
+    evaluation_registry: PredicateRegistry | None = None,
 ) -> _ConfiguredTaskProgramDeployment:
     """Compose Task Program metadata after Gym resolves physical components."""
     selected_base_dir = Path(base_dir).expanduser()
@@ -606,13 +638,16 @@ def _load_configured_task_program_deployment(
         task_program,
         base_dir=selected_base_dir,
     )
+    from .demo_skill import _prepare_named_demo_skills, _bind_named_demo_sources
+
+    named_demo_sources = _prepare_named_demo_skills(task)
     selected_skill_profile = _mapping(
         skill_profile,
         path="embodiment component.skill_profile",
         required=frozenset(
             {"contract_id", "profile_id", "resources", "command_presets"}
         ),
-        optional=frozenset({"runtime_services"}),
+        optional=frozenset({"runtime_services", "evaluation_links"}),
     )
     scene_binding = _mapping(
         task["scene_binding"],
@@ -638,6 +673,12 @@ def _load_configured_task_program_deployment(
     integration = _decode_configured_task_program_integration(
         payload,
         planner_config=planner_config,
+        evaluation=evaluation,
+        evaluation_registry=evaluation_registry,
+        evaluation_robot_links=_identifier_mapping(
+            selected_skill_profile.get("evaluation_links", {}),
+            path="embodiment component.skill_profile.evaluation_links",
+        ),
     )
     integration_id = _identifier(
         task["integration_id"],
@@ -656,7 +697,11 @@ def _load_configured_task_program_deployment(
         ),
     )
     factory = cast(_ConfiguredTaskProgramAdapterFactory, integration.adapter_factory)
-    if factory.nominal_motion_sources or isinstance(program_path, Mapping):
+    if (
+        factory.nominal_motion_sources
+        or named_demo_sources
+        or isinstance(program_path, Mapping)
+    ):
         from .nominal import _ConfiguredTaskProgramNominalSources
 
         catalog = integration.registration.catalog
@@ -668,6 +713,44 @@ def _load_configured_task_program_deployment(
                 "configured nominal sources require the integration's program_id"
             )
         compiled = catalog.preflight(program)
+        if named_demo_sources:
+            from dataclasses import replace
+
+            factory = replace(
+                factory,
+                nominal_motion_sources=_bind_named_demo_sources(
+                    compiled, named_demo_sources, factory.nominal_motion_sources
+                ),
+            )
+            from dataclasses import asdict
+            import hashlib
+            import json
+
+            source_identity = [
+                {
+                    key: value
+                    for key, value in asdict(item).items()
+                    if key not in {"asset_manifest", "prototype_manifest"}
+                }
+                for item in factory.nominal_motion_sources
+            ]
+            fingerprint = hashlib.sha256(
+                json.dumps(
+                    {
+                        "integration": integration.integration_fingerprint,
+                        "nominal_motion_sources": source_identity,
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                ).encode()
+            ).hexdigest()
+            factory = replace(factory, integration_fingerprint=fingerprint)
+            integration = replace(
+                integration,
+                adapter_factory=factory,
+                integration_fingerprint=fingerprint,
+            )
         if factory.nominal_motion_sources:
             _ConfiguredTaskProgramNominalSources(
                 compiled, factory.nominal_motion_sources

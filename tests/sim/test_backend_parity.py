@@ -36,6 +36,7 @@ import pytest
 import torch
 
 import embodichain.lab.sim.sim_manager as sim_manager_module
+from embodichain.lab.sim.cfg import CableObjectCfg
 from embodichain.lab.sim.physics import (
     DefaultPhysicsBackend,
     NewtonPhysicsBackend,
@@ -43,12 +44,15 @@ from embodichain.lab.sim.physics import (
 )
 from embodichain.lab.sim.sim_manager import SimulationManager
 
+pytestmark = pytest.mark.no_sim
+
 # ---------------------------------------------------------------------------
 # The parity matrix — edit this table when a backend gains/loses a feature.
 # ---------------------------------------------------------------------------
 # feature -> {backend -> supported}
 BACKEND_CAPABILITIES: dict[str, dict[str, bool]] = {
     "robot": {"default": True, "newton": True},
+    "cables": {"default": False, "newton": True},
     "volume_deformables": {"default": False, "newton": True},
     "surface_deformables": {"default": False, "newton": True},
     "rigid_object_group": {"default": True, "newton": True},
@@ -66,6 +70,7 @@ BACKENDS: dict[str, type[PhysicsBackend]] = {
 # elsewhere rather than an add_* guard.
 CAPABILITY_TO_ADD_METHOD: dict[str, str | None] = {
     "robot": "add_robot",
+    "cables": "add_cable_object",
     "volume_deformables": "add_deformable_object",
     "surface_deformables": "add_deformable_object",
     "rigid_object_group": "add_rigid_object_group",
@@ -132,9 +137,45 @@ def test_newton_contact_sensor_capability_depends_on_runtime(
     runtime_device: str,
     expected: bool,
 ) -> None:
+    from dexsim.scene import ContactBuffer
+
+    if solver_type == "dexuni" and not hasattr(ContactBuffer, "impulse_valid"):
+        expected = False  # Published wheels predate DexUni ContactQuery.
     backend = NewtonPhysicsBackend(SimpleNamespace())
     backend._configured_solver_type = solver_type
     backend._runtime_device = runtime_device
+
+    assert backend.supports_contact_sensor is expected
+
+
+@pytest.mark.parametrize(
+    ("solver_path", "use_mujoco_cpu", "expected"),
+    [
+        ("pure_mujoco", False, True),
+        ("pure_mujoco", True, False),
+        ("pure_vbd", False, True),
+        ("coupled", False, True),
+        ("dexuni_kinematic_soft", False, True),
+    ],
+)
+@pytest.mark.usefixtures("requires_dexuni_contact_query")
+def test_dexuni_contact_sensor_capability_follows_resolved_path(
+    monkeypatch: pytest.MonkeyPatch,
+    solver_path: str,
+    use_mujoco_cpu: bool,
+    expected: bool,
+) -> None:
+    world = object()
+    native = SimpleNamespace(
+        solver_type="dexuni",
+        solver=SimpleNamespace(features=SimpleNamespace(backend=solver_path)),
+        mujoco_solver=SimpleNamespace(use_mujoco_cpu=use_mujoco_cpu),
+    )
+    monkeypatch.setattr(
+        "dexsim.engine.newton_physics.backend_registry.get_newton_backend",
+        lambda candidate: native if candidate is world else None,
+    )
+    backend = NewtonPhysicsBackend(SimpleNamespace(_world=world))
 
     assert backend.supports_contact_sensor is expected
 
@@ -220,6 +261,15 @@ def test_add_method_guard_maps_to_capability(
     cfg = SimpleNamespace(uid=None)
     if feature in deformable_types:
         cfg.deformable_type = deformable_types[feature]
+    elif feature == "cables":
+        cfg = CableObjectCfg(uid=None, points=[[0, 0, 0], [0, 0, 0.2]], radius=0.01)
+        sim.device = torch.device("cuda:0")
+        sim.sim_config = SimpleNamespace(
+            physics_cfg=SimpleNamespace(requires_grad=False)
+        )
+        sim._fluid_objects = {}
+        if supported:
+            backend._configured_solver_type = "dexuni"
 
     if supported:
         # Past the guard it will hit missing-world attrs; assert the failure is
@@ -259,3 +309,55 @@ def test_matrix_covers_all_backends() -> None:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+def test_dexuni_contacts_remain_unavailable_without_quantity_validity(monkeypatch):
+    from dexsim.scene import ContactBuffer
+
+    monkeypatch.delattr(ContactBuffer, "impulse_valid", raising=False)
+    backend = NewtonPhysicsBackend(SimpleNamespace())
+    backend._configured_solver_type = "dexuni"
+    backend._runtime_device = "cuda:0"
+    assert not backend.supports_contact_sensor
+
+
+@pytest.mark.parametrize(
+    "solver_type,solver_backend,two_way,expected",
+    [
+        ("mujoco_warp", "pure_mujoco", False, False),
+        ("dexuni", "pure_mujoco", False, False),
+        ("dexuni", "coupled", True, False),
+        ("dexuni", "coupled", False, True),
+    ],
+)
+def test_cpu_mujoco_contact_capability_uses_resolved_solver(
+    monkeypatch,
+    solver_type,
+    solver_backend,
+    two_way,
+    expected,
+):
+    from dexsim.scene import ContactBuffer
+    from dexsim.engine.newton_physics import backend_registry
+
+    if solver_type == "dexuni" and not hasattr(ContactBuffer, "impulse_valid"):
+        pytest.skip("DexUni contacts require the per-row quantity contract.")
+    world = object()
+    native = SimpleNamespace(
+        solver_type=solver_type,
+        mujoco_solver=SimpleNamespace(use_mujoco_cpu=True),
+        solver=SimpleNamespace(
+            features=SimpleNamespace(
+                backend=solver_backend,
+                two_way_coupling_enabled=two_way,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        backend_registry,
+        "get_newton_backend",
+        lambda value: native if value is world else None,
+    )
+    backend = NewtonPhysicsBackend(SimpleNamespace(_world=world))
+    backend._runtime_device = "cuda:0"
+    assert backend.supports_contact_sensor is expected

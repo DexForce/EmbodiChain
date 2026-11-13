@@ -22,7 +22,7 @@ representation require rebuilding and updated pinned integration digests. Qpos r
 entry tolerances; XY/yaw transfer requires calibrated TCP poses, unchanged physical
 geometry, compatible authority and declared displacement limits.
 
-`atomic_actions.ExecuteDemoSkill` consumes `DemoSkillMotionProvider` through the
+`atomic_skills.ExecuteDemoSkill` consumes `DemoSkillMotionProvider` through the
 ordinary nominal-source interface. Its optional per-observation monitor runs
 before the next runner command and owns only evidence, not task-state commits.
 The terminal effect boundary commits verified held-state changes only after
@@ -33,7 +33,10 @@ events are monitoring/edit boundaries, not independent recovery boundaries.
 
 Configured registered calls use the allowlisted `demo_skill` lowerer and
 occurrence-bound `demo_skill` source declarations, sealed to asset content and
-compiled-program identity. Native calls remain unbound. The Expansion Engine
+compiled-program identity. Task Program's optional named `demo_skills` registry
+generates these same declarations for every expanded occurrence; explicit
+legacy bindings remain strict. See the [configuration contract](../task-programs/configuration.md)
+for ownership. Native calls remain unbound. The Expansion Engine
 owns qualified collection; its source adapter retains standard prototype guards
 for explicitly selected occurrences when a program mixes source families.
 See `examples/expansion/demo_skill/` for migration of the existing real DROID
@@ -64,7 +67,7 @@ The qualified sink requires both the original recording and typed evidence for
 DROID sources, verifies their imported crop, and archives them with the prototype.
 
 `sim.motion.expansion.Real2SimSourceAdapter` exports fixed-scene qpos templates.
-`atomic_actions.PrototypeMotionProvider` supplies qpos, EEF or explicitly
+`atomic_skills.PrototypeMotionProvider` supplies qpos, EEF or explicitly
 phase-bound hybrid nominal motion. Cartesian transfer is limited to B=1,
 tabletop XY/yaw and compatible geometry; it checks IK/FK and sampled joint limits.
 Hybrid qpos phases retain their recorded joints without a fresh IK solve;
@@ -128,7 +131,7 @@ prototype rebuilding, refinement comparisons and collection through the official
 `carton_stocking` task.
 Its local `_audit.py` independently verifies persisted real-source episode evidence.
 
-`AtomicActionEngine` accepts a call-scoped nominal source before native planning;
+`AtomicSkillEngine` accepts a call-scoped nominal source before native planning;
 only PickUp, MoveHeldObject and Place opt in. Their skill-owned assembly retains
 effects, tracking, segments and scene dependencies. Source plans reject retries
 and replans. Pick requires the configured grasp command by the end of closure
@@ -211,7 +214,7 @@ Failed attempts retain available actual T+1
 partial rollouts without becoming successful episodes.
 
 Focused coverage: `tests/data_pipeline/test_real2sim_normalize.py`,
-`tests/sim/motion/expansion/test_mapped_timing.py`, and matching Atomic Action
+`tests/sim/motion/expansion/test_mapped_timing.py`, and matching Atomic Skill
 and Task Program source-binding tests. Synthetic fixtures establish software
 contracts, not real-data physical qualification.
 

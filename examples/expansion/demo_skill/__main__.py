@@ -60,7 +60,33 @@ def _hash(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def _compact_node(node):
+    kind = node["kind"]
+    if kind == "sequence":
+        items = [_compact_node(item) for item in node["items"]]
+        return items if len(items) != 1 else {"sequence": {"items": items}}
+    if kind == "segment":
+        return {
+            "segment": node["name"],
+            **{
+                key: _compact_node(value) if key == "steps" else value
+                for key, value in node.items()
+                if key not in {"kind", "name"}
+            },
+        }
+    if kind == "invoke":
+        call = node["call"]
+        return {
+            call["kind"]: {key: value for key, value in call.items() if key != "kind"}
+        }
+    if kind == "repeat":
+        return {"repeat": {"count": node["count"], "body": _compact_node(node["body"])}}
+    raise ValueError(f"Unsupported example node {kind!r}")
+
+
 def _write(path, value):
+    if isinstance(value, dict) and isinstance(value.get("program"), dict):
+        value = {**value, "program": _compact_node(value["program"])}
     path.write_text(yaml.safe_dump(value, sort_keys=False))
 
 
@@ -198,17 +224,17 @@ def _prepare_asset(baseline, directory, selected):
     carton = units[0].unit.source.object_pose
     relation = np.eye(4)
     relation[2, 3] = 0.043592974023364456 / 2 + 0.0365978079862995 / 2
-    if selected == [1]:
+    if selected in ([0], [1]):
         # A transport-only skill retains the measured grasp and checks its final
         # rigid relation. It makes no claim of acquiring or releasing the object.
-        active = np.flatnonzero(trace["step_call_index"] == 1)
+        active = np.flatnonzero(trace["step_call_index"] == selected[0])
         start, stop = int(active[0]), int(active[-1]) + 1
         # Terminal TCP relation is supplied by the task's calibrated grasp.
         integration = yaml.safe_load(
             (TASK / "task_program/integration.yaml").read_text()
         )
         grasp = tuple(
-            integration["profile"]["action_options"]["pick"]["fixed_object_to_eef"]
+            integration["profile"]["skill_options"]["pick"]["fixed_object_to_eef"]
         )
         constraints = (
             DemoSkillConstraint(
@@ -232,6 +258,17 @@ def _prepare_asset(baseline, directory, selected):
                 rotation_tolerance_rad=0.15,
             ),
         )
+        if selected == [0]:
+            constraints = (
+                constraints[-1],
+                DemoSkillConstraint(
+                    "grasp_contact",
+                    "contact",
+                    "terminal",
+                    subject="tcp",
+                    other="carton",
+                ),
+            )
         # qpos authority freezes scene roles at the recorded entry snapshot.
     else:
         start, stop = 0, len(commands)
@@ -247,8 +284,21 @@ def _prepare_asset(baseline, directory, selected):
                 rotation_tolerance_rad=np.deg2rad(5),
             ),
         )
+    # The Pick source names no receiving target; the adjacent transport source
+    # supplies the same task's explicitly pinned worktop geometry.
+    receiver_geometry = (
+        first.target_geometry_sha256 or units[-1].unit.source.target_geometry_sha256
+    )
+    if receiver_geometry is None and selected == [0]:
+        adjacent = load_prototype(
+            rawroot / "inputs/measured/1/prototype.json"
+        ).unit.source
+        if adjacent.object_geometry_sha256 != first.object_geometry_sha256:
+            raise ValueError("Pick and transport source object geometry differs")
+        receiver_geometry = adjacent.target_geometry_sha256
     spec = DemoSkillSpec(
-        asset_id="carton." + ("transport" if selected == [1] else "whole"),
+        asset_id="carton."
+        + ("pick" if selected == [0] else "transport" if selected == [1] else "whole"),
         instruction="Move the carton with the real expert demonstration",
         phases=tuple(raw_phases),
         events=tuple(raw_events),
@@ -259,12 +309,12 @@ def _prepare_asset(baseline, directory, selected):
             ),
             DemoSkillRole(
                 "worktop",
-                first.target_geometry_sha256
-                or units[-1].unit.source.target_geometry_sha256,
+                receiver_geometry,
                 tuple(target_pose.flat),
             ),
         ),
         initial_held_role="carton" if selected == [1] else None,
+        terminal_held_role="carton" if selected == [0] else None,
         max_translation_m=0.0,
         max_yaw_rad=0.0,
     )
@@ -508,7 +558,11 @@ def _deployment(directory, asset, manifest, mixed):
         (TASK / base["task_program"]["execution_policy"]).resolve()
     )
     integration = yaml.safe_load((TASK / "task_program/integration.yaml").read_text())
-    program = yaml.safe_load((TASK / "task_program/program.yaml").read_text())
+    from embodichain.lab.task_program.language.authoring import normalize_task_program
+
+    program = normalize_task_program(
+        yaml.safe_load((TASK / "task_program/program.yaml").read_text())
+    ).declaration
     callid = "task.carton_transport" if mixed else "task.carton_whole"
     program["program_id"] = (
         "demo_skill_carton_mixed" if mixed else "demo_skill_carton_whole"
@@ -518,9 +572,9 @@ def _deployment(directory, asset, manifest, mixed):
         "demo_" + integration["integration_id"] + ("_mixed" if mixed else "_whole")
     )
     call = {
-        "kind": "registered",
-        "call_id": callid,
-        "arguments": {"carton": "carton", "worktop": "worktop"},
+        "kind": "demo_skill",
+        "skill": "carton_demo",
+        "roles": {"carton": "carton", "worktop": "worktop"},
     }
     if mixed:
         program["program"]["items"][1]["steps"]["call"] = call
@@ -535,18 +589,18 @@ def _deployment(directory, asset, manifest, mixed):
     integration["profile"]["defaults"]["execute_demo_skill"] = {
         "primary": "primary_manipulator"
     }
-    integration["profile"]["action_options"].pop("simulation.move_held_object", None)
-    integration["profile"]["action_options"][callid] = {"kind": "execute_demo_skill"}
+    integration["profile"]["skill_options"].pop("simulation.move_held_object", None)
+    integration["profile"]["skill_options"][callid] = {"kind": "execute_demo_skill"}
     service = integration["runtime_services"]
     sources = service.pop("nominal_motion_sources", [])
-    service["registered_semantic_lowerers"] = [
-        {
-            "kind": "demo_skill",
+    service["demo_skills"] = {
+        "carton_demo": {
             "call_id": callid,
             "asset_manifest": str(manifest),
             "asset_sha256": asset.content_sha256,
         }
-    ]
+    }
+    service["registered_semantic_lowerers"] = []
     if mixed:
         old = yaml.safe_load((TASK / "task_program/integration.yaml").read_text())[
             "runtime_services"
@@ -577,22 +631,13 @@ def _deployment(directory, asset, manifest, mixed):
         )
     )
     fingerprint = task_program_fingerprint(compiled)
-    declaration = {
-        "call_index": 1 if mixed else 0,
-        "program_fingerprint": fingerprint,
-        "provider_id": "demo_skill",
-        "revision": "1",
-        "call_id": callid,
-        "asset_manifest": str(manifest),
-        "asset_sha256": asset.content_sha256,
-    }
     if mixed:
         sources = [source for source in sources if source["call_index"] != 1]
         for source in sources:
             source["program_fingerprint"] = fingerprint
     else:
         sources = []
-    service["nominal_motion_sources"] = [*sources, declaration]
+    service["nominal_motion_sources"] = sources
     _write(directory / "integration.yaml", integration)
     finger_links = yaml.safe_load((TASK / "real2sim/collection.yaml").read_text())[
         "finger_links"

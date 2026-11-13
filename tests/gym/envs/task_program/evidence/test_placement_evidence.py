@@ -780,7 +780,7 @@ def _strong_evidence(*, region=False, historical=False):
         )
         for kind, time, extra in [
             ("trajectory_segment_entered", 0.04, {"segment_name": "release"}),
-            ("action_completed", 0.08, {}),
+            ("skill_completed", 0.08, {}),
         ]
     ]
     points = [

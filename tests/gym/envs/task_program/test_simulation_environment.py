@@ -60,10 +60,10 @@ from embodichain.lab.task_program.integrations.simulation.environment import (
     SharedTickSceneProvider,
     SimulationPlanningObservationProvider,
 )
-from embodichain.lab.sim.atomic_actions import (
-    ActionInvocation,
+from embodichain.lab.sim.atomic_skills import (
+    SkillInvocation,
     Affordance,
-    AtomicActionEngine,
+    AtomicSkillEngine,
     BATCH_INVERSE_KINEMATICS_CAPABILITY,
     CARTESIAN_POSE_CAPABILITY,
     EntityState,
@@ -81,8 +81,8 @@ from embodichain.lab.sim.atomic_actions import (
     TaskState,
     TimedTrajectory,
 )
-from embodichain.lab.sim.atomic_actions.bindings import RuntimeEndpointTarget
-from embodichain.lab.sim.atomic_actions.runtime_commands import (
+from embodichain.lab.sim.atomic_skills.bindings import RuntimeEndpointTarget
+from embodichain.lab.sim.atomic_skills.runtime_commands import (
     EndpointCommand,
     RuntimeCommandFrame,
     RuntimeCommandPayload,
@@ -423,7 +423,7 @@ class _ConstraintEvidenceFactory:
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
         scene_provider: SceneProvider,
     ) -> ControlPartSimulationEvidenceProvider:
         """Bind the current robot's explicit physical constraint observation."""
@@ -754,7 +754,7 @@ def _profile_binding() -> SimulationRobotSkillProfileBinding:
         presets=(
             SkillPolicyPreset(
                 "safe",
-                action_option_templates={},
+                skill_option_templates={},
                 effect_assurance=EffectAssurance.PROJECTED,
                 motion_policy=MotionPolicy(),
             ),
@@ -811,7 +811,7 @@ def _handover_profile_binding() -> SimulationRobotSkillProfileBinding:
         presets=(
             SkillPolicyPreset(
                 "safe",
-                action_option_templates={"hand_over": HandOverOptions()},
+                skill_option_templates={"hand_over": HandOverOptions()},
                 effect_assurance=EffectAssurance.VERIFIED,
                 effect_monitors=_verified_effect_monitors("hand_over"),
             ),
@@ -955,7 +955,7 @@ def _evidence_profile_binding() -> SimulationRobotSkillProfileBinding:
         presets=(
             SkillPolicyPreset(
                 "evidence",
-                action_option_templates={
+                skill_option_templates={
                     "pick": PickUpOptions(),
                     "place": PlaceOptions(),
                 },
@@ -1082,8 +1082,8 @@ def _evidence_adapter_runtime() -> tuple[
     )
     adapter = factory.create_adapter()
     assembly = adapter.assemble_runtime(_evidence_integration())
-    pick_action = assembly.engine.actions["pick_up"]
-    place_action = assembly.engine.actions["place"]
+    pick_action = assembly.engine.skill_implementations["pick_up"]
+    place_action = assembly.engine.skill_implementations["place"]
     pick_action._plan = MethodType(_pick_evidence_plan, pick_action)
     place_action._plan = MethodType(_place_evidence_plan, place_action)
     return adapter, assembly, robot, cube
@@ -1283,9 +1283,9 @@ def _mllm_pick_place_calls(
 def _capture_grounded_invocations(
     monkeypatch: pytest.MonkeyPatch,
     assembly: TaskProgramRuntimeAssembly,
-) -> list[ActionInvocation[Any, Any]]:
+) -> list[SkillInvocation[Any, Any]]:
     """Record the production compiler's final lowering without replacing it."""
-    invocations: list[ActionInvocation[Any, Any]] = []
+    invocations: list[SkillInvocation[Any, Any]] = []
     ground = assembly.compiler.ground
 
     def recording_ground(*args: Any, **kwargs: Any) -> Any:
@@ -1379,8 +1379,8 @@ def _assert_typed_equivalent(
 
 
 def _assert_invocation_equivalent(
-    actual: ActionInvocation[Any, Any],
-    expected: ActionInvocation[Any, Any],
+    actual: SkillInvocation[Any, Any],
+    expected: SkillInvocation[Any, Any],
 ) -> None:
     """Compare semantic lowering while ignoring engine-instance owner UUIDs."""
     assert actual.skill_id == expected.skill_id
@@ -1419,7 +1419,7 @@ def test_simulation_observation_owns_gym_control_cadence() -> None:
     factory, robot = _factory()
     registry = factory.create_scene_registry()
     profile = factory.create_robot_skill_profile()
-    engine = factory.create_atomic_action_engine(profile)
+    engine = factory.create_atomic_skill_engine(profile)
     observation = factory.create_planning_observation_provider(
         scene_registry=registry,
         engine=engine,
@@ -1549,7 +1549,7 @@ def test_simulation_root_capture_is_explicit_and_owns_the_same_tick_snapshot(
         return root_pose
 
     monkeypatch.setattr(robot, "get_local_pose", get_local_pose, raising=False)
-    engine = factory.create_atomic_action_engine(factory.create_robot_skill_profile())
+    engine = factory.create_atomic_skill_engine(factory.create_robot_skill_profile())
     if env_ids is not None:
         factory = factory.for_env_ids(env_ids)
     selected = list(range(_BATCH_SIZE)) if env_ids is None else list(env_ids)
@@ -1578,7 +1578,7 @@ def test_simulation_factory_builds_shared_observation_and_evidence_ports(
     factory, robot = _factory(hold_qpos_source=hold_qpos_source)
     registry = factory.create_scene_registry()
     profile = factory.create_robot_skill_profile()
-    engine = factory.create_atomic_action_engine(profile)
+    engine = factory.create_atomic_skill_engine(profile)
     if env_ids is not None:
         factory = factory.for_env_ids(env_ids)
     selected = list(range(_BATCH_SIZE)) if env_ids is None else list(env_ids)
@@ -1713,7 +1713,7 @@ def test_simulation_factory_preserves_owned_hand_calibration_across_engines(
         factory = factory.for_env_ids(env_ids)
     cfg.pad_link_names = ("changed", "input")
     profile = factory.create_robot_skill_profile()
-    engines = [factory.create_atomic_action_engine(profile) for _ in range(2)]
+    engines = [factory.create_atomic_skill_engine(profile) for _ in range(2)]
     for engine in engines:
         calibrated = engine.planning_services.hand_geometry_cfg("hand")
         assert calibrated.pad_link_names == ("contact_b", "contact_a")
@@ -1982,7 +1982,7 @@ def test_simulation_helper_assembles_mobile_endpoint_and_transport_without_joint
         presets=(
             SkillPolicyPreset(
                 "runtime",
-                action_option_templates={},
+                skill_option_templates={},
                 effect_assurance=EffectAssurance.PROJECTED,
             ),
         ),
@@ -2204,7 +2204,7 @@ def test_closed_factory_rejects_new_observation_and_assembly_without_native_read
 ):
     factory, robot = _factory()
     registry = factory.create_scene_registry()
-    engine = factory.create_atomic_action_engine(factory.create_robot_skill_profile())
+    engine = factory.create_atomic_skill_engine(factory.create_robot_skill_profile())
     observation = factory.create_planning_observation_provider(
         scene_registry=registry, engine=engine, clock=EnvironmentStepClock(_STEP_DT)
     )
@@ -2238,9 +2238,7 @@ def test_factory_closed_during_read_cannot_publish_without_optional_scope_guard(
     )
     observation = factory.create_planning_observation_provider(
         scene_registry=factory.create_scene_registry(),
-        engine=factory.create_atomic_action_engine(
-            factory.create_robot_skill_profile()
-        ),
+        engine=factory.create_atomic_skill_engine(factory.create_robot_skill_profile()),
         clock=EnvironmentStepClock(_STEP_DT),
     )
     state = TaskState.empty(_BATCH_SIZE, robot.device)
@@ -2304,7 +2302,7 @@ def test_support_bridges_reject_overlap_without_rebinding_and_allow_closed_itera
         presets=tuple(
             SkillPolicyPreset(
                 preset.preset_id,
-                action_option_templates=preset.action_option_templates,
+                skill_option_templates=preset.skill_option_templates,
                 motion_policy=preset.motion_policy,
                 effect_assurance=EffectAssurance.PROJECTED,
             )
@@ -2375,7 +2373,7 @@ def test_support_bridges_reject_overlap_without_rebinding_and_allow_closed_itera
     )  # The outstanding lazy segment still owns its clock.
     with pytest.raises(RuntimeError, match="active.*bridge"):
         adapter.create_bridge(program)
-    action = first._runtime.engine.actions["pick_up"]
+    action = first._runtime.engine.skill_implementations["pick_up"]
     monkeypatch.setattr(action, "_plan", MethodType(_pick_evidence_plan, action))
     for command in untouched.actions:
         robot.qpos = command.value.clone()
@@ -2413,7 +2411,7 @@ def test_returned_effect_providers_and_live_scene_reject_reads_after_close(
     else:
         factory, robot = _factory(hold_qpos_source="drive_target")
         registry = factory.create_scene_registry()
-        engine = factory.create_atomic_action_engine(
+        engine = factory.create_atomic_skill_engine(
             factory.create_robot_skill_profile()
         )
         observation = factory.create_planning_observation_provider(
@@ -2485,7 +2483,7 @@ def test_runtime_scope_rejects_replaced_cached_or_live_reads_without_robot_acces
     monkeypatch, accessor, env_ids
 ):
     factory, robot = _factory(hold_qpos_source="drive_target")
-    engine = factory.create_atomic_action_engine(factory.create_robot_skill_profile())
+    engine = factory.create_atomic_skill_engine(factory.create_robot_skill_profile())
     if env_ids is not None:
         factory = factory.for_env_ids(env_ids)
     registry = factory.create_scene_registry()
@@ -2509,7 +2507,7 @@ def test_runtime_scope_rejects_replaced_cached_or_live_reads_without_robot_acces
     other_factory, other_robot = _factory()
     other = other_factory.create_planning_observation_provider(
         scene_registry=other_factory.create_scene_registry(),
-        engine=other_factory.create_atomic_action_engine(
+        engine=other_factory.create_atomic_skill_engine(
             other_factory.create_robot_skill_profile()
         ),
         clock=EnvironmentStepClock(_STEP_DT),
@@ -2543,9 +2541,7 @@ def test_runtime_scope_changed_during_root_capture_cannot_publish_context(monkey
 
     observation = factory.create_planning_observation_provider(
         scene_registry=factory.create_scene_registry(),
-        engine=factory.create_atomic_action_engine(
-            factory.create_robot_skill_profile()
-        ),
+        engine=factory.create_atomic_skill_engine(factory.create_robot_skill_profile()),
         clock=EnvironmentStepClock(_STEP_DT),
         runtime_scope_guard=guard,
     )
@@ -2602,3 +2598,77 @@ def test_adapter_rejects_noncallable_scope_before_live_assembly(monkeypatch):
             runtime_scope_guard=object(),
         )
     adapter.close()
+
+
+def test_environment_owned_lowerer_survives_subset_binding_without_retaining_host():
+    import gc
+    import weakref
+    from embodichain.lab.sim.atomic_skills import MoveJoints
+    from embodichain.lab.task_program.semantics import (
+        RegisteredSemanticCall,
+        SemanticCallDescriptor,
+        builtin_semantic_call_catalog,
+    )
+    from embodichain.lab.task_program.integrations._kinematic_replay import (
+        _KinematicReplayFactory,
+    )
+    from embodichain.lab.gym.utils._replay import (
+        _AuthoredJointStream,
+        _JointCommandSnapshot,
+    )
+
+    robot = _Robot()
+    source = _AuthoredJointStream("commands", "unused.npz", "a" * 64, 60)
+    snapshot = _JointCommandSnapshot(
+        source, ("a", "b"), torch.zeros(2, _ROBOT_DOF), robot
+    )
+    descriptor = SemanticCallDescriptor(
+        call_id=_KinematicReplayFactory.call_id,
+        spec_type=RegisteredSemanticCall,
+        target_descriptor=MoveJoints.descriptor(),
+    )
+    registration = SimulationTaskProgramRegistration(
+        SimulationSceneBinding(registry_id="scene"),
+        _profile_binding(),
+        call_catalog=builtin_semantic_call_catalog().with_descriptor(descriptor),
+        registered_semantic_lowerer_factories=(
+            _KinematicReplayFactory("commands", (("all", 0, 1),)),
+        ),
+    )
+
+    class Host:
+        def _replay_snapshot(self, source_id):
+            assert source_id == "commands"
+            return snapshot
+
+    host = Host()
+    host.sim = _Simulation(robot)
+    host.robot = robot
+    host.step_dt = _STEP_DT
+
+    def selected_generator():
+        generator = _motion_generator(robot)
+        generator._env_ids = (0,)
+        return generator
+
+    factory = SimulationTaskProgramFactory.from_environment(
+        host,
+        registration=registration,
+        motion_generator_factory=selected_generator,
+    )
+    selected = factory.for_env_ids((0,))
+    scene = selected.create_scene_registry()
+    engine = selected.create_atomic_skill_engine(selected.create_robot_skill_profile())
+    created = selected.create_registered_semantic_lowerers(
+        scene_registry=scene, engine=engine
+    )
+    assert len(created) == 1
+    assert created[0]._snapshot is snapshot
+    host_ref = weakref.ref(host)
+    del host
+    gc.collect()
+    assert host_ref() is None
+    with pytest.raises(ValueError, match="environment-owned runtime source"):
+        selected.create_registered_semantic_lowerers(
+            scene_registry=scene, engine=engine
+        )

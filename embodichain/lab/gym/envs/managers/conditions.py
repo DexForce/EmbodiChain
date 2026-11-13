@@ -18,10 +18,18 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
 import torch
+
+from embodichain.lab.evaluation import (
+    EvaluationSpec,
+    EvaluationStatus,
+    PredicateRegistry,
+    RuleSession,
+    builtin_predicates,
+)
 
 from .cfg import ConditionCfg, SceneEntityCfg
 from .manager_base import Functor
@@ -35,7 +43,7 @@ if TYPE_CHECKING:
     from ..embodied_env import EmbodiedEnv
     from embodichain.lab.sim.objects import RigidObject
 
-__all__ = ["object_near_target", "object_below_height"]
+__all__ = ["object_near_target", "object_below_height", "evaluation_condition"]
 
 
 def _rigid_object(env: EmbodiedEnv, entity_cfg: SceneEntityCfg) -> RigidObject:
@@ -136,3 +144,123 @@ class object_below_height(Functor):
         """
         position = self._entity.get_local_pose(to_matrix=True)[:, :3, 3]
         return evaluate_below_height(position, height)
+
+
+class evaluation_condition(Functor):
+    """Adapt a compiled rule to an ordinary RL condition.
+
+    Sources select a measured rigid-object position or a reset-owned tensor
+    attribute. A trusted Python registry may extend the built-in predicate set.
+    The termination manager retains update cadence, time limits and Gym flags.
+    """
+
+    def __init__(self, cfg: ConditionCfg, env: EmbodiedEnv) -> None:
+        super().__init__(cfg, env)
+        sources = cfg.params["sources"]
+        if not isinstance(sources, Mapping) or not sources:
+            raise ValueError("An evaluation condition needs observation sources.")
+        registry = cfg.params.get("registry") or builtin_predicates()
+        if not isinstance(registry, PredicateRegistry):
+            raise TypeError("registry must be a trusted PredicateRegistry.")
+        root = cfg.params["root"]
+        spec = EvaluationSpec.from_dict({"rules": cfg.params["rules"], "roots": [root]})
+        self._objects = {}
+        attributes = {}
+        field_kinds = {}
+        for field, source in sources.items():
+            if not isinstance(source, Mapping):
+                raise ValueError(f"Invalid evaluation source for {field!r}.")
+            if set(source) == {"rigid_object"}:
+                field_kinds[field] = "position"
+            elif (
+                set(source) in ({"attribute"}, {"attribute", "kind"})
+                and isinstance(source["attribute"], str)
+                and source["attribute"].isidentifier()
+                and not source["attribute"].startswith("_")
+            ):
+                attributes[field] = source["attribute"]
+                if "kind" in source:
+                    field_kinds[field] = source["kind"]
+            else:
+                raise ValueError(f"Invalid evaluation source for {field!r}.")
+        self._compiled = registry.compile(
+            spec,
+            available_fields=set(sources),
+            field_kinds=field_kinds,
+            field_layouts={},
+        ).select(root)
+        self._session = (
+            RuleSession(
+                self._compiled,
+                env_ids=range(env.num_envs),
+                episode_ids=(0,) * env.num_envs,
+                scope=f"rl:{root}",
+                device=env.device,
+            )
+            if self._compiled.stateful
+            else None
+        )
+        self._sample = 0
+        self._object_fields = {}
+        self._attribute_fields = {}
+        for field in self._compiled.required_fields:
+            if field in attributes:
+                self._attribute_fields.setdefault(attributes[field], []).append(field)
+            else:
+                uid = sources[field]["rigid_object"]
+                if uid not in self._objects:
+                    self._objects[uid] = _rigid_object(env, SceneEntityCfg(uid=uid))
+                self._object_fields.setdefault(uid, []).append(field)
+
+    def reset(self, env_ids: Sequence[int] | torch.Tensor | None = None) -> None:
+        """Restart compiled windows for the selected environment rows."""
+        session = self._session
+        if session is not None:
+            rows = (
+                session.env_ids
+                if env_ids is None
+                else tuple(torch.as_tensor(env_ids).tolist())
+            )
+            session.reset(rows, tuple(session.episode_ids[row] + 1 for row in rows))
+
+    def __call__(
+        self,
+        env: EmbodiedEnv,
+        *,
+        sources: Mapping,
+        rules: Mapping,
+        root: str,
+        registry: PredicateRegistry | None = None,
+    ) -> ConditionResult:
+        """Acquire bound inputs and evaluate the compiled root once."""
+        values = {}
+        for uid, fields in self._object_fields.items():
+            position = self._objects[uid].get_local_pose(to_matrix=True)[:, :3, 3]
+            values.update(dict.fromkeys(fields, position))
+        for attribute, fields in self._attribute_fields.items():
+            value = getattr(env, attribute, None)
+            if isinstance(value, torch.Tensor):
+                values.update(dict.fromkeys(fields, value))
+        if self._session is None:
+            result = self._compiled.evaluate(
+                values, batch_size=env.num_envs, device=env.device
+            )
+        else:
+            self._session.advance(
+                self._sample,
+                values,
+                revisions=torch.full(
+                    (env.num_envs,), self._sample, dtype=torch.long, device=env.device
+                ),
+                episode_ids=self._session.episode_ids,
+            )
+            self._sample += 1
+            result = self._session.snapshot().rules
+        status = result[root].status
+        return ConditionResult(
+            status == EvaluationStatus.SATISFIED,
+            status != EvaluationStatus.UNAVAILABLE,
+            {"status": status},
+            result,
+            self._compiled.identity,
+        )

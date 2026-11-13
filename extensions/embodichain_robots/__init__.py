@@ -26,6 +26,8 @@ from importlib import import_module
 from typing import Any
 
 __all__ = [
+    "AgibotG1Cfg",
+    "YamI2rtCfg",
     "UnitreeGo1Cfg",
     "UnitreeGo2Cfg",
     "UnitreeG1Cfg",
@@ -35,8 +37,10 @@ __all__ = [
     "ARX5Cfg",
     "AlohaMiniCfg",
     "TianjiMarvinCfg",
+    "AgibotG2Cfg",
     "DexforceW1Cfg",
     "CobotMagicCfg",
+    "AgilexPiperXCfg",
     "FrankaCfg",
     "FrankaPandaCfg",
     "FlexivRizon4SCfg",
@@ -45,9 +49,18 @@ __all__ = [
     "BrainCoRevo1Cfg",
     "SharpaWaveCfg",
     "WujiHandCfg",
+    "FrankaPandaHandCfg",
+    "DHPGI14080Cfg",
+    "CobotMagicV100GripperCfg",
+    "PikaGripperCfg",
+    "TianjiMarvinGripperCfg",
+    "RobotiqArg2F85Cfg",
+    "RobotiqArg2F140Cfg",
 ]
 
 _EXPORTS = {
+    "AgibotG1Cfg": ".agibot.g1",
+    "YamI2rtCfg": ".i2rt.yam",
     "UnitreeGo1Cfg": ".unitree.go1",
     "UnitreeGo2Cfg": ".unitree.go2",
     "UnitreeG1Cfg": ".unitree.g1",
@@ -57,8 +70,10 @@ _EXPORTS = {
     "ARX5Cfg": ".arx.arx5",
     "AlohaMiniCfg": ".alohamini.aloha_mini",
     "TianjiMarvinCfg": ".tianji.marvin",
+    "AgibotG2Cfg": ".agibot.g2",
     "DexforceW1Cfg": ".dexforce.w1",
     "CobotMagicCfg": ".agilex.cobotmagic",
+    "AgilexPiperXCfg": ".agilex.piper_x",
     "FrankaCfg": ".franka.cfg",
     "FrankaPandaCfg": ".franka.panda",
     "FlexivRizon4SCfg": ".flexiv.rizon4s",
@@ -67,6 +82,13 @@ _EXPORTS = {
     "BrainCoRevo1Cfg": ".brainco.revo1",
     "SharpaWaveCfg": ".sharpa.wave",
     "WujiHandCfg": ".wuji.hand",
+    "FrankaPandaHandCfg": ".franka.hand.cfg",
+    "DHPGI14080Cfg": ".dh_robotics.pgi_140_80.cfg",
+    "CobotMagicV100GripperCfg": ".agilex.cobotmagic.gripper.cfg",
+    "PikaGripperCfg": ".agilex.pika.cfg",
+    "TianjiMarvinGripperCfg": ".tianji.marvin.gripper.cfg",
+    "RobotiqArg2F85Cfg": ".robotiq.arg2f85.cfg",
+    "RobotiqArg2F140Cfg": ".robotiq.arg2f140.cfg",
 }
 
 

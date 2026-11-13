@@ -296,6 +296,13 @@ class NewtonCollisionPropertiesCfg(CollisionPropertiesCfg):
     ``margin + gap``; increasing the gap detects approaching contact earlier.
     """
 
+    preserve_mesh_transform: bool | None = None
+    """Keep authored mesh pose and scale separate from collision vertices.
+
+    ``None`` preserves the source setting. Set before scene preparation when
+    reproducing a reference solver model built from authored USD meshes.
+    """
+
     def __post_init__(self) -> None:
         """Validate authored MuJoCo parameters before lowering to the SDK."""
         if self.solref is not None:

@@ -93,7 +93,7 @@ def structured_call(
     model: str | None = None,
     role: str = "task_interpretation",
     services: GenSimServices | None = None,
-    system_prompt: str = "Return only the requested structured JSON response. Never return reasoning, coordinates, or AtomicAction nodes.",
+    system_prompt: str = "Return only the requested structured JSON response. Never return reasoning, coordinates, or AtomicSkill nodes.",
 ) -> Mapping[str, Any]:
     """Request structured output; consuming owners still validate semantics."""
     with service_scope(services) as run:

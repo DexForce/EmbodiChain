@@ -141,6 +141,7 @@ def test_mimic_profile_only_changes_selected_articulation_equalities(
     )
     backend = SimpleNamespace(
         solver_type="mujoco_warp",
+        mujoco_solver=solver,
         model=model,
         cfg=SimpleNamespace(requires_grad=False, dt=0.001, num_substeps=1),
     )

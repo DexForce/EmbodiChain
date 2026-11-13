@@ -83,8 +83,11 @@ def resolve_continuous_ik_path(
     robot = generator.robot
     seed = options.start_qpos.clone()
     bounds = robot.get_qpos_limits(name=options.control_part).to(seed)
-    lower, upper = bounds[..., 0], bounds[..., 1]
     limits = authored_joint_velocity_limits(robot, options.control_part).to(seed)
+    if getattr(generator, "_env_ids", None) is not None:
+        bounds = bounds[list(generator._env_ids)]
+        limits = limits[list(generator._env_ids)]
+    lower, upper = bounds[..., 0], bounds[..., 1]
     step_dt = options.interpolation_dt
 
     def solve(

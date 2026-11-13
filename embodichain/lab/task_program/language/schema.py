@@ -21,7 +21,7 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import MISSING, field
-from typing import TypeAlias
+from typing import Literal, TypeAlias
 
 from embodichain.utils import configclass
 
@@ -291,7 +291,40 @@ class CyclicPoseTargetCfg:
         self.values = values  # type: ignore[assignment]
 
 
-TargetCfg: TypeAlias = CyclicPoseTargetCfg
+@configclass
+class PoseTargetCfg(PoseCfg):
+    """A single world-frame object pose, in metres and XYZW order."""
+
+    kind: str = "pose"
+    frame: str = "world"
+
+    def __post_init__(self) -> None:
+        PoseCfg.__post_init__(self)
+        _validate_kind(self.kind, expected="pose", field_name="kind")
+        _validate_kind(self.frame, expected="world", field_name="frame")
+
+
+@configclass
+class SceneRelativePoseTargetCfg(PoseCfg):
+    """A scene-relative pose resolved when its call starts.
+
+    ``parent`` composes the reference transform. ``world_axes`` follows only
+    the reference position and keeps offset and orientation in world axes.
+    """
+
+    entity: str = MISSING
+    frame: str = "parent"
+    kind: str = "scene_relative"
+
+    def __post_init__(self) -> None:
+        PoseCfg.__post_init__(self)
+        _validate_identifier(self.entity, field_name="entity")
+        if self.frame not in ("parent", "world_axes"):
+            raise ValueError("frame must be parent or world_axes.")
+        _validate_kind(self.kind, expected="scene_relative", field_name="kind")
+
+
+TargetCfg: TypeAlias = CyclicPoseTargetCfg | PoseTargetCfg | SceneRelativePoseTargetCfg
 
 
 @configclass
@@ -361,6 +394,23 @@ class HandOverCfg:
 
 
 @configclass
+class MoveHeldObjectCfg:
+    """Transport an explicitly held object to a named task target."""
+
+    object: str = MISSING
+    at: TargetRefCfg = MISSING
+    resources: dict[str, str] = field(default_factory=dict)
+    kind: str = "move_held_object"
+
+    def __post_init__(self) -> None:
+        _validate_identifier(self.object, field_name="object")
+        if type(self.at) is not TargetRefCfg:
+            raise TypeError("at must be exactly TargetRefCfg.")
+        self.resources = _validate_resources(self.resources, field_name="resources")
+        _validate_kind(self.kind, expected="move_held_object", field_name="kind")
+
+
+@configclass
 class RegisteredSemanticCallCfg:
     """Safe declarative payload for one catalog-registered semantic call."""
 
@@ -390,7 +440,7 @@ class RegisteredSemanticCallCfg:
 
 
 SemanticCallCfg: TypeAlias = (
-    PickCfg | PlaceCfg | HandOverCfg | RegisteredSemanticCallCfg
+    PickCfg | PlaceCfg | HandOverCfg | MoveHeldObjectCfg | RegisteredSemanticCallCfg
 )
 
 
@@ -409,7 +459,34 @@ class WaitStablePostCfg:
         _validate_kind(self.kind, expected="wait_stable", field_name="kind")
 
 
-PostPolicyCfg: TypeAlias = WaitStablePostCfg
+@configclass
+class HoldPostCfg:
+    """Require continuous measured attachment and target pose for a duration.
+
+    Time is in seconds, position tolerance in metres and orientation tolerance
+    in radians. Every acknowledged observation must satisfy the declaration.
+    """
+
+    object: str = MISSING
+    at: TargetRefCfg = MISSING
+    duration_s: float = MISSING
+    position_tolerance: float = 0.02
+    orientation_tolerance: float = 0.1
+    kind: str = "hold"
+
+    def __post_init__(self) -> None:
+        _validate_identifier(self.object, field_name="object")
+        if type(self.at) is not TargetRefCfg:
+            raise TypeError("at must be exactly TargetRefCfg.")
+        for name in ("duration_s", "position_tolerance", "orientation_tolerance"):
+            value = _validate_number(getattr(self, name), field_name=name)
+            if value <= 0:
+                raise ValueError(f"{name} must be positive.")
+            setattr(self, name, value)
+        _validate_kind(self.kind, expected="hold", field_name="kind")
+
+
+PostPolicyCfg: TypeAlias = WaitStablePostCfg | HoldPostCfg
 
 
 @configclass
@@ -627,6 +704,19 @@ class ArticulationJointPositionValidatorCfg:
         )
 
 
+@configclass
+class ConditionValidatorCfg:
+    """Reference a named rule owned by the deployment's evaluation component."""
+
+    ref: str = MISSING
+    kind: str = "condition"
+
+    def __post_init__(self) -> None:
+        """Validate the rule identifier and discriminator."""
+        _validate_identifier(self.ref, field_name="ref")
+        _validate_kind(self.kind, expected="condition", field_name="kind")
+
+
 ValidatorCfg: TypeAlias = (
     ObjectNearTargetValidatorCfg
     | ObjectNearRelativeTargetValidatorCfg
@@ -634,6 +724,7 @@ ValidatorCfg: TypeAlias = (
     | ObjectLiftedValidatorCfg
     | ObjectRelativePositionValidatorCfg
     | ObjectUprightValidatorCfg
+    | ConditionValidatorCfg
 )
 
 
@@ -706,6 +797,83 @@ class RepeatCfg:
 
 
 @configclass
+class SegmentEvidenceCfg:
+    """One evidence source referenced by a segment acceptance contract.
+
+    State and condition references use logical names. Call effects, validators,
+    and post-policies use zero-based indices local to the segment. An unsupported
+    capability produces unavailable evidence and may be diagnostic-only.
+    """
+
+    kind: Literal[
+        "held",
+        "released",
+        "condition",
+        "call_effect",
+        "validator",
+        "post_policy",
+        "unsupported",
+    ] = MISSING
+    ref: str | int = MISSING
+    assurance: Literal["projected", "verified"] | None = None
+    required: bool = True
+
+    def __post_init__(self) -> None:
+        """Validate the reference shape and allowed assurance."""
+        if self.kind in ("held", "released", "condition", "unsupported"):
+            _validate_identifier(self.ref, field_name="ref")
+        elif self.kind in ("call_effect", "validator", "post_policy"):
+            if type(self.ref) is not int or self.ref < 0:
+                raise ValueError("ref must be a nonnegative local index.")
+        else:
+            raise ValueError(f"Unknown segment evidence kind {self.kind!r}.")
+        if self.kind == "call_effect":
+            if self.assurance not in ("projected", "verified"):
+                raise ValueError(
+                    "call_effect requires projected or verified assurance."
+                )
+        elif self.assurance is not None:
+            raise ValueError("Only call_effect can declare assurance.")
+        if type(self.required) is not bool or (
+            not self.required and self.kind != "unsupported"
+        ):
+            raise ValueError("Only unsupported capability evidence may be optional.")
+
+
+@configclass
+class SegmentContractCfg:
+    """Incoming prerequisites and outcome evidence for a described subgoal."""
+
+    prerequisites: tuple[SegmentEvidenceCfg, ...] = field(default_factory=tuple)
+    outcomes: tuple[SegmentEvidenceCfg, ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        """Own the declared prerequisites and outcomes in authoring order."""
+        for field_name in ("prerequisites", "outcomes"):
+            entries = getattr(self, field_name)
+            if type(entries) not in (tuple, list) or any(
+                type(entry) is not SegmentEvidenceCfg for entry in entries
+            ):
+                raise TypeError(
+                    f"{field_name} must contain segment evidence declarations."
+                )
+            setattr(self, field_name, tuple(entries))
+        if any(
+            entry.kind not in ("held", "released", "condition")
+            for entry in self.prerequisites
+        ):
+            raise ValueError(
+                "Prerequisites require symbolic state or a current condition."
+            )
+        if not any(entry.required for entry in self.outcomes):
+            raise ValueError("A segment contract needs at least one required outcome.")
+        if any(entry.kind == "condition" for entry in self.outcomes):
+            raise ValueError(
+                "Outcome conditions must reference an existing validator by index."
+            )
+
+
+@configclass
 class SegmentCfg:
     """Logical transaction with optional segment-specific language instruction.
 
@@ -719,12 +887,17 @@ class SegmentCfg:
     validators: tuple[ValidatorCfg, ...] = field(default_factory=tuple)
     kind: str = "segment"
     instruction: str | None = None
+    contract: SegmentContractCfg | None = field(
+        default=None, metadata={"omit_none_from_provenance": True}
+    )
 
     def __post_init__(self) -> None:
         """Validate the segment boundary and its declarative hooks."""
         _validate_identifier(self.name, field_name="name")
         if self.instruction is not None:
             _validate_identifier(self.instruction, field_name="instruction")
+        if self.contract is not None and type(self.contract) is not SegmentContractCfg:
+            raise TypeError("contract must be exactly SegmentContractCfg or None.")
         if type(self.steps) not in _PROGRAM_NODE_TYPES:
             raise TypeError("steps must be an exact ProgramNodeCfg value.")
         if type(self.post) not in (list, tuple):
@@ -775,9 +948,13 @@ _SEMANTIC_CALL_TYPES = (
     PickCfg,
     PlaceCfg,
     HandOverCfg,
+    MoveHeldObjectCfg,
     RegisteredSemanticCallCfg,
 )
-_POST_POLICY_TYPES = (WaitStablePostCfg,)
+_POST_POLICY_TYPES = (
+    WaitStablePostCfg,
+    HoldPostCfg,
+)
 _VALIDATOR_TYPES = (
     ObjectLiftedValidatorCfg,
     ObjectRelativePositionValidatorCfg,
@@ -785,6 +962,7 @@ _VALIDATOR_TYPES = (
     ObjectNearTargetValidatorCfg,
     ObjectNearRelativeTargetValidatorCfg,
     ArticulationJointPositionValidatorCfg,
+    ConditionValidatorCfg,
 )
 _PROGRAM_NODE_TYPES = (
     SequenceCfg,
@@ -817,7 +995,7 @@ def _validate_program(
         raise ValueError(f"Program exceeds node limit {MAX_PROGRAM_NODES}.")
     if type(node) is InvokeCfg:
         call = node.call
-        if type(call) is PlaceCfg and call.at is not None:
+        if type(call) in (PlaceCfg, MoveHeldObjectCfg) and call.at is not None:
             _validate_target_reference(call.at.target, targets)
         if type(call) is HandOverCfg and call.final_target is not None:
             _validate_target_reference(call.final_target.target, targets)
@@ -847,6 +1025,9 @@ def _validate_program(
                 "Parallel branches may contain only Invoke, Sequence, and Repeat "
                 "nodes; wrap the Parallel node in one Segment instead."
             )
+        for post in node.post:
+            if type(post) is HoldPostCfg:
+                _validate_target_reference(post.at.target, targets)
         for validator in node.validators:
             if type(validator) is ObjectNearTargetValidatorCfg:
                 _validate_target_reference(validator.target, targets)
@@ -911,7 +1092,11 @@ class TaskProgramCfg:
                 target_id,
                 field_name="target IDs",
             )
-            if type(target) is not CyclicPoseTargetCfg:
+            if type(target) not in (
+                CyclicPoseTargetCfg,
+                PoseTargetCfg,
+                SceneRelativePoseTargetCfg,
+            ):
                 raise TypeError("targets must contain exact TargetCfg values.")
             targets[normalized_id] = target
         if type(self.program) not in _PROGRAM_NODE_TYPES:

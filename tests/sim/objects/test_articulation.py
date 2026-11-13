@@ -49,6 +49,10 @@ from dexsim.types import ActorType, DriveType
 
 ART_PATH = "SlidingBoxDrawer/SlidingBoxDrawer.urdf"
 USD_DRAWER_PATH = "DrawerUSD/drawer_001.usdc"
+# These small scenes do not inspect pixels; leave room for all tested links.
+TEST_SCENE_NODE_CAPACITY = 512
+TEST_VIEWPORT_SIZE = 64
+
 NUM_ARENAS = 10
 NEWTON_EFFORT_TARGET_MODE = 4
 DRIVE_TEST_STIFFNESS = 12.0
@@ -125,6 +129,53 @@ def _inertia_tensor(inertia: torch.Tensor, com_pose: torch.Tensor) -> torch.Tens
     """Compare physical inertia independently of the chosen principal axes."""
     rotation = matrix_from_quat(com_pose[..., 3:])
     return rotation @ torch.diag_embed(inertia) @ rotation.transpose(-1, -2)
+
+
+@pytest.mark.requires_sim
+def test_newton_initial_hold_targets_for_multiple_articulations(tmp_path: Path) -> None:
+    from embodichain.lab.sim.cfg import NewtonPhysicsCfg
+
+    asset = tmp_path / "initial_slider.urdf"
+    asset.write_text("""<robot name="initial_slider">
+      <link name="base"><inertial><mass value="1"/><inertia ixx=".1" ixy="0" ixz="0" iyy=".1" iyz="0" izz=".1"/></inertial></link>
+      <link name="slider"><inertial><mass value="1"/><inertia ixx=".1" ixy="0" ixz="0" iyy=".1" iyz="0" izz=".1"/></inertial></link>
+      <joint name="slide" type="prismatic"><parent link="base"/><child link="slider"/><axis xyz="1 0 0"/><limit lower="-1" upper="1" effort="100" velocity="10"/></joint>
+    </robot>""")
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            enable_entity_gizmo=False,
+            physics_cfg=NewtonPhysicsCfg(
+                device="cpu",
+                gravity=(0, 0, 0),
+                collision_cfg=None,
+                solver_cfg={"solver_type": "semi_implicit"},
+            ),
+        ),
+        requires_native_renderer=False,
+    )
+    articulations = []
+    art = None
+    try:
+        initial_positions = (0.2, -0.3)
+        for index, position in enumerate(initial_positions):
+            articulations.append(
+                sim.add_articulation(
+                    ArticulationCfg(
+                        uid=f"slider_{index}", fpath=str(asset), init_qpos=[position]
+                    )
+                )
+            )
+        sim.prepare()
+        for art, position in zip(articulations, initial_positions, strict=True):
+            expected = torch.tensor([[position]])
+            torch.testing.assert_close(art.get_qpos(), expected)
+            torch.testing.assert_close(art.get_qpos(target=True), expected)
+    finally:
+        art = None
+        articulations.clear()
+        sim.destroy(exit_process=False)
+        SimulationManager.flush_cleanup_queue()
 
 
 @pytest.mark.parametrize("device", ["cpu", "cuda:0"])
@@ -243,7 +294,7 @@ def test_usdc_drawer_supports_named_kinematics_and_affordance_geometry(
     physics: str,
 ) -> None:
     """The three-drawer asset supports geometry and a one-joint Jacobian."""
-    from embodichain.lab.sim.atomic_actions.articulation_geometry import (
+    from embodichain.lab.sim.atomic_skills.articulation_geometry import (
         sample_initial_articulation_geometry,
     )
 
@@ -738,6 +789,9 @@ class BaseArticulationTest:
             device=device,
             num_envs=NUM_ARENAS,
             physics_cfg=physics_cfg,
+            scene_node_capacity=TEST_SCENE_NODE_CAPACITY,
+            width=TEST_VIEWPORT_SIZE,
+            height=TEST_VIEWPORT_SIZE,
         )
         self.sim = SimulationManager(config)
         self.physics = physics
@@ -1674,33 +1728,36 @@ class BaseArticulationTest:
     def teardown_method(self):
         """Clean up resources after each test method."""
         self.sim.destroy()
+        # Drop test-owned views before queued child/parent destruction runs.
+        self.__dict__.clear()
         import embodichain.lab.sim as om
 
         om.SimulationManager.flush_cleanup_queue()
-        self.__dict__.clear()
-        import gc
-
-        gc.collect()
 
 
 class BaseArticulationLinkPhysicsTest:
     """Tests for per-link physics configuration (isolated sim per test)."""
 
     def setup_simulation(self, device: str) -> None:
-        config = SimulationManagerCfg(headless=True, device=device, num_envs=2)
+        config = SimulationManagerCfg(
+            headless=True,
+            device=device,
+            num_envs=2,
+            scene_node_capacity=TEST_SCENE_NODE_CAPACITY,
+            width=TEST_VIEWPORT_SIZE,
+            height=TEST_VIEWPORT_SIZE,
+        )
         self.sim = SimulationManager(config)
         self.art_path = get_data_path(ART_PATH)
         assert os.path.isfile(self.art_path)
 
     def teardown_method(self):
         self.sim.destroy()
+        # Drop test-owned views before queued child/parent destruction runs.
+        self.__dict__.clear()
         import embodichain.lab.sim as om
 
         om.SimulationManager.flush_cleanup_queue()
-        self.__dict__.clear()
-        import gc
-
-        gc.collect()
 
     def test_global_attrs_applied_to_all_links(self):
         """Default attrs should set the same static friction on every link."""

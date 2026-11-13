@@ -21,6 +21,8 @@ This module deliberately has no Gym or Task Program dependency.
 
 from __future__ import annotations
 
+from embodichain.lab.sim.utility.gripper_geometry import grasp_generator_parameters
+
 from dataclasses import dataclass
 from itertools import product
 from pathlib import Path
@@ -95,7 +97,12 @@ def _embodiment() -> dict[str, Any]:
         "extensions/embodichain_tasks/configs/components/embodiments/ur5_dh_pgi_140_80.yaml",
         base_dir=Path(__file__).parent,
     )
-    return yaml.safe_load(path.read_text(encoding="utf-8"))
+    from embodichain.lab.gym.utils.composition import resolve_gym_components
+
+    physical = resolve_gym_components(
+        {"embodiment": {"component": str(path)}}, base_dir=path.parent
+    )
+    return {"simulation": physical.config["robot"]}
 
 
 def _robot_cfg() -> RobotCfg:
@@ -220,12 +227,12 @@ def _choose_grasp(
         ParallelJawGraspCollisionCfg,
     )
 
-    from examples.sim.atomic_action.gripper_geometry import mounted_gripper_geometry
+    from examples.sim.atomic_skill.gripper_geometry import mounted_gripper_geometry
 
     model, geometry = mounted_gripper_geometry(robot.cfg)
     mesh = trimesh.creation.box(extents=[CUBE_SIZE] * 3)
     generator = AntipodalGraspPoseGenerator(
-        model,
+        **grasp_generator_parameters(model),
         collision_geometry=geometry,
         algorithm_cfg=AntipodalGraspPoseGeneratorCfg(
             sample_count=1000,

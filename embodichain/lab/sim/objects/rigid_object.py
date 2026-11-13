@@ -37,6 +37,7 @@ from embodichain.lab.sim.objects.backends import (
 )
 from embodichain.lab.sim.objects.backends.base import RigidBodyViewBase
 from embodichain.lab.sim.objects.backends.rigid_physics import (
+    _set_default_spawn_friction,
     apply_legacy_physical_attr,
     can_use_newton_entity_dynamics_fallback,
     get_legacy_damping,
@@ -474,6 +475,7 @@ class RigidObject(BatchEntity):
 
         cfg = deepcopy(self.cfg)
         self.__dict__.pop("user_ids", None)
+        self.__dict__.pop("_static_friction_batch", None)
         self._spawn_result = result
         self.body_type = cfg.body_type
         self._world = result.world
@@ -503,7 +505,9 @@ class RigidObject(BatchEntity):
 
     def _apply_spawn_visual_uv(self) -> None:
         """Apply configured projective UV mapping to spawned render bodies."""
-        shape = self.cfg.shape
+        shape = getattr(self.cfg, "visual_shape", None) or getattr(
+            self.cfg, "shape", None
+        )
         if not isinstance(shape, MeshCfg) or not shape.compute_uv:
             return
 
@@ -1196,6 +1200,14 @@ class RigidObject(BatchEntity):
 
         return torch.as_tensor(masses, dtype=torch.float32, device=self.device)
 
+    def _static_friction_view(self) -> SceneRigidBodyView:
+        """Create a shape-property view for Spawn bodies without dynamic state."""
+        if not hasattr(self, "_static_friction_batch"):
+            self._static_friction_batch = SceneRigidBodyView.from_entities(
+                self._spawn_result, self._entities, self.device
+            )
+        return self._static_friction_batch
+
     def set_friction(
         self, friction: torch.Tensor, env_ids: Sequence[int] | None = None
     ) -> None:
@@ -1211,6 +1223,17 @@ class RigidObject(BatchEntity):
             logger.log_error(
                 f"Length of env_ids {len(local_env_ids)} does not match friction length {len(friction)}."
             )
+
+        if self.is_spawn_bound and self._data is None:
+            if self._spawn_result.backend != "newton":
+                for env_id, value in zip(local_env_ids, friction.tolist()):
+                    _set_default_spawn_friction(self._entities[env_id], float(value))
+                return
+            ids = torch.as_tensor(local_env_ids, dtype=torch.int32, device=self.device)
+            self._static_friction_view().apply_friction(
+                friction.to(dtype=torch.float32, device=self.device).unsqueeze(-1), ids
+            )
+            return
 
         if self._data is not None and self._data.body_view.is_ready:
             body_ids = self._data.body_ids_for(local_env_ids)
@@ -1243,13 +1266,20 @@ class RigidObject(BatchEntity):
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
-        if self.is_spawn_bound and self.is_static:
-            return torch.full(
-                (len(local_env_ids),),
-                float(self.cfg.attrs.to_dexsim_physical_attr().dynamic_friction),
-                dtype=torch.float32,
-                device=self.device,
-            )
+        if self.is_spawn_bound and self._data is None:
+            if self._spawn_result.backend != "newton":
+                return torch.tensor(
+                    [
+                        self._entities[env_id].get_physical_attr().dynamic_friction
+                        for env_id in local_env_ids
+                    ],
+                    dtype=torch.float32,
+                    device=self.device,
+                )
+            ids = torch.as_tensor(local_env_ids, dtype=torch.int32, device=self.device)
+            result = torch.empty((len(local_env_ids), 1), device=self.device)
+            self._static_friction_view().fetch_friction(result, ids)
+            return result.squeeze(-1)
 
         if self._data is not None and self._data.body_view.is_ready:
             body_ids = self._data.body_ids_for(local_env_ids)
@@ -1456,6 +1486,12 @@ class RigidObject(BatchEntity):
             update_default: Whether the assigned material should become the baseline
                 restored by :meth:`reset`. Defaults to False.
         """
+        binding = getattr(self, "_visual_binding", None)
+        if binding is not None:
+            binding.set_material(
+                mat, env_ids, shared=shared, update_default=update_default
+            )
+            return
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
         if shared:
@@ -1495,6 +1531,9 @@ class RigidObject(BatchEntity):
         Returns:
             List[MaterialInst]: List of material instances.
         """
+        binding = getattr(self, "_visual_binding", None)
+        if binding is not None:
+            return binding.material_instances(env_ids)
         ids = env_ids if env_ids is not None else range(self.num_instances)
         return [self._visual_material[i] for i in ids]
 
@@ -1551,6 +1590,10 @@ class RigidObject(BatchEntity):
         Args:
             env_ids: Environment indices. If None, all instances are restored.
         """
+        binding = getattr(self, "_visual_binding", None)
+        if binding is not None:
+            binding.restore_materials(env_ids)
+            return
         if not hasattr(self, "_original_visual_material"):
             return
         local_env_ids = self._all_indices if env_ids is None else env_ids
@@ -1587,6 +1630,12 @@ class RigidObject(BatchEntity):
         Raises:
             ValueError: If a segment has no material or no retrievable template.
         """
+        binding = getattr(self, "_visual_binding", None)
+        if binding is not None:
+            if not any(not element.gaussian for element in binding.elements):
+                raise TypeError("Gaussian captured SH has no reusable mesh material.")
+            ids = [0] if shared else binding.indices(env_ids)
+            return [binding.reuse_materials(env) for env in ids]
         if shared:
             local_env_ids = [self._all_indices[0]]
         else:
@@ -1645,6 +1694,10 @@ class RigidObject(BatchEntity):
             mat_inst: dexsim ``MaterialInst`` to attach.
             mesh_id: Render-body segment index.
         """
+        binding = getattr(self, "_visual_binding", None)
+        if binding is not None:
+            binding.apply_material_inst(env_idx, mat_inst, mesh_id)
+            return
         _set_render_material(
             self._entities[env_idx].get_render_body(), mesh_id, mat_inst
         )
@@ -1664,6 +1717,12 @@ class RigidObject(BatchEntity):
                 f"Length of entities {len(self._entities)} does not match length of material instances {len(mat_insts)}."
             )
 
+        binding = getattr(self, "_visual_binding", None)
+        if binding is not None:
+            for env, instance in enumerate(mat_insts):
+                if instance is not None:
+                    binding.apply_material_inst(env, instance.mat)
+            return
         for i, entity in enumerate(self._entities):
             if mat_insts[i] is None:
                 continue
@@ -1698,6 +1757,10 @@ class RigidObject(BatchEntity):
             scale (torch.Tensor): The scale to set with shape (N, 3).
             env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
         """
+        if getattr(self, "_visual_binding", None) is not None:
+            raise NotImplementedError(
+                "Explicit visual geometry scale is fixed during preparation; replace the asset to change it."
+            )
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
         if len(local_env_ids) != len(scale):
@@ -1801,6 +1864,9 @@ class RigidObject(BatchEntity):
         Returns:
             Combined vertices with shape ``(N, num_vertices, 3)``.
         """
+        binding = getattr(self, "_visual_binding", None)
+        if binding is not None:
+            return binding.mesh(env_ids, scale=scale)[0]
         ids = env_ids if env_ids is not None else range(self.num_instances)
         verts = torch.as_tensor(
             np.array(
@@ -1826,6 +1892,9 @@ class RigidObject(BatchEntity):
         Returns:
             Triangle indices with shape ``(N, num_triangles, 3)``.
         """
+        binding = getattr(self, "_visual_binding", None)
+        if binding is not None:
+            return binding.mesh(env_ids)[1]
         ids = env_ids if env_ids is not None else range(self.num_instances)
         return torch.as_tensor(
             np.array(
@@ -1833,6 +1902,58 @@ class RigidObject(BatchEntity):
             ),
             dtype=torch.int32,
             device=self.device,
+        )
+
+    def get_semantic_mesh(
+        self, env_ids: Sequence[int] | None = None
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return independent scaled semantic vertices and triangle indices.
+
+        Appearance replacement preserves the original surface unless an explicit
+        semantic_shape is supplied. Gaussian data never substitutes for a mesh.
+
+        Args:
+            env_ids: Environment indices, or None for all environments.
+
+        Returns:
+            Owner-local vertices of shape (B, V, 3) with body scaling applied,
+            and triangle indices of shape (B, F, 3).
+
+        Raises:
+            ValueError: If no semantic surface or explicit proxy is available.
+        """
+        binding = getattr(self, "_visual_binding", None)
+        if binding is None:
+            if self.cfg.semantic_shape is None:
+                if getattr(self.cfg, "source", None) is not None:
+                    elements = self.get_visual_elements()
+                    if elements and all(
+                        element["representation"] == "gaussian_splat"
+                        for element in elements
+                    ):
+                        raise ValueError(
+                            "Semantic mesh is unavailable for Gaussian-only USD appearance; configure semantic_shape."
+                        )
+                return self.get_vertices(env_ids, scale=True), self.get_triangles(
+                    env_ids
+                )
+            from ..spawn._visuals import _semantic_mesh_arrays
+
+            vertices, faces = _semantic_mesh_arrays(self.cfg.semantic_shape)
+            ids = list(range(self.num_instances)) if env_ids is None else env_ids
+            vertices = torch.as_tensor(vertices, device=self.device)
+            faces = torch.as_tensor(faces, dtype=torch.int32, device=self.device)
+            return (
+                vertices.unsqueeze(0) * self.get_body_scale(ids).unsqueeze(1),
+                faces.unsqueeze(0).expand(len(ids), -1, -1).clone(),
+            )
+        if binding.semantic is None or binding.semantic[0].shape[1] == 0:
+            raise ValueError("Semantic mesh is unavailable; configure semantic_shape.")
+        ids = binding.indices(env_ids)
+        vertices, faces = binding.semantic
+        return (
+            vertices[ids].clone() * self.get_body_scale(ids).unsqueeze(1),
+            faces[ids].clone(),
         )
 
     def get_collision_shapes(
@@ -2022,13 +2143,18 @@ class RigidObject(BatchEntity):
         for i, env_idx in enumerate(self._all_indices):
             set_physical_visible(self._entities[env_idx], visible)
 
-    def set_visible(self, visible: bool = True) -> None:
+    def set_visible(
+        self, visible: bool = True, env_ids: Sequence[int] | None = None
+    ) -> None:
         """Set the visibility of the rigid object.
 
         Args:
             visible (bool, optional): Whether the rigid object is visible. Defaults to True.
         """
-        for i, env_idx in enumerate(self._all_indices):
+        binding = getattr(self, "_visual_binding", None)
+        if binding is not None:
+            binding.set_visible(visible, env_ids)
+        for env_idx in (self._all_indices if env_ids is None else env_ids):
             set_visible(self._entities[env_idx], visible)
 
     def _build_cfg_init_pose(
@@ -2109,6 +2235,9 @@ class RigidObject(BatchEntity):
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
+        binding = getattr(self, "_visual_binding", None)
+        if binding is not None:
+            binding.reset(local_env_ids)
         self.restore_visual_material(env_ids=local_env_ids)
 
         # Preserve the legacy Default-backend attribute reset before restoring

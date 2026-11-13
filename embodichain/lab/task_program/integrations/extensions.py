@@ -32,11 +32,11 @@ from typing import ClassVar, Protocol, runtime_checkable, TYPE_CHECKING
 
 import torch
 
-from embodichain.lab.sim.atomic_actions.bindings import (
+from embodichain.lab.sim.atomic_skills.bindings import (
     JointPositionTarget,
     RuntimeEndpointTarget,
 )
-from embodichain.lab.sim.atomic_actions.runtime_commands import RuntimeCommandPayload
+from embodichain.lab.sim.atomic_skills.runtime_commands import RuntimeCommandPayload
 from embodichain.lab.task_program.semantics.effects import (
     CONTROL_PART_EVIDENCE_PROVIDER_ID,
     CONTROL_PART_EVIDENCE_PROVIDER_REVISION,
@@ -59,7 +59,7 @@ from embodichain.lab.gym.envs.task_program.bridge import (
 
 if TYPE_CHECKING:
     from embodichain.lab.task_program.semantics import SceneManifest
-    from embodichain.lab.sim.atomic_actions import AtomicActionEngine, SceneProvider
+    from embodichain.lab.sim.atomic_skills import AtomicSkillEngine, SceneProvider
     from embodichain.lab.task_program.semantics import (
         EffectEvidenceProvider,
         SceneRegistry,
@@ -513,7 +513,7 @@ class ParallelCommandSafetyValidatorFactory(Protocol):
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> ParallelCommandSafetyValidator:
         """Create one live gate bound to the exact assembled runtime."""
 
@@ -531,7 +531,7 @@ class ControlPartEvidenceProviderFactory(Protocol):
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
         scene_provider: SceneProvider,
     ) -> EffectEvidenceProvider:
         """Create one live provider bound to the exact assembled runtime.
@@ -550,7 +550,14 @@ class ControlPartEvidenceProviderFactory(Protocol):
 
 @runtime_checkable
 class RegisteredSemanticLowererFactory(Protocol):
-    """Registration-owned factory for one fresh live semantic lowerer."""
+    """Registration-owned factory for one fresh live semantic lowerer.
+
+    A factory requiring host-owned runtime inputs can additionally implement
+    ``create_for_environment(environment=..., simulation=..., robot=...,
+    scene_registry=..., engine=...)``. Standard environment assembly supplies
+    its live host to that optional hook, retaining the same freshness and
+    descriptor checks. The required ``create`` contract remains unchanged.
+    """
 
     call_id: ClassVar[str]
     revision: ClassVar[str]
@@ -561,7 +568,7 @@ class RegisteredSemanticLowererFactory(Protocol):
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> RegisteredSemanticLowerer:
         """Create a lowerer bound to the exact assembled simulation runtime.
 
