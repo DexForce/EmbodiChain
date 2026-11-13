@@ -1513,13 +1513,13 @@ def test_empty_camera_group_does_not_publish_render_state() -> None:
 def test_empty_camera_group_still_publishes_for_an_open_window() -> None:
     sim = object.__new__(SimulationManager)
     sim.is_window_opened = True
-    sim.sync_render_state = MagicMock()
+    sim._publish_render_state = MagicMock()
     sim._world = SimpleNamespace(render_camera_group=MagicMock())
     sim._log_scene_summary = MagicMock()
 
     sim.render_camera_group([])
 
-    sim.sync_render_state.assert_called_once_with()
+    sim._publish_render_state.assert_called_once_with()
     sim._world.render_camera_group.assert_not_called()
 
 
@@ -1577,18 +1577,121 @@ def _make_render_frame_sim(*, window=False, viser=False, automatic_sync=False):
 
 @pytest.mark.parametrize("automatic_sync", [None, False, True])
 @pytest.mark.parametrize("window", [False, True])
+@pytest.mark.parametrize("defer_final_frame", [False, True])
 def test_window_publication_respects_consumers_with_all_newton_policies(
-    automatic_sync, window
+    automatic_sync, window, defer_final_frame
 ):
     sim, _, _, publications, rendered = _make_render_frame_sim(
         window=window, automatic_sync=automatic_sync
     )
+    sim._world._flush_render_updates = MagicMock(return_value=0)
     for _ in range(3):
-        sim.update(0.01, 1, render_final_step=False)
-        with sim.render_frame():
-            sim.render_camera_group([])
+        sim.update(0.01, 1, render_final_step=not defer_final_frame)
+        if defer_final_frame:
+            with sim.render_frame():
+                sim.render_camera_group([])
     assert publications == ([1, 2, 3] if window or automatic_sync is True else [])
     assert rendered == []
+    sim._world._flush_render_updates.assert_not_called()
+
+
+@pytest.mark.parametrize("camera", [False, True])
+def test_window_publication_waits_once_for_cameras_and_recording(camera: bool) -> None:
+    sim, _, state, publications, rendered = _make_render_frame_sim(window=True)
+    completed, recorded = [], []
+    sim._world._flush_render_updates = lambda: completed.append(state["published"]) or 0
+    sim._world.render_camera_group = lambda _: rendered.append(completed[-1])
+    sim._window_record_state = _WindowRecordState(
+        time_step=0.01,
+        max_memory_bytes=1024,
+        output_dir="unused",
+        video_name="unused",
+        save_kwargs={},
+        capture_from_sim_update=True,
+    )
+    sim._capture_window_record_frame = lambda _: recorded.append(completed[-1])
+    for value in (4, 7):
+        state["value"] = value
+        sim._pending_record_dt = 0.01
+        with sim.render_frame():
+            assert completed == publications[:-1]
+            if camera:
+                sim.render_camera_group([1])
+                sim.render_camera_group([2])
+    assert publications == completed == recorded == [4, 7]
+    assert rendered == ([4, 4, 7, 7] if camera else [])
+
+
+def test_window_camera_wait_failure_retries_without_republishing() -> None:
+    sim, _, state, publications, rendered = _make_render_frame_sim(window=True)
+    sim._world._flush_render_updates = MagicMock(side_effect=[-1, 0])
+    state["value"] = 5
+    with sim.render_frame():
+        with pytest.raises(
+            RuntimeError, match="Native render-state publication failed"
+        ):
+            sim.render_camera_group([1])
+        assert rendered == []
+        sim.render_camera_group([1])
+        sim.render_camera_group([2])
+    assert publications == [5]
+    assert rendered == [5, 5]
+    assert sim._world._flush_render_updates.call_count == 2
+
+
+def test_fluid_window_publication_completes_before_reusing_native_staging() -> None:
+    sim, _, state, _, rendered = _make_render_frame_sim(window=True)
+    sim._fluid_objects = {"water": object()}
+    pending = []
+    visible = []
+
+    def stage(_result):
+        # Native fluid staging drops an update when both copy slots are busy.
+        if len(pending) < 2:
+            pending.append(state["value"])
+
+    def complete():
+        if pending:
+            visible[:] = [pending[-1]]
+            pending.clear()
+        return 0
+
+    sim.physics.sync_render_state = stage
+    sim._world._flush_render_updates = complete
+    sim._world.render_camera_group = lambda _: rendered.append(visible[-1])
+    sim.update(0.01, 3, render_final_step=False)
+    with sim.render_frame():
+        sim.render_camera_group([1])
+    assert rendered == [3]
+
+
+@pytest.mark.parametrize("prior_steps", [0, 2])
+def test_window_record_wait_failure_preserves_due_frame_for_retry(
+    prior_steps: int,
+) -> None:
+    sim, _, state, _, _ = _make_render_frame_sim(window=True)
+    sim._window_record_state = _WindowRecordState(
+        time_step=(prior_steps + 1) * 0.01,
+        max_memory_bytes=1024,
+        output_dir="unused",
+        video_name="unused",
+        save_kwargs={},
+        capture_from_sim_update=True,
+    )
+    recorded = []
+    sim._capture_window_record_frame = lambda _: recorded.append(state["published"])
+    sim.update(0.01, prior_steps)
+    sim._world._flush_render_updates = MagicMock(side_effect=[-1, 0])
+    sim.update(0.01, 1, render_final_step=False)
+    with pytest.raises(RuntimeError, match="Native render-state publication failed"):
+        with sim.render_frame():
+            pass
+    assert recorded == []
+    with sim.render_frame():
+        pass
+    assert recorded == [prior_steps + 1]
+    assert sim._pending_record_dt == 0
+    assert sim._window_record_state.accumulated_sim_time == 0
 
 
 @pytest.mark.parametrize("camera", [False, True])
@@ -1680,8 +1783,9 @@ def test_render_frames_and_independent_reads_refresh_direct_state_writes():
     assert rendered == [4, 4, 7, 7, 9, 12]
 
 
-def test_explicit_publication_inside_frame_refreshes_after_state_edit():
-    sim, _, state, publications, rendered = _make_render_frame_sim()
+@pytest.mark.parametrize("window", [False, True])
+def test_explicit_publication_inside_frame_refreshes_after_state_edit(window):
+    sim, _, state, publications, rendered = _make_render_frame_sim(window=window)
     with sim.render_frame():
         sim.render_camera_group([1])
         state["value"] = 5
@@ -3768,6 +3872,26 @@ def test_automatic_attachment_native_publication_only_when_parent_changes():
     assert len(published) == 1
     np.testing.assert_allclose(published[0][1][0].position, [14, 0, 0])
     assert sim._visualization_runtime.capture_calls == []
+
+
+def test_window_updates_attached_markers_without_waiting() -> None:
+    sim, _, pose = _attach_groups_for_host_update(1)
+    sim.sim_config.visualization.backend = "native"
+    sim.is_window_opened = True
+    published = []
+    sim._native_markers = SimpleNamespace(
+        publish=lambda name, markers: published.append(markers[0].position.copy())
+    )
+    sim._world._flush_render_updates = MagicMock(return_value=0)
+
+    def move_parent(_dt: float) -> None:
+        pose[:, 0] += 1
+
+    sim.update(step=2, after_substep=move_parent)
+
+    np.testing.assert_allclose(published, [[14, 0, 0], [15, 0, 0]])
+    assert sim.simulation_time == pytest.approx(0.02)
+    sim._world._flush_render_updates.assert_not_called()
 
 
 def test_automatic_attachment_native_failure_preserves_step_accounting():
