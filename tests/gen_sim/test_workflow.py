@@ -237,6 +237,14 @@ def test_workflow_generates_binds_and_preserves_actual_execution_verdict(
         load_configured_task_program_deployment,
     )
 
+    # Releasing above the resting pose is opt-in; cover both settings.
+    clearance = 0.03 if success else 0.0
+    run_cfg = _RunCfg(
+        **{
+            **run_cfg.to_dict(),
+            "binding": {**run_cfg.binding, "release_clearance": clearance},
+        }
+    )
     monkeypatch.setattr(
         generate,
         "generate_scene_from_image",
@@ -286,8 +294,13 @@ def test_workflow_generates_binds_and_preserves_actual_execution_verdict(
     )
     destination = binding["scene_binding"]["rigid_objects"][1]["affordances"][0]
     pose = np.array(destination["object_target_pose"]).reshape(4, 4)
-    # Table is 4 cm thick, cube is 4 cm tall; the owner adds its 1 mm landing gap.
-    assert pose[2, 3] == pytest.approx(0.041, abs=1e-7)
+    # Table is 4 cm thick, cube is 4 cm tall; the owner adds its 1 mm landing
+    # gap, and an opt-in release clearance lifts only the release pose. The
+    # validator still expects the resting pose.
+    assert pose[2, 3] == pytest.approx(0.041 + clearance, abs=1e-7)
+    program = json.loads((run_cfg.output / "deployment/program.json").read_text())
+    (validator,) = program["program"]["items"][1]["validators"]
+    assert validator["displacement"][2] == pytest.approx(0.041, abs=1e-7)
 
 
 def test_unresolved_native_binding_retains_failure_and_never_executes(
@@ -382,6 +395,339 @@ def test_runtime_mesh_handoff_bakes_axis_and_scale_without_changing_source(
     assert np.ptp(vertices, axis=0) == pytest.approx([1.2, 2.4, 0.12], abs=1e-6)
     assert table["body_scale"] == [1.0, 1.0, 1.0]
     assert source.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    ("relation", "expected"),
+    [
+        ("right_of", [0.0, 0.12, 0.005]),
+        ("left_of", [0.0, -0.12, 0.005]),
+        ("front_of", [-0.12, 0.0, 0.005]),
+        ("on", [0.0, 0.0, 0.105]),
+    ],
+)
+def test_relative_placement_offsets_follow_shared_world_axes(
+    tmp_path: Path, relation: str, expected: list[float]
+) -> None:
+    from embodichain.gen_sim._run_binding import _relative_displacement
+
+    # 0.1 m cubes; the side gap is 0.02 m and the release clearance 0.005 m.
+    trimesh.creation.box(extents=[0.1, 0.1, 0.1]).export(tmp_path / "cube.glb")
+    entry = {"shape": {"fpath": "cube.glb"}, "init_rot": [0, 0, 0]}
+    displacement = _relative_displacement(entry, entry, relation, tmp_path)
+    assert displacement == pytest.approx(expected, abs=1e-6)
+
+
+def test_directional_relations_follow_the_source_camera_view(
+    tmp_path: Path,
+) -> None:
+    from embodichain.gen_sim._run_binding import (
+        _relation_axes,
+        _relative_displacement,
+    )
+
+    # The RoboTwin head camera looks along +y with its left along -x, so an
+    # instruction's "right of" is world +x and "in front of" is world -y.
+    camera = {"left": [-1.0, 0.0, 0.0], "forward": [0.0, 0.6, -0.8]}
+    axes = _relation_axes({"camera": camera})
+    trimesh.creation.box(extents=[0.1, 0.1, 0.1]).export(tmp_path / "cube.glb")
+    entry = {"shape": {"fpath": "cube.glb"}, "init_rot": [0, 0, 0]}
+
+    right = _relative_displacement(entry, entry, "right_of", tmp_path, axes=axes)
+    front = _relative_displacement(entry, entry, "front_of", tmp_path, axes=axes)
+    assert right == pytest.approx([0.12, 0.0, 0.005], abs=1e-6)
+    assert front == pytest.approx([0.0, -0.12, 0.005], abs=1e-6)
+
+
+def _export_z_up(mesh: trimesh.Trimesh, path: Path) -> None:
+    """Write a body-frame Z-up mesh as the Y-up GLB a scene export holds."""
+    from embodichain.gen_sim.scene_engine.randomization._geometry import (
+        _Y_UP_TO_Z_UP,
+    )
+
+    mesh = mesh.copy()
+    mesh.vertices = np.asarray(mesh.vertices) @ _Y_UP_TO_Z_UP
+    mesh.export(path)
+
+
+def test_axis_alignment_frame_points_local_z_at_the_narrow_end(
+    tmp_path: Path,
+) -> None:
+    from scipy.spatial.transform import Rotation
+
+    from embodichain.gen_sim._run_binding import _align_body_frame, _z_up_mesh
+
+    # A bottle lying along body x with its narrow neck toward -x.
+    body = trimesh.creation.cylinder(radius=0.04, height=0.2)
+    neck = trimesh.creation.cylinder(radius=0.012, height=0.06)
+    neck.apply_translation([0.0, 0.0, 0.13])
+    bottle = trimesh.util.concatenate([body, neck])
+    bottle.apply_transform(
+        trimesh.transformations.rotation_matrix(-np.pi / 2, [0, 1, 0])
+    )
+    _export_z_up(bottle, tmp_path / "bottle.glb")
+    entry = {"shape": {"fpath": "bottle.glb"}, "init_rot": [0.0, 0.0, 30.0]}
+    # ObjectBaseCfg reads init_rot as extrinsic x-y-z; the aligned frame's
+    # pitch is near 90 degrees, where an intrinsic reading would differ.
+
+    def world(value: dict) -> np.ndarray:
+        rotation = Rotation.from_euler("xyz", value["init_rot"], degrees=True)
+        return rotation.apply(np.asarray(_z_up_mesh(value, tmp_path).vertices))
+
+    before = world(entry)
+    _align_body_frame(entry, tmp_path)
+
+    rotation = Rotation.from_euler("xyz", entry["init_rot"], degrees=True)
+    neck_direction = Rotation.from_euler("z", 30, degrees=True).apply([-1, 0, 0])
+    assert rotation.apply([0, 0, 1]) == pytest.approx(neck_direction, abs=0.02)
+    assert world(entry) == pytest.approx(before, abs=1e-6)
+
+
+@pytest.mark.parametrize(("relation", "gap"), [("on", 0.002), ("above", 0.05)])
+def test_held_tool_target_puts_its_wide_end_on_the_reference(
+    tmp_path: Path, relation: str, gap: float
+) -> None:
+    from embodichain.gen_sim._run_binding import _held_contact_pose
+
+    # A hammer along body x: a thin handle and a wide head at +x.
+    handle = trimesh.creation.box(extents=[0.2, 0.02, 0.02])
+    head = trimesh.creation.box(extents=[0.03, 0.03, 0.1])
+    head.apply_translation([0.1, 0.0, 0.04])
+    _export_z_up(trimesh.util.concatenate([handle, head]), tmp_path / "hammer.glb")
+    trimesh.creation.box(extents=[0.04, 0.04, 0.04]).export(tmp_path / "cube.glb")
+    # The hammer lies yawed by 90 degrees, its head toward world +y.
+    hammer = {
+        "uid": "tool_001",
+        "shape": {"fpath": "hammer.glb"},
+        "init_pos": [0.0, 0.0, 0.81],
+        "init_rot": [0.0, 0.0, 90.0],
+    }
+    block = {
+        "uid": "cube_001",
+        "shape": {"fpath": "cube.glb"},
+        "init_pos": [0.2, 0.1, 0.76],
+        "init_rot": [0.0, 0.0, 30.0],
+    }
+
+    pose, displacement = _held_contact_pose(hammer, block, relation, tmp_path)
+
+    assert (pose["kind"], pose["entity_id"]) == ("scene_entity", "cube_001")
+    # The head (centered 0.1 along the handle, bottom z -0.01) sits on the block top.
+    assert displacement == pytest.approx([0.0, -0.1, 0.03 + gap], abs=3e-3)
+    # The runtime replaces the block rotation with world_orientation and then
+    # applies relative_pose; the result is the hammer's initial orientation at
+    # the displaced position.
+    resolved = np.eye(4)
+    resolved[:3, :3] = np.reshape(pose["world_orientation"], (3, 3))
+    resolved[:3, 3] = block["init_pos"]
+    resolved = resolved @ np.reshape(pose["relative_pose"], (4, 4))
+    yaw = trimesh.transformations.rotation_matrix(np.pi / 2, [0, 0, 1])[:3, :3]
+    assert resolved[:3, :3] == pytest.approx(yaw, abs=1e-6)
+    assert resolved[:3, 3] == pytest.approx(
+        np.asarray(block["init_pos"]) + displacement, abs=1e-6
+    )
+
+
+def test_upright_hold_turns_the_grasped_side_toward_the_holding_arm(
+    tmp_path: Path,
+) -> None:
+    from scipy.spatial.transform import Rotation
+
+    from embodichain.gen_sim._run_binding import _align_body_frame, _held_contact_pose
+
+    # A bottle lying along world x, its neck toward -x, picked from above by
+    # an arm anchored in front-left of it.
+    body = trimesh.creation.cylinder(radius=0.04, height=0.2)
+    neck = trimesh.creation.cylinder(radius=0.012, height=0.06)
+    neck.apply_translation([0.0, 0.0, 0.13])
+    bottle = trimesh.util.concatenate([body, neck])
+    bottle.apply_transform(
+        trimesh.transformations.rotation_matrix(-np.pi / 2, [0, 1, 0])
+    )
+    _export_z_up(bottle, tmp_path / "bottle.glb")
+    entry = {
+        "uid": "bottle_001",
+        "shape": {"fpath": "bottle.glb"},
+        "init_pos": [0.0, 0.0, 0.78],
+        "init_rot": [0.0, 0.0, 0.0],
+    }
+    _align_body_frame(entry, tmp_path)
+    anchor = [0.0, -0.4]
+
+    pose, displacement = _held_contact_pose(
+        entry, None, None, tmp_path, upright=True, toward=anchor
+    )
+
+    rotation = Rotation.from_quat(pose["quaternion_xyzw"])
+    initial = Rotation.from_euler("xyz", entry["init_rot"], degrees=True)
+    assert rotation.apply([0, 0, 1]) == pytest.approx([0, 0, 1], abs=1e-6)
+    # The side that faced up, where a top grasp holds it, now faces the arm.
+    grasped_side = rotation.apply(initial.inv().apply([0, 0, 1]))
+    # The length axis is estimated from surface samples.
+    assert grasped_side == pytest.approx([0, -1, 0], abs=0.01)
+    # Held 10 cm above its initial footprint: the 0.04 m-radius body rested
+    # with its bottom at z 0.74, so the upright base, 0.1 m below the body
+    # center origin, is at 0.84.
+    assert pose["position"][2] - 0.1 == pytest.approx(0.84, abs=0.005)
+    assert displacement[2] == pytest.approx(pose["position"][2] - 0.78)
+
+    # Holding it above the table it rests on lifts it in place rather than
+    # carrying it to the table center.
+    trimesh.creation.box(extents=[1.2, 0.05, 0.7]).export(tmp_path / "table.glb")
+    table = {"uid": "table", "shape": {"fpath": "table.glb"}}
+    table["init_pos"] = [0.4, 0.2, 0.715]
+    pose, _ = _held_contact_pose(
+        entry, table, "above", tmp_path, upright=True, toward=anchor
+    )
+    resolved = (
+        np.asarray(table["init_pos"])
+        + np.reshape(pose["world_orientation"], (3, 3))
+        @ np.reshape(pose["relative_pose"], (4, 4))[:3, 3]
+    )
+    assert resolved[:2] == pytest.approx([0.0, 0.0], abs=0.01)
+    assert resolved[2] - 0.1 == pytest.approx(0.74 + 0.05, abs=0.005)
+
+
+def test_support_landing_prefers_the_robot_side_when_arms_are_anchored(
+    tmp_path: Path,
+) -> None:
+    from embodichain.gen_sim._run_binding import _placement
+
+    # Y-up exports: a 1.2 x 0.7 m tabletop 5 cm thick, and a 5 cm cube.
+    trimesh.creation.box(extents=[1.2, 0.05, 0.7]).export(tmp_path / "table.glb")
+    trimesh.creation.box(extents=[0.05, 0.05, 0.05]).export(tmp_path / "cube.glb")
+    table = {"shape": {"fpath": "table.glb"}, "init_pos": [0.0, 0.0, 0.715]}
+    cube = {"shape": {"fpath": "cube.glb"}, "init_pos": [0.2, 0.1, 0.765]}
+
+    _, centered = _placement(cube, table, tmp_path, [])
+    _, front = _placement(cube, table, tmp_path, [], robot_xy=[0.0, -0.42])
+
+    assert centered[:2] == pytest.approx([0.0, 0.0], abs=1e-6)
+    # The landing is inset 15 cm from the robot-side rim at y = -0.35.
+    assert front[:2] == pytest.approx([0.0, -0.2], abs=1e-6)
+
+
+def test_resource_anchors_select_the_nearest_arm(run_cfg: _RunCfg) -> None:
+    from embodichain.gen_sim._run_binding import _nearest_resource
+
+    anchors = {"left": [-0.3, -0.42], "right": [0.3, -0.42]}
+    assert _nearest_resource(anchors, [-0.17, -0.07, 0.74]) == "left"
+    assert _nearest_resource(anchors, [0.15, 0.0, 0.74]) == "right"
+    with pytest.raises(ValueError, match="resource_anchors"):
+        _RunCfg(**{**run_cfg.to_dict(), "binding": {"resource_anchors": {"left": [0]}}})
+    with pytest.raises(ValueError, match="release_clearance"):
+        _RunCfg(**{**run_cfg.to_dict(), "binding": {"release_clearance": -0.01}})
+
+
+def test_registered_calls_get_templates_keyed_by_call_id() -> None:
+    from embodichain.gen_sim._run_binding import _register_call_options
+
+    options = {"place": {"kind": "place", "hand_interp_steps": 12}}
+    monitors: dict = {}
+    call = {"kind": "registered", "call_id": "simulation.place_relative"}
+    _register_call_options(
+        options, monitors, call, "simulation.place_relative", "place", "place"
+    )
+    _register_call_options(
+        options, monitors, {"kind": "pick"}, "pick", "pick", "pick_up"
+    )
+
+    assert options["simulation.place_relative"] == options["place"]
+    assert options["simulation.place_relative"] is not options["place"]
+    assert options["pick"] == {"kind": "pick_up"}
+    assert set(monitors) == {"place", "simulation.place_relative", "pick"}
+
+
+def test_configured_lowerers_take_precedence_over_automatic_ones() -> None:
+    from embodichain.gen_sim._run_binding import _with_automatic_lowerers
+
+    route = {"object_id": "a", "reference_entity_id": "b", "relation": "on"}
+    configured = {"registered_semantic_lowerers": [{"kind": "place_relative"}]}
+    services = _with_automatic_lowerers(configured, [route], ["a", "a"])
+    assert services["registered_semantic_lowerers"] == [
+        {"kind": "place_relative"},
+        {"kind": "axis_align", "object_ids": ["a"]},
+    ]
+    assert configured == {"registered_semantic_lowerers": [{"kind": "place_relative"}]}
+    assert _with_automatic_lowerers({}, [], []) == {}
+    held = {"object_id": "a", "target_id": "t", "pose": {"kind": "scene_entity"}}
+    assert _with_automatic_lowerers({}, [], [], [held]) == {
+        "registered_semantic_lowerers": [{"kind": "move_held_object", "routes": [held]}]
+    }
+
+
+def test_room_adds_visual_shell_and_authored_floor_collider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import embodichain.data
+    from embodichain.gen_sim._run_binding import _room_entries
+
+    bundle = tmp_path / "WoodLab" / "wood_lab"
+    (bundle / "collision").mkdir(parents=True)
+    (bundle / "visual").mkdir()
+    (bundle / "wood_lab.usda").write_text("#usda 1.0\n")
+    (bundle / "collision" / "floor.usda").write_text(
+        "double3 xformOp:translate = (0.7, 0, -0.03)\n"
+        "double3 xformOp:scale = (5.6, 5.2, 0.06)\n"
+    )
+    # A Y-up room shell: 2 m tall, its floor at height 0.
+    shell = trimesh.creation.box(extents=[4.0, 2.0, 3.0])
+    shell.apply_translation([0.0, 1.0, 0.0])
+    shell.export(bundle / "visual" / "room.glb")
+    monkeypatch.setattr(
+        embodichain.data, "get_data_path", lambda path: str(tmp_path / path)
+    )
+
+    room = _room_entries("WoodLab", tmp_path / "assets")
+
+    assert room["floor"]["shape"] == {"shape_type": "Cube", "size": [5.6, 5.2, 0.06]}
+    assert room["floor"]["init_pos"] == [0.7, 0.0, -0.03]
+    assert room["floor"]["body_type"] == "static"
+    mesh = trimesh.load(room["visual"]["shape"]["fpath"], force="mesh")
+    assert mesh.bounds[0] == pytest.approx([-2.0, -1.5, 0.0], abs=1e-6)
+    assert mesh.bounds[1] == pytest.approx([2.0, 1.5, 2.0], abs=1e-6)
+
+
+def test_run_config_rejects_invalid_room_and_recording(run_cfg: _RunCfg) -> None:
+    with pytest.raises(ValueError, match="room must name"):
+        _RunCfg(**{**run_cfg.to_dict(), "room": "wood lab"})
+    with pytest.raises(TypeError, match="recording must be a boolean"):
+        _RunCfg(**{**run_cfg.to_dict(), "recording": "yes"})
+
+
+def test_episode_recording_keeps_every_camera_frame_and_state(tmp_path: Path) -> None:
+    import torch
+    from embodichain.gen_sim._run_execution import _EpisodeRecording
+
+    pose = Mock()
+    pose.get_local_pose.return_value = torch.eye(4).unsqueeze(0)
+    sim = Mock()
+    sim.get_rigid_object_uid_list.return_value = ["cube"]
+    sim.get_rigid_object.return_value = pose
+    recording = _EpisodeRecording(SimpleNamespace(step_dt=0.04, sim=sim), tmp_path)
+    for value in (0, 255):
+        recording.observe(
+            {
+                "sensor": {
+                    "cam_head": {
+                        "color": torch.full((1, 16, 16, 4), value, dtype=torch.uint8)
+                    }
+                },
+                "robot": {"qpos": torch.zeros(1, 2)},
+            }
+        )
+
+    manifest = recording.write({"completed": False})
+
+    assert manifest["fps"] == pytest.approx(25.0)
+    assert manifest["cameras"]["cam_head"] == {"frames": 2, "width": 16, "height": 16}
+    assert (tmp_path / "cam_head.mp4").is_file()
+    states = [
+        json.loads(line)
+        for line in (tmp_path / "states.jsonl").read_text().splitlines()
+    ]
+    assert [state["control_step"] for state in states] == [0, 1]
+    assert states[1]["objects"] == {"cube": [0.0, 0.0, 0.0]}
 
 
 def test_runtime_mesh_sidecars_preserve_each_assets_texture(tmp_path: Path) -> None:

@@ -46,8 +46,8 @@ uses the configured GenSim model to interpret the complete instruction, ground
 logical image references and plan canonical calls from the data-only Task Program
 catalog. It always ends at the unbound semantic graph; there are no model or
 stage-selection flags. `image_planning.py` retains raw provider attempts and
-allows one diagnostic repair per grounding/planning stage. It contains no
-per-task graph construction templates.
+allows a bounded number of diagnostic repairs per grounding/planning stage (one
+by default). It contains no per-task graph construction templates.
 
 `lab/task_program/language/semantic_contracts.py` owns provider-free call argument,
 resource, precondition/effect and runtime-binding declarations. Configured live
@@ -68,7 +68,10 @@ complete strict validator. Task Engine side enums `left_arm`/`right_arm` map
 explicitly to logical resources `left`/`right`; custom resource identifiers and
 robot control-part names are preserved for runtime binding. Terminal holds are checked at
 the source step boundary; coordinated hold is rejected until a matching hold
-call is available in the catalog.
+call is available in the catalog. E1/E2 release by default; with
+`terminal_behavior=hold` their producer is one held transport after a pick
+(`terminal_hold_requires_one_of`), which also realizes an upright goal, so a hold
+step rejects `simulation.axis_align`.
 
 Image entities distinguish `observed`, `instruction_declared` and
 `runtime_required`; only observed entities carry normalized boxes. Ambiguous references retain

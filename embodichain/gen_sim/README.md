@@ -86,10 +86,36 @@ conversion directly into the vertices, with isolated material/texture sidecars.
 This avoids renderer-dependent GLB up-axis conversion while preserving the
 original scene export.
 
+Measured geometry also binds the registered `simulation.place_relative`,
+`simulation.axis_align` and `simulation.move_held_object` calls when the run
+configuration does not supply their lowerers. Relative placement offsets follow
+the shared world axes, or the photographed view when `source_calibration` is set.
+An aligned or upright-carried object's local +Z is re-framed to its length axis,
+toward the narrower end, without changing world geometry. A held transport keeps
+the object's initial orientation (or the upright one) and centers its contact end,
+the wider end of an elongated tool, over the reference; relative to a support the
+object already rests on, it lifts in place. Action-option and effect-monitor
+templates named after a skill (for example `axis_align`) seed the registered call
+IDs that use that skill.
+
 Registered calls require compatible configured lowerers and runtime services.
 The optional `binding` mapping supplies task-owned `profile`, `runtime_services`,
 `scene_binding` additions and `segments` post-policy/validator declarations
-through the existing closed decoders. Missing native parts, hidden or ambiguous
+through the existing closed decoders. `binding.resource_anchors` maps declared
+resources to planar `[x, y]` anchors: a single-arm call without a resource then
+uses the arm already holding its object, or the arm anchored nearest to it, and
+a placement on a support prefers its robot-side region. `binding.release_clearance`
+(metres, default 0) releases placements above their resting pose while validators
+keep the resting target; the place gate otherwise expects a released object to
+separate from the open gripper before retracting.
+
+Further optional run fields: `task` reuses a published task-plan directory instead
+of planning; `planning_repairs` (default 1) bounds diagnostic re-planning;
+`source_calibration` names a JSON camera/tabletop calibration of the input image,
+which rescales and places each object so its projection matches its image mask;
+`room` adds a scene asset room (for example `WoodLab`) as a visual shell with its
+authored floor collider; `recording` writes every camera frame and per-step state
+to `recording/`. Missing native parts, hidden or ambiguous
 references, unsupported geometry and incompatible capabilities reject rather
 than selecting a substitute or claiming execution readiness. Model grounding
 never creates capabilities, rewrites control-part names or chooses physics.
