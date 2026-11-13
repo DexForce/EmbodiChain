@@ -1,0 +1,14 @@
+task_key: leap_cube_rotate_z
+title: LEAP Hand Cube Z-Axis Rotation
+summary: Continuously rotate a rigid cube around the world Z-axis in-hand with the
+  16-DOF LEAP Hand.
+tags:
+- manipulation
+- dexterous
+- reinforcement_learning
+default_deployment: newton
+deployments:
+  newton:
+    config: env.newton.yaml
+  mjwarp:
+    config: env.mjwarp.yaml

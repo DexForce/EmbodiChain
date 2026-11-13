@@ -13,19 +13,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
+
 from __future__ import annotations
 
-from typing import Any
-import torch
-from embodichain.learning.rl.env import register_learning_env
-from ._runtime import DexSimManipulationEnv
+from embodichain.lab.gym.utils.registration import register_env
 
-__all__ = ["make_env"]
+from ._runtime import DexterousManipulationEnv
+
+__all__ = ["LeapCubeFaceTurnEnv"]
 
 
-@register_learning_env("LeapCubeFaceTurnDexSim-v1")
-def make_env(
-    *, num_envs: int, device: torch.device | str, **cfg: Any
-) -> DexSimManipulationEnv:
-    """Create the leap cube face turn task with the selected DexSim solver."""
-    return DexSimManipulationEnv(task_id="M3", num_envs=num_envs, device=device, **cfg)
+@register_env(
+    "LeapCubeFaceTurnRL-v1", max_episode_steps=500, override=True, supports_rl=True
+)
+class LeapCubeFaceTurnEnv(DexterousManipulationEnv):
+    """LEAP Hand top-layer articulated cube face-turning environment."""
+
+    task_id = "M3"

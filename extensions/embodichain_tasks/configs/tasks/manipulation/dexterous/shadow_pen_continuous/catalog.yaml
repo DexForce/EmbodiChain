@@ -1,0 +1,14 @@
+task_key: shadow_pen_continuous
+title: Shadow Hand Continuous Pen Spin
+summary: Continuously spin a pen through sequential orientation targets with the 24-DOF
+  Shadow Hand.
+tags:
+- manipulation
+- dexterous
+- reinforcement_learning
+default_deployment: newton
+deployments:
+  newton:
+    config: env.newton.yaml
+  mjwarp:
+    config: env.mjwarp.yaml

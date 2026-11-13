@@ -5814,74 +5814,95 @@ The scanner evaluates 187 torso-relative terrain rays and replays a fixed-buffer
    :members:
 
 
+embodichain_tasks.manipulation.dexterous
+----------------------------------------
+
+USD-native Shadow Hand and LEAP Hand dexterous manipulation RL environments built on ``EmbodiedEnv``.
+
+.. currentmodule:: embodichain_tasks.manipulation.dexterous
+
+.. autosummary::
+
+   LeapCubeFaceTurnEnv
+   LeapCubeReorientEnv
+   LeapCubeRotateZAxisEnv
+   ShadowPenContinuousEnv
+   ShadowPenFixedEnv
+
+
 embodichain_tasks.manipulation.dexterous.leap_cube_face_turn
 ------------------------------------------------------------
 
-Create the leap cube face turn vector environment with an explicit DexSim solver and packaged model inputs.
+LEAP Hand top-layer articulated cube face-turning environment (``LeapCubeFaceTurnRL-v1``).
 
 .. currentmodule:: embodichain_tasks.manipulation.dexterous.leap_cube_face_turn
 
 .. autosummary::
 
-   make_env
+   LeapCubeFaceTurnEnv
 
-.. autofunction:: make_env
+.. autoclass:: LeapCubeFaceTurnEnv
+   :members:
 
 
 embodichain_tasks.manipulation.dexterous.leap_cube_reorient
 -----------------------------------------------------------
 
-Create the leap cube reorient vector environment with an explicit DexSim solver and packaged model inputs.
+LEAP Hand in-hand cube 3D orientation tracking environment (``LeapCubeReorientRL-v1``).
 
 .. currentmodule:: embodichain_tasks.manipulation.dexterous.leap_cube_reorient
 
 .. autosummary::
 
-   make_env
+   LeapCubeReorientEnv
 
-.. autofunction:: make_env
+.. autoclass:: LeapCubeReorientEnv
+   :members:
 
 
 embodichain_tasks.manipulation.dexterous.leap_cube_rotate_z
 -----------------------------------------------------------
 
-Create the leap cube rotate z vector environment with an explicit DexSim solver and packaged model inputs.
+LEAP Hand continuous cube Z-axis rotation environment (``LeapCubeRotateZAxisRL-v1``).
 
 .. currentmodule:: embodichain_tasks.manipulation.dexterous.leap_cube_rotate_z
 
 .. autosummary::
 
-   make_env
+   LeapCubeRotateZAxisEnv
 
-.. autofunction:: make_env
+.. autoclass:: LeapCubeRotateZAxisEnv
+   :members:
 
 
 embodichain_tasks.manipulation.dexterous.shadow_pen_continuous
 --------------------------------------------------------------
 
-Create the shadow pen continuous vector environment with an explicit DexSim solver and packaged model inputs.
+Shadow Hand continuous multi-pose pen-spinning environment (``ShadowPenContinuousRL-v1``).
 
 .. currentmodule:: embodichain_tasks.manipulation.dexterous.shadow_pen_continuous
 
 .. autosummary::
 
-   make_env
+   ShadowPenContinuousEnv
 
-.. autofunction:: make_env
+.. autoclass:: ShadowPenContinuousEnv
+   :members:
 
 
 embodichain_tasks.manipulation.dexterous.shadow_pen_fixed
 ---------------------------------------------------------
 
-Create the shadow pen fixed vector environment with an explicit DexSim solver and packaged model inputs.
+Shadow Hand fixed-grasp pen-spinning environment (``ShadowPenFixedRL-v1``).
 
 .. currentmodule:: embodichain_tasks.manipulation.dexterous.shadow_pen_fixed
 
 .. autosummary::
 
-   make_env
+   ShadowPenFixedEnv
 
-.. autofunction:: make_env
+.. autoclass:: ShadowPenFixedEnv
+   :members:
 
 
 Parallel-jaw hand configuration and composition

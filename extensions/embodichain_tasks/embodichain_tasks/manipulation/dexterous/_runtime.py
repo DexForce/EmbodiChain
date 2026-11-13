@@ -14,702 +14,825 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Batched manipulation environments stepped by the DexSim Newton backend."""
+"""USD-native dexterous manipulation environments built on :class:`EmbodiedEnv`."""
 
 from __future__ import annotations
 
-import copy
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+import math
 from pathlib import Path
-import re
 from typing import Any
 
 import gymnasium as gym
-import mujoco
 import numpy as np
+from tensordict import TensorDict
 import torch
-import warp as wp
 
-import dexsim
+from dexsim.engine.newton_physics.runtime_control import GraphRuntimeControl
 from embodichain.data import get_data_path
-from dexsim.engine.newton_physics import DexUniSolverCfg, MJWarpSolverCfg, NewtonCfg
-from dexsim.engine.newton_physics.backend_registry import get_newton_backend
+from embodichain.lab.gym.envs import EmbodiedEnv
+from embodichain.lab.sim.cfg import (
+    JointDrivePropertiesCfg,
+    RobotCfg,
+    UsdImportCfg,
+    UsdSourceCfg,
+)
+from embodichain.lab.sim.objects import Articulation, RigidObject, Robot
+from embodichain.lab.sim.spawn.usd_import import _parse_usd_source, _source_path
+from embodichain.lab.sim.types import EnvAction, EnvObs
+from embodichain.learning.rl.policy_evaluation import PolicyViewerCameraCfg
 
+from ._leap_tasks import LeapTask
 from ._shadow_task import ShadowState, ShadowTask
 
-__all__ = ["DexSimManipulationEnv", "ENV_NAMES"]
+__all__ = ["DexterousManipulationEnv", "ENV_NAMES", "TASK_SPECS", "rotate_wxyz"]
 
-ENV_NAMES = {
-    "M1": "ShadowPenFixedDexSim-v1",
-    "M2": "ShadowPenContinuousDexSim-v1",
-    "M3": "LeapCubeFaceTurnDexSim-v1",
-    "M4": "LeapCubeReorientDexSim-v1",
-    "M5": "LeapCubeRotateZAxisDexSim-v1",
+ENV_NAMES: dict[str, str] = {
+    "M1": "ShadowPenFixedRL-v1",
+    "M2": "ShadowPenContinuousRL-v1",
+    "M3": "LeapCubeFaceTurnRL-v1",
+    "M4": "LeapCubeReorientRL-v1",
+    "M5": "LeapCubeRotateZAxisRL-v1",
 }
 
 
-def _named_index(
-    model: Any, kind: str, name: str, *, default: int | None = None
-) -> int:
-    count = getattr(model, "n" + ("jnt" if kind == "joint" else kind))
-    candidates = [
-        i
-        for i in range(count)
-        if getattr(model, kind)(i).name == name
-        or getattr(model, kind)(i).name.endswith("_" + name)
-        or getattr(model, kind)(i).name.rsplit("/", 1)[-1] == name
-        or (
-            kind == "geom"
-            and re.sub(r"_\d+$", "", getattr(model, kind)(i).name).split("/")[-1]
-            == name
-        )
-    ]
-    if not candidates and default is not None:
-        return default
-    if len(candidates) != 1:
-        raise ValueError(f"Cannot resolve {kind} {name!r}: {candidates}")
-    return candidates[0]
+@dataclass(frozen=True)
+class _TaskSpec:
+    task_id: str
+    env_id: str
+    usd_asset: str
+    initial_asset: str
+    ctrl_dt: float
+    sim_dt: float
+    max_episode_steps: int
+    action_dim: int
+    policy_dim: int
+    critic_dim: int
+    has_episode_success: bool
+    viewer_eye_offset: tuple[float, float, float]
+    viewer_target_height: float
+
+
+TASK_SPECS: dict[str, _TaskSpec] = {
+    "M1": _TaskSpec(
+        task_id="M1",
+        env_id="ShadowPenFixedRL-v1",
+        usd_asset="ShadowHandPen/usd/shadow_pen.usdc",
+        initial_asset="ShadowHandPen/ShadowPenSpin-initial.npz",
+        ctrl_dt=0.04,
+        sim_dt=0.002,
+        max_episode_steps=500,
+        action_dim=18,
+        policy_dim=87,
+        critic_dim=87,
+        has_episode_success=True,
+        viewer_eye_offset=(0.35, -0.35, 0.22),
+        viewer_target_height=0.20,
+    ),
+    "M2": _TaskSpec(
+        task_id="M2",
+        env_id="ShadowPenContinuousRL-v1",
+        usd_asset="ShadowHandPen/usd/shadow_pen.usdc",
+        initial_asset="ShadowHandPen/ShadowPenSpin-initial.npz",
+        ctrl_dt=0.04,
+        sim_dt=0.002,
+        max_episode_steps=500,
+        action_dim=18,
+        policy_dim=87,
+        critic_dim=87,
+        has_episode_success=True,
+        viewer_eye_offset=(0.35, -0.35, 0.22),
+        viewer_target_height=0.20,
+    ),
+    "M3": _TaskSpec(
+        task_id="M3",
+        env_id="LeapCubeFaceTurnRL-v1",
+        usd_asset="LeapHandCubeFaceTurn/usd/leap_cube_top_layer.usdc",
+        initial_asset="LeapHandCubeFaceTurn/LeapCubeFaceTurn-initial.npz",
+        ctrl_dt=0.05,
+        sim_dt=0.005,
+        max_episode_steps=500,
+        action_dim=16,
+        policy_dim=65,
+        critic_dim=65,
+        has_episode_success=True,
+        viewer_eye_offset=(0.32, -0.32, 0.20),
+        viewer_target_height=0.05,
+    ),
+    "M4": _TaskSpec(
+        task_id="M4",
+        env_id="LeapCubeReorientRL-v1",
+        usd_asset="LeapHandCube/usd/M4.usdc",
+        initial_asset="LeapHandCube/M4-initial.npz",
+        ctrl_dt=0.05,
+        sim_dt=0.01,
+        max_episode_steps=1000,
+        action_dim=16,
+        policy_dim=57,
+        critic_dim=128,
+        has_episode_success=True,
+        viewer_eye_offset=(0.34, -0.34, 0.22),
+        viewer_target_height=0.08,
+    ),
+    "M5": _TaskSpec(
+        task_id="M5",
+        env_id="LeapCubeRotateZAxisRL-v1",
+        usd_asset="LeapHandCube/usd/M5.usdc",
+        initial_asset="LeapHandCube/M5-initial.npz",
+        ctrl_dt=0.05,
+        sim_dt=0.01,
+        max_episode_steps=500,
+        action_dim=16,
+        policy_dim=32,
+        critic_dim=105,
+        has_episode_success=False,
+        viewer_eye_offset=(0.32, -0.32, 0.20),
+        viewer_target_height=0.08,
+    ),
+}
+
+
+class _DexUniSceneJointOwnership(GraphRuntimeControl):
+    """Assign all rigid and kinematic scene joints to DexUni's MuJoCo branch."""
+
+    def __init__(self) -> None:
+        self._assigned: tuple[int, ...] | None = None
+
+    def initialize_model(self, model: Any, result: Any) -> None:
+        from dexsim.engine.newton_physics.backend_registry import get_newton_backend
+
+        backend = get_newton_backend(result.world)
+        if backend is None or backend.solver_type != "dexuni":
+            return
+        cfg = backend.cfg.solver_cfg
+        if (
+            cfg.mujoco_articulations is None
+            and cfg.mujoco_articulation_paths is None
+            and (cfg.mujoco_joints is None or cfg.mujoco_joints == self._assigned)
+        ):
+            self._assigned = tuple(range(model.joint_count))
+            cfg.mujoco_joints = self._assigned
+
+    def __call__(
+        self, context: Any, substep_index: int, substep_count: int, substep_dt: float
+    ) -> None:
+        del context, substep_index, substep_count, substep_dt
+
+    def prepare_episode_reset(
+        self, arena_indices: tuple[int, ...]
+    ) -> Callable[[], None]:
+        del arena_indices
+        return lambda: None
 
 
 def rotate_wxyz(q: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+    """Rotate 3D vectors ``v`` by normalized ``wxyz`` quaternions ``q``."""
     xyz = q[..., 1:]
-    t = 2 * torch.cross(xyz, v, dim=-1)
+    t = 2.0 * torch.cross(xyz, v, dim=-1)
     return v + q[..., :1] * t + torch.cross(xyz, t, dim=-1)
 
 
-class DexSimManipulationEnv:
-    """Expose real DexSim physics through EmbodiChain's vector-env interface.
+def _xyzw_to_wxyz(quat_xyzw: torch.Tensor) -> torch.Tensor:
+    return torch.cat((quat_xyzw[..., 3:4], quat_xyzw[..., :3]), dim=-1)
 
-    SceneBuilder loads the USD physics model. MJCF supplies task metadata and
-    the import audit reference. DexSim owns simulation stepping; MuJoCo forward
-    calls below update kinematics after explicit reset.
-    """
 
-    def __init__(
-        self,
-        task_id: str,
-        num_envs: int = 32,
-        device: str = "cuda:0",
-        seed: int | None = None,
-        cuda_graph: bool = True,
-        solver_kind: str = "mujoco_warp",
-        diagnostics: bool = True,
-        solver_iterations: tuple[int, int] | None = None,
-    ) -> None:
-        if solver_kind not in ("mujoco_warp", "dexuni"):
-            raise ValueError(f"Unknown manipulation solver: {solver_kind}")
-        self.solver_kind = solver_kind
-        self.diagnostics = diagnostics
-        device = str(torch.device(device))
-        self.task_id = task_id
-        self.num_envs = num_envs
-        self.device = torch.device(device)
-        seed = torch.initial_seed() if seed is None else seed
-        if task_id in ("M1", "M2"):
+def _wxyz_to_xyzw(quat_wxyz: torch.Tensor) -> torch.Tensor:
+    return torch.cat((quat_wxyz[..., 1:4], quat_wxyz[..., :1]), dim=-1)
+
+
+def _invert_wxyz(quat_wxyz: torch.Tensor) -> torch.Tensor:
+    return torch.cat((quat_wxyz[..., :1], -quat_wxyz[..., 1:]), dim=-1)
+
+
+class DexterousManipulationEnv(EmbodiedEnv):
+    """Base USD-native :class:`EmbodiedEnv` for Shadow Hand and LEAP Hand RL tasks."""
+
+    task_id: str = "M1"
+
+    def __init__(self, cfg: Any = None, **kwargs: Any) -> None:
+        if self.task_id not in TASK_SPECS:
+            raise ValueError(
+                f"Unknown dexterous manipulation task_id: {self.task_id!r}"
+            )
+        self._spec = TASK_SPECS[self.task_id]
+        if cfg is not None:
+            if not getattr(cfg, "control_parts", None) and not getattr(
+                cfg, "active_joint_ids", None
+            ):
+                cfg.control_parts = ["hand"]
+            for field_name in ("events", "observations", "rewards", "actions"):
+                val = getattr(cfg, field_name, None)
+                if (
+                    val is not None
+                    and isinstance(val, object)
+                    and hasattr(val, "__dict__")
+                    and not vars(val)
+                ):
+                    setattr(cfg, field_name, None)
+        self.policy_viewer_camera_cfg = PolicyViewerCameraCfg(
+            eye_offset=self._spec.viewer_eye_offset,
+            target_height=self._spec.viewer_target_height,
+        )
+        super().__init__(cfg, **kwargs)
+
+    @property
+    def is_shadow(self) -> bool:
+        """Return whether this task uses the Shadow Hand pen-spinning scene."""
+        return self.task_id in ("M1", "M2")
+
+    def _declare_robot(self, **kwargs: Any) -> Robot:
+        del kwargs
+        self.sim.remove_ground_plane()
+        usd_path = Path(get_data_path(self._spec.usd_asset))
+        if not usd_path.is_file():
+            raise FileNotFoundError(
+                f"Missing dexterous manipulation USD asset: {usd_path}"
+            )
+        self._usd_path = usd_path
+
+        scene_desc = _parse_usd_source(
+            UsdSourceCfg(file_path=str(usd_path)), name="scene", namespace=None
+        )
+        hand_art = next(
+            (art for art in scene_desc.articulations if art.fixed_base), None
+        )
+        if hand_art is None:
+            raise ValueError(f"No fixed-base hand articulation found in {usd_path}")
+
+        dof_joints = [j for j in hand_art.joints if j.joint_type.name != "FIXED"]
+        actuated_joints = [
+            j for j in dof_joints if j.newton is not None and j.newton.target_mode == 1
+        ]
+        self._actuated_joint_names = [j.name for j in actuated_joints]
+        policy_joint_names = (
+            self._actuated_joint_names[2:]
+            if self.is_shadow
+            else self._actuated_joint_names
+        )
+        self._usd_ctrlrange = np.asarray(
+            [j.newton.actuator_ctrlrange for j in actuated_joints], dtype=np.float32
+        )
+        self._usd_kp = np.asarray(
+            [float(j.newton.target_ke or 0.0) for j in actuated_joints],
+            dtype=np.float32,
+        )
+        self._usd_kd = np.asarray(
+            [float(j.newton.target_kd or 0.0) for j in actuated_joints],
+            dtype=np.float32,
+        )
+        self._usd_sites: dict[str, tuple[str, tuple[float, float, float]]] = {}
+        for site in getattr(hand_art, "sites", ()):
+            pos = tuple(
+                float(v) for v in np.asarray(site.local_pose, dtype=np.float32)[:3, 3]
+            )
+            self._usd_sites[site.name] = (site.link_name, pos)
+
+        default_uid = "shadow_hand" if self.is_shadow else "leap_hand"
+        cfg_robot = getattr(self.cfg, "robot", None)
+        robot_uid = (
+            cfg_robot.uid
+            if cfg_robot is not None and getattr(cfg_robot, "uid", None)
+            else default_uid
+        )
+        robot_cfg = RobotCfg(
+            uid=robot_uid,
+            build_pk_chain=False,
+            asset_physics_mode="preserve",
+            source_pose_mode="preserve",
+            enable_sensor=self.cfg.enable_sensor,
+            control_parts={"hand": policy_joint_names},
+            joint_drive_props=JointDrivePropertiesCfg(
+                stiffness=None,
+                damping=None,
+                max_effort=None,
+                max_velocity=None,
+                friction=None,
+                drive_type=None,
+            ),
+        )
+        self._robot_sensor_cfgs = []
+        if (
+            self.sim.is_newton_backend
+            and self.sim._active_newton_solver_type == "dexuni"
+        ):
+            self.sim._spawn_scene.builder.add_runtime_control(
+                _DexUniSceneJointOwnership()
+            )
+        self.sim.add_usd(
+            UsdImportCfg(
+                name="scene",
+                source=UsdSourceCfg(file_path=str(usd_path)),
+                asset_cfgs={_source_path(hand_art): robot_cfg},
+            )
+        )
+        return self.sim.get_robot(robot_uid)
+
+    def _init_sim_state(self, **kwargs: Any) -> None:
+        super()._init_sim_state(**kwargs)
+        spec = self._spec
+        expected_decimation = round(spec.ctrl_dt / spec.sim_dt)
+        if not math.isclose(self.physics_dt, spec.sim_dt, abs_tol=1e-9):
+            raise ValueError(
+                f"{spec.env_id} requires physics_dt={spec.sim_dt}, got {self.physics_dt}."
+            )
+        if self.cfg.sim_steps_per_control != expected_decimation:
+            raise ValueError(
+                f"{spec.env_id} requires sim_steps_per_control={expected_decimation}, "
+                f"got {self.cfg.sim_steps_per_control}."
+            )
+
+        self.action_dim = spec.action_dim
+        self.policy_dim = spec.policy_dim
+        self.critic_dim = spec.critic_dim
+        self.single_action_space = gym.spaces.Box(
+            -1.0, 1.0, shape=(self.action_dim,), dtype=np.float32
+        )
+
+        self._actuated_joint_ids = [
+            self.robot.joint_names.index(name) for name in self._actuated_joint_names
+        ]
+        self._actuated_joint_ids_tensor = torch.tensor(
+            self._actuated_joint_ids, dtype=torch.long, device=self.device
+        )
+        self._kp = torch.as_tensor(
+            self._usd_kp, dtype=torch.float32, device=self.device
+        )
+        self._kd = torch.as_tensor(
+            self._usd_kd, dtype=torch.float32, device=self.device
+        )
+
+        detached_uids = [self.robot.uid]
+        self._object: RigidObject | None = None
+        self._goal_obj: RigidObject | None = None
+        self._cube_art: Articulation | None = None
+        self._face_joint_id: int = 0
+
+        if self.is_shadow:
+            self._object = self.sim.get_rigid_object("object")
+            detached_uids.append("object")
+            self._palm_link_idx = self.robot.link_names.index("robot0:palm")
+        elif self.task_id == "M3":
+            self._cube_art = self.sim.get_articulation("cube")
+            self._face_joint_id = self._cube_art.joint_names.index("face_turn")
+            detached_uids.append("cube")
+        else:
+            self._object = self.sim.get_rigid_object("cube")
+            detached_uids.append("cube")
+            if "goal" in self.sim._rigid_objects:
+                self._goal_obj = self.sim.get_rigid_object("goal")
+                self._goal_pos = self._goal_obj.get_local_pose()[:1, :3].clone()
+                detached_uids.append("goal")
+
+        self.add_detached_uids_for_reset(detached_uids)
+
+        if self.task_id in ("M4", "M5"):
+            site_names = ("grasp_site", "th_tip", "if_tip", "mf_tip", "rf_tip")
+            self._site_link_indices = torch.tensor(
+                [
+                    self.robot.link_names.index(self._usd_sites[name][0])
+                    for name in site_names
+                ],
+                dtype=torch.long,
+                device=self.device,
+            )
+            self._site_local_pos = torch.tensor(
+                [self._usd_sites[name][1] for name in site_names],
+                dtype=torch.float32,
+                device=self.device,
+            )
+
+        seed = 42 if self.cfg.seed is None else int(self.cfg.seed)
+        initial_path = Path(get_data_path(spec.initial_asset))
+        if self.is_shadow:
             self.task = ShadowTask.from_assets(
-                Path(get_data_path("ShadowHandPen/shadow_pen.xml")).parent,
-                num_envs,
-                variant=task_id,
-                device=device,
+                initial_path.parent,
+                self.num_envs,
+                variant=self.task_id,
+                device=self.device,
+                lower=self._usd_ctrlrange[:, 0],
+                upper=self._usd_ctrlrange[:, 1],
             )
             self._reset_generator = torch.Generator(device=self.device).manual_seed(
                 seed
             )
-            xml = Path(get_data_path("ShadowHandPen/shadow_pen.xml"))
-            self.ctrl_dt, self.sim_dt = 0.04, 0.002
-            self.observation_dim, self.critic_dim, self.action_dim = 87, 87, 18
         else:
-            from ._leap_tasks import LeapTask
-
-            if task_id == "M3":
-                xml = Path(
-                    get_data_path("LeapHandCubeFaceTurn/leap_cube_top_layer.xml")
-                )
-                initial = np.load(
-                    get_data_path("LeapHandCubeFaceTurn/LeapCubeFaceTurn-initial.npz")
-                )
-            else:
-                xml = Path(get_data_path(f"LeapHandCube/{task_id}.xml"))
-                initial = np.load(get_data_path(f"LeapHandCube/{task_id}-initial.npz"))
-            source = mujoco.MjModel.from_xml_path(str(xml))
+            with np.load(initial_path) as initial:
+                qpos0 = initial["qpos"].copy()
+                ctrl0 = initial["ctrl"].copy()
+            leap_task_name = {
+                "M3": "LeapCubeFaceTurn",
+                "M4": "LeapCubeReorient",
+                "M5": "LeapCubeRotateZAxis",
+            }[self.task_id]
             self.task = LeapTask(
-                {
-                    "M3": "LeapCubeFaceTurn",
-                    "M4": "LeapCubeReorient",
-                    "M5": "LeapCubeRotateZAxis",
-                }[task_id],
-                num_envs,
-                initial["qpos"],
-                initial["ctrl"],
-                source.actuator_ctrlrange[:, 0],
-                source.actuator_ctrlrange[:, 1],
-                device=device,
+                leap_task_name,
+                self.num_envs,
+                qpos0,
+                ctrl0,
+                self._usd_ctrlrange[:, 0],
+                self._usd_ctrlrange[:, 1],
+                device=self.device,
                 seed=seed,
             )
             self._reset_generator = self.task.generator
-            self.ctrl_dt, self.sim_dt = 0.05, (0.005 if task_id == "M3" else 0.01)
-            self.observation_dim = {"M3": 65, "M4": 57, "M5": 32}[task_id]
-            self.critic_dim = {"M3": 65, "M4": 128, "M5": 105}[task_id]
-            self.action_dim = 16
-        self.source = mujoco.MjModel.from_xml_path(str(xml))
-        self.source.opt.timestep = self.sim_dt
-        if task_id in ("M1", "M2", "M3"):
-            self.source.opt.ccd_iterations = 10
-        self.xml = xml
-        self.usd = xml.parent / "usd" / f"{xml.stem}.usdc"
-        if not self.usd.is_file():
-            raise FileNotFoundError(
-                f"The manipulation asset lacks its USD model: {self.usd}"
-            )
-        self.substeps = round(self.ctrl_dt / self.sim_dt)
-        observation_spaces = {
-            "obs": gym.spaces.Box(
-                -np.inf, np.inf, (self.observation_dim,), dtype=np.float32
-            )
-        }
-        if task_id in ("M4", "M5"):
-            observation_spaces["critic_obs"] = gym.spaces.Box(
-                -np.inf, np.inf, (self.critic_dim,), dtype=np.float32
-            )
-        self.single_observation_space = gym.spaces.Dict(observation_spaces)
-        self.single_action_space = gym.spaces.Box(
-            -1, 1, (self.action_dim,), dtype=np.float32
+
+        self._ctrl = torch.zeros(
+            (self.num_envs, len(self._actuated_joint_ids)),
+            dtype=torch.float32,
+            device=self.device,
         )
-        self.action_space = self.single_action_space
-        self.observation_space = self.single_observation_space
-        self.action_format = "tensor"
-        self.elapsed_steps = torch.zeros(num_envs, dtype=torch.long, device=device)
-        self._episode_return = torch.zeros(num_envs, device=device)
-        self._episode_success = torch.zeros(num_envs, dtype=torch.bool, device=device)
-        self._last_observation: dict[str, torch.Tensor] | None = None
-        self._closed = False
-        config = dexsim.WorldConfig()
-        config.open_windows = False
-        config.backend = dexsim.types.Backend.VULKAN
-        config.renderer = dexsim.types.Renderer.NORENDER
-        config.init_ground = False
-        config.cache_path = str(Path.home() / ".cache/embodichain/dexterous")
-        solver_options = {
-            "use_mujoco_contacts": True,
-            "iterations": int(self.source.opt.iterations),
-            "ls_iterations": int(self.source.opt.ls_iterations),
-            "ccd_iterations": int(self.source.opt.ccd_iterations),
-            "integrator": int(self.source.opt.integrator),
-            "solver": int(self.source.opt.solver),
-            "cone": ("pyramidal", "elliptic")[int(self.source.opt.cone)],
-            "impratio": float(self.source.opt.impratio),
-            "tolerance": float(self.source.opt.tolerance),
-            "ls_tolerance": float(self.source.opt.ls_tolerance),
-            "ccd_tolerance": float(self.source.opt.ccd_tolerance),
-            # Face-turn contacts and joint constraints exceed 512 rows in
-            # large batches. Keep headroom for the 256-contact allocation.
-            "njmax": 2048 if task_id == "M3" else 512,
-            "nconmax": 256,
-            "update_data_interval": 0,
-        }
-        self.backend_option_overrides = {}
-        if solver_iterations is not None:
-            selected_iterations = solver_iterations
-            for name, value in zip(
-                ("iterations", "ls_iterations"), selected_iterations
-            ):
-                self.backend_option_overrides[name] = {
-                    "source": solver_options[name],
-                    "configured": value,
-                    "reason": "Explicit benchmark settings",
-                }
-                solver_options[name] = value
-        if solver_kind == "dexuni":
-            solver_cfg = DexUniSolverCfg(mujoco_options=solver_options)
+        self._actuator_force = torch.zeros(
+            (self.num_envs, len(self._actuated_joint_ids)),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        self._raw_action = torch.zeros(
+            (self.num_envs, self.action_dim), dtype=torch.float32, device=self.device
+        )
+        self._policy_obs = torch.zeros(
+            (self.num_envs, self.policy_dim), dtype=torch.float32, device=self.device
+        )
+        self._critic_obs = torch.zeros(
+            (self.num_envs, self.critic_dim), dtype=torch.float32, device=self.device
+        )
+        self._step_reward = torch.zeros(
+            self.num_envs, dtype=torch.float32, device=self.device
+        )
+        self._step_terminated = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
+        self._step_truncated = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
+        self._episode_success = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
+        self._step_metrics: dict[str, torch.Tensor] = {}
+
+    def _set_seed(self, seed: int) -> int:
+        effective = int(seed)
+        self.cfg.seed = effective
+        if hasattr(self, "_reset_generator"):
+            self._reset_generator.manual_seed(effective)
+        for name, generator in getattr(self, "_component_generators", {}).items():
+            generator.manual_seed(self._component_seed(name, effective))
+        event_manager = getattr(self, "event_manager", None)
+        if event_manager is not None:
+            event_manager.set_seed(effective)
+        return effective
+
+    def get_policy_viewer_target_pose(self) -> tuple[float, ...]:
+        """Return environment 0's manipulated object world pose ``(x, y, z, qx, qy, qz, qw)``."""
+        if self._object is not None:
+            pose = self._object.get_local_pose()[0].detach().clone()
+        elif self._cube_art is not None:
+            pose = self._cube_art.get_local_pose()[0].detach().clone()
         else:
-            solver_cfg = MJWarpSolverCfg(**solver_options)
-        config.newton_cfg = NewtonCfg(
-            device=device,
-            gravity=self.source.opt.gravity.tolist(),
-            dt=self.sim_dt,
-            num_substeps=1,
-            sync_to_dexsim=False,
-            solver_cfg=solver_cfg,
+            pose = self.robot.get_local_pose()[0].detach().clone()
+        pose[:3] = pose[:3] + self.sim.arena_offsets[0].to(
+            pose.device, dtype=pose.dtype
         )
-        config.newton_cfg.use_cuda_graph = cuda_graph
-        self.world = dexsim.World(config)
-        self.world.set_manual_update(True)
-        self.backend = get_newton_backend(self.world)
-        builder = dexsim.spawn.SceneBuilder(self.world)
-        builder.add_usd("asset", str(self.usd))
-        if solver_kind == "dexuni":
-            from ._dexuni_adapter import _mujoco_articulation_ids
+        return tuple(float(v) for v in pose.cpu().tolist())
 
-            self.backend.cfg.solver_cfg.mujoco_articulations = _mujoco_articulation_ids(
-                builder.scene_desc, num_envs
-            )
-        self._explicit_collision_filtering = bool(
-            builder.scene_desc.newton
-            and builder.scene_desc.newton.use_explicit_collision_filtering
-        )
-        self._articulation_names = tuple(
-            item.name for item in builder.scene_desc.articulations
-        )
-        builder.replicate(num_envs, spacing=(0.0, 0.0, 0.0))
-        self.scene = builder.finalize()
-        self.solver = self.backend.solver
-        self.mujoco_solver = self.backend.mujoco_solver
-        self.dexuni_adapter = None
-        if solver_kind == "dexuni":
-            from ._dexuni_adapter import DexUniStateAdapter
+    def _local_link_poses(self) -> torch.Tensor:
+        """Return robot link poses in local arena coordinates ``(N, L, 7)`` (xyzw)."""
+        link_poses = self.robot.body_data.body_link_pose
+        root_local = self.robot.get_local_pose()[:, :3]
+        offset = link_poses[:, 0, :3] - root_local
+        if bool((offset.abs() > 1e-6).any()):
+            link_poses = link_poses.clone()
+            link_poses[:, :, :3] = link_poses[:, :, :3] - offset[:, None, :]
+        return link_poses
 
-            self.dexuni_adapter = DexUniStateAdapter(self.backend)
-        self.imported = self.mujoco_solver.mj_model
-        self.data = self.mujoco_solver.mjw_data
-        self.option_import_corrections = {}
-        # World.dt owns the step size; Newton's host MjModel keeps the compiler
-        # default until explicitly synchronized for the task model audit.
-        self.imported.opt.timestep = self.sim_dt
-        wp.to_torch(self.mujoco_solver.mjw_model.opt.timestep).fill_(self.sim_dt)
-        self._make_mapping()
-        model = self.backend.model
-        joint_world = wp.to_torch(model.joint_world).long()
-        self._reset_field_worlds = {
-            "joint_q": torch.repeat_interleave(
-                joint_world, torch.diff(wp.to_torch(model.joint_q_start)).long()
-            ),
-            "joint_qd": torch.repeat_interleave(
-                joint_world, torch.diff(wp.to_torch(model.joint_qd_start)).long()
-            ),
-            "body_q": wp.to_torch(model.body_world).long(),
-            "body_qd": wp.to_torch(model.body_world).long(),
-        }
-        self.reset(seed=seed)
+    def _read_physical_state(self) -> Any:
+        """Read batched simulation state via public Robot/Articulation/RigidObject facades."""
+        hand_qpos = self.robot.get_qpos()
+        hand_qvel = self.robot.get_qvel()
 
-    @property
-    def unwrapped(self) -> DexSimManipulationEnv:
-        return self
+        if self.is_shadow:
+            assert self._object is not None
+            obj_pose_xyzw = self._object.get_local_pose()
+            obj_pos = obj_pose_xyzw[:, :3]
+            obj_quat_wxyz = _xyzw_to_wxyz(obj_pose_xyzw[:, 3:7])
+            obj_linvel = self._object.body_data.lin_vel
+            obj_world_angvel = self._object.body_data.ang_vel
+            obj_local_angvel = rotate_wxyz(
+                _invert_wxyz(obj_quat_wxyz), obj_world_angvel
+            )
+            qpos = torch.cat((hand_qpos, obj_pos, obj_quat_wxyz), dim=-1)
+            qvel = torch.cat((hand_qvel, obj_linvel, obj_local_angvel), dim=-1)
+            palm_pos = self._local_link_poses()[:, self._palm_link_idx, :3]
+            return ShadowState(qpos, qvel, palm_pos)
 
-    def _make_mapping(self) -> None:
-        from ._audit_model import snapshot_execution_model
-
-        derived_cache_report = {}
-        source, imported = self.source, snapshot_execution_model(
-            self.mujoco_solver, derived_cache_report=derived_cache_report
-        )
-        for name in ("nq", "nv", "nu", "ntendon"):
-            if getattr(source, name) != getattr(imported, name):
-                raise ValueError(
-                    f"MJCF {name} changed: {getattr(source, name)} -> {getattr(imported, name)}"
-                )
-        qmap, vmap = [], []
-        joint_map = {}
-        for j in range(source.njnt):
-            name = source.joint(j).name
-            if name and source.jnt_type[j] != mujoco.mjtJoint.mjJNT_FREE:
-                target = _named_index(imported, "joint", name)
-            else:
-                body = _named_index(
-                    imported, "body", source.body(int(source.jnt_bodyid[j])).name
-                )
-                candidates = np.flatnonzero(
-                    (imported.jnt_bodyid == body)
-                    & (imported.jnt_type == source.jnt_type[j])
-                )
-                if len(candidates) != 1:
-                    raise ValueError("Root joint cannot be resolved unambiguously")
-                target = int(candidates[0])
-            joint_map[j] = target
-            width = (7, 4, 1, 1)[int(source.jnt_type[j])]
-            vwidth = (6, 3, 1, 1)[int(source.jnt_type[j])]
-            qmap.extend(
-                range(
-                    int(imported.jnt_qposadr[target]),
-                    int(imported.jnt_qposadr[target]) + width,
-                )
+        if self.task_id == "M3":
+            assert self._cube_art is not None
+            cube_pose_xyzw = self._cube_art.get_local_pose()
+            cube_pos = cube_pose_xyzw[:, :3]
+            cube_quat_wxyz = _xyzw_to_wxyz(cube_pose_xyzw[:, 3:7])
+            cube_linvel = self._cube_art.body_data.root_lin_vel
+            cube_world_angvel = self._cube_art.body_data.root_ang_vel
+            cube_local_angvel = rotate_wxyz(
+                _invert_wxyz(cube_quat_wxyz), cube_world_angvel
             )
-            vmap.extend(
-                range(
-                    int(imported.jnt_dofadr[target]),
-                    int(imported.jnt_dofadr[target]) + vwidth,
-                )
-            )
-        amap = []
-        for a in range(source.nu):
-            source_joint = int(source.actuator_trnid[a, 0])
-            candidates = np.flatnonzero(
-                imported.actuator_trnid[:, 0] == joint_map[source_joint]
-            )
-            if len(candidates) != 1:
-                raise ValueError(f"Actuator {a} mapping ambiguous: {candidates}")
-            amap.append(int(candidates[0]))
-        self.qmap = torch.tensor(qmap, device=self.device)
-        self.vmap = torch.tensor(vmap, device=self.device)
-        self.amap = torch.tensor(amap, device=self.device)
-        self.ctrl = torch.zeros((self.num_envs, source.nu), device=self.device)
-        self._bind_controls()
-        self.model_audit = {
-            "solver_derived_cache_variation": derived_cache_report,
-            "source": str(self.xml),
-            "usd_source": str(self.usd),
-            "parameter_source": "Active solver device parameters at initialization.",
-            "backend_option_overrides": self.backend_option_overrides,
-            "solver_selection": {
-                "requested": self.solver_kind,
-                "actual_backend": self.backend.solver_type,
-                "actual_solver_class": (
-                    f"{type(self.solver).__module__}.{type(self.solver).__name__}"
-                ),
-                "mujoco_branch_class": (
-                    f"{type(self.mujoco_solver).__module__}."
-                    f"{type(self.mujoco_solver).__name__}"
-                ),
-                "diagnostics": self.backend.get_solver_diagnostics(),
-                "standalone_mjwarp_fallback": False,
-            },
-            "option_import_corrections": self.option_import_corrections,
-            "counts": {
-                k: int(getattr(source, k)) for k in ("nq", "nv", "nu", "ntendon")
-            },
-            "source_reference_counts": {
-                k: int(getattr(source, k)) for k in ("nsite", "nsensor")
-            },
-            "imported_reference_counts": {
-                k: int(getattr(imported, k)) for k in ("nsite", "nsensor")
-            },
-            "observation_state_source": (
-                "Named qpos/qvel, body poses, source-local site transforms, "
-                "and actuator forces; imported sensor channels are not consumed."
-            ),
-            "qpos_map": qmap,
-            "qvel_map": vmap,
-            "actuator_map": amap,
-            "gain_max_abs_error": float(
-                np.max(
-                    np.abs(source.actuator_gainprm - imported.actuator_gainprm[amap])
-                )
-            ),
-            "bias_max_abs_error": float(
-                np.max(
-                    np.abs(source.actuator_biasprm - imported.actuator_biasprm[amap])
-                )
-            ),
-            "tendon_range_max_abs_error": (
-                float(np.max(np.abs(source.tendon_range - imported.tendon_range)))
-                if source.ntendon
-                else 0.0
-            ),
-            "solver_options": {
-                key: float(getattr(imported.opt, key))
-                for key in (
-                    "timestep",
-                    "iterations",
-                    "ls_iterations",
-                    "ccd_iterations",
-                    "integrator",
-                    "solver",
-                    "cone",
-                    "impratio",
-                )
-            },
-        }
-        if (
-            max(
-                self.model_audit[k]
-                for k in (
-                    "gain_max_abs_error",
-                    "bias_max_abs_error",
-                    "tendon_range_max_abs_error",
-                )
-            )
-            > 1e-5
-        ):
-            raise ValueError(
-                f"Imported actuator/tendon properties changed: {self.model_audit}"
-            )
-        self.body_map = {
-            source.body(i).name: _named_index(
-                imported,
-                "body",
-                source.body(i).name,
-                default=(
-                    0
-                    if source.body_weldid[i] == 0 and source.body_mocapid[i] < 0
-                    else None
-                ),
-            )
-            for i in range(1, source.nbody)
-            if source.body(i).name
-        }
-        self.model_audit["property_import_corrections"] = []
-        from ._audit_model import audit_model
-
-        audit_source = source
-        if self.backend_option_overrides:
-            audit_source = copy.copy(source)
-            for name, item in self.backend_option_overrides.items():
-                setattr(audit_source.opt, name, item["configured"])
-        self.model_audit["physical_model"] = audit_model(
-            audit_source,
-            imported,
-            joint_map,
-            amap,
-            self.body_map,
-            explicit_collision_filtering=self._explicit_collision_filtering,
-        )
-        self.model_audit["physical_model"]["option_reference"] = (
-            "Source model with explicit backend_option_overrides."
-            if self.backend_option_overrides
-            else "Source model."
-        )
-        from ._audit_tendons import audit_tendons
-
-        self.model_audit["tendons"] = audit_tendons(source, imported, joint_map)
-        if self.model_audit["tendons"]["status"] != "passed":
-            raise ValueError(f"Imported tendons differ: {self.model_audit['tendons']}")
-        if self.model_audit["physical_model"]["status"] != "passed":
-            raise ValueError(
-                f"Imported physical model differs: {self.model_audit['physical_model']['mismatches']}"
-            )
-
-    def _bind_controls(self) -> None:
-        """Bind source actuator order to homogeneous public articulation batches."""
-        self._control_batches = []
-        assigned = set()
-        faces = []
-        for name in self._articulation_names:
-            handles = [
-                self.scene.get_articulation(f"env_{index}/{name}")
-                for index in range(self.num_envs)
+            face_qpos = self._cube_art.get_qpos()[
+                :, self._face_joint_id : self._face_joint_id + 1
             ]
-            batch = self.scene.create_articulation_batch(handles)
-            layouts = batch.joint_layouts_per_articulation[0]
-            offsets, actuators = [], []
-            for layout in layouts:
-                matches = [
-                    aid
-                    for aid in range(self.source.nu)
-                    if self.source.joint(int(self.source.actuator_trnid[aid, 0])).name
-                    == layout.name
-                ]
-                if matches:
-                    if (
-                        len(matches) != 1
-                        or layout.dof_count != 1
-                        or matches[0] in assigned
-                    ):
-                        raise ValueError(
-                            f"Ambiguous USD actuator mapping: {layout.name}"
-                        )
-                    assigned.add(matches[0])
-                    offsets.append(layout.dof_start)
-                    actuators.append(matches[0])
-                if layout.name == "face_turn":
-                    if layout.dof_count != 1:
-                        raise ValueError("The passive cube face must have one DOF")
-                    faces.append((batch, layout.dof_start))
-            if offsets:
-                self._control_batches.append(
-                    (
-                        batch,
-                        torch.tensor(offsets, device=self.device),
-                        torch.tensor(actuators, device=self.device),
-                        torch.zeros(
-                            (self.num_envs, batch.dof_width), device=self.device
-                        ),
-                    )
-                )
-        if assigned != set(range(self.source.nu)):
-            raise ValueError(
-                f"USD actuators are missing: {set(range(self.source.nu)) - assigned}"
+            face_qvel = self._cube_art.get_qvel()[
+                :, self._face_joint_id : self._face_joint_id + 1
+            ]
+            return {
+                "qpos": torch.cat(
+                    (hand_qpos, cube_pos, cube_quat_wxyz, face_qpos), dim=-1
+                ),
+                "qvel": torch.cat(
+                    (hand_qvel, cube_linvel, cube_local_angvel, face_qvel), dim=-1
+                ),
+            }
+
+        assert self._object is not None
+        cube_pose_xyzw = self._object.get_local_pose()
+        cube_pos = cube_pose_xyzw[:, :3]
+        cube_quat_wxyz = _xyzw_to_wxyz(cube_pose_xyzw[:, 3:7])
+        cube_linvel = self._object.body_data.lin_vel
+        cube_world_angvel = self._object.body_data.ang_vel
+        cube_local_angvel = rotate_wxyz(_invert_wxyz(cube_quat_wxyz), cube_world_angvel)
+
+        link_poses = self._local_link_poses()[:, self._site_link_indices, :]
+        site_link_pos = link_poses[:, :, :3]
+        site_link_quat_wxyz = _xyzw_to_wxyz(link_poses[:, :, 3:7])
+        site_world_pos = site_link_pos + rotate_wxyz(
+            site_link_quat_wxyz, self._site_local_pos.unsqueeze(0)
+        )
+        grasp_pos = site_world_pos[:, 0, :]
+        palm_quat_inv = _invert_wxyz(site_link_quat_wxyz[:, 0, :])
+        tip_offsets = site_world_pos[:, 1:, :] - grasp_pos[:, None, :]
+        tips_in_grasp = rotate_wxyz(palm_quat_inv[:, None, :], tip_offsets).reshape(
+            self.num_envs, 12
+        )
+
+        return {
+            "qpos": torch.cat((hand_qpos, cube_pos, cube_quat_wxyz), dim=-1),
+            "qvel": torch.cat((hand_qvel, cube_linvel, cube_local_angvel), dim=-1),
+            "hand_qpos": hand_qpos,
+            "hand_qvel": hand_qvel,
+            "actuator_force": self._actuator_force.clone(),
+            "cube_pos": cube_pos,
+            "cube_quat": cube_quat_wxyz,
+            "cube_linvel": cube_linvel,
+            "cube_angvel": cube_world_angvel,
+            "palm_pos": grasp_pos,
+            "fingertip_pos": tips_in_grasp,
+        }
+
+    def _sync_goal_object(self, env_ids: torch.Tensor | None = None) -> None:
+        if self._goal_obj is None or self.task_id != "M4":
+            return
+        if env_ids is None:
+            goal_quat_xyzw = _wxyz_to_xyzw(self.task.goal_quat)
+            goal_pose = torch.cat(
+                (self._goal_pos.expand(self.num_envs, -1), goal_quat_xyzw), dim=-1
             )
-        if self.task_id == "M3":
-            if len(faces) != 1:
-                raise ValueError(f"Expected one passive cube face, got {len(faces)}")
-            self._face_batch, self._face_dof = faces[0]
+            self._goal_obj.set_local_pose(goal_pose)
+        else:
+            goal_quat_xyzw = _wxyz_to_xyzw(self.task.goal_quat[env_ids])
+            goal_pose = torch.cat(
+                (self._goal_pos.expand(len(env_ids), -1), goal_quat_xyzw), dim=-1
+            )
+            self._goal_obj.set_local_pose(goal_pose, env_ids=env_ids)
 
-    def _publish_controls(self) -> None:
-        for batch, offsets, actuators, commands in self._control_batches:
-            commands[:, offsets] = self.ctrl[:, actuators]
-            batch.apply_joint_target_position(commands)
-
-    def _site(self, name: str) -> tuple[torch.Tensor, torch.Tensor]:
-        source_id = self.source.site(name).id
-        body_name = self.source.body(int(self.source.site_bodyid[source_id])).name
-        body_id = self.body_map[body_name]
-        pos = wp.to_torch(self.data.xpos)[:, body_id]
-        quat = wp.to_torch(self.data.xquat)[:, body_id]
-        local = torch.as_tensor(
-            self.source.site_pos[source_id], dtype=torch.float32, device=self.device
-        ).expand(self.num_envs, -1)
-        return pos + rotate_wxyz(quat, local), quat
-
-    def _state(self) -> Any:
-        qpos = wp.to_torch(self.data.qpos)[:, self.qmap]
-        qvel = wp.to_torch(self.data.qvel)[:, self.vmap]
-        if self.task_id in ("M1", "M2"):
-            palm = wp.to_torch(self.data.xpos)[:, self.body_map["robot0:palm"]]
-            return ShadowState(qpos, qvel, palm)
-        state = {"qpos": qpos, "qvel": qvel}
-        if self.task_id == "M3":
-            return state
-        grasp, palm_quat = self._site("grasp_site")
-        tips = []
-        for name in ("th_tip", "if_tip", "mf_tip", "rf_tip"):
-            tip, _ = self._site(name)
-            inverse = palm_quat * palm_quat.new_tensor([1, -1, -1, -1])
-            tips.append(rotate_wxyz(inverse, tip - grasp))
-        cube_quat = qpos[:, 19:23]
-        state.update(
-            hand_qpos=qpos[:, :16],
-            hand_qvel=qvel[:, :16],
-            actuator_force=wp.to_torch(self.data.actuator_force)[:, self.amap],
-            cube_pos=qpos[:, 16:19],
-            cube_quat=cube_quat,
-            cube_linvel=qvel[:, 16:19],
-            cube_angvel=rotate_wxyz(cube_quat, qvel[:, 19:22]),
-            palm_pos=grasp,
-            fingertip_pos=torch.cat(tips, dim=-1),
-        )
-        return state
-
-    def _observation(self, raw: Any) -> dict[str, torch.Tensor]:
-        if isinstance(raw, torch.Tensor):
-            return {"obs": raw}
-        result = {"obs": raw["state"]}
-        if self.critic_dim != self.observation_dim:
-            result["critic_obs"] = raw["privileged_state"]
-        return result
-
-    def reset(
-        self, *, seed: int | None = None, options: dict[str, Any] | None = None
-    ) -> tuple[dict, dict]:
-        if seed is not None:
-            self._reset_generator.manual_seed(seed)
+    def _initialize_episode(
+        self, env_ids: Sequence[int] | torch.Tensor | None = None, **kwargs: Any
+    ) -> None:
+        super()._initialize_episode(env_ids=env_ids, **kwargs)
         ids = (
-            torch.arange(self.num_envs, device=self.device)
-            if not options
-            else options.get("reset_ids")
+            torch.arange(self.num_envs, device=self.device, dtype=torch.long)
+            if env_ids is None
+            else torch.as_tensor(env_ids, device=self.device, dtype=torch.long)
         )
-        ids = torch.as_tensor(ids, dtype=torch.long, device=self.device)
-        if self.task_id in ("M1", "M2"):
-            qpos, qvel, ctrl = self.task.reset(ids, generator=self._reset_generator)
+        if not ids.numel():
+            return
+
+        if self.is_shadow:
+            qpos, _, ctrl = self.task.reset(ids, generator=self._reset_generator)
+            hand_qpos = qpos[:, :24]
+            obj_pos = qpos[:, 24:27]
+            obj_quat_xyzw = _wxyz_to_xyzw(qpos[:, 27:31])
+            assert self._object is not None
+            zeros_3 = torch.zeros(
+                (len(ids), 3), dtype=torch.float32, device=self.device
+            )
+            self._object.set_local_pose(
+                torch.cat((obj_pos, obj_quat_xyzw), dim=-1), env_ids=ids
+            )
+            self._object.set_velocity(lin_vel=zeros_3, ang_vel=zeros_3, env_ids=ids)
         else:
             initial = self.task.reset(ids)
-            qpos, qvel, ctrl = initial["qpos"], initial["qvel"], initial["ctrl"]
-        wp.to_torch(self.data.qpos)[ids[:, None], self.qmap[None, :]] = qpos
-        wp.to_torch(self.data.qvel)[ids[:, None], self.vmap[None, :]] = qvel
-        self.ctrl[ids] = ctrl
-        self._publish_controls()
-        # Transfer explicitly set coordinates to both DexSim-owned buffers.
-        if self.dexuni_adapter is not None:
-            self.dexuni_adapter.publish_reset(self.data, ids)
-        else:
-            for state in (self.backend.state_0, self.backend.state_1):
-                retained = []
-                for name, worlds in self._reset_field_worlds.items():
-                    unselected = ~torch.isin(worlds, ids)
-                    values = wp.to_torch(getattr(state, name))
-                    retained.append((values, unselected, values[unselected].clone()))
-                self.mujoco_solver._update_newton_state(
-                    self.backend.model, state, self.data, state_prev=state
-                )
-                for values, unselected, previous in retained:
-                    values[unselected] = previous
-        mask = torch.zeros(self.num_envs + 1, dtype=torch.bool, device=self.device)
-        mask[ids] = True
-        self.backend.clear_solver_state(wp.from_torch(mask))
-        # Solver reset clears native controls; restore the selected reset targets
-        # before computing their initial actuator forces and observations.
-        wp.to_torch(self.data.ctrl)[ids[:, None], self.amap[None, :]] = ctrl
-        # Forward updates derived data without advancing time or warm-start state.
-        self.mujoco_solver._mujoco_warp.forward(self.mujoco_solver.mjw_model, self.data)
-        self.elapsed_steps[ids] = 0
-        self._episode_return[ids] = 0
-        self._episode_success[ids] = False
-        state = self._state()
-        if self.task_id in ("M1", "M2"):
-            selected = {
-                key: value[ids]
-                for key, value in self._observation(self.task.observe(state)).items()
-            }
-        else:
-            selected = self._observation(self.task.observe(state, env_ids=ids))
-        if self._last_observation is None:
-            fresh = {
-                key: value.new_empty((self.num_envs, value.shape[-1]))
-                for key, value in selected.items()
-            }
-        else:
-            fresh = {
-                key: value.clone() for key, value in self._last_observation.items()
-            }
-        for key, value in selected.items():
-            fresh[key][ids] = value
-        self._last_observation = fresh
-        return fresh, {}
-
-    def advance_physics(self) -> None:
-        """Advance one complete control interval with the configured substeps."""
-        self._publish_controls()
-        for _ in range(self.substeps):
+            qpos = initial["qpos"]
+            ctrl = initial["ctrl"]
+            hand_qpos = qpos[:, :16]
+            cube_pos = qpos[:, 16:19]
+            cube_quat_xyzw = _wxyz_to_xyzw(qpos[:, 19:23])
             if self.task_id == "M3":
-                # The passive layer detent is updated for each physical substep.
-                state = self._state()
-                face_force = self.task.face_detent(state["qpos"][:, -1])
-                self._face_batch.apply_joint_force(
-                    face_force[:, None], dof_ids=[self._face_dof]
+                assert self._cube_art is not None
+                face_qpos = qpos[:, 23:24]
+                self._cube_art.set_local_pose(
+                    torch.cat((cube_pos, cube_quat_xyzw), dim=-1), env_ids=ids
                 )
-            self.world.update(self.sim_dt)
+                self._cube_art.set_root_velocity(
+                    torch.zeros((len(ids), 6), dtype=torch.float32, device=self.device),
+                    env_ids=ids,
+                )
+                self._cube_art.set_qpos(
+                    face_qpos,
+                    joint_ids=[self._face_joint_id],
+                    env_ids=ids,
+                    target=False,
+                )
+                self._cube_art.set_qvel(
+                    torch.zeros_like(face_qpos),
+                    joint_ids=[self._face_joint_id],
+                    env_ids=ids,
+                    target=False,
+                )
+                self._cube_art.set_qf(
+                    torch.zeros_like(face_qpos),
+                    joint_ids=[self._face_joint_id],
+                    env_ids=ids,
+                )
+            else:
+                assert self._object is not None
+                zeros_3 = torch.zeros(
+                    (len(ids), 3), dtype=torch.float32, device=self.device
+                )
+                self._object.set_local_pose(
+                    torch.cat((cube_pos, cube_quat_xyzw), dim=-1), env_ids=ids
+                )
+                self._object.set_velocity(lin_vel=zeros_3, ang_vel=zeros_3, env_ids=ids)
+                self._sync_goal_object(ids)
 
-    def step(
-        self, actions: torch.Tensor
-    ) -> tuple[dict, torch.Tensor, torch.Tensor, torch.Tensor, dict]:
-        if self.diagnostics and not bool(torch.isfinite(actions).all()):
-            raise FloatingPointError("Non-finite policy action")
-        actions = actions.clamp(-1.0, 1.0)
-        if self.task_id in ("M1", "M2"):
-            targets = self.task.action_targets(actions)
+        zero_hand_qvel = torch.zeros_like(hand_qpos)
+        self.robot.set_qpos(hand_qpos, env_ids=ids, target=False)
+        for target in (False, True):
+            self.robot.set_qvel(zero_hand_qvel, env_ids=ids, target=target)
+        self.robot.set_qf(zero_hand_qvel, env_ids=ids)
+        # clear_articulation_dynamics syncs Newton state_0 (including all world
+        # articulations and standalone rigid objects) into the MuJoCo solver
+        # data and refreshes forward kinematics; restore actuator position
+        # targets right after clearing solver state.
+        self.sim.clear_articulation_dynamics(env_ids=ids)
+        self._ctrl[ids] = ctrl
+        self._actuator_force[ids] = 0.0
+        self.robot.set_qpos(
+            ctrl, joint_ids=self._actuated_joint_ids, env_ids=ids, target=True
+        )
+
+        self._raw_action[ids] = 0.0
+        self._episode_success[ids] = False
+        self._step_terminated[ids] = False
+        self._step_truncated[ids] = False
+
+        state = self._read_physical_state()
+        if self.is_shadow:
+            obs_all = self.task.observe(state)
+            self._policy_obs[ids] = obs_all[ids]
+            self._critic_obs[ids] = obs_all[ids]
         else:
-            targets = self.task.control_targets(actions)
-        self.ctrl.copy_(targets)
-        self.advance_physics()
-        state = self._state()
-        if self.diagnostics and not bool(
-            torch.isfinite(
-                state.qpos if isinstance(state, ShadowState) else state["qpos"]
-            ).all()
-        ):
-            raise FloatingPointError("Non-finite physical state")
-        if self.task_id in ("M1", "M2"):
-            obs, reward, terminated, metrics = self.task.step(state, actions)
-            self.elapsed_steps += 1
-            truncated = (self.elapsed_steps >= 500) & ~terminated
-        else:
-            obs, reward, terminated, truncated, metrics = self.task.after_step(
-                state, actions
+            raw = self.task.observe(state, env_ids=ids)
+            self._policy_obs[ids] = raw["state"]
+            self._critic_obs[ids] = raw["privileged_state"]
+
+    def _preprocess_action(self, action: EnvAction) -> EnvAction:
+        return action
+
+    def _step_action(self, action: EnvAction) -> EnvAction:
+        if not isinstance(action, torch.Tensor):
+            raise TypeError(f"Expected Tensor action, got {type(action).__name__}")
+        if action.ndim != 2 or action.shape != (self.num_envs, self.action_dim):
+            raise ValueError(
+                f"Expected action shape ({self.num_envs}, {self.action_dim}), got {tuple(action.shape)}"
             )
-            self.elapsed_steps += 1
-        self._episode_return += reward
-        done = terminated | truncated
-        result = self._observation(obs)
-        self._last_observation = result
-        info = {"metrics": {key: value.clone() for key, value in metrics.items()}}
-        if "success" in metrics:
-            # Task success is an event; evaluation consumes the completed episode.
-            self._episode_success |= metrics["success"].bool()
-            info["success"] = self._episode_success.clone()
-        if bool(done.any()):
-            ids = torch.where(done)[0]
-            info["episode"] = {
-                "r": self._episode_return[ids].clone(),
-                "l": self.elapsed_steps[ids].clone(),
-            }
-            final_observation = {k: v.clone() for k, v in result.items()}
-            reset_obs, _ = self.reset(options={"reset_ids": ids})
-            for key in result:
-                result[key][ids] = reset_obs[key][ids]
-            info["final_observation"] = final_observation
-            info["_final_observation"] = done
-        self._last_observation = result
-        return result, reward, terminated.bool(), truncated.bool(), info
+        if not bool(torch.isfinite(action).all()):
+            raise FloatingPointError("Non-finite policy action")
+        clipped = action.clamp(-1.0, 1.0)
+        self._raw_action.copy_(clipped)
+        if self.is_shadow:
+            targets = self.task.action_targets(clipped)
+        else:
+            targets = self.task.control_targets(clipped)
+        self._ctrl.copy_(targets)
+        self.robot.set_qpos(targets, joint_ids=self._actuated_joint_ids, target=True)
+        return action
 
-    def close(self) -> None:
-        if not self._closed:
-            self.scene.close()
-            self.world.quit()
-            self._closed = True
+    def _advance_physics(self) -> None:
+        if self.task_id == "M3":
+            assert self._cube_art is not None
+            for _ in range(self.cfg.sim_steps_per_control):
+                face_angle = self._cube_art.get_qpos()[:, self._face_joint_id]
+                face_force = self.task.face_detent(face_angle)
+                self._cube_art.set_qf(
+                    face_force[:, None], joint_ids=[self._face_joint_id]
+                )
+                self.sim.update(self.physics_dt, 1, render_final_step=False)
+            return
+        if self.task_id in ("M4", "M5"):
+            substeps = self.cfg.sim_steps_per_control
+            if substeps > 1:
+                self.sim.update(self.physics_dt, substeps - 1, render_final_step=False)
+            qpos_pre = self.robot.get_qpos()[:, self._actuated_joint_ids_tensor]
+            qvel_pre = self.robot.get_qvel()[:, self._actuated_joint_ids_tensor]
+            self._actuator_force.copy_(
+                self._kp * (self._ctrl - qpos_pre) - self._kd * qvel_pre
+            )
+            self.sim.update(self.physics_dt, 1, render_final_step=False)
+            return
+        super()._advance_physics()
+
+    def _update_sim_state(self, **kwargs: Any) -> None:
+        super()._update_sim_state(**kwargs)
+        state = self._read_physical_state()
+        qpos_check = state.qpos if isinstance(state, ShadowState) else state["qpos"]
+        if not bool(torch.isfinite(qpos_check).all()):
+            raise FloatingPointError("Non-finite physical state")
+
+        next_elapsed = self._elapsed_steps + 1
+        if self.is_shadow:
+            obs, reward, terminated, metrics = self.task.step(state, self._raw_action)
+            self._policy_obs.copy_(obs)
+            self._critic_obs.copy_(obs)
+            truncated = (next_elapsed >= self.max_episode_steps) & ~terminated
+        else:
+            raw_obs, reward, terminated, _, metrics = self.task.after_step(
+                state, self._raw_action
+            )
+            self._policy_obs.copy_(raw_obs["state"])
+            self._critic_obs.copy_(raw_obs["privileged_state"])
+            truncated = (next_elapsed >= self.max_episode_steps) & ~terminated
+            if self.task_id == "M4":
+                self._sync_goal_object()
+
+        self._step_reward.copy_(reward)
+        self._step_terminated.copy_(terminated.bool())
+        self._step_truncated.copy_(truncated.bool())
+        self._step_metrics = {key: value.clone() for key, value in metrics.items()}
+        if "success" in metrics:
+            self._episode_success |= metrics["success"].bool()
+
+    def get_obs(self, **kwargs: Any) -> EnvObs:
+        obs = TensorDict(
+            {"policy": self._policy_obs.clone(), "critic": self._critic_obs.clone()},
+            batch_size=[self.num_envs],
+            device=self.device,
+        )
+        if self.sensors:
+            sensor_obs = self._get_sensor_obs(**kwargs)
+            if len(sensor_obs.keys()) > 0:
+                obs["sensor"] = sensor_obs
+        if self.cfg.observations and self.observation_manager is not None:
+            obs = self.observation_manager.compute(obs)
+        return obs
+
+    def compute_task_state(
+        self, **kwargs: Any
+    ) -> tuple[torch.Tensor, torch.Tensor, dict[str, Any]]:
+        del kwargs
+        return (
+            self._episode_success.clone(),
+            self._step_terminated.clone(),
+            {key: value.clone() for key, value in self._step_metrics.items()},
+        )
+
+    def is_task_success(self, **kwargs: Any) -> torch.Tensor:
+        del kwargs
+        return self._episode_success.clone()
+
+    def get_info(self, **kwargs: Any) -> dict[str, Any]:
+        info = super().get_info(**kwargs)
+        if not self._spec.has_episode_success:
+            info.pop("success", None)
+        return info
+
+    def evaluate(self, **kwargs: Any) -> dict[str, Any]:
+        info = self.get_info(**kwargs)
+        eval_dict: dict[str, Any] = {}
+        if "success" in info:
+            eval_dict["success"] = info["success"][0].item()
+        for key, value in info.get("metrics", {}).items():
+            eval_dict[key] = value
+        return eval_dict
+
+    def get_reward(
+        self, obs: EnvObs, action: EnvAction, info: dict[str, Any]
+    ) -> torch.Tensor:
+        del obs, action, info
+        return self._step_reward.clone()
+
+    def _get_termination_flags(
+        self, obs: EnvObs, info: dict[str, Any]
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        del obs, info
+        terminated = self._step_terminated.clone()
+        truncated = self._step_truncated.clone()
+        if self.cfg.ignore_terminations:
+            terminated[:] = False
+        return terminated, truncated
