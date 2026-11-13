@@ -1,14 +1,14 @@
 trainer:
-  exp_name: g1_rough_ppo_dexuni
-  gym_config: ../env.dexuni.yaml
+  exp_name: unitree_g1_rough_ppo_mjwarp
+  gym_config: extensions/embodichain_tasks/configs/tasks/locomotion/velocity/g1_rough/env.mjwarp.yaml
   seed: 42
   device: cuda:0
   headless: true
-  num_envs: 64
-  iterations: 20
+  num_envs: 4096
+  iterations: 3000
   buffer_size: 24
   enable_eval: false
-  save_frequency_updates: 10
+  save_frequency_updates: 100
   use_wandb: false
   wandb_project_name: embodichain-locomotion
 policy:
@@ -49,7 +49,7 @@ algorithm:
     maximum_learning_rate: 0.01
     n_epochs: 5
     num_mini_batches: 4
-    batch_size: 384
+    batch_size: 24576
     gamma: 0.99
     gae_lambda: 0.95
     clip_coef: 0.2

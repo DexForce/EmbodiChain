@@ -79,21 +79,26 @@ def load_rough_env_cfg(
     data = yaml.safe_load(resource.read_text())
     data["num_envs"] = num_envs
     data["robot"]["fpath"] = str(asset)
+    solver_cfg = data["physics_config"]["solver_cfg"]
+    mj_target = (
+        solver_cfg.setdefault("mujoco_options", {})
+        if solver_cfg.get("solver_type") == "dexuni"
+        else solver_cfg
+    )
     if use_mujoco_contacts is None:
-        use_mujoco_contacts = data["physics_config"]["solver_cfg"][
-            "use_mujoco_contacts"
-        ]
-    data["physics_config"]["solver_cfg"]["use_mujoco_contacts"] = use_mujoco_contacts
+        use_mujoco_contacts = mj_target["use_mujoco_contacts"]
+    mj_target["use_mujoco_contacts"] = use_mujoco_contacts
     if use_mujoco_contacts:
         data["physics_config"]["collision_cfg"] = None
+        solver_cfg.pop("collision_options", None)
     # Newton contact mode sets dynamic friction to 0.8, while native MJWarp
     # contact mode retains the imported sliding friction of 1.0.
     data["robot"]["attrs"]["material_props"]["dynamic_friction"] = (
         1.0 if use_mujoco_contacts else 0.8
     )
     extension = data["env"]["extensions"]
-    extension["reference_deterministic_reset"] = not training_randomization
-    extension["reference_randomization"] = training_randomization
+    extension["deterministic_reset"] = not training_randomization
+    extension["randomization"] = training_randomization
     if initial_state_file is not None:
         if training_randomization:
             raise ValueError(
@@ -132,14 +137,14 @@ def load_rough_env_cfg(
                 position > limits[:, 1] + 1e-7
             ):
                 raise ValueError("Initial joint positions exceed the task soft limits.")
-        extension["reference_initial_states"] = rows
+        extension["initial_states"] = rows
     for term in data["env"]["observations"].values():
         term["params"]["enable_corruption"] = training_randomization
     if robot == "g1":
         terrain = bundle / "terrain.npz"
         if not terrain.is_file():
             raise FileNotFoundError(terrain)
-        extension["reference_terrain"] = str(terrain)
+        extension["terrain"] = str(terrain)
         metadata = json.loads((bundle / "terrain.json").read_text())
         if training_randomization:
             required_keys = (
@@ -152,9 +157,9 @@ def load_rough_env_cfg(
                     "G1 training requires terrain.json with terrain_origins, "
                     "max_init_terrain_level, and generator."
                 )
-            extension["reference_terrain_course"] = metadata
+            extension["terrain_course"] = metadata
         else:
-            extension["reference_origin"] = metadata["env_origins"][0]
+            extension["origin"] = metadata["env_origins"][0]
     cfg = config_to_cfg(data, manager_modules=get_manager_modules())
     cfg.seed = seed
     return cfg

@@ -110,16 +110,19 @@ contracts; run native/distributed suites only for those resource boundaries.
 Missing names point to registries/discovery, disappearing gradients to early
 detachment, and reset/terminal issues to the selected environment protocol.
 
-## Rough terrain and dexterous task candidates
+## Rough terrain and dexterous manipulation tasks
 
 `locomotion/velocity/g1_rough.py` registers the 37-action G1 task (`UnitreeG1RoughRL-v1`).
-Its frozen curriculum comes from `G1RoughTerrains`; the robot comes from
-`UnitreeG1Rough`, independently of the 29-joint G1 flat archive.
+Its terrain curriculum comes from `G1RoughTerrains` and its robot comes from
+`UnitreeG1Rough`, independently of the 29-joint G1 flat archive. Its catalog
+defaults to `newton` (`solver_type: dexuni` with Newton heightfield contacts)
+alongside `mjwarp` (`solver_type: mujoco_warp`).
 
-`manipulation/dexterous/` contains five task-named learning-env factories and
-shared internal physics/MDP adapters. Matching task-first agent configurations
-select `mujoco_warp` or `dexuni` explicitly. The declared Dict observation
-spaces match returned actor/critic groups. Source MJCF audits run at creation.
-Version-specific backend adapters remain local to the task collection pending
-engine-owned public import/state interfaces. See the user-facing dexterous
-RL page for current training and checkpoint-continuation boundaries.
+`manipulation/dexterous/` registers five USD-native `EmbodiedEnv` tasks
+(`ShadowPenFixedRL-v1`, `ShadowPenContinuousRL-v1`, `LeapCubeFaceTurnRL-v1`,
+`LeapCubeReorientRL-v1`, `LeapCubeRotateZAxisRL-v1`) backed by
+`DexterousManipulationEnv`. Runtime scene loading uses `SimulationManager.add_usd()`
+and public `Robot`/`Articulation`/`RigidObject` facades with zero MJCF dependency;
+each task catalog defaults to `newton` (`solver_type: dexuni`, GPU MJWarp CUDA)
+and also ships `mjwarp` (`solver_type: mujoco_warp`). Offline physical-model and
+tendon parity helpers live in `_audit_model.py` and `_audit_tendons.py`.

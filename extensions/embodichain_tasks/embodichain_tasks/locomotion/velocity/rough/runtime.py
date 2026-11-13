@@ -53,7 +53,7 @@ class RoughVelocityEnv(EmbodiChainVelocityEnv):
     """Run rough-terrain velocity locomotion on shared training or evaluation terrain.
 
     Deterministic evaluation disables startup mass/COM randomization and
-    interval pushes. ``reference_randomization=True`` enables those training
+    interval pushes. ``randomization=True`` enables those training
     events. Training loads the complete rough terrain and curriculum; fixed
     scenes load evaluation origins. Both use the shared triangle mesh for
     height rays and Newton heightfield rasterization for collision.
@@ -84,11 +84,11 @@ class RoughVelocityEnv(EmbodiChainVelocityEnv):
             from embodichain.data import get_data_path
             import json
 
-            path = Path(get_data_path(self.cfg.reference_terrain))
-            if getattr(self.cfg, "reference_randomization", False) and not getattr(
-                self.cfg, "reference_terrain_course", None
+            path = Path(get_data_path(self.cfg.terrain))
+            if getattr(self.cfg, "randomization", False) and not getattr(
+                self.cfg, "terrain_course", None
             ):
-                self.cfg.reference_terrain_course = json.loads(
+                self.cfg.terrain_course = json.loads(
                     path.with_suffix(".json").read_text()
                 )
             terrain = np.load(path)
@@ -129,7 +129,7 @@ class RoughVelocityEnv(EmbodiChainVelocityEnv):
             config, self.locomotion_action
         )
         self._reference_origin = self.locomotion_action.new_tensor(
-            getattr(self.cfg, "reference_origin", (0.0, 0.0, 0.0))
+            getattr(self.cfg, "origin", (0.0, 0.0, 0.0))
         )
         self.compute_rewards_fn = partial(
             compute_rewards, constants=self._reference_constants
@@ -195,18 +195,18 @@ class RoughVelocityEnv(EmbodiChainVelocityEnv):
         self._reference_initial_states = (
             {
                 name: torch.tensor(
-                    [row[name] for row in self.cfg.reference_initial_states],
+                    [row[name] for row in self.cfg.initial_states],
                     device=self.device,
                     dtype=torch.float32,
                 )
                 for name in ("root_pose", "root_velocity", "qpos", "qvel")
             }
-            if getattr(self.cfg, "reference_initial_states", None) is not None
+            if getattr(self.cfg, "initial_states", None) is not None
             else None
         )
         self._observation_cache: torch.Tensor | None = None
         self._reference_terrain_course = None
-        terrain_course = getattr(self.cfg, "reference_terrain_course", None)
+        terrain_course = getattr(self.cfg, "terrain_course", None)
         if terrain_course is not None:
             origins = torch.tensor(
                 terrain_course["terrain_origins"],
@@ -221,7 +221,7 @@ class RoughVelocityEnv(EmbodiChainVelocityEnv):
                 self.max_episode_steps * self.step_dt,
                 self._locomotion_generator,
             )
-        if getattr(self.cfg, "reference_randomization", False):
+        if getattr(self.cfg, "randomization", False):
             self._randomize_startup()
         self._reference_events_deferred = False
 
@@ -372,8 +372,8 @@ class RoughVelocityEnv(EmbodiChainVelocityEnv):
             super()._update_heading_commands()
 
     def _apply_reference_interval_events(self) -> None:
-        """Apply reference velocity pushes after rewards and episode resets."""
-        if getattr(self.cfg, "reference_randomization", False):
+        """Apply velocity pushes after rewards and episode resets."""
+        if getattr(self.cfg, "randomization", False):
             self._push_remaining.sub_(self.step_dt)
             ids = (self._push_remaining <= 0.0).nonzero().flatten()
             if ids.numel():
@@ -528,7 +528,7 @@ class RoughVelocityEnv(EmbodiChainVelocityEnv):
             super()._initialize_episode(env_ids=env_ids, **kwargs)
         finally:
             self._reference_events_deferred = previous_deferred
-        deterministic = getattr(self.cfg, "reference_deterministic_reset", True)
+        deterministic = getattr(self.cfg, "deterministic_reset", True)
         pose = self._reference_reset_pose
         self._reference_reset_pose = None
         if deterministic:
@@ -541,9 +541,7 @@ class RoughVelocityEnv(EmbodiChainVelocityEnv):
             else getattr(self, "_reference_origin", None)
         )
         if origin is None:
-            origin = pose.new_tensor(
-                getattr(self.cfg, "reference_origin", (0.0, 0.0, 0.0))
-            )
+            origin = pose.new_tensor(getattr(self.cfg, "origin", (0.0, 0.0, 0.0)))
         pose[:, :3] += origin
         constants = getattr(self, "_reference_constants", None)
         default_position = (
