@@ -325,7 +325,9 @@ def test_gaussian_capture_rejects_failure_and_wrong_group_without_overwriting_su
     assert first["status"]["outcome"] == "SUCCESS"
 
 
-@pytest.mark.parametrize("failure_stage", ["publication", "render"])
+@pytest.mark.parametrize(
+    "failure_stage", ["publication", "completion", "window_completion", "render"]
+)
 def test_failed_frame_cannot_republish_previous_camera_capture(tmp_path, failure_stage):
     from embodichain.lab.sim.sensors import Camera
 
@@ -340,7 +342,8 @@ def test_failed_frame_cannot_republish_previous_camera_capture(tmp_path, failure
     sim.physics = SimpleNamespace(sync_render_state=MagicMock())
     sim.sim_config = SimpleNamespace(render_cfg=SimpleNamespace(renderer="hybrid"))
     sim._world = SimpleNamespace(
-        render_camera_group=MagicMock(), _flush_render_updates=lambda: 0
+        render_camera_group=MagicMock(),
+        _flush_render_updates=MagicMock(return_value=0),
     )
     camera = object.__new__(Camera)
     camera.group_id = 8
@@ -350,11 +353,18 @@ def test_failed_frame_cannot_republish_previous_camera_capture(tmp_path, failure
     sim._sensors = {"camera": camera}
     sim._gaussian_captures = {8: {"frame_id": 41}}
     sim._render_state_published = False
-    failing_call = (
-        batch.apply
-        if failure_stage == "publication"
-        else sim._world.render_camera_group
-    )
+    if failure_stage == "window_completion":
+        sim.is_window_opened = True
+        sim._log_scene_summary = lambda: None
+        sim.render_camera_group([])
+        sim._world._flush_render_updates.assert_not_called()
+        assert batch.apply.called
+    failing_call = {
+        "publication": batch.apply,
+        "completion": sim._world._flush_render_updates,
+        "window_completion": sim._world._flush_render_updates,
+        "render": sim._world.render_camera_group,
+    }[failure_stage]
     failing_call.side_effect = RuntimeError("native frame failure")
     with pytest.raises(RuntimeError, match="native frame failure"):
         sim.render_camera_group([8])

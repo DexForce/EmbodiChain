@@ -85,6 +85,12 @@ physics, interval events or reset writes. An open native window, nonempty camera
 groups, due simulation-time recording and due Viser captures share one state
 publication in that phase. Empty camera groups alone are not consumers; an open
 window remains a consumer even with `NewtonPhysicsCfg.sync_to_renderer=False`.
+Window publication stages transforms and marker updates without waiting for
+native render completion. Scenes containing fluids retain completion waits to
+prevent bounded native staging from discarding newer particle updates.
+Camera reads and due captures complete those uploads
+before consumption, sharing one completion wait within the frame. Explicit
+`sync_render_state()` always publishes and waits for native completion.
 Viser decides whether a frame is due before invoking its publication callback.
 
 `update()` renders after each substep by default. Gym uses
@@ -177,6 +183,9 @@ after physics publication and before CameraGroups consume the state. Each
 binding retains only instance transforms/visibility and immutable references;
 resource residency and cloning remain native-owned. Rebind on topology changes,
 retain reset baselines, and do not assume native batch failures roll back.
+Window-only publication stages Gaussian companions without a completion wait.
+Failed staging or completion invalidates Gaussian capture identities; a failed
+completion can retry the staged publication before another camera read.
 
 USD visual Xforms may reference an external Gaussian PLY through DexSim's
 native parser. This produces a Gaussian render on its original USD rigid or

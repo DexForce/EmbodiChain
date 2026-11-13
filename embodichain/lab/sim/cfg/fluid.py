@@ -149,11 +149,12 @@ class FluidObjectCfg(ObjectBaseCfg):
 
     Density and spacing determine mass and must agree across fluid objects.
     Solver viscosity, surface tension and iteration controls belong exclusively
-    to DexSim's SPHSolverCfg supplied through DexUniSolverCfg.sph_cfg.
+    to DexUniSolverCfg.sph_cfg. The nested DexSim fluid component is not an
+    independently selectable Newton solver.
 
-    This config owns density and spacing. Native SPH defaults for those fields
-    are placeholders in both mapping and native ``sph_cfg`` values; non-default
-    solver values must match the fluid declaration.
+    This config owns density and spacing. Native nested DFSPH defaults for
+    those fields are placeholders in both mapping and native ``sph_cfg``
+    values; non-default solver values must match the fluid declaration.
     """
 
     density: float = 1000.0
