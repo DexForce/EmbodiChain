@@ -1102,7 +1102,7 @@ class SimulationManager:
         uid_list = (
             ["default_plane"]
             if getattr(self.sim_config, "enable_ground_plane", True)
-            and "default_plane" in self._spawn_scene
+            and not getattr(self, "_ground_plane_removed", False)
             else []
         )
         uid_list.extend(list(self._lights.keys()))
@@ -2942,6 +2942,7 @@ class SimulationManager:
             per_env=False,
         )
         self._spawn_default_plane_descriptor = descriptor
+        self._ground_plane_removed = False
 
         if hasattr(descriptor, "render_categories"):
             descriptor.render_categories = self._GROUND_RENDER_CATEGORY
@@ -3034,6 +3035,7 @@ class SimulationManager:
             self._spawn_scene.remove("default_plane")
         self._spawn_default_plane_descriptor = None
         self._default_plane = None
+        self._ground_plane_removed = True
 
     def set_default_global_lighting(self) -> None:
         """Set default global lighting for the scene.

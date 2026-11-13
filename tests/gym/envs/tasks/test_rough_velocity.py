@@ -37,7 +37,7 @@ from dexsim.spawn import (
 )
 
 from embodichain.lab.gym.envs.episode_context import EpisodeContext
-from embodichain.lab.sim.sim_manager import SimulationManager
+from embodichain.lab.sim.sim_manager import SimulationManager, SimulationManagerCfg
 from embodichain_tasks.locomotion.velocity.rough.curriculum import (
     TerrainCurriculum,
 )
@@ -335,6 +335,7 @@ def test_ground_replacement_updates_declared_geometry() -> None:
     )
     declared = copy(descriptor)
     sim = object.__new__(SimulationManager)
+    sim.sim_config = SimulationManagerCfg()
     sim._spawn_default_plane_descriptor = descriptor
     scene = Mock()
     scene.builder.is_finalized = False
@@ -367,6 +368,19 @@ def test_remove_ground_plane_before_prepare() -> None:
     from unittest.mock import MagicMock
 
     sim = object.__new__(SimulationManager)
+    sim.sim_config = SimulationManagerCfg()
+    for key in (
+        "_lights",
+        "_sensors",
+        "_robots",
+        "_rigid_objects",
+        "_rigid_object_groups",
+        "_deformable_objects",
+        "_fluid_objects",
+        "_articulations",
+    ):
+        setattr(sim, key, {})
+    assert sim.asset_uids == ["default_plane"]
     scene = MagicMock()
     scene.builder.is_finalized = False
     scene.handles.return_value = ()
@@ -376,6 +390,7 @@ def test_remove_ground_plane_before_prepare() -> None:
     sim.remove_ground_plane()
     scene.remove.assert_called_once_with("default_plane")
     assert sim._spawn_default_plane_descriptor is None
+    assert sim.asset_uids == []
 
     sim._spawn_scene = SimpleNamespace(
         builder=SimpleNamespace(is_finalized=True, result=object())
