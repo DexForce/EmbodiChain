@@ -367,6 +367,18 @@ def test_remove_ground_plane_before_prepare() -> None:
     from unittest.mock import MagicMock
 
     sim = object.__new__(SimulationManager)
+    for key in (
+        "_lights",
+        "_sensors",
+        "_robots",
+        "_rigid_objects",
+        "_rigid_object_groups",
+        "_deformable_objects",
+        "_fluid_objects",
+        "_articulations",
+    ):
+        setattr(sim, key, {})
+    assert sim.asset_uids == ["default_plane"]
     scene = MagicMock()
     scene.builder.is_finalized = False
     scene.handles.return_value = ()
@@ -376,6 +388,7 @@ def test_remove_ground_plane_before_prepare() -> None:
     sim.remove_ground_plane()
     scene.remove.assert_called_once_with("default_plane")
     assert sim._spawn_default_plane_descriptor is None
+    assert sim.asset_uids == []
 
     sim._spawn_scene = SimpleNamespace(
         builder=SimpleNamespace(is_finalized=True, result=object())
