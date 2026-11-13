@@ -1,0 +1,287 @@
+{
+  "task": "S03",
+  "subtask": "S03",
+  "description": "Physical corner grasp of a flat cloth; lift 180mm, hold 2s, translate 80mm, lower and release. No pinned particles or attachments.",
+  "status": "frozen v6 high-clearance release fixed-five protocol",
+  "units": "m, kg, s; Z up, X towards the worktop, Y to the robot's left",
+  "coupling": "two_way",
+  "joint_mode": "dynamic",
+  "platform_solvers": {
+    "dexsim": "DexUniSolverCfg(contact_mode='full', coupling='two_way'): MuJoCo owns the Franka; VBD owns the triangle cloth and static shapes; per-vertex particle-shape contact",
+    "embodichain": "EmbodiChain SimulationManager, NewtonPhysicsCfg(solver='dexuni') with the same DexUni options as the DexSim script",
+    "isaaclab": "Newton CouplerProxy: MuJoCo-Warp entry owns the Franka; VBD entry owns the triangle cloth and static shapes; every robot link proxied into VBD; per-vertex particle contact"
+  },
+  "robot": {
+    "urdf": "/home/oem/code/assets/franka_emika_panda/fr3_franka_hand.dexsim.urdf",
+    "urdf_sha256": "recorded in per-run manifest.json",
+    "model_note": "Newton-assets FR3 arm + Franka Hand (franka_hand_white); same asset, drives and limits as S01-T",
+    "base_position": [
+      0.0,
+      0.0,
+      0.86
+    ],
+    "arm_joints": [
+      "fr3_joint1",
+      "fr3_joint2",
+      "fr3_joint3",
+      "fr3_joint4",
+      "fr3_joint5",
+      "fr3_joint6",
+      "fr3_joint7"
+    ],
+    "finger_joints": [
+      "fr3_finger_joint1",
+      "fr3_finger_joint2"
+    ],
+    "finger_mimic": "both finger joints are driven independently with identical targets on all platforms",
+    "tcp_body": "fr3_hand",
+    "tcp_offset": [
+      0.0,
+      0.0,
+      0.1034
+    ],
+    "tcp_rotation_xyzw": [
+      1.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "arm_kp": [
+      12000.0,
+      12000.0,
+      12000.0,
+      12000.0,
+      4000.0,
+      4000.0,
+      4000.0
+    ],
+    "arm_kd": [
+      400.0,
+      400.0,
+      400.0,
+      400.0,
+      120.0,
+      120.0,
+      120.0
+    ],
+    "arm_effort_limit": [
+      87.0,
+      87.0,
+      87.0,
+      87.0,
+      12.0,
+      12.0,
+      12.0
+    ],
+    "finger_kp": 2000.0,
+    "finger_kd": 50.0,
+    "finger_effort_limit": 100.0,
+    "finger_armature": 0.1,
+    "arm_armature": 0.1,
+    "gravity": "robot links do not feel gravity (DexSim gravity compensation 1.0 / IsaacLab disable_gravity)",
+    "seed_q": [
+      0.0,
+      -0.3,
+      0.0,
+      -2.2,
+      0.0,
+      1.95,
+      0.785
+    ],
+    "finger_initial_q": 0.039,
+    "finger_note": "Both fingers start open at q=0.039 m and physically close along world Y around the cloth corner."
+  },
+  "scene": {
+    "table_z": 0.86,
+    "table": {
+      "center": [
+        0.5,
+        0.0,
+        0.835
+      ],
+      "size": [
+        0.6,
+        1.0,
+        0.05
+      ]
+    },
+    "robot_stand": {
+      "center": [
+        0.0,
+        0.0,
+        0.4275
+      ],
+      "size": [
+        0.22,
+        0.22,
+        0.855
+      ]
+    },
+    "ground_z": 0.0
+  },
+  "grip": {
+    "tcp": [
+      0.335,
+      -0.145,
+      0.871
+    ],
+    "finger_closed": 0.0,
+    "finger_open": 0.039,
+    "close_duration": 1.0,
+    "release_duration": 1.0
+  },
+  "path": {
+    "lift_height": 0.18,
+    "place_xy": [
+      0.335,
+      -0.225
+    ],
+    "place_clearance": 0.06,
+    "retreat_height": 0.08,
+    "ik_step": 0.0005
+  },
+  "solver": {
+    "dt": 0.016666666666666666,
+    "num_substeps": 10,
+    "vbd_iterations": 40,
+    "proxy_mass_scale": 4.0,
+    "proxy_relaxation": 0.5,
+    "coupling_iterations": 1,
+    "use_cuda_graph": true,
+    "coupling_mode": "staggered",
+    "vbd_friction_epsilon": 0.0001,
+    "vbd_rigid_contact_hard": false,
+    "mujoco_cone": "pyramidal",
+    "proxied_robot_links": "all",
+    "parity_note": "all coupling/VBD/MuJoCo options carried over explicitly from S01 (see ../PARITY_CHECKLIST.md)"
+  },
+  "contact": {
+    "friction": 1.0,
+    "friction_rule": "Every shape and the cloth particle set uses mu=1.0; particle-shape friction is averaged on each platform.",
+    "particle_contact_ke": 20000.0,
+    "particle_contact_kd": 10.0,
+    "shape_ke": 20000.0,
+    "shape_kd": 100.0,
+    "shape_gap": 0.002,
+    "shape_margin": 0.0,
+    "soft_contact_margin": 0.003,
+    "contact_model": "per-vertex particle-shape contact on all platforms (same as S01)"
+  },
+  "trajectory": {
+    "frame_rate": 60,
+    "settle_duration": 1.0,
+    "lift_duration": 2.0,
+    "hold_duration": 2.0,
+    "transport_duration": 1.5,
+    "lower_duration": 2.0,
+    "retreat_duration": 0.7,
+    "observe_duration": 2.0
+  },
+  "initial_states": {
+    "count": 1,
+    "seed": 20261022
+  },
+  "variants": {
+    "nominal": {}
+  },
+  "variants_note": "One nominal configuration: 10 substeps with CUDA Graph; five independent processes per platform.",
+  "measurement": {
+    "reference_window": [
+      0.8,
+      1.0
+    ],
+    "camera_rate_hz": 30,
+    "camera_resolution": [
+      1280,
+      960
+    ],
+    "camera_hfov_deg": 47.2,
+    "cameras": {
+      "oblique": {
+        "eye": [
+          0.92,
+          -0.62,
+          1.35
+        ],
+        "target": [
+          0.46,
+          -0.04,
+          0.96
+        ],
+        "up": [
+          0,
+          0,
+          1
+        ]
+      },
+      "front": {
+        "eye": [
+          1.1,
+          -0.1,
+          1.18
+        ],
+        "target": [
+          0.46,
+          -0.03,
+          0.96
+        ],
+        "up": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    "images": {
+      "outputs": [
+        "rgb",
+        "depth (planar distance to the image plane, m)",
+        "instance segmentation (common label ids)"
+      ],
+      "labels": {
+        "0": "background",
+        "1": "ground",
+        "2": "table",
+        "3": "robot_stand",
+        "4": "robot",
+        "5": "cloth"
+      },
+      "full": "every 30 Hz frame: RGB video + depth/segmentation arrays (state s00 runs)",
+      "keyframes": "RGB/depth/segmentation at phase starts and episode end (perturbed states and variants), to bound data volume"
+    },
+    "depth_background": "no-hit pixels: DexSim/EmbodiChain return a very large value, Isaac Lab returns 0; raw values are stored, plots mask both",
+    "image_downsample": 2,
+    "resolution_note": "cameras render at 1280x960 for the HD comparison video; depth, segmentation and RGB keyframes are stored at 640x480 (every 2nd pixel) with the matching intrinsics",
+    "video_policy": "Separate media run per platform; build_s03_media.py exports one 2x2 oblique/front comparison at 30 fps."
+  },
+  "acceptance": {
+    "corner_lift_min": 0.15,
+    "hold_drop_max": 0.01,
+    "release_corner_height_max": 0.025,
+    "table_penetration_tolerance": 0.004
+  },
+  "cloth": {
+    "size": [
+      0.3,
+      0.3
+    ],
+    "center": [
+      0.48,
+      0,
+      0.861
+    ],
+    "vertices_per_side": 31,
+    "density": 0.2,
+    "particle_radius": 0.001,
+    "surface_props": {
+      "tri_ke": 1000.0,
+      "tri_ka": 1000.0,
+      "tri_kd": 0.001,
+      "tri_drag": 0.0,
+      "tri_lift": 0.0,
+      "edge_ke": 0.0005,
+      "edge_kd": 0.0001
+    },
+    "corner_half_extent": 0.01
+  }
+}

@@ -1,0 +1,386 @@
+{
+  "task": "S01",
+  "subtask": "S01-C",
+  "description": "Franka FR3 holds press plate H by its handle above soft block A, lowers it onto the block, compresses the block to 5 % of its settled height under a closed-loop rule shared by both platforms, holds 1 s, unloads and observes recovery for 2 s.",
+  "status": "pilot round 2 (not frozen)",
+  "units": "m, kg, s; Z up, X towards the worktop, Y to the robot's left",
+  "coupling": "two_way",
+  "joint_mode": "dynamic",
+  "platform_solvers": {
+    "dexsim": "DexUniSolverCfg(contact_mode='full', coupling='two_way'): MuJoCo owns the Franka; VBD owns the soft block, the press plate and static shapes; per-vertex particle-shape contact",
+    "isaaclab": "Newton CouplerProxy: MuJoCo-Warp entry owns the Franka; VBD entry owns the soft block, the press plate and static shapes; hand and fingers are proxied into VBD; per-vertex particle contact"
+  },
+  "robot": {
+    "urdf": "/home/oem/code/assets/franka_emika_panda/fr3_franka_hand.dexsim.urdf",
+    "urdf_sha256": "recorded in inputs/inputs_manifest.json",
+    "model_note": "Newton-assets FR3 arm + Franka Hand (franka_hand_white); the repo panda_arm_hand.urdf has no local meshes.",
+    "base_position": [
+      0.0,
+      0.0,
+      0.86
+    ],
+    "arm_joints": [
+      "fr3_joint1",
+      "fr3_joint2",
+      "fr3_joint3",
+      "fr3_joint4",
+      "fr3_joint5",
+      "fr3_joint6",
+      "fr3_joint7"
+    ],
+    "finger_joints": [
+      "fr3_finger_joint1",
+      "fr3_finger_joint2"
+    ],
+    "finger_mimic": "both finger joints are driven independently with identical targets on both platforms",
+    "tcp_body": "fr3_hand",
+    "tcp_offset": [
+      0.0,
+      0.0,
+      0.1034
+    ],
+    "tcp_rotation_xyzw": [
+      1.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "arm_kp": [
+      12000.0,
+      12000.0,
+      12000.0,
+      12000.0,
+      4000.0,
+      4000.0,
+      4000.0
+    ],
+    "arm_kd": [
+      400.0,
+      400.0,
+      400.0,
+      400.0,
+      120.0,
+      120.0,
+      120.0
+    ],
+    "arm_effort_limit": [
+      87.0,
+      87.0,
+      87.0,
+      87.0,
+      12.0,
+      12.0,
+      12.0
+    ],
+    "finger_kp": 2000.0,
+    "finger_kd": 50.0,
+    "finger_effort_limit": 100.0,
+    "finger_armature": 0.1,
+    "arm_armature": 0.1,
+    "gravity": "robot links do not feel gravity (DexSim gravity compensation 1.0 / IsaacLab disable_gravity)",
+    "seed_q": [
+      0.0,
+      -0.3,
+      0.0,
+      -2.2,
+      0.0,
+      1.95,
+      0.785
+    ],
+    "finger_initial_q": 0.0101
+  },
+  "scene": {
+    "table_z": 0.86,
+    "table": {
+      "center": [
+        0.5,
+        0.0,
+        0.835
+      ],
+      "size": [
+        0.6,
+        1.0,
+        0.05
+      ]
+    },
+    "robot_stand": {
+      "center": [
+        0.0,
+        0.0,
+        0.4275
+      ],
+      "size": [
+        0.22,
+        0.22,
+        0.855
+      ]
+    },
+    "ground_z": 0.0
+  },
+  "soft_block": {
+    "size": [
+      0.06,
+      0.06,
+      0.06
+    ],
+    "center": [
+      0.48,
+      -0.1,
+      0.892
+    ],
+    "cells_per_side": 8,
+    "tet_split": "Freudenthal 6 tets per hexahedral cell (shared main diagonal)",
+    "density": 250.0,
+    "youngs_modulus": 30000.0,
+    "poisson_ratio": 0.35,
+    "k_damp": 0.001,
+    "particle_radius": 0.002
+  },
+  "press_plate": {
+    "base_size": [
+      0.07,
+      0.07,
+      0.005
+    ],
+    "handle_size": [
+      0.02,
+      0.02,
+      0.05
+    ],
+    "mass": 0.1,
+    "edge_fillet": "not modelled (plain boxes); 3 mm fillet from the plan is a pilot deviation",
+    "tcp_above_base_bottom": 0.036,
+    "owner": "vbd",
+    "collar": {
+      "z_range": [
+        0.01875,
+        0.02475
+      ],
+      "y_extent": [
+        0.01,
+        0.022
+      ],
+      "x_size": 0.02
+    },
+    "cap": {
+      "z_range": [
+        0.04525,
+        0.05025
+      ],
+      "y_extent": [
+        0.01,
+        0.014
+      ],
+      "x_size": 0.02
+    },
+    "guides": {
+      "x_range": [
+        0.00975,
+        0.013
+      ],
+      "y_extent": [
+        0.01,
+        0.022
+      ],
+      "z_range": [
+        0.02475,
+        0.03275
+      ]
+    },
+    "notes": [
+      "fingertip pads close on the 20 mm handle between a collar below and a cap above (1 mm clearance) with guide walls beside the pads along X (1 mm clearance); the plate is held by pad normal contact, not grip friction (round-1 pilot: friction-only grip slipped at 1-2 N in DexSim and dropped the plate in Isaac Lab)",
+      "the episode starts with the plate already held: fingers closed on the handle, plate hanging on the pads by its cap (plate base bottom = TCP - tcp_above_base_bottom)",
+      "the plate is a free rigid body owned by VBD on both platforms (round-1 pilot: a MuJoCo-owned plate penetrated the block in DexSim and went NaN in Isaac Lab)",
+      "part boxes, density, mass, centre of mass and inertia are derived once into inputs/s01c_plate.json"
+    ]
+  },
+  "contact": {
+    "friction": 0.6,
+    "friction_rule": "every shape and particle set uses mu=0.6, so Newton's sqrt(mu_a*mu_b) and average blends both give 0.6",
+    "particle_contact_ke": 20000.0,
+    "particle_contact_kd": 10.0,
+    "shape_ke": 20000.0,
+    "shape_kd": 100.0,
+    "shape_gap": 0.002,
+    "shape_margin": 0.0,
+    "shape_margin_note": "explicit on both platforms: DexSim NewtonCollisionDesc defaults to margin=0.001 m, Isaac Lab NewtonShapeCfg to 0.0; round 1 left the DexSim default, so DexSim shapes were 1 mm thicker",
+    "soft_contact_margin": 0.003,
+    "contact_model": "per-vertex particle-shape contact on both platforms: DexSim contact_mode='full' (required for two-way with a VBD-owned body) leaves collision_options enable_rigid_soft_full_surface_contact at False; Isaac Lab passes enable_rigid_soft_full_surface_contact=False. Round 1 wrongly reported DexSim as full-surface"
+  },
+  "solver": {
+    "dt": 0.016666666666666666,
+    "num_substeps": 10,
+    "vbd_iterations": 40,
+    "proxy_mass_scale": 4.0,
+    "proxy_relaxation": 0.5,
+    "coupling_iterations": 1,
+    "use_cuda_graph": true,
+    "vbd_iterations_note": "40 = smallest tested count at which task s00 passes every check on both platforms (2026-10-21 sweep on the task, numbers in results/S01C_DECISIONS.md: 10 -> DexSim grip slip 3.09 mm; 20 -> Isaac Lab misses the target in 3 s; 40 -> both pass, 43/54 ms per frame). Round 1 used 160 (3-4x the cost); it is not used",
+    "coupling_mode": "staggered",
+    "vbd_friction_epsilon": 0.0001,
+    "vbd_rigid_contact_hard": false,
+    "mujoco_cone": "pyramidal",
+    "proxied_robot_links": "all",
+    "parity_note": "set explicitly on both platforms (2026-10-21): DexUni defaults to staggered coupling, Isaac Lab's CouplerProxyMappingCfg to lagged; the round-2 DexSim script set friction_epsilon=1e-4 and rigid_contact_hard=False while Isaac Lab ran Newton's defaults (0.01, True); Isaac Lab used an elliptic MuJoCo cone, DexUni the pyramidal default; DexUni proxies every MuJoCo link into VBD, Isaac Lab only the hand and fingers"
+  },
+  "trajectory": {
+    "frame_rate": 60,
+    "block_xy": [
+      0.48,
+      -0.1
+    ],
+    "finger_open": 0.03,
+    "finger_closed_target": 0.0,
+    "ik_table_z_range": [
+      -0.025,
+      0.045
+    ],
+    "ik_table_step": 0.00025,
+    "ik_table_note": "TCP z offsets relative to the nominal contact TCP height; all motion is vertical at block_xy with the fixed top-down orientation",
+    "rest_clearance": 0.015,
+    "approach_clearance": 0.003,
+    "unload_clearance": 0.02,
+    "nominal_block_height": 0.06,
+    "rest_duration": 1.0,
+    "approach_duration": 1.0,
+    "press_speed": 0.005,
+    "press_timeout": 3.0,
+    "hold_duration": 1.0,
+    "hold_integral_gain": 2.0,
+    "hold_max_speed": 0.002,
+    "unload_duration": 0.8,
+    "recover_duration": 2.0,
+    "controller": "closed-loop rule implemented identically in both platform scripts (class CompressionController; tools/analyze.py checks the two class sources are identical): descend at press_speed until the 6-frame mean of h=max(z)-min(z) <= h0*(1-target); hold with dz = -gain*(h-h_target)*dt clipped to hold_max_speed; quintic unload; hold position while recovering",
+    "height_filter_frames": 6,
+    "height_filter_note": "the controller uses a 6-frame (0.1 s) moving average of h=max(z)-min(z); pilot: the raw value jitters 1-2 % from node vibration and made the 5 % run stop late (7.8 % hold). Reported metrics use the raw per-frame h"
+  },
+  "target_compression": 0.05,
+  "target_note": "the 10 % level of round 1 is dropped for now (user decision 2026-10-20)",
+  "initial_states": {
+    "file": "inputs/s01c_initial_states.npz",
+    "count": 10,
+    "seed": 20261020,
+    "rule": "s00 is nominal; s01-s09 move the soft block in the table plane by dx, dy ~ U(-3, 3) mm and yaw ~ U(-3, 3) deg about its vertical axis; the robot, plate and joint targets are unchanged, so the plate meets the block off-centre. Bounds keep the rotated block footprint inside the 70 mm plate (worst corner 34.5 mm < 35 mm). The file stores the actual world-space node positions of every state.",
+    "dx_dy_range": [
+      -0.003,
+      0.003
+    ],
+    "yaw_range_deg": [
+      -3.0,
+      3.0
+    ]
+  },
+  "variants": {
+    "nominal": {},
+    "substeps5": {
+      "solver.num_substeps": 5
+    },
+    "substeps20": {
+      "solver.num_substeps": 20
+    },
+    "direct": {
+      "solver.use_cuda_graph": false
+    }
+  },
+  "variants_note": "plan 3.3 (5/10/20 substep convergence) and 7.2 (CUDA Graph vs direct paired check); each variant is run on state s00; nominal = 10 substeps with CUDA Graph",
+  "bench": {
+    "description": "robot-free material bench (plan 3.3): a flat rigid weight of bench_mass (weight_size, uniform density, low centre of mass) is released bench_gap above the block while the robot stays parked away from it; the static compression over measure_window is compared with a linear-elastic estimate",
+    "bench_mass": 0.5,
+    "bench_gap": 0.001,
+    "duration": 3.0,
+    "measure_window": [
+      2.5,
+      3.0
+    ],
+    "vbd_iterations_sweep": [
+      10,
+      40
+    ],
+    "estimate": "uniaxial, frictionless ends: dh = H*(m*g/A + rho*g*H/2)/E",
+    "weight_size": [
+      0.07,
+      0.07,
+      0.01
+    ],
+    "weight_note": "pilot 2026-10-21: the handled press plate (COM ~14 mm above its base) loaded to 0.5 kg rocked on the block on both platforms (DexSim: slid off at 160 iterations; Isaac Lab: settled with ~5 deg tilt), so the bench uses a flat weight, see results/S01C_DECISIONS.md",
+    "status": "informational, not a gate: with a free 0.5 kg rigid weight on the 0.07 g nodes neither platform converges to the linear-elastic estimate at practical iteration counts (10-40 iterations: 0.1-0.6 mm vs 2.87 mm; higher counts or contact ke 2e3-2e4, 40 substeps, no damping or a 4-cell mesh did not fix it, and 40+ iterations sometimes flip the weight). The block's effective stiffness is therefore not verified; S01-C reports geometric response only. Sweep numbers: results/S01C_DECISIONS.md"
+  },
+  "measurement": {
+    "reference_window": [
+      0.9,
+      1.0
+    ],
+    "camera_rate_hz": 30,
+    "camera_resolution": [
+      1280,
+      960
+    ],
+    "camera_hfov_deg": 47.2,
+    "cameras": {
+      "oblique": {
+        "eye": [
+          0.86,
+          -0.42,
+          1.1
+        ],
+        "target": [
+          0.48,
+          -0.1,
+          0.92
+        ],
+        "up": [
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "front45": {
+        "eye": [
+          0.8,
+          -0.1,
+          1.22
+        ],
+        "target": [
+          0.48,
+          -0.1,
+          0.9
+        ],
+        "up": [
+          0.0,
+          0.0,
+          1.0
+        ]
+      }
+    },
+    "phase_windows": "hold metrics use the last 0.8 s of the hold phase; recovery is read 2.0 s after the unload phase ends; all phase boundaries are recorded per frame",
+    "images": {
+      "outputs": [
+        "rgb",
+        "depth (planar distance to the image plane, m)",
+        "instance segmentation (common label ids)"
+      ],
+      "labels": {
+        "0": "background",
+        "1": "ground",
+        "2": "table",
+        "3": "robot_stand",
+        "4": "robot",
+        "5": "press_plate",
+        "6": "soft_block"
+      },
+      "full": "every 30 Hz frame: RGB video + depth/segmentation arrays (state s00 runs)",
+      "keyframes": "RGB video every 30 Hz frame; depth/segmentation at phase starts, hold end and episode end (perturbed states and variants), to bound data volume"
+    },
+    "cameras_note": "the plan asks for top + oblique views; a vertical top view (eye 0.48,-0.10,1.35) only shows the Franka hand, which covers the block during the whole episode (2026-10-21 check), so the second camera looks down at 45 deg from +X, past the 5 cm-thick side of the hand",
+    "depth_background": "no-hit pixels: DexSim returns a very large value (~1e16), Isaac Lab returns 0 (depth_clipping_behavior='none'); raw values are stored, plots mask both",
+    "image_downsample": 2,
+    "resolution_note": "cameras render at camera_resolution (1280x960) for the HD comparison video; depth, segmentation and RGB keyframes are stored at the plan's 640x480 by taking every image_downsample-th pixel (row/column 0, 2, 4, ...), with the matching intrinsics K stored next to them; the full-resolution K is in the run manifest",
+    "video_policy": "only one exported video per task: tools/analyze.py writes videos/s01c_comparison.mp4 (2x2: columns platform, rows oblique/front45, HD, real-time frame-rate overlay). The s00 full runs keep rgb_<camera>.mp4 inside their raw_data run directory as the source; other runs keep RGB only as keyframes in images_<camera>.npz"
+  },
+  "acceptance": {
+    "compression_tolerance_pp": 2.0,
+    "recovery_error_max": 0.05,
+    "table_penetration_tolerance": 0.004,
+    "grip_slip_max": 0.003
+  }
+}

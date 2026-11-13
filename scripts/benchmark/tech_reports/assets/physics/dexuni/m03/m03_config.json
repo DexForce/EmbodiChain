@@ -1,0 +1,156 @@
+{
+  "task": "M03",
+  "robot": {
+    "urdf": "/home/oem/.cache/dexsim/resources/mjvbd_v2/w1_bag_packing/w1_v030/robot.urdf",
+    "base_position": [
+      0.08,
+      0.0,
+      0.0
+    ],
+    "tcp_offset": [
+      0.0,
+      0.0,
+      0.125
+    ],
+    "open_finger": 0.035,
+    "release_finger": 0.05,
+    "closed_finger": 0.0045,
+    "retreat_finger": 0.0055
+  },
+  "cloth": {
+    "layers": 4,
+    "size": [
+      0.3,
+      0.3
+    ],
+    "spacing": 0.01,
+    "center_xy": [
+      0.43,
+      0.0
+    ],
+    "bottom_z": 0.918,
+    "layer_spacing": 0.006,
+    "surface_density": 0.2,
+    "particle_radius": 0.003,
+    "tri_ke": 30000.0,
+    "tri_ka": 30000.0,
+    "tri_kd": 1e-05,
+    "edge_ke": 0.3,
+    "edge_kd": 0.05,
+    "colors": [
+      [
+        0.9,
+        0.3,
+        0.22
+      ],
+      [
+        0.95,
+        0.72,
+        0.15
+      ],
+      [
+        0.24,
+        0.7,
+        0.38
+      ],
+      [
+        0.25,
+        0.58,
+        0.9
+      ]
+    ]
+  },
+  "support": {
+    "table_z": 0.86,
+    "pickup_z": 0.91,
+    "channel_width": 0.08,
+    "channel_end_x": 0.335,
+    "target_center_xy": [
+      0.58,
+      0.0
+    ],
+    "target_size": 0.34
+  },
+  "contact": {
+    "shape_ke": 50000.0,
+    "shape_kd": 0.001,
+    "table_friction": 0.6,
+    "gripper_ke": 500000.0,
+    "gripper_kd": 0.005,
+    "gripper_friction": 1.0,
+    "particle_ke": 10000.0,
+    "particle_kd": 0.01,
+    "particle_friction": 0.6,
+    "soft_contact_margin": 0.003
+  },
+  "solver": {
+    "dt": 0.016666666666666666,
+    "num_substeps": 10,
+    "coupling": "one_way",
+    "joint_mode": "kinematic",
+    "contact_mode": "soft",
+    "vbd_preset": "surface-fast",
+    "particle_coloring_include_bending": true,
+    "particle_coloring_balance_colors": true,
+    "use_cuda_graph": true,
+    "self_contact_radius": 0.002,
+    "self_contact_margin": 0.002,
+    "rest_shape_exclusion_radius": 0.0
+  },
+  "motion": {
+    "grasp_x": 0.3,
+    "grasp_y": 0.13,
+    "grasp_z": 0.91,
+    "lift_z": 1.28,
+    "lift_x": 0.38,
+    "transport_x": 0.53,
+    "lay_start_x": 0.71,
+    "lay_start_z": 1.2,
+    "place_z": 0.934,
+    "place_x": 0.43,
+    "duration": 27.5,
+    "timing": {
+      "settle": 2.0,
+      "approach": 3.0,
+      "insert": 4.0,
+      "close": 5.0,
+      "lift": 10.0,
+      "hold": 12.0,
+      "transport": 14.0,
+      "advance": 16.0,
+      "advance_hold": 17.0,
+      "land": 18.0,
+      "land_hold": 18.5,
+      "lay": 23.5,
+      "release": 24.5,
+      "retreat": 25.5
+    },
+    "grasp_pitch_deg": 40,
+    "place_pitch_deg": 50,
+    "side_yaw_deg": 35,
+    "home_offset": [
+      0.04,
+      0,
+      0.2
+    ],
+    "approach_offset": [
+      -0.015,
+      0,
+      0.02
+    ],
+    "release_offset": [
+      0,
+      0,
+      0.018
+    ],
+    "retreat_offset": [
+      -0.12,
+      0,
+      0.1
+    ],
+    "grasp_yaw_deg": 10,
+    "tcp_grasp_y": 0.13,
+    "release_pitch_deg": 75,
+    "retreat_pitch_deg": 75
+  }
+}

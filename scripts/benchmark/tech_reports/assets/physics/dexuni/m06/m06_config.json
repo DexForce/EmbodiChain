@@ -1,0 +1,94 @@
+{
+  "task": "M06",
+  "description": "Kinematic Franka folds the T-shirt once from left to right; no exact alignment requirement",
+  "robot": {
+    "urdf": "/home/oem/code/assets/franka_emika_panda/fr3_franka_hand.dexsim.urdf",
+    "base_position": [
+      -0.5,
+      -0.5,
+      0.12
+    ],
+    "tcp_body": "fr3_hand",
+    "tcp_offset": [
+      0.0,
+      0.0,
+      0.1034
+    ],
+    "tcp_rotation_xyzw": [
+      1.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "seed_q": [
+      0.0,
+      -0.3,
+      0.0,
+      -1.8,
+      0.0,
+      1.6,
+      0.7854
+    ],
+    "open_finger": 0.039,
+    "closed_finger": 0.0015
+  },
+  "cloth": {
+    "mesh_source": "/home/oem/code/engine/gensimdemo/fold_cloth/joint_target/shirt_mesh.txt",
+    "scale": 0.0065,
+    "center": [
+      0.0,
+      -0.5,
+      0.32
+    ],
+    "density": 0.2,
+    "particle_radius": 0.003,
+    "tri_ke": 30000.0,
+    "tri_ka": 30000.0,
+    "tri_kd": 1.5e-06,
+    "edge_ke": 0.7,
+    "edge_kd": 0.003,
+    "texture_source": "/home/oem/.cache/embodichain_data/extract/DeformableDemoData/textures/mianbu.png",
+    "edge_rest_angle": 0.0
+  },
+  "contact": {
+    "shape_ke": 50000.0,
+    "shape_kd": 0.001,
+    "table_friction": 1.5,
+    "gripper_ke": 500000.0,
+    "gripper_kd": 0.005,
+    "gripper_friction": 10.0,
+    "particle_ke": 10000.0,
+    "particle_kd": 0.01,
+    "particle_friction": 0.25,
+    "soft_contact_margin": 0.003
+  },
+  "solver": {
+    "dt": 0.016666666666666666,
+    "num_substeps": 10,
+    "vbd_iterations": 15,
+    "use_cuda_graph": true,
+    "joint_mode": "kinematic",
+    "self_contact_margin": 0.002,
+    "self_contact_radius": 0.002
+  },
+  "motion": {
+    "park_tcp": [
+      -0.13,
+      -0.67,
+      0.5
+    ],
+    "left_grasp": [
+      -0.196,
+      -0.53,
+      0.203
+    ],
+    "left_place": [
+      0.08,
+      -0.53,
+      0.295
+    ],
+    "lift_height": 0.13,
+    "settle_seconds": 2.0,
+    "observe_seconds": 2.0
+  }
+}
