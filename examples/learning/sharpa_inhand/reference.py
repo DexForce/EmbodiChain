@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib
 import json
 import os
 import subprocess
@@ -50,6 +51,33 @@ _SIM_TESTS = [
 
 def _capture(args: list[str], root: Path) -> str:
     return subprocess.check_output(args, cwd=root, text=True).strip()
+
+
+def _verify_imported_learner(root: Path) -> Path:
+    """Require the imported ``sharpa_rl_unilab`` package to come from ``root``.
+
+    Checking the revision of ``--upstream`` says nothing about which learner
+    ``PYTHONPATH`` resolved; compare the imported package's own location.
+
+    Args:
+        root: The validated upstream checkout.
+
+    Returns:
+        Resolved directory of the imported package.
+
+    Raises:
+        ValueError: If the package was imported from another location.
+    """
+    package = importlib.import_module("sharpa_rl_unilab")
+    expected = (root / "src/sharpa_rl_unilab").resolve()
+    location = getattr(package, "__file__", None)
+    actual = Path(location).resolve().parent if location else None
+    if actual != expected:
+        raise ValueError(
+            f"sharpa_rl_unilab was imported from {actual}, not the --upstream "
+            f"checkout {expected}; put that checkout's src first on PYTHONPATH"
+        )
+    return expected
 
 
 def _source(root: Path) -> dict[str, Any]:

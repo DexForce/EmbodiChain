@@ -40,10 +40,12 @@ from _full_native_task import _FullNativeTask as _NativeTask
 from _native_checkpoint import (
     _ADAPTER_FILES,
     _restore_learner,
+    _runtime_source,
     _save_replay,
     _verify_resume,
 )
 from omegaconf import OmegaConf
+from reference import _verify_imported_learner
 from sharpa_rl_unilab.training.configuration import configure_threads
 from sharpa_rl_unilab.training.policy import (
     inference_distribution,
@@ -335,6 +337,7 @@ def main() -> None:
         ["git", "status", "--porcelain"], cwd=args.upstream, text=True
     ).strip():
         raise ValueError("The upstream reference sources must remain clean")
+    _verify_imported_learner(args.upstream.resolve())
     if (output / "metrics.jsonl").exists():
         raise FileExistsError("Use a fresh native training output directory")
     snapshot_dir = output / "sources"
@@ -439,9 +442,8 @@ def main() -> None:
                 for k, v in learner.actor.state_dict().items()
             }
         if args.resource_profile == "reference_host":
-            resource_path = (
-                Path(__file__).resolve().parents[3]
-                / "embodichain/learning/rl/experimental/_host_replay.py"
+            resource_path = _runtime_source(
+                "embodichain/learning/rl/experimental/_host_replay.py"
             )
             shutil.copy2(resource_path, snapshot_dir / "host_replay_adapter.py")
         OmegaConf.save(cfg, output / "config.yaml")
@@ -450,7 +452,7 @@ def main() -> None:
         )
         started = time.monotonic()
         for name in _ADAPTER_FILES:
-            path = (Path(__file__).resolve().parents[3] / "embodichain/lab/sim") / name
+            path = _runtime_source(f"embodichain/lab/sim/{name}")
             target = snapshot_dir / name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(path, target)

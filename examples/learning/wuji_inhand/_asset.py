@@ -34,6 +34,27 @@ from scipy.spatial.transform import Rotation
 __all__: list[str] = []
 
 
+def _prepared_sha256(root: Path) -> dict[str, str]:
+    """Hash the prepared files that screening and cache construction consume.
+
+    Args:
+        root: Directory written by ``prepare.py``.
+
+    Returns:
+        SHA-256 digests keyed by POSIX paths relative to ``root``.
+    """
+    files = [
+        root / "scene.xml",
+        *(root / "compiled").rglob("*"),
+        *root.glob("candidates_*.npy"),
+    ]
+    return {
+        path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in sorted(files)
+        if path.is_file()
+    }
+
+
 def _numbers(value: object) -> str:
     return " ".join(format(float(x), ".17g") for x in np.asarray(value).reshape(-1))
 

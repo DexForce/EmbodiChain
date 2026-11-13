@@ -44,6 +44,9 @@ def main() -> None:
     )
     parser.add_argument("--zero-action", action="store_true")
     args = parser.parse_args()
+    if len(set(args.seeds)) != len(args.seeds):
+        # Each seed resets every generator, so a repeat adds no new episodes.
+        raise ValueError("Evaluation seeds must be distinct")
     output = args.output.resolve()
     if output.exists():
         raise FileExistsError("Use a fresh evaluation directory")
@@ -51,6 +54,7 @@ def main() -> None:
     _activate(args.upstream.resolve(), output / "learner_dependency")
 
     import torch
+    from _native_checkpoint import _runtime_source
     from _task import _WujiTask
     from native_full import _evaluate, _wait_memory
     from omegaconf import OmegaConf
@@ -70,9 +74,9 @@ def main() -> None:
     for name, digest in inputs["assets"].items():
         if hashlib.sha256((args.assets / name).read_bytes()).hexdigest() != digest:
             raise ValueError(f"Physical asset changed since training: {name}")
-    repository = Path(__file__).resolve().parents[3]
     for name, digest in inputs["core"].items():
-        if hashlib.sha256((repository / name).read_bytes()).hexdigest() != digest:
+        current = _runtime_source(name).read_bytes()
+        if hashlib.sha256(current).hexdigest() != digest:
             raise ValueError(f"Runtime source changed since training: {name}")
     hashes = {}
     for name in ["_task.py", "_physics.py", "_dependency.py", "_asset.py"]:
@@ -143,13 +147,14 @@ def main() -> None:
             map_location="cpu",
             weights_only=False,
         )
-        for batch, seed in enumerate(args.seeds):
+        # _evaluate appends one record per row for each seed, in seed order.
+        for batch in range(len(args.seeds)):
             valid = torch.stack(task.grasp_flags[batch * 400 : (batch + 1) * 400])
             fraction = (valid * traces[batch][..., 1]).sum(0) / 400
-            for record in result["records"]:
-                if record["seed"] == seed:
-                    record["valid_grasp_fraction"] = float(fraction[record["row"]])
-                    record["stable"] &= record["valid_grasp_fraction"] >= 0.8
+            rows = slice(batch * task.num_envs, (batch + 1) * task.num_envs)
+            for record in result["records"][rows]:
+                record["valid_grasp_fraction"] = float(fraction[record["row"]])
+                record["stable"] &= record["valid_grasp_fraction"] >= 0.8
 
         def update_semantics(value: dict, rows: list[dict]) -> None:
             value["stable"] = sum(row["stable"] for row in rows) / len(rows)

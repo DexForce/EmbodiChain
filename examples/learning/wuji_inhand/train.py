@@ -53,7 +53,7 @@ def main() -> None:
     _activate(args.upstream.resolve(), output / "learner_dependency")
     import numpy as np
     import torch
-    from _native_checkpoint import _restore_learner
+    from _native_checkpoint import _restore_learner, _runtime_source
     from _resource_learner import _ResourceAPGLearner
     from _task import _WujiTask
     from native_full import _save, _wait_memory
@@ -85,9 +85,9 @@ def main() -> None:
         for name, digest in inputs["assets"].items():
             if hashlib.sha256((args.assets / name).read_bytes()).hexdigest() != digest:
                 raise ValueError(f"Physical asset changed since training: {name}")
-        repository = Path(__file__).resolve().parents[3]
         for name, digest in inputs["core"].items():
-            if hashlib.sha256((repository / name).read_bytes()).hexdigest() != digest:
+            current = _runtime_source(name).read_bytes()
+            if hashlib.sha256(current).hexdigest() != digest:
                 raise ValueError(f"Runtime source changed since training: {name}")
     else:
         cfg.algo.seed = args.seed
@@ -146,7 +146,6 @@ def main() -> None:
         "scope": "Palm-up Wuji v2; eight sizes; physically screened thumb/two-opposing-finger grasp and controller preloads; contact-gated reward and loss-of-grasp termination; axial phase randomization; fixed mass/friction/PD/vertical object gravity. Fresh training, no v1 cache or policy reuse. Not source Sharpa DR parity.",
     }
     (output / "experiment.json").write_text(json.dumps(experiment, indent=2) + "\n")
-    repository = Path(__file__).resolve().parents[3]
     runtime_files = [
         "embodichain/learning/rl/algo/apg.py",
         "embodichain/learning/rl/experimental/_host_replay.py",
@@ -169,7 +168,7 @@ def main() -> None:
             if p.is_file()
         },
         "core": {
-            name: hashlib.sha256((repository / name).read_bytes()).hexdigest()
+            name: hashlib.sha256(_runtime_source(name).read_bytes()).hexdigest()
             for name in runtime_files
         },
     }

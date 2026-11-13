@@ -25,6 +25,7 @@ from pathlib import Path
 import numpy as np
 import pytorch_kinematics as pk
 import torch
+from _asset import _prepared_sha256
 from _physics import SCALES, _WujiPhysics
 
 from embodichain.lab.sim import SimulationManager
@@ -85,7 +86,11 @@ def main() -> None:
     parser.add_argument("--steps", type=int, default=200)
     parser.add_argument("--adapt-steps", type=int, default=0)
     args = parser.parse_args()
+    # Cache construction reads every batch this run lists; never mix older runs.
+    if args.output.exists() and any(args.output.iterdir()):
+        raise FileExistsError("Use a fresh screening output directory")
     args.output.mkdir(parents=True, exist_ok=True)
+    prepared = _prepared_sha256(args.assets)
     physical = _WujiPhysics(
         args.assets, args.output, num_envs=256, seed=101, gain=args.gain
     )
@@ -142,6 +147,8 @@ def main() -> None:
                     ).cpu(),
                     "fingertip_contact_forces": torch.stack(contact_trace),
                     "physical_pose_trace": torch.stack(pose_trace),
+                    # Feedback may have moved the preload; this target was held.
+                    "target": physical.target.detach().cpu().clone(),
                 },
                 args.output / f"batch_{batch}.pt",
             )
@@ -173,6 +180,7 @@ def main() -> None:
                 {
                     "gain": args.gain,
                     "source_hashes": sources,
+                    "prepared_assets_sha256": prepared,
                     "control_steps": args.steps,
                     "preparation_feedback_steps": args.adapt_steps,
                     "feedback_active_during_qualification_holding": False,

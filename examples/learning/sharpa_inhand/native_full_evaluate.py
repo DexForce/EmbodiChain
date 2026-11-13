@@ -27,9 +27,10 @@ from typing import Any
 
 import torch
 from _full_native_task import _FullNativeTask as _NativeTask
+from _native_checkpoint import _runtime_source
 from native_full import _evaluate, _wait_memory
 from omegaconf import OmegaConf
-from reference import _REVISION
+from reference import _REVISION, _verify_imported_learner
 from sharpa_rl_unilab.training.configuration import configure_threads
 from sharpa_rl_unilab.training.policy import make_actor
 from unilab.base.torch_env import TorchEnvState
@@ -105,6 +106,7 @@ def main() -> None:
         text=True,
     ).strip():
         raise ValueError("The upstream reference sources must remain clean")
+    _verify_imported_learner(upstream)
     output = args.output.resolve()
     if output.exists():
         raise FileExistsError("Use a fresh physical evaluation output")
@@ -135,7 +137,7 @@ def main() -> None:
         "sensors/contact/_warp/geometry_contact.py",
     ]
     for name in adapter_files:
-        path = Path(__file__).resolve().parents[3] / "embodichain/lab/sim" / name
+        path = _runtime_source(f"embodichain/lab/sim/{name}")
         code_hashes[name] = hashlib.sha256(path.read_bytes()).hexdigest()
     if native and not args.allow_implementation_transfer:
         training_experiment = json.loads(

@@ -42,6 +42,7 @@ from embodichain.lab.sim.cfg import (
     RobotCfg,
     UsdSourceCfg,
 )
+from embodichain.lab.visualization import VisualizationCfg
 from embodichain.utils.math import matrix_from_quat
 
 __all__ = ["SharpaSimulation"]
@@ -238,6 +239,7 @@ class SharpaSimulation:
                     arena_space=1.0,
                     physics_dt=1.0 / 240.0,
                     render_cfg=RenderCfg(renderer=renderer),
+                    visualization=VisualizationCfg(backend="none"),
                     physics_cfg=NewtonPhysicsCfg(
                         device=str(self.device),
                         gravity=(

@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -43,12 +44,36 @@ from embodichain.lab.sim.physics._cylinder_variants import _shrink_cylinder_vari
 from embodichain.lab.sim.sensors.contact._geometry_contact_sensor import (
     _GeometryNetForceSensor,
 )
+from embodichain.lab.visualization import VisualizationCfg
 from embodichain.utils.math import quat_apply
 
 __all__: list[str] = []
 
 JOINTS = tuple(f"right_finger{i}_joint{j}" for i in range(1, 6) for j in range(1, 5))
 SCALES = (0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5)
+
+
+def _native_hand_source(assets: Path, profile: dict[str, Any]) -> Path:
+    """Return the compiled hand USD under ``assets`` after checking its hash.
+
+    The profile's recorded ``native_source`` path names the directory that
+    compiled the asset, which may be another copy or no longer exist. Loading
+    the file under ``assets`` keeps the simulated hand the one that callers hash.
+
+    Args:
+        assets: Prepared or initial-cache asset root.
+        profile: Parsed ``compiled/source.json`` of that root.
+
+    Returns:
+        Resolved path of ``compiled/hand.usda`` under ``assets``.
+
+    Raises:
+        ValueError: If the file differs from the compiled ``native_source_sha256``.
+    """
+    path = (assets / "compiled/hand.usda").resolve()
+    if hashlib.sha256(path.read_bytes()).hexdigest() != profile["native_source_sha256"]:
+        raise ValueError(f"{path} does not match the compiled native_source_sha256")
+    return path
 
 
 class _WujiPhysics:
@@ -72,6 +97,8 @@ class _WujiPhysics:
             self.scale_ids
         ]
         self.profile = json.loads((assets / "compiled/source.json").read_text())
+        hand_source = _native_hand_source(assets, self.profile)
+        self.profile["native_source"] = str(hand_source)
         root_pose = np.eye(4)
         quat = np.asarray(self.profile["root_quat_wxyz"])
         root_pose[:3, :3] = Rotation.from_quat(quat[[1, 2, 3, 0]]).as_matrix()
@@ -138,6 +165,7 @@ class _WujiPhysics:
                     arena_space=1.0,
                     physics_dt=1 / 240,
                     render_cfg=RenderCfg(renderer="no-render"),
+                    visualization=VisualizationCfg(backend="none"),
                     physics_cfg=NewtonPhysicsCfg(
                         device=str(self.device),
                         gravity=(0.0, 0.0, 0.0),
@@ -160,8 +188,7 @@ class _WujiPhysics:
                 RobotCfg(
                     uid="hand",
                     source=UsdSourceCfg(
-                        file_path=self.profile["native_source"],
-                        source_prim_path="/Hand",
+                        file_path=str(hand_source), source_prim_path="/Hand"
                     ),
                     init_local_pose=root_pose,
                     root_props=ArticulationRootPropertiesCfg(

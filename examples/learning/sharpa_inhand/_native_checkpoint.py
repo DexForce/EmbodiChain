@@ -26,6 +26,7 @@ from typing import Any
 import numpy as np
 import torch
 
+import embodichain
 from embodichain.learning.rl.experimental._host_replay import (
     _host_replay_state_dict,
     _load_host_replay_state_dict,
@@ -50,6 +51,30 @@ _ADAPTER_FILES = (
 )
 
 
+def _runtime_source(name: str) -> Path:
+    """Resolve a recorded runtime source name in checkouts and wheel installs.
+
+    A wheel installs examples under ``<prefix>/share/embodichain/examples`` and
+    the core package in site-packages, so neither root is derived from the other.
+
+    Args:
+        name: ``embodichain/...`` for a core file, resolved in the imported
+            package, or ``examples/...`` for a file of this examples tree.
+
+    Returns:
+        Path of the file that the running process uses.
+
+    Raises:
+        ValueError: If ``name`` has another root.
+    """
+    root, _, relative = name.partition("/")
+    if root == "embodichain":
+        return Path(embodichain.__file__).resolve().parent / relative
+    if root == "examples":
+        return Path(__file__).resolve().parents[2] / relative
+    raise ValueError(f"Unknown runtime source root: {name}")
+
+
 def _verify_resume(
     checkpoint: Path, snapshot: dict[str, Any], hashes: dict[str, str], profile: str
 ) -> None:
@@ -67,11 +92,11 @@ def _verify_resume(
             raise ValueError(
                 f"Physical implementation changed: {name}; use an explicit implementation-transfer evaluation"
             )
-    root = Path(__file__).resolve().parents[3] / "embodichain/lab/sim"
     for name in _ADAPTER_FILES:
         original = checkpoint.parent / "sources" / name
+        current = _runtime_source(f"embodichain/lab/sim/{name}")
         if (
-            hashlib.sha256((root / name).read_bytes()).digest()
+            hashlib.sha256(current.read_bytes()).digest()
             != hashlib.sha256(original.read_bytes()).digest()
         ):
             raise ValueError(f"Native physics/sensor adapter changed: {name}")

@@ -27,12 +27,66 @@ import hashlib
 import json
 import shutil
 from pathlib import Path
+from typing import Any
 
 import mujoco
 import numpy as np
 import torch
+from _asset import _prepared_sha256
 
 __all__ = ["main"]
+
+
+def _screened_batches(screen: Path, prepared: Path) -> tuple[list[Path], int]:
+    """Return the batches a screening run lists and its feedback step count.
+
+    Batch files left by another run in the same directory are ignored. When the
+    manifest records the prepared-asset hashes, they must match ``prepared``.
+
+    Args:
+        screen: Directory written by ``screen.py``.
+        prepared: Prepared assets that the cache will copy.
+
+    Returns:
+        Listed batch files and the preparation feedback step count.
+
+    Raises:
+        ValueError: If the screening run used different prepared assets.
+        FileNotFoundError: If a listed batch is missing.
+    """
+    manifest = json.loads((screen / "screening.json").read_text())
+    recorded = manifest.get("prepared_assets_sha256")
+    if recorded is not None and recorded != _prepared_sha256(prepared):
+        raise ValueError("The screening run used different prepared assets")
+    files = [screen / f"batch_{record['batch']}.pt" for record in manifest["batches"]]
+    missing = [file.name for file in files if not file.is_file()]
+    if missing:
+        raise FileNotFoundError(f"Screening batches are missing: {missing}")
+    return files, int(manifest["preparation_feedback_steps"])
+
+
+def _holding_targets(packet: dict[str, Any], feedback_steps: int) -> np.ndarray:
+    """Return the fixed controller targets held while a batch was measured.
+
+    Args:
+        packet: One loaded ``batch_*.pt`` screening packet.
+        feedback_steps: The run's preparation feedback step count.
+
+    Returns:
+        Holding targets, one row per screened arena.
+
+    Raises:
+        ValueError: If feedback changed targets that the packet does not record.
+    """
+    if "target" in packet:
+        return packet["target"].numpy()
+    if feedback_steps:
+        raise ValueError(
+            "This screening packet predates recorded holding targets; rerun "
+            "screen.py because preparation feedback changed them"
+        )
+    # Without feedback the reset preload is held unchanged.
+    return packet["initial"][:, 27:47].numpy()
 
 
 def main() -> None:
@@ -42,6 +96,7 @@ def main() -> None:
     p.add_argument("--screen", type=Path, required=True)
     p.add_argument("--output", type=Path, required=True)
     a = p.parse_args()
+    batches, feedback_steps = _screened_batches(a.screen, a.prepared)
     a.output.mkdir(exist_ok=False, parents=True)
     m = mujoco.MjModel.from_xml_path(str((a.prepared / "scene.xml").resolve()))
     d = mujoco.MjData(m)
@@ -56,11 +111,11 @@ def main() -> None:
     kept = [[] for _ in range(8)]
     records = []
     scales = [0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5]
-    for file in sorted(a.screen.glob("batch_*.pt")):
+    for file in batches:
         packet = torch.load(file, weights_only=False, map_location="cpu")
         states = packet["physical_pose_trace"].numpy()
         forces = packet["fingertip_contact_forces"].numpy()
-        initial = packet["initial"].numpy()
+        targets = _holding_targets(packet, feedback_steps)
         for row in range(states.shape[1]):
             scale = scales[row // 32]
             m.geom_size[obj, :2] = [0.02 * scale, 0.016 * scale]
@@ -97,7 +152,7 @@ def main() -> None:
                     )
                     if depth > 0.003:
                         continue
-                    kept[row // 32].append(np.r_[s, initial[row, 27:47]])
+                    kept[row // 32].append(np.r_[s, targets[row]])
                     records.append(
                         {
                             "batch": file.name,
