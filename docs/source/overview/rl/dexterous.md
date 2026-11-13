@@ -10,18 +10,15 @@ Five USD-native dexterous manipulation tasks inherit from `EmbodiedEnv` (`Dexter
 | `leap_cube_reorient` | `LeapCubeReorientRL-v1` | 16 | 57 / 128 | `LeapHandCube` |
 | `leap_cube_rotate_z` | `LeapCubeRotateZAxisRL-v1` | 16 | 32 / 105 | `LeapHandCube` |
 
-## Deployments and CLI Usage
+## Configuration and CLI Usage
 
-Each task directory under `extensions/embodichain_tasks/configs/tasks/manipulation/dexterous/<task>/` provides two catalog deployments:
-
-- `newton` (default): `env.newton.yaml` + `agents/ppo.newton.yaml`, running `solver_type: dexuni` (`use_mujoco_cpu: false`, GPU MuJoCo Warp CUDA with full scene joint ownership).
-- `mjwarp`: `env.mjwarp.yaml` + `agents/ppo.mjwarp.yaml`, running `solver_type: mujoco_warp`.
+Each task directory under `extensions/embodichain_tasks/configs/tasks/manipulation/dexterous/<task>/` provides a single `default` catalog deployment (`env.yaml` and `agents/ppo.yaml`) configured with `physics: newton` and `solver_type: dexuni` (`use_mujoco_cpu: false`, `use_mujoco_contacts: true`, GPU MuJoCo Warp on CUDA with full scene joint ownership).
 
 ```bash
 embodichain data download --name ShadowHandPen
 embodichain show-task embodichain_tasks:shadow_pen_fixed
-embodichain run-task --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/dexterous/shadow_pen_fixed/env.newton.yaml
-embodichain train-rl --config extensions/embodichain_tasks/configs/tasks/manipulation/dexterous/shadow_pen_fixed/agents/ppo.newton.yaml
+embodichain run-task --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/dexterous/shadow_pen_fixed/env.yaml
+embodichain train-rl --config extensions/embodichain_tasks/configs/tasks/manipulation/dexterous/shadow_pen_fixed/agents/ppo.yaml
 ```
 
 Continue training from a saved checkpoint with `embodichain train-rl --config CONFIG --resume latest --run RUN_DIRECTORY`, setting `trainer.iterations` to the cumulative update target. Evaluate a saved checkpoint via `embodichain eval-policy RUN_DIRECTORY --checkpoint latest --num-envs 64 --episodes 64 --renderer no-render`.
@@ -34,13 +31,13 @@ Evaluation reports `eval/success_rate` for `ShadowPenFixedRL-v1`, `ShadowPenCont
 
 ## USD Physical Fidelity and Solver Settings
 
-All five environments import fixed tendons, joint limits, actuator `ctrlrange`, PD `target_ke`/`target_kd`, site local poses, and collision filter pairs directly from `.usdc`. Source MJCF files in the asset archives are used only by offline verification tests (`_audit_model.py`, `_audit_tendons.py`) to verify mass, inertia, joint, actuator, tendon, and collision-graph parity against active GPU solver buffers.
+All five environments import fixed tendons, joint limits, actuator `ctrlrange`, PD `target_ke`/`target_kd`, site local poses, and collision filter pairs directly from `.usdc`.
 
-`LeapCubeFaceTurnRL-v1` reserves `njmax: 2048` constraint rows per world (`512` for the remaining tasks). Both `newton` (`dexuni`) and `mjwarp` (`mujoco_warp`) deployments preserve authored solver settings (`20/50` Newton/line-search iterations on Shadow Hand tasks; `5/8` on LEAP Hand tasks) and set `arena_space: 0.0` with `separate_worlds: true` so execution-model geometry stays spatially uniform across parallel worlds.
+`LeapCubeFaceTurnRL-v1` reserves `njmax: 2048` constraint rows per world (`512` for the remaining tasks). Each `env.yaml` preserves authored solver settings (`20/50` Newton/line-search iterations on Shadow Hand tasks; `5/8` on LEAP Hand tasks) and sets `arena_space: 0.0` with `separate_worlds: true` so execution-model geometry stays spatially uniform across parallel worlds.
 
 ## DexUni Training and Evaluation Baseline
 
-Sustained single-GPU PPO training, `--resume latest` continuation (`+10` updates), and `64`-episode `eval-policy` results under the default `newton` (`solver_type: dexuni`, `4096` parallel environments, single NVIDIA RTX PRO 5000 Blackwell 72 GB GPU):
+Sustained single-GPU PPO training, `--resume latest` continuation (`+10` updates), and `64`-episode `eval-policy` results under `env.yaml` (`physics: newton`, `solver_type: dexuni`, `4096` parallel environments, single NVIDIA RTX PRO 5000 Blackwell 72 GB GPU):
 
 | Environment | Updates (`train + resume`) | Transitions | Steady SPS | Train `episode_reward_avg_100` (`start -> end`) | `eval-policy` (`64` episodes, `--checkpoint latest`) |
 |---|---:|---:|---:|---|---|

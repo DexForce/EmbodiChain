@@ -115,14 +115,14 @@ detachment, and reset/terminal issues to the selected environment protocol.
 `locomotion/velocity/g1_rough.py` registers the 37-action G1 task (`UnitreeG1RoughRL-v1`).
 Its terrain curriculum comes from `G1RoughTerrains` and its robot comes from
 `UnitreeG1Rough`, independently of the 29-joint G1 flat archive. Its catalog
-defaults to `newton` (`solver_type: dexuni` with Newton heightfield contacts)
-alongside `mjwarp` (`solver_type: mujoco_warp`).
+exposes a single `default` deployment (`env.yaml` + `agents/ppo.yaml`) running
+`physics: newton` with `solver_type: dexuni` and Newton heightfield contacts.
 
 `manipulation/dexterous/` registers five USD-native `EmbodiedEnv` tasks
 (`ShadowPenFixedRL-v1`, `ShadowPenContinuousRL-v1`, `LeapCubeFaceTurnRL-v1`,
 `LeapCubeReorientRL-v1`, `LeapCubeRotateZAxisRL-v1`) backed by
 `DexterousManipulationEnv`. Runtime scene loading uses `SimulationManager.add_usd()`
 and public `Robot`/`Articulation`/`RigidObject` facades with zero MJCF dependency;
-each task catalog defaults to `newton` (`solver_type: dexuni`, GPU MJWarp CUDA)
-and also ships `mjwarp` (`solver_type: mujoco_warp`). Offline physical-model and
-tendon parity helpers live in `_audit_model.py` and `_audit_tendons.py`.
+each task catalog exposes a single `default` deployment (`env.yaml` +
+`agents/ppo.yaml`) running `physics: newton` with `solver_type: dexuni` (GPU
+MJWarp CUDA).

@@ -1,12 +1,12 @@
 trainer:
-  exp_name: shadow_pen_continuous_ppo_mjwarp
-  gym_config: extensions/embodichain_tasks/configs/tasks/manipulation/dexterous/shadow_pen_continuous/env.mjwarp.yaml
+  exp_name: leap_cube_rotate_z_ppo
+  gym_config: extensions/embodichain_tasks/configs/tasks/manipulation/dexterous/leap_cube_rotate_z/env.yaml
   seed: 42
   device: cuda:0
   headless: true
   num_envs: 4096
-  iterations: 310
-  buffer_size: 80
+  iterations: 650
+  buffer_size: 40
   enable_eval: false
   save_frequency_updates: 100
   use_wandb: false
@@ -19,7 +19,7 @@ policy:
     actor:
     - policy
     critic:
-    - policy
+    - critic
   actor:
     type: mlp
     network_cfg:
@@ -42,18 +42,14 @@ algorithm:
   cfg:
     optimizer:
       name: adam
-      learning_rate: 0.0001
-    schedule: adaptive
-    desired_kl: 0.03
-    minimum_learning_rate: 1.0e-05
-    maximum_learning_rate: 0.0003
+      learning_rate: 0.0003
     n_epochs: 4
-    num_mini_batches: 64
+    num_mini_batches: 32
     batch_size: 5120
-    gamma: 0.995
+    gamma: 0.97
     gae_lambda: 0.95
     clip_coef: 0.3
-    ent_coef: 0.03
+    ent_coef: 0.01
     vf_coef: 0.5
     use_clipped_value_loss: true
     max_grad_norm: 1.0

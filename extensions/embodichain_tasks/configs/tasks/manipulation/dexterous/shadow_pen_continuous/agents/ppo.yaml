@@ -1,12 +1,12 @@
 trainer:
-  exp_name: leap_cube_reorient_ppo_mjwarp
-  gym_config: extensions/embodichain_tasks/configs/tasks/manipulation/dexterous/leap_cube_reorient/env.mjwarp.yaml
+  exp_name: shadow_pen_continuous_ppo
+  gym_config: extensions/embodichain_tasks/configs/tasks/manipulation/dexterous/shadow_pen_continuous/env.yaml
   seed: 42
   device: cuda:0
   headless: true
   num_envs: 4096
-  iterations: 920
-  buffer_size: 40
+  iterations: 310
+  buffer_size: 80
   enable_eval: false
   save_frequency_updates: 100
   use_wandb: false
@@ -19,7 +19,7 @@ policy:
     actor:
     - policy
     critic:
-    - critic
+    - policy
   actor:
     type: mlp
     network_cfg:
@@ -44,16 +44,16 @@ algorithm:
       name: adam
       learning_rate: 0.0001
     schedule: adaptive
-    desired_kl: 0.02
+    desired_kl: 0.03
     minimum_learning_rate: 1.0e-05
     maximum_learning_rate: 0.0003
     n_epochs: 4
-    num_mini_batches: 32
+    num_mini_batches: 64
     batch_size: 5120
-    gamma: 0.99
+    gamma: 0.995
     gae_lambda: 0.95
     clip_coef: 0.3
-    ent_coef: 0.001
+    ent_coef: 0.03
     vf_coef: 0.5
     use_clipped_value_loss: true
     max_grad_norm: 1.0

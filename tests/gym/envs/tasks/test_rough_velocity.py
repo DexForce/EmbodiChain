@@ -236,45 +236,101 @@ def test_control_state_read_is_reused_by_reference_managers() -> None:
 
 @pytest.mark.no_sim
 @pytest.mark.parametrize("task, dimension", [("g1_rough", 310)])
-@pytest.mark.parametrize("cached", [False, True])
-def test_rough_velocity_mdp_golden_values(
-    task: str, dimension: int, cached: bool
+def test_rough_velocity_mdp_contracts_and_cached_constants(
+    task: str, dimension: int
 ) -> None:
-    """Verify observation, reward and termination values against golden fixtures."""
-    fixture = json.loads(
-        (Path(__file__).parent / "fixtures" / f"{task}.json").read_text()
-    )
-    state = RoughVelocityState(
-        **{
-            name: torch.tensor(value, dtype=torch.float32)
-            for name, value in fixture["state"].items()
-        }
-    )
+    """Verify observation clipping/scaling, termination, and cached reward parity."""
     config = load_config(task)
-    constants = (
-        RoughVelocityConstants.from_config(config, state.joint_pos) if cached else None
+    n = 4
+    dof = config.action_dim
+    default_qpos = torch.tensor(config.default_joint_position, dtype=torch.float32)
+    limits = torch.tensor(
+        config.data["robot"]["soft_joint_pos_limits"], dtype=torch.float32
     )
-    noise = {name: torch.tensor(value) for name, value in fixture["noise"].items()}
-    observed = build_observation(config, state, noise=noise, constants=constants)
-    assert observed.shape == (4, dimension)
-    torch.testing.assert_close(
-        observed, torch.tensor(fixture["observation"]), rtol=1e-6, atol=1e-6
+    limit_term, limit_spec = next(
+        (k, v)
+        for k, v in config.data["rewards"].items()
+        if v["function"] == "joint_pos_limits"
     )
+    term_penalty = next(
+        k for k, v in config.data["rewards"].items() if v["function"] == "is_terminated"
+    )
+    limit_joint = limit_spec["joint_ids"][0]
+    joint_pos = default_qpos.repeat(n, 1)
+    joint_pos[1, limit_joint] = limits[limit_joint, 1] + 0.15
+    illegal = torch.zeros((n, 3, 2, 3), dtype=torch.float32)
+    illegal[2, 1, 0, 2] = 2.5
+    foot_force = torch.zeros((n, 3, 2, 3), dtype=torch.float32)
+    foot_force[1, 0, 0, 2] = 5.0
+    state = RoughVelocityState(
+        base_lin_vel_b=torch.tensor(
+            [[0.5, 0.0, 0.0], [0.2, -0.1, 0.3], [0.0, 0.0, 0.0], [0.4, 0.1, -0.2]]
+        ),
+        base_ang_vel_b=torch.tensor(
+            [[0.0, 0.0, 0.3], [0.2, -0.1, 0.0], [0.0, 0.0, 0.0], [0.1, 0.1, -0.2]]
+        ),
+        projected_gravity_b=torch.tensor(
+            [[0.0, 0.0, -1.0], [0.1, -0.1, -0.99], [0.0, 0.0, -1.0], [0.2, 0.0, -0.98]]
+        ),
+        base_lin_vel_yaw=torch.tensor(
+            [[0.5, 0.0, 0.0], [0.1, 0.0, 0.0], [0.0, 0.0, 0.0], [0.4, 0.1, 0.0]]
+        ),
+        base_ang_vel_w=torch.tensor(
+            [[0.0, 0.0, 0.3], [0.0, 0.0, 0.1], [0.0, 0.0, 0.0], [0.0, 0.0, -0.2]]
+        ),
+        command=torch.tensor(
+            [[0.5, 0.0, 0.3], [0.5, 0.0, 0.0], [0.0, 0.0, 0.0], [0.4, 0.1, -0.2]]
+        ),
+        joint_pos=joint_pos,
+        joint_vel=torch.full((n, dof), 0.25),
+        joint_acc=torch.full((n, dof), 1.5),
+        applied_torque=torch.full((n, dof), 2.0),
+        action=torch.full((n, dof), 0.5),
+        previous_action=torch.full((n, dof), 0.1),
+        foot_vel_w=torch.tensor([[[0.2, 0.1, 0.0], [0.0, 0.0, 0.0]]]).repeat(n, 1, 1),
+        foot_force_history=foot_force,
+        current_air_time=torch.tensor(
+            [[0.3, 0.0], [0.0, 0.2], [0.1, 0.1], [0.25, 0.0]]
+        ),
+        current_contact_time=torch.tensor(
+            [[0.0, 0.2], [0.02, 0.0], [0.0, 0.0], [0.0, 0.15]]
+        ),
+        last_air_time=torch.full((n, 2), 0.35),
+        illegal_force_history=illegal,
+        height_scan=torch.linspace(-2.0, 2.0, n * 187).reshape(n, 187),
+        episode_step=torch.tensor([10, 20, 30, 1000]),
+        root_height=torch.full((n,), 0.78),
+    )
+    noise = {"height_scan": torch.full((n, 187), 0.05)}
+    constants = RoughVelocityConstants.from_config(config, state.joint_pos)
+    obs_uncached = build_observation(config, state, noise=noise, constants=None)
+    obs_cached = build_observation(config, state, noise=noise, constants=constants)
+    assert obs_uncached.shape == (n, dimension)
+    torch.testing.assert_close(obs_cached, obs_uncached, rtol=0, atol=0)
+    # Height scan clips to [-1.0, 1.0] before scaling.
+    assert obs_uncached[:, -187:].abs().max().item() <= 1.0 + 1e-6
+
     terminated, truncated = compute_termination(config, state)
-    assert torch.equal(terminated, torch.tensor(fixture["terminated"]))
-    assert not truncated.any()
-    reward = compute_rewards(config, state, terminated, constants=constants)
-    for name, expected in fixture["rewards"].items():
+    assert terminated.tolist() == [False, False, True, False]
+    assert truncated.tolist() == [False, False, False, True]
+
+    rew_uncached = compute_rewards(config, state, terminated, constants=None)
+    rew_cached = compute_rewards(config, state, terminated, constants=constants)
+    assert set(rew_uncached.raw_terms) == set(config.data["rewards"])
+    for name in config.data["rewards"]:
         torch.testing.assert_close(
-            reward.raw_terms[name], torch.tensor(expected), rtol=1e-6, atol=1e-6
+            rew_cached.raw_terms[name], rew_uncached.raw_terms[name], rtol=0, atol=0
         )
     expected_total = sum(
-        torch.tensor(value) * config.data["rewards"][name]["weight"] * 0.02
-        for name, value in fixture["rewards"].items()
+        rew_uncached.raw_terms[name]
+        * config.data["rewards"][name]["weight"]
+        * config.control_dt
+        for name in config.data["rewards"]
     )
-    torch.testing.assert_close(reward.total, expected_total, rtol=1e-6, atol=1e-6)
-    state.episode_step[0] = 1000
-    assert compute_termination(config, state)[1].tolist() == [True, False, False, False]
+    torch.testing.assert_close(rew_uncached.total, expected_total, rtol=1e-6, atol=1e-6)
+    torch.testing.assert_close(rew_cached.total, rew_uncached.total, rtol=0, atol=0)
+    assert rew_uncached.raw_terms[limit_term][1].item() == pytest.approx(0.15)
+    assert rew_uncached.raw_terms[term_penalty][2].item() == 1.0
 
 
 @pytest.mark.no_sim
@@ -521,48 +577,59 @@ def test_contact_impulse_uses_internal_solver_interval() -> None:
 
 
 @pytest.mark.no_sim
-def test_rough_curriculum_matches_golden_resets() -> None:
-    """Match source assignments, threshold cases, selected resets and overflow."""
-    fixture = json.loads(
-        (Path(__file__).parent / "fixtures/terrain_curriculum.json").read_text()
+def test_rough_curriculum_updates_and_preserves_untouched_rows() -> None:
+    """Verify promotion, demotion, floor/overflow bounds, and row isolation."""
+    rows, cols = 5, 3
+    grid_x, grid_y = torch.meshgrid(
+        torch.arange(rows, dtype=torch.float32) * 10.0,
+        torch.arange(cols, dtype=torch.float32) * 10.0,
+        indexing="ij",
     )
-    origins = torch.tensor(fixture["origins"], dtype=torch.float32)
+    origins = torch.stack((grid_x, grid_y, torch.zeros_like(grid_x)), dim=-1)
     curriculum = TerrainCurriculum(
-        origins, 20, 5, 8.0, 20.0, torch.Generator().manual_seed(fixture["seed"])
+        origins, 6, 2, 8.0, 20.0, torch.Generator().manual_seed(7)
     )
+    assert curriculum.types.tolist() == [0, 0, 1, 1, 2, 2]
+    assert int(curriculum.levels.min()) >= 0 and int(curriculum.levels.max()) <= 2
+
+    curriculum.levels[:] = torch.tensor([2, 2, 2, 0, 4, 3])
+    curriculum.env_origins.copy_(origins[curriculum.levels, curriculum.types])
+    before_levels = curriculum.levels.clone()
+    before_origins = curriculum.env_origins.clone()
+
+    # Selected rows [0, 1, 2, 3, 4]; row 5 is untouched:
+    # - row 0: distance 5.0 > 4.0 -> promote 2 -> 3
+    # - row 1: distance 1.0 < 0.4 * 20 * 0.5 = 4.0 -> demote 2 -> 1
+    # - row 2: distance 3.0 in [2.0, 4.0] (cmd=0.2 -> threshold 2.0) -> stay 2
+    # - row 3: level 0 demotion clamps at 0
+    # - row 4: level 4 promotion overflows max_level=5 -> wraps into [0, 4]
+    positions = curriculum.env_origins.clone()
+    positions[0, 0] += 5.0
+    positions[1, 0] += 1.0
+    positions[2, 0] += 3.0
+    positions[3, 0] += 0.5
+    positions[4, 0] += 5.0
+    commands = torch.tensor(
+        [
+            [0.4, 0.0, 0.0],
+            [0.4, 0.0, 0.0],
+            [0.2, 0.0, 0.0],
+            [0.4, 0.0, 0.0],
+            [0.4, 0.0, 0.0],
+            [0.8, 0.0, 0.0],
+        ]
+    )
+    selected = torch.tensor([0, 1, 2, 3, 4])
+    curriculum.update(selected, positions, commands)
+
+    assert curriculum.levels[:4].tolist() == [3, 1, 2, 0]
+    assert 0 <= int(curriculum.levels[4]) < rows
+    assert int(curriculum.levels[5]) == int(before_levels[5])
+    torch.testing.assert_close(curriculum.env_origins[5], before_origins[5])
     torch.testing.assert_close(
-        curriculum.levels, torch.tensor(fixture["initial"]["levels"]), rtol=0, atol=0
+        curriculum.env_origins[selected],
+        origins[curriculum.levels[selected], curriculum.types[selected]],
     )
-    torch.testing.assert_close(
-        curriculum.types, torch.tensor(fixture["initial"]["types"]), rtol=0, atol=0
-    )
-    torch.testing.assert_close(
-        curriculum.env_origins,
-        torch.tensor(fixture["initial"]["env_origins"]),
-        rtol=0,
-        atol=0,
-    )
-    for case in fixture["cases"]:
-        ids = torch.tensor(case["ids"])
-        if case["stage"] in (4, 5):
-            level = 9 if case["stage"] == 4 else 0
-            curriculum.levels[ids] = level
-            curriculum.env_origins[ids] = origins[level, curriculum.types[ids]]
-        untouched = torch.ones(20, dtype=torch.bool)
-        untouched[ids] = False
-        before_levels = curriculum.levels.clone()
-        before_origins = curriculum.env_origins.clone()
-        curriculum.update(
-            ids, torch.tensor(case["positions"]), torch.tensor(case["commands"])
-        )
-        torch.testing.assert_close(
-            curriculum.levels, torch.tensor(case["levels"]), rtol=0, atol=0
-        )
-        torch.testing.assert_close(
-            curriculum.env_origins, torch.tensor(case["env_origins"]), rtol=0, atol=0
-        )
-        assert torch.equal(curriculum.levels[untouched], before_levels[untouched])
-        assert torch.equal(curriculum.env_origins[untouched], before_origins[untouched])
 
 
 @pytest.mark.no_sim

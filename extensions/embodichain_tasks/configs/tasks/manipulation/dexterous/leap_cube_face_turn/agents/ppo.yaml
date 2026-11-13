@@ -1,11 +1,11 @@
 trainer:
-  exp_name: leap_cube_rotate_z_ppo_mjwarp
-  gym_config: extensions/embodichain_tasks/configs/tasks/manipulation/dexterous/leap_cube_rotate_z/env.mjwarp.yaml
+  exp_name: leap_cube_face_turn_ppo
+  gym_config: extensions/embodichain_tasks/configs/tasks/manipulation/dexterous/leap_cube_face_turn/env.yaml
   seed: 42
   device: cuda:0
   headless: true
   num_envs: 4096
-  iterations: 650
+  iterations: 430
   buffer_size: 40
   enable_eval: false
   save_frequency_updates: 100
@@ -19,7 +19,7 @@ policy:
     actor:
     - policy
     critic:
-    - critic
+    - policy
   actor:
     type: mlp
     network_cfg:
@@ -46,7 +46,7 @@ algorithm:
     n_epochs: 4
     num_mini_batches: 32
     batch_size: 5120
-    gamma: 0.97
+    gamma: 0.99
     gae_lambda: 0.95
     clip_coef: 0.3
     ent_coef: 0.01
