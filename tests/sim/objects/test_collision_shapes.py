@@ -113,7 +113,8 @@ def test_prepared_variant_reset_pose_accepts_gym_tensor_indices() -> None:
 
 @pytest.mark.gpu
 @pytest.mark.requires_sim
-def test_native_compound_aperture_and_parent_lifecycle() -> None:
+@pytest.mark.parametrize("solver", ["mujoco_warp", "dexuni"])
+def test_native_compound_aperture_and_parent_lifecycle(solver: str) -> None:
     """A falling peg traverses the aperture in both isolated arenas."""
     import numpy as np
     import torch
@@ -138,7 +139,7 @@ def test_native_compound_aperture_and_parent_lifecycle() -> None:
             physics_cfg=NewtonPhysicsCfg(
                 use_cuda_graph=False,
                 num_substeps=1,
-                solver_cfg={"solver_type": "mujoco_warp"},
+                solver_cfg={"solver_type": solver},
             ),
             render_cfg=RenderCfg(renderer="hybrid"),
         )
@@ -202,7 +203,8 @@ def test_native_compound_aperture_and_parent_lifecycle() -> None:
 
 @pytest.mark.gpu
 @pytest.mark.requires_sim
-def test_native_raw_mujoco_contact_parameters_reach_solver() -> None:
+@pytest.mark.parametrize("solver", ["mujoco_warp", "dexuni"])
+def test_native_raw_mujoco_contact_parameters_reach_solver(solver: str) -> None:
     """Native contact arrays preserve raw values through model compilation."""
     import numpy as np
     from dataclasses import fields
@@ -232,7 +234,7 @@ def test_native_raw_mujoco_contact_parameters_reach_solver() -> None:
             physics_cfg=NewtonPhysicsCfg(
                 use_cuda_graph=False,
                 num_substeps=1,
-                solver_cfg={"solver_type": "mujoco_warp"},
+                solver_cfg={"solver_type": solver},
             ),
             render_cfg=RenderCfg(renderer="hybrid"),
         )
@@ -252,12 +254,15 @@ def test_native_raw_mujoco_contact_parameters_reach_solver() -> None:
         )
         sim.prepare()
         backend = get_newton_backend(sim.get_world())
+        assert backend.solver_type == solver
+        mujoco_solver = backend.mujoco_solver
+        assert mujoco_solver is not None
         # One ground geom followed by the cube, in a single MuJoCo world.
         np.testing.assert_allclose(
-            backend.solver.mjw_model.geom_solref.numpy()[0, -1], reference, rtol=1e-6
+            mujoco_solver.mjw_model.geom_solref.numpy()[0, -1], reference, rtol=1e-6
         )
         np.testing.assert_allclose(
-            backend.solver.mjw_model.geom_solimp.numpy()[0, -1], impedance, rtol=1e-6
+            mujoco_solver.mjw_model.geom_solimp.numpy()[0, -1], impedance, rtol=1e-6
         )
         assert backend.model.mujoco.solref_mode.numpy()[-1] == 1
         sim.update(step=1)
@@ -269,7 +274,7 @@ def test_native_raw_mujoco_contact_parameters_reach_solver() -> None:
 
 @pytest.mark.gpu
 @pytest.mark.requires_sim
-@pytest.mark.parametrize("solver", ["mujoco_warp", "semi_implicit"])
+@pytest.mark.parametrize("solver", ["mujoco_warp", "semi_implicit", "dexuni"])
 def test_native_prepared_variants_keep_mass_reset_and_rebuild(solver: str) -> None:
     """Prepared variants bind real arena rows, retaining their own bodies."""
     from dataclasses import fields
@@ -286,6 +291,7 @@ def test_native_prepared_variants_keep_mass_reset_and_rebuild(solver: str) -> No
         RenderCfg,
         RigidBodyPhysicsCfg,
         RigidObjectCfg,
+        RigidObjectGroupCfg,
     )
     from embodichain.lab.sim.shapes import CompoundShapeCfg, CubeCfg, ShapePartCfg
 
@@ -329,9 +335,20 @@ def test_native_prepared_variants_keep_mass_reset_and_rebuild(solver: str) -> No
             },
         )
         body = sim.add_rigid_object(cfg)
+        member_cfg = cfg.copy()
+        member_cfg.init_pos = (1, 0, 1)
+        member_cfg.env_variants[1].init_pos = (1, 0, 2)
+        group = sim.add_rigid_object_group(
+            RigidObjectGroupCfg(uid="group", rigid_objects={"member": member_cfg})
+        )
         sim.prepare()
         expected_masses = torch.tensor([1.0, 2.0], device=sim.device)
         torch.testing.assert_close(body.get_mass(), expected_masses)
+        torch.testing.assert_close(group.get_mass(), expected_masses[:, None])
+        torch.testing.assert_close(
+            group.get_local_pose()[:, 0, 2],
+            torch.tensor([1.0, 2.0], device=sim.device),
+        )
         assert "arena_0/logical" in sim.spawn_result.handles
         assert "arena_1/logical" in sim.spawn_result.handles
         assert len(body.get_collision_shapes(1, allow_heterogeneous=True)) == (
@@ -339,9 +356,13 @@ def test_native_prepared_variants_keep_mass_reset_and_rebuild(solver: str) -> No
         )
         sim.update(step=1)
         first_pose = body.get_local_pose()[0].clone()
+        first_group_pose = group.get_local_pose()[0].clone()
         body.reset(env_ids=[1])
+        group.reset(env_ids=[1])
         torch.testing.assert_close(body.get_local_pose()[0], first_pose)
+        torch.testing.assert_close(group.get_local_pose()[0], first_group_pose)
         assert body.get_local_pose()[1, 2] == 2.0
+        assert group.get_local_pose()[1, 0, 2] == 2.0
         sim.add_rigid_object(
             RigidObjectCfg(
                 uid="extra", shape=CubeCfg(size=(0.01, 0.01, 0.01)), init_pos=(0, 0, 3)
@@ -349,7 +370,147 @@ def test_native_prepared_variants_keep_mass_reset_and_rebuild(solver: str) -> No
         )
         sim.prepare()
         torch.testing.assert_close(body.get_mass(), expected_masses)
+        torch.testing.assert_close(group.get_mass(), expected_masses[:, None])
     finally:
+        sim.destroy(exit_process=False)
+        SimulationManager.flush_cleanup_queue()
+
+
+@pytest.mark.gpu
+@pytest.mark.requires_sim
+def test_native_dexuni_compound_and_profiles_in_mixed_scene(tmp_path) -> None:
+    """Qualify independent equality profiles with a VBD-owned cylindrical peg."""
+    import numpy as np
+    import torch
+    from dexsim.engine.newton_physics.backend_registry import get_newton_backend
+    from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+    from embodichain.lab.sim.cfg import (
+        ArticulationCfg,
+        ArticulationRootPropertiesCfg,
+        JointDrivePropertiesCfg,
+        MassPropertiesCfg,
+        NewtonPhysicsCfg,
+        RenderCfg,
+        RigidBodyPhysicsCfg,
+        RigidObjectCfg,
+    )
+    from embodichain.lab.sim.shapes import (
+        CompoundShapeCfg,
+        CubeCfg,
+        CylinderCfg,
+        ShapePartCfg,
+    )
+
+    path = tmp_path / "mimic.urdf"
+    path.write_text("""<robot name="mimic_probe">
+<link name="base"><inertial><mass value="1"/><inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/></inertial></link>
+<link name="leader_link"><inertial><mass value="0.1"/><inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/></inertial><visual><geometry><box size="0.02 0.02 0.02"/></geometry></visual><collision><geometry><box size="0.02 0.02 0.02"/></geometry></collision></link>
+<link name="follower_link"><inertial><mass value="0.1"/><inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/></inertial><visual><geometry><box size="0.02 0.02 0.02"/></geometry></visual><collision><geometry><box size="0.02 0.02 0.02"/></geometry></collision></link>
+<joint name="leader" type="prismatic"><parent link="base"/><child link="leader_link"/><origin xyz="0 -0.1 0"/><axis xyz="1 0 0"/><limit lower="-0.5" upper="0.5" effort="100" velocity="1"/></joint>
+<joint name="follower" type="prismatic"><parent link="base"/><child link="follower_link"/><origin xyz="0 0.1 0"/><axis xyz="1 0 0"/><limit lower="-0.5" upper="0.5" effort="100" velocity="1"/><mimic joint="leader" multiplier="1" offset="0"/></joint>
+</robot>""")
+    profiles = [
+        ((0.003, 1.0), (0.8, 0.99, 0.0001, 0.5, 2.0)),
+        ((0.007, 0.9), (0.6, 0.95, 0.0003, 0.4, 3.0)),
+    ]
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            startup_summary="off",
+            enable_entity_gizmo=False,
+            scene_node_capacity=512,
+            width=64,
+            height=64,
+            num_envs=2,
+            physics_dt=0.001,
+            physics_cfg=NewtonPhysicsCfg(
+                use_cuda_graph=False,
+                num_substeps=1,
+                solver_cfg={"solver_type": "dexuni"},
+            ),
+            render_cfg=RenderCfg(renderer="hybrid"),
+        )
+    )
+    arms = []
+    fixture = peg = backend = mujoco = None
+    try:
+        for index, (reference, impedance) in enumerate(profiles):
+            arms.append(
+                sim.add_articulation(
+                    ArticulationCfg(
+                        uid=f"mechanism_{index}",
+                        fpath=str(path),
+                        asset_physics_mode="overlay",
+                        init_pos=(2 + index, 0, 1),
+                        init_qpos=[0, 0],
+                        root_props=ArticulationRootPropertiesCfg(
+                            fixed_base=True,
+                            self_collision_enabled=False,
+                            newton_mimic_solref=reference,
+                            newton_mimic_solimp=impedance,
+                        ),
+                        joint_drive_props=JointDrivePropertiesCfg(
+                            stiffness=20,
+                            damping=2,
+                            drive_type="force",
+                            target_mode="position",
+                        ),
+                    )
+                )
+            )
+        fixture = sim.add_rigid_object(
+            RigidObjectCfg(
+                uid="fixture",
+                body_type="static",
+                init_pos=(0, 0, 0.1),
+                shape=CompoundShapeCfg(
+                    parts=[
+                        ShapePartCfg(
+                            shape=CubeCfg(size=(0.01, 0.06, 0.02)), position=(x, 0, 0)
+                        )
+                        for x in (-0.02, 0.02)
+                    ]
+                ),
+            )
+        )
+        peg = sim.add_rigid_object(
+            RigidObjectCfg(
+                uid="peg",
+                init_pos=(0, 0, 0.2),
+                shape=CylinderCfg(radius=0.004, half_height=0.01),
+                attrs=RigidBodyPhysicsCfg(
+                    mass_props=MassPropertiesCfg(mass=0.1, inertia=(1e-5, 1e-5, 1e-5))
+                ),
+            )
+        )
+        sim.prepare()
+        backend = get_newton_backend(sim.get_world())
+        assert backend.solver_type == "dexuni"
+        features = sim.spawn_result.get_solver_diagnostics()["features"]
+        assert features["mujoco_solve_enabled"] and features["vbd_solve_enabled"]
+        assert features["vbd_dynamic_body_count"] == 2
+        mujoco = backend.mujoco_solver
+        reference_rows = mujoco.mjw_model.eq_solref.numpy().reshape(-1, 2)
+        impedance_rows = mujoco.mjw_model.eq_solimp.numpy().reshape(-1, 5)
+        for reference, impedance in profiles:
+            rows = np.all(np.isclose(reference_rows, reference, rtol=1e-6), axis=1)
+            assert rows.sum() == 2  # One equality per environment for this mechanism.
+            np.testing.assert_allclose(
+                impedance_rows[rows], np.tile(impedance, (2, 1)), rtol=1e-6
+            )
+        gains = backend.model.joint_target_ke.numpy()
+        assert np.count_nonzero(np.isclose(gains, 20.0)) == 8
+        assert not np.any(np.isclose(gains, 0.2))  # No opt-in follower stabilizer.
+        assert len(fixture.get_collision_shapes()) == 2
+        sim.update(step=200)
+        z = peg.get_local_pose()[:, 2]
+        # The peg must cross the aperture and stop on the ground, at half-height.
+        assert torch.all((z > 0.005) & (z < 0.05))
+        for arm in arms:
+            assert torch.isfinite(arm.get_qpos()).all()
+    finally:
+        arm = fixture = peg = backend = mujoco = None
+        arms.clear()
         sim.destroy(exit_process=False)
         SimulationManager.flush_cleanup_queue()
 
