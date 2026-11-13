@@ -69,10 +69,13 @@ class AgilexPiperXCfg(RobotCfg):
         self.root_props = ArticulationRootPropertiesCfg(fixed_base=True)
         self.attrs = RigidBodyPhysicsCfg()
         # Position gains are simulation settings; cap speed at the manual's
-        # per-axis ratings and retain the authored effort limits.
+        # per-axis ratings and explicitly apply the pinned URDF's effort caps.
+        # Default imports undriven joints with mode NONE and zero drive effort.
         self.joint_drive_props = JointDrivePropertiesCfg(
+            drive_type="force",
             stiffness={"joint[1-3]": 300.0, "joint[4-6]": 100.0},
             damping={"joint[1-3]": 30.0, "joint[4-6]": 10.0},
+            max_effort={"arm": 100.0},
             max_velocity={
                 name: math.radians(speed)
                 for name, speed in zip(_ARM_JOINTS, (180, 195, 195, 225, 225, 225))

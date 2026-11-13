@@ -93,8 +93,18 @@ def test_g2_native_joint_and_mimic_contract() -> None:
 
 
 @pytest.mark.no_sim
+@pytest.mark.parametrize(
+    "effort_rules",
+    [
+        {"left_arm": 30.0},
+        {"idx2[1-7]_arm_l_joint[1-7]": 30.0},
+        {"left_arm": 30.0, "idx21_arm_l_joint1": 20.0},
+    ],
+    ids=["control_part", "regex", "control_part_and_joint"],
+)
 def test_g2_roundtrip_and_local_overrides_do_not_download(
     monkeypatch: pytest.MonkeyPatch,
+    effort_rules: dict[str, float],
 ) -> None:
     """A caller-owned URDF, TCP and drive overrides survive JSON round-tripping."""
     monkeypatch.setattr(
@@ -107,7 +117,7 @@ def test_g2_roundtrip_and_local_overrides_do_not_download(
         "uid": "local_g2",
         "root_props": {"fixed_base": False},
         "solver_cfg": {"left_arm": {"tcp": tcp}},
-        "joint_drive_props": {"max_effort": {"left_arm": 30.0}},
+        "joint_drive_props": {"max_effort": effort_rules},
         "sensors": [],
     }
     original = deepcopy(overrides)
@@ -118,11 +128,26 @@ def test_g2_roundtrip_and_local_overrides_do_not_download(
     assert restored.root_props.fixed_base is False
     assert restored.uid == "local_g2"
     np.testing.assert_array_equal(restored.solver_cfg["left_arm"].tcp, tcp)
-    defaults = AgibotG2Cfg.from_dict({"fpath": str(_URDF)})
-    assert restored.joint_drive_props.max_effort == {
-        **defaults.joint_drive_props.max_effort,
-        "left_arm": 30.0,
+    from embodichain.lab.sim.spawn.descriptors import _joint_property_matches
+
+    expected = {
+        joint.get("name"): float(joint.find("limit").get("effort"))
+        for joint in ET.parse(_URDF).findall("joint")
+        if joint.get("type") != "fixed"
     }
+    expected.update({name: 30.0 for name in cfg.control_parts["left_arm"]})
+    if "idx21_arm_l_joint1" in effort_rules:
+        expected["idx21_arm_l_joint1"] = 20.0
+    for candidate in (cfg, restored):
+        actual = dict(
+            _joint_property_matches(
+                candidate.joint_drive_props.max_effort,
+                list(expected),
+                property_name="max_effort",
+                control_parts=candidate.control_parts,
+            )
+        )
+        assert actual == expected
     assert overrides == original
 
 
@@ -268,11 +293,22 @@ class _AgibotG2Simulation:
         gc.collect()
 
     def test_native_fk_and_mimic_commands_remain_finite(self) -> None:
-        cfg = resolve_robot_cfg("AgibotG2")
+        cfg = resolve_robot_cfg(
+            "AgibotG2",
+            overrides={"joint_drive_props": {"max_effort": {"left_arm": 30.0}}},
+        )
         robot = self.sim.add_robot(cfg)
         self.sim.prepare()
         assert robot.dof == 46
         assert len(robot.active_joint_ids) == 32
+        torch.testing.assert_close(
+            robot.get_joint_drive(joint_ids=robot.get_joint_ids(name="left_arm"))[2],
+            torch.full((1, 7), 30.0),
+        )
+        torch.testing.assert_close(
+            robot.get_joint_drive(joint_ids=robot.get_joint_ids(name="right_arm"))[2],
+            torch.tensor([[108.0, 108.0, 35.0, 35.0, 35.0, 18.0, 18.0]]),
+        )
         chains = cfg.build_pk_serial_chain()
         for part in chains:
             q = torch.tensor([[-0.2, 0.3, -0.1, -0.8, 0.2, -0.2, 0.15]])
