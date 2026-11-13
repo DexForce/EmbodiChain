@@ -92,7 +92,44 @@ def _poster(video: Path, second: int) -> str | None:
         return "data:image/jpeg;base64," + base64.b64encode(frame.read_bytes()).decode()
 
 
-def _payload(root: Path, output: Path, include_posters: bool) -> dict:
+def _refresh_media(
+    directory: Path, output: Path, second: int, include_posters: bool
+) -> dict | None:
+    """Load separate preview evidence without importing new measurement values."""
+    asset_path = directory / "robot_asset_override.json"
+    if not asset_path.is_file():
+        return None
+    manifest_path = directory / "manifest.json"
+    if not manifest_path.is_file():
+        manifest_path = directory / "preview/manifest.json"
+    if not manifest_path.is_file():
+        return {"completed": False}
+    manifest = json.loads(manifest_path.read_text())
+    if manifest.get("performance_measurements_started", False) or manifest.get(
+        "performance_measurements", False
+    ):
+        raise ValueError(f"Expected an untimed media recording: {manifest_path}")
+    video = manifest_path.with_name("video.mp4")
+    if not video.is_file():
+        video = directory / "preview/video.mp4"
+    completed = manifest.get("status") == "completed" and video.is_file()
+    effective = manifest.get("effective", {})
+    return {
+        "completed": completed,
+        "steps": effective.get("step_index", manifest.get("frames")),
+        "time_s": effective.get("sim_time", manifest.get("actual_simulation_time_s")),
+        "poster_second": second,
+        "poster": _poster(video, second) if completed and include_posters else None,
+        "video_url": _local_url(video, output) if completed else None,
+        "manifest_sha256": _sha(manifest_path),
+        "robot_asset": json.loads(asset_path.read_text()),
+        "asset_record_sha256": _sha(asset_path),
+    }
+
+
+def _payload(
+    root: Path, output: Path, include_posters: bool, preview_root: Path | None = None
+) -> dict:
     comparison = root / "comparison.json"
     data = json.loads(comparison.read_text())
     publication = json.loads((_ASSETS / "publication.json").read_text())
@@ -125,6 +162,15 @@ def _payload(root: Path, output: Path, include_posters: bool) -> dict:
         task["poster"] = (
             _poster(video, task["poster_second"]) if include_posters else None
         )
+        if preview_root is not None:
+            refresh = _refresh_media(
+                preview_root / task["code"].lower(),
+                output,
+                task["poster_second"],
+                include_posters,
+            )
+            if refresh is not None:
+                task["refresh"] = refresh
     c02_path = root / "c02_bag_frame_packing/performance_comparison/results.json"
     c02 = json.loads(c02_path.read_text())
     data["c02"] = [
@@ -137,6 +183,25 @@ def _payload(root: Path, output: Path, include_posters: bool) -> dict:
         }
         for c in c02["configurations"]
     ]
+    data["c02_figures"] = []
+    if include_posters:
+        refreshed_c02 = next(t for t in data["tasks"] if t["code"] == "C02").get(
+            "refresh", {}
+        )
+        if refreshed_c02.get("poster"):
+            data["c02_figures"].append(
+                {"label": "EC 12×6 · 新资产录像", "poster": refreshed_c02["poster"]}
+            )
+        for label, relative in (
+            (
+                "Isaac 24×12 · 历史失败录像",
+                "budget_reduction/i24_s12_video/preview/video.mp4",
+            ),
+            ("Isaac 96×24 · 历史录像", "platforms/isaaclab/preview/video.mp4"),
+        ):
+            poster = _poster(root / "c02_bag_frame_packing" / relative, 58)
+            if poster:
+                data["c02_figures"].append({"label": label, "poster": poster})
     e2e_path = root.parent / "maintenance/e2e-sdk-2026-10-27/RESULTS.json"
     data["e2e"] = None
     if e2e_path.is_file():
@@ -179,6 +244,11 @@ def main() -> None:
     parser.add_argument("--root", type=Path, default=_DEFAULT_ROOT)
     parser.add_argument("--output", type=Path)
     parser.add_argument(
+        "--preview-root",
+        type=Path,
+        help="Optional isolated new-asset recordings, with lowercase task directories.",
+    )
+    parser.add_argument(
         "--no-posters", action="store_true", help="Skip video frame extraction."
     )
     args = parser.parse_args()
@@ -186,7 +256,10 @@ def main() -> None:
     output = (args.output or root / "report.html").expanduser().resolve()
     if output.suffix.lower() != ".html":
         parser.error("--output must be an .html file")
-    data = _payload(root, output, not args.no_posters)
+    preview_root = (
+        args.preview_root.expanduser().resolve() if args.preview_root else None
+    )
+    data = _payload(root, output, not args.no_posters, preview_root)
     template = Path(__file__).with_name("report_template.html").read_text()
     encoded = json.dumps(data, ensure_ascii=False, allow_nan=False).replace(
         "<", "\\u003c"

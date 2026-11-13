@@ -74,6 +74,10 @@ from scripts.benchmark.tech_reports.physics.experiments.dexuni.c01_replay import
     write_json,
 )
 
+from scripts.benchmark.tech_reports.physics.experiments.dexuni.preview_robot import (
+    preview_robot,
+)
+
 __all__ = ["main"]
 
 
@@ -114,6 +118,9 @@ def main() -> None:
     parser.add_argument("--no-video", action="store_true")
     parser.add_argument("--pilot-performance", action="store_true")
     parser.add_argument("--measure", type=int, choices=range(1, 6))
+    parser.add_argument(
+        "--robot-urdf", type=Path, help="Alternate robot for a separate untimed preview"
+    )
     args = parser.parse_args()
     if args.until is not None and args.out is None:
         parser.error("Truncated diagnostics need a separate --out")
@@ -227,7 +234,7 @@ def main() -> None:
         robot = sim.add_articulation(
             ArticulationCfg(
                 uid="w1",
-                fpath=str(output / "inputs/w1_v030/robot.urdf"),
+                fpath=str(preview_robot(output / "inputs/w1_v030/robot.urdf", args)),
                 asset_physics_mode="overlay",
                 build_pk_chain=False,
                 attrs=attrs(contact["robot_ke"], 100.0, contact["finger_mu"]),

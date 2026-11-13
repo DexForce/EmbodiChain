@@ -71,6 +71,10 @@ from scripts.benchmark.tech_reports.physics.experiments.dexuni.c02_replay import
     audit_model,
 )
 
+from scripts.benchmark.tech_reports.physics.experiments.dexuni.preview_robot import (
+    preview_robot,
+)
+
 __all__ = ["main"]
 
 
@@ -132,6 +136,9 @@ def main() -> None:
     p.add_argument("--out", type=Path)
     p.add_argument("--until", type=float)
     p.add_argument("--no-video", action="store_true")
+    p.add_argument(
+        "--robot-urdf", type=Path, help="Alternate robot for a separate untimed preview"
+    )
     args = p.parse_args()
     inputs = load(args.reference)
     out = args.out or OUTPUT / "platforms/embodichain"
@@ -147,7 +154,7 @@ def main() -> None:
     demo = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = demo
     spec.loader.exec_module(demo)
-    urdf = out / "inputs/w1_v030/robot.urdf"
+    urdf = preview_robot(out / "inputs/w1_v030/robot.urdf", args)
     hands = demo.hand_links(urdf)
     original = demo.solver_config(
         SimpleNamespace(device="cuda:0", disable_cuda_graph=False, w1_urdf=urdf)
@@ -389,7 +396,11 @@ def main() -> None:
         model = backend.solver.model
         audit = audit_model(model, inputs, out)
         ids = [robot.joint_names.index(n) for n in joints["joint_names"]]
-        names = inputs["manifest"]["link_state_order"]
+        names = (
+            list(robot.link_names)
+            if args.robot_urdf is not None
+            else inputs["manifest"]["link_state_order"]
+        )
         link_order = [robot.link_names.index(n) for n in names]
         hand_order = [
             names.index(n) for n in ("left_gripper_base", "right_gripper_base")
@@ -410,16 +421,16 @@ def main() -> None:
         write_json(
             out / "analysis/state_reader_validation.json",
             dict(
-                links=44,
+                links=len(names),
                 max_matrix_error=reader_error,
-                old_device_to_host_reads_per_frame=44,
+                old_device_to_host_reads_per_frame=len(names),
                 new_device_to_host_reads_per_frame=1,
                 performance_timing_measured=False,
             ),
         )
 
         def readings() -> dict[str, np.ndarray]:
-            # One owned public pose batch replaces 44 identical per-link reads.
+            # One owned public pose batch replaces repeated per-link reads.
             public = robot.body_data.body_link_pose[0, link_order].cpu().numpy()
             links = np.column_stack((public[:, 3:], public[:, :3]))
             snack = np.stack([o.get_local_pose()[0].cpu().numpy() for o in goods])
@@ -476,6 +487,7 @@ def main() -> None:
             diagnostics,
             audit,
             args.until,
+            link_state_order=names,
         )
     finally:
         controller.close()

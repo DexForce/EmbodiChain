@@ -218,6 +218,8 @@ def record_preview(
     diagnostics: Callable,
     model_audit: dict,
     source: Path,
+    *,
+    output: Path | None = None,
 ) -> None:
     """Record a complete actual-time episode; collect no performance samples."""
     import imageio.v2 as imageio
@@ -225,7 +227,7 @@ def record_preview(
     from contextlib import ExitStack
 
     root = inputs.get("output_root", OUTPUT)
-    output = root / "preview" / platform
+    output = output or root / "preview" / platform
     output.mkdir(parents=True, exist_ok=True)
     manifest = dict(
         task="M03",

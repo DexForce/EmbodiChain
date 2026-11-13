@@ -61,6 +61,10 @@ from scripts.benchmark.tech_reports.physics.experiments.dexuni.s04_measurement i
     record_measurement,
 )
 
+from scripts.benchmark.tech_reports.physics.experiments.dexuni.preview_robot import (
+    preview_robot,
+)
+
 __all__ = ["main"]
 
 
@@ -69,11 +73,17 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--measure", action="store_true")
     parser.add_argument("--repeat", type=int, default=1)
+    parser.add_argument(
+        "--robot-urdf", type=Path, help="Alternate robot for a separate untimed preview"
+    )
+    parser.add_argument("--out", type=Path, help="Separate preview output")
     args = parser.parse_args()
+    if args.measure and (args.out is not None or args.robot_urdf is not None):
+        parser.error("Preview overrides cannot be used with --measure")
     output = (
         measurement_directory("embodichain", args.repeat)
         if args.measure
-        else OUTPUT / "preview/embodichain"
+        else args.out or OUTPUT / "preview/embodichain"
     )
     started = time.perf_counter()
     inputs = load_inputs()
@@ -149,7 +159,7 @@ def main() -> None:
         robot = sim.add_articulation(
             ArticulationCfg(
                 uid="w1",
-                fpath=str(OUTPUT / "inputs" / cfg["robot_urdf"]),
+                fpath=str(preview_robot(OUTPUT / "inputs" / cfg["robot_urdf"], args)),
                 build_pk_chain=False,
                 asset_physics_mode="overlay",
                 attrs=attrs(1.0),
@@ -381,6 +391,7 @@ def main() -> None:
                     camera_intrinsics=camera.get_intrinsics()[0].cpu().tolist(),
                     camera_pose=camera.get_arena_pose(to_matrix=True)[0].cpu().tolist(),
                 ),
+                output=output,
             )
     finally:
         sim.destroy(exit_process=False)

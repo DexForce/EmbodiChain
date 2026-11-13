@@ -58,6 +58,10 @@ from scripts.benchmark.tech_reports.physics.experiments.dexuni.m05_replay import
     record_preview,
 )
 
+from scripts.benchmark.tech_reports.physics.experiments.dexuni.preview_robot import (
+    preview_robot,
+)
+
 __all__ = ["main"]
 
 
@@ -67,6 +71,9 @@ def main() -> None:
     parser.add_argument("--no-video", action="store_true")
     parser.add_argument("--out", type=Path)
     parser.add_argument("--until", type=float)
+    parser.add_argument(
+        "--robot-urdf", type=Path, help="Alternate robot for a separate untimed preview"
+    )
     args = parser.parse_args()
     inputs = load_inputs()
     scene = inputs["manifest"]["scene"]
@@ -153,7 +160,7 @@ def main() -> None:
         robot = sim.add_articulation(
             ArticulationCfg(
                 uid="w1",
-                fpath=str(OUTPUT / "inputs/w1_v030/robot.urdf"),
+                fpath=str(preview_robot(OUTPUT / "inputs/w1_v030/robot.urdf", args)),
                 init_pos=tuple(scene["robot_base_position"]),
                 asset_physics_mode="overlay",
                 build_pk_chain=False,

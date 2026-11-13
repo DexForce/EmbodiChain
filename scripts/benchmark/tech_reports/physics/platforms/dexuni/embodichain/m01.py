@@ -59,6 +59,10 @@ from scripts.benchmark.tech_reports.physics.experiments.dexuni.s04_common import
     lame_to_youngs,
 )
 
+from scripts.benchmark.tech_reports.physics.experiments.dexuni.preview_robot import (
+    preview_robot,
+)
+
 __all__ = ["main"]
 
 
@@ -67,7 +71,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--measure", action="store_true")
     parser.add_argument("--repeat", type=int, default=1)
+    parser.add_argument(
+        "--robot-urdf", type=Path, help="Alternate robot for a separate untimed preview"
+    )
+    parser.add_argument("--out", type=Path, help="Separate preview output")
     args = parser.parse_args()
+    if args.measure and (args.out is not None or args.robot_urdf is not None):
+        parser.error("Preview overrides cannot be used with --measure")
     started = time.perf_counter()
     if args.measure:
         from scripts.benchmark.tech_reports.physics.experiments.dexuni.m01_measurement import (
@@ -76,7 +86,7 @@ def main() -> None:
 
         output = measurement_directory("embodichain", args.repeat)
     else:
-        output = OUTPUT / "preview/embodichain"
+        output = args.out or OUTPUT / "preview/embodichain"
     inputs = load_inputs()
     cfg, mesh, names = inputs["config"], inputs["mesh"], inputs["names"]
     width, height = cfg["camera"]["resolution"]
@@ -147,7 +157,7 @@ def main() -> None:
         robot = sim.add_articulation(
             ArticulationCfg(
                 uid="w1",
-                fpath=str(OUTPUT / "inputs" / cfg["robot_urdf"]),
+                fpath=str(preview_robot(OUTPUT / "inputs" / cfg["robot_urdf"], args)),
                 build_pk_chain=False,
                 asset_physics_mode="overlay",
                 attrs=attrs(cfg["robot_mu"]),
@@ -361,7 +371,15 @@ def main() -> None:
                 time.perf_counter() - started,
             )
         else:
-            record_preview("embodichain", inputs, step, readings, capture, diagnostics)
+            record_preview(
+                "embodichain",
+                inputs,
+                step,
+                readings,
+                capture,
+                diagnostics,
+                output=output,
+            )
     finally:
         sim.destroy(exit_process=False)
 

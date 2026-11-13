@@ -203,6 +203,8 @@ def record_preview(
     readings: Callable[[], dict[str, np.ndarray]],
     capture: Callable[[], np.ndarray],
     diagnostics: Callable[[], dict],
+    *,
+    output: Path | None = None,
 ) -> None:
     """Record actual states, fold metrics and one video (no timing).
 
@@ -213,11 +215,12 @@ def record_preview(
         readings: Read ``qpos``, ``particles`` and ``tcp`` without changing state.
         capture: Render the current state to an RGB array.
         diagnostics: Read initialized physics settings and graph state.
+        output: Optional separate preview directory.
     """
     import imageio.v2 as imageio
     from PIL import Image, ImageDraw, ImageFont
 
-    output = OUTPUT / "preview" / platform
+    output = output or OUTPUT / "preview" / platform
     output.mkdir(parents=True, exist_ok=True)
     config = inputs["config"]
     manifest = {

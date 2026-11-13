@@ -3,67 +3,39 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <meta name="color-scheme" content="light" />
-    <title>DexUni · 跨平台物理仿真技术报告</title>
+    <title>DexUni 物理仿真性能与任务效果对比｜技术报告</title>
     <style>
       :root {
-        --ink: #172d31;
-        --muted: #617577;
-        --paper: #f4f6f3;
-        --line: #dde5df;
-        --ec: #087f70;
-        --ec-soft: #e4f3ee;
-        --il: #8070b6;
-        --amber: #a86418;
-        --white: #fff;
-        --red: #b74d38;
-        --radius: 16px;
+        --ink: #192c3d;
+        --muted: #607080;
+        --line: #d7dde3;
+        --ec: #24698c;
+        --il: #8d969f;
+        --accent: #235f80;
+        --bg: #f1f3f5;
+        --amber: #855715;
+        --green: #24634e;
       }
       * {
         box-sizing: border-box;
       }
       html {
         scroll-behavior: smooth;
-        scroll-padding-top: 28px;
+        scroll-padding-top: 30px;
       }
       body {
         margin: 0;
-        background: var(--paper);
+        background: var(--bg);
         color: var(--ink);
         font:
-          14px/1.65 "Inter",
-          "Noto Sans CJK SC",
+          14px/1.8 "Noto Sans CJK SC",
           "Microsoft YaHei",
-          system-ui,
+          Arial,
           sans-serif;
       }
       a {
-        color: inherit;
-        text-decoration: none;
-      }
-      button,
-      input,
-      select {
-        font: inherit;
-      }
-      button,
-      select {
-        cursor: pointer;
-      }
-      button {
-        color: inherit;
-      }
-      button:focus-visible,
-      a:focus-visible,
-      input:focus-visible,
-      select:focus-visible,
-      summary:focus-visible {
-        outline: 3px solid #e5a442;
-        outline-offset: 4px;
-      }
-      button:disabled {
-        cursor: default;
-        opacity: 0.45;
+        color: var(--accent);
+        text-underline-offset: 3px;
       }
       h1,
       h2,
@@ -71,1404 +43,1028 @@
       p {
         margin: 0;
       }
+      h1 {
+        font-size: 33px;
+        line-height: 1.5;
+        font-weight: 700;
+        letter-spacing: 0.3px;
+      }
       h2 {
-        font-size: 26px;
+        font-size: 22px;
+        line-height: 1.5;
         font-weight: 650;
-        letter-spacing: -0.7px;
       }
       h3 {
-        font-size: 17px;
-        line-height: 1.4;
+        font-size: 16px;
+        line-height: 1.6;
       }
-      small {
-        font-size: 12px;
+      button,
+      input,
+      select {
+        font: inherit;
       }
-      code,
-      .num {
-        font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-        font-variant-numeric: tabular-nums;
+      button,
+      a,
+      select,
+      input {
+        outline-offset: 4px;
+      }
+      button:focus-visible,
+      a:focus-visible,
+      input:focus-visible,
+      select:focus-visible,
+      summary:focus-visible {
+        outline: 2px solid #397b9b;
       }
       button {
-        border: 0;
+        cursor: pointer;
+        color: inherit;
+      }
+      button:disabled {
+        cursor: default;
       }
       img {
         max-width: 100%;
       }
+      .mono,
+      .number {
+        font-family: Consolas, "Liberation Mono", monospace;
+        font-variant-numeric: tabular-nums;
+      }
       .muted {
         color: var(--muted);
       }
-      .eyebrow {
-        text-transform: uppercase;
-        font-size: 11px;
-        letter-spacing: 2px;
-        font-weight: 700;
-        color: var(--ec);
-      }
-      .sidebar {
+      .toc {
         position: fixed;
-        inset: 0 auto 0 0;
-        width: 216px;
-        background: #122d30;
-        color: #c6d6d2;
-        padding: 32px 23px;
-        display: flex;
-        flex-direction: column;
-        z-index: 20;
+        width: 192px;
+        top: 0;
+        bottom: 0;
+        padding: 30px 22px;
+        background: #e9edf1;
+        border-right: 1px solid var(--line);
+        font-size: 12px;
       }
-      .brand {
-        color: white;
-        font-size: 24px;
+      .wordmark {
+        font-size: 19px;
         font-weight: 700;
-        letter-spacing: -1px;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-      }
-      .brand-mark {
-        display: grid;
-        grid-template-columns: repeat(2, 8px);
-        gap: 3px;
-        transform: rotate(-15deg);
-      }
-      .brand-mark i {
-        width: 8px;
-        height: 8px;
-        background: #76d9ba;
-        border-radius: 2px;
-      }
-      .brand-mark i:last-child {
-        opacity: 0.35;
-      }
-      .brand-sub {
-        margin: 8px 0 42px 29px;
-        font-size: 10px;
-        letter-spacing: 1.8px;
-        color: #8aa7a1;
-      }
-      .nav-label {
-        font-size: 10px;
-        letter-spacing: 1.5px;
-        color: #718f89;
-        margin-bottom: 14px;
-      }
-      .nav {
-        display: grid;
-        gap: 8px;
-      }
-      .nav a {
-        display: flex;
-        gap: 14px;
-        padding: 11px 13px;
-        border-radius: 8px;
-        font-size: 13px;
-      }
-      .nav a:hover,
-      .nav a.active {
-        background: #244346;
-        color: #fff;
-      }
-      .nav a.active {
-        box-shadow: inset 3px 0 #8de0c6;
-      }
-      .nav-num {
-        font-size: 11px;
-        color: #85a29b;
-        font-family: monospace;
-      }
-      .sidebar-foot {
-        margin-top: auto;
-        font-size: 11px;
-        line-height: 1.9;
-        color: #8fa9a3;
-      }
-      .sidebar-foot a {
-        display: block;
-        color: #d3e4df;
-        margin-top: 10px;
-      }
-      .side-line {
-        height: 1px;
-        background: #2b4849;
-        margin: 20px 0;
-      }
-      .dot {
-        display: inline-block;
-        width: 6px;
-        height: 6px;
-        background: #8edcba;
-        border-radius: 50%;
-        margin-right: 6px;
-      }
-      .shell {
-        margin-left: 216px;
-        padding: 27px 46px 24px;
-        max-width: 1800px;
-      }
-      .topbar {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 28px;
-        font-size: 12px;
-        color: var(--muted);
-        gap: 16px;
-      }
-      .crumb b {
+        letter-spacing: -0.3px;
         color: var(--ink);
-        font-weight: 500;
+        text-decoration: none;
       }
-      .top-actions {
-        display: flex;
-        gap: 10px;
-      }
-      .btn {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        gap: 7px;
-        background: white;
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        padding: 8px 13px;
-        font-size: 12px;
-        white-space: nowrap;
-      }
-      .btn:hover {
-        border-color: var(--ec);
-        color: var(--ec);
-      }
-      .btn-dark {
-        background: var(--ink);
-        color: white;
-        border-color: var(--ink);
-      }
-      .btn-dark:hover {
-        background: var(--ec);
-        color: white;
-      }
-      .title-row {
-        display: flex;
-        justify-content: space-between;
-        gap: 24px;
-        align-items: flex-start;
-        margin-bottom: 25px;
-      }
-      .title-row h1 {
-        font-size: 36px;
-        line-height: 1.3;
-        font-weight: 650;
-        letter-spacing: -1.4px;
-        margin: 7px 0 10px;
-      }
-      .subtitle {
-        color: var(--muted);
-        font-size: 13px;
-        max-width: 730px;
-      }
-      .edition {
-        text-align: right;
-        font-size: 11px;
-        color: var(--muted);
-        padding-top: 12px;
-        white-space: nowrap;
-      }
-      .edition strong {
-        display: block;
-        font-size: 20px;
-        font-weight: 450;
-        letter-spacing: -0.6px;
-        color: var(--ink);
-      }
-      .hero {
-        display: grid;
-        grid-template-columns: 0.9fr 1.1fr;
-        background: #183b3d;
-        border-radius: var(--radius);
-        overflow: hidden;
-        min-height: 274px;
-        color: white;
-        margin-bottom: 20px;
-      }
-      .hero-copy {
-        padding: 31px 32px;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-      }
-      .hero-copy .eyebrow {
-        color: #93d7bd;
-      }
-      .hero h2 {
-        font-size: 27px;
-        line-height: 1.5;
-        letter-spacing: -0.5px;
-        margin: 13px 0;
-      }
-      .hero p {
-        font-size: 12px;
-        color: #c2d6d0;
-        max-width: 430px;
-        line-height: 1.9;
-      }
-      .hero-tags {
-        display: flex;
-        gap: 8px;
-        flex-wrap: wrap;
-        margin-top: 21px;
-      }
-      .hero-tags span {
-        padding: 4px 10px;
-        border: 1px solid #55726b;
-        border-radius: 5px;
-        font-size: 10px;
-        color: #d7e8e0;
-      }
-      .hero-visual {
-        background: #d6e0dc;
-        position: relative;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        overflow: hidden;
-        min-height: 240px;
-      }
-      .hero-visual img {
-        width: 100%;
-        display: block;
-      }
-      .hero-caption {
-        position: absolute;
-        bottom: 12px;
-        left: 15px;
-        background: #163532e8;
-        color: white;
-        padding: 5px 11px;
-        border-radius: 5px;
-        font-size: 10px;
-      }
-      .stats {
-        display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: 14px;
-        margin-bottom: 46px;
-      }
-      .stat {
-        background: white;
-        border: 1px solid var(--line);
-        border-radius: 12px;
-        padding: 19px 21px;
-        position: relative;
-      }
-      .stat-top {
-        font-size: 11px;
-        color: var(--muted);
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-      }
-      .stat-index {
-        color: #a8b8b2;
-        font-size: 10px;
-      }
-      .stat-value {
-        font-size: 34px;
-        line-height: 1.2;
-        letter-spacing: -1.5px;
-        margin: 10px 0 8px;
-      }
-      .stat-value span {
-        font-size: 12px;
-        letter-spacing: 0;
-        color: var(--muted);
-        margin-left: 8px;
-      }
-      .stat-note {
-        font-size: 11px;
-        color: var(--muted);
-      }
-      section {
-        margin-bottom: 42px;
-      }
-      .section-head {
-        display: flex;
-        align-items: flex-end;
-        justify-content: space-between;
-        gap: 20px;
-        margin-bottom: 18px;
-      }
-      .section-title {
-        display: flex;
-        gap: 12px;
-        align-items: baseline;
-      }
-      .section-index {
-        font-size: 12px;
-        font-family: monospace;
-        color: var(--ec);
-      }
-      .section-description {
-        color: var(--muted);
-        font-size: 12px;
-        margin-top: 6px;
-      }
-      .pill {
-        display: inline-flex;
-        align-items: center;
-        padding: 3px 9px;
-        border-radius: 5px;
-        font-size: 10px;
-        font-weight: 550;
-        background: var(--ec-soft);
-        color: #176c59;
-        white-space: nowrap;
-      }
-      .pill.pilot {
-        color: #935214;
-        background: #fff0d9;
-      }
-      .pill.single,
-      .pill.demo {
-        color: #6d607d;
-        background: #eeeaf4;
-      }
-      .panel {
-        background: white;
-        border: 1px solid var(--line);
-        border-radius: var(--radius);
-        overflow: hidden;
-      }
-      .panel-head {
-        padding: 21px 24px;
-        border-bottom: 1px solid var(--line);
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        gap: 15px;
-      }
-      .panel-head h3 {
-        font-size: 14px;
-      }
-      .legend {
-        display: flex;
-        gap: 16px;
-        align-items: center;
-        font-size: 11px;
-        color: var(--muted);
-        flex-wrap: wrap;
-      }
-      .legend span {
-        display: flex;
-        gap: 6px;
-        align-items: center;
-      }
-      .legend i {
-        width: 9px;
-        height: 9px;
-        border-radius: 2px;
-        background: var(--ec);
-      }
-      .legend i.il {
-        background: var(--il);
-      }
-      .chart-controls {
-        display: flex;
-        gap: 10px;
-        align-items: center;
-      }
-      .select {
-        border: 1px solid var(--line);
-        padding: 7px 28px 7px 9px;
-        border-radius: 7px;
-        background: white;
-        color: var(--muted);
-        font-size: 11px;
-        max-width: 100%;
-      }
-      .seg {
-        display: flex;
-        gap: 2px;
-        padding: 3px;
-        background: #edf2ee;
-        border-radius: 7px;
-      }
-      .seg button {
-        border-radius: 5px;
-        background: transparent;
-        padding: 5px 10px;
-        font-size: 11px;
-        color: var(--muted);
-      }
-      .seg button[aria-pressed="true"] {
-        background: white;
-        box-shadow: 0 1px 4px #142a2215;
-        color: var(--ink);
-      }
-      .chart {
-        padding: 18px 24px 8px;
-      }
-      .chart-header,
-      .chart-row {
-        display: grid;
-        grid-template-columns: 174px minmax(200px, 1fr) 95px;
-        gap: 16px;
-        align-items: center;
-      }
-      .chart-header {
-        font-size: 10px;
-        color: var(--muted);
-        margin-bottom: 5px;
-      }
-      .chart-header > span:last-child {
-        text-align: right;
-      }
-      .axis {
-        display: flex;
-        justify-content: space-between;
-        padding-right: 0;
-      }
-      .chart-row {
-        padding: 10px 0;
-        border-bottom: 1px solid #eef1ec;
-      }
-      .chart-row:last-child {
-        border: 0;
-      }
-      .chart-label {
-        font-size: 12px;
-        display: flex;
-        gap: 10px;
-        align-items: center;
-        text-align: left;
-        background: none;
-        padding: 5px 0;
-      }
-      .chart-label:hover {
-        color: var(--ec);
-      }
-      .chart-label b {
-        font-size: 11px;
-        min-width: 42px;
-      }
-      .bar-area {
-        background: repeating-linear-gradient(
-          to right,
-          #e8eee9 0,
-          #e8eee9 1px,
-          transparent 1px,
-          transparent 25%
-        );
-        height: 38px;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        gap: 6px;
-      }
-      .bar-track {
-        position: relative;
-        height: 11px;
-      }
-      .bar {
-        position: absolute;
-        left: 0;
-        height: 11px;
-        width: var(--w);
-        background: var(--ec);
-        border-radius: 0 3px 3px 0;
-      }
-      .bar.il {
-        background: var(--il);
-      }
-      .error-line {
-        position: absolute;
-        top: 4px;
-        height: 3px;
-        background: #153e33;
-        left: var(--left);
-        width: var(--span);
-        min-width: 2px;
-        border-left: 1px solid #0c3025;
-        border-right: 1px solid #0c3025;
-      }
-      .bar-track.il .error-line {
-        background: #4b3b70;
-      }
-      .bar-value {
-        position: absolute;
-        left: calc(var(--w) + 5px);
-        top: -4px;
-        font-size: 10px;
-        line-height: 19px;
-        font-family: monospace;
-        color: var(--muted);
-        white-space: nowrap;
-      }
-      .saving {
-        text-align: right;
-        font-size: 17px;
-        font-family: monospace;
-        color: var(--ec);
-      }
-      .saving small {
-        display: block;
+      .toc-kicker {
         font-size: 9px;
+        letter-spacing: 1.6px;
+        margin: 4px 0 38px;
         color: var(--muted);
-        font-family: inherit;
       }
-      .chart-foot {
-        padding: 14px 24px 19px;
+      .toc-title {
+        font-size: 10px;
+        letter-spacing: 2px;
         color: var(--muted);
-        font-size: 11px;
-        line-height: 1.9;
+        margin-bottom: 12px;
       }
-      .notice {
-        padding: 13px 17px;
-        border-left: 3px solid #b7c9bd;
-        background: #eaf0e9;
-        font-size: 12px;
-        color: #506560;
-        margin-top: 15px;
-        border-radius: 0 7px 7px 0;
+      .toc nav {
+        display: grid;
+        gap: 3px;
       }
-      .notice.amber {
-        background: #fff3e5;
-        border-color: #d69a4b;
-        color: #80531e;
+      .toc nav a {
+        text-decoration: none;
+        padding: 8px 0;
+        color: #5c6c7d;
+        border-left: 2px solid transparent;
+        padding-left: 10px;
       }
-      .notice strong {
+      .toc nav a.active {
+        border-left-color: var(--accent);
+        color: var(--ink);
         font-weight: 600;
       }
-      .toolbar {
-        display: flex;
-        gap: 12px;
-        align-items: center;
-        justify-content: space-between;
-        margin-bottom: 18px;
-        flex-wrap: wrap;
-      }
-      .filters {
-        display: flex;
-        gap: 7px;
-        flex-wrap: wrap;
-      }
-      .filter {
-        background: white;
-        border: 1px solid var(--line);
-        border-radius: 7px;
-        font-size: 12px;
-        padding: 7px 12px;
-      }
-      .filter[aria-pressed="true"] {
-        background: var(--ink);
-        color: white;
-        border-color: var(--ink);
-      }
-      .search {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        background: white;
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        padding: 0 12px;
-        min-width: 220px;
-      }
-      .search input {
-        padding: 8px 0;
-        min-width: 0;
-        width: 100%;
-        border: 0;
-        outline: 0;
-        color: var(--ink);
-        background: none;
-        font-size: 12px;
-      }
-      .task-grid {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 20px;
-      }
-      .task-card {
-        border: 1px solid var(--line);
-        border-radius: 13px;
-        background: white;
-        overflow: hidden;
-        display: flex;
-        flex-direction: column;
-      }
-      .card-image {
-        background: #dde5e1;
-        aspect-ratio: 2.15;
-        position: relative;
-        overflow: hidden;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
-      .card-image img {
-        width: 100%;
-        height: 100%;
-        object-fit: contain;
-      }
-      .image-label {
+      .toc-foot {
         position: absolute;
-        bottom: 8px;
-        left: 10px;
-        font-size: 9px;
-        border-radius: 4px;
-        background: #16332ddc;
-        color: white;
-        padding: 3px 7px;
+        bottom: 26px;
+        left: 22px;
+        font-size: 10px;
+        color: var(--muted);
+        line-height: 2;
       }
-      .card-body {
-        padding: 19px 21px;
-        display: flex;
-        flex-direction: column;
-        flex: 1;
+      .toc-foot a {
+        text-decoration: none;
       }
-      .card-title {
+      .document {
+        margin: 30px 35px 30px 227px;
+        background: white;
+        max-width: 1230px;
+        padding: 34px 50px 42px;
+        box-shadow: 0 1px 6px #1a2b3c0b;
+      }
+      .running-head {
         display: flex;
-        align-items: center;
-        gap: 9px;
+        justify-content: space-between;
+        border-bottom: 2px solid var(--ink);
+        padding-bottom: 13px;
+        font-size: 10px;
+        letter-spacing: 0.8px;
+        color: var(--muted);
+      }
+      .running-head strong {
+        color: var(--ink);
+      }
+      .doc-title {
+        padding: 28px 0 22px;
+      }
+      .report-label {
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 2px;
+        color: var(--accent);
+        margin-bottom: 9px;
+      }
+      .subtitle {
+        font-size: 13px;
+        margin-top: 11px;
+        color: var(--muted);
+      }
+      .metadata {
+        display: flex;
+        gap: 12px 25px;
         flex-wrap: wrap;
+        font-size: 11px;
+        border-top: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+        padding: 11px 0;
+        color: var(--muted);
       }
-      .task-code {
-        color: var(--ec);
-        font-family: monospace;
-        font-size: 12px;
-        font-weight: bold;
+      .metadata strong {
+        font-weight: 500;
+        color: var(--ink);
+        margin-left: 5px;
       }
-      .card-title h3 {
-        font-size: 16px;
-        flex: 1;
+      .abstract {
+        padding: 23px 0 26px;
       }
-      .card-measures {
+      .abstract h2 {
+        font-size: 15px;
+        margin-bottom: 9px;
+      }
+      .abstract p {
+        font-size: 13px;
+        line-height: 1.95;
+      }
+      .findings {
+        border-top: 2px solid var(--accent);
+        border-bottom: 1px solid var(--line);
+        margin: 4px 0 15px;
+      }
+      .finding {
         display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 16px;
-        padding: 16px 0 13px;
+        grid-template-columns: 30px minmax(0, 1fr) 160px;
+        align-items: start;
+        gap: 13px;
+        padding: 16px 0;
+        border-bottom: 1px solid #e6eaee;
       }
-      .measure-label {
-        font-size: 10px;
-        color: var(--muted);
-        display: flex;
-        gap: 5px;
-        align-items: center;
+      .finding:last-child {
+        border-bottom: 0;
       }
-      .measure-label:before {
-        content: "";
-        display: block;
-        width: 5px;
-        height: 5px;
-        border-radius: 50%;
-        background: var(--ec);
-      }
-      .measure-label.il:before {
-        background: var(--il);
-      }
-      .measure-value {
-        font-size: 23px;
-        letter-spacing: -1px;
-        margin-top: 3px;
-        font-family: monospace;
-      }
-      .measure-value small {
+      .finding-index {
         font-size: 11px;
-        color: var(--muted);
-        letter-spacing: 0;
+        color: var(--accent);
+        padding-top: 4px;
       }
-      .measure-sub {
-        color: var(--muted);
-        font-size: 10px;
-      }
-      .outcome {
-        font-size: 12px;
-        line-height: 1.8;
-        padding-top: 12px;
-        border-top: 1px solid #edf1ec;
-        color: #4f6363;
-        margin-bottom: 16px;
-        flex: 1;
-      }
-      .card-actions {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        gap: 10px;
-      }
-      .card-actions .btn {
-        padding: 5px 10px;
-        font-size: 11px;
-      }
-      .card-reduction {
-        font-size: 11px;
-        color: var(--ec);
-      }
-      .empty {
-        padding: 45px;
-        text-align: center;
-        color: var(--muted);
-        grid-column: 1/-1;
-        background: white;
-        border: 1px dashed var(--line);
-        border-radius: 12px;
-      }
-      .section-tail {
-        text-align: right;
-        margin-top: 12px;
-        font-size: 11px;
-        color: var(--muted);
-      }
-      .c02-layout {
-        display: grid;
-        grid-template-columns: 1fr;
-        gap: 20px;
-      }
-      #budget-chart {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 28px;
-      }
-      .c02-visual {
-        background: #e2e8e4;
-        border-radius: 13px;
-        overflow: hidden;
-        display: flex;
-        flex-direction: column;
-        justify-content: flex-start;
-        border: 1px solid var(--line);
-      }
-      .c02-visual img {
-        width: 100%;
-        display: block;
-      }
-      .caption {
-        padding: 14px 17px;
-        font-size: 11px;
-        color: var(--muted);
-        background: white;
-      }
-      .budget-panel {
-        padding: 22px;
-      }
-      .budget-panel h3 {
+      .finding h3 {
         font-size: 14px;
-        margin-bottom: 6px;
+        margin-bottom: 4px;
       }
-      .budget-row {
-        margin: 21px 0;
+      .finding p {
+        font-size: 12px;
+        color: var(--muted);
+        line-height: 1.8;
       }
-      .budget-label {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        font-size: 11px;
-        gap: 9px;
-        margin-bottom: 7px;
+      .finding-value {
+        text-align: right;
+        font-family: Consolas, monospace;
+        font-size: 24px;
+        line-height: 1.3;
+        color: var(--accent);
+        padding-top: 1px;
       }
-      .budget-track {
-        height: 7px;
-        background: #e9eeea;
-        border-radius: 4px;
-        overflow: hidden;
-      }
-      .budget-fill {
-        height: 100%;
-        min-width: 3px;
-        border-radius: 4px;
-        background: var(--ec);
-      }
-      .budget-value {
-        display: flex;
-        justify-content: space-between;
-        gap: 7px;
-        align-items: baseline;
-        font-size: 20px;
-        font-family: monospace;
-        margin-top: 6px;
-      }
-      .budget-value small {
+      .finding-value span {
+        display: block;
         font-family: inherit;
         font-size: 10px;
-        color: var(--muted);
-      }
-      .budget-text {
-        font-size: 10px;
+        line-height: 1.7;
         color: var(--muted);
         margin-top: 4px;
       }
-      .limits {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 16px;
-        margin-top: 18px;
+      .abstract-note {
+        font-size: 11px !important;
+        color: var(--muted);
       }
-      .limit {
+      .tools {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+        margin: 12px 0 28px;
+      }
+      .btn {
         background: white;
         border: 1px solid var(--line);
-        border-radius: 12px;
-        padding: 20px;
-      }
-      .limit-title {
-        font-size: 12px;
-        font-weight: 600;
-        margin: 8px 0;
-      }
-      .limit p {
+        border-radius: 3px;
+        padding: 5px 11px;
         font-size: 11px;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        color: var(--ink);
+      }
+      .btn:hover {
+        background: #f0f5f8;
+        border-color: #7f9eaf;
+      }
+      .btn-primary {
+        color: white;
+        background: var(--accent);
+        border-color: var(--accent);
+      }
+      .btn-primary:hover {
+        background: #194d69;
+        color: white;
+      }
+      .section {
+        margin: 0 0 34px;
+      }
+      .section-heading {
+        display: flex;
+        align-items: baseline;
+        gap: 14px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid var(--ink);
+        margin-bottom: 15px;
+      }
+      .section-num {
+        font-size: 17px;
+        font-weight: 600;
+        color: var(--accent);
+        font-family: Georgia, serif;
+      }
+      .lead {
+        font-size: 12px;
         color: var(--muted);
+        margin-bottom: 17px;
+      }
+      .conditions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        border-top: 1px solid var(--line);
+        border-left: 1px solid var(--line);
+      }
+      .condition {
+        display: grid;
+        grid-template-columns: 87px 1fr;
+        gap: 12px;
+        padding: 12px 15px;
+        border-bottom: 1px solid var(--line);
+        border-right: 1px solid var(--line);
+        font-size: 12px;
+      }
+      .condition dt {
+        color: var(--muted);
+      }
+      .condition dd {
+        margin: 0;
+      }
+      .note {
+        border-left: 3px solid #8da8b9;
+        padding: 10px 14px;
+        background: #f4f7fa;
+        font-size: 11px;
+        color: #526677;
+        margin-top: 14px;
         line-height: 1.9;
       }
-      .limit .num {
-        font-size: 10px;
-        color: var(--amber);
+      .warning {
+        border-color: #b99861;
+        background: #faf6ee;
+        color: #795923;
+      }
+      .table-caption {
+        font-size: 12px;
+        margin: 19px 0 9px;
+        color: var(--ink);
+      }
+      .table-caption strong {
+        margin-right: 8px;
       }
       .table-scroll {
         overflow: auto;
       }
       table {
-        border-collapse: collapse;
         width: 100%;
-        text-align: left;
+        border-collapse: collapse;
         font-size: 12px;
-      }
-      th {
-        font-weight: 500;
-        font-size: 10px;
-        color: var(--muted);
-        background: #f6f8f5;
-        white-space: nowrap;
+        line-height: 1.7;
+        text-align: left;
       }
       th,
       td {
-        padding: 13px 18px;
         border-bottom: 1px solid var(--line);
+        padding: 11px 10px;
+        vertical-align: top;
       }
-      tbody tr:last-child td {
+      thead th {
+        background: #f2f5f8;
+        border-top: 2px solid var(--ink);
+        border-bottom: 1px solid var(--ink);
+        font-weight: 600;
+        font-size: 11px;
+        white-space: nowrap;
+      }
+      tbody tr:last-child > * {
+        border-bottom: 1px solid var(--ink);
+      }
+      .result-table .value {
+        text-align: right;
+        white-space: nowrap;
+        font-family: Consolas, monospace;
+        font-size: 12px;
+      }
+      .result-table th:first-child {
+        width: 70px;
+      }
+      .result-table .scope {
+        font-size: 10px;
+        color: var(--muted);
+        min-width: 124px;
+      }
+      .result-table .case {
+        min-width: 130px;
+      }
+      .result-table tbody tr:hover {
+        background: #f7fafc;
+      }
+      .result-table tr.pilot {
+        background: #faf6ee;
+      }
+      .result-table tr.demo,
+      .result-table tr.single {
+        background: #f7f7f7;
+      }
+      .task-link {
+        padding: 0;
+        border: 0;
+        color: var(--accent);
+        background: none;
+        font-family: Consolas, monospace;
+        font-size: 12px;
+        text-decoration: underline;
+        text-underline-offset: 3px;
+      }
+      .footnote {
+        font-size: 10px;
+        color: var(--muted);
+        line-height: 1.9;
+        margin: 10px 0;
+      }
+      .toolbar {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        margin: 15px 0 10px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .filter-group {
+        display: flex;
+        gap: 5px;
+        flex-wrap: wrap;
+      }
+      .filter {
+        border: 1px solid var(--line);
+        background: white;
+        padding: 3px 9px;
+        font-size: 11px;
+        border-radius: 2px;
+      }
+      .filter[aria-pressed="true"] {
+        background: #e4edf3;
+        border-color: #9fb7c7;
+        color: #194a65;
+      }
+      .search {
+        border: 1px solid var(--line);
+        padding: 4px 10px;
+        font-size: 11px;
+        max-width: 230px;
+        width: 100%;
+        border-radius: 2px;
+      }
+      .chart-wrap {
+        border: 1px solid var(--line);
+        padding: 18px 20px 12px;
+        margin-top: 20px;
+      }
+      .figure-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        flex-wrap: wrap;
+      }
+      .legend {
+        display: flex;
+        gap: 18px;
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .legend span {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+      }
+      .legend i {
+        width: 18px;
+        height: 7px;
+        background: var(--ec);
+        display: block;
+      }
+      .legend .il {
+        background: var(--il);
+      }
+      .chart-options {
+        display: flex;
+        gap: 8px;
+      }
+      .chart-options select {
+        font-size: 10px;
+        background: white;
+        border: 1px solid var(--line);
+        padding: 4px;
+        color: var(--muted);
+      }
+      .chart {
+        padding: 18px 0 5px;
+      }
+      .chart-head,
+      .chart-row {
+        display: grid;
+        grid-template-columns: 165px 1fr 82px;
+        align-items: center;
+        gap: 15px;
+      }
+      .chart-head {
+        font-size: 10px;
+        color: var(--muted);
+        margin-bottom: 7px;
+      }
+      .axis {
+        display: flex;
+        justify-content: space-between;
+      }
+      .chart-row {
+        padding: 9px 0;
+        border-bottom: 1px solid #edf0f2;
+      }
+      .chart-row:last-child {
         border-bottom: 0;
       }
-      .pass {
-        color: var(--ec);
+      .chart-label {
+        background: none;
+        border: 0;
+        text-align: left;
+        padding: 0;
+        font-size: 11px;
+        display: flex;
+        gap: 8px;
       }
-      .e2e-note {
-        padding: 16px 21px;
-        border-top: 1px solid var(--line);
+      .chart-label b {
+        min-width: 42px;
+        font-family: Consolas, monospace;
+      }
+      .bar-area {
+        height: 30px;
+        display: grid;
+        gap: 6px;
+        align-content: center;
+        background: repeating-linear-gradient(
+          to right,
+          #e4e9ee 0,
+          #e4e9ee 1px,
+          transparent 1px,
+          transparent 25%
+        );
+      }
+      .track {
+        height: 9px;
+        position: relative;
+      }
+      .bar {
+        position: absolute;
+        height: 9px;
+        width: var(--w);
+        background: var(--ec);
+      }
+      .bar.il {
+        background: var(--il);
+      }
+      .error {
+        position: absolute;
+        top: 3px;
+        height: 3px;
+        left: var(--left);
+        width: var(--span);
+        min-width: 1px;
+        background: #233746;
+      }
+      .bar-value {
+        position: absolute;
+        left: calc(var(--w) + 5px);
+        font:
+          10px/11px Consolas,
+          monospace;
+        top: -1px;
+        color: var(--muted);
+      }
+      .ratio {
+        text-align: right;
+        font-family: Consolas, monospace;
+        font-size: 14px;
+        color: var(--accent);
+      }
+      .ratio small {
+        font-size: 9px;
+        color: var(--muted);
+        display: block;
+      }
+      .figure-caption {
         font-size: 11px;
         color: var(--muted);
         line-height: 1.9;
+        margin-top: 14px;
       }
-      .method-grid {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 16px;
+      .figure-caption strong {
+        color: var(--ink);
+        margin-right: 6px;
       }
-      .method {
-        padding: 23px;
-        background: white;
-        border: 1px solid var(--line);
-        border-radius: 12px;
+      .quality-table th:first-child {
+        width: 90px;
       }
-      .method .eyebrow {
-        font-size: 10px;
-      }
-      .method h3 {
-        font-size: 15px;
-        margin: 9px 0 12px;
-      }
-      .method p {
+      .quality-table td {
         font-size: 12px;
-        color: var(--muted);
-        line-height: 1.9;
       }
-      .source-strip {
+      .quality-table td:last-child {
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .quality-table strong {
+        color: var(--ink);
+        font-weight: 600;
+      }
+      .figures {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+        margin-top: 23px;
+      }
+      figure {
+        margin: 0;
+      }
+      .scene {
+        background: #edf0f3;
+        aspect-ratio: 16/9;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .scene img {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        display: block;
+      }
+      .scene-label {
+        padding: 5px 10px;
+        background: #eef2f5;
+        font-size: 10px;
         display: flex;
         justify-content: space-between;
-        gap: 24px;
-        border-top: 1px solid var(--line);
-        margin-top: 23px;
-        padding-top: 22px;
-        align-items: center;
-        font-size: 12px;
+        color: var(--muted);
       }
-      .source-links {
+      .budget-top {
         display: flex;
-        gap: 8px;
-        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin: 15px 0;
+      }
+      .tabs {
+        display: flex;
+        border: 1px solid var(--line);
+      }
+      .tabs button {
+        padding: 5px 12px;
+        border: 0;
+        background: white;
+        font-size: 11px;
+      }
+      .tabs button[aria-pressed="true"] {
+        background: var(--ink);
+        color: white;
+      }
+      .budget-status {
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .budget-table .value {
+        font-family: Consolas, monospace;
+        white-space: nowrap;
+        text-align: right;
+      }
+      .budget-table tr.failed {
+        background: #fbf4ed;
+      }
+      .budget-table td:last-child {
+        font-size: 11px;
+      }
+      .c02-figures {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+        margin-top: 20px;
+      }
+      .limits-list {
+        padding: 0;
+        list-style: none;
+        margin: 16px 0;
+      }
+      .limits-list li {
+        font-size: 12px;
+        margin-bottom: 10px;
+        padding-left: 16px;
+        position: relative;
+      }
+      .limits-list li:before {
+        content: "—";
+        position: absolute;
+        left: 0;
+        color: var(--muted);
+      }
+      .limits-list strong {
+        font-weight: 600;
+      }
+      .subheading {
+        font-size: 15px;
+        margin: 21px 0 10px;
+      }
+      .e2e-table th,
+      .e2e-table td {
+        padding: 9px;
+        font-size: 11px;
+      }
+      .success {
+        color: var(--green);
+      }
+      .refs {
+        font-size: 11px;
+        line-height: 1.9;
+        padding-left: 22px;
+        color: var(--muted);
+      }
+      .refs li {
+        margin: 9px 0;
       }
       .hash {
-        font-family: monospace;
-        font-size: 10px;
+        font:
+          10px/1.8 Consolas,
+          monospace;
         overflow-wrap: anywhere;
         color: var(--muted);
       }
-      .source-details {
-        margin-top: 18px;
-        color: var(--muted);
+      .provenance summary {
         font-size: 11px;
-      }
-      .source-details summary {
         cursor: pointer;
-        padding: 12px 0;
+        color: var(--accent);
+        padding: 10px 0;
       }
       .source-list {
-        padding: 15px;
-        background: white;
-        border: 1px solid var(--line);
-        border-radius: 8px;
+        padding: 12px;
+        background: #f6f8fa;
         display: grid;
         gap: 10px;
+        font-size: 10px;
       }
-      .footer {
-        border-top: 1px solid var(--line);
-        padding: 22px 0 5px;
+      .report-end {
+        border-top: 2px solid var(--ink);
+        padding-top: 13px;
         display: flex;
         justify-content: space-between;
-        gap: 15px;
+        font-size: 9px;
         color: var(--muted);
-        font-size: 10px;
+      }
+      .status-note {
+        font-size: 11px;
+        color: var(--muted);
       }
       dialog {
         border: 1px solid var(--line);
-        border-radius: 18px;
-        padding: 0;
-        max-width: 940px;
-        width: calc(100% - 32px);
+        width: calc(100% - 30px);
+        max-width: 900px;
         max-height: 90vh;
-        box-shadow: 0 30px 100px #001d2a33;
+        padding: 0;
         color: var(--ink);
-        background: var(--paper);
+        background: white;
+        box-shadow: 0 20px 90px #162b3d3b;
       }
       dialog::backdrop {
-        background: #071b23ac;
-        backdrop-filter: blur(5px);
+        background: #142537a1;
       }
       .modal-head {
         position: sticky;
         top: 0;
-        background: white;
+        padding: 18px 24px;
         border-bottom: 1px solid var(--line);
-        padding: 19px 25px;
+        background: white;
         display: flex;
-        align-items: center;
         justify-content: space-between;
-        z-index: 1;
-        gap: 16px;
+        gap: 15px;
+        z-index: 2;
       }
       .modal-head h2 {
-        font-size: 21px;
+        font-size: 20px;
+      }
+      .modal-head small {
+        font-size: 11px;
+        color: var(--muted);
       }
       .close {
+        border: 1px solid var(--line);
+        background: white;
         width: 32px;
         height: 32px;
-        border-radius: 50%;
-        background: #eff3ef;
-        font-size: 22px;
-        line-height: 1;
+        font-size: 21px;
       }
       .modal-body {
         padding: 24px;
       }
-      .modal-image {
-        width: 100%;
-        max-height: 370px;
-        object-fit: contain;
-        background: #e0e7e1;
-        border-radius: 10px;
+      .modal-body .scene {
+        max-height: 360px;
       }
-      .modal-body .outcome {
-        font-size: 13px;
-        flex: none;
-        margin: 18px 0;
-        padding: 16px;
-        background: white;
-        border: 1px solid var(--line);
-        border-radius: 9px;
-      }
-      .modal-meta {
+      .modal-body p {
         font-size: 12px;
-        color: var(--muted);
         margin: 14px 0;
-        line-height: 1.9;
-      }
-      .modal-body video {
-        width: 100%;
-        max-height: 480px;
-        background: #152e31;
-        border-radius: 10px;
-        display: block;
-        margin-top: 16px;
-      }
-      .modal-body video[hidden] {
-        display: none;
-      }
-      .video-note {
-        font-size: 11px;
-        color: var(--muted);
-        margin-top: 10px;
       }
       .modal-actions {
         display: flex;
-        gap: 10px;
+        gap: 8px;
         flex-wrap: wrap;
-        margin-top: 18px;
+        margin: 15px 0;
       }
-      #modal-hash {
-        margin-top: 16px;
+      .modal-body video {
+        width: 100%;
+        display: block;
+        max-height: 480px;
+        background: #222;
+        margin-top: 15px;
       }
-      .modal-metrics {
-        margin-top: 18px;
-      }
-      .toast {
-        position: fixed;
-        bottom: 26px;
-        left: 50%;
-        transform: translateX(-50%);
-        padding: 10px 20px;
-        border-radius: 8px;
-        background: #173b32;
-        color: white;
-        z-index: 50;
-        font-size: 12px;
-      }
-      .hidden,
+      .modal-body video[hidden],
       [hidden] {
         display: none !important;
       }
-      @media (min-width: 1550px) {
-        .shell {
-          padding-left: 62px;
-          padding-right: 62px;
-        }
-        .hero {
-          min-height: 315px;
-        }
-        .hero-copy {
-          padding: 38px 42px;
-        }
-        .hero h2 {
-          font-size: 32px;
-        }
-        .hero p {
-          font-size: 14px;
-        }
-        .card-image {
-          aspect-ratio: 2.3;
+      .empty {
+        text-align: center;
+        padding: 30px;
+        color: var(--muted);
+      }
+      @media (min-width: 1600px) {
+        .document {
+          margin-left: auto;
+          margin-right: auto;
+          transform: translateX(80px);
         }
       }
-      @media (max-width: 1200px) {
-        .sidebar {
-          width: 180px;
-          padding: 28px 16px;
+      @media (max-width: 1150px) {
+        .toc {
+          width: 160px;
+          padding: 24px 15px;
         }
-        .shell {
-          margin-left: 180px;
-          padding: 25px 28px;
+        .document {
+          margin: 20px 20px 20px 180px;
+          padding: 28px;
         }
-        .brand {
-          font-size: 22px;
+        .toc-foot {
+          left: 15px;
         }
-        .brand-sub {
-          font-size: 8px;
-          margin-left: 25px;
+        h1 {
+          font-size: 29px;
         }
-        .hero-copy {
-          padding: 26px;
-        }
-        .hero h2 {
-          font-size: 23px;
-        }
-        .chart-header,
+        .chart-head,
         .chart-row {
-          grid-template-columns: 145px minmax(130px, 1fr) 72px;
-          gap: 13px;
+          grid-template-columns: 135px 1fr 70px;
         }
         .chart-label {
-          font-size: 11px;
-          gap: 5px;
+          font-size: 10px;
+          gap: 4px;
         }
         .chart-label b {
           min-width: 37px;
         }
-        .card-title h3 {
-          font-size: 14px;
-        }
-        .panel-head {
-          flex-wrap: wrap;
-        }
-        .limits {
-          gap: 10px;
-        }
-        .limit {
-          padding: 16px;
-        }
       }
-      @media (max-width: 900px) {
-        .sidebar {
+      @media (max-width: 850px) {
+        .toc {
           position: static;
           width: 100%;
-          padding: 15px 22px;
-          flex-direction: row;
-          align-items: center;
-          justify-content: space-between;
-          gap: 20px;
-        }
-        .brand {
-          font-size: 21px;
-        }
-        .brand-sub,
-        .nav-label,
-        .sidebar-foot {
-          display: none;
-        }
-        .nav {
+          padding: 14px 20px;
+          border-bottom: 1px solid var(--line);
+          border-right: 0;
           display: flex;
-          gap: 0;
-          overflow: auto;
+          justify-content: space-between;
+          align-items: center;
+          gap: 15px;
         }
-        .nav a {
-          font-size: 11px;
-          white-space: nowrap;
-          padding: 8px;
-        }
-        .nav-num {
+        .toc-kicker,
+        .toc-title,
+        .toc-foot {
           display: none;
         }
-        .shell {
-          margin: 0;
-          padding: 24px;
+        .toc nav {
+          display: flex;
+          overflow: auto;
+          gap: 7px;
         }
-        .title-row h1 {
-          font-size: 30px;
+        .toc nav a {
+          padding: 3px 0;
+          border: 0;
+          white-space: nowrap;
+          font-size: 10px;
         }
-        .hero {
+        .document {
+          margin: 14px;
+          padding: 27px;
+        }
+        .running-head {
+          font-size: 9px;
+        }
+        .conditions {
           grid-template-columns: 1fr 1fr;
         }
-        .hero h2 {
-          font-size: 22px;
+        .condition {
+          grid-template-columns: 70px 1fr;
+          padding: 10px;
         }
-        .hero-copy {
-          padding: 22px;
-        }
-        .hero-tags {
-          margin-top: 12px;
-        }
-        .stats {
-          gap: 10px;
-        }
-        .stat {
-          padding: 16px;
-        }
-        .stat-value {
-          font-size: 30px;
-        }
-        .c02-layout {
-          grid-template-columns: 1fr;
-        }
-        .c02-visual {
-          max-height: none;
-        }
-        .method-grid {
-          gap: 10px;
-        }
-        .method {
-          padding: 16px;
-        }
-        .edition {
-          font-size: 10px;
+        .chart-head,
+        .chart-row {
+          grid-template-columns: 125px 1fr 65px;
         }
       }
       @media (max-width: 600px) {
-        html {
-          scroll-padding-top: 12px;
+        body {
+          font-size: 13px;
         }
-        .sidebar {
+        .toc {
           display: block;
-          padding: 16px 18px;
+          padding: 12px 16px;
         }
-        .nav {
-          margin-top: 12px;
+        .wordmark {
+          font-size: 17px;
+        }
+        .toc nav {
+          margin-top: 9px;
           justify-content: space-between;
+          gap: 8px;
         }
-        .nav a {
-          padding: 6px 4px;
-        }
-        .nav a.active {
+        .document {
+          margin: 0;
+          padding: 22px 17px;
           box-shadow: none;
-          color: #95dfc6;
-          background: transparent;
         }
-        .shell {
-          padding: 18px 16px;
-        }
-        .topbar {
-          align-items: flex-start;
-          margin-bottom: 24px;
-        }
-        .top-actions .btn:first-child {
-          display: none;
-        }
-        .crumb {
-          font-size: 10px;
-          max-width: 170px;
-        }
-        .btn {
-          padding: 7px 10px;
-          font-size: 11px;
-        }
-        .title-row {
-          gap: 8px;
-        }
-        .title-row h1 {
-          font-size: 27px;
-        }
-        .edition {
-          display: none;
-        }
-        .subtitle {
-          font-size: 12px;
-        }
-        .hero {
-          grid-template-columns: 1fr;
-        }
-        .hero-copy {
-          padding: 24px;
-        }
-        .hero h2 {
+        h1 {
           font-size: 25px;
+          line-height: 1.55;
+          letter-spacing: 0;
         }
-        .hero-visual {
-          min-height: 150px;
-        }
-        .hero-caption {
-          font-size: 9px;
-        }
-        .stats {
-          grid-template-columns: 1fr 1fr;
-          margin-bottom: 30px;
-        }
-        .stat-note {
-          font-size: 10px;
-        }
-        h2 {
-          font-size: 21px;
-        }
-        .section-title {
-          gap: 8px;
-        }
-        .section-description {
-          font-size: 11px;
-        }
-        .section-head {
-          align-items: flex-start;
-          gap: 8px;
-        }
-        .section-head > .btn {
-          margin-top: 2px;
-        }
-        .panel-head {
-          padding: 16px;
+        .running-head {
+          font-size: 8px;
+          letter-spacing: 0;
           gap: 12px;
         }
-        .legend {
+        .doc-title {
+          padding: 22px 0 18px;
+        }
+        .subtitle {
+          font-size: 11px;
+        }
+        .metadata {
           font-size: 10px;
+          gap: 7px 15px;
+        }
+        .abstract p {
+          font-size: 12px;
+        }
+        .finding {
+          grid-template-columns: 21px 1fr;
+          gap: 8px;
+        }
+        .finding-value {
+          grid-column: 2;
+          text-align: left;
+          font-size: 19px;
+          display: flex;
+          gap: 12px;
+          align-items: baseline;
+        }
+        .finding-value span {
+          font-size: 9px;
+        }
+        .finding h3 {
+          font-size: 13px;
+        }
+        .finding p {
+          font-size: 11px;
+        }
+        .tools {
+          justify-content: flex-start;
+          flex-wrap: wrap;
+        }
+        .conditions {
+          grid-template-columns: 1fr;
+        }
+        .condition {
+          grid-template-columns: 80px 1fr;
+          font-size: 11px;
+        }
+        .section-heading {
           gap: 10px;
         }
-        .chart {
-          padding: 12px 12px 6px;
+        .section-heading h2 {
+          font-size: 20px;
         }
-        .chart-header,
+        .chart-wrap {
+          padding: 13px 10px;
+        }
+        .chart-head,
         .chart-row {
-          grid-template-columns: 49px minmax(80px, 1fr) 56px;
+          grid-template-columns: 43px 1fr 57px;
           gap: 8px;
         }
         .chart-label span {
           display: none;
         }
         .chart-label b {
-          font-size: 10px;
-        }
-        .chart-header {
           font-size: 9px;
+          min-width: 0;
         }
-        .saving {
-          font-size: 13px;
-        }
-        .saving small {
-          font-size: 8px;
+        .chart-head {
+          font-size: 9px;
         }
         .bar-value {
           font-size: 8px;
           left: calc(var(--w) + 3px);
         }
-        .chart-foot {
-          padding: 13px 16px;
-          font-size: 10px;
+        .ratio {
+          font-size: 12px;
         }
-        .chart-controls {
-          gap: 6px;
+        .ratio small {
+          font-size: 8px;
+        }
+        .chart-options {
           flex-wrap: wrap;
         }
-        .select {
+        .legend {
           font-size: 10px;
         }
-        .seg button {
-          font-size: 10px;
-          padding: 5px 7px;
+        .figures {
+          grid-template-columns: 1fr;
         }
-        .task-grid {
+        .c02-figures {
           grid-template-columns: 1fr;
         }
         .search {
-          width: 100%;
+          max-width: none;
         }
-        .filters {
-          gap: 5px;
+        .budget-top {
+          flex-wrap: wrap;
         }
-        .filter {
+        .table-caption {
           font-size: 11px;
-          padding: 6px 9px;
         }
-        .limits,
-        .method-grid,
-        #budget-chart {
-          grid-template-columns: 1fr;
-        }
-        #budget-chart {
-          gap: 0;
-        }
-        .limit {
-          padding: 18px;
-        }
-        .source-strip {
-          display: block;
-        }
-        .source-links {
-          margin-top: 12px;
-        }
-        .footer {
-          display: block;
-          font-size: 9px;
-        }
-        .footer span {
-          display: block;
-          margin-bottom: 6px;
+        .report-end {
+          font-size: 8px;
+          gap: 15px;
         }
         .modal-body {
-          padding: 16px;
+          padding: 15px;
         }
         .modal-head {
-          padding: 15px 16px;
+          padding: 14px;
         }
         .modal-head h2 {
           font-size: 17px;
         }
-        .modal-body td,
-        .modal-body th {
-          padding: 10px;
+        .btn {
+          font-size: 10px;
         }
-        .notice {
-          font-size: 11px;
-        }
-        .caption {
+        .note {
           font-size: 10px;
         }
       }
@@ -1476,527 +1072,627 @@
         html {
           scroll-behavior: auto;
         }
-        * {
-          transition: none !important;
-        }
       }
       @media print {
         @page {
           size: A4;
-          margin: 13mm;
+          margin: 16mm;
         }
         body {
-          font-size: 10px;
           background: white;
+          font-size: 10px;
         }
-        .sidebar,
-        .topbar,
+        .toc,
+        .tools,
         .toolbar,
-        .chart-controls,
+        .chart-options,
+        .tabs,
+        .btn,
         .modal-actions,
-        .card-actions,
-        .source-links,
-        .footer,
-        .seg,
-        .section-head > .btn,
         dialog,
-        .toast {
+        .provenance {
           display: none !important;
         }
-        .shell {
+        .document {
           margin: 0;
           padding: 0;
+          box-shadow: none;
           max-width: none;
+          transform: none;
         }
-        .title-row h1 {
-          font-size: 28px;
+        .running-head {
+          font-size: 8px;
         }
-        .hero {
-          min-height: 0;
-          grid-template-columns: 1fr 1fr;
-          print-color-adjust: exact;
-          -webkit-print-color-adjust: exact;
-        }
-        .hero-copy {
-          padding: 20px;
-        }
-        .hero h2 {
-          font-size: 20px;
-        }
-        .stats {
-          margin-bottom: 24px;
-        }
-        .stat {
-          padding: 12px;
-        }
-        .stat-value {
+        h1 {
           font-size: 25px;
         }
-        .chart-row,
-        .task-card,
-        .limit,
-        .method,
-        .stats,
-        .hero {
-          break-inside: avoid;
+        .doc-title {
+          padding: 20px 0;
         }
-        .chart {
-          print-color-adjust: exact;
-          -webkit-print-color-adjust: exact;
+        .abstract {
+          padding: 18px 0;
         }
-        .task-grid {
-          grid-template-columns: 1fr 1fr;
+        .abstract p {
+          font-size: 11px;
         }
-        .card-body {
-          padding: 12px;
+        .finding {
+          padding: 11px 0;
         }
-        .card-image {
-          aspect-ratio: 2.5;
+        .finding p {
+          font-size: 10px;
         }
-        .card-title h3 {
+        .finding h3 {
           font-size: 12px;
         }
-        .measure-value {
+        .finding-value {
+          font-size: 21px;
+        }
+        .metadata {
+          font-size: 9px;
+        }
+        .section {
+          margin-bottom: 25px;
+        }
+        h2 {
           font-size: 18px;
         }
-        .outcome {
+        .condition {
           font-size: 10px;
         }
-        .section-description,
-        .chart-foot {
-          font-size: 10px;
+        .finding,
+        figure,
+        .chart-wrap,
+        .conditions,
+        .note,
+        .section-heading {
+          break-inside: avoid;
         }
-        .c02-layout {
-          grid-template-columns: 1fr 1fr;
+        .section-heading {
+          break-after: avoid;
         }
-        .budget-panel {
-          padding: 15px;
-        }
-        #budget-chart {
-          display: block;
-        }
-        .budget-row {
-          margin: 14px 0;
+        tr {
+          break-inside: avoid;
         }
         .table-scroll {
           overflow: visible;
         }
-        .source-details {
-          display: none;
+        th,
+        td {
+          padding: 8px 6px;
         }
-        .method {
-          padding: 14px;
+        table,
+        .result-table .value {
+          font-size: 10px;
         }
-        section {
-          margin-bottom: 25px;
+        .quality-table td {
+          font-size: 10px;
         }
-        h2 {
-          font-size: 21px;
+        .result-table .scope {
+          font-size: 9px;
+          min-width: 100px;
+        }
+        .result-table .case {
+          min-width: 100px;
+        }
+        .chart-wrap {
+          print-color-adjust: exact;
+          -webkit-print-color-adjust: exact;
+        }
+        .chart-row {
+          padding: 6px 0;
+        }
+        .chart-label {
+          font-size: 9px;
+        }
+        .bar-value {
+          font-size: 8px;
+        }
+        .footnote,
+        .note,
+        .figure-caption {
+          font-size: 9px;
+        }
+        .c02-figures,
+        .figures {
+          gap: 10px;
+        }
+        .lead {
+          font-size: 10px;
+        }
+        .report-end {
+          margin-top: 20px;
         }
       }
     </style>
   </head>
   <body>
-    <a
-      href="#overview"
-      style="position: absolute; left: -9999px"
-      onfocus="this.style.left = '20px'"
-      onblur="this.style.left = '-9999px'"
-      >跳到报告正文</a
-    >
-    <aside class="sidebar" aria-label="报告导航">
-      <a class="brand" href="#overview"
-        ><span class="brand-mark" aria-hidden="true"
-          ><i></i><i></i><i></i><i></i></span
-        >DexUni<span
-          style="font-size: 9px; align-self: flex-start; color: #9dbab0"
-          >LAB</span
-        ></a
-      >
-      <div class="brand-sub">PHYSICS / TECH REPORT</div>
-      <div class="nav-label">IN THIS REPORT</div>
-      <nav class="nav">
-        <a href="#overview" class="active"
-          ><span class="nav-num">01</span>结果总览</a
-        ><a href="#performance"><span class="nav-num">02</span>性能对比</a
-        ><a href="#tasks"><span class="nav-num">03</span>任务与效果</a
-        ><a href="#tradeoff"><span class="nav-num">04</span>C02 配置取舍</a
-        ><a href="#reproduce"><span class="nav-num">05</span>复现与来源</a>
+    <aside class="toc">
+      <a class="wordmark" href="#summary">EmbodiChain</a>
+      <p class="toc-kicker">PHYSICS TECHNICAL REPORT</p>
+      <p class="toc-title">CONTENTS / 目录</p>
+      <nav>
+        <a href="#summary" class="active">摘要与结论</a
+        ><a href="#method">1. 实验条件</a><a href="#results">2. 性能结果</a
+        ><a href="#quality">3. 任务效果</a><a href="#c02">4. C02 配置取舍</a
+        ><a href="#reproduction">5. 复现与资产更新</a
+        ><a href="#references">6. 数据来源</a>
       </nav>
-      <div class="sidebar-foot">
-        <span class="dot"></span>已保留的实验结果
-        <div class="side-line"></div>
-        EmbodiChain × Isaac Lab<br />RTX 5090 D v2<br />数据截至 2026.10.27<a
+      <div class="toc-foot">
+        TR · DEXUNI · 2026-10<br />测量快照：2026.10.27<br />报告修订：2026.11.13<br /><a
           href="https://github.com/DexForce/EmbodiChain/pull/893"
           target="_blank"
           rel="noopener"
-          >MR #893 ↗</a
+          >关联 MR #893 ↗</a
         >
       </div>
     </aside>
-    <main class="shell" id="overview">
-      <header class="topbar">
-        <div class="crumb">
-          EmbodiChain <span style="margin: 0 9px; color: #a9b8af">/</span>
-          <b>物理仿真技术报告</b>
-        </div>
-        <div class="top-actions">
-          <button class="btn" id="export-top">↓ 导出数据 CSV</button
-          ><button class="btn" id="print">打印 / 保存 PDF ↗</button>
-        </div>
+    <main class="document">
+      <header class="running-head">
+        <strong>DEXFORCE / EMBODICHAIN</strong
+        ><span>TECHNICAL REPORT · TR-DEXUNI-2026-10</span>
       </header>
-      <div class="title-row">
-        <div>
-          <div class="eyebrow">Benchmark collection · 2026</div>
-          <h1>DexUni 跨平台物理仿真</h1>
-          <p class="subtitle">
-            从软体形变到双臂装袋，汇总已有任务的运行耗时、操作效果与能力边界。每项结论均可追溯至保留的实验记录。
-          </p>
-        </div>
-        <div class="edition">
-          EXPERIMENT SNAPSHOT<strong>2026.10.27</strong>页面整理 · 2026.11.12
-        </div>
+      <div class="doc-title" id="summary">
+        <div class="report-label">物理仿真基准评测</div>
+        <h1>EmbodiChain 与 Isaac Lab<br />物理仿真性能及任务效果对比</h1>
+        <p class="subtitle">
+          DexUni 系列任务：软体形变、布料操作、刚柔耦合与双臂装袋
+        </p>
       </div>
-      <div class="hero">
-        <div class="hero-copy">
-          <div class="eyebrow">Performance meets physical behavior</div>
-          <h2>看运行速度，<br />也看任务实际完成了什么。</h2>
-          <p>
-            同一任务下对照两平台的物理推进耗时；将正式重复测量、功能演示与单次摸测分别呈现。
-          </p>
-          <div class="hero-tags">
-            <span>软体与布料</span><span>刚柔耦合</span><span>双臂操作</span
-            ><span>原始证据可追溯</span>
-          </div>
-        </div>
-        <div class="hero-visual">
-          <img
-            id="hero-image"
-            alt="M04 双臂 T 恤折叠的两平台录影片段"
-            fetchpriority="high"
-          /><span class="hero-caption">M04 / 双臂 T 恤对折 · 保留录像截帧</span>
-        </div>
+      <div class="metadata">
+        <span>测量数据<strong>截至 2026-10-27</strong></span
+        ><span>硬件<strong>RTX 5090 D v2</strong></span
+        ><span>范围<strong>13 个任务项</strong></span
+        ><span>报告修订<strong>2026-11-13</strong></span>
       </div>
-      <div class="stats">
-        <div class="stat">
-          <div class="stat-top">
-            覆盖任务项<span class="stat-index">01</span>
-          </div>
-          <div class="stat-value" id="stat-total">13<span>项</span></div>
-          <div class="stat-note">S01-C/T 分别计 · C03 已移除</div>
-        </div>
-        <div class="stat">
-          <div class="stat-top">
-            双平台正式对比<span class="stat-index">02</span>
-          </div>
-          <div class="stat-value" id="stat-formal">10<span>项</span></div>
-          <div class="stat-note">每侧保留 5 次独立进程测量</div>
-        </div>
-        <div class="stat">
-          <div class="stat-top">
-            单次配置摸测<span class="stat-index">03</span>
-          </div>
-          <div class="stat-value">1<span>项</span></div>
-          <div class="stat-note">C02 · 单列速度与保形取舍</div>
-        </div>
-        <div class="stat">
-          <div class="stat-top">
-            缺少完整等价场景<span class="stat-index">04</span>
-          </div>
-          <div class="stat-value">2<span>项</span></div>
-          <div class="stat-note">M05 / C01 · 含封闭气腔</div>
-        </div>
-      </div>
-      <section id="performance">
-        <div class="section-head">
-          <div>
-            <div class="section-title">
-              <span class="section-index">02</span>
-              <h2>物理推进性能</h2>
+      <div class="abstract">
+        <h2>摘要</h2>
+        <p>
+          本报告汇总 13 个既有任务项，其中 10 项具有双平台各 5
+          次进程测量。以关闭相机、GPU
+          同步完成的物理外步耗时为主要指标，在已测配置下，EmbodiChain 的耗时较
+          Isaac Lab 降低 <strong>1.7%–72.7%</strong>。较大差异集中在使用
+          surface-fast
+          策略的布料任务；基础软体任务差异相对较小。操作效果按各任务既定检查分别报告，失败样本仍计入耗时统计。M05、C01
+          缺少本次 Isaac 环境的完整等价气腔场景；C02
+          仅有单次配置摸测，单独分析。
+        </p>
+        <div class="findings">
+          <div class="finding">
+            <span class="finding-index">01</span>
+            <div>
+              <h3>主要性能收益来自布料优化组</h3>
+              <p>
+                M03、M04、M06 的逆耗时比分别为
+                3.67×、3.30×、2.22×。这些结果包含求解策略差异；M03 的 20 mm
+                放置检查为 EC 5/5、Isaac 0/5，不能解读为等质量比较。
+              </p>
             </div>
-            <p class="section-description">
-              10 项双平台正式测量 · 均值 ± 样本标准差 · 越低越快
-            </p>
+            <div class="finding-value">
+              3.67×<span>M03 · 当前配置逆耗时比</span>
+            </div>
           </div>
-          <span class="pill">每平台 n = 5</span>
+          <div class="finding">
+            <span class="finding-index">02</span>
+            <div>
+              <h3>基础任务性能差距较小</h3>
+              <p>
+                S01-C/T、S02–S04 与 M01 的耗时降低约
+                1.7%–22.1%。此结论限于固定初态和已测版本，不代表整应用帧率或通用物理精度。
+              </p>
+            </div>
+            <div class="finding-value">
+              1.7–22.1%<span>上述基础任务耗时降低</span>
+            </div>
+          </div>
+          <div class="finding">
+            <span class="finding-index">03</span>
+            <div>
+              <h3>能力缺口与失败配置必须单列</h3>
+              <p>
+                M05 / C01 不生成虚构的平台速度比。C02 的 Isaac 24×12
+                配置倒袋失败；96×24
+                录像完成提袋，但严格保形检查未全过，最低可用预算尚未确定。
+              </p>
+            </div>
+            <div class="finding-value">
+              不作总榜<span>统计级别与效果条件不同</span>
+            </div>
+          </div>
         </div>
-        <div class="panel">
-          <div class="panel-head">
+        <p class="abstract-note">
+          本次整理未新增正式性能测量。2026-11-13 的 W1
+          资产更新运行仅用于视频与图片更新，单独列于第 5 节，不替换表 1
+          中的历史测量数据。
+        </p>
+      </div>
+      <div class="tools">
+        <button class="btn" id="export-all">导出全部结果 CSV</button
+        ><button class="btn" id="export-json">导出内嵌数据 JSON</button
+        ><button class="btn btn-primary" id="print">打印 / 保存 PDF</button>
+      </div>
+      <section class="section" id="method">
+        <div class="section-heading">
+          <span class="section-num">1</span>
+          <h2>实验条件与评价口径</h2>
+        </div>
+        <p class="lead">
+          比较单位为同一任务下的已测平台配置。不同任务的控制、SDK
+          版本及测量边界以各自原报告为准。
+        </p>
+        <dl class="conditions">
+          <div class="condition">
+            <dt>测量硬件</dt>
+            <dd>NVIDIA RTX 5090 D v2；其余环境信息见各任务原始记录。</dd>
+          </div>
+          <div class="condition">
+            <dt>主指标</dt>
+            <dd>物理外步耗时，ms/步；相机关闭，实际 GPU 同步完成。</dd>
+          </div>
+          <div class="condition">
+            <dt>统计方法</dt>
+            <dd>
+              每侧 5 个进程均值的平均值 ± 样本标准差（SD）；不是置信区间。
+            </dd>
+          </div>
+          <div class="condition">
+            <dt>计时范围</dt>
+            <dd>
+              不含渲染；控制、读回与端到端开销另见原报告，不能直接换算整应用
+              FPS。
+            </dd>
+          </div>
+          <div class="condition">
+            <dt>效果评价</dt>
+            <dd>
+              按任务几何阈值与观察分别判断。有限状态、完整录像、任务成功是不同概念。
+            </dd>
+          </div>
+          <div class="condition">
+            <dt>样本保留</dt>
+            <dd>
+              失败计时保留。M06 的 EC 第 5
+              次按用户要求重测替换，原始记录仍保留。
+            </dd>
+          </div>
+        </dl>
+        <div class="note">
+          M02 / M03 / M04 / M06 中，EC 的 surface-fast 与 Isaac 的普通 VBD
+          属于不同求解策略。基础迭代、自适应回退和校正机制共同构成配置，一次迭代与“迭代数
+          × 子步数”不可视为等价计算量。
+        </div>
+      </section>
+      <section class="section" id="results">
+        <div class="section-heading">
+          <span class="section-num">2</span>
+          <h2>性能结果</h2>
+        </div>
+        <p class="lead">
+          先给出正式测量图，再列出完整结果表。C02 不进入正式图；M05、C01
+          的缺失项保留为“不适用 / 未测”。
+        </p>
+        <div class="chart-wrap">
+          <div class="figure-top">
             <div class="legend">
               <span><i></i>EmbodiChain</span
               ><span><i class="il"></i>Isaac Lab</span>
             </div>
-            <div class="chart-controls">
-              <div class="seg" aria-label="图表单位">
-                <button data-chart="absolute" aria-pressed="true">
-                  ms / 步</button
-                ><button data-chart="relative" aria-pressed="false">
-                  Isaac = 100%
-                </button>
-              </div>
-              <select class="select" id="chart-sort" aria-label="图表排序">
-                <option value="task">按任务顺序</option>
-                <option value="reduction">按耗时降低排序</option>
+            <div class="chart-options">
+              <select id="chart-unit" aria-label="图表单位">
+                <option value="absolute">物理耗时 · ms/步</option>
+                <option value="relative">
+                  相对耗时 · Isaac = 100%
+                </option></select
+              ><select id="chart-sort" aria-label="图表排序">
+                <option value="task">按任务编号</option>
+                <option value="reduction">按耗时降低</option>
               </select>
             </div>
           </div>
-          <div class="chart" id="performance-chart"></div>
-          <div class="chart-foot">
-            ms/步视图的误差线表示
-            <strong>5 个进程均值的样本标准差</strong
-            >，不是置信区间。计时关闭相机、同步实际 GPU
-            完成，不含渲染；不能换算为整应用 FPS。M06 的 5 个 EC
-            样本中含一次指定重测替换。
-          </div>
+          <div id="chart" class="chart"></div>
+          <p class="figure-caption">
+            <strong>图 1.</strong>10
+            项双平台正式测量。绝对耗时视图的误差线为进程间
+            SD，越低越快；右侧给出 EC 耗时降低比例及逆耗时比。M03/M04/M06
+            的差异包含不同求解策略，需结合第 3 节的效果检查解读。
+          </p>
         </div>
-        <div class="notice">
-          M02 / M03 / M04 / M06 比较的是
-          <strong>surface-fast 与普通 VBD 的任务配置</strong
-          >，不同求解策略的一次迭代不等价。只对同一行解读速度差，不合成跨任务总分；效果检查见下方任务详情。
-        </div>
-      </section>
-      <section id="tasks">
-        <div class="section-head">
-          <div>
-            <div class="section-title">
-              <span class="section-index">03</span>
-              <h2>任务与操作效果</h2>
-            </div>
-            <p class="section-description">
-              场景截图来自独立录像；耗时来自无相机测量，两者不是同一次运行。
-            </p>
-          </div>
-          <button class="btn" id="export-filtered">↓ 导出当前筛选</button>
-        </div>
+        <p class="footnote">
+          证据级别：10 项双平台正式测量；C01 为 EC 单平台正式测量；M05
+          为演示；C02 为单次摸测。
+        </p>
         <div class="toolbar">
-          <div class="filters" role="group" aria-label="任务分类">
+          <div class="filter-group">
             <button class="filter" data-filter="all" aria-pressed="true">
-              全部任务</button
+              全部</button
             ><button class="filter" data-filter="S" aria-pressed="false">
-              S · 基础操作</button
+              S · 基础任务</button
             ><button class="filter" data-filter="M" aria-pressed="false">
               M · 操作任务</button
             ><button class="filter" data-filter="C" aria-pressed="false">
               C · 组合场景</button
             ><button class="filter" data-filter="limits" aria-pressed="false">
-              能力边界 / 摸测
+              边界 / 摸测
             </button>
           </div>
-          <label class="search"
-            ><span aria-hidden="true">⌕</span
-            ><input
-              type="search"
-              id="search"
-              placeholder="搜索任务编号、场景或配置"
-              aria-label="搜索任务"
-          /></label>
+          <input
+            class="search"
+            id="search"
+            type="search"
+            aria-label="搜索任务"
+            placeholder="搜索任务编号或场景"
+          />
         </div>
-        <div id="task-grid" class="task-grid"></div>
-        <div
-          class="section-tail"
-          id="task-count"
+        <p class="table-caption">
+          <strong>表 1.</strong>全部任务物理推进耗时。单位：ms/步；± 表示进程间
+          SD。点击任务编号查看配置、来源及录像。
+        </p>
+        <div class="table-scroll">
+          <table class="result-table">
+            <thead>
+              <tr>
+                <th>任务</th>
+                <th>场景</th>
+                <th style="text-align: right">EmbodiChain</th>
+                <th style="text-align: right">Isaac Lab</th>
+                <th style="text-align: right">EC 耗时降低</th>
+                <th>统计范围</th>
+              </tr>
+            </thead>
+            <tbody id="result-rows"></tbody>
+          </table>
+        </div>
+        <p
+          id="result-count"
+          class="footnote"
           role="status"
           aria-live="polite"
-        ></div>
+        ></p>
+        <p class="footnote">
+          耗时降低 = 1 − EC/Isaac；逆耗时比 = Isaac/EC。单次 C02 不附 SD；97.5%
+          仅描述该行配置的物理耗时，不能独立归因于求解器，也不代表同等质量下的通用加速。
+        </p>
+        <button class="btn" id="export-filtered">导出当前表格 CSV</button>
       </section>
-      <section id="tradeoff">
-        <div class="section-head">
-          <div>
-            <div class="section-title">
-              <span class="section-index">04</span>
-              <h2>C02：速度与保形的取舍</h2>
-            </div>
-            <p class="section-description">
-              袋体扶正 → 两件载荷装填 → 提袋 · 单次摸测，不纳入正式重复测量图表
-            </p>
-          </div>
-          <span class="pill pilot">非等质量对照</span>
+      <section class="section" id="quality">
+        <div class="section-heading">
+          <span class="section-num">3</span>
+          <h2>任务效果与结论边界</h2>
         </div>
-        <div class="c02-layout">
-          <div class="c02-visual">
-            <img
-              id="c02-image"
-              alt="C02 三档配置在 58 秒时的实际录像截帧"
-              loading="lazy"
-            />
-            <div class="caption">
-              同为 64 秒完整录像：EC 12×6、Isaac 24×12 与 96×24。24×12
-              录满时长，但倒袋并未完成任务。<button
-                class="btn"
-                data-open="C02"
-                style="margin-top: 9px"
-              >
-                查看详情与本地录像 ↗
-              </button>
-            </div>
-          </div>
-          <div class="panel budget-panel">
-            <h3>匹配仿真窗口后再比较</h3>
-            <p class="section-description" id="window-description"></p>
-            <div
-              class="seg"
-              style="margin-top: 14px; width: fit-content"
-              aria-label="C02 计时窗口"
-            >
-              <button data-window="short" aria-pressed="true">前 12 秒</button
-              ><button data-window="full" aria-pressed="false">
-                完整 64 秒
-              </button>
-            </div>
-            <div id="budget-chart"></div>
-          </div>
+        <p class="lead">
+          性能数据需与完成质量同时阅读。下表概括已有检查，未设质量阈值的任务不补造通过率。
+        </p>
+        <p class="table-caption">
+          <strong>表 2.</strong>关键效果检查与限制。所有结论均限于已保留批次。
+        </p>
+        <div class="table-scroll">
+          <table class="quality-table">
+            <thead>
+              <tr>
+                <th>任务</th>
+                <th>已观察到的结果</th>
+                <th>解释与限制</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th>S01 / S02</th>
+                <td>当前两侧 5 次均通过各自既定任务检查。</td>
+                <td>固定初态的重复测量，不代表随机任务成功率。</td>
+              </tr>
+              <tr>
+                <th>S03 / S04</th>
+                <td>两侧均为 5 次完整、有限执行。</td>
+                <td>协议完成不等于布形精度；旧错误步长批次已排除。</td>
+              </tr>
+              <tr>
+                <th>M01 / M02</th>
+                <td>M01 下垂与端距响应接近；M02 左右角对齐各有优劣。</td>
+                <td>未预设统一物理质量或折叠成功阈值。</td>
+              </tr>
+              <tr>
+                <th>M03</th>
+                <td>
+                  抬升两侧 5/5；<strong
+                    >20 mm 放置检查：EC 5/5，Isaac 0/5。</strong
+                  >
+                </td>
+                <td>全部计时样本保留；不能把更快或完成轨迹当作等质量比较。</td>
+              </tr>
+              <tr>
+                <th>M04</th>
+                <td>
+                  原 6 项检查两侧均 5/5；最终下摆 XY 误差 EC 约 26 mm、Isaac 约
+                  46 mm。
+                </td>
+                <td>结论限于当前轨迹、模型与求解策略。</td>
+              </tr>
+              <tr>
+                <th>M06</th>
+                <td>保留样本两侧折叠检查均 5/5。</td>
+                <td>EC 第 5 次存在指定重测替换，须连同原始记录解读。</td>
+              </tr>
+              <tr>
+                <th>M05 / C01</th>
+                <td>M05 演示压载、恢复和搬运；C01 EC 5/5 两件留存且无倒置。</td>
+                <td>
+                  本次 Isaac 原生 Newton
+                  缺少完整气腔场景；单面包版本不能冒充双商品等价对照。
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
-        <div class="limits">
-          <article class="limit">
-            <div class="num">01 / 已观察到的失败</div>
-            <div class="limit-title">24×12：更快，但任务失败</div>
-            <p>
-              换手后袋体倒下，物品离开场景。状态数值有限、录像完整，都不能替代任务成功判定。失败配置的计时仍保留。
-            </p>
-          </article>
-          <article class="limit">
-            <div class="num">02 / 高配置的边界</div>
-            <div class="limit-title">96×24：提袋完成，严格检查未全过</div>
-            <p>
-              录像最大袋口弯曲 51.285 mm，超过原 30 mm 限值；独立计时终态纸盒 X
-              边界超出 0.191 mm。尚未证明这是最低所需预算。
-            </p>
-          </article>
-          <article class="limit">
-            <div class="num">03 / 比较范围</div>
-            <div class="limit-title">轨迹与求解策略均存在差异</div>
-            <p>
-              EC 使用参考轨迹，Isaac 使用适配双手轨迹。参数为“迭代次数 ×
-              子步数”，不能按乘积视作相同计算量或等质量配置。
-            </p>
-          </article>
+        <div id="refresh-figures" class="figures"></div>
+        <p class="figure-caption" id="refresh-caption"></p>
+      </section>
+      <section class="section" id="c02">
+        <div class="section-heading">
+          <span class="section-num">4</span>
+          <h2>C02：迭代预算与保形取舍</h2>
+        </div>
+        <p class="lead">
+          任务包括袋体扶正、两件载荷装填和提袋。仅有单次摸测，控制轨迹与求解策略亦有平台差异，不能作等质量排名。
+        </p>
+        <div class="budget-top">
+          <div class="tabs" aria-label="计时窗口">
+            <button data-window="short" aria-pressed="true">匹配前 12 秒</button
+            ><button data-window="full" aria-pressed="false">完整 64 秒</button>
+          </div>
+          <p class="budget-status" id="window-status"></p>
+        </div>
+        <p class="table-caption">
+          <strong>表 3.</strong>C02 按相同仿真窗口比较的物理耗时，单位
+          ms/步。每档只有一个进程轨迹。
+        </p>
+        <div class="table-scroll">
+          <table class="budget-table">
+            <thead>
+              <tr>
+                <th>配置（迭代 × 子步）</th>
+                <th>均值</th>
+                <th>p95</th>
+                <th>录像效果 / 质量限制</th>
+              </tr>
+            </thead>
+            <tbody id="budget-rows"></tbody>
+          </table>
+        </div>
+        <p class="footnote">
+          均剔除前 30 步；12 秒窗口为 690 个稳态步，64 秒为 3810
+          个。步数不是独立试验次数。短窗口只覆盖前段立袋，不代表完成装袋提袋的全程成本。
+        </p>
+        <ul class="limits-list">
+          <li>
+            <strong>24×12 失败：</strong>换手后袋体倒下、物品离开场景；录满 64
+            秒且状态有限，仍未完成任务。
+          </li>
+          <li>
+            <strong>96×24 的限制：</strong>历史录像完成装袋提袋，但最大袋口弯曲
+            51.285 mm 超过原 30 mm 限值；独立计时终态纸盒 X 边界超出 0.191
+            mm。尚未证明这是最低所需预算。
+          </li>
+          <li>
+            <strong>归因边界：</strong>EC 使用参考轨迹，Isaac
+            使用适配双手轨迹。较大速度差同时包含控制、接触过程和求解配置差异。
+          </li>
+        </ul>
+        <div id="c02-figures" class="c02-figures"></div>
+        <p id="c02-caption" class="figure-caption"></p>
+      </section>
+      <section class="section" id="reproduction">
+        <div class="section-heading">
+          <span class="section-num">5</span>
+          <h2>复现验证与资产更新</h2>
+        </div>
+        <h3 class="subheading">5.1 新 SDK 冷启动验证（2026-10-27）</h3>
+        <p class="lead">
+          从当时保留的修改源码编译 SDK 后，M01/M02
+          在两平台从缺失输入开始，自动下载固定版本资产并完成全流程。此轮含下载、JIT
+          和渲染，未作为正式性能样本。
+        </p>
+        <div id="e2e-panel" class="table-scroll">
+          <table class="e2e-table">
+            <thead>
+              <tr>
+                <th>平台</th>
+                <th>任务</th>
+                <th>完整步数</th>
+                <th>自动下载</th>
+                <th>执行结果</th>
+              </tr>
+            </thead>
+            <tbody id="e2e-rows"></tbody>
+          </table>
+        </div>
+        <p class="footnote">
+          EC 实际加载的新 JIT SDK 提交：<code id="sdk-commit"></code>；Isaac Lab
+          使用自身 Newton 环境。M02 最终右角偏差约为 EC 52 mm、Isaac 108
+          mm，流程完成不表示效果一致。
+        </p>
+        <h3 class="subheading">5.2 W1 外观资产更新（2026-11-13）</h3>
+        <p class="lead">
+          旧资产的躯干外壳与手臂采用不同材质参数。按用户提供的
+          <code>w1-030</code> 资产重新运行 EC
+          场景并录制；完整运行结果及独立输出见下表。新资产同时减少了相机/支架链接，因此这批录像明确作为新资产素材录制，不与旧资产性能统计混合。
+        </p>
+        <div class="table-scroll">
+          <table class="e2e-table">
+            <thead>
+              <tr>
+                <th>EC 场景</th>
+                <th>完成范围</th>
+                <th>新资产录像</th>
+                <th>备注</th>
+              </tr>
+            </thead>
+            <tbody id="asset-rows"></tbody>
+          </table>
+        </div>
+        <div class="note">
+          表 1 / 表 2 为 2026-10-27
+          及以前的历史测量与效果检查；本节是后续素材录制。原始状态、录像与来源哈希均保留。新录像中的材质来自真实资产，未对图片涂色。
         </div>
       </section>
-      <section id="reproduce">
-        <div class="section-head">
-          <div>
-            <div class="section-title">
-              <span class="section-index">05</span>
-              <h2>复现验证与证据来源</h2>
-            </div>
-            <p class="section-description">
-              已有性能结果与新 SDK 的功能复验分别保留，不混用测量结论。
-            </p>
-          </div>
+      <section class="section" id="references">
+        <div class="section-heading">
+          <span class="section-num">6</span>
+          <h2>数据来源与复现说明</h2>
         </div>
-        <div class="panel" id="e2e-panel">
-          <div class="panel-head">
-            <div>
-              <h3>2026.10.27 · 新 SDK 冷启动验证</h3>
-              <p class="section-description">
-                编译 SDK → 缺失输入自动下载 → 完整任务执行
-              </p>
-            </div>
-            <span class="pill">4 次完整运行</span>
-          </div>
-          <div class="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>平台</th>
-                  <th>任务</th>
-                  <th>完整步数</th>
-                  <th>自动下载</th>
-                  <th>退出 / 状态</th>
-                </tr>
-              </thead>
-              <tbody id="e2e-rows"></tbody>
-            </table>
-          </div>
-          <div class="e2e-note">
-            EmbodiChain 使用新编译的开发版 JIT SDK
-            <code id="sdk-commit"></code>，并核实实际加载的原生库路径；Isaac Lab
-            使用自身 Newton 环境。这些运行包含下载、JIT
-            与渲染，<strong>不作为正式性能测量</strong>。M02 右角最终偏差：EC 约
-            52 mm、Isaac 约 108 mm；完成流程不代表效果完全一致。
-          </div>
-        </div>
-        <div class="method-grid" style="margin-top: 20px">
-          <article class="method">
-            <div class="eyebrow">01 / Measurement</div>
-            <h3>明确计时边界</h3>
-            <p>
-              主要指标为 GPU 同步完成的物理外步耗时，单位
-              ms/步。原报告单列读回、控制与端到端开销；硬件为 RTX 5090 D
-              v2。各任务 SDK 版本及计时细节以对应原报告为准。
-            </p>
-          </article>
-          <article class="method">
-            <div class="eyebrow">02 / Qualification</div>
-            <h3>保留失败与不支持项</h3>
-            <p>
-              M03 放置误差 20 mm 检查为 EC 5/5、Isaac
-              0/5，所有计时样本均保留。M05 未测性能；C01 仅 EC
-              有完整双商品正式测量，不对不同负载计算速度比。
-            </p>
-          </article>
-          <article class="method">
-            <div class="eyebrow">03 / Reproducibility</div>
-            <h3>固定版本，逐项追溯</h3>
-            <p>
-              构建本页时核对 13 项任务的来源
-              SHA256。页面内嵌数据与截图，离线可浏览和导出。原始 JSON/CSV
-              与运行输入已发布；视频和完整数组保留在本地。
-            </p>
-          </article>
-        </div>
-        <div class="source-strip">
-          <div>
-            <strong>原始记录，而非只有结论</strong>
-            <p class="section-description">
-              链接固定到已发布的数据集版本；逐任务来源可在详情中查看。
-            </p>
-          </div>
-          <div class="source-links">
-            <a class="btn" id="source-comparison" target="_blank" rel="noopener"
-              >原始 comparison.json ↗</a
-            ><a class="btn" id="source-dataset" target="_blank" rel="noopener"
-              >输入与原始表格 ↗</a
-            ><a
-              class="btn"
+        <ol class="refs">
+          <li>
+            <a id="source-comparison" target="_blank" rel="noopener"
+              >comparison.json：13 项任务汇总、均值、SD 与来源 SHA256</a
+            >。构建本页时逐项核对原始来源哈希。
+          </li>
+          <li>
+            <a id="source-dataset" target="_blank" rel="noopener"
+              >Hugging Face 固定版本：运行输入、原始 JSON/CSV 与逐任务报告</a
+            >。历史报告中的本地数组、视频链接不代表这些大文件已在线发布。
+          </li>
+          <li>
+            <a
               href="https://github.com/DexForce/EmbodiChain/blob/feat/dexuni-tech-report-suite/scripts/benchmark/tech_reports/physics/experiments/dexuni/SETUP.md"
               target="_blank"
               rel="noopener"
-              >复现环境 ↗</a
-            ><button class="btn" id="export-json">↓ 本页数据 JSON</button>
-          </div>
-        </div>
-        <details class="source-details">
-          <summary>查看固定版本与来源校验信息</summary>
+              >环境与资产恢复说明</a
+            >。下载输入不等于安装仿真环境。
+          </li>
+          <li>
+            <a
+              href="https://github.com/DexForce/EmbodiChain/pull/893"
+              target="_blank"
+              rel="noopener"
+              >MR #893：技术报告源码、任务脚本与页面构建器</a
+            >。C03 已移除；S01-C/T 分别计为任务项。
+          </li>
+        </ol>
+        <p class="footnote">
+          本 HTML
+          内嵌数据与截图，可离线浏览、导出和打印。视频未内嵌或上传，播放依赖本地目录关系。所有在线来源固定到已发布的数据集版本。
+        </p>
+        <details class="provenance">
+          <summary>展开固定版本与来源校验信息</summary>
           <div class="source-list" id="source-list"></div>
         </details>
-        <div class="notice">
-          本页整理已有结果，没有新增仿真或性能测量。完整输入下载不等于安装仿真环境；原报告中的本地数组、视频链接不代表这些大文件已在线发布。单独分享此
-          HTML 时，数据与截图可用，本地录像需保留原目录关系。
-        </div>
       </section>
-      <footer class="footer">
-        <span>DEXFORCE / EMBODICHAIN · DEXUNI PHYSICS BENCHMARK</span
-        ><span>13 个任务项 · 数据截至 2026.10.27 · 整理于 2026.11.12</span>
+      <footer class="report-end">
+        <span>DEXFORCE · EMBODICHAIN / DEXUNI</span
+        ><span>历史测量快照：2026-10-27 · 报告修订：2026-11-13</span>
       </footer>
     </main>
     <dialog id="task-dialog" aria-labelledby="modal-title">
       <div class="modal-head">
         <div>
-          <span id="modal-code" class="eyebrow"></span>
+          <small id="modal-code"></small>
           <h2 id="modal-title"></h2>
         </div>
-        <button class="close" id="close-dialog" aria-label="关闭任务详情">
-          ×
-        </button>
+        <button class="close" id="close-dialog" aria-label="关闭详情">×</button>
       </div>
       <div class="modal-body" id="modal-body"></div>
     </dialog>
-    <div class="toast" id="toast" role="status" hidden></div>
     <noscript
-      ><p style="margin: 30px">
-        请启用 JavaScript
-        以查看内嵌任务图表；本页不依赖网络脚本。文字说明仍可阅读。
+      ><p>
+        请启用 JavaScript 查看内嵌数据表和图表；本页无需网络脚本。
       </p></noscript
     >
     <script id="report-data" type="application/json">
@@ -2005,9 +1701,9 @@
     <script>
       "use strict";
       const DATA = JSON.parse(
-        document.getElementById("report-data").textContent,
-      );
-      const $ = (s) => document.querySelector(s),
+          document.getElementById("report-data").textContent,
+        ),
+        $ = (s) => document.querySelector(s),
         $$ = (s) => [...document.querySelectorAll(s)];
       const esc = (v) =>
         String(v ?? "").replace(
@@ -2021,131 +1717,110 @@
               "'": "&#39;",
             })[c],
         );
-      const fmt = (n, d = 3) => Number(n).toFixed(d),
-        kinds = {
-          formal: "双平台正式测量",
-          pilot: "单次摸测",
-          single: "单平台正式测量",
-          demo: "仅功能演示",
-        };
+      const fmt = (n, d = 3) => Number(n).toFixed(d);
+      const taskBy = (c) => DATA.tasks.find((t) => t.code === c);
+      const formal = DATA.tasks.filter((t) => t.kind === "formal");
       let filter = "all",
         query = "",
-        chartMode = "absolute",
         windowMode = "short";
-      const formal = DATA.tasks.filter((t) => t.kind === "formal");
-      function taskBy(code) {
-        return DATA.tasks.find((t) => t.code === code);
-      }
-      function measure(t, p) {
-        const s = t.stats[p];
-        if (!s)
-          return `<div class="measure-value" style="font-size:16px;letter-spacing:0">${t.code === "M05" && p === "embodichain" ? "未测性能" : "无等价数据"}</div><div class="measure-sub">${p === "isaaclab" ? "本次版本 / 完整场景不适用" : "已保留功能演示"}</div>`;
-        return `<div class="measure-value">${fmt(s.mean_ms)} <small>ms/步</small></div><div class="measure-sub">${s.sd_ms === null ? "单次运行 · 不附标准差" : `± ${fmt(s.sd_ms)} SD · n = ${s.processes}`}</div>`;
-      }
       function filtered() {
-        const q = query.toLowerCase().trim();
         return DATA.tasks.filter(
           (t) =>
             (filter === "all" ||
-              filter === t.group ||
+              t.group === filter ||
               (filter === "limits" && t.kind !== "formal")) &&
             [t.code, t.name, t.configuration, t.outcome]
               .join(" ")
               .toLowerCase()
-              .includes(q),
+              .includes(query.trim().toLowerCase()),
         );
       }
-      function renderTasks() {
-        const items = filtered();
-        $("#task-grid").innerHTML =
-          items
+      function stat(t, p) {
+        const s = t.stats[p];
+        return s
+          ? `${fmt(s.mean_ms)}${s.sd_ms == null ? "" : ` ± ${fmt(s.sd_ms)}`}`
+          : p === "embodichain"
+            ? "未测"
+            : "不适用";
+      }
+      function renderTable() {
+        const rows = filtered();
+        $("#result-rows").innerHTML =
+          rows
             .map(
               (t) =>
-                `<article class="task-card" id="card-${esc(t.code)}"><div class="card-image">${t.poster ? `<img src="${t.poster}" alt="${esc(t.code + " " + t.name)}的保留录像截帧" loading="lazy">` : '<span class="muted">未附录像截图</span>'}<span class="image-label">${esc(t.code === "M05" ? "DexSim / EmbodiChain" : t.code === "C01" ? "EmbodiChain 双商品场景" : "平台对比录像")} · ${t.poster_second}s</span></div><div class="card-body"><div class="card-title"><span class="task-code">${esc(t.code)}</span><h3>${esc(t.name)}</h3><span class="pill ${t.kind}">${kinds[t.kind]}</span></div><div class="card-measures"><div><div class="measure-label">EmbodiChain</div>${measure(t, "embodichain")}</div><div><div class="measure-label il">Isaac Lab</div>${measure(t, "isaaclab")}</div></div><p class="outcome">${esc(t.outcome)}</p><div class="card-actions"><span class="card-reduction">${t.ec_latency_reduction_percent !== undefined ? `EC 耗时降低 ${fmt(t.ec_latency_reduction_percent, 1)}%${t.kind === "pilot" ? " · 单次配置" : ""}` : "不计算平台速度比"}</span><button class="btn" data-open="${t.code}" aria-label="查看 ${esc(t.code)} 详情">查看详情 ↗</button></div></div></article>`,
+                `<tr class="${t.kind}" data-task="${t.code}"><th><button class="task-link" data-open="${t.code}" aria-label="查看 ${t.code} 详情">${t.code}</button></th><td class="case">${esc(t.name)}</td><td class="value">${stat(t, "embodichain")}</td><td class="value">${stat(t, "isaaclab")}</td><td class="value">${t.ec_latency_reduction_percent == null ? "—" : fmt(t.ec_latency_reduction_percent, 1) + "%"}</td><td class="scope">${esc(t.scope)}</td></tr>`,
             )
             .join("") ||
-          '<div class="empty">没有匹配的任务。请更换关键词或分类。</div>';
-        $("#task-count").textContent =
-          `显示 ${items.length} / ${DATA.tasks.length} 个任务项`;
+          '<tr><td colspan="6" class="empty">没有匹配任务。</td></tr>';
+        $("#result-count").textContent =
+          `当前显示 ${rows.length} / ${DATA.tasks.length} 项。`;
       }
       function renderChart() {
-        let items = [...formal];
+        const relative = $("#chart-unit").value === "relative";
+        let rows = [...formal];
         if ($("#chart-sort").value === "reduction")
-          items.sort(
+          rows.sort(
             (a, b) =>
               b.ec_latency_reduction_percent - a.ec_latency_reduction_percent,
           );
-        const relative = chartMode === "relative",
-          axis = relative
-            ? ["0", "25", "50", "75", "100%"]
-            : ["0", "20", "40", "60", "80 ms"];
-        $("#performance-chart").innerHTML =
-          `<div class="chart-header"><span>任务 / 场景</span><div class="axis">${axis.map((v) => `<span>${v}</span>`).join("")}</div><span>EC 耗时降低</span></div>` +
-          items
+        $("#chart").innerHTML =
+          `<div class="chart-head"><span>任务</span><div class="axis">${(relative ? ["0", "25", "50", "75", "100%"] : ["0", "20", "40", "60", "80 ms"]).map((x) => `<span>${x}</span>`).join("")}</div><span style="text-align:right">耗时降低</span></div>` +
+          rows
             .map((t) => {
               const base = relative ? t.stats.isaaclab.mean_ms : 80;
-              const bars = ["embodichain", "isaaclab"]
+              return `<div class="chart-row"><button class="chart-label" data-open="${t.code}"><b>${t.code}</b><span>${esc(t.name)}</span></button><div class="bar-area">${[
+                "embodichain",
+                "isaaclab",
+              ]
                 .map((p, i) => {
                   const s = t.stats[p],
                     w = (s.mean_ms / base) * 100,
-                    spread = (s.sd_ms / base) * 100;
-                  return `<div class="bar-track ${i ? "il" : ""}" role="img" aria-label="${esc(t.code)} ${p}: ${fmt(s.mean_ms)} ± ${fmt(s.sd_ms)} 毫秒每步"><span class="bar ${i ? "il" : ""}" style="--w:${w}%"></span>${!relative ? `<span class="error-line" style="--left:${Math.max(0, w - spread)}%;--span:${2 * spread}%"></span>` : ""}<span class="bar-value" style="--w:${w}%;${w > 84 ? "left:auto;right:5px;color:white;top:-4px;" : ""}">${relative ? fmt(w, 1) + "%" : fmt(s.mean_ms, 2)}</span></div>`;
+                    sd = (s.sd_ms / base) * 100;
+                  return `<div class="track" role="img" aria-label="${t.code} ${p} ${fmt(s.mean_ms)} ± ${fmt(s.sd_ms)} ms/步"><span class="bar ${i ? "il" : ""}" style="--w:${w}%"></span>${relative ? "" : `<span class="error" style="--left:${Math.max(0, w - sd)}%;--span:${2 * sd}%"></span>`}<span class="bar-value" style="--w:${w}%;${w > 84 ? "left:auto;right:4px;color:white;" : ""}">${relative ? fmt(w, 1) + "%" : fmt(s.mean_ms, 2)}</span></div>`;
                 })
-                .join("");
-              return `<div class="chart-row"><button class="chart-label" data-open="${t.code}" aria-label="查看 ${t.code} ${esc(t.name)}"><b>${t.code}</b><span>${esc(t.name)}</span></button><div class="bar-area">${bars}</div><div class="saving">${fmt(t.ec_latency_reduction_percent, 1)}%<small>${fmt(t.stats.isaaclab.mean_ms / t.stats.embodichain.mean_ms, 2)}× 逆耗时比</small></div></div>`;
+                .join(
+                  "",
+                )}</div><div class="ratio">${fmt(t.ec_latency_reduction_percent, 1)}%<small>${fmt(t.stats.isaaclab.mean_ms / t.stats.embodichain.mean_ms, 2)}× 逆耗时比</small></div></div>`;
             })
             .join("");
       }
       function renderBudget() {
         const short = windowMode === "short";
-        $("#window-description").textContent = short
-          ? "0–12s · 每档 690 个稳态步 · 剔除前 30 步"
-          : "0–64s · 已测两档各 3810 个稳态步 · 24×12 无全程计时";
-        const max = Math.max(
-          ...DATA.c02.map((c) => c[windowMode]?.mean_ms || 0),
-        );
-        $("#budget-chart").innerHTML = DATA.c02
+        $("#window-status").textContent = short
+          ? "0–12s · 每档 690 个稳态步"
+          : "0–64s · 两档各 3810 个稳态步";
+        const outcomes = [
+          "原独立摸测完成，严格检查通过",
+          "录像倒袋、装袋提袋失败；全程未计时",
+          "录像提袋完成；严格保形及终态边界未全过",
+        ];
+        $("#budget-rows").innerHTML = DATA.c02
           .map((c, i) => {
-            const s = c[windowMode],
-              colors = ["#087f70", "#cc9650", "#8070b6"],
-              outcomes = [
-                "录像完成装袋、载荷提袋",
-                "录像倒袋 / 任务失败",
-                "录像完成提袋 / 严格检查未全过",
-              ];
-            return `<div class="budget-row"><div class="budget-label"><strong>${esc(c.label)}</strong><span class="pill ${i ? "pilot" : ""}">${i === 1 ? "失败配置" : i === 2 ? "高预算配置" : "参考配置"}</span></div><div class="budget-track">${s ? `<div class="budget-fill" style="width:${(s.mean_ms / max) * 100}%;background:${colors[i]}"></div>` : ""}</div><div class="budget-value">${s ? fmt(s.mean_ms) : "未测"}<small>${s ? "ms / 物理步" : "不能由短窗口外推"}</small></div><div class="budget-text">${outcomes[i]}${s ? " · p95 " + fmt(s.p95_ms) + " ms" : ""}</div></div>`;
+            const s = c[windowMode];
+            return `<tr class="${i === 1 ? "failed" : ""}"><th>${esc(c.label)}</th><td class="value">${s ? fmt(s.mean_ms) : "未测"}</td><td class="value">${s ? fmt(s.p95_ms) : "—"}</td><td>${outcomes[i]}</td></tr>`;
           })
           .join("");
       }
       function openTask(code) {
         const t = taskBy(code);
         $("#modal-title").textContent = t.name;
-        $("#modal-code").textContent = `${code} / ${kinds[t.kind]}`;
+        $("#modal-code").textContent = `${code} · ${t.scope}`;
+        const fresh = t.refresh?.completed;
+        const poster = fresh ? t.refresh.poster : t.poster;
         $("#modal-body").innerHTML =
-          `${t.poster ? `<img class="modal-image" src="${t.poster}" alt="${esc(t.name)} ${t.poster_second}秒录像截图">` : ""}<p class="modal-meta">${esc(t.scope)}<br><strong>求解配置：</strong>${esc(t.configuration)}<br>参数 × 号表示迭代次数 × 子步数；不同策略不按乘积等价。</p><div class="panel modal-metrics table-scroll"><table><thead><tr><th>平台</th><th>物理均值 ms/步</th><th>进程间 SD</th><th>样本数</th></tr></thead><tbody>${[
-            "embodichain",
-            "isaaclab",
-          ]
-            .map((p) => {
-              const s = t.stats[p];
-              return `<tr><td>${p === "embodichain" ? "EmbodiChain" : "Isaac Lab"}</td><td class="num">${s ? fmt(s.mean_ms) : "未测 / 不适用"}</td><td class="num">${s?.sd_ms != null ? fmt(s.sd_ms) : "—"}</td><td>${s ? s.processes : "—"}</td></tr>`;
-            })
-            .join(
-              "",
-            )}</tbody></table></div><p class="outcome"><strong>效果与限制</strong><br>${esc(t.outcome)}${t.code === "C02" ? "<br>原录像袋口弯曲 51.285 mm > 30 mm；96×24 不是已证明的最低配置。各平台控制轨迹也不同。" : t.code === "M06" ? "<br>EC 第 5 次按用户要求替换，原始批次与重测记录保留；不把选定样本视为普遍成功率。" : ""}</p><div class="modal-actions"><a class="btn btn-dark" href="${esc(t.report_url)}" target="_blank" rel="noopener">逐任务原始报告 ↗</a><a class="btn" href="${esc(t.source_url)}" target="_blank" rel="noopener">原始数据来源 ↗</a>${t.video_url ? '<button class="btn" id="load-video">▶ 播放本地录像</button>' : ""}</div><div class="hash" id="modal-hash">SHA256 · ${esc(t.source_sha256)}<br>${esc(t.source)}</div>${t.video_url ? '<video id="local-video" controls playsinline preload="none" hidden></video><p id="video-note" class="video-note">录像未上传。仅在本机保留的目录关系下可播放；单独分享 HTML 仍可查看全部截图和数据。</p>' : ""}`;
-        if (t.video_url) {
-          $("#load-video").onclick = () => {
-            const v = $("#local-video");
-            v.hidden = false;
-            v.src = t.video_url;
-            v.onerror = () => {
-              $("#video-note").textContent =
-                "本地录像不可用或格式不受支持。截图已内嵌；请在原结果目录中打开对应 MP4。";
-            };
-            v.play().catch(() => {});
-            $("#load-video").hidden = true;
-          };
+          `${poster ? `<div class="scene"><img src="${poster}" alt="${esc(t.name)}场景截图"></div>` : ""}<p class="status-note">${fresh ? "图像来源：2026-11-13 EC 新 W1 资产完整录制。以下性能和效果数值仍为历史测量。" : "图像来源：历史保留录像，非正式性能测量帧。"}</p><p><strong>历史求解配置：</strong>${esc(t.configuration)}</p><div class="table-scroll"><table><thead><tr><th>平台</th><th>物理均值 ± SD（ms/步）</th><th>进程数</th></tr></thead><tbody>${["embodichain", "isaaclab"].map((p) => `<tr><td>${p === "embodichain" ? "EmbodiChain" : "Isaac Lab"}</td><td class="number">${stat(t, p)}</td><td>${t.stats[p]?.processes ?? "—"}</td></tr>`).join("")}</tbody></table></div><p><strong>历史效果与限制：</strong>${esc(t.outcome)}</p><div class="modal-actions"><a class="btn btn-primary" href="${esc(t.report_url)}" target="_blank" rel="noopener">逐任务原始报告 ↗</a><a class="btn" href="${esc(t.source_url)}" target="_blank" rel="noopener">原始数据 ↗</a>${fresh ? '<button class="btn" id="play-fresh">播放新资产 EC 录像</button>' : ""}${t.video_url ? '<button class="btn" id="play-original">播放历史录像</button>' : ""}</div><video id="local-video" controls playsinline preload="none" hidden></video><p id="video-note" class="footnote">录像依赖本地目录，未内嵌或上传。历史录像保留原资产外观。</p><div class="hash">来源：${esc(t.source)}<br>SHA256：${esc(t.source_sha256)}</div>`;
+        function play(url) {
+          const v = $("#local-video");
+          v.hidden = false;
+          v.src = url;
+          v.onerror = () =>
+            ($("#video-note").textContent =
+              "无法加载本地录像。请在原结果目录中打开 MP4；HTML 内嵌的图表、数据仍可查看。");
+          v.play().catch(() => {});
         }
+        if (fresh) $("#play-fresh").onclick = () => play(t.refresh.video_url);
+        if (t.video_url) $("#play-original").onclick = () => play(t.video_url);
         $("#task-dialog").showModal();
         $("#task-dialog").scrollTop = 0;
       }
@@ -2158,16 +1833,16 @@
         }
         $("#task-dialog").close();
       }
-      function download(filename, text, type) {
+      function download(name, text, type) {
         const url = URL.createObjectURL(new Blob([text], { type }));
         const a = document.createElement("a");
         a.href = url;
-        a.download = filename;
+        a.download = name;
         a.click();
         setTimeout(() => URL.revokeObjectURL(url), 1000);
       }
-      function csv(items) {
-        const fields = [
+      function csv(rows) {
+        const header = [
           "任务",
           "场景",
           "数据级别",
@@ -2179,11 +1854,11 @@
           "Isaac_n",
           "EC_耗时降低_percent",
           "配置",
-          "效果与限制",
+          "历史效果与限制",
           "来源",
           "SHA256",
         ];
-        const rows = items.map((t) => [
+        const values = rows.map((t) => [
           t.code,
           t.name,
           t.scope,
@@ -2201,16 +1876,16 @@
         ]);
         return (
           "\ufeff" +
-          [fields, ...rows]
-            .map((r) =>
-              r
+          [header, ...values]
+            .map((row) =>
+              row
                 .map((v) => '"' + String(v ?? "").replace(/"/g, '""') + '"')
                 .join(","),
             )
             .join("\r\n")
         );
       }
-      $("#export-top").onclick = () =>
+      $("#export-all").onclick = () =>
         download(
           "dexuni-results-all.csv",
           csv(DATA.tasks),
@@ -2223,11 +1898,15 @@
           "text/csv;charset=utf-8",
         );
       $("#export-json").onclick = () => {
-        const d = JSON.parse(JSON.stringify(DATA));
-        for (const t of d.tasks) delete t.poster;
+        const copy = JSON.parse(JSON.stringify(DATA));
+        for (const t of copy.tasks) {
+          delete t.poster;
+          if (t.refresh) delete t.refresh.poster;
+        }
+        for (const f of copy.c02_figures || []) delete f.poster;
         download(
           "dexuni-report-data.json",
-          JSON.stringify(d, null, 2),
+          JSON.stringify(copy, null, 2),
           "application/json",
         );
       };
@@ -2238,7 +1917,7 @@
         $$("[data-filter]").forEach((b) =>
           b.setAttribute("aria-pressed", b.dataset.filter === "all"),
         );
-        renderTasks();
+        renderTable();
         window.print();
       };
       $$("[data-filter]").forEach(
@@ -2248,23 +1927,14 @@
             $$("[data-filter]").forEach((x) =>
               x.setAttribute("aria-pressed", x === b),
             );
-            renderTasks();
+            renderTable();
           }),
       );
       $("#search").oninput = (e) => {
         query = e.target.value;
-        renderTasks();
+        renderTable();
       };
-      $$("[data-chart]").forEach(
-        (b) =>
-          (b.onclick = () => {
-            chartMode = b.dataset.chart;
-            $$("[data-chart]").forEach((x) =>
-              x.setAttribute("aria-pressed", x === b),
-            );
-            renderChart();
-          }),
-      );
+      $("#chart-unit").onchange = renderChart;
       $("#chart-sort").onchange = renderChart;
       $$("[data-window]").forEach(
         (b) =>
@@ -2277,73 +1947,84 @@
           }),
       );
       document.addEventListener("click", (e) => {
-        const button = e.target.closest("[data-open]");
-        if (button) openTask(button.dataset.open);
+        const b = e.target.closest("[data-open]");
+        if (b) openTask(b.dataset.open);
       });
       $("#close-dialog").onclick = closeTask;
       $("#task-dialog").addEventListener("cancel", (e) => {
         e.preventDefault();
         closeTask();
       });
-      $("#task-dialog").addEventListener("click", (e) => {
-        if (e.target === $("#task-dialog")) {
-          const r = e.target.getBoundingClientRect();
-          if (
-            e.clientX < r.left ||
-            e.clientX > r.right ||
-            e.clientY < r.top ||
-            e.clientY > r.bottom
+      const figures = ["M03", "M04"]
+        .map(taskBy)
+        .filter((t) => t.refresh?.completed && t.refresh.poster);
+      $("#refresh-figures").innerHTML = figures
+        .map(
+          (t) =>
+            `<figure><div class="scene"><img src="${t.refresh.poster}" alt="${t.code} 新资产 EC 完整录制截图"></div><div class="scene-label"><span>${t.code} · ${esc(t.name)}</span><span>EC · 新资产复验</span></div></figure>`,
+        )
+        .join("");
+      $("#refresh-caption").textContent = figures.length
+        ? "图 2. EC 使用更新后的 W1 资产重新运行所得画面，用于说明场景与外观修订。上方效果检查来自原始测量批次；新录像不替代旧批次的统计结论。"
+        : "";
+      $("#c02-figures").innerHTML = (DATA.c02_figures || [])
+        .map(
+          (f) =>
+            `<figure><div class="scene"><img src="${f.poster}" alt="${esc(f.label)}"></div><div class="scene-label">${esc(f.label)}</div></figure>`,
+        )
+        .join("");
+      $("#c02-caption").textContent = (DATA.c02_figures || []).length
+        ? "图 3. C02 在 58 秒附近的录像画面。EC 为新资产完整录制；Isaac 两档为历史保留录像。表 3 的计时仍为原始历史样本，图像不构成新的等条件性能对照。"
+        : "";
+      $("#asset-rows").innerHTML =
+        DATA.tasks
+          .filter((t) => t.refresh)
+          .map(
+            (t) =>
+              `<tr><th>${t.code}</th><td>${t.refresh.completed ? `${t.refresh.steps} 步 / ${fmt(t.refresh.time_s, 2)} s` : "未完成"}</td><td>${t.refresh.completed ? `<button class="task-link" data-open="${t.code}">查看完整录像</button>` : "待检查"}</td><td>${t.refresh.completed ? "完整执行；非正式性能测量" : "保留失败记录"}</td></tr>`,
           )
-            closeTask();
-        }
-      });
-      const hero = taskBy("M04");
-      if (hero.poster) $("#hero-image").src = hero.poster;
-      else $("#hero-image").hidden = true;
-      if (taskBy("C02").poster) $("#c02-image").src = taskBy("C02").poster;
-      else $("#c02-image").hidden = true;
-      $("#stat-total").innerHTML = `${DATA.tasks.length}<span>项</span>`;
-      $("#stat-formal").innerHTML = `${formal.length}<span>项</span>`;
+          .join("") || '<tr><td colspan="4">尚未载入新资产复验记录。</td></tr>';
       if (DATA.e2e) {
         $("#sdk-commit").textContent = DATA.e2e.sdk_commit.slice(0, 8);
         $("#e2e-rows").innerHTML = DATA.e2e.cases
           .map(
             (c) =>
-              `<tr><td>${c.platform === "embodichain" ? "EmbodiChain + 新 SDK" : "Isaac Lab"}</td><td>${esc(c.task)}</td><td class="num">${c.steps}</td><td class="${c.cold_automatic_download ? "pass" : ""}">${c.cold_automatic_download ? "已验证" : "未验证"}</td><td class="${c.exit_code === 0 && c.finite_states ? "pass" : ""}">${c.exit_code === 0 && c.finite_states ? "退出 0 · 状态有限" : "需检查"}</td></tr>`,
+              `<tr><td>${c.platform === "embodichain" ? "EmbodiChain + 新 SDK" : "Isaac Lab"}</td><td>${c.task}</td><td class="number">${c.steps}</td><td>${c.cold_automatic_download ? "已验证" : "未验证"}</td><td class="success">${c.exit_code === 0 && c.finite_states ? "退出 0 · 状态有限" : "需检查"}</td></tr>`,
           )
           .join("");
-      } else {
-        $("#e2e-panel").innerHTML =
-          '<p style="padding:24px" class="muted">当前输入目录未附 SDK 冷启动验证记录。上方历史测量独立保留。</p>';
-      }
+      } else $("#e2e-panel").textContent = "当前目录未附此轮功能验证记录。";
       $("#source-comparison").href = DATA.publication.url + "/comparison.json";
       $("#source-dataset").href = DATA.publication.url + "/README.md";
       $("#source-list").innerHTML =
-        `<div>固定数据集版本 <code>${esc(DATA.publication.revision)}</code></div><div>comparison.json SHA256 <span class="hash">${DATA.provenance.comparison_sha256}</span></div>` +
+        `<div>固定数据集版本：<code>${esc(DATA.publication.revision)}</code></div><div>comparison.json SHA256：<span class="hash">${DATA.provenance.comparison_sha256}</span></div>` +
         DATA.provenance.sources
           .map(
             (s) =>
               `<div>${esc(s.path)}<br><span class="hash">${s.sha256}</span></div>`,
           )
           .join("");
-      const navLinks = $$(".nav a");
+      const links = $$(".toc nav a");
       const observer = new IntersectionObserver(
         (entries) => {
-          for (const entry of entries) {
-            if (entry.isIntersecting) {
-              navLinks.forEach((a) =>
-                a.classList.toggle("active", a.hash === "#" + entry.target.id),
+          for (const e of entries)
+            if (e.isIntersecting)
+              links.forEach((a) =>
+                a.classList.toggle("active", a.hash === "#" + e.target.id),
               );
-            }
-          }
         },
-        { rootMargin: "-5% 0px -70% 0px", threshold: 0 },
+        { rootMargin: "-5% 0px -75% 0px" },
       );
-      ["overview", "performance", "tasks", "tradeoff", "reproduce"].forEach(
-        (id) => observer.observe(document.getElementById(id)),
-      );
+      [
+        "summary",
+        "method",
+        "results",
+        "quality",
+        "c02",
+        "reproduction",
+        "references",
+      ].forEach((id) => observer.observe(document.getElementById(id)));
+      renderTable();
       renderChart();
-      renderTasks();
       renderBudget();
     </script>
   </body>

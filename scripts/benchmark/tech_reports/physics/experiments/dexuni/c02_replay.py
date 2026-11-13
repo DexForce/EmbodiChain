@@ -304,6 +304,8 @@ def record(
     diagnostics: Callable,
     audit: dict[str, Any],
     until: float | None = None,
+    *,
+    link_state_order: list[str] | None = None,
 ) -> None:
     """Record physical outer states and an optional full 30 fps video."""
     import imageio.v2 as imageio
@@ -328,7 +330,9 @@ def record(
         coupling="one_way",
         controller="Original W1BagController with observed bag feedback; reference lift tail; external process provides IK only",
         joint_state_order=native["joint_state_order"],
-        link_state_order=native["link_state_order"],
+        link_state_order=(
+            native["link_state_order"] if link_state_order is None else link_state_order
+        ),
         table_centre=native["table_centre"],
         table_half=native["table_half"],
         initial_model=audit,

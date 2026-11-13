@@ -41,3 +41,30 @@ parity、compare_models 保留历史诊断用途；旧工作区已删除，旧 S
 HTML 的本地路径；移动 HTML 后若未保留目录关系，仍可浏览截图，但需从原目录打开视频。
 在线原始报告和表格链接固定到资产发布版本。M05、C01 不计算虚构速度比，
 C02 摸测独立展示，M06 的替换样本和各项失败检查保留说明。
+
+
+## 新 W1 资产的视频与图片
+
+EC 的 S04、M01–M05、C01、C02 脚本支持显式指定预览资产及独立输出：
+
+```bash
+python scripts/benchmark/tech_reports/physics/platforms/dexuni/embodichain/m04.py \
+  --robot-urdf "$HOME/下载/assets/w1-030/robot.urdf" \
+  --out outputs/benchmarks/tech_reports/dexuni/presentation/w1-refresh/m04
+```
+
+沿用任务原环境与 SDK 启动方式。此选项只支持非计时录制，拒绝与 `--measure`
+或 `--pilot-performance` 组合，并拒绝覆盖已有 manifest。`robot_asset_override.json`
+记录实际使用的 URDF、网格哈希，原 manifest 中的冻结输入身份仍保留为来源。
+新资产的链接/碰撞模型可能变化，因此本轮只更新视频、图片，测量数据使用历史批次。
+
+将这一批素材接入 HTML：
+
+```bash
+.venv/bin/python scripts/benchmark/tech_reports/reporting/dexuni/build_html_report.py \
+  --preview-root outputs/benchmarks/tech_reports/dexuni/presentation/w1-refresh
+```
+
+预览目录用小写任务编号（如 `m04/`、`c02/`）；缺少素材时仍可构建历史结果。
+页面以摘要、实验条件、正式结果表、效果限制、C02 配置取舍为主，素材更新单列。
+新资产图像不会覆盖历史均值、标准差、效果指标或原始视频。

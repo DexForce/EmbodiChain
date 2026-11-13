@@ -79,6 +79,10 @@ from scripts.benchmark.tech_reports.physics.experiments.dexuni.m04_measurement i
     measurement_directory,
 )
 
+from scripts.benchmark.tech_reports.physics.experiments.dexuni.preview_robot import (
+    preview_robot,
+)
+
 __all__ = ["main"]
 
 
@@ -90,9 +94,22 @@ def main() -> None:
     mode.add_argument("--pilot-performance", action="store_true")
     mode.add_argument("--measure", action="store_true")
     parser.add_argument("--repeat", type=int, choices=range(1, 6))
+    parser.add_argument(
+        "--robot-urdf",
+        type=Path,
+        help="Robot asset override for a separate preview only",
+    )
     parser.add_argument("--out", type=Path)
     parser.add_argument("--until", type=float)
     args = parser.parse_args()
+    if args.robot_urdf is not None and (
+        args.out is None or args.measure or args.pilot_performance
+    ):
+        parser.error(
+            "--robot-urdf requires a separate --out preview, without measurement"
+        )
+    if args.robot_urdf is not None and not args.robot_urdf.is_file():
+        parser.error("--robot-urdf does not exist")
     if args.until is not None and args.out is None:
         parser.error("Truncated diagnostics require --out <scratch>")
     if args.pilot_performance:
@@ -180,7 +197,7 @@ def main() -> None:
         robot = sim.add_articulation(
             ArticulationCfg(
                 uid="w1",
-                fpath=str(OUTPUT / "inputs/w1_v030/robot.urdf"),
+                fpath=str(preview_robot(OUTPUT / "inputs/w1_v030/robot.urdf", args)),
                 init_pos=tuple(cfg["robot"]["base_position"]),
                 build_pk_chain=False,
                 asset_physics_mode="overlay",

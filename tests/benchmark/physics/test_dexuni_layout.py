@@ -17,7 +17,10 @@
 
 from __future__ import annotations
 
+import argparse
+import hashlib
 import importlib.util
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -144,3 +147,53 @@ def test_matrix_keeps_failed_worker_exit(tmp_path: Path) -> None:
     )
     assert second.returncode == 2
     assert (output / "attempts.tsv").read_text() == journal
+
+
+@pytest.fixture
+def preview_selector():
+    spec = importlib.util.spec_from_file_location(
+        "preview_robot", SUITE / "preview_robot.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.preview_robot
+
+
+def test_preview_asset_is_explicit_and_preserves_existing_results(
+    tmp_path, preview_selector
+):
+    frozen = tmp_path / "frozen.urdf"
+    args = argparse.Namespace(robot_urdf=None, out=None)
+    assert preview_selector(frozen, args) == frozen
+    assert not list(tmp_path.iterdir())
+
+    mesh = tmp_path / "mesh.obj"
+    mesh.write_bytes(b"v 0 0 0\n")
+    robot = tmp_path / "robot.urdf"
+    robot.write_text(
+        '<robot name="test"><link name="body"><visual><geometry><mesh filename="mesh.obj"/></geometry></visual></link></robot>'
+    )
+    args.robot_urdf, args.out = robot, tmp_path / "new-preview"
+    assert preview_selector(frozen, args) == robot
+    record = json.loads((args.out / "robot_asset_override.json").read_text())
+    assert record["selected_robot_urdf"] == str(robot)
+    assert record["sha256"][str(mesh)] == hashlib.sha256(b"v 0 0 0\n").hexdigest()
+    assert record["link_count"] == 1
+    (args.out / "manifest.json").write_text('{"status":"completed"}')
+    with pytest.raises(ValueError, match="new output directory"):
+        preview_selector(frozen, args)
+    assert (args.out / "manifest.json").read_text() == '{"status":"completed"}'
+
+
+@pytest.mark.parametrize("mode", ["measure", "pilot_performance", "missing_output"])
+def test_preview_asset_cannot_change_measurement_inputs(
+    tmp_path, preview_selector, mode
+):
+    args = argparse.Namespace(robot_urdf=tmp_path / "robot.urdf", out=tmp_path / "out")
+    if mode == "missing_output":
+        args.out = None
+    else:
+        setattr(args, mode, True)
+    with pytest.raises(ValueError, match="untimed preview"):
+        preview_selector(tmp_path / "frozen.urdf", args)
+    assert not list(tmp_path.iterdir())
