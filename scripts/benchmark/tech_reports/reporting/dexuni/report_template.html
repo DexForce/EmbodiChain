@@ -1203,6 +1203,106 @@
           margin-top: 20px;
         }
       }
+
+      .video-study {
+        margin-top: 28px;
+        border-top: 1px solid var(--line);
+        padding-top: 20px;
+      }
+      .video-tasks {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin: 12px 0 18px;
+      }
+      .video-task {
+        border: 1px solid var(--line);
+        background: white;
+        border-radius: 2px;
+        padding: 5px 10px;
+        font:
+          11px Consolas,
+          monospace;
+      }
+      .video-task[aria-pressed="true"] {
+        background: var(--ink);
+        border-color: var(--ink);
+        color: white;
+      }
+      .video-heading {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: baseline;
+        flex-wrap: wrap;
+        margin-bottom: 12px;
+      }
+      .video-sources {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+        margin: 12px 0;
+      }
+      .video-sources button[aria-pressed="true"] {
+        border-color: var(--accent);
+        color: var(--accent);
+        background: #eef5f8;
+      }
+      .video-screen {
+        background: #17212a;
+        position: relative;
+      }
+      #inline-video {
+        display: block;
+        width: 100%;
+        max-height: 600px;
+        aspect-ratio: 16/9;
+        object-fit: contain;
+      }
+      .video-controls {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        align-items: center;
+        font-size: 11px;
+        margin: 12px 0;
+      }
+      .video-controls select {
+        background: white;
+        border: 1px solid var(--line);
+        padding: 3px 6px;
+        font-size: 11px;
+      }
+      .video-controls label {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+      }
+      #video-error {
+        color: var(--amber);
+        font-size: 12px;
+        padding: 12px;
+      }
+      #inline-poster {
+        display: none;
+      }
+      @media print {
+        .video-tasks,
+        .video-controls,
+        .video-sources,
+        #inline-video {
+          display: none !important;
+        }
+        #inline-poster {
+          display: block;
+          width: 100%;
+          max-height: 90mm;
+          object-fit: contain;
+        }
+        .video-study {
+          break-inside: avoid;
+        }
+      }
     </style>
   </head>
   <body>
@@ -1213,7 +1313,7 @@
       <nav>
         <a href="#summary" class="active">摘要与结论</a
         ><a href="#method">1. 实验条件</a><a href="#results">2. 性能结果</a
-        ><a href="#quality">3. 任务效果</a><a href="#c02">4. C02 配置取舍</a
+        ><a href="#quality">3. 任务效果与录像</a><a href="#c02">4. C02 配置取舍</a
         ><a href="#reproduction">5. 复现与资产更新</a
         ><a href="#references">6. 数据来源</a>
       </nav>
@@ -1306,6 +1406,7 @@
         </p>
       </div>
       <div class="tools">
+        <a class="btn btn-primary" href="#task-videos">观看 13 项任务录像</a>
         <button class="btn" id="export-all">导出全部结果 CSV</button
         ><button class="btn" id="export-json">导出内嵌数据 JSON</button
         ><button class="btn btn-primary" id="print">打印 / 保存 PDF</button>
@@ -1524,6 +1625,64 @@
         </div>
         <div id="refresh-figures" class="figures"></div>
         <p class="figure-caption" id="refresh-caption"></p>
+        <div class="video-study" id="task-videos">
+          <h3>全任务动态录像</h3>
+          <p class="lead" id="video-coverage"></p>
+          <div
+            class="video-tasks"
+            id="video-tasks"
+            role="group"
+            aria-label="选择任务录像"
+          ></div>
+          <div class="video-heading">
+            <h3 id="video-title"></h3>
+            <button class="task-link" id="video-detail">
+              查看该任务配置与数据
+            </button>
+          </div>
+          <div
+            class="video-sources"
+            id="video-sources"
+            role="group"
+            aria-label="选择录像版本"
+          ></div>
+          <div class="video-screen">
+            <video
+              id="inline-video"
+              controls
+              muted
+              playsinline
+              loop
+              preload="none"
+              aria-label="任务演示录像"
+            ></video
+            ><img id="inline-poster" alt="当前录像代表帧" />
+            <p id="video-error" hidden></p>
+          </div>
+          <div class="video-controls">
+            <label
+              >播放速度
+              <select id="video-speed">
+                <option value="0.5">0.5×</option>
+                <option value="1" selected>1×</option>
+                <option value="2">2×</option>
+              </select></label
+            ><label
+              ><input
+                id="video-autoplay"
+                type="checkbox"
+                checked
+              />进入视野时静音预览</label
+            ><a class="btn" id="video-file" target="_blank" rel="noopener"
+              >单独打开 MP4 ↗</a
+            >
+          </div>
+          <p class="figure-caption" id="video-caption" aria-live="polite"></p>
+          <p class="footnote">
+            播放时间为录像时间；相同播放速度不表示计算性能相同。新资产与历史版本分别标注，性能数据仍使用原批次。视频在页内播放，MP4
+            单独保留在本地。
+          </p>
+        </div>
       </section>
       <section class="section" id="c02">
         <div class="section-heading">
@@ -1667,8 +1826,8 @@
           </li>
         </ol>
         <p class="footnote">
-          本 HTML
-          内嵌数据与截图，可离线浏览、导出和打印。视频未内嵌或上传，播放依赖本地目录关系。所有在线来源固定到已发布的数据集版本。
+          本 HTML 内嵌数据与截图，可离线浏览、导出和打印。视频可在页内播放，MP4
+          未上传；播放依赖本地目录关系。所有在线来源固定到已发布的数据集版本。
         </p>
         <details class="provenance">
           <summary>展开固定版本与来源校验信息</summary>
@@ -1803,6 +1962,7 @@
           .join("");
       }
       function openTask(code) {
+        document.querySelectorAll("video").forEach((v) => v.pause());
         const t = taskBy(code);
         $("#modal-title").textContent = t.name;
         $("#modal-code").textContent = `${code} · ${t.scope}`;
@@ -1902,6 +2062,7 @@
         for (const t of copy.tasks) {
           delete t.poster;
           if (t.refresh) delete t.refresh.poster;
+          for (const r of t.recordings || []) delete r.poster;
         }
         for (const f of copy.c02_figures || []) delete f.poster;
         download(
@@ -1955,6 +2116,135 @@
         e.preventDefault();
         closeTask();
       });
+      const inlineVideo = $("#inline-video");
+      let videoTask = "M04",
+        visibleVideo = false,
+        previewPending = true;
+      const reduceMotion = window.matchMedia(
+        "(prefers-reduced-motion: reduce)",
+      );
+      $("#video-autoplay").checked = !reduceMotion.matches;
+      const newMediaCount = DATA.tasks.filter(
+        (t) => t.refresh?.completed,
+      ).length;
+      const mediaCount = DATA.tasks.filter((t) => t.recordings?.length).length;
+      $("#video-coverage").textContent =
+        `${mediaCount} 个任务均可直接选择播放。其中 ${newMediaCount} 项提供新 W1 资产录像，其余 ${mediaCount - newMediaCount} 项沿用历史素材；可切换已有平台及配置版本。`;
+      $("#video-tasks").innerHTML = DATA.tasks
+        .map(
+          (t) =>
+            `<button class="video-task" data-video-task="${t.code}" aria-pressed="false" title="${esc(t.name)}">${t.code}</button>`,
+        )
+        .join("");
+      function maybePreview() {
+        if (
+          visibleVideo &&
+          previewPending &&
+          $("#video-autoplay").checked &&
+          !document.hidden &&
+          !$("#task-dialog").open
+        ) {
+          previewPending = false;
+          inlineVideo.play().catch(() => {});
+        }
+      }
+      function selectRecording(index) {
+        const t = taskBy(videoTask),
+          r = t.recordings?.[index];
+        inlineVideo.pause();
+        inlineVideo.removeAttribute("src");
+        inlineVideo.poster = r?.poster || "";
+        $("#inline-poster").hidden = !r?.poster;
+        if (r?.poster) $("#inline-poster").src = r.poster;
+        $("#video-error").hidden = !!r;
+        $("#video-error").textContent = r ? "" : "此目录未找到该任务录像。";
+        $("#video-file").hidden = !r;
+        $("#video-caption").textContent = r
+          ? `${t.code} · ${r.label}。${r.note}`
+          : "";
+        $$("[data-video-source]").forEach((b) =>
+          b.setAttribute(
+            "aria-pressed",
+            Number(b.dataset.videoSource) === index,
+          ),
+        );
+        if (r) {
+          inlineVideo.src = r.url;
+          $("#video-file").href = r.url;
+        }
+        inlineVideo.load();
+        inlineVideo.playbackRate = Number($("#video-speed").value);
+        previewPending = true;
+        maybePreview();
+      }
+      function selectVideoTask(code) {
+        videoTask = code;
+        const t = taskBy(code);
+        $("#video-title").textContent = `${code} · ${t.name}`;
+        $$("[data-video-task]").forEach((b) =>
+          b.setAttribute("aria-pressed", b.dataset.videoTask === code),
+        );
+        $("#video-sources").innerHTML = (t.recordings || [])
+          .map(
+            (r, i) =>
+              `<button class="btn" data-video-source="${i}" aria-pressed="false">${esc(r.label)}</button>`,
+          )
+          .join("");
+        $$("[data-video-source]").forEach(
+          (b) =>
+            (b.onclick = () => selectRecording(Number(b.dataset.videoSource))),
+        );
+        selectRecording(0);
+      }
+      $$("[data-video-task]").forEach(
+        (b) => (b.onclick = () => selectVideoTask(b.dataset.videoTask)),
+      );
+      $("#video-speed").onchange = () => {
+        inlineVideo.playbackRate = Number($("#video-speed").value);
+      };
+      $("#video-autoplay").onchange = () => {
+        if ($("#video-autoplay").checked) {
+          previewPending = true;
+          maybePreview();
+        } else inlineVideo.pause();
+      };
+      $("#video-detail").onclick = () => {
+        inlineVideo.pause();
+        openTask(videoTask);
+      };
+      inlineVideo.onerror = () => {
+        $("#video-error").hidden = false;
+        $("#video-error").textContent =
+          "无法读取本地视频。请保留 HTML 与视频目录的相对位置，或从原目录打开 MP4。";
+      };
+      document.addEventListener(
+        "play",
+        (e) => {
+          if (e.target.tagName === "VIDEO")
+            document.querySelectorAll("video").forEach((v) => {
+              if (v !== e.target) v.pause();
+            });
+        },
+        true,
+      );
+      document.addEventListener("visibilitychange", () => {
+        if (document.hidden) inlineVideo.pause();
+      });
+      new IntersectionObserver(
+        (entries) => {
+          visibleVideo = entries[0].isIntersecting;
+          if (visibleVideo) maybePreview();
+          else inlineVideo.pause();
+        },
+        { threshold: 0.25 },
+      ).observe(inlineVideo);
+      window.addEventListener("beforeprint", () => inlineVideo.pause());
+      selectVideoTask(
+        DATA.tasks.find((t) => t.code === "M04" && t.recordings?.length)
+          ?.code ||
+          DATA.tasks.find((t) => t.recordings?.length)?.code ||
+          DATA.tasks[0].code,
+      );
       const figures = ["M03", "M04"]
         .map(taskBy)
         .filter((t) => t.refresh?.completed && t.refresh.poster);

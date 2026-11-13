@@ -171,6 +171,88 @@ def _payload(
             )
             if refresh is not None:
                 task["refresh"] = refresh
+        recordings = []
+        refresh = task.get("refresh", {})
+        if refresh.get("completed"):
+            recordings.append(
+                dict(
+                    label="EC · 新 W1 资产",
+                    url=refresh["video_url"],
+                    poster=refresh["poster"],
+                    note="新资产完整录制，仅更新展示素材；性能及效果统计沿用历史批次。",
+                )
+            )
+        if task["video_url"]:
+            recordings.append(
+                dict(
+                    label=(
+                        "EC · 历史录像"
+                        if task["code"] == "C01"
+                        else (
+                            "历史演示录像"
+                            if task["code"] == "M05"
+                            else (
+                                "历史配置对比"
+                                if task["code"] == "C02"
+                                else "历史双平台对比"
+                            )
+                        )
+                    ),
+                    url=task["video_url"],
+                    poster=task["poster"],
+                    note="保留的原始展示录像，使用当时的资产与配置；录像播放速度不代表物理计算速度。",
+                )
+            )
+        task_root = root / Path(task["video"]).parts[0]
+        alternatives = []
+        if task["code"] in {"S04", "M01", "M02", "M03", "M04"}:
+            alternatives = [
+                (
+                    "Isaac Lab · 历史录像",
+                    "preview/isaaclab/video.mp4",
+                    "历史 Isaac Lab 场景录像。",
+                )
+            ]
+        elif task["code"] == "C01":
+            alternatives = [
+                (
+                    "Isaac Lab · 单面包",
+                    "platforms/isaaclab/preview/video.mp4",
+                    "单面包场景，缺少奶包气腔；不是双商品等价对照。",
+                )
+            ]
+        elif task["code"] == "C02":
+            alternatives = [
+                (
+                    "Isaac 24×12 · 失败",
+                    "budget_reduction/i24_s12_video/preview/video.mp4",
+                    "倒袋失败录像；没有完整 64 秒性能测量。",
+                ),
+                (
+                    "Isaac 96×24 · 高预算",
+                    "platforms/isaaclab/preview/video.mp4",
+                    "录像完成提袋，但原严格保形检查未全部通过。",
+                ),
+            ]
+        for label, relative, note in alternatives:
+            path = task_root / relative
+            if path.is_file():
+                recordings.append(
+                    dict(
+                        label=label,
+                        url=_local_url(path, output),
+                        poster=(
+                            _poster(
+                                path,
+                                8 if task["code"] == "C01" else task["poster_second"],
+                            )
+                            if include_posters
+                            else None
+                        ),
+                        note=note,
+                    )
+                )
+        task["recordings"] = recordings
     c02_path = root / "c02_bag_frame_packing/performance_comparison/results.json"
     c02 = json.loads(c02_path.read_text())
     data["c02"] = [
