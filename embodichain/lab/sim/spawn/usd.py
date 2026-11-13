@@ -25,6 +25,7 @@ import numpy as np
 from dexsim.spawn import (
     ArticulationDesc,
     CollisionDesc,
+    GeometryType,
     ConstraintDesc,
     MaterialDesc,
     ObjectDesc,
@@ -61,6 +62,41 @@ from embodichain.lab.sim.spawn.descriptors import (
 __all__ = ["articulation_desc_from_usd", "rigid_desc_from_usd", "visual_desc_from_usd"]
 
 _PropertyCfgT = TypeVar("_PropertyCfgT")
+
+
+def _has_native_gaussian_renders(descriptor: object) -> bool:
+    """Detect Gaussian visuals already classified by DexSim's USD parser."""
+    return any(
+        render.geometry_type == GeometryType.GAUSSIAN_SPLAT
+        for render in getattr(descriptor, "renders", ())
+    )
+
+
+def _source_visual_elements(descriptor: object) -> tuple[dict[str, object], ...]:
+    """Snapshot typed USD render references without copying Gaussian points."""
+    return tuple(
+        {
+            "id": (
+                render.usd.prim_path
+                if render.usd is not None and render.usd.prim_path
+                else render.segment_name or f"render_{index}"
+            ),
+            "link_name": None,
+            "representation": (
+                "gaussian_splat"
+                if render.geometry_type == GeometryType.GAUSSIAN_SPLAT
+                else "mesh"
+            ),
+            "file_path": render.file_path,
+            "source_prim_path": (
+                render.usd.prim_path if render.usd is not None else None
+            ),
+            "local_pose": render.local_transform.copy(),
+            "scale": 1.0,
+            "resource_ids": (),
+        }
+        for index, render in enumerate(getattr(descriptor, "renders", ()))
+    )
 
 
 def _require_usd_import_contract() -> None:

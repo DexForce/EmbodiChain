@@ -145,6 +145,7 @@ def test_fluid_write_respects_render_frame_cache_scope(inside_frame):
             sync_render_state=lambda _result: calls.append("publish"),
         ),
         spawn_result=object(),
+        _spawn_scene=SimpleNamespace(has_visual_composition=False),
         has_native_renderer=False,
         _refresh_marker_attachments=lambda: None,
         _render_state_published=True if inside_frame else None,
