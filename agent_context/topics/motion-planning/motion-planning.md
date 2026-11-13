@@ -449,6 +449,10 @@ scoring version are specified in the benchmark README and `evaluation.py`.
 Run host calls serially within a process. `run_benchmark(workers>1)` isolates
 quality shards with spawned processes after freezing the full input corpus;
 `prepare_case_manifest()` can prepare that corpus without running planners.
+A later simulator in the same process can diverge physically from the first,
+so contact-sensitive results depend on shard order; `isolate_tracks=True`
+replays every track in its own single-use process (at most `workers` at once)
+and retries a shard once when its process dies.
 Frozen B=1 Free-space NMG-only replay optionally uses `quality_batch_size` to
 pack compatible requests into a larger simulator. `_quality_batching.py` owns
 packing, valid-prefix recovery and explicit environment-row FK mapping; the

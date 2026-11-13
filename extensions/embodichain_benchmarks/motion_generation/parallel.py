@@ -26,7 +26,8 @@ import time
 import traceback
 from collections import defaultdict
 from collections.abc import Iterator, Mapping, Sequence
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from concurrent.futures.process import BrokenProcessPool
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import replace
@@ -116,6 +117,44 @@ def _partition_rows(rows: list[dict[str, Any]], workers: int) -> list[list[int]]
         shards[target].extend(ids)
         costs[target] += cost
     return [sorted(shard) for shard in shards]
+
+
+_ISOLATED_SHARD_ATTEMPTS = 2
+
+
+def _run_isolated_shard(
+    job: dict[str, Any], worker_threads: int
+) -> tuple[BenchmarkRunResult, dict[str, Any]]:
+    """Run one shard in its own single-use process, retrying once if it dies.
+
+    A worker killed by the native runtime, such as a transient CUDA allocation
+    failure on a shared GPU, breaks only this shard's executor. Python errors
+    raised by the shard are not retried.
+    """
+    for attempt in range(1, _ISOLATED_SHARD_ATTEMPTS + 1):
+        with ProcessPoolExecutor(
+            max_workers=1,
+            mp_context=multiprocessing.get_context("spawn"),
+            initializer=_initialize_worker,
+            initargs=(worker_threads,),
+        ) as pool:
+            try:
+                result, state = pool.submit(_run_shard, job).result()
+            except BrokenProcessPool:
+                if attempt == _ISOLATED_SHARD_ATTEMPTS:
+                    raise
+                continue
+        state["attempts"] = attempt
+        return result, state
+    raise AssertionError("unreachable")
+
+
+def _partition_tracks(rows: list[dict[str, Any]]) -> list[list[int]]:
+    """Return one shard per track, in canonical first-row order."""
+    groups: dict[str, list[int]] = {}
+    for index, row in enumerate(rows):
+        groups.setdefault(row["track"], []).append(index)
+    return list(groups.values())
 
 
 @contextmanager
@@ -349,8 +388,14 @@ def run_parallel_benchmark(
     quality_batch_size: int = 1,
     quality_devices: Sequence[str] | None = None,
     capture_trajectories: bool = False,
+    isolate_tracks: bool = False,
 ) -> BenchmarkRunResult:
-    """Freeze inputs, execute bounded independent processes, then aggregate."""
+    """Freeze inputs, execute bounded independent processes, then aggregate.
+
+    With ``isolate_tracks`` every track becomes its own shard and each worker
+    process exits after one shard, so no simulator is created after another in
+    the same process. At most ``workers`` processes run concurrently.
+    """
     import torch
 
     from .aggregation import aggregate_results
@@ -413,6 +458,7 @@ def run_parallel_benchmark(
         "mode": "parallel_quality",
         "status": "preparing",
         "workers_requested": workers,
+        "isolate_tracks": isolate_tracks,
         "quality_batch_size": quality_batch_size,
         "capture_trajectories": capture_trajectories,
         "worker_threads": worker_threads,
@@ -451,7 +497,11 @@ def run_parallel_benchmark(
             )
         # Retain the original canonical row order and input hash in the merged artifact.
         write_json(run_dir / "case_manifest.json", payload)
-        shards = _partition_rows(rows, workers)
+        shards = (
+            _partition_tracks(rows)
+            if isolate_tracks
+            else _partition_rows(rows, workers)
+        )
         execution.update(
             status="running", workers=len(shards), cases_sha256=payload["cases_sha256"]
         )
@@ -493,32 +543,44 @@ def run_parallel_benchmark(
         write_json(run_dir / "execution.json", execution)
         results: dict[int, BenchmarkRunResult] = {}
         errors = []
-        with (
-            _worker_environment(worker_threads),
-            ProcessPoolExecutor(
-                max_workers=len(jobs),
-                mp_context=multiprocessing.get_context("spawn"),
-                initializer=_initialize_worker,
-                initargs=(worker_threads,),
-            ) as pool,
-        ):
-            futures = {pool.submit(_run_shard, job): job["index"] for job in jobs}
-            for future in as_completed(futures):
-                index = futures[future]
-                try:
-                    result, state = future.result()
-                    results[index] = result
-                    execution["shards"].append(state)
-                except Exception as error:  # noqa: BLE001 - persist worker failures
-                    errors.append(f"shard {index}: {type(error).__name__}: {error}")
-                    execution["shards"].append(
-                        {
-                            "shard_index": index,
-                            "status": "error",
-                            "error": str(error),
-                        }
-                    )
-                write_json(run_dir / "execution.json", execution)
+        with _worker_environment(worker_threads):
+            # A later simulator in the same process can diverge physically from
+            # the first one, so isolated shards each get a new process.
+            pool = (
+                ThreadPoolExecutor(max_workers=min(workers, len(jobs)))
+                if isolate_tracks
+                else ProcessPoolExecutor(
+                    max_workers=len(jobs),
+                    mp_context=multiprocessing.get_context("spawn"),
+                    initializer=_initialize_worker,
+                    initargs=(worker_threads,),
+                )
+            )
+            with pool:
+                futures = {
+                    (
+                        pool.submit(_run_isolated_shard, job, worker_threads)
+                        if isolate_tracks
+                        else pool.submit(_run_shard, job)
+                    ): job["index"]
+                    for job in jobs
+                }
+                for future in as_completed(futures):
+                    index = futures[future]
+                    try:
+                        result, state = future.result()
+                        results[index] = result
+                        execution["shards"].append(state)
+                    except Exception as error:  # noqa: BLE001 - persist worker failures
+                        errors.append(f"shard {index}: {type(error).__name__}: {error}")
+                        execution["shards"].append(
+                            {
+                                "shard_index": index,
+                                "status": "error",
+                                "error": str(error),
+                            }
+                        )
+                    write_json(run_dir / "execution.json", execution)
         if errors:
             raise RuntimeError("Parallel benchmark failed: " + "; ".join(errors))
         records, metadata = _merge_records(

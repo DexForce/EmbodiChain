@@ -962,6 +962,91 @@ def test_parallel_partition_preserves_shared_geometry_and_rejects_timing(
             )
 
 
+def test_isolated_tracks_run_one_shard_per_fresh_process(
+    fake_runtime, tmp_path, monkeypatch
+):
+    from embodichain_benchmarks.motion_generation import parallel, prepare_case_manifest
+
+    rows = [{"track": track} for track in ("b", "a", "b", "c", "a")]
+    assert parallel._partition_tracks(rows) == [[0, 2], [1, 4], [3]]
+
+    suite = load_suite()
+    corpus = prepare_case_manifest(suite, tmp_path / "quality.json", device="cpu")
+    pools = []
+
+    class StopPool(Exception):
+        pass
+
+    def record_pool(**kwargs):
+        pools.append(kwargs)
+        raise StopPool
+
+    monkeypatch.setattr(parallel, "ProcessPoolExecutor", record_pool)
+    tracks = {row["track"] for row in json.loads(corpus.read_text())["cases"]}
+    with pytest.raises(RuntimeError, match="Parallel benchmark failed"):
+        run_benchmark(
+            suite,
+            case_manifest=corpus,
+            output_root=tmp_path / "isolated",
+            device="cpu",
+            isolate_tracks=True,
+        )
+    # One single-use process pool per track; a Python error is not retried.
+    assert len(pools) == len(tracks)
+    assert all(pool["max_workers"] == 1 for pool in pools)
+    pools.clear()
+    with pytest.raises(StopPool):
+        run_benchmark(
+            suite,
+            case_manifest=corpus,
+            output_root=tmp_path / "shared",
+            device="cpu",
+            workers=2,
+        )
+    assert len(pools) == 1
+    with pytest.raises(TypeError, match="isolate_tracks"):
+        run_benchmark(suite, case_manifest=corpus, device="cpu", isolate_tracks=1)
+
+
+def test_isolated_shard_retries_once_after_its_process_dies(monkeypatch):
+    from concurrent.futures.process import BrokenProcessPool
+
+    from embodichain_benchmarks.motion_generation import parallel
+
+    outcomes = []
+
+    class OnePool:
+        def __init__(self, **kwargs):
+            assert kwargs["max_workers"] == 1
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def submit(self, function, job):
+            future = Future()
+            outcome = outcomes.pop(0)
+            if isinstance(outcome, BaseException):
+                future.set_exception(outcome)
+            else:
+                future.set_result(outcome)
+            return future
+
+    monkeypatch.setattr(parallel, "ProcessPoolExecutor", OnePool)
+    outcomes[:] = [BrokenProcessPool("killed"), ("result", {"status": "completed"})]
+    result, state = parallel._run_isolated_shard({"index": 0}, 1)
+    assert result == "result" and state["attempts"] == 2
+    outcomes[:] = [BrokenProcessPool("killed"), BrokenProcessPool("killed again")]
+    with pytest.raises(BrokenProcessPool, match="killed again"):
+        parallel._run_isolated_shard({"index": 0}, 1)
+    outcomes[:] = [ValueError("shard bug")]
+    with pytest.raises(ValueError, match="shard bug"):
+        parallel._run_isolated_shard({"index": 0}, 1)
+    assert outcomes == []
+
+
 @pytest.mark.parametrize("devices", [[], ["cuda"], ["cuda:0", "cuda:0"], ["cuda:2"]])
 def test_quality_device_list_is_explicit_unique_and_available(monkeypatch, devices):
     from embodichain_benchmarks.motion_generation import resolve_quality_devices

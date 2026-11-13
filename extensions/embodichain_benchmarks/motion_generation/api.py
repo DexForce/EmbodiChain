@@ -49,6 +49,7 @@ def run_benchmark(
     quality_batch_size: int = 1,
     quality_devices: Sequence[str] | None = None,
     capture_trajectories: bool = False,
+    isolate_tracks: bool = False,
 ) -> BenchmarkRunResult:
     """Evaluate planners against a suite without modifying caller configuration.
 
@@ -92,6 +93,11 @@ def run_benchmark(
             Performance replay does not accept this option.
         capture_trajectories: Save immutable per-stage tensors for measured
             quality trials. Capture timings are not performance measurements.
+        isolate_tracks: Evaluate every track in a fresh worker process, at most
+            ``workers`` at a time. A simulator created after another one in
+            the same process can diverge physically, so the default sharing
+            makes contact-sensitive replay depend on track order. False keeps
+            the original shards; True uses the parallel path even for one worker.
 
     Returns:
         Raw trial records, aggregate metrics and paths to persisted artifacts.
@@ -111,6 +117,8 @@ def run_benchmark(
         raise ValueError("workers must be a positive integer.")
     if type(worker_threads) is not int or worker_threads < 1:
         raise ValueError("worker_threads must be a positive integer.")
+    if type(isolate_tracks) is not bool:
+        raise TypeError("isolate_tracks must be a bool.")
     if quality_devices is not None:
         import torch
 
@@ -123,7 +131,7 @@ def run_benchmark(
             for row in json.loads(Path(case_manifest).read_text()).get("cases", [])
         ):
             raise ValueError("Performance replay does not accept quality_devices.")
-    if workers > 1:
+    if workers > 1 or isolate_tracks:
         from .parallel import run_parallel_benchmark
 
         return run_parallel_benchmark(
@@ -140,6 +148,7 @@ def run_benchmark(
             quality_batch_size=quality_batch_size,
             quality_devices=quality_devices,
             capture_trajectories=capture_trajectories,
+            isolate_tracks=isolate_tracks,
         )
     if isinstance(suite, (str, Path)):
         resolved = load_suite(suite)
