@@ -437,6 +437,40 @@ def build_fixtures(output: Path, reference: Path | None = None) -> None:
             (output / "unified.html").write_text(
                 _viewer_document({**data, "review": review})
             )
+            omitted = deepcopy(data)
+            for node in omitted["graph"]["nodes"]:
+                node["call"].pop("resources", None)
+            (output / "unified-omitted-resources.html").write_text(
+                _viewer_document({**omitted, "review": review})
+            )
+            rows = deepcopy(review)
+            rows["attempt"]["calls"][call_id].update(
+                start_step=0,
+                end_step=60,
+                env_ids=[0, 1],
+                active=[True, True],
+                successes=[False, False],
+                start_steps=[0, 5],
+                end_steps=[60, 30],
+                failure_reasons=["release_failed", "truncated"],
+                issues=[
+                    dict(
+                        kind="phase_effect_gate_failed",
+                        message="'source_released' failed for env 0",
+                        timestamp=1.0,
+                        env_mask=[True, False],
+                    ),
+                    dict(
+                        kind="session_failed",
+                        message="env 1 capture ended",
+                        timestamp=2.0,
+                        env_mask=[False, True],
+                    ),
+                ],
+            )
+            (output / "unified-multi.html").write_text(
+                _viewer_document({**data, "review": rows})
+            )
         (output / f"{name}.html").write_text(html)
         (output / f"{name}.json").write_text(
             json.dumps(data, ensure_ascii=False, indent=2)

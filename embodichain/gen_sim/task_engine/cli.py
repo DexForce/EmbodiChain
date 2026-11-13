@@ -82,6 +82,7 @@ def _revise(argv: Sequence[str] | None = None, *, prog: str) -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--expected-spec-digest", required=True)
     parser.add_argument("--expected-graph-digest", required=True)
+    parser.add_argument("--expected-plan-digest", required=True)
     args = parser.parse_args(argv)
     print(
         revise_task_plan(
@@ -90,6 +91,7 @@ def _revise(argv: Sequence[str] | None = None, *, prog: str) -> None:
             args.output,
             expected_spec_digest=args.expected_spec_digest,
             expected_graph_digest=args.expected_graph_digest,
+            expected_plan_digest=args.expected_plan_digest,
         )
     )
 

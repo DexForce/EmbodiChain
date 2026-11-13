@@ -35,6 +35,37 @@ test("unified canvas opens measured evidence by clicking the action itself", asy
   await expect(page.locator(".rv-detail")).toHaveCount(0);
   await expect(node).toBeFocused();
 });
+test("unified single-arm canvas accepts omitted resources and opens exports", async ({
+  page,
+}) => {
+  await page.goto(
+    pathToFileURL(join(root, "unified-omitted-resources.html")).href,
+  );
+  await expect(
+    page.locator('button[data-key="call:step_01__call_02"]'),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Graph & exports" }).click();
+  await page.waitForFunction(() => Boolean(window.__graphViewer));
+  await page.getByRole("button", { name: "← Task review" }).click();
+  await expect(
+    page.locator('button[data-key="call:step_01__call_02"]'),
+  ).toBeVisible();
+});
+test("unified evidence follows the selected environment", async ({ page }) => {
+  await page.goto(pathToFileURL(join(root, "unified-multi.html")).href);
+  await page.locator('button[data-key="call:step_01__call_02"]').click();
+  const detail = page.locator(".rv-detail");
+  await detail.getByRole("combobox", { name: "Environment" }).selectOption("1");
+  await expect(detail).toContainText("truncated");
+  await expect(detail).toContainText(/Control steps\s*5\s*–\s*30/);
+  await expect(detail).toContainText("env 1 capture ended");
+  await expect(detail).not.toContainText("Gripper release check failed");
+  await expect(detail).not.toContainText("failed for env 0");
+  await detail.getByRole("combobox", { name: "Environment" }).selectOption("0");
+  await expect(detail).toContainText("Gripper release check failed");
+  await expect(detail).toContainText(/Control steps\s*0\s*–\s*60/);
+  await expect(detail).not.toContainText("env 1 capture ended");
+});
 const cases = [
   "static-absent",
   "static-spec",

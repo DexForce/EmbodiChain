@@ -404,6 +404,7 @@ def _bind_deployment(
     profile: dict[str, Any],
     *,
     services: GenSimServices | None,
+    expected_plan_digest: str,
     generated_scene: dict[str, Any] | None = None,
     resolved_bindings: dict[str, dict[str, str]] | None = None,
     resolved_placements: dict[str, dict[str, Any]] | None = None,
@@ -421,6 +422,11 @@ def _bind_deployment(
         build_program_declaration,
     )
     from .task_engine.orchestration.workflow_artifacts import write_run_json
+    from .workflow import _check_scene_roles, load_task_plan
+
+    plan = load_task_plan(task)
+    if plan["plan_digest"] != expected_plan_digest:
+        raise ValueError("Stale task plan revision before deployment binding")
 
     if generated_scene is None:
         export = scene / "scene_export"
@@ -451,6 +457,22 @@ def _bind_deployment(
         bindings = _ground_ids(
             grounding, annotations, graph, entries, profile, services=services
         )
+    role_report, issues = _check_scene_roles(
+        plan,
+        bindings,
+        (
+            entries
+            if generated_scene is None
+            else {item["uid"]: item for item in generated_scene["objects"]}
+        ),
+    )
+    write_run_json(
+        cfg.output / "scene_role_report.json", {"roles": role_report, "issues": issues}
+    )
+    if issues:
+        raise ValueError(
+            "Frozen scene requirements are not satisfied: " + json.dumps(issues)
+        )
     root = cfg.output / "deployment"
     root.mkdir()
     write_run_json(
@@ -459,6 +481,7 @@ def _bind_deployment(
             "objects": bindings["objects"],
             "resources": bindings["resources"],
             "source_graph_sha256": original_digest,
+            "source_plan_digest": plan["plan_digest"],
         },
     )
     scene_id = "gensim_" + hashlib.sha256(str(cfg.output).encode()).hexdigest()[:16]
@@ -584,7 +607,7 @@ def _bind_deployment(
     if set(cfg.binding.get("segments", {})) - {node["id"] for node in graph["nodes"]}:
         raise ValueError("Segment bindings must select existing graph nodes")
     program = build_program_declaration(graph, scene_id, bindings=segment_bindings)
-    program["instruction"] = cfg.instruction
+    program["instruction"] = plan["instruction"]
     integration = {
         "integration_id": scene_id,
         "program_id": scene_id,

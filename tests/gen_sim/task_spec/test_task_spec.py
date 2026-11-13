@@ -370,6 +370,74 @@ def test_spec_identity_ignores_evidence_ids_and_observation_keys() -> None:
     assert first.semantic_hash == second.semantic_hash
 
 
+def test_attempt_capture_cannot_use_future_trajectory_frames() -> None:
+    from embodichain.gen_sim.task_spec.publication import (
+        evaluate_attempt_observations,
+        freeze_task_spec,
+    )
+
+    spec = TaskSpec(
+        task_id="contact",
+        instruction="Maintain contact at steps one and two",
+        roles=(RoleSpec("object"),),
+        goal=(Predicate("exists", observation="exists"),),
+        temporal=(
+            TemporalCondition(
+                Predicate("contact", observation="touch"),
+                start_step=1,
+                within_steps=1,
+                mode="always",
+            ),
+        ),
+    )
+    document = freeze_task_spec(
+        spec,
+        image_sha256="a" * 64,
+        image_ref="source.png",
+        role_descriptions={"object": "object"},
+        interpretation=[],
+        generalization=[],
+    )
+    identity = dict(
+        run_id="run",
+        attempt_id="attempt",
+        spec_digest=document["spec_digest"],
+        scene_digest="scene",
+        program_digest="program",
+        bundle_digest="bundle",
+    )
+    observations = {
+        "exists": True,
+        "trajectory": [{}, {"touch": True}, {"touch": True}],
+    }
+    with pytest.raises(ValueError, match="beyond.*capture step"):
+        evaluate_attempt_observations(
+            document,
+            identity,
+            dict(identity=identity, step=0, observations=observations),
+        )
+    assert (
+        evaluate_attempt_observations(
+            document,
+            identity,
+            dict(
+                identity=identity,
+                step=0,
+                observations={"exists": True, "trajectory": [{}]},
+            ),
+        )["status"]
+        == "unavailable"
+    )
+    assert (
+        evaluate_attempt_observations(
+            document,
+            identity,
+            dict(identity=identity, step=2, observations=observations),
+        )["certificate_ready"]
+        is True
+    )
+
+
 @pytest.mark.parametrize(
     ("quantifier", "count", "single"),
     [("one", 0, True), ("count", 1, True), ("count", 2, False), ("all", 0, False)],

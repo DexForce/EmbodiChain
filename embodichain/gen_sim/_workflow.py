@@ -143,8 +143,11 @@ def _run(cfg: _RunCfg, *, services: GenSimServices | None = None) -> dict[str, A
                 services=run,
             )
             plan = load_task_plan(task)
+            manifest["task_id"] = plan["task_id"]
+            manifest["instruction"] = plan["instruction"]
             manifest["spec_digest"] = plan.get("spec_digest")
             manifest["graph_digest"] = plan["semantic_graph_sha256"]
+            manifest["plan_digest"] = plan["plan_digest"]
             update("succeeded")
             stage = "scene"
             update("running")
@@ -158,7 +161,7 @@ def _run(cfg: _RunCfg, *, services: GenSimServices | None = None) -> dict[str, A
                     cfg.scene_provider["id"], provider_profile
                 )
                 request = SceneGenerationRequest(
-                    task_id=cfg.task_id,
+                    task_id=plan["task_id"],
                     image_path=source,
                     image_sha256=manifest["image_sha256"],
                     requirements_path=requirements,
@@ -170,7 +173,9 @@ def _run(cfg: _RunCfg, *, services: GenSimServices | None = None) -> dict[str, A
                 )
                 request_key = hashlib.sha256(
                     (
-                        cfg.scene_provider["id"] + request.request_hash + cfg.task_id
+                        cfg.scene_provider["id"]
+                        + request.request_hash
+                        + plan["task_id"]
                     ).encode("utf-8")
                 ).hexdigest()
                 job = submit_scene_generation(
@@ -220,10 +225,18 @@ def _run(cfg: _RunCfg, *, services: GenSimServices | None = None) -> dict[str, A
                     cfg.runtime,
                     cfg.execution_policy,
                     output / "prepared",
+                    expected_revisions={"plan_digest": manifest["plan_digest"]},
                 )
             else:
                 deployment = _bind_deployment(
-                    cfg, scene, task, runtime, policy, profile, services=run
+                    cfg,
+                    scene,
+                    task,
+                    runtime,
+                    policy,
+                    profile,
+                    services=run,
+                    expected_plan_digest=manifest["plan_digest"],
                 )
             manifest["deployment"] = str(deployment)
             update("succeeded")
@@ -268,6 +281,7 @@ def _run(cfg: _RunCfg, *, services: GenSimServices | None = None) -> dict[str, A
                             "attempt_id",
                             "spec_digest",
                             "graph_digest",
+                            "plan_digest",
                             "bundle_digest",
                             "scene_digest",
                             "program_digest",

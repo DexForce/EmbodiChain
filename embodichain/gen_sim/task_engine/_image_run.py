@@ -114,7 +114,7 @@ def plan_image_task(
             raise ValueError("Input image changed before preview publication.")
         summary = {
             "schema_version": "task_engine.image_semantic_run/v1",
-            "task_id": task_id,
+            "task_id": document["task_id"],
             "created_at": datetime.now(timezone.utc).isoformat(),
             "elapsed_seconds": perf_counter() - started,
             "elapsed_scope": "instruction interpretation and image semantic planning",
@@ -154,9 +154,9 @@ def plan_image_task(
                 "graph_path": "semantic_task_graph.json",
                 "task_semantic_hash": document["task_semantic_hash"],
                 "generalization_hash": document["generalization_hash"],
-                "task_id": task_id,
+                "task_id": document["task_id"],
                 "candidate_id": candidate_id,
-                "instruction": instruction,
+                "instruction": document["inputs"]["instruction"],
                 "image_sha256": summary["image_sha256"],
                 "semantic_graph_sha256": result["semantic_graph_validation"][
                     "graph_digest"
@@ -170,6 +170,9 @@ def plan_image_task(
                 "artifacts": inventory,
             },
         )
+        from ..workflow import load_task_plan
+
+        load_task_plan(artifacts.output_dir)
         artifacts.commit()
     print(f"Semantic graph: {artifacts.output_dir / 'semantic_task_graph.json'}")
     print(f"Offline viewer: {artifacts.output_dir / 'semantic_task_graph.html'}")
@@ -263,5 +266,8 @@ def _image_preview(
             "pairing": result["plan_coverage"],
             "attempt": attempt,
             "pending": summary["pending_bindings"],
+            "qualifiers": result["semantic_graph_validation"].get(
+                "qualifier_coverage", []
+            ),
         }
     return _viewer_document(data)

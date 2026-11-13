@@ -1,8 +1,9 @@
 # Task Engine semantic contracts
 
 `gensim task revise` validates a planner proposal against the frozen v1
-document and grounding in a published plan. The caller identifies both
-expected revisions and supplies a new output directory. The revised graph and
+document and grounding in a published plan. The caller supplies expected spec,
+graph and complete publication digests plus a new output directory. The complete
+identity covers deployment annotations and binding requests. The revised graph and
 its coverage report share the original document and scene requirements.
 
 `embodichain.gen_sim.task_engine` owns instruction understanding, candidate
@@ -59,7 +60,10 @@ resource, precondition/effect and runtime-binding declarations. Configured live
 lowerers consume those same argument contracts and retain their stricter scene
 and route checks. The catalog must import without `lab.sim`, Gym or DexSim.
 `semantic_plan_validation.py` checks task producers, source identity, topology,
-held-object/arm state, quoted instruction obligations and deferred binding needs.
+held-object/arm state, structured instruction qualifiers and deferred binding needs.
+Qualifier witnesses must reference their frozen target and implementing calls;
+return-to-origin also requires its source-pose binding. Unsupported meanings
+remain unverified and cannot authorize a revision or deployment.
 Task producer obligations derive from the existing task affordances and catalog
 capabilities rather than per-E-type construction branches. Explicit part parents
 retain drawer/handle identity; step-result selectors inherit earlier source IDs.
@@ -104,8 +108,11 @@ Version-2 plans and revisions embed the frozen v1 specification and its pairing
 report in the offline viewer. The grouped action canvas links milestones, final
 goals and roles. Native run review is published separately at `task_review.html`;
 `gensim task view --plan PLAN [--run RUN] --output NEW.html` also renders
-existing artifacts. Only matching attempt identities and execution-report digests
-supply native call evidence. Archived graph-only views retain their existing renderer.
+existing artifacts. Only matching attempt identities, complete plan identities and
+execution-report digests supply native call evidence. Per-environment details
+retain row reasons, step ranges and event masks. Source images come from the
+verified input reference or legacy inventory. Archived graph-only views retain
+their existing renderer.
 
 `semantic_graph_html.py` renders an existing graph and optional TaskSpec,
 recomputed coverage and recorded execution report. `reporting.py` owns the

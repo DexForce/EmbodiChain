@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from .canonicalization import canonical_hash, json_snapshot
@@ -60,6 +61,8 @@ def freeze_task_spec(
         source_kind: Image or prepared-scene input discriminator.
         interpreted_steps: Frozen instruction intent used for graph coverage.
         clauses: Quoted requirements associated with roles, goals or milestones.
+            Optional structured constraints identify role properties or supported
+            restoration semantics; unsupported meanings remain unverified.
         role_properties: Explicit source-backed properties augmenting the roles.
         parent_spec_digest: Optional source document for a user-requested variant.
 
@@ -88,7 +91,9 @@ def freeze_task_spec(
     targets = roles | {p.id for p in spec.goal} | {m.id for m in spec.milestones}
     for clause in clauses:
         if (
-            set(clause) != {"id", "quote", "target", "origin", "resolution"}
+            not {"id", "quote", "target", "origin", "resolution"} <= set(clause)
+            or set(clause)
+            - {"id", "quote", "target", "origin", "resolution", "constraint"}
             or not isinstance(clause["id"], str)
             or not clause["id"]
             or clause["id"] in ids
@@ -100,6 +105,22 @@ def freeze_task_spec(
             or clause["resolution"] not in {"resolved", "pending_binding"}
         ):
             raise ValueError("Unresolved or invalid instruction obligation")
+        constraint = clause.get("constraint")
+        if "constraint" in clause and (
+            not isinstance(constraint, dict)
+            or not isinstance(constraint.get("kind"), str)
+            or not constraint["kind"].strip()
+            or (
+                (
+                    set(constraint) != {"kind", "key", "value"}
+                    or not isinstance(constraint.get("key"), str)
+                    or not constraint["key"].strip()
+                )
+                if constraint["kind"] == "role_property"
+                else set(constraint) != {"kind"}
+            )
+        ):
+            raise ValueError("Invalid structured instruction constraint")
         ids.add(clause["id"])
     for row in interpretation:
         if (
@@ -192,6 +213,28 @@ def freeze_task_spec(
                 "Additional role properties require an explicit source clause"
             )
         role["properties"].update(additions)
+    frozen_roles = {role["id"]: role for role in configuration["roles"]}
+    for clause in clauses:
+        constraint = clause.get("constraint", {})
+        if constraint.get("kind") == "role_property":
+            properties = frozen_roles.get(clause["target"], {}).get("properties", {})
+            if (
+                constraint["key"] not in properties
+                or properties[constraint["key"]] != constraint["value"]
+            ):
+                raise ValueError(
+                    "Structured property constraint differs from its frozen role"
+                )
+    semantic_parts = [configuration, {k: semantic[k] for k in objective_keys}]
+    constraints = [
+        {"target": clause["target"], "constraint": clause["constraint"]}
+        for clause in clauses
+        if clause["origin"] == "explicit"
+        and clause.get("constraint")
+        and clause["constraint"]["kind"] != "role_property"
+    ]
+    if constraints:
+        semantic_parts.append(sorted(constraints, key=canonical_hash))
     doc = {
         "schema_version": "task_spec/v1",
         "task_id": spec.task_id,
@@ -209,9 +252,7 @@ def freeze_task_spec(
         "objectives": {k: raw[k] for k in objective_keys},
         "generalization": generalization,
         "source_spec_digest": canonical_hash(raw),
-        "task_semantic_hash": canonical_hash(
-            [configuration, {k: semantic[k] for k in objective_keys}]
-        ),
+        "task_semantic_hash": canonical_hash(semantic_parts),
         "generalization_hash": canonical_hash(
             [{k: v for k, v in t.items() if k != "quote"} for t in generalization]
         ),
@@ -397,7 +438,8 @@ def evaluate_attempt_observations(
         Predicate report bound to the capture identity and content digest.
 
     Raises:
-        ValueError: The capture refers to another attempt or has no capture step.
+        ValueError: The capture refers to another attempt, has no capture step,
+            or contains trajectory frames after that boundary.
     """
     from .validation import evaluate_task_spec
 
@@ -419,11 +461,21 @@ def evaluate_attempt_observations(
         raise ValueError("Stale or mismatched observation identity")
     if type(capture.get("step")) is not int or capture["step"] < 0:
         raise ValueError("Observations require an actual capture step")
+    observations = capture["observations"]
+    trajectory = (
+        observations.get("trajectory") if isinstance(observations, Mapping) else None
+    )
+    if (
+        isinstance(trajectory, Sequence)
+        and not isinstance(trajectory, (str, bytes))
+        and len(trajectory) > capture["step"] + 1
+    ):
+        raise ValueError("Trajectory extends beyond the declared capture step")
     spec = TaskSpec.from_dict(
         {"roles": verified["configuration"]["roles"], **verified["objectives"]}
     )
     return {
-        **evaluate_task_spec(spec, capture["observations"]).to_dict(),
+        **evaluate_task_spec(spec, observations).to_dict(),
         "identity": dict(expected),
         "capture_step": capture["step"],
         "capture_digest": canonical_hash(capture),

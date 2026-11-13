@@ -20,6 +20,7 @@ of those owners.
 |---|---|
 | Task roles and required properties | `contracts.py`: `RoleSpec` |
 | Normative identity and ordered milestones | `spec.py`: `TaskSpec`, `MilestoneSpec` |
+| Frozen v1 authoring documents, projections and identified captures | `publication.py` |
 | Predicate vocabulary and temporal windows | `expressions.py` |
 | Structure validation and evidence evaluation | `validation.py` |
 | Placement binding, physical proof checks and certificate assembly | `evidence.py` |
@@ -50,6 +51,9 @@ hold at the same snapshot strictly after its predecessors. Missing evidence and
 incomplete temporal windows cannot certify success. Only an entirely satisfied
 evaluation sets `certificate_ready`; the evaluator does not establish the
 physical authenticity of caller-provided measurements.
+The identified-capture wrapper rejects trajectory frames beyond its declared
+capture step. Frozen structured qualifiers participate in the v1 task semantic
+identity; Task Engine checks their implementing calls separately from physical proof.
 Bounded `always` and `eventually` windows share their per-slot conclusion
 with the batched Lab evaluator through Compute. TaskSpec's Python result
 exposes inclusive witness and violation steps while retaining its canonical

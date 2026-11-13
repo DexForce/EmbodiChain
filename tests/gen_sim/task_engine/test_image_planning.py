@@ -358,6 +358,225 @@ def test_explicit_role_properties_survive_standalone_scene_projection(source_ima
         next(r for r in roles if r["id"] == "role_001")["properties"]["color"] == "red"
     )
 
+    def structured(step, grounding, plan):
+        constrain(step, grounding, plan)
+        grounding["clauses"][0]["constraint"] = {
+            "kind": "role_property",
+            "key": "color",
+            "value": "red",
+        }
+
+    explicit = _plan(
+        source_image, mutate=structured, instruction="执行测试任务，物体必须是红色"
+    )["task_spec_v1"]
+    assert explicit["task_semantic_hash"] == doc["task_semantic_hash"]
+    assert explicit["spec_digest"] != doc["spec_digest"]
+
+    def contradictory(step, grounding, plan):
+        structured(step, grounding, plan)
+        grounding["clauses"][0]["constraint"]["value"] = "blue"
+
+    with pytest.raises(ValueError, match="property constraint"):
+        _plan(
+            source_image,
+            mutate=contradictory,
+            instruction="执行测试任务，物体必须是红色",
+        )
+
+
+@pytest.mark.parametrize("damage", ["remove_restoration", "quote_only_pick"])
+def test_frozen_restoration_qualifier_checks_node_semantics_on_revision_and_load(
+    source_image,
+    tmp_path,
+    monkeypatch,
+    damage,
+):
+    import hashlib
+    import shutil
+    from embodichain.gen_sim.task_engine import _image_run
+    from embodichain.gen_sim.task_engine.image_planning import _assemble
+    from embodichain.gen_sim.task_spec import canonical_hash
+    from embodichain.gen_sim.workflow import load_task_plan, revise_task_plan
+
+    instruction = "Pour into tray then return to original position"
+    proposal = {}
+
+    def restoration(step, grounding, plan):
+        grounding["clauses"] = [
+            dict(
+                id="restore",
+                quote="return to original position",
+                target="step_01",
+                origin="explicit",
+                resolution="resolved",
+                constraint={"kind": "return_to_origin"},
+            )
+        ]
+        plan["nodes"][-1]["call"] = dict(
+            kind="place", object="source", on="initial_support", resources={}
+        )
+        ann = plan["nodes"][-1]["semantic"]
+        ann.update(
+            reference="source",
+            relation="on",
+            intent={**ann["intent"], "return_to_origin": True},
+        )
+        plan["requirements"] = [
+            dict(id="pour", quote="Pour into tray", node_ids=["n0", "n1", "n2"]),
+            dict(id="restore", quote="return to original position", node_ids=["n3"]),
+        ]
+        proposal.update(deepcopy(plan))
+
+    result = _plan(source_image, "E3", mutate=restoration, instruction=instruction)
+    assert (
+        result["semantic_graph_validation"]["qualifier_coverage"][0]["status"]
+        == "covered"
+    )
+    monkeypatch.setattr(
+        _image_run,
+        "generate_semantic_task_graph_from_image",
+        lambda *a, **kw: deepcopy(result),
+    )
+    parent = _image_run.plan_image_task(
+        source_image, instruction, tmp_path / "original", task_id="case"
+    )
+    original = load_task_plan(parent)
+    broken = deepcopy(proposal)
+    if damage == "remove_restoration":
+        broken["nodes"][-1]["call"] = dict(
+            kind="place", object="source", inside="tray_slot", resources={}
+        )
+        ann = broken["nodes"][-1]["semantic"]
+        ann.update(
+            reference="tray",
+            relation="inside",
+            intent={k: v for k, v in ann["intent"].items() if k != "return_to_origin"},
+        )
+    else:
+        broken["requirements"][1]["node_ids"] = ["n0"]
+        broken["requirements"][0]["node_ids"].append("n3")
+    rejected = tmp_path / "rejected-revision"
+    with pytest.raises(ValueError, match="qualifier.*return_to_origin"):
+        revise_task_plan(
+            parent,
+            broken,
+            rejected,
+            expected_spec_digest=original["spec_digest"],
+            expected_graph_digest=original["semantic_graph_sha256"],
+            expected_plan_digest=original["plan_digest"],
+        )
+    assert not rejected.exists()
+
+    # Even a correctly inventoried, self-consistent semantic report cannot
+    # replace the frozen qualifier with a matching quote and different behavior.
+    unsafe = tmp_path / "unsafe"
+    shutil.copytree(parent, unsafe)
+    validation = deepcopy(result["semantic_graph_validation"])
+    graph, annotations, bindings = _assemble(broken, validation["source"]["candidate"])
+    validation["source"].update(
+        annotations=annotations, bindings=bindings, requirements=broken["requirements"]
+    )
+    validation.update(
+        graph_digest=canonical_hash(graph),
+        coverage=validate_semantic_plan(graph, **validation["source"]),
+    )
+    pairing = json.loads((parent / "plan_coverage.json").read_text())
+    pairing["graph_digest"] = canonical_hash(graph)
+    for name, value in dict(
+        semantic_task_graph=graph,
+        semantic_graph_validation=validation,
+        plan_coverage=pairing,
+    ).items():
+        (unsafe / (name + ".json")).write_text(json.dumps(value))
+    manifest = json.loads((unsafe / "task_plan_manifest.json").read_text())
+    manifest["semantic_graph_sha256"] = canonical_hash(graph)
+    manifest["artifacts"] = {
+        name: hashlib.sha256((unsafe / name).read_bytes()).hexdigest()
+        for name in manifest["artifacts"]
+    }
+    (unsafe / "task_plan_manifest.json").write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="qualifier.*return_to_origin"):
+        load_task_plan(unsafe)
+
+
+@pytest.mark.parametrize("quote_pick", [False, True])
+def test_orientation_qualifier_requires_the_restoring_primitive(
+    source_image, quote_pick
+):
+    def qualify(step, grounding, plan):
+        grounding["clauses"] = [
+            dict(
+                id="upright",
+                quote="回正",
+                target="step_01",
+                origin="explicit",
+                resolution="resolved",
+                constraint={"kind": "restore_upright"},
+            )
+        ]
+        plan["requirements"] = [
+            dict(id="all", quote="倾倒", node_ids=[n["id"] for n in plan["nodes"]]),
+            dict(id="upright", quote="回正", node_ids=["n0" if quote_pick else "n2"]),
+        ]
+
+    if quote_pick:
+        with pytest.raises(SemanticPlanningError, match="restore_upright"):
+            _plan(source_image, "E3", mutate=qualify, instruction="倾倒后回正")
+    else:
+        result = _plan(source_image, "E3", mutate=qualify, instruction="倾倒后回正")
+        assert (
+            result["semantic_graph_validation"]["qualifier_coverage"][0]["status"]
+            == "covered"
+        )
+
+
+def test_unsupported_frozen_qualifier_remains_unverified(
+    source_image, tmp_path, monkeypatch
+):
+    from embodichain.gen_sim.task_engine import _image_run
+    from embodichain.gen_sim.workflow import (
+        _check_scene_roles,
+        load_task_plan,
+        revise_task_plan,
+    )
+
+    def unsupported(step, grounding, plan):
+        grounding["clauses"] = [
+            dict(
+                id="opaque",
+                quote="执行测试任务",
+                target="role_001",
+                origin="explicit",
+                resolution="pending_binding",
+                constraint={"kind": "unsupported"},
+            )
+        ]
+
+    result = _plan(source_image, mutate=unsupported)
+    monkeypatch.setattr(
+        _image_run, "generate_semantic_task_graph_from_image", lambda *a, **kw: result
+    )
+    parent = _image_run.plan_image_task(
+        source_image, "执行测试任务", tmp_path / "unverified", task_id="case"
+    )
+    plan = load_task_plan(parent)
+    assert plan["qualifier_coverage"][0]["status"] == "unverified"
+    _, issues = _check_scene_roles(
+        plan,
+        {"objects": {"source": "source", "tray": "tray"}},
+        {"source": {}, "tray": {}},
+    )
+    assert issues[0]["code"] == "unverified_instruction_qualifier"
+    with pytest.raises(ValueError, match="Unverified instruction qualifiers"):
+        revise_task_plan(
+            parent,
+            _fixture()[2],
+            tmp_path / "blocked",
+            expected_spec_digest=plan["spec_digest"],
+            expected_graph_digest=plan["semantic_graph_sha256"],
+            expected_plan_digest=plan["plan_digest"],
+        )
+
 
 def test_hidden_objects_have_no_invented_image_boxes(source_image):
     def hidden(s, g, p):
@@ -519,6 +738,7 @@ def test_preview_and_existing_output_remain_read_only(
             target,
             expected_spec_digest=plan["spec_digest"],
             expected_graph_digest="0" * 64,
+            expected_plan_digest=plan["plan_digest"],
         )
     assert not target.exists()
     revise_task_plan(
@@ -527,11 +747,98 @@ def test_preview_and_existing_output_remain_read_only(
         target,
         expected_spec_digest=plan["spec_digest"],
         expected_graph_digest=plan["semantic_graph_sha256"],
+        expected_plan_digest=plan["plan_digest"],
     )
     revision = load_task_plan(target)
     assert revision["semantic_graph_sha256"] != plan["semantic_graph_sha256"]
     assert revision["spec_digest"] == plan["spec_digest"]
     assert revision["scene_requirements"] == plan["scene_requirements"]
+
+
+def test_publication_normalizes_identity_and_uses_its_verified_source_image(
+    source_image, tmp_path, monkeypatch
+):
+    import base64
+    from io import BytesIO
+    import re
+    from embodichain.gen_sim.task_engine import _image_run
+    from embodichain.gen_sim.task_engine._review import write_review
+    from embodichain.gen_sim.workflow import _source_image, load_task_plan
+
+    Image.new("RGB", (100, 80), "red").save(source_image)
+    result = _plan(source_image)
+    monkeypatch.setattr(
+        _image_run, "generate_semantic_task_graph_from_image", lambda *a, **kw: result
+    )
+    output = tmp_path / "normalized"
+    _image_run.plan_image_task(
+        source_image, "  执行测试任务\n", output, task_id=" case "
+    )
+    plan = load_task_plan(output)
+    assert plan["instruction"] == "执行测试任务"
+    assert plan["task_id"] == "case"
+    Image.new("RGB", (100, 80), "blue").save(output / "source_image.jpg")
+    view = tmp_path / "verified-image.html"
+    write_review(output, view)
+    payload = json.loads(
+        re.search(
+            r'<script id="graph-data" type="application/json">(.*?)</script>',
+            view.read_text(),
+            re.S,
+        )[1]
+    )
+    encoded = payload["review"]["source_image"].split(",", 1)[1]
+    with Image.open(BytesIO(base64.b64decode(encoded))) as image:
+        red, green, blue = image.getpixel((0, 0))
+        assert red > 200 and green < 30 and blue < 30
+    assert (
+        _source_image(
+            output, {k: v for k, v in plan.items() if k != "task_document"}
+        ).name
+        == "source_image.png"
+    )
+
+
+def test_plan_identity_covers_annotation_only_revisions(
+    source_image, tmp_path, monkeypatch
+):
+    from embodichain.gen_sim.task_engine import _image_run
+    from embodichain.gen_sim.workflow import load_task_plan, revise_task_plan
+
+    result = _plan(source_image)
+    monkeypatch.setattr(
+        _image_run, "generate_semantic_task_graph_from_image", lambda *a, **kw: result
+    )
+    parent = _image_run.plan_image_task(
+        source_image, "执行测试任务", tmp_path / "parent", task_id="case"
+    )
+    original = load_task_plan(parent)
+    proposal = _fixture()[2]
+    proposal["nodes"][0]["semantic"]["intent"][
+        "description"
+    ] = "revised deployment annotation"
+    revised = revise_task_plan(
+        parent,
+        proposal,
+        tmp_path / "revision",
+        expected_spec_digest=original["spec_digest"],
+        expected_graph_digest=original["semantic_graph_sha256"],
+        expected_plan_digest=original["plan_digest"],
+    )
+    current = load_task_plan(revised)
+    assert current["semantic_graph_sha256"] == original["semantic_graph_sha256"]
+    assert current["plan_digest"] != original["plan_digest"]
+    target = tmp_path / "stale"
+    with pytest.raises(ValueError, match="Stale"):
+        revise_task_plan(
+            revised,
+            proposal,
+            target,
+            expected_spec_digest=original["spec_digest"],
+            expected_graph_digest=original["semantic_graph_sha256"],
+            expected_plan_digest=original["plan_digest"],
+        )
+    assert not target.exists()
 
 
 def test_ambiguous_reference_preserves_observed_candidates(source_image):
@@ -627,8 +934,20 @@ def test_control_part_is_linked_to_its_instruction_parent(
         plan["nodes"][0]["semantic"]["object"] = (
             "source" if annotate_parent else "handle"
         )
+        grounding["role_properties"] = {"role_001": {"color": "red"}}
+        grounding["clauses"] = [
+            dict(
+                id="red",
+                quote="红色",
+                target="role_001",
+                origin="explicit",
+                resolution="resolved",
+                constraint={"kind": "role_property", "key": "color", "value": "red"},
+            )
+        ]
+        plan["requirements"][0]["quote"] = "执行红色抽屉测试任务"
 
-    result = _plan(source_image, "E6", mutate)
+    result = _plan(source_image, "E6", mutate, instruction="执行红色抽屉测试任务")
     assert result["semantic_task_graph"]["nodes"][0]["call"]["arguments"] == {
         "handle": "handle"
     }

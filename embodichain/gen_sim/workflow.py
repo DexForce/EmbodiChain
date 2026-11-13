@@ -151,7 +151,18 @@ def load_task_plan(path: str | Path) -> dict[str, Any]:
             root / "image_grounding.json", "image grounding"
         ):
             raise ValueError("Grounding differs from the validated plan")
-        _validate_clause_coverage(document, source["requirements"])
+        qualifiers = _validate_clause_coverage(
+            document,
+            source["requirements"],
+            graph,
+            source["annotations"],
+            source["bindings"],
+            {
+                **normative.metadata["goal_sources"],
+                **{k: [v] for k, v in normative.metadata["milestone_sources"].items()},
+            },
+            source["grounding"],
+        )
         declared_coverage = _validate_interpreted_plan(
             graph,
             draft,
@@ -193,13 +204,16 @@ def load_task_plan(path: str | Path) -> dict[str, Any]:
             or canonical_hash(graph) != coverage["graph_digest"]
             or coverage["graph_digest"] != manifest["semantic_graph_sha256"]
             or project_scene_requirements(document) != requirements
+            or validation.get("qualifier_coverage", qualifiers) != qualifiers
         ):
             raise ValueError("Task plan spec, graph or scene projection mismatch")
         return {
             **manifest,
+            "plan_digest": _file_hash(root / "task_plan_manifest.json"),
             "root": str(root),
             "scene_requirements": requirements,
             "task_document": document,
+            "qualifier_coverage": qualifiers,
         }
     if (
         requirements.get("schema_version") != "embodichain.scene-requirements/v1"
@@ -208,7 +222,12 @@ def load_task_plan(path: str | Path) -> dict[str, Any]:
         or requirements.get("image_sha256") != manifest.get("image_sha256")
     ):
         raise ValueError("Scene requirements do not match the task plan")
-    return {**manifest, "root": str(root), "scene_requirements": requirements}
+    return {
+        **manifest,
+        "plan_digest": _file_hash(root / "task_plan_manifest.json"),
+        "root": str(root),
+        "scene_requirements": requirements,
+    }
 
 
 def revise_task_plan(
@@ -218,6 +237,7 @@ def revise_task_plan(
     *,
     expected_spec_digest: str,
     expected_graph_digest: str,
+    expected_plan_digest: str,
 ) -> Path:
     """Publish a fresh graph revision against the parent's frozen task and grounding.
 
@@ -230,6 +250,8 @@ def revise_task_plan(
         output: Fresh directory for the graph revision.
         expected_spec_digest: Frozen task identity selected by the caller.
         expected_graph_digest: Source graph identity selected by the caller.
+        expected_plan_digest: Complete publication identity, including deployment
+            annotations, binding requests and grounding.
 
     Returns:
         Published revision directory retaining the parent task specification.
@@ -254,6 +276,7 @@ def revise_task_plan(
     if (
         plan.get("spec_digest") != expected_spec_digest
         or plan["semantic_graph_sha256"] != expected_graph_digest
+        or plan["plan_digest"] != expected_plan_digest
     ):
         raise ValueError("Stale task plan revision")
     root = Path(plan["root"])
@@ -268,12 +291,28 @@ def revise_task_plan(
         bindings=bindings,
         requirements=proposal["requirements"],
     )
-    _validate_clause_coverage(plan["task_document"], source["requirements"])
+    pairing = _load_json(root / "plan_coverage.json", "pairing")
+    qualifiers = _validate_clause_coverage(
+        plan["task_document"],
+        source["requirements"],
+        graph,
+        annotations,
+        bindings,
+        {
+            **pairing["goal_groups"],
+            **{k: [v] for k, v in pairing["milestone_groups"].items()},
+        },
+        source["grounding"],
+    )
+    if any(item["status"] != "covered" for item in qualifiers):
+        raise ValueError(
+            "Unverified instruction qualifiers require clarification before revision"
+        )
     report.update(
         graph_digest=canonical_hash(graph),
         coverage=validate_semantic_plan(graph, **source),
+        qualifier_coverage=qualifiers,
     )
-    pairing = _load_json(root / "plan_coverage.json", "pairing")
     pairing["graph_digest"] = report["graph_digest"]
     revised = {
         "semantic_task_graph": graph,
@@ -311,7 +350,7 @@ def revise_task_plan(
         )
         write_run_json(target / "run_manifest.json", summary)
         (target / "semantic_task_graph.html").write_text(
-            _image_preview(preview, _source_image(target), summary)
+            _image_preview(preview, _source_image(target, plan), summary)
         )
         manifest.update(
             parent_plan_sha256=_file_hash(root / "task_plan_manifest.json"),
@@ -504,15 +543,97 @@ def materialize_scene_generation(
     return Path(path).resolve(strict=True)
 
 
-def _source_image(root: Path) -> Path:
-    matches = sorted(root.glob("source_image.*"))
-    if len(matches) != 1:
-        raise ValueError("Task plan must contain exactly one source image")
-    return matches[0]
+def _source_image(root: Path, plan: Mapping[str, Any] | None = None) -> Path:
+    plan = load_task_plan(root) if plan is None else plan
+    if "task_document" in plan:
+        relative = plan["task_document"]["inputs"]["image"]["ref"]
+    else:
+        matches = [
+            name
+            for name in plan["artifacts"]
+            if name.startswith("source_image.") and "/" not in name
+        ]
+        if len(matches) != 1:
+            raise ValueError("Task plan inventory must identify one source image")
+        relative = matches[0]
+    path = _artifact_path(root, relative)
+    if relative not in plan["artifacts"] or _file_hash(path) != plan["image_sha256"]:
+        raise ValueError("Task plan source image does not match its verified input")
+    return path
 
 
 def _file_hash(path: str | Path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def _check_scene_roles(
+    plan: Mapping[str, Any],
+    bindings: Mapping[str, Any],
+    assets: Mapping[str, Any],
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Check explicit frozen properties; retain unknown v1 affordances as pending."""
+    if "task_document" not in plan:
+        return {}, []
+    members = _load_json(Path(plan["root"]) / "plan_coverage.json", "coverage")[
+        "role_entities"
+    ]
+    report = {}
+    issues = [
+        {"code": "unverified_instruction_qualifier", **item}
+        for item in plan.get("qualifier_coverage", [])
+        if item["status"] != "covered"
+    ]
+    for role in plan["task_document"]["configuration"]["roles"]:
+        role_id = role["id"]
+        selected = [bindings["objects"].get(entity) for entity in members[role_id]]
+        row = report[role_id] = {"members": selected, "verified": [], "pending": []}
+        for uid in selected:
+            if uid not in assets:
+                issues.append(
+                    {"code": "scene_role_unbound", "role_id": role_id, "uid": uid}
+                )
+                continue
+            asset = assets[uid]
+            for capability in role["affordances"]:
+                declared = asset.get("affordances")
+                if isinstance(declared, list) and capability in declared:
+                    row["verified"].append(capability)
+                else:
+                    row["pending"].append(capability)
+                    # generated-scene/v1 never required this optional metadata.
+                    # An explicit declaration is authoritative when supplied.
+                    if "affordances" in asset:
+                        issues.append(
+                            {
+                                "code": "missing_asset_capability",
+                                "role_id": role_id,
+                                "expected": capability,
+                                "measured": declared,
+                                "uid": uid,
+                            }
+                        )
+            properties = asset.get("properties", {})
+            for key, expected in role["properties"].items():
+                available = isinstance(properties, Mapping) and key in properties
+                measured = properties[key] if available else None
+                if available and measured == expected:
+                    row["verified"].append("property:" + key)
+                else:
+                    row["pending"].append("property:" + key)
+                    issues.append(
+                        {
+                            "code": (
+                                "asset_property_mismatch"
+                                if available
+                                else "asset_property_unverified"
+                            ),
+                            "role_id": role_id,
+                            "expected": {key: expected},
+                            "measured": measured,
+                            "uid": uid,
+                        }
+                    )
+    return report, issues
 
 
 def _publish_qualification(
@@ -717,53 +838,18 @@ def qualify_task_scene(
                 }
             ],
         )
-    role_report = {}
-    if "task_document" in plan:
-        members = _load_json(plan_root / "plan_coverage.json", "coverage")[
-            "role_entities"
-        ]
-        native = {item["uid"]: item for item in scene["objects"]}
-        issues = []
-        for role in plan["task_document"]["configuration"]["roles"]:
-            role_id = role["id"]
-            selected = [bindings["objects"].get(e) for e in members[role_id]]
-            role_report[role_id] = {"members": selected, "verified": [], "pending": []}
-            for uid in selected:
-                asset = native.get(uid, {})
-                for capability in role["affordances"]:
-                    if "affordances" in asset and capability in asset["affordances"]:
-                        role_report[role_id]["verified"].append(capability)
-                    else:
-                        role_report[role_id]["pending"].append(capability)
-                        issues.append(
-                            {
-                                "code": "missing_asset_capability",
-                                "role_id": role_id,
-                                "expected": capability,
-                                "measured": asset.get("affordances"),
-                                "uid": uid,
-                            }
-                        )
-                for key, value in role["properties"].items():
-                    if asset.get("properties", {}).get(key) != value:
-                        issues.append(
-                            {
-                                "code": "asset_property_mismatch",
-                                "role_id": role_id,
-                                "expected": {key: value},
-                                "measured": asset.get("properties", {}).get(key),
-                                "uid": uid,
-                            }
-                        )
-        if issues:
-            return _publish_qualification(
-                output,
-                status="rejected",
-                inputs=inputs,
-                issues=issues,
-                bindings=bindings,
-                role_report=role_report,
-            )
+    role_report, issues = _check_scene_roles(
+        plan, bindings, {item["uid"]: item for item in scene["objects"]}
+    )
+    if issues:
+        return _publish_qualification(
+            output,
+            status="rejected",
+            inputs=inputs,
+            issues=issues,
+            bindings=bindings,
+            role_report=role_report,
+        )
     placements = {}
     occupied: dict[str, list[tuple[float, float, float]]] = {}
     annotations = validation["source"]["annotations"]
@@ -860,6 +946,7 @@ def prepare_task_deployment(
         **expected,
         "spec_digest": plan.get("spec_digest"),
         "graph_digest": plan.get("semantic_graph_sha256"),
+        "plan_digest": plan["plan_digest"],
     }
     if expected_revisions is not None and any(
         key not in revisions or revisions[key] != value
@@ -894,6 +981,7 @@ def prepare_task_deployment(
         policy,
         profile,
         services=None,
+        expected_plan_digest=plan["plan_digest"],
         generated_scene=scene,
         resolved_bindings=qualification["bindings"],
         resolved_placements=qualification.get("placements", {}),

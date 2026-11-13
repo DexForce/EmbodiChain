@@ -258,7 +258,21 @@ def generate_semantic_task_graph_from_image(
                 graph, annotations, bindings = _assemble(plan, candidate)
                 from .semantic_plan_validation import _validate_clause_coverage
 
-                _validate_clause_coverage(document, plan["requirements"])
+                qualifiers = _validate_clause_coverage(
+                    document,
+                    plan["requirements"],
+                    graph,
+                    annotations,
+                    bindings,
+                    {
+                        **spec.metadata["goal_sources"],
+                        **{
+                            k: [v]
+                            for k, v in spec.metadata["milestone_sources"].items()
+                        },
+                    },
+                    grounding,
+                )
                 coverage = validate_semantic_plan(
                     graph,
                     candidate,
@@ -296,6 +310,7 @@ def generate_semantic_task_graph_from_image(
                 "bindings": bindings,
             },
             "coverage": coverage,
+            "qualifier_coverage": qualifiers,
         }
         artifacts.update(
             semantic_task_graph=graph,
@@ -519,6 +534,10 @@ Extract explicitly required properties in role_properties keyed by role_id, e.g.
 Include clauses for explicit task qualifiers: each has id, quote (literal instruction span),
 target (role, goal or milestone ID), origin (explicit/inferred), and resolution
 (resolved/pending_binding/ambiguous_goal). Mark ambiguous goal meanings ambiguous_goal.
+Include a structured constraint for checkable qualifiers: {kind:role_property,key:color,value:red},
+{kind:return_to_origin}, or {kind:restore_upright}. Bind action qualifiers to their milestone
+and property qualifiers to their role. Other meanings may use {kind:unsupported}; they remain
+unverified and cannot authorize deployment. A source quote alone does not prove implementation.
 Record explicitly requested crossed coverage using cross_with naming the other required dimensions.
 Extract dataset variation clauses in an optional generalization array. Each target has domain asset or background,
 dimension, mode allow (permitted) or cover (requested diversity), and an exact instruction quote. Asset targets

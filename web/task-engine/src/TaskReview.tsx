@@ -72,10 +72,18 @@ type Observation = {
   failure_reason: string | null;
   start_step: number;
   end_step: number;
-  issues: { kind: string; message: string; timestamp: number }[];
+  issues: {
+    kind: string;
+    message: string;
+    timestamp: number;
+    env_mask?: boolean[] | null;
+  }[];
   env_ids: number[];
   successes: boolean[];
   active: boolean[];
+  failure_reasons?: (string | null)[];
+  start_steps?: number[];
+  end_steps?: number[];
 };
 type Attempt = {
   status: string;
@@ -129,6 +137,7 @@ export type Review = {
     goal_groups: Record<string, string[]>;
   };
   pending: number;
+  qualifiers?: { clause_id: string; status: string; reason: string }[];
   attempt: Attempt | { error: string } | null;
 };
 type Part = Node<{ content: React.ReactNode }, "reviewPart">;
@@ -380,6 +389,9 @@ export default function TaskReview({
   const { spec, pairing } = review,
     groups = data.graph.task_groups,
     calls = data.graph.nodes;
+  const unverifiedQualifiers = (review.qualifiers || []).filter(
+    (q) => q.status !== "covered",
+  );
   const run =
     review.attempt && "calls" in review.attempt ? review.attempt : null;
   const failure = calls.find((c) => run?.calls[c.id]?.success === false);
@@ -475,6 +487,19 @@ export default function TaskReview({
     ? spec.generalization[Number(selected.slice(10))]
     : null;
   const seg = selectedCall && run?.calls[selectedCall.id];
+  const rowIndex = seg ? seg.env_ids.indexOf(Number(env)) : -1;
+  const startStep =
+    seg && (env === "all" ? seg.start_step : seg.start_steps?.[rowIndex]);
+  const endStep =
+    seg && (env === "all" ? seg.end_step : seg.end_steps?.[rowIndex]);
+  const events = (s: Observation) =>
+    s.issues.filter(
+      (issue) =>
+        env === "all" ||
+        (issue.env_mask
+          ? issue.env_mask[Number(env)] === true
+          : envs.length === 1),
+    );
   const anns = (data.validation?.source?.annotations || {}) as Record<
     string,
     { object?: string; reference?: string }
@@ -486,7 +511,7 @@ export default function TaskReview({
         ? t("右臂", "Right arm")
         : id;
   const armLabel = ({ call }: TaskNode) => {
-    const { primary, source, destination, left, right } = call.resources;
+    const { primary, source, destination, left, right } = call.resources || {};
     if (call.kind === "hand_over" && source && destination)
       return zh
         ? armName(source) + "递给" + armName(destination)
@@ -776,12 +801,17 @@ export default function TaskReview({
         .flatMap((r) => r.entities)
     : [];
   const reason = (c: TaskNode) => {
-    const gate = run?.calls[c.id]?.issues?.find(
-      (e) => e.kind === "phase_effect_gate_failed",
-    );
+    const observation = run?.calls[c.id];
+    const gate =
+      observation &&
+      events(observation).find((e) => e.kind === "phase_effect_gate_failed");
     return gate?.message?.includes("'source_released'")
       ? t("夹爪释放检查失败", "Gripper release check failed")
-      : run?.calls[c.id]?.failure_reason || t("执行失败", "Execution failed");
+      : (env === "all"
+          ? observation?.failure_reason
+          : observation?.failure_reasons?.[
+              observation.env_ids.indexOf(Number(env))
+            ]) || t("执行失败", "Execution failed");
   };
   return (
     <main className="rv graph-ui" data-theme={dark ? "dark" : "light"}>
@@ -856,9 +886,15 @@ export default function TaskReview({
               </>
             ) : (
               <>
-                <span className="good">
-                  <Check size={14} />
-                  {t("计划已校验", "Plan validated")}
+                <span className={unverifiedQualifiers.length ? "bad" : "good"}>
+                  {unverifiedQualifiers.length ? (
+                    <CircleX size={14} />
+                  ) : (
+                    <Check size={14} />
+                  )}
+                  {unverifiedQualifiers.length
+                    ? t("限定要求待核实", "Qualifiers unverified")
+                    : t("计划已校验", "Plan validated")}
                 </span>
                 {review.pending > 0 && (
                   <button onClick={() => show("bindings")}>
@@ -980,11 +1016,13 @@ export default function TaskReview({
                             )}
                       </div>
                       <p>
-                        {t("控制步", "Control steps")}　{seg.start_step} –{" "}
-                        {seg.end_step}
+                        {t("控制步", "Control steps")}　
+                        {startStep ?? t("未记录", "Not recorded")} –{" "}
+                        {endStep ?? t("未记录", "Not recorded")}
                       </p>
-                      {env === "all" &&
-                        seg.issues.map((v, i) => (
+                      {events(seg)
+                        .slice(0, 8)
+                        .map((v, i) => (
                           <div key={i} className="rv-event">
                             <code>{v.kind}</code>
                             <p>{v.message}</p>

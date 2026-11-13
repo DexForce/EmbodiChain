@@ -36,6 +36,7 @@ def _attempt(plan: dict[str, Any], root: Path, nodes: set[str]) -> dict[str, Any
     keys = (
         "spec_digest",
         "graph_digest",
+        "plan_digest",
         "bundle_digest",
         "scene_digest",
         "program_digest",
@@ -48,6 +49,7 @@ def _attempt(plan: dict[str, Any], root: Path, nodes: set[str]) -> dict[str, Any
         or any(not feedback.get(k) or manifest.get(k) != feedback[k] for k in keys)
         or manifest["spec_digest"] != plan["spec_digest"]
         or manifest["graph_digest"] != plan["semantic_graph_sha256"]
+        or manifest["plan_digest"] != plan["plan_digest"]
         or feedback["execution_report_digest"] != canonical_hash(report)
         or feedback["execution"] != report["status"]
     ):
@@ -63,6 +65,7 @@ def _attempt(plan: dict[str, Any], root: Path, nodes: set[str]) -> dict[str, Any
                 "kind": e["kind"],
                 "message": e.get("message"),
                 "timestamp": e.get("timestamp"),
+                "env_mask": e.get("env_mask"),
             }
             for e in runtime.get("events", [])
             if "failed" in e["kind"]
@@ -76,9 +79,19 @@ def _attempt(plan: dict[str, Any], root: Path, nodes: set[str]) -> dict[str, Any
                 "end_step",
                 "successes",
                 "active",
+                "failure_reasons",
+                "start_steps",
+                "end_steps",
             )
         }
-        calls[name].update(issues=issues[:8], env_ids=runtime.get("env_ids", []))
+        # DemoSegmentResult row arrays use global environment indices, even
+        # when the runtime invocation itself only contains a subset of rows.
+        env_ids = (
+            list(range(len(segment["active"])))
+            if segment.get("active")
+            else runtime.get("env_ids", [])
+        )
+        calls[name].update(issues=issues, env_ids=env_ids)
     return {
         "status": feedback["execution"],
         "physical": feedback["physical_verdict"],
@@ -91,7 +104,7 @@ def _attempt(plan: dict[str, Any], root: Path, nodes: set[str]) -> dict[str, Any
 
 
 def write_review(plan_dir: Path, output: Path, run_dir: Path | None = None) -> None:
-    from ..workflow import load_task_plan
+    from ..workflow import _source_image, load_task_plan
 
     plan = load_task_plan(plan_dir)
     root = Path(plan["root"])
@@ -112,6 +125,10 @@ def write_review(plan_dir: Path, output: Path, run_dir: Path | None = None) -> N
     if "task_document" in plan:
         keys.extend(["task_spec_v1", "plan_coverage"])
     result = {k: json.loads((root / (k + ".json")).read_text()) for k in keys}
+    if "qualifier_coverage" in plan:
+        result["semantic_graph_validation"]["qualifier_coverage"] = plan[
+            "qualifier_coverage"
+        ]
     attempt = None
     if run_dir is not None:
         if "task_document" not in plan:
@@ -123,7 +140,7 @@ def write_review(plan_dir: Path, output: Path, run_dir: Path | None = None) -> N
         except (ValueError, OSError, KeyError, TypeError) as exc:
             attempt = {"error": str(exc)}
     summary = json.loads((root / "run_manifest.json").read_text())
-    image = next(root.glob("source_image.*"))
+    image = _source_image(root, plan)
     html = _image_preview(result, image, summary, attempt=attempt)
     destination.parent.mkdir(parents=True, exist_ok=True)
     with destination.open("x", encoding="utf-8") as stream:
