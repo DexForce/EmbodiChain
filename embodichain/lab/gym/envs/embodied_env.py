@@ -1415,6 +1415,7 @@ class EmbodiedEnv(BaseEnv):
             validation_cameras,
         )
         from embodichain.lab.sim import SimulationManager
+        from embodichain.lab.sim.sensors.registry import _resolve_sensor_factory
 
         if super()._requires_native_renderer():
             return True
@@ -1425,8 +1426,8 @@ class EmbodiedEnv(BaseEnv):
             return True
         if self.cfg.enable_sensor:
             for sensor_cfg in self._sensor_configs():
-                sensor_factory = SimulationManager.SUPPORTED_SENSOR_TYPES.get(
-                    sensor_cfg.sensor_type
+                _, sensor_factory, _ = _resolve_sensor_factory(
+                    sensor_cfg.sensor_type, SimulationManager.SUPPORTED_SENSOR_TYPES
                 )
                 if isinstance(sensor_factory, type) and issubclass(
                     sensor_factory, Camera
