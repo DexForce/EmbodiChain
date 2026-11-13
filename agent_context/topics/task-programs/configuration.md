@@ -242,8 +242,8 @@ ID and an inert absolute or scene-relative pose, optionally preceded by
 observed rotation while positions follow their declared frames. These
 declarations live in `simulation/targets.py` and `simulation/transport.py`;
 lowering resolves a fresh planning snapshot when waypoints or observed rotation
-are requested, then constructs typed goals, retained-attachment effects and
-lookahead targets. It does not select motion policy or replace the shared
+are requested, places every resolved pose on the planning device, then
+constructs typed goals, retained-attachment effects and lookahead targets. It does not select motion policy or replace the shared
 Atomic Skill. The original single-target decoder/factory and effect behavior
 remain unchanged. Mixed forms
 and duplicate target IDs are rejected. The optional
@@ -260,7 +260,9 @@ The configured `move_end_effector` lowerer exposes the existing Cartesian
 Atomic Skill through closed named routes of arena-frame SE(3) waypoints. Its
 call accepts only a configured `target` selector. Use it for empty-hand transit
 or deliberate contact motion; held-object transit requires the transport
-contract above.
+contract above. The lowerer declares `requires_unoccupied_slots = ("primary",)`,
+so grounding rejects the call with `unoccupied_resource_required` when the bound
+manipulator holds a verified object in any eligible environment.
 
 Container affordances may declare a local-z release clearance while retaining
 their original semantic target for final acceptance.
@@ -375,6 +377,9 @@ Select `reference_frame: parent` to measure both in the live reference frame,
 matching a target whose relative pose composes the complete parent transform.
 The reference may be an articulation link; the observer reads its current
 native link pose so acceptance follows a moving drawer floor after closure.
+Static validation sends this reference with role `object`; a validation context
+that declares `supports_link_references = True`, such as the integration
+catalog, receives `object_or_link` instead.
 
 
 ## Named evaluation rules

@@ -234,10 +234,10 @@ panel and its fingers stay clear of the row.
 
 ### Preview
 
-![Loaded drawer before contact-driven closure](media/long_horizon_preview.jpg)
+![Loaded drawer before contact-driven closure](https://raw.githubusercontent.com/DexForce/EmbodiChain/main/extensions/embodichain_tasks/configs/tasks/manipulation/drawer_storage/media/long_horizon_preview.jpg)
 
-[Full task at 4× speed](media/long_horizon_preview.mp4) ·
-[Supported releases and contact closure at 1× speed](media/long_horizon_release_and_closure.mp4)
+[Full task at 4× speed](https://github.com/DexForce/EmbodiChain/blob/main/extensions/embodichain_tasks/configs/tasks/manipulation/drawer_storage/media/long_horizon_preview.mp4) ·
+[Supported releases and contact closure at 1× speed](https://github.com/DexForce/EmbodiChain/blob/main/extensions/embodichain_tasks/configs/tasks/manipulation/drawer_storage/media/long_horizon_release_and_closure.mp4)
 
 Both videos render the measured states from an accepted Default physics
 episode with DexSim 0.6.0rc1, CPU, seed 0, recorded before the handle-grasp

@@ -27,7 +27,7 @@ import math
 from _thread import LockType
 from threading import Lock
 from types import MappingProxyType
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 import torch
 
 from embodichain.lab.evaluation import CompiledEvaluation
@@ -601,6 +601,9 @@ def _planning_contracts(factories):
 @dataclass(frozen=True, slots=True)
 class TaskProgramIntegrationCatalog:
     """Provider-free integration directory owned by one task registration."""
+
+    supports_link_references: ClassVar[bool] = True
+    """Validate relative-position references as objects or articulation links."""
 
     scene_registry_id: str
     robot_profile_id: str

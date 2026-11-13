@@ -104,6 +104,47 @@ class _RejectingValidationContext:
         del validator, path
 
 
+_STACK_BLOCKS_TWO_PROGRAM = (
+    Path(__file__).parents[3]
+    / "extensions/embodichain_tasks/configs/tasks/manipulation/tableware"
+    / "stack_blocks_two/task_program/program.yaml"
+)
+
+
+class _RoleDispatchingValidationContext(_RejectingValidationContext):
+    """Dispatch on the scene roles supported before articulation-link references."""
+
+    roles: frozenset[str] = frozenset(
+        {"entity", "object", "articulation", "affordance", "object_or_affordance"}
+    )
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.reference_roles: dict[ConfigPath, str] = {}
+
+    def validate_integration(self, integration: object, *, path: ConfigPath) -> None:
+        del integration, path
+
+    def validate_scene_reference(
+        self,
+        reference: str,
+        *,
+        role: str,
+        path: ConfigPath,
+    ) -> None:
+        del reference
+        if role not in self.roles:
+            raise ValueError(f"Unsupported scene reference role {role!r}.")
+        self.reference_roles[path] = role
+
+
+class _LinkReferenceValidationContext(_RoleDispatchingValidationContext):
+    """Opt into articulation-link references for relative-position validators."""
+
+    supports_link_references = True
+    roles = _RoleDispatchingValidationContext.roles | {"object_or_link"}
+
+
 def test_parse_task_program_json_preserves_predecode_mapping() -> None:
     value = parse_task_program_json('{"host_integration_pending": [true, null, 3.5]}')
 
@@ -175,6 +216,34 @@ def test_load_task_program_forwards_validation_context_for_each_format(
     assert error.value.code == "reference_validation_failed"
     assert error.value.path == ("integration",)
     assert context.integration_paths == [("integration",)]
+
+
+@pytest.mark.parametrize(
+    ("context_type", "role"),
+    [
+        (_RoleDispatchingValidationContext, "object"),
+        (_LinkReferenceValidationContext, "object_or_link"),
+    ],
+)
+def test_relative_position_reference_role_is_opt_in_for_link_contexts(
+    context_type: type[_RoleDispatchingValidationContext],
+    role: str,
+) -> None:
+    """Existing contexts keep the object role for shipped relative validators."""
+    context = context_type()
+
+    load_task_program(
+        _STACK_BLOCKS_TWO_PROGRAM,
+        integration=_deployment_selection(),
+        validation_context=context,
+    )
+
+    relative_roles = {
+        value
+        for path, value in context.reference_roles.items()
+        if path[-1] == "reference"
+    }
+    assert relative_roles == {role}
 
 
 def test_loads_task_program_json_rejects_nested_duplicate_keys() -> None:

@@ -1450,10 +1450,14 @@ class _PourTargetBinding:
 
 
 class _MoveEndEffectorLowerer(RegisteredSemanticLowerer):
-    """Lower a configured free-space route to the shared Cartesian skill."""
+    """Lower a configured free-space route to the shared Cartesian skill.
+
+    The route installs no held-object guard, so grounding requires a free hand.
+    """
 
     call_id: ClassVar[str] = _MOVE_END_EFFECTOR_CALL_ID
     target_descriptor: ClassVar[SkillDescriptor] = MoveEndEffector.descriptor()
+    requires_unoccupied_slots: ClassVar[tuple[str, ...]] = ("primary",)
 
     def __init__(
         self, routes: tuple[tuple[str, tuple[tuple[float, ...], ...]], ...]

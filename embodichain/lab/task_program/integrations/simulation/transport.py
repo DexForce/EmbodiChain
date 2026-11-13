@@ -154,8 +154,12 @@ class _RoutedMoveHeldObjectLowerer(RegisteredSemanticLowerer):
         declarations = (*route.waypoints, route.pose)
         targets = [resolve_pose_target(value) for value in declarations]
         if route.preserve_current_object_orientation or route.waypoints:
+            # Absolute declarations resolve on the host while scene-relative
+            # ones resolve on the planning device; stacking needs one device.
             targets = [
-                resolve_pose_goal(value, context, name="transport target").clone()
+                resolve_pose_goal(value, context, name="transport target").to(
+                    device=context.robot.qpos.device, dtype=torch.float32, copy=True
+                )
                 for value in targets
             ]
             targets = [

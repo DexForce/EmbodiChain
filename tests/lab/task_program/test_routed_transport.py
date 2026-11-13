@@ -405,3 +405,74 @@ def test_routed_transport_preserves_live_rotation(waypoints: bool) -> None:
         call, picked_object=SceneObjectRef("cube"), bound=None, previous_target=None
     )
     assert lookahead[0].preserve_current_object_orientation
+
+
+@pytest.mark.parametrize("preserve", [False, True])
+@pytest.mark.parametrize(
+    "device", ["meta", pytest.param("cuda", marks=pytest.mark.gpu)]
+)
+def test_routed_transport_places_mixed_route_on_planning_device(
+    device: str, preserve: bool
+) -> None:
+    """Absolute waypoints join scene-relative poses on the planning device."""
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA is unavailable")
+    from embodichain.lab.task_program.integrations.simulation.targets import (
+        SceneEntityTarget,
+    )
+
+    relative = torch.eye(4)
+    relative[:3, 3] = torch.tensor([0.05, -0.04, 0.0391])
+    route = HeldObjectTransportRoute(
+        "cube",
+        "slot",
+        SceneEntityTarget("table", relative_pose=tuple(relative.flatten().tolist())),
+        preserve_current_object_orientation=preserve,
+        waypoints=(AbsolutePoseTarget((0.1, 0.2, 0.6), (0.0, 0.0, 0.0, 1.0)),),
+    )
+    factory = RoutedMoveHeldObjectLowererFactory((route,))
+    registry, _ = _scene_registry()
+    robot = object()
+    lowerer = factory.create(
+        simulation=None,
+        robot=robot,
+        engine=SimpleNamespace(robot=robot),
+        scene_registry=registry,
+    )
+    planning_device = torch.device(device)
+    floor = torch.eye(4, device=planning_device)
+    floor[:3, 3] = torch.tensor([-0.6, 0.0, 0.4], device=planning_device)
+    observed = torch.diag(torch.tensor([1.0, -1.0, -1.0, 1.0], device=planning_device))
+    context = SimpleNamespace(
+        batch_size=2,
+        robot=SimpleNamespace(qpos=torch.zeros(2, 6, device=planning_device)),
+        scene=SimpleNamespace(
+            entities={
+                "cube": SimpleNamespace(pose=observed, confidence=1.0),
+                "table": SimpleNamespace(pose=floor, confidence=1.0),
+            }
+        ),
+    )
+    call = RegisteredSemanticCall(call_id=factory.call_id, arguments={"target": "slot"})
+
+    result = lowerer.lower(
+        call, context=context, bound=None, option_template=MoveHeldObjectOptions()
+    )
+
+    target = result.goal.object_target_pose
+    assert target.device.type == planning_device.type
+    assert target.dtype == torch.float32
+    assert target.shape == (2, 2, 4, 4)
+    if device == "meta":
+        return
+    torch.testing.assert_close(
+        target[:, 0, :3, 3].cpu(), torch.tensor([[0.1, 0.2, 0.6], [0.1, 0.2, 0.6]])
+    )
+    torch.testing.assert_close(
+        target[:, 1, :3, 3].cpu(),
+        torch.tensor([[-0.55, -0.04, 0.4391], [-0.55, -0.04, 0.4391]]),
+    )
+    rotation = observed[:3, :3] if preserve else torch.eye(3, device=planning_device)
+    torch.testing.assert_close(
+        target[..., :3, :3].cpu(), rotation.cpu().expand(2, 2, -1, -1)
+    )

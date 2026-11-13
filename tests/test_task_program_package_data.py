@@ -19,9 +19,11 @@
 from __future__ import annotations
 
 import ast
+from fnmatch import fnmatch
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -577,6 +579,25 @@ print(json.dumps(decoded_deployments, sort_keys=True))
     assert json.loads(completed.stdout.splitlines()[-1]) == {
         path: list(identifiers) for path, identifiers in expected_deployments.items()
     }
+
+
+def test_drawer_storage_readme_links_survive_wheel_installation() -> None:
+    """Relative README links target packaged files; previews use stable URLs."""
+    readme = _CONFIG_SOURCE / "tasks/manipulation/drawer_storage/README.md"
+    patterns = get_package_data()[_CONFIG_PACKAGE]
+    targets = re.findall(r"\]\(([^)\s#]+)", readme.read_text(encoding="utf-8"))
+    relative = [
+        (readme.parent / target).resolve().relative_to(_CONFIG_SOURCE.resolve())
+        for target in targets
+        if re.match(r"[a-z][a-z0-9+.-]*:", target) is None
+    ]
+
+    assert relative
+    assert [
+        path
+        for path in relative
+        if not any(fnmatch(path.as_posix(), pattern) for pattern in patterns)
+    ] == []
 
 
 def test_installed_wheel_registers_drawer_storage(tmp_path: Path) -> None:
