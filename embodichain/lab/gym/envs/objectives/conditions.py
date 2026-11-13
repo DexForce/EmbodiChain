@@ -18,13 +18,25 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import math
 from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING
 
 import torch
 
-__all__ = ["ConditionResult", "evaluate_near_target", "evaluate_below_height"]
+from embodichain.compute.geometry._distance import _measure_near_target, _positions
+from embodichain.lab.evaluation._predicates import _HEIGHT, _near_params
+
+if TYPE_CHECKING:
+    from embodichain.lab.evaluation import RuleResult
+
+__all__ = [
+    "ConditionResult",
+    "ObjectMotionMetrics",
+    "evaluate_near_target",
+    "evaluate_below_height",
+]
 
 
 @dataclass(frozen=True)
@@ -35,11 +47,15 @@ class ConditionResult:
         satisfied: Boolean vector of physical predicate values.
         valid: Boolean vector identifying available finite evidence.
         metrics: Named floating measurements with the same leading batch size.
+        rule_results: Optional diagnostics from a compiled rule graph.
+        evaluation_identity: Content identity of the compiled rule graph, if supplied.
     """
 
     satisfied: torch.Tensor
     valid: torch.Tensor
     metrics: Mapping[str, torch.Tensor]
+    rule_results: Mapping[str, RuleResult] = field(default_factory=dict)
+    evaluation_identity: str | None = None
 
     def __post_init__(self) -> None:
         if self.satisfied.dtype != torch.bool or self.satisfied.ndim != 1:
@@ -62,11 +78,79 @@ class ConditionResult:
         object.__setattr__(self, "metrics", owned)
 
 
-def _positions(value: torch.Tensor) -> None:
-    if not isinstance(value, torch.Tensor) or value.ndim != 2 or value.shape[1] != 3:
-        raise ValueError("Positions must have shape (num_envs, 3).")
-    if not value.is_floating_point():
-        raise TypeError("Positions must be floating tensors.")
+class ObjectMotionMetrics:
+    """Accumulate lift, world-up tilt and return distance with bounded storage.
+
+    Args:
+        initial_pose: Arena-local ``(B, 7)`` xyz+xyzw poses after reset.
+
+    Only initial/current positions and extrema are retained, on the input device.
+    Updating metrics does not advance simulation or establish task acceptance.
+    """
+
+    def __init__(self, initial_pose: torch.Tensor) -> None:
+        self._validate_pose(initial_pose)
+        self._initial = initial_pose[:, :3].detach().clone()
+        self._position = self._initial.clone()
+        self._max_height = initial_pose[:, 2].detach().clone()
+        self._max_tilt = self._tilt(initial_pose)
+        self._valid = torch.isfinite(initial_pose).all(dim=-1)
+
+    @staticmethod
+    def _validate_pose(pose: torch.Tensor) -> None:
+        if pose.ndim != 2 or pose.shape[1] != 7 or not pose.is_floating_point():
+            raise ValueError("Object poses must be floating (B, 7) xyz+xyzw tensors.")
+
+    @staticmethod
+    def _tilt(pose: torch.Tensor) -> torch.Tensor:
+        vertical = 1 - 2 * (pose[:, 3].square() + pose[:, 4].square())
+        return torch.rad2deg(torch.acos(vertical.clamp(-1, 1))).detach()
+
+    def update(self, pose: torch.Tensor) -> None:
+        """Observe one pose batch without retaining a trajectory history.
+
+        Args:
+            pose: Current poses with the initial batch, device and dtype.
+        """
+        self._validate_pose(pose)
+        if (
+            pose.shape[0] != self._initial.shape[0]
+            or pose.device != self._initial.device
+            or pose.dtype != self._initial.dtype
+        ):
+            raise ValueError(
+                "Object motion poses must retain their batch/device/dtype."
+            )
+        self._position.copy_(pose[:, :3].detach())
+        self._max_height = torch.maximum(self._max_height, pose[:, 2].detach())
+        self._max_tilt = torch.maximum(self._max_tilt, self._tilt(pose))
+        self._valid &= torch.isfinite(pose).all(dim=-1)
+
+    def evaluate(
+        self, *, min_lift_m: float, min_tilt_deg: float, max_return_error_m: float
+    ) -> ConditionResult:
+        """Compare measured motion with explicit nonnegative acceptance bounds.
+
+        Args:
+            min_lift_m: Minimum attained height above the initial position.
+            min_tilt_deg: Minimum attained local-Z tilt from world up, degrees.
+            max_return_error_m: Maximum final distance from the initial position.
+
+        Returns:
+            Owned row-local truth, validity and measurements in metres/degrees.
+        """
+        for value in (min_lift_m, min_tilt_deg, max_return_error_m):
+            if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
+                raise ValueError("Motion bounds must be finite and nonnegative.")
+        lift = self._max_height - self._initial[:, 2]
+        error = torch.linalg.vector_norm(self._position - self._initial, dim=-1)
+        return ConditionResult(
+            (lift >= min_lift_m)
+            & (self._max_tilt >= min_tilt_deg)
+            & (error <= max_return_error_m),
+            self._valid,
+            {"lift_m": lift, "max_tilt_deg": self._max_tilt, "return_error_m": error},
+        )
 
 
 def evaluate_near_target(
@@ -89,33 +173,12 @@ def evaluate_near_target(
     Returns:
         Physical truth, validity and the measured ``distance`` vector.
     """
+    params = _near_params(
+        {"tolerance": tolerance, "axes": axes, "inclusive": inclusive}
+    )
     _positions(position)
-    axes = tuple(axes)
-    if (
-        not axes
-        or any(type(axis) is not int or axis not in (0, 1, 2) for axis in axes)
-        or len(set(axes)) != len(axes)
-    ):
-        raise ValueError("axes must select distinct indices from 0, 1, 2.")
-    if (
-        isinstance(tolerance, bool)
-        or not isinstance(tolerance, (int, float))
-        or not math.isfinite(tolerance)
-        or tolerance <= 0
-    ):
-        raise ValueError("tolerance must be positive and finite.")
-    if type(inclusive) is not bool:
-        raise TypeError("inclusive must be a bool.")
-    target = target.to(device=position.device, dtype=position.dtype)
-    if target.shape == (3,):
-        target = target.unsqueeze(0).expand_as(position)
-    _positions(target)
-    if target.shape != position.shape:
-        raise ValueError("Target batch must match object positions.")
-    valid = torch.isfinite(position).all(dim=-1) & torch.isfinite(target).all(dim=-1)
-    distance = torch.linalg.vector_norm((position - target)[:, axes], dim=-1)
-    satisfied = distance <= tolerance if inclusive else distance < tolerance
-    return ConditionResult(satisfied, valid, {"distance": distance})
+    passed, valid, distance = _measure_near_target(position, target, **params)
+    return ConditionResult(passed, valid, {"distance": distance})
 
 
 def evaluate_below_height(position: torch.Tensor, height: float) -> ConditionResult:
@@ -128,12 +191,7 @@ def evaluate_below_height(position: torch.Tensor, height: float) -> ConditionRes
     Returns:
         Physical truth, validity and measured ``height``.
     """
-    _positions(position)
-    if (
-        isinstance(height, bool)
-        or not isinstance(height, (int, float))
-        or not math.isfinite(height)
-    ):
-        raise ValueError("height must be finite.")
-    valid = torch.isfinite(position).all(dim=-1)
-    return ConditionResult(position[:, 2] < height, valid, {"height": position[:, 2]})
+    result = _HEIGHT.measure(
+        {"position": position}, _HEIGHT.normalize({"height": height})
+    )
+    return ConditionResult(result.satisfied, result.valid, result.metrics)

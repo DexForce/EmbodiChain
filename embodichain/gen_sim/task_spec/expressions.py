@@ -24,11 +24,12 @@ under the observation key declared by each predicate.
 
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Final
+
+from embodichain.compute._evaluation import _compare, _temporal_window_decision
 
 from .canonicalization import json_snapshot
 
@@ -321,7 +322,11 @@ class TemporalCondition:
 
 @dataclass(frozen=True, slots=True)
 class PredicateEvaluation:
-    """One auditable predicate measurement outcome."""
+    """One auditable predicate measurement outcome.
+
+    Temporal evaluations also expose optional inclusive witness or violation
+    steps. These diagnostics are separate from the canonical serialized report.
+    """
 
     predicate_id: str
     predicate: str
@@ -330,6 +335,12 @@ class PredicateEvaluation:
     expected: Any
     reason: str
     evidence_refs: tuple[str, ...] = ()
+    witness_steps: tuple[int, int] | None = field(
+        default=None, compare=False, kw_only=True
+    )
+    violation_steps: tuple[int, int] | None = field(
+        default=None, compare=False, kw_only=True
+    )
 
     def __post_init__(self) -> None:
         _nonempty(self.predicate_id, "PredicateEvaluation.predicate_id")
@@ -450,10 +461,8 @@ def evaluate_temporal_condition(
     )
     if not isinstance(trajectory, Sequence) or isinstance(trajectory, (str, bytes)):
         raise TypeError("trajectory must be a sequence of observation mappings.")
-    window = trajectory[
-        expression.start_step : expression.start_step + expression.within_steps + 1
-    ]
-    if not window:
+    end = min(expression.end_step, len(trajectory) - 1)
+    if end < expression.start_step:
         return PredicateEvaluation(
             predicate_id=local_id,
             predicate=expression.predicate.name,
@@ -462,97 +471,81 @@ def evaluate_temporal_condition(
             expected=expression.predicate.expected,
             reason="bounded temporal window has no observations",
         )
-    evaluations = [
-        evaluate_predicate(
+    complete = end == expression.end_step
+    status = None
+    witness_steps = violation_steps = None
+    missing = set()
+    observed = []
+    evidence_refs = []
+    for step in range(expression.start_step, end + 1):
+        item = evaluate_predicate(
             expression.predicate,
-            snapshot,
+            trajectory[step],
             predicate_id=expression.predicate.predicate_id or local_id,
         )
-        for snapshot in window
-    ]
-    statuses = [item.status for item in evaluations]
-    if expression.mode == "eventually":
-        if EvaluationStatus.SATISFIED in statuses:
+        observed.append(item.observed)
+        evidence_refs.extend(item.evidence_refs)
+        if status is not None:
+            continue
+        matched = item.status is EvaluationStatus.SATISFIED
+        violated = item.status is EvaluationStatus.FAILED
+        if not (matched or violated):
+            missing.add(item.status)
+        passed, failed = _temporal_window_decision(
+            expression.mode,
+            matched=matched,
+            violated=violated,
+            closing=complete and step == end,
+            missing=bool(missing),
+        )
+        if passed:
             status = EvaluationStatus.SATISFIED
-            reason = "predicate was satisfied within the bounded window"
-        elif EvaluationStatus.FAILED in statuses and all(
-            item in {EvaluationStatus.FAILED, EvaluationStatus.SATISFIED}
-            for item in statuses
-        ):
+            first = expression.start_step if expression.mode == "always" else step
+            witness_steps = (first, step)
+        elif failed:
             status = EvaluationStatus.FAILED
-            reason = "predicate was never satisfied within the bounded window"
-        elif EvaluationStatus.UNKNOWN in statuses:
-            status = EvaluationStatus.UNKNOWN
-            reason = "temporal window contains an unknown measurement"
-        elif EvaluationStatus.NOT_RUN in statuses:
-            status = EvaluationStatus.NOT_RUN
-            reason = "temporal window was not run"
-        else:
-            status = EvaluationStatus.UNAVAILABLE
-            reason = "temporal window lacks a usable measurement"
-    else:  # always
-        if EvaluationStatus.FAILED in statuses:
-            status = EvaluationStatus.FAILED
-            reason = "predicate failed within the bounded window"
-        elif EvaluationStatus.UNAVAILABLE in statuses:
-            status = EvaluationStatus.UNAVAILABLE
-            reason = "temporal window lacks a required measurement"
-        elif EvaluationStatus.UNKNOWN in statuses:
-            status = EvaluationStatus.UNKNOWN
-            reason = "temporal window contains an unknown measurement"
-        elif EvaluationStatus.NOT_RUN in statuses:
-            status = EvaluationStatus.NOT_RUN
-            reason = "temporal window was not run"
-        else:
-            status = EvaluationStatus.SATISFIED
-            reason = "predicate held throughout the bounded window"
-    if len(window) < expression.within_steps + 1 and not (
-        expression.mode == "eventually"
-        and status is EvaluationStatus.SATISFIED
-        or expression.mode == "always"
-        and status is EvaluationStatus.FAILED
-    ):
+            if expression.mode == "always":
+                violation_steps = (step, step)
+    if status is None:
+        # Preserve TaskSpec's diagnostic precedence for a closed window
+        # containing an explicit unknown or not-run observation.
         status = EvaluationStatus.UNAVAILABLE
+        if complete and not (
+            expression.mode == "always" and EvaluationStatus.UNAVAILABLE in missing
+        ):
+            if EvaluationStatus.UNKNOWN in missing:
+                status = EvaluationStatus.UNKNOWN
+            elif EvaluationStatus.NOT_RUN in missing:
+                status = EvaluationStatus.NOT_RUN
+    if status is EvaluationStatus.UNAVAILABLE and not complete:
         reason = "bounded temporal window is incomplete"
+    elif status is EvaluationStatus.UNKNOWN:
+        reason = "temporal window contains an unknown measurement"
+    elif status is EvaluationStatus.NOT_RUN:
+        reason = "temporal window was not run"
+    elif expression.mode == "eventually":
+        reason = {
+            EvaluationStatus.SATISFIED: "predicate was satisfied within the bounded window",
+            EvaluationStatus.FAILED: "predicate was never satisfied within the bounded window",
+            EvaluationStatus.UNAVAILABLE: "temporal window lacks a usable measurement",
+        }[status]
+    else:
+        reason = {
+            EvaluationStatus.SATISFIED: "predicate held throughout the bounded window",
+            EvaluationStatus.FAILED: "predicate failed within the bounded window",
+            EvaluationStatus.UNAVAILABLE: "temporal window lacks a required measurement",
+        }[status]
     return PredicateEvaluation(
         predicate_id=local_id,
         predicate=expression.predicate.name,
         status=status,
-        observed=[item.observed for item in evaluations],
+        observed=observed,
         expected=expression.predicate.expected,
         reason=reason,
-        evidence_refs=tuple(ref for item in evaluations for ref in item.evidence_refs),
+        evidence_refs=tuple(evidence_refs),
+        witness_steps=witness_steps,
+        violation_steps=violation_steps,
     )
-
-
-def _compare(observed: Any, expected: Any, operator: str) -> bool:
-    if operator == "eq":
-        return observed == expected
-    if operator == "ne":
-        return observed != expected
-    if operator == "gt":
-        return observed > expected
-    if operator == "gte":
-        return observed >= expected
-    if operator == "lt":
-        return observed < expected
-    if operator == "lte":
-        return observed <= expected
-    if operator == "in":
-        if not isinstance(expected, Sequence) or isinstance(expected, (str, bytes)):
-            raise TypeError("operator='in' expects a sequence as expected value")
-        return observed in expected
-    if operator == "contains":
-        return expected in observed
-    if operator == "approx":
-        if not isinstance(observed, (int, float)) or isinstance(observed, bool):
-            raise TypeError("operator='approx' requires a numeric observation")
-        if not isinstance(expected, (int, float)) or isinstance(expected, bool):
-            raise TypeError("operator='approx' requires a numeric expected value")
-        return math.isclose(
-            float(observed), float(expected), rel_tol=1e-6, abs_tol=1e-6
-        )
-    raise ValueError(f"unsupported predicate operator {operator!r}")
 
 
 def _string_refs(value: Any) -> tuple[str, ...]:

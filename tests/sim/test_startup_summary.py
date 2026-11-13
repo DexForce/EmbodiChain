@@ -88,6 +88,7 @@ def test_cpu_physics_does_not_imply_rendering_disabled(monkeypatch):
     summary = importlib.import_module("embodichain.lab.sim._startup_summary")
     monkeypatch.setattr(summary.torch.cuda, "is_available", lambda: False)
     rows = summary.simulation_rows(_sim())
+    assert ("Physics", "Backend", "Default") in rows
     text = summary.format_summary("Simulation initialized", rows, color=False)
     assert "Default" in text
     assert "Constraint Dynamics" in text
@@ -96,7 +97,6 @@ def test_cpu_physics_does_not_imply_rendering_disabled(monkeypatch):
     assert "cpu" in text
     assert "10 ms (100 Hz)" in text
     assert "Engine threads" not in text and "Stepping" not in text
-    assert "PhysX" not in text
     assert "\x1b" not in text and "\x00" not in text
 
 

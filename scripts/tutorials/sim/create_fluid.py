@@ -98,7 +98,7 @@ def main(args: argparse.Namespace | None = None) -> None:
     )
     fluid = None
     try:
-        # SPH queries texture SDFs; render boxes alone are not fluid boundaries.
+        # DexUni's DFSPH component queries texture SDFs; render boxes alone are not fluid boundaries.
         for uid, position, size in (
             ("floor", (0, 0, 0), (0.32, 0.32, 0.02)),
             ("left", (-0.16, 0, 0.15), (0.02, 0.32, 0.3)),

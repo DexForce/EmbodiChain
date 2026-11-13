@@ -1294,10 +1294,12 @@ def test_start_visualization_rejects_open_native_window() -> None:
         sim.start_visualization()
 
 
-def test_start_visualization_does_not_prepare_an_empty_declaration_phase(
+@pytest.mark.parametrize("has_cable", [False, True], ids=["empty", "cable-only"])
+def test_start_visualization_prepares_only_when_assets_are_declared(
     monkeypatch: pytest.MonkeyPatch,
+    has_cable: bool,
 ) -> None:
-    """Starting Viser must not finalize Newton before assets are declared."""
+    """Viser prepares cable-only scenes but leaves an empty builder open."""
 
     class _Exporter:
         def __init__(self, sim: SimulationManager, cfg: object) -> None:
@@ -1313,6 +1315,7 @@ def test_start_visualization_does_not_prepare_an_empty_declaration_phase(
             self.captures = 0
 
         def start(self) -> None:
+            assert self.exporter.sim.prepare.call_count == int(has_cable)
             self.is_running = True
 
         def capture(self, **_kwargs: object) -> None:
@@ -1336,6 +1339,7 @@ def test_start_visualization_does_not_prepare_an_empty_declaration_phase(
     sim._rigid_object_groups = {}
     sim._fluid_objects = {}
     sim._deformable_objects = {}
+    sim._cable_objects = {"cable": object()} if has_cable else {}
     sim._articulations = {}
     sim._robots = {}
     sim._sensors = {}
@@ -1352,7 +1356,7 @@ def test_start_visualization_does_not_prepare_an_empty_declaration_phase(
 
     runtime = sim.start_visualization()
 
-    sim.prepare.assert_not_called()
+    assert sim.prepare.call_count == int(has_cable)
     sim.sync_render_state.assert_not_called()
     assert runtime is not None
     assert runtime.captures == 1
@@ -1863,6 +1867,8 @@ def test_register_kinematic_joint_trajectory_expands_each_arena() -> None:
         positions,
         fps=50.0,
         root_poses=root_poses,
+        joint_names=("joint_b", "joint_a"),
+        initialize_pose=True,
     )
 
     assert builder.add_runtime_control.call_count == sim.num_envs
@@ -1872,6 +1878,8 @@ def test_register_kinematic_joint_trajectory_expands_each_arena() -> None:
         control = control_call.args[0]
         assert control.target == f"arena_{env_index}/robot"
         assert control.fps == 50.0
+        assert control.joint_names == ("joint_b", "joint_a")
+        assert control.initialize_pose is True
         np.testing.assert_array_equal(
             control.joint_positions,
             positions[env_index].numpy(),
@@ -2450,6 +2458,8 @@ def test_prepare_initializes_runtime_for_backend_device_matrix(
     spawn_scene.bind.side_effect = lambda: events.append("bind")
 
     sim = object.__new__(SimulationManager)
+    sim._fluid_objects = {}
+    sim.num_envs = 1
     sync_render_state = MagicMock()
     sim.device = device
     sim._world = MagicMock()
@@ -2502,6 +2512,8 @@ def test_prepare_retries_runtime_and_binding_without_recommit() -> None:
     spawn_scene.builder.has_pending_changes = False
 
     sim = object.__new__(SimulationManager)
+    sim._fluid_objects = {}
+    sim.num_envs = 1
     sync_render_state = MagicMock()
     prepare_spawn_runtime = MagicMock(side_effect=[RuntimeError("first attempt"), None])
     sim.physics = SimpleNamespace(
@@ -2540,6 +2552,8 @@ def test_prepare_retries_camera_attachment_without_recommit() -> None:
     spawn_scene.builder.has_pending_changes = False
 
     sim = object.__new__(SimulationManager)
+    sim._fluid_objects = {}
+    sim.num_envs = 1
     sync_render_state = MagicMock()
     sim.physics = SimpleNamespace(
         name="default",
@@ -2579,6 +2593,8 @@ def test_prepare_syncs_render_state_once_per_topology_revision() -> None:
     sync_render_state = MagicMock(side_effect=lambda _result: events.append("sync"))
 
     sim = object.__new__(SimulationManager)
+    sim._fluid_objects = {}
+    sim.num_envs = 1
     sim.physics = SimpleNamespace(
         name="newton",
         prepare_spawn_runtime=MagicMock(),
@@ -2622,6 +2638,8 @@ def test_prepare_retries_render_state_sync_without_recommit() -> None:
     )
 
     sim = object.__new__(SimulationManager)
+    sim._fluid_objects = {}
+    sim.num_envs = 1
     sim.physics = SimpleNamespace(
         name="newton",
         prepare_spawn_runtime=MagicMock(),
@@ -2928,6 +2946,7 @@ def _make_camera_with_fake_views(
 
 def _make_camera_attachment_manager(num_envs: int = 2) -> SimulationManager:
     sim = object.__new__(SimulationManager)
+    sim._fluid_objects = {}
     sim.num_envs = num_envs
     sim.device = torch.device("cpu")
     sim._robots = {}
@@ -3433,6 +3452,8 @@ def test_prepare_detaches_camera_before_rebuilding_parent(rebuild: bool) -> None
 
     scene.commit.side_effect = commit
     sim = object.__new__(SimulationManager)
+    sim._fluid_objects = {}
+    sim.num_envs = 1
     sim._spawn_scene = scene
     sim._sensors = {"camera": camera}
     sim._default_plane = object()
@@ -4121,7 +4142,7 @@ def test_marker_update_in_observer_waits_for_deferred_final_frame() -> None:
     assert runtime.capture_calls[0]["sim_step"] == 1
 
 
-def test_reset_fluid_selects_rows_and_honors_exclusions():
+def test_reset_fluids_selects_rows_and_honors_exclusions():
     sim = object.__new__(SimulationManager)
     sim.physics = NewtonPhysicsBackend(sim)
     sim.num_envs = 2
@@ -4135,10 +4156,10 @@ def test_reset_fluid_selects_rows_and_honors_exclusions():
         "_deformable_objects",
     ):
         setattr(sim, name, {})
-    fluid, excluded = MagicMock(), MagicMock()
-    sim._fluid_objects = {"water": fluid, "other": excluded}
-    sim.reset_objects_state(env_ids=[1], excluded_uids=["other"])
-    excluded.reset.assert_not_called()
+    fluid, excluded_fluid = MagicMock(), MagicMock()
+    sim._fluid_objects = {"water": fluid, "other_fluid": excluded_fluid}
+    sim.reset_objects_state(env_ids=[1], excluded_uids=["other_fluid"])
+    excluded_fluid.reset.assert_not_called()
     fluid.reset.assert_called_once_with([1])
 
 
