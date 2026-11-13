@@ -150,7 +150,13 @@ def _payload(
         f"{publication['revision']}/reports/{publication['report_id']}"
     )
     verified = []
+    commentary = json.loads(
+        Path(__file__).with_name("task_commentary.json").read_text()
+    )
+    if set(commentary) != {task["code"] for task in data["tasks"]}:
+        raise ValueError("Editorial task coverage must match the retained comparison")
     for task in data["tasks"]:
+        task["editorial"] = commentary[task["code"]]
         source = root / task["source"]
         actual = _sha(source)
         if actual != task["source_sha256"]:
@@ -425,6 +431,14 @@ def main() -> None:
         args.preview_root.expanduser().resolve() if args.preview_root else None
     )
     data = _payload(root, output, not args.no_posters, preview_root)
+    from performance_figures import build_performance_figures
+
+    data["figures"] = build_performance_figures(
+        data["tasks"], output.parent / "figures"
+    )
+    for figure in data["figures"].values():
+        figure["svg_url"] = "figures/" + figure["svg_name"]
+        figure["png_url"] = "figures/" + figure["png_name"]
     if args.bundle_media:
         _bundle_media(data, output)
     template = Path(__file__).with_name("report_template.html").read_text()

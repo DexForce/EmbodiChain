@@ -2024,6 +2024,320 @@
           font-size: 9px;
         }
       }
+
+      .publication-chart {
+        overflow-x: auto;
+        margin-top: 10px;
+      }
+      .publication-chart img {
+        display: block;
+        width: 100%;
+        min-width: 740px;
+      }
+      .plot-downloads {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+        margin: 8px 0;
+      }
+      .plot-downloads span {
+        margin-left: auto;
+        color: var(--muted);
+        font-size: 10px;
+      }
+      .chart-wrap {
+        padding: 16px 10px 12px;
+        background: white;
+        border: 1px solid #cfdfd9;
+        border-top: 3px solid #168c79;
+      }
+      .figure-top {
+        padding: 0 12px;
+      }
+      .legend i {
+        border-radius: 50%;
+        height: 9px;
+        width: 9px;
+      }
+      .legend i.il {
+        border-radius: 0;
+        transform: rotate(45deg);
+      }
+      .case-index {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+        margin: 20px 0 25px;
+      }
+      .case-index a {
+        font:
+          11px Consolas,
+          monospace;
+        padding: 4px 10px;
+        border: 1px solid #cfdfd9;
+        text-decoration: none;
+      }
+      .case-index a:hover {
+        background: #edf7f1;
+      }
+      .task-review {
+        border-top: 2px solid #547f72;
+        margin: 0 0 38px;
+        padding-top: 20px;
+        scroll-margin-top: 24px;
+      }
+      .review-heading {
+        display: flex;
+        justify-content: space-between;
+        gap: 15px;
+        align-items: flex-start;
+        margin-bottom: 18px;
+      }
+      .review-code {
+        font:
+          600 11px Consolas,
+          monospace;
+        color: #087f78;
+        letter-spacing: 1px;
+      }
+      .review-heading h3 {
+        font-size: 21px;
+        line-height: 1.6;
+        margin: 4px 0;
+      }
+      .review-heading p {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .review-benefit {
+        font-size: 12px;
+        font-weight: 600;
+        background: #e9f5ed;
+        border: 1px solid #c4e0d0;
+        color: #087568;
+        padding: 6px 10px;
+        white-space: nowrap;
+      }
+      .review-pair {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+      }
+      .review-pane {
+        min-width: 0;
+      }
+      .review-video {
+        display: block;
+        width: 100%;
+        aspect-ratio: 16/9;
+        background: #17212a;
+        object-fit: contain;
+      }
+      .review-print-poster {
+        display: none;
+      }
+      .review-controls {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin: 12px 0 16px;
+      }
+      .review-controls label {
+        font-size: 11px;
+      }
+      .review-controls select {
+        font-size: 11px;
+        padding: 4px;
+        border: 1px solid var(--line);
+        background: white;
+      }
+      .review-controls .task-link {
+        margin-left: auto;
+        font-size: 10px;
+      }
+      .review-unsupported {
+        padding: 20px;
+        min-height: 225px;
+        background: #fbf7ed;
+        border: 1px solid #e4d2ad;
+        font-size: 12px;
+        color: #795923;
+      }
+      .review-unsupported h4 {
+        font-size: 16px;
+        margin: 12px 0 8px;
+      }
+      .review-stats {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1.1fr;
+        border-top: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+        padding: 14px 0;
+        gap: 16px;
+      }
+      .review-stats span {
+        display: block;
+        color: var(--muted);
+        font-size: 10px;
+        margin-bottom: 6px;
+      }
+      .review-stats strong {
+        font:
+          500 15px/1.6 Consolas,
+          monospace;
+        color: #087568;
+      }
+      .review-stats > div:nth-child(2) strong {
+        color: #657981;
+      }
+      .review-stats p {
+        font-size: 11px;
+      }
+      .review-measured {
+        font-size: 11px;
+        margin: 14px 0;
+        color: #4c6565;
+        line-height: 1.9;
+      }
+      .review-measured strong {
+        font-weight: 600;
+        color: var(--ink);
+        margin-right: 10px;
+      }
+      .review-commentary {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+        background: #f3f8f5;
+        border-left: 3px solid #419b7e;
+        padding: 16px 18px;
+      }
+      .review-eyebrow {
+        font-size: 10px;
+        font-weight: 600;
+        color: #087568;
+        letter-spacing: 0.4px;
+      }
+      .review-commentary p {
+        font-size: 12px;
+        line-height: 1.95;
+        margin-top: 6px;
+      }
+      .review-limit {
+        font-size: 10px;
+        color: var(--muted);
+        line-height: 1.9;
+        margin-top: 12px;
+      }
+      .review-limit strong {
+        font-weight: 500;
+        color: #63756f;
+      }
+      @media (max-width: 650px) {
+        .review-pair,
+        .review-commentary {
+          grid-template-columns: 1fr;
+        }
+        .review-heading {
+          flex-wrap: wrap;
+        }
+        .review-heading h3 {
+          font-size: 20px;
+        }
+        .review-stats {
+          grid-template-columns: 1fr 1fr;
+        }
+        .review-stats > div:last-child {
+          grid-column: 1/-1;
+        }
+        .review-stats strong {
+          font-size: 12px;
+        }
+        .review-unsupported {
+          min-height: 150px;
+        }
+        .review-controls .task-link {
+          margin-left: 0;
+        }
+        .review-commentary {
+          padding: 13px;
+        }
+        .review-commentary p {
+          font-size: 11px;
+        }
+        .plot-downloads span {
+          width: 100%;
+          margin-left: 0;
+        }
+      }
+      @media print {
+        .publication-chart {
+          overflow: visible;
+        }
+        .publication-chart img {
+          min-width: 0;
+          width: 100%;
+        }
+        .plot-downloads,
+        .case-index,
+        .review-controls {
+          display: none !important;
+        }
+        .review-video {
+          display: none !important;
+        }
+        .review-print-poster {
+          display: block;
+          width: 100%;
+          aspect-ratio: 16/9;
+          object-fit: contain;
+          background: #17212a;
+        }
+        .task-review {
+          break-inside: avoid;
+          margin-bottom: 23px;
+          padding-top: 14px;
+        }
+        .review-pair,
+        .review-commentary {
+          grid-template-columns: 1fr 1fr;
+        }
+        .review-heading h3 {
+          font-size: 17px;
+        }
+        .review-heading p {
+          font-size: 10px;
+        }
+        .review-commentary p {
+          font-size: 9px;
+        }
+        .review-commentary {
+          padding: 12px;
+          print-color-adjust: exact;
+        }
+        .review-limit,
+        .review-measured {
+          font-size: 9px;
+        }
+        .review-stats strong {
+          font-size: 12px;
+        }
+        .review-stats {
+          padding: 9px 0;
+        }
+        .review-unsupported {
+          min-height: 150px;
+          font-size: 10px;
+        }
+        .review-benefit {
+          font-size: 10px;
+        }
+        .review-stats > div:last-child {
+          grid-column: auto;
+        }
+      }
     </style>
   </head>
   <body>
@@ -2035,6 +2349,7 @@
         <a href="#summary" class="active">摘要与结论</a
         ><a href="#method">1. 实验条件</a><a href="#results">2. 性能结果</a
         ><a href="#quality">3. 任务效果与录像</a
+        ><a href="#task-reviews">3.1 逐任务效果点评</a
         ><a href="#c02">4. C02 配置取舍</a
         ><a href="#reproduction">5. 复现与数据溯源</a
         ><a href="#references">6. 数据来源</a>
@@ -2101,7 +2416,8 @@
         </div>
         <div>
           <p>四层布夹取铺放 · M03</p>
-          <strong id="headline-m03">−72.7%</strong><span>物理步耗时 · 相对 Isaac</span
+          <strong id="headline-m03">−72.7%</strong
+          ><span>物理步耗时 · 相对 Isaac</span
           ><small>放置检查 EC 5/5，Isaac 0/5；质量条件不同</small>
         </div>
         <div>
@@ -2238,16 +2554,22 @@
                 </option></select
               ><select id="chart-sort" aria-label="图表排序">
                 <option value="task">按任务编号</option>
-                <option value="reduction">按耗时降低</option>
+                <option value="reduction" selected>按耗时降低</option>
               </select>
             </div>
           </div>
-          <div id="chart" class="chart"></div>
+          <div id="chart" class="publication-chart"></div>
+          <div class="plot-downloads">
+            <a class="btn" id="download-chart-svg" download>下载矢量图 SVG</a
+            ><a class="btn" id="download-chart-png" download>下载高清图 PNG</a
+            ><span>均值 ± SD · 仅正式测量</span>
+          </div>
           <p class="figure-caption">
             <strong>图 1.</strong>10
             项双平台正式测量。绝对耗时视图的误差线为进程间
-            SD，越低越快；右侧给出 EC 耗时降低比例及逆耗时比。M03/M04/M06
-            的差异包含不同求解策略，需结合第 3 节的效果检查解读。
+            SD，横轴越低越快；连线展示两侧均值差距，右侧列出精确均值与耗时降低。归一化视图不显示
+            SD。M03/M04/M06 的差异包含不同求解策略，需结合第 3
+            节的效果检查解读。
           </p>
         </div>
         <p class="footnote">
@@ -2479,6 +2801,22 @@
             单独保留在本地。
           </p>
         </div>
+      </section>
+      <section class="section" id="task-reviews">
+        <div class="section-heading">
+          <span class="section-num">3.1</span>
+          <h2>逐任务对比与效果点评</h2>
+        </div>
+        <p class="lead">
+          每项任务单独列出录像、已测数据与效果点评。点评基于实际录像代表阶段的定性观察，不是新增测量；画面材质和光照差异不用于评价物理准确性。EC
+          的优势按性能、效果或场景能力分别说明。
+        </p>
+        <nav
+          class="case-index"
+          id="case-index"
+          aria-label="逐任务对比索引"
+        ></nav>
+        <div id="task-review-list"></div>
       </section>
       <section class="section" id="c02">
         <div class="section-heading">
@@ -2748,33 +3086,12 @@
           `当前显示 ${rows.length} / ${DATA.tasks.length} 项。`;
       }
       function renderChart() {
-        const relative = $("#chart-unit").value === "relative";
-        let rows = [...formal];
-        if ($("#chart-sort").value === "reduction")
-          rows.sort(
-            (a, b) =>
-              b.ec_latency_reduction_percent - a.ec_latency_reduction_percent,
-          );
+        const key = $("#chart-unit").value + "_" + $("#chart-sort").value,
+          f = DATA.figures[key];
         $("#chart").innerHTML =
-          `<div class="chart-head"><span>任务</span><div class="axis">${(relative ? ["0", "25", "50", "75", "100%"] : ["0", "20", "40", "60", "80 ms"]).map((x) => `<span>${x}</span>`).join("")}</div><span style="text-align:right">耗时降低</span></div>` +
-          rows
-            .map((t) => {
-              const base = relative ? t.stats.isaaclab.mean_ms : 80;
-              return `<div class="chart-row"><button class="chart-label" data-open="${t.code}"><b>${t.code}</b><span>${esc(t.name)}</span></button><div class="bar-area">${[
-                "embodichain",
-                "isaaclab",
-              ]
-                .map((p, i) => {
-                  const s = t.stats[p],
-                    w = (s.mean_ms / base) * 100,
-                    sd = (s.sd_ms / base) * 100;
-                  return `<div class="track" role="img" aria-label="${t.code} ${p} ${fmt(s.mean_ms)} ± ${fmt(s.sd_ms)} ms/步"><span class="bar ${i ? "il" : ""}" style="--w:${w}%"></span>${relative ? "" : `<span class="error" style="--left:${Math.max(0, w - sd)}%;--span:${2 * sd}%"></span>`}<span class="bar-value" style="--w:${w}%;${w > 84 ? "left:auto;right:4px;color:white;" : ""}">${relative ? fmt(w, 1) + "%" : fmt(s.mean_ms, 2)}</span></div>`;
-                })
-                .join(
-                  "",
-                )}</div><div class="ratio">${fmt(t.ec_latency_reduction_percent, 1)}%<small>${fmt(t.stats.isaaclab.mean_ms / t.stats.embodichain.mean_ms, 2)}× 逆耗时比</small></div></div>`;
-            })
-            .join("");
+          `<img src="${f.svg_data}" alt="10 项正式任务的配对耗时图；EC 为绿色圆点，Isaac 为灰色菱形。详细数值见下方结果表。" data-chart-variant="${key}">`;
+        $("#download-chart-svg").href = f.svg_url;
+        $("#download-chart-png").href = f.png_url;
       }
       function renderBudget() {
         const short = windowMode === "short";
@@ -2899,6 +3216,7 @@
           for (const r of t.recordings || []) delete r.poster;
         }
         for (const f of copy.c02_figures || []) delete f.poster;
+        for (const f of Object.values(copy.figures || {})) delete f.svg_data;
         download(
           "dexuni-report-data.json",
           JSON.stringify(copy, null, 2),
@@ -2950,6 +3268,78 @@
         e.preventDefault();
         closeTask();
       });
+      function reviewPane(t, r, platform) {
+        if (!r)
+          return `<div class="review-pane"><div class="platform-label il-label">Isaac Lab</div><div class="review-unsupported"><span class="unsupported-tag">完整场景未支持</span><h4>无等价对照场景</h4><p>${esc(t.capability.reason)}</p></div></div>`;
+        return `<div class="review-pane" data-platform="${platform}"><div class="platform-label ${platform === "embodichain" ? "ec-label" : "il-label"}">${esc(r.label)}</div><video class="review-video" controls muted playsinline preload="none" src="${esc(r.url)}" ${r.poster ? `poster="${r.poster}"` : ""} aria-label="${t.code} ${esc(r.label)}"></video>${r.poster ? `<img class="review-print-poster" src="${r.poster}" alt="${t.code} ${esc(r.label)}代表帧">` : ""}</div>`;
+      }
+      $("#case-index").innerHTML = DATA.tasks
+        .map((t) => `<a href="#case-${t.code}">${t.code}</a>`)
+        .join("");
+      $("#task-review-list").innerHTML = DATA.tasks
+        .map((t) => {
+          const ed = t.editorial,
+            ec = t.recordings.find((r) => r.platform === "embodichain"),
+            isaac = t.recordings.filter((r) => r.platform === "isaaclab");
+          const benefit =
+            t.kind === "formal"
+              ? `耗时降低 ${fmt(t.ec_latency_reduction_percent, 1)}%`
+              : t.code === "C02"
+                ? "单次配置摸测"
+                : t.code === "M05"
+                  ? "完整气腔演示"
+                  : "完整双商品场景";
+          return `<article class="task-review" id="case-${t.code}" data-case="${t.code}"><header class="review-heading"><div><span class="review-code">${t.code}</span><h3>${esc(t.name)}</h3><p>${esc(ed.headline)}</p></div><span class="review-benefit">${benefit}</span></header><div class="review-pair">${reviewPane(t, ec, "embodichain")}${reviewPane(t, isaac[0], "isaaclab")}</div><div class="review-controls"><button class="btn btn-primary" data-case-play>播放${isaac.length ? "两侧" : "EC"}录像</button><button class="btn" data-case-pause>暂停</button><button class="btn" data-case-restart>从头重播</button>${isaac.length > 1 ? `<label>Isaac 配置 <select data-case-variant>${isaac.map((r, i) => `<option value="${i}">${esc(r.label)}</option>`).join("")}</select></label>` : ""}<a class="task-link" href="${esc(t.report_url)}" target="_blank" rel="noopener">原始报告 ↗</a></div><div class="review-stats"><div><span>EC · ms/步</span><strong>${stat(t, "embodichain")}</strong></div><div><span>Isaac · ms/步</span><strong>${stat(t, "isaaclab")}</strong></div><div><span>统计范围</span><p>${esc(t.scope)}</p></div></div><p class="review-measured"><strong>已测结果</strong>${esc(t.outcome.replace("按用户要求", "经指定"))}</p><div class="review-commentary"><div><span class="review-eyebrow">效果点评 · 定性观察</span><p>${esc(ed.observation)}</p></div><div><span class="review-eyebrow">EC 优势解读</span><p>${esc(ed.strength)}</p></div></div><p class="review-limit"><strong>比较边界</strong> ${esc(ed.limit)}${t.code === "C02" ? " 上方性能数值对应 EC 与 Isaac 96×24 的单次完整窗口；24×12 仅有前 12 秒计时。" : ""}</p></article>`;
+        })
+        .join("");
+      $$(".task-review").forEach((article) => {
+        const videos = () => [...article.querySelectorAll("video")];
+        article.querySelector("[data-case-play]").onclick = () =>
+          videos().forEach((v) => v.play().catch(() => {}));
+        article.querySelector("[data-case-pause]").onclick = () =>
+          videos().forEach((v) => v.pause());
+        article.querySelector("[data-case-restart]").onclick = () =>
+          videos().forEach((v) => {
+            v.currentTime = 0;
+            v.play().catch(() => {});
+          });
+        const select = article.querySelector("[data-case-variant]");
+        if (select)
+          select.onchange = () => {
+            videos().forEach((v) => v.pause());
+            const t = taskBy(article.dataset.case),
+              r = t.recordings.filter((r) => r.platform === "isaaclab")[
+                Number(select.value)
+              ],
+              pane = article.querySelector('[data-platform="isaaclab"]'),
+              v = pane.querySelector("video");
+            v.src = r.url;
+            v.poster = r.poster || "";
+            v.load();
+            pane.querySelector(".platform-label").textContent = r.label;
+            const img = pane.querySelector("img");
+            if (img && r.poster) img.src = r.poster;
+          };
+      });
+      new IntersectionObserver(
+        (entries) => {
+          entries.forEach((e) => {
+            if (!e.isIntersecting)
+              e.target.querySelectorAll("video").forEach((v) => v.pause());
+          });
+        },
+        { threshold: 0 },
+      ).observe($("#task-review-list"));
+      const caseObserver = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((e) => {
+            if (!e.isIntersecting)
+              e.target.querySelectorAll("video").forEach((v) => v.pause());
+          });
+        },
+        { threshold: 0 },
+      );
+      $$(".task-review").forEach((e) => caseObserver.observe(e));
       const inlineVideo = $("#inline-video"),
         isaacVideo = $("#isaac-video");
       const pair = [inlineVideo, isaacVideo];
@@ -3068,7 +3458,7 @@
         (b) =>
           (b.onclick = () => {
             selectVideoTask(b.dataset.jumpVideo);
-            $("#task-videos").scrollIntoView({
+            $("#case-" + b.dataset.jumpVideo).scrollIntoView({
               behavior: reduceMotion.matches ? "instant" : "smooth",
             });
           }),
@@ -3104,17 +3494,22 @@
       document.addEventListener(
         "play",
         (e) => {
-          if (e.target.tagName === "VIDEO") {
-            if (pair.includes(e.target)) {
-              const v = $("#local-video");
-              if (v) v.pause();
-            } else pausePair();
-          }
+          if (e.target.tagName !== "VIDEO") return;
+          const group = e.target.closest(".task-review");
+          document.querySelectorAll("video").forEach((v) => {
+            const keep = group
+              ? group.contains(v)
+              : pair.includes(e.target)
+                ? pair.includes(v)
+                : v === e.target;
+            if (!keep) v.pause();
+          });
         },
         true,
       );
       document.addEventListener("visibilitychange", () => {
-        if (document.hidden) pausePair();
+        if (document.hidden)
+          document.querySelectorAll("video").forEach((v) => v.pause());
       });
       new IntersectionObserver(
         (entries) => {
@@ -3124,7 +3519,9 @@
         },
         { threshold: 0.25 },
       ).observe($("#video-pair"));
-      window.addEventListener("beforeprint", pausePair);
+      window.addEventListener("beforeprint", () =>
+        document.querySelectorAll("video").forEach((v) => v.pause()),
+      );
       selectVideoTask("M04");
       const figures = ["M03", "M04"]
         .map(taskBy)
@@ -3190,6 +3587,7 @@
         "method",
         "results",
         "quality",
+        "task-reviews",
         "c02",
         "reproduction",
         "references",
