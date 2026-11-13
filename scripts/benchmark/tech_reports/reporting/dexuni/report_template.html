@@ -1450,6 +1450,580 @@
           grid-template-columns: 1fr 1fr;
         }
       }
+
+      :root {
+        --ec: #087f78;
+        --accent: #076f69;
+        --ink: #142e35;
+        --muted: #637879;
+        --line: #d9e3e1;
+        --bg: #f4f7f6;
+      }
+      .toc {
+        background: #eef3f1;
+        border-right-color: #dce6e2;
+      }
+      .toc nav a.active {
+        border-left-color: #087f78;
+      }
+      .toc-kicker {
+        letter-spacing: 1.25px;
+      }
+      .document {
+        padding: 30px 42px 40px;
+        max-width: 1280px;
+        box-shadow: 0 1px 12px #173d3220;
+      }
+      .running-head {
+        border-bottom: 0;
+        padding-bottom: 20px;
+        letter-spacing: 1.2px;
+      }
+      .running-head strong {
+        font-size: 11px;
+      }
+      .report-cover {
+        display: grid;
+        grid-template-columns: 1.03fr 1fr;
+        background: #102d34;
+        color: #f4faf8;
+        margin: 0 -42px;
+        padding: 42px;
+        gap: 30px;
+        position: relative;
+        border-top: 3px solid #2bbaa0;
+      }
+      .cover-eyebrow {
+        color: #7bd8be;
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 2px;
+        margin-bottom: 24px;
+      }
+      .report-cover h1 {
+        font-size: 38px;
+        line-height: 1.48;
+        letter-spacing: 0;
+        font-weight: 700;
+      }
+      .cover-subtitle {
+        font-size: 17px;
+        color: #cce4dc;
+        margin-top: 16px;
+        letter-spacing: 0.5px;
+      }
+      .cover-description {
+        font-size: 12px;
+        color: #b3cac7;
+        line-height: 2;
+        margin-top: 20px;
+        max-width: 420px;
+      }
+      .cover-links {
+        display: flex;
+        gap: 20px;
+        flex-wrap: wrap;
+        margin: 27px 0 23px;
+      }
+      .cover-links a {
+        color: #f2fff9;
+        text-decoration: none;
+        border-bottom: 1px solid #80b3a5;
+        padding-bottom: 5px;
+        font-size: 12px;
+      }
+      .cover-links a span {
+        color: #6cdbba;
+        margin-left: 12px;
+      }
+      .cover-context {
+        font-size: 9px;
+        color: #9cbbb5;
+        letter-spacing: 0.4px;
+      }
+      .cover-visual {
+        align-self: center;
+        position: relative;
+        background: #1c3c42;
+        border: 1px solid #496360;
+      }
+      .cover-visual img {
+        display: block;
+        width: 100%;
+        aspect-ratio: 4/3;
+        object-fit: cover;
+        object-position: center;
+      }
+      .cover-visual figcaption {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 12px;
+        font-size: 8px;
+        color: #b4cfca;
+        flex-wrap: wrap;
+      }
+      .cover-visual figcaption strong {
+        font-size: 9px;
+        font-weight: 400;
+        color: #d8efe8;
+      }
+      .cover-play {
+        position: absolute;
+        bottom: 62px;
+        left: 15px;
+        background: #0e3435e8;
+        color: #e2fff3;
+        border: 1px solid #80cdb8;
+        padding: 7px 12px;
+        font-size: 10px;
+        backdrop-filter: blur(4px);
+      }
+      .headline-metrics {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        padding: 27px 0 22px;
+        border-bottom: 1px solid var(--line);
+        gap: 22px;
+      }
+      .headline-metrics > div {
+        border-right: 1px solid var(--line);
+        padding-right: 15px;
+      }
+      .headline-metrics > div:last-child {
+        border: 0;
+      }
+      .headline-metrics p {
+        font-size: 10px;
+        color: var(--muted);
+        margin-bottom: 6px;
+      }
+      .headline-metrics strong {
+        display: block;
+        font:
+          600 46px/1.3 Arial,
+          sans-serif;
+        letter-spacing: -1.5px;
+        color: #087568;
+      }
+      .headline-metrics strong em {
+        font:
+          18px/1 Arial,
+          sans-serif;
+        letter-spacing: 0;
+      }
+      .headline-metrics span {
+        display: block;
+        font-size: 12px;
+        margin: 5px 0;
+        color: var(--ink);
+      }
+      .headline-metrics small {
+        font-size: 9px;
+        display: block;
+        color: var(--muted);
+        line-height: 1.9;
+      }
+      .cover-footnote {
+        font-size: 9px;
+        color: var(--muted);
+        line-height: 1.9;
+        margin-top: 12px;
+      }
+      .abstract {
+        padding: 34px 0 26px;
+      }
+      .editorial-heading p {
+        font-size: 9px;
+        letter-spacing: 1.8px;
+        color: #087568;
+        font-weight: 600;
+        margin-bottom: 7px;
+      }
+      .editorial-heading h2 {
+        font-size: 24px;
+        font-weight: 650;
+      }
+      .evidence-highlights {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 23px;
+        margin: 23px 0 17px;
+      }
+      .evidence-highlights article {
+        border-top: 2px solid #709a8c;
+        padding: 14px 0 0;
+      }
+      .evidence-highlights .evidence-code {
+        font-size: 11px;
+        font-weight: 600;
+        color: #087568;
+      }
+      .evidence-code span {
+        font-size: 10px;
+        color: var(--muted);
+        font-weight: 400;
+        margin-left: 7px;
+      }
+      .evidence-highlights h3 {
+        font-size: 14px;
+        line-height: 1.7;
+        margin: 9px 0 14px;
+      }
+      .evidence-cost {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+      .evidence-cost span {
+        display: block;
+        font-size: 9px;
+        color: var(--muted);
+      }
+      .evidence-cost strong {
+        font:
+          500 23px/1.6 Arial,
+          sans-serif;
+        color: #087568;
+      }
+      .evidence-cost > div + div strong {
+        color: #748181;
+      }
+      .evidence-cost small {
+        font-size: 10px;
+      }
+      .evidence-bars {
+        display: grid;
+        gap: 5px;
+        margin: 10px 0;
+      }
+      .evidence-bars i {
+        display: block;
+        height: 5px;
+        background: #087f78;
+      }
+      .evidence-bars i + i {
+        background: #b6c4c1;
+        width: 100%;
+      }
+      .evidence-highlights .evidence-saving {
+        font-size: 11px;
+        font-weight: 600;
+        color: #087568;
+        margin: 10px 0;
+      }
+      .evidence-highlights .evidence-note {
+        font-size: 10px;
+        color: var(--muted);
+        line-height: 1.9;
+        min-height: 65px;
+      }
+      .evidence-highlights .task-link {
+        font-family: inherit;
+        font-size: 10px;
+        margin-top: 10px;
+      }
+      .abstract-note {
+        border-top: 1px solid var(--line);
+        padding-top: 15px;
+      }
+      .capability-summary {
+        border-color: #b8d5c7;
+        border-top-color: #19846d;
+        background: #f1f8f3;
+      }
+      .capability-heading h2 {
+        color: #17604f;
+      }
+      .capability-grid article {
+        border-left: 2px solid #b9d3bd;
+        padding-left: 15px;
+      }
+      .section-heading {
+        border-bottom-color: #87a599;
+      }
+      .section-num {
+        color: #087568;
+      }
+      .platform-label {
+        background: #e9f6f0;
+      }
+      .chart-wrap {
+        border-color: #d3e2dd;
+        background: #fbfdfc;
+      }
+      .btn-primary {
+        background: #087568;
+        border-color: #087568;
+      }
+      .video-task[aria-pressed="true"] {
+        background: #087568;
+        border-color: #087568;
+      }
+      .unsupported-task[aria-pressed="true"] {
+        background: #855715;
+        border-color: #855715;
+      }
+      @media (max-width: 1200px) {
+        .document {
+          padding: 28px;
+        }
+        .report-cover {
+          margin: 0 -28px;
+          padding: 30px 28px;
+          gap: 20px;
+        }
+        .report-cover h1 {
+          font-size: 31px;
+        }
+        .cover-description {
+          font-size: 11px;
+        }
+        .headline-metrics strong {
+          font-size: 39px;
+        }
+        .evidence-highlights {
+          gap: 16px;
+        }
+        .evidence-highlights h3 {
+          font-size: 13px;
+        }
+        .evidence-cost strong {
+          font-size: 21px;
+        }
+      }
+      @media (max-width: 850px) {
+        .report-cover h1 {
+          font-size: 29px;
+        }
+        .report-cover {
+          gap: 20px;
+        }
+        .cover-eyebrow {
+          font-size: 8px;
+          letter-spacing: 1px;
+        }
+        .cover-visual img {
+          aspect-ratio: 1/1;
+        }
+        .headline-metrics strong {
+          font-size: 34px;
+        }
+        .evidence-code span {
+          display: block;
+          margin-left: 0;
+        }
+      }
+      @media (max-width: 600px) {
+        .document {
+          padding: 20px 17px;
+        }
+        .report-cover {
+          grid-template-columns: 1fr;
+          margin: 0 -17px;
+          padding: 28px 20px;
+          gap: 24px;
+        }
+        .report-cover h1 {
+          font-size: 32px;
+        }
+        .cover-eyebrow {
+          margin-bottom: 15px;
+        }
+        .cover-description {
+          max-width: none;
+        }
+        .cover-visual img {
+          aspect-ratio: 16/10;
+        }
+        .cover-links {
+          margin: 20px 0;
+        }
+        .headline-metrics {
+          grid-template-columns: 1fr;
+          gap: 15px;
+          padding: 23px 0;
+        }
+        .headline-metrics > div {
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+          padding-bottom: 14px;
+          display: grid;
+          grid-template-columns: 120px 1fr;
+          column-gap: 15px;
+        }
+        .headline-metrics p {
+          grid-column: 1/-1;
+        }
+        .headline-metrics strong {
+          grid-row: 2/4;
+        }
+        .headline-metrics span {
+          font-size: 12px;
+        }
+        .headline-metrics small {
+          font-size: 10px;
+        }
+        .headline-metrics > div:last-child {
+          padding-bottom: 0;
+        }
+        .evidence-highlights {
+          grid-template-columns: 1fr;
+        }
+        .evidence-highlights .evidence-note {
+          min-height: 0;
+        }
+        .evidence-code span {
+          display: inline;
+          margin-left: 6px;
+        }
+        .evidence-cost strong {
+          font-size: 26px;
+        }
+        .evidence-highlights h3 {
+          font-size: 15px;
+        }
+        .abstract {
+          padding-top: 27px;
+        }
+        .editorial-heading h2 {
+          font-size: 22px;
+        }
+        .cover-footnote {
+          font-size: 9px;
+        }
+      }
+      @media print {
+        .report-cover {
+          margin: 0;
+          padding: 20px;
+          grid-template-columns: 1.1fr 1fr;
+          gap: 20px;
+          print-color-adjust: exact;
+          -webkit-print-color-adjust: exact;
+          break-inside: avoid;
+        }
+        .report-cover h1 {
+          font-size: 24px;
+        }
+        .cover-eyebrow {
+          font-size: 7px;
+          margin-bottom: 15px;
+        }
+        .cover-subtitle {
+          font-size: 12px;
+        }
+        .cover-description {
+          font-size: 9px;
+          margin-top: 12px;
+        }
+        .cover-links,
+        .cover-play {
+          display: none;
+        }
+        .cover-context {
+          font-size: 7px;
+          margin-top: 16px;
+        }
+        .cover-visual img {
+          aspect-ratio: 4/3;
+        }
+        .cover-visual figcaption {
+          font-size: 6px;
+        }
+        .headline-metrics {
+          grid-template-columns: 1fr 1fr 1fr;
+          gap: 15px;
+          padding: 18px 0;
+        }
+        .headline-metrics strong {
+          font-size: 31px;
+        }
+        .headline-metrics small {
+          font-size: 7px;
+        }
+        .headline-metrics p {
+          font-size: 8px;
+        }
+        .headline-metrics span {
+          font-size: 9px;
+        }
+        .cover-footnote {
+          font-size: 8px;
+        }
+        .evidence-highlights {
+          grid-template-columns: repeat(3, 1fr);
+          gap: 15px;
+          break-inside: avoid;
+        }
+        .evidence-cost strong {
+          font-size: 19px;
+        }
+        .evidence-highlights h3 {
+          font-size: 11px;
+        }
+        .evidence-highlights .evidence-note {
+          font-size: 8px;
+        }
+        .editorial-heading h2 {
+          font-size: 20px;
+        }
+        .abstract {
+          padding-top: 23px;
+        }
+        .document {
+          padding: 0;
+        }
+      }
+
+      .cover-mobile-proof {
+        display: none;
+      }
+      @media (max-width: 600px) {
+        .cover-mobile-proof {
+          display: block;
+          color: #d2ede4;
+          font-size: 11px;
+          margin: 18px 0 12px;
+        }
+        .cover-mobile-proof strong {
+          font:
+            600 30px/1.2 Arial,
+            sans-serif;
+          color: #7be3bf;
+          margin-right: 10px;
+        }
+        .cover-mobile-proof small {
+          font-size: 9px;
+        }
+        .cover-context {
+          font-size: 8px;
+        }
+        .running-head strong {
+          font-size: 9px;
+        }
+      }
+      .cover-footnote {
+        font-size: 10px;
+      }
+      .headline-metrics small {
+        font-size: 10px;
+      }
+      .evidence-highlights .evidence-note {
+        font-size: 11px;
+      }
+      @media print {
+        .cover-mobile-proof {
+          display: none;
+        }
+        .cover-footnote,
+        .headline-metrics small {
+          font-size: 8px;
+        }
+        .evidence-highlights .evidence-note {
+          font-size: 9px;
+        }
+      }
     </style>
   </head>
   <body>
@@ -1462,7 +2036,7 @@
         ><a href="#method">1. 实验条件</a><a href="#results">2. 性能结果</a
         ><a href="#quality">3. 任务效果与录像</a
         ><a href="#c02">4. C02 配置取舍</a
-        ><a href="#reproduction">5. 复现与资产更新</a
+        ><a href="#reproduction">5. 复现与数据溯源</a
         ><a href="#references">6. 数据来源</a>
       </nav>
       <div class="toc-foot">
@@ -1470,7 +2044,7 @@
           href="https://github.com/DexForce/EmbodiChain/pull/893"
           target="_blank"
           rel="noopener"
-          >关联 MR #893 ↗</a
+          >报告源码 ↗</a
         >
       </div>
     </aside>
@@ -1479,89 +2053,86 @@
         <strong>DEXFORCE / EMBODICHAIN</strong
         ><span>TECHNICAL REPORT · TR-DEXUNI-2026-10</span>
       </header>
-      <div class="doc-title" id="summary">
-        <div class="report-label">物理仿真基准评测</div>
-        <h1>EmbodiChain 与 Isaac Lab<br />物理仿真性能及任务效果对比</h1>
-        <p class="subtitle">
-          DexUni 系列任务：软体形变、布料操作、刚柔耦合与双臂装袋
-        </p>
-      </div>
-      <div class="metadata">
-        <span>测量数据<strong>截至 2026-10-27</strong></span
-        ><span>硬件<strong>RTX 5090 D v2</strong></span
-        ><span>范围<strong>13 个任务项</strong></span
-        ><span>报告修订<strong>2026-11-13</strong></span>
-      </div>
-      <div class="abstract">
-        <h2>摘要</h2>
-        <p>
-          本报告汇总 13 个既有任务项，其中 10 项具有双平台各 5
-          次进程测量。以关闭相机、GPU
-          同步完成的物理外步耗时为主要指标，在已测配置下，EmbodiChain 的耗时较
-          Isaac Lab 降低 <strong>1.7%–72.7%</strong>。较大差异集中在使用
-          surface-fast
-          策略的布料任务；基础软体任务差异相对较小。操作效果按各任务既定检查分别报告，失败样本仍计入耗时统计。M05、C01
-          缺少本次 Isaac 环境的完整等价气腔场景；C02
-          仅有单次配置摸测，单独分析。
-        </p>
-        <div class="findings">
-          <div class="finding">
-            <span class="finding-index">01</span>
-            <div>
-              <h3>主要性能收益来自布料优化组</h3>
-              <p>
-                M03、M04、M06 的逆耗时比分别为
-                3.67×、3.30×、2.22×。这些结果包含求解策略差异；M03 的 20 mm
-                放置检查为 EC 5/5、Isaac 0/5，不能解读为等质量比较。
-              </p>
-            </div>
-            <div class="finding-value">
-              3.67×<span>M03 · 当前配置逆耗时比</span>
-            </div>
+      <section class="report-cover" id="summary">
+        <div class="cover-copy">
+          <p class="cover-eyebrow">DEXUNI · MULTIPHYSICS BENCHMARK</p>
+          <h1>更低的计算开销，<br />更完整的交互场景。</h1>
+          <p class="cover-subtitle">EmbodiChain 多物理仿真技术报告</p>
+          <p class="cover-description">
+            从软体抓取、布料折叠到含气腔商品装袋，评估 EmbodiChain 与 Isaac Lab
+            在机器人交互任务中的物理推进性能、任务效果与场景能力。
+          </p>
+          <div class="cover-links">
+            <a href="#results">查看完整测量结果 <span>↗</span></a
+            ><a href="#task-videos">观看双平台对比 <span>▶</span></a>
           </div>
-          <div class="finding">
-            <span class="finding-index">02</span>
-            <div>
-              <h3>基础任务性能差距较小</h3>
-              <p>
-                S01-C/T、S02–S04 与 M01 的耗时降低约
-                1.7%–22.1%。此结论限于固定初态和已测版本，不代表整应用帧率或通用物理精度。
-              </p>
-            </div>
-            <div class="finding-value">
-              1.7–22.1%<span>上述基础任务耗时降低</span>
-            </div>
-          </div>
-          <div class="finding">
-            <span class="finding-index">03</span>
-            <div>
-              <h3>Isaac 完整场景支持存在缺口</h3>
-              <p>
-                M05 充气包压载、C01 双商品装袋，在本次 Isaac Lab / Newton
-                后端未实现完整场景。C02 的 Isaac 24×12 配置倒袋失败；96×24
-                录像完成提袋，但严格保形检查未全过，最低可用预算尚未确定。
-              </p>
-            </div>
-            <div class="finding-value">
-              2 项未支持<span>M05 / C01 · 完整场景</span>
-            </div>
-          </div>
+          <p class="cover-mobile-proof">
+            <strong id="mobile-m04">3.30×</strong> M04 物理推进速度比<br /><small
+              >两侧 6 项既定检查均为 5/5</small
+            >
+          </p>
+          <p class="cover-context">
+            13 项任务 · RTX 5090 D v2 · GPU 同步物理步计时
+          </p>
         </div>
-        <p class="abstract-note">
-          本次整理未新增正式性能测量。2026-11-13 的 W1
-          资产更新运行仅用于视频与图片更新，单独列于第 5 节，不替换表 1
-          中的既有测量数据。
-        </p>
+        <figure class="cover-visual">
+          <img
+            id="cover-image"
+            alt="EmbodiChain 使用新 W1 资产完成双臂 T 恤折叠"
+          />
+          <figcaption>
+            <span>M04 / Bimanual cloth folding</span
+            ><strong>实际仿真画面 · EmbodiChain</strong>
+          </figcaption>
+          <button
+            class="cover-play"
+            data-jump-video="M04"
+            aria-label="观看 M04 双平台视频"
+          >
+            ▶ 观看折叠对比
+          </button>
+        </figure>
+      </section>
+      <div class="headline-metrics">
+        <div>
+          <p>双臂 T 恤折叠 · M04</p>
+          <strong id="headline-m04">3.30×</strong><span>物理推进速度比</span
+          ><small>两侧 6 项既定检查均为 5/5</small>
+        </div>
+        <div>
+          <p>四层布夹取铺放 · M03</p>
+          <strong id="headline-m03">−72.7%</strong><span>物理步耗时 · 相对 Isaac</span
+          ><small>放置检查 EC 5/5，Isaac 0/5；质量条件不同</small>
+        </div>
+        <div>
+          <p>含气腔完整场景 · M05 / C01</p>
+          <strong>2 <em>项</em></strong
+          ><span>EC 已展示完整交互</span
+          ><small>本次 Isaac Lab / Newton 未实现等价场景</small>
+        </div>
       </div>
+      <p class="cover-footnote">
+        性能数字来自截至 2026-10-27 的已测配置；双平台正式任务每侧 5
+        个进程。不同求解策略不等价，结果不代表整应用 FPS。2026-11-13 更新 W1
+        展示素材，测量数据保持原批次。
+      </p>
+      <section class="abstract" aria-label="核心发现">
+        <div class="editorial-heading">
+          <p>KEY FINDINGS / 核心发现</p>
+          <h2>性能优势，落实到任务结果。</h2>
+        </div>
+        <div class="evidence-highlights" id="evidence-highlights"></div>
+        <p class="abstract-note" id="formal-summary"></p>
+      </section>
       <div class="capability-summary" id="capabilities">
         <div class="capability-heading">
-          <h2>Isaac 场景支持边界</h2>
+          <h2>覆盖含气腔的完整交互场景</h2>
           <span>本次测试环境：Isaac Lab / Newton 后端</span>
         </div>
         <div class="capability-grid">
           <article>
             <span class="unsupported-tag">完整场景未支持</span>
-            <h3>M05 · 充气包与刚块压载</h3>
+            <h3>M05 · 充气包压载与恢复</h3>
             <p>
               EC 展示气腔形变、压载与恢复；Isaac
               侧未实现同等气腔场景，无等价性能对照。
@@ -1590,8 +2161,8 @@
       </div>
       <div class="tools">
         <a class="btn btn-primary" href="#task-videos">观看 13 项任务录像</a>
-        <button class="btn" id="export-all">导出全部结果 CSV</button
-        ><button class="btn" id="export-json">导出内嵌数据 JSON</button
+        <button class="btn" id="export-all">下载结果 CSV</button
+        ><button class="btn" id="export-json">下载结果 JSON</button
         ><button class="btn btn-primary" id="print">打印 / 保存 PDF</button>
       </div>
       <section class="section" id="method">
@@ -1634,8 +2205,7 @@
           <div class="condition">
             <dt>样本保留</dt>
             <dd>
-              失败计时保留。M06 的 EC 第 5
-              次按用户要求重测替换，原始记录仍保留。
+              失败计时保留。M06 的 EC 第 5 次经指定重测替换，原始记录仍保留。
             </dd>
           </div>
         </dl>
@@ -1967,7 +2537,7 @@
       <section class="section" id="reproduction">
         <div class="section-heading">
           <span class="section-num">5</span>
-          <h2>复现验证与资产更新</h2>
+          <h2>复现验证与数据溯源</h2>
         </div>
         <h3 class="subheading">5.1 新 SDK 冷启动验证（2026-10-27）</h3>
         <p class="lead">
@@ -1996,7 +2566,7 @@
         </p>
         <h3 class="subheading">5.2 W1 外观资产更新（2026-11-13）</h3>
         <p class="lead">
-          旧资产的躯干外壳与手臂采用不同材质参数。按用户提供的
+          旧资产的躯干外壳与手臂采用不同材质参数。使用更新后的
           <code>w1-030</code> 资产重新运行 EC
           场景并录制；完整运行结果及独立输出见下表。新资产同时减少了相机/支架链接，因此这批录像明确作为新资产素材录制，不与旧资产性能统计混合。
         </p>
@@ -2015,7 +2585,7 @@
         </div>
         <div class="note">
           表 1 / 表 2 为 2026-10-27
-          及以前的既有测量与效果检查；本节是后续素材录制。原始状态、录像与来源哈希均保留。新录像中的材质来自真实资产，未对图片涂色。
+          及以前的既有测量与效果检查；本节列出后续素材更新。原始状态、录像与来源哈希均保留。
         </div>
       </section>
       <section class="section" id="references">
@@ -2048,12 +2618,12 @@
               target="_blank"
               rel="noopener"
               >MR #893：技术报告源码、任务脚本与页面构建器</a
-            >。C03 已移除；S01-C/T 分别计为任务项。
+            >。S01-C/T 分别计为任务项。
           </li>
         </ol>
         <p class="footnote">
-          本 HTML 内嵌数据与截图，可离线浏览、导出和打印。视频可在页内播放，MP4
-          未上传；播放依赖本地目录关系。所有在线来源固定到已发布的数据集版本。
+          本 HTML
+          内嵌数据与截图，可离线浏览、导出和打印。视频在页内播放；分发时请保留随附媒体目录。测量数据来源固定到已发布的数据集版本。
         </p>
         <details class="provenance">
           <summary>展开固定版本与来源校验信息</summary>
@@ -2105,6 +2675,40 @@
       const fmt = (n, d = 3) => Number(n).toFixed(d);
       const taskBy = (c) => DATA.tasks.find((t) => t.code === c);
       const formal = DATA.tasks.filter((t) => t.kind === "formal");
+      const m04 = taskBy("M04"),
+        m03 = taskBy("M03");
+      $("#headline-m04").textContent =
+        fmt(m04.stats.isaaclab.mean_ms / m04.stats.embodichain.mean_ms, 2) +
+        "×";
+      $("#headline-m03").textContent =
+        "−" + fmt(m03.ec_latency_reduction_percent, 1) + "%";
+      $("#mobile-m04").textContent = $("#headline-m04").textContent;
+      if (m04.poster) $("#cover-image").src = m04.poster;
+      else $("#cover-image").hidden = true;
+      const evidenceNotes = {
+        M04: [
+          "相同既定检查，更低推进耗时",
+          "两侧原 6 项检查均 5/5；最终下摆 XY 误差约为 EC 26 mm、Isaac 46 mm。",
+        ],
+        M03: [
+          "多层布料，兼顾速度与放置结果",
+          "20 mm 放置检查 EC 5/5、Isaac 0/5。两侧效果不同，全部计时样本保留。",
+        ],
+        M06: [
+          "将布料优化扩展至单臂折叠",
+          "保留样本两侧折叠检查均 5/5；EC 含一组指定重测替换。",
+        ],
+      };
+      $("#evidence-highlights").innerHTML = ["M04", "M03", "M06"]
+        .map((code) => {
+          const t = taskBy(code),
+            e = t.stats.embodichain,
+            i = t.stats.isaaclab;
+          return `<article><p class="evidence-code">${code} <span>${esc(t.name)}</span></p><h3>${evidenceNotes[code][0]}</h3><div class="evidence-cost"><div><span>EmbodiChain</span><strong>${fmt(e.mean_ms, 2)}<small> ms</small></strong></div><div><span>Isaac Lab</span><strong>${fmt(i.mean_ms, 2)}<small> ms</small></strong></div></div><div class="evidence-bars"><i style="width:${(e.mean_ms / i.mean_ms) * 100}%" aria-label="EC 相对耗时"></i><i aria-label="Isaac 相对耗时"></i></div><p class="evidence-saving">耗时降低 ${fmt(t.ec_latency_reduction_percent, 1)}%</p><p class="evidence-note">${evidenceNotes[code][1]}</p><button class="task-link" data-jump-video="${code}">查看视频与效果 →</button></article>`;
+        })
+        .join("");
+      $("#formal-summary").textContent =
+        `${formal.filter((t) => t.stats.embodichain.mean_ms < t.stats.isaaclab.mean_ms).length}/${formal.length} 项双平台正式任务中，EC 的物理步耗时均值更低。优势幅度随任务变化（1.7%–72.7%），不等同于每项均具有统计显著性；M02/M03/M04/M06 使用不同求解策略，完整配置、SD 与效果见下文。`;
       let filter = "all",
         query = "",
         windowMode = "short";
@@ -2196,7 +2800,7 @@
         $("#modal-code").textContent = `${code} · ${t.scope}`;
         const poster = t.poster;
         $("#modal-body").innerHTML =
-          `${poster ? `<div class="scene"><img src="${poster}" alt="${esc(t.name)}场景截图"></div>` : ""}${t.capability.status === "unsupported" ? `<div class="note warning"><strong>Isaac 完整场景未支持</strong><br>${esc(t.capability.reason)}</div>` : ""}<p><strong>测量配置：</strong>${esc(t.configuration)}</p><div class="table-scroll"><table><thead><tr><th>平台</th><th>物理均值 ± SD（ms/步）</th><th>进程数</th></tr></thead><tbody>${["embodichain", "isaaclab"].map((p) => `<tr><td>${p === "embodichain" ? "EmbodiChain" : "Isaac Lab"}</td><td class="number">${stat(t, p)}</td><td>${t.stats[p]?.processes ?? "—"}</td></tr>`).join("")}</tbody></table></div><p><strong>已测效果与限制：</strong>${esc(t.outcome)}</p><div class="modal-actions"><a class="btn" href="${esc(t.report_url)}" target="_blank" rel="noopener">逐任务报告 ↗</a><a class="btn" href="${esc(t.source_url)}" target="_blank" rel="noopener">原始数据 ↗</a>${t.recordings.map((r, i) => `<button class="btn" data-modal-video="${i}">${esc(r.label)}</button>`).join("")}</div><video id="local-video" controls playsinline preload="none" hidden></video><p id="video-note" class="footnote">W1 场景使用最新资产录像；性能数值来自既有测量批次。</p><div class="hash">来源：${esc(t.source)}<br>SHA256：${esc(t.source_sha256)}</div>`;
+          `${poster ? `<div class="scene"><img src="${poster}" alt="${esc(t.name)}场景截图"></div>` : ""}${t.capability.status === "unsupported" ? `<div class="note warning"><strong>Isaac 完整场景未支持</strong><br>${esc(t.capability.reason)}</div>` : ""}<p><strong>测量配置：</strong>${esc(t.configuration)}</p><div class="table-scroll"><table><thead><tr><th>平台</th><th>物理均值 ± SD（ms/步）</th><th>进程数</th></tr></thead><tbody>${["embodichain", "isaaclab"].map((p) => `<tr><td>${p === "embodichain" ? "EmbodiChain" : "Isaac Lab"}</td><td class="number">${stat(t, p)}</td><td>${t.stats[p]?.processes ?? "—"}</td></tr>`).join("")}</tbody></table></div><p><strong>已测效果与限制：</strong>${esc(t.outcome.replace("按用户要求", "经指定"))}</p><div class="modal-actions"><a class="btn" href="${esc(t.report_url)}" target="_blank" rel="noopener">逐任务报告 ↗</a><a class="btn" href="${esc(t.source_url)}" target="_blank" rel="noopener">原始数据 ↗</a>${t.recordings.map((r, i) => `<button class="btn" data-modal-video="${i}">${esc(r.label)}</button>`).join("")}</div><video id="local-video" controls playsinline preload="none" hidden></video><p id="video-note" class="footnote">W1 场景使用最新资产录像；性能数值来自既有测量批次。</p><div class="hash">来源：${esc(t.source)}<br>SHA256：${esc(t.source_sha256)}</div>`;
         $$("[data-modal-video]").forEach(
           (b) =>
             (b.onclick = () => {

@@ -82,3 +82,21 @@ python scripts/benchmark/tech_reports/physics/platforms/dexuni/embodichain/m04.p
 不宣称动作阶段或视频时长严格对齐；结束一侧停在末帧。进入视野时静音预览，离开时暂停，
 遵循减少动态效果偏好，也可关闭自动预览。打印保留两侧对应截图。
 MP4 使用本地相对路径，没有上传视频；分享时需一并保留对应目录。
+
+
+### 对外展示与便携发布包
+
+首屏以实际 W1 仿真画面和可追溯的 M04/M03 数据呈现性能，突出含气腔场景能力。
+关键数字从内嵌测量数据计算；M03 的效果差异、M06 的替换样本及后端支持范围仍明确列出。
+页面只保留资产相对文件名与 SHA256，不包含运行机器的用户目录。
+
+```bash
+.venv/bin/python scripts/benchmark/tech_reports/reporting/dexuni/build_html_report.py \
+  --preview-root outputs/benchmarks/tech_reports/dexuni/presentation/w1-refresh-20261112 \
+  --output outputs/benchmarks/tech_reports/dexuni/publication/embodichain-physics-report/index.html \
+  --bundle-media
+```
+
+`--bundle-media` 将当前选择的 25 段平台录像复制到 HTML 旁的 `media/`，并写入
+`media/manifest.json` 校验清单。整个目录可以搬移或托管；此命令不上传任何内容。
+仅复制 HTML 不包含 MP4。原始测量、输入资产及录像均不改写。

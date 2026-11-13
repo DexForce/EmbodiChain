@@ -23,9 +23,10 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 __all__ = ["main"]
 
@@ -114,6 +115,17 @@ def _refresh_media(
         video = directory / "preview/video.mp4"
     completed = manifest.get("status") == "completed" and video.is_file()
     effective = manifest.get("effective", {})
+    asset = json.loads(asset_path.read_text())
+    asset_root = Path(asset["selected_robot_urdf"]).parent
+    public_asset = {
+        "model": "W1-030",
+        "link_count": asset["link_count"],
+        "joint_count": asset["joint_count"],
+        "sha256": {
+            str(Path(name).relative_to(asset_root)): digest
+            for name, digest in asset["sha256"].items()
+        },
+    }
     return {
         "completed": completed,
         "steps": effective.get("step_index", manifest.get("frames")),
@@ -122,7 +134,7 @@ def _refresh_media(
         "poster": _poster(video, second) if completed and include_posters else None,
         "video_url": _local_url(video, output) if completed else None,
         "manifest_sha256": _sha(manifest_path),
-        "robot_asset": json.loads(asset_path.read_text()),
+        "robot_asset": public_asset,
         "asset_record_sha256": _sha(asset_path),
     }
 
@@ -345,6 +357,39 @@ def _payload(
     return data
 
 
+def _bundle_media(data: dict, output: Path) -> None:
+    """Copy the selected platform videos into a portable, hash-indexed folder."""
+    media = output.parent / "media"
+    media.mkdir(parents=True, exist_ok=True)
+    manifest = []
+    for task in data["tasks"]:
+        for index, recording in enumerate(task["recordings"]):
+            source = (output.parent / unquote(recording["url"])).resolve(strict=True)
+            name = f"{task['code'].lower()}_{recording['platform']}_{index}.mp4"
+            destination = media / name
+            if source != destination.resolve():
+                shutil.copy2(source, destination)
+            recording["url"] = "media/" + name
+            manifest.append(
+                dict(
+                    task=task["code"],
+                    label=recording["label"],
+                    file=recording["url"],
+                    bytes=destination.stat().st_size,
+                    sha256=_sha(destination),
+                )
+            )
+        ec = next(
+            (r for r in task["recordings"] if r["platform"] == "embodichain"), None
+        )
+        task["video_url"] = ec["url"] if ec else None
+        if task.get("refresh", {}).get("completed"):
+            task["refresh"]["video_url"] = ec["url"] if ec else None
+    (media / "manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n"
+    )
+
+
 def main() -> None:
     """Render embedded data, screenshots and UI into one offline HTML report.
 
@@ -357,6 +402,11 @@ def main() -> None:
     parser.add_argument("--root", type=Path, default=_DEFAULT_ROOT)
     parser.add_argument("--output", type=Path)
     parser.add_argument(
+        "--bundle-media",
+        action="store_true",
+        help="Copy selected MP4 files beside --output for a portable report. No upload.",
+    )
+    parser.add_argument(
         "--preview-root",
         type=Path,
         help="Optional isolated new-asset recordings, with lowercase task directories.",
@@ -365,6 +415,8 @@ def main() -> None:
         "--no-posters", action="store_true", help="Skip video frame extraction."
     )
     args = parser.parse_args()
+    if args.bundle_media and args.output is None:
+        parser.error("--bundle-media requires an explicit --output release path")
     root = args.root.expanduser().resolve()
     output = (args.output or root / "report.html").expanduser().resolve()
     if output.suffix.lower() != ".html":
@@ -373,6 +425,8 @@ def main() -> None:
         args.preview_root.expanduser().resolve() if args.preview_root else None
     )
     data = _payload(root, output, not args.no_posters, preview_root)
+    if args.bundle_media:
+        _bundle_media(data, output)
     template = Path(__file__).with_name("report_template.html").read_text()
     encoded = json.dumps(data, ensure_ascii=False, allow_nan=False).replace(
         "<", "\\u003c"
