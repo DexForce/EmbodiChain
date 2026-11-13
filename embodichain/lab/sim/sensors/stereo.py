@@ -294,34 +294,31 @@ class StereoCamera(Camera):
         fetch_only = kwargs.get("fetch_only", False)
         if not fetch_only:
             self._pending_capture_metadata = None
-            self._frame_buffer.apply_ordered()
-            self._snapshot_render_metadata()
+            self._apply_camera_groups()
 
         self.cfg: StereoCameraCfg
         if self.cfg.enable_color:
-            data = self._frame_buffer.get_rgb_gpu_buffer().to(self.device)
+            data = self._read_groups("get_rgb_gpu_buffer")
             self._data_buffer["color"] = data[: self.num_instances, ...]
             self._data_buffer[f"color_right"] = data[self.num_instances :, ...]
         if self.cfg.enable_depth:
-            data = self._frame_buffer.get_depth_gpu_buffer().to(self.device)
+            data = self._read_groups("get_depth_gpu_buffer")
             self._data_buffer["depth"] = data[: self.num_instances, ...].unsqueeze_(-1)
             self._data_buffer[f"depth_right"] = data[
                 self.num_instances :, ...
             ].unsqueeze_(-1)
         if self.cfg.enable_mask:
-            data = self._frame_buffer.get_visible_mask_gpu_buffer().to(
-                self.device, torch.int32
-            )
+            data = self._read_groups("get_visible_mask_gpu_buffer", torch.int32)
             self._data_buffer["mask"] = data[: self.num_instances, ...].unsqueeze_(-1)
             self._data_buffer[f"mask_right"] = data[
                 self.num_instances :, ...
             ].unsqueeze_(-1)
         if self.cfg.enable_normal:
-            data = self._frame_buffer.get_normal_gpu_buffer().to(self.device)[..., :3]
+            data = self._read_groups("get_normal_gpu_buffer")[..., :3]
             self._data_buffer["normal"] = data[: self.num_instances, ...]
             self._data_buffer[f"normal_right"] = data[self.num_instances :, ...]
         if self.cfg.enable_position:
-            data = self._frame_buffer.get_position_gpu_buffer().to(self.device)[..., :3]
+            data = self._read_groups("get_position_gpu_buffer")[..., :3]
             self._data_buffer["position"] = data[: self.num_instances, ...]
             self._data_buffer[f"position_right"] = data[self.num_instances :, ...]
         if self.cfg.enable_disparity:

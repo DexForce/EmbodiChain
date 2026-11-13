@@ -44,6 +44,17 @@ multiple robots need distinct sensor UIDs. Camera creation and rebuilds retain
 the same manager-owned lifecycle. Removing a robot destroys its automatically
 initialized cameras before rebuilding the physical scene.
 
+For a configured Gym deployment, the manager plans Scene-owned groups before
+creating robot-mounted and independent cameras. Cameras with matching
+resolution, enabled outputs and visual-overlay policy share a target; individual
+intrinsics, poses and ground visibility remain view-owned. FastRT and offline RT
+use one group per compatible set on the current DexSim dev build, while Hybrid
+packs at most 32 views per group. Sensors added after startup keep independent
+targets. The manager owns group lifetime, and each sensor reads only its leased
+slots in Arena/eye order. Gym and recording consumers render each unique group
+once; direct sensor captures include all groups in its shared set. A partial
+group render cannot publish a complete capture-metadata snapshot.
+
 Componentized Gym deployments select the robot and independent sensors through
 an embodiment component. The component/inline exclusion rules, Gym acquisition
 switch and effective suite belong to

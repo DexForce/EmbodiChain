@@ -1,5 +1,29 @@
 # Rendering benchmark
 
+Compare native group sharing for three 640×480 RGB-only cameras in the fixed
+scene:
+
+```bash
+python -m scripts.benchmark.rendering.camera_grouping \
+  --config scripts/benchmark/rendering/settings/three_rgb_640x480.yaml
+```
+
+The paired run alternates three independent groups with one shared group at
+each configured environment count. It reports completed RGB camera images per
+second (`frames × environments × 3 / seconds`), completed render and fetch
+latency, sampled GPU memory, and a corresponding-view image comparison. Scene
+state updates and initialization are outside the timed window. Raw worker
+results and the report are under `outputs/benchmarks/camera_grouping_<timestamp>/`.
+The default gate requires positive paired mean-gain 95% intervals at 1, 8, 32,
+and 80 environments, no more than 3% median regression at the other counts,
+and at least 2 GiB GPU memory free during shared runs.
+The paired runner refuses to start while another GPU compute process is present
+and checks again between workers. Use `--allow-shared-gpu` only for exploratory
+runs whose throughput will be reported as shared-machine measurements.
+An interrupted clean run can resume with `--resume-run-dir` pointing to its
+existing output directory; a sample rejected for shared GPU activity is removed
+before resuming.
+
 The rendering benchmark compares configured offscreen rendering settings using
 one deterministic reflective scene. The scene is deliberately fixed today;
 the scene builder and its name provide the extension point for future scenes.

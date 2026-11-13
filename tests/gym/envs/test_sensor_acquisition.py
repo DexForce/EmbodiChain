@@ -44,7 +44,10 @@ def _sensor_env(*, enable_sensor: bool) -> EmbodiedEnv:
         enable_sensor=enable_sensor,
         sensor=[SimpleNamespace(uid="camera")],
     )
-    env.sim = SimpleNamespace(add_sensor=MagicMock(return_value=object()))
+    env.sim = SimpleNamespace(
+        add_sensor=MagicMock(return_value=object()),
+        _plan_camera_groups=MagicMock(),
+    )
     return env
 
 
@@ -101,11 +104,13 @@ def test_gym_overrides_robot_sensor_switch_on_a_copy(
     assert runtime_cfg is not original
     sensors = env._setup_sensors()
     if enable_sensor:
+        env.sim._plan_camera_groups.assert_called_once()
         assert list(sensors) == ["camera", "wrist"]
         assert sensors["wrist"] is mounted_instance
         env.sim.add_sensor.assert_called_once_with(env.cfg.sensor[0])
         env.sim.get_sensor.assert_called_once_with("wrist")
     else:
+        env.sim._plan_camera_groups.assert_not_called()
         assert sensors == {}
         env.sim.add_sensor.assert_not_called()
         env.sim.get_sensor.assert_not_called()
