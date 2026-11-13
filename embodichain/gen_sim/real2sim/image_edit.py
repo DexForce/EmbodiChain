@@ -91,10 +91,11 @@ def edit_scene_image(
     *,
     prompt: str = _SCENE_PROMPT,
 ) -> Path:
-    """Remove robot/background and lighting clutter, preserving image coordinates.
+    """Remove robot/background and lighting clutter at the provider resolution.
 
     The service receives padded 32-aligned input; output padding is removed and
-    resized back to the original pixel grid for calibrated RGB-D registration.
+    kept at the model's output resolution. Registration maps masks back onto the
+    calibrated observation grid without discarding this reconstruction image.
     Generated hidden surfaces remain estimates, never observation evidence.
 
     Args:
@@ -104,13 +105,13 @@ def edit_scene_image(
         prompt: Image-edit instruction; override to compare preprocessing models or styles.
 
     Returns:
-        Cleaned reconstruction image path, restored to the source pixel grid.
+        Cleaned high-resolution image path with provider padding removed.
     """
     output.mkdir(parents=True, exist_ok=False)
     with Image.open(source) as opened:
         image = opened.convert("RGB")
     # Low-resolution robot recordings lose small task objects when edited at
-    # 320 px. Use the model's normal image scale, then restore the source grid.
+    # 320 px. Retain the model's normal image scale for reconstruction.
     service_long_side = min(1024, max(768, max(image.size)))
     scale = service_long_side / max(image.size)
     resized_size = tuple(max(1, round(side * scale)) for side in image.size)
@@ -149,11 +150,19 @@ def edit_scene_image(
                 )
             )
             target = output / "scene_input.png"
-            cropped.resize(image.size, Image.Resampling.LANCZOS).save(target)
+            cropped.save(target)
     except Exception as error:
         receipt.update(status="failed_or_unknown", error=str(error))
         write_json(output / "receipt.json", receipt)
         raise
-    receipt.update(status="completed", output_sha256=digest(target))
+    receipt.update(
+        status="completed",
+        output_size=list(resized_size),
+        source_to_output_scale_xy=[
+            resized_size[0] / image.width,
+            resized_size[1] / image.height,
+        ],
+        output_sha256=digest(target),
+    )
     write_json(output / "receipt.json", receipt)
     return target

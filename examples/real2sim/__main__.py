@@ -53,7 +53,7 @@ def main() -> None:
     cfg = load_services_config(args.services)
     registry = None
     if cfg and any(p["adapter"] == "codex_cli" for p in cfg.profiles.values()):
-        from ._codex import CodexChat
+        from embodichain.gen_sim.real2sim._codex import CodexChat
 
         registry = ServiceRegistry.defaults()
         registry.register(

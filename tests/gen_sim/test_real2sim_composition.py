@@ -38,7 +38,7 @@ class _Chat:
         return SimpleNamespace(structured=self.value, text="")
 
 
-def test_image_edit_restores_source_grid_after_provider_padding(tmp_path):
+def test_image_edit_preserves_provider_resolution_without_padding(tmp_path):
     source = tmp_path / "source.png"
     rgb = np.zeros((73, 101, 3), np.uint8)
     rgb[:] = [40, 80, 120]
@@ -57,7 +57,8 @@ def test_image_edit_restores_source_grid_after_provider_padding(tmp_path):
         source, tmp_path / "image_edit", Editor(), prompt="Use diffuse lighting."
     )
     with Image.open(target) as opened:
-        restored = np.asarray(opened)
+        assert opened.size == (768, 555)
+        restored = np.asarray(opened.resize((101, 73), Image.Resampling.LANCZOS))
         assert restored.shape == rgb.shape
         # Resampling may alter boundary colors, but must preserve object pixels'
         # locations rather than shifting them by the service padding.
@@ -127,7 +128,7 @@ def test_multiframe_edit_reaches_native_engine_without_foreground_gate(
         video=Path("video.mp4"),
         reference_frames=refs,
     )
-    expected = np.full_like(first, [20, 160, 70])
+    expected = np.full((576, 768, 3), [20, 160, 70], dtype=np.uint8)
     np.testing.assert_array_equal(np.asarray(Image.open(edited)), expected)
 
     def native_generate(image, output, *, services):
@@ -199,7 +200,7 @@ def test_annotation_rejects_gaps_in_source_coverage():
 
 def test_annotation_assigns_distinct_ids_to_repeated_actions(tmp_path, monkeypatch):
     from embodichain.gen_sim.real2sim import annotation
-    from embodichain.data_pipeline.real2sim.reconstruction.inputs import RegisteredScene
+    from embodichain.data_pipeline.real2sim.adaptation.inputs import RegisteredScene
 
     inputs = SimpleNamespace(
         demonstration=SimpleNamespace(
@@ -250,12 +251,13 @@ def test_annotation_assigns_distinct_ids_to_repeated_actions(tmp_path, monkeypat
     ] == [(0, 5, "approach"), (6, 11, "approach again")]
 
 
+@pytest.mark.parametrize("mask_scale", [1, 3])
 def test_source_grounding_uses_video_mapping_and_rejects_invented_or_missing_events(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, mask_scale
 ):
     from copy import deepcopy
     from embodichain.gen_sim.real2sim import annotation
-    from embodichain.data_pipeline.real2sim.reconstruction.inputs import RegisteredScene
+    from embodichain.data_pipeline.real2sim.adaptation.inputs import RegisteredScene
 
     q = np.zeros((300, 8))
     q[:, 6] = q[:, 7] = np.interp(
@@ -275,7 +277,11 @@ def test_source_grounding_uses_video_mapping_and_rejects_invented_or_missing_eve
         instruction="Move block",
     )
     mask = tmp_path / "mask.png"
-    Image.new("L", (32, 24), 255).save(mask)
+    source_mask = np.zeros((24, 32), np.uint8)
+    source_mask[4:20, 8:24] = 255
+    Image.fromarray(
+        source_mask.repeat(mask_scale, axis=0).repeat(mask_scale, axis=1)
+    ).save(mask)
     scene = RegisteredScene(
         {
             "objects": [
@@ -329,6 +335,9 @@ def test_source_grounding_uses_video_mapping_and_rejects_invented_or_missing_eve
 
     chat = Chat()
     result = annotation.ground_gripper_events(inputs, scene, tmp_path / "valid", chat)
+    np.testing.assert_array_equal(
+        np.asarray(Image.open(tmp_path / "valid/source_masks/block.png")), source_mask
+    )
     assert result["events"][0]["object_id"] is None
     assert all(
         frame == int(sample) * 2
@@ -361,17 +370,22 @@ def test_pipeline_preflight_does_not_launch_services_or_create_output(tmp_path):
     assert not output.exists()
 
 
-def test_pipeline_refines_and_exports_the_settled_scene(tmp_path, monkeypatch):
+def test_pipeline_refines_registered_scene_without_physics_prerequisite(
+    tmp_path, monkeypatch
+):
     import json
     from embodichain.gen_sim.real2sim import pipeline
-    from embodichain.data_pipeline.real2sim.reconstruction.inputs import RegisteredScene
+    from embodichain.data_pipeline.real2sim.adaptation.inputs import RegisteredScene
 
     source = tmp_path / "input.png"
     Image.new("RGB", (32, 32)).save(source)
     initial = np.eye(4)
     initial[2, 3] = 0.03
     scene = RegisteredScene(
-        {"objects": [{"id": "cup", "transform": initial.tolist()}]},
+        {
+            "objects": [{"id": "cup", "transform": initial.tolist()}],
+            "robot_base_pose_world": np.eye(4).tolist(),
+        },
         {"cup": np.array([[0, 0, 0.03], [0.01, 0.01, 0.04]])},
     )
     inputs = SimpleNamespace(
@@ -384,92 +398,45 @@ def test_pipeline_refines_and_exports_the_settled_scene(tmp_path, monkeypatch):
     )
     output = tmp_path / "run"
 
-    def native_rollout(run):
-        folder = run / "settling"
-        folder.mkdir()
-        pose = np.eye(4)
-        pose[2, 3] = 0.02
-        np.savez_compressed(
-            folder / "physics_rollout.npz",
-            timestamps=np.arange(301) / 30,
-            object_names=["cup"],
-            object_poses=np.broadcast_to(pose, (301, 1, 4, 4)),
-        )
-        (folder / "contacts.json").write_text(
-            json.dumps(
-                {
-                    "actors": {},
-                    "samples": [{"user_ids": []} for _ in range(301)],
-                }
-            )
-        )
-        return folder
-
     grounded = (
         {"side": 0, "grasp": 10, "object_id": None, "reason_zh": "Empty closure"},
     )
 
     def ground(inputs, registered, folder, chat):
-        assert registered.vertices["cup"][0, 2] == 0.02
+        assert registered.vertices["cup"][0, 2] == 0.03
         return {"events": list(grounded)}
 
-    def refine(inputs, registered, folder, *, grounding):
-        assert registered.description["objects"][0]["transform"][2][3] == 0.02
-        assert registered.vertices["cup"][0, 2] == 0.02
+    def refine(inputs, registered, folder, *, grounding, approach_clearance_m):
+        assert registered.description["objects"][0]["transform"][2][3] == 0.03
+        assert registered.vertices["cup"][0, 2] == 0.03
         assert grounding == grounded
+        assert approach_clearance_m == 0.007
         return SimpleNamespace(report={})
 
     monkeypatch.setattr(pipeline, "refine_recording", refine)
     monkeypatch.setattr(
         "embodichain.gen_sim.real2sim.annotation.ground_gripper_events", ground
     )
-    with pytest.raises(ValueError, match="settling_runner"):
-        run_real2sim(
-            inputs,
-            output,
-            prepared_image=source,
-            registered_scene=scene,
-            annotate=False,
-        )
-    assert not output.exists()
     result = run_real2sim(
         inputs,
         output,
         prepared_image=source,
         registered_scene=scene,
         annotate=False,
-        settling_runner=native_rollout,
+        approach_clearance_m=0.007,
         chat=_Chat({}),
     )
-    assert result.scene.description["objects"][0]["transform"][2][3] == 0.02
+    assert result.scene.description["objects"][0]["transform"][2][3] == 0.03
     exported = json.loads((output / "scene.json").read_text())
-    assert exported["objects"][0]["transform"][2][3] == 0.02
-    assert (
-        json.loads((output / "scene_before_settling.json").read_text())["objects"][0][
-            "transform"
-        ][2][3]
-        == 0.03
-    )
-
-    def failed_rollout(run):
-        raise RuntimeError("native worker failed")
-
-    failed_output = tmp_path / "failed_run"
-    with pytest.raises(RuntimeError, match="native worker failed"):
-        run_real2sim(
-            inputs,
-            failed_output,
-            prepared_image=source,
-            registered_scene=scene,
-            annotate=False,
-            settling_runner=failed_rollout,
-            chat=_Chat({}),
-        )
-    status = json.loads((failed_output / "status.json").read_text())
-    assert status["status"] == "failed"
-    assert status["current_stage"] == "settling"
-    assert status["error_type"] == "RuntimeError"
-    assert "refinement" not in status["completed_stages"]
+    assert exported["objects"][0]["transform"][2][3] == 0.03
+    status = json.loads((output / "status.json").read_text())
+    assert status["status"] == "geometry_and_trajectory_completed"
+    assert status["completed_stages"] == [
+        "scene_input",
+        "registered_scene",
+        "source_grounding",
+        "refinement",
+    ]
 
 
 @pytest.mark.parametrize("fail", [False, True])

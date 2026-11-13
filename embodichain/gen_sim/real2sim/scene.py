@@ -23,11 +23,11 @@ import numpy as np
 from PIL import Image
 
 if TYPE_CHECKING:
-    from embodichain.data_pipeline.real2sim.reconstruction.inputs import (
+    from embodichain.data_pipeline.real2sim.adaptation.inputs import (
         ReconstructionInput,
         RegisteredScene,
     )
-from embodichain.data_pipeline.real2sim.reconstruction.video_fusion import (
+from embodichain.data_pipeline.real2sim.adaptation.video_fusion import (
     decode_video_frames,
     recover_scene_image,
     RecoveryCfg,
@@ -89,7 +89,7 @@ def prepare_scene_input(
         recovery_cfg: Optional observed-pixel recovery tolerances and memory budget.
 
     Returns:
-        Prepared image path on the original observation pixel grid.
+        Prepared high-resolution image path with the source framing preserved.
     """
     if reference_frames and video is None:
         raise ValueError("Reference frames require a source video")
@@ -224,13 +224,12 @@ def register_scene_export(
     Returns:
         Generated geometry registered to the original robot-base frame.
     """
-    from embodichain.data_pipeline.real2sim.reconstruction.registration import (
+    from embodichain.data_pipeline.real2sim.adaptation.registration import (
         register_scene,
     )
 
     export = native_run / "scene_export"
     cfg = json.loads((export / "scene_config.json").read_text())
-    graph = json.loads((export / "scene_graph.json").read_text())
     understanding = json.loads(
         (native_run / "scene_understanding/scene.json").read_text()
     )
@@ -252,23 +251,16 @@ def register_scene_export(
         with Image.open(path) as mask:
             masks[obj["id"]] = np.asarray(mask) > 0
         mask_paths[obj["id"]] = str(path.resolve())
-    parents = {node["object_id"]: node.get("parent_id") for node in graph["nodes"]}
     table = next(x for x in assets if x["uid"] == "table")
     registered = register_scene(
         inputs.cameras[inputs.primary_camera],
         assets,
         masks,
-        parents,
         table["support_surface_z"],
         auxiliary_depth={
             k: v for k, v in inputs.cameras.items() if k != inputs.primary_camera
         },
     )
-    from embodichain.data_pipeline.real2sim.reconstruction.settling import (
-        prepare_settling_scene,
-    )
-
     for obj in registered.description["objects"]:
         obj["source_mask_path"] = mask_paths[obj["id"]]
-    prepared, _ = prepare_settling_scene(registered, graph["nodes"])
-    return prepared
+    return registered

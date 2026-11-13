@@ -13,8 +13,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""Scene reconstruction and source-near trajectory preparation capabilities."""
+"""Replay a prepared recording; use --help for the native worker options."""
 
 from __future__ import annotations
 
-__all__ = []
+from embodichain.gen_sim.real2sim.replay import main
+
+__all__ = ["main"]
+
+if __name__ == "__main__":
+    main()

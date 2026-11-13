@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""Bounded vertical residuals for unintended pre-grasp finger contact."""
+"""Bounded vertical residuals for unintended pre-grasp hand contact."""
 
 from __future__ import annotations
 
@@ -21,9 +21,9 @@ from pathlib import Path
 from typing import Callable
 import numpy as np
 import open3d as o3d
-import trimesh
 from ._contact_fit import _body, _mesh, _transform
 from ._kinematics import Robot
+from ._hand_geometry import hand_collision_surfaces
 
 __all__: list[str] = []
 
@@ -60,7 +60,9 @@ def _idle_windows(
                         arm[first - 1]["open_end"] if first else 0,
                         arm[first]["close_start"] - lead,
                     ),
-                    checked_end=arm[i]["open_end"],
+                    checked_end=(
+                        arm[i + 1]["close_start"] if i + 1 < len(arm) else count - 1
+                    ),
                     fade_end=arm[i + 1]["grasp"] if i + 1 < len(arm) else count - 1,
                     grasps=[e["grasp"] for e in arm[first : i + 1]],
                 )
@@ -70,16 +72,12 @@ def _idle_windows(
 
 
 def _lift_envelope(required: np.ndarray, radius: int = 15) -> np.ndarray:
-    """Spread positive corrections smoothly, keeping both phase endpoints fixed."""
+    """Spread positive corrections without pinning an artificial window edge."""
     result = required.copy()
     for i in np.flatnonzero(required > 0):
         left, right = min(radius, i), min(radius, len(required) - 1 - i)
-        if not left or not right:
-            raise ValueError(
-                "Approach endpoint collides; cannot preserve grasp anchors"
-            )
         ids = np.arange(i - left, i + right + 1)
-        distance = (ids - i) / np.where(ids <= i, left, right)
+        distance = (ids - i) / np.where(ids <= i, max(1, left), max(1, right))
         result[ids] = np.maximum(
             result[ids], required[i] * np.cos(distance * np.pi / 2) ** 2
         )
@@ -98,36 +96,26 @@ def clear_approach(
     solve_ik: Callable,
     *,
     grasp: int | None = None,
+    clearance_m: float = 0.003,
 ) -> tuple[np.ndarray, dict]:
-    """Lift only the original approach samples whose finger sweep hits geometry.
+    """Lift only the original approach samples whose hand sweep hits geometry.
 
     The pre-closure lift fades to zero at the grasp anchor. This preserves
     grasp, transport and release anchors while allowing the closing transition
     to adapt. It is a
     local clearance residual, not a task planner or a full-arm collision check.
+    Exhausting this local search returns its finite candidate and diagnostics;
+    it does not reject a recording or establish physical task failure.
     """
+    if not np.isfinite(clearance_m) or not 0 < clearance_m < 0.15:
+        raise ValueError("Approach clearance must be between zero and 0.15 metres")
     end = close_start if grasp is None else grasp
     if end < close_start or end >= len(qpos):
         raise ValueError("Invalid grasp anchor for approach clearance")
     indices = np.arange(max(0, start), end + 1)
     checked_count = close_start - int(indices[0]) + 1
     result = qpos.copy()
-    fingers = {}
-    for link in robot.finger_surfaces(side)[0]:
-        parts = []
-        for visual in visuals:
-            if visual["link"] == link:
-                part = _mesh(Path(visual["path"]))
-                part.apply_transform(np.asarray(visual["origin"]))
-                parts.append(part)
-        if not parts:
-            raise ValueError("Approach clearance requires actual finger geometry")
-        mesh = trimesh.util.concatenate(parts)
-        points, _ = trimesh.sample.sample_surface(mesh, 1024, seed=42)
-        vertices = np.asarray(mesh.vertices)
-        if len(vertices) > 1024:
-            vertices = vertices[np.linspace(0, len(vertices) - 1, 1024).astype(int)]
-        fingers[link] = np.concatenate([vertices, points])
+    fingers = hand_collision_surfaces(robot, side)
     bodies = []
     for obj in scene["objects"]:
         mesh = _mesh(Path(obj["path"]))
@@ -148,8 +136,32 @@ def clear_approach(
 
     total = np.zeros(len(indices))
     hit_frames = set()
-    margin = 0.003
-    for iteration in range(3):
+    maximum_ik_error = 0.0
+
+    def finish(status, reason=None):
+        return result, dict(
+            method="local upward TCP residual with a fade toward the grasp",
+            status=status,
+            reason=reason,
+            corrected_frames=sorted(hit_frames),
+            collision_links=list(fingers),
+            geometry="authored URDF hand collision surfaces",
+            max_lift_m=float(total.max()),
+            minimum_checked_gap_m=None if not np.isfinite(minimum) else minimum,
+            preferred_clearance_m=clearance_m,
+            max_ik_error_m=maximum_ik_error,
+            iterations=iteration,
+            fade_end_frame=end,
+            physical_success_verified=False,
+        )
+
+    # The caller includes its physical contact envelope and tracking allowance.
+    # Aim slightly above that minimum to accommodate the IK residual.
+    margin = clearance_m + 0.001
+    # Smoothing a lift can bring a neighboring sample into contact. Recheck the
+    # resulting sweep after every correction, including the final allowed one.
+    max_corrections = 8
+    for iteration in range(max_corrections + 1):
         fk = robot.links(result[indices])
         required = np.zeros(len(indices))
         minimum = float("inf")
@@ -164,17 +176,13 @@ def clear_approach(
                         continue
                     gap = float(distance(body, points))
                     minimum = min(minimum, gap)
-                    if gap >= (0.001 if iteration else margin):
+                    if gap >= clearance_m:
                         continue
                     hit_frames.add(int(indices[i]))
                     lower = 0.0
                     upper = max(
                         0.0, float(body.mesh.bounds[1, 2] - points[:, 2].min()) + margin
                     )
-                    if upper + total[i] > 0.15:
-                        raise ValueError(
-                            "Approach clearance needs more than 15 cm vertical correction"
-                        )
                     for _ in range(12):
                         middle = (lower + upper) / 2
                         shifted = points + [0, 0, middle]
@@ -184,24 +192,22 @@ def clear_approach(
                             lower = middle
                     required[i] = max(required[i], upper)
         if not required.any():
-            return result, dict(
-                method="local upward TCP residual with fixed boundary anchors",
-                corrected_frames=sorted(hit_frames),
-                max_lift_m=float(total.max()),
-                minimum_checked_gap_m=None if not np.isfinite(minimum) else minimum,
-                iterations=iteration,
-                fade_end_frame=end,
-            )
+            return finish("adjusted")
+        if iteration == max_corrections:
+            break
         lift = _lift_envelope(required)
-        total += lift
-        if total.max() > 0.15:
-            raise ValueError("Smoothed approach correction exceeds 15 cm")
+        if (total + lift).max() > 0.15:
+            return finish("review_needed", "Local vertical search budget exhausted")
         tcps = robot.tcp(result[indices], side)
+        candidate = result.copy()
         for i in np.flatnonzero(lift > 1e-6):
             target = tcps[i].copy()
             target[2, 3] += lift[i]
             corrected, fit = solve_ik(robot, result[indices[i]], side, target)
-            if fit["tcp_error_m"] > 0.002:
-                raise ValueError("IK could not realize the required approach clearance")
-            result[indices[i]] = corrected
-    raise ValueError("Approach remains in contact after bounded local correction")
+            if not np.isfinite(corrected).all():
+                return finish("review_needed", "IK returned nonfinite candidate")
+            maximum_ik_error = max(maximum_ik_error, float(fit["tcp_error_m"]))
+            candidate[indices[i]] = corrected
+        result = candidate
+        total += lift
+    return finish("review_needed", "Local correction iteration budget exhausted")

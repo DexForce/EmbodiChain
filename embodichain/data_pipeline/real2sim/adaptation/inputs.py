@@ -119,6 +119,19 @@ class RobotModel:
     max_half_open_m: float = 0.065
     arm_joint_groups: tuple[tuple[str, ...], ...] = ()
     gripper_calibrations: tuple[dict[str, Any], ...] = ()
+    base_pose_world: np.ndarray = field(default_factory=lambda: np.eye(4))
+
+    def __post_init__(self) -> None:
+        pose = np.array(self.base_pose_world, dtype=float, copy=True)
+        if (
+            pose.shape != (4, 4)
+            or not np.isfinite(pose).all()
+            or not np.allclose(pose[3], [0, 0, 0, 1])
+            or not np.allclose(pose[:3, :3].T @ pose[:3, :3], np.eye(3))
+            or not np.isclose(np.linalg.det(pose[:3, :3]), 1)
+        ):
+            raise ValueError("base_pose_world must be a rigid transform")
+        object.__setattr__(self, "base_pose_world", pose)
 
 
 @dataclass(frozen=True)

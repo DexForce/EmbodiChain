@@ -82,3 +82,45 @@ def prepare_robot_collisions(
     tree.write(target, encoding="unicode", xml_declaration=True)
     report["prepared_sha256"] = hashlib.sha256(target.read_bytes()).hexdigest()
     return target, report
+
+
+def prepare_robot_visual_winding(source: Path, output: Path) -> tuple[Path, dict]:
+    """Repair CAD face orientation in a derived GLB, preserving visual placement.
+
+    CAD exports commonly split vertices along normal seams. Weld a temporary
+    topology to discover connected surfaces, then transfer only face reversals
+    back to the original mesh so positions, UVs and material groups survive.
+    This function accepts visual assets only; callers retain the original URDF
+    collision geometry, joints and drives.
+    """
+    import numpy as np
+    import trimesh
+
+    source = source.resolve()
+    if source == output.resolve():
+        raise ValueError("Visual repair must not overwrite the source asset")
+    scene = trimesh.load(source, force="scene", process=False)
+    changes = {}
+    for name, mesh in scene.geometry.items():
+        topology = mesh.copy()
+        topology.merge_vertices(merge_norm=True, merge_tex=True)
+        before = topology.faces.copy()
+        topology.fix_normals(multibody=True)
+        flipped = np.any(topology.faces != before, axis=1)
+        if np.any(flipped):
+            faces = mesh.faces.copy()
+            faces[flipped] = faces[flipped, ::-1]
+            mesh.faces = faces
+            changes[name] = int(flipped.sum())
+    output.parent.mkdir(parents=True, exist_ok=True)
+    if output.exists():
+        raise FileExistsError(output)
+    scene.export(output)
+    return output, dict(
+        source=str(source),
+        source_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
+        output=str(output.resolve()),
+        output_sha256=hashlib.sha256(output.read_bytes()).hexdigest(),
+        reversed_faces=changes,
+        collision_geometry_unchanged=True,
+    )

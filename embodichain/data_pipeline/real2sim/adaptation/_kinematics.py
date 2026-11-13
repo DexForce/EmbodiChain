@@ -28,14 +28,14 @@ __all__: list[str] = []
 class Robot:
     def __init__(self, model: RobotModel) -> None:
         self.path = model.urdf
+        self.base_pose = np.array(model.base_pose_world, copy=True)
         self.chain = pk.build_chain_from_urdf(self.path.read_bytes()).to(
             dtype=torch.float64
         )
         self.names = list(model.joint_names)
         chain_names = self.chain.get_joint_parameter_names()
-        joints = {
-            j.get("name"): j for j in ET.parse(self.path).getroot().findall("joint")
-        }
+        document = ET.parse(self.path).getroot()
+        joints = {j.get("name"): j for j in document.findall("joint")}
         self.calibrations = model.gripper_calibrations
         if model.arm_joint_groups:
             if set(self.names) != set(chain_names):
@@ -83,6 +83,23 @@ class Robot:
             self.jaw_columns = [
                 np.array([i * 8 + 6, i * 8 + 7]) for i in range(len(model.tcp_links))
             ]
+        self.arm_limits: list[tuple[np.ndarray, np.ndarray]] = []
+        for columns in self.arm_columns:
+            bounds = []
+            for column in columns:
+                joint = joints[self.names[column]]
+                if joint.get("type") == "continuous":
+                    bounds.append((-np.inf, np.inf))
+                    continue
+                limit = joint.find("limit")
+                if limit is None:
+                    raise ValueError("Missing URDF arm limits: " + self.names[column])
+                lower, upper = float(limit.get("lower")), float(limit.get("upper"))
+                if not np.isfinite([lower, upper]).all() or lower >= upper:
+                    raise ValueError("Invalid URDF arm limits: " + self.names[column])
+                bounds.append((lower, upper))
+            lower, upper = np.asarray(bounds, dtype=float).T
+            self.arm_limits.append((lower.copy(), upper.copy()))
         self.offset = np.array(model.flange_to_tcp, dtype=float, copy=True)
         if (
             self.offset.shape != (4, 4)
@@ -95,17 +112,36 @@ class Robot:
         ):
             raise ValueError("Invalid flange_to_tcp calibration")
         self.prefixes = list(model.side_names)
+        self.opening_limits: list[tuple[float, float]] = []
+        for side, columns in enumerate(self.jaw_columns):
+            limits = [joints[self.names[i]].find("limit") for i in columns]
+            lower = np.array([float(item.get("lower")) for item in limits])
+            upper = np.array([float(item.get("upper")) for item in limits])
+            if self.calibrations:
+                calibration = self.calibrations[side]
+                grid = np.asarray(calibration["qpos"])
+                if np.any(grid < lower - 1e-6) or np.any(grid > upper + 1e-6):
+                    raise ValueError("Gripper calibration exceeds URDF joint limits")
+                widths = np.asarray(calibration["width_m"]) / 2
+                lo, hi = float(widths.min()), float(widths.max())
+            else:
+                lo, hi = float(lower.max()), float(upper.min())
+            hi = min(hi, model.max_half_open_m)
+            if not 0 <= lo < hi:
+                raise ValueError("Gripper has no valid opening range")
+            self.opening_limits.append((lo, hi))
         self.config = dict(
             tcp_links=list(model.tcp_links),
             side_names=list(model.side_names),
             pad_center_tcp_z_m=model.pad_center_tcp_z_m,
-            max_half_open_m=model.max_half_open_m,
             robot_type="explicit",
         )
 
     def links(self, q: np.ndarray) -> dict[str, np.ndarray]:
+        if not np.asarray(q).flags.writeable:
+            q = np.array(q, copy=True)
         return {
-            k: v.get_matrix().numpy()
+            k: self.base_pose @ v.get_matrix().numpy()
             for k, v in self.chain.forward_kinematics(
                 (
                     {
@@ -122,6 +158,14 @@ class Robot:
 
     def tcp(self, q: np.ndarray, side: int) -> np.ndarray:
         return self.links(q)[self.config["tcp_links"][side]] @ self.offset
+
+    def ik(
+        self, source: np.ndarray, side: int, target: np.ndarray
+    ) -> tuple[np.ndarray, dict]:
+        """Use the isolated Real2Sim approximate IK, not a native motion solver."""
+        from ._real2sim_ik import solve_real2sim_ik
+
+        return solve_real2sim_ik(self, source, side, target)
 
     def half_open(self, q: np.ndarray, side: int) -> np.ndarray:
         values = np.asarray(q)
@@ -144,6 +188,7 @@ class Robot:
         self, q: np.ndarray, side: int, half: np.ndarray | float
     ) -> np.ndarray:
         result = np.array(q, copy=True)
+        half = np.clip(half, *self.opening_limits[side])
         if not self.calibrations:
             result[..., self.jaw_columns[side]] = np.asarray(half)[..., None]
             return result

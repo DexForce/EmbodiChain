@@ -24,7 +24,6 @@ from dataclasses import dataclass
 from collections import OrderedDict
 from itertools import product
 from pathlib import Path
-import xml.etree.ElementTree as ET
 import time
 import numpy as np
 import open3d as o3d
@@ -34,6 +33,11 @@ from scipy.optimize import least_squares
 from scipy.spatial import cKDTree
 from scipy.spatial.transform import Rotation
 from ._kinematics import Robot
+from ._hand_geometry import (
+    hand_collision_surfaces,
+    closed_hand_collision_parts,
+    reverse_hand_penetration,
+)
 from embodichain.compute.geometry.aabb import aabb_separation
 
 __all__: list[str] = []
@@ -67,13 +71,15 @@ class _Body:
     closed: bool
 
 
-def _obstacle_distances(body: _Body, points: np.ndarray) -> np.ndarray:
+def _obstacle_distances(
+    body: _Body, points: np.ndarray, clearance_m: float = 0.001
+) -> np.ndarray:
     """Return exact sampled distances near a body, a safe lower bound far away."""
     bounds = np.stack([points.min(0), points.max(0)]).astype(np.float64)
     gap = float(
         aabb_separation(torch.from_numpy(bounds), torch.from_numpy(body.bounds[0]))
     )
-    if gap > 0.001:
+    if gap > clearance_m:
         # The whole swept sample set is separated. Both dense and worst-case
         # clearance penalties are exactly zero; preserve their fixed dimensions.
         return np.full(len(points), gap, dtype=np.float32)
@@ -156,6 +162,8 @@ def fit_grasp(
     object_delta: np.ndarray,
     object_deltas: dict[str, np.ndarray] | None = None,
     closing_half_open_m: float | None = None,
+    clearance_m: float = 0.001,
+    seed_qpos: tuple[np.ndarray, ...] = (),
 ) -> tuple[np.ndarray, float, dict]:
     """Fit bilateral finger contact with table and neighboring-object clearance.
 
@@ -169,12 +177,23 @@ def fit_grasp(
         object_delta: Current rigid object motion relative to its initial pose.
         object_deltas: Other object pose estimates at this anchor, for obstacle clearance.
         closing_half_open_m: Recorded opening before closure. When provided, check
-            neighboring objects throughout the jaw sweep at the fitted arm pose.
+            the complete hand throughout the jaw sweep at the fitted arm pose.
+        seed_qpos: Optional same-model optimizer starts selected by the caller.
+            When supplied, they replace the default geometric starts. Source
+            joint and TCP priors remain the recorded source.
+        clearance_m: Caller physical envelope for unintended hand contacts.
+            Excess distance violations and pad/target penetration beyond 1 mm
+            contribute soft penalties; they do not prevent trajectory return.
 
     Returns:
         Fitted joint state, paired jaw half width and geometric diagnostics.
         This does not establish force closure or replace full-path screening.
     """
+    if not np.isfinite(clearance_m) or not 0 <= clearance_m < 0.15:
+        raise ValueError(
+            "Hand clearance must be finite and between zero and 0.15 metres"
+        )
+    hand_surfaces = hand_collision_surfaces(robot, side)
     columns = robot.arm_columns[side]
     d = len(columns)
     links, axes = robot.finger_surfaces(side)
@@ -211,6 +230,9 @@ def fit_grasp(
     path = Path(scene_object["path"])
     mesh = _mesh(path)
     mesh.apply_transform(object_delta @ np.asarray(scene_object["transform"]))
+    # CAD/GLB normal seams disconnect otherwise closed surfaces. Orient the
+    # welded numerical mesh before using its normals to select opposing sides.
+    mesh.merge_vertices(merge_tex=True, merge_norm=True)
     mesh.fix_normals(multibody=True)
     object_body = _body(scene_object["id"], mesh.copy(), np.eye(4)[None], 16)
     obstacles = []
@@ -226,12 +248,25 @@ def fit_grasp(
             obstacles.append(_body(other["id"], other_mesh, np.eye(4)[None], 16))
     surface, surface_faces = trimesh.sample.sample_surface(mesh, 4096, seed=42)
     surface_normals = mesh.face_normals[surface_faces]
+    reverse_parts = (
+        closed_hand_collision_parts(
+            robot, [link for link in hand_surfaces if link not in links]
+        )
+        if not object_body.closed
+        else {}
+    )
     tcp_link = robot.config.get("tcp_links", [p + "_link6" for p in robot.prefixes])[
         side
     ]
     initial_tcp = robot.tcp(source[None], side)[0]
     initial = np.r_[source[columns], float(robot.half_open(source, side))]
-    closure_samples = 9 if closing_half_open_m is not None and obstacles else 1
+    minimum, limit = robot.opening_limits[side]
+    minimum = max(minimum, 0.001)
+    initial[-1] = np.clip(initial[-1], minimum, limit)
+    recorded_closing = closing_half_open_m
+    if closing_half_open_m is not None:
+        closing_half_open_m = float(np.clip(closing_half_open_m, minimum, limit))
+    closure_samples = 9 if closing_half_open_m is not None else 1
     cache: OrderedDict[bytes, tuple[np.ndarray, dict]] = OrderedDict()
 
     def evaluate(x: np.ndarray) -> tuple[np.ndarray, dict]:
@@ -350,8 +385,54 @@ def fit_grasp(
                     obstacle_clearance_m=clearance,
                 )
             )
+        hand_clearance = {}
+        hand_violation = 0.0
+        reverse_penetration = {}
+        # Intended target contact is restricted to calibrated pad links. Palm
+        # and articulated links must remain clear throughout the same closure.
+        # All collision links, including pads, clear table and other objects.
+        for link, local_points in hand_surfaces.items():
+            transforms = fk[link]
+            if np.allclose(transforms, transforms[:1], atol=1e-12, rtol=0):
+                transforms = transforms[:1]
+            world = _transform(local_points, transforms).reshape(-1, 3)
+            bodies = [support, *obstacles, object_body]
+            distances = {}
+            for body in bodies:
+                if body is support and not body.closed:
+                    origin_z = float(body.mesh.bounds[1, 2] + 0.1)
+                    rays = np.zeros((len(world), 6), dtype=np.float32)
+                    rays[:, :2] = world[:, :2]
+                    rays[:, 2], rays[:, 5] = origin_z, -1
+                    hits = body.bvh.cast_rays(o3d.core.Tensor(rays), nthreads=2)[
+                        "t_hit"
+                    ].numpy()
+                    distance = world[:, 2] - (origin_z - hits)
+                    distance[~np.isfinite(hits)] = 1.0
+                else:
+                    distance = _obstacle_distances(body, world, clearance_m)
+                minimum_gap = float(distance.min())
+                if body is object_body and link in reverse_parts:
+                    depth = reverse_hand_penetration(
+                        reverse_parts[link], surface, transforms
+                    )
+                    reverse_penetration[link] = depth
+                    if depth > 0:
+                        minimum_gap = min(minimum_gap, -depth)
+                required = (
+                    -0.001 if body is object_body and link in links else clearance_m
+                )
+                violation = max(0.0, required - minimum_gap)
+                hand_violation = max(hand_violation, violation)
+                terms.append(np.array([violation / 0.0001]))
+                distances[body.name] = minimum_gap
+            hand_clearance[link] = distances
         value = np.concatenate(terms), dict(
-            fingers=records, tcp_shift_m=(tcp[:3, 3] - initial_tcp[:3, 3]).tolist()
+            hand_clearance_m=hand_clearance,
+            hand_clearance_violation_m=hand_violation,
+            open_target_reverse_penetration_m=reverse_penetration,
+            fingers=records,
+            tcp_shift_m=(tcp[:3, 3] - initial_tcp[:3, 3]).tolist(),
         )
         cache[key] = value
         if len(cache) > 16:
@@ -359,8 +440,6 @@ def fit_grasp(
         return value
 
     before = evaluate(initial)[1]
-    limit = robot.config.get("max_half_open_m", 0.065)
-    initial[-1] = np.clip(initial[-1], 0.001, limit)
 
     def jacobian(x: np.ndarray) -> np.ndarray:
         steps = np.r_[np.full(d, 1e-4), 1e-5]
@@ -371,20 +450,9 @@ def fit_grasp(
             ]
         )
 
-    def accepted(candidate) -> bool:
-        return all(
-            f["opposing_pad_gap_m"] <= 0.004
-            and f["sampled_object_penetration_m"] <= 0.002
-            and f["sampled_table_penetration_m"] <= 0.002
-            and all(
-                value >= (0.0005 if closure_samples > 1 else -0.0005)
-                for value in f["obstacle_clearance_m"].values()
-            )
-            for f in evaluate(candidate.x)[1]["fingers"]
-        )
-
-    lower = np.r_[initial[:d] - 0.15, 0.001]
-    upper = np.r_[initial[:d] + 0.15, limit]
+    arm_lower, arm_upper = robot.arm_limits[side]
+    lower = np.r_[arm_lower, minimum]
+    upper = np.r_[arm_upper, limit]
     # Initialize the same local search from opposing pad geometry. Preserve the
     # demonstrated orientation; this is a seed, not an alternative grasp planner.
     fk = robot.links(source[None])
@@ -405,24 +473,62 @@ def fit_grasp(
     delta[2] = max(delta[2], mesh.bounds[0, 2] + 0.003 - lowest_finger)
     target[:3, 3] += np.clip(delta, -0.08, 0.08)
 
-    def seed_residual(joints: np.ndarray) -> np.ndarray:
-        q = source.copy()
-        q[columns] = joints
-        tcp = robot.tcp(q[None], side)[0]
-        return np.r_[
-            (tcp[:3, 3] - target[:3, 3]) / 0.003,
-            Rotation.from_matrix(tcp[:3, :3] @ target[:3, :3].T).as_rotvec() / 0.03,
-            (joints - initial[:d]) / 0.3,
-        ]
-
-    seed[:d] = least_squares(
-        seed_residual, initial[:d], bounds=(lower[:d], upper[:d]), max_nfev=60
-    ).x
+    if not seed_qpos:
+        seed[:d] = robot.ik(source, side, target)[0][columns]
     wide = seed.copy()
     wide[-1] = limit * 0.9
+    starts = (
+        []
+        if seed_qpos
+        else [("pad_geometry", seed), ("source", initial), ("wide", wide)]
+    )
+    for index, q_seed in enumerate(seed_qpos):
+        q_seed = np.asarray(q_seed, dtype=float)
+        if q_seed.shape != source.shape or not np.isfinite(q_seed).all():
+            raise ValueError("Grasp seed must be a finite full joint state")
+        starts.insert(
+            index,
+            (
+                f"supplied_{index}",
+                np.r_[q_seed[columns], robot.half_open(q_seed, side)],
+            ),
+        )
+    # Derive an axial retreat from the actual non-pad collision surfaces. Keep
+    # the demonstrated orientation and physical joint limits; this only seeds the
+    # existing source-prior solve, never translates an object or its support.
+    seed_q = source.copy()
+    seed_q[columns] = seed[:d]
+    seed_q = robot.set_half_open(seed_q, side, np.clip(seed[-1], minimum, limit))
+    seed_fk = robot.links(seed_q[None])
+    seed_tcp = robot.tcp(seed_q[None], side)[0]
+    retreat_axis = -seed_tcp[:3, 2]
+    nonpad_world = [
+        _transform(points, seed_fk[link])[0]
+        for link, points in hand_surfaces.items()
+        if link not in links
+    ]
+    axial_retreat_m = None
+    if nonpad_world and not seed_qpos:
+        cloud = np.concatenate(nonpad_world)
+        for distance in np.linspace(0.0, 0.08, 17):
+            shifted = cloud + distance * retreat_axis
+            if all(
+                float(_obstacle_distances(body, shifted, clearance_m).min())
+                >= clearance_m
+                for body in [object_body, support, *obstacles]
+            ):
+                if distance > 0:
+                    target = seed_tcp.copy()
+                    target[:3, 3] += distance * retreat_axis
+                    retreat = seed.copy()
+                    retreat[:d] = robot.ik(seed_q, side, target)[0][columns]
+                    starts.append(("hand_axial_retreat", retreat))
+                    axial_retreat_m = float(distance)
+                break
     candidates = []
+    stopped_after_supplied_seed = False
     started = time.monotonic()
-    for name, start in [("pad_geometry", seed), ("source", initial), ("wide", wide)]:
+    for name, start in starts:
         print(f"Contact fit {scene_object['id']}: {name}", flush=True)
         candidate = least_squares(
             lambda x: evaluate(x)[0],
@@ -431,40 +537,66 @@ def fit_grasp(
             jac=jacobian,
             max_nfev=80,
         )
+        if not np.isfinite(candidate.x).all() or not np.isfinite(candidate.cost):
+            raise ValueError(
+                "Contact optimizer returned non-finite joints or objective"
+            )
         candidates.append(candidate)
-        result = min(candidates, key=lambda item: (not accepted(item), item.cost))
         print(
-            f"Contact fit {scene_object['id']}: {name} accepted={accepted(candidate)}, "
+            f"Contact fit {scene_object['id']}: {name} cost={candidate.cost:.4f}, "
             f"elapsed={time.monotonic() - started:.1f}s",
             flush=True,
         )
-        if accepted(result):
+        contact = evaluate(candidate.x)[1]
+        if name.startswith("supplied_") and (
+            contact["hand_clearance_violation_m"] <= 0.0002
+            and all(
+                finger["opposing_pad_gap_m"] <= 0.003
+                and finger["sampled_object_penetration_m"] <= 0.0012
+                for finger in contact["fingers"]
+            )
+        ):
+            stopped_after_supplied_seed = True
             break
+    result = min(candidates, key=lambda item: item.cost)
     trial_report = {
         "method": "source-near mesh contact fit with pad-geometry initialization",
-        "arm_search_bound_rad": 0.15,
-        "target_contact_acceptance_unchanged": True,
+        "arm_search_bounds": "URDF physical limits; source retained as soft prior",
+        "arm_joint_lower_limits_rad": [
+            float(v) if np.isfinite(v) else None for v in arm_lower
+        ],
+        "arm_joint_upper_limits_rad": [
+            float(v) if np.isfinite(v) else None for v in arm_upper
+        ],
+        "selection": "lowest soft objective among evaluated candidates; geometry diagnostics do not establish task completion",
+        "candidate_source": "caller" if seed_qpos else "default_geometry",
+        "stopped_after_supplied_seed": stopped_after_supplied_seed,
         "neighbor_clearance_checked": bool(obstacles),
         "neighbor_clearance_kind": "AABB lower bound when separated, otherwise sampled mesh distance",
         "closure_samples": closure_samples,
-        "recorded_closing_half_open_m": closing_half_open_m,
-        "minimum_neighbor_clearance_m": 0.0005 if closure_samples > 1 else -0.0005,
+        "axial_retreat_seed_m": axial_retreat_m,
+        "hand_collision_links": list(hand_surfaces),
+        "open_target_reverse_sdf_components": {
+            link: len(parts) for link, parts in reverse_parts.items()
+        },
+        "clearance_objective_m": clearance_m,
+        "hand_geometry": "authored URDF collision surfaces; sampled closure, not continuous collision certification",
+        "recorded_closing_half_open_m": recorded_closing,
+        "joint_limited_closing_half_open_m": closing_half_open_m,
+        "joint_half_open_limits_m": [minimum, limit],
         "candidates": [
             dict(
+                seed=starts[index][0],
                 cost=float(item.cost),
-                accepted=accepted(item),
+                optimizer_converged=bool(item.success),
                 arm_and_half_open=item.x.tolist(),
                 **evaluate(item.x)[1],
             )
-            for item in candidates
+            for index, item in enumerate(candidates)
         ],
     }
     diagnostics = evaluate(result.x)[1]
     diagnostics["search"] = trial_report
-    if not accepted(result):
-        raise ValueError(
-            "No source-near bilateral contact candidate: " + str(diagnostics)
-        )
     fitted = source.copy()
     fitted[columns] = result.x[:d]
     fitted = robot.set_half_open(fitted, side, result.x[d])

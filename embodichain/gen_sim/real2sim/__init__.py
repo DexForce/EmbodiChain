@@ -15,8 +15,9 @@
 # ----------------------------------------------------------------------------
 """Composition of real demonstration processing with existing GenSim engines.
 
-Import concrete stage functions from ``pipeline``. This package does not register
-or alter existing engine, CLI, planner or simulator behavior.
+``scene`` owns reconstruction, ``execution`` composes prepared-recording agent
+review/replay, and ``pipeline`` retains the earlier explicit contact-fit flow.
+This package does not register or alter core engine, planner or solver behavior.
 """
 
 from __future__ import annotations

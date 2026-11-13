@@ -13,10 +13,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""Assemble reusable Real2Sim processing with native Scene/Task Engine calls.
+"""Earlier Real2Sim contact-fit composition with native Scene/Task Engine calls.
 
-Source-specific loading and native settling execution are caller-owned.
+Source-specific loading and physical replay are caller-owned.
 Existing core APIs are invoked unchanged; rendering remains a separate consumer.
+The bounded agent/replay workflow is composed by
+``execution.run_prepared_real2sim``; this module retains explicit contact fitting.
 """
 
 from __future__ import annotations
@@ -25,7 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, ContextManager
 import numpy as np
-from embodichain.data_pipeline.real2sim.reconstruction.inputs import (
+from embodichain.data_pipeline.real2sim.adaptation.inputs import (
     ReconstructionInput,
     RegisteredScene,
     RefinedTrajectory,
@@ -54,27 +56,43 @@ def refine_recording(
     output: Path,
     *,
     approach_lead_frames: int = 120,
+    approach_clearance_m: float = 0.003,
     grounding: tuple[dict, ...] = (),
+    grasp_seeds: dict[tuple[int, int], tuple[np.ndarray, ...]] | None = None,
+    grasp_object_deltas: dict[tuple[int, int], dict[str, np.ndarray]] | None = None,
 ) -> RefinedTrajectory:
     """Refine the demonstration and persist independent nominal outputs.
 
     Args:
         inputs: Original recording and calibrated robot model.
-        scene: Generated geometry after initial physical settling.
+        scene: Generated geometry registered to the source robot frame.
         output: New directory for refined arrays and diagnostics.
         approach_lead_frames: Extra source samples for introducing grasp residuals.
+        approach_clearance_m: Preferred gap for local correction. Residual
+            distances are diagnostics, not a task-success or replay gate.
         grounding: Validated source-video associations for detected gripper events.
+        grasp_seeds: Optional same-robot candidates indexed by (side, grasp sample),
+            replacing default optimizer starts for those events.
+        grasp_object_deltas: Observed rigid world deltas from the initial scene,
+            indexed by (side, grasp sample) and object ID. These condition robot
+            targets; they do not change the scene or command simulated objects.
 
     Returns:
         Refined joint reference without modifying the recorded demonstration.
     """
-    from embodichain.data_pipeline.real2sim.reconstruction.refinement import (
+    from embodichain.data_pipeline.real2sim.adaptation.refinement import (
         refine_trajectory,
     )
 
     output.mkdir(parents=True, exist_ok=False)
     result = refine_trajectory(
-        inputs, scene, approach_lead_frames=approach_lead_frames, grounding=grounding
+        inputs,
+        scene,
+        approach_lead_frames=approach_lead_frames,
+        approach_clearance_m=approach_clearance_m,
+        grounding=grounding,
+        grasp_seeds=grasp_seeds,
+        grasp_object_deltas=grasp_object_deltas,
     )
     np.savez_compressed(
         output / "trajectory_refined.npz",
@@ -110,10 +128,10 @@ def run_real2sim(
     native_run: Path | None = None,
     reference_frames: tuple[int, ...] = (),
     annotate: bool = True,
+    approach_clearance_m: float = 0.003,
     scene_lock: Callable[[], ContextManager] | None = None,
-    settling_runner: Callable[[Path], Path] | None = None,
 ) -> Real2SimResult:
-    """Process one demonstration or explicitly reuse generated scene artifacts.
+    """Run the earlier contact-fit pipeline, with optional source graph annotation.
 
     Args:
         inputs: Unified source observation, robot and calibrated video inputs.
@@ -126,10 +144,8 @@ def run_real2sim(
         native_run: Existing full Scene Engine export to register instead of generate.
         reference_frames: Task-relevant same-view video reference frame IDs.
         annotate: Produce source annotation and graph; independent of simulation.
+        approach_clearance_m: Preferred non-contact gap for local correction.
         scene_lock: Caller-owned resource lock around native scene generation.
-        settling_runner: Run the original initial ten-second physics window for
-            the output directory and return its rollout directory. Required so
-            fresh scenes cannot silently bypass settling before grasp fitting.
 
     Returns:
         Registered scene, separate nominal reference, and optional annotated graph.
@@ -141,11 +157,6 @@ def run_real2sim(
         raise ValueError("Image preparation requires segmentation and editing services")
     if registered_scene is None and native_run is None and services is None:
         raise ValueError("Scene reconstruction requires GenSim services")
-    if settling_runner is None:
-        raise ValueError(
-            "Supply a native settling_runner before trajectory refinement; "
-            "use refine_recording directly for an already prepared scene"
-        )
     if chat is None:
         raise ValueError("Source-event grounding requires injected chat")
     output = output.resolve()
@@ -219,16 +230,16 @@ def run_real2sim(
                 output / "scene_export_source.json",
                 {"path": str((native_run / "scene_export").resolve())},
             )
+        if "robot_base_pose_world" not in registered_scene.description:
+            from embodichain.data_pipeline.real2sim.adaptation.placement import (
+                place_robot_base,
+            )
+
+            starting("robot_placement")
+            registered_scene = place_robot_base(inputs, registered_scene)
         write_json(output / "scene.json", registered_scene.description)
         np.savez_compressed(output / "scene_vertices.npz", **registered_scene.vertices)
         completed("registered_scene")
-        from ._settling import settle_registered_scene
-
-        starting("settling")
-        registered_scene = settle_registered_scene(
-            registered_scene, settling_runner(output), output
-        )
-        completed("scene_settled")
         from .annotation import ground_gripper_events
 
         starting("source_grounding")
@@ -241,6 +252,7 @@ def run_real2sim(
             inputs,
             registered_scene,
             output / "trajectory",
+            approach_clearance_m=approach_clearance_m,
             grounding=tuple(grounding["events"]),
         )
         completed("refinement")

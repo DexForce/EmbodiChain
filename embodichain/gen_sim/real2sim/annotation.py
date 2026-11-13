@@ -16,16 +16,18 @@
 """Source-time annotation and existing Task Engine graph composition."""
 
 from __future__ import annotations
+from dataclasses import asdict
 import json
 from pathlib import Path
+import cv2
 import numpy as np
 from PIL import Image, ImageDraw
-from embodichain.data_pipeline.real2sim.reconstruction.inputs import (
+from embodichain.data_pipeline.real2sim.adaptation.inputs import (
     ReconstructionInput,
     RegisteredScene,
     RefinedTrajectory,
 )
-from embodichain.data_pipeline.real2sim.reconstruction.video_fusion import (
+from embodichain.data_pipeline.real2sim.adaptation.video_fusion import (
     decode_video_frames,
 )
 from embodichain.gen_sim.services import GenSimServices
@@ -43,7 +45,175 @@ __all__ = [
     "annotate_trajectory",
     "bind_graph_intervals",
     "generate_annotated_graph",
+    "validate_program_annotation",
+    "bound_trajectory_phases",
 ]
+
+
+def validate_program_annotation(
+    value: dict, count: int, objects: set[str], arms: set[str]
+) -> dict:
+    """Decode observed Task Program semantics and their separate sample bindings.
+
+    Args:
+        value: Agent response containing task_program and trajectory_bindings.
+        count: Number of original trajectory samples.
+        objects: Known logical scene references, currently using source object IDs.
+        arms: Recorded arm names permitted in observation bindings.
+
+    Returns:
+        Canonical Task Program JSON plus validated half-open trajectory bindings.
+        This is observation annotation, not a compiled deployment. The integration
+        and destination affordances must be grounded before Task Program execution.
+    """
+    from embodichain.agents.mllm.task_program import decode_mllm_task_program
+    from embodichain.data_pipeline.real2sim.contracts import PhaseAnnotation
+    from embodichain.lab.task_program.language.schema import (
+        InvokeCfg,
+        SceneRelativePoseTargetCfg,
+        SegmentCfg,
+        SequenceCfg,
+        TaskProgramIntegrationCfg,
+    )
+
+    if type(value) is not dict or set(value) != {
+        "task_program",
+        "trajectory_bindings",
+    }:
+        raise ValueError(
+            "Annotation requires task_program and trajectory_bindings; "
+            "legacy phase-only annotations require a fresh annotation run"
+        )
+    # As in Task Engine's provider-free graph validation, these host-owned
+    # references are decoder context only. They are never serialized or claimed
+    # to select a real runtime, and no integration/compiler is constructed here.
+    config = decode_mllm_task_program(
+        json.dumps(value["task_program"], allow_nan=False),
+        integration=TaskProgramIntegrationCfg(
+            robot_profile="real2sim_observation_only",
+            scene_registry="real2sim_observation_only",
+            runtime_preset="real2sim_observation_only",
+        ),
+    )
+    if not config.instruction or type(config.program) is not SequenceCfg:
+        raise ValueError(
+            "Observed program requires an instruction and a segment sequence"
+        )
+    segments = {}
+    for node in config.program.items:
+        if type(node) is not SegmentCfg or type(node.steps) is not InvokeCfg:
+            raise ValueError(
+                "Each observed segment must contain one canonical semantic call"
+            )
+        if node.name in segments:
+            raise ValueError("Observed segment names must be unique")
+        segments[node.name] = node.steps.call
+        call = node.steps.call
+        references = [call.object]
+        references.extend(
+            reference
+            for key in ("on", "inside", "grasp")
+            if (reference := getattr(call, key, None)) is not None
+        )
+        if not set(references) <= objects:
+            raise ValueError(
+                "Task Program annotation references an unknown scene object"
+            )
+    for target in config.targets.values():
+        if type(target) is SceneRelativePoseTargetCfg and target.entity not in objects:
+            raise ValueError("Task Program target references an unknown scene object")
+    bindings = value["trajectory_bindings"]
+    if type(bindings) is not list or not bindings:
+        raise ValueError("Trajectory bindings must be a nonempty list")
+    keys = {
+        "name",
+        "segment",
+        "start",
+        "stop",
+        "kind",
+        "reference",
+        "acting_arm",
+        "instruction",
+    }
+    seen, bound = set(), set()
+    stop, ordinal = 0, -1
+    order = {name: index for index, name in enumerate(segments)}
+    for binding in bindings:
+        if type(binding) is not dict or set(binding) != keys:
+            raise ValueError("Unexpected trajectory binding fields")
+        phase = PhaseAnnotation(
+            **{
+                key: binding[key]
+                for key in ("name", "start", "stop", "kind", "reference")
+            }
+        )
+        if phase.name in seen or phase.start != stop or phase.stop > count:
+            raise ValueError(
+                "Bindings must cover the source exactly once with unique names"
+            )
+        segment = binding["segment"]
+        if segment not in segments or order[segment] < ordinal:
+            raise ValueError(
+                "Binding must reference an existing segment in program order"
+            )
+        if binding["acting_arm"] not in arms:
+            raise ValueError("Binding references an unknown recorded arm")
+        if (
+            type(binding["instruction"]) is not str
+            or not binding["instruction"].strip()
+        ):
+            raise ValueError("Binding requires an observed subphase instruction")
+        seen.add(phase.name)
+        bound.add(segment)
+        stop, ordinal = phase.stop, order[segment]
+    if stop != count or bound != set(segments):
+        raise ValueError(
+            "Bindings must cover the full recording and every program segment"
+        )
+    canonical = asdict(config)
+    canonical.pop("integration")
+    return json.loads(
+        json.dumps(
+            dict(task_program=canonical, trajectory_bindings=bindings), allow_nan=False
+        )
+    )
+
+
+def bound_trajectory_phases(annotation: dict) -> list[dict]:
+    """Project validated bindings to the numerical module's inclusive intervals.
+
+    Args:
+        annotation: Result of validate_program_annotation.
+
+    Returns:
+        Internal phase views retaining their canonical Task Program segment IDs.
+        Persisted bindings continue to use the shared half-open sample convention.
+    """
+    segments = {
+        node["name"]: node["steps"]["call"]
+        for node in annotation["task_program"]["program"]["items"]
+    }
+    return [
+        dict(
+            id=item["name"],
+            segment=item["segment"],
+            call=segments[item["segment"]],
+            start_frame=item["start"],
+            end_frame=item["stop"] - 1,
+            acting_arm=item["acting_arm"],
+            object_ids=list(
+                dict.fromkeys(
+                    reference
+                    for key in ("object", "on", "inside")
+                    if (reference := segments[item["segment"]].get(key)) is not None
+                )
+            ),
+            action_zh=item["instruction"],
+            kind=item["kind"],
+            reference=item["reference"],
+        )
+        for item in annotation["trajectory_bindings"]
+    ]
 
 
 def _json_response(
@@ -75,7 +245,7 @@ def ground_gripper_events(
 
     Args:
         inputs: Real observations with explicit sample-to-video-frame mapping.
-        scene: Generated object identities and optional original-grid SAM masks.
+        scene: Generated identities and optional SAM masks of the same image view.
         output: New directory for evidence and validated associations.
         chat: Caller-provided multimodal service; no simulation is submitted.
 
@@ -83,7 +253,7 @@ def ground_gripper_events(
         One association per detected event, including null for idle/failed grabs.
         A missing manipulated object or invalid model response raises ValueError.
     """
-    from embodichain.data_pipeline.real2sim.reconstruction.refinement import (
+    from embodichain.data_pipeline.real2sim.adaptation.refinement import (
         _demonstration_events,
     )
 
@@ -103,12 +273,39 @@ def ground_gripper_events(
     )
     first = Image.fromarray(frames[int(camera.sample_frames[0])])
     cards = [(first, "REAL first frame")]
+    mask_mapping = {}
     for obj in scene.description["objects"]:
         if obj["id"] == "table" or not obj.get("source_mask_path"):
             continue
         with Image.open(obj["source_mask_path"]) as mask:
+            original_size = mask.size
             if mask.size != first.size:
-                raise ValueError("Object identity mask must use the source image grid")
+                if not np.isclose(
+                    mask.width / mask.height,
+                    first.width / first.height,
+                    rtol=0.005,
+                ):
+                    raise ValueError(
+                        "Object identity mask requires inverse image preprocessing"
+                    )
+                # Match RGB-D registration's nearest-neighbor inverse resize.
+                # Image-edit padding has already been removed by its owner.
+                mask = Image.fromarray(
+                    cv2.resize(
+                        np.asarray(mask.convert("L")),
+                        first.size,
+                        interpolation=cv2.INTER_NEAREST,
+                    )
+                )
+            mask_path = output / "source_masks" / (obj["id"] + ".png")
+            mask_path.parent.mkdir(exist_ok=True)
+            mask.convert("L").save(mask_path)
+            mask_mapping[obj["id"]] = dict(
+                reconstruction_mask=obj["source_mask_path"],
+                reconstruction_size=list(original_size),
+                source_size=list(first.size),
+                source_mask=str(mask_path.resolve()),
+            )
             card = first.point(lambda x: int(x * 0.25))
             card.paste(first, mask=mask.convert("L"))
         cards.append((card, "IDENTITY: " + obj["id"]))
@@ -179,6 +376,7 @@ def ground_gripper_events(
         source_sample_to_video_frame={
             str(i): int(camera.sample_frames[i]) for i in sorted(indices)
         },
+        mask_mapping=mask_mapping,
         scope="real observations only; null events retain jaw timing and may receive local collision clearance",
     )
     write_json(output / "grounding.json", value)

@@ -22,11 +22,11 @@ simulator. Use the original robot, not cross-robot retargeting or a task planner
 
 from __future__ import annotations
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 import numpy as np
 from scipy.interpolate import PchipInterpolator
 from scipy.ndimage import gaussian_filter1d, label
-from scipy.optimize import least_squares
 from scipy.spatial import cKDTree
 from scipy.spatial.transform import Rotation
 from .inputs import ReconstructionInput, RegisteredScene, RefinedTrajectory
@@ -188,34 +188,27 @@ def detect_gripper_events(
 def _ik(
     robot: Robot, source: np.ndarray, side: int, target: np.ndarray
 ) -> tuple[np.ndarray, dict]:
-    cols = robot.arm_columns[side]
-    initial = source[cols]
+    return robot.ik(source, side, target)
 
-    def residual(x: np.ndarray) -> np.ndarray:
-        q = source.copy()
-        q[cols] = x
-        actual = robot.tcp(q[None], side)[0]
-        return np.r_[
-            (actual[:3, 3] - target[:3, 3]) / 0.003,
-            Rotation.from_matrix(target[:3, :3] @ actual[:3, :3].T).as_rotvec() / 0.035,
-            (x - initial) / 0.5,
-        ]
 
-    fit = least_squares(
-        residual, initial, bounds=(initial - 0.65, initial + 0.65), max_nfev=80
+def _handoff_receiver_target(
+    source_donor_grasp: np.ndarray,
+    source_donor_handoff: np.ndarray,
+    source_receiver_handoff: np.ndarray,
+    capture_delta: np.ndarray,
+    held_delta: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Preserve source receiver contact relative to the donor's held object.
+
+    Deltas map the registered world-space object to its current hypothesis.
+    Include the donor's capture delta on both paths so earlier object motion
+    is not applied twice. These hypotheses condition robot targets only.
+    """
+    source_delta = (
+        source_donor_handoff @ np.linalg.inv(source_donor_grasp) @ capture_delta
     )
-    result = source.copy()
-    result[cols] = fit.x
-    actual = robot.tcp(result[None], side)[0]
-    return result, dict(
-        tcp_error_m=float(np.linalg.norm(actual[:3, 3] - target[:3, 3])),
-        max_joint_residual_rad=float(np.max(abs(fit.x - initial))),
-        orientation_error_deg=float(
-            np.rad2deg(
-                Rotation.from_matrix(target[:3, :3] @ actual[:3, :3].T).magnitude()
-            )
-        ),
-    )
+    target = held_delta @ np.linalg.inv(source_delta) @ source_receiver_handoff
+    return target, source_delta
 
 
 def _warp(
@@ -266,13 +259,108 @@ def _demonstration_events(
     return detect_gripper_events(event_q, require_open_transition=False)
 
 
+def _select_grasp_object(
+    objects: dict[str, dict],
+    candidates: dict[str, float],
+    grounded: dict | None,
+    active: list[str],
+) -> str | None:
+    """Use observed identity first; proximity is only an ungrounded fallback."""
+    if grounded is not None:
+        uid = grounded["object_id"]
+        if uid is None:
+            return None
+        if uid not in objects:
+            raise ValueError("Grounded object is absent from the scene: " + uid)
+        if (
+            objects[uid].get("articulated", False)
+            and grounded.get("internal_articulation_motion_visible") is not False
+        ):
+            raise ValueError("Grounded articulated motion is unsupported: " + uid)
+        return uid
+    if not candidates or min(candidates.values()) > 0.15:
+        return None
+    return (
+        min(active, key=candidates.get)
+        if active
+        else min(candidates, key=candidates.get)
+    )
+
+
+def _is_handoff(
+    uid: str,
+    receiver_grounding: dict | None,
+    held_distance: float,
+    alternatives: list[float],
+) -> bool:
+    """Called only for overlapping grasps on opposite hands."""
+    if receiver_grounding is not None:
+        return receiver_grounding["object_id"] == uid
+    return held_distance < 0.15 and held_distance <= min(alternatives, default=1) + 0.03
+
+
+def _validated_grasp_object_deltas(
+    updates: dict[tuple[int, int], dict[str, np.ndarray]] | None,
+    phases: list[dict],
+    objects: dict[str, dict],
+    grounding: dict[tuple[int, int], dict],
+) -> dict[tuple[int, int], dict[str, np.ndarray]]:
+    """Own validated world-space observations without modifying caller arrays."""
+    result = {}
+    supported = {(event["side"], event["grasp"]) for event in phases}
+    for key, values in (updates or {}).items():
+        if not isinstance(key, tuple) or len(key) != 2 or key not in supported:
+            raise ValueError(
+                f"Object pose observation references an unsupported grasp event: {key}"
+            )
+        observed = grounding.get(key)
+        if observed is not None and observed["object_id"] is None:
+            raise ValueError(
+                f"Object pose observation references an empty-grasp event: {key}"
+            )
+        if not isinstance(values, dict) or not values:
+            raise ValueError(f"Object pose observation requires object deltas: {key}")
+        result[key] = {}
+        for uid, value in values.items():
+            if uid not in objects:
+                raise ValueError(
+                    f"Object pose observation references an unknown object: {uid}"
+                )
+            if objects[uid].get("articulated", False) and not (
+                observed is not None
+                and observed["object_id"] == uid
+                and observed.get("internal_articulation_motion_visible") is False
+            ):
+                raise ValueError(
+                    f"Object pose observation cannot represent unsupported articulated motion: {uid}"
+                )
+            delta = np.array(value, dtype=float, copy=True)
+            if (
+                delta.shape != (4, 4)
+                or not np.isfinite(delta).all()
+                or not np.allclose(delta[3], [0, 0, 0, 1], atol=1e-6, rtol=0)
+                or not np.allclose(
+                    delta[:3, :3].T @ delta[:3, :3], np.eye(3), atol=1e-6, rtol=0
+                )
+                or not np.isclose(np.linalg.det(delta[:3, :3]), 1, atol=1e-6, rtol=0)
+            ):
+                raise ValueError(
+                    f"Object pose observation must be a finite rigid 4x4 world delta: {key}, {uid}"
+                )
+            result[key][uid] = delta
+    return result
+
+
 def refine_trajectory(
     inputs: ReconstructionInput,
     registered: RegisteredScene,
     *,
     approach_lead_frames: int = 120,
     gripper_preload_m: float = 0.002,
+    approach_clearance_m: float = 0.003,
     grounding: tuple[dict, ...] = (),
+    grasp_seeds: dict[tuple[int, int], tuple[np.ndarray, ...]] | None = None,
+    grasp_object_deltas: dict[tuple[int, int], dict[str, np.ndarray]] | None = None,
 ) -> RefinedTrajectory:
     """Fit local anchors and smooth residuals without modifying source observations.
 
@@ -282,7 +370,16 @@ def refine_trajectory(
         approach_lead_frames: Extra samples for introducing the grasp correction.
         gripper_preload_m: Per-jaw closing margin beyond geometric contact. Native
             force-limited drives supply holding force; object poses are not constrained.
+        approach_clearance_m: Preferred non-contact gap for local correction;
+            it is not a task-success or replay eligibility threshold.
         grounding: Optional source-observed object/receiver associations by event.
+        grasp_seeds: Optional same-robot joint candidates indexed by (side, grasp
+            sample), replacing default starts at those events. They retain the
+            source prior; geometry contributes soft costs and diagnostics, not task acceptance.
+        grasp_object_deltas: Observed world rigid deltas relative to registered
+            initial geometry, indexed by (side, grasp sample) then object ID.
+            Update internal pose hypotheses from that event onward; never edit
+            registered geometry, source observations, or simulator object poses.
 
     Returns:
         Separate nominal joints, unchanged timestamps, and geometric diagnostics.
@@ -298,17 +395,30 @@ def refine_trajectory(
         raise ValueError("approach_lead_frames must be nonnegative")
     if not np.isfinite(gripper_preload_m) or not 0 <= gripper_preload_m <= 0.005:
         raise ValueError("gripper_preload_m must be between zero and 0.005 metres")
+    if not np.isfinite(approach_clearance_m) or not 0 < approach_clearance_m < 0.15:
+        raise ValueError("Approach clearance must be between zero and 0.15 metres")
     original = demo.qpos.copy()
     q = original.copy()
     n = len(q)
-    robot = Robot(inputs.robot)
     scene = deepcopy(registered.description)
+    model = replace(
+        inputs.robot,
+        base_pose_world=np.asarray(
+            scene.get("robot_base_pose_world", inputs.robot.base_pose_world)
+        ),
+    )
+    robot = Robot(model)
+    source_robot = Robot(inputs.robot)
+    relocated = not np.allclose(model.base_pose_world, inputs.robot.base_pose_world)
     objects = {x["id"]: x for x in scene["objects"] if x["id"] != "table"}
     vertices = {k: np.asarray(registered.vertices[k]) for k in objects}
     tracks = {k: np.tile(np.eye(4), (n, 1, 1)) for k in objects}
     plane = np.asarray(scene["source_table_plane"])
     phases = _demonstration_events(inputs, robot)
     grounding = {(e["side"], e["grasp"]): e for e in grounding}
+    object_observations = _validated_grasp_object_deltas(
+        grasp_object_deltas, phases, objects, grounding
+    )
     reports = []
     skipped = []
     for event in phases:
@@ -319,7 +429,19 @@ def refine_trajectory(
                 dict(**event, reason="Source-video grounding: " + grounded["reason_zh"])
             )
             continue
-        tcp = robot.tcp(q[g : g + 1], side)[0]
+        event_deltas = object_observations.get((side, g), {})
+        for uid, delta in event_deltas.items():
+            tracks[uid][g:] = delta
+        if event_deltas:
+            event["observed_object_deltas"] = {
+                uid: delta.tolist() for uid, delta in event_deltas.items()
+            }
+        anchor = original[g].copy()
+        if relocated:
+            anchor, event["base_placement_compensation"] = _ik(
+                robot, anchor, side, source_robot.tcp(original[g : g + 1], side)[0]
+            )
+        tcp = robot.tcp(anchor[None], side)[0]
         # Source-defined TCP lies forward of the inner finger pads.
         pad_z = robot.config.get(
             "pad_center_tcp_z_m",
@@ -336,7 +458,18 @@ def refine_trajectory(
                 and grounded.get("internal_articulation_motion_visible") is False
             ):
                 candidates[uid] = distance
-        if not candidates or min(candidates.values()) > 0.15:
+        active = [
+            e["object"]
+            for e in reports
+            if e["grasp"] <= g <= e["release"]
+            and e["side"] != side
+            and (
+                (grounded is not None and grounded["object_id"] == e["object"])
+                or candidates.get(e["object"], 1) < 0.15
+            )
+        ]
+        uid = _select_grasp_object(objects, candidates, grounded, active)
+        if uid is None:
             skipped.append(
                 dict(
                     **event,
@@ -345,22 +478,7 @@ def refine_trajectory(
                 )
             )
             continue
-        active = [
-            e["object"]
-            for e in reports
-            if e["grasp"] <= g <= e["release"]
-            and e["side"] != side
-            and candidates.get(e["object"], 1) < 0.15
-        ]
-        uid = (
-            min(active, key=candidates.get)
-            if active
-            else min(candidates, key=candidates.get)
-        )
         if grounded:
-            uid = grounded["object_id"]
-            if candidates.get(uid, float("inf")) > 0.15:
-                raise ValueError("Grounded object too far from recorded grasp: " + uid)
             event["source_video_grounding"] = grounded
         if objects[uid].get("articulated", False):
             event["articulation_scope"] = (
@@ -410,13 +528,61 @@ def refine_trajectory(
                     cKDTree(current).query(pad)[0]
                 ),
             )
+        # An observed event pose remains authoritative after any earlier donor
+        # hypothesis correction. Subsequent fitting and carry start here.
+        for observed_uid, delta in event_deltas.items():
+            tracks[observed_uid][g:] = delta
+        if uid in active:
+            donor_event = next(
+                e
+                for e in reports
+                if e["object"] == uid
+                and e["side"] != side
+                and e["grasp"] <= g <= e["release"]
+            )
+            donor = donor_event["side"]
+            donor_grasp = donor_event["grasp"]
+            source_receiver = source_robot.tcp(original[g : g + 1], side)[0]
+            target, source_delta = _handoff_receiver_target(
+                source_robot.tcp(original[donor_grasp : donor_grasp + 1], donor)[0],
+                source_robot.tcp(original[g : g + 1], donor)[0],
+                source_receiver,
+                tracks[uid][donor_grasp],
+                tracks[uid][g],
+            )
+            source_anchor = anchor.copy()
+            anchor, conditioning_ik = _ik(robot, source_anchor, side, target)
+            event["handoff_conditioning"] = dict(
+                donor_side=donor,
+                donor_grasp=donor_grasp,
+                held_pose_kind=(
+                    "observed event world delta"
+                    if uid in event_deltas
+                    else "donor commanded-FK hypothesis, not observed physics"
+                ),
+                original_source_tcp_world=source_receiver.tolist(),
+                source_anchor_tcp_world=robot.tcp(source_anchor[None], side)[
+                    0
+                ].tolist(),
+                source_object_delta=source_delta.tolist(),
+                captured_object_delta=tracks[uid][donor_grasp].tolist(),
+                held_object_delta=tracks[uid][g].tolist(),
+                conditioned_target_tcp_world=target.tolist(),
+                conditioned_anchor_tcp_world=robot.tcp(anchor[None], side)[0].tolist(),
+                conditioning_ik=conditioning_ik,
+                conditioned_anchor_joint_residual_from_original=(
+                    anchor[robot.arm_columns[side]]
+                    - original[g, robot.arm_columns[side]]
+                ).tolist(),
+                fit_prior="conditioned anchor; original source retained separately",
+            )
         category = objects[uid]["category"]
 
         grasp_q, half, fit = fit_grasp(
             scene,
             inputs.robot.visuals,
             robot,
-            original[g],
+            anchor,
             side,
             objects[uid],
             tracks[uid][g],
@@ -428,8 +594,17 @@ def refine_trajectory(
                     )
                 )
             ),
+            clearance_m=approach_clearance_m,
+            seed_qpos=(grasp_seeds or {}).get((side, g), ()),
         )
         shift = np.asarray(fit["tcp_shift_m"])
+        if "handoff_conditioning" in event:
+            event["handoff_conditioning"]["fitted_joint_residual_from_original"] = (
+                grasp_q[robot.arm_columns[side]] - original[g, robot.arm_columns[side]]
+            ).tolist()
+            event["handoff_conditioning"]["fitted_tcp_shift_from_original_m"] = (
+                robot.tcp(grasp_q[None], side)[0, :3, 3] - source_receiver[:3, 3]
+            ).tolist()
         contact_half = half
         half = max(0.001, contact_half - gripper_preload_m)
         event["gripper_drive"] = dict(
@@ -483,7 +658,7 @@ def refine_trajectory(
             event["close_start"],
             g,
             half,
-            robot.config["max_half_open_m"],
+            robot.opening_limits[side][1],
             max((e["open_end"] for e in previous), default=0),
         )
         q = robot.set_half_open(q, side, opening)
@@ -495,13 +670,13 @@ def refine_trajectory(
         center = final.mean(0)
         receiver = None
         best = 0.13
-        # Overlapping grasps can manipulate different objects. Require geometric
-        # evidence that the receiving fingers approach this carried object.
+        # Explicit observed receiver identity takes precedence over proximity.
+        # Without grounding, overlapping grasps still require geometric evidence.
         later = [e for e in phases if g < e["grasp"] <= r and e["side"] != side]
         handoff = False
         for other_event in later:
             t = other_event["grasp"]
-            other_tcp = robot.tcp(original[t : t + 1], other_event["side"])[0]
+            other_tcp = source_robot.tcp(original[t : t + 1], other_event["side"])[0]
             other_pad = other_tcp[:3, 3] + other_tcp[:3, 2] * pad_z
             held = vertices[uid] @ carried[t - g, :3, :3].T + carried[t - g, :3, 3]
             held_distance = float(cKDTree(held).query(other_pad)[0])
@@ -514,9 +689,11 @@ def refine_trajectory(
                 for k, v in vertices.items()
                 if k != uid
             ]
-            if (
-                held_distance < 0.15
-                and held_distance <= min(alternatives, default=1) + 0.03
+            if _is_handoff(
+                uid,
+                grounding.get((other_event["side"], t)),
+                held_distance,
+                alternatives,
             ):
                 handoff = True
         placement_shift = np.zeros(3)
@@ -678,7 +855,7 @@ def refine_trajectory(
             carried = tcps[g : r + 1] @ attachment
         else:
             release_fit = {}
-        if not handoff and not active:
+        if uid not in active:
             from ._approach import clear_approach
 
             q, event["approach_clearance"] = clear_approach(
@@ -692,6 +869,7 @@ def refine_trajectory(
                 event["close_start"],
                 _ik,
                 grasp=g,
+                clearance_m=approach_clearance_m,
             )
         tracks[uid][g : r + 1] = carried
         tracks[uid][r + 1 :] = carried[-1]
@@ -726,6 +904,7 @@ def refine_trajectory(
             window["checked_end"],
             _ik,
             grasp=window["fade_end"],
+            clearance_m=approach_clearance_m,
         )
         idle_clearance.append(dict(**window, **clearance))
     armcols = np.concatenate(robot.arm_columns).tolist()
