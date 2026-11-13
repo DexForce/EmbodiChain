@@ -171,67 +171,96 @@ def _payload(
             )
             if refresh is not None:
                 task["refresh"] = refresh
+        task_root = root / Path(task["video"]).parts[0]
+        code = task["code"]
+        unsupported = code in {"M05", "C01"}
+        task["capability"] = {
+            "status": (
+                "unsupported"
+                if unsupported
+                else "limited" if code == "C02" else "supported"
+            ),
+            "label": (
+                "完整场景未支持"
+                if unsupported
+                else "可运行 · 保形受限" if code == "C02" else "已实现对照"
+            ),
+            "reason": (
+                "本次 Isaac Lab / Newton 后端未实现充气包气腔、压载与恢复的完整场景。"
+                if code == "M05"
+                else (
+                    "本次 Isaac Lab / Newton 后端未实现包含充气奶包的双商品装袋；单面包替代场景不计为完整支持。"
+                    if code == "C01"
+                    else (
+                        "24×12 倒袋失败；96×24 完成提袋录像，但严格保形检查未全过。"
+                        if code == "C02"
+                        else "两侧已实现本任务；具体效果差异见检查结果。"
+                    )
+                )
+            ),
+        }
         recordings = []
         refresh = task.get("refresh", {})
         if refresh.get("completed"):
             recordings.append(
                 dict(
-                    label="EC · 新 W1 资产",
+                    platform="embodichain",
+                    label="EmbodiChain · 最新 W1 资产",
                     url=refresh["video_url"],
                     poster=refresh["poster"],
-                    note="新资产完整录制，仅更新展示素材；性能及效果统计沿用历史批次。",
+                    note="使用更新后的 W1 模型重新录制。",
                 )
             )
-        if task["video_url"]:
-            recordings.append(
-                dict(
-                    label=(
-                        "EC · 历史录像"
-                        if task["code"] == "C01"
-                        else (
-                            "历史演示录像"
-                            if task["code"] == "M05"
-                            else (
-                                "历史配置对比"
-                                if task["code"] == "C02"
-                                else "历史双平台对比"
-                            )
+        franka_patterns = {
+            "S01-C": "media/s01c/raw_data/{platform}/*/rgb_oblique.mp4",
+            "S01-T": "media/s01t/raw_data/{platform}/*/rgb_oblique.mp4",
+            "S02": "media/s02/raw_data/{platform}/*/rgb_oblique.mp4",
+            "S03": "preview/raw_data/{platform}/*/rgb_oblique.mp4",
+            "M06": "preview/{platform}/{platform}.mp4",
+        }
+        if code in franka_patterns:
+            for platform, label in (
+                ("embodichain", "EmbodiChain · Franka"),
+                ("isaaclab", "Isaac Lab"),
+            ):
+                matches = sorted(
+                    task_root.glob(franka_patterns[code].format(platform=platform))
+                )
+                if len(matches) > 1:
+                    raise ValueError(
+                        f"Ambiguous preview source for {code} {platform}: {matches}"
+                    )
+                if matches:
+                    path = matches[0]
+                    recordings.append(
+                        dict(
+                            platform=platform,
+                            label=label,
+                            url=_local_url(path, output),
+                            poster=(
+                                _poster(path, task["poster_second"])
+                                if include_posters
+                                else None
+                            ),
+                            note="本场景使用 Franka，机器人资产无变更。",
                         )
-                    ),
-                    url=task["video_url"],
-                    poster=task["poster"],
-                    note="保留的原始展示录像，使用当时的资产与配置；录像播放速度不代表物理计算速度。",
-                )
-            )
-        task_root = root / Path(task["video"]).parts[0]
+                    )
         alternatives = []
-        if task["code"] in {"S04", "M01", "M02", "M03", "M04"}:
+        if code in {"S04", "M01", "M02", "M03", "M04"}:
             alternatives = [
-                (
-                    "Isaac Lab · 历史录像",
-                    "preview/isaaclab/video.mp4",
-                    "历史 Isaac Lab 场景录像。",
-                )
+                ("Isaac Lab", "preview/isaaclab/video.mp4", "Isaac Lab 对应场景。")
             ]
-        elif task["code"] == "C01":
+        elif code == "C02":
             alternatives = [
                 (
-                    "Isaac Lab · 单面包",
+                    "Isaac Lab · 96×24",
                     "platforms/isaaclab/preview/video.mp4",
-                    "单面包场景，缺少奶包气腔；不是双商品等价对照。",
-                )
-            ]
-        elif task["code"] == "C02":
-            alternatives = [
-                (
-                    "Isaac 24×12 · 失败",
-                    "budget_reduction/i24_s12_video/preview/video.mp4",
-                    "倒袋失败录像；没有完整 64 秒性能测量。",
+                    "完成提袋录像，严格保形检查未全部通过。",
                 ),
                 (
-                    "Isaac 96×24 · 高预算",
-                    "platforms/isaaclab/preview/video.mp4",
-                    "录像完成提袋，但原严格保形检查未全部通过。",
+                    "Isaac Lab · 24×12 · 失败",
+                    "budget_reduction/i24_s12_video/preview/video.mp4",
+                    "倒袋失败，未完成装袋提袋。",
                 ),
             ]
         for label, relative, note in alternatives:
@@ -239,13 +268,11 @@ def _payload(
             if path.is_file():
                 recordings.append(
                     dict(
+                        platform="isaaclab",
                         label=label,
                         url=_local_url(path, output),
                         poster=(
-                            _poster(
-                                path,
-                                8 if task["code"] == "C01" else task["poster_second"],
-                            )
+                            _poster(path, task["poster_second"])
                             if include_posters
                             else None
                         ),
@@ -253,6 +280,10 @@ def _payload(
                     )
                 )
         task["recordings"] = recordings
+        ec = next((r for r in recordings if r["platform"] == "embodichain"), None)
+        # Presentation uses only the selected current EC asset, never the old composite.
+        task["video_url"] = ec["url"] if ec else None
+        task["poster"] = ec["poster"] if ec else None
     c02_path = root / "c02_bag_frame_packing/performance_comparison/results.json"
     c02 = json.loads(c02_path.read_text())
     data["c02"] = [
@@ -276,10 +307,10 @@ def _payload(
             )
         for label, relative in (
             (
-                "Isaac 24×12 · 历史失败录像",
+                "Isaac 24×12 · 倒袋失败",
                 "budget_reduction/i24_s12_video/preview/video.mp4",
             ),
-            ("Isaac 96×24 · 历史录像", "platforms/isaaclab/preview/video.mp4"),
+            ("Isaac 96×24 · 保形受限", "platforms/isaaclab/preview/video.mp4"),
         ):
             poster = _poster(root / "c02_bag_frame_packing" / relative, 58)
             if poster:

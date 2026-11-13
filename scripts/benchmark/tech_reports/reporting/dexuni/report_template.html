@@ -1303,6 +1303,153 @@
           break-inside: avoid;
         }
       }
+
+      .capability-summary {
+        border: 1px solid #d9bf8a;
+        border-top: 3px solid #a67528;
+        background: #fcf9f2;
+        padding: 18px 20px;
+        margin: 8px 0 20px;
+      }
+      .capability-heading {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      .capability-heading h2 {
+        font-size: 17px;
+      }
+      .capability-heading span {
+        font-size: 10px;
+        color: var(--muted);
+      }
+      .capability-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 24px;
+        margin-top: 15px;
+      }
+      .capability-grid h3 {
+        font-size: 13px;
+        margin: 6px 0;
+      }
+      .capability-grid p {
+        font-size: 11px;
+        line-height: 1.9;
+        margin-bottom: 8px;
+      }
+      .unsupported-tag {
+        display: inline-block;
+        color: #855715;
+        background: #f4e9d2;
+        border: 1px solid #ddc394;
+        font-size: 10px;
+        padding: 1px 7px;
+        font-weight: 600;
+      }
+      .unsupported-cell {
+        color: #855715;
+        font-weight: 600;
+        background: #faf4e8;
+      }
+      .unsupported-task {
+        border-color: #cba66a;
+        color: #855715;
+      }
+      .unsupported-task[aria-pressed="true"] {
+        background: #855715;
+        border-color: #855715;
+      }
+      .video-pair {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+      }
+      .video-pane {
+        min-width: 0;
+      }
+      .platform-label {
+        font-size: 12px;
+        font-weight: 600;
+        padding: 8px 11px;
+        border-bottom: 2px solid var(--ec);
+        background: #edf4f7;
+      }
+      .il-label {
+        border-color: #8d969f;
+        background: #f0f2f4;
+      }
+      .video-download {
+        display: inline-block;
+        font-size: 10px;
+        margin: 7px 0;
+      }
+      #inline-video,
+      #isaac-video {
+        display: block;
+        width: 100%;
+        height: auto;
+        max-height: none;
+        aspect-ratio: 16/9;
+        object-fit: contain;
+        background: #17212a;
+      }
+      #isaac-poster {
+        display: none;
+      }
+      #unsupported-panel {
+        min-height: 230px;
+        background: #fcf9f2;
+        border: 1px solid #e0c99f;
+        padding: 28px 22px;
+        line-height: 1.9;
+      }
+      #unsupported-panel h3 {
+        font-size: 17px;
+        margin: 10px 0;
+      }
+      #unsupported-panel p {
+        font-size: 12px;
+        color: #795923;
+      }
+      @media (max-width: 650px) {
+        .video-pair,
+        .capability-grid {
+          grid-template-columns: 1fr;
+        }
+        .capability-summary {
+          padding: 15px;
+        }
+        .capability-grid {
+          gap: 15px;
+        }
+        #unsupported-panel {
+          min-height: 150px;
+        }
+      }
+      @media print {
+        .video-download {
+          display: none !important;
+        }
+        #isaac-video {
+          display: none !important;
+        }
+        #isaac-poster:not([hidden]) {
+          display: block;
+          width: 100%;
+          max-height: 90mm;
+          object-fit: contain;
+        }
+        .capability-summary {
+          break-inside: avoid;
+          print-color-adjust: exact;
+        }
+        .video-pair {
+          grid-template-columns: 1fr 1fr;
+        }
+      }
     </style>
   </head>
   <body>
@@ -1313,7 +1460,8 @@
       <nav>
         <a href="#summary" class="active">摘要与结论</a
         ><a href="#method">1. 实验条件</a><a href="#results">2. 性能结果</a
-        ><a href="#quality">3. 任务效果与录像</a><a href="#c02">4. C02 配置取舍</a
+        ><a href="#quality">3. 任务效果与录像</a
+        ><a href="#c02">4. C02 配置取舍</a
         ><a href="#reproduction">5. 复现与资产更新</a
         ><a href="#references">6. 数据来源</a>
       </nav>
@@ -1387,22 +1535,57 @@
           <div class="finding">
             <span class="finding-index">03</span>
             <div>
-              <h3>能力缺口与失败配置必须单列</h3>
+              <h3>Isaac 完整场景支持存在缺口</h3>
               <p>
-                M05 / C01 不生成虚构的平台速度比。C02 的 Isaac 24×12
-                配置倒袋失败；96×24
+                M05 充气包压载、C01 双商品装袋，在本次 Isaac Lab / Newton
+                后端未实现完整场景。C02 的 Isaac 24×12 配置倒袋失败；96×24
                 录像完成提袋，但严格保形检查未全过，最低可用预算尚未确定。
               </p>
             </div>
             <div class="finding-value">
-              不作总榜<span>统计级别与效果条件不同</span>
+              2 项未支持<span>M05 / C01 · 完整场景</span>
             </div>
           </div>
         </div>
         <p class="abstract-note">
           本次整理未新增正式性能测量。2026-11-13 的 W1
           资产更新运行仅用于视频与图片更新，单独列于第 5 节，不替换表 1
-          中的历史测量数据。
+          中的既有测量数据。
+        </p>
+      </div>
+      <div class="capability-summary" id="capabilities">
+        <div class="capability-heading">
+          <h2>Isaac 场景支持边界</h2>
+          <span>本次测试环境：Isaac Lab / Newton 后端</span>
+        </div>
+        <div class="capability-grid">
+          <article>
+            <span class="unsupported-tag">完整场景未支持</span>
+            <h3>M05 · 充气包与刚块压载</h3>
+            <p>
+              EC 展示气腔形变、压载与恢复；Isaac
+              侧未实现同等气腔场景，无等价性能对照。
+            </p>
+            <button class="task-link" data-jump-video="M05">
+              查看 EC 演示与缺失能力 →
+            </button>
+          </article>
+          <article>
+            <span class="unsupported-tag">完整场景未支持</span>
+            <h3>C01 · 面包 / 奶包双商品装袋</h3>
+            <p>
+              EC 完成双商品装袋；Isaac
+              的单面包替代版缺少充气奶包，不计为完整场景支持。
+            </p>
+            <button class="task-link" data-jump-video="C01">
+              查看 EC 演示与缺失能力 →
+            </button>
+          </article>
+        </div>
+        <p class="footnote">
+          C02 属于可运行但保形受限：24×12 失败，96×24
+          仍有严格检查未通过。上述范围仅指本次后端与实现，不泛指所有 Isaac Sim
+          功能。
         </p>
       </div>
       <div class="tools">
@@ -1468,8 +1651,8 @@
           <h2>性能结果</h2>
         </div>
         <p class="lead">
-          先给出正式测量图，再列出完整结果表。C02 不进入正式图；M05、C01
-          的缺失项保留为“不适用 / 未测”。
+          先给出正式测量图，再列出完整结果表。C02 不进入正式图；M05、C01 的
+          Isaac 项明确标为“完整场景未支持”。
         </p>
         <div class="chart-wrap">
           <div class="figure-top">
@@ -1626,7 +1809,7 @@
         <div id="refresh-figures" class="figures"></div>
         <p class="figure-caption" id="refresh-caption"></p>
         <div class="video-study" id="task-videos">
-          <h3>全任务动态录像</h3>
+          <h3>双平台动态对比</h3>
           <p class="lead" id="video-coverage"></p>
           <div
             class="video-tasks"
@@ -1646,21 +1829,66 @@
             role="group"
             aria-label="选择录像版本"
           ></div>
-          <div class="video-screen">
-            <video
-              id="inline-video"
-              controls
-              muted
-              playsinline
-              loop
-              preload="none"
-              aria-label="任务演示录像"
-            ></video
-            ><img id="inline-poster" alt="当前录像代表帧" />
-            <p id="video-error" hidden></p>
+          <div class="video-pair" id="video-pair">
+            <div class="video-pane">
+              <div class="platform-label ec-label" id="ec-label">
+                EmbodiChain
+              </div>
+              <div class="video-screen">
+                <video
+                  id="inline-video"
+                  controls
+                  muted
+                  playsinline
+                  preload="none"
+                  aria-label="EmbodiChain 录像"
+                ></video
+                ><img id="inline-poster" alt="EmbodiChain 代表帧" hidden />
+              </div>
+              <a
+                class="video-download"
+                id="video-file"
+                target="_blank"
+                rel="noopener"
+                >打开 EC MP4 ↗</a
+              >
+            </div>
+            <div class="video-pane">
+              <div class="platform-label il-label" id="isaac-label">
+                Isaac Lab
+              </div>
+              <div class="video-screen" id="isaac-screen">
+                <video
+                  id="isaac-video"
+                  controls
+                  muted
+                  playsinline
+                  preload="none"
+                  aria-label="Isaac Lab 录像"
+                ></video
+                ><img id="isaac-poster" alt="Isaac Lab 代表帧" hidden />
+              </div>
+              <div id="unsupported-panel" hidden>
+                <span class="unsupported-tag">完整场景未支持</span>
+                <h3>无等价 Isaac 对照</h3>
+                <p id="unsupported-reason"></p>
+                <p class="footnote">本次 Isaac Lab / Newton 后端</p>
+              </div>
+              <a
+                class="video-download"
+                id="isaac-file"
+                target="_blank"
+                rel="noopener"
+                >打开 Isaac MP4 ↗</a
+              >
+            </div>
           </div>
+          <p id="video-error" hidden></p>
           <div class="video-controls">
-            <label
+            <button class="btn btn-primary" id="pair-play">一起播放</button
+            ><button class="btn" id="pair-pause">暂停</button
+            ><button class="btn" id="pair-restart">从头重播</button
+            ><label
               >播放速度
               <select id="video-speed">
                 <option value="0.5">0.5×</option>
@@ -1672,14 +1900,12 @@
                 id="video-autoplay"
                 type="checkbox"
                 checked
-              />进入视野时静音预览</label
-            ><a class="btn" id="video-file" target="_blank" rel="noopener"
-              >单独打开 MP4 ↗</a
+              />静音自动预览</label
             >
           </div>
           <p class="figure-caption" id="video-caption" aria-live="polite"></p>
           <p class="footnote">
-            播放时间为录像时间；相同播放速度不表示计算性能相同。新资产与历史版本分别标注，性能数据仍使用原批次。视频在页内播放，MP4
+            两侧可同步启停，也可分别拖动进度查看同一动作阶段；录像时长可能不同，结束一侧会停在末帧。播放速度不代表计算性能，性能数据使用原测量批次。MP4
             单独保留在本地。
           </p>
         </div>
@@ -1726,7 +1952,7 @@
             秒且状态有限，仍未完成任务。
           </li>
           <li>
-            <strong>96×24 的限制：</strong>历史录像完成装袋提袋，但最大袋口弯曲
+            <strong>96×24 的限制：</strong>录像完成装袋提袋，但最大袋口弯曲
             51.285 mm 超过原 30 mm 限值；独立计时终态纸盒 X 边界超出 0.191
             mm。尚未证明这是最低所需预算。
           </li>
@@ -1789,7 +2015,7 @@
         </div>
         <div class="note">
           表 1 / 表 2 为 2026-10-27
-          及以前的历史测量与效果检查；本节是后续素材录制。原始状态、录像与来源哈希均保留。新录像中的材质来自真实资产，未对图片涂色。
+          及以前的既有测量与效果检查；本节是后续素材录制。原始状态、录像与来源哈希均保留。新录像中的材质来自真实资产，未对图片涂色。
         </div>
       </section>
       <section class="section" id="references">
@@ -1836,7 +2062,7 @@
       </section>
       <footer class="report-end">
         <span>DEXFORCE · EMBODICHAIN / DEXUNI</span
-        ><span>历史测量快照：2026-10-27 · 报告修订：2026-11-13</span>
+        ><span>既有测量快照：2026-10-27 · 报告修订：2026-11-13</span>
       </footer>
     </main>
     <dialog id="task-dialog" aria-labelledby="modal-title">
@@ -1900,7 +2126,9 @@
           ? `${fmt(s.mean_ms)}${s.sd_ms == null ? "" : ` ± ${fmt(s.sd_ms)}`}`
           : p === "embodichain"
             ? "未测"
-            : "不适用";
+            : t.capability?.status === "unsupported"
+              ? "完整场景未支持"
+              : "未测";
       }
       function renderTable() {
         const rows = filtered();
@@ -1908,7 +2136,7 @@
           rows
             .map(
               (t) =>
-                `<tr class="${t.kind}" data-task="${t.code}"><th><button class="task-link" data-open="${t.code}" aria-label="查看 ${t.code} 详情">${t.code}</button></th><td class="case">${esc(t.name)}</td><td class="value">${stat(t, "embodichain")}</td><td class="value">${stat(t, "isaaclab")}</td><td class="value">${t.ec_latency_reduction_percent == null ? "—" : fmt(t.ec_latency_reduction_percent, 1) + "%"}</td><td class="scope">${esc(t.scope)}</td></tr>`,
+                `<tr class="${t.kind}" data-task="${t.code}"><th><button class="task-link" data-open="${t.code}" aria-label="查看 ${t.code} 详情">${t.code}</button></th><td class="case">${esc(t.name)}</td><td class="value">${stat(t, "embodichain")}</td><td class="value ${t.capability.status === "unsupported" ? "unsupported-cell" : ""}">${stat(t, "isaaclab")}</td><td class="value">${t.ec_latency_reduction_percent == null ? "—" : fmt(t.ec_latency_reduction_percent, 1) + "%"}</td><td class="scope">${esc(t.scope)}</td></tr>`,
             )
             .join("") ||
           '<tr><td colspan="6" class="empty">没有匹配任务。</td></tr>';
@@ -1966,21 +2194,23 @@
         const t = taskBy(code);
         $("#modal-title").textContent = t.name;
         $("#modal-code").textContent = `${code} · ${t.scope}`;
-        const fresh = t.refresh?.completed;
-        const poster = fresh ? t.refresh.poster : t.poster;
+        const poster = t.poster;
         $("#modal-body").innerHTML =
-          `${poster ? `<div class="scene"><img src="${poster}" alt="${esc(t.name)}场景截图"></div>` : ""}<p class="status-note">${fresh ? "图像来源：2026-11-13 EC 新 W1 资产完整录制。以下性能和效果数值仍为历史测量。" : "图像来源：历史保留录像，非正式性能测量帧。"}</p><p><strong>历史求解配置：</strong>${esc(t.configuration)}</p><div class="table-scroll"><table><thead><tr><th>平台</th><th>物理均值 ± SD（ms/步）</th><th>进程数</th></tr></thead><tbody>${["embodichain", "isaaclab"].map((p) => `<tr><td>${p === "embodichain" ? "EmbodiChain" : "Isaac Lab"}</td><td class="number">${stat(t, p)}</td><td>${t.stats[p]?.processes ?? "—"}</td></tr>`).join("")}</tbody></table></div><p><strong>历史效果与限制：</strong>${esc(t.outcome)}</p><div class="modal-actions"><a class="btn btn-primary" href="${esc(t.report_url)}" target="_blank" rel="noopener">逐任务原始报告 ↗</a><a class="btn" href="${esc(t.source_url)}" target="_blank" rel="noopener">原始数据 ↗</a>${fresh ? '<button class="btn" id="play-fresh">播放新资产 EC 录像</button>' : ""}${t.video_url ? '<button class="btn" id="play-original">播放历史录像</button>' : ""}</div><video id="local-video" controls playsinline preload="none" hidden></video><p id="video-note" class="footnote">录像依赖本地目录，未内嵌或上传。历史录像保留原资产外观。</p><div class="hash">来源：${esc(t.source)}<br>SHA256：${esc(t.source_sha256)}</div>`;
-        function play(url) {
-          const v = $("#local-video");
-          v.hidden = false;
-          v.src = url;
-          v.onerror = () =>
-            ($("#video-note").textContent =
-              "无法加载本地录像。请在原结果目录中打开 MP4；HTML 内嵌的图表、数据仍可查看。");
-          v.play().catch(() => {});
-        }
-        if (fresh) $("#play-fresh").onclick = () => play(t.refresh.video_url);
-        if (t.video_url) $("#play-original").onclick = () => play(t.video_url);
+          `${poster ? `<div class="scene"><img src="${poster}" alt="${esc(t.name)}场景截图"></div>` : ""}${t.capability.status === "unsupported" ? `<div class="note warning"><strong>Isaac 完整场景未支持</strong><br>${esc(t.capability.reason)}</div>` : ""}<p><strong>测量配置：</strong>${esc(t.configuration)}</p><div class="table-scroll"><table><thead><tr><th>平台</th><th>物理均值 ± SD（ms/步）</th><th>进程数</th></tr></thead><tbody>${["embodichain", "isaaclab"].map((p) => `<tr><td>${p === "embodichain" ? "EmbodiChain" : "Isaac Lab"}</td><td class="number">${stat(t, p)}</td><td>${t.stats[p]?.processes ?? "—"}</td></tr>`).join("")}</tbody></table></div><p><strong>已测效果与限制：</strong>${esc(t.outcome)}</p><div class="modal-actions"><a class="btn" href="${esc(t.report_url)}" target="_blank" rel="noopener">逐任务报告 ↗</a><a class="btn" href="${esc(t.source_url)}" target="_blank" rel="noopener">原始数据 ↗</a>${t.recordings.map((r, i) => `<button class="btn" data-modal-video="${i}">${esc(r.label)}</button>`).join("")}</div><video id="local-video" controls playsinline preload="none" hidden></video><p id="video-note" class="footnote">W1 场景使用最新资产录像；性能数值来自既有测量批次。</p><div class="hash">来源：${esc(t.source)}<br>SHA256：${esc(t.source_sha256)}</div>`;
+        $$("[data-modal-video]").forEach(
+          (b) =>
+            (b.onclick = () => {
+              const r = t.recordings[Number(b.dataset.modalVideo)],
+                v = $("#local-video");
+              v.hidden = false;
+              v.src = r.url;
+              $("#video-note").textContent = r.note;
+              v.onerror = () =>
+                ($("#video-note").textContent =
+                  "无法读取视频，请保留本地目录关系。");
+              v.play().catch(() => {});
+            }),
+        );
         $("#task-dialog").showModal();
         $("#task-dialog").scrollTop = 0;
       }
@@ -2014,7 +2244,7 @@
           "Isaac_n",
           "EC_耗时降低_percent",
           "配置",
-          "历史效果与限制",
+          "已测效果与限制",
           "来源",
           "SHA256",
         ];
@@ -2116,26 +2346,29 @@
         e.preventDefault();
         closeTask();
       });
-      const inlineVideo = $("#inline-video");
+      const inlineVideo = $("#inline-video"),
+        isaacVideo = $("#isaac-video");
+      const pair = [inlineVideo, isaacVideo];
       let videoTask = "M04",
         visibleVideo = false,
         previewPending = true;
-      const reduceMotion = window.matchMedia(
-        "(prefers-reduced-motion: reduce)",
-      );
+      const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)");
       $("#video-autoplay").checked = !reduceMotion.matches;
-      const newMediaCount = DATA.tasks.filter(
-        (t) => t.refresh?.completed,
-      ).length;
-      const mediaCount = DATA.tasks.filter((t) => t.recordings?.length).length;
       $("#video-coverage").textContent =
-        `${mediaCount} 个任务均可直接选择播放。其中 ${newMediaCount} 项提供新 W1 资产录像，其余 ${mediaCount - newMediaCount} 项沿用历史素材；可切换已有平台及配置版本。`;
+        "13 项任务 · 左侧 EmbodiChain，右侧 Isaac Lab。8 个 W1 场景统一使用最新资产；Franka 场景保留当前模型。M05、C01 显示完整场景未支持的原因，C02 可切换迭代预算。";
       $("#video-tasks").innerHTML = DATA.tasks
         .map(
           (t) =>
-            `<button class="video-task" data-video-task="${t.code}" aria-pressed="false" title="${esc(t.name)}">${t.code}</button>`,
+            `<button class="video-task ${t.capability.status === "unsupported" ? "unsupported-task" : ""}" data-video-task="${t.code}" aria-pressed="false" title="${esc(t.name)} · ${esc(t.capability.label)}">${t.code}${t.capability.status === "unsupported" ? " *" : ""}</button>`,
         )
         .join("");
+      const activeVideos = () => pair.filter((v) => v.hasAttribute("src"));
+      function pausePair() {
+        pair.forEach((v) => v.pause());
+      }
+      function playPair() {
+        activeVideos().forEach((v) => v.play().catch(() => {}));
+      }
       function maybePreview() {
         if (
           visibleVideo &&
@@ -2145,106 +2378,150 @@
           !$("#task-dialog").open
         ) {
           previewPending = false;
-          inlineVideo.play().catch(() => {});
+          playPair();
         }
       }
-      function selectRecording(index) {
+      function setVideo(v, r, posterId, fileId) {
+        v.pause();
+        v.removeAttribute("src");
+        v.poster = r?.poster || "";
+        const img = $(posterId);
+        img.hidden = !r?.poster;
+        if (r?.poster) img.src = r.poster;
+        $(fileId).hidden = !r;
+        if (r) {
+          v.src = r.url;
+          $(fileId).href = r.url;
+        }
+        v.load();
+        v.playbackRate = Number($("#video-speed").value);
+      }
+      function selectIsaac(index) {
+        pausePair();
         const t = taskBy(videoTask),
-          r = t.recordings?.[index];
-        inlineVideo.pause();
-        inlineVideo.removeAttribute("src");
-        inlineVideo.poster = r?.poster || "";
-        $("#inline-poster").hidden = !r?.poster;
-        if (r?.poster) $("#inline-poster").src = r.poster;
-        $("#video-error").hidden = !!r;
-        $("#video-error").textContent = r ? "" : "此目录未找到该任务录像。";
-        $("#video-file").hidden = !r;
-        $("#video-caption").textContent = r
-          ? `${t.code} · ${r.label}。${r.note}`
-          : "";
+          ec = t.recordings.find((r) => r.platform === "embodichain"),
+          r = t.recordings[index];
+        setVideo(isaacVideo, r, "#isaac-poster", "#isaac-file");
+        if (inlineVideo.readyState) inlineVideo.currentTime = 0;
+        $("#isaac-label").textContent = r?.label || "Isaac Lab";
+        $("#video-caption").textContent =
+          `${ec?.note || ""} ${r?.note || t.capability.reason}`;
         $$("[data-video-source]").forEach((b) =>
           b.setAttribute(
             "aria-pressed",
             Number(b.dataset.videoSource) === index,
           ),
         );
-        if (r) {
-          inlineVideo.src = r.url;
-          $("#video-file").href = r.url;
-        }
-        inlineVideo.load();
-        inlineVideo.playbackRate = Number($("#video-speed").value);
         previewPending = true;
         maybePreview();
       }
       function selectVideoTask(code) {
+        pausePair();
         videoTask = code;
-        const t = taskBy(code);
+        const t = taskBy(code),
+          ec = t.recordings.find((r) => r.platform === "embodichain");
         $("#video-title").textContent = `${code} · ${t.name}`;
         $$("[data-video-task]").forEach((b) =>
           b.setAttribute("aria-pressed", b.dataset.videoTask === code),
         );
-        $("#video-sources").innerHTML = (t.recordings || [])
-          .map(
-            (r, i) =>
-              `<button class="btn" data-video-source="${i}" aria-pressed="false">${esc(r.label)}</button>`,
-          )
-          .join("");
+        setVideo(inlineVideo, ec, "#inline-poster", "#video-file");
+        $("#ec-label").textContent = ec?.label || "EmbodiChain";
+        const isaac = t.recordings
+          .map((r, i) => ({ r, i }))
+          .filter((x) => x.r.platform === "isaaclab");
+        $("#video-sources").innerHTML =
+          isaac.length > 1
+            ? `<span class="muted">Isaac 求解预算：</span>` +
+              isaac
+                .map(
+                  ({ r, i }) =>
+                    `<button class="btn" data-video-source="${i}" aria-pressed="false">${esc(r.label)}</button>`,
+                )
+                .join("")
+            : "";
         $$("[data-video-source]").forEach(
-          (b) =>
-            (b.onclick = () => selectRecording(Number(b.dataset.videoSource))),
+          (b) => (b.onclick = () => selectIsaac(Number(b.dataset.videoSource))),
         );
-        selectRecording(0);
+        $("#isaac-screen").hidden = !isaac.length;
+        $("#unsupported-panel").hidden = !!isaac.length;
+        $("#unsupported-panel h3").textContent =
+          t.capability.status === "unsupported"
+            ? "无等价 Isaac 对照"
+            : "录像未载入";
+        $("#unsupported-reason").textContent = t.capability.reason;
+        $("#unsupported-panel .unsupported-tag").textContent =
+          t.capability.status === "unsupported" ? "完整场景未支持" : "缺少录像";
+        $("#video-error").hidden = !!ec;
+        $("#video-error").textContent = ec
+          ? ""
+          : "未载入当前 EC 资产录像，请构建时指定 --preview-root。";
+        selectIsaac(isaac[0]?.i ?? -1);
       }
       $$("[data-video-task]").forEach(
         (b) => (b.onclick = () => selectVideoTask(b.dataset.videoTask)),
       );
-      $("#video-speed").onchange = () => {
-        inlineVideo.playbackRate = Number($("#video-speed").value);
+      $$("[data-jump-video]").forEach(
+        (b) =>
+          (b.onclick = () => {
+            selectVideoTask(b.dataset.jumpVideo);
+            $("#task-videos").scrollIntoView({
+              behavior: reduceMotion.matches ? "instant" : "smooth",
+            });
+          }),
+      );
+      $("#pair-play").onclick = playPair;
+      $("#pair-pause").onclick = pausePair;
+      $("#pair-restart").onclick = () => {
+        activeVideos().forEach((v) => {
+          v.currentTime = 0;
+        });
+        playPair();
       };
+      $("#video-speed").onchange = () =>
+        pair.forEach((v) => (v.playbackRate = Number($("#video-speed").value)));
       $("#video-autoplay").onchange = () => {
         if ($("#video-autoplay").checked) {
           previewPending = true;
           maybePreview();
-        } else inlineVideo.pause();
+        } else pausePair();
       };
       $("#video-detail").onclick = () => {
-        inlineVideo.pause();
+        pausePair();
         openTask(videoTask);
       };
-      inlineVideo.onerror = () => {
-        $("#video-error").hidden = false;
-        $("#video-error").textContent =
-          "无法读取本地视频。请保留 HTML 与视频目录的相对位置，或从原目录打开 MP4。";
-      };
+      pair.forEach(
+        (v) =>
+          (v.onerror = () => {
+            $("#video-error").hidden = false;
+            $("#video-error").textContent =
+              "无法读取本地视频，请保留 HTML 与视频目录的相对位置。";
+          }),
+      );
       document.addEventListener(
         "play",
         (e) => {
-          if (e.target.tagName === "VIDEO")
-            document.querySelectorAll("video").forEach((v) => {
-              if (v !== e.target) v.pause();
-            });
+          if (e.target.tagName === "VIDEO") {
+            if (pair.includes(e.target)) {
+              const v = $("#local-video");
+              if (v) v.pause();
+            } else pausePair();
+          }
         },
         true,
       );
       document.addEventListener("visibilitychange", () => {
-        if (document.hidden) inlineVideo.pause();
+        if (document.hidden) pausePair();
       });
       new IntersectionObserver(
         (entries) => {
           visibleVideo = entries[0].isIntersecting;
           if (visibleVideo) maybePreview();
-          else inlineVideo.pause();
+          else pausePair();
         },
         { threshold: 0.25 },
-      ).observe(inlineVideo);
-      window.addEventListener("beforeprint", () => inlineVideo.pause());
-      selectVideoTask(
-        DATA.tasks.find((t) => t.code === "M04" && t.recordings?.length)
-          ?.code ||
-          DATA.tasks.find((t) => t.recordings?.length)?.code ||
-          DATA.tasks[0].code,
-      );
+      ).observe($("#video-pair"));
+      window.addEventListener("beforeprint", pausePair);
+      selectVideoTask("M04");
       const figures = ["M03", "M04"]
         .map(taskBy)
         .filter((t) => t.refresh?.completed && t.refresh.poster);
@@ -2264,7 +2541,7 @@
         )
         .join("");
       $("#c02-caption").textContent = (DATA.c02_figures || []).length
-        ? "图 3. C02 在 58 秒附近的录像画面。EC 为新资产完整录制；Isaac 两档为历史保留录像。表 3 的计时仍为原始历史样本，图像不构成新的等条件性能对照。"
+        ? "图 3. C02 在 58 秒附近的录像画面。EC 为新资产完整录制；Isaac 两档为对应场景录像。表 3 的计时仍为原测量样本，图像不构成新的等条件性能对照。"
         : "";
       $("#asset-rows").innerHTML =
         DATA.tasks
