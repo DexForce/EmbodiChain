@@ -314,6 +314,18 @@ def visual_desc_from_cfg(
             "USD files describe typed scenes; use visual_desc_from_usd() to "
             "select a visual object's appearance."
         )
+    if cfg.visuals is not None:
+        return (
+            ObjectDesc(
+                name=uid,
+                pose=_pose_from_cfg(cfg),
+                renders=[],
+                physics=None,
+                collisions=[],
+                per_env=per_env,
+            ),
+            {},
+        )
     shape = cfg.shape
     if isinstance(shape, MeshCfg):
         geometry = _mesh_geometry_from_cfg(shape, segment_name=uid)
@@ -362,6 +374,11 @@ def rigid_desc_from_cfg(
         raise NotImplementedError(
             "USD files describe typed scenes; use rigid_desc_from_usd() to "
             "select one rigid object."
+        )
+
+    if cfg.shape is None:
+        raise ValueError(
+            "Rigid objects require a physical shape or USD source independently of visuals."
         )
 
     if cfg.body_type is None:

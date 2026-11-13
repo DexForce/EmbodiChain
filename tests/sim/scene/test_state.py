@@ -21,7 +21,7 @@ import torch
 from embodichain.lab.sim.scene.query import SceneView
 from embodichain.lab.sim.scene.state import capture_state, restore_state
 from embodichain.lab.sim.scene.validation import compare_states
-from ._runtime_ports import Sim, Rigid
+from ._runtime_ports import Sim, Rigid, Visual
 
 
 def test_capture_owns_batches_and_restores_targets_effort_and_velocity():
@@ -36,6 +36,26 @@ def test_capture_owns_batches_and_restores_targets_effort_and_velocity():
     assert compare_states(saved, capture_state(view)).passed
     assert sim.steps == 0 and sim.syncs == 1
     assert sim.articulations["drawer"].state["qf"].item() == pytest.approx(0.5)
+
+
+def test_mixed_group_snapshot_retains_only_selected_physical_state():
+    sim = Sim(4)
+    sim.visuals["scan"] = Visual(4)
+    view = SceneView(sim, env_ids=(3, 1), entity_uids=("scan", "cube"))
+    saved = capture_state(view)
+    assert [[row.uid for row in batch] for batch in saved.batches] == [
+        ["cube"],
+        ["cube"],
+    ]
+    sim.rigid["cube"].value[[3, 1], 0] = 9
+    sim.visuals["scan"].value[:, 0, 3] = 5
+    restore_state(view, saved)
+    torch.testing.assert_close(
+        sim.rigid["cube"].value[[3, 1], 0], torch.full((2,), 0.2)
+    )
+    assert sim.rigid["other"].writes == 0
+    assert sim.visuals["scan"].writes == 0
+    assert sim.visuals["scan"].value[:, 0, 3].tolist() == [5.0] * 4
 
 
 def test_foreign_and_rebound_snapshots_rejected_before_writes():

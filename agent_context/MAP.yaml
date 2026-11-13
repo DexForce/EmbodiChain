@@ -7,7 +7,7 @@ topics:
 - id: simulation-system
   title: Simulation System
   aliases: [simulation system, simulation manager, Newton physics backend, motion module, sim motion, camera attachment, 运动能力模块, 仿真系统, 仿真管理器]
-  keywords: [SimulationManager, SimulationManagerCfg, RenderCfg, DenoisingCfg, DenoisingMode, DLSSCfg,
+  keywords: [GaussianSplatCfg, VisualElementCfg, GaussianRenderCfg, 3DGS, Gaussian visual, SimulationManager, SimulationManagerCfg, RenderCfg, DenoisingCfg, DenoisingMode, DLSSCfg,
     NRDCfg, DLSS, NRD, frame_time_delta_ms, explicit physics stepping, simulation_time, arena, DexSim, UsdImportCfg, UsdImportResult, root_prim_path, LightCfg, LightBatch, 灯光批次, PhysicsBackendCfg,
     DefaultPhysicsCfg, NewtonPhysicsCfg, VisualObject, VisualObjectCfg, VisualMaterial, VisualMaterialCfg, VisualMaterialInst, preview-material, 材质预览, UsdSourceCfg, source_prim_path, add_visual_object, 纯渲染对象, DexUniSolverCfg, DexUni, runtime control, deformable, particle set,
     UsdSourceSnapshot, read_usd_source, LinkMesh,
@@ -271,6 +271,7 @@ topics:
     NativePlanarPlacement, planar_floor_region, planar_placement_metrics, select_container_landing,
     SceneMeshSnapshot, SceneMeshComponent, capture_scene_meshes, CollisionObjectSnapshot, snapshot_collision_sources,
     LayoutSolution, PlanarRelation, SceneView, SceneState, SceneChangeSet, SceneCheckReport,
+    apply_group_transform, scene group, 组变换,
     SettlingCfg, declare_fragment, detect_support_region, clamp_group,
     solve_layout, capture_state, restore_state, settle_scene, check_layout,
     aabb_overlap_depth, aabb_containment_violation, transform_aabbs, triangle_geometry,
