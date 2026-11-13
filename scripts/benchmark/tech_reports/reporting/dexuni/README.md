@@ -18,3 +18,26 @@ parity、compare_models 保留历史诊断用途；旧工作区已删除，旧 S
 [Hugging Face 报告](https://huggingface.co/datasets/DexForceAI/embodichain_reports/tree/cafe3e14f650f93123d47fe338e49c003443f3a4/reports/dexuni-physics-2026-10-27)
 提供可浏览的原始 JSON/CSV、输入资产和逐文件哈希。视频和完整结果大包仅在本地保留。
 按[恢复命令](../../physics/experiments/dexuni/SETUP.md)准备输入；完整数组复算仍需本地保留的测量结果。
+
+## 单文件 HTML 总览
+
+从本地保留的结果生成可离线浏览的交互报告：
+
+```bash
+.venv/bin/python scripts/benchmark/tech_reports/reporting/dexuni/build_html_report.py
+```
+
+产物为 `outputs/benchmarks/tech_reports/dexuni/report.html`，可直接用浏览器打开。
+页面包含 13 个任务、正式测量对比图、分类/搜索、逐项效果与配置、C02 两个计时窗口、
+可选 SDK 冷启动复验，以及 CSV/JSON 导出和打印样式。数据与录像截帧内嵌，无 CDN 或网络脚本。
+
+生成器只读 `comparison.json` 及其冻结来源，先校验每项来源 SHA256，再生成页面；
+不重跑仿真、不覆盖原始结果。默认使用已有 `imageio_ffmpeg` 从本地视频提取截图，
+`--no-posters` 可跳过截图且无需该依赖。`--root` 指向已有完整结果根目录，
+`--output` 可指定 HTML 输出位置。构建需要本地汇总及原始 JSON/CSV/报告，
+仅下载运行输入不包含全部报告构建数据。
+
+单独分享 HTML 可保留图表、截图和数据导出。视频不内嵌、不上传，播放使用相对于
+HTML 的本地路径；移动 HTML 后若未保留目录关系，仍可浏览截图，但需从原目录打开视频。
+在线原始报告和表格链接固定到资产发布版本。M05、C01 不计算虚构速度比，
+C02 摸测独立展示，M06 的替换样本和各项失败检查保留说明。

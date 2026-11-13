@@ -1,0 +1,2350 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>DexUni · 跨平台物理仿真技术报告</title>
+    <style>
+      :root {
+        --ink: #172d31;
+        --muted: #617577;
+        --paper: #f4f6f3;
+        --line: #dde5df;
+        --ec: #087f70;
+        --ec-soft: #e4f3ee;
+        --il: #8070b6;
+        --amber: #a86418;
+        --white: #fff;
+        --red: #b74d38;
+        --radius: 16px;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        scroll-behavior: smooth;
+        scroll-padding-top: 28px;
+      }
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--ink);
+        font:
+          14px/1.65 "Inter",
+          "Noto Sans CJK SC",
+          "Microsoft YaHei",
+          system-ui,
+          sans-serif;
+      }
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+      button,
+      input,
+      select {
+        font: inherit;
+      }
+      button,
+      select {
+        cursor: pointer;
+      }
+      button {
+        color: inherit;
+      }
+      button:focus-visible,
+      a:focus-visible,
+      input:focus-visible,
+      select:focus-visible,
+      summary:focus-visible {
+        outline: 3px solid #e5a442;
+        outline-offset: 4px;
+      }
+      button:disabled {
+        cursor: default;
+        opacity: 0.45;
+      }
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+      h2 {
+        font-size: 26px;
+        font-weight: 650;
+        letter-spacing: -0.7px;
+      }
+      h3 {
+        font-size: 17px;
+        line-height: 1.4;
+      }
+      small {
+        font-size: 12px;
+      }
+      code,
+      .num {
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        font-variant-numeric: tabular-nums;
+      }
+      button {
+        border: 0;
+      }
+      img {
+        max-width: 100%;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .eyebrow {
+        text-transform: uppercase;
+        font-size: 11px;
+        letter-spacing: 2px;
+        font-weight: 700;
+        color: var(--ec);
+      }
+      .sidebar {
+        position: fixed;
+        inset: 0 auto 0 0;
+        width: 216px;
+        background: #122d30;
+        color: #c6d6d2;
+        padding: 32px 23px;
+        display: flex;
+        flex-direction: column;
+        z-index: 20;
+      }
+      .brand {
+        color: white;
+        font-size: 24px;
+        font-weight: 700;
+        letter-spacing: -1px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .brand-mark {
+        display: grid;
+        grid-template-columns: repeat(2, 8px);
+        gap: 3px;
+        transform: rotate(-15deg);
+      }
+      .brand-mark i {
+        width: 8px;
+        height: 8px;
+        background: #76d9ba;
+        border-radius: 2px;
+      }
+      .brand-mark i:last-child {
+        opacity: 0.35;
+      }
+      .brand-sub {
+        margin: 8px 0 42px 29px;
+        font-size: 10px;
+        letter-spacing: 1.8px;
+        color: #8aa7a1;
+      }
+      .nav-label {
+        font-size: 10px;
+        letter-spacing: 1.5px;
+        color: #718f89;
+        margin-bottom: 14px;
+      }
+      .nav {
+        display: grid;
+        gap: 8px;
+      }
+      .nav a {
+        display: flex;
+        gap: 14px;
+        padding: 11px 13px;
+        border-radius: 8px;
+        font-size: 13px;
+      }
+      .nav a:hover,
+      .nav a.active {
+        background: #244346;
+        color: #fff;
+      }
+      .nav a.active {
+        box-shadow: inset 3px 0 #8de0c6;
+      }
+      .nav-num {
+        font-size: 11px;
+        color: #85a29b;
+        font-family: monospace;
+      }
+      .sidebar-foot {
+        margin-top: auto;
+        font-size: 11px;
+        line-height: 1.9;
+        color: #8fa9a3;
+      }
+      .sidebar-foot a {
+        display: block;
+        color: #d3e4df;
+        margin-top: 10px;
+      }
+      .side-line {
+        height: 1px;
+        background: #2b4849;
+        margin: 20px 0;
+      }
+      .dot {
+        display: inline-block;
+        width: 6px;
+        height: 6px;
+        background: #8edcba;
+        border-radius: 50%;
+        margin-right: 6px;
+      }
+      .shell {
+        margin-left: 216px;
+        padding: 27px 46px 24px;
+        max-width: 1800px;
+      }
+      .topbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 28px;
+        font-size: 12px;
+        color: var(--muted);
+        gap: 16px;
+      }
+      .crumb b {
+        color: var(--ink);
+        font-weight: 500;
+      }
+      .top-actions {
+        display: flex;
+        gap: 10px;
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 7px;
+        background: white;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 8px 13px;
+        font-size: 12px;
+        white-space: nowrap;
+      }
+      .btn:hover {
+        border-color: var(--ec);
+        color: var(--ec);
+      }
+      .btn-dark {
+        background: var(--ink);
+        color: white;
+        border-color: var(--ink);
+      }
+      .btn-dark:hover {
+        background: var(--ec);
+        color: white;
+      }
+      .title-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 24px;
+        align-items: flex-start;
+        margin-bottom: 25px;
+      }
+      .title-row h1 {
+        font-size: 36px;
+        line-height: 1.3;
+        font-weight: 650;
+        letter-spacing: -1.4px;
+        margin: 7px 0 10px;
+      }
+      .subtitle {
+        color: var(--muted);
+        font-size: 13px;
+        max-width: 730px;
+      }
+      .edition {
+        text-align: right;
+        font-size: 11px;
+        color: var(--muted);
+        padding-top: 12px;
+        white-space: nowrap;
+      }
+      .edition strong {
+        display: block;
+        font-size: 20px;
+        font-weight: 450;
+        letter-spacing: -0.6px;
+        color: var(--ink);
+      }
+      .hero {
+        display: grid;
+        grid-template-columns: 0.9fr 1.1fr;
+        background: #183b3d;
+        border-radius: var(--radius);
+        overflow: hidden;
+        min-height: 274px;
+        color: white;
+        margin-bottom: 20px;
+      }
+      .hero-copy {
+        padding: 31px 32px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+      }
+      .hero-copy .eyebrow {
+        color: #93d7bd;
+      }
+      .hero h2 {
+        font-size: 27px;
+        line-height: 1.5;
+        letter-spacing: -0.5px;
+        margin: 13px 0;
+      }
+      .hero p {
+        font-size: 12px;
+        color: #c2d6d0;
+        max-width: 430px;
+        line-height: 1.9;
+      }
+      .hero-tags {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 21px;
+      }
+      .hero-tags span {
+        padding: 4px 10px;
+        border: 1px solid #55726b;
+        border-radius: 5px;
+        font-size: 10px;
+        color: #d7e8e0;
+      }
+      .hero-visual {
+        background: #d6e0dc;
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        min-height: 240px;
+      }
+      .hero-visual img {
+        width: 100%;
+        display: block;
+      }
+      .hero-caption {
+        position: absolute;
+        bottom: 12px;
+        left: 15px;
+        background: #163532e8;
+        color: white;
+        padding: 5px 11px;
+        border-radius: 5px;
+        font-size: 10px;
+      }
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 14px;
+        margin-bottom: 46px;
+      }
+      .stat {
+        background: white;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 19px 21px;
+        position: relative;
+      }
+      .stat-top {
+        font-size: 11px;
+        color: var(--muted);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .stat-index {
+        color: #a8b8b2;
+        font-size: 10px;
+      }
+      .stat-value {
+        font-size: 34px;
+        line-height: 1.2;
+        letter-spacing: -1.5px;
+        margin: 10px 0 8px;
+      }
+      .stat-value span {
+        font-size: 12px;
+        letter-spacing: 0;
+        color: var(--muted);
+        margin-left: 8px;
+      }
+      .stat-note {
+        font-size: 11px;
+        color: var(--muted);
+      }
+      section {
+        margin-bottom: 42px;
+      }
+      .section-head {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 20px;
+        margin-bottom: 18px;
+      }
+      .section-title {
+        display: flex;
+        gap: 12px;
+        align-items: baseline;
+      }
+      .section-index {
+        font-size: 12px;
+        font-family: monospace;
+        color: var(--ec);
+      }
+      .section-description {
+        color: var(--muted);
+        font-size: 12px;
+        margin-top: 6px;
+      }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 3px 9px;
+        border-radius: 5px;
+        font-size: 10px;
+        font-weight: 550;
+        background: var(--ec-soft);
+        color: #176c59;
+        white-space: nowrap;
+      }
+      .pill.pilot {
+        color: #935214;
+        background: #fff0d9;
+      }
+      .pill.single,
+      .pill.demo {
+        color: #6d607d;
+        background: #eeeaf4;
+      }
+      .panel {
+        background: white;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        overflow: hidden;
+      }
+      .panel-head {
+        padding: 21px 24px;
+        border-bottom: 1px solid var(--line);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 15px;
+      }
+      .panel-head h3 {
+        font-size: 14px;
+      }
+      .legend {
+        display: flex;
+        gap: 16px;
+        align-items: center;
+        font-size: 11px;
+        color: var(--muted);
+        flex-wrap: wrap;
+      }
+      .legend span {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+      .legend i {
+        width: 9px;
+        height: 9px;
+        border-radius: 2px;
+        background: var(--ec);
+      }
+      .legend i.il {
+        background: var(--il);
+      }
+      .chart-controls {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+      }
+      .select {
+        border: 1px solid var(--line);
+        padding: 7px 28px 7px 9px;
+        border-radius: 7px;
+        background: white;
+        color: var(--muted);
+        font-size: 11px;
+        max-width: 100%;
+      }
+      .seg {
+        display: flex;
+        gap: 2px;
+        padding: 3px;
+        background: #edf2ee;
+        border-radius: 7px;
+      }
+      .seg button {
+        border-radius: 5px;
+        background: transparent;
+        padding: 5px 10px;
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .seg button[aria-pressed="true"] {
+        background: white;
+        box-shadow: 0 1px 4px #142a2215;
+        color: var(--ink);
+      }
+      .chart {
+        padding: 18px 24px 8px;
+      }
+      .chart-header,
+      .chart-row {
+        display: grid;
+        grid-template-columns: 174px minmax(200px, 1fr) 95px;
+        gap: 16px;
+        align-items: center;
+      }
+      .chart-header {
+        font-size: 10px;
+        color: var(--muted);
+        margin-bottom: 5px;
+      }
+      .chart-header > span:last-child {
+        text-align: right;
+      }
+      .axis {
+        display: flex;
+        justify-content: space-between;
+        padding-right: 0;
+      }
+      .chart-row {
+        padding: 10px 0;
+        border-bottom: 1px solid #eef1ec;
+      }
+      .chart-row:last-child {
+        border: 0;
+      }
+      .chart-label {
+        font-size: 12px;
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        text-align: left;
+        background: none;
+        padding: 5px 0;
+      }
+      .chart-label:hover {
+        color: var(--ec);
+      }
+      .chart-label b {
+        font-size: 11px;
+        min-width: 42px;
+      }
+      .bar-area {
+        background: repeating-linear-gradient(
+          to right,
+          #e8eee9 0,
+          #e8eee9 1px,
+          transparent 1px,
+          transparent 25%
+        );
+        height: 38px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        gap: 6px;
+      }
+      .bar-track {
+        position: relative;
+        height: 11px;
+      }
+      .bar {
+        position: absolute;
+        left: 0;
+        height: 11px;
+        width: var(--w);
+        background: var(--ec);
+        border-radius: 0 3px 3px 0;
+      }
+      .bar.il {
+        background: var(--il);
+      }
+      .error-line {
+        position: absolute;
+        top: 4px;
+        height: 3px;
+        background: #153e33;
+        left: var(--left);
+        width: var(--span);
+        min-width: 2px;
+        border-left: 1px solid #0c3025;
+        border-right: 1px solid #0c3025;
+      }
+      .bar-track.il .error-line {
+        background: #4b3b70;
+      }
+      .bar-value {
+        position: absolute;
+        left: calc(var(--w) + 5px);
+        top: -4px;
+        font-size: 10px;
+        line-height: 19px;
+        font-family: monospace;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .saving {
+        text-align: right;
+        font-size: 17px;
+        font-family: monospace;
+        color: var(--ec);
+      }
+      .saving small {
+        display: block;
+        font-size: 9px;
+        color: var(--muted);
+        font-family: inherit;
+      }
+      .chart-foot {
+        padding: 14px 24px 19px;
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 1.9;
+      }
+      .notice {
+        padding: 13px 17px;
+        border-left: 3px solid #b7c9bd;
+        background: #eaf0e9;
+        font-size: 12px;
+        color: #506560;
+        margin-top: 15px;
+        border-radius: 0 7px 7px 0;
+      }
+      .notice.amber {
+        background: #fff3e5;
+        border-color: #d69a4b;
+        color: #80531e;
+      }
+      .notice strong {
+        font-weight: 600;
+      }
+      .toolbar {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 18px;
+        flex-wrap: wrap;
+      }
+      .filters {
+        display: flex;
+        gap: 7px;
+        flex-wrap: wrap;
+      }
+      .filter {
+        background: white;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        font-size: 12px;
+        padding: 7px 12px;
+      }
+      .filter[aria-pressed="true"] {
+        background: var(--ink);
+        color: white;
+        border-color: var(--ink);
+      }
+      .search {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background: white;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 0 12px;
+        min-width: 220px;
+      }
+      .search input {
+        padding: 8px 0;
+        min-width: 0;
+        width: 100%;
+        border: 0;
+        outline: 0;
+        color: var(--ink);
+        background: none;
+        font-size: 12px;
+      }
+      .task-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 20px;
+      }
+      .task-card {
+        border: 1px solid var(--line);
+        border-radius: 13px;
+        background: white;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+      .card-image {
+        background: #dde5e1;
+        aspect-ratio: 2.15;
+        position: relative;
+        overflow: hidden;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .card-image img {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+      }
+      .image-label {
+        position: absolute;
+        bottom: 8px;
+        left: 10px;
+        font-size: 9px;
+        border-radius: 4px;
+        background: #16332ddc;
+        color: white;
+        padding: 3px 7px;
+      }
+      .card-body {
+        padding: 19px 21px;
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+      }
+      .card-title {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        flex-wrap: wrap;
+      }
+      .task-code {
+        color: var(--ec);
+        font-family: monospace;
+        font-size: 12px;
+        font-weight: bold;
+      }
+      .card-title h3 {
+        font-size: 16px;
+        flex: 1;
+      }
+      .card-measures {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+        padding: 16px 0 13px;
+      }
+      .measure-label {
+        font-size: 10px;
+        color: var(--muted);
+        display: flex;
+        gap: 5px;
+        align-items: center;
+      }
+      .measure-label:before {
+        content: "";
+        display: block;
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: var(--ec);
+      }
+      .measure-label.il:before {
+        background: var(--il);
+      }
+      .measure-value {
+        font-size: 23px;
+        letter-spacing: -1px;
+        margin-top: 3px;
+        font-family: monospace;
+      }
+      .measure-value small {
+        font-size: 11px;
+        color: var(--muted);
+        letter-spacing: 0;
+      }
+      .measure-sub {
+        color: var(--muted);
+        font-size: 10px;
+      }
+      .outcome {
+        font-size: 12px;
+        line-height: 1.8;
+        padding-top: 12px;
+        border-top: 1px solid #edf1ec;
+        color: #4f6363;
+        margin-bottom: 16px;
+        flex: 1;
+      }
+      .card-actions {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+      }
+      .card-actions .btn {
+        padding: 5px 10px;
+        font-size: 11px;
+      }
+      .card-reduction {
+        font-size: 11px;
+        color: var(--ec);
+      }
+      .empty {
+        padding: 45px;
+        text-align: center;
+        color: var(--muted);
+        grid-column: 1/-1;
+        background: white;
+        border: 1px dashed var(--line);
+        border-radius: 12px;
+      }
+      .section-tail {
+        text-align: right;
+        margin-top: 12px;
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .c02-layout {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 20px;
+      }
+      #budget-chart {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 28px;
+      }
+      .c02-visual {
+        background: #e2e8e4;
+        border-radius: 13px;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-start;
+        border: 1px solid var(--line);
+      }
+      .c02-visual img {
+        width: 100%;
+        display: block;
+      }
+      .caption {
+        padding: 14px 17px;
+        font-size: 11px;
+        color: var(--muted);
+        background: white;
+      }
+      .budget-panel {
+        padding: 22px;
+      }
+      .budget-panel h3 {
+        font-size: 14px;
+        margin-bottom: 6px;
+      }
+      .budget-row {
+        margin: 21px 0;
+      }
+      .budget-label {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 11px;
+        gap: 9px;
+        margin-bottom: 7px;
+      }
+      .budget-track {
+        height: 7px;
+        background: #e9eeea;
+        border-radius: 4px;
+        overflow: hidden;
+      }
+      .budget-fill {
+        height: 100%;
+        min-width: 3px;
+        border-radius: 4px;
+        background: var(--ec);
+      }
+      .budget-value {
+        display: flex;
+        justify-content: space-between;
+        gap: 7px;
+        align-items: baseline;
+        font-size: 20px;
+        font-family: monospace;
+        margin-top: 6px;
+      }
+      .budget-value small {
+        font-family: inherit;
+        font-size: 10px;
+        color: var(--muted);
+      }
+      .budget-text {
+        font-size: 10px;
+        color: var(--muted);
+        margin-top: 4px;
+      }
+      .limits {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 16px;
+        margin-top: 18px;
+      }
+      .limit {
+        background: white;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 20px;
+      }
+      .limit-title {
+        font-size: 12px;
+        font-weight: 600;
+        margin: 8px 0;
+      }
+      .limit p {
+        font-size: 11px;
+        color: var(--muted);
+        line-height: 1.9;
+      }
+      .limit .num {
+        font-size: 10px;
+        color: var(--amber);
+      }
+      .table-scroll {
+        overflow: auto;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        text-align: left;
+        font-size: 12px;
+      }
+      th {
+        font-weight: 500;
+        font-size: 10px;
+        color: var(--muted);
+        background: #f6f8f5;
+        white-space: nowrap;
+      }
+      th,
+      td {
+        padding: 13px 18px;
+        border-bottom: 1px solid var(--line);
+      }
+      tbody tr:last-child td {
+        border-bottom: 0;
+      }
+      .pass {
+        color: var(--ec);
+      }
+      .e2e-note {
+        padding: 16px 21px;
+        border-top: 1px solid var(--line);
+        font-size: 11px;
+        color: var(--muted);
+        line-height: 1.9;
+      }
+      .method-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 16px;
+      }
+      .method {
+        padding: 23px;
+        background: white;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+      }
+      .method .eyebrow {
+        font-size: 10px;
+      }
+      .method h3 {
+        font-size: 15px;
+        margin: 9px 0 12px;
+      }
+      .method p {
+        font-size: 12px;
+        color: var(--muted);
+        line-height: 1.9;
+      }
+      .source-strip {
+        display: flex;
+        justify-content: space-between;
+        gap: 24px;
+        border-top: 1px solid var(--line);
+        margin-top: 23px;
+        padding-top: 22px;
+        align-items: center;
+        font-size: 12px;
+      }
+      .source-links {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .hash {
+        font-family: monospace;
+        font-size: 10px;
+        overflow-wrap: anywhere;
+        color: var(--muted);
+      }
+      .source-details {
+        margin-top: 18px;
+        color: var(--muted);
+        font-size: 11px;
+      }
+      .source-details summary {
+        cursor: pointer;
+        padding: 12px 0;
+      }
+      .source-list {
+        padding: 15px;
+        background: white;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        display: grid;
+        gap: 10px;
+      }
+      .footer {
+        border-top: 1px solid var(--line);
+        padding: 22px 0 5px;
+        display: flex;
+        justify-content: space-between;
+        gap: 15px;
+        color: var(--muted);
+        font-size: 10px;
+      }
+      dialog {
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        padding: 0;
+        max-width: 940px;
+        width: calc(100% - 32px);
+        max-height: 90vh;
+        box-shadow: 0 30px 100px #001d2a33;
+        color: var(--ink);
+        background: var(--paper);
+      }
+      dialog::backdrop {
+        background: #071b23ac;
+        backdrop-filter: blur(5px);
+      }
+      .modal-head {
+        position: sticky;
+        top: 0;
+        background: white;
+        border-bottom: 1px solid var(--line);
+        padding: 19px 25px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        z-index: 1;
+        gap: 16px;
+      }
+      .modal-head h2 {
+        font-size: 21px;
+      }
+      .close {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        background: #eff3ef;
+        font-size: 22px;
+        line-height: 1;
+      }
+      .modal-body {
+        padding: 24px;
+      }
+      .modal-image {
+        width: 100%;
+        max-height: 370px;
+        object-fit: contain;
+        background: #e0e7e1;
+        border-radius: 10px;
+      }
+      .modal-body .outcome {
+        font-size: 13px;
+        flex: none;
+        margin: 18px 0;
+        padding: 16px;
+        background: white;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+      }
+      .modal-meta {
+        font-size: 12px;
+        color: var(--muted);
+        margin: 14px 0;
+        line-height: 1.9;
+      }
+      .modal-body video {
+        width: 100%;
+        max-height: 480px;
+        background: #152e31;
+        border-radius: 10px;
+        display: block;
+        margin-top: 16px;
+      }
+      .modal-body video[hidden] {
+        display: none;
+      }
+      .video-note {
+        font-size: 11px;
+        color: var(--muted);
+        margin-top: 10px;
+      }
+      .modal-actions {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-top: 18px;
+      }
+      #modal-hash {
+        margin-top: 16px;
+      }
+      .modal-metrics {
+        margin-top: 18px;
+      }
+      .toast {
+        position: fixed;
+        bottom: 26px;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 10px 20px;
+        border-radius: 8px;
+        background: #173b32;
+        color: white;
+        z-index: 50;
+        font-size: 12px;
+      }
+      .hidden,
+      [hidden] {
+        display: none !important;
+      }
+      @media (min-width: 1550px) {
+        .shell {
+          padding-left: 62px;
+          padding-right: 62px;
+        }
+        .hero {
+          min-height: 315px;
+        }
+        .hero-copy {
+          padding: 38px 42px;
+        }
+        .hero h2 {
+          font-size: 32px;
+        }
+        .hero p {
+          font-size: 14px;
+        }
+        .card-image {
+          aspect-ratio: 2.3;
+        }
+      }
+      @media (max-width: 1200px) {
+        .sidebar {
+          width: 180px;
+          padding: 28px 16px;
+        }
+        .shell {
+          margin-left: 180px;
+          padding: 25px 28px;
+        }
+        .brand {
+          font-size: 22px;
+        }
+        .brand-sub {
+          font-size: 8px;
+          margin-left: 25px;
+        }
+        .hero-copy {
+          padding: 26px;
+        }
+        .hero h2 {
+          font-size: 23px;
+        }
+        .chart-header,
+        .chart-row {
+          grid-template-columns: 145px minmax(130px, 1fr) 72px;
+          gap: 13px;
+        }
+        .chart-label {
+          font-size: 11px;
+          gap: 5px;
+        }
+        .chart-label b {
+          min-width: 37px;
+        }
+        .card-title h3 {
+          font-size: 14px;
+        }
+        .panel-head {
+          flex-wrap: wrap;
+        }
+        .limits {
+          gap: 10px;
+        }
+        .limit {
+          padding: 16px;
+        }
+      }
+      @media (max-width: 900px) {
+        .sidebar {
+          position: static;
+          width: 100%;
+          padding: 15px 22px;
+          flex-direction: row;
+          align-items: center;
+          justify-content: space-between;
+          gap: 20px;
+        }
+        .brand {
+          font-size: 21px;
+        }
+        .brand-sub,
+        .nav-label,
+        .sidebar-foot {
+          display: none;
+        }
+        .nav {
+          display: flex;
+          gap: 0;
+          overflow: auto;
+        }
+        .nav a {
+          font-size: 11px;
+          white-space: nowrap;
+          padding: 8px;
+        }
+        .nav-num {
+          display: none;
+        }
+        .shell {
+          margin: 0;
+          padding: 24px;
+        }
+        .title-row h1 {
+          font-size: 30px;
+        }
+        .hero {
+          grid-template-columns: 1fr 1fr;
+        }
+        .hero h2 {
+          font-size: 22px;
+        }
+        .hero-copy {
+          padding: 22px;
+        }
+        .hero-tags {
+          margin-top: 12px;
+        }
+        .stats {
+          gap: 10px;
+        }
+        .stat {
+          padding: 16px;
+        }
+        .stat-value {
+          font-size: 30px;
+        }
+        .c02-layout {
+          grid-template-columns: 1fr;
+        }
+        .c02-visual {
+          max-height: none;
+        }
+        .method-grid {
+          gap: 10px;
+        }
+        .method {
+          padding: 16px;
+        }
+        .edition {
+          font-size: 10px;
+        }
+      }
+      @media (max-width: 600px) {
+        html {
+          scroll-padding-top: 12px;
+        }
+        .sidebar {
+          display: block;
+          padding: 16px 18px;
+        }
+        .nav {
+          margin-top: 12px;
+          justify-content: space-between;
+        }
+        .nav a {
+          padding: 6px 4px;
+        }
+        .nav a.active {
+          box-shadow: none;
+          color: #95dfc6;
+          background: transparent;
+        }
+        .shell {
+          padding: 18px 16px;
+        }
+        .topbar {
+          align-items: flex-start;
+          margin-bottom: 24px;
+        }
+        .top-actions .btn:first-child {
+          display: none;
+        }
+        .crumb {
+          font-size: 10px;
+          max-width: 170px;
+        }
+        .btn {
+          padding: 7px 10px;
+          font-size: 11px;
+        }
+        .title-row {
+          gap: 8px;
+        }
+        .title-row h1 {
+          font-size: 27px;
+        }
+        .edition {
+          display: none;
+        }
+        .subtitle {
+          font-size: 12px;
+        }
+        .hero {
+          grid-template-columns: 1fr;
+        }
+        .hero-copy {
+          padding: 24px;
+        }
+        .hero h2 {
+          font-size: 25px;
+        }
+        .hero-visual {
+          min-height: 150px;
+        }
+        .hero-caption {
+          font-size: 9px;
+        }
+        .stats {
+          grid-template-columns: 1fr 1fr;
+          margin-bottom: 30px;
+        }
+        .stat-note {
+          font-size: 10px;
+        }
+        h2 {
+          font-size: 21px;
+        }
+        .section-title {
+          gap: 8px;
+        }
+        .section-description {
+          font-size: 11px;
+        }
+        .section-head {
+          align-items: flex-start;
+          gap: 8px;
+        }
+        .section-head > .btn {
+          margin-top: 2px;
+        }
+        .panel-head {
+          padding: 16px;
+          gap: 12px;
+        }
+        .legend {
+          font-size: 10px;
+          gap: 10px;
+        }
+        .chart {
+          padding: 12px 12px 6px;
+        }
+        .chart-header,
+        .chart-row {
+          grid-template-columns: 49px minmax(80px, 1fr) 56px;
+          gap: 8px;
+        }
+        .chart-label span {
+          display: none;
+        }
+        .chart-label b {
+          font-size: 10px;
+        }
+        .chart-header {
+          font-size: 9px;
+        }
+        .saving {
+          font-size: 13px;
+        }
+        .saving small {
+          font-size: 8px;
+        }
+        .bar-value {
+          font-size: 8px;
+          left: calc(var(--w) + 3px);
+        }
+        .chart-foot {
+          padding: 13px 16px;
+          font-size: 10px;
+        }
+        .chart-controls {
+          gap: 6px;
+          flex-wrap: wrap;
+        }
+        .select {
+          font-size: 10px;
+        }
+        .seg button {
+          font-size: 10px;
+          padding: 5px 7px;
+        }
+        .task-grid {
+          grid-template-columns: 1fr;
+        }
+        .search {
+          width: 100%;
+        }
+        .filters {
+          gap: 5px;
+        }
+        .filter {
+          font-size: 11px;
+          padding: 6px 9px;
+        }
+        .limits,
+        .method-grid,
+        #budget-chart {
+          grid-template-columns: 1fr;
+        }
+        #budget-chart {
+          gap: 0;
+        }
+        .limit {
+          padding: 18px;
+        }
+        .source-strip {
+          display: block;
+        }
+        .source-links {
+          margin-top: 12px;
+        }
+        .footer {
+          display: block;
+          font-size: 9px;
+        }
+        .footer span {
+          display: block;
+          margin-bottom: 6px;
+        }
+        .modal-body {
+          padding: 16px;
+        }
+        .modal-head {
+          padding: 15px 16px;
+        }
+        .modal-head h2 {
+          font-size: 17px;
+        }
+        .modal-body td,
+        .modal-body th {
+          padding: 10px;
+        }
+        .notice {
+          font-size: 11px;
+        }
+        .caption {
+          font-size: 10px;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        html {
+          scroll-behavior: auto;
+        }
+        * {
+          transition: none !important;
+        }
+      }
+      @media print {
+        @page {
+          size: A4;
+          margin: 13mm;
+        }
+        body {
+          font-size: 10px;
+          background: white;
+        }
+        .sidebar,
+        .topbar,
+        .toolbar,
+        .chart-controls,
+        .modal-actions,
+        .card-actions,
+        .source-links,
+        .footer,
+        .seg,
+        .section-head > .btn,
+        dialog,
+        .toast {
+          display: none !important;
+        }
+        .shell {
+          margin: 0;
+          padding: 0;
+          max-width: none;
+        }
+        .title-row h1 {
+          font-size: 28px;
+        }
+        .hero {
+          min-height: 0;
+          grid-template-columns: 1fr 1fr;
+          print-color-adjust: exact;
+          -webkit-print-color-adjust: exact;
+        }
+        .hero-copy {
+          padding: 20px;
+        }
+        .hero h2 {
+          font-size: 20px;
+        }
+        .stats {
+          margin-bottom: 24px;
+        }
+        .stat {
+          padding: 12px;
+        }
+        .stat-value {
+          font-size: 25px;
+        }
+        .chart-row,
+        .task-card,
+        .limit,
+        .method,
+        .stats,
+        .hero {
+          break-inside: avoid;
+        }
+        .chart {
+          print-color-adjust: exact;
+          -webkit-print-color-adjust: exact;
+        }
+        .task-grid {
+          grid-template-columns: 1fr 1fr;
+        }
+        .card-body {
+          padding: 12px;
+        }
+        .card-image {
+          aspect-ratio: 2.5;
+        }
+        .card-title h3 {
+          font-size: 12px;
+        }
+        .measure-value {
+          font-size: 18px;
+        }
+        .outcome {
+          font-size: 10px;
+        }
+        .section-description,
+        .chart-foot {
+          font-size: 10px;
+        }
+        .c02-layout {
+          grid-template-columns: 1fr 1fr;
+        }
+        .budget-panel {
+          padding: 15px;
+        }
+        #budget-chart {
+          display: block;
+        }
+        .budget-row {
+          margin: 14px 0;
+        }
+        .table-scroll {
+          overflow: visible;
+        }
+        .source-details {
+          display: none;
+        }
+        .method {
+          padding: 14px;
+        }
+        section {
+          margin-bottom: 25px;
+        }
+        h2 {
+          font-size: 21px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <a
+      href="#overview"
+      style="position: absolute; left: -9999px"
+      onfocus="this.style.left = '20px'"
+      onblur="this.style.left = '-9999px'"
+      >跳到报告正文</a
+    >
+    <aside class="sidebar" aria-label="报告导航">
+      <a class="brand" href="#overview"
+        ><span class="brand-mark" aria-hidden="true"
+          ><i></i><i></i><i></i><i></i></span
+        >DexUni<span
+          style="font-size: 9px; align-self: flex-start; color: #9dbab0"
+          >LAB</span
+        ></a
+      >
+      <div class="brand-sub">PHYSICS / TECH REPORT</div>
+      <div class="nav-label">IN THIS REPORT</div>
+      <nav class="nav">
+        <a href="#overview" class="active"
+          ><span class="nav-num">01</span>结果总览</a
+        ><a href="#performance"><span class="nav-num">02</span>性能对比</a
+        ><a href="#tasks"><span class="nav-num">03</span>任务与效果</a
+        ><a href="#tradeoff"><span class="nav-num">04</span>C02 配置取舍</a
+        ><a href="#reproduce"><span class="nav-num">05</span>复现与来源</a>
+      </nav>
+      <div class="sidebar-foot">
+        <span class="dot"></span>已保留的实验结果
+        <div class="side-line"></div>
+        EmbodiChain × Isaac Lab<br />RTX 5090 D v2<br />数据截至 2026.10.27<a
+          href="https://github.com/DexForce/EmbodiChain/pull/893"
+          target="_blank"
+          rel="noopener"
+          >MR #893 ↗</a
+        >
+      </div>
+    </aside>
+    <main class="shell" id="overview">
+      <header class="topbar">
+        <div class="crumb">
+          EmbodiChain <span style="margin: 0 9px; color: #a9b8af">/</span>
+          <b>物理仿真技术报告</b>
+        </div>
+        <div class="top-actions">
+          <button class="btn" id="export-top">↓ 导出数据 CSV</button
+          ><button class="btn" id="print">打印 / 保存 PDF ↗</button>
+        </div>
+      </header>
+      <div class="title-row">
+        <div>
+          <div class="eyebrow">Benchmark collection · 2026</div>
+          <h1>DexUni 跨平台物理仿真</h1>
+          <p class="subtitle">
+            从软体形变到双臂装袋，汇总已有任务的运行耗时、操作效果与能力边界。每项结论均可追溯至保留的实验记录。
+          </p>
+        </div>
+        <div class="edition">
+          EXPERIMENT SNAPSHOT<strong>2026.10.27</strong>页面整理 · 2026.11.12
+        </div>
+      </div>
+      <div class="hero">
+        <div class="hero-copy">
+          <div class="eyebrow">Performance meets physical behavior</div>
+          <h2>看运行速度，<br />也看任务实际完成了什么。</h2>
+          <p>
+            同一任务下对照两平台的物理推进耗时；将正式重复测量、功能演示与单次摸测分别呈现。
+          </p>
+          <div class="hero-tags">
+            <span>软体与布料</span><span>刚柔耦合</span><span>双臂操作</span
+            ><span>原始证据可追溯</span>
+          </div>
+        </div>
+        <div class="hero-visual">
+          <img
+            id="hero-image"
+            alt="M04 双臂 T 恤折叠的两平台录影片段"
+            fetchpriority="high"
+          /><span class="hero-caption">M04 / 双臂 T 恤对折 · 保留录像截帧</span>
+        </div>
+      </div>
+      <div class="stats">
+        <div class="stat">
+          <div class="stat-top">
+            覆盖任务项<span class="stat-index">01</span>
+          </div>
+          <div class="stat-value" id="stat-total">13<span>项</span></div>
+          <div class="stat-note">S01-C/T 分别计 · C03 已移除</div>
+        </div>
+        <div class="stat">
+          <div class="stat-top">
+            双平台正式对比<span class="stat-index">02</span>
+          </div>
+          <div class="stat-value" id="stat-formal">10<span>项</span></div>
+          <div class="stat-note">每侧保留 5 次独立进程测量</div>
+        </div>
+        <div class="stat">
+          <div class="stat-top">
+            单次配置摸测<span class="stat-index">03</span>
+          </div>
+          <div class="stat-value">1<span>项</span></div>
+          <div class="stat-note">C02 · 单列速度与保形取舍</div>
+        </div>
+        <div class="stat">
+          <div class="stat-top">
+            缺少完整等价场景<span class="stat-index">04</span>
+          </div>
+          <div class="stat-value">2<span>项</span></div>
+          <div class="stat-note">M05 / C01 · 含封闭气腔</div>
+        </div>
+      </div>
+      <section id="performance">
+        <div class="section-head">
+          <div>
+            <div class="section-title">
+              <span class="section-index">02</span>
+              <h2>物理推进性能</h2>
+            </div>
+            <p class="section-description">
+              10 项双平台正式测量 · 均值 ± 样本标准差 · 越低越快
+            </p>
+          </div>
+          <span class="pill">每平台 n = 5</span>
+        </div>
+        <div class="panel">
+          <div class="panel-head">
+            <div class="legend">
+              <span><i></i>EmbodiChain</span
+              ><span><i class="il"></i>Isaac Lab</span>
+            </div>
+            <div class="chart-controls">
+              <div class="seg" aria-label="图表单位">
+                <button data-chart="absolute" aria-pressed="true">
+                  ms / 步</button
+                ><button data-chart="relative" aria-pressed="false">
+                  Isaac = 100%
+                </button>
+              </div>
+              <select class="select" id="chart-sort" aria-label="图表排序">
+                <option value="task">按任务顺序</option>
+                <option value="reduction">按耗时降低排序</option>
+              </select>
+            </div>
+          </div>
+          <div class="chart" id="performance-chart"></div>
+          <div class="chart-foot">
+            ms/步视图的误差线表示
+            <strong>5 个进程均值的样本标准差</strong
+            >，不是置信区间。计时关闭相机、同步实际 GPU
+            完成，不含渲染；不能换算为整应用 FPS。M06 的 5 个 EC
+            样本中含一次指定重测替换。
+          </div>
+        </div>
+        <div class="notice">
+          M02 / M03 / M04 / M06 比较的是
+          <strong>surface-fast 与普通 VBD 的任务配置</strong
+          >，不同求解策略的一次迭代不等价。只对同一行解读速度差，不合成跨任务总分；效果检查见下方任务详情。
+        </div>
+      </section>
+      <section id="tasks">
+        <div class="section-head">
+          <div>
+            <div class="section-title">
+              <span class="section-index">03</span>
+              <h2>任务与操作效果</h2>
+            </div>
+            <p class="section-description">
+              场景截图来自独立录像；耗时来自无相机测量，两者不是同一次运行。
+            </p>
+          </div>
+          <button class="btn" id="export-filtered">↓ 导出当前筛选</button>
+        </div>
+        <div class="toolbar">
+          <div class="filters" role="group" aria-label="任务分类">
+            <button class="filter" data-filter="all" aria-pressed="true">
+              全部任务</button
+            ><button class="filter" data-filter="S" aria-pressed="false">
+              S · 基础操作</button
+            ><button class="filter" data-filter="M" aria-pressed="false">
+              M · 操作任务</button
+            ><button class="filter" data-filter="C" aria-pressed="false">
+              C · 组合场景</button
+            ><button class="filter" data-filter="limits" aria-pressed="false">
+              能力边界 / 摸测
+            </button>
+          </div>
+          <label class="search"
+            ><span aria-hidden="true">⌕</span
+            ><input
+              type="search"
+              id="search"
+              placeholder="搜索任务编号、场景或配置"
+              aria-label="搜索任务"
+          /></label>
+        </div>
+        <div id="task-grid" class="task-grid"></div>
+        <div
+          class="section-tail"
+          id="task-count"
+          role="status"
+          aria-live="polite"
+        ></div>
+      </section>
+      <section id="tradeoff">
+        <div class="section-head">
+          <div>
+            <div class="section-title">
+              <span class="section-index">04</span>
+              <h2>C02：速度与保形的取舍</h2>
+            </div>
+            <p class="section-description">
+              袋体扶正 → 两件载荷装填 → 提袋 · 单次摸测，不纳入正式重复测量图表
+            </p>
+          </div>
+          <span class="pill pilot">非等质量对照</span>
+        </div>
+        <div class="c02-layout">
+          <div class="c02-visual">
+            <img
+              id="c02-image"
+              alt="C02 三档配置在 58 秒时的实际录像截帧"
+              loading="lazy"
+            />
+            <div class="caption">
+              同为 64 秒完整录像：EC 12×6、Isaac 24×12 与 96×24。24×12
+              录满时长，但倒袋并未完成任务。<button
+                class="btn"
+                data-open="C02"
+                style="margin-top: 9px"
+              >
+                查看详情与本地录像 ↗
+              </button>
+            </div>
+          </div>
+          <div class="panel budget-panel">
+            <h3>匹配仿真窗口后再比较</h3>
+            <p class="section-description" id="window-description"></p>
+            <div
+              class="seg"
+              style="margin-top: 14px; width: fit-content"
+              aria-label="C02 计时窗口"
+            >
+              <button data-window="short" aria-pressed="true">前 12 秒</button
+              ><button data-window="full" aria-pressed="false">
+                完整 64 秒
+              </button>
+            </div>
+            <div id="budget-chart"></div>
+          </div>
+        </div>
+        <div class="limits">
+          <article class="limit">
+            <div class="num">01 / 已观察到的失败</div>
+            <div class="limit-title">24×12：更快，但任务失败</div>
+            <p>
+              换手后袋体倒下，物品离开场景。状态数值有限、录像完整，都不能替代任务成功判定。失败配置的计时仍保留。
+            </p>
+          </article>
+          <article class="limit">
+            <div class="num">02 / 高配置的边界</div>
+            <div class="limit-title">96×24：提袋完成，严格检查未全过</div>
+            <p>
+              录像最大袋口弯曲 51.285 mm，超过原 30 mm 限值；独立计时终态纸盒 X
+              边界超出 0.191 mm。尚未证明这是最低所需预算。
+            </p>
+          </article>
+          <article class="limit">
+            <div class="num">03 / 比较范围</div>
+            <div class="limit-title">轨迹与求解策略均存在差异</div>
+            <p>
+              EC 使用参考轨迹，Isaac 使用适配双手轨迹。参数为“迭代次数 ×
+              子步数”，不能按乘积视作相同计算量或等质量配置。
+            </p>
+          </article>
+        </div>
+      </section>
+      <section id="reproduce">
+        <div class="section-head">
+          <div>
+            <div class="section-title">
+              <span class="section-index">05</span>
+              <h2>复现验证与证据来源</h2>
+            </div>
+            <p class="section-description">
+              已有性能结果与新 SDK 的功能复验分别保留，不混用测量结论。
+            </p>
+          </div>
+        </div>
+        <div class="panel" id="e2e-panel">
+          <div class="panel-head">
+            <div>
+              <h3>2026.10.27 · 新 SDK 冷启动验证</h3>
+              <p class="section-description">
+                编译 SDK → 缺失输入自动下载 → 完整任务执行
+              </p>
+            </div>
+            <span class="pill">4 次完整运行</span>
+          </div>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>平台</th>
+                  <th>任务</th>
+                  <th>完整步数</th>
+                  <th>自动下载</th>
+                  <th>退出 / 状态</th>
+                </tr>
+              </thead>
+              <tbody id="e2e-rows"></tbody>
+            </table>
+          </div>
+          <div class="e2e-note">
+            EmbodiChain 使用新编译的开发版 JIT SDK
+            <code id="sdk-commit"></code>，并核实实际加载的原生库路径；Isaac Lab
+            使用自身 Newton 环境。这些运行包含下载、JIT
+            与渲染，<strong>不作为正式性能测量</strong>。M02 右角最终偏差：EC 约
+            52 mm、Isaac 约 108 mm；完成流程不代表效果完全一致。
+          </div>
+        </div>
+        <div class="method-grid" style="margin-top: 20px">
+          <article class="method">
+            <div class="eyebrow">01 / Measurement</div>
+            <h3>明确计时边界</h3>
+            <p>
+              主要指标为 GPU 同步完成的物理外步耗时，单位
+              ms/步。原报告单列读回、控制与端到端开销；硬件为 RTX 5090 D
+              v2。各任务 SDK 版本及计时细节以对应原报告为准。
+            </p>
+          </article>
+          <article class="method">
+            <div class="eyebrow">02 / Qualification</div>
+            <h3>保留失败与不支持项</h3>
+            <p>
+              M03 放置误差 20 mm 检查为 EC 5/5、Isaac
+              0/5，所有计时样本均保留。M05 未测性能；C01 仅 EC
+              有完整双商品正式测量，不对不同负载计算速度比。
+            </p>
+          </article>
+          <article class="method">
+            <div class="eyebrow">03 / Reproducibility</div>
+            <h3>固定版本，逐项追溯</h3>
+            <p>
+              构建本页时核对 13 项任务的来源
+              SHA256。页面内嵌数据与截图，离线可浏览和导出。原始 JSON/CSV
+              与运行输入已发布；视频和完整数组保留在本地。
+            </p>
+          </article>
+        </div>
+        <div class="source-strip">
+          <div>
+            <strong>原始记录，而非只有结论</strong>
+            <p class="section-description">
+              链接固定到已发布的数据集版本；逐任务来源可在详情中查看。
+            </p>
+          </div>
+          <div class="source-links">
+            <a class="btn" id="source-comparison" target="_blank" rel="noopener"
+              >原始 comparison.json ↗</a
+            ><a class="btn" id="source-dataset" target="_blank" rel="noopener"
+              >输入与原始表格 ↗</a
+            ><a
+              class="btn"
+              href="https://github.com/DexForce/EmbodiChain/blob/feat/dexuni-tech-report-suite/scripts/benchmark/tech_reports/physics/experiments/dexuni/SETUP.md"
+              target="_blank"
+              rel="noopener"
+              >复现环境 ↗</a
+            ><button class="btn" id="export-json">↓ 本页数据 JSON</button>
+          </div>
+        </div>
+        <details class="source-details">
+          <summary>查看固定版本与来源校验信息</summary>
+          <div class="source-list" id="source-list"></div>
+        </details>
+        <div class="notice">
+          本页整理已有结果，没有新增仿真或性能测量。完整输入下载不等于安装仿真环境；原报告中的本地数组、视频链接不代表这些大文件已在线发布。单独分享此
+          HTML 时，数据与截图可用，本地录像需保留原目录关系。
+        </div>
+      </section>
+      <footer class="footer">
+        <span>DEXFORCE / EMBODICHAIN · DEXUNI PHYSICS BENCHMARK</span
+        ><span>13 个任务项 · 数据截至 2026.10.27 · 整理于 2026.11.12</span>
+      </footer>
+    </main>
+    <dialog id="task-dialog" aria-labelledby="modal-title">
+      <div class="modal-head">
+        <div>
+          <span id="modal-code" class="eyebrow"></span>
+          <h2 id="modal-title"></h2>
+        </div>
+        <button class="close" id="close-dialog" aria-label="关闭任务详情">
+          ×
+        </button>
+      </div>
+      <div class="modal-body" id="modal-body"></div>
+    </dialog>
+    <div class="toast" id="toast" role="status" hidden></div>
+    <noscript
+      ><p style="margin: 30px">
+        请启用 JavaScript
+        以查看内嵌任务图表；本页不依赖网络脚本。文字说明仍可阅读。
+      </p></noscript
+    >
+    <script id="report-data" type="application/json">
+      __REPORT_DATA__
+    </script>
+    <script>
+      "use strict";
+      const DATA = JSON.parse(
+        document.getElementById("report-data").textContent,
+      );
+      const $ = (s) => document.querySelector(s),
+        $$ = (s) => [...document.querySelectorAll(s)];
+      const esc = (v) =>
+        String(v ?? "").replace(
+          /[&<>"']/g,
+          (c) =>
+            ({
+              "&": "&amp;",
+              "<": "&lt;",
+              ">": "&gt;",
+              '"': "&quot;",
+              "'": "&#39;",
+            })[c],
+        );
+      const fmt = (n, d = 3) => Number(n).toFixed(d),
+        kinds = {
+          formal: "双平台正式测量",
+          pilot: "单次摸测",
+          single: "单平台正式测量",
+          demo: "仅功能演示",
+        };
+      let filter = "all",
+        query = "",
+        chartMode = "absolute",
+        windowMode = "short";
+      const formal = DATA.tasks.filter((t) => t.kind === "formal");
+      function taskBy(code) {
+        return DATA.tasks.find((t) => t.code === code);
+      }
+      function measure(t, p) {
+        const s = t.stats[p];
+        if (!s)
+          return `<div class="measure-value" style="font-size:16px;letter-spacing:0">${t.code === "M05" && p === "embodichain" ? "未测性能" : "无等价数据"}</div><div class="measure-sub">${p === "isaaclab" ? "本次版本 / 完整场景不适用" : "已保留功能演示"}</div>`;
+        return `<div class="measure-value">${fmt(s.mean_ms)} <small>ms/步</small></div><div class="measure-sub">${s.sd_ms === null ? "单次运行 · 不附标准差" : `± ${fmt(s.sd_ms)} SD · n = ${s.processes}`}</div>`;
+      }
+      function filtered() {
+        const q = query.toLowerCase().trim();
+        return DATA.tasks.filter(
+          (t) =>
+            (filter === "all" ||
+              filter === t.group ||
+              (filter === "limits" && t.kind !== "formal")) &&
+            [t.code, t.name, t.configuration, t.outcome]
+              .join(" ")
+              .toLowerCase()
+              .includes(q),
+        );
+      }
+      function renderTasks() {
+        const items = filtered();
+        $("#task-grid").innerHTML =
+          items
+            .map(
+              (t) =>
+                `<article class="task-card" id="card-${esc(t.code)}"><div class="card-image">${t.poster ? `<img src="${t.poster}" alt="${esc(t.code + " " + t.name)}的保留录像截帧" loading="lazy">` : '<span class="muted">未附录像截图</span>'}<span class="image-label">${esc(t.code === "M05" ? "DexSim / EmbodiChain" : t.code === "C01" ? "EmbodiChain 双商品场景" : "平台对比录像")} · ${t.poster_second}s</span></div><div class="card-body"><div class="card-title"><span class="task-code">${esc(t.code)}</span><h3>${esc(t.name)}</h3><span class="pill ${t.kind}">${kinds[t.kind]}</span></div><div class="card-measures"><div><div class="measure-label">EmbodiChain</div>${measure(t, "embodichain")}</div><div><div class="measure-label il">Isaac Lab</div>${measure(t, "isaaclab")}</div></div><p class="outcome">${esc(t.outcome)}</p><div class="card-actions"><span class="card-reduction">${t.ec_latency_reduction_percent !== undefined ? `EC 耗时降低 ${fmt(t.ec_latency_reduction_percent, 1)}%${t.kind === "pilot" ? " · 单次配置" : ""}` : "不计算平台速度比"}</span><button class="btn" data-open="${t.code}" aria-label="查看 ${esc(t.code)} 详情">查看详情 ↗</button></div></div></article>`,
+            )
+            .join("") ||
+          '<div class="empty">没有匹配的任务。请更换关键词或分类。</div>';
+        $("#task-count").textContent =
+          `显示 ${items.length} / ${DATA.tasks.length} 个任务项`;
+      }
+      function renderChart() {
+        let items = [...formal];
+        if ($("#chart-sort").value === "reduction")
+          items.sort(
+            (a, b) =>
+              b.ec_latency_reduction_percent - a.ec_latency_reduction_percent,
+          );
+        const relative = chartMode === "relative",
+          axis = relative
+            ? ["0", "25", "50", "75", "100%"]
+            : ["0", "20", "40", "60", "80 ms"];
+        $("#performance-chart").innerHTML =
+          `<div class="chart-header"><span>任务 / 场景</span><div class="axis">${axis.map((v) => `<span>${v}</span>`).join("")}</div><span>EC 耗时降低</span></div>` +
+          items
+            .map((t) => {
+              const base = relative ? t.stats.isaaclab.mean_ms : 80;
+              const bars = ["embodichain", "isaaclab"]
+                .map((p, i) => {
+                  const s = t.stats[p],
+                    w = (s.mean_ms / base) * 100,
+                    spread = (s.sd_ms / base) * 100;
+                  return `<div class="bar-track ${i ? "il" : ""}" role="img" aria-label="${esc(t.code)} ${p}: ${fmt(s.mean_ms)} ± ${fmt(s.sd_ms)} 毫秒每步"><span class="bar ${i ? "il" : ""}" style="--w:${w}%"></span>${!relative ? `<span class="error-line" style="--left:${Math.max(0, w - spread)}%;--span:${2 * spread}%"></span>` : ""}<span class="bar-value" style="--w:${w}%;${w > 84 ? "left:auto;right:5px;color:white;top:-4px;" : ""}">${relative ? fmt(w, 1) + "%" : fmt(s.mean_ms, 2)}</span></div>`;
+                })
+                .join("");
+              return `<div class="chart-row"><button class="chart-label" data-open="${t.code}" aria-label="查看 ${t.code} ${esc(t.name)}"><b>${t.code}</b><span>${esc(t.name)}</span></button><div class="bar-area">${bars}</div><div class="saving">${fmt(t.ec_latency_reduction_percent, 1)}%<small>${fmt(t.stats.isaaclab.mean_ms / t.stats.embodichain.mean_ms, 2)}× 逆耗时比</small></div></div>`;
+            })
+            .join("");
+      }
+      function renderBudget() {
+        const short = windowMode === "short";
+        $("#window-description").textContent = short
+          ? "0–12s · 每档 690 个稳态步 · 剔除前 30 步"
+          : "0–64s · 已测两档各 3810 个稳态步 · 24×12 无全程计时";
+        const max = Math.max(
+          ...DATA.c02.map((c) => c[windowMode]?.mean_ms || 0),
+        );
+        $("#budget-chart").innerHTML = DATA.c02
+          .map((c, i) => {
+            const s = c[windowMode],
+              colors = ["#087f70", "#cc9650", "#8070b6"],
+              outcomes = [
+                "录像完成装袋、载荷提袋",
+                "录像倒袋 / 任务失败",
+                "录像完成提袋 / 严格检查未全过",
+              ];
+            return `<div class="budget-row"><div class="budget-label"><strong>${esc(c.label)}</strong><span class="pill ${i ? "pilot" : ""}">${i === 1 ? "失败配置" : i === 2 ? "高预算配置" : "参考配置"}</span></div><div class="budget-track">${s ? `<div class="budget-fill" style="width:${(s.mean_ms / max) * 100}%;background:${colors[i]}"></div>` : ""}</div><div class="budget-value">${s ? fmt(s.mean_ms) : "未测"}<small>${s ? "ms / 物理步" : "不能由短窗口外推"}</small></div><div class="budget-text">${outcomes[i]}${s ? " · p95 " + fmt(s.p95_ms) + " ms" : ""}</div></div>`;
+          })
+          .join("");
+      }
+      function openTask(code) {
+        const t = taskBy(code);
+        $("#modal-title").textContent = t.name;
+        $("#modal-code").textContent = `${code} / ${kinds[t.kind]}`;
+        $("#modal-body").innerHTML =
+          `${t.poster ? `<img class="modal-image" src="${t.poster}" alt="${esc(t.name)} ${t.poster_second}秒录像截图">` : ""}<p class="modal-meta">${esc(t.scope)}<br><strong>求解配置：</strong>${esc(t.configuration)}<br>参数 × 号表示迭代次数 × 子步数；不同策略不按乘积等价。</p><div class="panel modal-metrics table-scroll"><table><thead><tr><th>平台</th><th>物理均值 ms/步</th><th>进程间 SD</th><th>样本数</th></tr></thead><tbody>${[
+            "embodichain",
+            "isaaclab",
+          ]
+            .map((p) => {
+              const s = t.stats[p];
+              return `<tr><td>${p === "embodichain" ? "EmbodiChain" : "Isaac Lab"}</td><td class="num">${s ? fmt(s.mean_ms) : "未测 / 不适用"}</td><td class="num">${s?.sd_ms != null ? fmt(s.sd_ms) : "—"}</td><td>${s ? s.processes : "—"}</td></tr>`;
+            })
+            .join(
+              "",
+            )}</tbody></table></div><p class="outcome"><strong>效果与限制</strong><br>${esc(t.outcome)}${t.code === "C02" ? "<br>原录像袋口弯曲 51.285 mm > 30 mm；96×24 不是已证明的最低配置。各平台控制轨迹也不同。" : t.code === "M06" ? "<br>EC 第 5 次按用户要求替换，原始批次与重测记录保留；不把选定样本视为普遍成功率。" : ""}</p><div class="modal-actions"><a class="btn btn-dark" href="${esc(t.report_url)}" target="_blank" rel="noopener">逐任务原始报告 ↗</a><a class="btn" href="${esc(t.source_url)}" target="_blank" rel="noopener">原始数据来源 ↗</a>${t.video_url ? '<button class="btn" id="load-video">▶ 播放本地录像</button>' : ""}</div><div class="hash" id="modal-hash">SHA256 · ${esc(t.source_sha256)}<br>${esc(t.source)}</div>${t.video_url ? '<video id="local-video" controls playsinline preload="none" hidden></video><p id="video-note" class="video-note">录像未上传。仅在本机保留的目录关系下可播放；单独分享 HTML 仍可查看全部截图和数据。</p>' : ""}`;
+        if (t.video_url) {
+          $("#load-video").onclick = () => {
+            const v = $("#local-video");
+            v.hidden = false;
+            v.src = t.video_url;
+            v.onerror = () => {
+              $("#video-note").textContent =
+                "本地录像不可用或格式不受支持。截图已内嵌；请在原结果目录中打开对应 MP4。";
+            };
+            v.play().catch(() => {});
+            $("#load-video").hidden = true;
+          };
+        }
+        $("#task-dialog").showModal();
+        $("#task-dialog").scrollTop = 0;
+      }
+      function closeTask() {
+        const v = $("#local-video");
+        if (v) {
+          v.pause();
+          v.removeAttribute("src");
+          v.load();
+        }
+        $("#task-dialog").close();
+      }
+      function download(filename, text, type) {
+        const url = URL.createObjectURL(new Blob([text], { type }));
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+      function csv(items) {
+        const fields = [
+          "任务",
+          "场景",
+          "数据级别",
+          "EC_ms_per_step",
+          "EC_SD_ms",
+          "EC_n",
+          "Isaac_ms_per_step",
+          "Isaac_SD_ms",
+          "Isaac_n",
+          "EC_耗时降低_percent",
+          "配置",
+          "效果与限制",
+          "来源",
+          "SHA256",
+        ];
+        const rows = items.map((t) => [
+          t.code,
+          t.name,
+          t.scope,
+          t.stats.embodichain?.mean_ms,
+          t.stats.embodichain?.sd_ms,
+          t.stats.embodichain?.processes,
+          t.stats.isaaclab?.mean_ms,
+          t.stats.isaaclab?.sd_ms,
+          t.stats.isaaclab?.processes,
+          t.ec_latency_reduction_percent,
+          t.configuration,
+          t.outcome,
+          t.source_url,
+          t.source_sha256,
+        ]);
+        return (
+          "\ufeff" +
+          [fields, ...rows]
+            .map((r) =>
+              r
+                .map((v) => '"' + String(v ?? "").replace(/"/g, '""') + '"')
+                .join(","),
+            )
+            .join("\r\n")
+        );
+      }
+      $("#export-top").onclick = () =>
+        download(
+          "dexuni-results-all.csv",
+          csv(DATA.tasks),
+          "text/csv;charset=utf-8",
+        );
+      $("#export-filtered").onclick = () =>
+        download(
+          "dexuni-results-filtered.csv",
+          csv(filtered()),
+          "text/csv;charset=utf-8",
+        );
+      $("#export-json").onclick = () => {
+        const d = JSON.parse(JSON.stringify(DATA));
+        for (const t of d.tasks) delete t.poster;
+        download(
+          "dexuni-report-data.json",
+          JSON.stringify(d, null, 2),
+          "application/json",
+        );
+      };
+      $("#print").onclick = () => {
+        filter = "all";
+        query = "";
+        $("#search").value = "";
+        $$("[data-filter]").forEach((b) =>
+          b.setAttribute("aria-pressed", b.dataset.filter === "all"),
+        );
+        renderTasks();
+        window.print();
+      };
+      $$("[data-filter]").forEach(
+        (b) =>
+          (b.onclick = () => {
+            filter = b.dataset.filter;
+            $$("[data-filter]").forEach((x) =>
+              x.setAttribute("aria-pressed", x === b),
+            );
+            renderTasks();
+          }),
+      );
+      $("#search").oninput = (e) => {
+        query = e.target.value;
+        renderTasks();
+      };
+      $$("[data-chart]").forEach(
+        (b) =>
+          (b.onclick = () => {
+            chartMode = b.dataset.chart;
+            $$("[data-chart]").forEach((x) =>
+              x.setAttribute("aria-pressed", x === b),
+            );
+            renderChart();
+          }),
+      );
+      $("#chart-sort").onchange = renderChart;
+      $$("[data-window]").forEach(
+        (b) =>
+          (b.onclick = () => {
+            windowMode = b.dataset.window;
+            $$("[data-window]").forEach((x) =>
+              x.setAttribute("aria-pressed", x === b),
+            );
+            renderBudget();
+          }),
+      );
+      document.addEventListener("click", (e) => {
+        const button = e.target.closest("[data-open]");
+        if (button) openTask(button.dataset.open);
+      });
+      $("#close-dialog").onclick = closeTask;
+      $("#task-dialog").addEventListener("cancel", (e) => {
+        e.preventDefault();
+        closeTask();
+      });
+      $("#task-dialog").addEventListener("click", (e) => {
+        if (e.target === $("#task-dialog")) {
+          const r = e.target.getBoundingClientRect();
+          if (
+            e.clientX < r.left ||
+            e.clientX > r.right ||
+            e.clientY < r.top ||
+            e.clientY > r.bottom
+          )
+            closeTask();
+        }
+      });
+      const hero = taskBy("M04");
+      if (hero.poster) $("#hero-image").src = hero.poster;
+      else $("#hero-image").hidden = true;
+      if (taskBy("C02").poster) $("#c02-image").src = taskBy("C02").poster;
+      else $("#c02-image").hidden = true;
+      $("#stat-total").innerHTML = `${DATA.tasks.length}<span>项</span>`;
+      $("#stat-formal").innerHTML = `${formal.length}<span>项</span>`;
+      if (DATA.e2e) {
+        $("#sdk-commit").textContent = DATA.e2e.sdk_commit.slice(0, 8);
+        $("#e2e-rows").innerHTML = DATA.e2e.cases
+          .map(
+            (c) =>
+              `<tr><td>${c.platform === "embodichain" ? "EmbodiChain + 新 SDK" : "Isaac Lab"}</td><td>${esc(c.task)}</td><td class="num">${c.steps}</td><td class="${c.cold_automatic_download ? "pass" : ""}">${c.cold_automatic_download ? "已验证" : "未验证"}</td><td class="${c.exit_code === 0 && c.finite_states ? "pass" : ""}">${c.exit_code === 0 && c.finite_states ? "退出 0 · 状态有限" : "需检查"}</td></tr>`,
+          )
+          .join("");
+      } else {
+        $("#e2e-panel").innerHTML =
+          '<p style="padding:24px" class="muted">当前输入目录未附 SDK 冷启动验证记录。上方历史测量独立保留。</p>';
+      }
+      $("#source-comparison").href = DATA.publication.url + "/comparison.json";
+      $("#source-dataset").href = DATA.publication.url + "/README.md";
+      $("#source-list").innerHTML =
+        `<div>固定数据集版本 <code>${esc(DATA.publication.revision)}</code></div><div>comparison.json SHA256 <span class="hash">${DATA.provenance.comparison_sha256}</span></div>` +
+        DATA.provenance.sources
+          .map(
+            (s) =>
+              `<div>${esc(s.path)}<br><span class="hash">${s.sha256}</span></div>`,
+          )
+          .join("");
+      const navLinks = $$(".nav a");
+      const observer = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) {
+            if (entry.isIntersecting) {
+              navLinks.forEach((a) =>
+                a.classList.toggle("active", a.hash === "#" + entry.target.id),
+              );
+            }
+          }
+        },
+        { rootMargin: "-5% 0px -70% 0px", threshold: 0 },
+      );
+      ["overview", "performance", "tasks", "tradeoff", "reproduce"].forEach(
+        (id) => observer.observe(document.getElementById(id)),
+      );
+      renderChart();
+      renderTasks();
+      renderBudget();
+    </script>
+  </body>
+</html>
