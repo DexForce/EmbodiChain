@@ -27,7 +27,7 @@ import json
 from pathlib import Path
 import tempfile
 import threading
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, TYPE_CHECKING
 from uuid import uuid4
 
 import numpy as np
@@ -38,6 +38,9 @@ from ._models import ConflictError
 from ._skills import RECONSTRUCTION_SKILLS, _canonical_skill_id
 
 __all__ = []
+
+if TYPE_CHECKING:
+    from ._robot_preview import RobotGhostPreview
 
 
 def _comparison(
@@ -93,6 +96,7 @@ class FitSession:
         self._directory: tempfile.TemporaryDirectory[str] | None = None
         self._thread: threading.Thread | None = None
         self._closed = False
+        self._robot_preview: RobotGhostPreview | None = None
 
     def snapshot(self, document: dict[str, Any]) -> dict[str, Any]:
         """Return status with selection/revision invalidation computed live."""
@@ -153,6 +157,9 @@ class FitSession:
                 )
             if self._bundle is not None:
                 self._bundle.unlink(missing_ok=True)
+            if self._robot_preview is not None:
+                self._robot_preview.close()
+                self._robot_preview = None
             self._preview, self._bundle = None, None
             self._selection, self._revision = deepcopy(matches[0]), document["revision"]
             job_id = uuid4().hex
@@ -259,11 +266,33 @@ class FitSession:
             self._require_result(job_id, document)
             return self._bundle.open("rb")
 
+    def robot_preview(
+        self,
+        job_id: str,
+        document: dict[str, Any],
+        *,
+        time_seconds: float | None = None,
+    ) -> dict[str, Any]:
+        """Read readiness or publish a video cursor to a lazily owned URDF viewer."""
+        with self._lock:
+            self._require_result(job_id, document)
+            if self._robot_preview is None:
+                if time_seconds is None:
+                    return {"phase": "idle"}
+                from ._robot_preview import RobotGhostPreview
+
+                self._robot_preview = RobotGhostPreview(self._preview)
+            if time_seconds is not None:
+                self._robot_preview.set_time(time_seconds)
+            return self._robot_preview.snapshot()
+
     def close(self) -> None:
         """Join cooperative native fitting before removing the sole result bundle."""
         with self._lock:
             self._closed = True
         if self._thread is not None:
             self._thread.join()
+        if self._robot_preview is not None:
+            self._robot_preview.close()
         if self._directory is not None:
             self._directory.cleanup()

@@ -1,0 +1,154 @@
+<title>EmbodiChain 轨迹切分与回填：操作指南与实现说明</title>
+<p>先在网页中为遥操轨迹标注原子技能及起止帧，再利用关节记录和机器人标定重建技能运动，并将通过校验的结果接回原轨迹。标注范围可以保留前后过渡动作；需要拟合时，可单独指定其中的核心区间。</p>
+<p>适用读者：需要标注遥操数据、验证技能重建或接入 Real2Sim 的开发者。核验日期：2026-11-12；Conda 环境：py312_bk；分支：codex/trajectory-skill-annotator。本文依据基于 c80b36115 的当前工作区，包含本次尚未提交的技能下拉菜单和核心区间改动。</p>
+
+<h1 seq="auto">轨迹切分与回填操作</h1>
+<h2 seq="auto">准备输入和环境</h2>
+<p>切分标注只需要视频、HDF5 相机图像或图像数组。执行参数拟合与回填时，还需要与视频同步的关节记录和匹配的机器人配置。</p>
+<table><thead><tr><th background-color="light-gray"><p>输入</p></th><th background-color="light-gray"><p>内容与用途</p></th></tr></thead><tbody>
+<tr><td><p>视频或 HDF5 图像</p></td><td><p>用于逐帧查看、标注和时间定位。视频使用实际显示时间戳；HDF5 图像使用显式提供或文件记录的 FPS。</p></td></tr>
+<tr><td><p>关节记录</p></td><td><p>支持 NPZ、HDF5 和本地 Atomic PT 回放文件。需要关节位置及真实采样时钟，并包含机器人配置声明的夹爪关节。</p></td></tr>
+<tr><td><p>robot_profile.json</p></td><td><p>声明关节顺序、控制组、参与机械臂、URDF、TCP、基座位姿、夹爪开闭命令及关节限制。示例使用 UR5 / PGI；自己的机器人需要自己的配置。</p></td></tr>
+</tbody></table>
+<p>在仓库根目录激活环境。已有运行中的标注服务需重启，以加载本次后端和界面修改。</p>
+<pre lang="bash" caption="环境与工作目录"><code>conda activate py312_bk
+cd /home/oem/projects/py312_backup/EmbodiChain</code></pre>
+
+<h2 seq="auto">启动 Pickup 切分与回填网页</h2>
+<p>以下命令复用本机已经验证过的示例视频、关节记录和机器人配置，并预填拟合面板。/tmp 下的示例输入可能被系统清理；正式数据应放在持久目录，并替换对应路径。</p>
+<pre lang="bash" caption="启动网页，同时预填拟合输入"><code>python -m embodichain run-example toolkits/trajectory_annotation \
+  --video /tmp/codex-skill-fitting-plan-20261110/00_pickup_cube_auto_play.mp4 \
+  --joints /tmp/codex-skill-fitting-plan-20261110/00_pickup_cube_auto_play.pt \
+  --robot-profile /tmp/embodichain-skill-fit-20261110/robot_profile.json \
+  --qpos-semantics actual_submission \
+  --time-offset 0 \
+  --output-dir /home/oem/projects/py312_backup/EmbodiChain/outputs/trajectory_annotation \
+  --port 8893 \
+  --no-browser</code></pre>
+<p>打开 <a href="http://127.0.0.1:8893/">http://127.0.0.1:8893/</a>。这是运行服务的电脑上的本地地址；保持终端运行，结束时按 Ctrl+C。如果端口已被占用，可换一个端口，或使用 --port 0 让系统分配并查看终端打印的网址。</p>
+<p>本命令对应的标注文件为 outputs/trajectory_annotation/00_pickup_cube_auto_play.segments.json。首次成功保存时创建文件；再次使用同一路径启动会恢复已有标注。</p>
+
+<h2 seq="auto">标注原子技能区间</h2>
+<ol>
+<li>使用时间轴、帧号输入框、← / → 逐帧定位，或按 Space 播放 / 暂停。定位到技能起点后按 I。</li>
+<li>在“新建原子技能区间”的下拉菜单选择技能，例如 Pickup、Twist 或 DemoSkill。选择后可按 Enter 返回视频区。</li>
+<li>定位到技能最后一帧，按 O 设置终点。检查起止帧后点击“提交区间”，或在视频区按 Enter 提交。</li>
+<li>右侧列表和时间轴会显示已提交区间。点击列表选中，按 E 编辑；Delete 删除；Ctrl+Z 撤销；Ctrl+S 保存。已提交区间也会自动保存。</li>
+</ol>
+<p>帧号从 0 开始，起止帧都包含。例如 [100, 150] 表示 51 帧，对应图像切片 frames[100:151]。当前为单轨道标注：允许空隙和单帧区间，已完成的标注区间不能重叠。</p>
+<p>此处“切分”的产物是带技能类型和帧边界的 JSON；标注操作不会另外剪出视频文件。</p>
+
+<h2 seq="auto">为偏宽的标注设置拟合核心区间</h2>
+<p>真实操作的前后可能带有调整、停顿或其他过渡动作，标注边界不必与原子技能模型逐帧一致。完成起止帧设置后，可勾选“单独设置拟合核心区间”，手动填写标注内部的核心起点和终点。</p>
+<ul>
+<li><b>标注范围</b>保留这段动作的完整来源和上下文。</li>
+<li><b>拟合核心区间</b>决定真正进入技能重建和回填的范围；未设置时使用整个标注范围。</li>
+<li>核心区间必须位于标注范围内，并包含所选技能需要的完整阶段。范围外的关节采样保持原值。</li>
+</ul>
+<p>本机 Pickup 示例共 248 帧。已验证将标注保留为 [0, 247]，只拟合 [1, 245] 时仍可通过校验，核心范围之外的采样逐项保持原值。该帧号仅适用于此示例；自己的记录需根据动作选择。</p>
+<img path="@./draft_ce86b92c_folder/skill-selection-and-core.png" width="520" caption="当前界面：从下拉菜单选择技能，并将标注范围 [0, 247] 与拟合核心 [1, 245] 分开保存。"/>
+<p>DemoSkill 用于保留不适合当前参数模型的示教标注。目前不会对它执行参数重建，也不会仅凭这一标签生成可执行 DemoSkill 资产。核心区间是用户手动指定的边界容错方式，当前不会自动识别或裁掉所有多余动作。</p>
+
+<h2 seq="auto">拟合、查看结果并下载</h2>
+<ol>
+<li>提交并选中标注。拟合面板会自动跟随已识别的技能类型。下拉菜单可标注 16 种内置技能，其中 Pickup、Slide、Twist、HandOver 支持当前参数重建。</li>
+<li>检查关节记录、机器人配置、关节数据语义和时间偏移。示例 PT 记录使用 actual_submission；真实测量关节通常应声明为 measured_state。</li>
+<li>点击“拟合并回填选中区间”。网页先保存标注，再后台运行拟合；期间仍可逐帧查看视频。</li>
+<li>查看“通过校验”或“未通过校验”、辨识参数、关节误差、FK 骨架和 TCP 路径。曲线与视频联动，可旋转骨架视角并放大显示几何误差。</li>
+<li>点击“下载完整回填 NPZ”，保存完整采样和报告。网页临时结果在服务退出时清理，需要长期使用的结果应先下载。</li>
+</ol>
+<p>每次只处理当前选区，并始终以输入的原始关节记录为基准；多次拟合不会自动累积成多区间编辑。修改标注或核心范围后，旧结果会过期，需要重新拟合后下载。校验拒绝时仍可查看候选，但回填数组保留原始值。</p>
+
+<h2 seq="auto">通过命令行执行同一流程</h2>
+<p>已经知道帧范围时，可以直接运行生产命令。以下示例拟合完整 Pickup 视频 [0, 247]：</p>
+<pre lang="bash" caption="按视频帧范围重建并回填"><code>python -m embodichain fit-trajectory \
+  --video /tmp/codex-skill-fitting-plan-20261110/00_pickup_cube_auto_play.mp4 \
+  --joints /tmp/codex-skill-fitting-plan-20261110/00_pickup_cube_auto_play.pt \
+  --robot-profile /tmp/embodichain-skill-fit-20261110/robot_profile.json \
+  --skill pick_up \
+  --start-frame 0 --end-frame 247 \
+  --qpos-semantics actual_submission \
+  --time-offset 0 \
+  --output /home/oem/projects/py312_backup/EmbodiChain/outputs/trajectory_annotation/pickup.fit.npz</code></pre>
+<p>使用网页保存的标注时，将 --start-frame / --end-frame 替换为 --annotations 标注文件路径，以及 --segment-id 对应的 segments[].id。CLI 会自动读取该标注的 core_interval；未设置核心时读取整个标注范围。--skill 必须与标注的已知技能类型一致，Pickup 使用 pick_up。</p>
+<p>若本机旧示例已被清理，可在相同环境中重新生成 UR5 / PGI 示例，再把网页命令中的三个输入路径改成下面的输出路径：</p>
+<pre lang="bash" caption="可选：重新生成示例输入与机器人配置"><code>python -m embodichain run-example sim/atomic_skill \
+  --skill pickup --headless --save-video \
+  --output-dir /tmp/pickup-source
+
+python -m embodichain run-example toolkits/skill_fitting \
+  --replay-dir /tmp/pickup-source \
+  --output-dir /tmp/pickup-fit</code></pre>
+<p>第一条生成 /tmp/pickup-source/00_pickup_cube_auto_play.mp4 和同名 PT；第二条生成 /tmp/pickup-fit/robot_profile.json，并调用生产拟合流程输出 pickup_fit.npz。第二条返回状态码 2 时应检查报告中的拒绝原因。</p>
+
+<h1 seq="auto">换成自己的遥操数据</h1>
+<p>替换三个输入路径，并明确以下信息。UR5 示例配置不能直接用于 Piper 或其他机器人。</p>
+<table><thead><tr><th background-color="light-gray"><p>项目</p></th><th background-color="light-gray"><p>需要确认的内容</p></th></tr></thead><tbody>
+<tr><td><p>关节字段与顺序</p></td><td><p>NPZ 默认读取 qpos 和 timestamps。HDF5 可用 --qpos-key observations/qpos、--timestamps-key observations/timestamps 等参数指定实际字段。配置中的关节名称、顺序和 TCP 必须与记录一致。</p></td></tr>
+<tr><td><p>关节时钟</p></td><td><p>timestamps 以秒表示且严格递增。缺少时间戳时，必须显式提供 --joint-dt；不能用视频 FPS 代替关节采样周期。</p></td></tr>
+<tr><td><p>时间偏移</p></td><td><p>--time-offset 表示“视频零时刻对应的关节时间戳”，单位为秒；需要显式声明，0 只适用于已对齐的记录。</p></td></tr>
+<tr><td><p>数据语义</p></td><td><p>measured_state 表示测量状态，actual_submission 表示已发送指令，design_reference 表示设计参考。重建输出统一标记为 design_reference。</p></td></tr>
+<tr><td><p>动作完整性</p></td><td><p>核心需包含完整阶段，例如 Pickup 的接近、闭合、抬升。没有可观测夹爪开闭时，可提供完整 --phase-hints；仅有机械臂数据时，CLI 不会从 RGB 自动补造夹爪命令。</p></td></tr>
+</tbody></table>
+<p>可在网页高级设置或 --fit-config 中指定现有 SkillFitCfg 参数，包括误差容差、候选数和运行预算。遇到拒绝时，先检查时间对齐、机器人标定、关节语义和核心范围，再判断动作是否符合所选技能；不适配的片段可保留为 DemoSkill 标注。</p>
+
+<h1 seq="auto">实现方法</h1>
+<h2 seq="auto">整体链路与模块职责</h2>
+<p>网页和命令行使用同一拟合流水线：读取标注或帧范围 → 确定拟合核心 → 转换到关节时间区间 → FK 与阶段辨识 → 原生技能规划 → 源时钟对齐 → 边界连接 → 独立校验 → 导出完整结果。</p>
+<table><thead><tr><th background-color="light-gray"><p>模块</p></th><th background-color="light-gray"><p>职责</p></th></tr></thead><tbody>
+<tr><td><p>toolkits/trajectory_annotator/web/</p></td><td><p>视频逐帧操作、技能下拉选择、标注和核心范围编辑、误差与 FK/TCP 预览。</p></td></tr>
+<tr><td><p>toolkits/trajectory_annotator/_skills.py、_models.py、_storage.py</p></td><td><p>提供轻量技能目录；验证边界、核心包含关系和不重叠约束；按来源身份与修订号保存 JSON。</p></td></tr>
+<tr><td><p>toolkits/trajectory_annotator/_frames.py、_server.py、_fitting.py</p></td><td><p>管理帧源、HTTP 边界及一个后台拟合任务，获取准确的端点时间，检查标注是否过期。</p></td></tr>
+<tr><td><p>toolkits/skill_fitting/_pipeline.py、_robot.py</p></td><td><p>共享网页与 CLI 的文件读取、机器人配置、离线 FK/IK、规划、几何预览和来源摘要处理。</p></td></tr>
+<tr><td><p>lab/sim/atomic_skills/fitting.py</p></td><td><p>辨识技能阶段和参数，调用普通原子技能规划器，选择候选并校验回填。</p></td></tr>
+<tr><td><p>compute/trajectory/phase_alignment.py、splicing.py</p></td><td><p>阶段时间对齐、固定时钟连接及关节路径数值检查。</p></td></tr>
+<tr><td><p>data_pipeline/skill_fitting.py</p></td><td><p>关节记录加载、视频到关节区间映射、NPZ 与 JSON 元数据读写。</p></td></tr>
+</tbody></table>
+<p>表中路径均相对于 embodichain/。命令入口另见 examples/toolkits/trajectory_annotation/__main__.py 和 embodichain/toolkits/skill_fitting/cli.py。</p>
+
+<h2 seq="auto">标注类型、核心范围与兼容性</h2>
+<p>界面展示友好技能名称，保存时使用规范标识，例如 Pickup → pick_up、DemoSkill → execute_demo_skill。目录覆盖 16 种内置技能，列表不依赖启动仿真；可标注的类型与可参数重建的四种类型分开管理。旧文件的自由文本标签继续保留并允许编辑。</p>
+<pre lang="json" caption="核心区间随标注保存；以下为单个 segment"><code>{
+  "id": "pickup-broad",
+  "label": "pick_up",
+  "start_frame": 0,
+  "end_frame": 247,
+  "core_interval": {
+    "start_frame": 1,
+    "end_frame": 245
+  },
+  "note": "保留前后过渡帧，仅拟合完整核心动作"
+}</code></pre>
+<p>core_interval 使用绝对视频帧号，同样为闭区间。包含该字段的文档保存为 schema_version=3；读取器兼容旧版 1/2，没有核心字段的旧标注默认以整个范围拟合。结果同时保存外部标注范围 annotation_video_interval 和实际拟合范围 video_interval，便于后续 Real2Sim 消费程序区分上下文与重建核心。</p>
+<p>标注文件通过源内容摘要及相机、流、帧率等配置校验来源。保存使用修订号检查与临时文件原子替换，避免旧页面覆盖新编辑；后台拟合结果在标注修订变化后失效。</p>
+
+<h2 seq="auto">视频帧如何映射到关节采样</h2>
+<p>视频读取解码后的显示时间戳 PTS，并减去首帧时间；不按视频帧号乘固定帧率近似。HDF5 相机没有相同的容器时钟，时间按配置 FPS 推算，并在来源中声明。</p>
+<p>选中闭区间 [a, b] 后，先取得 a 的显示起点和 b 的显示结束时刻，再加 time_offset，映射为关节记录的半开区间 [start, stop)。因此最后一帧的显示时长也被计入；关节记录继续使用自己的物理时间戳。网页只请求核心端点时钟，不会为每次拟合重新建立整个视频索引。</p>
+
+<h2 seq="auto">从关节轨迹辨识并重建技能</h2>
+<ol>
+<li>按机器人配置解析关节列、机械臂与夹爪绑定，通过 FK 得到末端位置和姿态。辨识使用关节记录及运动学标定，视频主要用于人工选区和时间同步。</li>
+<li>结合夹爪开闭变化及末端运动确定阶段；可用完整 phase_hints 指定阶段分区。Pickup 使用 approach / close / lift；其他技能有各自的阶段要求。</li>
+<li>估计技能参数。例如 Pickup 从接近、闭合位置和末端抬升计算抓取目标、接近方向、预抓距离及世界 Z 方向的抬升高度；Twist 估计旋转轴线及角度；Slide 估计滑动方向及行程；HandOver 使用显式双臂参与绑定。</li>
+<li>构造运动目标，调用 AtomicSkillEngine 中已注册的普通规划器生成原生轨迹。拟合端使用离线 RobotPort 提供 FK/IK，不创建运行中的仿真世界。</li>
+</ol>
+<p>生成后按来源阶段的单调进度映射回原关节时钟，而不是直接复制原轨迹作为原生候选。这样可保留源时间轴，同时分别检查参数重建和边界修正的误差。</p>
+
+<h2 seq="auto">连续回填与拒绝策略</h2>
+<p>回填只修改参与技能的关节和选定核心区间；非参与关节及核心之外的采样保持观察值。连接使用五次修正包络，并保留区间两端各三个原始采样点，保护边界处的离散导数模板；最终仍需重新检查整条输出路径。</p>
+<p>独立校验包括关节重建误差、末端位置与旋转误差、受保护接触阶段的误差与连接修正，以及回填后的关节位置、速度、加速度限制。当前默认的末端位置 RMSE 阈值为 0.015 m，旋转 RMSE 为 0.08 rad，接触路径误差为 0.005 m 和 0.03 rad；具体配置以结果中的 fit_cfg 为准。</p>
+<p>通过全部检查才将候选写入 patched_qpos。校验不通过时，保留原生候选及拟议回填轨迹，patched_qpos 返回原始轨迹，报告列出 failures；阶段不可辨识等输入问题则直接报告错误。</p>
+
+<h1 seq="auto">输出、验证与使用边界</h1>
+<table><thead><tr><th background-color="light-gray"><p>NPZ 字段</p></th><th background-color="light-gray"><p>含义</p></th></tr></thead><tbody>
+<tr><td><p>original_qpos</p></td><td><p>完整原始关节轨迹。</p></td></tr>
+<tr><td><p>native_qpos</p></td><td><p>核心内为按源时钟对齐的原生技能候选，核心外保留原值。</p></td></tr>
+<tr><td><p>proposed_qpos</p></td><td><p>应用连接修正后的拟议完整轨迹，拒绝时仍可供对比。</p></td></tr>
+<tr><td><p>patched_qpos</p></td><td><p>通过校验的回填结果；拒绝时与 original_qpos 一致。</p></td></tr>
+<tr><td><p>timestamps、modified_mask</p></td><td><p>原始关节时间戳及实际修改位置。</p></td></tr>
+<tr><td><p>metadata_json 与几何字段</p></td><td><p>技能、参数、阶段、校验、标注与来源摘要、配置、拟合范围，以及降采样 FK/TCP 数据。网页预览有界，下载保留完整关节采样。</p></td></tr>
+</tbody></table>
+<p>本次在 py312_bk 中完成 51 项相关功能检查，覆盖浏览器编辑、保存恢复、核心范围、网页与 CLI 一致性及拟合行为；另有 42 项项目上下文检查通过。真实 UR5 Pickup 示例 accepted=true，抬升高度约 0.16000009 m；标注 [0, 247]、拟合核心 [1, 245] 的外围采样逐项保持原值。</p>
+<p>这些结果证明当前示例的运动学重建与回填通过检查。输出仍是设计参考，报告中的 physical_success 为 unknown、collision_evidence 为 unverified。面向真实执行或目标仿真时，仍需目标场景中的碰撞、接触和任务成功验证；修改物体位姿也不会自动迁移整段轨迹。</p>
+<p>进一步阅读：仓库中的 examples/toolkits/trajectory_annotation/README.md、examples/toolkits/skill_fitting/README.md，以及 embodichain/toolkits/trajectory_annotator/README.md。后续更新界面、标注 schema 或拟合契约时，应同步修订本文命令和实现说明。</p>

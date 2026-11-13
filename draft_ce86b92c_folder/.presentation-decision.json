@@ -1,0 +1,1 @@
+{"audience":"使用 EmbodiChain 进行遥操数据标注与 Real2Sim 接入的开发者","reader_task":"先完成一次 Pickup 轨迹切分与回填，再查阅时间映射、核心区间和重建校验的实现方法","genre_contract":"router.knowledge","adapter":null,"presentation_mode":"normal","visual_plan":{"reason":"操作步骤与可复制命令为主；用当前界面截图定位技能下拉菜单和核心区间，并用表格对应输入、输出与实现模块","blocks":[{"type":"img","min_count":1,"purpose":"展示技能下拉选择和拟合核心区间的位置，辅助完成宽范围标注"}]}}

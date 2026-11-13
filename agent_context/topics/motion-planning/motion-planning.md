@@ -137,7 +137,9 @@ must not import simulation objects.
 Offline atomic reconstruction uses `compute.trajectory.phase_alignment` for
 bounded monotone native-path clock fitting and `splicing` for fixed-clock joint
 replacement. Callers retain required anchors and qualify TCP constraints and
-joint derivatives after mapping and correction. The discrete boundary-stencil
+joint derivatives after mapping and correction. Connections use physical
+timestamps and independent entrance/exit widths; an early protected anchor
+cannot shorten the exit connection. The discrete boundary-stencil
 contract is not continuous-time smoothness or collision evidence. An explicitly
 injected planner/robot port bypasses simulator lookup; ordinary construction
 continues to resolve the simulator-owned robot.

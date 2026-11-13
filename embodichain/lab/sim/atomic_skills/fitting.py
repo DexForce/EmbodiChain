@@ -59,12 +59,24 @@ class SkillFitCfg:
 
     control_dt: float = 0.01
     blend_samples: int = 12
+    blend_duration_s: float = 0.5
+    """Minimum boundary-transition duration, capped independently by phase anchors.
+
+    ``blend_samples`` additionally sets the minimum sample width. Both outer
+    joins retain the original position and derivative stencils exactly.
+    """
     max_samples: int = 20_000
     max_candidates: int = 3
     max_seconds: float = 120.0
     max_joint_rmse: float = 0.15
     max_tcp_rmse_m: float = 0.015
     max_rotation_rmse_rad: float = 0.08
+    max_approach_rotation_rad: float = 0.03
+    """Allowed pre-grasp orientation deviation when inferring an approach anchor.
+
+    This inference tolerance accommodates measured orientation noise. Final
+    native/contact reconstruction still uses its independent error tolerances.
+    """
     max_contact_error_m: float = 0.005
     max_contact_rotation_rad: float = 0.03
     min_twist_angle_rad: float = 0.05
@@ -111,19 +123,41 @@ def _rot_error(left: np.ndarray, right: np.ndarray) -> np.ndarray:
     ).magnitude()
 
 
-def _approach(poses: np.ndarray, close_start: int) -> tuple[np.ndarray, float, int]:
+def _approach(
+    poses: np.ndarray,
+    close_start: int,
+    *,
+    max_rotation_rad: float,
+    pre_index: int | None = None,
+) -> tuple[np.ndarray, float, int]:
+    """Resolve an explicit reach anchor or infer one within rotation tolerance."""
     grasp = poses[close_start]
-    candidates = np.flatnonzero(_rot_error(poses[:close_start], grasp) < 0.00003)
-    if len(candidates) < 2:
-        raise ValueError("No stable TCP orientation before grasp; provide phase hints.")
-    # The farthest point after attaining the grasp orientation is the pre-grasp.
-    offsets = grasp[:3, 3] - poses[candidates, :3, 3]
-    norms = np.linalg.norm(offsets, axis=1)
-    index = int(candidates[np.flatnonzero(norms >= np.max(norms) - 1e-8)[-1]])
-    distance = float(np.max(norms))
+    if pre_index is None:
+        rotation_error = _rot_error(poses[:close_start], grasp)
+        candidates = np.flatnonzero(rotation_error <= max_rotation_rad)
+        if len(candidates) < 2:
+            nearest = (
+                f"{rotation_error.min():.6g} rad"
+                if len(rotation_error)
+                else "no pre-grasp samples"
+            )
+            raise ValueError(
+                "No stable TCP orientation before grasp within "
+                f"max_approach_rotation_rad={max_rotation_rad:.6g} "
+                f"(nearest deviation: {nearest}). Increase this inference "
+                "tolerance or refine the selected core interval."
+            )
+        # The farthest point after attaining the grasp orientation is the pre-grasp.
+        offsets = grasp[:3, 3] - poses[candidates, :3, 3]
+        norms = np.linalg.norm(offsets, axis=1)
+        pre_index = int(candidates[np.flatnonzero(norms >= np.max(norms) - 1e-8)[-1]])
+    elif not 0 <= pre_index < close_start:
+        raise ValueError("The hinted reach anchor must precede gripper closure.")
+    offset = grasp[:3, 3] - poses[pre_index, :3, 3]
+    distance = float(np.linalg.norm(offset))
     if distance < 1e-4:
         raise ValueError("Approach displacement is not observable.")
-    return (grasp[:3, 3] - poses[index, :3, 3]) / distance, distance, index
+    return offset / distance, distance, pre_index
 
 
 def _twist_line(
@@ -303,6 +337,8 @@ def fit_skill_segment(
         participant_data[role] = (poses, closes, opens, arm_ids, hand_ids)
 
     params: dict[str, Any] = {"pose_origin": "fk_derived"}
+    source_template_errors: dict[str, Any] = {}
+    source_template_failures: list[str] = []
     contact_ranges: list[tuple[str, int, int]] = []
 
     def tensor(value: np.ndarray) -> torch.Tensor:
@@ -337,22 +373,40 @@ def fit_skill_segment(
             raise ValueError(
                 "The native skill requires a stationary arm during closure."
             )
-        direction, pre_distance, pre_index = _approach(poses, close_start)
-        if "reach" in hints:
-            pre_index = hints["reach"]["start"]
-            offset = poses[close_start, :3, 3] - poses[pre_index, :3, 3]
-            pre_distance = float(np.linalg.norm(offset))
-            if pre_distance <= 1e-4:
-                raise ValueError("Hinted pre-grasp displacement is not observable.")
-            direction = offset / pre_distance
+        direction, pre_distance, pre_index = _approach(
+            poses,
+            close_start,
+            max_rotation_rad=cfg.max_approach_rotation_rad,
+            pre_index=hints["reach"]["start"] if "reach" in hints else None,
+        )
         grasp = poses[close_start]
         close_count = lift_start - close_start
         if skill_id == "pick_up":
             lift = poses[-1, :3, 3] - grasp[:3, 3]
-            if lift[2] <= 0 or np.linalg.norm(lift[:2]) > cfg.max_contact_error_m:
+            if lift[2] <= 0:
                 raise ValueError("Pickup requires an observable world-Z lift.")
-            if float(_rot_error(poses[-1], grasp)) > cfg.max_contact_rotation_rad:
-                raise ValueError("Pickup lift changes TCP orientation.")
+            lateral = float(np.linalg.norm(lift[:2]))
+            rotation = float(_rot_error(poses[-1], grasp))
+            source_template_errors["pickup_lift"] = {
+                "translation_m": lift.tolist(),
+                "lateral_displacement_m": lateral,
+                "rotation_change_rad": rotation,
+            }
+            # A measurable lift still supplies a native vertical candidate.
+            # Keep incompatible source motion inspectable without accepting it
+            # or replacing the original reference outside the acceptance gates.
+            if lateral > cfg.max_contact_error_m:
+                source_template_failures.append(
+                    "Pickup lift deviates from world Z: "
+                    f"lateral displacement {lateral:.6g} m exceeds "
+                    f"max_contact_error_m={cfg.max_contact_error_m:.6g}"
+                )
+            if rotation > cfg.max_contact_rotation_rad:
+                source_template_failures.append(
+                    "Pickup lift changes TCP orientation: "
+                    f"{rotation:.6g} rad exceeds "
+                    f"max_contact_rotation_rad={cfg.max_contact_rotation_rad:.6g}"
+                )
             goal = PickUpMotionGoal(tensor(grasp))
             options = PickUpOptions(
                 lift_height=float(lift[2]),
@@ -673,10 +727,11 @@ def fit_skill_segment(
         stop=stop,
         joint_indices=editable,
         blend_samples=cfg.blend_samples,
+        blend_duration_s=cfg.blend_duration_s,
         anchors=tuple(start + p["start"] for p in phases[1:]),
     )
     errors = {}
-    failures = []
+    failures = list(source_template_failures)
     for role, (observed, _, _, arm_ids, _) in participant_data.items():
 
         def fk(values: np.ndarray) -> np.ndarray:
@@ -761,7 +816,21 @@ def fit_skill_segment(
         "native_options": serializable(asdict(selected_options)),
         "native_goal": serializable(asdict(goal)),
         "initial_qpos": q[0].tolist(),
-        "algorithm_revision": 1,
+        "algorithm_revision": 3,
+        "boundary_connection": {
+            "method": "physical_time_quintic_envelope",
+            "requested_duration_s": cfg.blend_duration_s,
+            "minimum_samples": cfg.blend_samples,
+            "fixed_samples_per_end": 3,
+            "endpoint_position_error": float(
+                np.max(
+                    np.abs(
+                        patched[[start, stop - 1]] - recording.qpos[[start, stop - 1]]
+                    )
+                )
+            ),
+        },
+        "source_template_errors": source_template_errors,
         "per_joint_native_rmse": np.sqrt(np.mean((mapped - q) ** 2, axis=0)).tolist(),
         "time_mapping": "phasewise_monotone_native_path_projection",
         "native_motion_policy": {

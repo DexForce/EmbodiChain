@@ -1,11 +1,17 @@
 // Copyright (c) 2021-2026 DexForce Technology Co., Ltd. Licensed under Apache-2.0.
 // Drawing data is bounded; the downloadable NPZ retains the original sample grid.
+import { createRobotPreview } from "./robot_preview.js";
 const $ = (id) => document.getElementById(id);
 const colors = { original: "#fb8696", native: "#f2b664", patched: "#66d5bc", proposed: "#b6a1ff" };
 const fields = {
   joints: "fit-joints", robot_profile: "fit-profile", qpos_semantics: "fit-semantics",
   time_offset: "fit-offset", qpos_key: "fit-qpos-key", timestamps_key: "fit-timestamps-key",
   joint_dt: "fit-joint-dt", env_index: "fit-env-index", device: "fit-device",
+};
+// Standard mode removes these overrides and uses the fitter's canonical defaults.
+const relaxedTolerances = {
+  max_joint_rmse: 0.5, max_tcp_rmse_m: 0.1, max_rotation_rmse_rad: 1.0,
+  max_contact_error_m: 0.1, max_contact_rotation_rad: 1.0,
 };
 
 async function jsonRequest(url, options) {
@@ -38,7 +44,8 @@ function surface(canvas) {
   return { ctx, width, height };
 }
 
-export function createFittingPanel({ context, saveAnnotations, seekTime }) {
+export function createFittingPanel({ context, saveAnnotations, seekTime, seekFrame }) {
+  const robotPreview = createRobotPreview({ context, seekFrame });
   const state = { job: null, data: null, timer: null, loading: false, starting: false, time: 0, hover: null, seeking: false };
   const camera = { yaw: -0.8, pitch: 0.5, zoom: 1, center: [0, 0, 0], radius: 1 };
   const series = () => state.data?.report.accepted ? ["original", "native", "patched"] : ["original", "native", "patched", "proposed"];
@@ -51,18 +58,56 @@ export function createFittingPanel({ context, saveAnnotations, seekTime }) {
     $("fit-message").className = `fit-message ${kind}`;
   }
 
+  function toleranceHint() {
+    const mode = $("fit-tolerance").value;
+    $("fit-tolerance-hint").textContent = (mode === "relaxed" ? "TCP / 阶段位置容差 10 cm，姿态容差 1 rad。" : mode === "standard" ? "使用标准误差阈值。" : "使用下方 JSON 中的误差阈值。") + "更改后重新拟合生效；关节限制独立校验。";
+  }
+
+  function fitConfig() {
+    const config = $("fit-config").value.trim() ? JSON.parse($("fit-config").value) : {};
+    if (!config || typeof config !== "object" || Array.isArray(config)) throw new Error("拟合配置需要 JSON 对象。");
+    return config;
+  }
+
+  function syncTolerance() {
+    try {
+      const config = fitConfig(), entries = Object.entries(relaxedTolerances);
+      $("fit-tolerance").value = entries.every(([key, value]) => config[key] === value) ? "relaxed" : entries.every(([key]) => config[key] === undefined) ? "standard" : "custom";
+    } catch { $("fit-tolerance").value = "custom"; }
+    toleranceHint();
+  }
+
+  function applyTolerance() {
+    const mode = $("fit-tolerance").value;
+    if (mode === "custom") {
+      $("fit-inputs").open = true; $("fit-config").closest("details").open = true;
+      $("fit-config").focus(); toleranceHint(); return;
+    }
+    try {
+      const config = fitConfig();
+      for (const [key, value] of Object.entries(relaxedTolerances)) {
+        if (mode === "relaxed") config[key] = value;
+        else delete config[key];
+      }
+      $("fit-config").value = Object.keys(config).length ? JSON.stringify(config, null, 2) : "";
+      syncTolerance();
+    } catch (error) { syncTolerance(); notify(error.message, "error"); }
+  }
+
   function selectionChanged() {
     const current = context();
     const skill = selectedSkill();
     const core = current.selection?.core_interval;
     $("fit-selection").textContent = current.selection ? `${current.selection.label} · 标注 [${current.selection.start_frame}, ${current.selection.end_frame}] 帧${core ? ` · 核心 [${core.start_frame}, ${core.end_frame}]` : ""}` : "请在右侧选择一段已标注区间";
-    $("fit-selection-hint").textContent = skill && !skill.can_fit ? `${skill.name} 可保存为示教标注；当前未提供该技能的参数重建。` : core ? "仅拟合核心区间，保留标注内前后过渡动作的原始采样。" : "标注包含额外过渡动作时，可在编辑区间中单独设置拟合核心范围。";
+    const demo = skill?.id === "execute_demo_skill";
+    $("fit-selection-hint").textContent = demo ? "DemoSkill 不拟合原子技能，也不执行轨迹回填；保留该区间的原始轨迹。" : skill && !skill.can_fit ? `${skill.name} 可保存为示教标注；当前未提供该技能的参数重建。` : core ? "仅拟合核心区间，保留标注内前后过渡动作的原始采样。" : "标注包含额外过渡动作时，可在编辑区间中单独设置拟合核心范围。";
     $("fit-skill").disabled = !!skill;
     if (skill?.can_fit) $("fit-skill").value = skill.id;
     if (skill && !skill.can_fit) $("fit-skill").value = "";
     if (!skill && !$("fit-skill").value) $("fit-skill").value = "pick_up";
     $("fit-run").disabled = !current.selection || !!current.draft || (!!skill && !skill.can_fit) || state.starting || state.job?.phase === "running";
-    $("fit-run").textContent = state.starting || state.job?.phase === "running" ? "正在拟合…" : "拟合并回填选中区间";
+    $("fit-run").textContent = state.starting || state.job?.phase === "running" ? "正在拟合…" : demo ? "DemoSkill · 保留原始轨迹" : "拟合并回填选中区间";
+    $("fit-tolerance").disabled = (!!skill && !skill.can_fit) || state.starting || state.job?.phase === "running";
     if (!state.job) return;
     const outdated = stale();
     const labels = { running: "拟合中", error: "拟合失败", done: state.job.accepted ? "通过校验" : "未通过校验" };
@@ -71,6 +116,7 @@ export function createFittingPanel({ context, saveAnnotations, seekTime }) {
     const link = $("fit-download");
     link.setAttribute("aria-disabled", String(outdated || state.job.phase !== "done"));
     if (outdated) {
+      robotPreview.invalidate();
       link.removeAttribute("href");
       notify("标注已变化，当前结果属于先前修订。请重新拟合后下载。", "warning");
     } else if (state.job.phase === "done") link.href = `/api/fitting/jobs/${state.job.job_id}/bundle`;
@@ -80,7 +126,7 @@ export function createFittingPanel({ context, saveAnnotations, seekTime }) {
     const result = Object.fromEntries(Object.entries(fields).map(([key, id]) => [key, $(id).value.trim()]));
     for (const key of ["time_offset", "joint_dt", "env_index"]) result[key] = result[key] === "" ? null : Number(result[key]);
     result.phase_hints = $("fit-phase-hints").value.trim() ? JSON.parse($("fit-phase-hints").value) : null;
-    result.fit_config = $("fit-config").value.trim() ? JSON.parse($("fit-config").value) : {};
+    result.fit_config = fitConfig();
     if (!result.joints || !result.robot_profile) throw new Error("请填写关节记录路径和机器人配置路径。");
     if (!result.qpos_semantics || result.time_offset === null) throw new Error("请显式选择数据语义，并填写视频零时刻对应的关节时间。");
     return result;
@@ -103,6 +149,7 @@ export function createFittingPanel({ context, saveAnnotations, seekTime }) {
       });
       state.job = { ...job, revision: current.revision };
       state.data = null;
+      robotPreview.reset(null, false);
       $("fit-result").hidden = true;
       notify(job.message);
       clearTimeout(state.timer);
@@ -120,6 +167,9 @@ export function createFittingPanel({ context, saveAnnotations, seekTime }) {
         for (const [key, id] of Object.entries(fields)) $(id).value = defaults[key] ?? "";
         $("fit-phase-hints").value = defaults.phase_hints ? JSON.stringify(defaults.phase_hints, null, 2) : "";
         $("fit-config").value = Object.keys(defaults.fit_config || {}).length ? JSON.stringify(defaults.fit_config, null, 2) : "";
+        if (!job.job_id && Object.keys(relaxedTolerances).every((key) => defaults.fit_config?.[key] === undefined)) {
+          $("fit-tolerance").value = "relaxed"; applyTolerance();
+        } else syncTolerance();
         if (job.skill_id) $("fit-skill").value = job.skill_id;
       }
       if (!job.job_id) return;
@@ -147,6 +197,10 @@ export function createFittingPanel({ context, saveAnnotations, seekTime }) {
   function showResult() {
     const { report } = state.data;
     const selection = state.job.selection;
+    robotPreview.reset(state.job.job_id, report.accepted, selection);
+    const boundary = report.boundary_connection;
+    $("fit-boundary").hidden = !boundary;
+    $("fit-boundary").textContent = boundary ? `首尾各 ${boundary.fixed_samples_per_end} 个采样保持原值 · 边界过渡目标 ${boundary.requested_duration_s} s（可用长度受技能阶段约束）` : "";
     const core = selection.core_interval || selection;
     $("fit-result-title").textContent = `${selection.label} · ${report.skill_id} · 拟合 [${core.start_frame}, ${core.end_frame}]`;
     $("fit-result").hidden = false;
@@ -321,6 +375,8 @@ export function createFittingPanel({ context, saveAnnotations, seekTime }) {
   canvas.addEventListener("wheel", (event) => { event.preventDefault(); camera.zoom = Math.max(0.2, Math.min(6, camera.zoom * Math.exp(-event.deltaY * 0.001))); draw(); }, { passive: false });
   $("fit-reset-view").onclick = () => { camera.yaw = -0.8; camera.pitch = 0.5; camera.zoom = 1; draw(); };
   $("fit-joint").onchange = draw; $("fit-exaggeration").onchange = draw; $("fit-run").onclick = () => void start();
+  $("fit-tolerance").onchange = applyTolerance;
+  $("fit-config").addEventListener("input", syncTolerance);
   new ResizeObserver(draw).observe($("fit-result"));
-  return { initialize: () => void poll(true), selectionChanged, displayTime: (time) => { state.time = time; draw(); } };
+  return { initialize: () => void poll(true), selectionChanged, displayFrame: (index, time, image) => { state.time = time; robotPreview.displayFrame(index, time, image); draw(); } };
 }

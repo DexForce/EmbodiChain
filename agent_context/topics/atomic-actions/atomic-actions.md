@@ -162,8 +162,13 @@ annotation revisions change. Annotation choices cover all built-in skills withou
 importing simulation; only supported reconstruction types enter fitting. A saved
 optional core interval separates loose annotation boundaries from reconstruction,
 preserving surrounding motion; DemoSkill labels do not create executable assets.
-Its bounded joint/FK preview follows video time;
-the downloadable NPZ retains full samples. See the
+Its bounded joint/FK preview follows video time; `_robot_preview.py` additionally
+owns an opt-in Viser URDF overlay of the original robot and a translucent
+patched/native/rejected candidate. It requires local visual assets and explicit
+profile joint/base bindings. One worker owns model loading, scene updates and
+teardown, with a latest-time mailbox; replacing the fit or closing the host stops
+the private loopback server. It never constructs a simulator or enters the
+simulation visualization lifecycle. The downloadable NPZ retains full samples. See the
 [web example](../../../examples/toolkits/trajectory_annotation/README.md).
 `atomic_skills/fitting.py` identifies explicit
 world-TCP motion goals for PickUp, Slide, Twist and HandOver, then calls their

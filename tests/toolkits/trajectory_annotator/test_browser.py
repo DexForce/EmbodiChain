@@ -134,6 +134,7 @@ def test_web_fitting_comparison_download_rejection_and_invalidation(
     )
     page.locator("#fit-joint").select_option("1")
     expect(page.locator("#fit-cursor")).to_contain_text("hand_joint")
+    page.locator(".fit-skeleton > summary").click()
     page.locator("#fit-exaggeration").select_option("20")
     chart = page.locator("#fit-joint-chart").bounding_box()
     # The plot spans 0..2.99 s. This point is video t=.2 s, where the VFR
@@ -152,6 +153,7 @@ def test_web_fitting_comparison_download_rejection_and_invalidation(
     page.locator("#commit").click()
     expect(page.locator("#fit-state")).to_have_text("标注已变化")
     expect(page.locator("#fit-download")).to_have_attribute("aria-disabled", "true")
+    expect(page.locator("#fit-robot-scrubber")).to_be_disabled()
     # An unobservable segment must surface the error and release the job guard,
     # allowing a corrected configuration/selection to be fitted again.
     fitting_oracle["error"] = True
@@ -164,6 +166,155 @@ def test_web_fitting_comparison_download_rejection_and_invalidation(
     expect(page.locator("#fit-state")).to_have_text("通过校验")
     expect(page.locator("#fit-proposed-legend")).to_be_hidden()
     expect(page.locator("#fit-parameters")).to_contain_text("lift_height")
+
+
+def test_robot_preview_scrubs_exact_frames_with_bounds_and_latest_pts(
+    page: Page,
+    annotation_server: tuple[str, Path],
+    fitting_oracle: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Image pixels and the robot cursor follow the final VFR seek, including core bounds."""
+    from playwright.sync_api import expect
+    from embodichain.toolkits.trajectory_annotator._frames import FrameReader
+
+    original = FrameReader.preview
+    slow_frame_entered = threading.Event()
+
+    def delayed(self: FrameReader, index: int) -> Any:
+        if index == 40:
+            slow_frame_entered.set()
+            time.sleep(0.3)
+        return original(self, index)
+
+    monkeypatch.setattr(FrameReader, "preview", delayed)
+    url, _ = annotation_server
+    open_project(page, url)
+    create_skill_interval(page)
+    page.locator("#edit").click()
+    page.locator("#use-core").check()
+    page.locator("#core-start-frame").fill("3")
+    page.locator("#core-end-frame").fill("4")
+    page.locator("#commit").click()
+    page.locator("#fit-joints").fill("known.npz")
+    page.locator("#fit-profile").fill("robot.json")
+    page.locator("#fit-semantics").select_option("measured_state")
+    page.locator("#fit-offset").fill("0")
+    page.locator("#fit-run").click()
+    expect(page.locator("#fit-state")).to_have_text("通过校验", timeout=15000)
+    slider = page.locator("#fit-robot-scrubber")
+    scope = page.locator("#fit-robot-scope")
+    expect(slider).to_have_attribute("min", "2")
+    expect(slider).to_have_attribute("max", "5")
+    expect(page.locator("#fit-robot-position")).to_have_text("4 / 4 帧")
+
+    # Isolate the browser's transport from mesh loading (covered by the robot
+    # preview tests). The iframe gets a static document on the test's own port.
+    robot_times: list[float] = []
+
+    def robot_request(route: Any) -> None:
+        if route.request.method == "POST":
+            robot_times.append(route.request.post_data_json["time_seconds"])
+        route.fulfill(json={"phase": "ready", "port": int(url.rsplit(":", 1)[1])})
+
+    page.route("**/api/fitting/jobs/*/robot-preview", robot_request)
+    page.route(f"{url}/", lambda route: route.fulfill(body="<p>Robot viewer</p>"))
+    page.locator("#fit-robot-load").click()
+    expect(page.locator("#fit-robot-frame")).to_be_visible()
+    scope.select_option("core")
+    expect(slider).to_have_attribute("min", "3")
+    expect(slider).to_have_attribute("max", "4")
+    expect(page.locator("#frame-current")).to_have_text("4")
+    slider.press("Home")
+    expect(page.locator("#frame-current")).to_have_text("3")
+    slider.press("ArrowLeft")
+    expect(page.locator("#frame-current")).to_have_text("3")
+    expect(page.locator("#fit-robot-previous")).to_be_disabled()
+    slider.press("End")
+    expect(page.locator("#frame-current")).to_have_text("4")
+    expect(page.locator("#fit-robot-next")).to_be_disabled()
+
+    scope.select_option("all")
+    expect(slider).to_have_attribute("min", "0")
+    expect(slider).to_have_attribute("max", "89")
+    slider.evaluate(
+        "el => { el.value = '40'; el.dispatchEvent(new Event('input', {bubbles:true})); }"
+    )
+    assert slow_frame_entered.wait(5), "Delayed seek never entered the decoder."
+    # Frame 43 has normalized PTS (43 + floor(43/5)) / 30 = 1.7 s,
+    # independent of average FPS and the recording's nonzero first PTS.
+    with page.expect_request(
+        lambda request: request.url.endswith("/robot-preview")
+        and request.method == "POST"
+        and request.post_data_json["time_seconds"] == pytest.approx(1.7)
+    ):
+        slider.evaluate(
+            "el => { el.value = '43'; el.dispatchEvent(new Event('input', {bubbles:true})); }"
+        )
+    expect(page.locator("#frame-current")).to_have_text("43")
+    expect(slider).to_have_value("43")
+    expect(page.locator("#fit-robot-current")).to_have_text("第 43 帧 · 1.700 s")
+    expect(page.locator("#fit-robot-image")).to_have_attribute(
+        "aria-label", "视频第 43 帧"
+    )
+    pixel = page.locator("#fit-robot-image").evaluate(
+        "el => Array.from(el.getContext('2d').getImageData(0, 0, 1, 1).data)"
+    )
+    # The fixture encodes frame 43 with RGB (53, 47, 45); tolerate H.264 loss.
+    assert pixel[:3] == pytest.approx([53, 47, 45], abs=6)
+    assert 1.6 not in robot_times, "The discarded frame 40 moved the robot cursor."
+    page.locator("#fit-robot-next").click()
+    expect(page.locator("#frame-current")).to_have_text("44")
+    scope.select_option("annotation")
+    expect(page.locator("#frame-current")).to_have_text("5")
+    expect(page.locator("#fit-robot-position")).to_have_text("4 / 4 帧")
+
+
+def test_tolerance_presets_preserve_other_settings_and_restore_job(
+    page: Page,
+    annotation_server: tuple[str, Path],
+    fitting_oracle: dict[str, Any],
+) -> None:
+    """Presets reach the fitter explicitly without discarding boundary tuning."""
+    from playwright.sync_api import expect
+
+    open_project(page, annotation_server[0])
+    preset, config = page.locator("#fit-tolerance"), page.locator("#fit-config")
+    expect(preset).to_have_value("relaxed")
+    create_skill_interval(page)
+    page.locator("#fit-inputs details > summary").click()
+    config.fill('{"blend_duration_s":0.8,"max_tcp_rmse_m":0.07}')
+    expect(preset).to_have_value("custom")
+    preset.select_option("relaxed")
+    expected = {
+        "blend_duration_s": 0.8,
+        "max_joint_rmse": 0.5,
+        "max_tcp_rmse_m": 0.1,
+        "max_rotation_rmse_rad": 1.0,
+        "max_contact_error_m": 0.1,
+        "max_contact_rotation_rad": 1.0,
+    }
+    assert json.loads(config.input_value()) == expected
+    page.locator("#fit-joints").fill("known.npz")
+    page.locator("#fit-profile").fill("robot.json")
+    page.locator("#fit-semantics").select_option("measured_state")
+    page.locator("#fit-offset").fill("0")
+    with page.expect_request(
+        lambda request: request.method == "POST"
+        and request.url.endswith("/api/fitting/jobs")
+    ) as pending:
+        page.locator("#fit-run").click()
+    assert pending.value.post_data_json["inputs"]["fit_config"] == expected
+    expect(page.locator("#fit-state")).to_have_text("通过校验", timeout=15000)
+    page.reload()
+    expect(preset).to_have_value("relaxed")
+    expect(page.locator("#fit-result")).to_be_visible()
+    preset.select_option("standard")
+    assert json.loads(config.input_value()) == {"blend_duration_s": 0.8}
+    preset.select_option("custom")
+    expect(config).to_be_visible()
+    config.fill('{"blend_duration_s":0.8,"max_tcp_rmse_m":0.2}')
+    expect(preset).to_have_value("custom")
 
 
 def test_keyboard_edit_delete_undo_and_resume(
@@ -339,6 +490,15 @@ def test_skill_dropdown_core_persistence_and_demoskill(
     url, destination = annotation_server
     open_project(page, url)
     expect(page.locator("select#label")).to_be_visible()
+    expect(page.locator("#label optgroup").first).to_have_attribute(
+        "label", "保留原始轨迹"
+    )
+    expect(page.locator("#label optgroup").first.locator("option")).to_have_attribute(
+        "value", "execute_demo_skill"
+    )
+    expect(page.locator('#label option[value="execute_demo_skill"]')).to_contain_text(
+        "不拟合，保留原始轨迹"
+    )
     for identifier in ("pick_up", "twist", "execute_demo_skill", "pour"):
         expect(page.locator(f'#label option[value="{identifier}"]')).to_have_count(1)
     create_skill_interval(page)
@@ -367,9 +527,12 @@ def test_skill_dropdown_core_persistence_and_demoskill(
     expect(page.locator("#use-core")).to_be_checked()
     expect(page.locator("#core-start-frame")).to_have_value("3")
     page.locator("#label").select_option("execute_demo_skill")
+    expect(page.locator("#skill-kind-hint")).to_be_visible()
+    expect(page.locator("#skill-kind-hint")).to_contain_text("保留该区间的原始轨迹")
     page.locator("#commit").click()
     expect(page.locator("#fit-run")).to_be_disabled()
     expect(page.locator("#fit-selection-hint")).to_contain_text("DemoSkill")
+    expect(page.locator("#fit-selection-hint")).to_contain_text("保留该区间的原始轨迹")
     page.locator("#save").click()
     expect(page.locator("#save-status")).to_have_text("已保存")
     assert (

@@ -161,6 +161,8 @@ def test_pickup_inverse_native_and_splice_preserve_source_and_report_rejection(
     np.testing.assert_array_equal(recording.qpos, before)
     np.testing.assert_array_equal(arrays["patched_qpos"][:9], before[:9])
     np.testing.assert_array_equal(arrays["patched_qpos"][138:], before[138:])
+    np.testing.assert_array_equal(arrays["proposed_qpos"][:9], before[:9])
+    np.testing.assert_array_equal(arrays["proposed_qpos"][138:], before[138:])
     assert "phase_progress" in arrays
     if not accept:
         np.testing.assert_array_equal(arrays["patched_qpos"], before)
@@ -169,8 +171,88 @@ def test_pickup_inverse_native_and_splice_preserve_source_and_report_rejection(
         assert np.ptp(arrays["native_phase_qpos"][:, 2]) > 0.1
 
 
-@pytest.mark.parametrize("skill", ("slide", "twist"))
-def test_axis_skills_identify_geometric_parameters_and_use_native_motion(skill) -> None:
+@pytest.mark.parametrize("rotation_tolerance", (0.03, 0.0001))
+def test_pickup_approach_handles_measured_orientation_noise_with_explicit_tolerance(
+    rotation_tolerance: float,
+) -> None:
+    original = _pickup()
+    q = original.qpos.copy()
+    # At least 0.2 mrad of pre-grasp orientation error: the old fixed 0.03 mrad
+    # threshold rejected every sample despite the known 15 cm vertical approach.
+    q[:67, 5] = np.linspace(0.006, 0.0002, 67)
+    source = JointRecording(
+        original.timestamps, q, original.joint_names, original.semantics
+    )
+    kwargs = dict(
+        skill_id="pick_up",
+        endpoints={"primary": {"motion": "tool_motion", "grasp": "fingers"}},
+        start=6,
+        stop=141,
+        acceleration_limits=np.full(7, 1000.0),
+        cfg=SkillFitCfg(max_candidates=1, max_approach_rotation_rad=rotation_tolerance),
+    )
+    if rotation_tolerance < 0.0002:
+        with pytest.raises(ValueError, match="max_approach_rotation_rad=0.0001"):
+            fit_skill_segment(source, _engine(), **kwargs)
+        return
+    _, report = fit_skill_segment(source, _engine(), **kwargs)
+    assert report["accepted"], report["failures"]
+    assert report["parameters"]["pre_grasp_distance"] == pytest.approx(0.15, abs=1e-6)
+    assert report["parameters"]["lift_height"] == pytest.approx(0.12, abs=1e-6)
+
+
+@pytest.mark.parametrize("deviation", ("lateral", "rotation"))
+@pytest.mark.parametrize("relaxed", (False, True))
+def test_pickup_template_mismatch_obeys_explicit_geometric_tolerances(
+    deviation: str,
+    relaxed: bool,
+) -> None:
+    original = _pickup()
+    q = original.qpos.copy()
+    column, displacement = (0, 0.03) if deviation == "lateral" else (5, 0.15)
+    q[80:141, column] += np.linspace(0.0, displacement, 61)
+    q[141:, column] += displacement
+    source = JointRecording(
+        original.timestamps, q, original.joint_names, original.semantics
+    )
+    arrays, report = fit_skill_segment(
+        source,
+        _engine(),
+        skill_id="pick_up",
+        endpoints={"primary": {"motion": "tool_motion", "grasp": "fingers"}},
+        start=6,
+        stop=141,
+        acceleration_limits=np.full(7, 1000.0),
+        cfg=SkillFitCfg(
+            max_candidates=1,
+            **(
+                dict(
+                    max_joint_rmse=0.5,
+                    max_tcp_rmse_m=0.1,
+                    max_rotation_rmse_rad=1.0,
+                    max_contact_error_m=0.1,
+                    max_contact_rotation_rad=1.0,
+                )
+                if relaxed
+                else {}
+            ),
+        ),
+    )
+    assert report["accepted"] == relaxed
+    if not relaxed:
+        assert any("Pickup lift" in failure for failure in report["failures"])
+        np.testing.assert_array_equal(arrays["patched_qpos"], source.qpos)
+    else:
+        assert np.any(arrays["patched_qpos"] != source.qpos)
+    assert np.any(arrays["native_qpos"] != source.qpos)
+
+
+@pytest.mark.parametrize(
+    "skill, hinted", (("slide", False), ("twist", False), ("slide", True))
+)
+def test_axis_skills_identify_geometric_parameters_and_use_native_motion(
+    skill: str, hinted: bool
+) -> None:
     engine = _engine()
     # Known rigid source path, independent of the skill's planner code.
     grasp = np.array([0.2, 0, 0.05, 2.0, 0, 0])
@@ -213,6 +295,24 @@ def test_axis_skills_identify_geometric_parameters_and_use_native_motion(skill) 
     arm = np.concatenate((arm, np.repeat(arm[-1:], 9, axis=0)))
     hand = np.r_[hand, np.zeros(9)]
     q = np.column_stack((arm, hand)).astype(np.float32)
+    phase_hints = None
+    if hinted:
+        # A complete user-supplied reach phase must bypass automatic anchor
+        # inference, even when its orientation threshold is deliberately strict.
+        noise = Rotation.from_rotvec(
+            np.linspace(0.006, 0.0002, 67)[:, None] * np.array([0, 0, 1])
+        )
+        q[:67, 3:6] = (noise * Rotation.from_rotvec(q[:67, 3:6])).as_rotvec()
+        phase_hints = [
+            {"name": name, "start": start, "stop": stop}
+            for name, start, stop in (
+                ("approach", 0, 6),
+                ("reach", 6, 67),
+                ("close", 67, 80),
+                ("pull", 80, 141),
+                ("open", 141, len(q)),
+            )
+        ]
     source = JointRecording(
         np.arange(len(q)) * 0.01, q, CartesianRobot.joint_names, "design_reference"
     )
@@ -224,7 +324,11 @@ def test_axis_skills_identify_geometric_parameters_and_use_native_motion(skill) 
         start=0,
         stop=len(q),
         acceleration_limits=np.full(7, 1000.0),
-        cfg=SkillFitCfg(max_candidates=1),
+        cfg=SkillFitCfg(
+            max_candidates=1,
+            max_approach_rotation_rad=0.0001 if hinted else 0.03,
+        ),
+        phase_hints=phase_hints,
     )
     assert report["accepted"], report["failures"]
     parameter, expected = (

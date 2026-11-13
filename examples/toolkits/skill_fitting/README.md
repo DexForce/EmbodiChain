@@ -89,6 +89,33 @@ candidate and wall-clock budgets and independent joint/TCP/contact tolerances.
 The wall-clock budget is cooperative between native plans, not a preemptive
 native-solver timeout.
 
+The website additionally offers relaxed, standard and custom tolerance choices.
+The relaxed choice sets joint RMSE to `0.5` in source joint units, TCP/phase
+position errors to `0.1 m`, and rotation/phase rotation errors to `1 rad`.
+It preserves unrelated fitting options and requires a new fit to take effect.
+Standard mode uses the canonical `SkillFitCfg` error defaults, which also remain
+the CLI defaults. Robot position, velocity and acceleration qualification is
+independent of these geometric error settings.
+
+Boundary connections retain the first/last three original samples exactly,
+including the finite-difference stencils at both outer joins. The default
+`blend_duration_s=0.5` requests a quintic transition over physical time, with
+`blend_samples=12` as an additional minimum sample width. Entrance and exit
+widths are capped independently by phase anchors and available segment length.
+For a longer connection, use `{"blend_duration_s": 0.8}` in `--fit-config`
+or the website's configuration JSON. No samples or time are appended, and values
+outside the selected interval remain unchanged. A longer transition can reduce
+endpoint spikes; it does not remove noise already in the recording or bypass
+contact/derivative acceptance gates. Leave enough surrounding motion in the
+selected interval for the connection.
+
+Pre-grasp anchor inference tolerates orientation noise up to
+`max_approach_rotation_rad` (default `0.03` rad, about 1.7 degrees). Set it in
+`--fit-config`, or the annotation website's fitting-configuration JSON. This
+controls anchor inference separately from the final TCP/contact acceptance
+limits. Complete Slide/Twist phase hints use the explicit `reach.start` anchor
+without first requiring automatic orientation-based inference.
+
 ## Phases and limitations
 
 The command uses hand opening/closure and FK to estimate phases. `--phase-hints`
@@ -111,9 +138,13 @@ Pickup requires an observable stable-orientation approach and a world-Z lift.
 Slide fits a translating rail; arbitrary tabletop sliding may have a different
 skill contract. Twist needs sufficient rotation around one line; the stored
 axis point is the closest point on that line to the initial TCP, not an object
-origin. Unobservable or incompatible segments fail explicitly. Tests cover all
-four skills using an independent Cartesian robot oracle; the recorded robot
-round-trip is qualified on the UR5 Pickup example.
+origin. Unobservable phases fail explicitly. A measurable positive Pickup lift
+with excess lateral motion or rotation still produces a vertical,
+fixed-orientation native candidate for inspection. Its report lists the measured
+template errors and rejects the replacement; `patched_qpos` retains the original
+reference. Final native, contact and derivative checks remain independent of
+approach inference. Tests cover all four skills using an independent Cartesian
+robot oracle; the recorded robot round-trip is qualified on the UR5 Pickup example.
 
 ## Standalone result
 
@@ -122,6 +153,10 @@ source-derived monotone phase progress, raw native phase joints, modification
 mask, and decimated FK link/TCP geometry. `metadata_json` stores parameters,
 native options, phases, initial qpos, calibration/profile/annotation/source
 identities, timing interpretation and independent native/patched diagnostics.
+`boundary_connection` records the transition target and fixed endpoint samples.
+`native_qpos` is the time-aligned native skill before boundary connection; its
+joins may jump. Inspect `patched_qpos` (accepted) or `proposed_qpos` (candidate)
+to assess the connected reference.
 It uses numeric arrays and JSON, with pickle disabled.
 
 For plotting:

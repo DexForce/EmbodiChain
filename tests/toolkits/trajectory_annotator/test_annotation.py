@@ -355,6 +355,7 @@ def test_web_fitting_vfr_clock_concurrency_export_and_stale_revisions(
     tmp_path: Path,
     fitting_oracle: dict[str, object],
     accepted: bool,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A fit never owns decoding, blocks edits, exports rejection as success or outlives its annotation."""
     import io
@@ -362,6 +363,28 @@ def test_web_fitting_vfr_clock_concurrency_export_and_stale_revisions(
     from fastapi.testclient import TestClient
     from embodichain.toolkits.trajectory_annotator._server import create_app
     from embodichain.toolkits.trajectory_annotator.video import VideoFrameSource
+
+    viewers = []
+
+    class RobotPreview:
+        def __init__(self, preview):
+            self.time = None
+            self.closed = False
+            viewers.append(self)
+
+        def set_time(self, value):
+            self.time = value
+
+        def snapshot(self):
+            return {"phase": "ready", "port": 8123, "time": self.time}
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(
+        "embodichain.toolkits.trajectory_annotator._robot_preview.RobotGhostPreview",
+        RobotPreview,
+    )
 
     video = make_video(variable=True, start=90)
     fitting_oracle["accepted"] = accepted
@@ -457,6 +480,24 @@ def test_web_fitting_vfr_clock_concurrency_export_and_stale_revisions(
         assert client.get("/api/frame-index?time_seconds=nan").status_code == 422
         preview = client.get(f"/api/fitting/jobs/{job}/preview").json()
         assert preview["report"]["parameters"]["lift_height"] == 0.12
+        robot_endpoint = f"/api/fitting/jobs/{job}/robot-preview"
+        assert client.get(robot_endpoint).json() == {"phase": "idle"}
+        assert not viewers  # Meshes and sockets are strictly opt-in.
+        assert (
+            client.post(robot_endpoint, json={"time_seconds": 0.2}).status_code == 403
+        )
+        assert (
+            client.post(
+                robot_endpoint, json={"time_seconds": -1}, headers=headers
+            ).status_code
+            == 422
+        )
+        assert (
+            client.post(
+                robot_endpoint, json={"time_seconds": 0.2}, headers=headers
+            ).json()["time"]
+            == 0.2
+        )
         response = client.get(f"/api/fitting/jobs/{job}/bundle")
         assert response.status_code == 200
         with np.load(io.BytesIO(response.content), allow_pickle=False) as bundle:
@@ -479,8 +520,32 @@ def test_web_fitting_vfr_clock_concurrency_export_and_stale_revisions(
             == 200
         )
         assert client.get("/api/fitting").json()["stale"]
-        for endpoint in ("bundle", "preview"):
+        for endpoint in ("bundle", "preview", "robot-preview"):
             assert client.get(f"/api/fitting/jobs/{job}/{endpoint}").status_code == 409
+        assert (
+            client.post(
+                robot_endpoint, json={"time_seconds": 0.4}, headers=headers
+            ).status_code
+            == 409
+        )
+        # Replacing a result closes its model server before accepting a new one.
+        next_payload = {**payload, "expected_revision": 2}
+        next_job = client.post(
+            "/api/fitting/jobs", json=next_payload, headers=headers
+        ).json()["job_id"]
+        assert viewers[0].closed
+        while client.get("/api/fitting").json()["phase"] == "running":
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        assert (
+            client.post(
+                f"/api/fitting/jobs/{next_job}/robot-preview",
+                json={"time_seconds": 0.4},
+                headers=headers,
+            ).status_code
+            == 200
+        )
+    assert viewers[-1].closed  # App shutdown owns the remaining preview lifetime.
 
 
 def test_cli_fits_saved_core_and_retains_outer_annotation(

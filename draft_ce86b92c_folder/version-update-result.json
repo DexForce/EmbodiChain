@@ -1,0 +1,20 @@
+{
+  "ok": true,
+  "identity": "user",
+  "data": {
+    "document": {
+      "revision_id": 6,
+      "url": "https://dexforce.feishu.cn/docx/GEbJdF2NHoZla7x8VWxcy6BXnwd"
+    },
+    "result": "success",
+    "warnings": []
+  },
+  "_notice": {
+    "update": {
+      "command": "lark-cli update",
+      "current": "1.0.98",
+      "latest": "1.0.100",
+      "message": "lark-cli 1.0.100 available, current 1.0.98, run: lark-cli update"
+    }
+  }
+}

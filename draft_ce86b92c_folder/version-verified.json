@@ -1,0 +1,19 @@
+{
+  "ok": true,
+  "identity": "user",
+  "data": {
+    "document": {
+      "content": "<fragment mode=\"keyword\" keyword=\"5f6169bbf\"><p id=\"doxcn5NF6aNbQpkUBlgrSCmVIzd\">适用读者：需要标注遥操数据、验证技能重建或接入 Real2Sim 的开发者。核验日期：2026-11-12；Conda 环境：py312_bk；分支：codex/trajectory-skill-annotator。本文对应已推送提交 5f6169bbf，包含技能下拉菜单和拟合核心区间功能；代码审阅见 PR #1129。</p></fragment>",
+      "document_id": "GEbJdF2NHoZla7x8VWxcy6BXnwd",
+      "revision_id": 6
+    }
+  },
+  "_notice": {
+    "update": {
+      "command": "lark-cli update",
+      "current": "1.0.98",
+      "latest": "1.0.100",
+      "message": "lark-cli 1.0.100 available, current 1.0.98, run: lark-cli update"
+    }
+  }
+}

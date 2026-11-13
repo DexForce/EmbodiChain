@@ -1,0 +1,26 @@
+{
+  "ok": true,
+  "identity": "user",
+  "data": {
+    "document": {
+      "document_id": "GEbJdF2NHoZla7x8VWxcy6BXnwd",
+      "new_blocks": [
+        {
+          "block_id": "doxcnNtYClpp4uHD5hSUP1MKBBc",
+          "block_token": "ZUERbpoyOoI6NhxAV15cH6vbn3g",
+          "block_type": "image"
+        }
+      ],
+      "revision_id": 5,
+      "url": "https://dexforce.feishu.cn/docx/GEbJdF2NHoZla7x8VWxcy6BXnwd"
+    }
+  },
+  "_notice": {
+    "update": {
+      "command": "lark-cli update",
+      "current": "1.0.98",
+      "latest": "1.0.100",
+      "message": "lark-cli 1.0.100 available, current 1.0.98, run: lark-cli update"
+    }
+  }
+}

@@ -23,11 +23,11 @@ __all__ = []
 # Annotation categories mirror BUILTIN_SKILL_TYPES. Listing them must also work
 # in installations containing only the image annotation dependencies.
 SKILL_CHOICES: tuple[tuple[str, str], ...] = (
+    ("execute_demo_skill", "DemoSkill"),
     ("pick_up", "Pickup"),
     ("twist", "Twist"),
     ("slide", "Slide"),
     ("hand_over", "HandOver"),
-    ("execute_demo_skill", "DemoSkill"),
     ("place", "Place"),
     ("pour", "Pour"),
     ("move_end_effector", "MoveEndEffector"),

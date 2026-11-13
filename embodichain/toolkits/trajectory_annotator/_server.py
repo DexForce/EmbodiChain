@@ -246,7 +246,9 @@ def create_app(
                 if store.snapshot()["document"] != document:
                     raise ConflictError("标注在拟合期间发生变化，请重新拟合。")
 
-            return fitting.start(payload, document, worker.interval, check_current)
+            return await run_in_threadpool(
+                fitting.start, payload, document, worker.interval, check_current
+            )
         except ConflictError as error:
             raise HTTPException(409, str(error)) from error
         except (ValueError, TypeError, OSError, RuntimeError) as error:
@@ -282,6 +284,40 @@ def create_app(
             },
             background=BackgroundTask(stream.close),
         )
+
+    @app.get("/api/fitting/jobs/{job_id}/robot-preview")
+    async def robot_preview_status(job_id: str) -> dict[str, Any]:
+        ready()
+        try:
+            await run_in_threadpool(store.check_unchanged)
+            return fitting.robot_preview(job_id, store.snapshot()["document"])
+        except ConflictError as error:
+            raise HTTPException(409, str(error)) from error
+        except (ValueError, OSError) as error:
+            raise HTTPException(404, str(error)) from error
+
+    @app.post("/api/fitting/jobs/{job_id}/robot-preview")
+    async def robot_preview_time(job_id: str, request: Request) -> dict[str, Any]:
+        authorize(request)
+        ready()
+        payload = await read_json(request, 1024)
+        value = payload.get("time_seconds")
+        if (
+            payload.keys() != {"time_seconds"}
+            or type(value) not in (int, float)
+            or not math.isfinite(value)
+            or value < 0
+        ):
+            raise HTTPException(422, "time_seconds 需要非负有限数值。")
+        try:
+            await run_in_threadpool(store.check_unchanged)
+            return fitting.robot_preview(
+                job_id, store.snapshot()["document"], time_seconds=value
+            )
+        except ConflictError as error:
+            raise HTTPException(409, str(error)) from error
+        except (ValueError, OSError) as error:
+            raise HTTPException(422, str(error)) from error
 
     @app.post("/api/cancel")
     async def cancel(request: Request) -> dict[str, Any]:

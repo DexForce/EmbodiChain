@@ -50,11 +50,12 @@ def splice_joint_segment(
     stop: int,
     joint_indices: tuple[int, ...],
     blend_samples: int = 12,
+    blend_duration_s: float | None = None,
     anchors: tuple[int, ...] = (),
 ) -> NDArray[np.floating]:
     """Replace a half-open segment on its original clock.
 
-    A quintic correction envelope preserves three original samples at both
+    A physical-time quintic envelope preserves three original samples at both
     ends. Thus the three-point position/velocity/acceleration stencils crossing
     the outer joins are identical to the original. This is a discrete C2
     boundary contract, not a claim that noisy observations are a smooth curve.
@@ -68,13 +69,16 @@ def splice_joint_segment(
         start: First included source sample.
         stop: First excluded source sample.
         joint_indices: Explicit editable columns.
-        blend_samples: Width of each quintic boundary connection.
+        blend_samples: Minimum sample width of each quintic boundary connection.
+        blend_duration_s: Optional minimum duration per connection, in seconds.
+            Each side is independently capped by segment length and protected
+            anchors. The original clock and sample count remain unchanged.
         anchors: Absolute source indices that must retain the native solution.
 
     Returns:
         An owned array with source dtype and unchanged values outside the mask.
     """
-    q, _ = _path(original, timestamps)
+    q, t = _path(original, timestamps)
     count = stop - start
     candidate = np.asarray(replacement)
     if (
@@ -86,27 +90,67 @@ def splice_joint_segment(
         or not np.isfinite(candidate).all()
         or type(blend_samples) is not int
         or blend_samples < 4
+        or (
+            blend_duration_s is not None
+            and (
+                isinstance(blend_duration_s, bool)
+                or not isinstance(blend_duration_s, (int, float, np.floating))
+                or not np.isfinite(blend_duration_s)
+                or blend_duration_s <= 0
+            )
+        )
         or not joint_indices
         or len(set(joint_indices)) != len(joint_indices)
         or any(type(i) is not int or not 0 <= i < q.shape[1] for i in joint_indices)
     ):
         raise ValueError("Invalid replacement, editable columns, or connection width.")
-    width = min(blend_samples, (count - 6) // 2)
+    if any(type(a) is not int or not start <= a < stop for a in anchors):
+        raise ValueError("Anchor is outside the selected segment.")
+    local_t = t[start:stop]
+    left_requested = right_requested = blend_samples
+    if blend_duration_s is not None:
+        left_requested = max(
+            blend_samples,
+            int(np.searchsorted(local_t, local_t[3] + blend_duration_s)) - 3,
+        )
+        right_requested = max(
+            blend_samples,
+            count
+            - 4
+            - (
+                int(
+                    np.searchsorted(
+                        local_t, local_t[-4] - blend_duration_s, side="right"
+                    )
+                )
+                - 1
+            ),
+        )
+    left_cap = right_cap = (count - 6) // 2
     interior_anchors = [a - start for a in anchors if start + 3 <= a < stop - 3]
     if interior_anchors:
-        width = min(width, min(interior_anchors) - 3, count - 4 - max(interior_anchors))
-    if width < 3:
+        left_cap = min(left_cap, min(interior_anchors) - 3)
+        right_cap = min(right_cap, count - 4 - max(interior_anchors))
+    left_width, right_width = min(left_requested, left_cap), min(
+        right_requested, right_cap
+    )
+    if min(left_width, right_width) < 3:
         raise ValueError("Boundary connection overlaps a protected skill anchor.")
-    u = np.linspace(0.0, 1.0, width + 1)
-    ramp = u**3 * (10.0 + u * (-15.0 + 6.0 * u))
     weight = np.ones(count)
     weight[:3] = weight[-3:] = 0.0
-    weight[3 : 3 + width + 1] = ramp
-    weight[-3 - width - 1 : -3] = ramp[::-1]
+    for first, last, reverse in (
+        (3, 3 + left_width, False),
+        (count - 4 - right_width, count - 4, True),
+    ):
+        u = (local_t[first : last + 1] - local_t[first]) / (
+            local_t[last] - local_t[first]
+        )
+        if reverse:
+            u = 1.0 - u
+        # Multiplication also handles overlapping ramps in very short segments.
+        weight[first : last + 1] *= u**3 * (10.0 + u * (-15.0 + 6.0 * u))
     ids = list(joint_indices)
     for anchor in anchors:
-        if type(anchor) is not int or not start <= anchor < stop:
-            raise ValueError("Anchor is outside the selected segment.")
         index = anchor - start
         if index < 3 or index >= count - 3:
             if not np.allclose(

@@ -54,6 +54,7 @@
           <div class="card-heading"><div><h2>原子技能拟合与轨迹回填</h2><p class="muted">选中一段已提交的标注，使用关节数据辨识参数并重建。</p></div><span id="fit-state" class="status-pill">未开始</span></div>
           <div class="fit-target"><span id="fit-selection">请在右侧选择一段已标注区间</span><button id="fit-run" class="primary" disabled>拟合并回填选中区间</button></div>
           <p id="fit-selection-hint" class="fit-footnote"></p>
+          <div class="fit-tolerance"><label>拟合误差阈值<select id="fit-tolerance"><option value="relaxed">宽松 · 允许较大误差</option><option value="standard">标准</option><option value="custom">自定义 JSON</option></select></label><span id="fit-tolerance-hint"></span></div>
           <details id="fit-inputs" class="fit-inputs" open><summary>关节记录与机器人配置 <span class="muted">本机文件路径 · 可从启动参数预填</span></summary>
             <div class="fit-grid">
               <label>关节记录路径<input id="fit-joints" type="text" placeholder="/data/joints.npz、episode.hdf5 或 replay.pt" autocomplete="off"></label>
@@ -67,23 +68,39 @@
               <label>关节字段<input id="fit-qpos-key" value="qpos"></label><label>时间戳字段<input id="fit-timestamps-key" value="timestamps"></label>
               <label>无时间戳时的关节采样周期（秒）<input id="fit-joint-dt" type="number" step="any" min="0" placeholder="留空表示使用记录中的时钟"></label><label>PT 环境索引<input id="fit-env-index" type="number" min="0" step="1" value="0"></label>
               <label class="fit-wide">阶段提示 JSON（可选）<textarea id="fit-phase-hints" rows="3" spellcheck="false" placeholder='例如 [{"name":"approach","start":0,"stop":100}, …]'></textarea><small>选区内的关节采样索引，半开区间；需完整、连续地覆盖选区。留空则从关节数据估计。</small></label>
-              <label class="fit-wide">SkillFitCfg 覆盖项 JSON（可选）<textarea id="fit-config" rows="2" spellcheck="false" placeholder='例如 {"blend_samples":12,"max_candidates":3}'></textarea></label>
+              <label class="fit-wide">SkillFitCfg 覆盖项 JSON（可选）<textarea id="fit-config" rows="2" spellcheck="false" placeholder='例如 {"blend_duration_s":0.5,"blend_samples":12}'></textarea></label>
             </div></details>
             <p class="fit-footnote">视频只用于选区与时间同步；参数辨识使用关节角与机器人 FK/IK 标定。每次回填一个选区，保留原始关节时钟与选区外的采样。</p>
           </details>
           <p id="fit-message" class="fit-message" role="status" aria-live="polite">可读取 NPZ、HDF5 或 Atomic PT；需要包含配置中的夹爪关节。</p>
           <div id="fit-result" class="fit-result" hidden>
             <div class="fit-result-heading"><strong id="fit-result-title"></strong><a id="fit-download" class="button-link" download>下载完整回填 NPZ</a></div>
+            <p id="fit-boundary" class="fit-footnote" hidden></p>
             <div id="fit-metrics" class="fit-metrics"></div>
             <dl id="fit-parameters" class="fit-parameters" aria-label="辨识参数"></dl>
             <div class="fit-view-controls"><label>关节 <select id="fit-joint"></select></label><span class="muted">曲线点击定位视频 · 当前帧联动</span></div>
-            <div class="fit-legend" aria-label="轨迹颜色"><span class="original">● 原始轨迹</span><span class="native">● 原生技能（时间对齐）</span><span class="patched">● 连续回填</span><span id="fit-proposed-legend" class="proposed" hidden>● 校正候选（未通过）</span></div>
+            <div class="fit-legend" aria-label="轨迹颜色"><span class="original">● 原始轨迹</span><span class="native">● 原生技能（未拼接）</span><span class="patched">● 连续回填</span><span id="fit-proposed-legend" class="proposed" hidden>● 校正候选（未通过）</span></div>
             <canvas id="fit-joint-chart" class="fit-chart" height="210" role="img" aria-label="原始、原生技能和连续回填的关节位置曲线"></canvas>
             <canvas id="fit-error-chart" class="fit-chart fit-error-chart" height="120" role="img" aria-label="关节重建与回填误差曲线"></canvas>
             <div id="fit-cursor" class="fit-cursor"></div>
+            <section class="fit-robot-preview" aria-label="机械臂模型叠加预览">
+              <div class="fit-view-controls"><strong>机械臂实体与轨迹虚影</strong><button id="fit-robot-load">加载机器人模型叠加</button><a id="fit-robot-link" target="_blank" rel="noopener" hidden>独立窗口</a></div>
+              <p id="fit-robot-message" class="fit-footnote" role="status"></p>
+              <div class="fit-robot-transport">
+                <div class="fit-robot-range-heading"><label>查看范围 <select id="fit-robot-scope"><option value="annotation">标注区间</option><option value="core" hidden>拟合核心区间</option><option value="all">整段视频</option></select></label><span id="fit-robot-range"></span></div>
+                <div class="fit-robot-scrub-row"><button id="fit-robot-previous" aria-label="模型预览前一帧" disabled>←</button><input id="fit-robot-scrubber" type="range" min="0" max="0" value="0" step="1" aria-label="机械臂与图像帧进度" disabled><button id="fit-robot-next" aria-label="模型预览后一帧" disabled>→</button></div>
+                <div class="fit-robot-cursor"><strong id="fit-robot-current">等待视频帧</strong><span id="fit-robot-position"></span></div>
+              </div>
+              <div class="fit-robot-views">
+                <figure class="fit-robot-image-panel"><figcaption>当前视频帧</figcaption><canvas id="fit-robot-image" width="640" height="480" role="img" aria-label="等待视频帧"></canvas><p>全部机械臂与夹爪共用当前帧时间。</p><div class="fit-legend"><span class="original">● 原始机械臂实体</span><span class="patched">● 拟合轨迹虚影</span></div></figure>
+                <div class="fit-robot-model-panel"><div id="fit-robot-placeholder" class="fit-robot-placeholder">点击“加载机器人模型叠加”查看双轨迹</div><iframe id="fit-robot-frame" title="原始机械臂与回填轨迹虚影" class="fit-robot-frame" hidden allowfullscreen></iframe></div>
+              </div>
+            </section>
+            <details class="fit-skeleton"><summary>简化 FK 骨架与 TCP 轨迹</summary>
             <div class="fit-view-controls"><strong>FK 骨架与 TCP 轨迹</strong><label>几何误差放大 <select id="fit-exaggeration"><option value="1">1×</option><option value="5">5×</option><option value="20">20×</option><option value="100">100×</option></select></label><button id="fit-reset-view">重置视角</button></div>
             <canvas id="fit-geometry" class="fit-geometry" height="280" role="img" aria-label="可拖动旋转的原始、技能和回填 FK 骨架与 TCP 路径"></canvas>
             <p class="fit-footnote">拖动旋转 · 滚轮缩放。几何误差放大仅用于显示。完整 NPZ 保留全部采样，网页曲线与 FK 已降采样。</p>
+            </details>
             <details class="fit-report"><summary>辨识参数、阶段与校验报告</summary><pre id="fit-report"></pre></details>
           </div>
         </section>
@@ -107,6 +124,7 @@
             <label>终点帧<input id="end-frame" type="number" min="0" step="1" placeholder="—" disabled></label>
             <div class="duration-field"><span>区间长度</span><strong id="skill-interval-length">— <small>帧</small></strong></div>
           </div>
+          <p id="skill-kind-hint" class="skill-kind-hint" hidden>DemoSkill 不拟合原子技能，保留该区间的原始轨迹。</p>
           <div class="core-editor">
             <label class="core-toggle"><input id="use-core" type="checkbox" disabled>单独设置拟合核心区间</label>
             <p class="muted">标注范围可包含前后过渡动作。仅核心区间参与拟合，其余采样保留；未设置时使用整个标注区间。不规则片段可选择 DemoSkill。</p>

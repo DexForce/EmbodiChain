@@ -26,7 +26,10 @@ from embodichain.compute.trajectory.splicing import (
 )
 
 
-def test_splice_retains_external_values_and_boundary_derivative_stencils() -> None:
+@pytest.mark.parametrize("duration", [None, 0.5])
+def test_splice_retains_external_values_and_boundary_derivative_stencils(
+    duration: float | None,
+) -> None:
     times = np.linspace(0, 2, 101) ** 1.3
     source = np.column_stack((times**2, np.cos(times))).astype(np.float32)
     replacement = source[10:90].copy()
@@ -39,6 +42,7 @@ def test_splice_retains_external_values_and_boundary_derivative_stencils() -> No
         stop=90,
         joint_indices=(0,),
         blend_samples=12,
+        blend_duration_s=duration,
         anchors=(50,),
     )
     assert output.dtype == source.dtype
@@ -70,6 +74,37 @@ def test_splice_rejects_a_connection_that_overwrites_a_contact_anchor() -> None:
             joint_indices=(0,),
             anchors=(9,),
         )
+
+
+def test_physical_time_transition_is_independent_of_the_opposite_anchor() -> None:
+    # Alternating timestamp gaps make index-based blending exceed the analytic
+    # quintic speed bound. An early protected anchor must not shorten the exit.
+    times = np.r_[0.0, np.cumsum(np.tile([0.003, 0.017], 200))]
+    source = np.column_stack((np.zeros(len(times)), times))
+    start, stop, anchor = 20, 380, 40
+    displacement, duration = 0.4, 0.6
+    replacement = source[start:stop].copy()
+    replacement[:, 0] = displacement
+    options = dict(start=start, stop=stop, joint_indices=(0,), anchors=(anchor,))
+    output = splice_joint_segment(
+        source, replacement, times, blend_duration_s=duration, **options
+    )
+    sample_only = splice_joint_segment(source, replacement, times, **options)
+    np.testing.assert_array_equal(output[: start + 3], source[: start + 3])
+    np.testing.assert_array_equal(output[stop - 3 :], source[stop - 3 :])
+    np.testing.assert_array_equal(output[:, 1], source[:, 1])
+    assert output[anchor, 0] == displacement
+    # For a quintic smoothstep over T seconds, max |dq/dt| = 15/8 * dq/T.
+    # Finite difference velocities cannot exceed the continuous derivative cap.
+    max_speed = 1.875 * displacement / duration
+    for path, timed in ((output, True), (sample_only, False)):
+        tail_speed = np.max(
+            np.abs(np.diff(path[200:stop, 0]) / np.diff(times[200:stop]))
+        )
+        if timed:
+            assert tail_speed <= max_speed * (1 + 1e-12)
+        else:
+            assert tail_speed > 4 * max_speed
 
 
 def test_derivative_gate_detects_a_single_step_jump() -> None:

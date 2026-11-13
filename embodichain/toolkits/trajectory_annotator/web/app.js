@@ -111,7 +111,7 @@ async function pumpFrames() {
         state.loading = false;
         $("frame-current").textContent = index;
         $("frame-time").textContent = timecode(Number(response.headers.get("X-Frame-Time")));
-        fittingPanel?.displayTime(Number(response.headers.get("X-Frame-Time")));
+        fittingPanel?.displayFrame(index, Number(response.headers.get("X-Frame-Time")), image);
         $("scrubber").value = index;
         // Do not change a number the user is still typing.
         if (document.activeElement !== $("goto-frame")) $("goto-frame").value = index;
@@ -197,6 +197,7 @@ function renderDraft(syncInputs = true) {
     $("core-start-frame").value = draft?.core_interval?.start_frame ?? "";
     $("core-end-frame").value = draft?.core_interval?.end_frame ?? "";
   }
+  $("skill-kind-hint").hidden = $("label").value !== "execute_demo_skill";
   const error = skillIntervalError(draft);
   $("draft-error").textContent = error;
   $("commit").disabled = !draft || !!error;
@@ -365,12 +366,15 @@ function renderSkillChoices() {
   const placeholder = document.createElement("option");
   placeholder.value = "";
   placeholder.textContent = "请选择原子技能";
-  const options = state.project.skills.map((skill) => {
+  const demo = document.createElement("optgroup"), atomic = document.createElement("optgroup");
+  demo.label = "保留原始轨迹"; atomic.label = "原子技能";
+  for (const skill of state.project.skills) {
     const option = document.createElement("option");
     option.value = skill.id;
-    option.textContent = skill.name;
-    return option;
-  });
+    const preserve = skill.id === "execute_demo_skill";
+    option.textContent = preserve ? "DemoSkill（不拟合，保留原始轨迹）" : skill.name;
+    (preserve ? demo : atomic).append(option);
+  }
   const ids = new Set(state.project.skills.map((skill) => skill.id));
   // Keep historical names selectable when reviewing old files. New annotations
   // use canonical choices; no arbitrary text entry is needed.
@@ -379,9 +383,9 @@ function renderSkillChoices() {
     const option = document.createElement("option");
     option.value = label;
     option.textContent = `${label}（已有标注）`;
-    options.push(option);
+    atomic.append(option);
   }
-  picker.replaceChildren(placeholder, ...options);
+  picker.replaceChildren(placeholder, demo, atomic);
   picker.value = value;
 }
 
@@ -639,13 +643,14 @@ async function initialize() {
       return tick;
     }));
     fittingPanel = createFittingPanel({
-      context: () => ({ selection: selected(), skills: state.project.skills, revision: state.project.document.revision, dirty: dirty(), draft: state.draft, token: state.token }),
+      context: () => ({ selection: selected(), skills: state.project.skills, frameCount: state.project.document.source.frame_count, revision: state.project.document.revision, dirty: dirty(), draft: state.draft, token: state.token }),
       saveAnnotations: async () => {
         if (state.draft) throw new Error("请先提交或取消当前标注草稿。");
         while (state.saving) await new Promise((resolve) => setTimeout(resolve, 50));
         await save();
         if (dirty() || state.saveError || state.conflict) throw new Error("标注尚未成功保存，请处理保存错误后重新拟合。");
       },
+      seekFrame: (index) => requestFrame(index),
       seekTime: async (seconds) => {
         pause();
         const serial = state.serial;
