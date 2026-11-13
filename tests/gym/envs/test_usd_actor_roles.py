@@ -23,7 +23,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.sim.cfg import RigidObjectCfg, UsdSourceCfg
 
 pytestmark = pytest.mark.no_sim
@@ -48,15 +48,11 @@ def test_role_uses_resolved_usd_actor(role, resolved_type, valid):
         validate_resolved(cfg)
         registered.append(cfg)
 
+    env_cfg = EmbodiedEnvCfg()
+    env_cfg.background = [cfg]
+    env_cfg.rigid_object = [cfg]
     env = SimpleNamespace(
-        cfg=SimpleNamespace(
-            background=[cfg],
-            rigid_object=[cfg],
-            articulation=[],
-            visual_object=[],
-            rigid_object_group=[],
-            fluid_object=[],
-        ),
+        cfg=env_cfg,
         sim=SimpleNamespace(add_rigid_object=declare),
     )
     if role == "interactive":

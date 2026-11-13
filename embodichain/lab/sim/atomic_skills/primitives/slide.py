@@ -163,7 +163,23 @@ class SlideOptions(SkillOptions):
     release_retreat_distance: float = 0.0
     """Distance opposite grasp Z while opening; zero holds the arm still."""
 
+    push_approach_offset: tuple[float, float, float] | None = None
+    """World XYZ offset (m) from the pre-grasp pose for an extra push waypoint."""
+
     def __post_init__(self) -> None:
+        if self.push_approach_offset is not None:
+            if len(self.push_approach_offset) != 3 or any(
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                for value in self.push_approach_offset
+            ):
+                raise ValueError(
+                    "push_approach_offset must contain three finite numbers."
+                )
+            object.__setattr__(
+                self, "push_approach_offset", tuple(self.push_approach_offset)
+            )
         if self.direction not in ("pull", "push"):
             raise ValueError("direction must be either 'pull' or 'push'.")
         if self.hand_interp_steps < 1:
@@ -383,8 +399,14 @@ class Slide(AtomicSkill[SlideGoal, SlideOptions]):
             options.hand_interp_steps,
             direction=direction,
         )
+        approach_target = approach_xpos
+        if direction == "push" and options.push_approach_offset is not None:
+            clearance_pose = translate_pose_world(
+                approach_xpos, approach_xpos.new_tensor(options.push_approach_offset)
+            )
+            approach_target = torch.stack((clearance_pose, approach_xpos), dim=1)
         approach_success, approach_arm = self._plan_pose_segment(
-            approach_xpos,
+            approach_target,
             start_arm_qpos,
             control_part,
             request,

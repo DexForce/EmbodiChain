@@ -32,6 +32,7 @@ from embodichain.lab.gym.utils.trajectory_state import FluidTrajectoryReader
 from embodichain.lab.gym.envs.task_program._final_acceptance import (
     _replay_final_acceptance,
 )
+from embodichain.lab.gym.utils._replay import _ReplayCommands, _ReplayCursor
 from embodichain.lab.gym.envs.types import ControllerAction
 from embodichain.lab.gym.utils.gym_utils import load_trajectory
 from embodichain.lab.gym.utils.trajectory_state import (
@@ -197,9 +198,9 @@ class ReplayWrapper(gym.Wrapper):
                 f"Trajectory lengths exceed env max_episode_steps={max_steps}; clamping."
             )
             self._lengths = self._lengths.clamp(max=max_steps)
-        self._replay_steps = torch.zeros(
-            self.env.num_envs, dtype=torch.long, device=self.env.device
-        )
+        self._replay_cursor = _ReplayCursor(self._lengths)
+        self._replay_steps = self._replay_cursor.steps
+        self._commands = _ReplayCommands.from_recording(self._trajectory)
 
     def _validate_action_schema(self, meta: dict) -> None:
         """Validate explicit controller recordings before any simulation step."""
@@ -310,9 +311,7 @@ class ReplayWrapper(gym.Wrapper):
             self.env._replay_no_auto_reset = True
         if self._task_outcome_replay:
             self.env.restore_task_initial_state(self._task_initial_state)
-        self._replay_steps = torch.zeros(
-            self.env.num_envs, dtype=torch.long, device=self.env.device
-        )
+        self._replay_cursor.reset()
         recording = getattr(
             getattr(self.env, "observation_manager", None), "has_history", False
         )
@@ -375,11 +374,11 @@ class ReplayWrapper(gym.Wrapper):
         self, action: Any
     ) -> tuple[EnvObs, torch.Tensor, torch.Tensor, torch.Tensor, dict]:
         env = self.env
-        if self._objective_replay and bool((self._replay_steps >= self._lengths).any()):
+        if self._objective_replay and bool(self._replay_cursor.exhausted.any()):
             raise RuntimeError("Physical-objective replay is exhausted; reset first.")
         n = env.num_envs
         idx = torch.arange(n, device=env.device)
-        st = self._replay_steps.clamp(max=self._lengths - 1)  # finished envs hold last
+        st = self._replay_cursor.indices()  # finished envs hold last
 
         if self._mode in ("kinematic", "control"):
             restore_trajectory_state(self.env, self._trajectory["states"][idx, st])
@@ -392,7 +391,7 @@ class ReplayWrapper(gym.Wrapper):
             else:
                 env.sim.update(env.sim_cfg.physics_dt, env.cfg.sim_steps_per_control)
             obs = env.get_obs()
-            self._replay_steps = (self._replay_steps + 1).clamp(max=self._lengths)
+            self._replay_cursor.advance()
             trunc = self._replay_steps >= self._lengths
             return (
                 obs,
@@ -403,7 +402,7 @@ class ReplayWrapper(gym.Wrapper):
             )
 
         # Raw policy recordings retain their ordinary action-manager preprocessing.
-        action_t = self._trajectory["actions"][idx, st]
+        action_t = self._commands.sample(st)
         if self._controller_spec is not None:
             spec = self._controller_spec
             commands = {"qpos": action_t[:, slice(*spec.qpos_slice)]}
@@ -411,7 +410,7 @@ class ReplayWrapper(gym.Wrapper):
                 commands["qvel"] = action_t[:, slice(*spec.qvel_slice)]
             action_t = ControllerAction(TensorDict(commands, batch_size=[n]))
         obs, reward, term, trunc, info = env.step(action_t)
-        self._replay_steps = (self._replay_steps + 1).clamp(max=self._lengths)
+        self._replay_cursor.advance()
         trunc = trunc | (self._replay_steps >= self._lengths)
         return obs, reward, term, trunc, info
 
@@ -451,9 +450,7 @@ class ReplayWrapper(gym.Wrapper):
                 pass
         else:
             env.sim.update(env.sim_cfg.physics_dt, env.cfg.sim_steps_per_control)
-        self._replay_steps = torch.full(
-            (env.num_envs,), step, dtype=torch.long, device=env.device
-        )
+        self._replay_cursor.seek(step)
         return env.get_obs()
 
     @property

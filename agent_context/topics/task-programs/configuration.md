@@ -94,6 +94,20 @@ factories, and registered-call lowerers. Adapter creation calls
 Reconstructing a registration with `dataclasses.replace` does not duplicate its
 scene-derived standard grounders; duplicate custom grounders remain errors.
 
+The configured articulation-link Slide lowerer can bind an explicit
+`joint_target: {joint_name: ..., axis_sign: -1|1}`. Its call then requires
+`handle` and an absolute joint `position`; direction and distance remain policy
+options. The factory checks the handle's prismatic ancestor and finite limits;
+multiple active ancestors require an explicit translation axis. Without this
+binding the existing handle-only call keeps its factory and fingerprint. The
+joint-target factory includes the authored target in its registration fingerprint.
+
+Configured action options may add clearance waypoints before a native motion.
+PickUp's `initial_lift_height` adds a world-Z offset to the starting TCP pose
+before moving toward pre-grasp. Slide's `push_approach_offset` adds a waypoint
+at a world XYZ offset from pre-grasp for pushes. These offsets are in metres
+and belong in the deployment integration.
+
 `runtime_services.settle_presets` is the closed serialized route to this same
 registration-owned table. Omission retains the existing dynamic presets; an
 explicit table owns its complete named selection. Components may contribute
@@ -201,6 +215,22 @@ The configured lowerer allowlist also exposes profile-owned Park, AxisAlign,
 relative Place and coordinated transport. Their declarations in
 `integrations/_configured_services.py` select exact Atomic Skill descriptors;
 the closed decoder in `configured.py` owns accepted options and route fields.
+
+The configured `kinematic_joint_replay` lowerer selects a physical replay source
+by ID and maps named phases to contiguous intervals. It obtains the environment's
+already verified and ordered command snapshot and emits `TimedTrajectory` /
+`JointPositionGoal` for `MoveJoints`; it owns no file reader or playback cursor.
+The optional `create_for_environment` factory hook receives the live host through
+standard registration assembly, including selected-row factories, without
+changing existing factories' `create` contract. The host is weakly referenced.
+
+The physical `simulation.replay` declaration owns the digest and cadence.
+Newton interpolates registered source positions inside each physics step while
+cloth physics continues. Canonical world-space centroid fields carry the verified
+mesh SHA and sorted particle selection. Ordinary `evaluation.component` supplies
+`near_target` rules; source identity, topology and finite coordinates qualify
+evidence. Reaching the final replay frame qualifies completion. Shared final
+measurement, sealing and offline replay own physical outcomes.
 Relative Place resolves a live reference plus world-axis displacement and
 requires the verified held-object transform. Coordinated transport must select
 the real primitive's release mode. Do not install frontend skill replacements.

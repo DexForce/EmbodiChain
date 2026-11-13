@@ -171,6 +171,7 @@ def get_package_data() -> dict[str, list[str]]:
         ],
         **{name: list(extension_patterns) for name in _extension_package_dirs()},
         "embodichain_tasks.configs": [
+            "tasks/manipulation/cloth_fold/task_program/trajectory.npz",
             "**/*.json",
             "**/*.yaml",
             "**/*.yml",

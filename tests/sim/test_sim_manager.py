@@ -1763,6 +1763,8 @@ def test_register_kinematic_joint_trajectory_expands_each_arena() -> None:
         positions,
         fps=50.0,
         root_poses=root_poses,
+        joint_names=("joint_b", "joint_a"),
+        initialize_pose=True,
     )
 
     assert builder.add_runtime_control.call_count == sim.num_envs
@@ -1772,6 +1774,8 @@ def test_register_kinematic_joint_trajectory_expands_each_arena() -> None:
         control = control_call.args[0]
         assert control.target == f"arena_{env_index}/robot"
         assert control.fps == 50.0
+        assert control.joint_names == ("joint_b", "joint_a")
+        assert control.initialize_pose is True
         np.testing.assert_array_equal(
             control.joint_positions,
             positions[env_index].numpy(),
