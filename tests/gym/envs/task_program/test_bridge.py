@@ -266,6 +266,7 @@ class _FakeSegment:
     validators: tuple[object, ...] = ()
     parallel_block: object | None = None
     implicit: bool = False
+    contract: object | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -3053,3 +3054,249 @@ def test_named_hold_uses_host_frames_and_starts_fresh_for_repeated_segments(
         EvaluationStatus.UNAVAILABLE,
         EvaluationStatus.SATISFIED,
     ]
+
+
+@pytest.mark.parametrize("required", [False, True])
+def test_segment_contract_filters_incoming_rows_and_reports_unsupported_evidence(
+    required,
+):
+    from dataclasses import replace
+    from embodichain.lab.evaluation import (
+        EvaluationSpec,
+        PredicateSpec,
+        builtin_predicates,
+    )
+    from embodichain.lab.gym.envs.episode_context import EpisodeContext
+    from embodichain.lab.gym.envs.managers.observation_types import (
+        ObservationDescriptor,
+        ObservationFrame,
+        ObservationSample,
+    )
+    from embodichain.lab.gym.envs.task_program._segment_contract import (
+        _check_prerequisites,
+    )
+    from embodichain.lab.task_program.compiler.program import (
+        _CompiledSegmentContract,
+        _CompiledSegmentEvidence,
+    )
+
+    condition = builtin_predicates().compile(
+        EvaluationSpec(
+            {
+                "near": PredicateSpec(
+                    "joint_range", {"position": "position"}, {"lower": 0.0}
+                )
+            },
+            ("near",),
+        )
+    )
+    prerequisite = _CompiledSegmentEvidence("condition", "near", None, True, condition)
+    contract = _CompiledSegmentContract(
+        (prerequisite,),
+        (
+            _CompiledSegmentEvidence("validator", 0, None, True, None),
+            _CompiledSegmentEvidence(
+                "unsupported", "liquid_transfer", None, required, None
+            ),
+        ),
+    )
+    rows = torch.tensor([7, 3])
+    valid = torch.ones_like(rows, dtype=torch.bool)
+    context = EpisodeContext(8)
+    context._begin_episode(range(8))
+    positions = torch.zeros(8)
+    positions[3] = -1.0
+    sample = ObservationSample(
+        ObservationDescriptor(
+            "position", "scalar", "arena", "scalar", (), (), torch.float32
+        ),
+        positions,
+        torch.ones(8, dtype=torch.bool),
+        (None,) * 8,
+    )
+    frame = ObservationFrame(
+        None, {"position": sample}, context.episode_ids, 1, episode_owner=context
+    )
+    for foreign in (
+        replace(frame, episode_owner=EpisodeContext(2)),
+        replace(frame, episode_ids=(5,) * 8),
+        replace(frame, fields={}),
+    ):
+        accepted, report = _check_prerequisites(
+            (prerequisite,), valid, rows, None, lambda fields: foreign, context
+        )
+        assert not accepted.any()
+        assert report[0]["status"] == ["unavailable", "unavailable"]
+
+    bridge, runtime, _ = _bridge(
+        duration=STEP_DT,
+        segment=_FakeSegment(contract=contract, validators=(object(),)),
+        validator_port=_ValidatorPort(valid),
+    )
+    bridge._contract_capture = lambda fields: frame
+    bridge._contract_episode_owner = context
+    segment = next(bridge.iter_segments())
+    actions = iter(segment.actions)
+    next(actions)
+    assert runtime.eligible_masks[0].tolist() == [True, False]
+    list(actions)
+    assert segment.validator().tolist() == [not required, False]
+    report = segment.metadata["segment_contract"]
+    assert report["prerequisites"][0]["status"] == ["satisfied", "failed"]
+    assert report["outcomes"][1]["status"] == ["unavailable", "not_run"]
+    assert report["outcomes"][1]["reasons"][0] == "unsupported_capability"
+    assert segment.validator().tolist() == report["accepted_mask"]
+
+    if not required:
+        blocked, blocked_runtime, _ = _bridge(
+            duration=STEP_DT,
+            segment=_FakeSegment(contract=contract, validators=(object(),)),
+            validator_port=_ValidatorPort(valid),
+        )
+        result = execute_demo_episode(_BridgeExecutorEnv(blocked))
+        assert blocked_runtime.start_count == 0
+        assert result.length == 0
+        assert result.terminal_reasons == ("segment_validation_failed",) * 2
+        blocked_contract = result.segments[0].metadata["segment_contract"]
+        assert blocked_contract["prerequisites_rejected_all"]
+        assert blocked_contract["outcomes"][0]["status"] == ["not_run", "not_run"]
+
+
+def test_segment_prerequisite_uses_the_native_bound_preset():
+    from types import SimpleNamespace
+    from embodichain.lab.evaluation import (
+        EvaluationSpec,
+        PredicateSpec,
+        builtin_predicates,
+    )
+    from embodichain.lab.gym.envs.episode_context import EpisodeContext
+    from embodichain.lab.gym.envs.managers.observation_types import (
+        ObservationDescriptor,
+        ObservationFrame,
+        ObservationSample,
+    )
+    from embodichain.lab.gym.envs.task_program._segment_contract import (
+        _check_prerequisites,
+    )
+    from embodichain.lab.task_program.compiler.program import _CompiledSegmentEvidence
+    from embodichain.lab.task_program.integrations.simulation.bindings import (
+        _bind_evaluation_joint_names,
+    )
+
+    field = "robot/hand/qpos"
+    unbound = builtin_predicates().compile(
+        EvaluationSpec(
+            {
+                "open": PredicateSpec(
+                    "command_preset_match",
+                    {"position": field},
+                    {
+                        "preset": "open",
+                        "positions": [0.0, 1.0],
+                        "tolerance": 0.01,
+                    },
+                ),
+            },
+            ("open",),
+        )
+    )
+    robot = SimpleNamespace(
+        control_parts={"hand": ["finger_.*"]},
+        joint_names=["finger_a", "finger_b"],
+        get_joint_ids=lambda *, name: [1, 0],
+    )
+    conditions = _bind_evaluation_joint_names({"open": unbound}, robot)
+    evidence = (_CompiledSegmentEvidence("condition", "open", None, True, unbound),)
+    owner = EpisodeContext(1)
+    owner._begin_episode([0])
+    for names, expected in (
+        (("finger_b", "finger_a"), True),
+        (("finger_a", "finger_b"), False),
+    ):
+        descriptor = ObservationDescriptor(
+            "hand",
+            "qpos",
+            "joint",
+            "joint_order",
+            ("joint_units",),
+            (2,),
+            torch.float32,
+            joint_names=names,
+        )
+        sample = ObservationSample(
+            descriptor,
+            torch.tensor([[0.0, 1.0]]),
+            torch.ones(1, dtype=torch.bool),
+            (None,),
+        )
+        frame = ObservationFrame(
+            None, {field: sample}, owner.episode_ids, 1, episode_owner=owner
+        )
+        accepted, report = _check_prerequisites(
+            evidence,
+            torch.ones(1, dtype=torch.bool),
+            torch.tensor([0]),
+            None,
+            lambda fields: frame,
+            owner,
+            conditions,
+        )
+        assert accepted.tolist() == [expected]
+        assert (
+            report[0]["evidence"]["evaluation_identity"] == conditions["open"].identity
+        )
+
+
+def test_segment_contract_distinguishes_symbolic_hold_release_and_measured_lift():
+    from types import SimpleNamespace
+
+    from embodichain.lab.gym.envs.task_program._segment_contract import _check_outcomes
+    from embodichain.lab.sim.atomic_skills.affordance import Affordance
+    from embodichain.lab.sim.atomic_skills.core import ObjectSemantics
+    from embodichain.lab.sim.atomic_skills.state import HeldObjectState
+    from embodichain.lab.task_program.compiler.program import (
+        _CompiledSegmentContract,
+        _CompiledSegmentEvidence,
+    )
+
+    relation = HeldObjectState(
+        ObjectSemantics(
+            affordance=Affordance(), geometry={}, label="bottle", entity_id="bottle"
+        ),
+        torch.eye(4),
+        torch.eye(4),
+        torch.tensor([True, False]),
+    )
+    active = torch.ones(2, dtype=torch.bool)
+    result = SimpleNamespace(
+        success_mask=active,
+        task_state=TaskState(2, "cpu", held_objects={"hand": relation}),
+    )
+    hold = _CompiledSegmentEvidence("held", "bottle", None, True, None)
+    release = _CompiledSegmentEvidence("released", "bottle", None, True, None)
+    measured_lift = _CompiledSegmentEvidence("validator", 0, None, True, None)
+    validators = [
+        {
+            "kind": "condition",
+            "result_mask": [False, True],
+            "result": {"status": ["failed", "satisfied"]},
+        }
+    ]
+
+    accepted, reports = _check_outcomes(
+        _CompiledSegmentContract((), (hold, measured_lift)),
+        result,
+        active,
+        validators,
+        (),
+    )
+    assert not accepted.any()
+    assert reports[0]["assurance"] == "symbolic"
+    assert reports[0]["status"] == ["satisfied", "failed"]
+    assert reports[1]["status"] == ["failed", "satisfied"]
+
+    accepted, reports = _check_outcomes(
+        _CompiledSegmentContract((), (release,)), result, active, (), ()
+    )
+    assert accepted.tolist() == [False, True]
+    assert reports[0]["assurance"] == "symbolic"

@@ -39,6 +39,7 @@ from embodichain.lab.gym.envs._json import json_safe_copy as _json_safe_copy
 from embodichain.lab.gym.envs.demo import DemoSegment
 from embodichain.lab.gym.envs.expert_trajectory import JointCommandMode
 from embodichain.lab.gym.envs.types import ControllerAction
+from ._segment_contract import _check_outcomes, _check_prerequisites, _unrun_outcomes
 from embodichain.lab.sim.atomic_skills.bindings import (
     JointPositionTarget,
     RuntimeEndpointTarget,
@@ -1041,6 +1042,7 @@ class _SegmentLifecycle:
     abort_complete: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
     post_policy_success: torch.Tensor | None = None
+    contract_active: torch.Tensor | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1167,6 +1169,10 @@ class TaskProgramDemoBridge:
     They are lowered through :class:`ParallelSemanticExecutor`; they are never
     flattened into a sequential semantic-call list.
     """
+
+    _contract_capture = None
+    _contract_conditions = None
+    _contract_episode_owner = None
 
     def __init__(
         self,
@@ -1851,6 +1857,53 @@ class TaskProgramDemoBridge:
         ) = self._runtime
         is_parallel = getattr(segment, "parallel_block", None) is not None
         try:
+            contract = getattr(segment, "contract", None)
+            if contract is not None:
+                rows = self.env_ids
+                active = (
+                    torch.ones_like(rows, dtype=torch.bool)
+                    if self._eligible_mask is None
+                    else self._eligible_mask.clone()
+                )
+                qualified, prerequisites = _check_prerequisites(
+                    contract.prerequisites,
+                    active,
+                    rows,
+                    (
+                        getattr(self._runtime, "task_state", None)
+                        if contract.prerequisites
+                        else None
+                    ),
+                    self._contract_capture,
+                    self._contract_episode_owner,
+                    self._contract_conditions,
+                )
+                lifecycle.contract_active = qualified
+                blocked = not bool(qualified.any())
+                lifecycle.metadata["segment_contract"] = {
+                    "env_ids": rows.tolist(),
+                    "segment_id": segment_id,
+                    "prerequisite_step": self._clock.step_index,
+                    "prerequisites": prerequisites,
+                    "prerequisite_mask": qualified.tolist(),
+                    "outcomes": _unrun_outcomes(contract, rows),
+                    "prerequisites_rejected_all": blocked,
+                }
+                self._retain_eligible_rows(qualified)
+                if blocked:
+                    mask = qualified.tolist()
+                    lifecycle.metadata["segment_contract"].update(
+                        acceptance_step=self._clock.step_index, accepted_mask=mask
+                    )
+                    lifecycle.metadata["validation"] = {
+                        "env_ids": rows.tolist(),
+                        "eligible_mask_before_validation": active.tolist(),
+                        "validators": [],
+                        "accepted_mask": mask,
+                    }
+                    lifecycle.validation = qualified.clone()
+                    lifecycle.complete = True
+                    return
             if isinstance(self._validator_port, _SegmentValidatorLifecyclePort):
                 self._validator_port.begin_segment(
                     segment=segment,
@@ -2322,13 +2375,13 @@ class TaskProgramDemoBridge:
         """Create a demo-boundary validator including runtime row success."""
 
         def validate() -> torch.Tensor:
+            if lifecycle.validation is not None:
+                return lifecycle.validation.clone()
             if not lifecycle.complete or lifecycle.result is None:
                 raise RuntimeError(
                     f"Segment {segment.segment_id!r} cannot be validated before its "
                     "action iterable is exhausted."
                 )
-            if lifecycle.validation is not None:
-                return lifecycle.validation.clone()
             result = lifecycle.result
             accepted = result.success_mask.clone()
             runtime_success = result.success_mask.clone()
@@ -2381,6 +2434,21 @@ class TaskProgramDemoBridge:
                         trace,
                         field_name=f"validator {validator_index} metadata",
                     )
+                )
+            contract = getattr(segment, "contract", None)
+            if contract is not None:
+                contract_mask, outcomes = _check_outcomes(
+                    contract,
+                    result,
+                    lifecycle.contract_active,
+                    validator_traces,
+                    lifecycle.metadata["post_policies"],
+                )
+                accepted &= contract_mask
+                lifecycle.metadata["segment_contract"].update(
+                    outcomes=outcomes,
+                    acceptance_step=self._clock.step_index,
+                    accepted_mask=accepted.tolist(),
                 )
             lifecycle.metadata["validation"] = _json_safe_copy(
                 {

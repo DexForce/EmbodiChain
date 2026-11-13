@@ -227,7 +227,7 @@ def test_config_to_cfg_rejects_conflicting_action_declarations() -> None:
         config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
 
 
-@pytest.mark.parametrize("backend", (None, True, "physx", " newton"))
+@pytest.mark.parametrize("backend", (None, True, "Default", " newton"))
 def test_config_to_cfg_rejects_invalid_physics_backend(backend: object) -> None:
     """Only the two exact public backend names are accepted."""
     config = {
@@ -2763,6 +2763,82 @@ def test_launcher_can_explicitly_disable_configured_headless() -> None:
     args = parser.parse_args(["--gym_config", "task.yaml", "--no-headless"])
     merged = merge_args_with_gym_config(args, {"physics": "default", "headless": True})
     assert merged["headless"] is False
+
+
+@pytest.mark.parametrize(
+    "collection", ["background", "rigid_object", "rigid_object_group"]
+)
+def test_mesh_asset_paths_resolve_collision_and_visual_geometry(
+    collection: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Separate render meshes use the same asset resolver as collision meshes."""
+    paths = {
+        "TaskMeshes/collision.obj": str(tmp_path / "collision.obj"),
+        "TaskMeshes/visual.glb": str(tmp_path / "visual.glb"),
+    }
+    monkeypatch.setattr("embodichain.data.get_data_path", paths.__getitem__)
+    obj = {
+        "uid": "cup",
+        "shape": {"shape_type": "Mesh", "fpath": "TaskMeshes/collision.obj"},
+        "visual_shape": {"shape_type": "Mesh", "fpath": "TaskMeshes/visual.glb"},
+    }
+    entries = [obj]
+    if collection == "rigid_object_group":
+        entries = [{"uid": "cups", "rigid_objects": {"cup": obj}}]
+    cfg = config_to_cfg(
+        {
+            "id": "EmbodiedEnv-v1",
+            "physics": "default",
+            "env": {},
+            "robot": {"uid": "robot"},
+            collection: entries,
+        },
+        manager_modules=DEFAULT_MANAGER_MODULES,
+    )
+    parsed = getattr(cfg, collection)[0]
+    if collection == "rigid_object_group":
+        parsed = parsed.rigid_objects["cup"]
+    assert parsed.shape.fpath == paths["TaskMeshes/collision.obj"]
+    assert parsed.visual_shape.fpath == paths["TaskMeshes/visual.glb"]
+
+
+@pytest.mark.parametrize("owner", ["inline", "environment", "scene"])
+def test_fluid_point_files_resolve_from_declaration_owner(
+    owner: str, tmp_path: Path
+) -> None:
+    physical_dir = tmp_path / "physical"
+    physical_dir.mkdir()
+    points = np.array([[0.0, 0.0, 0.0], [0.02, 0.0, 0.0]], dtype=np.float32)
+    np.savez(physical_dir / "water.npz", positions=points)
+    fluid = {"uid": "water", "spawn": {"kind": "points", "file_path": "water.npz"}}
+    config = {
+        "id": "EmbodiedEnv-v1",
+        "physics": "newton",
+        "env": {},
+        "robot": {"uid": "robot"},
+    }
+    source_path = tmp_path / "task.yaml"
+    if owner == "inline":
+        config["fluid_object"] = [fluid]
+        source_path = physical_dir / "task.yaml"
+    else:
+        component = {"simulation": {"fluid_object": [fluid]}}
+        if owner == "environment":
+            component.update(environment_id="fluid_test", physics="newton", env={})
+            del config["physics"], config["env"]
+        else:
+            component["scene_id"] = "fluid_test"
+        save_config(physical_dir / "component.yaml", component)
+        config[owner] = {"component": "physical/component.yaml"}
+
+    cfg = config_to_cfg(
+        config, manager_modules=DEFAULT_MANAGER_MODULES, source_path=source_path
+    )
+
+    spawn = cfg.fluid_object[0].spawn
+    assert spawn.file_path == str(physical_dir / "water.npz")
+    np.testing.assert_array_equal(spawn.sample(0.01), points)
+    assert fluid["spawn"]["file_path"] == "water.npz"
 
 
 def test_config_to_cfg_loads_render_only_objects():

@@ -71,7 +71,12 @@ stable online language IDs. Language intent does not establish physical success.
   policy actions.
 - Descriptor-driven policy recording and policy-width trajectory recording do
   not accept `ControllerAction`; mixing those fixed layouts fails before action
-  processing. Expert recording continues to use `ExpertActionSpec`.
+  processing. Expert recording continues to use `ExpertActionSpec`. The position-only
+  `expert_trajectory.use_action_manager` opt-in converts joint targets through the
+  policy terms while retaining exact FK targets. With
+  `rollout_action_semantics="policy_request"`, it instead records the converted
+  ActionManager request and trace independently of expert joint width; unmanaged
+  direct controller commands remain rejected by this recording contract.
 - For raw-policy vector demos with staggered completion, ActionManager masks
   inactive rows after processing: selected qpos resources hold measured values,
   while qvel/qf resources receive zero commands.
@@ -312,6 +317,15 @@ not orchestrate multiple experiments or qualify kinematic playback.
   data and finalizes writes. Persistence failures propagate through the durability
   barrier. Defaults and paths live in `EmbodiedEnvCfg`/`save_trajectory`.
 - **Replay**: `ReplayWrapper(env, trajectory, mode)` wraps any `EmbodiedEnv`.
+  The private `gym/utils/_replay.py` owner supplies command sampling and row-local
+  cursors to both recorded replay and authored native-position replay. Authored
+  NPZ inputs contain commands, not fabricated recorded cloth states. Their
+  physical declaration is loaded once before scene preparation; native controls
+  register before `SimulationManager.prepare()`, then joint columns bind once
+  after native metadata is ready. The Task Program reads this bound snapshot.
+  Native replay requires resolved cadence compatibility and position-only targets;
+  extra velocity/effort commands fail before consumption. Holds freeze native time.
+  Episode metadata retains the source digest, joint orders and cadence.
   `kinematic` disables physics and writes recorded states (obs only, exact
   reproduction); `dynamic` feeds raw-policy actions through `env.step` so the
   `ActionManager` re-applies the transform. An expert trajectory with
@@ -332,6 +346,10 @@ not orchestrate multiple experiments or qualify kinematic playback.
   Use `evaluate_recorded_rules` to evaluate a compiled graph directly from a
   trusted trajectory in bounded chunks. It can use a recorded segment
   occurrence to select the matching control slots and acquisition revisions.
+  Qualified fluid recordings carry bounded particle-state sidecars. Kinematic
+  and control replay restore complete particle states at each recorded boundary;
+  dynamic replay restores only the initial particle state and recomputes later
+  fluid motion from recorded actions.
 - **Policy projection**: `rollout_buffer` retains actual policy observations,
   including sampled noise, and its existing obs/action/reward alignment for
   LeRobot/RL. It shares the acquisition boundary with raw history, rather than

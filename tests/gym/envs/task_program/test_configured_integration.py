@@ -293,6 +293,7 @@ def _tableware_deployment(task_name: str) -> ConfiguredTaskProgramDeployment:
         task_program=physical.config["task_program"],
         skill_profile=physical.embodiment_skill_profile,
         base_dir=path.parent,
+        evaluation=physical.evaluation,
     )
 
 
@@ -814,8 +815,14 @@ def test_pour_water_mouth_alignment_and_measured_checkpoints() -> None:
     )
     picking, positioning, pouring, returning = program.program.items
     checkpoint = positioning.validators[0]
-    assert checkpoint.object == "bottle"
-    assert checkpoint.position_tolerance <= 0.01
+    assert checkpoint.ref == "bottle_above_cup"
+    catalog = deployment.integration.registration.catalog
+    compiled = catalog.preflight(program, strict_contracts=True)
+    segments = tuple(compiled.iter_segments())
+    assert segments[1].validators[0].spec is segments[2].contract.prerequisites[1].spec
+    predicate = segments[1].validators[0].spec.parameters["bottle_above_cup"]
+    assert predicate["tolerance"] == 0.01
+    assert picking.validators[0].ref == "bottle_lifted"
     assert picking.steps.call.kind == "pick"
     assert positioning.steps.call.call_id == "simulation.move_held_object"
     assert pouring.steps.call.call_id == "simulation.pour"
@@ -854,11 +861,57 @@ def test_pour_water_mouth_alignment_and_measured_checkpoints() -> None:
         rtol=0,
     )
     assert float(relative[2, 3] + rotated[2]) >= 0.21
-    cup_position = torch.tensor(program.targets[cup_check.target].values[0].position)
-    bottle_position = torch.tensor(
-        program.targets[checkpoint.target].values[0].position
+    assert predicate["displacement"] == pytest.approx(relative[:3, 3].tolist())
+    condition = segments[1].validators[0].spec
+    qualified_cup = torch.tensor([[0.75, 0.1, 0.921, 0.0, 0.0, 0.5**0.5, 0.5**0.5]])
+    displacement = relative[:3, 3].float()
+    rotated_displacement = torch.stack(
+        (-displacement[1], displacement[0], displacement[2])
     )
-    torch.testing.assert_close(bottle_position, cup_position + relative[:3, 3].float())
+    measured = qualified_cup[:, :3] + rotated_displacement
+    result = condition.evaluate(
+        {
+            "rigid_objects/bottle/pose": measured,
+            "rigid_objects/cup/frame": qualified_cup,
+        },
+        batch_size=1,
+    )
+    from embodichain.lab.evaluation import EvaluationStatus
+
+    assert result[checkpoint.ref].status.tolist() == [EvaluationStatus.SATISFIED]
+
+
+@pytest.mark.parametrize(
+    ("change", "field"),
+    [
+        (lambda segment: setattr(segment, "instruction", None), "instruction"),
+        (lambda segment: setattr(segment, "contract", None), "contract"),
+        (
+            lambda segment: setattr(
+                segment.contract.outcomes[0], "assurance", "verified"
+            ),
+            "contract.outcomes[0].assurance",
+        ),
+        (
+            lambda segment: setattr(segment.contract.outcomes[0], "ref", 9),
+            "contract.outcomes[0].ref",
+        ),
+    ],
+)
+def test_pour_water_strict_contract_reports_exact_paths(change, field):
+    deployment = _tableware_deployment("pour_water")
+    catalog = deployment.integration.registration.catalog
+    program = load_task_program(
+        deployment.program_path,
+        integration=deployment.selection,
+        validation_context=catalog,
+    )
+    change(program.program.items[0])
+    if field in ("instruction", "contract"):
+        catalog.preflight(program)
+    with pytest.raises(ValueError) as error:
+        catalog.preflight(program, strict_contracts=True)
+    assert str(error.value).startswith(f"$.program.items[0].{field}:")
 
 
 def test_pour_water_uses_shared_calibrated_embodiment(
@@ -1319,6 +1372,20 @@ def test_axis_align_and_relative_place_configs_use_closed_decoders() -> None:
     assert type(axis_options) is AxisAlignOptions
     assert axis_options.pre_grasp_distance == pytest.approx(0.12)
     torch.testing.assert_close(axis_options.target_axis, torch.tensor((0.0, 0.0, 1.0)))
+
+
+def test_initial_lift_is_pickup_only() -> None:
+    options = _decode_skill_options(
+        {"kind": "pick_up", "initial_lift_height": 0.20}, path="options"
+    )
+    assert options.initial_lift_height == pytest.approx(0.20)
+
+    with pytest.raises(ValueError, match="initial_lift_height"):
+        _decode_skill_options(
+            {"kind": "axis_align", "initial_lift_height": 0.20}, path="options"
+        )
+    with pytest.raises(ValueError, match="initial_lift_height"):
+        AxisAlignOptions(initial_lift_height=0.20)
 
 
 def test_coordinated_transport_config_decodes_closed_routes_and_options() -> None:
@@ -2630,6 +2697,34 @@ def test_pour_dwell_duration_decodes() -> None:
     assert options.dwell_duration == pytest.approx(0.75)
 
 
+def test_pour_rotation_duration_decodes() -> None:
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_skill_options,
+    )
+
+    options = _decode_skill_options(
+        {"kind": "pour", "rotation_duration": 3.0},
+        path="options",
+    )
+    assert isinstance(options, PourOptions)
+    assert options.rotation_duration == pytest.approx(3.0)
+
+
+@pytest.mark.parametrize("value", [0.0, -0.1, float("inf")])
+def test_pour_rotation_duration_rejects_nonpositive_or_nonfinite_values(
+    value: float,
+) -> None:
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_skill_options,
+    )
+
+    with pytest.raises(ValueError, match="rotation_duration"):
+        _decode_skill_options(
+            {"kind": "pour", "rotation_duration": value},
+            path="options",
+        )
+
+
 def test_configured_pour_target_lowers_live_geometry_and_is_closed() -> None:
     from embodichain.lab.task_program.integrations.configured import (
         _decode_registered_lowerer,
@@ -2769,6 +2864,7 @@ def test_segmented_examples_preserve_overall_and_segment_instructions(
         task_program=physical.config["task_program"],
         skill_profile=physical.embodiment_skill_profile,
         base_dir=path.parent,
+        evaluation=physical.evaluation,
     )
     catalog = deployment.integration.registration.catalog
     program = load_task_program(
@@ -2794,7 +2890,7 @@ def test_segmented_examples_preserve_overall_and_segment_instructions(
     assert [segment.name for segment in segments] == expected_names[task_name]
     if task_name == "pour_water":
         assert [len(segment.post_policies) for segment in segments] == [0, 0, 0, 2]
-        assert [len(segment.validators) for segment in segments] == [0, 1, 0, 2]
+        assert [len(segment.validators) for segment in segments] == [1, 1, 0, 2]
     for segment in segments:
         assert isinstance(segment.instruction, str) and segment.instruction.strip()
         assert segment.instruction != overall

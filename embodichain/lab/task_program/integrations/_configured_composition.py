@@ -468,12 +468,17 @@ def _resolve_task_program_components(
                 )
         if "registered_semantic_lowerers" in runtime_services:
             for lowerer in runtime_services["registered_semantic_lowerers"]:
-                if isinstance(lowerer, dict) and lowerer.get("kind") == "demo_skill":
+                if not isinstance(lowerer, dict):
+                    continue
+                field = {
+                    "demo_skill": "asset_manifest",
+                }.get(lowerer.get("kind"))
+                if field is not None and field in lowerer:
                     from embodichain.data._references import _resolve_data_reference
 
-                    lowerer["asset_manifest"] = str(
+                    lowerer[field] = str(
                         _resolve_data_reference(
-                            lowerer["asset_manifest"], base_dir=integration_base
+                            lowerer[field], base_dir=integration_base
                         )
                     )
         if "nominal_motion_sources" in runtime_services:

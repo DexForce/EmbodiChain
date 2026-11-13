@@ -1040,7 +1040,7 @@ def test_pose_options_own_late_bound_relative_transforms() -> None:
 
 
 def test_joint_position_goal_rejects_unsupported_target_type() -> None:
-    with pytest.raises(TypeError, match="torch.Tensor or str"):
+    with pytest.raises(TypeError, match="torch.Tensor, str or TimedTrajectory"):
         JointPositionGoal(target=1.0)  # type: ignore[arg-type]
 
 
@@ -2771,6 +2771,95 @@ def test_pour_rotates_held_object_about_internal_axis_and_returns() -> None:
     assert plan.expected_effects.is_empty
     assert context.task is task
 
+    slower = _plan_action(
+        action,
+        SkillInvocation(
+            skill_id="pour",
+            goal=PourGoal(),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(
+                sample_count=10,
+                velocity_limit=100.0,
+                acceleration_limit=1000.0,
+            ),
+            skill_options=PourOptions(rotation_duration=8.0 / 60.0),
+        ),
+        context,
+    )
+    segments = {segment.name: segment.waypoint_count for segment in slower.segments}
+    assert segments["pour"] >= 9
+    assert segments["return"] >= 8
+    slower_arm = _joint_trajectory(slower).positions[:, :, :ARM_DOF]
+    pour_end = segments["pour"] - 1
+    return_start = segments["pour"] + segments["dwell"]
+    return_end = return_start + segments["return"] - 1
+    assert not torch.allclose(slower_arm[:, pour_end // 2], slower_arm[:, pour_end])
+    assert not torch.allclose(
+        slower_arm[:, (return_start + return_end) // 2],
+        slower_arm[:, return_end],
+    )
+
+
+def test_pour_rotation_duration_stretches_each_native_batch_row() -> None:
+    generator = _motion_generator()
+    positions = torch.zeros(NUM_ENVS, 9, ARM_DOF)
+    positions[:, :, 0] = torch.tensor(
+        [
+            [0.0, 0.5, 1.0, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0],
+            [0.0, 0.25, 0.5, 0.75, 1.0, 0.75, 0.5, 0.25, 0.0],
+        ]
+    )
+    # Native tilt/return each take 1 s in row 0 and 3 s in row 1.
+    intervals = torch.tensor(
+        [
+            [0.0, 0.5, 0.5, 0.5, 0.5, 0.0, 0.0, 0.0, 0.0],
+            [0.0, 0.75, 0.75, 0.75, 0.75, 0.75, 0.75, 0.75, 0.75],
+        ]
+    )
+    generator.generate = Mock(
+        return_value=PlanResult(
+            success=torch.ones(NUM_ENVS, dtype=torch.bool),
+            positions=positions,
+            dt=intervals,
+            waypoint_indices=torch.tensor([[2, 4], [4, 8]]),
+        )
+    )
+    action = _bind_action(generator, Pour())
+    semantics = ObjectSemantics(
+        affordance=AxisAlignAffordance(internal_axis=torch.tensor([1.0, 0.0, 0.0])),
+        geometry={},
+        entity_id="cup",
+        label="cup",
+    )
+    task = TaskState(
+        batch_size=NUM_ENVS, device="cpu", held_objects={"arm": _held(semantics)}
+    )
+
+    plan = _plan_action(
+        action,
+        SkillInvocation(
+            skill_id="pour",
+            goal=PourGoal(),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(sample_count=4),
+            skill_options=PourOptions(rotation_duration=2.0, dwell_duration=0.0),
+        ),
+        _context(task),
+    )
+
+    assert plan.plan_success.all()
+    trajectory = _joint_trajectory(plan).positions[:, :, 0]
+    pour_count = plan.segments[0].waypoint_count
+    for row, expected_duration in enumerate((2.0, 3.0)):
+        first_arrival = torch.isclose(trajectory[row, :pour_count], torch.tensor(1.0))
+        arrival_time = first_arrival.nonzero()[0].item() * CONTROL_DT
+        assert arrival_time == pytest.approx(expected_duration, abs=CONTROL_DT)
+        return_path = trajectory[row, pour_count:]
+        return_arrival = torch.isclose(return_path, torch.tensor(0.0)).nonzero()[0]
+        assert (return_arrival.item() + 1) * CONTROL_DT == pytest.approx(
+            expected_duration, abs=CONTROL_DT
+        )
+
 
 def test_pour_reads_held_state_from_the_bound_logical_resource() -> None:
     """Profile resource IDs need not match native motion control-part names."""
@@ -2921,6 +3010,8 @@ def test_pour_options_validate_rotation_and_dwell_duration() -> None:
         PourOptions(rotate_angle=float("nan"))
     with pytest.raises(ValueError, match="dwell_duration"):
         PourOptions(dwell_duration=-0.1)
+    with pytest.raises(ValueError, match="rotation_duration"):
+        PourOptions(rotation_duration=0.0)
     with pytest.raises(ValueError, match="max_mouth_height"):
         PourOptions(mouth_height=0.2, max_mouth_height=0.1)
     with pytest.raises(ValueError, match="max_rotation_step"):
@@ -2928,8 +3019,10 @@ def test_pour_options_validate_rotation_and_dwell_duration() -> None:
 
 
 @pytest.mark.parametrize("inverted_receiver", [False, True])
+@pytest.mark.parametrize("rotation_duration", [None, 2.0])
 def test_targeted_pour_keeps_mouth_over_receiver_and_body_above_rim(
     inverted_receiver: bool,
+    rotation_duration: float | None,
 ) -> None:
     """Two opposite approach directions share one compensated mouth path."""
     generator = _motion_generator()
@@ -2998,12 +3091,24 @@ def test_targeted_pour_keeps_mouth_over_receiver_and_body_above_rim(
             goal=PourGoal(PourTarget(SceneEntityPose("target"), mouth, 0.04, 0.01)),
             binding=_binding(action),
             motion_policy=MotionPolicy(sample_count=80),
-            skill_options=PourOptions(rotate_angle=math.pi / 3),
+            skill_options=PourOptions(
+                rotate_angle=math.pi / 3,
+                rotation_duration=rotation_duration,
+            ),
         ),
         context,
     )
     assert plan.plan_success.tolist() == [True, not inverted_receiver]
     assert plan.scene_dependencies == ("target",)
+    if rotation_duration is not None:
+        requested = math.ceil(rotation_duration / CONTROL_DT) + 1
+        assert (
+            sum(
+                call.kwargs["options"].sample_count >= requested
+                for call in generator.generate.call_args_list
+            )
+            >= 2
+        )
     poses = torch.stack(sampled_poses, dim=1) @ torch.linalg.inv(attachment[:, None])
     mouths = (poses @ mouth)[:, :, :3, 3]
     pouring = poses[:, :, 2, 2] < math.cos(math.radians(50))
@@ -9536,6 +9641,49 @@ def test_contact_pickup_preserves_other_arm_and_requires_physical_verification(
     assert plan.scene_dependencies == ()
     projected = plan.expected_effects.apply(context.task, plan.plan_success)
     assert projected.get_held_object("left_arm") is None
+    generator.robot.set_qpos.assert_not_called()
+
+
+@pytest.mark.parametrize("pre_grasp_distance", [0.0, 0.03])
+def test_contact_pickup_initial_lift_precedes_approach(
+    pre_grasp_distance: float,
+) -> None:
+    from embodichain.lab.sim.atomic_skills import ContactGraspGoal
+
+    generator = _dual_motion_generator()
+    generator.generate = Mock(wraps=generator.generate)
+    skill = _bind_action(generator, PickUp())
+    plan = _plan_action(
+        skill,
+        SkillInvocation(
+            skill_id="pick_up",
+            goal=ContactGraspGoal(torch.eye(4)),
+            binding=_binding(skill, motion="left_arm", grasp="left_hand"),
+            motion_policy=MotionPolicy(
+                sample_count=12, interpolate_position_step=0.05 * CONTROL_DT
+            ),
+            skill_options=PickUpOptions(
+                hand_interp_steps=4,
+                initial_lift_height=0.08,
+                pre_grasp_distance=pre_grasp_distance,
+                lift_height=0.0185,
+            ),
+        ),
+        _dual_context(),
+    )
+
+    assert plan.plan_success.all()
+    calls = generator.generate.call_args_list
+    assert len(calls) == (4 if pre_grasp_distance else 3)
+    initial_lift_target = calls[0].args[0][-1].xpos
+    torch.testing.assert_close(
+        initial_lift_target[:, :3, 3],
+        torch.tensor([0.0, 0.0, 0.08]).expand(NUM_ENVS, -1),
+    )
+    torch.testing.assert_close(
+        calls[-2].args[0][-1].xpos, torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    )
+    assert plan.requires_effect_verification
     generator.robot.set_qpos.assert_not_called()
 
 

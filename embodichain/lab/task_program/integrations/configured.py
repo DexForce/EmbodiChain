@@ -38,6 +38,7 @@ import json
 import math
 from typing import TYPE_CHECKING, TypeVar
 
+from ._kinematic_replay import _KinematicReplayFactory, _decode_kinematic_replay
 from ._configured_controls import (
     _PressLowererFactory,
     _TwistLowererFactory,
@@ -45,6 +46,7 @@ from ._configured_controls import (
 )
 from ._configured_services import (
     _AntipodalGraspPoseGeneratorFactory,
+    _ArticulationLinkJointTargetSlideLowererFactory,
     _ArticulationLinkSlideLowererFactory,
     _AxisAlignLowererFactory,
     _CoordinatedTransportLowererFactory,
@@ -1048,6 +1050,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                 "pick_object_part",
                 "lift_height",
                 "pre_grasp_distance",
+                "initial_lift_height",
                 "grasp_commit_fraction",
                 "approach_direction",
                 "left_to_right_arm_direction",
@@ -1070,8 +1073,10 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                 "preshape_fraction",
                 "approach_along_grasp_axis",
                 "release_retreat_distance",
+                "push_approach_offset",
                 "rotate_angle",
                 "dwell_duration",
+                "rotation_duration",
                 "mouth_height",
                 "max_mouth_height",
                 "clearance",
@@ -1109,7 +1114,11 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                     "rotate_upright",
                     "grasp_frame_to_eef",
                     "fixed_object_to_eef",
-                    *(("approach_along_grasp_axis",) if kind == "pick_up" else ()),
+                    *(
+                        ("approach_along_grasp_axis", "initial_lift_height")
+                        if kind == "pick_up"
+                        else ()
+                    ),
                     *(("target_axis",) if kind == "axis_align" else ()),
                 }
             ),
@@ -1137,7 +1146,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                 config["pick_object_part"],
                 path=f"{path}.pick_object_part",
             )
-        for field_name in ("lift_height", "pre_grasp_distance"):
+        for field_name in ("lift_height", "pre_grasp_distance", "initial_lift_height"):
             if field_name in config:
                 kwargs[field_name] = _real(
                     config[field_name],
@@ -1376,6 +1385,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                 {
                     "rotate_angle",
                     "dwell_duration",
+                    "rotation_duration",
                     "mouth_height",
                     "max_mouth_height",
                     "clearance",
@@ -1395,6 +1405,13 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                 config["dwell_duration"],
                 path=f"{path}.dwell_duration",
                 minimum=0.0,
+            )
+        if "rotation_duration" in config:
+            kwargs["rotation_duration"] = _real(
+                config["rotation_duration"],
+                path=f"{path}.rotation_duration",
+                minimum=0.0,
+                strict_minimum=True,
             )
         for field_name in (
             "mouth_height",
@@ -1594,6 +1611,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                     "preshape_fraction",
                     "approach_along_grasp_axis",
                     "release_retreat_distance",
+                    "push_approach_offset",
                 }
             ),
         )
@@ -1629,6 +1647,12 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
             kwargs["approach_along_grasp_axis"] = _boolean(
                 config["approach_along_grasp_axis"],
                 path=f"{path}.approach_along_grasp_axis",
+            )
+        if "push_approach_offset" in config:
+            kwargs["push_approach_offset"] = _finite_tuple(
+                config["push_approach_offset"],
+                path=f"{path}.push_approach_offset",
+                expected_length=3,
             )
         return SlideOptions(**kwargs)
     if kind == "hand_over":
@@ -2552,8 +2576,11 @@ def _decode_registered_lowerer(
     | _PourLowererFactory
     | _PushObjectLowererFactory
     | _RelativePlaceLowererFactory
+    | _KinematicReplayFactory
 ):
     """Decode one allowlisted registered semantic lowerer factory."""
+    if isinstance(value, Mapping) and value.get("kind") == "kinematic_joint_replay":
+        return _decode_kinematic_replay(value, path=path)
     if isinstance(value, Mapping) and value.get("kind") in {
         "press",
         "twist",
@@ -2598,6 +2625,7 @@ def _decode_registered_lowerer(
                 "articulation_simulation_uid",
                 "link_entity_id",
                 "translation_axis",
+                "joint_target",
                 "target_pose_mode",
                 "target_id",
                 "reference_entity_id",
@@ -2635,7 +2663,9 @@ def _decode_registered_lowerer(
                     "link_entity_id",
                 }
             ),
-            optional=frozenset({"target_pose_mode", "translation_axis"}),
+            optional=frozenset(
+                {"target_pose_mode", "translation_axis", "joint_target"}
+            ),
         )
         target_pose_mode = _identifier(
             config.get("target_pose_mode", "live"),
@@ -2645,7 +2675,25 @@ def _decode_registered_lowerer(
             raise ValueError(
                 f"{path}.target_pose_mode must be one of ['live', 'snapshot']."
             )
-        return _ArticulationLinkSlideLowererFactory(
+        joint_target = None
+        if "joint_target" in config:
+            target = _mapping(
+                config["joint_target"],
+                path=f"{path}.joint_target",
+                required=frozenset({"joint_name", "axis_sign"}),
+            )
+            joint_target = (
+                _identifier(
+                    target["joint_name"], path=f"{path}.joint_target.joint_name"
+                ),
+                _integer(
+                    target["axis_sign"],
+                    path=f"{path}.joint_target.axis_sign",
+                    minimum=-1,
+                    maximum=1,
+                ),
+            )
+        factory_kwargs = dict(
             articulation_id=_identifier(
                 config["articulation_id"],
                 path=f"{path}.articulation_id",
@@ -2669,6 +2717,11 @@ def _decode_registered_lowerer(
             ),
             target_pose_mode=target_pose_mode,
         )
+        if joint_target is not None:
+            return _ArticulationLinkJointTargetSlideLowererFactory(
+                **factory_kwargs, joint_target=joint_target
+            )
+        return _ArticulationLinkSlideLowererFactory(**factory_kwargs)
     if kind == "move_held_object" and "routes" in value:
         config = _mapping(value, path=path, required=frozenset({"kind", "routes"}))
         routes = []
@@ -2995,7 +3048,8 @@ class _DecodedRuntimeServices:
         | RoutedMoveHeldObjectLowererFactory
         | _PourLowererFactory
         | _PushObjectLowererFactory
-        | _RelativePlaceLowererFactory,
+        | _RelativePlaceLowererFactory
+        | _KinematicReplayFactory,
         ...,
     ] = ()
     control_part_evidence: _JointPositionConstraintEvidenceProviderFactory | None = None
@@ -3411,6 +3465,7 @@ def _decode_evaluation(
     robot_links: Mapping[str, str] | None = None,
     registry: PredicateRegistry | None = None,
     cable_material: object | None = None,
+    transport_targets: Mapping[str, _MoveHeldObjectLowererFactory] | None = None,
 ) -> tuple[dict[str, CompiledEvaluation], tuple[str, ...], tuple[str, ...]]:
     if value is None:
         return {}, (), ()
@@ -3476,6 +3531,13 @@ def _decode_evaluation(
                         raise ValueError(
                             "A segment-start pose can only bind a lift baseline."
                         )
+                elif field.startswith("deformables/"):
+                    from embodichain.lab.evaluation._deformable import (
+                        _centroid_selection,
+                    )
+
+                    _centroid_selection(field)
+                    native = field
                 else:
                     parts = field.split("/")
                     if (
@@ -3490,6 +3552,33 @@ def _decode_evaluation(
                 inputs[role] = native
                 field_kinds[native] = _raw_field_kind(native)
             params = rule.params
+            if rule.kind == "near_frame_target" and "transport_target" in params:
+                raw = _mapping(
+                    params,
+                    path=f"evaluation.graph.rules.{name}.params",
+                    required=frozenset({"transport_target", "tolerance"}),
+                    optional=frozenset({"axes", "inclusive"}),
+                )
+                target_id = _identifier(
+                    raw["transport_target"],
+                    path=f"evaluation.graph.rules.{name}.params.transport_target",
+                )
+                target = (transport_targets or {}).get(target_id)
+                if target is None or rule.bindings.get("reference") != (
+                    f"rigid_objects/{target.reference_entity_id}/frame"
+                ):
+                    raise ValueError(
+                        f"evaluation.graph.rules.{name}.params.transport_target must name a configured "
+                        "transport target with the same reference entity."
+                    )
+                params = {
+                    key: value
+                    for key, value in raw.items()
+                    if key != "transport_target"
+                }
+                params["displacement"] = tuple(
+                    target.relative_pose[i] for i in (3, 7, 11)
+                )
             if rule.kind == "command_preset_match":
                 raw = _mapping(
                     params,
@@ -3597,6 +3686,11 @@ def _decode_configured_task_program_integration(
         robot_links=evaluation_robot_links,
         registry=evaluation_registry,
         cable_material=services.cable_material,
+        transport_targets={
+            factory.target_id: factory
+            for factory in services.registered_semantic_lowerers
+            if type(factory) is _MoveHeldObjectLowererFactory
+        },
     )
     registration = SimulationTaskProgramRegistration(
         scene_binding=scene_binding,

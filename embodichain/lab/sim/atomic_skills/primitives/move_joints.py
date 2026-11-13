@@ -29,7 +29,8 @@ from embodichain.lab.sim.atomic_skills.invocation import (
     SkillOptions,
     ResolvedSkillRequest,
 )
-from embodichain.lab.sim.atomic_skills.plans import SkillPlan
+from embodichain.lab.sim.atomic_skills.plans import SkillPlan, TimedTrajectory
+from embodichain.lab.sim.atomic_skills.policies import DynamicCollisionMode
 from embodichain.lab.sim.atomic_skills.requirements import (
     JOINT_POSITION_CAPABILITY,
     SkillBindingContract,
@@ -49,17 +50,26 @@ from embodichain.lab.sim.atomic_skills.primitives._binding_contracts import (
 class JointPositionGoal:
     """Explicit or named joint-space goal for a bound robot resource."""
 
-    target: torch.Tensor | str
-    """Joint qpos/waypoints or a named control-part profile command."""
+    target: torch.Tensor | str | TimedTrajectory
+    """Joint waypoints, a named command, or an explicitly timed full-joint replay.
+
+    Authored timed replay requires dynamic collision planning to be disabled.
+    """
 
     def __post_init__(self) -> None:
+        if isinstance(self.target, TimedTrajectory):
+            if self.target.waypoint_count == 0:
+                raise ValueError(
+                    "A timed joint replay must contain at least one command."
+                )
+            return
         if isinstance(self.target, str):
             if not self.target.strip():
                 raise ValueError("Named joint-position target must not be empty.")
             return
         if not isinstance(self.target, torch.Tensor):
             raise TypeError(
-                "target must be a torch.Tensor or str, "
+                "target must be a torch.Tensor, str or TimedTrajectory, "
                 f"got {type(self.target).__name__}."
             )
         if self.target.dim() not in (1, 2, 3) or self.target.shape[-1] == 0:
@@ -110,6 +120,36 @@ class MoveJoints(AtomicSkill[JointPositionGoal, MoveJointsOptions]):
         motion_target = motion.require_target(JointPositionTarget)
         control_part = motion_target.control_part
         joint_ids = list(motion_target.joint_ids)
+        if isinstance(goal.target, TimedTrajectory):
+            trajectory = goal.target
+            if sorted(joint_ids) != list(range(context.robot.robot_dof)):
+                raise ValueError("Timed replay requires a full-robot motion binding.")
+            if not torch.equal(trajectory.env_ids, context.env_ids):
+                raise ValueError(
+                    "Timed replay must match the selected environment rows."
+                )
+            if trajectory.positions.device != context.robot.qpos.device:
+                raise ValueError("Timed replay must be on the bound robot device.")
+            if (
+                request.motion_policy.dynamic_collision_mode
+                is not DynamicCollisionMode.OFF
+            ):
+                raise ValueError(
+                    "Authored replay requires dynamic collision planning to be off."
+                )
+            if not trajectory.dt.is_floating_point() or not torch.allclose(
+                trajectory.dt,
+                torch.full_like(trajectory.dt, context.require_control_dt()),
+                rtol=1e-6,
+                atol=0,
+            ):
+                raise ValueError(
+                    "Each timed replay command must occupy one control step."
+                )
+            return self.build_plan(
+                request, context, success=True, trajectory=trajectory, replannable=False
+            )
+
         joint_dof = len(motion_target.joint_ids)
         target_qpos = resolve_joint_target(
             self._resolve_target_qpos(

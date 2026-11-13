@@ -19,6 +19,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 import trimesh
 
 from embodichain.gen_sim.scene_engine.core.scene import Scene
@@ -30,6 +31,7 @@ from embodichain.gen_sim.scene_engine.core.scene_graph import (
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
 from embodichain.gen_sim.scene_engine.pipeline.utils.parent_surface_layout_optimizer import (
     ParentSurfaceLayoutOptimizer,
+    ParentSurfaceLayoutOptimizerConfig,
     ParentSurfaceLayoutProblem,
 )
 import embodichain.gen_sim.scene_engine.pipeline.utils.parent_surface_layout_optimizer as parent_surface_layout_optimizer_module
@@ -39,6 +41,7 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.scene_layout_constructor im
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.table_surface_layout_optimizer import (
     TableSurfaceLayoutOptimizer,
+    TableSurfaceLayoutOptimizerConfig,
     TableSurfaceLayoutProblem,
     _table_region_bounds,
 )
@@ -58,6 +61,29 @@ _CAN_XY_SIZE_M = 0.1
 _PENCIL_XY_SIZE_M = [0.04, 0.2]
 _SETTLED_DYNAMIC_POS_Y_UP = [0.25, 0.5, -0.4]
 _SETTLED_DYNAMIC_ROT_Y_UP = [0.0, 0.0, 0.0]
+
+
+@pytest.mark.parametrize(
+    "config_type",
+    [TableSurfaceLayoutOptimizerConfig, ParentSurfaceLayoutOptimizerConfig],
+)
+def test_surface_layout_configs_share_budget_validation(config_type) -> None:
+    with pytest.raises(ValueError, match="max_slsqp_iterations"):
+        config_type(max_slsqp_iterations=0)
+
+
+@pytest.mark.parametrize(
+    "config_type",
+    [TableSurfaceLayoutOptimizerConfig, ParentSurfaceLayoutOptimizerConfig],
+)
+@pytest.mark.parametrize(
+    "field", ["min_center_distance_m", "min_center_distance_weight"]
+)
+def test_surface_layout_configs_reject_retired_ineffective_controls(
+    config_type, field: str
+) -> None:
+    with pytest.raises(TypeError, match=field):
+        config_type(**{field: 1.0})
 
 
 def _asset(

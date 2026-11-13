@@ -145,6 +145,7 @@ def normalize_task_program(
                     "segment",
                     "steps",
                     "instruction",
+                    "contract",
                     "post",
                     "validators",
                 }:

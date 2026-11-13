@@ -43,6 +43,11 @@ def _raw_field_kind(field: str) -> str:
     quantity = channel.rsplit("/", 1)[1]
     if owner == "cables":
         return "position" if quantity == "end_position" else "scalar"
+    if owner == "deformables":
+        from ._deformable import _centroid_selection
+
+        _centroid_selection(field)
+        return "position"
     if owner == "rigid_objects":
         return {
             "pose": "position",
