@@ -6,9 +6,7 @@ tags:
 - manipulation
 - dexterous
 - reinforcement_learning
-default_deployment: newton
+default_deployment: default
 deployments:
-  newton:
-    config: env.newton.yaml
-  mjwarp:
-    config: env.mjwarp.yaml
+  default:
+    config: env.yaml

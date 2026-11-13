@@ -74,7 +74,7 @@ def load_rough_env_cfg(
     if not asset.is_file():
         raise FileNotFoundError(asset)
     resource = files("embodichain_tasks.configs").joinpath(
-        "tasks", "locomotion", "velocity", tasks[robot], "env.newton.yaml"
+        "tasks", "locomotion", "velocity", tasks[robot], "env.yaml"
     )
     data = yaml.safe_load(resource.read_text())
     data["num_envs"] = num_envs

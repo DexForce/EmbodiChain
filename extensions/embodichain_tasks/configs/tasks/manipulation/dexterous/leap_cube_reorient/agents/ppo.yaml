@@ -1,6 +1,6 @@
 trainer:
-  exp_name: leap_cube_reorient_ppo_newton
-  gym_config: extensions/embodichain_tasks/configs/tasks/manipulation/dexterous/leap_cube_reorient/env.newton.yaml
+  exp_name: leap_cube_reorient_ppo
+  gym_config: extensions/embodichain_tasks/configs/tasks/manipulation/dexterous/leap_cube_reorient/env.yaml
   seed: 42
   device: cuda:0
   headless: true
