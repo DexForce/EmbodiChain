@@ -131,40 +131,78 @@ def test_snapshot_rejects_per_world_timestep_changes() -> None:
         snapshot_execution_model(SimpleNamespace(mj_model=model, mjw_model=remote))
 
 
-def test_dexuni_ownership_includes_free_bodies_and_replicas() -> None:
-    from dexsim.spawn import (
-        ArticulationDesc,
-        MeshObjectDesc,
-        RigidBodyPhysicsDesc,
-        SceneDesc,
-        NewtonPhysicsDesc,
-        CollisionDesc,
-    )
-    from dexsim.types import ActorType
-    from embodichain_tasks.manipulation.dexterous._dexuni_adapter import (
-        _mujoco_articulation_ids,
+def test_dexuni_scene_joint_ownership_assigns_all_joints(monkeypatch) -> None:
+    from dexsim.engine.newton_physics import backend_registry
+    from embodichain_tasks.manipulation.dexterous._runtime import (
+        _DexUniSceneJointOwnership,
     )
 
-    scene = SceneDesc(
-        articulations=[ArticulationDesc(name="hand")],
-        mesh_objects=[
-            MeshObjectDesc(
-                name="cube",
-                physics=RigidBodyPhysicsDesc(actor_type=ActorType.DYNAMIC),
-                collisions=[CollisionDesc()],
-            ),
-            MeshObjectDesc(
-                name="anchor",
-                physics=RigidBodyPhysicsDesc(
-                    actor_type=ActorType.KINEMATIC, newton=NewtonPhysicsDesc(mocap=True)
-                ),
-            ),
-            MeshObjectDesc(
-                name="floor",
-                physics=RigidBodyPhysicsDesc(actor_type=ActorType.STATIC),
-                collisions=[CollisionDesc()],
-            ),
-        ],
+    solver_cfg = SimpleNamespace(
+        mujoco_articulations=None,
+        mujoco_articulation_paths=None,
+        mujoco_joints=None,
     )
-    assert _mujoco_articulation_ids(scene, 1) == (0, 1, 2)
-    assert _mujoco_articulation_ids(scene, 4) == tuple(range(12))
+    backend = SimpleNamespace(
+        solver_type="dexuni", cfg=SimpleNamespace(solver_cfg=solver_cfg)
+    )
+    monkeypatch.setattr(backend_registry, "get_newton_backend", lambda world: backend)
+
+    control = _DexUniSceneJointOwnership()
+    control.initialize_model(
+        SimpleNamespace(joint_count=12), SimpleNamespace(world=object())
+    )
+    assert solver_cfg.mujoco_joints == tuple(range(12))
+
+    # Explicit caller overrides remain untouched.
+    explicit_cfg = SimpleNamespace(
+        mujoco_articulations=None,
+        mujoco_articulation_paths=("/World/hand",),
+        mujoco_joints=None,
+    )
+    backend.cfg = SimpleNamespace(solver_cfg=explicit_cfg)
+    control.initialize_model(
+        SimpleNamespace(joint_count=12), SimpleNamespace(world=object())
+    )
+    assert explicit_cfg.mujoco_joints is None
+
+
+def test_dexterous_runtime_and_catalog_configs_are_usd_native() -> None:
+    import argparse
+    import inspect
+    from pathlib import Path
+    from embodichain.cli._task_catalog import _catalog_from_args
+    from embodichain_tasks.manipulation.dexterous import _runtime, _shadow_task
+
+    for module in (_runtime, _shadow_task):
+        source = inspect.getsource(module)
+        assert "from_xml_path" not in source
+        assert "ElementTree" not in source
+        assert ".xml" not in source
+
+    worktree_config_root = Path.cwd() / "extensions/embodichain_tasks/configs/tasks"
+    if worktree_config_root.is_dir():
+        config_root = worktree_config_root
+    else:
+        config_root = Path(_runtime.__file__).resolve().parents[3] / "configs/tasks"
+        if not config_root.is_dir():
+            config_root = Path(_runtime.__file__).resolve().parents[2] / "configs/tasks"
+    tasks = _catalog_from_args(
+        argparse.Namespace(config_root=[f"embodichain_tasks={config_root}"])
+    )
+    catalog = {task.qualified_key: task for task in tasks}
+    expected = (
+        "embodichain_tasks:shadow_pen_fixed",
+        "embodichain_tasks:shadow_pen_continuous",
+        "embodichain_tasks:leap_cube_face_turn",
+        "embodichain_tasks:leap_cube_reorient",
+        "embodichain_tasks:leap_cube_rotate_z",
+        "embodichain_tasks:g1_rough",
+    )
+    for selector in expected:
+        assert selector in catalog
+        entry = catalog[selector]
+        assert entry.default_deployment == "newton"
+        deps = {d.name: d for d in entry.deployments}
+        assert set(deps) == {"newton", "mjwarp"}
+        assert len(deps["newton"].agent_refs) >= 1
+        assert len(deps["mjwarp"].agent_refs) >= 1

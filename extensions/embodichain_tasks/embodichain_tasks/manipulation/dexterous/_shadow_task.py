@@ -16,9 +16,9 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from pathlib import Path
 from typing import NamedTuple
-import xml.etree.ElementTree as ET
 
 import torch
 
@@ -143,8 +143,11 @@ class ShadowTask:
         variant: str = "M1",
         device: torch.device | str = "cpu",
         dtype: torch.dtype = torch.float32,
+        *,
+        lower: torch.Tensor | Sequence[float],
+        upper: torch.Tensor | Sequence[float],
     ) -> ShadowTask:
-        """Load retained reset arrays and actuator limits without loading physics."""
+        """Load retained reset arrays with USD-authored actuator control bounds."""
         import numpy as np
 
         assets = Path(asset_root)
@@ -153,20 +156,16 @@ class ShadowTask:
             ctrl0 = torch.as_tensor(initial["ctrl"].copy(), device=device, dtype=dtype)
         with np.load(assets / "ShadowPenSpinPhases-initial-states.npz") as phases:
             starts = torch.as_tensor(phases["qpos"].copy(), device=device, dtype=dtype)
-        actuator = ET.parse(assets / "shadow_pen.xml").getroot().find("actuator")
-        bounds = torch.tensor(
-            [[float(v) for v in item.attrib["ctrlrange"].split()] for item in actuator],
-            device=device,
-            dtype=dtype,
-        )
+        lower_tensor = torch.as_tensor(lower, device=device, dtype=dtype)
+        upper_tensor = torch.as_tensor(upper, device=device, dtype=dtype)
         return cls(
             shadow_config(variant),
             num_envs,
             q0,
             ctrl0,
             starts,
-            bounds[:, 0],
-            bounds[:, 1],
+            lower_tensor,
+            upper_tensor,
         )
 
     @staticmethod

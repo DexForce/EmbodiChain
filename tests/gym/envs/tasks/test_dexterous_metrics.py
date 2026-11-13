@@ -16,120 +16,255 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 import math
 from types import SimpleNamespace
 from typing import Any, Callable
 from unittest.mock import Mock
 
 import gymnasium as gym
+import numpy as np
 import pytest
+from tensordict import TensorDict
 import torch
 
+from embodichain.lab.gym.envs.episode_context import EpisodeContext
 from embodichain.learning.rl.evaluation import evaluate_episodes
-from embodichain_tasks.manipulation.dexterous import _runtime
+from embodichain_tasks.manipulation.dexterous._runtime import (
+    DexterousManipulationEnv,
+    TASK_SPECS,
+)
+from embodichain_tasks.manipulation.dexterous._shadow_task import ShadowState
 
 
 class _Policy(torch.nn.Module):
     obs_dim = 1
     action_dim = 1
+    actor_obs_groups = ("policy",)
 
-    def __init__(self) -> None:
+    def __init__(self, action_dim: int = 1) -> None:
         super().__init__()
+        self.action_dim = action_dim
         self.anchor = torch.nn.Parameter(torch.zeros(()))
 
     def get_action(self, data: Any, deterministic: bool = False) -> Any:
-        data["action"] = torch.zeros(data.batch_size[0], 1)
+        del deterministic
+        data["action"] = torch.zeros(data.batch_size[0], self.action_dim)
         return data
 
 
 @pytest.fixture
-def env_factory(
-    monkeypatch: pytest.MonkeyPatch,
-) -> Callable[[str], _runtime.DexSimManipulationEnv]:
-    """Exercise the real step/reset bridge with deterministic task events."""
-    monkeypatch.setattr(_runtime.wp, "to_torch", lambda x: x)
-    monkeypatch.setattr(_runtime.wp, "from_torch", lambda x: x)
+def env_factory() -> Callable[[str], DexterousManipulationEnv]:
+    """Build a lightweight CPU DexterousManipulationEnv exercising real step/reset hooks."""
 
-    def make(task_id: str):
-        env = _runtime.DexSimManipulationEnv.__new__(_runtime.DexSimManipulationEnv)
+    def make(task_id: str) -> DexterousManipulationEnv:
+        spec = TASK_SPECS[task_id]
+        env = DexterousManipulationEnv.__new__(DexterousManipulationEnv)
         env.task_id = task_id
-        env.device = torch.device("cpu")
-        env.num_envs = 2
-        env.diagnostics = False
-        env.observation_dim = env.critic_dim = 1
+        env._spec = spec
+        env._device = torch.device("cpu")
+        env._num_envs = 2
+        env.max_episode_steps = spec.max_episode_steps
+        env.action_dim = spec.action_dim
+        env.policy_dim = spec.policy_dim
+        env.critic_dim = spec.critic_dim
+        env.single_action_space = gym.spaces.Box(
+            -1.0, 1.0, (spec.action_dim,), dtype=np.float32
+        )
         env.single_observation_space = gym.spaces.Dict(
-            {"obs": gym.spaces.Box(-1.0, 1.0, (1,))}
+            {
+                "policy": gym.spaces.Box(
+                    -np.inf, np.inf, (spec.policy_dim,), dtype=np.float32
+                ),
+                "critic": gym.spaces.Box(
+                    -np.inf, np.inf, (spec.critic_dim,), dtype=np.float32
+                ),
+            }
         )
-        env.single_action_space = gym.spaces.Box(-1.0, 1.0, (1,))
-        env.action_format = "tensor"
-        env.elapsed_steps = torch.zeros(2, dtype=torch.long)
-        env._reset_generator = torch.Generator().manual_seed(0)
-        env._episode_return = torch.zeros(2)
+        env.sim_cfg = SimpleNamespace(physics_dt=spec.sim_dt)
+        env.cfg = SimpleNamespace(
+            seed=42,
+            ignore_terminations=False,
+            episode_context_in_info=False,
+            sim_steps_per_control=round(spec.ctrl_dt / spec.sim_dt),
+            events=None,
+            observations=None,
+            rewards=None,
+            actions=None,
+            dataset=None,
+        )
+        env.episode_context = EpisodeContext(2)
+        env.episode_success_status = torch.zeros(2, dtype=torch.bool)
+        env._profiler = SimpleNamespace(section=lambda *args, **kwargs: nullcontext())
+        env._elapsed_steps = torch.zeros(2, dtype=torch.long)
+        env._detached_uids_for_reset = ["hand", "obj"]
+        env.sensors = {}
+        env.event_manager = None
+        env.observation_manager = None
+        env.action_manager = None
+        env.reward_manager = None
+        env.dataset_manager = None
+        env.rollout_buffer = None
+        env._traj_buffer = None
+        env._is_Keyboard = False
+
+        env.sim = SimpleNamespace(
+            device=torch.device("cpu"),
+            is_rt_enabled=False,
+            reset_objects_state=Mock(),
+            clear_articulation_dynamics=Mock(),
+            update=Mock(),
+            render_frame=lambda **kwargs: nullcontext(),
+            arena_offsets=torch.zeros(2, 3),
+        )
+        hand_dof = 24 if env.is_shadow else 16
+        act_count = 20 if env.is_shadow else 16
+        env._actuated_joint_ids = list(range(act_count))
+        env._actuated_joint_ids_tensor = torch.arange(act_count, dtype=torch.long)
+        env._kp = torch.ones(act_count)
+        env._kd = torch.zeros(act_count)
+        env._ctrl = torch.zeros(2, act_count)
+        env._actuator_force = torch.zeros(2, act_count)
+        env._raw_action = torch.zeros(2, spec.action_dim)
+        env._policy_obs = torch.zeros(2, spec.policy_dim)
+        env._critic_obs = torch.zeros(2, spec.critic_dim)
+        env._step_reward = torch.zeros(2)
+        env._step_terminated = torch.zeros(2, dtype=torch.bool)
+        env._step_truncated = torch.zeros(2, dtype=torch.bool)
         env._episode_success = torch.zeros(2, dtype=torch.bool)
-        env._last_observation = None
-        env.ctrl = torch.zeros(2, 1)
-        env.qmap = env.vmap = env.amap = torch.tensor([0])
-        env.data = SimpleNamespace(
-            qpos=torch.zeros(2, 1), qvel=torch.zeros(2, 1), ctrl=torch.zeros(2, 1)
+        env._step_metrics = {}
+        env._reset_generator = torch.Generator().manual_seed(0)
+
+        env.robot = SimpleNamespace(
+            uid="hand",
+            get_qpos=lambda: torch.zeros(2, hand_dof),
+            get_qvel=lambda: torch.zeros(2, hand_dof),
+            get_qf=lambda: torch.zeros(2, hand_dof),
+            set_qpos=Mock(),
+            set_qvel=Mock(),
+            set_qf=Mock(),
         )
-        env.dexuni_adapter = Mock()
-        env.backend = Mock()
-        env.mujoco_solver = Mock()
-        env.advance_physics = Mock()
-        env._publish_controls = Mock()
-        env._state = lambda: None
+        env._object = SimpleNamespace(
+            set_local_pose=Mock(),
+            set_velocity=Mock(),
+            get_local_pose=lambda: torch.tensor(
+                [[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]] * 2
+            ),
+        )
+        env._goal_obj = None
+        env._cube_art = (
+            SimpleNamespace(
+                set_local_pose=Mock(),
+                set_root_velocity=Mock(),
+                set_qpos=Mock(),
+                set_qvel=Mock(),
+                set_qf=Mock(),
+                get_qpos=lambda: torch.zeros(2, 1),
+            )
+            if task_id == "M3"
+            else None
+        )
+        env._face_joint_id = 0
+
+        if env.is_shadow:
+            env._read_physical_state = lambda: ShadowState(
+                torch.zeros(2, 31), torch.zeros(2, 30), torch.zeros(2, 3)
+            )
+        else:
+            env._read_physical_state = lambda: {"qpos": torch.zeros(2, 24)}
 
         def task_reset(ids, *, generator=None):
-            values = torch.zeros(len(ids), 1)
-            if task_id in ("M1", "M2"):
+            n = len(ids)
+            if env.is_shadow:
                 assert generator is env._reset_generator
-                return values, values, values
-            return dict(qpos=values, qvel=values, ctrl=values)
+                qpos = torch.zeros(n, 31)
+                qpos[:, 27] = 1.0
+                return qpos, torch.zeros(n, 30), torch.zeros(n, act_count)
+            q_len = 24 if task_id == "M3" else 23
+            qpos = torch.zeros(n, q_len)
+            qpos[:, 19] = 1.0
+            return {
+                "qpos": qpos,
+                "qvel": torch.zeros(n, q_len - 1),
+                "ctrl": torch.zeros(n, act_count),
+            }
 
         def observe(state, env_ids=None):
-            return torch.zeros(2 if env_ids is None else len(env_ids), 1)
+            del state
+            if env.is_shadow:
+                return torch.zeros(2, spec.policy_dim)
+            n = 2 if env_ids is None else len(env_ids)
+            return {
+                "state": torch.zeros(n, spec.policy_dim),
+                "privileged_state": torch.zeros(n, spec.critic_dim),
+            }
 
-        def step(state, actions):
-            # Environment 0 succeeds before termination; environment 1 never does.
-            success = (env.elapsed_steps == 0) & torch.tensor([True, False])
-            done = env.elapsed_steps >= torch.tensor([2, 3])
-            metrics = {"rotation": env.elapsed_steps.float()}
+        def step_fn(state, actions):
+            del state, actions
+            # Environment 0 succeeds on step 0 and terminates after 3 steps;
+            # environment 1 never succeeds and terminates after 4 steps.
+            success = (env._elapsed_steps == 0) & torch.tensor([True, False])
+            done = env._elapsed_steps >= torch.tensor([2, 3])
+            metrics = {"rotation": env._elapsed_steps.float()}
             if task_id != "M5":
                 metrics["success"] = success.float()
-            result = (torch.zeros(2, 1), torch.ones(2), done)
-            if task_id in ("M1", "M2"):
-                return (*result, metrics)
-            return (*result, torch.zeros(2, dtype=torch.bool), metrics)
+            if env.is_shadow:
+                return (
+                    torch.zeros(2, spec.policy_dim),
+                    torch.ones(2),
+                    done,
+                    metrics,
+                )
+            return (
+                {
+                    "state": torch.zeros(2, spec.policy_dim),
+                    "privileged_state": torch.zeros(2, spec.critic_dim),
+                },
+                torch.ones(2),
+                done,
+                torch.zeros(2, dtype=torch.bool),
+                metrics,
+            )
 
         env.task = SimpleNamespace(
             reset=task_reset,
             observe=observe,
-            action_targets=lambda x: x,
-            control_targets=lambda x: x,
-            step=step,
-            after_step=step,
+            action_targets=lambda x: torch.zeros(x.shape[0], act_count),
+            control_targets=lambda x: torch.zeros(x.shape[0], act_count),
+            face_detent=lambda a: torch.zeros_like(a),
+            step=step_fn,
+            after_step=step_fn,
         )
+        env.reset(seed=42)
         return env
 
     return make
 
 
+@pytest.mark.no_sim
 @pytest.mark.parametrize("task_id", ["M1", "M2", "M3", "M4"])
 def test_success_survives_until_autoreset_and_reaches_evaluation(
-    env_factory: Callable, task_id: str
+    env_factory: Callable[[str], DexterousManipulationEnv], task_id: str
 ) -> None:
-    """An early success counts at episode completion even if its pulse has ended."""
+    """An early success pulse persists across the episode until reset."""
     env = env_factory(task_id)
-    result = evaluate_episodes(policy=_Policy(), env=env, num_episodes=2, device="cpu")
+    result = evaluate_episodes(
+        policy=_Policy(env.action_dim),
+        env=env,
+        num_episodes=2,
+        device="cpu",
+    )
     assert result["eval/success_rate"] == 0.5
     assert result["eval/metrics/success"] == 0.0
     assert result["eval/avg_length"] == 3.5
 
 
+@pytest.mark.no_sim
 @pytest.mark.parametrize("task_id", ["M1", "M3"])
 def test_partial_reset_clears_only_selected_success_and_keeps_terminal_info(
-    env_factory: Callable, task_id: str
+    env_factory: Callable[[str], DexterousManipulationEnv], task_id: str
 ) -> None:
+    """Selective reset clears only target rows and rewinds the reset generator on explicit seed."""
     env = env_factory(task_id)
     env._episode_success[:] = True
     trainer_rng = torch.random.get_rng_state()
@@ -137,38 +272,48 @@ def test_partial_reset_clears_only_selected_success_and_keeps_terminal_info(
     assert env._reset_generator.initial_seed() == 19
     assert torch.equal(torch.random.get_rng_state(), trainer_rng)
     assert env._episode_success.tolist() == [False, True]
-    env.elapsed_steps[:] = torch.tensor([2, 0])
-    _, _, done, _, info = env.step(torch.zeros(2, 1))
-    assert done.tolist() == [True, False]
+    env._elapsed_steps[:] = torch.tensor([2, 1])
+    _, _, terminated, _, info = env.step(torch.zeros(2, env.action_dim))
+    assert terminated.tolist() == [True, False]
     assert info["success"].tolist() == [False, True]
     env.reset()
     assert not env._episode_success.any()
     assert info["success"].tolist() == [False, True]
 
 
+@pytest.mark.no_sim
 def test_continuous_rotation_has_metrics_without_invented_binary_success(
-    env_factory: Callable,
+    env_factory: Callable[[str], DexterousManipulationEnv],
 ) -> None:
+    """M5 omits binary episode success while reporting continuous rotation metrics."""
     env = env_factory("M5")
-    result = evaluate_episodes(policy=_Policy(), env=env, num_episodes=2, device="cpu")
+    result = evaluate_episodes(
+        policy=_Policy(env.action_dim),
+        env=env,
+        num_episodes=2,
+        device="cpu",
+    )
     assert math.isnan(result["eval/success_rate"])
     assert math.isfinite(result["eval/metrics/rotation"])
 
 
+@pytest.mark.no_sim
 @pytest.mark.parametrize("task_id", ["M1", "M2"])
-def test_failure_at_time_limit_does_not_bootstrap(env_factory, task_id):
-    from tensordict import TensorDict
+def test_failure_at_time_limit_does_not_bootstrap(
+    env_factory: Callable[[str], DexterousManipulationEnv], task_id: str
+) -> None:
+    """True failure on the final step sets terminated=True and truncated=False."""
     from embodichain.learning.rl.algo.common import compute_gae
 
     env = env_factory(task_id)
-    env.elapsed_steps.fill_(499)
+    env._elapsed_steps.fill_(env.max_episode_steps - 1)
     env.task.step = lambda state, actions: (
-        torch.zeros(2, 1),
+        torch.zeros(2, env.policy_dim),
         torch.ones(2),
         torch.tensor([True, False]),
         {},
     )
-    _, reward, terminated, truncated, _ = env.step(torch.zeros(2, 1))
+    _, reward, terminated, truncated, _ = env.step(torch.zeros(2, env.action_dim))
     assert terminated.tolist() == [True, False]
     assert truncated.tolist() == [False, True]
     rollout = TensorDict(

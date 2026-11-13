@@ -1,79 +1,51 @@
 # Pen and cube manipulation
 
-Five vector tasks use the standard learning-environment interface and PPO trainer.
-Each deployment selects its solver explicitly and obtains models and initial
-states through the EmbodiChain asset registry.
+Five USD-native dexterous manipulation tasks inherit from `EmbodiedEnv` (`DexterousManipulationEnv`) and integrate with the task catalog, `run-task`, `train-rl`, and `eval-policy`. Each task loads its physical scene directly from packaged USD (`.usdc`) via `SimulationManager.add_usd()` with zero runtime MJCF dependency.
 
 | Task directory | Registered environment | Actions | Actor / critic observations | Asset |
 |---|---|---:|---:|---|
-| `shadow_pen_fixed` | `ShadowPenFixedDexSim-v1` | 18 | 87 / 87 | `ShadowHandPen` |
-| `shadow_pen_continuous` | `ShadowPenContinuousDexSim-v1` | 18 | 87 / 87 | `ShadowHandPen` |
-| `leap_cube_face_turn` | `LeapCubeFaceTurnDexSim-v1` | 16 | 65 / 65 | `LeapHandCubeFaceTurn` |
-| `leap_cube_reorient` | `LeapCubeReorientDexSim-v1` | 16 | 57 / 128 | `LeapHandCube` |
-| `leap_cube_rotate_z` | `LeapCubeRotateZAxisDexSim-v1` | 16 | 32 / 105 | `LeapHandCube` |
+| `shadow_pen_fixed` | `ShadowPenFixedRL-v1` | 18 | 87 / 87 | `ShadowHandPen` |
+| `shadow_pen_continuous` | `ShadowPenContinuousRL-v1` | 18 | 87 / 87 | `ShadowHandPen` |
+| `leap_cube_face_turn` | `LeapCubeFaceTurnRL-v1` | 16 | 65 / 65 | `LeapHandCubeFaceTurn` |
+| `leap_cube_reorient` | `LeapCubeReorientRL-v1` | 16 | 57 / 128 | `LeapHandCube` |
+| `leap_cube_rotate_z` | `LeapCubeRotateZAxisRL-v1` | 16 | 32 / 105 | `LeapHandCube` |
 
-Training configurations are under
-`extensions/embodichain_tasks/configs/tasks/manipulation/dexterous/<task>/agents/`.
-`ppo.mujoco_warp.yaml` and `ppo.dexuni.yaml` select the corresponding solver.
-The default configurations run 32 environments for ten updates and save
-checkpoints. For example:
+## Deployments and CLI Usage
+
+Each task directory under `extensions/embodichain_tasks/configs/tasks/manipulation/dexterous/<task>/` provides two catalog deployments:
+
+- `newton` (default): `env.newton.yaml` + `agents/ppo.newton.yaml`, running `solver_type: dexuni` (`use_mujoco_cpu: false`, GPU MuJoCo Warp CUDA with full scene joint ownership).
+- `mjwarp`: `env.mjwarp.yaml` + `agents/ppo.mjwarp.yaml`, running `solver_type: mujoco_warp`.
 
 ```bash
 embodichain data download --name ShadowHandPen
-embodichain train-rl --config extensions/embodichain_tasks/configs/tasks/manipulation/dexterous/shadow_pen_fixed/agents/ppo.mujoco_warp.yaml
+embodichain show-task embodichain_tasks:shadow_pen_fixed
+embodichain run-task --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/dexterous/shadow_pen_fixed/env.newton.yaml
+embodichain train-rl --config extensions/embodichain_tasks/configs/tasks/manipulation/dexterous/shadow_pen_fixed/agents/ppo.newton.yaml
 ```
 
-Increase `trainer.iterations` and `trainer.num_envs` for a longer experiment.
-Policy and optimizer state are saved by the standard trainer. Checkpoint
-evaluation uses the generated RUN manifest through `embodichain eval-policy`.
-Continue training with `embodichain train-rl --config CONFIG --resume CHECKPOINT`.
-Set `trainer.iterations` to the cumulative target, for example 15 after an initial
-10 updates. Resume restores policy normalization, optimizer, scheduler and update
-counters, then starts fresh episodes. The shared schema-v2 loader checks task,
-physics, policy and algorithm compatibility. Select a manifest checkpoint with
-`--resume latest --run RUN_DIRECTORY`; `--resume-scheduler restart` starts the
-configured schedule over the remaining updates while preserving optimizer
-momentum. Legacy checkpoints without metadata emit a compatibility warning.
-Each resumed invocation writes a new RUN directory.
+Continue training from a saved checkpoint with `embodichain train-rl --config CONFIG --resume latest --run RUN_DIRECTORY`, setting `trainer.iterations` to the cumulative update target. Evaluate a saved checkpoint via `embodichain eval-policy RUN_DIRECTORY --checkpoint latest --num-envs 64 --episodes 64 --renderer no-render`.
 
-The fixed and continuous pen tasks share their model. Continuous spinning
-samples from 22 retained initial poses. Cube face turning retains the passive
-top-layer joint and updates its detent on every physics substep. Reorientation
-and Z-axis rotation use separate actor and critic observation groups.
-Selective reset preserves unselected physical rows; completed rows return the
-next initial observation with terminal reward and done flags.
+## Task Semantics and Evaluation
 
-Evaluation reports `eval/success_rate` for pen spinning, cube face turning and
-cube reorientation. An episode succeeds if it reaches at least one task success
-event before termination or truncation, including an event on the final step.
-Pen spinning requires one complete positive revolution while retaining the pen;
-face turning requires holding the target face angle for 20 steps; reorientation
-requires reaching the target orientation. The environment retains these events
-in `info["success"]` until the corresponding episode resets. Per-step events
-remain available in `info["metrics"]["success"]`.
+Fixed and continuous pen-spinning share the `ShadowHandPen` USD scene; continuous pen-spinning samples across 22 initial grasp poses. Cube face-turning (`LeapCubeFaceTurnRL-v1`) models the cube as a single-hinge articulation (`face_turn`) and applies passive detent torque before each physics substep. Cube reorientation (`LeapCubeReorientRL-v1`) and Z-axis rotation (`LeapCubeRotateZAxisRL-v1`) construct asymmetric actor and privileged critic observation groups from public `Robot` and `RigidObject` state, site transforms parsed from USD, and pre-integration PD actuator forces.
 
-Continuous Z-axis rotation has no binary success criterion. Its success rate is
-unavailable; evaluate `rotation`, `angular_velocity_z`, `retained`, episode length
-and return instead. A numeric zero success rate for the other tasks means no
-evaluated episode met its success criterion. Short training verifies execution
-and checkpoint compatibility, not policy convergence.
+Evaluation reports `eval/success_rate` for `ShadowPenFixedRL-v1`, `ShadowPenContinuousRL-v1`, `LeapCubeFaceTurnRL-v1`, and `LeapCubeReorientRL-v1`: an episode counts as successful if at least one task success event occurs before termination or truncation (`info["success"]`), while per-step pulses remain in `info["metrics"]["success"]`. `LeapCubeRotateZAxisRL-v1` optimizes unbounded angular velocity without a binary success threshold; evaluate `rotation`, `angular_velocity_z`, `retained`, episode length, and return instead.
 
-SceneBuilder loads the packaged `usd/*.usdc` physics models and replicates them
-for each environment. MJCF remains in the asset packages as task metadata and
-an independent model-audit reference. Joint targets and passive face torque use
-public articulation batches. The assets require DexSim's retained MuJoCo scene
-metadata support, including fixed tendons, explicit filters and actuator limits.
+## USD Physical Fidelity and Solver Settings
 
-Model audits compare masses, inertia, actuator and tendon parameters, and the
-complete effective collision graph against the source MJCF. They read active
-device parameters because Newton notifications can leave the host model stale.
-Both solver configurations retain source iteration settings unless explicitly
-overridden. Reset still uses a version-specific MuJoCo coordinate bridge and,
-for DexUni, compact-to-scene maps. Local validation versions and asset publication
-status must accompany a release; short-run checkpoints are not converged policies.
+All five environments import fixed tendons, joint limits, actuator `ctrlrange`, PD `target_ke`/`target_kd`, site local poses, and collision filter pairs directly from `.usdc`. Source MJCF files in the asset archives are used only by offline verification tests (`_audit_model.py`, `_audit_tendons.py`) to verify mass, inertia, joint, actuator, tendon, and collision-graph parity against active GPU solver buffers.
 
-The face-turn task reserves 2048 constraint rows per world. A 512-row budget
-can truncate constraints during large-batch training. Solver iteration limits
-remain distinct from capacity limits: source defaults for LEAP tasks use
-5 solver iterations and 8 line-search iterations on MJWarp; increase the
-iteration budget explicitly when validating convergence.
+`LeapCubeFaceTurnRL-v1` reserves `njmax: 2048` constraint rows per world (`512` for the remaining tasks). Both `newton` (`dexuni`) and `mjwarp` (`mujoco_warp`) deployments preserve authored solver settings (`20/50` Newton/line-search iterations on Shadow Hand tasks; `5/8` on LEAP Hand tasks) and set `arena_space: 0.0` with `separate_worlds: true` so execution-model geometry stays spatially uniform across parallel worlds.
+
+## DexUni Training and Evaluation Baseline
+
+Sustained single-GPU PPO training, `--resume latest` continuation (`+10` updates), and `64`-episode `eval-policy` results under the default `newton` (`solver_type: dexuni`, `4096` parallel environments, single NVIDIA RTX PRO 5000 Blackwell 72 GB GPU):
+
+| Environment | Updates (`train + resume`) | Transitions | Steady SPS | Train `episode_reward_avg_100` (`start -> end`) | `eval-policy` (`64` episodes, `--checkpoint latest`) |
+|---|---:|---:|---:|---|---|
+| `ShadowPenFixedRL-v1` | `150 + 10` | `26,214,400` | `54,106` | `-50.49 -> +47.94` | `avg_reward=+74.26`, `avg_length=500.0`, `retained=100%`, `error=0.143 rad`, `rotation=2.40 rad` |
+| `ShadowPenContinuousRL-v1` | `150 + 10` | `52,428,800` | `57,265` | `-39.46 -> +14.47` | `avg_reward=+9.64`, `avg_length=485.8`, `retained=96.9%`, `error=0.229 rad`, `rotation=0.82 rad` |
+| `LeapCubeFaceTurnRL-v1` | `150 + 10` | `26,214,400` | `55,562` | `-0.47 -> +216.71` | `avg_reward=+255.53`, `avg_length=500.0`, `success_rate=100%`, `success_count=12.52`, `rotation=20.56 rad` |
+| `LeapCubeReorientRL-v1` | `300 + 10` | `50,790,400` | `48,218` | `-4.58 -> +172.64` | `avg_reward=+180.98`, `avg_length=997.6`, `retained=98.4%`, `success_rate=3.1%`, `position_error=0.020 m` |
+| `LeapCubeRotateZAxisRL-v1` | `300 + 10` | `50,790,400` | `94,216` | `-5.56 -> +27.40` | `avg_reward=+29.35`, `avg_length=497.5`, `retained=98.4%`, `rotation=29.43 rad`, `angular_velocity_z=1.39 rad/s` |
