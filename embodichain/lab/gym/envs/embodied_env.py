@@ -63,6 +63,8 @@ from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.sensors import BaseSensor, Camera, SensorCfg
 from embodichain.lab.sim.types import EnvObs, EnvAction
 from embodichain.lab.gym.envs import BaseEnv, EnvCfg
+from embodichain.lab.gym.envs._physical_replay import _PhysicalReplay, _ReplaySurface
+from embodichain.lab.gym.utils._replay import _AuthoredJointStream
 from embodichain.lab.gym.envs._startup_summary import format_functor_summary
 from embodichain.lab.gym.envs.objectives import (
     MeasuredRigidObjectState,
@@ -448,6 +450,12 @@ class EmbodiedEnvCfg(EnvCfg):
     task_program_action_owners: dict[str, str] = {}
     """Explicit policy ownership of the declared robot resource IDs."""
 
+    replay: _AuthoredJointStream | None = None
+    """Explicit physical command-stream replay, independent of semantic lowerers."""
+
+    replay_surface: _ReplaySurface | None = None
+    """Surface asset used by a configured native replay."""
+
 
 class _EpisodeMetadataRows(Sequence):
     """Retain reset-time metadata, materializing row copies when recording uses them."""
@@ -544,6 +552,9 @@ class EmbodiedEnv(BaseEnv):
         task_program_adapter_factory: TaskProgramAdapterFactory | None = None,
         **kwargs,
     ):
+        replay = getattr(cfg, "replay", None)
+        if replay is not None:
+            cfg = copy.deepcopy(cfg)
         rl_task = getattr(cfg, "rl_task", None)
         if rl_task is not None:
             if not isinstance(rl_task, RLTaskCfg):
@@ -591,6 +602,13 @@ class EmbodiedEnv(BaseEnv):
         self._active_task_program_bridge: TaskProgramDemoBridge | None = None
 
         extensions = getattr(cfg, "extensions", {}) or {}
+        if replay is not None and any(
+            name.startswith("_") or hasattr(cfg, name) or hasattr(self, name)
+            for name in extensions
+        ):
+            raise ValueError(
+                "Extensions cannot override configured acceptance or environment fields."
+            )
 
         if cfg.task_program_execution == "policy":
             from embodichain.lab.task_program.integrations.progress import (
@@ -606,6 +624,7 @@ class EmbodiedEnv(BaseEnv):
             setattr(cfg, name, value)
             setattr(self, name, value)
 
+        self._physical_replay = None if replay is None else _PhysicalReplay(cfg, replay)
         self.event_manager: EventManager | None = None
         self.observation_manager: ObservationManager | None = None
         self.reward_manager: RewardManager | None = None
@@ -1123,6 +1142,9 @@ class EmbodiedEnv(BaseEnv):
         if not self.sim.has_native_renderer:
             self._filter_native_visual_functors()
 
+        if self._physical_replay is not None:
+            self._physical_replay.bind(self)
+
         # create event manager
         self.cfg: EmbodiedEnvCfg
         if self.cfg.events:
@@ -1504,6 +1526,8 @@ class EmbodiedEnv(BaseEnv):
         self._setup_background()
         self._setup_interactive_objects()
         self._setup_lights()
+        if self._physical_replay is not None:
+            self._physical_replay.prepare_scene(self)
 
     def _update_sim_state(self, **kwargs) -> None:
         """Perform the simulation step and apply events if configured.
@@ -2107,6 +2131,9 @@ class EmbodiedEnv(BaseEnv):
         self, env_ids: Sequence[int] | torch.Tensor | None = None, **kwargs: Any
     ) -> None:
         env_ids_to_process = self.episode_context._ids(env_ids)
+        replay = getattr(self, "_physical_replay", None)
+        if replay is not None:
+            replay.reset(self, env_ids_to_process)
         # Keep one shared provenance snapshot per seed epoch, even without a
         # recorder. Individual episode dictionaries and UUIDs stay lazy.
         seed = getattr(self.cfg, "seed", None)
@@ -2612,6 +2639,9 @@ class EmbodiedEnv(BaseEnv):
             self._demo_episode_metadata[env_id] = metadata
         self._demo_metadata_initialized = True
         metadata = copy.deepcopy(self._demo_episode_metadata[env_id])
+        replay = getattr(self, "_physical_replay", None)
+        if replay is not None:
+            metadata["replay_source"] = replay.snapshot.metadata()
         metadata["episode_context"] = self.episode_context.snapshot([env_id])[0]
         metadata.setdefault("segments", [])
         termination_manager = getattr(self, "termination_manager", None)
@@ -3300,6 +3330,9 @@ class EmbodiedEnv(BaseEnv):
             The raw policy tensor or applied controller value.
         """
 
+        replay = getattr(self, "_physical_replay", None)
+        if replay is not None:
+            return replay.consume(self, action)
         if isinstance(action, ControllerAction):
             if getattr(self, "_step_uses_action_manager", False):
                 self.action_manager.apply_action()
@@ -3315,8 +3348,18 @@ class EmbodiedEnv(BaseEnv):
             return action
         return EmbodiedEnv._apply_controller_action(self, action)
 
+    def _replay_snapshot(self, source_id: str):
+        """Return the host-owned command source after native robot binding."""
+        replay = self._physical_replay
+        if replay is None or replay.snapshot.source.stream_id != source_id:
+            raise ValueError(f"No physical replay source {source_id!r} is bound.")
+        return replay.snapshot
+
     def _advance_physics(self) -> None:
         """Connect manager callbacks to physics and sensor sampling."""
+        replay = getattr(self, "_physical_replay", None)
+        if replay is not None and replay.hold:
+            return
         manager = getattr(self, "action_manager", None)
         if not getattr(self, "_step_uses_action_manager", False) or manager is None:
             return super()._advance_physics()
@@ -4194,7 +4237,11 @@ class EmbodiedEnv(BaseEnv):
                 "Task Program completion mask must be bool with one value per "
                 "environment."
             )
-        return completion.to(device=self.device)
+        completion = completion.to(device=self.device)
+        replay = getattr(self, "_physical_replay", None)
+        if replay is not None and replay.frame(self) != replay.snapshot.steps:
+            return torch.zeros_like(completion)
+        return completion
 
     def _evaluate_final_task_acceptance(
         self,
@@ -4231,6 +4278,9 @@ class EmbodiedEnv(BaseEnv):
         if saved is not None:
             episodes, previous = saved
             mask = mask | qualified(episodes, previous)
+        replay = getattr(self, "_physical_replay", None)
+        if replay is not None and replay.frame(self) != replay.snapshot.steps:
+            return torch.zeros_like(mask)
         return mask
 
     def _finalize_demo_task_success(

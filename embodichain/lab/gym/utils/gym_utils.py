@@ -904,9 +904,24 @@ def config_to_cfg(
         configured_task_program_selection = deployment.selection
         configured_task_program_id = deployment.program_id
         configured_task_program_path = deployment.program_path
+
     elif "robot" not in config:
         log_error("Missing required config key: robot")
 
+    if "acceptance" in config:
+        raise ValueError("Use evaluation.component for measured final rules.")
+    if "replay" in config:
+        from embodichain.lab.gym.utils._replay import _decode_authored_joint_stream
+
+        env_cfg.replay = _decode_authored_joint_stream(
+            config["replay"], base_dir=base_dir
+        )
+    if "replay_surface" in config:
+        from embodichain.lab.gym.envs._physical_replay import _load_replay_surface
+
+        if env_cfg.replay is None:
+            raise ValueError("replay_surface requires explicit simulation.replay.")
+        env_cfg.replay_surface = _load_replay_surface(config["replay_surface"])
     if env_cfg.objective is not None and env_cfg.objective.condition is not None:
         from embodichain.lab.gym.envs.objectives.ordered_placement import (
             _objective_fields,

@@ -260,6 +260,7 @@ def _evaluation_observation_cfgs(
     from embodichain.lab.gym.envs.managers.observations import (
         _get_evaluation_state,
         _get_segment_start_state,
+        _get_deformable_centroid_state,
     )
 
     fields = {
@@ -296,7 +297,15 @@ def _evaluation_observation_cfgs(
                     name, uid, "qpos"
                 )
     for name in sorted(fields):
-        if name.startswith(("links/", "robot/", "robot_links/")):
+        if name.startswith("deformables/"):
+            result[f"recording:{name}"] = ObservationCfg(
+                func=_get_deformable_centroid_state,
+                mode="add",
+                name=name,
+                params={"field": name},
+                consumers=("recording",),
+            )
+        elif name.startswith(("links/", "robot/", "robot_links/")):
             result[f"recording:{name}"] = ObservationCfg(
                 func=_get_evaluation_state,
                 mode="add",
@@ -322,7 +331,23 @@ def _validate_evaluation_observation_bindings(env: _TrajectoryEnv, configs) -> N
 
     for cfg in configs.values():
         parts = cfg.name.split("/")
-        if parts[0] == "articulations":
+        if parts[0] == "deformables":
+            from embodichain.lab.evaluation._deformable import _centroid_selection
+
+            uid, digest, indices = _centroid_selection(cfg.name)
+            replay = getattr(env, "_physical_replay", None)
+            if replay is None:
+                raise ValueError(
+                    "Deformable evaluation requires a verified replay source."
+                )
+            surface, nodes = replay.require_surface(
+                env.sim, uid=uid, mesh_sha256=digest
+            )
+            if max(indices) >= nodes.shape[1]:
+                raise ValueError(
+                    "Acceptance particle index exceeds the verified mesh size."
+                )
+        elif parts[0] == "articulations":
             _, uid, _, joint = parts
             asset = env.sim.get_articulation(uid)
             if asset is None or joint not in asset.joint_names:
