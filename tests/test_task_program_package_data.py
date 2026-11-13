@@ -332,6 +332,15 @@ _RESOURCE_PATHS = frozenset(
         Path(
             "tasks/manipulation/repeated_pick_place/task_program/integration.tianji_marvin.yaml"
         ),
+        Path("components/embodiments/dexforce_w1_030_cloth_fold.yaml"),
+        Path("tasks/manipulation/cloth_fold/env.yaml"),
+        Path("tasks/manipulation/cloth_fold/task.w1.yaml"),
+        Path("tasks/manipulation/cloth_fold/catalog.yaml"),
+        Path("tasks/manipulation/cloth_fold/README.md"),
+        Path("tasks/manipulation/cloth_fold/task_program/program.yaml"),
+        Path("tasks/manipulation/cloth_fold/task_program/integration.yaml"),
+        Path("tasks/manipulation/cloth_fold/task_program/evaluation.yaml"),
+        Path("tasks/manipulation/cloth_fold/task_program/trajectory.npz"),
         Path("tasks/manipulation/repeated_pick_place/envs/newton.yaml"),
         Path(
             "tasks/manipulation/repeated_pick_place/expansion/"
@@ -439,6 +448,7 @@ def test_setup_stages_all_official_task_programs(
     assert staged_config_package.include_package_data is False
     assert get_package_dir()[_CONFIG_PACKAGE] == "extensions/embodichain_tasks/configs"
     assert staged_config_package.package_data[_CONFIG_PACKAGE] == [
+        "tasks/manipulation/cloth_fold/task_program/trajectory.npz",
         "**/*.json",
         "**/*.yaml",
         "**/*.yml",

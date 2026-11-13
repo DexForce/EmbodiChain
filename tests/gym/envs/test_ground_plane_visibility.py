@@ -26,7 +26,7 @@ from unittest.mock import Mock
 import pytest
 
 import embodichain.lab.gym.envs.base_env as base_module
-from embodichain.lab.gym.envs import BaseEnv, EmbodiedEnv, EmbodiedEnvCfg
+from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.gym.envs.managers.cfg import EventCfg
 from embodichain.lab.gym.envs.managers.randomization.visual import (
     randomize_indirect_lighting,
@@ -280,9 +280,8 @@ def test_visibility_is_applied_before_prepare_and_authored_config_is_reusable(
 
     for filtered in (False, True):
         cfg.filter_visual_rand = filtered
-        env = EmbodiedEnv.__new__(EmbodiedEnv)
         with pytest.raises(RuntimeError, match="stop before materialization"):
-            BaseEnv.__init__(env, cfg)
+            EmbodiedEnv(cfg)
         simulations[-1].set_ground_plane_visibility.assert_called_once_with(filtered)
         assert cfg.ground_plane_visible is None
         assert cfg.events["lighting"] is not None

@@ -317,6 +317,15 @@ not orchestrate multiple experiments or qualify kinematic playback.
   data and finalizes writes. Persistence failures propagate through the durability
   barrier. Defaults and paths live in `EmbodiedEnvCfg`/`save_trajectory`.
 - **Replay**: `ReplayWrapper(env, trajectory, mode)` wraps any `EmbodiedEnv`.
+  The private `gym/utils/_replay.py` owner supplies command sampling and row-local
+  cursors to both recorded replay and authored native-position replay. Authored
+  NPZ inputs contain commands, not fabricated recorded cloth states. Their
+  physical declaration is loaded once before scene preparation; native controls
+  register before `SimulationManager.prepare()`, then joint columns bind once
+  after native metadata is ready. The Task Program reads this bound snapshot.
+  Native replay requires resolved cadence compatibility and position-only targets;
+  extra velocity/effort commands fail before consumption. Holds freeze native time.
+  Episode metadata retains the source digest, joint orders and cadence.
   `kinematic` disables physics and writes recorded states (obs only, exact
   reproduction); `dynamic` feeds raw-policy actions through `env.step` so the
   `ActionManager` re-applies the transform. An expert trajectory with

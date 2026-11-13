@@ -96,7 +96,7 @@ must not reach into `_spawn_scene.builder`.
 
 | Manager API | Cross-module contract |
 |---|---|
-| `register_kinematic_joint_trajectory()` | Declare articulation first; positions `[env, frames, dof]` use public qpos order; optional root poses `[env, frames, 4, 4]` |
+| `register_kinematic_joint_trajectory()` | Declare the articulation first. Positions `[env, frames, dof]` follow public qpos order or explicit `joint_names`. Optional root poses have shape `[env, frames, 4, 4]`. Use `initialize_pose` to seed the model from the first sample. |
 | `register_kinematic_nodal_trajectory()` | Declare deformable with selected nodes inactive; offsets `[env, samples, selected_nodes, 3]` are relative to finalized initial world positions |
 | `register_contact_material_schedule()` | Declared rigid object/robot/articulation; piecewise-constant shape friction/stiffness/damping tracks |
 | `register_particle_contact_material_schedule()` | Targeted DexUni deformable material via `uid`; omitted UID retains legacy scene-wide particle properties |

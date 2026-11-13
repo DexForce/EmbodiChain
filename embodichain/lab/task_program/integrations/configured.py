@@ -38,6 +38,7 @@ import json
 import math
 from typing import TYPE_CHECKING, TypeVar
 
+from ._kinematic_replay import _KinematicReplayFactory, _decode_kinematic_replay
 from ._configured_controls import (
     _PressLowererFactory,
     _TwistLowererFactory,
@@ -2537,8 +2538,11 @@ def _decode_registered_lowerer(
     | _PourLowererFactory
     | _PushObjectLowererFactory
     | _RelativePlaceLowererFactory
+    | _KinematicReplayFactory
 ):
     """Decode one allowlisted registered semantic lowerer factory."""
+    if isinstance(value, Mapping) and value.get("kind") == "kinematic_joint_replay":
+        return _decode_kinematic_replay(value, path=path)
     if isinstance(value, Mapping) and value.get("kind") in {
         "press",
         "twist",
@@ -3006,7 +3010,8 @@ class _DecodedRuntimeServices:
         | RoutedMoveHeldObjectLowererFactory
         | _PourLowererFactory
         | _PushObjectLowererFactory
-        | _RelativePlaceLowererFactory,
+        | _RelativePlaceLowererFactory
+        | _KinematicReplayFactory,
         ...,
     ] = ()
     control_part_evidence: _JointPositionConstraintEvidenceProviderFactory | None = None
@@ -3454,6 +3459,13 @@ def _decode_evaluation(
                         raise ValueError(
                             "A segment-start pose can only bind a lift baseline."
                         )
+                elif field.startswith("deformables/"):
+                    from embodichain.lab.evaluation._deformable import (
+                        _centroid_selection,
+                    )
+
+                    _centroid_selection(field)
+                    native = field
                 else:
                     parts = field.split("/")
                     if (
