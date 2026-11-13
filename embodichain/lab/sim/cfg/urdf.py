@@ -215,7 +215,7 @@ class URDFCfg:
             # Accept both list and dict; serialization round-trips an empty
             # dict when no sensors are configured (the field default).
             if isinstance(sensors, dict) and not sensors:
-                self.sensors = []
+                self.sensors = {}
             elif not isinstance(sensors, (list, dict)):
                 logger.log_error(
                     f"sensors must be a list of dicts or a dict, got {type(sensors)}"
@@ -343,6 +343,8 @@ class URDFCfg:
         Returns:
             URDFCfg: Returns self to allow method chaining.
         """
+        if isinstance(self.sensors, dict):
+            self.sensors = list(self.sensors.values())
         self.sensors.append({"sensor_name": sensor_name, **sensor_config})
         return self
 

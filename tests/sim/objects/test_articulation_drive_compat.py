@@ -91,9 +91,11 @@ def test_runtime_effort_mode_disables_pd_gains_on_newton() -> None:
 
 
 @pytest.mark.parametrize("override_impedance", [False, True])
+@pytest.mark.parametrize("stabilize", [False, True])
 def test_mimic_profile_only_changes_selected_articulation_equalities(
-    monkeypatch, override_impedance: bool
+    monkeypatch, override_impedance: bool, stabilize: bool
 ) -> None:
+    from unittest.mock import Mock
     from dexsim.engine.newton_physics import backend_registry
     from embodichain.lab.sim.objects.backends.newton import (
         _configure_newton_mimic_compliance,
@@ -137,7 +139,7 @@ def test_mimic_profile_only_changes_selected_articulation_equalities(
         ],
     )
     entity = SimpleNamespace(
-        _physics_binding=binding, set_newton_drive=lambda **kwargs: 1
+        _physics_binding=binding, set_newton_drive=Mock(return_value=1)
     )
     backend = SimpleNamespace(
         solver_type="mujoco_warp",
@@ -147,17 +149,20 @@ def test_mimic_profile_only_changes_selected_articulation_equalities(
     )
     monkeypatch.setattr(backend_registry, "get_newton_backend", lambda world: backend)
     impedance = [0.99, 0.99, 0.001, 0.5, 2.0]
+    reference = None if override_impedance and not stabilize else [0.002, 1.0]
     assert _configure_newton_mimic_compliance(
         result=SimpleNamespace(backend="newton", world=object()),
         entities=[entity],
         state_joint_names=["leader", "follower"],
         mimic_ids=[1],
         mimic_parents=[0],
-        solref=[0.002, 1.0],
+        stabilize=stabilize,
+        solref=reference,
         solimp=impedance if override_impedance else None,
     )
     expected_ref = initial_ref.copy()
-    expected_ref[0, 1] = [0.002, 1.0]
+    if reference is not None:
+        expected_ref[0, 1] = reference
     expected_imp = initial_imp.copy()
     if override_impedance:
         expected_imp[0, 1] = impedance
@@ -165,3 +170,4 @@ def test_mimic_profile_only_changes_selected_articulation_equalities(
     np.testing.assert_allclose(mjw_model.eq_solimp.numpy(), expected_imp)
     np.testing.assert_allclose(cpu.eq_solref, expected_ref[0])
     np.testing.assert_allclose(cpu.eq_solimp, expected_imp[0])
+    assert entity.set_newton_drive.call_count == int(stabilize)

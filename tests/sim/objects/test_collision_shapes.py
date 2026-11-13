@@ -450,15 +450,20 @@ def test_compound_cylinder_query_preserves_parts_and_scaled_local_positions() ->
     fallback.assert_not_called()
 
 
-def test_compound_query_refuses_merged_fallback_for_unavailable_part() -> None:
+@pytest.mark.parametrize("enabled", [True, False])
+def test_compound_query_refuses_merged_fallback_for_unavailable_part(enabled) -> None:
     from unittest.mock import Mock
 
     from dexsim.spawn.descs import GeometryType
 
     missing = SimpleNamespace(
-        geometry_type=GeometryType.MESH, vertices=None, triangles=None
+        geometry_type=GeometryType.MESH,
+        vertices=None,
+        triangles=None,
+        enable_collision=enabled,
     )
     second = CollisionDesc.from_geometry(GeometryDesc.cube(size=(1, 1, 1)))
+    second.enable_collision = enabled
     fallback = Mock()
     entity = SimpleNamespace(
         object_desc=SimpleNamespace(collisions=[missing, second], body_scale=(1, 1, 1)),

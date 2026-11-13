@@ -128,12 +128,14 @@ Use zero for both parameters for hard coupling. Newton rejects these settings.
 
 MuJoCo-Warp mimic joints retain native equality constraints and contact-force
 coupling. `_configure_newton_mimic_compliance()` adjusts only the selected
-articulation's equality rows, respecting the solver's time-constant safety
-floor; a weak follower drive stabilizes updates. Optional root fields
+articulation's equality rows. Optional root fields
 `newton_mimic_solref` and `newton_mimic_solimp` select a per-articulation
-MuJoCo profile; omission preserves the existing compliance approximation.
-Contact impedance remains separate. Command targets propagate the
-authored leader relation. Never copy measured follower state or disable the
+MuJoCo profile independently of `newton_mimic_stabilizer`. Explicit profiles
+retain follower drives and unspecified equality parameters. The opt-in
+stabilizer additionally configures weak follower drives, propagates commanded
+leader targets and supplies a Default-inspired reference when none is authored;
+solver timestep safety remains native-owned. Contact impedance remains separate.
+Never copy measured follower state or disable the
 native equality, which would turn the follower into an independent servo.
 Keep private Newton runtime access in the backend helper, with generic
 Articulation owning name mappings, resets and target propagation.

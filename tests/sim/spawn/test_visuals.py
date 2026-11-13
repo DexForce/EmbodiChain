@@ -44,6 +44,66 @@ from embodichain.lab.sim.sim_manager import SimulationManager
 pytestmark = pytest.mark.no_sim
 
 
+@pytest.mark.parametrize("file_backed", [False, True])
+def test_compound_semantic_mesh_preserves_every_part_transform_and_face_offset(
+    tmp_path, file_backed
+):
+    from embodichain.lab.sim.objects import RigidObject
+    from embodichain.lab.sim.shapes import CompoundShapeCfg, ShapePartCfg, MeshCfg
+
+    mesh_vertices = [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]]
+    mesh_faces = [[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]]
+    if file_backed:
+        pytest.importorskip("trimesh")
+        path = tmp_path / "tetrahedron.obj"
+        path.write_text(
+            "v 0 0 0\nv 1 0 0\nv 0 1 0\nv 0 0 1\n"
+            "f 1 3 2\nf 1 2 4\nf 1 4 3\nf 2 3 4\n"
+        )
+        mesh = MeshCfg(fpath=str(path))
+    else:
+        mesh = MeshCfg(vertices=mesh_vertices, triangles=mesh_faces)
+    # Cyclic rotation maps (x, y, z) to (z, x, y).
+    shape = CompoundShapeCfg(
+        parts=[ShapePartCfg(shape=CubeCfg())],
+        visual_parts=[
+            ShapePartCfg(
+                shape=CubeCfg(size=(2, 4, 6)),
+                position=(1, 2, 3),
+                quaternion=(0.5, 0.5, 0.5, 0.5),
+            ),
+            ShapePartCfg(
+                shape=mesh, position=(10, 20, 30), quaternion=(0.5, 0.5, 0.5, 0.5)
+            ),
+        ],
+    )
+    owner = SimpleNamespace(
+        cfg=RigidObjectCfg(semantic_shape=shape),
+        device=torch.device("cpu"),
+        get_body_scale=lambda ids: torch.tensor([[2, 3, 4]], dtype=torch.float32),
+    )
+
+    vertices, faces = RigidObject.get_semantic_mesh(owner, [1])
+
+    assert vertices.shape[1] > 4
+    torch.testing.assert_close(
+        vertices[0, :-4].amin(dim=0), torch.tensor([-4, 3, 4], dtype=torch.float32)
+    )
+    torch.testing.assert_close(
+        vertices[0, :-4].amax(dim=0), torch.tensor([8, 9, 20], dtype=torch.float32)
+    )
+    torch.testing.assert_close(
+        vertices[0, -4:],
+        torch.tensor(
+            [[20, 60, 120], [20, 63, 120], [20, 60, 124], [22, 60, 120]],
+            dtype=torch.float32,
+        ),
+    )
+    expected_faces = torch.tensor(mesh_faces, dtype=torch.int32) + vertices.shape[1] - 4
+    assert torch.equal(faces[0, -4:], expected_faces)
+    assert faces.min() >= 0 and faces.max() < vertices.shape[1]
+
+
 @pytest.mark.parametrize(
     "kwargs",
     [

@@ -194,13 +194,7 @@ def collision_shapes_from_entity(
     if descriptor_shapes is not None:
         return descriptor_shapes
 
-    if (
-        collisions
-        and sum(
-            getattr(item, "enable_collision", True) is not False for item in collisions
-        )
-        > 1
-    ):
+    if collisions and len(collisions) > 1:
         raise RuntimeError(
             f"RigidObject {object_uid!r} has collision pieces that cannot be "
             "queried independently; refusing a merged collision mesh."

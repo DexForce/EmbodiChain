@@ -3531,6 +3531,56 @@ def test_replace_rigid_object_commits_only_after_new_declaration() -> None:
     assert sim._rigid_objects["box"] is replacement
 
 
+@pytest.mark.parametrize("backend,num_envs", [("newton", 1), ("dexsim", 2)])
+def test_replace_invalid_variants_preserves_existing_spawn_object(backend, num_envs):
+    from embodichain.lab.sim.spawn.scene import SpawnScene, _AssetDeclaration
+    from embodichain.lab.sim.cfg import RigidObjectCfg
+    from embodichain.lab.sim.shapes import CubeCfg
+    from dexsim.spawn import ObjectDesc
+
+    old = object()
+    original = ObjectDesc(name="box")
+    scene = object.__new__(SpawnScene)
+    scene._num_envs = num_envs
+    scene._assets = {
+        "box": _AssetDeclaration(kind="rigid_object", descriptor=original, facade=old)
+    }
+    objects = [original]
+    scene.builder = SimpleNamespace(
+        backend=backend,
+        is_finalized=False,
+        result=None,
+        mesh_objects=objects,
+        scene_entities=[],
+        cables=[],
+        particle_sets=[],
+        remove_object=MagicMock(side_effect=lambda uid: objects.pop()),
+    )
+    scene._register_material_batches = MagicMock()
+    sim = object.__new__(SimulationManager)
+    sim.device = torch.device("cpu")
+    sim.physics = SimpleNamespace(
+        name="newton" if backend == "newton" else "default", solver_type="mujoco_warp"
+    )
+    sim._rigid_objects = {"box": old}
+    sim._spawn_scene = scene
+    sim._validate_visual_config = lambda cfg: None
+    cfg = RigidObjectCfg(
+        uid="box", shape=CubeCfg(), env_variants={1: RigidObjectCfg(shape=CubeCfg())}
+    )
+
+    with pytest.raises(
+        (ValueError, NotImplementedError), match="env_variants|Newton backend"
+    ):
+        sim.replace_rigid_object(cfg)
+
+    assert sim._rigid_objects["box"] is old
+    assert scene._assets["box"].descriptor is original
+    assert objects == [original]
+    scene.builder.remove_object.assert_not_called()
+    scene._register_material_batches.assert_not_called()
+
+
 def test_replace_missing_rigid_object_does_not_mutate_scene() -> None:
     from embodichain.lab.sim.cfg import RigidObjectCfg
 

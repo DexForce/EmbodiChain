@@ -315,7 +315,7 @@ def rigid_desc_from_usd(
     scene, desc = _parse_singleton(
         path, "mesh_objects", "rigid object", source=cfg.source
     )
-    _check_disabled_body_colliders(path, desc)
+    _check_disabled_body_colliders(path, desc, source=cfg.source)
 
     return _configure_rigid_usd(
         cfg, scene, desc, per_env=per_env, newton_solver_type=newton_solver_type
@@ -542,15 +542,28 @@ def _configure_articulation_usd(
     return desc, materials
 
 
-def _check_disabled_body_colliders(path: object, desc: ObjectDesc) -> None:
+def _check_disabled_body_colliders(
+    path: object, desc: ObjectDesc, *, source: UsdSourceCfg | None = None
+) -> None:
     """Reject SDK parser loss instead of materializing a collision-free fixture."""
     if desc.collisions or desc.usd is None:
         return
-    from pxr import Usd, UsdPhysics
+    from pxr import Sdf, Usd, UsdPhysics
 
-    stage = Usd.Stage.Open(str(path))
+    layer = Sdf.Layer.FindOrOpen(str(path))
+    if layer is None:
+        raise ValueError(f"Cannot inspect USD rigid object {path!r}.")
+    stage = Usd.Stage.Open(layer, Sdf.Layer.CreateAnonymous())
     if stage is None:
         raise ValueError(f"Cannot inspect USD rigid object {path!r}.")
+    stage.SetEditTarget(stage.GetSessionLayer())
+    variants = {} if source is None else source.variants or {}
+    for prim_path, selections in sorted(
+        variants.items(), key=lambda item: item[0].count("/")
+    ):
+        selected_prim = stage.GetPrimAtPath(prim_path)
+        for name, value in selections.items():
+            selected_prim.GetVariantSet(name).SetVariantSelection(value)
     prim = stage.GetPrimAtPath(desc.usd.prim_path)
     if not prim or not prim.HasAPI(UsdPhysics.RigidBodyAPI):
         return

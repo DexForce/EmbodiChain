@@ -35,18 +35,31 @@ def _semantic_mesh_arrays(shape: Any) -> tuple[np.ndarray, np.ndarray]:
     from embodichain.data import get_data_path
 
     descriptor, _ = visual_desc_from_cfg(VisualObjectCfg(uid="semantic", shape=shape))
-    geometry = descriptor.renders[0]
-    if geometry.file_path:
-        import trimesh
+    if not descriptor.renders:
+        raise ValueError("Semantic shape must contain at least one mesh surface.")
+    vertices_by_part = []
+    faces_by_part = []
+    vertex_offset = 0
+    for geometry in descriptor.renders:
+        if geometry.file_path:
+            import trimesh
 
-        mesh = trimesh.load(
-            get_data_path(geometry.file_path), force="mesh", process=False
-        )
-        return np.asarray(mesh.vertices, dtype=np.float32), np.asarray(
-            mesh.faces, dtype=np.int32
-        )
-    vertices, faces, _, _ = generated_mesh(geometry)
-    return vertices, faces
+            mesh = trimesh.load(
+                get_data_path(geometry.file_path), force="mesh", process=False
+            )
+            transform = np.asarray(geometry.local_transform, dtype=np.float32)
+            vertices = (
+                np.asarray(mesh.vertices, dtype=np.float32) @ transform[:3, :3].T
+                + transform[:3, 3]
+            )
+            faces = np.asarray(mesh.faces, dtype=np.int32)
+        else:
+            # The native generator already bakes this part's local transform.
+            vertices, faces, _, _ = generated_mesh(geometry)
+        vertices_by_part.append(vertices)
+        faces_by_part.append(faces + vertex_offset)
+        vertex_offset += len(vertices)
+    return np.concatenate(vertices_by_part), np.concatenate(faces_by_part)
 
 
 @dataclass(frozen=True)

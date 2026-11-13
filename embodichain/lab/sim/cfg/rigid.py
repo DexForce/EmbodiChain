@@ -240,7 +240,7 @@ class NewtonCollisionPropertiesCfg(CollisionPropertiesCfg):
     solref: Sequence[float] | None = None
     """Raw MuJoCo contact reference pair, preserving its sign convention.
 
-    Positive values specify time constant and damping ratio; negative values
+    Positive values specify time constant and damping ratio; non-positive values
     specify direct stiffness and damping. Requires a DexSim build exposing
     native contact parameters; unsupported builds fail before materialization.
     Prefer ``NewtonRigidBodyMaterialCfg`` for new declarations. These original
@@ -310,10 +310,10 @@ class NewtonCollisionPropertiesCfg(CollisionPropertiesCfg):
             if (
                 reference.shape != (2,)
                 or not np.isfinite(reference).all()
-                or not (np.all(reference > 0) or np.all(reference < 0))
+                or not (np.all(reference > 0) or np.all(reference <= 0))
             ):
                 raise ValueError(
-                    "solref must contain two finite values with the same nonzero sign."
+                    "solref must contain two finite positive or two non-positive values."
                 )
         if self.solimp is not None:
             impedance = np.asarray(self.solimp, dtype=float)

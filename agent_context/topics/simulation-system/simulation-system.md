@@ -97,6 +97,8 @@ per-arena piece counts are not qualified. Spawn checks descriptor support for
 variants and raw Newton `solref`/`solimp`/`solmix` before materialization rather
 than silently discarding requested settings. A dependency version alone does
 not qualify every geometry or solver profile.
+Rigid-object groups retain member variants on selected resets. Variant checks
+precede replacement removals and material registration for the complete batch.
 The default ground is separately owned by `SimulationManagerCfg`: disable it
 for constrained probes or author `ground_plane_attrs` to match a reference
 contact profile. Omitting that profile preserves the existing scene defaults.

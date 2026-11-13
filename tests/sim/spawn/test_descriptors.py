@@ -221,8 +221,10 @@ def test_compound_rejects_nested_parts_and_degenerate_quaternion() -> None:
         ShapePartCfg(shape=CubeCfg(), quaternion=(0, 0, 0, 0))
 
 
-def test_raw_mujoco_contact_parameters_preserve_values_or_fail_closed() -> None:
-    reference = (0.002, 1.0)
+@pytest.mark.parametrize("reference", [(0.002, 1.0), (-1000.0, 0.0), (0.0, -10.0)])
+def test_raw_mujoco_contact_parameters_preserve_values_or_fail_closed(
+    reference,
+) -> None:
     impedance = (0.8, 0.99, 0.0001, 0.5, 2.0)
     cfg = RigidObjectCfg(
         uid="raw_contact",
@@ -2357,6 +2359,64 @@ def test_rigid_usd_rejects_parser_loss_of_disabled_body_colliders(
         usd.rigid_desc_from_usd(cfg)
 
 
+@pytest.mark.parametrize("selected", ["contact", "visual"])
+def test_rigid_usd_collider_check_uses_selected_variant_without_editing_source(
+    tmp_path, monkeypatch, selected
+) -> None:
+    from pxr import Usd, UsdGeom, UsdPhysics
+    from embodichain.lab.sim.cfg import UsdSourceCfg
+    from embodichain.lab.sim.spawn import usd
+
+    path = tmp_path / "variants.usda"
+    stage = Usd.Stage.CreateNew(str(path))
+    body = UsdGeom.Xform.Define(stage, "/Fixture").GetPrim()
+    stage.SetDefaultPrim(body)
+    UsdPhysics.RigidBodyAPI.Apply(body).CreateRigidBodyEnabledAttr(False)
+    wall = UsdGeom.Cube.Define(stage, "/Fixture/wall").GetPrim()
+    variants = body.GetVariantSets().AddVariantSet("physics")
+    for name in ("contact", "visual"):
+        variants.AddVariant(name)
+        variants.SetVariantSelection(name)
+        with variants.GetVariantEditContext():
+            if name == "contact":
+                UsdPhysics.CollisionAPI.Apply(wall)
+    # Inspecting a selection must not change another reader's default stage.
+    default = "visual" if selected == "contact" else "contact"
+    variants.SetVariantSelection(default)
+    stage.GetRootLayer().Save()
+    cfg = RigidObjectCfg(
+        uid="fixture",
+        source=UsdSourceCfg(
+            file_path=str(path),
+            source_prim_path="/Fixture",
+            variants={"/Fixture": {"physics": selected}},
+        ),
+    )
+    # Independently model parser collider loss, including on SDKs that fixed it.
+    scene, parsed = usd._parse_singleton(
+        path, "mesh_objects", "rigid object", source=cfg.source
+    )
+    parsed.collisions = []
+    monkeypatch.setattr(
+        usd, "_parse_singleton", lambda *args, **kwargs: (scene, parsed)
+    )
+    if selected == "contact":
+        with pytest.raises(NotImplementedError, match="dropped collision pieces"):
+            usd.rigid_desc_from_usd(cfg)
+    else:
+        descriptor, _ = usd.rigid_desc_from_usd(cfg)
+        assert descriptor.collisions == []
+        assert descriptor.renders
+    assert variants.GetVariantSelection() == default
+    reopened = Usd.Stage.Open(str(path))
+    assert (
+        reopened.GetPrimAtPath("/Fixture")
+        .GetVariantSet("physics")
+        .GetVariantSelection()
+        == default
+    )
+
+
 def test_global_articulation_mass_properties_can_recompute_inertia() -> None:
     cfg = ArticulationCfg(
         uid="robot",
@@ -2841,8 +2901,12 @@ def test_spawn_post_config_only_applies_render_uv() -> None:
     render_body.set_projective_uv.assert_called_once_with()
 
 
-@pytest.mark.parametrize("enabled", [True, False])
-def test_newton_mimic_stabilizer_can_be_disabled(monkeypatch, enabled) -> None:
+@pytest.mark.parametrize(
+    "enabled,reference", [(True, None), (False, None), (False, (0.002, 1.0))]
+)
+def test_newton_mimic_stabilizer_can_be_disabled(
+    monkeypatch, enabled, reference
+) -> None:
     configure = Mock(return_value=True)
     monkeypatch.setattr(
         "embodichain.lab.sim.objects.articulation._configure_newton_mimic_compliance",
@@ -2851,7 +2915,9 @@ def test_newton_mimic_stabilizer_can_be_disabled(monkeypatch, enabled) -> None:
     articulation = object.__new__(Articulation)
     articulation.cfg = SimpleNamespace(
         compute_uv=False,
-        root_props=ArticulationRootPropertiesCfg(newton_mimic_stabilizer=enabled),
+        root_props=ArticulationRootPropertiesCfg(
+            newton_mimic_stabilizer=enabled, newton_mimic_solref=reference
+        ),
     )
     articulation._entities = [Mock(joint_dof_layout=[])]
     articulation._prepared_default_root_topology_revision = -1
@@ -2864,7 +2930,10 @@ def test_newton_mimic_stabilizer_can_be_disabled(monkeypatch, enabled) -> None:
     articulation._apply_spawn_config()
 
     assert articulation._newton_mimic_compliance_configured is enabled
-    assert configure.called is enabled
+    assert configure.called is (enabled or reference is not None)
+    if configure.called:
+        assert configure.call_args.kwargs["stabilize"] is enabled
+        assert configure.call_args.kwargs["solref"] == reference
 
 
 def test_rigid_object_spawn_applies_projective_uv() -> None:

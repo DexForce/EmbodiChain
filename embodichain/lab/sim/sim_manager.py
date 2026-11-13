@@ -3344,7 +3344,8 @@ class SimulationManager:
                 rigid_obj._source_visual_elements = source_elements
             declarations.append((cfg.uid, descriptor, materials, rigid_obj))
 
-        for uid, _, _, _ in declarations:
+        for uid, descriptor, _, _ in declarations:
+            self._spawn_scene._validate_rigid_variants(descriptor)
             if replace:
                 self._spawn_scene._require_removable(uid)
             else:
@@ -4016,6 +4017,7 @@ class SimulationManager:
                     f"Rigid object group member {index} has no rigid-body physics."
                 )
             descriptor.physics.actor_type = actor_type
+            self._spawn_scene._validate_rigid_variants(descriptor)
             self._spawn_scene._require_available_uid(descriptor.name)
             material_batches.append(materials)
             descriptors.append(descriptor)

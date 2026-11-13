@@ -111,8 +111,10 @@ class ArticulationRootPropertiesCfg:
     newton_mimic_solref: tuple[float, float] | None = None
     """Optional MuJoCo-Warp equality time constant and damping ratio.
 
-    Applies only to this articulation's mimic constraints. ``None`` retains
-    the existing Default-inspired compliance approximation. Explicit values
+    Applies only to this articulation's mimic constraints, independently of
+    :attr:`newton_mimic_stabilizer`. ``None`` retains the native reference unless
+    the stabilizer is enabled, in which case its compliance approximation applies.
+    Explicit values
     use MuJoCo's positive, mass-scaled convention; timestep safety remains
     enforced by the native solver. This does not change URDF mimic ratios.
     """
@@ -121,7 +123,8 @@ class ArticulationRootPropertiesCfg:
     """Optional MuJoCo-Warp impedance curve for this articulation's mimics.
 
     Uses ``(dmin, dmax, width, midpoint, power)``. ``None`` preserves the
-    imported equality impedance. Contact impedance is configured separately.
+    imported equality impedance. Explicit values do not enable follower drives.
+    Contact impedance is configured separately.
     """
 
     newton_gravity_compensation: float | None = None
