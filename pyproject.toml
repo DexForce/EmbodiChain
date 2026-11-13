@@ -1,19 +1,8 @@
 [build-system]
-# Use the legacy setuptools backend so the existing `setup.py` (which dynamically
-# detects torch and builds C/CUDA extensions via torch.utils.cpp_extension)
-# is still executed during build. This is a minimal, non-opinionated pyproject
-# that modernizes the package while preserving the custom extension build steps.
+# setup.py supplies package discovery, source mappings and bundled resources.
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
-
-# Note:
-# - Building the torch extensions requires a working PyTorch installation
-#   available at build time (or FORCE_CUDA=1 for cross-compilation). We keep
-#   the extension-building logic in `setup.py` because it needs to import
-#   `torch` at build time to select CUDA/Cpp extension classes.
-# - If you prefer a pure PEP 517 build without a legacy setup.py, we can
-#   refactor the extension-building logic into a custom build backend plugin.
 
 [project]
 name = "embodichain"

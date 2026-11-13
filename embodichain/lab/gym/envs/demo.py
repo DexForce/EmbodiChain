@@ -18,21 +18,28 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from inspect import signature
 from types import MappingProxyType
 from typing import Any, Literal
 
+import inspect
+import math
+import time
+
 import torch
 
-from embodichain.utils import configclass
+from embodichain.utils import configclass, logger
 
 from ._json import json_safe_copy as _json_safe_copy
+from .objectives.conditions import ObjectMotionMetrics
 
 __all__ = [
     "DEMO_ANNOTATION_KEYS",
     "DEMO_SCHEMA_VERSION",
     "DemoExecutionCfg",
+    "DemoQualification",
     "DemoEpisodeResult",
     "DemoOutputMode",
     "DemoSegment",
@@ -74,6 +81,253 @@ DemoSegmentOutcomeKind = Literal[
     "not_attempted",
 ]
 """Stable, first-failure-phase outcome for one program segment row."""
+
+
+class DemoQualification:
+    """Measure configured object motion and numeric observation bounds.
+
+    Args:
+        env: Host supplying simulation objects, observations and control timing.
+        declaration: Optional ``object_motion`` bounds and named ``observations``
+            with elementwise ``min``/``max`` lists.
+            Null list entries are unbounded. An observation's ``when`` is
+            ``final`` (default) or ``always`` across the sampled boundaries.
+
+    Sources must be stateless raw functions that read directly from ``env``.
+    They receive an empty observation input; base-policy and cross-term input
+    dependencies are unsupported. Acquisition does not advance history, apply
+    policy noise/projection or invoke a stateful functor twice.
+    Motion extrema stay on the host device with O(B) storage. Raw diagnostic
+    observations are sampled about once per second and at episode boundaries.
+    This monitor reports physical truth; the collector owns episode acceptance.
+    """
+
+    def __init__(self, env: Any, declaration: Mapping[str, Any]) -> None:
+        if not isinstance(declaration, Mapping) or set(declaration) - {
+            "object_motion",
+            "observations",
+        }:
+            raise ValueError("Unknown collection qualification fields.")
+        self._env = env
+        motion = declaration.get("object_motion")
+        self._object = None
+        self._motion_limits = {}
+        if motion is not None:
+            if not isinstance(motion, Mapping) or set(motion) != {
+                "uid",
+                "min_lift_m",
+                "min_tilt_deg",
+                "max_return_error_m",
+            }:
+                raise ValueError("object_motion requires a UID and all three bounds.")
+            if not isinstance(motion["uid"], str) or not motion["uid"]:
+                raise ValueError("object_motion.uid must be a nonempty string.")
+            self._object = env.sim.get_rigid_object(motion["uid"])
+            if self._object is None:
+                raise ValueError("Unknown qualification object.")
+            for name in ("min_lift_m", "min_tilt_deg", "max_return_error_m"):
+                value = motion[name]
+                if (
+                    type(value) not in (int, float)
+                    or not math.isfinite(value)
+                    or value < 0
+                ):
+                    raise ValueError("Motion bounds must be finite and nonnegative.")
+                self._motion_limits[name] = float(value)
+        observations = declaration.get("observations", {})
+        if not isinstance(observations, Mapping):
+            raise ValueError("Qualification observations must be a mapping.")
+        self._sources: dict[str, tuple[Any, torch.Tensor, torch.Tensor, str]] = {}
+        manager = getattr(env, "observation_manager", None)
+        for name, bounds in observations.items():
+            if not isinstance(name, str) or not name:
+                raise ValueError("Qualification observation names must be nonempty.")
+            if not isinstance(bounds, Mapping) or set(bounds) - {"min", "max", "when"}:
+                raise ValueError("Unknown observation qualification bounds.")
+            lower, upper = bounds.get("min"), bounds.get("max")
+            supplied = [value for value in (lower, upper) if value is not None]
+            if not supplied or any(
+                not isinstance(value, (list, tuple)) or not value for value in supplied
+            ):
+                raise ValueError("Observation bounds require nonempty min/max lists.")
+            width = len(supplied[0])
+            if any(len(value) != width for value in supplied):
+                raise ValueError("Observation bounds must have equal widths.")
+            limits = []
+            for values, default in ((lower, -math.inf), (upper, math.inf)):
+                converted = []
+                for value in ([None] * width if values is None else values):
+                    if value is not None and (
+                        type(value) not in (int, float) or not math.isfinite(value)
+                    ):
+                        raise ValueError("Observation bounds must be finite or null.")
+                    converted.append(default if value is None else float(value))
+                limits.append(
+                    torch.tensor(converted, dtype=torch.float64, device=env.device)
+                )
+            if bool((limits[0] > limits[1]).any()):
+                raise ValueError("Observation minimum cannot exceed maximum.")
+            when = bounds.get("when", "final")
+            if when not in ("always", "final"):
+                raise ValueError("Observation when must be 'always' or 'final'.")
+            cfg = (
+                manager.get_functor_cfg(name)
+                if manager is not None
+                else getattr(env.cfg.observations, name, None)
+            )
+            if cfg is None or not inspect.isfunction(cfg.func):
+                raise ValueError(
+                    "Qualification requires stateless observation functions."
+                )
+            self._sources[name] = (cfg, limits[0], limits[1], when)
+        if self._object is None and not self._sources:
+            raise ValueError("Qualification requires motion or observation bounds.")
+        self._stride = max(1, round(1 / env.step_dt))
+        self._motion: ObjectMotionMetrics | None = None
+        self._samples: list[dict[str, Any]] = []
+        self._latest: dict[str, torch.Tensor] = {}
+        self._always_passed: dict[str, torch.Tensor] = {}
+        self._steps = 0
+        self._started: float | None = None
+
+    @staticmethod
+    def _matches_bounds(
+        value: torch.Tensor, lower: torch.Tensor, upper: torch.Tensor
+    ) -> torch.Tensor:
+        dtype = value.dtype if value.is_floating_point() else torch.float64
+        return (
+            (value >= lower.to(dtype=dtype)) & (value <= upper.to(dtype=dtype))
+        ).all(-1)
+
+    def _sample(self) -> dict[str, Any]:
+        from .managers.observation_types import ObservationSample
+
+        observations = {}
+        for name, (cfg, lower, upper, when) in self._sources.items():
+            try:
+                value = cfg.func(self._env, {}, **cfg.params)
+            except KeyError as error:
+                raise ValueError(
+                    f"Cannot acquire qualification observation {name!r}; sources "
+                    "must read raw data directly from env without obs dependencies."
+                ) from error
+            if isinstance(value, ObservationSample):
+                if not bool(value.valid.all()):
+                    raise RuntimeError(
+                        f"Qualification observation {name!r} is unavailable."
+                    )
+                value = value.values
+            if isinstance(value, torch.Tensor) and value.ndim == 1:
+                value = value[:, None]
+            if (
+                not isinstance(value, torch.Tensor)
+                or value.shape != (self._env.num_envs, lower.numel())
+                or value.device != torch.device(self._env.device)
+            ):
+                raise ValueError(
+                    f"Qualification observation {name!r} has an invalid layout."
+                )
+            if not bool(torch.isfinite(value).all()):
+                raise RuntimeError(
+                    f"Qualification observation {name!r} became non-finite."
+                )
+            self._latest[name] = value.detach().clone()
+            if when == "always":
+                self._always_passed[name] &= self._matches_bounds(value, lower, upper)
+            observations[name] = value.detach().cpu().tolist()
+        sample = {
+            "time_s": self._steps * self._env.step_dt,
+            "observations": observations,
+        }
+        if self._object is not None:
+            sample["object_pose"] = (
+                self._object.get_local_pose().detach().cpu().tolist()
+            )
+        return sample
+
+    def start(self) -> None:
+        """Seed one attempt after its reset; no prior attempt state is retained."""
+        self._motion = (
+            ObjectMotionMetrics(self._object.get_local_pose())
+            if self._object is not None
+            else None
+        )
+        self._always_passed = {
+            name: torch.ones(
+                self._env.num_envs, dtype=torch.bool, device=self._env.device
+            )
+            for name in self._sources
+        }
+        self._steps = 0
+        self._latest.clear()
+        self._samples = [self._sample()]
+        self._started = time.perf_counter()
+
+    def after_step(self) -> None:
+        """Update motion at each control boundary and sample configured observations."""
+        if self._started is None:
+            raise RuntimeError("Qualification must start after reset.")
+        if self._motion is not None:
+            self._motion.update(self._object.get_local_pose())
+        self._steps += 1
+        if self._steps % self._stride == 0:
+            self._samples.append(self._sample())
+
+    def finish(self, selected_rows: Sequence[int]) -> dict[str, Any]:
+        """Return physical measurements for selected rows without committing data.
+
+        Args:
+            selected_rows: Nonempty unique environment indices to qualify.
+
+        Returns:
+            Physical acceptance, motion metrics and sampled raw observations.
+        """
+        if self._started is None:
+            raise RuntimeError("Qualification must start after reset.")
+        selected = tuple(selected_rows)
+        if (
+            not selected
+            or len(set(selected)) != len(selected)
+            or any(
+                type(row) is not int or not 0 <= row < self._env.num_envs
+                for row in selected
+            )
+        ):
+            raise ValueError("Qualification must select unique valid rows.")
+        accepted = torch.ones(
+            self._env.num_envs, dtype=torch.bool, device=self._env.device
+        )
+        motion_report = None
+        if self._motion is not None:
+            self._motion.update(self._object.get_local_pose())
+            motion = self._motion.evaluate(**self._motion_limits)
+            if not bool(motion.valid.all()):
+                raise RuntimeError("Qualification object motion became non-finite.")
+            accepted &= motion.satisfied
+            motion_report = {
+                **{
+                    name: value.cpu().tolist() for name, value in motion.metrics.items()
+                },
+                "accepted": motion.satisfied.cpu().tolist(),
+            }
+        self._samples.append(self._sample())
+        for name, (_, lower, upper, when) in self._sources.items():
+            value = self._latest[name]
+            accepted &= (
+                self._always_passed[name]
+                if when == "always"
+                else self._matches_bounds(value, lower, upper)
+            )
+        return {
+            "accepted": bool(accepted[list(selected)].all()),
+            "accepted_rows": accepted.cpu().tolist(),
+            "object_motion": motion_report,
+            "num_envs": self._env.num_envs,
+            "control_dt": self._env.step_dt,
+            "samples": self._samples,
+            "wall_seconds": time.perf_counter() - self._started,
+            "selected_rows": list(selected),
+        }
 
 
 @configclass
@@ -139,6 +393,11 @@ def _segment_outcome_kind(
         return "cancelled"
 
     validation = metadata.get("validation")
+    contract = metadata.get("segment_contract")
+    if isinstance(contract, Mapping) and (
+        _validation_mask_value(contract, "prerequisite_mask", env_id) is False
+    ):
+        return "validation_failed"
     if isinstance(validation, Mapping):
         if _validation_mask_value(validation, "runtime_success_mask", env_id) is False:
             return "runtime_failed"
@@ -261,6 +520,8 @@ class DemoSegmentResult:
         continuity_id: Causal-continuity region containing this segment.
         outcome_kind: Aggregate first-failure-phase outcome.
         outcome_kinds: Per-environment first-failure-phase outcomes.
+        validator_accepted: Cached validator decisions, with None for rows
+            where the validator did not run.
     """
 
     segment_id: int
@@ -283,6 +544,7 @@ class DemoSegmentResult:
     outcome_kinds: tuple[DemoSegmentOutcomeKind, ...] = ()
 
     instruction_source: str | None = None
+    validator_accepted: tuple[bool | None, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.metadata, Mapping):
@@ -370,6 +632,8 @@ class DemoSegmentResult:
             ),
         }
         if env_id is not None and self.start_steps:
+            if self.validator_accepted:
+                metadata["validator_accepted"] = self.validator_accepted[env_id]
             metadata.update(
                 {
                     "start_step": self.start_steps[env_id],
@@ -417,6 +681,8 @@ class DemoSegmentResult:
                     "outcome_kinds": list(self.outcome_kinds),
                 }
             )
+        if self.validator_accepted:
+            metadata["validator_accepted"] = list(self.validator_accepted)
         return metadata
 
 
@@ -440,6 +706,7 @@ class DemoEpisodeResult:
         attempt_id: Zero-based collection attempt identifier.
         instruction: Overall task language frozen before execution.
         instruction_source: Origin of the overall task language.
+        execution_eligible: Row eligibility before the deployment's final gate.
     """
 
     episode_index: int
@@ -458,6 +725,7 @@ class DemoEpisodeResult:
 
     instruction: str | None = None
     instruction_source: str | None = None
+    execution_eligible: tuple[bool, ...] = ()
 
     @property
     def all_success(self) -> bool:
@@ -531,6 +799,8 @@ class DemoEpisodeResult:
                     "terminal_reasons": list(self.terminal_reasons),
                 }
             )
+        if self.execution_eligible:
+            metadata["execution_eligible"] = list(self.execution_eligible)
         return metadata
 
 
@@ -825,7 +1095,8 @@ def execute_demo_episode(
     Auto-reset is suspended for the duration of execution. The caller owns the
     transaction boundary and must explicitly call ``env.reset()`` to commit a
     successful episode or ``env.reset(options={"save_data": False})`` to
-    discard an invalid attempt.
+    discard an invalid attempt. A sealed deployment-gated row must be reset
+    before another attempt.
 
     Args:
         env: Gym environment or wrapper.
@@ -869,10 +1140,14 @@ def execute_demo_episode(
     begin_segment = _get_env_callable(env, "_begin_demo_segment_recording")
     end_segment = _get_env_callable(env, "_end_demo_segment_recording")
     end_episode = _get_env_callable(env, "_end_demo_episode_recording")
+    capture_terminal_physical = _get_env_callable(
+        env, "_capture_demo_terminal_physical"
+    )
     normalize_action = _get_env_callable(env, "_normalize_demo_action")
     mask_action = _get_env_callable(env, "_mask_demo_action")
     set_active_mask = _get_env_callable(env, "_set_demo_active_mask")
     success_fn = _get_env_callable(env, "is_task_success")
+    final_acceptance_fn = _get_env_callable(env, "_finalize_demo_task_success")
 
     if active_env_ids is not None and (
         not active_env_ids
@@ -915,14 +1190,58 @@ def execute_demo_episode(
     segment_results: list[DemoSegmentResult] = []
     last_info: Mapping[str, Any] = {}
     fatal_reason: str | None = None
+    recording_started = False
+    outcome_published = False
+
+    def capture_frozen_rows(before: tuple[bool, ...]) -> None:
+        if capture_terminal_physical is not None and (
+            "task_outcome" in last_info or "physical_objective" in last_info
+        ):
+            frozen = [
+                row
+                for row, was_active in enumerate(before)
+                if was_active and not active[row]
+            ]
+            if frozen:
+                capture_terminal_physical(frozen, last_info)
+
+    def episode_result(
+        reason: str, execution_eligible: tuple[bool, ...]
+    ) -> DemoEpisodeResult:
+        return DemoEpisodeResult(
+            episode_index=episode_index,
+            length=max(lengths, default=0),
+            completed=all(completed_by_env),
+            success=tuple(success),
+            terminated=tuple(terminated),
+            truncated=tuple(truncated),
+            terminal_reason=reason,
+            segments=tuple(segment_results),
+            lengths=tuple(lengths),
+            completed_by_env=tuple(completed_by_env),
+            terminal_reasons=tuple(terminal_reasons),
+            execution_mode=execution_cfg.mode,
+            attempt_id=attempt_id,
+            instruction=task_instruction,
+            instruction_source=instruction_source,
+            execution_eligible=execution_eligible,
+        )
 
     try:
         if begin_episode is not None:
+            parameters = signature(begin_episode).parameters
+            row_options = {}
+            if active_env_ids is not None and "active_env_ids" in parameters:
+                row_options["active_env_ids"] = active_env_ids
+            if "replan" in parameters:
+                row_options["replan"] = segments is None
             begin_episode(
                 episode_index=episode_index,
                 execution_cfg=execution_cfg,
                 attempt_id=attempt_id,
+                **row_options,
             )
+        recording_started = True
         publish_active_mask()
         segment_count = 0
         segment_iterator = iter(
@@ -950,6 +1269,7 @@ def execute_demo_episode(
             start_steps = tuple(lengths)
             segment_successes = [False] * num_envs
             segment_failure_reasons: list[str | None] = [None] * num_envs
+            validator_accepted: tuple[bool | None, ...] = ()
             segment_reason: str | None = None
             if begin_segment is not None:
                 begin_segment(segment_id=segment_id, segment=segment)
@@ -1099,9 +1419,11 @@ def execute_demo_episode(
                                 active[env_id] = False
                     publish_active_mask()
                     if segment.failure_policy == "batch_abort" or not any(active):
+                        capture_frozen_rows(active_before_step)
                         actions_exhausted = False
                         break
 
+                capture_frozen_rows(active_before_step)
                 publish_active_mask()
                 if not any(active):
                     # Every row reached episode-level success. Stop this segment
@@ -1186,17 +1508,24 @@ def execute_demo_episode(
                     "after an emergency safe-stop attempt."
                 ) from action_error
 
-            traced_terminal_runtime_failure = (
+            contract = segment.metadata.get("segment_contract")
+            traced_boundary_rejection = (
                 action_count == 0
                 and actions_exhausted
                 and segment_reason is None
                 and segment.validator is not None
-                and _has_terminal_runtime_failure_trace(segment)
+                and (
+                    _has_terminal_runtime_failure_trace(segment)
+                    or (
+                        isinstance(contract, Mapping)
+                        and contract.get("prerequisites_rejected_all") is True
+                    )
+                )
             )
             if (
                 action_count == 0
                 and segment_reason is None
-                and not traced_terminal_runtime_failure
+                and not traced_boundary_rejection
             ):
                 fatal_reason = "empty_segment"
                 segment_reason = fatal_reason
@@ -1208,11 +1537,17 @@ def execute_demo_episode(
                 publish_active_mask()
 
             if actions_exhausted and segment_reason is None:
+                active_before_validation = tuple(active)
                 validation = (
                     _as_bool_tuple(segment.validator(), num_envs)
                     if segment.validator is not None
                     else (True,) * num_envs
                 )
+                if segment.validator is not None:
+                    validator_accepted = tuple(
+                        validation[row] if active[row] else None
+                        for row in range(num_envs)
+                    )
                 validation_failed = False
                 for env_id, is_participant in enumerate(participants):
                     if not is_participant:
@@ -1247,6 +1582,7 @@ def execute_demo_episode(
                                 segment_successes[env_id] = False
                                 active[env_id] = False
                     publish_active_mask()
+                    capture_frozen_rows(active_before_validation)
 
             participant_ids = [
                 env_id
@@ -1283,6 +1619,7 @@ def execute_demo_episode(
                 failure_reasons=tuple(segment_failure_reasons),
                 attempt_id=attempt_id,
                 continuity_id=0,
+                validator_accepted=validator_accepted,
             )
             segment_results.append(segment_result)
             if end_segment is not None:
@@ -1292,6 +1629,24 @@ def execute_demo_episode(
 
             if segment_reason is not None or not any(active):
                 break
+
+        final_gate = None
+        normal_exhaustion = segment_count > 0 and fatal_reason is None
+        execution_eligible = tuple(
+            succeeded or (normal_exhaustion and is_active)
+            for succeeded, is_active in zip(success, active, strict=True)
+        )
+        if final_acceptance_fn is not None:
+            final_acceptance = final_acceptance_fn(execution_eligible)
+            if final_acceptance is not None:
+                final_gate = _as_bool_tuple(final_acceptance, num_envs)
+        if final_gate is not None:
+            # A step outcome cannot bypass the deployment gate or bridge completion.
+            for env_id, accepted in enumerate(final_gate):
+                if success[env_id] and not accepted:
+                    success[env_id] = False
+                    completed_by_env[env_id] = False
+                    terminal_reasons[env_id] = "task_incomplete"
 
         if segment_count == 0 and fatal_reason is None:
             fatal_reason = "empty_plan"
@@ -1304,12 +1659,14 @@ def execute_demo_episode(
             # Normal plan exhaustion validates only rows that have not already
             # reached sticky episode success. Legacy expert tasks use
             # is_task_success() for this final validation.
-            success_source = (
-                success_fn()
-                if success_fn is not None
-                else last_info.get("success", True)
-            )
-            final_success = _as_bool_tuple(success_source, num_envs)
+            final_success = final_gate
+            if final_success is None:
+                success_source = (
+                    success_fn()
+                    if success_fn is not None
+                    else last_info.get("success", True)
+                )
+                final_success = _as_bool_tuple(success_source, num_envs)
             for env_id, is_active in enumerate(active):
                 if not is_active:
                     continue
@@ -1332,26 +1689,21 @@ def execute_demo_episode(
                 "task_incomplete",
             )
 
-        result = DemoEpisodeResult(
-            episode_index=episode_index,
-            length=max(lengths, default=0),
-            completed=completed,
-            success=tuple(success),
-            terminated=tuple(terminated),
-            truncated=tuple(truncated),
-            terminal_reason=terminal_reason,
-            segments=tuple(segment_results),
-            lengths=tuple(lengths),
-            completed_by_env=tuple(completed_by_env),
-            terminal_reasons=tuple(terminal_reasons),
-            execution_mode=execution_cfg.mode,
-            attempt_id=attempt_id,
-            instruction=task_instruction,
-            instruction_source=instruction_source,
-        )
+        result = episode_result(terminal_reason, execution_eligible)
         if end_episode is not None:
+            outcome_published = True
             end_episode(result=result)
         return result
+    except Exception:
+        if recording_started and not outcome_published and end_episode is not None:
+            for row, is_active in enumerate(active):
+                if is_active:
+                    terminal_reasons[row] = "execution_error"
+            try:
+                end_episode(result=episode_result("execution_error", tuple(success)))
+            except Exception as error:
+                logger.log_warning(f"Could not seal failed demo episode: {error}")
+        raise
     finally:
         setattr(target, "_demo_instruction_snapshot", previous_instruction_snapshot)
         setattr(target, "_demo_no_auto_reset", previous_no_auto_reset)

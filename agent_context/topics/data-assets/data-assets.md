@@ -58,6 +58,10 @@ fails, retaining the descriptor's revision, digest and extraction subdirectory.
 Custom hosts and other repositories are unchanged; failure of every source
 still raises a download error.
 
+The `task` category registers `PourCupAssets` runtime meshes and
+`PourCupDemoData` historical recordings through `assets/task_assets.py`.
+Both use the shared download cache and class-prefixed paths.
+
 The CLI honors an asset class's optional `cache_prefix` when checking readiness
 and ensuring extraction; otherwise the class name is the cache entry.
 The shared registry merges core category modules and `embodichain.assets`

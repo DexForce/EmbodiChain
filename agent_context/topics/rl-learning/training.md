@@ -132,8 +132,8 @@ example is an experimental gradient reference, not a general simulator task.
 
 ### Add a Policy
 
-1. Implement the `Policy` contract under `models/`.
-2. Register it in `models/__init__.py`.
+1. Implement the `Policy` contract under `policies/`.
+2. Register it with `register_policy` from `embodichain.learning.rl.policies`.
 3. Ensure its outputs satisfy every intended algorithm.
 4. Provide graph-preserving sampling if used with differentiable rollouts.
 
@@ -154,3 +154,17 @@ example is an experimental gradient reference, not a general simulator task.
 Use `add-task-env` for simulator-backed task environments and
 `manager-functor` for their observation, reward, event, and action
 components.
+
+## Actor-critic gradients
+
+APG Actor-Critic retains derivatives through critic inputs while freezing critic
+parameters/statistics during actor collection and backward. Terminal-value
+gradients, detached lambda-return regression and a separate critic optimizer
+have disjoint parameter groups. Task-data masks stay detached.
+
+Optional `update_critic_normalization` runs after actor backward and before
+lambda targets; default leaves statistics unchanged. Weighted current states
+and valid bootstrap successors contribute, while complete-rollout post-terminal
+suffixes do not. Critic minibatches contain only positive-weight samples. An
+empty valid set leaves parameters and optimizer momentum unchanged. Evaluate
+with the frozen training normalizer.
