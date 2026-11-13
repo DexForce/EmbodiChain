@@ -29,7 +29,7 @@ program:
         target: right_approach_0.162_tracking
       resources:
         primary: right_manipulator
-- segment: right_pinch_lift_0.162
+- segment: right_pinch_0.162
   steps:
   - kind: invoke
     call:
@@ -37,14 +37,6 @@ program:
       call_id: simulation.cable_pick
       arguments:
         target: right_grasp_0.162
-      resources:
-        primary: right_manipulator
-  - kind: invoke
-    call:
-      kind: registered
-      call_id: simulation.cable_check
-      arguments:
-        target: right_lifted_0.162
       resources:
         primary: right_manipulator
 - segment: raise_0
@@ -71,6 +63,14 @@ program:
       call_id: simulation.cable_check
       arguments:
         target: raise_0_tracking
+      resources:
+        primary: right_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: right_lifted_0.162
       resources:
         primary: right_manipulator
 - segment: carry_0
@@ -197,7 +197,7 @@ program:
         target: right_approach_0.282_tracking
       resources:
         primary: right_manipulator
-- segment: right_pinch_lift_0.282
+- segment: right_pinch_0.282
   steps:
   - kind: invoke
     call:
@@ -205,14 +205,6 @@ program:
       call_id: simulation.cable_pick
       arguments:
         target: right_grasp_0.282
-      resources:
-        primary: right_manipulator
-  - kind: invoke
-    call:
-      kind: registered
-      call_id: simulation.cable_check
-      arguments:
-        target: right_lifted_0.282
       resources:
         primary: right_manipulator
 - segment: raise_1
@@ -239,6 +231,14 @@ program:
       call_id: simulation.cable_check
       arguments:
         target: raise_1_tracking
+      resources:
+        primary: right_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: right_lifted_0.282
       resources:
         primary: right_manipulator
 - segment: carry_1
@@ -365,7 +365,7 @@ program:
         target: right_approach_0.438_tracking
       resources:
         primary: right_manipulator
-- segment: right_pinch_lift_0.438
+- segment: right_pinch_0.438
   steps:
   - kind: invoke
     call:
@@ -373,14 +373,6 @@ program:
       call_id: simulation.cable_pick
       arguments:
         target: right_grasp_0.438
-      resources:
-        primary: right_manipulator
-  - kind: invoke
-    call:
-      kind: registered
-      call_id: simulation.cable_check
-      arguments:
-        target: right_lifted_0.438
       resources:
         primary: right_manipulator
 - segment: raise_2
@@ -407,6 +399,14 @@ program:
       call_id: simulation.cable_check
       arguments:
         target: raise_2_tracking
+      resources:
+        primary: right_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: right_lifted_0.438
       resources:
         primary: right_manipulator
 - segment: carry_2
@@ -559,7 +559,7 @@ program:
         target: left_approach_0.57_tracking
       resources:
         primary: left_manipulator
-- segment: left_pinch_lift_0.57
+- segment: left_pinch_0.57
   steps:
   - kind: invoke
     call:
@@ -567,6 +567,32 @@ program:
       call_id: simulation.cable_pick
       arguments:
         target: left_grasp_0.57
+      resources:
+        primary: left_manipulator
+- segment: raise_free_end
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: raise_free_end
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: raise_free_end_tracking
       resources:
         primary: left_manipulator
   - kind: invoke
@@ -603,14 +629,14 @@ program:
         target: stage_free_end_tracking
       resources:
         primary: left_manipulator
-- segment: align_yaw_0
+- segment: align_over_port_0
   steps:
   - kind: invoke
     call:
       kind: registered
       call_id: simulation.cable_move
       arguments:
-        target: align_yaw_0
+        target: align_over_port_0
       resources:
         primary: left_manipulator
   - kind: invoke
@@ -626,17 +652,17 @@ program:
       kind: registered
       call_id: simulation.cable_check
       arguments:
-        target: align_yaw_0_tracking
+        target: align_over_port_0_tracking
       resources:
         primary: left_manipulator
-- segment: align_lateral_0
+- segment: align_over_port_1
   steps:
   - kind: invoke
     call:
       kind: registered
       call_id: simulation.cable_move
       arguments:
-        target: align_lateral_0
+        target: align_over_port_1
       resources:
         primary: left_manipulator
   - kind: invoke
@@ -652,17 +678,17 @@ program:
       kind: registered
       call_id: simulation.cable_check
       arguments:
-        target: align_lateral_0_tracking
+        target: align_over_port_1_tracking
       resources:
         primary: left_manipulator
-- segment: align_yaw_1
+- segment: align_over_port_2
   steps:
   - kind: invoke
     call:
       kind: registered
       call_id: simulation.cable_move
       arguments:
-        target: align_yaw_1
+        target: align_over_port_2
       resources:
         primary: left_manipulator
   - kind: invoke
@@ -678,17 +704,17 @@ program:
       kind: registered
       call_id: simulation.cable_check
       arguments:
-        target: align_yaw_1_tracking
+        target: align_over_port_2_tracking
       resources:
         primary: left_manipulator
-- segment: align_lateral_1
+- segment: align_over_port_3
   steps:
   - kind: invoke
     call:
       kind: registered
       call_id: simulation.cable_move
       arguments:
-        target: align_lateral_1
+        target: align_over_port_3
       resources:
         primary: left_manipulator
   - kind: invoke
@@ -704,7 +730,7 @@ program:
       kind: registered
       call_id: simulation.cable_check
       arguments:
-        target: align_lateral_1_tracking
+        target: align_over_port_3_tracking
       resources:
         primary: left_manipulator
 - segment: lower_channel_0
@@ -1065,6 +1091,16 @@ program:
         target: retreat_free_end_tracking
       resources:
         primary: left_manipulator
+- segment: open_clear_of_port
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: open_clear_of_port
+      resources:
+        primary: left_hand
 - segment: home_left
   steps:
   - kind: invoke

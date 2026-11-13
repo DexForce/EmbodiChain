@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 import math
@@ -33,10 +34,11 @@ from embodichain.lab.task_program.integrations.simulation.cable import (
     _decode_cable_service,
     _CableRuntime,
     _CableCheckLowerer,
+    _CableMoveLowerer,
     _CablePickFactory,
 )
 from embodichain.lab.task_program.semantics import RegisteredSemanticCall
-from embodichain.lab.sim.atomic_skills import MoveJointsOptions
+from embodichain.lab.sim.atomic_skills import MoveEndEffectorOptions, MoveJointsOptions
 
 pytestmark = pytest.mark.no_sim
 _ROOT = Path(__file__).resolve().parents[4]
@@ -65,7 +67,7 @@ def test_cable_deployment_preflights_all_calls_and_measured_final_acceptance():
     physical.validate_scene_bindings(deployment.scene_binding)
     registration = deployment.integration.registration
     compiled = registration.catalog.preflight(deployment.load_program())
-    assert compiled.segment_count == 49
+    assert compiled.segment_count == 51
     assert registration.evaluation_final_refs == ("route_success",)
     assert registration.scene_binding.declare().entries == ()
     factories = registration.registered_semantic_lowerer_factories
@@ -91,6 +93,35 @@ def test_cable_configuration_rejects_invalid_closed_payload(change):
         value["geometry"]["strict_region"] = [[0, 0, 0]]
     else:
         value["targets"]["right_grasp_0.162"]["class_type"] = "os.system"
+    with pytest.raises((ValueError, TypeError)):
+        _decode_cable_service(value)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"material_distance": None},
+        {"material_distance": -0.01},
+        {"retract_distance": -0.001},
+        {"retract_distance": float("inf")},
+        {"position": [0.5, None, 0.78]},
+        {"position": [None, None, None]},
+        {"position": [None, None, float("nan")]},
+        {"firm": True},
+        {"kind": "material", "retract_distance": 0.005},
+    ],
+)
+def test_material_lift_rejects_invalid_geometry_and_inapplicable_fields(changes):
+    value = _declaration()
+    target = {
+        "kind": "material_lift",
+        "material_distance": 0.162,
+        "position": [None, None, 0.78],
+    }
+    target.update(changes)
+    if target.get("material_distance") is None:
+        target.pop("material_distance")
+    value["targets"] = {"lift": target}
     with pytest.raises((ValueError, TypeError)):
         _decode_cable_service(value)
 
@@ -166,6 +197,65 @@ def test_material_observation_maps_selected_rows_and_arena_origins_once():
     )
 
 
+@pytest.mark.parametrize("retract_distance", [0.0, 0.008])
+def test_material_lift_retracts_from_measured_tool_along_horizontal_material_tangent(
+    retract_distance,
+):
+    service, state, measured = _runtime()
+    value = _declaration()
+    target = {
+        "kind": "material_lift",
+        "material_distance": 0.162,
+        "position": [None, None, 0.78],
+    }
+    if retract_distance:
+        target["retract_distance"] = retract_distance
+    value["targets"] = {"lift": target}
+    target = _decode_cable_service(value).target("lift")
+    measured[3] = torch.tensor([0.50, 0.02, 0.76])
+    measured[1] = torch.tensor([0.60, 0.03, 0.77])
+    commanded = measured + 0.01
+    service.robot.get_qpos = lambda *, target=False: commanded if target else measured
+    original_fk = service.robot.compute_fk
+    measured_rotation = torch.tensor(
+        [[0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, -1.0]]
+    )
+
+    def rotated_fk(qpos, **kwargs):
+        pose = original_fk(qpos, **kwargs)
+        pose[:, :3, :3] = measured_rotation
+        return pose
+
+    service.robot.compute_fk = rotated_fk
+    # Native rows 3 and 1 belong to arenas at X=40 and X=20. The first
+    # tangent also tilts upward, so the XY projection must be normalized.
+    for row, direction in ((3, (0.0, 0.6, 0.8)), (1, (-0.6, 0.8, 0.0))):
+        x, y, z = direction
+        quaternion = torch.tensor([-y, x, 0.0, 1 + z])
+        state[row, 13, 3:7] = quaternion / quaternion.norm()
+    pose = service.pose(target, "left_arm")
+    expected = torch.tensor([[0.50, 0.02, 0.78], [0.60, 0.03, 0.78]])
+    expected[:, :2] -= retract_distance * torch.tensor([[0.0, 1.0], [-0.6, 0.8]])
+    torch.testing.assert_close(pose[:, :3, 3], expected, atol=2e-6, rtol=0)
+    torch.testing.assert_close(pose[:, :3, :3], measured_rotation.repeat(2, 1, 1))
+
+
+def test_material_lift_rejects_vertical_tangent_without_horizontal_retraction_axis():
+    service, state, _ = _runtime()
+    value = _declaration()
+    value["targets"] = {
+        "lift": {
+            "kind": "material_lift",
+            "material_distance": 0.162,
+            "position": [None, None, 0.78],
+            "retract_distance": 0.008,
+        }
+    }
+    state[1, 13, 3:7] = torch.tensor([0.0, 0.0, 0.0, 1.0])
+    with pytest.raises(ValueError, match="horizontal direction"):
+        service.pose(_decode_cable_service(value).target("lift"), "left_arm")
+
+
 def test_material_reference_is_captured_after_close_and_tracks_slip_per_row():
     service, state, qpos = _runtime()
     service.pending_pick = ("right_arm", service.cfg.target("right_grasp_0.162"))
@@ -188,6 +278,93 @@ def test_material_reference_is_captured_after_close_and_tracks_slip_per_row():
     torch.testing.assert_close(service.grasps["right_arm"][1], baseline)
     fresh, _, _ = _runtime()
     assert not fresh.grasps and fresh.max_slip.tolist() == [0, 0]
+
+
+def test_port_stage_replaces_measured_tilt_with_selected_downward_orientation():
+    service, _, _ = _runtime()
+    original_fk = service.robot.compute_fk
+    cosine = math.sqrt(0.5)
+    # A physical tool tilted by 45 degrees in both pitch and roll.
+    measured_rotation = torch.tensor(
+        [[cosine, 0.5, 0.5], [0.0, cosine, -cosine], [-cosine, 0.5, 0.5]]
+    )
+
+    def tilted_fk(qpos, **kwargs):
+        pose = original_fk(qpos, **kwargs)
+        pose[:, :3, :3] = measured_rotation
+        return pose
+
+    service.robot.compute_fk = tilted_fk
+    service.port_yaw["left_arm"] = torch.tensor([math.pi / 2, -math.pi / 2])
+    target = replace(
+        service.cfg.target("stage_free_end"), position=(0.586, 0.047, 0.815)
+    )
+    pose = service.pose(target, "left_arm")
+    rotation = pose[:, :3, :3]
+    # The two reachable wrist branches point down with opposite channel yaw.
+    expected_rotation = torch.tensor(
+        [
+            [[0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, -1.0]],
+            [[0.0, -1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, -1.0]],
+        ]
+    )
+    torch.testing.assert_close(rotation, expected_rotation)
+    torch.testing.assert_close(
+        rotation.transpose(1, 2) @ rotation, torch.eye(3).repeat(2, 1, 1)
+    )
+    torch.testing.assert_close(torch.linalg.det(rotation), torch.ones(2))
+    torch.testing.assert_close(
+        pose[:, :3, 3], torch.tensor([[0.586, 0.047, 0.815]]).repeat(2, 1)
+    )
+
+
+def test_seated_rows_preserve_contact_loading_command_while_other_rows_move():
+    service, _, measured = _runtime()
+    commanded = measured.clone()
+    measured[3] = torch.tensor([0.585, 0.034, 0.781])
+    measured[1] = torch.tensor([0.585, 0.033, 0.785])
+    commanded[3] = torch.tensor([0.586, 0.035, 0.775])
+    commanded[1] = torch.tensor([0.587, 0.034, 0.780])
+    service.robot.get_qpos = lambda *, target=False: commanded if target else measured
+    service.seated = lambda: torch.tensor([True, False])
+    target = replace(
+        service.cfg.target("lower_channel_3"), position=(None, None, 0.760)
+    )
+
+    pose = service.pose(target, "left_arm")
+
+    # The loaded command remains intact for the seated row; the other row
+    # retains its commanded XY and receives the next requested height.
+    torch.testing.assert_close(
+        pose[:, :3, 3],
+        torch.tensor([[0.586, 0.035, 0.775], [0.587, 0.034, 0.760]]),
+    )
+    service.cfg = replace(service.cfg, targets=(target,))
+    lowerer = _CableMoveLowerer(service.cfg)
+    lowerer.runtime = service
+    endpoint = SimpleNamespace(runtime_target=SimpleNamespace(control_part="left_arm"))
+    bound = SimpleNamespace(
+        binding=SimpleNamespace(
+            resources={"primary": SimpleNamespace(endpoints={"motion": endpoint})}
+        )
+    )
+    result = lowerer.lower(
+        RegisteredSemanticCall(
+            call_id="simulation.cable_move", arguments={"target": target.target_id}
+        ),
+        context=SimpleNamespace(require_control_dt=lambda: 1 / 60),
+        bound=bound,
+        option_template=MoveEndEffectorOptions(),
+    )
+    path = result.goal.xpos
+    # Every command for the seated row must retain its loaded pose, including
+    # the first interpolation sample. Returning to the measured pose unloads
+    # the contact even if the final sample restores the original command.
+    torch.testing.assert_close(path[0], pose[0].expand_as(path[0]))
+    torch.testing.assert_close(path[1, -1], pose[1])
+    assert bool((path[1, :, 2, 3].diff() < 0).all())
+    assert path[1, 0, 2, 3] < measured[1, 2]
+    assert path[1, 0, 2, 3] > commanded[1, 2]
 
 
 def test_cable_tracking_rejects_wrong_orientation_at_same_position():
@@ -214,6 +391,55 @@ def test_cable_tracking_rejects_wrong_orientation_at_same_position():
             bound=bound,
             option_template=MoveJointsOptions(),
         )
+
+
+@pytest.mark.parametrize("tracking_error", ["position", "orientation"])
+def test_release_alignment_above_channel_does_not_bypass_tcp_tracking(tracking_error):
+    service, _, _ = _runtime()
+    service.last_targets["left_arm"] = service.tool("left_arm")
+    # Both rows are aligned for release, but only the first is physically
+    # inside the channel. Both tools miss the 6 mm or 0.25 rad tracking limit.
+    if tracking_error == "position":
+        service.last_targets["left_arm"][:, 0, 3] += 0.007
+    else:
+        service.last_targets["left_arm"][:, :2, :2] = torch.tensor(
+            [[math.cos(0.3), -math.sin(0.3)], [math.sin(0.3), math.cos(0.3)]]
+        )
+    service.seated = lambda: torch.tensor([True, True])
+    service.metrics = lambda: {"strict_port": torch.tensor([True, False])}
+    lowerer = _CableCheckLowerer(service.cfg)
+    lowerer.runtime = service
+    endpoint = SimpleNamespace(runtime_target=SimpleNamespace(control_part="left_arm"))
+    bound = SimpleNamespace(
+        binding=SimpleNamespace(
+            resources={"primary": SimpleNamespace(endpoints={"motion": endpoint})}
+        )
+    )
+    call = RegisteredSemanticCall(
+        call_id="simulation.cable_check",
+        arguments={"target": "lower_channel_3_tracking"},
+    )
+    with pytest.raises(ValueError, match=r"failed in envs \[1\]"):
+        lowerer.lower(
+            call,
+            context=SimpleNamespace(env_ids=service.env_ids),
+            bound=bound,
+            option_template=MoveJointsOptions(),
+        )
+    # The hovered row can proceed once it meets the original tracking limit;
+    # the inserted row may retain its contact-loaded command.
+    if tracking_error == "position":
+        service.last_targets["left_arm"][1, 0, 3] = 0.005
+    else:
+        service.last_targets["left_arm"][1, :2, :2] = torch.tensor(
+            [[math.cos(0.2), -math.sin(0.2)], [math.sin(0.2), math.cos(0.2)]]
+        )
+    lowerer.lower(
+        call,
+        context=SimpleNamespace(env_ids=service.env_ids),
+        bound=bound,
+        option_template=MoveJointsOptions(),
+    )
 
 
 def test_cable_observation_rejects_invalid_quaternion_per_row():

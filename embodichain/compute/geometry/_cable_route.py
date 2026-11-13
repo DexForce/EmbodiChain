@@ -163,9 +163,11 @@ def _measure_cable_route(
     strict_lo, strict_hi = (state.new_tensor(v) for v in geometry["strict_region"])
     release_lo, release_hi = (state.new_tensor(v) for v in geometry["release_region"])
     out["strict_port"] = ((end >= strict_lo) & (end <= strict_hi)).all(-1)
-    out["release_ready"] = valid & (
-        out["strict_port"] | ((end >= release_lo) & (end <= release_hi)).all(-1)
-    )
+    inside_release = ((end >= release_lo) & (end <= release_hi)).all(-1)
+    # An endpoint already seated deeply inside the physical channel need not
+    # be pushed toward the narrower corridor used for release from above.
+    seated_deeply = out["strict_port"] & (end[:, 1] >= release_lo[1])
+    out["release_ready"] = valid & (inside_release | seated_deeply)
     out["reference_routed"] = (
         valid
         & (out["seat_0"] >= 2)

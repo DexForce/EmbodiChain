@@ -75,15 +75,17 @@ class _SpoolReleaseCUDAScenario:
         scene = env.sim.spawn_result
         handles = scene.handles
         robot_path = next(path for path in handles if path.endswith("/yam"))
-        spool_paths = [path for path in handles if "/spool_" in path]
+        obstacle_paths = [
+            path for path in handles if "/spool_" in path or path.endswith("/bench")
+        ]
         query = scene.create_contact_query(
-            [handles[robot_path], *(handles[path] for path in spool_paths)],
+            [handles[robot_path], *(handles[path] for path in obstacle_paths)],
             match="all",
             capacity=4096,
             device=env.device,
         )
-        spool_ids = torch.tensor(
-            [actor.actor_id for actor in query.actors if actor.path in spool_paths],
+        obstacle_ids = torch.tensor(
+            [actor.actor_id for actor in query.actors if actor.path in obstacle_paths],
             device=env.device,
         )
         robot_ids = torch.tensor(
@@ -99,10 +101,10 @@ class _SpoolReleaseCUDAScenario:
                 contacts = query.fetch_solver_report()
                 assert contacts.dropped_count == 0
                 pairs = contacts.actor_ids[: contacts.count]
-                robot_spool = torch.isin(pairs, robot_ids).any(-1) & torch.isin(
-                    pairs, spool_ids
+                robot_obstacle = torch.isin(pairs, robot_ids).any(-1) & torch.isin(
+                    pairs, obstacle_ids
                 ).any(-1)
-                distances = contacts.distance[: contacts.count][robot_spool]
+                distances = contacts.distance[: contacts.count][robot_obstacle]
                 if distances.numel():
                     distance = float(distances.min())
                     if distance < worst_distance:
@@ -113,6 +115,8 @@ class _SpoolReleaseCUDAScenario:
 
         # Finite cable states and seated cable alone previously accepted a jaw
         # sweep through the rim with about 16 mm reported penetration.
+        # Include the bench when qualifying the deeper initial pinch.
+        record_property("first_spool_robot_obstacle_distance_m", worst_distance)
         assert worst_distance >= -0.001, (worst_segment, worst_distance)
         max_slip = float(_material_runtime(env).max_slip.max())
         record_property("max_grasp_slip_m", max_slip)
@@ -196,6 +200,133 @@ class _SpoolReleaseCUDAScenario:
                 return
         pytest.fail("The expert did not complete the third carry")
 
+    def test_full_route_keeps_released_endpoint_in_channel(
+        self, record_property: Callable[[str, float], None]
+    ) -> None:
+        """Require the measured route to survive opening, retreat and settling."""
+        env = self.env
+        assert env.num_envs == 1
+        scene = env.sim.spawn_result
+        handles = scene.handles
+        robot_path = next(path for path in handles if path.endswith("/yam"))
+        obstacle_paths = [
+            path
+            for path in handles
+            if path.endswith("/bench")
+            or path.rsplit("/", 1)[-1].startswith(("spool_", "port_"))
+        ]
+        assert any(path.endswith("/bench") for path in obstacle_paths)
+        assert any("/spool_" in path for path in obstacle_paths)
+        assert any("/port_" in path for path in obstacle_paths)
+        query = scene.create_contact_query(
+            [handles[robot_path], *(handles[path] for path in obstacle_paths)],
+            match="all",
+            capacity=4096,
+            device=env.device,
+        )
+        robot_ids = torch.tensor(
+            [actor.actor_id for actor in query.actors if actor.path == robot_path],
+            device=env.device,
+        )
+        obstacle_ids = torch.tensor(
+            [actor.actor_id for actor in query.actors if actor.path in obstacle_paths],
+            device=env.device,
+        )
+        assert robot_ids.numel() and obstacle_ids.numel()
+        worst_distance = 0.0
+        worst_segment = ""
+        required_boundaries = {
+            "release_free_end",
+            "retreat_free_end",
+            "settle_and_validate",
+        }
+        completed_boundaries: set[str] = set()
+        settling_steps = 0
+        last_segment = None
+        env.reset()
+        for segment in env.create_demo_segments():
+            last_segment = segment.name
+            segment_distance = 0.0
+            for action in segment.actions:
+                env.step(action)
+                # The material goal cannot detect a finger penetrating the
+                # bench or port during the left-hand pinch and insertion.
+                contacts = query.fetch_solver_report()
+                assert contacts.dropped_count == 0, (
+                    segment.name,
+                    contacts.dropped_count,
+                )
+                pairs = contacts.actor_ids[: contacts.count]
+                robot_obstacle = torch.isin(pairs, robot_ids).any(-1) & torch.isin(
+                    pairs, obstacle_ids
+                ).any(-1)
+                distances = contacts.distance[: contacts.count][robot_obstacle]
+                if distances.numel():
+                    segment_distance = min(segment_distance, float(distances.min()))
+                    if segment_distance < worst_distance:
+                        worst_distance, worst_segment = segment_distance, segment.name
+                    record_property(
+                        f"robot_obstacle_{segment.name}_distance_m", segment_distance
+                    )
+                    record_property(
+                        "full_route_robot_obstacle_distance_m", worst_distance
+                    )
+                    assert worst_distance >= -0.001, (worst_segment, worst_distance)
+                if segment.name == "settle_and_validate":
+                    settling_steps += 1
+            measurements = _material_runtime(env).metrics()
+            endpoint = measurements["end_position"][0]
+            # Keep the most recent endpoint even when an earlier stage fails.
+            # Named boundaries distinguish release-induced escape from drift
+            # during retreat or the final settling interval.
+            for axis, value in zip("xyz", endpoint, strict=True):
+                record_property(f"last_endpoint_{axis}_m", float(value))
+                if segment.name in required_boundaries:
+                    record_property(f"{segment.name}_endpoint_{axis}_m", float(value))
+            record_property(
+                "max_grasp_slip_m", float(measurements["max_grasp_slip"].max())
+            )
+            assert bool(segment.validator().all()), (
+                segment.name,
+                {
+                    key: value.detach().cpu().tolist()
+                    for key, value in measurements.items()
+                },
+            )
+            if segment.name in required_boundaries:
+                completed_boundaries.add(segment.name)
+
+        assert completed_boundaries == required_boundaries
+        assert last_segment == "settle_and_validate"
+        record_property("full_route_robot_obstacle_distance_m", worst_distance)
+        # The deployment's 120 control frames at 60 Hz must include a real
+        # two-second physical settling interval after release and retreat.
+        settling_seconds = settling_steps * env.step_dt
+        record_property("settling_seconds", settling_seconds)
+        assert settling_seconds >= 2.0 - 1e-9
+
+        measurements = _material_runtime(env).metrics()
+        endpoint = measurements["end_position"]
+        # Independent physical channel bounds from the task acceptance
+        # contract: loosening the configured evaluator must not pass this case.
+        lower = endpoint.new_tensor((0.5845, 0.064, 0.753))
+        upper = endpoint.new_tensor((0.5875, 0.0896, 0.759))
+        assert bool(((endpoint >= lower) & (endpoint <= upper)).all()), endpoint
+        assert bool((measurements["max_grasp_slip"] <= 0.012).all())
+        for metric in (
+            "bench_penetration",
+            "spool_penetration",
+            "port_penetration",
+        ):
+            record_property(metric + "_m", float(measurements[metric].max()))
+            assert bool((measurements[metric] <= 0.001).all()), (
+                metric,
+                measurements[metric],
+            )
+        success = env.is_task_success()
+        record_property("task_success", float(success.all()))
+        assert bool(success.all()), measurements
+
 
 def _run_spool_case(case_name: str, metrics_path: Path) -> None:
     """Execute one unchanged acceptance case in its own NoRender world."""
@@ -263,6 +394,17 @@ class TestSpoolReleaseCUDA:
     ) -> None:
         _assert_spool_case_in_subprocess(
             "test_third_carry_preserves_grasp_and_clears_spools",
+            tmp_path,
+            record_property,
+        )
+
+    def test_full_route_keeps_released_endpoint_in_channel(
+        self,
+        tmp_path: Path,
+        record_property: Callable[[str, float], None],
+    ) -> None:
+        _assert_spool_case_in_subprocess(
+            "test_full_route_keeps_released_endpoint_in_channel",
             tmp_path,
             record_property,
         )

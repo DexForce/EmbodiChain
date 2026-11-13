@@ -36,15 +36,20 @@ from embodichain.lab.sim.shapes import CylinderCfg
 pytestmark = pytest.mark.no_sim
 
 
-def measure_route(state, lengths, hands, origins):
+def _route_geometry():
     path = (
         Path(__file__).resolve().parents[4]
         / "extensions/embodichain_tasks/configs/tasks/manipulation/cable/route_the_cable/task_program/integration.yaml"
     )
-    geometry = yaml.safe_load(path.read_text())["runtime_services"]["cable_material"][
+    return yaml.safe_load(path.read_text())["runtime_services"]["cable_material"][
         "geometry"
     ]
-    return _measure_cable_route(state, lengths, hands, origins, geometry, 0.0035)
+
+
+def measure_route(state, lengths, hands, origins):
+    return _measure_cable_route(
+        state, lengths, hands, origins, _route_geometry(), 0.0035
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -236,6 +241,69 @@ def test_strict_channel_rejects_end_that_only_meets_broad_region():
     metrics = measure_route(state, lengths, hands, origin)
     assert metrics["reference_routed"].item()
     assert not metrics["strict_port"].item()
+
+
+def test_release_requires_seating_depth_even_when_tip_is_inside_strict_channel():
+    geometry = _route_geometry()
+    geometry["release_region"] = [[0.585, 0.072, 0.753], [0.587, 0.083, 0.772]]
+    state = _goal_state().repeat(2, 1, 1)
+    # The last capsule points along +Y and has a 6 mm half length. Both tips
+    # are in the final channel. The shallow tip must not stop corrections;
+    # the deeper tip is seated near a sidewall, outside the hover corridor.
+    state[:, -1, :3] = torch.tensor([[0.586, 0.060, 0.755], [0.5846, 0.067, 0.757]])
+    metrics = _measure_cable_route(
+        state,
+        torch.full((50,), 0.012),
+        torch.ones(2, 2, 3),
+        torch.zeros(2, 3),
+        geometry,
+        0.0035,
+    )
+    assert metrics["strict_port"].tolist() == [True, True]
+    assert metrics["release_ready"].tolist() == [False, True]
+
+
+def test_above_channel_release_region_is_independent_of_final_strict_region():
+    geometry = _route_geometry()
+    # An open-top placement may release from above the channel. This is an
+    # action precondition; the final endpoint must still be at or below .759 m.
+    geometry["release_region"] = [[0.585, 0.072, 0.753], [0.587, 0.083, 0.772]]
+    state = _goal_state().repeat(3, 1, 1)
+    state[:, -1, :3] = torch.tensor(
+        [[0.586, 0.071, 0.766], [0.586, 0.071, 0.773], [0.5846, 0.071, 0.766]]
+    )
+    metrics = _measure_cable_route(
+        state,
+        torch.full((50,), 0.012),
+        torch.ones(3, 2, 3),
+        torch.zeros(3, 3),
+        geometry,
+        0.0035,
+    )
+    assert metrics["release_ready"].tolist() == [True, False, False]
+    assert metrics["strict_port"].tolist() == [False, False, False]
+
+
+@pytest.mark.parametrize("invalid", ["nonfinite", "zero_quaternion"])
+def test_strict_seating_does_not_allow_release_with_invalid_cable_state(invalid):
+    geometry = _route_geometry()
+    geometry["release_region"] = [[0.585, 0.072, 0.753], [0.587, 0.083, 0.772]]
+    state = _goal_state()
+    state[0, -1, :3] = torch.tensor([0.5846, 0.067, 0.757])
+    if invalid == "nonfinite":
+        state[0, 0, 0] = float("nan")
+    else:
+        state[0, 0, 3:7] = 0
+    metrics = _measure_cable_route(
+        state,
+        torch.full((50,), 0.012),
+        torch.ones(1, 2, 3),
+        torch.zeros(1, 3),
+        geometry,
+        0.0035,
+    )
+    assert metrics["strict_port"].item()
+    assert not metrics["release_ready"].item()
 
 
 @pytest.mark.parametrize("invalid", ["motion", "nonfinite", "held", "empty_seat"])

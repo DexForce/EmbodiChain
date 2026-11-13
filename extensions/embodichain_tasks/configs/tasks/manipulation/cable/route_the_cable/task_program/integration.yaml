@@ -22,7 +22,7 @@ profile:
       kind: pick_up
       hand_interp_steps: 48
       grasp_settle_steps: 21
-      lift_height: 0.0185
+      lift_height: 0.0
       pre_grasp_distance: 0.0
     simulation.cable_move:
       kind: move_end_effector
@@ -49,8 +49,8 @@ runtime_services:
       - 0.08
       port_stage:
       - 0.586
-      - 0.047
-      - 0.815
+      - 0.055
+      - 0.805
       port_mouth:
       - 0.586
       - 0.064
@@ -119,12 +119,12 @@ runtime_services:
         - 0.0896
         - 0.759
       release_region:
-      - - 0.585
-        - 0.073
+      - - 0.5845
+        - 0.072
         - 0.753
-      - - 0.587
-        - 0.085
-        - 0.766
+      - - 0.5875
+        - 0.083
+        - 0.758
     targets:
       right_approach_0.162:
         kind: material
@@ -150,18 +150,20 @@ runtime_services:
         position:
         - null
         - null
-        - 0.7615
+        - 0.7605
         firm: true
         port_screen: false
       right_lifted_0.162:
         kind: check
         condition: lift
       raise_0:
-        kind: measured
+        kind: material_lift
         position:
         - null
         - null
-        - 0.78
+        - 0.774
+        material_distance: 0.162
+        retract_distance: 0.0015
       raise_0_tracking:
         kind: check
         condition: pose
@@ -235,18 +237,20 @@ runtime_services:
         position:
         - null
         - null
-        - 0.7615
+        - 0.7605
         firm: false
         port_screen: false
       right_lifted_0.282:
         kind: check
         condition: lift
       raise_1:
-        kind: measured
+        kind: material_lift
         position:
         - null
         - null
         - 0.78
+        material_distance: 0.282
+        retract_distance: 0.003
       raise_1_tracking:
         kind: check
         condition: pose
@@ -320,18 +324,20 @@ runtime_services:
         position:
         - null
         - null
-        - 0.7615
+        - 0.7605
         firm: true
         port_screen: false
       right_lifted_0.438:
         kind: check
         condition: lift
       raise_2:
-        kind: measured
+        kind: material_lift
         position:
         - null
         - null
         - 0.8
+        material_distance: 0.438
+        retract_distance: 0.008
       raise_2_tracking:
         kind: check
         condition: pose
@@ -414,7 +420,7 @@ runtime_services:
         position:
         - null
         - null
-        - 0.7615
+        - 0.7605
         firm: true
         port_screen: true
       left_lifted_0.57:
@@ -424,47 +430,9 @@ runtime_services:
         kind: port_stage
         position:
         - 0.586
-        - 0.047
-        - 0.815
+        - 0.055
+        - 0.805
       stage_free_end_tracking:
-        kind: check
-        condition: pose
-        tolerance: 0.02
-        orientation_tolerance: 0.25
-        stop_when_seated: false
-      align_yaw_0:
-        kind: yaw_align
-        material_distance: 0.57
-      align_yaw_0_tracking:
-        kind: check
-        condition: pose
-        tolerance: 0.02
-        orientation_tolerance: 0.25
-        stop_when_seated: false
-      align_lateral_0:
-        kind: ray_align
-        material_distance: 0.57
-        speed: 0.03
-      align_lateral_0_tracking:
-        kind: check
-        condition: pose
-        tolerance: 0.02
-        orientation_tolerance: 0.25
-        stop_when_seated: false
-      align_yaw_1:
-        kind: yaw_align
-        material_distance: 0.57
-      align_yaw_1_tracking:
-        kind: check
-        condition: pose
-        tolerance: 0.02
-        orientation_tolerance: 0.25
-        stop_when_seated: false
-      align_lateral_1:
-        kind: ray_align
-        material_distance: 0.57
-        speed: 0.03
-      align_lateral_1_tracking:
         kind: check
         condition: pose
         tolerance: 0.02
@@ -475,7 +443,7 @@ runtime_services:
         position:
         - null
         - null
-        - 0.79
+        - 0.795
         speed: 0.025
         tolerance: 0.006
         stop_when_seated: true
@@ -492,7 +460,7 @@ runtime_services:
         - 0.077
         - null
         maximum_correction: 0.005
-        maximum_y: 0.047
+        maximum_y: 0.05
         speed: 0.02
         tolerance: 0.006
         stop_when_seated: true
@@ -510,7 +478,7 @@ runtime_services:
         - 0.077
         - null
         maximum_correction: 0.005
-        maximum_y: 0.047
+        maximum_y: 0.05
         speed: 0.02
         tolerance: 0.006
         stop_when_seated: true
@@ -526,7 +494,7 @@ runtime_services:
         position:
         - null
         - null
-        - 0.78
+        - 0.7875
         speed: 0.025
         tolerance: 0.006
         stop_when_seated: true
@@ -543,7 +511,7 @@ runtime_services:
         - 0.077
         - null
         maximum_correction: 0.005
-        maximum_y: 0.047
+        maximum_y: 0.05
         speed: 0.02
         tolerance: 0.006
         stop_when_seated: true
@@ -561,7 +529,7 @@ runtime_services:
         - 0.077
         - null
         maximum_correction: 0.005
-        maximum_y: 0.047
+        maximum_y: 0.05
         speed: 0.02
         tolerance: 0.006
         stop_when_seated: true
@@ -577,7 +545,7 @@ runtime_services:
         position:
         - null
         - null
-        - 0.772
+        - 0.78
         speed: 0.025
         tolerance: 0.006
         stop_when_seated: true
@@ -594,7 +562,7 @@ runtime_services:
         - 0.077
         - null
         maximum_correction: 0.005
-        maximum_y: 0.047
+        maximum_y: 0.05
         speed: 0.02
         tolerance: 0.006
         stop_when_seated: true
@@ -612,7 +580,7 @@ runtime_services:
         - 0.077
         - null
         maximum_correction: 0.005
-        maximum_y: 0.047
+        maximum_y: 0.05
         speed: 0.02
         tolerance: 0.006
         stop_when_seated: true
@@ -628,7 +596,7 @@ runtime_services:
         position:
         - null
         - null
-        - 0.7645
+        - 0.7655
         speed: 0.025
         tolerance: 0.006
         stop_when_seated: true
@@ -645,8 +613,8 @@ runtime_services:
         - 0.077
         - 0.754
         maximum_correction: 0.005
-        maximum_y: 0.047
-        minimum_z: 0.762
+        maximum_y: 0.05
+        minimum_z: 0.7655
         speed: 0.02
         tolerance: 0.006
         stop_when_seated: true
@@ -664,8 +632,8 @@ runtime_services:
         - 0.077
         - 0.754
         maximum_correction: 0.005
-        maximum_y: 0.047
-        minimum_z: 0.762
+        maximum_y: 0.05
+        minimum_z: 0.7655
         speed: 0.02
         tolerance: 0.006
         stop_when_seated: true
@@ -683,6 +651,7 @@ runtime_services:
         kind: open
         samples: 36
         release_part: left_arm
+        finger_position: 0.008
       retreat_free_end:
         kind: command
         position:
@@ -708,3 +677,89 @@ runtime_services:
       settle_and_validate:
         kind: hold
         samples: 120
+      align_over_port_0:
+        kind: tip_align
+        position:
+        - 0.586
+        - 0.077
+        - null
+        maximum_correction: 0.005
+        maximum_y: 0.05
+        speed: 0.02
+        tolerance: 0.006
+        stop_when_seated: true
+      align_over_port_0_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.006
+        orientation_tolerance: 0.25
+        stop_when_seated: true
+      align_over_port_1:
+        kind: tip_align
+        position:
+        - 0.586
+        - 0.077
+        - null
+        maximum_correction: 0.005
+        maximum_y: 0.05
+        speed: 0.02
+        tolerance: 0.006
+        stop_when_seated: true
+      align_over_port_1_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.006
+        orientation_tolerance: 0.25
+        stop_when_seated: true
+      align_over_port_2:
+        kind: tip_align
+        position:
+        - 0.586
+        - 0.077
+        - null
+        maximum_correction: 0.005
+        maximum_y: 0.05
+        speed: 0.02
+        tolerance: 0.006
+        stop_when_seated: true
+      align_over_port_2_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.006
+        orientation_tolerance: 0.25
+        stop_when_seated: true
+      align_over_port_3:
+        kind: tip_align
+        position:
+        - 0.586
+        - 0.077
+        - null
+        maximum_correction: 0.005
+        maximum_y: 0.05
+        speed: 0.02
+        tolerance: 0.006
+        stop_when_seated: true
+      align_over_port_3_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.006
+        orientation_tolerance: 0.25
+        stop_when_seated: true
+      raise_free_end:
+        kind: material_lift
+        material_distance: 0.57
+        retract_distance: 0.003
+        position:
+        - null
+        - null
+        - 0.78
+      raise_free_end_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.006
+        orientation_tolerance: 0.25
+        stop_when_seated: false
+      open_clear_of_port:
+        kind: open
+        samples: 36
+        release_part: left_arm

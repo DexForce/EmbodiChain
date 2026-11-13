@@ -76,6 +76,7 @@ class _CableTarget:
     target_id: str
     kind: str
     material_distance: float | None = None
+    retract_distance: float = 0.0
     position: tuple[float | None, float | None, float | None] = (None, None, None)
     speed: float = 0.05
     tolerance: float = 0.02
@@ -325,13 +326,15 @@ class _CableRuntime:
     def pose(self, target: _CableTarget, part: str) -> torch.Tensor:
         if target.kind == "material":
             return self._material_pose(target, part)
-        measured = self.tool(part)
         if target.kind == "home":
             return self.home[part].clone()
         pose = self.tool(part, commanded=target.kind in {"command", "tip_align"})
         if target.kind == "port_stage":
             angle = self.port_yaw[part]
             c, s = torch.cos(angle), torch.sin(angle)
+            # Replace the complete rotation; measured tilt is not part of this
+            # downward staging orientation and would make it non-orthogonal.
+            pose[:, :3, :3] = 0
             pose[:, 0, 0], pose[:, 0, 1] = c, s
             pose[:, 1, 0], pose[:, 1, 1] = s, -c
             pose[:, 2, 2] = -1
@@ -357,6 +360,17 @@ class _CableRuntime:
                     mouth_y - point[:, 1]
                 )
                 pose[:, 0, 3] += mouth_x - meets
+        elif target.kind == "material_lift":
+            assert target.material_distance is not None
+            assert target.position[2] is not None
+            tangent = self.point(target.material_distance)[1][:, :2]
+            horizontal_norm = tangent.norm(dim=-1, keepdim=True)
+            if not bool((horizontal_norm > 1e-6).all()):
+                raise ValueError(
+                    "Material lift requires a cable tangent with a horizontal direction."
+                )
+            pose[:, :2, 3] -= target.retract_distance * tangent / horizontal_norm
+            pose[:, 2, 3] = target.position[2]
         elif target.kind == "tip_align":
             end = cable_endpoints(self.state(), self.lengths)[1][:, -1] - self.origins
             for axis, value in enumerate(target.position):
@@ -382,7 +396,10 @@ class _CableRuntime:
                 if value is not None:
                     pose[:, axis, 3] = value
         if target.stop_when_seated:
-            pose = torch.where(self.seated()[:, None, None], measured, pose)
+            # Retain the loading target after seating; holding the measured
+            # pose would unload contact forces before the configured release.
+            commanded = self.tool(part, commanded=True)
+            pose = torch.where(self.seated()[:, None, None], commanded, pose)
         return pose
 
 
@@ -472,6 +489,10 @@ class _CableMoveLowerer(_CableLowerer):
         service, target = self._target(call)
         part = self._part(bound)
         start, end = service.tool(part), service.pose(target, part)
+        if target.stop_when_seated:
+            # Seated rows retain the loaded command throughout the path;
+            # interpolating from their measured pose would first unload it.
+            start = torch.where(service.seated()[:, None, None], end, start)
         distance = (start[:, :3, 3] - end[:, :3, 3]).norm(dim=-1).max().item()
         trace = (
             (start[:, :3, :3].transpose(1, 2) @ end[:, :3, :3])
@@ -562,7 +583,13 @@ class _CableCheckLowerer(_CableLowerer):
                 angle <= target.orientation_tolerance
             )
             if target.stop_when_seated:
-                passed |= service.seated() & ~service.observe()
+                # Above-channel release alignment still requires ordinary TCP
+                # tracking. Only an inserted endpoint may retain contact bias.
+                passed |= (
+                    service.seated()
+                    & service.metrics()["strict_port"]
+                    & ~service.observe()
+                )
             details = {
                 "position_error_m": error.tolist(),
                 "orientation_error_rad": angle.tolist(),
@@ -696,6 +723,8 @@ def _decode_cable_service(value: object) -> _CableService:
         allowed = {
             "material": motion_fields
             | {"material_distance", "position", "port_screen", "firm"},
+            "material_lift": motion_fields
+            | {"material_distance", "retract_distance", "position"},
             "measured": motion_fields | {"position", "stop_when_seated"},
             "command": motion_fields | {"position", "stop_when_seated"},
             "home": motion_fields,
@@ -724,6 +753,7 @@ def _decode_cable_service(value: object) -> _CableService:
             raise ValueError(f"Unsupported fields for cable target kind {kind!r}.")
         if kind not in {
             "material",
+            "material_lift",
             "measured",
             "command",
             "home",
@@ -763,10 +793,17 @@ def _decode_cable_service(value: object) -> _CableService:
             or target.maximum_correction <= 0
         ):
             raise ValueError("Cable motion limits must be positive.")
-        if kind in {"material", "yaw_align", "ray_align"} and (
+        if kind in {"material", "material_lift", "yaw_align", "ray_align"} and (
             target.material_distance is None or target.material_distance < 0
         ):
             raise ValueError("A cable material coordinate must be nonnegative.")
+        if kind == "material_lift":
+            if target.retract_distance < 0:
+                raise ValueError("Cable retraction distance must be nonnegative.")
+            if target.position[:2] != (None, None) or target.position[2] is None:
+                raise ValueError(
+                    "Material lift position must specify only its Z height."
+                )
         if kind == "open" and target.release_part is None:
             raise ValueError("An opening target requires its explicit release_part.")
         if kind == "check" and target.condition not in {"pose", "lift", "seated"}:
