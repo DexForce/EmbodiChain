@@ -1,0 +1,28 @@
+[
+  {
+    "file": "cube.usda",
+    "sha256": "26782246446b559a5a714605b328fc4b798f89f7316f5c15dba2a5e27db95f43",
+    "mass_kg": 0.1,
+    "inertia_kg_m2": [
+      4.166666666666668e-05,
+      4.166666666666668e-05,
+      4.166666666666668e-05
+    ],
+    "source": "Authored benchmark geometry",
+    "license": "Apache-2.0",
+    "cylinder_sections": null
+  },
+  {
+    "file": "cylinder.usda",
+    "sha256": "0a6f59866e4b46430c6bb90587830d4f556bd0fd33ecb1287f27427c9c655f61",
+    "mass_kg": 0.1,
+    "inertia_kg_m2": [
+      3.6458333333333336e-05,
+      3.6458333333333336e-05,
+      3.125000000000001e-05
+    ],
+    "source": "Authored benchmark geometry",
+    "license": "Apache-2.0",
+    "cylinder_sections": 64
+  }
+]

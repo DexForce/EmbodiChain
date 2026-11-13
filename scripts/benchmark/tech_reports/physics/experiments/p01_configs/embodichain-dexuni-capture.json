@@ -1,0 +1,20 @@
+{
+  "runs": [
+    {
+      "id": "capture_freefall_dt005",
+      "case": "freefall",
+      "dt": 0.005,
+      "phase": "capture",
+      "count": 1,
+      "record": true
+    },
+    {
+      "id": "capture_pendulum_dt005",
+      "case": "pendulum",
+      "dt": 0.005,
+      "phase": "capture",
+      "count": 1,
+      "record": true
+    }
+  ]
+}

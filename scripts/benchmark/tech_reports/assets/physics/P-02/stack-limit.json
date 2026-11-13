@@ -1,0 +1,1012 @@
+{
+  "experiment": "P-02",
+  "revision": "stack-limit-v2-explicit-stick-defaults",
+  "initial_states": "stack-limit-initials.json",
+  "seed": 20261022,
+  "units": "m kg s rad",
+  "num_envs": 1,
+  "gravity_m_s2": 9.81,
+  "mass_kg": 0.1,
+  "main_dt_s": 0.005,
+  "supplement_dt_s": 0.0025,
+  "slope_duration_s": 10,
+  "stack_settle_s": 2,
+  "stack_observation_s": 58,
+  "slope_size_m": [
+    12,
+    1,
+    0.1
+  ],
+  "slope_top_origin_m": [
+    0,
+    0,
+    4.5
+  ],
+  "slope_body_size_m": [
+    0.1,
+    0.1,
+    0.02
+  ],
+  "stack_cube_size_m": [
+    0.05,
+    0.05,
+    0.05
+  ],
+  "stack_support_size_m": [
+    3,
+    3,
+    0.1
+  ],
+  "stack_support_top_z_m": 0.2,
+  "initial_gap_m": 0.0001,
+  "contact_margin_m": 0,
+  "contact_gap_m": 0.001,
+  "restitution": 0,
+  "dexuni_options": {
+    "solver_type": "dexuni",
+    "joint_mode": "dynamic",
+    "contact_mode": "auto",
+    "coupling": "one_way",
+    "vbd_options": {
+      "iterations": 10,
+      "rigid_enable_sleep": false,
+      "rigid_body_contact_buffer_size": 256,
+      "rigid_contact_hard": true,
+      "rigid_contact_history": false,
+      "rigid_contact_stick_motion_eps": 0.0001,
+      "rigid_contact_stick_freeze_translation_eps": 0.0001,
+      "rigid_contact_stick_freeze_angular_eps": 0.0001
+    },
+    "collision_options": {
+      "rigid_contact_max": 4096,
+      "verify_buffers": true
+    }
+  },
+  "physx": {
+    "solver": "TGS",
+    "position_iterations": 4,
+    "velocity_iterations": 1,
+    "sleep_threshold": 0,
+    "stabilization": false
+  },
+  "scenarios": [
+    {
+      "id": "stack_001",
+      "kind": "stack",
+      "layers": 1,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_002",
+      "kind": "stack",
+      "layers": 2,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_003",
+      "kind": "stack",
+      "layers": 3,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_004",
+      "kind": "stack",
+      "layers": 4,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_005",
+      "kind": "stack",
+      "layers": 5,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_006",
+      "kind": "stack",
+      "layers": 6,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_007",
+      "kind": "stack",
+      "layers": 7,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_008",
+      "kind": "stack",
+      "layers": 8,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_009",
+      "kind": "stack",
+      "layers": 9,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_010",
+      "kind": "stack",
+      "layers": 10,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_011",
+      "kind": "stack",
+      "layers": 11,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_012",
+      "kind": "stack",
+      "layers": 12,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_013",
+      "kind": "stack",
+      "layers": 13,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_014",
+      "kind": "stack",
+      "layers": 14,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_015",
+      "kind": "stack",
+      "layers": 15,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_016",
+      "kind": "stack",
+      "layers": 16,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_017",
+      "kind": "stack",
+      "layers": 17,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_018",
+      "kind": "stack",
+      "layers": 18,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_019",
+      "kind": "stack",
+      "layers": 19,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_020",
+      "kind": "stack",
+      "layers": 20,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_021",
+      "kind": "stack",
+      "layers": 21,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_022",
+      "kind": "stack",
+      "layers": 22,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_023",
+      "kind": "stack",
+      "layers": 23,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_024",
+      "kind": "stack",
+      "layers": 24,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_025",
+      "kind": "stack",
+      "layers": 25,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_026",
+      "kind": "stack",
+      "layers": 26,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_027",
+      "kind": "stack",
+      "layers": 27,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_028",
+      "kind": "stack",
+      "layers": 28,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_029",
+      "kind": "stack",
+      "layers": 29,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_030",
+      "kind": "stack",
+      "layers": 30,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_031",
+      "kind": "stack",
+      "layers": 31,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_032",
+      "kind": "stack",
+      "layers": 32,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_033",
+      "kind": "stack",
+      "layers": 33,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_034",
+      "kind": "stack",
+      "layers": 34,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_035",
+      "kind": "stack",
+      "layers": 35,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_036",
+      "kind": "stack",
+      "layers": 36,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_037",
+      "kind": "stack",
+      "layers": 37,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_038",
+      "kind": "stack",
+      "layers": 38,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_039",
+      "kind": "stack",
+      "layers": 39,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_040",
+      "kind": "stack",
+      "layers": 40,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_041",
+      "kind": "stack",
+      "layers": 41,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_042",
+      "kind": "stack",
+      "layers": 42,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_043",
+      "kind": "stack",
+      "layers": 43,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_044",
+      "kind": "stack",
+      "layers": 44,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_045",
+      "kind": "stack",
+      "layers": 45,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_046",
+      "kind": "stack",
+      "layers": 46,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_047",
+      "kind": "stack",
+      "layers": 47,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_048",
+      "kind": "stack",
+      "layers": 48,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_049",
+      "kind": "stack",
+      "layers": 49,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_050",
+      "kind": "stack",
+      "layers": 50,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_051",
+      "kind": "stack",
+      "layers": 51,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_052",
+      "kind": "stack",
+      "layers": 52,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_053",
+      "kind": "stack",
+      "layers": 53,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_054",
+      "kind": "stack",
+      "layers": 54,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_055",
+      "kind": "stack",
+      "layers": 55,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_056",
+      "kind": "stack",
+      "layers": 56,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_057",
+      "kind": "stack",
+      "layers": 57,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_058",
+      "kind": "stack",
+      "layers": 58,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_059",
+      "kind": "stack",
+      "layers": 59,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_060",
+      "kind": "stack",
+      "layers": 60,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_061",
+      "kind": "stack",
+      "layers": 61,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_062",
+      "kind": "stack",
+      "layers": 62,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_063",
+      "kind": "stack",
+      "layers": 63,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_064",
+      "kind": "stack",
+      "layers": 64,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_065",
+      "kind": "stack",
+      "layers": 65,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_066",
+      "kind": "stack",
+      "layers": 66,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_067",
+      "kind": "stack",
+      "layers": 67,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_068",
+      "kind": "stack",
+      "layers": 68,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_069",
+      "kind": "stack",
+      "layers": 69,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_070",
+      "kind": "stack",
+      "layers": 70,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_071",
+      "kind": "stack",
+      "layers": 71,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_072",
+      "kind": "stack",
+      "layers": 72,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_073",
+      "kind": "stack",
+      "layers": 73,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_074",
+      "kind": "stack",
+      "layers": 74,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_075",
+      "kind": "stack",
+      "layers": 75,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_076",
+      "kind": "stack",
+      "layers": 76,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_077",
+      "kind": "stack",
+      "layers": 77,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_078",
+      "kind": "stack",
+      "layers": 78,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_079",
+      "kind": "stack",
+      "layers": 79,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_080",
+      "kind": "stack",
+      "layers": 80,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_081",
+      "kind": "stack",
+      "layers": 81,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_082",
+      "kind": "stack",
+      "layers": 82,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_083",
+      "kind": "stack",
+      "layers": 83,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_084",
+      "kind": "stack",
+      "layers": 84,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_085",
+      "kind": "stack",
+      "layers": 85,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_086",
+      "kind": "stack",
+      "layers": 86,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_087",
+      "kind": "stack",
+      "layers": 87,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_088",
+      "kind": "stack",
+      "layers": 88,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_089",
+      "kind": "stack",
+      "layers": 89,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_090",
+      "kind": "stack",
+      "layers": 90,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_091",
+      "kind": "stack",
+      "layers": 91,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_092",
+      "kind": "stack",
+      "layers": 92,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_093",
+      "kind": "stack",
+      "layers": 93,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_094",
+      "kind": "stack",
+      "layers": 94,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_095",
+      "kind": "stack",
+      "layers": 95,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_096",
+      "kind": "stack",
+      "layers": 96,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_097",
+      "kind": "stack",
+      "layers": 97,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_098",
+      "kind": "stack",
+      "layers": 98,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_099",
+      "kind": "stack",
+      "layers": 99,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_100",
+      "kind": "stack",
+      "layers": 100,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_101",
+      "kind": "stack",
+      "layers": 101,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_102",
+      "kind": "stack",
+      "layers": 102,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_103",
+      "kind": "stack",
+      "layers": 103,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_104",
+      "kind": "stack",
+      "layers": 104,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_105",
+      "kind": "stack",
+      "layers": 105,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_106",
+      "kind": "stack",
+      "layers": 106,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_107",
+      "kind": "stack",
+      "layers": 107,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_108",
+      "kind": "stack",
+      "layers": 108,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_109",
+      "kind": "stack",
+      "layers": 109,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_110",
+      "kind": "stack",
+      "layers": 110,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_111",
+      "kind": "stack",
+      "layers": 111,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_112",
+      "kind": "stack",
+      "layers": 112,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_113",
+      "kind": "stack",
+      "layers": 113,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_114",
+      "kind": "stack",
+      "layers": 114,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_115",
+      "kind": "stack",
+      "layers": 115,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_116",
+      "kind": "stack",
+      "layers": 116,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_117",
+      "kind": "stack",
+      "layers": 117,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_118",
+      "kind": "stack",
+      "layers": 118,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_119",
+      "kind": "stack",
+      "layers": 119,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_120",
+      "kind": "stack",
+      "layers": 120,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_121",
+      "kind": "stack",
+      "layers": 121,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_122",
+      "kind": "stack",
+      "layers": 122,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_123",
+      "kind": "stack",
+      "layers": 123,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_124",
+      "kind": "stack",
+      "layers": 124,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_125",
+      "kind": "stack",
+      "layers": 125,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_126",
+      "kind": "stack",
+      "layers": 126,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_127",
+      "kind": "stack",
+      "layers": 127,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    },
+    {
+      "id": "stack_128",
+      "kind": "stack",
+      "layers": 128,
+      "mu_static": 0.8,
+      "mu_dynamic": 0.8
+    }
+  ],
+  "capture": {
+    "width": 1280,
+    "height": 720,
+    "intrinsics": [
+      1100,
+      1100,
+      640,
+      360
+    ],
+    "fps": 20,
+    "body_colors": [
+      [
+        0.05,
+        0.35,
+        0.66
+      ],
+      [
+        0.94,
+        0.55,
+        0.13
+      ],
+      [
+        0.08,
+        0.57,
+        0.4
+      ]
+    ],
+    "surface_color": [
+      0.5,
+      0.55,
+      0.61
+    ],
+    "background_color": [
+      0.9,
+      0.92,
+      0.94
+    ],
+    "stack_duration_s": 60
+  },
+  "frozen_after_pilot": "20261022_121044",
+  "execution_policy": "Fresh process per initial. Adaptive exploratory 12 s, boundary validation 60 s. Full raw state; force export disabled for size sweep. Baselines and increased budgets kept separately. VBD default stick thresholds explicitly recorded as 1e-4 m/1e-4 rad; --no-contact-snap overrides all three to zero. Earlier implicit defaults have the same numeric values.",
+  "record_contact_forces": false
+}
