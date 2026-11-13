@@ -92,7 +92,13 @@ from .atomic_evaluation import (
     trace_validity,
 )
 from .atomic_grasps import parallel_jaw_sampler
-from .atomic_policy import with_pick_approach_waypoints, with_plan_options
+from .atomic_policy import (
+    with_axis_align_rotation_waypoints,
+    with_pick_approach_waypoints,
+    with_pick_lift_waypoints,
+    with_plan_options,
+    with_pour_rotation_waypoints,
+)
 from ..atomic_skill import register_atomic_skill_provider
 
 if TYPE_CHECKING:
@@ -651,6 +657,20 @@ def _compile_reference(
     invocations = tuple(with_plan_options(item, plan_opts) for item in build(engine))
     invocations = tuple(
         with_pick_approach_waypoints(item, scenario.pick_approach_waypoints())
+        for item in invocations
+    )
+    invocations = tuple(
+        with_pick_lift_waypoints(item, scenario.pick_lift_waypoints())
+        for item in invocations
+    )
+    invocations = tuple(
+        with_axis_align_rotation_waypoints(
+            item, scenario.axis_align_rotation_waypoints()
+        )
+        for item in invocations
+    )
+    invocations = tuple(
+        with_pour_rotation_waypoints(item, scenario.pour_rotation_waypoints())
         for item in invocations
     )
     context = engine.initial_context(

@@ -182,9 +182,23 @@ class PourOptions(SkillOptions):
     max_rotation_step: float = math.pi / 36
     """Maximum angular spacing of mouth-compensated Cartesian keyframes."""
 
+    rotation_waypoints: int = 0
+    """Intermediate held-object poses on each untargeted rotation leg.
+
+    The pour and return legs each pass through poses rotated by
+    ``k / (rotation_waypoints + 1)`` of ``rotate_angle`` about the same world
+    internal axis, planned in the same call. This keeps the object rotating in
+    place instead of letting a free-space reorientation sweep it into the
+    support. ``0`` plans only the poured and returned poses. A targeted Pour
+    already plans through keyframes spaced by ``max_rotation_step`` and ignores
+    this option.
+    """
+
     def __post_init__(self) -> None:
         if not math.isfinite(self.rotate_angle):
             raise ValueError("rotate_angle must be finite.")
+        if type(self.rotation_waypoints) is not int or self.rotation_waypoints < 0:
+            raise ValueError("rotation_waypoints must be a non-negative integer.")
         if not math.isfinite(self.dwell_duration) or self.dwell_duration < 0.0:
             raise ValueError("dwell_duration must be finite and non-negative.")
         for name in (
@@ -316,7 +330,29 @@ class Pour(AtomicSkill[PourGoal, PourOptions]):
         # signed angle.  Supplying both targets in one call lets planners such
         # as cuRobo chain the two collision-aware legs without another public
         # MotionGenerator.generate invocation.
-        eef_targets = torch.stack([poured_eef_pose, current_eef_pose], dim=1)
+        if options.rotation_waypoints:
+            # Optional in-place keyframes rotate the attached object by
+            # k / (n + 1) of the same signed angle, so a free-space backend
+            # cannot sweep it between the endpoints; the return leg visits
+            # them in reverse before reaching the observed start pose.
+            partial_eef_pose = self._partial_rotation_eef_poses(
+                current_object_pose,
+                object_to_eef,
+                world_axis,
+                options.rotate_angle,
+                options.rotation_waypoints,
+            )
+            eef_targets = torch.cat(
+                [
+                    partial_eef_pose,
+                    poured_eef_pose[:, None],
+                    partial_eef_pose.flip(1),
+                    current_eef_pose[:, None],
+                ],
+                dim=1,
+            )
+        else:
+            eef_targets = torch.stack([poured_eef_pose, current_eef_pose], dim=1)
 
         result = self.motion_generator.generate(
             build_pose_plan_states(eef_targets),
@@ -344,7 +380,8 @@ class Pour(AtomicSkill[PourGoal, PourOptions]):
             dt=result.dt,
             control_dt=control_dt,
             arrival_indices=result.waypoint_indices,
-            split_target_index=0,
+            # The poured pose follows the optional pour-leg keyframes.
+            split_target_index=options.rotation_waypoints,
         )
         dwell_steps = math.ceil(options.dwell_duration / control_dt)
         dwell_arm = pour_arm[:, -1:].expand(-1, dwell_steps, -1)
@@ -382,6 +419,40 @@ class Pour(AtomicSkill[PourGoal, PourOptions]):
                 "return": return_arm.shape[1],
             },
         )
+
+    def _partial_rotation_eef_poses(
+        self,
+        object_pose: torch.Tensor,
+        object_to_eef: torch.Tensor,
+        world_axis: torch.Tensor,
+        rotate_angle: float,
+        waypoint_count: int,
+    ) -> torch.Tensor:
+        """Return EEF poses for evenly spaced fractions of an in-place rotation.
+
+        Args:
+            object_pose: Held object world poses with shape ``(B, 4, 4)``.
+            object_to_eef: Rigid object-to-EEF transforms with shape ``(B, 4, 4)``.
+            world_axis: World rotation axes with shape ``(B, 3)``.
+            rotate_angle: Signed full rotation angle, in radians.
+            waypoint_count: Number of strictly intermediate poses.
+
+        Returns:
+            EEF poses rotated by ``k / (waypoint_count + 1)`` of
+            ``rotate_angle`` for ``k = 1..waypoint_count``, shape
+            ``(B, waypoint_count, 4, 4)``.
+        """
+        fractions = torch.arange(
+            1, waypoint_count + 1, device=object_pose.device, dtype=object_pose.dtype
+        ) / (waypoint_count + 1)
+        rotation = axis_angle_to_rotation_matrix(
+            world_axis[:, None] * (fractions * rotate_angle)[None, :, None]
+        )
+        partial_object_pose = object_pose[:, None].repeat(1, waypoint_count, 1, 1)
+        partial_object_pose[:, :, :3, :3] = torch.matmul(
+            rotation, object_pose[:, None, :3, :3]
+        )
+        return torch.matmul(partial_object_pose, object_to_eef[:, None])
 
     def _target_paths(
         self,

@@ -916,7 +916,7 @@ def _fake_articulation_geometry(*, joint_type: str) -> dict[str, torch.Tensor]:
 def test_atomic_suite_is_franka_robotiq_and_curobo_only():
     suite = load_suite("atomic_franka_robotiq_smoke")
 
-    assert suite.suite_version == "atomic_franka_robotiq_smoke_v8"
+    assert suite.suite_version == "atomic_franka_robotiq_smoke_v9"
     assert suite.robot.id == "franka_robotiq"
     assert suite.robot.provider == "franka_robotiq"
     assert [spec.id for spec in suite.planners if spec.enabled] == ["curobo"]
@@ -1048,7 +1048,7 @@ def test_randomized_atomic_suite_covers_four_interaction_skills_with_fixed_seed_
     suite = load_suite("atomic_franka_robotiq_randomized")
     track = suite.enabled_tracks()[0]
 
-    assert suite.suite_version == "atomic_franka_robotiq_randomized_v6"
+    assert suite.suite_version == "atomic_franka_robotiq_randomized_v7"
     assert track.id == "atomic-skill-randomized"
     assert track.config["seeds"] == list(range(101, 117))
     assert [item["id"] for item in track.config["skills"]] == [
@@ -3575,13 +3575,65 @@ def test_robotiq_grasp_pool_requires_face_normal_closing_axes() -> None:
     )
 
 
-def test_pick_approach_waypoints_are_an_opt_in_track_count() -> None:
+@pytest.mark.parametrize(
+    "key",
+    [
+        "pick_approach_waypoints",
+        "pick_lift_waypoints",
+        "axis_align_rotation_waypoints",
+        "pour_rotation_waypoints",
+    ],
+)
+def test_track_waypoint_counts_are_opt_in(key: str) -> None:
     scenario = AtomicSkillScenario()
+    count = getattr(scenario, key)
     scenario.track = Mock(config={})
-    assert scenario.pick_approach_waypoints() == 0
-    scenario.track = Mock(config={"pick_approach_waypoints": 5})
-    assert scenario.pick_approach_waypoints() == 5
+    assert count() == 0
+    scenario.track = Mock(config={key: 5})
+    assert count() == 5
     for invalid in (True, -1, 2.0):
-        scenario.track = Mock(config={"pick_approach_waypoints": invalid})
-        with pytest.raises(ValueError, match="pick_approach_waypoints"):
-            scenario.pick_approach_waypoints()
+        scenario.track = Mock(config={key: invalid})
+        with pytest.raises(ValueError, match=key):
+            count()
+
+
+def test_track_waypoints_thread_only_into_their_skill_options() -> None:
+    from embodichain.lab.sim.atomic_skills import (
+        AxisAlignOptions,
+        PickUpOptions,
+        PourOptions,
+    )
+    from embodichain_benchmarks.motion_generation.scenarios.atomic_policy import (
+        with_axis_align_rotation_waypoints,
+        with_pick_lift_waypoints,
+        with_pour_rotation_waypoints,
+    )
+
+    def invocation(skill_id: str, options: object) -> SkillInvocation:
+        return SkillInvocation(
+            skill_id=skill_id,
+            goal=None,
+            binding=SkillBinding(owner_id="test", endpoints={}),
+            skill_options=options,
+        )
+
+    axis_align = invocation("axis_align", AxisAlignOptions(approach_waypoints=5))
+    pour = invocation("pour", PourOptions(rotate_angle=1.0))
+    pick = invocation("pick_up", PickUpOptions())
+    aligned = with_axis_align_rotation_waypoints(axis_align, 8).skill_options
+    assert (aligned.alignment_waypoints, aligned.approach_waypoints) == (8, 5)
+    poured = with_pour_rotation_waypoints(pour, 8).skill_options
+    assert (poured.rotation_waypoints, poured.rotate_angle) == (8, 1.0)
+    for item in (axis_align, pour, pick):
+        assert with_axis_align_rotation_waypoints(item, 0) is item
+        assert with_pour_rotation_waypoints(item, 0) is item
+    assert with_axis_align_rotation_waypoints(pour, 8) is pour
+    assert with_axis_align_rotation_waypoints(pick, 8) is pick
+    assert with_pour_rotation_waypoints(axis_align, 8) is axis_align
+    assert with_pour_rotation_waypoints(pick, 8) is pick
+    # Lift keyframes reach every PickUpOptions, including AxisAlign's.
+    assert with_pick_lift_waypoints(pick, 4).skill_options.lift_waypoints == 4
+    lifted = with_pick_lift_waypoints(axis_align, 4).skill_options
+    assert (lifted.lift_waypoints, lifted.approach_waypoints) == (4, 5)
+    assert with_pick_lift_waypoints(pour, 4) is pour
+    assert with_pick_lift_waypoints(pick, 0) is pick

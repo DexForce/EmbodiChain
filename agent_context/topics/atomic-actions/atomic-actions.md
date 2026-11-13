@@ -135,6 +135,12 @@ actual action; replacing them with one shared vector changes the request.
 `approach_waypoints` adds evenly spaced poses on the straight pre-grasp line
 to the same motion-policy call, so a free-space backend cannot sweep the target
 on a diagonal approach. Zero keeps the three-pose plan.
+`lift_waypoints` adds the same kind of poses on the vertical grasp-to-lift line,
+including AxisAlign's held phase, so the held object rises before it moves.
+`AxisAlignOptions.alignment_waypoints` and `PourOptions.rotation_waypoints`
+likewise add evenly spaced in-place rotation poses to the held-object call
+(Pour's return leg visits them in reverse; targeted Pour ignores the option),
+so the held object cannot sweep the support. Zero keeps the endpoint plans.
 
 `AxisAlignOptions.alignment_twist_rad` selects a scalar or per-row rotation
 about the aligned target axis. Zero keeps shortest-arc behavior; an independent

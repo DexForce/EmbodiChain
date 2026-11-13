@@ -222,6 +222,17 @@ class PickUpOptions(SkillOptions):
     ``0`` plans only the pre-grasp and grasp poses before closing. AxisAlign
     inherits the same approach.
     """
+
+    lift_waypoints: int = 0
+    """Intermediate poses on the straight world +Z line from grasp to lift.
+
+    The poses keep the grasp orientation and are planned in the same call as
+    the lift, which keeps the closed hand rising vertically instead of letting
+    a free-space lift drag the held object across the support. ``0`` plans only
+    the grasp and lift poses. AxisAlign inherits the same lift. Grasp-candidate
+    IK screening still checks only the endpoints, and an external nominal
+    motion keeps its own path.
+    """
     approach_along_grasp_axis: bool = False
     """Use the realized calibrated TCP +Z for native pre-grasp translation.
 
@@ -281,6 +292,8 @@ class PickUpOptions(SkillOptions):
             raise TypeError("approach_along_grasp_axis must be boolean.")
         if type(self.approach_waypoints) is not int or self.approach_waypoints < 0:
             raise ValueError("approach_waypoints must be a non-negative integer.")
+        if type(self.lift_waypoints) is not int or self.lift_waypoints < 0:
+            raise ValueError("lift_waypoints must be a non-negative integer.")
         if self.approach_along_grasp_axis and self.fixed_object_to_eef is None:
             raise ValueError("Grasp-axis approach requires fixed_object_to_eef.")
         if self.fixed_object_to_eef is not None:
@@ -414,11 +427,22 @@ class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
                     n_waypoints=options.approach_waypoints + 1,
                 )[:, :-1]
             )
+        # Optional vertical lift keyframes follow the grasp target, so the
+        # grasp split index below depends only on the approach keyframes.
+        lift_poses = [lift_xpos[:, None]]
+        if options.lift_waypoints:
+            lift_poses.insert(
+                0,
+                axis_translation_keyframes(
+                    grasp_xpos,
+                    lift_xpos,
+                    lift_xpos.new_tensor([0.0, 0.0, 1.0]),
+                    n_waypoints=options.lift_waypoints + 1,
+                )[:, :-1],
+            )
         motion_result = self.motion_generator.generate(
             build_pose_plan_states(
-                torch.cat(
-                    [*approach_poses, grasp_xpos[:, None], lift_xpos[:, None]], dim=1
-                )
+                torch.cat([*approach_poses, grasp_xpos[:, None], *lift_poses], dim=1)
             ),
             options=motion_options,
         )

@@ -2,7 +2,7 @@
 # Hand asset: Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf
 schema_version: 1
 name: atomic_dual_franka_robotiq_hand_over
-suite_version: atomic_dual_franka_robotiq_hand_over_v7
+suite_version: atomic_dual_franka_robotiq_hand_over_v8
 profile: smoke
 robot:
   id: dual_franka_robotiq_hand_over
@@ -152,3 +152,5 @@ tracks:
     grasp_model: RobotiqArg2F140
     # Straight-line poses keep the open hand from sweeping the target.
     pick_approach_waypoints: 5
+    # Straight vertical lift keeps the held object off the support.
+    pick_lift_waypoints: 4

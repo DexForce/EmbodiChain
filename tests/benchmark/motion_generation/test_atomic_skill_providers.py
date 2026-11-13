@@ -1328,6 +1328,8 @@ def test_door_pour_align_push_suite_declares_the_four_skills() -> None:
         "push_object",
     ]
     assert track.config["physics"]["steps_per_waypoint"] == 16
+    assert track.config["axis_align_rotation_waypoints"] == 8
+    assert track.config["pour_rotation_waypoints"] == 8
     assert suite.protocol.validation_samples == 512
     assert all(
         "fit_type" not in spec.config.get("auto_gen", {}) for spec in suite.planners

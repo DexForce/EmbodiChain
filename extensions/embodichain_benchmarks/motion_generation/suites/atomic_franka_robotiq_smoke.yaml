@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_franka_robotiq_smoke
-suite_version: atomic_franka_robotiq_smoke_v8
+suite_version: atomic_franka_robotiq_smoke_v9
 profile: smoke
 
 robot:
@@ -83,6 +83,8 @@ tracks:
       grasp_model: RobotiqArg2F140
       # Straight-line poses keep the open hand from sweeping the target.
       pick_approach_waypoints: 5
+      # Straight vertical lift keeps the held object off the support.
+      pick_lift_waypoints: 4
       batch_sizes: [1]
       seeds: [11]
       physics:

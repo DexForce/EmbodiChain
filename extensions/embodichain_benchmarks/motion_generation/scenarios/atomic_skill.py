@@ -92,9 +92,12 @@ from .atomic_policy import (
     benchmark_motion_attribution,
     benchmark_motion_policy_strategy,
     policy_motion_budget,
+    with_axis_align_rotation_waypoints,
     with_pick_approach_waypoints,
+    with_pick_lift_waypoints,
     with_motion_budget,
     with_plan_options,
+    with_pour_rotation_waypoints,
 )
 from .atomic_evaluation import executed_final_pose_errors, motion_valid_mask
 
@@ -187,15 +190,37 @@ class AtomicSkillScenario(ScenarioProvider):
         Tracks opt in with ``pick_approach_waypoints``; the default ``0`` plans
         only the pre-grasp, grasp and lift poses.
         """
-        value = (
-            0
-            if self.track is None
-            else self.track.config.get("pick_approach_waypoints", 0)
-        )
+        return self._track_waypoint_count("pick_approach_waypoints")
+
+    def pick_lift_waypoints(self) -> int:
+        """Straight vertical PickUp lift poses requested by the track.
+
+        Tracks opt in with ``pick_lift_waypoints``; the default ``0`` plans
+        only the grasp and lift poses.
+        """
+        return self._track_waypoint_count("pick_lift_waypoints")
+
+    def axis_align_rotation_waypoints(self) -> int:
+        """Intermediate AxisAlign reorientation poses requested by the track.
+
+        Tracks opt in with ``axis_align_rotation_waypoints``; the default ``0``
+        plans only the lift and aligned poses.
+        """
+        return self._track_waypoint_count("axis_align_rotation_waypoints")
+
+    def pour_rotation_waypoints(self) -> int:
+        """Intermediate poses on each Pour rotation leg requested by the track.
+
+        Tracks opt in with ``pour_rotation_waypoints``; the default ``0`` plans
+        only the poured and returned poses.
+        """
+        return self._track_waypoint_count("pour_rotation_waypoints")
+
+    def _track_waypoint_count(self, key: str) -> int:
+        """Read one optional non-negative waypoint count from the track config."""
+        value = 0 if self.track is None else self.track.config.get(key, 0)
         if type(value) is not int or value < 0:
-            raise ValueError(
-                "track.config.pick_approach_waypoints must be a non-negative int."
-            )
+            raise ValueError(f"track.config.{key} must be a non-negative int.")
         return value
 
     def grasp_root_from_tcp(self) -> list[list[float]] | None:
@@ -857,6 +882,20 @@ class AtomicSkillScenario(ScenarioProvider):
             )
             invocations = tuple(
                 with_pick_approach_waypoints(item, self.pick_approach_waypoints())
+                for item in invocations
+            )
+            invocations = tuple(
+                with_pick_lift_waypoints(item, self.pick_lift_waypoints())
+                for item in invocations
+            )
+            invocations = tuple(
+                with_axis_align_rotation_waypoints(
+                    item, self.axis_align_rotation_waypoints()
+                )
+                for item in invocations
+            )
+            invocations = tuple(
+                with_pour_rotation_waypoints(item, self.pour_rotation_waypoints())
                 for item in invocations
             )
         physics = (

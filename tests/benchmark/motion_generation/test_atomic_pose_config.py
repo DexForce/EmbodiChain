@@ -58,7 +58,7 @@ def test_pose_batch_suite_declares_translation_only_batched_trials() -> None:
     track = suite.enabled_tracks()[0]
 
     settings = resolve_atomic_pose_randomization(track)
-    assert suite.suite_version == "atomic_franka_robotiq_pose_batch_v9"
+    assert suite.suite_version == "atomic_franka_robotiq_pose_batch_v10"
     assert settings.enabled is True
     assert settings.mode == "translation"
     assert settings.pose_batch_size == 8
@@ -227,7 +227,7 @@ def test_spatial_generalization_suite_covers_task_level_single_arm_skills() -> N
         ),
     }
 
-    assert suite.suite_version == "atomic_franka_robotiq_spatial_generalization_v17"
+    assert suite.suite_version == "atomic_franka_robotiq_spatial_generalization_v18"
     assert len(suite.evaluation_tracks()) == 79
     assert set(expected) == {track.id for track in suite.tracks}
     for track in suite.tracks:
@@ -235,6 +235,9 @@ def test_spatial_generalization_suite_covers_task_level_single_arm_skills() -> N
         assert {entry["id"] for entry in track.config["skills"]} == skills
         assert {domain.id for domain in track.domains} == domain_ids
         assert all(set(domain.applicability) == skills for domain in track.domains)
+        rotation_waypoints = 8 if skills & {"pour", "axis_align"} else 0
+        for key in ("axis_align_rotation_waypoints", "pour_rotation_waypoints"):
+            assert track.config.get(key, 0) == rotation_waypoints
 
 
 def test_cube_primitive_domains_parameterize_only_geometry_for_every_skill() -> None:

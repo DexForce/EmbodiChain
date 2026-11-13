@@ -117,8 +117,20 @@ class AxisAlignOptions(PickUpOptions):
     axis goal. Zero preserves the shortest-arc realisation.
     """
 
+    alignment_waypoints: int = 0
+    """Intermediate held-object poses between the lift and aligned poses.
+
+    Each pose applies an even fraction of the alignment rotation, twist and
+    offset to the lifted object. The motion policy plans through them in the
+    same call, which keeps the object near its lifted position instead of
+    letting a free-space reorientation sweep it into the support. ``0`` plans
+    only the lift and aligned poses.
+    """
+
     def __post_init__(self) -> None:
         PickUpOptions.__post_init__(self)
+        if type(self.alignment_waypoints) is not int or self.alignment_waypoints < 0:
+            raise ValueError("alignment_waypoints must be a non-negative integer.")
         if (
             not isinstance(self.target_axis, torch.Tensor)
             or self.target_axis.dim() not in (1, 2)
@@ -341,16 +353,19 @@ class AxisAlign(AtomicSkill[AxisAlignGoal, AxisAlignOptions]):
             options.hand_interp_steps,
         )
         interpolation_dt = context.require_control_dt()
-        # Only the final aligned pose is a planner target.  Supplying n_align
-        # intermediate Cartesian keyframes would make CuRobo call plan_pose once
-        # per keyframe; n_align is instead retained as the output sample budget
-        # for the continuous post-close phase.
+        # By default only the final aligned pose is a planner target, because
+        # CuRobo calls plan_pose once per Cartesian keyframe.  A free-space
+        # backend whose collision world omits the support can route the held
+        # object through it on that single lift-to-aligned plan, so
+        # ``alignment_waypoints`` opts into that many evenly spaced rotation
+        # keyframes before the aligned pose.  n_align remains the output sample
+        # budget for the continuous post-close phase in both cases.
         align_xpos = self._axis_alignment_eef_keyframes(
             lifted_object_pose,
             held_state.object_to_eef,
             affordance.internal_axis,
             options.target_axis,
-            waypoint_count=1,
+            waypoint_count=options.alignment_waypoints + 1,
             alignment_twist_rad=options.alignment_twist_rad,
             alignment_offset_m=options.alignment_offset_m,
         )
@@ -380,12 +395,26 @@ class AxisAlign(AtomicSkill[AxisAlignGoal, AxisAlignOptions]):
         )
 
         # Once the gripper is closed, lifting and alignment form one continuous
-        # held-object phase.  Passing only those two semantic
-        # endpoints retains the required ordering without expanding the rotation
-        # into many CuRobo plan_pose calls.  Together with the open-gripper phase,
-        # the action uses two MotionGenerator.generate calls and four backend
-        # target plans instead of n_align + 3 backend target plans.
-        post_close_xpos = torch.cat([lift_xpos[:, None], align_xpos], dim=1)
+        # held-object phase.  By default only those two semantic endpoints are
+        # passed, which retains the required ordering without expanding the
+        # rotation into many CuRobo plan_pose calls.  Together with the
+        # open-gripper phase, the action uses two MotionGenerator.generate calls
+        # and four backend target plans instead of n_align + 3 backend target
+        # plans; each approach, lift or alignment waypoint adds one target plan.
+        # Optional lift keyframes keep the grasp rotation on the vertical line
+        # from the grasp, so the held object rises before it rotates.
+        lift_poses = [lift_xpos[:, None]]
+        if options.lift_waypoints:
+            lift_poses.insert(
+                0,
+                axis_translation_keyframes(
+                    grasp_xpos,
+                    lift_xpos,
+                    lift_xpos.new_tensor([0.0, 0.0, 1.0]),
+                    n_waypoints=options.lift_waypoints + 1,
+                )[:, :-1],
+            )
+        post_close_xpos = torch.cat([*lift_poses, align_xpos], dim=1)
         post_close_success, post_close_arm = self._plan_pose_phase(
             post_close_xpos,
             pre_close_arm[:, -1],

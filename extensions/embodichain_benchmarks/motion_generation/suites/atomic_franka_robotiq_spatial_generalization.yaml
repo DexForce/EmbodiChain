@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_franka_robotiq_spatial_generalization
-suite_version: atomic_franka_robotiq_spatial_generalization_v17
+suite_version: atomic_franka_robotiq_spatial_generalization_v18
 profile: coverage
 
 # Reusable strict-spatial domain definitions. Every track below selects only
@@ -758,7 +758,9 @@ x-skill-pour: &skill_pour
   hand_interp_steps: 12
   pre_grasp_distance_m: 0.15
   lift_height_m: 0.16
-  approach_direction: [-0.7071, 0.0, -0.7071]
+  # The pads close along the pour axis, so pouring turns the cube about the
+  # pad normal; closing across that axis let it slip in hand at 90 degrees.
+  approach_direction: [0.0, -0.7071, -0.7071]
   # Flat Robotiq pads close along a face normal only if the approach turns
   # with the cube's yaw; a fixed world approach leaves yawed rows no grasp.
   approach_follows_object_yaw: true
@@ -912,6 +914,11 @@ tracks:
       grasp_model: RobotiqArg2F140
       # Straight-line poses keep the open hand from sweeping the target.
       pick_approach_waypoints: 5
+      # Straight vertical lift keeps the held object off the support.
+      pick_lift_waypoints: 4
+      # Empty cuRobo world: ~10-degree keyframes keep held reorientation off the support.
+      axis_align_rotation_waypoints: 8
+      pour_rotation_waypoints: 8
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -957,6 +964,8 @@ tracks:
       grasp_model: RobotiqArg2F140
       # Straight-line poses keep the open hand from sweeping the target.
       pick_approach_waypoints: 5
+      # Straight vertical lift keeps the held object off the support.
+      pick_lift_waypoints: 4
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -996,6 +1005,8 @@ tracks:
       grasp_model: RobotiqArg2F140
       # Straight-line poses keep the open hand from sweeping the target.
       pick_approach_waypoints: 5
+      # Straight vertical lift keeps the held object off the support.
+      pick_lift_waypoints: 4
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -1032,6 +1043,8 @@ tracks:
       grasp_model: RobotiqArg2F140
       # Straight-line poses keep the open hand from sweeping the target.
       pick_approach_waypoints: 5
+      # Straight vertical lift keeps the held object off the support.
+      pick_lift_waypoints: 4
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -1067,6 +1080,11 @@ tracks:
       grasp_model: RobotiqArg2F140
       # Straight-line poses keep the open hand from sweeping the target.
       pick_approach_waypoints: 5
+      # Straight vertical lift keeps the held object off the support.
+      pick_lift_waypoints: 4
+      # Empty cuRobo world: ~10-degree keyframes keep held reorientation off the support.
+      axis_align_rotation_waypoints: 8
+      pour_rotation_waypoints: 8
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -1100,6 +1118,8 @@ tracks:
       grasp_model: RobotiqArg2F140
       # Straight-line poses keep the open hand from sweeping the target.
       pick_approach_waypoints: 5
+      # Straight vertical lift keeps the held object off the support.
+      pick_lift_waypoints: 4
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -1133,6 +1153,8 @@ tracks:
       grasp_model: RobotiqArg2F140
       # Straight-line poses keep the open hand from sweeping the target.
       pick_approach_waypoints: 5
+      # Straight vertical lift keeps the held object off the support.
+      pick_lift_waypoints: 4
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -1166,6 +1188,8 @@ tracks:
       grasp_model: RobotiqArg2F140
       # Straight-line poses keep the open hand from sweeping the target.
       pick_approach_waypoints: 5
+      # Straight vertical lift keeps the held object off the support.
+      pick_lift_waypoints: 4
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -1205,6 +1229,8 @@ tracks:
       grasp_model: RobotiqArg2F140
       # Straight-line poses keep the open hand from sweeping the target.
       pick_approach_waypoints: 5
+      # Straight vertical lift keeps the held object off the support.
+      pick_lift_waypoints: 4
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -1244,6 +1270,8 @@ tracks:
       grasp_model: RobotiqArg2F140
       # Straight-line poses keep the open hand from sweeping the target.
       pick_approach_waypoints: 5
+      # Straight vertical lift keeps the held object off the support.
+      pick_lift_waypoints: 4
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
@@ -1283,6 +1311,8 @@ tracks:
       grasp_model: RobotiqArg2F140
       # Straight-line poses keep the open hand from sweeping the target.
       pick_approach_waypoints: 5
+      # Straight vertical lift keeps the held object off the support.
+      pick_lift_waypoints: 4
       batch_sizes: [1]
       seeds: [11, 23, 47]
       physics: *physics
