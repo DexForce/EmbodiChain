@@ -37,7 +37,12 @@ __all__ = ["CodexTrajectoryAgent"]
 
 
 class CodexTrajectoryAgent:
-    """Return semantics and bounded JSON edits; no shell or trajectory-file output."""
+    """Return semantics and bounded JSON edits; no shell or trajectory-file output.
+
+    Args:
+        model: Model name selected for the locally authenticated Codex CLI.
+        reasoning_effort: Inference effort passed to the model adapter.
+    """
 
     def __init__(self, model: str, reasoning_effort: str) -> None:
         self.profile = dict(
@@ -47,6 +52,19 @@ class CodexTrajectoryAgent:
         )
 
     def __call__(self, stage: str, context: dict, output: Path) -> dict:
+        """Prepare evidence and request one annotation or replay review.
+
+        Args:
+            stage: ``annotate`` for source semantics or ``review`` for replay.
+            context: Host-owned paths to source, robot, scene and replay evidence.
+            output: Directory for evidence images and model request artifacts.
+
+        Returns:
+            Parsed annotation or review JSON, for validation by the loop host.
+
+        Raises:
+            ValueError: The stage or model response is invalid.
+        """
         if stage not in ("annotate", "review"):
             raise ValueError(f"Unknown agent stage: {stage}")
         output.mkdir(parents=True, exist_ok=True)

@@ -53,7 +53,23 @@ def _write(path: Path, value: dict) -> None:
 
 
 def export_native_inputs(source: Path, run: Path) -> Path:
-    """Package explicit registered scene and refined commands, preserving clocks."""
+    """Package explicit registered scene and refined commands, preserving clocks.
+
+    Args:
+        source: Prepared recording with robot metadata, original trajectory
+            arrays, and source videos.
+        run: Run directory containing ``scene.json``, a native scene export
+            receipt and ``trajectory/trajectory_refined.npz``.
+
+    Returns:
+        New ``run/native_inputs`` directory. Videos and the native scene export
+        are symlinked; source calibration arrays are preserved alongside the
+        refined joints. Keep the referenced recording and export available.
+
+    Raises:
+        ValueError: Native Scene Engine export or RH20T timing is invalid.
+        FileExistsError: The native input directory already exists.
+    """
     source, run = source.resolve(), run.resolve()
     output = run / "native_inputs"
     output.mkdir(parents=True, exist_ok=False)

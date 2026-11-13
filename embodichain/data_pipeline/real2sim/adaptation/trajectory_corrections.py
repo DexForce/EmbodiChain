@@ -28,7 +28,7 @@ from .trajectory_tools import (
 
 __all__ = ["CORRECTION_LIMITS", "apply_trajectory_corrections"]
 
-# Edit-authority limits, not task-success thresholds. The model cannot enlarge them.
+#: Per-revision Cartesian/gripper edit limits; the model cannot enlarge them.
 CORRECTION_LIMITS = {
     "max_edits": 4,
     "translation_m": 0.10,

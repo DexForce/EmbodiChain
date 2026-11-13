@@ -41,7 +41,12 @@ class ImageEditor(Protocol):
 
 
 class HttpImageEditor:
-    """Invoke the existing Qwen image-edit HTTP service without automatic retries."""
+    """Invoke the existing Qwen image-edit HTTP service without automatic retries.
+
+    Args:
+        base_url: HTTP service root exposing ``/generate_image_by_image``.
+        timeout_s: Read timeout in seconds; connection timeout is 15 seconds.
+    """
 
     def __init__(self, base_url: str, *, timeout_s: float = 600) -> None:
         self.base_url = base_url.rstrip("/")

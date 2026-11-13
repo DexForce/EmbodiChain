@@ -18,6 +18,7 @@ Paths below are relative to `embodichain/gen_sim/` unless qualified.
 | Image to native execution | `_workflow.py`, `_run_config.py`, `_run_binding.py`, `_run_execution.py`; [command and run guide](../../../embodichain/gen_sim/README.md) |
 | Generate/edit CLI modes | `scene_engine/cli/start.py` |
 | Image → scene | `scene_engine/pipeline/generate.py`: `generate_scene_from_image()` |
+| Real video reconstruction and recorded trajectory correction | `real2sim/scene.py`: `reconstruct_video()`, `register_scene_export()`; `real2sim/execution.py`: `run_prepared_real2sim()`; [run guide](../../../examples/real2sim/README.md) |
 | Edit portable scene | `scene_engine/pipeline/edit.py`: `edit_scene()` |
 | Audited image/edit stages | `scene_engine/pipeline/api.py`: `analyze_image()`, `analyze_edit()`, and their materialization functions |
 | Prepare source GLB geometry before publication | `scene_engine/asset_normalization.py`: `normalize_source_scene_assets()`; owned declarations and content-addressed output, no simulator |
@@ -30,6 +31,15 @@ Paths below are relative to `embodichain/gen_sim/` unless qualified.
 | Web app launch/configuration | `gensim ui` replaces its process with `gradio_ui/gradio_app.py`; `app_env.py` retains auth and allowed-root rules |
 | Session-owned subprocesses | `gradio_ui/app_processes.py`: `SessionProcessRegistry` |
 | Frozen placement declaration → normative evidence binding | `task_engine/evidence.py` → [TaskSpec evidence boundary](../task-spec/task-spec.md#physical-evidence-boundary) |
+
+Real2Sim prepares a video-derived reconstruction image before calling Scene
+Engine. Its bounded loop uses canonical Task Program observation annotations,
+structured correction parameters and native physical replay in a fixed scene.
+Numerical/data operations belong to
+[data-pipeline adaptation](../data-pipeline/real2sim.md#reconstructed-scene-adaptation).
+`real2sim/pipeline.py::run_real2sim()` is the earlier contact-fit path, distinct
+from `execution.run_prepared_real2sim()`. Neither observation annotation nor
+agent review supplies executable graph bindings or qualifies augmentation.
 
 Generate: validate input → VLM understanding → geometry/articulation generation
 → placement refinement → export. Model capabilities resolve lazily through one run-scoped `GenSimServices`.

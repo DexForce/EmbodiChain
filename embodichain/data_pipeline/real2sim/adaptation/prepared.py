@@ -35,7 +35,22 @@ __all__ = ["load_prepared_source", "load_registered_scene"]
 
 
 def load_prepared_source(root: Path, instruction: str) -> ReconstructionInput:
-    """Load unchanged joints and explicit source frame mappings without inference."""
+    """Load unchanged joints and explicit source frame mappings without inference.
+
+    Args:
+        root: Prepared directory containing robot metadata, original trajectory
+            NPZ, videos and calibrated first observations. Paths in metadata
+            resolve relative to this directory. The primary view is ``front``.
+        instruction: Observed task description for downstream annotation.
+
+    Returns:
+        Recording, matching robot, and camera observations. RH20T acquisition
+        timestamps, when supplied, define the relative trajectory clock.
+
+    Raises:
+        ValueError: Acquisition timing or the assembled input contract is invalid.
+        FileNotFoundError: A required recording or robot asset file is absent.
+    """
     root = root.resolve()
     meta = json.loads((root / "robot.json").read_text())
     urdf = (root / meta["urdf"]).resolve()
@@ -121,7 +136,18 @@ def load_prepared_source(root: Path, instruction: str) -> ReconstructionInput:
 
 
 def load_registered_scene(root: Path) -> RegisteredScene:
-    """Load the registered scene and cached world vertices without regeneration."""
+    """Load the registered scene and cached world vertices without regeneration.
+
+    Args:
+        root: Directory with ``scene.json`` and ``scene_vertices.npz``. Object
+            mesh paths resolve relative to this directory.
+
+    Returns:
+        Scene description and world vertices keyed by the same object IDs.
+
+    Raises:
+        ValueError: An object has no corresponding vertex array.
+    """
     root = root.resolve()
     description = json.loads((root / "scene.json").read_text())
     with np.load(root / "scene_vertices.npz", allow_pickle=False) as data:

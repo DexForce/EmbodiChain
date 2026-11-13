@@ -143,7 +143,11 @@ def _trajectory(value: ArrayLike) -> np.ndarray:
 
 
 class TrajectoryTools:
-    """World-frame FK and numerical IK; no grasp, clearance or success rules."""
+    """World-frame FK and numerical IK; no grasp, clearance or success rules.
+
+    Args:
+        model: Source robot model, including the registered world base pose.
+    """
 
     def __init__(self, model: RobotModel) -> None:
         self.robot: Robot = Robot(model)
@@ -151,7 +155,18 @@ class TrajectoryTools:
         self._arm_surfaces: dict[int, dict[str, np.ndarray]] = {}
 
     def fk(self, qpos: np.ndarray, side: int) -> np.ndarray:
-        """Return world TCP pose(s) for one full state or a batch of states."""
+        """Return world TCP pose(s) for one full state or a batch of states.
+
+        Args:
+            qpos: Full joint state ``(J,)`` or batch ``(T, J)`` in robot order.
+            side: Zero-based recorded arm index.
+
+        Returns:
+            TCP transform shaped ``(4, 4)`` or ``(T, 4, 4)`` respectively.
+
+        Raises:
+            ValueError: States are nonfinite or dimensions/arm index mismatch.
+        """
         qpos = np.asarray(qpos, dtype=float)
         single = qpos.ndim == 1
         batch = _trajectory(qpos[None] if single else qpos)
@@ -167,6 +182,12 @@ class TrajectoryTools:
 
         Ranges use half-open source sample indices. This diagnoses URDF/source
         mismatch; it does not decide which semantic phases need correction.
+
+        Args:
+            qpos: Full joint trajectory shaped ``(T, J)`` in source order.
+
+        Returns:
+            Per-arm maximum excess and half-open ranges with limit violations.
         """
         qpos = _trajectory(qpos)
         if qpos.shape[1] != len(self.robot.names):
@@ -262,6 +283,18 @@ class TrajectoryTools:
         Other arm and jaw coordinates are preserved. Target error and URDF limit
         excess are reported without rejecting a finite approximate solution.
         This does not change simulator limits or establish task completion.
+
+        Args:
+            target: Rigid world TCP transform shaped ``(4, 4)``.
+            side: Zero-based recorded arm index to solve.
+            seed: One full source-near joint state shaped ``(J,)``.
+
+        Returns:
+            Full joint state and approximate solver diagnostics. Other arm and
+            jaw coordinates retain their seed values.
+
+        Raises:
+            ValueError: The seed, arm index or rigid target is invalid.
         """
         target, seed = np.asarray(target, dtype=float), np.asarray(seed, dtype=float)
         if seed.ndim != 1:
@@ -284,7 +317,21 @@ def interpolate_joint_knots(
     values: ArrayLike,
     joint_indices: Sequence[int] | np.ndarray,
 ) -> np.ndarray:
-    """Linearly interpolate selected joints between inclusive first/last knots."""
+    """Linearly interpolate selected joints between inclusive first/last knots.
+
+    Args:
+        qpos: Finite source trajectory shaped ``(T, J)``.
+        frames: At least two increasing integer sample indices.
+        values: Knot values shaped ``(len(frames), len(joint_indices))``.
+        joint_indices: Unique command columns to interpolate.
+
+    Returns:
+        Separate joint array; other columns and samples outside the knot span
+        retain their source values.
+
+    Raises:
+        ValueError: Array shapes, knot indices or values are invalid.
+    """
     source = _trajectory(qpos)
     frames, indices = np.asarray(frames), np.asarray(joint_indices)
     values = np.asarray(values, dtype=float)
@@ -326,6 +373,18 @@ def validate_segment_revision(
     Phases contain unique ``id``, ``start_frame`` and ``end_frame`` fields. This preserves
     the current sample grid but imposes no motion, deviation or clearance rule.
     It does not modify either trajectory or evaluate task success.
+
+    Args:
+        previous: Finite joint commands before the proposed edit.
+        candidate: Proposed commands on the same sample/joint grid.
+        phases: Semantic phase records with inclusive sample boundaries.
+        changed_phase_ids: Phases in which edits are permitted.
+
+    Returns:
+        Declared phase IDs and the actual changed sample indices.
+
+    Raises:
+        ValueError: Inputs are invalid or edits escape the declared phases.
     """
     before, after = _trajectory(previous), _trajectory(candidate)
     if before.shape != after.shape:

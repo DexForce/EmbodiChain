@@ -137,6 +137,19 @@ def recover_scene_image(
     Unaligned frames are skipped. Unresolved pixels keep the first observation
     for subsequent image editing; recovery coverage never gates reconstruction.
     References should reveal task objects without changing the desired scene state.
+
+    Args:
+        images: RGB arrays keyed by decoded frame ID, including frame zero.
+        robot_masks: Same-sized boolean robot-occlusion masks keyed by frame ID.
+        reference_frames: Positive same-camera donor frame IDs present in both
+            mappings; frame zero remains the reconstruction anchor.
+        cfg: Alignment, mask and color-consistency settings, or defaults.
+
+    Returns:
+        Recovered image, unresolved mask, per-pixel donor IDs and recovery report.
+
+    Raises:
+        ValueError: Frame IDs, image/mask shapes or recovery settings are invalid.
     """
     cfg = cfg or RecoveryCfg()
     refs = sorted(set(reference_frames))

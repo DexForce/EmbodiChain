@@ -38,7 +38,22 @@ def _write(path: Path, value: dict) -> None:
 
 
 def export_comparison(source: Path, output: Path) -> Path:
-    """Encode every render with its explicit nearest source observation frame."""
+    """Encode every render with its explicit nearest source observation frame.
+
+    Args:
+        source: Native input package with ``trajectory_refined.npz`` and
+            ``original_front.mp4``; the NPZ supplies sample times and frame IDs.
+        output: Completed replay directory with ``videos/simulation.mp4`` and
+            ``diagnostics/render_times.json``.
+
+    Returns:
+        ``videos/comparison_full.mp4`` in the replay directory. Its frame mapping
+        is also saved to ``diagnostics/comparison_full.json``.
+
+    Raises:
+        ValueError: Source frame IDs are negative/nonmonotonic, or simulation
+            frame counts do not match the supplied render times.
+    """
     import av
 
     with np.load(source / "trajectory_refined.npz", allow_pickle=False) as data:
@@ -98,7 +113,16 @@ def export_comparison(source: Path, output: Path) -> Path:
 def create_video_stream(
     video: av.container.OutputContainer, width: int, height: int
 ) -> av.video.stream.VideoStream:
-    """Create the existing 10 Hz H.264 stream with bounded encoder threads."""
+    """Create a 10 Hz H.264 stream using two encoder threads.
+
+    Args:
+        video: Open output container owned by the caller.
+        width: Output frame width in pixels.
+        height: Output frame height in pixels.
+
+    Returns:
+        Configured stream; the caller encodes frames, flushes and closes it.
+    """
     stream = video.add_stream("libx264", rate=10)
     stream.width, stream.height, stream.pix_fmt = width, height, "yuv420p"
     stream.codec_context.thread_count = 2
@@ -112,7 +136,14 @@ def encode_video_frame(
     rgb: np.ndarray,
     index: int,
 ) -> None:
-    """Encode one RGB frame on the comparison video clock."""
+    """Encode and mux one RGB frame on the 10 Hz comparison video clock.
+
+    Args:
+        video: Open destination container.
+        stream: Stream returned by :func:`create_video_stream`.
+        rgb: RGB uint8 array shaped ``(height, width, 3)``.
+        index: Zero-based output frame index, used as presentation timestamp.
+    """
     import av
 
     frame = av.VideoFrame.from_ndarray(np.ascontiguousarray(rgb), format="rgb24")

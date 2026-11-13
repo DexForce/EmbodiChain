@@ -84,6 +84,21 @@ def place_robot_base(
 
     ``replace_existing`` recomputes from the recording's original mounting pose;
     it does not accumulate a new translation on the previous placement.
+
+    Args:
+        inputs: Original demonstration and calibrated robot model.
+        scene: Registered scene with object vertices, including ``table``.
+        clearance_m: Preferred geometric gap during the placement search.
+        max_translation_m: Maximum horizontal base displacement to search.
+        replace_existing: Explicitly recompute an already declared mounting pose.
+
+    Returns:
+        Scene description with the selected robot mounting and search evidence;
+        object transforms and geometry remain unchanged.
+
+    Raises:
+        ValueError: Search bounds, collision geometry, mounting declaration or
+            table-to-base direction do not support the requested search.
     """
     if not 0 < clearance_m < max_translation_m <= 0.3:
         raise ValueError("Invalid initial placement search bounds")
