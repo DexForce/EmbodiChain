@@ -27,6 +27,7 @@ import numpy as np
 
 from dexsim.spawn import (
     ArticulationDesc,
+    CableDesc,
     ConstraintDesc,
     MeshObjectDesc,
     SoftBodyDesc,
@@ -36,6 +37,9 @@ from dexsim.spawn import (
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
     ArticulationRootPropertiesCfg,
+    CableAttachmentCfg,
+    CableObjectCfg,
+    CablePhysicsCfg,
     RigidObjectCfg,
     RobotCfg,
     VisualObjectCfg,
@@ -46,6 +50,7 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.lab.sim.objects import (
     Articulation,
+    CableObject,
     RigidObject,
     Robot,
     VisualObject,
@@ -108,6 +113,8 @@ def _compile_usd_import(
     manager._spawn_scene._require_compatible_particles(
         cables=bool(source.cables), particles=bool(source.particle_sets)
     )
+    if source.cables:
+        manager._require_cable_declaration()
     resources = list(source.iter_entities())
     source_paths_by_id = {id(item): _source_path(item) for item in resources}
     counts = Counter(source_paths_by_id.values())
@@ -342,6 +349,37 @@ def _compile_usd_import(
             cfg.body_type = None
             cfg.body_scale = None
             pose_mode = "preserve"
+        elif isinstance(descriptor, CableDesc):
+            if original_name in occupied:
+                raise ValueError(f"USD asset UID already exists: {original_name!r}.")
+            occupied.add(original_name)
+            if root_pose is not None:
+                descriptor.pose = root_pose @ descriptor.pose
+            # Keep the parsed descriptor as the source of physics and rendering.
+            # The facade config exposes the resolved segment and placement data.
+            frames = descriptor.segment_quaternions
+            cfg = CableObjectCfg(
+                uid=original_name,
+                points=descriptor.points,
+                radius=descriptor.radius,
+                init_local_pose=descriptor.pose,
+                segment_quaternions=None if frames is None else frames[:, [1, 2, 3, 0]],
+                closed=descriptor.closed,
+                fixed_segments=descriptor.fixed_segments,
+                attrs=CablePhysicsCfg(
+                    **{
+                        item.name: getattr(descriptor.physics, item.name)
+                        for item in fields(descriptor.physics)
+                    }
+                ),
+                collision_filter_span=descriptor.collision_filter_span,
+                render_mode=descriptor.render_mode,
+            )
+            facade = CableObject(cfg, device=manager.device)
+            declarations.append(
+                (resource_keys[id(descriptor)], "cable_object", descriptor, facade)
+            )
+            continue
         else:
             if descriptor.name in occupied:
                 raise ValueError(f"USD asset UID already exists: {descriptor.name!r}.")
@@ -481,6 +519,22 @@ def _compile_usd_import(
         owner, separator, suffix = endpoint.partition("/")
         return renamed.get(owner, owner) + separator + suffix
 
+    for _, kind, descriptor, facade in declarations:
+        if kind == "cable_object":
+            for name in ("start_attachment", "end_attachment"):
+                anchor = getattr(descriptor, name)
+                if anchor is not None:
+                    anchor.target = renamed.get(anchor.target, anchor.target)
+                    setattr(
+                        facade.cfg,
+                        name,
+                        CableAttachmentCfg(
+                            target=anchor.target,
+                            position=anchor.position.copy(),
+                            link_name=anchor.link_name,
+                        ),
+                    )
+
     for constraint in source.constraints:
         if constraint.body0 is not None:
             constraint.body0 = renamed_endpoint(constraint.body0)
@@ -511,6 +565,7 @@ def _compile_usd_import(
     public_kinds = {
         "soft_object": "volume_deformable",
         "cloth_object": "surface_deformable",
+        "cable_object": "cable",
     }
     resource_types = {
         path: "robot" if isinstance(facade, Robot) else public_kinds.get(kind, kind)
@@ -520,7 +575,6 @@ def _compile_usd_import(
         ("cameras", "camera"),
         ("lights", "light"),
         ("records", "record"),
-        ("cables", "cable"),
         ("constraints", "constraint"),
     ):
         resource_types.update(
