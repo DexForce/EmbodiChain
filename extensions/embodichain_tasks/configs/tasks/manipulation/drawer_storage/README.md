@@ -191,7 +191,7 @@ cube deployments' `demo_success` benchmark.
 
 | Seeds | All 24 segments and final acceptance | Steps per episode | Final rail position (mm) | Minimum finger clearance (mm) |
 | --- | --- | --- | --- | --- |
-| 0–9 | 10/10 | 6660–6670 | 0.021–0.090 | 365.62 |
+| 0–9 | 10/10 | 6662–6671 | 0.016–0.098 | 366.86 |
 
 Before the handle grasp was fixed, the same sweep accepted 5/10: three seeds
 sampled a straight handle grasp that slipped at 53 mm of travel, and two
