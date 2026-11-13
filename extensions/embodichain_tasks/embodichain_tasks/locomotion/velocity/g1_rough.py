@@ -14,24 +14,24 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Isaac Lab 3.0 EA g1 velocity task on DexSim."""
+"""Unitree G1 rough-terrain velocity task."""
 
 from __future__ import annotations
 
 from embodichain.lab.gym.utils.registration import register_env
-from .isaac.config import load_config
-from .isaac.runtime import IsaacVelocityEnv
+from .rough.config import load_config
+from .rough.runtime import RoughVelocityEnv
 
-__all__ = ["UnitreeG1IsaacRoughEnv"]
+__all__ = ["UnitreeG1RoughEnv"]
 
-_CONFIG = load_config("g1_isaac_rough")
+_CONFIG = load_config("g1_rough")
 
 
 @register_env(
-    "UnitreeG1IsaacRoughRL-v1", max_episode_steps=1000, override=True, supports_rl=True
+    "UnitreeG1RoughRL-v1", max_episode_steps=1000, override=True, supports_rl=True
 )
-class UnitreeG1IsaacRoughEnv(IsaacVelocityEnv):
-    """Run the reference g1 policy interface and rewards."""
+class UnitreeG1RoughEnv(RoughVelocityEnv):
+    """Track planar velocity commands with the 37-DOF G1 model on rough terrain."""
 
     velocity_task_config = _CONFIG
     foot_link_names = tuple(_CONFIG.data["feet"])

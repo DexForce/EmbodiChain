@@ -14,10 +14,10 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Isaac reference velocity task computations and runtime adapter."""
+"""Rough-terrain velocity task computations and runtime adapter."""
 
 from __future__ import annotations
 
-from .environment import load_reference_env_cfg
+from .environment import load_rough_env_cfg
 
-__all__ = ["load_reference_env_cfg"]
+__all__ = ["load_rough_env_cfg"]

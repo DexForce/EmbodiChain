@@ -1,8 +1,6 @@
 {
-  "reference": {
-    "isaac_lab": "v3.0.0-EA",
-    "task": "Isaac-Velocity-Rough-G1"
-  },
+  "schema": "unitree-velocity-task",
+  "official_task": "Unitree-G1-Rough",
   "robot": {
     "joint_names": [
       "left_hip_pitch_joint",

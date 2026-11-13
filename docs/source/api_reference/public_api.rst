@@ -5664,94 +5664,94 @@ Robot, reset-state and frozen-terrain archives use the standard asset cache.
    :members:
 
 
-embodichain_tasks.locomotion.velocity.g1_isaac_rough
-----------------------------------------------------
+embodichain_tasks.locomotion.velocity.g1_rough
+----------------------------------------------
 
-The G1 Rough environment registers the 37-action reference task with terrain height observations.
+The G1 Rough environment registers the 37-action rough-terrain locomotion task with terrain height observations.
 
-.. currentmodule:: embodichain_tasks.locomotion.velocity.g1_isaac_rough
+.. currentmodule:: embodichain_tasks.locomotion.velocity.g1_rough
 
 .. autosummary::
 
-   UnitreeG1IsaacRoughEnv
+   UnitreeG1RoughEnv
 
-.. autoclass:: UnitreeG1IsaacRoughEnv
+.. autoclass:: UnitreeG1RoughEnv
    :members:
 
 
-embodichain_tasks.locomotion.velocity.isaac
+embodichain_tasks.locomotion.velocity.rough
 -------------------------------------------
 
-Load reference task configurations from a supplied scene bundle. The loader validates robot joint order, shared initial states and terrain inputs.
+Load rough-terrain velocity task configurations from a supplied scene bundle. The loader validates robot joint order, shared initial states and terrain inputs.
 
-.. currentmodule:: embodichain_tasks.locomotion.velocity.isaac
+.. currentmodule:: embodichain_tasks.locomotion.velocity.rough
 
 .. autosummary::
 
-   load_reference_env_cfg
+   load_rough_env_cfg
 
-.. autofunction:: load_reference_env_cfg
+.. autofunction:: load_rough_env_cfg
 
 
-embodichain_tasks.locomotion.velocity.isaac.config
+embodichain_tasks.locomotion.velocity.rough.config
 --------------------------------------------------
 
 Packaged task definitions retain policy joint order, observation dimensions and fixed physics/control periods.
 
-.. currentmodule:: embodichain_tasks.locomotion.velocity.isaac.config
+.. currentmodule:: embodichain_tasks.locomotion.velocity.rough.config
 
 .. autosummary::
 
-   IsaacVelocityConfig
+   RoughVelocityConfig
    load_config
 
-.. autoclass:: IsaacVelocityConfig
+.. autoclass:: RoughVelocityConfig
    :members:
 
 .. autofunction:: load_config
 
 
-embodichain_tasks.locomotion.velocity.isaac.curriculum
+embodichain_tasks.locomotion.velocity.rough.curriculum
 ------------------------------------------------------
 
 Terrain assignment and selected-row curriculum updates use terminal positions and commands before resetting each episode.
 
-.. currentmodule:: embodichain_tasks.locomotion.velocity.isaac.curriculum
+.. currentmodule:: embodichain_tasks.locomotion.velocity.rough.curriculum
 
 .. autosummary::
 
-   ReferenceTerrainCurriculum
+   TerrainCurriculum
 
-.. autoclass:: ReferenceTerrainCurriculum
+.. autoclass:: TerrainCurriculum
    :members:
 
 
-embodichain_tasks.locomotion.velocity.isaac.environment
+embodichain_tasks.locomotion.velocity.rough.environment
 -------------------------------------------------------
 
-Resolve the reference deployment against exported robot and terrain assets, with optional training randomization and contact generation selection.
+Resolve the rough-terrain deployment against exported robot and terrain assets, with optional training randomization and contact generation selection.
 
-.. currentmodule:: embodichain_tasks.locomotion.velocity.isaac.environment
+.. currentmodule:: embodichain_tasks.locomotion.velocity.rough.environment
 
 .. autosummary::
 
-   load_reference_env_cfg
+   load_rough_env_cfg
 
-.. autofunction:: load_reference_env_cfg
+.. autofunction:: load_rough_env_cfg
 
 
-embodichain_tasks.locomotion.velocity.isaac.mdp
+embodichain_tasks.locomotion.velocity.rough.mdp
 -----------------------------------------------
 
-Pure Torch state, action, observation, reward and termination functions share the reference task definitions. Device constants cache fixed values and reward joint selectors.
+Pure Torch state, action, observation, reward and termination functions share the rough-terrain task definitions. Device constants cache fixed values and reward joint selectors.
 
-.. currentmodule:: embodichain_tasks.locomotion.velocity.isaac.mdp
+.. currentmodule:: embodichain_tasks.locomotion.velocity.rough.mdp
 
 .. autosummary::
 
-   IsaacVelocityState
-   IsaacVelocityReward
-   IsaacVelocityConstants
+   RoughVelocityState
+   RoughVelocityReward
+   RoughVelocityConstants
    action_target
    observation_terms
    build_observation
@@ -5760,13 +5760,13 @@ Pure Torch state, action, observation, reward and termination functions share th
    dc_motor_effort
    update_contact_times
 
-.. autoclass:: IsaacVelocityState
+.. autoclass:: RoughVelocityState
    :members:
 
-.. autoclass:: IsaacVelocityReward
+.. autoclass:: RoughVelocityReward
    :members:
 
-.. autoclass:: IsaacVelocityConstants
+.. autoclass:: RoughVelocityConstants
    :members:
 
 .. autofunction:: action_target
@@ -5784,48 +5784,33 @@ Pure Torch state, action, observation, reward and termination functions share th
 .. autofunction:: update_contact_times
 
 
-embodichain_tasks.locomotion.velocity.isaac.rsl_rl
---------------------------------------------------
-
-The RSL-RL adapter preserves unbounded policy actions, automatic selected-row resets and timeout bootstrapping. CUDA calls share the existing simulation stream with ordered entry and exit dependencies.
-
-.. currentmodule:: embodichain_tasks.locomotion.velocity.isaac.rsl_rl
-
-.. autosummary::
-
-   ReferenceRslRlEnv
-
-.. autoclass:: ReferenceRslRlEnv
-   :members:
-
-
-embodichain_tasks.locomotion.velocity.isaac.runtime
+embodichain_tasks.locomotion.velocity.rough.runtime
 ---------------------------------------------------
 
 The runtime adapts the shared task definitions to EmbodiChain managers, state and sensors. Explicit motors retain the configured outer physics cadence; implicit torque telemetry is sampled before the final physical step.
 
-.. currentmodule:: embodichain_tasks.locomotion.velocity.isaac.runtime
+.. currentmodule:: embodichain_tasks.locomotion.velocity.rough.runtime
 
 .. autosummary::
 
-   IsaacVelocityEnv
+   RoughVelocityEnv
 
-.. autoclass:: IsaacVelocityEnv
+.. autoclass:: RoughVelocityEnv
    :members:
 
 
-embodichain_tasks.locomotion.velocity.isaac.terrain
+embodichain_tasks.locomotion.velocity.rough.terrain
 ---------------------------------------------------
 
 The scanner evaluates 187 torso-relative terrain rays and replays a fixed-buffer CUDA graph when the geometry and buffers remain unchanged.
 
-.. currentmodule:: embodichain_tasks.locomotion.velocity.isaac.terrain
+.. currentmodule:: embodichain_tasks.locomotion.velocity.rough.terrain
 
 .. autosummary::
 
-   ReferenceHeightScanner
+   HeightScanner
 
-.. autoclass:: ReferenceHeightScanner
+.. autoclass:: HeightScanner
    :members:
 
 

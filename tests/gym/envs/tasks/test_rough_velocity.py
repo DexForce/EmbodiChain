@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Compare packaged velocity definitions with executed Isaac reference values."""
+"""Verify packaged rough-terrain velocity definitions, curriculum and runtime."""
 
 from __future__ import annotations
 
@@ -38,18 +38,18 @@ from dexsim.spawn import (
 
 from embodichain.lab.gym.envs.episode_context import EpisodeContext
 from embodichain.lab.sim.sim_manager import SimulationManager
-from embodichain_tasks.locomotion.velocity.isaac.curriculum import (
-    ReferenceTerrainCurriculum,
+from embodichain_tasks.locomotion.velocity.rough.curriculum import (
+    TerrainCurriculum,
 )
-from embodichain_tasks.locomotion.velocity.isaac.config import load_config
-from embodichain_tasks.locomotion.velocity.isaac.environment import (
-    load_reference_env_cfg,
+from embodichain_tasks.locomotion.velocity.rough.config import load_config
+from embodichain_tasks.locomotion.velocity.rough.environment import (
+    load_rough_env_cfg,
 )
-from embodichain_tasks.locomotion.velocity.isaac.rsl_rl import ReferenceRslRlEnv
-from embodichain_tasks.locomotion.velocity.isaac.runtime import IsaacVelocityEnv
-from embodichain_tasks.locomotion.velocity.isaac.terrain import ReferenceHeightScanner
-from embodichain_tasks.locomotion.velocity.isaac.mdp import (
-    IsaacVelocityState,
+from embodichain_tasks.locomotion.velocity.rough.runtime import RoughVelocityEnv
+from embodichain_tasks.locomotion.velocity.rough.terrain import HeightScanner
+from embodichain_tasks.locomotion.velocity.rough.mdp import (
+    RoughVelocityConstants,
+    RoughVelocityState,
     action_target,
     build_observation,
     compute_rewards,
@@ -82,7 +82,7 @@ def test_reference_observation_preserves_reset_contact_rows() -> None:
         sensors={"locomotion_contacts": contacts, "camera": camera},
         _reference_sensor=contacts,
     )
-    obs = IsaacVelocityEnv._get_sensor_obs(env)
+    obs = RoughVelocityEnv._get_sensor_obs(env)
     assert not obs["locomotion_contacts"]["is_valid"].any()
     assert obs["camera"].eq(1).all()
     assert calls == [[3], {"fetch_only": True}]
@@ -107,7 +107,7 @@ def test_reference_uses_control_frame_contacts_without_parent_histories() -> Non
     env._initialize_contact_histories()
     assert registered == ["feet", "illegal"]
     registered.clear()
-    reference = object.__new__(IsaacVelocityEnv)
+    reference = object.__new__(RoughVelocityEnv)
     reference.get_sensor = lambda name: sensor
     reference._initialize_contact_histories()
     assert registered == []
@@ -123,7 +123,7 @@ def test_joint_acceleration_matches_reference_update_interval(
         EmbodiChainVelocityEnv,
     )
 
-    env = object.__new__(IsaacVelocityEnv)
+    env = object.__new__(RoughVelocityEnv)
     env.sim_cfg = SimpleNamespace(physics_dt=0.005)
     env.cfg = SimpleNamespace(sim_steps_per_control=4)
     env.policy_joint_ids = torch.arange(2)
@@ -178,7 +178,7 @@ def test_joint_acceleration_matches_reference_update_interval(
 @pytest.mark.no_sim
 def test_control_state_read_is_reused_by_reference_managers() -> None:
     """Acceleration and task managers consume one live read per physics frame."""
-    env = object.__new__(IsaacVelocityEnv)
+    env = object.__new__(RoughVelocityEnv)
     env._num_envs = 1
     env.sim = SimpleNamespace(device=torch.device("cpu"))
     env.sim_cfg = SimpleNamespace(physics_dt=0.005)
@@ -235,24 +235,24 @@ def test_control_state_read_is_reused_by_reference_managers() -> None:
 
 
 @pytest.mark.no_sim
-@pytest.mark.parametrize("task, dimension", [("g1_isaac_rough", 310)])
+@pytest.mark.parametrize("task, dimension", [("g1_rough", 310)])
 @pytest.mark.parametrize("cached", [False, True])
-def test_executed_isaac_reference(task: str, dimension: int, cached: bool) -> None:
-    """Use golden values exported by the actual Isaac MDP functions."""
+def test_rough_velocity_mdp_golden_values(
+    task: str, dimension: int, cached: bool
+) -> None:
+    """Verify observation, reward and termination values against golden fixtures."""
     fixture = json.loads(
         (Path(__file__).parent / "fixtures" / f"{task}.json").read_text()
     )
-    state = IsaacVelocityState(
+    state = RoughVelocityState(
         **{
             name: torch.tensor(value, dtype=torch.float32)
             for name, value in fixture["state"].items()
         }
     )
     config = load_config(task)
-    from embodichain_tasks.locomotion.velocity.isaac.mdp import IsaacVelocityConstants
-
     constants = (
-        IsaacVelocityConstants.from_config(config, state.joint_pos) if cached else None
+        RoughVelocityConstants.from_config(config, state.joint_pos) if cached else None
     )
     noise = {name: torch.tensor(value) for name, value in fixture["noise"].items()}
     observed = build_observation(config, state, noise=noise, constants=constants)
@@ -278,7 +278,7 @@ def test_executed_isaac_reference(task: str, dimension: int, cached: bool) -> No
 
 
 @pytest.mark.no_sim
-@pytest.mark.parametrize("task", ["g1_isaac_rough"])
+@pytest.mark.parametrize("task", ["g1_rough"])
 def test_reference_action_retains_large_policy_output(task: str) -> None:
     """Outputs above one must reach the reference offset mapping unchanged."""
     config = load_config(task)
@@ -362,35 +362,38 @@ def test_ground_replacement_updates_declared_geometry() -> None:
 
 
 @pytest.mark.no_sim
-def test_rsl_wrapper_preserves_actions_and_timeout_bootstrapping() -> None:
-    """Failures end episodes while only timeouts bootstrap the value estimate."""
-    actions = torch.full((2, 12), 4.0)
-    received = []
-
-    def step(value: torch.Tensor, *, policy_observations_only: bool) -> tuple:
-        assert policy_observations_only
-        received.append(value)
-        return (
-            {"policy": torch.zeros(2, 48)},
-            torch.ones(2),
-            torch.tensor([True, False]),
-            torch.tensor([False, True]),
-            {},
-        )
-
-    inner = SimpleNamespace(
-        num_envs=2,
-        velocity_task_config=SimpleNamespace(action_dim=12),
-        max_episode_steps=1000,
-        device=torch.device("cpu"),
-        cfg=None,
-        step=step,
+def test_load_rough_env_cfg_resolves_training_and_evaluation_bundles(
+    tmp_path: Path,
+) -> None:
+    """Resolve explicit G1 asset bundles for evaluation and training modes."""
+    (tmp_path / "g1.usda").write_text("#usda 1.0\n")
+    np.savez(
+        tmp_path / "terrain.npz",
+        vertices=np.zeros((3, 3), dtype=np.float32),
+        triangles=np.array([[0, 1, 2]], dtype=np.int32),
+        resolution=np.float32(0.1),
     )
-    wrapped = ReferenceRslRlEnv(inner)
-    _, _, done, extras = wrapped.step(actions)
-    assert received[0] is actions
-    assert done.tolist() == [True, True]
-    assert extras["time_outs"].tolist() == [False, True]
+    (tmp_path / "terrain.json").write_text(
+        json.dumps(
+            {
+                "env_origins": [[1.0, 2.0, 0.5]],
+                "terrain_origins": [[[0.0, 0.0, 0.0]]],
+                "max_init_terrain_level": 0,
+                "generator": {"size": [8.0, 8.0]},
+            }
+        )
+    )
+    eval_cfg = load_rough_env_cfg("g1", tmp_path, num_envs=2, seed=7)
+    assert eval_cfg.num_envs == 2
+    assert eval_cfg.seed == 7
+    assert eval_cfg.extensions["reference_deterministic_reset"] is True
+    assert eval_cfg.extensions["reference_origin"] == [1.0, 2.0, 0.5]
+
+    train_cfg = load_rough_env_cfg(
+        "g1", tmp_path, num_envs=4, training_randomization=True
+    )
+    assert train_cfg.extensions["reference_randomization"] is True
+    assert "terrain_origins" in train_cfg.extensions["reference_terrain_course"]
 
 
 @pytest.mark.no_sim
@@ -399,7 +402,7 @@ def test_height_scanner_keeps_yaw_frame_and_xy_order() -> None:
     vertices = np.array(
         [[-5, -5, -1.5], [5, -5, -0.5], [5, 5, 1.5], [-5, 5, 0.5]], dtype=np.float32
     )
-    scanner = ReferenceHeightScanner(
+    scanner = HeightScanner(
         vertices,
         np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int32),
         1,
@@ -437,7 +440,7 @@ def test_height_scanner_queries_physics_heightfield_instead_of_source_mesh() -> 
     vertices = np.array(
         [[-2, -2, 0], [2, -2, 0], [2, 2, 0], [-2, 2, 0]], dtype=np.float32
     )
-    scanner = ReferenceHeightScanner(
+    scanner = HeightScanner(
         vertices,
         np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int32),
         1,
@@ -453,7 +456,7 @@ def test_height_scanner_queries_physics_heightfield_instead_of_source_mesh() -> 
 @pytest.mark.no_sim
 def test_contact_impulse_uses_internal_solver_interval() -> None:
     """0.025 N s from a 2.5 ms solver interval is 10 N; invalid slots stay zero."""
-    env = object.__new__(IsaacVelocityEnv)
+    env = object.__new__(RoughVelocityEnv)
     env._num_envs = 1
     env._device = torch.device("cpu")
     env.sim = SimpleNamespace(device=torch.device("cpu"))
@@ -482,13 +485,13 @@ def test_contact_impulse_uses_internal_solver_interval() -> None:
 
 
 @pytest.mark.no_sim
-def test_rough_curriculum_matches_executed_isaac_resets() -> None:
+def test_rough_curriculum_matches_golden_resets() -> None:
     """Match source assignments, threshold cases, selected resets and overflow."""
     fixture = json.loads(
         (Path(__file__).parent / "fixtures/terrain_curriculum.json").read_text()
     )
     origins = torch.tensor(fixture["origins"], dtype=torch.float32)
-    curriculum = ReferenceTerrainCurriculum(
+    curriculum = TerrainCurriculum(
         origins, 20, 5, 8.0, 20.0, torch.Generator().manual_seed(fixture["seed"])
     )
     torch.testing.assert_close(
@@ -530,11 +533,11 @@ def test_rough_curriculum_matches_executed_isaac_resets() -> None:
 def test_rough_reset_curriculum_uses_terminal_step_command(monkeypatch) -> None:
     """A timeout must use the terminal pose and its reward command."""
     origins = torch.zeros((10, 1, 3))
-    curriculum = ReferenceTerrainCurriculum(
+    curriculum = TerrainCurriculum(
         origins, 1, 5, 8.0, 20.0, torch.Generator().manual_seed(42)
     )
     curriculum.levels[:] = 3
-    env = object.__new__(IsaacVelocityEnv)
+    env = object.__new__(RoughVelocityEnv)
     env._device = torch.device("cpu")
     env.sim = SimpleNamespace(device=torch.device("cpu"))
     env._num_envs = 1
@@ -589,7 +592,7 @@ def test_reference_step_orders_events_after_rewards_and_resets(monkeypatch) -> N
     )
 
     events = []
-    env = object.__new__(IsaacVelocityEnv)
+    env = object.__new__(RoughVelocityEnv)
 
     def parent_step(self, action, **kwargs):
         self._advance_command_timer()
@@ -615,12 +618,12 @@ def test_reference_step_orders_events_after_rewards_and_resets(monkeypatch) -> N
         lambda self: events.append("heading"),
     )
     monkeypatch.setattr(
-        IsaacVelocityEnv,
+        RoughVelocityEnv,
         "_apply_reference_interval_events",
         lambda self: events.append("push"),
     )
     monkeypatch.setattr(
-        IsaacVelocityEnv,
+        RoughVelocityEnv,
         "get_obs",
         lambda self, **kwargs: events.append("observation") or {},
     )
@@ -639,7 +642,7 @@ def test_training_step_defers_only_unused_observations(
         EmbodiChainVelocityEnv,
     )
 
-    env = object.__new__(IsaacVelocityEnv)
+    env = object.__new__(RoughVelocityEnv)
     env.cfg = SimpleNamespace(events=SimpleNamespace())
     env._num_envs = 2
     env.sim = SimpleNamespace(device=torch.device("cpu"))
@@ -678,13 +681,13 @@ def test_training_step_defers_only_unused_observations(
 
     monkeypatch.setattr(EmbodiChainVelocityEnv, "get_obs", raw_observe)
     monkeypatch.setattr(
-        IsaacVelocityEnv, "_extend_obs", lambda self, obs, **kwargs: observe(self)
+        RoughVelocityEnv, "_extend_obs", lambda self, obs, **kwargs: observe(self)
     )
     monkeypatch.setattr(EmbodiChainVelocityEnv, "step", parent_step)
-    monkeypatch.setattr(IsaacVelocityEnv, "_advance_command_timer", lambda self: None)
-    monkeypatch.setattr(IsaacVelocityEnv, "_update_heading_commands", lambda self: None)
+    monkeypatch.setattr(RoughVelocityEnv, "_advance_command_timer", lambda self: None)
+    monkeypatch.setattr(RoughVelocityEnv, "_update_heading_commands", lambda self: None)
     monkeypatch.setattr(
-        IsaacVelocityEnv, "_apply_reference_interval_events", lambda self: None
+        RoughVelocityEnv, "_apply_reference_interval_events", lambda self: None
     )
 
     obs, *_ = env.step(torch.zeros(2, 12), policy_observations_only=True)
@@ -699,7 +702,7 @@ def test_training_step_defers_only_unused_observations(
 
 
 @pytest.mark.no_sim
-@pytest.mark.parametrize("task", ["g1_isaac_rough"])
+@pytest.mark.parametrize("task", ["g1_rough"])
 def test_reference_reset_writes_once_and_preserves_sampled_state(monkeypatch, task):
     """Deferred parent writes preserve final states, RNG and untouched rows."""
     from embodichain.lab.gym.envs import EmbodiedEnv
@@ -712,7 +715,7 @@ def test_reference_reset_writes_once_and_preserves_sampled_state(monkeypatch, ta
     rows = torch.tensor([1, 3])
 
     def make_env(legacy: bool):
-        env = object.__new__(IsaacVelocityEnv)
+        env = object.__new__(RoughVelocityEnv)
         env._device = torch.device("cpu")
         env._num_envs = 4
         env.sim = SimpleNamespace(device=env._device)
@@ -823,7 +826,7 @@ def test_height_scanner_graph_replays_changed_poses() -> None:
     builder.add_shape_plane()
     model = builder.finalize(str(device))
     state = model.state()
-    scanner = ReferenceHeightScanner(
+    scanner = HeightScanner(
         vertices, triangles, 2, device, physics_model=model, physics_state=state
     )
     previous = None
@@ -853,7 +856,7 @@ def test_curriculum_checkpoint_restores_assignments_and_rejects_other_maps() -> 
     origins = torch.arange(36, dtype=torch.float32).reshape(4, 3, 3)
 
     def make(count=6):
-        return ReferenceTerrainCurriculum(
+        return TerrainCurriculum(
             origins.clone(), count, 3, 8.0, 20.0, torch.Generator().manual_seed(4)
         )
 
@@ -878,9 +881,9 @@ def test_curriculum_checkpoint_restores_assignments_and_rejects_other_maps() -> 
         _reference_terrain_course=target, num_envs=6, device=torch.device("cpu")
     )
     env.validate_training_state = (
-        lambda state: IsaacVelocityEnv.validate_training_state(env, state)
+        lambda state: RoughVelocityEnv.validate_training_state(env, state)
     )
-    IsaacVelocityEnv.load_training_state(env, {"terrain_course": saved})
+    RoughVelocityEnv.load_training_state(env, {"terrain_course": saved})
     assert env._reference_resume_reset.all()
 
     before = target.state_dict()

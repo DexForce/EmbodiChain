@@ -112,7 +112,7 @@ detachment, and reset/terminal issues to the selected environment protocol.
 
 ## Rough terrain and dexterous task candidates
 
-`locomotion/velocity/g1_isaac_rough.py` registers the 37-action G1 task.
+`locomotion/velocity/g1_rough.py` registers the 37-action G1 task (`UnitreeG1RoughRL-v1`).
 Its frozen curriculum comes from `G1RoughTerrains`; the robot comes from
 `UnitreeG1Rough`, independently of the 29-joint G1 flat archive.
 

@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Tensor computations for the Isaac Lab 3.0 EA velocity task definitions."""
+"""Tensor computations for rough-terrain velocity task definitions."""
 
 from __future__ import annotations
 
@@ -24,12 +24,12 @@ from typing import TYPE_CHECKING
 import torch
 
 if TYPE_CHECKING:
-    from .config import IsaacVelocityConfig
+    from .config import RoughVelocityConfig
 
 __all__ = [
-    "IsaacVelocityState",
-    "IsaacVelocityReward",
-    "IsaacVelocityConstants",
+    "RoughVelocityState",
+    "RoughVelocityReward",
+    "RoughVelocityConstants",
     "action_target",
     "observation_terms",
     "build_observation",
@@ -41,7 +41,7 @@ __all__ = [
 
 
 @dataclass
-class IsaacVelocityState:
+class RoughVelocityState:
     """Measured tensors in policy joint order and XYZW quaternion convention."""
 
     base_lin_vel_b: torch.Tensor
@@ -68,7 +68,7 @@ class IsaacVelocityState:
 
 
 @dataclass(frozen=True)
-class IsaacVelocityReward:
+class RoughVelocityReward:
     """Reward values before and after weight and control-period multiplication."""
 
     raw_terms: dict[str, torch.Tensor]
@@ -77,7 +77,7 @@ class IsaacVelocityReward:
 
 
 @dataclass(frozen=True)
-class IsaacVelocityConstants:
+class RoughVelocityConstants:
     """Device tensors for the fixed task configuration."""
 
     default_joint_position: torch.Tensor
@@ -88,8 +88,8 @@ class IsaacVelocityConstants:
 
     @classmethod
     def from_config(
-        cls, config: IsaacVelocityConfig, reference: torch.Tensor
-    ) -> IsaacVelocityConstants:
+        cls, config: RoughVelocityConfig, reference: torch.Tensor
+    ) -> RoughVelocityConstants:
         """Materialize constants once on the environment device and dtype."""
         return cls(
             reference.new_tensor(config.default_joint_position),
@@ -114,12 +114,12 @@ class IsaacVelocityConstants:
 
 
 def action_target(
-    config: IsaacVelocityConfig,
+    config: RoughVelocityConfig,
     action: torch.Tensor,
     *,
-    constants: IsaacVelocityConstants | None = None,
+    constants: RoughVelocityConstants | None = None,
 ) -> torch.Tensor:
-    """Apply the reference default joint offset and scale without clipping."""
+    """Apply the task default joint offset and scale without clipping."""
     scale = (
         action.new_tensor(config.action_scale)
         if constants is None
@@ -134,12 +134,12 @@ def action_target(
 
 
 def observation_terms(
-    config: IsaacVelocityConfig,
-    state: IsaacVelocityState,
+    config: RoughVelocityConfig,
+    state: RoughVelocityState,
     *,
-    constants: IsaacVelocityConstants | None = None,
+    constants: RoughVelocityConstants | None = None,
 ) -> dict[str, torch.Tensor]:
-    """Return reference policy terms in their declared order before noise and clipping."""
+    """Return policy terms in their declared order before noise and clipping."""
     default = (
         state.joint_pos.new_tensor(config.default_joint_position)
         if constants is None
@@ -160,18 +160,18 @@ def observation_terms(
 
 
 def build_observation(
-    config: IsaacVelocityConfig,
-    state: IsaacVelocityState,
+    config: RoughVelocityConfig,
+    state: RoughVelocityState,
     *,
     noise: dict[str, torch.Tensor] | None = None,
-    constants: IsaacVelocityConstants | None = None,
+    constants: RoughVelocityConstants | None = None,
 ) -> torch.Tensor:
-    """Process term noise, clipping and scaling in reference order.
+    """Process term noise, clipping and scaling in declared order.
 
     Args:
-        config: Fixed reference task definition.
+        config: Fixed rough-terrain velocity task definition.
         state: Measured state tensors.
-        noise: Optional realized additive noise per term for cross-stack replay.
+        noise: Optional realized additive noise per term.
         constants: Optional device tensors for the fixed task configuration.
 
     Returns:
@@ -195,7 +195,7 @@ def build_observation(
 
 
 def compute_termination(
-    config: IsaacVelocityConfig, state: IsaacVelocityState
+    config: RoughVelocityConfig, state: RoughVelocityState
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Return illegal body contact and the independent time limit."""
     terminated = state.illegal_force_history.norm(dim=-1).amax(dim=(1, 2)) > 1.0
@@ -203,13 +203,13 @@ def compute_termination(
 
 
 def compute_rewards(
-    config: IsaacVelocityConfig,
-    state: IsaacVelocityState,
+    config: RoughVelocityConfig,
+    state: RoughVelocityState,
     terminated: torch.Tensor,
     *,
-    constants: IsaacVelocityConstants | None = None,
-) -> IsaacVelocityReward:
-    """Evaluate active reference terms, including joint selections and step duration."""
+    constants: RoughVelocityConstants | None = None,
+) -> RoughVelocityReward:
+    """Evaluate active reward terms, including joint selections and step duration."""
     raw = {}
     default = (
         state.joint_pos.new_tensor(config.default_joint_position)
@@ -287,13 +287,13 @@ def compute_rewards(
         elif function == "joint_deviation_l1":
             value = (state.joint_pos - default).abs()[:, joints].sum(-1)
         else:
-            raise ValueError(f"Unsupported reference reward function: {function}")
+            raise ValueError(f"Unsupported reward function: {function}")
         raw[name] = value
     weighted = {
         name: value * config.data["rewards"][name]["weight"] * config.control_dt
         for name, value in raw.items()
     }
-    return IsaacVelocityReward(
+    return RoughVelocityReward(
         raw, weighted, torch.stack(tuple(weighted.values())).sum(0)
     )
 

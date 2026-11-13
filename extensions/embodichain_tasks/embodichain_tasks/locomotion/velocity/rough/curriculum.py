@@ -14,16 +14,16 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Terrain assignment and distance curriculum matching Isaac G1 Rough."""
+"""Terrain assignment and distance curriculum for rough-terrain locomotion."""
 
 from __future__ import annotations
 
 import torch
 
-__all__ = ["ReferenceTerrainCurriculum"]
+__all__ = ["TerrainCurriculum"]
 
 
-class ReferenceTerrainCurriculum:
+class TerrainCurriculum:
     """Assign terrain columns and advance rows at episode resets.
 
     Args:

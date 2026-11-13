@@ -48,11 +48,11 @@ Humanoid uses clipped effort actions (`[-0.4, 0.4]`) multiplied by per-joint mot
 
 ## G1 rough terrain with DexUni
 
-`g1_isaac_rough/agents/ppo.dexuni.yaml` selects the pure MuJoCo branch of
-DexUni with Newton-generated terrain contacts. The paired DexSim build must
+`g1_rough/agents/ppo.dexuni.yaml` selects the pure MuJoCo branch of
+DexUni with Newton-generated terrain contacts (`UnitreeG1RoughRL-v1`). The paired DexSim build must
 support `mujoco_options.use_mujoco_contacts: false` in this branch and export
 MuJoCo solver contact forces for contact sensors. The MJWarp deployment remains
-`ppo.newton.yaml`; both configurations retain the same terrain and physical
+`g1_rough/agents/ppo.newton.yaml`; both configurations retain the same terrain and physical
 parameters.
 
 The separate `UnitreeG1Rough` and `G1RoughTerrains` asset packages provide the

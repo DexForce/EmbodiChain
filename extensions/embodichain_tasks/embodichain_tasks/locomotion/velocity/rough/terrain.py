@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Yaw-aligned height rays over reference collision terrain."""
+"""Yaw-aligned height rays over collision terrain."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ import newton
 import torch
 import warp as wp
 
-__all__ = ["ReferenceHeightScanner"]
+__all__ = ["HeightScanner"]
 
 
 @wp.kernel(enable_backward=False)
@@ -85,8 +85,8 @@ def _scan(
     height[env, ray] = value
 
 
-class ReferenceHeightScanner:
-    """187 terrain rays with the reference torso frame, XY order and offset."""
+class HeightScanner:
+    """187 terrain rays in the torso yaw frame, XY grid order and height offset."""
 
     def __init__(
         self,
