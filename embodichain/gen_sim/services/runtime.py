@@ -238,10 +238,9 @@ def _http_adapter(role: str, profile: Mapping[str, Any]) -> Any:
     kwargs.update(options)
     api_key = profile.get("api_key")
     if api_key:
-        import requests
+        from .adapters._http import _OriginBoundSession
 
-        session = requests.Session()
-        session.headers["Authorization"] = f"Bearer {api_key}"
+        session = _OriginBoundSession(profile["base_url"], api_key)
         kwargs["session"] = session
     try:
         return cls(**kwargs)
