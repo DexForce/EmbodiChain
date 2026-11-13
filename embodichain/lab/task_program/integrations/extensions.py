@@ -550,7 +550,14 @@ class ControlPartEvidenceProviderFactory(Protocol):
 
 @runtime_checkable
 class RegisteredSemanticLowererFactory(Protocol):
-    """Registration-owned factory for one fresh live semantic lowerer."""
+    """Registration-owned factory for one fresh live semantic lowerer.
+
+    A factory requiring host-owned runtime inputs can additionally implement
+    ``create_for_environment(environment=..., simulation=..., robot=...,
+    scene_registry=..., engine=...)``. Standard environment assembly supplies
+    its live host to that optional hook, retaining the same freshness and
+    descriptor checks. The required ``create`` contract remains unchanged.
+    """
 
     call_id: ClassVar[str]
     revision: ClassVar[str]

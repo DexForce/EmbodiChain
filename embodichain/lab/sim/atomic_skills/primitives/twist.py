@@ -58,7 +58,7 @@ from embodichain.lab.sim.atomic_skills.primitives._helpers import (
     find_symmetric_nearest_xpos,
     arm_qpos_from_state,
     hold_inactive_cartesian_rows,
-    resample_planned_trajectory,
+    plan_named_arm_trajectory,
 )
 from embodichain.lab.sim.atomic_skills.requirements import (
     CARTESIAN_POSE_CAPABILITY,
@@ -68,7 +68,6 @@ from embodichain.lab.sim.atomic_skills.requirements import (
 from embodichain.lab.sim.atomic_skills.state import PlanningContext
 from embodichain.lab.sim.atomic_skills.trajectory_ops import (
     axis_translation_keyframes,
-    build_pose_plan_states,
     interpolate_hand_qpos,
     resolve_pose_target,
     translate_pose_world,
@@ -435,26 +434,16 @@ class Twist(AtomicSkill[TwistGoal, TwistOptions]):
         cartesian_samples: bool = False,
         cartesian_path_sampler: Callable[[torch.Tensor], torch.Tensor] | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        result = self.motion_generator.generate(
-            build_pose_plan_states(target_pose),
-            options=request.motion_policy.to_motion_gen_options(
-                start_qpos=start_qpos,
-                control_part=control_part,
-                sample_count=sample_count,
-                interpolation_dt=interpolation_dt,
-                cartesian_linear=cartesian_samples,
-                cartesian_path_sampler=cartesian_path_sampler,
-            ),
-        )
-        assert isinstance(result.success, torch.Tensor)
-        assert result.positions is not None
-        assert result.dt is not None
-        return result.success, resample_planned_trajectory(
-            result.positions,
+        return plan_named_arm_trajectory(
+            self.motion_generator,
+            control_part,
+            start_qpos,
+            target_pose,
             sample_count,
-            dt=result.dt,
-            control_dt=interpolation_dt,
-            arrival_indices=result.waypoint_indices,
+            request.motion_policy,
+            interpolation_dt,
+            cartesian_linear=cartesian_samples,
+            cartesian_path_sampler=cartesian_path_sampler,
         )
 
     def _twisted_grasp_poses(

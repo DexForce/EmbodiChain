@@ -22,7 +22,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from embodichain.lab.sim.cfg import ArticulationRootPropertiesCfg, RigidObjectCfg
+from embodichain.lab.sim.cfg import (
+    ArticulationRootPropertiesCfg,
+    RigidObjectCfg,
+    VisualObjectCfg,
+)
 from embodichain.lab.sim.objects import (
     Articulation,
     DeformableObject,
@@ -32,7 +36,13 @@ from embodichain.lab.sim.objects import (
     Robot,
 )
 from embodichain.lab.sim.spawn.scene import SpawnScene
-from dexsim.spawn import MaterialDesc
+from dexsim.spawn import (
+    MaterialDesc,
+    MeshObjectDesc,
+    ObjectDesc,
+    SceneBuilder,
+    SceneDesc,
+)
 
 pytestmark = pytest.mark.no_sim
 
@@ -274,6 +284,40 @@ def test_declare_initializes_facade_with_spawn_instance_count() -> None:
     )
 
     assert facade.declared_num_instances == 3
+
+
+@pytest.mark.parametrize("failure", ["duplicate", "partial_add"])
+def test_visual_owner_add_failure_preserves_existing_companion(failure):
+    companion = MeshObjectDesc(name="room__visual_0_mesh")
+    builder = object.__new__(SceneBuilder)
+    builder.backend = "dexsim"
+    builder.scene_desc = SceneDesc(mesh_objects=[companion])
+    builder._finalized = False
+    builder._pending_changes = {}
+    builder.result = None
+    builder._adapter = SimpleNamespace(
+        backend="dexsim",
+        add=MagicMock(side_effect=RuntimeError("partial native add")),
+        remove=MagicMock(),
+    )
+    scene = object.__new__(SpawnScene)
+    scene.builder = builder
+    scene._assets = {"room": SimpleNamespace()}
+    scene._material_resources = SimpleNamespace(renderer="fast-rt")
+    uid = companion.name if failure == "duplicate" else "new_owner"
+    facade = SimpleNamespace(
+        uid=uid, num_instances=1, cfg=VisualObjectCfg(uid=uid, visuals=[])
+    )
+    error = ValueError if failure == "duplicate" else RuntimeError
+    message = "already" if failure == "duplicate" else "partial native add"
+
+    with pytest.raises(error, match=message):
+        scene.declare("visual_object", uid, ObjectDesc(name=uid), facade=facade)
+
+    assert len(builder.mesh_objects) == 1
+    assert builder.mesh_objects[0] is companion
+    assert set(scene._assets) == {"room"}
+    assert getattr(facade, "_visual_binding", None) is None
 
 
 def test_rigid_object_receives_instance_count_only_when_declared() -> None:

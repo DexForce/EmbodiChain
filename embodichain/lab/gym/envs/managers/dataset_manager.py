@@ -20,7 +20,8 @@ from __future__ import annotations
 
 import inspect
 import threading
-from typing import TYPE_CHECKING, Any, Dict, Optional, Union
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Dict, Literal, Optional, Union
 from collections.abc import Mapping, Sequence
 
 import torch
@@ -34,6 +35,12 @@ __all__ = ["DatasetManager"]
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
+
+
+@dataclass(frozen=True)
+class _DatasetSaveReceipts:
+    status: Literal["queued", "persisted"]
+    episode_uuids: dict[int, list[str]]
 
 
 class DatasetManager(ManagerBase):
@@ -273,7 +280,7 @@ class DatasetManager(ManagerBase):
         self,
         mode: str,
         env_ids: Union[Sequence[int], torch.Tensor, None] = None,
-    ) -> None:
+    ) -> dict[int, list[dict[str, str]]]:
         """Apply dataset functors for the specified mode.
 
         This method saves completed episodes by reading data from the environment's
@@ -283,27 +290,43 @@ class DatasetManager(ManagerBase):
             mode: The mode to apply (currently only "save" is supported).
             env_ids: The indices of the environments to apply the functor to.
                 Defaults to None, in which case the functor is applied to all environments.
+
+        Returns:
+            Per-row receipts from recorders that report queue or commit status.
         """
         # check if mode is valid
         if mode not in self._mode_functor_names:
             logger.log_warning(
                 f"Dataset mode '{mode}' is not defined. Skipping dataset operation."
             )
-            return
+            return {}
 
         context = getattr(self._env, "episode_context", None)
         if mode == "save" and context is not None:
             env_ids = context.filter_recordable(env_ids)
             if not len(env_ids):
-                return
+                return {}
 
-        # iterate over all the dataset functors for this mode
-        for functor_cfg in self._mode_functor_cfgs[mode]:
-            functor_cfg.func(
+        receipts: dict[int, list[dict[str, str]]] = {}
+        for name, functor_cfg in zip(
+            self._mode_functor_names[mode], self._mode_functor_cfgs[mode], strict=True
+        ):
+            result = functor_cfg.func(
                 self._env,
                 env_ids,
                 **functor_cfg.params,
             )
+            if isinstance(result, _DatasetSaveReceipts):
+                for row, episode_uuids in result.episode_uuids.items():
+                    receipts.setdefault(row, []).extend(
+                        {
+                            "recorder": name,
+                            "episode_uuid": identity,
+                            "status": result.status,
+                        }
+                        for identity in episode_uuids
+                    )
+        return receipts
 
     def finalize(self) -> Optional[str]:
         """Finalize every dataset functor exactly once.

@@ -50,18 +50,13 @@ class TestFluidRuntime:
         from dexsim.engine.newton_physics import DexUniSolverCfg
 
         if "sph_cfg" not in getattr(DexUniSolverCfg, "__dataclass_fields__", {}):
-            pytest.skip("This DexSim build does not compose SPH through DexUni.")
+            pytest.skip("This DexSim build lacks DexUni fluid composition.")
         if num_envs > 1:
             from dexsim.engine.newton_physics.solver_runtime import (
                 ensure_solver_available,
             )
 
-            solver = ensure_solver_available("sph")
-            if not (
-                getattr(solver, "supports_world_isolation", False)
-                and getattr(solver, "supports_world_reset", False)
-            ):
-                pytest.skip("This DexSim SPH build supports only a single world.")
+            ensure_solver_available("dexuni")
 
         def run_worlds(count: int, use_default: bool) -> dict:
             result_path = tmp_path / f"lifecycle-{count}-{use_default}.json"
@@ -97,7 +92,7 @@ class TestFluidRuntime:
 
 def _run_fluid_lifecycle(num_envs: int, automatic: bool) -> dict[str, object]:
     """Run the complete NoRender lifecycle in a fresh native process."""
-    from dexsim.engine.newton_physics import DexUniSolverCfg, SPHSolverCfg
+    from dexsim.engine.newton_physics import DexUniSolverCfg
     from dexsim.engine.newton_physics.backend_registry import get_newton_backend
     from embodichain.lab.sim.cfg import RigidObjectCfg
     from embodichain.lab.sim.shapes import CubeCfg
@@ -107,7 +102,7 @@ def _run_fluid_lifecycle(num_envs: int, automatic: bool) -> dict[str, object]:
             headless=True,
             device="cuda",
             num_envs=num_envs,
-            # The two fluid volumes overlap in world space. SPH worlds must
+            # The two fluid volumes overlap in world space. DexUni fluid worlds must
             # remain isolated even when their particles are nearby.
             arena_space=0.02,
             physics_dt=0.001,
@@ -119,11 +114,11 @@ def _run_fluid_lifecycle(num_envs: int, automatic: bool) -> dict[str, object]:
                     None
                     if automatic
                     else DexUniSolverCfg(
-                        sph_cfg=SPHSolverCfg(
-                            sph_method="dfsph",
-                            particle_support_radius=0.0225,
-                            volume_map_boundary_enabled=False,
-                        )
+                        sph_cfg={
+                            "sph_method": "dfsph",
+                            "particle_support_radius": 0.0225,
+                            "volume_map_boundary_enabled": False,
+                        }
                     )
                 ),
             ),

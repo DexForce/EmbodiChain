@@ -1026,3 +1026,55 @@ def test_prepared_replacement_tampering_prevents_native_mutation(replacement):
     with pytest.raises(ValueError, match="changed"):
         _apply_asset_deployment(replacement.env, replacement.artifact)
     replacement.env.sim.replace_rigid_objects.assert_not_called()
+
+
+def test_materialized_deployment_keeps_named_evaluation_component(deployment, tmp_path):
+    from embodichain.lab.gym.utils.registration import get_env_spec
+
+    source, requirements, resolved = deployment
+    config = yaml.safe_load(source.read_text())
+    config["evaluation"] = {"component": "rules.yaml"}
+    _write(source, config)
+    program_path = source.parent / "program.yaml"
+    program = yaml.safe_load(program_path.read_text())
+    program["program"]["items"][1]["validators"] = [
+        {"kind": "condition", "ref": "placed"}
+    ]
+    _write(program_path, program)
+    component = {
+        "graph": {
+            "roots": ["placed"],
+            "rules": {
+                "placed": {
+                    "kind": "near_target",
+                    "bindings": {
+                        "position": "rigid_objects/cube/pose",
+                        "target": "rigid_objects/platform/pose",
+                    },
+                    "params": {"tolerance": 0.15},
+                },
+            },
+        },
+    }
+    _write(source.parent / "rules.yaml", component)
+    first = materialize_asset_deployment(
+        source, requirements, resolved, output_dir=tmp_path / "first"
+    )
+    selected = yaml.safe_load(first.deployment_path.read_text())
+    component_path = first.deployment_path.parent / selected["evaluation"]["component"]
+    assert yaml.safe_load(component_path.read_text()) == component
+    first_rule = get_env_spec(
+        selected["id"]
+    ).task_program_registration.evaluation_conditions["placed"]
+    assert first_rule.required_fields == (
+        "rigid_objects/cube/pose",
+        "rigid_objects/platform/pose",
+    )
+    validate_materialized_deployment(first)
+
+    component["graph"]["rules"]["placed"]["params"]["tolerance"] = 0.25
+    _write(source.parent / "rules.yaml", component)
+    second = materialize_asset_deployment(
+        source, requirements, resolved, output_dir=tmp_path / "second"
+    )
+    assert yaml.safe_load(second.deployment_path.read_text())["id"] != selected["id"]

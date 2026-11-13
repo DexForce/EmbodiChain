@@ -57,6 +57,7 @@ TABLEWARE_CONFIG_TASKS = {
     "blocks_ranking_size",
     "match_object_container",
     "place_object_drawer",
+    "pour_cup",
     "pour_water",
     "stack_blocks_two",
     "stack_cups",

@@ -31,7 +31,7 @@ import pytest
 from setuptools import Distribution
 from setuptools.command.build_py import build_py
 
-from setup import get_package_dir
+from setup import get_package_data, get_package_dir
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 _SETUP_PATH = _REPOSITORY_ROOT / "setup.py"
@@ -120,6 +120,11 @@ _DEPLOYMENTS = {
         "pour_water_with_right_arm",
         "task_program_pour_water",
         "cobotmagic",
+    ),
+    Path("tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"): (
+        "pick_aim_pour_return_cup",
+        "task_program_pour_cup_fluid",
+        "franka_panda_fast_fluid",
     ),
 }
 _DEPLOYMENTS[
@@ -230,6 +235,14 @@ _DUAL_ARM_RESOURCES = {
 
 _RESOURCE_PATHS = frozenset(
     {
+        Path("tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"),
+        Path("tasks/manipulation/tableware/pour_cup/env.fluid.yaml"),
+        Path("tasks/manipulation/tableware/pour_cup/task_program/program.fluid.yaml"),
+        Path(
+            "tasks/manipulation/tableware/pour_cup/task_program/integration.fluid.yaml"
+        ),
+        Path("components/embodiments/franka_panda_fast_fluid.yaml"),
+        Path("components/execution_policies/trajectory_open_loop_fluid_pour.yaml"),
         Path("components/embodiments/franka_panda_robotiq85_rgbd.yaml"),
         Path(
             "tasks/manipulation/carton_stocking/task_program/integration.ordinary.yaml"
@@ -287,6 +300,9 @@ _RESOURCE_PATHS = frozenset(
         Path("tasks/manipulation/repeated_pick_place/objective.yaml"),
         Path("tasks/manipulation/push_cube/catalog.yaml"),
         Path("tasks/manipulation/push_cube/README.md"),
+        Path(
+            "tasks/manipulation/tableware/stack_blocks_two/task_program/evaluation.yaml"
+        ),
         Path("tasks/manipulation/tableware/stack_cups/catalog.yaml"),
         Path("tasks/manipulation/tableware/stack_cups/README.md"),
         Path("components/execution_policies/motion_gen_verified.yaml"),
@@ -316,6 +332,15 @@ _RESOURCE_PATHS = frozenset(
         Path(
             "tasks/manipulation/repeated_pick_place/task_program/integration.tianji_marvin.yaml"
         ),
+        Path("components/embodiments/dexforce_w1_030_cloth_fold.yaml"),
+        Path("tasks/manipulation/cloth_fold/env.yaml"),
+        Path("tasks/manipulation/cloth_fold/task.w1.yaml"),
+        Path("tasks/manipulation/cloth_fold/catalog.yaml"),
+        Path("tasks/manipulation/cloth_fold/README.md"),
+        Path("tasks/manipulation/cloth_fold/task_program/program.yaml"),
+        Path("tasks/manipulation/cloth_fold/task_program/integration.yaml"),
+        Path("tasks/manipulation/cloth_fold/task_program/evaluation.yaml"),
+        Path("tasks/manipulation/cloth_fold/task_program/trajectory.npz"),
         Path("tasks/manipulation/repeated_pick_place/envs/newton.yaml"),
         Path(
             "tasks/manipulation/repeated_pick_place/expansion/"
@@ -328,6 +353,7 @@ _RESOURCE_PATHS = frozenset(
         Path("tasks/manipulation/tableware/pour_water/env.tianji_marvin.yaml"),
         Path("tasks/manipulation/tableware/pour_water/README.md"),
         Path("tasks/manipulation/tableware/pour_water/task_program/integration.yaml"),
+        Path("tasks/manipulation/tableware/pour_water/task_program/evaluation.yaml"),
         Path(
             "tasks/manipulation/tableware/pour_water/task_program/integration.tianji_marvin.yaml"
         ),
@@ -369,7 +395,7 @@ def _literal_setup_keyword(keyword_name: str) -> object:
 @pytest.fixture
 def staged_config_package(tmp_path: Path) -> _StagedConfigPackage:
     """Stage official Task Program resources through the real build command."""
-    package_data = _literal_setup_keyword("package_data")
+    package_data = get_package_data()
     include_package_data = _literal_setup_keyword("include_package_data")
     assert type(package_data) is dict
     assert type(include_package_data) is bool
@@ -422,6 +448,7 @@ def test_setup_stages_all_official_task_programs(
     assert staged_config_package.include_package_data is False
     assert get_package_dir()[_CONFIG_PACKAGE] == "extensions/embodichain_tasks/configs"
     assert staged_config_package.package_data[_CONFIG_PACKAGE] == [
+        "tasks/manipulation/cloth_fold/task_program/trajectory.npz",
         "**/*.json",
         "**/*.yaml",
         "**/*.yml",
@@ -432,6 +459,10 @@ def test_setup_stages_all_official_task_programs(
         for relative_path in _RESOURCE_PATHS
     }
     assert expected_outputs <= staged_config_package.relative_outputs
+    assert not (
+        staged_config_package.build_lib
+        / "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/assets"
+    ).exists()
 
 
 def test_staged_task_program_resources_decode_through_installed_paths(
@@ -483,6 +514,7 @@ for relative_path, expected_ids in expected_deployments.items():
         task_program=physical.config["task_program"],
         skill_profile=physical.embodiment_skill_profile,
         base_dir=env_path.parent,
+        evaluation=physical.evaluation,
     )
     program = load_task_program(
         deployment.program_path,
@@ -525,3 +557,103 @@ print(json.dumps(decoded_deployments, sort_keys=True))
     assert json.loads(completed.stdout.splitlines()[-1]) == {
         path: list(identifiers) for path, identifiers in expected_deployments.items()
     }
+
+
+def test_installed_wheel_registers_drawer_storage(tmp_path: Path) -> None:
+    """Register both drawer deployments from installed YAML and discover the catalog."""
+    source = tmp_path / "source"
+    source.mkdir()
+    for name in ("setup.py", "pyproject.toml", "README.md", "VERSION", "MANIFEST.in"):
+        shutil.copyfile(_REPOSITORY_ROOT / name, source / name)
+    for name in ("embodichain", "extensions", "examples"):
+        shutil.copytree(
+            _REPOSITORY_ROOT / name,
+            source / name,
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.egg-info"),
+        )
+
+    wheel_dir = tmp_path / "wheels"
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "wheel",
+            "--no-build-isolation",
+            "--no-deps",
+            "--no-index",
+            "--wheel-dir",
+            str(wheel_dir),
+            ".",
+        ],
+        cwd=source,
+        check=True,
+    )
+    (wheel,) = wheel_dir.glob("embodichain-*.whl")
+    installed = tmp_path / "installed"
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--no-deps",
+            "--no-index",
+            "--target",
+            str(installed),
+            str(wheel),
+        ],
+        cwd=tmp_path,
+        check=True,
+    )
+    subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            """
+from pathlib import Path
+import sys
+
+installed = Path(sys.argv[1])
+sys.path.insert(0, str(installed))
+from embodichain.lab.gym.envs import EmbodiedEnv
+from embodichain.lab.gym.utils.gym_utils import config_to_cfg
+from embodichain.lab.gym.utils.registration import get_env_spec
+from embodichain.utils.utility import load_config
+from gymnasium import registry
+
+configs = installed / "embodichain_tasks/configs/tasks/manipulation/drawer_storage"
+assert not (installed / "embodichain_tasks/manipulation/drawer_storage.py").exists()
+assert (configs / "task_program/evaluation.yaml").is_file()
+assert "embodichain_tasks" not in sys.modules
+
+for name, open_positions in (("ur5", (0.0,)), ("franka", (0.04, 0.04))):
+    path = configs / f"task.{name}.yaml"
+    raw = load_config(path)
+    assert raw["id"] not in registry
+    config_to_cfg(raw, source_path=path)
+    spec = get_env_spec(raw["id"])
+    assert spec.cls is EmbodiedEnv
+    registration = spec.task_program_registration
+    rules = registration.evaluation_conditions
+    assert rules["hand_open"].parameters["hand_open"]["positions"] == open_positions
+    assert len(rules["fingers_clear"].required_fields) == 3
+    assert "cube_contained" in registration.evaluation_final_refs
+
+import embodichain_tasks
+from embodichain.cli.list_task import _collect_environment_entries
+
+assert Path(embodichain_tasks.__file__).is_relative_to(installed)
+assert "embodichain_tasks.manipulation.drawer_storage" not in sys.modules
+assert {entry.env_id for entry in _collect_environment_entries()} >= {
+    "TaskProgramDrawerStorage-UR5-v1",
+    "TaskProgramDrawerStorage-Franka-v1",
+}
+
+""",
+            str(installed),
+        ],
+        cwd=tmp_path,
+        check=True,
+    )
