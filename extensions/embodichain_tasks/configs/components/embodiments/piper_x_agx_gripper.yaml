@@ -24,6 +24,8 @@ simulation:
       gripper: 500.0
     damping:
       gripper: 20.0
+    max_effort:
+      gripper: 10.0
     max_velocity:
       gripper: 0.15
   solver_cfg:
