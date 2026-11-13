@@ -12,10 +12,13 @@ one `UsdSourceSnapshot` per assembly; live state remains Object-owned.
 creates content-addressed Default-only compensation without editing originals.
 Source proofs do not certify cooked shapes or physical paths.
 
-`rigid_mesh.capture_rigid_mesh` owns scaled native vertices and matching
+`rigid_mesh.capture_rigid_mesh` owns scaled semantic vertices and matching
 triangles as CPU data with the env axis intact. It reads no poses, preserves
 order/winding/duplicates, and substitutes no hull or box for missing topology.
-Recapture after model or scale changes.
+Recapture after model or scale changes. `get_semantic_mesh()` retains source
+geometry or an explicit `semantic_shape` across Gaussian appearance replacement;
+legacy facades without that API use their visual mesh. Gaussian-only appearance
+does not supply an implicit semantic surface.
 
 `native_hand.py` captures exact cooked convex/box shapes and requested offsets
 for simulation-owned Robot/rigid UIDs. It requires Default/B1/env0, checks FK
@@ -25,7 +28,7 @@ shares [Robot hand geometry](../robot-system/robot-system.md#sampled-hand-geomet
 Capture creates no query or grasp policy. GraspKit qualifies geometry; Atomic
 services compose query lifetime and hosts interpret physical effects.
 
-`mesh_snapshot.py` instead captures scaled rigid visual vertices and ordered
+`mesh_snapshot.py` instead captures scaled rigid semantic vertices and ordered
 articulation collision-input components from explicit UID/link mappings. It
 reads no live poses; missing or connected-nonconvex inputs remain unavailable.
 Planner role metadata never removes a selected physical input. The separate

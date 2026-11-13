@@ -70,7 +70,7 @@ def test_default_sparse_drive_config_preserves_loaded_properties(
     tmp_path: Path,
 ) -> None:
     """Each configured drive field preserves other loaded fields and joints."""
-    from embodichain.lab.sim.cfg import DefaultPhysicsCfg, RenderCfg
+    from embodichain.lab.sim.cfg import DefaultPhysicsCfg
 
     asset = tmp_path / "sparse_drive.urdf"
     asset.write_text(
@@ -98,7 +98,6 @@ def test_default_sparse_drive_config_preserves_loaded_properties(
             enable_entity_gizmo=False,
             robot_ik_gizmo=None,
             physics_cfg=DefaultPhysicsCfg(device="cpu", gravity=(0, 0, 0)),
-            render_cfg=RenderCfg(renderer="no-render"),
             startup_summary="off",
             scene_node_capacity=128,
         ),

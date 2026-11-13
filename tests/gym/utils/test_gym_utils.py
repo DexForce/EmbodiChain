@@ -2765,6 +2765,42 @@ def test_launcher_can_explicitly_disable_configured_headless() -> None:
     assert merged["headless"] is False
 
 
+@pytest.mark.parametrize("suffix", ["yaml", "json"])
+def test_gym_config_loads_gaussian_preset_and_single_visual(tmp_path, suffix):
+    from embodichain.lab.sim.cfg import GaussianSplatCfg
+
+    resource = tmp_path / "scan.ply"
+    resource.write_text("fixture")
+    config = {
+        "id": "EmbodiedEnv-v1",
+        "physics": "default",
+        "env": {},
+        "robot": {"uid": "robot"},
+        "render_cfg": {"preset": "gaussian", "spp": 4},
+        "visual_object": [
+            {
+                "uid": "room",
+                "visuals": {"type": "gaussian_splat", "file_path": str(resource)},
+            }
+        ],
+    }
+    path = tmp_path / f"gaussian.{suffix}"
+    save_config(path, config)
+    cfg = config_to_cfg(load_config(path), manager_modules=DEFAULT_MANAGER_MODULES)
+    assert cfg.sim_cfg.render_cfg.renderer == "hybrid"
+    assert cfg.sim_cfg.render_cfg.gaussian.enabled is True
+    assert cfg.sim_cfg.render_cfg.denoising.offscreen == "optix"
+    assert cfg.sim_cfg.render_cfg.spp == 4
+    element = cfg.visual_object[0].visuals[0]
+    assert element.id == "appearance"
+    assert isinstance(element.representation, GaussianSplatCfg)
+    assert element.representation.file_path == str(resource)
+    config["renderer"] = "fast-rt"
+    overridden = config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+    assert overridden.sim_cfg.render_cfg.renderer == "fast-rt"
+    assert cfg.sim_cfg.render_cfg.renderer == "hybrid"
+
+
 @pytest.mark.parametrize(
     "collection", ["background", "rigid_object", "rigid_object_group"]
 )

@@ -3329,6 +3329,30 @@ Render-only geometry or a USD source, and initial visual state.
 
    VisualObjectCfg
 
+embodichain.lab.sim.cfg.visuals
+-------------------------------
+
+Visual resources and owner-local composition are separate from physical
+geometry. Gaussian settings require the qualified native Spawn/Scene APIs;
+ordinary Mesh configurations remain compatible.
+
+.. currentmodule:: embodichain.lab.sim.cfg.visuals
+
+.. autosummary::
+
+   GaussianSplatCfg
+   VisualElementCfg
+   GaussianRenderCfg
+
+.. autoclass:: GaussianSplatCfg
+   :members:
+
+.. autoclass:: VisualElementCfg
+   :members:
+
+.. autoclass:: GaussianRenderCfg
+   :members:
+
 embodichain.lab.sim.diff.runtime
 --------------------------------
 

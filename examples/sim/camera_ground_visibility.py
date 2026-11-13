@@ -30,6 +30,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.visualization.cfg import VisualizationCfg
 from embodichain.lab.sim.cfg import RenderCfg, RigidObjectCfg, VisualObjectCfg
 from embodichain.lab.sim.sensors import CameraCfg
 from embodichain.lab.sim.shapes import CubeCfg
@@ -51,6 +52,7 @@ def main() -> None:
     sim = SimulationManager(
         SimulationManagerCfg(
             headless=True,
+            visualization=VisualizationCfg(backend="none"),
             device="cpu",
             num_envs=4,
             render_cfg=RenderCfg(renderer=args.renderer),
