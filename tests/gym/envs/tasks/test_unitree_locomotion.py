@@ -351,7 +351,7 @@ def test_policy_viewer_target_pose_preserves_world_xyzw_and_copies_state():
 
 
 @pytest.mark.parametrize(
-    "isaac,override,expected",
+    "rough,override,expected",
     [
         (False, {}, 0.5),
         (True, {}, 1.0),
@@ -360,7 +360,7 @@ def test_policy_viewer_target_pose_preserves_world_xyzw_and_copies_state():
     ],
 )
 def test_environment_action_clipping_defaults_and_overrides(
-    monkeypatch, isaac, override, expected
+    monkeypatch, rough, override, expected
 ):
     from dataclasses import dataclass
     from types import SimpleNamespace, MethodType
@@ -369,13 +369,13 @@ def test_environment_action_clipping_defaults_and_overrides(
     from embodichain_tasks.locomotion.velocity._embodichain import (
         EmbodiChainVelocityEnv,
     )
-    from embodichain_tasks.locomotion.velocity.isaac.runtime import IsaacVelocityEnv
+    from embodichain_tasks.locomotion.velocity.rough.runtime import RoughVelocityEnv
 
     @dataclass
     class State:
         qpos: torch.Tensor
 
-    cls = IsaacVelocityEnv if isaac else EmbodiChainVelocityEnv
+    cls = RoughVelocityEnv if rough else EmbodiChainVelocityEnv
     host = object.__new__(cls)
     host.state_type = State
     host.velocity_task_config = SimpleNamespace(

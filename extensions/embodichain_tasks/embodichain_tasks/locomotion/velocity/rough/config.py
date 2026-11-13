@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Fixed Isaac Lab 3.0 EA velocity task settings."""
+"""Rough-terrain velocity task settings."""
 
 from __future__ import annotations
 
@@ -24,12 +24,12 @@ from embodichain.utils import configclass
 
 from ..contracts._config import load_task_data
 
-__all__ = ["IsaacVelocityConfig", "load_config"]
+__all__ = ["RoughVelocityConfig", "load_config"]
 
 
 @configclass
-class IsaacVelocityConfig:
-    """Policy dimensions, timing, model parameters and resolved reference terms."""
+class RoughVelocityConfig:
+    """Policy dimensions, timing, model parameters and resolved task terms."""
 
     data: dict = MISSING
     joint_names: tuple[str, ...] = MISSING
@@ -43,13 +43,13 @@ class IsaacVelocityConfig:
     max_episode_steps: int = 1000
 
 
-def load_config(task: str) -> IsaacVelocityConfig:
-    """Load one packaged reference definition, retaining policy joint order."""
+def load_config(task: str = "g1_rough") -> RoughVelocityConfig:
+    """Load a packaged rough-terrain velocity definition in policy joint order."""
     data = load_task_data(task)
     robot = data["robot"]
     dimension = len(robot["joint_names"])
     observation_dimension = 12 + 3 * dimension + (187 if dimension == 37 else 0)
-    cfg = IsaacVelocityConfig(
+    cfg = RoughVelocityConfig(
         data=data,
         joint_names=tuple(robot["joint_names"]),
         default_joint_position=tuple(robot["default_joint_position"]),

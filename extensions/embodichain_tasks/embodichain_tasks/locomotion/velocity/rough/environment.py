@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Build reference environments from explicitly supplied frozen scene assets."""
+"""Build rough-terrain velocity environments from frozen scene assets."""
 
 from __future__ import annotations
 
@@ -30,12 +30,12 @@ from embodichain.lab.gym.utils.gym_utils import config_to_cfg, get_manager_modul
 
 from .config import load_config
 
-__all__ = ["load_reference_env_cfg"]
+__all__ = ["load_rough_env_cfg"]
 
 
-def load_reference_env_cfg(
+def load_rough_env_cfg(
     robot: str,
-    reference_bundle: str | Path,
+    asset_bundle: str | Path,
     *,
     num_envs: int = 1,
     seed: int = 42,
@@ -47,15 +47,15 @@ def load_reference_env_cfg(
 
     Args:
         robot: ``g1``.
-        reference_bundle: Directory containing the exported robot USDs and,
-            for G1, terrain.npz and terrain.json with evaluation origins or the
-            complete reference training terrain and curriculum definition.
+        asset_bundle: Directory containing the exported robot USDs and, for G1,
+            ``terrain.npz`` and ``terrain.json`` with evaluation origins or the
+            complete training terrain and curriculum definition.
         num_envs: Independent physics worlds.
         seed: Environment random seed.
-        training_randomization: Enable reference observation noise, startup
-            mass/COM events, random reset and interval velocity pushes.
+        training_randomization: Enable observation noise, startup mass/COM
+            events, random reset and interval velocity pushes.
         use_mujoco_contacts: Select native contacts or Newton contacts while
-            retaining MJWarp dynamics. ``None`` uses the EA reference setting.
+            retaining MJWarp dynamics. ``None`` keeps the packaged setting.
         initial_state_file: Shared deterministic benchmark states. Rows repeat
             in environment ID order and apply again on episode resets.
 
@@ -63,13 +63,13 @@ def load_reference_env_cfg(
         The resolved EmbodiChain environment configuration.
 
     Raises:
-        ValueError: The robot selector is unknown.
-        FileNotFoundError: A required reference asset is missing.
+        ValueError: The robot selector is unknown or bundle metadata is invalid.
+        FileNotFoundError: A required scene asset is missing.
     """
-    tasks = {"g1": "g1_isaac_rough"}
+    tasks = {"g1": "g1_rough"}
     if robot not in tasks:
-        raise ValueError(f"Unknown reference robot: {robot!r}")
-    bundle = Path(reference_bundle).expanduser().resolve()
+        raise ValueError(f"Unknown robot selector: {robot!r}")
+    bundle = Path(asset_bundle).expanduser().resolve()
     asset = bundle / f"{robot}.usda"
     if not asset.is_file():
         raise FileNotFoundError(asset)
@@ -86,8 +86,8 @@ def load_reference_env_cfg(
     data["physics_config"]["solver_cfg"]["use_mujoco_contacts"] = use_mujoco_contacts
     if use_mujoco_contacts:
         data["physics_config"]["collision_cfg"] = None
-    # The EA startup material event changes Newton mu to 0.8, while its native
-    # MJWarp model retains the imported sliding friction of 1.0.
+    # Newton contact mode sets dynamic friction to 0.8, while native MJWarp
+    # contact mode retains the imported sliding friction of 1.0.
     data["robot"]["attrs"]["material_props"]["dynamic_friction"] = (
         1.0 if use_mujoco_contacts else 0.8
     )
@@ -102,12 +102,12 @@ def load_reference_env_cfg(
         states = json.loads(Path(initial_state_file).read_text())
         task = load_config(tasks[robot])
         if (
-            states.get("schema") != "isaac_velocity.initial_states@1"
+            states.get("schema") != "rough_velocity.initial_states@1"
             or states.get("robot") != robot
             or states.get("joint_names") != list(task.joint_names)
         ):
             raise ValueError(
-                "Initial states must match the reference robot and policy joint order."
+                "Initial states must match the target robot and policy joint order."
             )
         rows = states["initial_states"]
         if not rows:
@@ -131,9 +131,7 @@ def load_reference_env_cfg(
             if np.any(position < limits[:, 0] - 1e-7) or np.any(
                 position > limits[:, 1] + 1e-7
             ):
-                raise ValueError(
-                    "Initial joint positions exceed the reference soft limits."
-                )
+                raise ValueError("Initial joint positions exceed the task soft limits.")
         extension["reference_initial_states"] = rows
     for term in data["env"]["observations"].values():
         term["params"]["enable_corruption"] = training_randomization
@@ -144,9 +142,15 @@ def load_reference_env_cfg(
         extension["reference_terrain"] = str(terrain)
         metadata = json.loads((bundle / "terrain.json").read_text())
         if training_randomization:
-            if metadata.get("schema") != "isaac_velocity.rough_training_terrain@1":
+            required_keys = (
+                "terrain_origins",
+                "max_init_terrain_level",
+                "generator",
+            )
+            if not all(key in metadata for key in required_keys):
                 raise ValueError(
-                    "G1 training requires the complete reference Rough terrain bundle."
+                    "G1 training requires terrain.json with terrain_origins, "
+                    "max_init_terrain_level, and generator."
                 )
             extension["reference_terrain_course"] = metadata
         else:

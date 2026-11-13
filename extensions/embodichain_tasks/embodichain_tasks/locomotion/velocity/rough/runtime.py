@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""EmbodiChain and DexSim adapter for fixed Isaac velocity definitions."""
+"""EmbodiChain and DexSim runtime adapter for rough-terrain velocity tasks."""
 
 from __future__ import annotations
 
@@ -33,8 +33,8 @@ from embodichain.utils.math import quat_apply_inverse
 
 from .._embodichain import EmbodiChainVelocityEnv
 from .mdp import (
-    IsaacVelocityState,
-    IsaacVelocityConstants,
+    RoughVelocityState,
+    RoughVelocityConstants,
     build_observation,
     observation_terms,
     action_target,
@@ -43,24 +43,24 @@ from .mdp import (
     dc_motor_effort,
     update_contact_times,
 )
-from .terrain import ReferenceHeightScanner
-from .curriculum import ReferenceTerrainCurriculum
+from .terrain import HeightScanner
+from .curriculum import TerrainCurriculum
 
-__all__ = ["IsaacVelocityEnv"]
+__all__ = ["RoughVelocityEnv"]
 
 
-class IsaacVelocityEnv(EmbodiChainVelocityEnv):
-    """Run the reference policy interface on shared training or evaluation terrain.
+class RoughVelocityEnv(EmbodiChainVelocityEnv):
+    """Run rough-terrain velocity locomotion on shared training or evaluation terrain.
 
-    The benchmark disables startup mass/COM and interval pushes on both stacks.
-    ``reference_randomization=True`` enables those reference training events.
-    Training loads the complete reference Rough terrain and curriculum; fixed
+    Deterministic evaluation disables startup mass/COM randomization and
+    interval pushes. ``reference_randomization=True`` enables those training
+    events. Training loads the complete rough terrain and curriculum; fixed
     scenes load evaluation origins. Both use the shared triangle mesh for
-    rays and Newton rasterization for collision.
+    height rays and Newton heightfield rasterization for collision.
     """
 
     _default_action_clip = None
-    state_type = IsaacVelocityState
+    state_type = RoughVelocityState
     compute_rewards_fn = staticmethod(compute_rewards)
     compute_termination_fn = staticmethod(compute_termination)
 
@@ -125,7 +125,7 @@ class IsaacVelocityEnv(EmbodiChainVelocityEnv):
             if id(collection) in expected
         )
         config = self.velocity_task_config
-        self._reference_constants = IsaacVelocityConstants.from_config(
+        self._reference_constants = RoughVelocityConstants.from_config(
             config, self.locomotion_action
         )
         self._reference_origin = self.locomotion_action.new_tensor(
@@ -185,7 +185,7 @@ class IsaacVelocityEnv(EmbodiChainVelocityEnv):
             from dexsim.engine.newton_physics.backend_registry import get_newton_backend
 
             backend = get_newton_backend(self.sim.spawn_result.world)
-            self._height_scanner = ReferenceHeightScanner(
+            self._height_scanner = HeightScanner(
                 *self._reference_terrain,
                 self.num_envs,
                 self.device,
@@ -213,7 +213,7 @@ class IsaacVelocityEnv(EmbodiChainVelocityEnv):
                 device=self.device,
                 dtype=torch.float32,
             )
-            self._reference_terrain_course = ReferenceTerrainCurriculum(
+            self._reference_terrain_course = TerrainCurriculum(
                 origins,
                 self.num_envs,
                 terrain_course["max_init_terrain_level"],
@@ -352,8 +352,8 @@ class IsaacVelocityEnv(EmbodiChainVelocityEnv):
 
     def _update_sim_state(self, **kwargs: Any) -> None:
         data = super()._update_sim_state(**kwargs)
-        # The EA native Go2 actuator path updates articulation data once per
-        # decimation block. G1 updates it after each individual physics step.
+        # Explicit PD effort actuators update articulation data once per
+        # decimation block; implicit-drive robots update it per physics step.
         if not self.explicit_pd_effort_control:
             self._joint_acceleration.copy_(
                 (self._previous_joint_velocity - self._previous_physics_joint_velocity)
@@ -613,8 +613,8 @@ class IsaacVelocityEnv(EmbodiChainVelocityEnv):
         """Keep sampled RNG values until the reference reset writes final state."""
         self._reference_reset_pose = root_pose.clone()
 
-    def get_velocity_locomotion_state(self) -> IsaacVelocityState:
-        """Fetch policy-ordered reference state and actual torso height rays."""
+    def get_velocity_locomotion_state(self) -> RoughVelocityState:
+        """Fetch policy-ordered task state and actual torso height rays."""
         if self._state_cache is not None:
             if (
                 self._height_scanner is not None
@@ -632,7 +632,7 @@ class IsaacVelocityEnv(EmbodiChainVelocityEnv):
 
     def _make_reference_state(
         self, data: dict[str, torch.Tensor]
-    ) -> IsaacVelocityState:
+    ) -> RoughVelocityState:
         """Build task state from the current control frame's articulation read."""
         quat = data["root_pose"][:, 3:7]
         if self.device.type == "cuda" and not any(
@@ -662,7 +662,7 @@ class IsaacVelocityEnv(EmbodiChainVelocityEnv):
             self, "_reference_defer_observations", False
         ):
             heights = self._compute_reference_height_scan()
-        return IsaacVelocityState(
+        return RoughVelocityState(
             base_lin_vel_b=linear_b,
             base_ang_vel_b=angular_b,
             projected_gravity_b=gravity_b,

@@ -1,4 +1,4 @@
-task_key: g1_isaac_rough
+task_key: g1_rough
 title: Unitree G1 Rough-Terrain Locomotion
 summary: G1 locomotion with a frozen terrain curriculum and height observations.
 tags:
