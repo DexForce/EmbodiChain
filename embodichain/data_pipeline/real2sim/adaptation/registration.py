@@ -50,9 +50,10 @@ def register_scene(
 
     Args:
         observation: Original pixel-aligned RGB-D and optical-to-base calibration.
-        assets: Generated mesh paths and declared Y-up poses/scales/categories.
+        assets: Generated Y-up mesh paths with native Z-up poses, scales and categories.
         object_masks: Masks in original image coordinates (or equal-aspect resize).
-        support_surface_z: Exported tabletop height before registration.
+        support_surface_z: Tabletop height in canonical Z-up mesh coordinates;
+            the native table pose and scale are applied before registration.
         auxiliary_depth: Optional calibrated depth views of the same initial scene.
 
     Returns:
@@ -86,7 +87,7 @@ def register_scene(
         mesh = _load_mesh(path)
         transform = np.eye(4)
         transform[:3, :3] = Rotation.from_euler(
-            "xyz", obj["init_rot"], degrees=True
+            "XYZ", obj["init_rot"], degrees=True
         ).as_matrix() * np.array(obj.get("proxy_body_scale", obj["body_scale"]))
         transform[:3, 3] = obj["init_pos"]
         transform = transform @ zup
@@ -231,13 +232,20 @@ def register_scene(
     # coordinate frame, never individual object dimensions or relative placement.
     normal = np.r_[-plane[:2], 1.0]
     normal /= np.linalg.norm(normal)
-    tilt = Rotation.align_vectors([normal], [[0.0, 0.0, 1.0]])[0].as_matrix()
+    # The exporter stores support height before the table's pose and body scale.
+    # Remove only the GLB Y-up conversion to transform its canonical Z-up plane.
+    table_native = transforms["table"] @ zup.T
+    support_point = (table_native @ [0.0, 0.0, float(support_surface_z), 1.0])[:3]
+    support_normal = np.linalg.solve(table_native[:3, :3].T, [0.0, 0.0, 1.0])
+    support_normal /= np.linalg.norm(support_normal)
+    rotated_normal = shared[:3, :3] @ support_normal / scale
+    tilt = Rotation.align_vectors([normal], [rotated_normal])[0].as_matrix()
     shared[:3, :3] = tilt @ shared[:3, :3]
     shared[:2, 3] = b.mean(0) - (shared[:3, :3] @ centers.mean(0))[:2]
     shared[2, 3] = (
         plane[2]
         + plane[:2] @ shared[:2, 3]
-        - scale * float(support_surface_z) / normal[2]
+        - normal @ (shared[:3, :3] @ support_point) / normal[2]
     )
     results = []
     vertices = {}

@@ -187,11 +187,13 @@ def prepare_trajectory_evidence(
         for phase in phases:
             pairs = {}
             dropped = 0
-            for row in contacts.get("interval_samples", contacts["samples"]):
+            for row in contacts.get("interval_samples", contacts.get("samples", [])):
+                # Interval peaks cover the whole interval, not only its endpoint.
+                # Preserve original bounds even when it overlaps multiple phases.
+                start = row.get("start_timestamp", row["timestamp"])
                 if (
-                    times[phase["start_frame"]]
-                    <= row["timestamp"]
-                    <= times[phase["end_frame"]]
+                    row["timestamp"] >= times[phase["start_frame"]] - 1e-8
+                    and start <= times[phase["end_frame"]] + 1e-8
                 ):
                     dropped += row.get("dropped_contact_rows", 0)
                     for index, pair in enumerate(row["user_ids"]):
@@ -199,12 +201,13 @@ def prepare_trajectory_evidence(
                         item = pairs.setdefault(
                             key,
                             dict(
-                                first_s=row["timestamp"],
+                                first_s=start,
                                 last_s=row["timestamp"],
                                 count=0,
                             ),
                         )
-                        item["last_s"] = row["timestamp"]
+                        item["first_s"] = min(item["first_s"], start)
+                        item["last_s"] = max(item["last_s"], row["timestamp"])
                         item["count"] += 1
                         forces = row.get("peak_force_on_first_actor_n")
                         if forces is not None:
@@ -215,6 +218,7 @@ def prepare_trajectory_evidence(
                                     peak_force_n=magnitude,
                                     peak_force_on_first_actor_n=force,
                                     peak_force_time_s=row["timestamp"],
+                                    peak_force_interval_s=[start, row["timestamp"]],
                                 )
             evidence["phase_contacts"].append(
                 dict(phase_id=phase["id"], pairs=pairs, dropped_contact_rows=dropped)

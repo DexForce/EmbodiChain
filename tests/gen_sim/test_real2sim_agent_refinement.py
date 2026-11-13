@@ -121,8 +121,9 @@ def _annotation() -> dict:
     )
 
 
+@pytest.mark.parametrize("tamper", [None, "trajectory", "rollout", "missing_receipt"])
 def test_prepared_entry_preserves_commands_and_reuses_completed_evidence(
-    recording: tuple, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    recording: tuple, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tamper
 ) -> None:
     from embodichain.gen_sim.real2sim import execution
     from embodichain.gen_sim.real2sim._artifacts import write_json
@@ -185,7 +186,32 @@ def test_prepared_entry_preserves_commands_and_reuses_completed_evidence(
     rollout = Path(result["latest_rollout"])
     assert (run / "videos").resolve() == rollout / "videos"
 
+    trajectory = Path(result["latest_trajectory"])
+    if tamper == "trajectory":
+        with np.load(trajectory, allow_pickle=False) as data:
+            modified = dict(data)
+        modified["qpos"][3, 0] = 0.75
+        np.savez_compressed(trajectory, **modified)
+    elif tamper == "rollout":
+        np.savez(rollout / "diagnostics/physics_rollout.npz", timestamps=[1.0])
+    elif tamper == "missing_receipt":
+        (trajectory.parent / "replay_receipt.json").unlink(missing_ok=True)
     continued = tmp_path / "continued"
+    if tamper:
+        with pytest.raises(
+            ValueError, match="replay receipt|trajectory changed|rollout changed"
+        ):
+            execution.run_prepared_real2sim(
+                source,
+                registered,
+                continued,
+                instruction=inputs.instruction,
+                max_revisions=0,
+                continue_from=run,
+            )
+        assert len(commands) == 1
+        assert not continued.exists()
+        return
     resumed = execution.run_prepared_real2sim(
         source,
         registered,
@@ -199,6 +225,16 @@ def test_prepared_entry_preserves_commands_and_reuses_completed_evidence(
     assert (continued / "videos").resolve() == rollout / "videos"
     assert (continued / "iterations/000/replay_reuse.json").is_file()
     assert (source / "trajectory_original.npz").read_bytes() == source_bytes
+    again = execution.run_prepared_real2sim(
+        source,
+        registered,
+        tmp_path / "continued_again",
+        instruction=inputs.instruction,
+        max_revisions=0,
+        continue_from=continued,
+    )
+    assert again["status"] == "completed"
+    assert len(commands) == 1
 
 
 def test_numerical_revision_replays_before_success(

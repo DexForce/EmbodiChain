@@ -172,8 +172,10 @@ Optional flags:
   match the recording.
 - `--continue-from /path/to/completed_run`: reuse the exact prior annotation and
   completed replay, then execute only newly corrected trajectories. Input hashes,
-  recording, scene, instruction, and visual URDF must match. It cannot be combined
-  with `--place-base` or `--initial-trajectory`.
+  recording, scene, instruction, and visual URDF must match. Each completed replay
+  saves `iterations/<index>/replay_receipt.json`, binding its trajectory and physics
+  rollout hashes. Changed artifacts or runs without this receipt require a fresh
+  replay. This option cannot be combined with `--place-base` or `--initial-trajectory`.
 
 The numerical solver is the feature-specific approximate IK in
 `embodichain/data_pipeline/real2sim/adaptation/_real2sim_ik.py`. Its residuals and

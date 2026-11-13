@@ -64,7 +64,8 @@ def run_prepared_real2sim(
         max_revisions: Correction budget after the baseline replay.
         visual_urdf: Optional robot visuals for replay.
         place_base: Explicitly recompute mounting before starting the loop.
-        continue_from: Completed run whose exact evidence may be reused.
+        continue_from: Completed run whose replay receipt verifies the unchanged
+            executed trajectory and rollout before reusing its evidence.
         initial_trajectory: Optional existing joint reference with source timing.
 
     Returns:
@@ -110,6 +111,19 @@ def run_prepared_real2sim(
         prior_rollout = Path(prior_result["latest_rollout"])
         if not (prior_rollout / "diagnostics/physics_rollout.npz").is_file():
             raise ValueError("Continuation requires a completed native replay")
+        prior_receipt = initial_trajectory.parent / "replay_receipt.json"
+        if not prior_receipt.is_file():
+            raise ValueError(
+                "Continuation requires a replay receipt; run a fresh replay"
+            )
+        executed = json.loads(prior_receipt.read_text())
+        if digest(initial_trajectory) != executed.get("trajectory_sha256"):
+            raise ValueError(
+                "Previously executed trajectory changed; run a fresh replay"
+            )
+        prior_physics = prior_rollout / "diagnostics/physics_rollout.npz"
+        if digest(prior_physics) != executed.get("rollout_sha256"):
+            raise ValueError("Previously completed rollout changed; run a fresh replay")
         if "visual_urdf" in prior_context:
             prior_visual = (
                 Path(prior_context["visual_urdf"])
@@ -213,6 +227,8 @@ def run_prepared_real2sim(
         context["fixed_files"].extend(
             [
                 str(previous / "annotation/annotation.json"),
+                str(prior_receipt),
+                str(prior_physics),
                 *context["previous_run_reviews"],
             ]
         )
@@ -226,6 +242,22 @@ def run_prepared_real2sim(
             raise ValueError(
                 "Replay requires finite commands with unchanged sample/joint shape"
             )
+        trajectory_path = iteration_dir / "trajectory.npz"
+        submitted_sha256 = digest(trajectory_path)
+
+        def record_execution(render: Path) -> None:
+            if digest(trajectory_path) != submitted_sha256:
+                raise ValueError("Submitted trajectory changed during replay")
+            write_json(
+                iteration_dir / "replay_receipt.json",
+                {
+                    "trajectory_sha256": submitted_sha256,
+                    "rollout_sha256": digest(
+                        render / "diagnostics/physics_rollout.npz"
+                    ),
+                },
+            )
+
         if previous and iteration_dir.name == "000":
             if not np.array_equal(qpos, initial_qpos):
                 raise ValueError(
@@ -233,6 +265,7 @@ def run_prepared_real2sim(
                 )
             render = iteration_dir / "native_render"
             render.symlink_to(prior_rollout, target_is_directory=True)
+            record_execution(render)
             write_json(
                 iteration_dir / "replay_reuse.json",
                 {
@@ -278,6 +311,7 @@ def run_prepared_real2sim(
                 stderr=subprocess.STDOUT,
                 check=True,
             )
+        record_execution(render)
         # A single viewing entry points to the latest completed replay. Earlier
         # iterations retain their own videos, runtime assets and observations.
         latest = output / "videos"

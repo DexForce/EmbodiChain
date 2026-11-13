@@ -291,18 +291,40 @@ def test_agibot_missing_observation_keeps_original_clock_and_frame_indices():
         )
 
 
-@pytest.mark.parametrize("offset", [0.0, 0.12])
-@pytest.mark.parametrize("native_table_scale", [(1.0, 1.0, 1.0), (0.25, 0.5, 1.0)])
+@pytest.mark.parametrize(
+    "offset,native_table_scale,table_position,table_rotation,block_rotation,height",
+    [
+        (0.0, (1, 1, 1), (0, 0, 0), (0, 0, 0), (0, 0, 0), 0),
+        (0.12, (1, 1, 1), (0, 0, 0), (0, 0, 0), (0, 0, 0), 0),
+        (0.0, (0.25, 0.5, 1), (0, 0, 0), (0, 0, 0), (0, 0, 0), 0),
+        (0.12, (0.25, 0.5, 1), (0, 0, 0), (0, 0, 0), (0, 0, 0), 0),
+        (0.12, (1, 1, 1), (0, 0, 0), (0, 0, 0), (25, 30, 40), 0),
+        (0.12, (1, 1, 1), (0, 0, 0.2), (0, 0, 0), (0, 0, 0), 0),
+        (0.12, (0.5, 1.2, 2), (0.03, -0.02, 0.2), (15, 20, 30), (25, 30, 40), 0.15),
+    ],
+    ids=[
+        "identity",
+        "offset",
+        "scaled",
+        "scaled-offset",
+        "intrinsic-XYZ",
+        "translated-support",
+        "tilted-scaled-support",
+    ],
+)
 def test_registration_preserves_native_scene_under_one_similarity(
-    tmp_path, offset, native_table_scale
+    tmp_path,
+    offset,
+    native_table_scale,
+    table_position,
+    table_rotation,
+    block_rotation,
+    height,
 ):
     import open3d as o3d
     import trimesh
     from PIL import Image
     from scipy.spatial.transform import Rotation
-    from embodichain.data_pipeline.real2sim.adaptation.registration import (
-        register_scene,
-    )
 
     table = trimesh.creation.box(extents=[0.8, 0.8, 0.04])
     table.apply_translation([0, 0, -0.02])
@@ -318,6 +340,8 @@ def test_registration_preserves_native_scene_under_one_similarity(
             )
         )
         y_up = mesh.copy()
+        if uid == "table":
+            y_up.apply_translation([0, 0, height])
         y_up.apply_transform(
             trimesh.transformations.rotation_matrix(-np.pi / 2, [1, 0, 0])
         )
@@ -329,8 +353,8 @@ def test_registration_preserves_native_scene_under_one_similarity(
                 name=uid,
                 category=uid,
                 mesh_path=str(path),
-                init_pos=[0, 0, 0],
-                init_rot=[0, 0, 0],
+                init_pos=list(table_position) if uid == "table" else [0, 0, 0],
+                init_rot=list(table_rotation if uid == "table" else block_rotation),
                 body_scale=list(native_table_scale) if uid == "table" else [1, 1, 1],
             )
         )
@@ -356,7 +380,28 @@ def test_registration_preserves_native_scene_under_one_similarity(
         Path("unused.mp4"), image, np.arange(2), k, camera, depth
     )
     before = {a["uid"]: Path(a["mesh_path"]).read_bytes() for a in assets}
-    result = register_scene(observation, assets, masks, 0.0)
+    # Exercise the same export adapter used by the public reconstruction pipeline.
+    from types import SimpleNamespace
+    from embodichain.gen_sim.real2sim.scene import register_scene_export
+    from embodichain.gen_sim.real2sim._artifacts import write_json
+
+    native_run = tmp_path / "native"
+    exported = [dict(a, shape={"fpath": a["mesh_path"]}) for a in assets]
+    exported[0]["support_surface_z"] = height
+    write_json(
+        native_run / "scene_export/scene_config.json",
+        {"background": exported[:1], "rigid_object": exported[1:]},
+    )
+    mask_records = []
+    for uid, mask in masks.items():
+        path = tmp_path / f"{uid}_mask.png"
+        Image.fromarray(mask.astype(np.uint8) * 255).save(path)
+        mask_records.append(dict(id=uid, mask_path=str(path)))
+    write_json(native_run / "scene_understanding/scene.json", {"objects": mask_records})
+    result = register_scene_export(
+        SimpleNamespace(cameras={"front": observation}, primary_camera="front"),
+        native_run,
+    )
     shared = np.asarray(result.description["global_similarity"])
     rotation_scale = shared[:3, :3]
     scale = np.cbrt(np.linalg.det(rotation_scale))
@@ -370,7 +415,16 @@ def test_registration_preserves_native_scene_under_one_similarity(
     native_transforms = {}
     for asset in assets:
         uid = asset["uid"]
-        native = np.diag([*asset["body_scale"], 1.0]) @ zup
+        # Intrinsic XYZ equals Rx @ Ry @ Rz; verify the export convention independently.
+        native = np.eye(4)
+        native[:3, :3] = (
+            Rotation.from_euler("x", asset["init_rot"][0], degrees=True).as_matrix()
+            @ Rotation.from_euler("y", asset["init_rot"][1], degrees=True).as_matrix()
+            @ Rotation.from_euler("z", asset["init_rot"][2], degrees=True).as_matrix()
+            @ np.diag(asset["body_scale"])
+        )
+        native[:3, 3] = asset["init_pos"]
+        native = native @ zup
         native_transforms[uid] = native
         actual = np.asarray(objects[uid]["transform"])
         np.testing.assert_allclose(actual, shared @ native, atol=1e-10)
@@ -659,7 +713,10 @@ def test_recording_starting_with_open_jaws_keeps_first_grasp():
     assert 260 < events[0]["release"] < 300
 
 
-def test_explicit_seven_axis_and_coupled_gripper_keep_other_joints(tmp_path):
+@pytest.mark.parametrize("descending", [False, True])
+def test_explicit_seven_axis_and_coupled_gripper_keep_other_joints(
+    tmp_path, descending
+):
     from embodichain.data_pipeline.real2sim.adaptation._kinematics import Robot
 
     names = ("torso", *[f"arm{i}" for i in range(7)], "inner", "outer")
@@ -680,6 +737,9 @@ def test_explicit_seven_axis_and_coupled_gripper_keep_other_joints(tmp_path):
         pad_links=["link8", "link9"],
         outward_axes=[[1, 0, 0], [1, 0, 0]],
     )
+    if descending:
+        calibration["width_m"].reverse()
+        calibration["qpos"].reverse()
     model = RobotModel(
         urdf,
         names,
@@ -692,13 +752,16 @@ def test_explicit_seven_axis_and_coupled_gripper_keep_other_joints(tmp_path):
         gripper_calibrations=(calibration,),
     )
     robot = Robot(model)
-    source = np.full((3, 10), 0.2)
-    result = robot.set_half_open(source, 0, np.array([0, 0.025, 0.05]))
+    source = np.full((5, 10), 0.2)
+    aperture = np.array([0, 0.01, 0.025, 0.04, 0.05])
+    result = robot.set_half_open(source, 0, aperture)
     np.testing.assert_array_equal(result[:, :8], source[:, :8])
-    np.testing.assert_allclose(result[:, 8:], [[0, 0], [0.5, -0.5], [1, -1]])
-    np.testing.assert_allclose(robot.half_open(result, 0), [0, 0.025, 0.05])
+    np.testing.assert_allclose(
+        result[:, 8:], [[0, 0], [0.2, -0.2], [0.5, -0.5], [0.8, -0.8], [1, -1]]
+    )
+    np.testing.assert_allclose(robot.half_open(result, 0), aperture)
     assert len(robot.arm_columns[0]) == 7
-    np.testing.assert_array_equal(source, np.full((3, 10), 0.2))
+    np.testing.assert_array_equal(source, np.full((5, 10), 0.2))
 
 
 def test_gripper_commands_use_urdf_limit_before_closure_is_refined(tmp_path):
@@ -940,6 +1003,7 @@ def test_observed_event_delta_reaches_fit_without_changing_source_or_scene(
     )
     event = dict(side=0, close_start=30, grasp=40, release=70, open_end=80)
     robot = SimpleNamespace(
+        joint_units=inputs.demonstration.joint_units,
         config={"robot_type": "cobotmagic", "pad_center_tcp_z_m": 0.0},
         tcp=lambda q, side: np.repeat(np.eye(4)[None], len(q), axis=0),
         half_open=lambda q, side: np.zeros(len(q)),

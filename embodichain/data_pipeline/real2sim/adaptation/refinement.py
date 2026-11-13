@@ -386,11 +386,6 @@ def refine_trajectory(
     """
     demo = inputs.demonstration
     clock_gaps = _clock_gaps(inputs)
-    expected_units = tuple(
-        "rad" if i % 8 < 6 else "m" for i in range(len(demo.joint_names))
-    )
-    if not inputs.robot.gripper_calibrations and demo.joint_units != expected_units:
-        raise ValueError("Explicit radian arms and metre jaw positions are required")
     if type(approach_lead_frames) is not int or approach_lead_frames < 0:
         raise ValueError("approach_lead_frames must be nonnegative")
     if not np.isfinite(gripper_preload_m) or not 0 <= gripper_preload_m <= 0.005:
@@ -408,6 +403,8 @@ def refine_trajectory(
         ),
     )
     robot = Robot(model)
+    if tuple(demo.joint_units) != robot.joint_units:
+        raise ValueError("Joint units must match URDF radians/metres")
     source_robot = Robot(inputs.robot)
     relocated = not np.allclose(model.base_pose_world, inputs.robot.base_pose_world)
     objects = {x["id"]: x for x in scene["objects"] if x["id"] != "table"}

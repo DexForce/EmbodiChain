@@ -83,6 +83,10 @@ class Robot:
             self.jaw_columns = [
                 np.array([i * 8 + 6, i * 8 + 7]) for i in range(len(model.tcp_links))
             ]
+        self.joint_units = tuple(
+            "m" if joints[name].get("type") == "prismatic" else "rad"
+            for name in self.names
+        )
         self.arm_limits: list[tuple[np.ndarray, np.ndarray]] = []
         for columns in self.arm_columns:
             bounds = []
@@ -195,8 +199,10 @@ class Robot:
         item = self.calibrations[side]
         width = np.asarray(half) * 2
         grid = np.asarray(item["width_m"])
+        order = np.argsort(grid)
+        qpos_grid = np.asarray(item["qpos"])[order]
         for i, column in enumerate(self.jaw_columns[side]):
-            result[..., column] = np.interp(width, grid, np.asarray(item["qpos"])[:, i])
+            result[..., column] = np.interp(width, grid[order], qpos_grid[:, i])
         return result
 
     def finger_surfaces(self, side: int) -> tuple[list[str], list[np.ndarray]]:

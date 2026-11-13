@@ -104,6 +104,147 @@ def robot_model(tmp_path: Path) -> RobotModel:
     return model
 
 
+@pytest.mark.parametrize("bad_joint,unit", [(None, None), (0, "deg"), (6, "mm")])
+def test_calibrated_refinement_requires_urdf_joint_units(
+    robot_model, monkeypatch, bad_joint, unit
+):
+    from dataclasses import replace
+    from types import SimpleNamespace
+    from embodichain.data_pipeline.real2sim.adaptation import refinement
+    from embodichain.data_pipeline.real2sim.adaptation.inputs import RegisteredScene
+
+    calibration = dict(
+        joint_names=["j6", "j7"],
+        width_m=[0, 0.1],
+        qpos=[[0, 0], [0.05, 0.05]],
+        pad_links=["link6", "link7"],
+        outward_axes=[[0, 0, 1], [0, 0, 1]],
+    )
+    model = replace(
+        robot_model,
+        arm_joint_groups=(robot_model.joint_names[:6],),
+        gripper_calibrations=(calibration,),
+    )
+    units = ["rad"] * 6 + ["m"] * 2
+    if bad_joint is not None:
+        units[bad_joint] = unit
+    demo = SimpleNamespace(
+        qpos=np.zeros((6, 8)),
+        timestamps=np.arange(6) / 30,
+        time_unit="s",
+        joint_names=model.joint_names,
+        joint_units=tuple(units),
+    )
+    inputs = SimpleNamespace(demonstration=demo, robot=model)
+
+    class ReachedRefinement(Exception):
+        pass
+
+    def events(*args):
+        raise ReachedRefinement
+
+    monkeypatch.setattr(refinement, "_demonstration_events", events)
+    expected = ReachedRefinement if bad_joint is None else ValueError
+    with pytest.raises(expected):
+        refinement.refine_trajectory(
+            inputs,
+            RegisteredScene({"objects": [], "source_table_plane": [0, 0, 0]}, {}),
+        )
+
+
+@pytest.mark.parametrize("interval", [False, True])
+def test_review_evidence_keeps_contacts_overlapping_a_semantic_phase(
+    robot_model, tmp_path, monkeypatch, interval
+):
+    from contextlib import nullcontext
+    from dataclasses import asdict
+    from types import SimpleNamespace
+    from embodichain.data_pipeline.real2sim.adaptation import evidence
+    from embodichain.gen_sim.real2sim._artifacts import write_json
+
+    times = np.arange(6) * 0.04
+    qpos = np.zeros((6, 8))
+    source = tmp_path / "source.npz"
+    np.savez(source, qpos=qpos, timestamps=times, front_frames=np.arange(6))
+    write_json(tmp_path / "robot.json", asdict(robot_model))
+    write_json(tmp_path / "scene.json", {"objects": [{"id": "cup"}]})
+    np.savez(tmp_path / "vertices.npz", cup=[[0, 0, 0], [0.02, 0.02, 0.02]])
+    rollout = tmp_path / "rollout"
+    diagnostics = rollout / "diagnostics"
+    diagnostics.mkdir(parents=True)
+    np.savez(
+        diagnostics / "physics_rollout.npz",
+        timestamps=times,
+        qpos_observed=qpos,
+        object_names=["cup"],
+        object_poses=np.tile(np.eye(4), (6, 1, 1, 1)),
+    )
+    write_json(
+        diagnostics / "initialization.json",
+        {"object_names": ["cup"], "initial_object_poses": [np.eye(4)]},
+    )
+    contact = dict(
+        timestamp=0.035,
+        user_ids=[[1, 2]],
+        peak_force_on_first_actor_n=[[3, 4, 0]],
+        dropped_contact_rows=2,
+    )
+    contacts = dict(actors={"1": "cup", "2": "finger"}, samples=[contact])
+    if interval:
+        contact = dict(contact, start_timestamp=1 / 30, timestamp=2 / 30)
+        contacts["interval_samples"] = [contact]
+        contacts["samples"] = []
+    write_json(diagnostics / "contacts.json", contacts)
+    context = dict(
+        instruction="Move the cup",
+        source_trajectory=str(source),
+        time_unit="s",
+        source_videos={
+            "front": {"video": "unused.mp4", "frame_indices_key": "front_frames"}
+        },
+        primary_camera="front",
+        robot_model_path=str(tmp_path / "robot.json"),
+        scene=str(tmp_path / "scene.json"),
+        scene_vertices=str(tmp_path / "vertices.npz"),
+        current_trajectory=str(source),
+        rollout=str(rollout),
+        correction_limits={},
+        revisions_remaining=1,
+        history=[],
+    )
+    phases = [
+        dict(id="grasp", start_frame=0, end_frame=1, acting_arm="arm"),
+        dict(id="carry", start_frame=2, end_frame=5, acting_arm="arm"),
+    ]
+    monkeypatch.setattr(evidence, "_sheet", lambda *args: args[-1].touch())
+    monkeypatch.setattr(
+        evidence.av,
+        "open",
+        lambda *args: nullcontext(
+            SimpleNamespace(
+                streams=SimpleNamespace(
+                    video=[SimpleNamespace(average_rate=30, frames=6)]
+                )
+            )
+        ),
+    )
+    result, _ = evidence.prepare_trajectory_evidence(
+        "review",
+        context,
+        tmp_path / "evidence",
+        annotation={"task_program": {}},
+        phases=phases,
+    )
+    first, second = result["phase_contacts"]
+    assert first["dropped_contact_rows"] == 2
+    assert first["pairs"]["[1, 2]"]["peak_force_n"] == pytest.approx(5)
+    assert first["pairs"]["[1, 2]"]["first_s"] == contact.get(
+        "start_timestamp", contact["timestamp"]
+    )
+    assert first["pairs"]["[1, 2]"]["last_s"] == contact["timestamp"]
+    assert second["pairs"] == {}
+
+
 def test_joint_limit_report_keeps_out_of_range_recordings_unchanged(
     robot_model: RobotModel,
 ) -> None:
