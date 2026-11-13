@@ -117,6 +117,8 @@ class AxisAlignOptions(PickUpOptions):
 
     def __post_init__(self) -> None:
         PickUpOptions.__post_init__(self)
+        if self.initial_lift_height > 0.0:
+            raise ValueError("initial_lift_height is supported only by PickUp.")
         if (
             not isinstance(self.target_axis, torch.Tensor)
             or self.target_axis.dim() not in (1, 2)

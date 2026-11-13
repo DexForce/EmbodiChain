@@ -223,6 +223,8 @@ def _canonical_value(value: object) -> object:
         from embodichain.lab.sim.atomic_skills.policies import MotionPolicy
 
         from embodichain.lab.sim.atomic_skills.core import SkillDescriptor
+        from embodichain.lab.sim.atomic_skills.primitives.pick_up import PickUpOptions
+        from embodichain.lab.sim.atomic_skills.primitives.slide import SlideOptions
 
         if (
             type(value) is SkillDescriptor
@@ -233,6 +235,10 @@ def _canonical_value(value: object) -> object:
             metadata.pop("final_velocity_rejection")
         if type(value) is RecoveryPolicy and value.retry_all_failed_plans is True:
             metadata.pop("retry_all_failed_plans")
+        if isinstance(value, PickUpOptions) and value.initial_lift_height == 0.0:
+            metadata.pop("initial_lift_height")
+        if isinstance(value, SlideOptions) and value.push_approach_offset is None:
+            metadata.pop("push_approach_offset")
         return {"type": _qualified_name(value), "fields": metadata}
     raise TypeError(
         "Registration fingerprint metadata contains unsupported value type "

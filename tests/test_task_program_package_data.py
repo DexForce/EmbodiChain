@@ -547,3 +547,103 @@ print(json.dumps(decoded_deployments, sort_keys=True))
     assert json.loads(completed.stdout.splitlines()[-1]) == {
         path: list(identifiers) for path, identifiers in expected_deployments.items()
     }
+
+
+def test_installed_wheel_registers_drawer_storage(tmp_path: Path) -> None:
+    """Register both drawer deployments from installed YAML and discover the catalog."""
+    source = tmp_path / "source"
+    source.mkdir()
+    for name in ("setup.py", "pyproject.toml", "README.md", "VERSION", "MANIFEST.in"):
+        shutil.copyfile(_REPOSITORY_ROOT / name, source / name)
+    for name in ("embodichain", "extensions", "examples"):
+        shutil.copytree(
+            _REPOSITORY_ROOT / name,
+            source / name,
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.egg-info"),
+        )
+
+    wheel_dir = tmp_path / "wheels"
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "wheel",
+            "--no-build-isolation",
+            "--no-deps",
+            "--no-index",
+            "--wheel-dir",
+            str(wheel_dir),
+            ".",
+        ],
+        cwd=source,
+        check=True,
+    )
+    (wheel,) = wheel_dir.glob("embodichain-*.whl")
+    installed = tmp_path / "installed"
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--no-deps",
+            "--no-index",
+            "--target",
+            str(installed),
+            str(wheel),
+        ],
+        cwd=tmp_path,
+        check=True,
+    )
+    subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            """
+from pathlib import Path
+import sys
+
+installed = Path(sys.argv[1])
+sys.path.insert(0, str(installed))
+from embodichain.lab.gym.envs import EmbodiedEnv
+from embodichain.lab.gym.utils.gym_utils import config_to_cfg
+from embodichain.lab.gym.utils.registration import get_env_spec
+from embodichain.utils.utility import load_config
+from gymnasium import registry
+
+configs = installed / "embodichain_tasks/configs/tasks/manipulation/drawer_storage"
+assert not (installed / "embodichain_tasks/manipulation/drawer_storage.py").exists()
+assert (configs / "task_program/evaluation.yaml").is_file()
+assert "embodichain_tasks" not in sys.modules
+
+for name, open_positions in (("ur5", (0.0,)), ("franka", (0.04, 0.04))):
+    path = configs / f"task.{name}.yaml"
+    raw = load_config(path)
+    assert raw["id"] not in registry
+    config_to_cfg(raw, source_path=path)
+    spec = get_env_spec(raw["id"])
+    assert spec.cls is EmbodiedEnv
+    registration = spec.task_program_registration
+    rules = registration.evaluation_conditions
+    assert rules["hand_open"].parameters["hand_open"]["positions"] == open_positions
+    assert len(rules["fingers_clear"].required_fields) == 3
+    assert "cube_contained" in registration.evaluation_final_refs
+
+import embodichain_tasks
+from embodichain.cli.list_task import _collect_environment_entries
+
+assert Path(embodichain_tasks.__file__).is_relative_to(installed)
+assert "embodichain_tasks.manipulation.drawer_storage" not in sys.modules
+assert {entry.env_id for entry in _collect_environment_entries()} >= {
+    "TaskProgramDrawerStorage-UR5-v1",
+    "TaskProgramDrawerStorage-Franka-v1",
+}
+
+""",
+            str(installed),
+        ],
+        cwd=tmp_path,
+        check=True,
+    )

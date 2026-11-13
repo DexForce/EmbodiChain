@@ -1,0 +1,125 @@
+integration_id: drawer_storage_v1
+program_id: drawer_storage
+requires:
+  scene_contract: drawer_storage_scene_v1
+  embodiment_contract: single_arm_parallel_gripper
+scene_binding:
+  contract_id: drawer_storage_scene_v1
+  registry_id: task_program_drawer_storage
+  articulations:
+  - entity_id: drawer
+    simulation_uid: drawer
+    dynamics: dynamic
+    semantic_type: drawer
+  links:
+  - entity_id: drawer_handle
+    articulation_id: drawer
+    native_link_name: large_handle_bar
+    dynamics: dynamic
+    semantic_type: drawer_handle
+  - entity_id: drawer_tray
+    articulation_id: drawer
+    native_link_name: drawer
+    dynamics: dynamic
+    affordances:
+    - entity_id: drawer_interior
+      kind: container
+      native_name: interior
+      object_target_pose:
+      - -1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - -1.0
+      - 0.0
+      - 0.105
+      - 0.0
+      - 0.0
+      - 1.0
+      - -0.027
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+      release_clearance: 0.015
+  rigid_objects:
+  - entity_id: cube
+    simulation_uid: cube
+    dynamics: dynamic
+    affordances:
+    - entity_id: cube_grasp
+      kind: antipodal_grasp
+profile:
+  defaults:
+    slide:
+      primary: primary_manipulator
+    pick_up:
+      primary: primary_manipulator
+    place:
+      primary: primary_manipulator
+  action_options:
+    simulation.articulation_link_slide:
+      kind: slide
+      direction: pull
+      hand_interp_steps: 12
+      approach_distance: 0.05
+      translation_distance: 0.26
+      release_retreat_distance: 0.1
+    pick:
+      kind: pick_up
+      lift_height: 0.18
+      grasp_settle_steps: 30
+      fixed_object_to_eef:
+      - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - -1.0
+      - 0.01
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+    place:
+      kind: place
+      lift_height: 0.16
+      cartesian_waypoint_count: 4
+      hand_interp_steps: 12
+  effect_monitors: {}
+runtime_services:
+  grasp_pose_generator_overrides:
+    eef:
+      approach_direction_samples: 1
+  registered_semantic_lowerers:
+  - kind: articulation_link_slide
+    articulation_id: drawer
+    articulation_simulation_uid: drawer
+    link_entity_id: drawer_handle
+    target_pose_mode: snapshot
+    joint_target:
+      joint_name: cabinet_to_drawer
+      axis_sign: -1
+  settle_presets:
+    stored_cube:
+      linear_velocity_threshold: 0.01
+      angular_velocity_threshold: 0.1
+      min_steps: 51
+      max_steps: 240
+      check_interval_steps: 1
+      required_stable_checks: 51
+    open_rail:
+      kind: joint_position_and_stability
+      entity: drawer
+      joint: cabinet_to_drawer
+      target: 0.26
+      tolerance: 0.02
+      duration: 0.5
+      timeout: 5.0
+      position_drift: 0.001
