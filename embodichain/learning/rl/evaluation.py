@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from copy import deepcopy
 from typing import Any
 
 import numpy as np
@@ -129,6 +130,15 @@ def _is_per_env_scalar_metric(value: Any, num_envs: int) -> bool:
     return array.ndim == 1 or array.shape[1:] in {(1,)}
 
 
+def _terminal_episode_outcome(
+    info: Mapping[str, Any], env_id: int
+) -> dict[str, Any] | None:
+    outcomes = info.get("terminal_outcomes")
+    if isinstance(outcomes, Mapping) and env_id in outcomes:
+        return deepcopy(outcomes[env_id])
+    return None
+
+
 @torch.no_grad()
 def evaluate_episodes(
     *,
@@ -138,6 +148,7 @@ def evaluate_episodes(
     device: torch.device | str,
     seed: int | None = None,
     on_step: Callable[[dict[str, Any]], None] | None = None,
+    on_episode: Callable[[dict[str, Any]], None] | None = None,
     observation_transform: Callable[[torch.Tensor], torch.Tensor] | None = None,
 ) -> dict[str, float]:
     """Evaluate exactly ``num_episodes`` completed asynchronous episodes.
@@ -149,6 +160,8 @@ def evaluate_episodes(
         device: Policy device.
         seed: Optional environment reset seed.
         on_step: Optional callback for raw step info.
+        on_episode: Optional callback for each selected environment-owned terminal
+            outcome when the environment provides one.
         observation_transform: Optional frozen preprocessing transform, such as
             a running observation normalizer.
     """
@@ -199,6 +212,11 @@ def evaluate_episodes(
             lengths.extend(_selected_values(current_length, selected))
 
             if isinstance(info, Mapping):
+                if on_episode is not None:
+                    for env_id in selected.tolist():
+                        outcome = _terminal_episode_outcome(info, env_id)
+                        if outcome is not None:
+                            on_episode(outcome)
                 if "success" in info:
                     successes.extend(_selected_values(info["success"], selected))
                 metrics = info.get("metrics", {})

@@ -31,6 +31,7 @@ from embodichain.utils import configclass, is_configclass, logger
 from ..shapes import ShapeCfg
 from .asset import AssetPhysicsMode, ObjectBaseCfg, _resolve_asset_physics_mode
 from .rigid import RigidBodyPhysicsCfg
+from .visuals import GaussianSplatCfg, VisualElementCfg
 from .source import UsdSourceCfg
 
 
@@ -42,6 +43,21 @@ class RigidObjectCfg(ObjectBaseCfg):
     such as physical attributes and collision group.
     """
 
+    visuals: list[VisualElementCfg | GaussianSplatCfg] | GaussianSplatCfg | None = (
+        field(default=None, kw_only=True)
+    )
+    __annotations__["visuals"] = (
+        list[VisualElementCfg | GaussianSplatCfg] | GaussianSplatCfg | None
+    )
+    """Render replacement; one Gaussian may omit its element wrapper.
+
+    None preserves source appearance; [] removes it. Multiple elements require
+    explicit VisualElementCfg IDs.
+    """
+
+    semantic_shape: ShapeCfg | None = field(default=None, kw_only=True)
+    """Optional independent mesh/primitive for semantic geometry queries."""
+
     shape: ShapeCfg | None = None
     """Shape configuration for the rigid body. """
 
@@ -49,6 +65,19 @@ class RigidObjectCfg(ObjectBaseCfg):
     """USD source asset; mutually exclusive with :attr:`shape`."""
 
     # TODO: supoort basic primitive shapes, such as box, sphere, etc cfg and spawn method.
+
+    visual_shape: ShapeCfg | None = None
+    """Optional independent render geometry; shape remains collision geometry."""
+
+    particle_collision_shape: ShapeCfg | None = None
+    """Optional Newton SDF mesh for particles on this same rigid body.
+
+    Rigid contacts and mass use :attr:`shape`. This boundary follows the body's
+    live pose and twist and contributes no mass or rigid contact geometry.
+    """
+
+    render_enabled: bool = True
+    """Whether to create native render geometry for this rigid object."""
 
     attrs: RigidBodyPhysicsCfg = RigidBodyPhysicsCfg()
     """Rigid-body physics.
@@ -99,6 +128,9 @@ class RigidObjectCfg(ObjectBaseCfg):
     def from_dict(cls, init_dict: Dict[str, Any]) -> RigidObjectCfg:
         """Parse a rigid object and normalize legacy mesh collision ownership."""
         data = dict(init_dict)
+        for key in ("visual_shape", "particle_collision_shape"):
+            if isinstance(data.get(key), Mapping):
+                data[key] = ShapeCfg.from_dict(data[key])
         attrs_value = data.get("attrs")
         if isinstance(attrs_value, Mapping) and "mesh_collision_props" in attrs_value:
             shape_value = data.get("shape")

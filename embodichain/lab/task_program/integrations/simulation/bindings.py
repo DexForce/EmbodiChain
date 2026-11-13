@@ -709,7 +709,10 @@ def _mesh_tensor(
     getter = getattr(entity, getter_name, None)
     if not callable(getter):
         raise TypeError(f"Simulation rigid object must provide {getter_name}().")
-    if vertices:
+    semantic_getter = getattr(entity, "get_semantic_mesh", None)
+    if callable(semantic_getter):
+        value = semantic_getter([mesh_env_id])[0 if vertices else 1]
+    elif vertices:
         value = getter(env_ids=[mesh_env_id], scale=True)
     else:
         value = getter(env_ids=[mesh_env_id])
@@ -1379,6 +1382,27 @@ class ControlPartCommandPreset:
                 for command_id, positions in self.commands.items()
             }
         )
+
+
+def _bind_evaluation_joint_names(conditions, robot):
+    """Resolve preset joint identities through the Robot's expanded control parts."""
+    fields = {
+        field for spec in conditions.values() for field in spec._preset_joint_names()
+    }
+    layouts = {}
+    for field in fields:
+        owner, part, quantity = field.split("/")
+        if owner != "robot" or quantity != "qpos":
+            raise ValueError("Command presets require a native robot qpos channel.")
+        _require_control_part_dof(robot, part)
+        layouts[field] = tuple(
+            robot.joint_names[index] for index in robot.get_joint_ids(name=part)
+        )
+    cache = {}
+    return {
+        ref: spec._bind_joint_names(layouts, cache=cache)
+        for ref, spec in conditions.items()
+    }
 
 
 def _require_control_part_dof(robot: Robot, control_part: str) -> int:

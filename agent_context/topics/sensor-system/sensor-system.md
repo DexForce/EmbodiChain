@@ -64,6 +64,14 @@ poses are converted from optical axes (+Z forward, +Y down) by flipping Y/Z.
 Convert optical-frame mount calibration before storing a parented `pos/quat`;
 do not infer image direction from `get_arena_pose()` without this conversion.
 
+For Gaussian scenes, `Camera.capture_metadata` retains completed-frame identity,
+calibration and output semantics separately from image tensors. Gym exposes the
+snapshot through `sensor_capture_metadata`. Capability checks and publication
+ordering follow [Gaussian composition](../simulation-system/rendering.md#gaussian-composition).
+USD-native Gaussian PLY references use the same capture-status path; source prim
+and local visual transform appear in `gaussian_instances`. The separate
+`get_capture_metadata()` method also includes the ground visibility policy.
+
 ## Camera ground visibility
 
 `CameraCfg.ground_plane_visible` and `Camera.set_ground_plane_visibility(...,

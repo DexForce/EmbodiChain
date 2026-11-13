@@ -117,14 +117,24 @@ def test_installed_wheel_cli_reads_external_profiles_without_package_edits(tmp_p
     (site / "runtime-dependencies.pth").write_text(
         "\n".join(dict.fromkeys(runtime_sites)) + "\n"
     )
-    # Remove inherited editable paths for this consumer, while retaining installed dependencies.
+    # Remove source imports without excluding dependencies installed inside the checkout.
+    source_paths = [repo.resolve()] + [
+        path.resolve() for path in (repo / "extensions").iterdir() if path.is_dir()
+    ]
     (site / "sitecustomize.py").write_text(
-        "import sys\nfrom pathlib import Path\nsys.meta_path=[x for x in sys.meta_path if '__editable__' not in str(x)]\nsys.path=[x for x in sys.path if x and 'EmbodiChain' not in str(Path(x))]\n"
+        "import sys\nfrom pathlib import Path\n"
+        f"source_paths={list(map(str, source_paths))!r}\n"
+        "sys.meta_path=[x for x in sys.meta_path if '__editable__' not in str(x)]\n"
+        "sys.path=[x for x in sys.path if x and str(Path(x).resolve()) not in source_paths]\n"
     )
     package = site / "embodichain/gen_sim"
     bundled = package / "asset_engine/configs/gen_config.json"
     before = hashlib.sha256(bundled.read_bytes()).hexdigest()
     assert (package / "services/model_services.example.json").is_file()
+    template = json.loads(
+        (package / "services/model_services.example.json").read_text()
+    )
+    assert "deepseek" in template["model_services"]["profiles"]
     assert (package / "services/DEPLOYMENT.md").is_file()
     assert (package / "services/spec/v1/README.md").is_file()
     assert not (package / ".env").exists()

@@ -32,6 +32,7 @@ import torch
 
 from embodichain.lab.gym.envs.demo import (
     DemoExecutionCfg,
+    DemoQualification,
     DemoSegment,
     DemoSegmentResult,
     execute_demo_episode,
@@ -2219,3 +2220,142 @@ def _append_fixture(env, frame, action):
 
     env._traj_raw_action = action
     EmbodiedEnv._write_trajectory_step(env, frame)
+
+
+def test_qualification_separates_final_bounds_from_always_sampled_health() -> None:
+    initial = torch.tensor([[0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 1.0]]).repeat(2, 1)
+    env = SimpleNamespace(
+        num_envs=2,
+        device=torch.device("cpu"),
+        step_dt=1.0,
+        pose=initial.clone(),
+        score=torch.zeros(2, 1),
+        health=torch.ones(2, 1),
+    )
+    env.sim = SimpleNamespace(
+        get_rigid_object=lambda uid: SimpleNamespace(get_local_pose=lambda: env.pose)
+    )
+    env.cfg = SimpleNamespace(
+        observations=SimpleNamespace(
+            score=SimpleNamespace(func=lambda host, obs: host.score, params={}),
+            health=SimpleNamespace(func=lambda host, obs: host.health, params={}),
+        )
+    )
+    qualification = DemoQualification(
+        env,
+        {
+            "object_motion": {
+                "uid": "payload",
+                "min_lift_m": 0.05,
+                "min_tilt_deg": 45.0,
+                "max_return_error_m": 0.03,
+            },
+            "observations": {
+                "score": {"min": [0.5]},
+                "health": {"min": [1.0], "when": "always"},
+            },
+        },
+    )
+    tilted = initial.clone()
+    tilted[:, 2] += 0.12
+    tilted[:, 3] = torch.sin(torch.deg2rad(torch.tensor(35.0)))
+    tilted[:, 6] = torch.cos(torch.deg2rad(torch.tensor(35.0)))
+    qualification.start()
+    env.pose.copy_(tilted)
+    env.health[1] = 0
+    qualification.after_step()
+    env.pose.copy_(initial)
+    env.score.fill_(1.0)
+    env.health.fill_(1.0)
+    qualification.after_step()
+    report = qualification.finish([0])
+    assert report["accepted"]
+    assert report["accepted_rows"] == [True, False]
+    assert report["object_motion"]["max_tilt_deg"] == pytest.approx([70.0, 70.0])
+    assert report["samples"][0]["observations"]["score"] == [[0.0], [0.0]]
+    # A fresh attempt neither inherits the failed health sample nor motion peaks.
+    qualification.start()
+    assert not qualification.finish([0, 1])["accepted"]
+    env.pose.copy_(tilted)
+    qualification.after_step()
+    env.pose.copy_(initial)
+    qualification.after_step()
+    assert qualification.finish([0, 1])["accepted_rows"] == [True, True]
+
+
+@pytest.mark.parametrize(
+    "bounds",
+    [
+        {"min": [0.0], "unknown": True},
+        {"min": [1.0], "max": [0.0]},
+        {"min": [float("nan")]},
+    ],
+)
+def test_qualification_rejects_invalid_observation_bounds(bounds) -> None:
+    env = SimpleNamespace(num_envs=1, device=torch.device("cpu"), step_dt=0.1)
+    with pytest.raises(ValueError):
+        DemoQualification(env, {"observations": {"metric": bounds}})
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+@pytest.mark.parametrize("when", ["always", "final"])
+def test_qualification_preserves_inclusive_floating_boundaries(dtype, when) -> None:
+    env = SimpleNamespace(num_envs=1, device=torch.device("cpu"), step_dt=0.1)
+    env.cfg = SimpleNamespace(
+        observations=SimpleNamespace(
+            positive=SimpleNamespace(
+                func=lambda host, obs: torch.tensor([[0.1]], dtype=dtype), params={}
+            ),
+            negative=SimpleNamespace(
+                func=lambda host, obs: torch.tensor([[-0.1]], dtype=dtype), params={}
+            ),
+        )
+    )
+    qualification = DemoQualification(
+        env,
+        {
+            "observations": {
+                "positive": {"min": [0.1], "when": when},
+                "negative": {"max": [-0.1], "when": when},
+            }
+        },
+    )
+    qualification.start()
+    assert qualification.finish([0])["accepted"]
+
+
+@pytest.mark.parametrize("dtype", [torch.int64, torch.bool])
+@pytest.mark.parametrize("minimum,accepted", [(1.0, True), (1.1, False)])
+def test_qualification_keeps_unbounded_limits_for_discrete_values(
+    dtype, minimum, accepted
+) -> None:
+    env = SimpleNamespace(num_envs=1, device=torch.device("cpu"), step_dt=0.1)
+    env.cfg = SimpleNamespace(
+        observations=SimpleNamespace(
+            flag=SimpleNamespace(
+                func=lambda host, obs: torch.tensor([[1]], dtype=dtype), params={}
+            ),
+        )
+    )
+    qualification = DemoQualification(
+        env, {"observations": {"flag": {"min": [minimum]}}}
+    )
+    qualification.start()
+    assert qualification.finish([0])["accepted"] is accepted
+
+
+def test_qualification_reports_unsupported_policy_input_dependencies() -> None:
+    env = SimpleNamespace(num_envs=1, device=torch.device("cpu"), step_dt=0.1)
+    env.cfg = SimpleNamespace(
+        observations=SimpleNamespace(
+            derived=SimpleNamespace(
+                func=lambda host, obs: obs["robot"]["qpos"], params={}
+            ),
+        )
+    )
+    qualification = DemoQualification(
+        env, {"observations": {"derived": {"min": [0.0]}}}
+    )
+    with pytest.raises(ValueError, match="raw data directly from env") as failure:
+        qualification.start()
+    assert isinstance(failure.value.__cause__, KeyError)

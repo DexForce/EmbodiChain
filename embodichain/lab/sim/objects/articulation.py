@@ -55,7 +55,6 @@ from embodichain.lab.sim.cfg.articulation import _mimic_compliance_from_dict
 from dexsim.types import PhysicalAttr
 from embodichain.utils.string import (
     resolve_matching_names,
-    resolve_matching_names_values,
 )
 from embodichain.lab.sim.common import BatchEntity
 from embodichain.lab.sim.cfg.source import _asset_file_path
@@ -2954,6 +2953,10 @@ class Articulation(BatchEntity):
         num_instances = len(local_env_ids)
         self.cfg: ArticulationCfg
 
+        binding = getattr(self, "_visual_binding", None)
+        if binding is not None:
+            binding.reset(local_env_ids)
+
         write_hold_targets = (
             not self.body_data.is_newton_backend
             or _supports_newton_position_targets(self._spawn_result)
@@ -3019,75 +3022,6 @@ class Articulation(BatchEntity):
         self._data.articulation_view.compute_kinematics(local_env_ids)
         if self.device.type == "cpu" and not self._data.is_newton_backend:
             self._world.update(0.0)
-
-    def _set_default_joint_drive(
-        self,
-        joint_drive_props: JointDrivePropertiesCfg | dict | None = None,
-    ) -> None:
-        """Set default joint drive parameters based on the configuration."""
-        import numbers
-        from embodichain.utils.string import resolve_matching_names_values
-
-        if joint_drive_props is None:
-            joint_drive_props = self.cfg.joint_drive_props
-        if joint_drive_props is None:
-            return
-
-        joint_property_targets = [
-            ("damping", self.default_joint_damping),
-            ("stiffness", self.default_joint_stiffness),
-            ("max_effort", self.default_joint_max_effort),
-            ("max_velocity", self.default_joint_max_velocity),
-            ("friction", self.default_joint_friction),
-            ("armature", self.default_joint_armature),
-        ]
-
-        for prop_name, default_array in joint_property_targets:
-            value = (
-                joint_drive_props.get(prop_name)
-                if isinstance(joint_drive_props, dict)
-                else getattr(joint_drive_props, prop_name, None)
-            )
-            if value is None:
-                continue
-            if isinstance(value, numbers.Number):
-                default_array[:] = value
-            else:
-                try:
-                    indices, _, values = resolve_matching_names_values(
-                        value, self.joint_names
-                    )
-                    default_array[:, indices] = torch.as_tensor(
-                        values, dtype=torch.float32, device=self.device
-                    )
-                except Exception as e:
-                    logger.log_error(f"Failed to set {prop_name}: {e}")
-
-        if isinstance(joint_drive_props, dict):
-            drive_type = joint_drive_props.get("drive_type")
-            target_mode = joint_drive_props.get("target_mode")
-        else:
-            drive_type = getattr(joint_drive_props, "drive_type", None)
-            target_mode = getattr(joint_drive_props, "target_mode", None)
-        if isinstance(target_mode, dict):
-            logger.log_warning(
-                "Per-joint target_mode mappings require a Spawn-bound "
-                "articulation; the retained raw-articulation path preserves "
-                "its current target modes."
-            )
-            target_mode = None
-
-        # Apply drive parameters to all articulations in the batch
-        self.set_joint_drive(
-            stiffness=self.default_joint_stiffness,
-            damping=self.default_joint_damping,
-            max_effort=self.default_joint_max_effort,
-            max_velocity=self.default_joint_max_velocity,
-            friction=self.default_joint_friction,
-            armature=self.default_joint_armature,
-            drive_type=drive_type,
-            target_mode=target_mode,
-        )
 
     def compute_fk(
         self,
@@ -3367,6 +3301,21 @@ class Articulation(BatchEntity):
             update_default: Whether the assigned material should become the baseline
                 restored by :meth:`reset`. Defaults to False.
         """
+        binding = getattr(self, "_visual_binding", None)
+        if binding is not None:
+            requested = self.link_names if link_names is None else link_names
+            replaced = [name for name in requested if name in binding.groups]
+            if replaced:
+                binding.set_material(
+                    mat,
+                    env_ids,
+                    link_names=replaced,
+                    shared=shared,
+                    update_default=update_default,
+                )
+            link_names = [name for name in requested if name not in binding.groups]
+            if not link_names:
+                return
         local_env_ids = self._all_indices if env_ids is None else env_ids
         link_names = self.link_names if link_names is None else link_names
 
@@ -3431,6 +3380,26 @@ class Articulation(BatchEntity):
         Returns:
             List[Dict[str, VisualMaterialInst]]: A list where each element corresponds to an environment and contains a dictionary mapping link names to their VisualMaterialInst.
         """
+        binding = getattr(self, "_visual_binding", None)
+        if binding is not None:
+            ids = binding.indices(env_ids)
+            names = self.link_names if link_names is None else link_names
+            overrides = {
+                name: binding.material_instances(ids, name)
+                for name in names
+                if name in binding.groups
+            }
+            return [
+                {
+                    name: (
+                        overrides[name][row]
+                        if name in overrides
+                        else self._visual_material[env].get(name)
+                    )
+                    for name in names
+                }
+                for row, env in enumerate(ids)
+            ]
         if env_ids is None and link_names is None:
             return self._visual_material
 
@@ -3483,6 +3452,9 @@ class Articulation(BatchEntity):
             env_ids: Environment indices. If None, all instances are restored.
             link_names: Links to restore. If None, all links are restored.
         """
+        binding = getattr(self, "_visual_binding", None)
+        if binding is not None:
+            binding.restore_materials(env_ids, link_names)
         if not hasattr(self, "_original_visual_material"):
             return
         local_env_ids = self._all_indices if env_ids is None else env_ids
@@ -3585,6 +3557,14 @@ class Articulation(BatchEntity):
                     )
                 link_map[link_name] = segments
             per_env.append(link_map)
+        binding = getattr(self, "_visual_binding", None)
+        if binding is not None:
+            for row, env in enumerate(local_env_ids):
+                for name in link_names:
+                    if name in binding.groups:
+                        per_env[row][name] = binding.reuse_materials(int(env), name)
+            if not any(segments for row in per_env for segments in row.values()):
+                raise TypeError("Selected visuals have no reusable mesh materials.")
         return per_env
 
     def apply_render_material_inst(
@@ -3602,6 +3582,10 @@ class Articulation(BatchEntity):
             link_name: Link whose render body receives the material.
             mesh_id: Render-body segment index.
         """
+        binding = getattr(self, "_visual_binding", None)
+        if binding is not None and link_name in binding.groups:
+            binding.apply_material_inst(env_idx, mat_inst, mesh_id, link_name)
+            return
         _set_render_material(
             self._entities[env_idx].get_render_body(link_name), mesh_id, mat_inst
         )

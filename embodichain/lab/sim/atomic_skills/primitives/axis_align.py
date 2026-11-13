@@ -63,7 +63,7 @@ from embodichain.lab.sim.atomic_skills.primitives._binding_contracts import (
 from embodichain.lab.sim.atomic_skills.primitives._helpers import (
     find_symmetric_nearest_xpos,
     arm_qpos_from_state,
-    resample_planned_trajectory,
+    plan_named_arm_trajectory,
     require_shared_task_state_key,
 )
 from embodichain.lab.sim.atomic_skills.primitives.pick_up import PickUpOptions
@@ -74,7 +74,6 @@ from embodichain.lab.sim.atomic_skills.requirements import (
 )
 from embodichain.lab.sim.atomic_skills.state import HeldObjectState, PlanningContext
 from embodichain.lab.sim.atomic_skills.trajectory_ops import (
-    build_pose_plan_states,
     interpolate_hand_qpos,
     resolve_pose_target,
     translate_pose_world,
@@ -118,6 +117,8 @@ class AxisAlignOptions(PickUpOptions):
 
     def __post_init__(self) -> None:
         PickUpOptions.__post_init__(self)
+        if self.initial_lift_height > 0.0:
+            raise ValueError("initial_lift_height is supported only by PickUp.")
         if (
             not isinstance(self.target_axis, torch.Tensor)
             or self.target_axis.dim() not in (1, 2)
@@ -552,24 +553,14 @@ class AxisAlign(AtomicSkill[AxisAlignGoal, AxisAlignOptions]):
         interpolation_dt: float,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Plan one continuous arm phase with a fixed gripper command."""
-        result = self.motion_generator.generate(
-            build_pose_plan_states(target_pose),
-            options=request.motion_policy.to_motion_gen_options(
-                start_qpos=start_qpos,
-                control_part=manipulator.control_part,
-                sample_count=sample_count,
-                interpolation_dt=interpolation_dt,
-            ),
-        )
-        assert isinstance(result.success, torch.Tensor)
-        assert result.positions is not None
-        assert result.dt is not None
-        return result.success, resample_planned_trajectory(
-            result.positions,
+        return plan_named_arm_trajectory(
+            self.motion_generator,
+            manipulator.control_part,
+            start_qpos,
+            target_pose,
             sample_count,
-            dt=result.dt,
-            control_dt=interpolation_dt,
-            arrival_indices=result.waypoint_indices,
+            request.motion_policy,
+            interpolation_dt,
         )
 
     def _axis_alignment_eef_keyframes(
