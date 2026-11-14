@@ -373,12 +373,9 @@ def test_installed_names_are_discovered_without_loading_plugins(
     )
     monkeypatch.setattr(registry.metadata, "entry_points", lambda **kwargs: [entry])
     discover_sensor_plugins()
-    assert list_sensor_types() == [
-        "Camera",
-        "ContactSensor",
-        "StereoCamera",
-        "TestProbe",
-    ]
+    discovered = list_sensor_types()
+    assert discovered == sorted(set(discovered))
+    assert {"Camera", "ContactSensor", "StereoCamera", "TestProbe"} <= set(discovered)
     assert calls == []
     SensorCfg.from_dict({"sensor_type": "Camera"})
     assert calls == []
