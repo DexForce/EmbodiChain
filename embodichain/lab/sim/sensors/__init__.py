@@ -43,6 +43,7 @@ from .ray import (
     RayDepthCamera,
     RayDepthCameraCfg,
 )
+from .tactile_indentation import TactileIndentation, TactileIndentationCfg
 from .registry import (
     SensorRegistration,
     register_sensor,
@@ -53,6 +54,8 @@ from .registry import (
 
 __all__ = [
     "BaseSensor",
+    "TactileIndentation",
+    "TactileIndentationCfg",
     "RayLidar",
     "RayLidarCfg",
     "RayDepthCamera",
@@ -117,3 +120,7 @@ register_sensor(SensorRegistration("TerrainScan", TerrainScanCfg, TerrainScan))
 
 register_sensor(SensorRegistration("RayLidar", RayLidarCfg, RayLidar))
 register_sensor(SensorRegistration("RayDepthCamera", RayDepthCameraCfg, RayDepthCamera))
+
+register_sensor(
+    SensorRegistration("TactileIndentation", TactileIndentationCfg, TactileIndentation)
+)
