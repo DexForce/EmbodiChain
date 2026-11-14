@@ -6013,3 +6013,25 @@ Reference state sensors
    JointEncoderCfg
    FrameTransform
    FrameTransformCfg
+
+
+Finite-difference inertial sensors
+----------------------------------
+
+.. currentmodule:: embodichain.lab.sim.sensors
+
+.. autosummary::
+
+   PVA
+   PVACfg
+   IMU
+   IMUCfg
+
+.. currentmodule:: embodichain.lab.sim.sensors.inertial
+
+.. autosummary::
+
+   PVA
+   PVACfg
+   IMU
+   IMUCfg
