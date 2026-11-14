@@ -733,3 +733,35 @@ def test_managed_sensor_mount_rebind_and_failed_binding(
     ]
     with pytest.raises(RuntimeError, match="no live mount"):
         sensor.get_mount_pose()
+
+
+def test_scheduled_samples_are_cached_and_reset_rows_are_invalid() -> None:
+    acquired = []
+
+    class ScheduledProbe(_Probe):
+        def update(self, **kwargs: object) -> None:
+            acquired.append(kwargs["sample_dt"])
+            self._data_buffer["reading"].fill_(len(acquired))
+
+    register_sensor(SensorRegistration("TestProbe", _ProbeCfg, ScheduledProbe))
+    manager = _manager()
+    sensor = manager.add_sensor(
+        _ProbeCfg(
+            uid="probe", asset_uid="robot", sample_phase="physics", sample_period=0.1
+        )
+    )
+    manager._sample_managed_sensors("physics", 12, 0.04)
+    manager._sample_managed_sensors("physics", 12, 0.04)
+    manager._visualization_sim_time = 0.33
+    manager._visualization_sim_step = 14
+    manager._sample_managed_sensors("physics", 14, 0.04)
+    assert acquired == [0.04]
+    assert sensor.get_sample_metadata()["sample_id"].tolist() == [1, 1]
+    sensor._invalidate_samples([0])
+    assert sensor.get_sample_metadata()["valid"].tolist() == [False, True]
+    manager._visualization_sim_time = 0.37
+    manager._visualization_sim_step = 15
+    manager._sample_managed_sensors("physics", 15, 0.04)
+    assert acquired == pytest.approx([0.04, 0.12])
+    assert sensor.get_sample_metadata()["physics_step"].tolist() == [15, 15]
+    assert sensor.get_sample_metadata()["valid"].tolist() == [True, True]
