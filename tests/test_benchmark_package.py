@@ -78,6 +78,15 @@ def installed_benchmark(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path,
         assert "embodichain_benchmarks/__init__.py" in entries
         assert "embodichain_benchmarks/motion_generation/api.py" in entries
         assert "embodichain/cli/benchmark.py" in entries
+        for filename in (
+            "dexsim_assembly_contact.patch",
+            "dexsim_assembly_variants.patch",
+            "apply_mujoco_warp_epa_horizon.py",
+        ):
+            assert any(
+                name.endswith(f"/data/share/embodichain/assembly_patches/{filename}")
+                for name in entries
+            ), filename
         suites = {
             Path(name).name
             for name in entries
@@ -112,6 +121,21 @@ def installed_benchmark(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path,
         / "lib"
         / f"python{sys.version_info.major}.{sys.version_info.minor}"
         / "site-packages"
+    )
+    # A nested venv inherits the base interpreter's packages, not the calling
+    # venv's dependencies. Make those installed dependency directories visible
+    # without activating their editable finders or exposing checkout paths.
+    dependency_paths = [
+        str(Path(entry).resolve())
+        for entry in sys.path
+        if entry
+        and (
+            Path(entry).name in {"site-packages", "dist-packages"}
+            or any(Path(entry).glob("*.dist-info"))
+        )
+    ]
+    (site_packages / "test_dependencies.pth").write_text(
+        "\n".join(dependency_paths) + "\n"
     )
     (site_packages / "inherited_benchmark.pth").write_text(str(inherited) + "\n")
     interpreter = target / "bin/python"

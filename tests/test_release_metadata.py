@@ -24,10 +24,12 @@ from zipfile import ZipFile
 import pytest
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name, parse_wheel_filename
+from setuptools import Distribution
+from setuptools.command.build_py import build_py
 
 import setup as package_setup
 from scripts.validate_wheel_metadata import WheelMetadataError, validate_wheel
-from setup import get_package_dir, get_packages
+from setup import get_package_data, get_package_dir, get_packages
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 _TEST_VERSION = "0.2.4"
@@ -126,7 +128,7 @@ def test_package_discovery_includes_only_runtime_trees() -> None:
 
 
 @pytest.mark.parametrize("nested", [False, True])
-def test_new_extension_package_is_discovered(
+def test_new_extension_package_and_resources_are_discovered(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, nested: bool
 ) -> None:
     extensions = tmp_path / "extensions"
@@ -135,6 +137,28 @@ def test_new_extension_package_is_discovered(
     (package / "feature").mkdir(parents=True)
     (package / "__init__.py").touch()
     (package / "feature" / "__init__.py").touch()
+    resources = {
+        "README.md": "Extension usage",
+        "LICENSE": "Source license",
+        "feature/LICENSE.txt": "Dependency license",
+        "feature/THIRD_PARTY_LICENSES": "Third-party attribution",
+        "feature/REFERENCE_SOURCES.json": "{}",
+        "feature/profile.json": '{"robot": {}}',
+        "feature/configs/default.yaml": "enabled: true\n",
+        "feature/configs/override.yml": "enabled: false\n",
+        "feature/model.urdf": '<robot name="example"/>',
+        "feature/preview.png": "Preview image",
+    }
+    excluded = {
+        ".private/secret.json": "Private resource",
+        "feature/unrelated.txt": "Unrelated file",
+        "feature/output.png": "Generated image",
+        "feature/module.pyc": "Cached bytecode",
+    }
+    for relative, content in {**resources, **excluded}.items():
+        path = package / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
     monkeypatch.setattr(package_setup, "THIS_DIR", tmp_path)
     monkeypatch.setattr(package_setup, "EXTENSIONS_DIR", extensions)
 
@@ -143,6 +167,28 @@ def test_new_extension_package_is_discovered(
         get_package_dir()["embodichain_example"]
         == package.relative_to(tmp_path).as_posix()
     )
+    distribution = Distribution(
+        {
+            "packages": [
+                name
+                for name in get_packages()
+                if name.startswith("embodichain_example")
+            ],
+            "package_dir": {"embodichain_example": str(package)},
+            "package_data": get_package_data(),
+            "include_package_data": False,
+            "script_name": str(tmp_path / "setup.py"),
+        }
+    )
+    command = build_py(distribution)
+    command.build_lib = str(tmp_path / "lib")
+    command.ensure_finalized()
+    command.run()
+    output = Path(command.build_lib) / "embodichain_example"
+    for relative, content in resources.items():
+        assert (output / relative).read_text() == content
+    for relative in excluded:
+        assert not (output / relative).exists(), relative
 
 
 @pytest.mark.parametrize("layout", ["missing", "ambiguous", "invalid_name"])
@@ -176,6 +222,29 @@ def test_project_metadata_has_no_direct_dependencies() -> None:
     ]
 
     assert direct_dependencies == []
+
+
+@pytest.mark.parametrize(
+    ("version", "supported"),
+    [
+        ("0.6.0.dev11491", False),
+        ("0.6.0rc1", True),
+    ],
+)
+def test_dexsim_dependency_selects_cable_release_wheel(
+    version: str, supported: bool
+) -> None:
+    requirements = [
+        Requirement(value)
+        for value in _read_project_metadata()["project"]["dependencies"]
+    ]
+    dexsim_requirement = next(
+        requirement
+        for requirement in requirements
+        if requirement.name.replace("_", "-") == "dexsim-engine"
+    )
+
+    assert dexsim_requirement.specifier.contains(version) is supported
 
 
 def test_wheel_metadata_accepts_index_dependencies(tmp_path: Path) -> None:

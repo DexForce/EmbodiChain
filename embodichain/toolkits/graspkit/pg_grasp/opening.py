@@ -44,8 +44,13 @@ class OpeningEnvelopeGraspPoseGenerator(ParallelJawGraspPoseGenerator):
     def __init__(self, delegate: ParallelJawGraspPoseGenerator) -> None:
         if not isinstance(delegate, ParallelJawGraspPoseGenerator):
             raise TypeError("Opening envelope requires a parallel-jaw delegate.")
-        super().__init__(delegate.gripper_model)
+        super().__init__(**delegate.gripper_data)
         self._delegate = delegate
+
+    @property
+    def paired_query_key(self) -> object:
+        """Preserve the identity of the provider owning both paired roles."""
+        return self._delegate.paired_query_key
 
     def get_valid_grasp_poses(
         self,
@@ -101,7 +106,7 @@ class OpeningEnvelopeGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                 mesh_vertices,
                 poses,
                 obj_poses[row].to(poses),
-                self.gripper_model.max_opening_width,
+                self.max_opening_width,
             )
             if accepted.any():
                 filtered.append((poses[accepted].clone(), costs[accepted].clone()))

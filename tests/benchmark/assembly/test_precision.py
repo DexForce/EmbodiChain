@@ -49,14 +49,17 @@ def test_usd_precision_detects_changed_primitive_dimensions(tmp_path) -> None:
     assert measured["geometry_error_m"] >= 0.0019
 
 
-def test_precision_host_matches_source_floor_and_disables_missing_floor() -> None:
+@pytest.mark.parametrize("source_contact", [False, True])
+def test_precision_host_matches_source_floor_and_disables_missing_floor(
+    source_contact: bool,
+) -> None:
     pytest.importorskip("mujoco")
     from embodichain_benchmarks.assembly.precision import (
         PrecisionRunCfg,
         _source_floor_attributes,
     )
 
-    cfg = PrecisionRunCfg(backend="newton", source_contact=True)
+    cfg = PrecisionRunCfg(backend="newton", source_contact=source_contact)
     enabled, attrs = _source_floor_attributes(import_mjcf(SOURCE), cfg)
     assert not enabled and attrs is None
     floor_source = SOURCE.replace(
@@ -69,8 +72,16 @@ def test_precision_host_matches_source_floor_and_disables_missing_floor() -> Non
     assert enabled
     assert attrs.material_props.dynamic_friction == pytest.approx(1)
     assert attrs.material_props.torsional_friction == pytest.approx(0.01)
-    assert attrs.collision_props.solref == pytest.approx([0.002, 1])
-    assert attrs.collision_props.solimp == pytest.approx([0.99, 0.999, 0.001, 0.5, 2])
+    if source_contact:
+        assert attrs.material_props.solref == pytest.approx([0.002, 1])
+        assert attrs.material_props.solimp == pytest.approx(
+            [0.99, 0.999, 0.001, 0.5, 2]
+        )
+        assert attrs.material_props.solmix == pytest.approx(1)
+    else:
+        assert attrs.material_props.solref is None
+        assert attrs.material_props.solimp is None
+        assert attrs.material_props.solmix is None
     assert attrs.collision_props.contact_offset == 0
 
 

@@ -49,6 +49,7 @@ def _deployment(task_name: str):
         task_program=physical.config["task_program"],
         skill_profile=physical.embodiment_skill_profile,
         base_dir=path.parent,
+        evaluation=physical.evaluation,
     )
     _validate_scene_binding_targets(
         deployment.scene_binding, simulation=physical.scene_config
@@ -127,6 +128,14 @@ def test_stack_program_keeps_measured_lift_and_relative_upright_stack_gates() ->
     assert support.parent_id == "block_1"
     assert support.object_target_frame == "world_axes"
     assert support.object_target_pose[11] == 0.05
+    registration = deployment.integration.registration
+    (final_ref,) = registration.evaluation_final_refs
+    alignment = registration.evaluation_conditions[final_ref]
+    assert alignment.required_fields == (
+        "rigid_objects/block_1/pose",
+        "rigid_objects/block_2/pose",
+    )
+    assert alignment.parameters[final_ref]["axes"] == (0, 1)
 
 
 def test_rgb_program_keeps_sequential_arm_ownership_and_world_relative_targets() -> (
@@ -175,7 +184,7 @@ def test_manipulation_grasp_dwell_and_placement_use_shared_atomic_options(
     """Grasp preload lives in PickUp options and does not mutate object dynamics."""
     deployment, _, _ = _deployment(task_name)
     (preset,) = deployment.integration.registration.robot_profile_binding.presets
-    options = preset.action_option_templates
+    options = preset.skill_option_templates
     assert options["pick"].grasp_settle_steps == 45
     assert options["pick"].hand_interp_steps == 10
     assert options["place"].preserve_current_object_orientation is True

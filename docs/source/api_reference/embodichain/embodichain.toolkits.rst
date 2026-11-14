@@ -30,21 +30,12 @@ or installed in a higher-level planning runtime.
 
    GraspPoseGenerator
    ParallelJawGraspPoseGenerator
-   ParallelJawGripperModelCfg
-   get_parallel_jaw_gripper_model
 
 .. autoclass:: GraspPoseGenerator
    :members:
 
 .. autoclass:: ParallelJawGraspPoseGenerator
    :members:
-
-.. autoclass:: ParallelJawGripperModelCfg
-   :members:
-   :show-inheritance:
-   :exclude-members: __init__, copy, replace, to_dict, validate
-
-.. autofunction:: get_parallel_jaw_gripper_model
 
 .. currentmodule:: embodichain.toolkits.graspkit.pose_generator
 
@@ -53,8 +44,6 @@ or installed in a higher-level planning runtime.
 
    GraspPoseGenerator
    ParallelJawGraspPoseGenerator
-   ParallelJawGripperModelCfg
-   get_parallel_jaw_gripper_model
 
 Box-side grasp regions
 ~~~~~~~~~~~~~~~~~~~~~
@@ -117,14 +106,12 @@ configuration/hand geometry; subsequent queries prepare lazily again.
 
    GraspPoseGenerator
    ParallelJawGraspPoseGenerator
-   ParallelJawGripperModelCfg
    AntipodalGraspPoseGenerator
    AntipodalGraspPoseGeneratorCfg
    GraspRegionSelector
    ParallelJawGraspCollisionCfg
    GraspAnnotationCfg
    FixedGripperCollisionGeometry
-   get_parallel_jaw_collision_geometry
    AntipodalSampler
    AntipodalSamplerCfg
    GripperCollisionChecker
@@ -191,15 +178,6 @@ continuous intersections, closing contact, or full robot/path safety.
 .. autoclass:: FixedGripperCollisionGeometry
    :members:
 
-get_parallel_jaw_collision_geometry
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Resolve a registered hand's actual meshes, open joints and calibrated TCP.
-Asymmetric hands require an explicit side; a TCP override preserves the
-physical geometry while changing returned poses. Custom hands supply their
-own :class:`FixedGripperCollisionGeometry`.
-
-.. autofunction:: get_parallel_jaw_collision_geometry
 
 GraspAnnotationCfg
 ~~~~~~~~~~~~~~~~~~
@@ -453,7 +431,7 @@ Captured convex hand qualification
 ``pg_grasp.native_contact`` qualifies discrete closing, release-opening and
 rigid-clearance samples using caller-supplied convex collision groups. It imports
 no Robot, simulator or Lab backend. ``ClosingContactPolicy`` declares geometric
-rules directly; source experiment revisions are selected by Atomic Actions.
+rules directly; source experiment revisions are selected by Atomic Skills.
 The existing sampled-surface ``HandContactChecker`` remains independently usable.
 Native offset/order semantics are preserved on this convex route. An ambiguous
 clearance interval remains unavailable, and geometric acceptance does not certify

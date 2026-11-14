@@ -18,11 +18,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 import inspect
 from typing import TYPE_CHECKING, Any
 
 import torch
+
+from embodichain.lab.evaluation import EvaluationStatus, RuleResult
+from embodichain.lab.evaluation.observations import _rule_tensor_report
 
 from .cfg import ConditionCfg, RLTaskCfg
 from .manager_base import Functor, ManagerBase
@@ -59,6 +62,8 @@ class TerminationManager(ManagerBase):
         self._valid = torch.zeros_like(self._initialized)
         self._terminated = torch.zeros_like(self._initialized)
         self._results: dict[str, ConditionResult] = {}
+        self._rule_results: dict[str, Mapping[str, RuleResult]] = {}
+        self._rule_identities: dict[str, str | None] = {}
         self._steps = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
 
     @property
@@ -123,6 +128,19 @@ class TerminationManager(ManagerBase):
             result.valid[ids] = False
             for metric in result.metrics.values():
                 metric[ids] = 0
+        for rules in self._rule_results.values():
+            for rule in rules.values():
+                rule.status[ids] = EvaluationStatus.NOT_RUN
+                for metric in rule.metrics.values():
+                    metric[ids] = float("nan") if metric.is_floating_point() else 0
+                for boundary in (
+                    rule.witness_steps,
+                    rule.witness_revisions,
+                    rule.violation_steps,
+                    rule.violation_revisions,
+                ):
+                    if boundary is not None:
+                        boundary[ids] = -1
         return {}
 
     def __str__(self) -> str:
@@ -201,7 +219,16 @@ class TerminationManager(ManagerBase):
                 owned.valid.copy_(result.valid)
                 for metric, value in result.metrics.items():
                     owned.metrics[metric].copy_(value)
+                if result.rule_results:
+                    self._rule_results[key] = result.rule_results
+                    self._rule_identities[key] = result.evaluation_identity
         self._initialized.fill_(True)
+        progress = getattr(self._env, "task_program_progress", None)
+        if progress is not None:
+            final, process_failed, gate_valid = progress.gates()
+            self._success &= final
+            self._failure |= process_failed
+            self._valid &= gate_valid
         self._failure |= ~self._valid
         self._terminated.copy_(self._accepted_success() | self._failure)
         if ignore_terminations:
@@ -230,6 +257,17 @@ class TerminationManager(ManagerBase):
                     "metrics": {
                         key: metric.clone() for key, metric in value.metrics.items()
                     },
+                    **(
+                        {
+                            "evaluation_identity": self._rule_identities[name],
+                            "rules": {
+                                rule_id: _rule_tensor_report(rule)
+                                for rule_id, rule in self._rule_results[name].items()
+                            },
+                        }
+                        if name in self._rule_results
+                        else {}
+                    ),
                 }
                 for name, value in self._results.items()
             },

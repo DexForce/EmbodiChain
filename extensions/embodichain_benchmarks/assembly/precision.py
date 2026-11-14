@@ -725,6 +725,7 @@ def _run_embodichain(
                         body, source_contact=cfg.source_contact, backend=cfg.backend
                     )
                     body_cfg.shape = None
+                    body_cfg.visuals = None
                     body_cfg.source = UsdSourceCfg(
                         file_path=str(path), source_prim_path=f"/Assembly/{body.name}"
                     )
@@ -745,7 +746,8 @@ def _run_embodichain(
                             _VISUAL_FORMAT_VERSION,
                             write_visual_mesh,
                         )
-                        from embodichain.lab.sim.shapes import MeshCfg, ShapePartCfg
+                        from embodichain.lab.sim.cfg import VisualElementCfg
+                        from embodichain.lab.sim.shapes import MeshCfg
 
                         visual_path = write_visual_mesh(
                             body,
@@ -754,9 +756,9 @@ def _run_embodichain(
                             / f"visual_v{_VISUAL_FORMAT_VERSION}"
                             / f"{body.name}.obj",
                         )
-                        body_cfg.shape.visual_parts = [
-                            ShapePartCfg(
-                                shape=MeshCfg(fpath=str(visual_path.resolve()))
+                        body_cfg.visuals = [
+                            VisualElementCfg(
+                                representation=MeshCfg(fpath=str(visual_path.resolve()))
                             )
                         ]
                     body_cfg.attrs.collision_props.contact_offset = cfg.contact_offset
@@ -926,9 +928,6 @@ def _source_floor_attributes(
             rest_offset=cfg.rest_offset,
             condim=int(model.geom_condim[index]),
             priority=int(model.geom_priority[index]),
-            solref=model.geom_solref[index].tolist(),
-            solimp=model.geom_solimp[index].tolist(),
-            solmix=float(model.geom_solmix[index]),
         )
         if cfg.source_contact
         else CollisionPropertiesCfg(
@@ -941,6 +940,9 @@ def _source_floor_attributes(
             dynamic_friction=float(friction[0]),
             torsional_friction=float(friction[1]),
             rolling_friction=float(friction[2]),
+            solref=tuple(model.geom_solref[index]) if cfg.source_contact else None,
+            solimp=tuple(model.geom_solimp[index]) if cfg.source_contact else None,
+            solmix=float(model.geom_solmix[index]) if cfg.source_contact else None,
         )
         if cfg.backend == "newton"
         else RigidBodyMaterialCfg(

@@ -29,9 +29,11 @@ fixed-anchor hinge trees. Never combine all source convex pieces into one hull
 or recompute authored inertia from overlapping pieces. Compiled MuJoCo geom
 poses already account for mesh recentering; convert frame and quaternion order
 once at the adapter boundary.
-For native compound visuals, `visual_parts=None` renders the collision parts;
-an explicit empty list hides them. Hinge export validates generated names and
-destinations before writing into the output directory.
+Native rigid appearance uses the owner's `visuals` list with body-local poses;
+an explicit empty list hides it without removing colliders. Raw source contact
+parameters belong to `attrs.material_props`, while contact envelopes, dimension
+and priority belong to `attrs.collision_props`. Hinge export validates generated
+names and destinations before writing into the output directory.
 
 `lab/sim/assembly/_visual.py` owns body-local OBJ visuals for native rigid objects and URDF
 moving links. The URDF visual origin stays identity because geom transforms

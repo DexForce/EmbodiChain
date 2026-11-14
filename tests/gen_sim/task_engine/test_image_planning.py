@@ -330,7 +330,7 @@ def test_preview_and_existing_output_remain_read_only(
     source_image, tmp_path, monkeypatch, home_path
 ):
     from embodichain.cli.main import main
-    from embodichain.gen_sim.task_engine import cli
+    from embodichain.gen_sim.task_engine import _image_run as cli
 
     def extra(step, grounding, plan):
         grounding["objects"].append(
@@ -372,6 +372,14 @@ def test_preview_and_existing_output_remain_read_only(
     assert (output / "semantic_task_graph.html").read_text() == html
     manifest = json.loads((output / "run_manifest.json").read_text())
     assert manifest["execution_ready"] is False and manifest["pending_bindings"] > 0
+    from embodichain.gen_sim.workflow import load_task_plan
+
+    plan = load_task_plan(output)
+    assert plan["schema_version"] == "embodichain.task-plan-artifact/v1"
+    assert plan["scene_requirements"]["schema_version"] == (
+        "embodichain.scene-requirements/v1"
+    )
+    assert plan["scene_requirements"]["image_sha256"] == manifest["image_sha256"]
 
 
 def test_ambiguous_reference_preserves_observed_candidates(source_image):

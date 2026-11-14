@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from time import perf_counter
 from typing import TYPE_CHECKING
 from urllib.parse import quote
@@ -39,6 +39,7 @@ from .protocol import (
     JointControlSpec,
     JointControlState,
     MeshGeometry,
+    MeshMarkerOverlay,
     PointCloudOverlay,
     SceneFrame,
     SceneManifest,
@@ -84,6 +85,44 @@ def mesh_geometry_id(
     return f"sha256:{digest.hexdigest()}"
 
 
+def _capsule_mesh(radius: float, length: float) -> tuple[np.ndarray, np.ndarray]:
+    """Build a centered +Z capsule; length is the distance between cap centers."""
+    radial_segments = 12
+    cap_segments = 4
+    angles = np.arange(radial_segments) * (2.0 * np.pi / radial_segments)
+    latitudes = np.linspace(0.0, np.pi / 2.0, cap_segments + 1)[:-1]
+    ring_radii = radius * np.cos(np.concatenate((-latitudes[::-1], latitudes)))
+    ring_heights = np.concatenate(
+        (
+            -length / 2.0 - radius * np.sin(latitudes[::-1]),
+            length / 2.0 + radius * np.sin(latitudes),
+        )
+    )
+    rings = np.empty((len(ring_heights), radial_segments, 3), dtype=np.float32)
+    rings[..., 0] = ring_radii[:, None] * np.cos(angles)
+    rings[..., 1] = ring_radii[:, None] * np.sin(angles)
+    rings[..., 2] = ring_heights[:, None]
+    vertices = np.concatenate(
+        (
+            [[0.0, 0.0, -length / 2.0 - radius]],
+            rings.reshape(-1, 3),
+            [[0.0, 0.0, length / 2.0 + radius]],
+        )
+    ).astype(np.float32)
+    faces: list[tuple[int, int, int]] = []
+    for side in range(radial_segments):
+        next_side = (side + 1) % radial_segments
+        faces.append((0, 1 + next_side, 1 + side))
+        for ring in range(len(ring_heights) - 1):
+            lower = 1 + ring * radial_segments
+            upper = lower + radial_segments
+            faces.append((lower + side, lower + next_side, upper + side))
+            faces.append((lower + next_side, upper + next_side, upper + side))
+        top_ring = 1 + (len(ring_heights) - 1) * radial_segments
+        faces.append((top_ring + side, top_ring + next_side, len(vertices) - 1))
+    return vertices, np.asarray(faces, dtype=np.uint32)
+
+
 @dataclass(frozen=True)
 class CaptureResult:
     """A captured frame and the time spent copying scene data."""
@@ -105,8 +144,7 @@ class _NodeSource:
     node: SceneNode
     asset_key: tuple[str, str]
     asset: object
-    link_index: int | None = None
-    object_index: int | None = None
+    component_index: int | None = None
 
 
 @dataclass(frozen=True)
@@ -153,6 +191,7 @@ class SceneExporter:
         "articulation_link": (255, 175, 70),
         "soft_object": (230, 120, 255),
         "cloth_object": (255, 105, 145),
+        "cable_segment": (255, 210, 85),
     }
 
     def __init__(
@@ -239,12 +278,7 @@ class SceneExporter:
         batches: list[_PoseBatch] = []
         for asset_key, indexed_sources in grouped.items():
             component_indices = [
-                (
-                    source.link_index
-                    if source.link_index is not None
-                    else source.object_index
-                )
-                for _, source in indexed_sources
+                source.component_index for _, source in indexed_sources
             ]
             has_components = component_indices[0] is not None
             if any(
@@ -375,6 +409,7 @@ class SceneExporter:
                     )
 
         self._append_rigid_object_groups(sources, geometries)
+        self._append_cable_objects(sources, geometries)
         self._append_articulations(
             sources=sources,
             geometries=geometries,
@@ -574,7 +609,65 @@ class SceneExporter:
                             node=node,
                             asset_key=("rigid_group", uid),
                             asset=asset,
-                            object_index=object_index,
+                            component_index=object_index,
+                        )
+                    )
+
+    def _append_cable_objects(
+        self,
+        sources: list[_NodeSource],
+        geometries: dict[str, MeshGeometry],
+    ) -> None:
+        """Export segment capsules independently of native tube/custom visuals."""
+        geometry_ids: dict[tuple[float, float], str] = {}
+        for uid in self._sim.get_cable_object_uid_list():
+            asset = self._sim.get_cable_object(uid)
+            if asset is None:
+                continue
+            data = asset.data
+            if data is None:
+                raise RuntimeError(
+                    f"Call SimulationManager.prepare() before exporting cable {uid!r}."
+                )
+            points = _to_numpy(asset.cfg.points, np.float32, copy=False)
+            lengths = np.linalg.norm(np.diff(points, axis=0), axis=1)
+            if data.num_segments != len(lengths):
+                raise ValueError(
+                    f"Cable {uid!r} has {data.num_segments} segments but "
+                    f"its configured points describe {len(lengths)}."
+                )
+            radius = float(asset.cfg.radius)
+            uid_component = safe_path_component(uid)
+            for segment_index, length in enumerate(lengths):
+                dimensions = (radius, float(length))
+                if dimensions not in geometry_ids:
+                    vertices, faces = _capsule_mesh(*dimensions)
+                    geometry_id = self._add_geometry(
+                        geometries, vertices, faces, self._COLORS["cable_segment"]
+                    )
+                    assert geometry_id is not None
+                    geometry_ids[dimensions] = geometry_id
+                for env_id in self._env_ids:
+                    node = SceneNode(
+                        node_id=(
+                            f"env:{env_id}/cable:{uid_component}/"
+                            f"segment:{segment_index}"
+                        ),
+                        path=(
+                            f"/envs/{env_id}/cable_objects/{uid_component}/"
+                            f"segments/{segment_index}"
+                        ),
+                        parent_id=f"env:{env_id}/cable:{uid_component}",
+                        env_id=env_id,
+                        kind="cable_segment",
+                        geometry_id=geometry_ids[dimensions],
+                    )
+                    sources.append(
+                        _NodeSource(
+                            node=node,
+                            asset_key=("cable", uid),
+                            asset=asset,
+                            component_index=segment_index,
                         )
                     )
 
@@ -734,7 +827,7 @@ class SceneExporter:
                             node=node,
                             asset_key=(asset_prefix, uid),
                             asset=asset,
-                            link_index=link_index,
+                            component_index=link_index,
                         )
                     )
 
@@ -784,10 +877,35 @@ class SceneExporter:
             else None
         )
         marker_frames = self._capture_axis_marker_overlays(reserved_frame_ids)
-        if overlays is None:
-            return SceneOverlays(frames=marker_frames)
+        reserved_mesh_ids = (
+            {mesh.overlay_id for mesh in overlays.meshes}
+            if overlays is not None
+            else set()
+        )
+        marker_meshes = self._capture_marker_mesh_overlays(reserved_mesh_ids)
+        overlays = overlays or SceneOverlays()
+        fluid_points = []
+        for uid, fluid in getattr(self._sim, "_fluid_objects", {}).items():
+            if fluid.is_declared or fluid.cfg.render.mode == "none":
+                continue
+            state = fluid.data.particle_pos_w
+            for env_id in self._env_ids:
+                points = state[env_id].detach().cpu().numpy().copy()
+                if fluid.cfg.render.clip_below_z is not None:
+                    points = points[points[:, 2] >= fluid.cfg.render.clip_below_z]
+                fluid_points.append(
+                    PointCloudOverlay(
+                        overlay_id=f"fluid/{uid}/{env_id}",
+                        points=points,
+                        point_size=2
+                        * (
+                            fluid.cfg.render.render_radius
+                            or fluid.cfg.particle_spacing / 2
+                        ),
+                    )
+                )
         point_clouds: list[PointCloudOverlay] = []
-        for point_cloud in overlays.point_clouds:
+        for point_cloud in overlays.point_clouds + tuple(fluid_points):
             point_count = point_cloud.points.shape[0]
             if point_count <= self.cfg.point_cloud_max_points:
                 point_clouds.append(point_cloud)
@@ -817,7 +935,36 @@ class SceneExporter:
             trajectories=overlays.trajectories,
             targets=overlays.targets,
             point_clouds=tuple(point_clouds),
+            meshes=marker_meshes + overlays.meshes,
         )
+
+    def _capture_marker_mesh_overlays(
+        self, reserved_mesh_ids: set[str]
+    ) -> tuple[MeshMarkerOverlay, ...]:
+        """Capture world-space marker meshes supplied by the simulation."""
+        get_marker_overlays = getattr(self._sim, "get_marker_overlays", None)
+        if get_marker_overlays is None:
+            return ()
+
+        meshes: list[MeshMarkerOverlay] = []
+        used_ids = set(reserved_mesh_ids)
+        selected_env_ids = set(self._env_ids)
+        for marker in get_marker_overlays():
+            if marker.env_id is not None and marker.env_id not in selected_env_ids:
+                continue
+            base_id = marker.overlay_id
+            overlay_id = base_id
+            suffix = 1
+            while overlay_id in used_ids:
+                overlay_id = f"{base_id}#{suffix}"
+                suffix += 1
+            used_ids.add(overlay_id)
+            meshes.append(
+                marker
+                if overlay_id == base_id
+                else replace(marker, overlay_id=overlay_id)
+            )
+        return tuple(meshes)
 
     def capture(
         self,
@@ -861,24 +1008,26 @@ class SceneExporter:
                 )
             if batch.asset_kind in {"rigid", "rigid_group", "visual"}:
                 pose = batch.asset.get_local_pose(to_matrix=False)
+            elif batch.asset_kind == "cable":
+                data = batch.asset.data
+                if data is None:
+                    raise RuntimeError(
+                        "Call SimulationManager.prepare() before capturing cable state."
+                    )
+                pose = data.segment_pose_w
             else:
                 pose = batch.asset.body_data.body_link_pose
-            all_positions, all_wxyz = pose_to_position_wxyz(pose)
             if batch.component_indices is None:
-                batch_positions = all_positions[batch.env_ids]
-                batch_wxyz = all_wxyz[batch.env_ids]
+                pose = pose[batch.env_ids]
             else:
-                batch_positions = all_positions[
-                    batch.env_ids,
-                    batch.component_indices,
-                ]
-                batch_wxyz = all_wxyz[
-                    batch.env_ids,
-                    batch.component_indices,
-                ]
-            positions[batch.destination_indices] = (
-                batch_positions + self._env_offsets[batch.env_ids]
-            )
+                pose = pose[batch.env_ids, batch.component_indices]
+            # Gather on the source device before CPU conversion and quaternion
+            # normalization, so export scales with the visible node count.
+            batch_positions, batch_wxyz = pose_to_position_wxyz(pose)
+            # Cable snapshots already contain world positions, including Arena origins.
+            if batch.asset_kind != "cable":
+                batch_positions = batch_positions + self._env_offsets[batch.env_ids]
+            positions[batch.destination_indices] = batch_positions
             wxyz[batch.destination_indices] = batch_wxyz
 
         dynamic_meshes: list[DynamicMeshUpdate] = []

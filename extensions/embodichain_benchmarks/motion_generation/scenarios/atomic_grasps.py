@@ -24,7 +24,6 @@ import torch
 from embodichain.toolkits.graspkit import (
     GraspPoseGenerator,
     ParallelJawGraspPoseGenerator,
-    ParallelJawGripperModelCfg,
 )
 from embodichain.utils.math import pose_inv
 
@@ -395,7 +394,7 @@ class ActiveCaseGraspPoseGenerator(GraspPoseGenerator):
 def parallel_jaw_sampler(
     n_sample: int,
     *,
-    gripper_model: ParallelJawGripperModelCfg | None = None,
+    gripper_data: dict[str, object] | None = None,
     root_from_tcp: Sequence[Sequence[float]] | None = None,
     grasp_depth_offset_m: float = 0.0,
 ) -> ParallelJawGraspPoseGenerator:
@@ -403,7 +402,7 @@ def parallel_jaw_sampler(
 
     Args:
         n_sample: Number of antipodal contact-pair samples.
-        gripper_model: Mounted hand geometry shared by preparation and replay.
+        gripper_data: Mounted hand geometry shared by preparation and replay.
         root_from_tcp: The bound fixture's calibrated hand-root-to-TCP transform.
         grasp_depth_offset_m: Physical contact-centre shift toward the hand,
             applied to collision geometry before candidate qualification.
@@ -418,7 +417,7 @@ def parallel_jaw_sampler(
     return create_parallel_jaw_grasp_pose_generator(
         n_sample=n_sample,
         force_refresh=False,
-        gripper_model=gripper_model,
+        gripper_data=gripper_data,
         root_from_tcp=root_from_tcp,
         grasp_depth_offset_m=grasp_depth_offset_m,
     )
@@ -442,10 +441,15 @@ class CaseSampleCountGraspPoseGenerator(ParallelJawGraspPoseGenerator):
     ) -> None:
         if default_count not in samplers:
             raise ValueError("The default sample count needs its own sampler.")
-        super().__init__(samplers[default_count].gripper_model)
+        super().__init__(**samplers[default_count].gripper_data)
         self._samplers = dict(samplers)
         self._default_count = default_count
         self._active_count = default_count
+
+    @property
+    def paired_query_key(self) -> object:
+        """Use the active sample-count provider's paired compatibility identity."""
+        return self._sampler.paired_query_key
 
     def activate(self, sample_count: int) -> None:
         """Use the sampler built with ``sample_count`` for the next compilation."""

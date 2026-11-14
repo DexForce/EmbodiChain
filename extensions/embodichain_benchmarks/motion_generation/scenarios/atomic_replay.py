@@ -37,7 +37,7 @@ from ._grasp_contacts import GraspContacts
 
 if TYPE_CHECKING:
     from embodichain.lab.sim import SimulationManager
-    from embodichain.lab.sim.atomic_actions.plans import CompiledTrajectory
+    from embodichain.lab.sim.atomic_skills.plans import CompiledTrajectory
     from embodichain.lab.sim.objects import Robot
 
     from ..atomic_skill import AtomicSkillCaseProvider

@@ -15,14 +15,7 @@
 # ----------------------------------------------------------------------------
 from __future__ import annotations
 
-import os
-
-from huggingface_hub import hf_hub_download
-
-# HuggingFace endpoint. Mirrors (e.g. hf-mirror.com) often redirect to the
-# real hub without forwarding the required commit-hash response headers, so we
-# default to the canonical endpoint and rely on the system proxy when needed.
-_HF_ENDPOINT = "https://huggingface.co"
+from ._checkpoint_download import _HF_ENDPOINT, _download_checkpoint
 
 __all__ = ["download_neural_planner_checkpoint"]
 
@@ -60,32 +53,4 @@ def download_neural_planner_checkpoint(
     # Normalize proxy env vars: the ``requests`` library on Linux requires the
     # lowercase form (``https_proxy``), but users typically export the uppercase
     # form (``HTTPS_PROXY``).
-    https_proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
-    if https_proxy:
-        os.environ.setdefault("https_proxy", https_proxy)
-        os.environ.setdefault("HTTPS_PROXY", https_proxy)
-
-    # Allow callers to pass the token explicitly; otherwise fall back to
-    # HF_TOKEN (huggingface_hub also reads this automatically, but being
-    # explicit makes the fallback order transparent).
-    if token is None:
-        token = os.environ.get("HF_TOKEN") or None
-
-    try:
-        return hf_hub_download(
-            repo_id=repo_id,
-            filename=filename,
-            token=token,
-            endpoint=endpoint,
-        )
-    except Exception as exc:
-        raise RuntimeError(
-            f"Failed to download '{filename}' from '{repo_id}'.\n"
-            "The repository is gated and requires an authenticated HuggingFace account.\n"
-            "To fix this:\n"
-            "  1. Accept the model license at https://huggingface.co/DexForceAI/neural_motion_generator\n"
-            "  2. Create an access token at https://huggingface.co/settings/tokens\n"
-            "  3. Export the token:  export HF_TOKEN=<your_token>\n"
-            "     or run:            huggingface-cli login\n"
-            f"Original error: {exc}"
-        ) from exc
+    return _download_checkpoint(repo_id, filename, token, endpoint)

@@ -149,22 +149,22 @@ only required when its backend is selected.
 
 ## Atomic Skill integration
 
-`MoveJoints` reaches the same planner through `AtomicActionEngine`:
+`MoveJoints` reaches the same planner through `AtomicSkillEngine`:
 
 ```python
-from embodichain.lab.sim.atomic_actions import (
-    ActionInvocation,
-    AtomicActionEngine,
+from embodichain.lab.sim.atomic_skills import (
+    SkillInvocation,
+    AtomicSkillEngine,
     JointPositionGoal,
     MotionPolicy,
 )
 
-engine = AtomicActionEngine(generator)
+engine = AtomicSkillEngine(generator)
 binding = engine.bind_control_parts(
     "move_joints",
     {"primary": {"motion": "arm"}},
 )
-invocation = ActionInvocation(
+invocation = SkillInvocation(
     skill_id="move_joints",
     goal=JointPositionGoal(target=goal_qpos),
     binding=binding,

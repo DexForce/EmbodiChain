@@ -39,24 +39,25 @@ from embodichain.lab.gym.envs._json import json_safe_copy as _json_safe_copy
 from embodichain.lab.gym.envs.demo import DemoSegment
 from embodichain.lab.gym.envs.expert_trajectory import JointCommandMode
 from embodichain.lab.gym.envs.types import ControllerAction
-from embodichain.lab.sim.atomic_actions.bindings import (
+from ._segment_contract import _check_outcomes, _check_prerequisites, _unrun_outcomes
+from embodichain.lab.sim.atomic_skills.bindings import (
     JointPositionTarget,
     RuntimeEndpointTarget,
 )
-from embodichain.lab.sim.atomic_actions.primitives.pick_up import PickUpOptions
-from embodichain.lab.sim.atomic_actions.primitives.place import PlaceOptions
-from embodichain.lab.sim.atomic_actions.runner import (
+from embodichain.lab.sim.atomic_skills.primitives.pick_up import PickUpOptions
+from embodichain.lab.sim.atomic_skills.primitives.place import PlaceOptions
+from embodichain.lab.sim.atomic_skills.runner import (
     CommandAcknowledgement,
     ExecutionClock,
     ExecutionRunnerCfg,
 )
-from embodichain.lab.sim.atomic_actions.runtime_commands import (
+from embodichain.lab.sim.atomic_skills.runtime_commands import (
     EndpointCommand,
     JointPositionPayload,
     RuntimeCommandFrame,
     RuntimeCommandPayload,
 )
-from embodichain.lab.sim.atomic_actions.state import PlanningContext, TaskState
+from embodichain.lab.sim.atomic_skills.state import PlanningContext, TaskState
 from embodichain.lab.task_program.runtime.parallel import ParallelTimingPolicy
 from embodichain.lab.task_program.runtime.parallel_executor import (
     ParallelCommandSafetyValidator,
@@ -79,6 +80,9 @@ from embodichain.lab.task_program.semantics.profiles import EffectAssurance
 from embodichain.lab.sim.types import EnvAction
 
 if TYPE_CHECKING:
+    from embodichain.lab.gym.envs.episode_context import EpisodeContext
+    from embodichain.lab.gym.envs.managers.observation_types import ObservationFrame
+
     from embodichain.lab.task_program.integrations.invocation_policy import (
         BoundInvocationPolicies,
     )
@@ -1033,10 +1037,12 @@ class _SegmentLifecycle:
     actions_started: bool = False
     sink_acceptance_baseline: int | None = None
     yielded_action_count: int = 0
+    observed_step: int | None = None
     abort_started: bool = False
     abort_complete: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
     post_policy_success: torch.Tensor | None = None
+    contract_active: torch.Tensor | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1164,6 +1170,10 @@ class TaskProgramDemoBridge:
     flattened into a sequential semantic-call list.
     """
 
+    _contract_capture = None
+    _contract_conditions = None
+    _contract_episode_owner = None
+
     def __init__(
         self,
         program: CompiledTaskProgramPort,
@@ -1289,6 +1299,9 @@ class TaskProgramDemoBridge:
         self._sequential_workflows: dict[int, tuple[SemanticWorkflow, int]] = {}
         self._execution_trace: list[dict[str, object]] | None = None
         self._row_rejection: tuple[torch.Tensor, ControllerAction, str] | None = None
+        self._process_rejection: tuple[torch.Tensor, ControllerAction, str] | None = (
+            None
+        )
         self._row_hold: tuple[torch.Tensor, ControllerAction] | None = None
         self._pending_rejected_ids: tuple[int, ...] = ()
 
@@ -1572,13 +1585,13 @@ class TaskProgramDemoBridge:
                     or motion.strategy != "ik_interp"
                     or type(motion.sample_count) is not int
                     or recovery.max_replans != 0
-                    or recovery.max_action_retries != 0
+                    or recovery.max_skill_retries != 0
                     or preset.workflow_recovery_policy.max_recovery_attempts != 0
                     or tracking.in_flight is not None
                     or getattr(tracking.terminal, "settle_duration", None) != 0.0
                 ):
                     return None
-                options = preset.action_option_template(call.semantic_id)
+                options = preset.skill_option_template(call.semantic_id)
                 if type(options) is PickUpOptions:
                     total += motion.sample_count + options.grasp_settle_steps
                 elif type(options) is PlaceOptions:
@@ -1598,6 +1611,17 @@ class TaskProgramDemoBridge:
             "program_segment_index": segment.segment_index,
             "segment_count": getattr(self._program, "segment_count", None),
             "program_segment_source_path": list(segment.source_path),
+            **(
+                {
+                    "program_segment_authored_path": list(
+                        self._program.authored_path(segment.source_path)
+                    )
+                }
+                if type(self._program) is CompiledTaskProgram
+                and self._program.authored_path(segment.source_path)
+                != segment.source_path
+                else {}
+            ),
             "program_segment_implicit": bool(segment.implicit),
             "semantic_call_indices": [call.call_index for call in segment.calls],
             "post_policy_count": len(segment.post_policies),
@@ -1664,6 +1688,78 @@ class TaskProgramDemoBridge:
         )
         return ControllerAction(value=value, metadata=metadata)
 
+    def _pending_evaluation_fields(self) -> tuple[str, ...] | None:
+        lifecycle = self._last_segment_lifecycle
+        if (
+            lifecycle is None
+            or lifecycle.pending_action is None
+            or lifecycle.abort_started
+            or lifecycle.observed_step == self._clock.step_index + 1
+        ):
+            return None
+        return getattr(self._validator_port, "_evaluation_fields", ())
+
+    def _segment_start_observation(self, field):
+        if (
+            self._pending_evaluation_fields() is None
+            or self._clock.step_index + 1
+            != getattr(self._validator_port, "_evaluation_start", None)
+        ):
+            return None
+        return self._validator_port._evaluation_initial.get(field)
+
+    def _observe_segment_frame(
+        self,
+        frame: ObservationFrame,
+        *,
+        episode_owner: EpisodeContext,
+        process_check: (
+            Callable[
+                [], tuple[torch.Tensor, Callable[[torch.Tensor], dict[str, object]]]
+            ]
+            | None
+        ) = None,
+        hold_qpos: Callable[[], torch.Tensor] | None = None,
+    ) -> None:
+        """Publish the observation after a yielded command's host control step."""
+        lifecycle = self._last_segment_lifecycle
+        if self._pending_evaluation_fields() is None:
+            return
+        observe = getattr(self._validator_port, "_observe_segment_frame", None)
+        step = self._clock.step_index + 1
+        if observe is not None:
+            observe(frame, step=step, episode_owner=episode_owner)
+        lifecycle.observed_step = step
+        if process_check is not None:
+            rows = self.env_ids
+            passed, report = process_check()
+            indices = getattr(self._validator_port, "_row_indices", None)
+            if indices is None:
+                indices = (
+                    rows
+                    if passed.shape != rows.shape
+                    else torch.arange(rows.numel(), device=rows.device)
+                )
+            rejected = ~passed.index_select(0, indices)
+            if self._eligible_mask is not None:
+                rejected &= self._eligible_mask
+            if bool(rejected.any()):
+                assert hold_qpos is not None
+                hold = ControllerAction(
+                    self._sink.encode_post_policy_hold(
+                        hold_qpos().index_select(0, indices)
+                    )
+                )
+                self._process_rejection = (rejected, hold, "process_constraint_failed")
+                lifecycle.metadata.setdefault("process_violations", []).append(
+                    {
+                        "step": step,
+                        "observation_revision": frame.revision,
+                        "env_ids": rows[rejected].tolist(),
+                        "conditions": report(indices[rejected]),
+                    }
+                )
+
     def _yield_and_advance(
         self,
         action: ControllerAction,
@@ -1688,6 +1784,20 @@ class TaskProgramDemoBridge:
             self._record_consumed_action(action)
             self._clock.advance_after_env_step()
             lifecycle.pending_action = None
+        process = getattr(self, "_process_rejection", None)
+        if process is not None:
+            self._process_rejection = None
+            if self._row_rejection is None:
+                self._row_rejection = process
+            else:
+                process_mask, hold, reason = process
+                external_mask, external_hold, external_reason = self._row_rejection
+                hold.value[external_mask] = external_hold.value[external_mask]
+                self._row_rejection = (
+                    process_mask | external_mask,
+                    hold,
+                    f"{reason}; {external_reason}",
+                )
         if self._row_rejection is not None:
             mask, hold, reason = self._row_rejection
             self._row_rejection = None
@@ -1734,6 +1844,53 @@ class TaskProgramDemoBridge:
         ) = self._runtime
         is_parallel = getattr(segment, "parallel_block", None) is not None
         try:
+            contract = getattr(segment, "contract", None)
+            if contract is not None:
+                rows = self.env_ids
+                active = (
+                    torch.ones_like(rows, dtype=torch.bool)
+                    if self._eligible_mask is None
+                    else self._eligible_mask.clone()
+                )
+                qualified, prerequisites = _check_prerequisites(
+                    contract.prerequisites,
+                    active,
+                    rows,
+                    (
+                        getattr(self._runtime, "task_state", None)
+                        if contract.prerequisites
+                        else None
+                    ),
+                    self._contract_capture,
+                    self._contract_episode_owner,
+                    self._contract_conditions,
+                )
+                lifecycle.contract_active = qualified
+                blocked = not bool(qualified.any())
+                lifecycle.metadata["segment_contract"] = {
+                    "env_ids": rows.tolist(),
+                    "segment_id": segment_id,
+                    "prerequisite_step": self._clock.step_index,
+                    "prerequisites": prerequisites,
+                    "prerequisite_mask": qualified.tolist(),
+                    "outcomes": _unrun_outcomes(contract, rows),
+                    "prerequisites_rejected_all": blocked,
+                }
+                self._retain_eligible_rows(qualified)
+                if blocked:
+                    mask = qualified.tolist()
+                    lifecycle.metadata["segment_contract"].update(
+                        acceptance_step=self._clock.step_index, accepted_mask=mask
+                    )
+                    lifecycle.metadata["validation"] = {
+                        "env_ids": rows.tolist(),
+                        "eligible_mask_before_validation": active.tolist(),
+                        "validators": [],
+                        "accepted_mask": mask,
+                    }
+                    lifecycle.validation = qualified.clone()
+                    lifecycle.complete = True
+                    return
             if isinstance(self._validator_port, _SegmentValidatorLifecyclePort):
                 self._validator_port.begin_segment(
                     segment=segment,
@@ -2107,6 +2264,16 @@ class TaskProgramDemoBridge:
             )
             if lifecycle.post_policy_success is not None:
                 active_mask &= lifecycle.post_policy_success
+            bind_hold = getattr(self._post_policy_port, "bind_hold_observer", None)
+            if getattr(
+                getattr(policy, "cfg", None), "kind", None
+            ) == "hold" and callable(bind_hold):
+                observer = getattr(self._runtime, "observe_hold", None)
+                if not callable(observer):
+                    raise TaskProgramBridgeError(
+                        "Hold requires a measured semantic runtime."
+                    )
+                bind_hold(observer)
             actions = self._post_policy_port.actions(
                 policy,
                 segment=segment,
@@ -2142,6 +2309,17 @@ class TaskProgramDemoBridge:
                     "policy_index": policy_index,
                     "kind": getattr(cfg, "kind", type(policy).__name__),
                     "source_path": list(getattr(policy, "source_path", ())),
+                    **(
+                        {
+                            "authored_path": list(
+                                self._program.authored_path(policy.source_path)
+                            )
+                        }
+                        if type(self._program) is CompiledTaskProgram
+                        and self._program.authored_path(policy.source_path)
+                        != policy.source_path
+                        else {}
+                    ),
                     "result_mask": result.success_mask.detach().cpu().tolist(),
                     "result": None,
                 }
@@ -2184,13 +2362,13 @@ class TaskProgramDemoBridge:
         """Create a demo-boundary validator including runtime row success."""
 
         def validate() -> torch.Tensor:
+            if lifecycle.validation is not None:
+                return lifecycle.validation.clone()
             if not lifecycle.complete or lifecycle.result is None:
                 raise RuntimeError(
                     f"Segment {segment.segment_id!r} cannot be validated before its "
                     "action iterable is exhausted."
                 )
-            if lifecycle.validation is not None:
-                return lifecycle.validation.clone()
             result = lifecycle.result
             accepted = result.success_mask.clone()
             runtime_success = result.success_mask.clone()
@@ -2212,6 +2390,13 @@ class TaskProgramDemoBridge:
             validator_traces: list[dict[str, Any]] = []
             for validator_index, validator in enumerate(validators):
                 assert self._validator_port is not None
+                bind_target = getattr(
+                    self._validator_port, "bind_target_observer", None
+                )
+                if callable(bind_target) and callable(
+                    getattr(self._runtime, "resolved_object_target", None)
+                ):
+                    bind_target(self._runtime.resolved_object_target)
                 value = self._validator_port.validate(validator, segment=segment)
                 validator_result = _normalize_validation(
                     value,
@@ -2236,6 +2421,21 @@ class TaskProgramDemoBridge:
                         trace,
                         field_name=f"validator {validator_index} metadata",
                     )
+                )
+            contract = getattr(segment, "contract", None)
+            if contract is not None:
+                contract_mask, outcomes = _check_outcomes(
+                    contract,
+                    result,
+                    lifecycle.contract_active,
+                    validator_traces,
+                    lifecycle.metadata["post_policies"],
+                )
+                accepted &= contract_mask
+                lifecycle.metadata["segment_contract"].update(
+                    outcomes=outcomes,
+                    acceptance_step=self._clock.step_index,
+                    accepted_mask=accepted.tolist(),
                 )
             lifecycle.metadata["validation"] = _json_safe_copy(
                 {

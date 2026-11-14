@@ -49,6 +49,10 @@ from dexsim.types import ActorType, DriveType
 
 ART_PATH = "SlidingBoxDrawer/SlidingBoxDrawer.urdf"
 USD_DRAWER_PATH = "DrawerUSD/drawer_001.usdc"
+# These small scenes do not inspect pixels; leave room for all tested links.
+TEST_SCENE_NODE_CAPACITY = 512
+TEST_VIEWPORT_SIZE = 64
+
 NUM_ARENAS = 10
 NEWTON_EFFORT_TARGET_MODE = 4
 DRIVE_TEST_STIFFNESS = 12.0
@@ -125,6 +129,139 @@ def _inertia_tensor(inertia: torch.Tensor, com_pose: torch.Tensor) -> torch.Tens
     """Compare physical inertia independently of the chosen principal axes."""
     rotation = matrix_from_quat(com_pose[..., 3:])
     return rotation @ torch.diag_embed(inertia) @ rotation.transpose(-1, -2)
+
+
+@pytest.mark.requires_sim
+def test_default_sparse_drive_config_preserves_loaded_properties(
+    tmp_path: Path,
+) -> None:
+    """Each configured drive field preserves other loaded fields and joints."""
+    from embodichain.lab.sim.cfg import DefaultPhysicsCfg
+
+    asset = tmp_path / "sparse_drive.urdf"
+    asset.write_text(
+        """<robot name="sparse_drive">
+      <link name="base"><inertial><mass value="1"/><inertia ixx=".1" ixy="0" ixz="0" iyy=".1" iyz="0" izz=".1"/></inertial></link>
+      <link name="slider"><inertial><mass value="1"/><inertia ixx=".1" ixy="0" ixz="0" iyy=".1" iyz="0" izz=".1"/></inertial></link>
+      <link name="hinge"><inertial><mass value="1"/><inertia ixx=".1" ixy="0" ixz="0" iyy=".1" iyz="0" izz=".1"/></inertial></link>
+      <joint name="slide" type="prismatic"><parent link="base"/><child link="slider"/><axis xyz="1 0 0"/><limit lower="-1" upper="1" effort="101" velocity="5"/><dynamics damping=".2" friction=".1"/></joint>
+      <joint name="hinge" type="revolute"><parent link="slider"/><child link="hinge"/><axis xyz="0 0 1"/><limit lower="-1" upper="1" effort="202" velocity="6"/><dynamics damping=".3" friction=".2"/></joint>
+    </robot>""",
+        encoding="utf-8",
+    )
+    overrides = {
+        "stiffness": 87.0,
+        "damping": 4.0,
+        "max_effort": 31.0,
+        "max_velocity": 2.5,
+        "friction": 0.0,
+        "armature": 0.02,
+    }
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            num_envs=2,
+            headless=True,
+            enable_entity_gizmo=False,
+            robot_ik_gizmo=None,
+            physics_cfg=DefaultPhysicsCfg(device="cpu", gravity=(0, 0, 0)),
+            startup_summary="off",
+            scene_node_capacity=128,
+        ),
+        requires_native_renderer=False,
+    )
+    articulations = {}
+    art = source = None
+    try:
+        config = {"fpath": str(asset), "build_pk_chain": False, "init_qpos": [0, 0]}
+        source = sim.add_articulation(
+            ArticulationCfg.from_dict({**config, "uid": "source"})
+        )
+        for field, value in overrides.items():
+            articulations[field] = sim.add_articulation(
+                ArticulationCfg.from_dict(
+                    {
+                        **config,
+                        "uid": field,
+                        "asset_physics_mode": "overlay",
+                        "joint_drive_props": {field: {"slide": value}},
+                    }
+                )
+            )
+        sim.prepare()
+        source_values = source.get_joint_drive()
+        source_modes = source.get_joint_drive_type()
+        for configured_field, art in articulations.items():
+            source_columns = [
+                source.joint_names.index(name) for name in art.joint_names
+            ]
+            selected_column = art.joint_names.index("slide")
+            for field, original, actual in zip(
+                overrides, source_values, art.get_joint_drive(), strict=True
+            ):
+                expected = original[:, source_columns].clone()
+                if field == configured_field:
+                    expected[:, selected_column] = overrides[field]
+                torch.testing.assert_close(
+                    actual, expected, msg=f"{configured_field}: {field}"
+                )
+                torch.testing.assert_close(
+                    getattr(art, f"default_joint_{field}"), expected
+                )
+            assert art.get_joint_drive_type() == [
+                [row[column] for column in source_columns] for row in source_modes
+            ]
+    finally:
+        art = source = None
+        articulations.clear()
+        sim.destroy(exit_process=False)
+        SimulationManager.flush_cleanup_queue()
+
+
+@pytest.mark.requires_sim
+def test_newton_initial_hold_targets_for_multiple_articulations(tmp_path: Path) -> None:
+    from embodichain.lab.sim.cfg import NewtonPhysicsCfg
+
+    asset = tmp_path / "initial_slider.urdf"
+    asset.write_text("""<robot name="initial_slider">
+      <link name="base"><inertial><mass value="1"/><inertia ixx=".1" ixy="0" ixz="0" iyy=".1" iyz="0" izz=".1"/></inertial></link>
+      <link name="slider"><inertial><mass value="1"/><inertia ixx=".1" ixy="0" ixz="0" iyy=".1" iyz="0" izz=".1"/></inertial></link>
+      <joint name="slide" type="prismatic"><parent link="base"/><child link="slider"/><axis xyz="1 0 0"/><limit lower="-1" upper="1" effort="100" velocity="10"/></joint>
+    </robot>""")
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            enable_entity_gizmo=False,
+            physics_cfg=NewtonPhysicsCfg(
+                device="cpu",
+                gravity=(0, 0, 0),
+                collision_cfg=None,
+                solver_cfg={"solver_type": "semi_implicit"},
+            ),
+        ),
+        requires_native_renderer=False,
+    )
+    articulations = []
+    art = None
+    try:
+        initial_positions = (0.2, -0.3)
+        for index, position in enumerate(initial_positions):
+            articulations.append(
+                sim.add_articulation(
+                    ArticulationCfg(
+                        uid=f"slider_{index}", fpath=str(asset), init_qpos=[position]
+                    )
+                )
+            )
+        sim.prepare()
+        for art, position in zip(articulations, initial_positions, strict=True):
+            expected = torch.tensor([[position]])
+            torch.testing.assert_close(art.get_qpos(), expected)
+            torch.testing.assert_close(art.get_qpos(target=True), expected)
+    finally:
+        art = None
+        articulations.clear()
+        sim.destroy(exit_process=False)
+        SimulationManager.flush_cleanup_queue()
 
 
 @pytest.mark.parametrize("device", ["cpu", "cuda:0"])
@@ -243,7 +380,7 @@ def test_usdc_drawer_supports_named_kinematics_and_affordance_geometry(
     physics: str,
 ) -> None:
     """The three-drawer asset supports geometry and a one-joint Jacobian."""
-    from embodichain.lab.sim.atomic_actions.articulation_geometry import (
+    from embodichain.lab.sim.atomic_skills.articulation_geometry import (
         sample_initial_articulation_geometry,
     )
 
@@ -738,6 +875,9 @@ class BaseArticulationTest:
             device=device,
             num_envs=NUM_ARENAS,
             physics_cfg=physics_cfg,
+            scene_node_capacity=TEST_SCENE_NODE_CAPACITY,
+            width=TEST_VIEWPORT_SIZE,
+            height=TEST_VIEWPORT_SIZE,
         )
         self.sim = SimulationManager(config)
         self.physics = physics
@@ -969,6 +1109,13 @@ class BaseArticulationTest:
 
         self.art.set_qpos(qpos=qpos_zero, env_ids=None, target=False)
 
+        # Position tracking requires explicit gains; a sparse drive_type overlay
+        # preserves the drawer's passive source drive.
+        self.art.set_joint_drive(
+            stiffness=torch.full_like(qpos, 1e4),
+            damping=torch.full_like(qpos, 1e3),
+            drive_type="force",
+        )
         # Test setting joint positions with target=True
         self.art.set_qpos(qpos, env_ids=None, target=True)
         self.sim.update(step=100)
@@ -1674,33 +1821,36 @@ class BaseArticulationTest:
     def teardown_method(self):
         """Clean up resources after each test method."""
         self.sim.destroy()
+        # Drop test-owned views before queued child/parent destruction runs.
+        self.__dict__.clear()
         import embodichain.lab.sim as om
 
         om.SimulationManager.flush_cleanup_queue()
-        self.__dict__.clear()
-        import gc
-
-        gc.collect()
 
 
 class BaseArticulationLinkPhysicsTest:
     """Tests for per-link physics configuration (isolated sim per test)."""
 
     def setup_simulation(self, device: str) -> None:
-        config = SimulationManagerCfg(headless=True, device=device, num_envs=2)
+        config = SimulationManagerCfg(
+            headless=True,
+            device=device,
+            num_envs=2,
+            scene_node_capacity=TEST_SCENE_NODE_CAPACITY,
+            width=TEST_VIEWPORT_SIZE,
+            height=TEST_VIEWPORT_SIZE,
+        )
         self.sim = SimulationManager(config)
         self.art_path = get_data_path(ART_PATH)
         assert os.path.isfile(self.art_path)
 
     def teardown_method(self):
         self.sim.destroy()
+        # Drop test-owned views before queued child/parent destruction runs.
+        self.__dict__.clear()
         import embodichain.lab.sim as om
 
         om.SimulationManager.flush_cleanup_queue()
-        self.__dict__.clear()
-        import gc
-
-        gc.collect()
 
     def test_global_attrs_applied_to_all_links(self):
         """Default attrs should set the same static friction on every link."""

@@ -21,7 +21,8 @@ It owns exactly:
 - `embodiment_id`;
 - one `simulation` robot mapping;
 - the independent `sensor` list (mounted defaults belong to `RobotCfg.sensors`);
-- optional `skill_profile`.
+- optional `skill_profile`;
+- optional `grippers` selecting concrete parallel-jaw Cfg defaults.
 
 It does not own a task, physical scene, Task Program, execution policy,
 task-local object IDs, or runnable Gym ID. Component files do not use a
@@ -51,6 +52,29 @@ selects that robot and declares additional independent sensors; do not repeat
 mounted defaults in `sensor`. Sensor UIDs must be unique across both sources.
 Gym initializes both sources by default and uses `enable_sensor: false` to
 disable both, overriding the robot's standalone initialization switch.
+
+## Reuse parallel-jaw hand defaults
+
+Declare `grippers.<instance>` with exact `class_type`, explicit `mode`
+(`mounted` or `existing`), `motion_part` and `control_part`. Mounted bindings
+also name `component_type` and may supply the ordinary installation `transform`.
+Existing bindings append no asset; select a native `variant` when required.
+Do not duplicate their hand components or control groups under `simulation`.
+Hand Cfgs own native physical data; embodiment bindings own installation and
+optional `root_from_tcp`/contact calibration and complete command replacements.
+
+A declared grasp endpoint opts in with `gripper: <instance>`, matching control
+part and explicit capability. A unique kind in the hand Cfg's `grasp_generators`
+supplies the default; multiple kinds require an explicit policy selection.
+Empty support keeps the open/grasp preset but grants no sampler service, so
+fixed-pose calls can still use the hand. Requesting an undeclared kind fails.
+Matching endpoints may share one hand, generated preset and sampler service.
+Composition fills its omitted command preset and supported generator; keep only
+search-policy adjustments in runtime services. Do not repeat
+physical command presets or old generator `model` fields. Solver TCPs are derived
+from the hand reference and fixed installation; any explicit value must agree
+after assembly resolves the solver end's fixed chain to the hand root.
+Without a semantic profile the same declaration supplies physical assembly only.
 
 ## Add `skill_profile` only when needed
 

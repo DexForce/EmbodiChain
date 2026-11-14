@@ -25,7 +25,7 @@ from typing import Mapping
 
 import torch
 
-from embodichain.lab.sim.atomic_actions import (
+from embodichain.lab.sim.atomic_skills import (
     RuntimeCommandFrame,
     StateDelta,
     TaskState,

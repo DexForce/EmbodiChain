@@ -1,0 +1,79 @@
+trainer:
+  learning_env:
+    name: MotionTrackingModelRL
+    cfg:
+      horizon: 32
+  num_envs: 128
+  rollout_mode: complete
+  deterministic_actions: true
+policy:
+  name: motion_tracking
+  cfg:
+    latent_dim: 128
+    encoder_hidden:
+    - 256
+    - 128
+    decoder_hidden:
+    - 256
+    - 128
+    critic_hidden:
+    - 128
+    - 64
+    amp_bfloat16: true
+algorithm:
+  name: apg_actor_critic
+  cfg:
+    gamma: 0.99
+    gae_lambda: 0.95
+    max_grad_norm: 1.0
+    optimizer:
+      learning_rate: 0.0002
+      kwargs:
+        betas:
+        - 0.9
+        - 0.95
+        fused: true
+    critic_optimizer:
+      learning_rate: 0.0002
+      kwargs:
+        fused: true
+    critic_epochs: 5
+    critic_minibatches: 4
+    actor_grad_value_clip: 0.1
+    update_critic_normalization: true
+workflow:
+  kind: test
+  seed: 0
+  clips:
+  - walk1_subject1
+  - dance1_subject1
+  num_envs: 128
+  buffer_steps: 256
+  prefill_steps: 64
+  warmup_updates: 50
+  iterations: 200
+  utd: 0.4
+  wm_batches: 2
+  wm_batch: 128
+  wm_horizon: 8
+  wm_hidden:
+  - 256
+  - 256
+  - 256
+  lr: 0.0002
+  lr_final_frac: 0.03
+  lr_decay_iters: 250000
+  amp: true
+  tf32: false
+  norm_update_every: 5
+  action_noise: 0.1
+  collect_det_frac: 0.25
+  eval_every: 200
+  save_every: 200
+  log_every: 25
+  task_options:
+    adaptive_sampling: true
+    reset_noise: true
+    domain_randomization: true
+  collection_env: extensions/embodichain_tasks/configs/tasks/locomotion/tracking/g1_motion/env.newton.yaml
+  evaluation_env: extensions/embodichain_tasks/configs/tasks/locomotion/tracking/g1_motion/env.newton.yaml

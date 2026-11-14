@@ -194,13 +194,7 @@ def collision_shapes_from_entity(
     if descriptor_shapes is not None:
         return descriptor_shapes
 
-    if (
-        collisions
-        and sum(
-            getattr(item, "enable_collision", True) is not False for item in collisions
-        )
-        > 1
-    ):
+    if collisions and len(collisions) > 1:
         raise RuntimeError(
             f"RigidObject {object_uid!r} has collision pieces that cannot be "
             "queried independently; refusing a merged collision mesh."
@@ -467,9 +461,9 @@ def _from_descriptor(entity: object) -> list[CollisionShapeDesc] | None:
         dtype=torch.float32,
     ).reshape(3)
     shapes: list[CollisionShapeDesc] = []
+    # Match native shape queries: disabling contact response keeps geometry
+    # available to planners, including moving obstacles that exert no impulses.
     for shape_idx, collision in enumerate(collisions):
-        if getattr(collision, "enable_collision", True) is False:
-            continue
         geometry_type = getattr(collision, "geometry_type", None)
         geometry_type = getattr(geometry_type, "value", geometry_type)
         local_pose = (

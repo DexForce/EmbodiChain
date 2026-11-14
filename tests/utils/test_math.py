@@ -25,6 +25,8 @@ from scipy.spatial.transform import Rotation
 
 from embodichain.utils import math as math_utils
 from embodichain.utils.math import (
+    axis_angle_from_quat,
+    axis_angle_to_rotation_matrix,
     convert_quat,
     default_orientation,
     inv_transform,
@@ -55,6 +57,19 @@ def test_math_wildcard_import_exposes_public_math_functions() -> None:
     exec("from embodichain.utils.math import *", namespace)
 
     assert {name for name in namespace if not name.startswith("_")} == expected
+
+
+def test_rotation_conversions_have_finite_gradients_at_identity() -> None:
+    vectors = torch.tensor(
+        [[0.0, 0.0, 0.0], [1e-7, -2e-7, 3e-7], [0.2, -0.3, 0.1]],
+        dtype=torch.float64,
+        requires_grad=True,
+    )
+    assert torch.autograd.gradcheck(axis_angle_to_rotation_matrix, (vectors,))
+    identity = torch.tensor(
+        [[0.0, 0.0, 0.0, 1.0]], dtype=torch.float64, requires_grad=True
+    )
+    assert torch.autograd.gradcheck(axis_angle_from_quat, (identity,))
 
 
 @pytest.mark.parametrize(
@@ -534,3 +549,13 @@ def test_quat_slerp_accepts_leaf_endpoints_with_gradients() -> None:
     assert torch.autograd.gradcheck(
         lambda first, second: quat_slerp(first, second, 0.25), (start, end)
     )
+
+
+def test_matrix_quaternion_gradient_at_identity_and_half_turn():
+    """Unselected quaternion candidates keep finite derivatives."""
+    matrices = (
+        torch.stack((torch.eye(3), torch.diag(torch.tensor([1.0, -1.0, -1.0]))))
+        .double()
+        .requires_grad_()
+    )
+    assert torch.autograd.gradcheck(quat_from_matrix, (matrices,))

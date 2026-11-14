@@ -21,8 +21,8 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 from dataclasses import dataclass
 
-from embodichain.lab.sim.atomic_actions import (
-    AtomicActionEngine,
+from embodichain.lab.sim.atomic_skills import (
+    AtomicSkillEngine,
     ExecutionPlanLifecycle,
 )
 from .expansion import TaskProgramPlanRequest
@@ -46,7 +46,7 @@ class TaskProgramPlanLifecycleFactory(Protocol):
         self,
         request: TaskProgramPlanRequest,
         *,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> ExecutionPlanLifecycle | None:
         """Select one execution owner for the supplied grounded occurrence.
 
@@ -86,7 +86,7 @@ class CompositeTaskProgramPlanLifecycleFactory:
             raise ValueError("Lifecycle factories cannot be registered twice.")
 
     def create_plan_lifecycle(
-        self, request: TaskProgramPlanRequest, *, engine: AtomicActionEngine
+        self, request: TaskProgramPlanRequest, *, engine: AtomicSkillEngine
     ) -> ExecutionPlanLifecycle | None:
         """Select one owner without copying its state or plan.
 

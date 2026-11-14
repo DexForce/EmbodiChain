@@ -21,10 +21,20 @@ from __future__ import annotations
 from differentiable_env_support import LinearDifferentiableEnv
 
 
-from embodichain.learning.rl import DifferentiableVecEnv
+from embodichain.learning import rl
+from embodichain.learning.rl import env as env_module
 
 
 def test_structural_protocol_accepts_differentiable_environment() -> None:
     env = LinearDifferentiableEnv()
 
-    assert isinstance(env, DifferentiableVecEnv)
+    assert isinstance(env, rl.LearningEnvProtocol)
+    assert isinstance(env, rl.DifferentiableEnvProtocol)
+    for old, new in (
+        ("LearningVecEnv", "LearningEnvProtocol"),
+        ("DifferentiableVecEnv", "DifferentiableEnvProtocol"),
+        ("ScheduledDifferentiableVecEnv", "ScheduledDifferentiableEnvProtocol"),
+    ):
+        assert getattr(rl, old) is getattr(rl, new)
+        assert getattr(env_module, old) is getattr(rl, new)
+        assert getattr(env_module, new) is getattr(rl, new)

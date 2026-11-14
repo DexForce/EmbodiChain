@@ -260,10 +260,10 @@ def validate_materialized_deployment(deployment: MaterializedAssetDeployment) ->
     checked_resources = set()
     for filename in required_files:
         document = _read(root / filename)
-        if filename == "task.yaml" and "objective" in document:
-            required = document["objective"]["component"]
-            if required not in files:
-                raise ValueError("Materialized manifest is missing the objective")
+        if filename == "task.yaml":
+            for owner in ("objective", "evaluation"):
+                if owner in document and document[owner]["component"] not in files:
+                    raise ValueError(f"Materialized manifest is missing the {owner}")
         for node in _walk(document):
             for key in ("fpath", "urdf_path", "xml_path"):
                 value = node.get(key)
@@ -400,7 +400,17 @@ def materialize_asset_deployment(
         raise ValueError(
             "Supplied requirements differ from the task integration contract"
         )
-    program = _read(program_path)
+    from embodichain.lab.task_program.language.authoring import normalize_task_program
+
+    aliases = {
+        alias: entry["call_id"]
+        for alias, entry in integration.get("runtime_services", {})
+        .get("demo_skills", {})
+        .items()
+    }
+    program = normalize_task_program(
+        _read(program_path), demo_skills=aliases
+    ).declaration
     embodiment = _read(embodiment_path)
     prepared_pour = None
     if adaptations.pour is not None:
@@ -709,6 +719,9 @@ def materialize_asset_deployment(
             objective = _read(objective_path)
             shutil.copy2(objective_path, output / "objective.yaml")
             config["objective"]["component"] = "objective.yaml"
+        if physical.evaluation is not None:
+            _dump(output / "evaluation.yaml", physical.evaluation)
+            config["evaluation"] = {"component": "evaluation.yaml"}
         # Include all source configuration and adaptation content in identity;
         # the same assets used by a changed task cannot reuse registry IDs.
         identity = hashlib.sha256(
@@ -721,6 +734,11 @@ def materialize_asset_deployment(
                     "embodiment": embodiment,
                     "assets": resolved_assets.set_id,
                     "objective": objective,
+                    **(
+                        {"evaluation": physical.evaluation}
+                        if physical.evaluation is not None
+                        else {}
+                    ),
                 },
                 sort_keys=True,
                 separators=(",", ":"),

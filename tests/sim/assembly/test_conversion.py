@@ -219,17 +219,43 @@ def test_usd_hinge_is_a_real_joint_with_a_fixed_anchor(tmp_path) -> None:
     assert parsed.articulations[0].fixed_base
 
 
-def test_contact_priority_and_mixing_survive_native_config_conversion() -> None:
+@pytest.mark.parametrize("source_contact", [False, True])
+@pytest.mark.parametrize("hinged", [False, True])
+def test_contact_priority_and_mixing_survive_native_config_conversion(
+    tmp_path: Path, source_contact: bool, hinged: bool
+) -> None:
     pytest.importorskip("mujoco")
     xml = SOURCE.replace(
         "<worldbody>", '<default><geom priority="3" solmix="0.7"/></default><worldbody>'
     )
-    body = import_mjcf(xml).bodies[0]
-    native = to_rigid_config(
-        body,
-    )
-    assert native.attrs.collision_props.priority == 3
-    assert native.attrs.collision_props.solmix == pytest.approx(0.7)
+    if hinged:
+        xml = xml.replace(
+            '<freejoint name="part_joint"/>', '<joint name="part_joint" type="hinge"/>'
+        )
+    asset = import_mjcf(xml)
+    if hinged:
+        attrs = (
+            to_articulation_configs(asset, tmp_path, source_contact=source_contact)[
+                "part"
+            ]
+            .link_attrs["moving_part"]
+            .attrs
+        )
+    else:
+        attrs = to_rigid_config(asset.bodies[0], source_contact=source_contact).attrs
+    if source_contact:
+        assert attrs.collision_props.priority == 3
+        assert attrs.material_props.solmix == pytest.approx(0.7)
+        np.testing.assert_allclose(
+            attrs.material_props.solref, asset.bodies[0].geometries[0].solref
+        )
+        np.testing.assert_allclose(
+            attrs.material_props.solimp, asset.bodies[0].geometries[0].solimp
+        )
+    else:
+        assert attrs.material_props.solmix is None
+        assert attrs.material_props.solref is None
+        assert attrs.material_props.solimp is None
 
 
 def test_separate_visual_mesh_never_enters_collision_parts() -> None:
@@ -244,7 +270,21 @@ def test_separate_visual_mesh_never_enters_collision_parts() -> None:
     cfg = to_rigid_config(body, source_contact=False)
     assert isinstance(cfg.shape, CompoundShapeCfg)
     assert len(cfg.shape.parts) == 2
-    assert len(cfg.shape.visual_parts) == 3
+    assert cfg.shape.visual_parts is None
+    assert len(cfg.visuals) == 3
+    np.testing.assert_allclose(cfg.visuals[0].local_pose[:3, 3], [-0.02, 0, 0])
+    np.testing.assert_allclose(cfg.visuals[1].local_pose[:3, 3], [0.03, 0.01, 0])
+    from scipy.spatial.transform import Rotation
+    from embodichain.lab.sim.spawn.descriptors import rigid_desc_from_cfg
+
+    np.testing.assert_allclose(
+        cfg.visuals[1].local_pose[:3, :3],
+        Rotation.from_euler("XYZ", [0.2, 0.4, -0.1]).as_matrix(),
+        atol=1e-15,
+    )
+    descriptor, _ = rigid_desc_from_cfg(cfg)
+    assert len(descriptor.collisions) == 2
+    assert len(descriptor.renders) == 3
     assert cfg.attrs.mass_props.mass == 2.0
 
 
