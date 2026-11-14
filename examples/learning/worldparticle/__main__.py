@@ -18,7 +18,9 @@
 from __future__ import annotations
 import argparse
 import json
+import os
 from pathlib import Path
+import sys
 import time
 
 import numpy as np
@@ -45,7 +47,9 @@ def _demo(default_scene="fancy_fluid") -> None:
     )
     parser.add_argument("--output", type=Path)
     parser.add_argument(
-        "--headless", action="store_true", help="No window; no pacing or final hold"
+        "--headless",
+        action="store_true",
+        help="No window or pacing; --capture-dir/--video enables offscreen rendering",
     )
     parser.add_argument(
         "--renderer", choices=("OFFLINERT", "HYBRID", "FASTRT"), default="OFFLINERT"
@@ -54,7 +58,7 @@ def _demo(default_scene="fancy_fluid") -> None:
         "--fps",
         type=float,
         default=15.0,
-        help="Display pacing only; checkpoint timestep is unchanged",
+        help="Display/video frame rate; checkpoint timestep is unchanged",
     )
     parser.add_argument(
         "--hold-seconds",
@@ -66,6 +70,9 @@ def _demo(default_scene="fancy_fluid") -> None:
         "--capture-dir",
         type=Path,
         help="Save actual native camera frames for diagnosis",
+    )
+    parser.add_argument(
+        "--video", type=Path, help="Record every native camera frame to an MP4"
     )
     parser.add_argument(
         "--once", action="store_true", help="Run once and hold the final frame"
@@ -89,6 +96,8 @@ def _demo(default_scene="fancy_fluid") -> None:
     steps = profile["steps"] if args.steps is None else args.steps
     if steps < 1 or args.fps < 0 or min(args.width, args.height) < 1:
         parser.error("steps/window size must be positive and fps must be nonnegative")
+    if args.video and (args.fps <= 0 or args.width % 2 or args.height % 2):
+        parser.error("video requires positive fps and even width/height")
     output = (
         args.output
         or Path("outputs/worldparticle/demos") / args.scene / "prediction.npz"
@@ -115,6 +124,17 @@ def _demo(default_scene="fancy_fluid") -> None:
         )
     )
     q, qd = initial @ rotation.T, velocity @ rotation.T
+    rendering_enabled = (
+        not args.headless or args.capture_dir is not None or args.video is not None
+    )
+    if (
+        args.headless
+        and rendering_enabled
+        and sys.platform == "linux"
+        and not os.environ.get("DISPLAY")
+        and not os.environ.get("WAYLAND_DISPLAY")
+    ):
+        os.environ.setdefault("SDL_VIDEODRIVER", "offscreen")
     import dexsim
     from dexsim.engine.newton_physics import NewtonCfg, ProviderNewtonSolverCfg
     from embodichain.lab.sim.physics.worldparticle import WorldParticleProvider
@@ -133,7 +153,7 @@ def _demo(default_scene="fancy_fluid") -> None:
     cfg.use_default_physics = False
     cfg.backend = (
         dexsim.types.Backend.OPENGL
-        if args.renderer == "OFFLINERT"
+        if rendering_enabled and args.renderer == "OFFLINERT"
         else dexsim.types.Backend.VULKAN
     )
     cfg.win_config.width = args.width
@@ -147,7 +167,7 @@ def _demo(default_scene="fancy_fluid") -> None:
     cfg.set_rt_render_modes(window=rt_mode, offscreen=rt_mode)
     cfg.renderer = (
         dexsim.types.Renderer.NORENDER
-        if args.headless
+        if not rendering_enabled
         else getattr(dexsim.types.Renderer, args.renderer)
     )
     cfg.newton_cfg = NewtonCfg(
@@ -155,7 +175,7 @@ def _demo(default_scene="fancy_fluid") -> None:
         dt=model_cfg["timestep"],
         num_substeps=1,
         gravity=rotation @ np.asarray(model_cfg["gravity"]),
-        sync_to_dexsim=not args.headless,
+        sync_to_dexsim=rendering_enabled,
         collision_pipeline_cfg=None,
         solver_cfg=ProviderNewtonSolverCfg(
             provider_factory=WorldParticleProvider,
@@ -176,7 +196,7 @@ def _demo(default_scene="fancy_fluid") -> None:
         roughness=0.45,
         double_sided=True,
     )
-    if args.headless:
+    if not rendering_enabled:
         material = None
     if faces is not None:
         builder.add_clothbody(
@@ -202,7 +222,7 @@ def _demo(default_scene="fancy_fluid") -> None:
             raise ValueError("Fancy Fluid demo requires uniform mass/density")
         particle_material = (
             None
-            if args.headless
+            if not rendering_enabled
             else MaterialDesc(
                 name="neural_particles",
                 base_color=(0.18, 0.58, 0.9, 1.0),
@@ -220,7 +240,7 @@ def _demo(default_scene="fancy_fluid") -> None:
             render_radius=model_cfg["particle_radius"] * 1.6,
             render_mode=FluidRenderMode.PARTICLES,
         )
-    if not args.headless:
+    if rendering_enabled:
         add_boundary_visuals(
             builder,
             box,
@@ -240,7 +260,7 @@ def _demo(default_scene="fancy_fluid") -> None:
                 intensity=150.0,
             )
         )
-    if args.capture_dir and not args.headless:
+    if args.capture_dir or args.video:
         builder.add_camera(
             CameraDesc(
                 name="viewer",
@@ -253,30 +273,52 @@ def _demo(default_scene="fancy_fluid") -> None:
             )
         )
     scene = builder.finalize()
-    window = camera = handle = None
+    window = camera = handle = video = None
     try:
-        if not args.headless:
+        if rendering_enabled:
             scene.set_environment_light_emission([0.8, 0.87, 1.0])
             scene.set_environment_light_intensity(80)
         handle = scene.get_particle_set("prediction")
         handle.set_particle_velocities(qd)
-        if not args.headless:
-            world.open_window()
-            window = world.get_windows()
+        if rendering_enabled:
             framing = np.concatenate((q, box @ rotation.T))
             span = max(float(np.ptp(framing, axis=0).max()), 0.8)
             center = (framing.min(0) + framing.max(0)) / 2
             eye = center + span * np.array([0.9, -1.1, 0.7])
-            window.set_look_at(eye=eye, look_at=center, up=np.array([0.0, 0.0, 1.0]))
-            if args.capture_dir:
+            if not args.headless:
+                world.open_window()
+                window = world.get_windows()
+                window.set_look_at(
+                    eye=eye, look_at=center, up=np.array([0.0, 0.0, 1.0])
+                )
+            if args.capture_dir or args.video:
                 camera = scene.get_camera("viewer")
                 camera.look_at(eye, center)
                 camera.open_camera()
                 camera.render()
-            print(
-                f"{profile['title']} — live inference; close window or Ctrl+C to exit",
-                flush=True,
-            )
+                if args.video:
+                    import imageio.v2 as imageio
+
+                    args.video.parent.mkdir(parents=True, exist_ok=True)
+                    video = imageio.get_writer(
+                        str(args.video),
+                        fps=args.fps,
+                        codec="libx264",
+                        quality=8,
+                        macro_block_size=1,
+                        ffmpeg_log_level="error",
+                    )
+                    for _ in range(4):
+                        camera.render()
+                    video_frame = np.asarray(camera.get_rgb_map())[..., :3].copy()
+                    # One second at each endpoint makes short rollouts viewable.
+                    for _ in range(max(1, round(args.fps))):
+                        video.append_data(video_frame)
+            if not args.headless:
+                print(
+                    f"{profile['title']} — live inference; close window or Ctrl+C to exit",
+                    flush=True,
+                )
         actual_initial = handle.get_particle_positions().numpy() @ rotation
         np.testing.assert_allclose(actual_initial, initial, rtol=0, atol=1e-7)
         frames, velocities = [actual_initial.copy()], [velocity.copy()]
@@ -290,6 +332,9 @@ def _demo(default_scene="fancy_fluid") -> None:
             world.update()
             if camera is not None:
                 camera.render()
+                if video is not None:
+                    video_frame = np.asarray(camera.get_rgb_map())[..., :3].copy()
+                    video.append_data(video_frame)
                 if args.capture_dir and step in (0, steps // 2, steps - 1):
                     for _ in range(4):
                         camera.render()
@@ -310,6 +355,9 @@ def _demo(default_scene="fancy_fluid") -> None:
             if not args.headless and args.fps:
                 time.sleep(max(0.0, 1.0 / args.fps - (time.perf_counter() - before)))
         elapsed = time.perf_counter() - started
+        if video is not None:
+            for _ in range(max(1, round(args.fps))):
+                video.append_data(video_frame)
         output.parent.mkdir(parents=True, exist_ok=True)
         np.savez_compressed(
             output,
@@ -331,6 +379,7 @@ def _demo(default_scene="fancy_fluid") -> None:
             generated_initial_conditions=args.scene == "deep_fluid",
             elapsed_seconds=elapsed,
             display_included=not args.headless,
+            rendering_included=rendering_enabled,
         )
         if reference is not None:
             count = min(len(reference), len(frames))
@@ -366,6 +415,8 @@ def _demo(default_scene="fancy_fluid") -> None:
     except KeyboardInterrupt:
         print("Stopped by user", flush=True)
     finally:
+        if video is not None:
+            video.close()
         if camera is not None:
             camera.close_camera()
         window = None
@@ -374,8 +425,6 @@ def _demo(default_scene="fancy_fluid") -> None:
 
 
 def main() -> None:
-    import sys
-
     if len(sys.argv) > 1 and sys.argv[1] == "prepare":
         sys.argv.pop(1)
         from ._prepare import main as prepare_main

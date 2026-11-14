@@ -9,35 +9,45 @@ Providers are constructed per scene through the existing Newton lifecycle.
 
 ## Prepared environment
 
-From this repository, the prepared environment is `.venv-worldparticle`.
-The normal `.venv` is unchanged. Linux x86_64, glibc >=2.35, Python 3.12,
+The demos use a dedicated Conda `py312` environment with `dexsim_engine==0.6.0rc2`.
+Linux x86_64, glibc >=2.35, Python 3.12,
 Torch 2.7.1+cu128/CXX11 ABI and SM120 are the currently verified operator profile.
-NumPy 2.2.6 is used to satisfy EmbodiChain/LeRobot; Torchvision matches Torch.
+NumPy is 2.2.6; Torchvision matches Torch. The published CPython 3.12 SDK wheel
+contains `ParticleInferenceSolver`.
 
-To reproduce, build the matching DexSim SDK using its normal CMake workflow
-(`DexSim`, `pybind`, `pip-jit-package` targets), preserving its cached Python
-interpreter. Use a local PEP 440 package version such as
-`-DDEXSIM_PACKAGE_VERSION=0.5.1rc1+worldparticle.6367b2` so it satisfies this
-checkout's SDK dependency; the unmodified published SDK lacks the new adapter.
-Then pass the produced CPython 3.12 wheel explicitly:
+Run from the repository root. Export the model's pinned requirements from the
+existing extra, then install the SDK and simulation imports needed by this
+source-checkout example:
 
 ```bash
-uv venv --python 3.12 .venv-worldparticle --seed
-uv pip install --python .venv-worldparticle/bin/python 'setuptools>=78.1.1' wheel
-SDK_WHEEL=/absolute/path/to/dexsim_engine-0.5.1rc1+worldparticle.6367b2-cp312-cp312-manylinux_2_35_x86_64.whl
-uv pip install --python .venv-worldparticle/bin/python --no-build-isolation \
-  -e '.[worldparticle]' "$SDK_WHEEL" \
+conda create -n py312 python=3.12 pip -y
+conda activate py312
+python - <<'PY'
+from pathlib import Path
+import tomllib
+
+project = tomllib.loads(Path("pyproject.toml").read_text())["project"]
+output = Path("outputs/worldparticle/model-requirements.txt")
+output.parent.mkdir(parents=True, exist_ok=True)
+output.write_text("\n".join(project["optional-dependencies"]["worldparticle"]) + "\n")
+PY
+uv pip install --python "$CONDA_PREFIX/bin/python" \
+  --index-url https://pypi.org/simple \
+  --extra-index-url http://pyp.open3dv.site:2345/simple/ \
   --extra-index-url https://download.pytorch.org/whl/cu128 \
-  --index-strategy unsafe-best-match
-uv pip check --python .venv-worldparticle/bin/python
+  --index-strategy unsafe-best-match \
+  -r outputs/worldparticle/model-requirements.txt \
+  'dexsim_engine==0.6.0rc2' 'tensordict==0.13.0' \
+  'pytorch_kinematics==0.10.0' 'viser==1.0.21' \
+  'gymnasium>=0.29.1' prettytable fvcore h5py
+uv pip check --python "$CONDA_PREFIX/bin/python"
+export PYTHONPATH="$PWD:$PWD/extensions/embodichain_models:$PWD/extensions/embodichain_robots${PYTHONPATH:+:$PYTHONPATH}"
 ```
 
-The requested DexSim source checkout and EmbodiChain's existing default/mapping
-Newton configuration have an AutoSolver API mismatch. This change adapts only
-explicit SDK configuration objects used by the Provider; it does not change
-default solver selection or add an AutoSolver-to-DexUni fallback. Use the
-explicit Provider configuration for this environment. The normal `.venv`
-remains untouched.
+This validates the source demo's simulation runtime. The main distribution's
+Python 3.12 training profile currently requires Torch 2.11 and Tensordict 0.15,
+which conflicts with these model operators. Full `.[worldparticle]` installation
+still requires reconciling those dependency profiles.
 
 The optional requirements in `pyproject.toml` are the dependency authority.
 `runtime-manifest.json`, the Open3D patch and relocation utility record operator
@@ -46,12 +56,11 @@ build/reproduction provenance. No environment, weight or native wheel is committ
 ## Resources and demos
 
 ```bash
-source .venv-worldparticle/bin/activate
-embodichain run-example learning/worldparticle prepare
-embodichain run-example learning/worldparticle demo --scene fancy_fluid
-embodichain run-example learning/worldparticle demo --scene cloth_on_ball
-embodichain run-example learning/worldparticle demo --scene inverse_design
-embodichain run-example learning/worldparticle demo --scene deep_fluid
+python -m embodichain run-example learning/worldparticle prepare
+python -m embodichain run-example learning/worldparticle demo --scene fancy_fluid
+python -m embodichain run-example learning/worldparticle demo --scene cloth_on_ball
+python -m embodichain run-example learning/worldparticle demo --scene inverse_design
+python -m embodichain run-example learning/worldparticle demo --scene deep_fluid
 ```
 
 The four profiles retain the official checkpoints. Cloth starts at configured
@@ -60,7 +69,23 @@ conditions with the official model and has no reference trajectory. Duck is a
 forward inference demo, not inverse optimization. Rendering uses DexSim's native
 1920x1080 OfflineRT window and public Spawn materials/geometry. Repeated display
 runs reset and infer fresh states. `--once --hold-seconds 0` exits after one run;
-`--headless` runs without a window. `--capture-dir DIR` saves native camera images.
+`--headless` runs without a window. `--capture-dir DIR` saves native camera images,
+including offscreen captures with `--headless`:
+
+```bash
+python -m embodichain run-example learning/worldparticle demo \
+  --scene cloth_on_ball --headless --capture-dir outputs/worldparticle/cloth-captures
+```
+
+Record a complete rollout to H.264 MP4 with `--video FILE.mp4`. Every simulation
+step contributes one native camera frame; `--fps` controls video playback speed
+without changing the checkpoint timestep. The initial and final frames each
+hold for one second:
+
+```bash
+python -m embodichain run-example learning/worldparticle demo \
+  --scene cloth_on_ball --headless --video outputs/worldparticle/cloth.mp4 --fps 15
+```
 
 Assets default to `outputs/worldparticle/assets`, predictions to
 `outputs/worldparticle/demos`. The explicit prepare command verifies all 19
