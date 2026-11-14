@@ -33,7 +33,8 @@ from typing import (
     get_type_hints,
 )
 from functools import cached_property
-from types import UnionType
+from dataclasses import MISSING
+from types import SimpleNamespace, UnionType
 from tensordict import TensorDict
 
 from embodichain.lab.sim.cfg import ObjectBaseCfg
@@ -116,45 +117,53 @@ class SensorCfg(ObjectBaseCfg):
 
 def _populate_sensor_config(cfg: Any, init_dict: dict[str, Any]) -> Any:
     """Decode typed nested configclasses without comparing values to MISSING."""
-    # Pass the module's global namespace for evaluating forward references
-    module_name = cfg.__class__.__module__
-    globalns = sys.modules[module_name].__dict__.copy()
-
-    # Include global namespaces of parent classes for inherited types
-    for base in cfg.__class__.__mro__[1:]:
-        base_module = sys.modules.get(base.__module__)
-        if base_module:
-            base_ns = base_module.__dict__
-            for key, value in base_ns.items():
-                if key not in globalns:
-                    globalns[key] = value
-            # Also include nested config classes from parent classes
-            for key in dir(base):
-                if not key.startswith("_"):
-                    value = getattr(base, key, None)
-                    if is_configclass(value) or (
-                        isinstance(value, type) and is_configclass(value)
-                    ):
-                        if key not in globalns:
-                            globalns[key] = value
-
-    type_hints = get_type_hints(cfg.__class__, globalns=globalns)
+    type_hints = {}
+    for base in reversed(type(cfg).__mro__):
+        annotations = base.__dict__.get(
+            "__configclass_annotations__", base.__dict__.get("__annotations__", {})
+        )
+        if not annotations:
+            continue
+        localns = {
+            name: value
+            for ancestor in reversed(base.__mro__)
+            for name, value in vars(ancestor).items()
+        }
+        # Evaluate only this class's declarations, not flattened inherited fields.
+        type_hints.update(
+            get_type_hints(
+                SimpleNamespace(__annotations__=annotations),
+                globalns=vars(sys.modules[base.__module__]),
+                localns=localns,
+            )
+        )
 
     for key, value in init_dict.items():
         if hasattr(cfg, key):
             setattr(
                 cfg,
                 key,
-                _decode_config_value(value, type_hints.get(key), getattr(cfg, key)),
+                _decode_config_value(
+                    value, type_hints.get(key), getattr(cfg, key), key
+                ),
             )
         else:
             logger.log_warning(f"Key '{key}' not found in {type(cfg).__name__}.")
     return cfg
 
 
-def _decode_config_value(value: Any, annotation: Any, default: Any = None) -> Any:
+def _decode_config_value(
+    value: Any, annotation: Any, default: Any = None, field_name: str = ""
+) -> Any:
     """Preserve custom decoders and resolve nullable/required nested types."""
+    nullable = get_origin(annotation) in (Union, UnionType) and type(None) in get_args(
+        annotation
+    )
     if value is None:
+        if not nullable and (is_configclass(annotation) or is_configclass(default)):
+            raise ValueError(
+                f"Sensor configuration field {field_name!r} does not accept null."
+            )
         return None
     if get_origin(annotation) in (Union, UnionType):
         candidates = [item for item in get_args(annotation) if item is not type(None)]
@@ -169,14 +178,57 @@ def _decode_config_value(value: Any, annotation: Any, default: Any = None) -> An
         if config_type is not None:
             decoder = getattr(config_type, "from_dict", None)
             if callable(decoder):
+                if is_configclass(default):
+                    defaults = _resolved_config_defaults(default, default.to_dict())
+                    value = _merge_config_overrides(defaults, value)
                 return decoder(value)
             cfg = default if is_configclass(default) else config_type()
             return _populate_sensor_config(cfg, value)
     if isinstance(value, list) and get_origin(annotation) is list:
         args = get_args(annotation)
         if args:
-            return [_decode_config_value(item, args[0]) for item in value]
+            return [
+                _decode_config_value(item, args[0], field_name=f"{field_name}[{index}]")
+                for index, item in enumerate(value)
+            ]
     return value
+
+
+def _resolved_config_defaults(source: Any, serialized: Any) -> Any:
+    """Exclude unresolved defaults that generic serialization represents as {}."""
+    # Nested config copies may contain a distinct _MISSING_TYPE instance;
+    # match configclass.validate(), which recognizes missing values by type.
+    if type(source) is type(MISSING):
+        return MISSING
+    if isinstance(serialized, dict):
+        resolved = {}
+        for key, value in serialized.items():
+            original = (
+                source.get(key)
+                if isinstance(source, dict)
+                else getattr(source, key, None)
+            )
+            if type(original) is not type(MISSING):
+                resolved[key] = _resolved_config_defaults(original, value)
+        return resolved
+    if isinstance(serialized, (list, tuple)) and isinstance(source, (list, tuple)):
+        return type(serialized)(
+            _resolved_config_defaults(original, value)
+            for original, value in zip(source, serialized)
+        )
+    return serialized
+
+
+def _merge_config_overrides(
+    defaults: dict[str, Any], overrides: dict[str, Any]
+) -> dict[str, Any]:
+    """Keep calibrated defaults while letting custom decoders normalize overrides."""
+    merged = dict(defaults)
+    for key, value in overrides.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            value = _merge_config_overrides(merged[key], value)
+        merged[key] = value
+    return merged
 
 
 class BaseSensor(BatchEntity):

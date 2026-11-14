@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import MISSING
 import os
 from pathlib import Path
@@ -24,7 +25,8 @@ import shutil
 import subprocess
 import sys
 import textwrap
-from types import SimpleNamespace
+from threading import Event
+from types import ModuleType, SimpleNamespace
 
 import pytest
 import torch
@@ -71,6 +73,17 @@ class _RequiredOptions:
 
 
 @configclass
+class _RequiredCalibration(SensorCfg.OffsetCfg):
+    gain: float = MISSING
+
+
+@configclass
+class _CustomCalibrationProbeCfg(SensorCfg):
+    sensor_type: str = "CustomCalibrationProbe"
+    calibration: _RequiredCalibration = _RequiredCalibration()
+
+
+@configclass
 class _CalibratedProbeCfg(_ProbeCfg):
     sensor_type: str = "CalibratedTestProbe"
     options: _RequiredOptions = _RequiredOptions(gain=5.0, offset=1.0)
@@ -112,7 +125,7 @@ def isolated_registry(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.setattr(registry, "_registrations", registry._registrations.copy())
     monkeypatch.setattr(registry, "_entry_points", {})
     monkeypatch.setattr(registry, "_discovered", False)
-    monkeypatch.setattr(registry, "_loading", set())
+    monkeypatch.setattr(registry, "_loading", {})
     monkeypatch.setattr(
         registry, "metadata", SimpleNamespace(entry_points=lambda **kwargs: ())
     )
@@ -242,6 +255,103 @@ def test_partial_nested_overrides_preserve_owned_calibration_defaults(
     assert _CalibratedProbeCfg().options.offset == 1.0
 
 
+@pytest.mark.parametrize("redeclare", [False, True])
+def test_inherited_annotations_use_their_declaring_module(
+    monkeypatch: pytest.MonkeyPatch,
+    redeclare: bool,
+) -> None:
+    base = ModuleType("sensor_test_base")
+    plugin = ModuleType("sensor_test_plugin")
+    monkeypatch.setitem(sys.modules, base.__name__, base)
+    monkeypatch.setitem(sys.modules, plugin.__name__, plugin)
+    exec(
+        textwrap.dedent("""
+        from __future__ import annotations
+        from embodichain.utils import configclass
+        from embodichain.lab.sim.sensors import SensorCfg
+        @configclass
+        class Calibration:
+            gain: float = 1.0
+        @configclass
+        class BaseCfg(SensorCfg):
+            calibration: Calibration | None = None
+    """),
+        base.__dict__,
+    )
+    exec(
+        textwrap.dedent("""
+        from __future__ import annotations
+        from embodichain.utils import configclass
+        from sensor_test_base import BaseCfg
+        @configclass
+        class Calibration:
+            offset: float = 2.0
+        @configclass
+        class PluginCfg(BaseCfg):
+            sensor_type: str = "InheritedModuleProbe"
+    """) + ("    calibration: Calibration | None = None\n" if redeclare else ""),
+        plugin.__dict__,
+    )
+    register_sensor(
+        SensorRegistration("InheritedModuleProbe", plugin.PluginCfg, _Probe)
+    )
+    field, expected_type = (
+        ("offset", plugin.Calibration) if redeclare else ("gain", base.Calibration)
+    )
+    cfg = SensorCfg.from_dict(
+        {"sensor_type": "InheritedModuleProbe", "calibration": {field: 5.0}}
+    )
+    cfg.validate()
+    assert type(cfg.calibration) is expected_type
+    assert getattr(cfg.calibration, field) == 5.0
+
+
+def test_camera_custom_decoder_preserves_calibration_defaults() -> None:
+    @configclass
+    class CalibratedCameraCfg(CameraCfg):
+        sensor_type: str = "CalibratedCamera"
+        extrinsics: CameraCfg.ExtrinsicsCfg = CameraCfg.ExtrinsicsCfg(
+            pos=(1.0, 2.0, 3.0), quat=(0.0, 0.0, 1.0, 0.0)
+        )
+
+    register_sensor(SensorRegistration("CalibratedCamera", CalibratedCameraCfg, _Probe))
+    cfg = SensorCfg.from_dict(
+        {"sensor_type": "CalibratedCamera", "extrinsics": {"parent": "arm/tool"}}
+    )
+    assert cfg.extrinsics.pos == (1.0, 2.0, 3.0)
+    assert cfg.extrinsics.quat == (0.0, 0.0, 1.0, 0.0)
+    assert cfg.extrinsics.parent == "arm/tool"
+    assert CalibratedCameraCfg().extrinsics.parent is None
+
+
+@pytest.mark.parametrize("gain", [None, 5.0])
+def test_custom_decoder_does_not_serialize_missing_defaults_as_supplied_values(
+    gain: float | None,
+) -> None:
+    register_sensor(
+        SensorRegistration("CustomCalibrationProbe", _CustomCalibrationProbeCfg, _Probe)
+    )
+    values = {"parent": "arm/tool"}
+    if gain is not None:
+        values["gain"] = gain
+    cfg = SensorCfg.from_dict(
+        {"sensor_type": "CustomCalibrationProbe", "calibration": values}
+    )
+    if gain is None:
+        assert cfg.calibration.gain is MISSING
+        with pytest.raises(TypeError, match="calibration.gain"):
+            cfg.validate()
+    else:
+        cfg.validate()
+        assert cfg.calibration.gain == 5.0
+
+
+@pytest.mark.parametrize("sensor_type", ["Camera", "StereoCamera"])
+def test_non_nullable_nested_configuration_rejects_null(sensor_type: str) -> None:
+    with pytest.raises(ValueError, match="extrinsics.*null"):
+        SensorCfg.from_dict({"sensor_type": sensor_type, "extrinsics": None})
+
+
 def test_duplicate_registration_and_api_mismatch_are_explicit() -> None:
     register_sensor(_registration())
     with pytest.raises(ValueError, match="already registered"):
@@ -305,6 +415,88 @@ def test_plugin_load_failure_identifies_entry_point_and_preserves_cause(
         get_sensor_registration("TestProbe")
     assert isinstance(caught.value.__cause__, ImportError)
     assert "TestProbe" not in registry._registrations
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_concurrent_plugin_resolution_shares_one_load(
+    monkeypatch: pytest.MonkeyPatch,
+    fail: bool,
+) -> None:
+    entered, release, joined = Event(), Event(), Event()
+    calls = []
+    expected = _registration()
+
+    def load():
+        calls.append("load")
+        entered.set()
+        assert release.wait(5), "Concurrent caller never joined"
+        if fail:
+            raise ImportError("optional SDK missing")
+        return expected
+
+    class ObservedFuture(registry.Future):
+        def result(self, timeout=None):
+            joined.set()
+            return super().result(timeout)
+
+    monkeypatch.setattr(registry, "Future", ObservedFuture)
+    entry = SimpleNamespace(name="TestProbe", value="external:REGISTRATION", load=load)
+    monkeypatch.setattr(registry.metadata, "entry_points", lambda **kwargs: [entry])
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(get_sensor_registration, "TestProbe")
+        assert entered.wait(5)
+        second = pool.submit(get_sensor_registration, "TestProbe")
+        try:
+            assert joined.wait(5), "Concurrent caller did not wait for the first load"
+        finally:
+            release.set()
+        if fail:
+            errors = []
+            for future in (first, second):
+                with pytest.raises(
+                    RuntimeError, match="optional SDK missing"
+                ) as caught:
+                    future.result(timeout=5)
+                errors.append(caught.value)
+            assert errors[0] is errors[1]
+        else:
+            assert first.result(timeout=5) is second.result(timeout=5) is expected
+    assert calls == ["load"]
+
+
+def test_recursive_plugin_import_reports_error_and_allows_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entry = SimpleNamespace(
+        name="TestProbe",
+        value="external:REGISTRATION",
+        load=lambda: get_sensor_registration("TestProbe"),
+    )
+    monkeypatch.setattr(registry.metadata, "entry_points", lambda **kwargs: [entry])
+    with pytest.raises(RuntimeError, match="Recursive loading"):
+        get_sensor_registration("TestProbe")
+    entry.load = _registration
+    assert get_sensor_registration("TestProbe").config_cls is _ProbeCfg
+
+
+def test_legacy_override_does_not_import_installed_plugin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_load():
+        pytest.fail("Legacy override must not import the installed plugin")
+
+    entry = SimpleNamespace(
+        name="TestProbe", value="external:REGISTRATION", load=fail_load
+    )
+    monkeypatch.setattr(registry.metadata, "entry_points", lambda **kwargs: [entry])
+    manager = _manager()
+    manager.SUPPORTED_SENSOR_TYPES = {
+        "TestProbe": lambda cfg, device: _Probe(
+            cfg, context=SensorContext.from_manager(manager)
+        )
+    }
+    sensor = manager.add_sensor(_ProbeCfg(uid="legacy", asset_uid="robot"))
+    torch.testing.assert_close(sensor.get_data()["reading"], torch.full((2, 1), 2.0))
 
 
 def test_unknown_type_has_the_same_installation_guidance_in_config_and_manager() -> (

@@ -113,6 +113,9 @@ def configclass(cls, **kwargs):
     Reference:
         https://github.com/isaac-sim/IsaacLab/blob/main/source/isaaclab/isaaclab/utils/configclass.py
     """
+    # Retain declaration ownership before inherited annotations are flattened.
+    # Domain decoders need the original module for postponed type references.
+    declared_annotations = cls.__dict__.get("__annotations__", {}).copy()
     # add type annotations
     _add_annotation_types(cls)
     # add field factory
@@ -141,6 +144,7 @@ def configclass(cls, **kwargs):
     setattr(cls, "validate", _validate)
     # wrap around dataclass
     cls = dataclass(cls, **kwargs)
+    cls.__configclass_annotations__ = declared_annotations
     # return wrapped class
     return cls
 
