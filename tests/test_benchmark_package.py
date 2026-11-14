@@ -78,6 +78,8 @@ def installed_benchmark(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path,
         assert "embodichain_benchmarks/__init__.py" in entries
         assert "embodichain_benchmarks/motion_generation/api.py" in entries
         assert "embodichain/cli/benchmark.py" in entries
+        for name in ("LICENSE.worldparticle", "LICENSE.tome", "PROVENANCE.json"):
+            assert f"embodichain_models/dynamics/worldparticle/{name}" in entries
         suites = {
             Path(name).name
             for name in entries
@@ -245,7 +247,7 @@ print("installed benchmark suites and CLI passed")
 def test_installed_solver_entry_point_and_core_dependency_boundary(
     installed_benchmark: tuple[Path, Path], tmp_path: Path
 ) -> None:
-    """The built wheel discovers NeRD while its core and package imports stay inert."""
+    """Discover optional adapters without eagerly importing models or the SDK."""
     target, _ = installed_benchmark
     script = r"""
 import importlib.abc
@@ -254,6 +256,7 @@ from pathlib import Path
 import sys
 
 import embodichain_solvers.physics.nerd
+import embodichain_solvers.physics.worldparticle
 assert Path(embodichain_solvers.__file__).is_relative_to(Path(sys.prefix))
 for name in ('torch', 'newton', 'dexsim', 'embodichain_models'):
     assert name not in sys.modules, name
@@ -274,6 +277,15 @@ assert len(entries) == 1
 assert entries[0].value == 'embodichain_solvers.physics.nerd.provider:NeRDProvider'
 provider = entries[0].load()
 assert provider.capabilities.supported_control_fields == ('joint_f',)
+entries = [entry for entry in metadata.entry_points(group='dexsim.newton_solvers') if entry.name == 'worldparticle']
+assert len(entries) == 1
+assert entries[0].value == 'embodichain_solvers.physics.worldparticle.provider:WorldParticleProvider'
+provider = entries[0].load()
+assert provider.capabilities.supported_particle_kinds == ('fluid',)
+assert not provider.capabilities.cuda_graph
+assert 'embodichain_models.dynamics.worldparticle' not in sys.modules
+assert 'open3d.ml.torch' not in sys.modules
+assert 'flash_attn' not in sys.modules
 import dexsim
 assert dexsim.get_world_num() == 0
 """

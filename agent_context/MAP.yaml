@@ -314,11 +314,11 @@ topics:
   status: active
 - id: neural-dynamics
   title: Neural Dynamics Models and Training
-  aliases: [neural dynamics, neural robot dynamics, NeRD, RigidFormer, 神经动力学, 动力学模型训练, NeRD 示例, RigidFormer 示例]
+  aliases: [neural dynamics, neural robot dynamics, NeRD, RigidFormer, WorldParticle, 神经动力学, 动力学模型训练, NeRD 示例, RigidFormer 示例]
   keywords: [NeRDStateCodec, NeRDModel, NeRDGeometry, NeRDState, NeRDTransition, NeRDModelEnv, DynamicsGenerationCfg,
     DynamicsShardWriter, DynamicsWindowDataset, DynamicsTrainer, embodichain_models,
     learning/nerd, nerd reference assets, RigidFormerModel, MOViSequenceSource, build_rigidformer_trainer,
-    官方训练精度对比]
+    WorldParticleModel, WorldParticleProvider, learning/worldparticle, 官方训练精度对比]
   paths: [topics/neural-dynamics/neural-dynamics.md]
   source_of_truth:
   - extensions/embodichain_models/embodichain_models/dynamics/nerd/
@@ -329,6 +329,9 @@ topics:
   - examples/learning/nerd/configs/
   - extensions/embodichain_models/embodichain_models/dynamics/rigidformer/
   - examples/learning/rigidformer/
+  - extensions/embodichain_models/embodichain_models/dynamics/worldparticle/
+  - extensions/embodichain_solvers/embodichain_solvers/physics/worldparticle/
+  - examples/learning/worldparticle/
   watch_paths: [extensions/embodichain_models/, examples/learning/nerd/, docs/source/features/neural_dynamics.md,
     docs/source/features/neural_dynamics/, docs/source/guides/neural_dynamics.md, docs/source/api_reference/model_catalogs.rst,
     docs/source/api_reference/model_rigidformer.rst]

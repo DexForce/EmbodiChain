@@ -37,6 +37,7 @@ Use the following canonical packages for the current model directions:
 | NeRD | `embodichain_models.dynamics.nerd` | Implemented in this change. |
 | Robot world model (RWM) | `embodichain_models.dynamics.rwm` | Implemented. |
 | RigidFormer | `embodichain_models.dynamics.rigidformer` | Native author architecture, official weights and shared-SL recipe. |
+| WorldParticle | `embodichain_models.dynamics.worldparticle` | Frozen particle transition; optional native deployment and operator qualification are separate. |
 
 Visual ACT's configuration and inference adapters are documented in the
 [API reference](../../docs/source/api_reference/visual_act.rst); its runnable

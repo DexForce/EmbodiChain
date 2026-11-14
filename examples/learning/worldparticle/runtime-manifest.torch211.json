@@ -1,0 +1,158 @@
+{
+  "schema_version": 1,
+  "platform": "linux-x86_64",
+  "python": "3.12",
+  "minimum_glibc": "2.35",
+  "torch": "2.11.0+cu128",
+  "torchvision": "0.26.0+cu128",
+  "numpy": "2.2.6",
+  "einops": "0.8.2",
+  "cxx11_abi": true,
+  "cuda": "12.8",
+  "cuda_architectures": [
+    "sm_120"
+  ],
+  "native_sdk": "0.6.0rc2",
+  "main_sdk_pin": "0.6.0rc1",
+  "native_facility": "dexsim.engine.newton_physics.particle_inference.ParticleInferenceSolver",
+  "main_installable_native_deployment": false,
+  "artifacts": "Local source builds, not uploaded. Rebuild using BUILDING.md; no native wheels are bundled.",
+  "wheels": [
+    {
+      "filename": "open3d-0.19.0+1e7b1743-1torch2110cu128sm120-cp312-cp312-manylinux_2_35_x86_64.whl",
+      "sha256": "25074556d1262d745f2be21494516032eaad3ec68a988afd38e3f2f2741732e0",
+      "size": 434445787
+    },
+    {
+      "filename": "flash_attn-2.8.3-1torch2110cu128sm120-cp312-cp312-linux_x86_64.whl",
+      "sha256": "4b35ac7014766ee86158efb0386cd277f2c8644448649b25cff89fa317da4641",
+      "size": 68322743
+    }
+  ],
+  "open3d": {
+    "source": "https://github.com/isl-org/Open3D",
+    "revision": "1e7b17438687a0b0c1e5a7187321ac7044afe275",
+    "patch": "open3d-build.patch",
+    "patch_sha256": "853748f047ba02fa256c4aa0179c9fa18a67173036be20d8d758a65e5c991a1e",
+    "version": "0.19.0+1e7b1743",
+    "cmake_options": {
+      "BUILD_CUDA_MODULE": "ON",
+      "CMAKE_CUDA_ARCHITECTURES": "120-real",
+      "BUILD_COMMON_CUDA_ARCHS": "OFF",
+      "BUILD_PYTORCH_OPS": "ON",
+      "BUILD_TENSORFLOW_OPS": "OFF",
+      "BUILD_GUI": "OFF",
+      "BUILD_WEBRTC": "OFF",
+      "BUILD_ISPC_MODULE": "OFF",
+      "BUILD_EXAMPLES": "OFF",
+      "BUILD_UNIT_TESTS": "OFF",
+      "WITH_IPP": "OFF"
+    },
+    "build_tools": {
+      "yapf": "0.30.0",
+      "patchelf": "0.17.2.4"
+    },
+    "relocation": [
+      {
+        "path": "open3d/cuda/open3d_torch_ops.so",
+        "runpath": "$ORIGIN/..:$ORIGIN/../../torch/lib:$ORIGIN/../../nvidia/cuda_runtime/lib"
+      },
+      {
+        "path": "open3d/cuda/pybind.cpython-312-x86_64-linux-gnu.so",
+        "runpath": "$ORIGIN/..:$ORIGIN/../../torch/lib:$ORIGIN/../../nvidia/cuda_runtime/lib"
+      },
+      {
+        "path": "open3d/libtbb.so.12",
+        "runpath": "$ORIGIN:$ORIGIN/../torch/lib:$ORIGIN/../nvidia/cuda_runtime/lib"
+      }
+    ]
+  },
+  "flash_attention": {
+    "source": "https://github.com/Dao-AILab/flash-attention",
+    "revision": "060c9188beec3a8b62b33a3bfa6d5d2d44975fab",
+    "version": "2.8.3",
+    "environment": {
+      "FLASH_ATTENTION_FORCE_BUILD": "TRUE",
+      "FLASH_ATTN_CUDA_ARCHS": "120",
+      "MAX_JOBS": "12",
+      "NVCC_THREADS": "2"
+    }
+  },
+  "validation": {
+    "operator_oracles": "CUDA fixed-radius search and BF16 FlashAttention/SDPA on a nondefault stream",
+    "published_models": [
+      "fancy_fluid",
+      "cloth_on_ball",
+      "inverse_design",
+      "deep_fluid"
+    ],
+    "native_steps_per_model": 2,
+    "all_finite": true,
+    "rendering": false,
+    "accuracy_equivalence_to_historical_runtime": false,
+    "bitwise_determinism": false,
+    "paper_scale_quality": false,
+    "standalone_input_mutation": false,
+    "standalone_nondefault_stream": true,
+    "standalone_simulation_imports": false,
+    "observation_semantics": {
+      "position_max_abs/velocity_max_abs": "Largest absolute standalone-vs-separately-recorded-native difference over two steps; observations only, not accepted parity bounds.",
+      "reset_position_difference/reset_velocity_difference": "Same transition called again with preserved initial tensors after the two steps; not physical scene reset-state error.",
+      "simulation_imports": "Import blocker rejected dexsim, newton, warp and embodichain during standalone model loading and execution. Open3D/FlashAttention native operators were allowed."
+    },
+    "repeat_and_adapter_observations": [
+      {
+        "scene": "fancy_fluid",
+        "particles": 7020,
+        "steps": 2,
+        "position_max_abs": 0.00011110305786132812,
+        "velocity_max_abs": 0.006622314453125,
+        "reset_position_difference": 6.103515625e-05,
+        "reset_velocity_difference": 0.00390625,
+        "input_storage_unchanged": true,
+        "all_finite": true,
+        "nondefault_stream": true,
+        "simulation_imports": false
+      },
+      {
+        "scene": "cloth_on_ball",
+        "particles": 4900,
+        "steps": 2,
+        "position_max_abs": 0.00010865926742553711,
+        "velocity_max_abs": 0.00390625,
+        "reset_position_difference": 6.103515625e-05,
+        "reset_velocity_difference": 0.00390625,
+        "input_storage_unchanged": true,
+        "all_finite": true,
+        "nondefault_stream": true,
+        "simulation_imports": false
+      },
+      {
+        "scene": "inverse_design",
+        "particles": 1102,
+        "steps": 2,
+        "position_max_abs": 0.000732421875,
+        "velocity_max_abs": 0.005859375,
+        "reset_position_difference": 0.0006103515625,
+        "reset_velocity_difference": 0.009765625,
+        "input_storage_unchanged": true,
+        "all_finite": true,
+        "nondefault_stream": true,
+        "simulation_imports": false
+      },
+      {
+        "scene": "deep_fluid",
+        "particles": 3528,
+        "steps": 2,
+        "position_max_abs": 9.198486804962158e-05,
+        "velocity_max_abs": 0.0010833740234375,
+        "reset_position_difference": 5.888938903808594e-05,
+        "reset_velocity_difference": 0.0006826780736446381,
+        "input_storage_unchanged": true,
+        "all_finite": true,
+        "nondefault_stream": true,
+        "simulation_imports": false
+      }
+    ]
+  }
+}

@@ -78,6 +78,35 @@ engine-camera recording. It uses explicit prepared geometry and weight paths.
 Assets/results stay outside the wheel. Numerical agreement, recovery and full
 benchmark/retraining qualification remain distinct evidence requirements.
 
+## WorldParticle frozen particle transition
+
+`dynamics.worldparticle.WorldParticleModel` owns the stateless world-space
+particle transition, authored features/boundaries/CSR topology, checkpoint
+loading and model-frame conversion. Its package imports neither simulation
+nor examples. Coordinate transport stays FP32 even under caller autocast;
+the original frozen network uses BF16. No learned-robot codec or history
+contract is shared with NeRD. Both families use the existing optional Newton
+Provider lifecycle in `embodichain_solvers.physics` for native deployment.
+
+`physics.worldparticle.provider.WorldParticleProvider` owns native admission and
+delegates stream/state/force/write/reset machinery to the SDK's generic
+`ParticleInferenceSolver`. That facility requires a runtime newer than main's
+pinned SDK 0.6.0rc1; SDK 0.6.0rc2 has it. The historical operator profile uses
+Torch 2.7.1 and must not replace main's Torch 2.11 dependencies. The showcase
+records runtime and immutable asset provenance. Its separate Torch 2.11 source
+build profile has local CUDA operator and four-checkpoint/two-step execution
+evidence; native deployment uses SDK 0.6.0rc2. Main pins and default-install
+native availability are unchanged. Tests with a small deterministic predictor
+qualify adapter behavior; real BF16 inference does not establish bitwise
+determinism, native/model parity or historical/paper accuracy.
+
+Only one CUDA particle world with static authored network boundaries is
+supported. It does not provide functional gradients/APG, dynamic rigid-body
+coupling, native contact reports or CUDA Graph capture. Keep its learning-env
+adapter deferred until an actual differentiable training contract is qualified.
+Preparation and four forward demonstrations belong to
+`examples/learning/worldparticle`; weights, data and native wheels stay external.
+
 ## Resource and physical identity
 
 `prepare --robot cartpole|ant --resource-root DIR` downloads the pinned dataset,
