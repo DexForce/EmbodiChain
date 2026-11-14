@@ -94,6 +94,45 @@ def load_task_plan(path: str | Path) -> dict[str, Any]:
     root = Path(path).expanduser().resolve(strict=True)
     manifest = _load_json(root / "task_plan_manifest.json", "task plan manifest")
     version = manifest.get("schema_version")
+    if version == "embodichain.hybrid-task-plan/v1":
+        from .task_engine.hybrid import _scene_projection, verify_witness
+        from .task_spec import TaskSpec, canonical_hash
+        from .task_spec.publication import decode_task_document
+
+        inventory = manifest["artifacts"]
+        _verify_inventory(root, inventory)
+
+        def read(name):
+            if name + ".json" not in inventory:
+                raise ValueError("Incomplete hybrid plan inventory: " + name)
+            return _load_json(root / (name + ".json"), name)
+
+        spec = TaskSpec.from_dict(read("task_spec"))
+        doc = decode_task_document(read("task_spec_v1"), spec)
+        graph = read("semantic_task_graph")
+        image = doc["inputs"]["image"]
+        if (
+            doc["spec_digest"] != manifest["spec_digest"]
+            or canonical_hash(graph) != manifest["semantic_graph_sha256"]
+            or doc["task_id"] != manifest["task_id"]
+            or doc["inputs"]["instruction"] != manifest["instruction"]
+            or image["ref"] not in inventory
+            or inventory[image["ref"]] != image["sha256"]
+            or image["sha256"] != manifest["image_sha256"]
+        ):
+            raise ValueError("Hybrid publication identity mismatch")
+        if verify_witness(spec, graph, support_targets={})["status"] != "covered":
+            raise ValueError("Uncovered hybrid placement")
+        projection = _scene_projection(doc, graph, read("scene_grounding"))
+        if any(read(k) != v for k, v in projection.items()):
+            raise ValueError("Hybrid scene projection mismatch")
+        return {
+            **manifest,
+            "root": str(root),
+            "plan_digest": _file_hash(root / "task_plan_manifest.json"),
+            "task_document": doc,
+            "scene_requirements": projection["scene_requirements"],
+        }
     if version not in {
         "embodichain.task-plan-artifact/v1",
         "embodichain.task-plan-artifact/v2",
@@ -279,6 +318,10 @@ def revise_task_plan(
         or plan["plan_digest"] != expected_plan_digest
     ):
         raise ValueError("Stale task plan revision")
+    if plan["schema_version"] == "embodichain.hybrid-task-plan/v1":
+        raise ValueError(
+            "Hybrid graph revisions require a fresh grounded hybrid publication"
+        )
     root = Path(plan["root"])
     target = Path(output).resolve()
     if target.is_relative_to(root):
@@ -772,6 +815,8 @@ def qualify_task_scene(
             {**p.get("arguments", {}), "relation": p.get("relation")}
             for p in placements
         ]
+        if plan["schema_version"] == "embodichain.hybrid-task-plan/v1":
+            steps = [{"task_type": "E1", "relation": goals[0]["relation"]}]
         if len(plan["task_document"]["objectives"]["milestones"]) != 1:
             steps = []
     else:
@@ -930,6 +975,7 @@ def prepare_task_deployment(
     execution_policy: str | Path,
     output_dir: str | Path,
     *,
+    skill_options: Mapping[str, Mapping[str, Any]] | None = None,
     expected_revisions: Mapping[str, str] | None = None,
 ) -> Path:
     """Publish an execution-ready deployment from one accepted qualification.
@@ -941,6 +987,7 @@ def prepare_task_deployment(
         runtime_config: Trusted robot and physical runtime configuration.
         execution_policy: Trusted execution policy configuration.
         output_dir: Fresh deployment publication directory.
+        skill_options: Optional trusted deployment-side Semantic Call parameters.
         expected_revisions: Optional caller-selected input digests.
 
     Returns:
@@ -952,6 +999,8 @@ def prepare_task_deployment(
     from ._run_binding import _bind_deployment, _load_runtime
     from ._run_config import _RunCfg
     from .task_engine.orchestration.workflow_artifacts import write_run_json
+
+    from .task_spec import canonical_hash
 
     plan = load_task_plan(task_plan_dir)
     scene = load_generated_scene(generated_scene_dir)
@@ -970,6 +1019,7 @@ def prepare_task_deployment(
     }
     revisions = {
         **expected,
+        "skill_options_digest": canonical_hash(dict(skill_options or {})),
         "spec_digest": plan.get("spec_digest"),
         "graph_digest": plan.get("semantic_graph_sha256"),
         "plan_digest": plan["plan_digest"],
@@ -997,6 +1047,7 @@ def prepare_task_deployment(
         runtime=runtime_path,
         execution_policy=policy_path,
         task_id=plan["task_id"],
+        binding={"profile": {"action_options": dict(skill_options or {})}},
     )
     runtime, policy, profile = _load_runtime(cfg)
     deployment = _bind_deployment(

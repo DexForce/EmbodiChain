@@ -48,6 +48,11 @@ def main(
     )
     parser.add_argument("--image", type=Path)
     parser.add_argument(
+        "--scene-grounding",
+        type=Path,
+        help="Reviewed source-image grounding for hybrid rigid placement qualification",
+    )
+    parser.add_argument(
         "--route", choices=("template", "goal", "hybrid"), default="template"
     )
     parser.add_argument(
@@ -73,6 +78,8 @@ def main(
     args = parser.parse_args(argv)
     if not args.instruction.strip():
         parser.error("--instruction must not be empty")
+    if args.scene_grounding and args.route != "hybrid":
+        parser.error("--scene-grounding requires --route hybrid")
     if args.route == "hybrid":
         from .hybrid import publish_hybrid
 
@@ -85,6 +92,7 @@ def main(
             args.output,
             services,
             args.deployment,
+            scene_grounding=args.scene_grounding,
         )
         print("Coverage:", result["coverage"]["status"])
         return

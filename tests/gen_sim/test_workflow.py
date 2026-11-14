@@ -975,3 +975,92 @@ def test_run_cli_propagates_native_failure_as_nonzero_exit(
     with pytest.raises(SystemExit) as error:
         main(["gensim", "run", "--config", "run.yaml"])
     assert error.value.code == 1
+
+
+@pytest.mark.parametrize("seen", [True, False])
+def test_grounded_hybrid_placement_uses_scene_qualification(run_cfg, seen):
+    from embodichain.gen_sim.workflow import (
+        load_task_plan,
+        qualify_task_scene,
+        prepare_task_deployment,
+    )
+    from embodichain.gen_sim.task_engine.hybrid import publish_hybrid
+
+    base = run_cfg.output.parent
+    text = "Place the cube on the table."
+    roles = ["cube_native", "table"]
+    packet = dict(
+        image_sha256=hashlib.sha256(run_cfg.image.read_bytes()).hexdigest(),
+        grounding=dict(
+            bindings={k: [k] for k in roles},
+            objects=[
+                dict(
+                    id=k,
+                    description=k,
+                    bbox=[100, 100, 200, 200] if seen or k == "table" else None,
+                    provenance=(
+                        "observed" if seen or k == "table" else "runtime_required"
+                    ),
+                )
+                for k in roles
+            ],
+        ),
+    )
+    ground = base / "ground.json"
+    ground.write_text(json.dumps(packet))
+    op = dict(
+        template="E1", object=roles[0], reference=roles[1], relation="on", quote=text
+    )
+    with GenSimServices(
+        GenSimServicesCfg(),
+        injected={
+            "task_image_grounding": _ScriptedChat({"operations": [op]}),
+            "task_interpretation": _ScriptedChat({"issues": []}),
+        },
+    ) as services:
+        publish_hybrid(
+            text,
+            "place",
+            run_cfg.image,
+            base / "plan",
+            services,
+            scene_grounding=ground,
+        )
+    plan = load_task_plan(base / "plan")
+    scene = _provider_scene(
+        base / "provider", plan, affordances=["graspable", "placeable"], properties=None
+    )
+    q = qualify_task_scene(
+        base / "plan",
+        scene,
+        run_cfg.runtime,
+        run_cfg.execution_policy,
+        base / "qualification",
+    )
+    verdict = json.loads((q / "scene_qualification.json").read_text())
+    assert verdict["status"] == ("accepted" if seen else "ambiguous")
+    if seen:
+        path = prepare_task_deployment(
+            base / "plan",
+            scene,
+            q,
+            run_cfg.runtime,
+            run_cfg.execution_policy,
+            base / "prepared",
+        )
+        assert path.exists()
+        manifest = json.loads((base / "prepared/deployment_manifest.json").read_text())
+        assert (
+            manifest["input_revisions"]["graph_digest"] == plan["semantic_graph_sha256"]
+        )
+        assert manifest["runtime_evidence_status"] == "not_run"
+    else:
+        with pytest.raises(ValueError, match="accepted qualification"):
+            prepare_task_deployment(
+                base / "plan",
+                scene,
+                q,
+                run_cfg.runtime,
+                run_cfg.execution_policy,
+                base / "prepared",
+            )

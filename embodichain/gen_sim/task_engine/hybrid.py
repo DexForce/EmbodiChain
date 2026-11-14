@@ -144,7 +144,11 @@ def _supported_program(operations, instruction, *, bindings=None):
         nonlocal last
         mid = f"m{len(milestones)+1}"
         milestones.append(
-            dict(id=mid, after=[last] if last else [], achieve=[predicate])
+            dict(
+                id=mid,
+                after=[last] if last else [],
+                achieve=[dict(predicate, id=mid + ".achieve")],
+            )
         )
         clauses.append((mid, quote))
         last = mid
@@ -558,6 +562,73 @@ def verify_witness(spec, graph, *, support_targets, bindings=None):
     )
 
 
+def _scene_projection(doc, graph, packet):
+    """Project a grounded, single rigid placement; never synthesize observations."""
+    from .image_planning import _validate_grounding
+    from ..task_spec.publication import project_scene_requirements
+
+    goals = doc["objectives"]["goal"]
+    nodes = graph["nodes"]
+    if (
+        len(goals) != 1
+        or len(doc["objectives"]["milestones"]) != 1
+        or len(nodes) != 2
+        or [n["call"]["kind"] for n in nodes] != ["pick", "place"]
+    ):
+        raise ValueError(
+            "Generated-scene qualification requires a single rigid pick/place"
+        )
+    goal = goals[0]
+    subject, reference, relation = (
+        goal.get("subject"),
+        goal.get("reference"),
+        goal.get("relation"),
+    )
+    if (
+        goal["predicate"] != "relation"
+        or relation not in {"on", "inside"}
+        or nodes[0]["call"]["object"] != subject
+        or nodes[1]["call"]["object"] != subject
+        or nodes[1]["call"].get(relation) != reference
+    ):
+        raise ValueError("Placement witness does not match the frozen objective")
+    if any(
+        c.get("constraint") or c["resolution"] != "resolved"
+        for c in doc["interpretation"]["clauses"]
+    ):
+        raise ValueError(
+            "Hybrid scene qualification cannot discharge additional qualifiers"
+        )
+    roles = [r["id"] for r in doc["configuration"]["roles"]]
+    if packet["image_sha256"] != doc["inputs"]["image"]["sha256"]:
+        raise ValueError("Grounding belongs to a different source image")
+    grounding = _validate_grounding(
+        json.dumps(packet["grounding"]),
+        [dict(reference_id=r, reference=r, quantifier="one", count=0) for r in roles],
+    )
+    if set(grounding) != {"objects", "bindings"} or any(
+        grounding["bindings"][r] != [r] for r in roles
+    ):
+        raise ValueError(
+            "Grounding must preserve hybrid role IDs and frozen declarations"
+        )
+    return {
+        "scene_requirements": project_scene_requirements(doc),
+        "image_grounding": grounding,
+        "plan_coverage": {"role_entities": grounding["bindings"]},
+        "semantic_graph_validation": {
+            "source": {
+                "annotations": {
+                    n["id"]: dict(
+                        object=subject, reference=reference, relation=relation
+                    )
+                    for n in nodes
+                }
+            }
+        },
+    }
+
+
 def publish_hybrid(
     instruction: str,
     task_id: str,
@@ -565,6 +636,8 @@ def publish_hybrid(
     output: Path,
     services: Any = None,
     deployment: Path | None = None,
+    *,
+    scene_grounding: Path | None = None,
 ) -> dict[str, Any]:
     from ..services.runtime import service_scope
     from ..services.compat import VisionFacade, structured_call
@@ -734,6 +807,11 @@ def publish_hybrid(
     )
     if deployment:
         _deployment_check(result, deployment)
+    if scene_grounding is not None:
+        if coverage["status"] != "covered":
+            raise ValueError("Only a covered witness can enter scene qualification")
+        packet = json.loads(scene_grounding.read_text())
+        result.update(_scene_projection(doc, graph, packet), scene_grounding=packet)
     with WorkflowRunArtifacts(output) as artifacts:
         (output / doc["inputs"]["image"]["ref"]).write_bytes(image_bytes)
         for k, v in result.items():
@@ -748,5 +826,22 @@ def publish_hybrid(
                 execution_ready=False,
             ),
         )
+        if scene_grounding is not None:
+            write_run_json(
+                output / "task_plan_manifest.json",
+                dict(
+                    schema_version="embodichain.hybrid-task-plan/v1",
+                    task_id=task_id,
+                    instruction=instruction,
+                    image_sha256=doc["inputs"]["image"]["sha256"],
+                    spec_digest=doc["spec_digest"],
+                    semantic_graph_sha256=canonical_hash(graph),
+                    artifacts={
+                        p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+                        for p in output.iterdir()
+                        if p.is_file()
+                    },
+                ),
+            )
         artifacts.commit()
     return result

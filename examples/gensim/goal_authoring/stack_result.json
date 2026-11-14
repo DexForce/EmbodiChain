@@ -1,0 +1,126 @@
+{
+  "qualification": "accepted",
+  "execution_ready": true,
+  "segments": [
+    {
+      "name": "call_1",
+      "success": true,
+      "start_step": 0,
+      "end_step": 606
+    },
+    {
+      "name": "call_2",
+      "success": true,
+      "start_step": 606,
+      "end_step": 1028
+    }
+  ],
+  "terminal": {
+    "identity": {
+      "run_id": "7f672687-beea-4866-8501-0b29ed4e9b9b",
+      "attempt_id": "b94e44f2-b6cb-4f55-a8db-f31ed11db468",
+      "spec_digest": "884ae965fa895a6c87dcc3284dc339d0ba5062dd499f42009b848518960b7646",
+      "program_digest": "0e946522c4c51fae1035d9f5d16ab0d2dcf54c9c4e843719cc9b877f28347c36",
+      "scene_digest": "b9177dec3746a6eab31756800adfccf26ffdbd3861dba9df28c00e609533e1d8",
+      "bundle_digest": "c76e5c00193fb9e325835a960fd7f4155d70b2e1642a7fd5f54d44910280444d"
+    },
+    "capture_step": 1028,
+    "spec_digest": "884ae965fa895a6c87dcc3284dc339d0ba5062dd499f42009b848518960b7646",
+    "graph_digest": "14e9cca56f3310e1ba246315bac95ddd66227a902181452e250864b8a25c9675",
+    "deployment_manifest": "c76e5c00193fb9e325835a960fd7f4155d70b2e1642a7fd5f54d44910280444d",
+    "program_digest": "0e946522c4c51fae1035d9f5d16ab0d2dcf54c9c4e843719cc9b877f28347c36",
+    "max_xy_m": 0.022121898700715976,
+    "bottom_gap_m": 0.001996306934743182,
+    "poses": {
+      "block_2": [
+        [
+          0.9987820982933044,
+          -0.049338728189468384,
+          0.0001864747900981456,
+          -0.4188414514064789
+        ],
+        [
+          0.04933875799179077,
+          0.9987820982933044,
+          -0.0001746228226693347,
+          0.30006033182144165
+        ],
+        [
+          -0.00017763199866749346,
+          0.00018361058027949184,
+          0.9999999403953552,
+          0.1040031760931015
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "block_1": [
+        [
+          1.0,
+          3.402349648240488e-06,
+          1.868358231149614e-05,
+          -0.4199986457824707
+        ],
+        [
+          -3.402273250685539e-06,
+          1.0,
+          -4.095334588782862e-06,
+          0.3000015914440155
+        ],
+        [
+          -1.8683596863411367e-05,
+          4.095270924153738e-06,
+          1.0,
+          0.04200013726949692
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ]
+    },
+    "passed": true
+  },
+  "goals": [
+    {
+      "predicate_id": "final_block_2",
+      "predicate": "relation",
+      "status": "satisfied",
+      "observed": true,
+      "expected": true,
+      "reason": "predicate satisfied",
+      "evidence_refs": []
+    }
+  ],
+  "milestones": [
+    {
+      "predicate_id": "milestone:m1",
+      "predicate": "semantic_goal",
+      "status": "satisfied",
+      "observed": {
+        "predicates": [
+          {
+            "evidence_refs": [],
+            "expected": true,
+            "observed": true,
+            "predicate": "relation",
+            "predicate_id": "m1.achieve",
+            "reason": "predicate satisfied",
+            "status": "satisfied"
+          }
+        ],
+        "step": 0
+      },
+      "expected": true,
+      "reason": "milestone achieved at step 0",
+      "evidence_refs": []
+    }
+  ],
+  "frozen_document_certificate": "unavailable"
+}
