@@ -319,6 +319,12 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     CUDA graph capture is disabled when gradients are enabled.
     """
 
+    enable_joint_wrenches: bool = False
+    """Allocate parent reaction state for JointWrench sensors.
+
+    Requires the CUDA MuJoCo Warp solver with RNE enabled.
+    """
+
     use_cuda_graph: bool = True
     """Whether to capture Newton stepping in a CUDA graph when supported.
 

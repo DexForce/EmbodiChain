@@ -26,6 +26,7 @@ from .context import SensorClock, SensorStateProvider, SensorContext
 from .camera import Camera, CameraCfg
 from .state import JointEncoder, JointEncoderCfg, FrameTransform, FrameTransformCfg
 from .inertial import PVA, PVACfg, IMU, IMUCfg
+from .joint_wrench import JointWrench, JointWrenchCfg
 from .stereo import StereoCamera, StereoCameraCfg
 from .contact import (
     ContactSensor,
@@ -71,6 +72,8 @@ __all__ = [
     "PVACfg",
     "IMU",
     "IMUCfg",
+    "JointWrench",
+    "JointWrenchCfg",
     "JointEncoder",
     "JointEncoderCfg",
     "FrameTransform",
@@ -109,6 +112,7 @@ register_sensor(SensorRegistration("FrameTransform", FrameTransformCfg, FrameTra
 
 register_sensor(SensorRegistration("PVA", PVACfg, PVA))
 register_sensor(SensorRegistration("IMU", IMUCfg, IMU))
+register_sensor(SensorRegistration("JointWrench", JointWrenchCfg, JointWrench))
 
 register_sensor(SensorRegistration("ContactGrid", ContactGridCfg, ContactGrid))
 
