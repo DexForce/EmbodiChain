@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 from dataclasses import dataclass
 
@@ -175,12 +176,33 @@ def collision_shapes_from_entity(
         physical_body = (
             native_get_physical_body() if callable(native_get_physical_body) else None
         )
+    collisions = getattr(getattr(entity, "object_desc", None), "collisions", None)
+    if collisions and any(
+        getattr(kind, "value", kind) == GeometryType.CYLINDER.value
+        for item in collisions
+        for kind in (getattr(item, "geometry_type", None),)
+    ):
+        # The legacy native API has no cylinder geometry descriptor. Prefer
+        # the per-piece Spawn descriptors, which also preserve compound gaps.
+        descriptor_shapes = _from_descriptor(entity)
+        if descriptor_shapes is not None:
+            return descriptor_shapes
     if physical_body is not None:
         return _from_physical_body(physical_body, object_uid=object_uid)
 
     descriptor_shapes = _from_descriptor(entity)
     if descriptor_shapes is not None:
         return descriptor_shapes
+
+    native_shapes = _from_newton_rigid(entity)
+    if native_shapes is not None:
+        return native_shapes
+
+    if collisions and len(collisions) > 1:
+        raise RuntimeError(
+            f"RigidObject {object_uid!r} has collision pieces that cannot be "
+            "queried independently; refusing a merged collision mesh."
+        )
 
     # Newton's runtime binding exposes a complete local collision mesh even
     # when it does not expose the legacy physical-body shape API. This is a
@@ -272,6 +294,60 @@ def collision_shapes_from_articulation_link(
     )
 
 
+def _is_particle_boundary(collision: object) -> bool:
+    """Identify explicitly particle-only geometry, independent of rigid contacts."""
+    return (
+        getattr(collision, "enable_collision", None) is False
+        and getattr(getattr(collision, "newton", None), "has_particle_collision", None)
+        is True
+    )
+
+
+def _from_newton_rigid(entity: object) -> list[CollisionShapeDesc] | None:
+    """Read separately cooked shapes, excluding a distinct particle boundary."""
+    binding = getattr(entity, "_physics_binding", None)
+    model = getattr(getattr(binding, "_runtime", None), "model", None)
+    shape_ids = getattr(binding, "shape_ids", None)
+    if model is None or shape_ids is None:
+        return None
+    collisions = getattr(getattr(entity, "object_desc", None), "collisions", ())
+    boundaries = [item for item in collisions if _is_particle_boundary(item)]
+    by_segment = getattr(binding, "shape_ids_by_segment", {})
+    excluded = {
+        shape_id
+        for item in boundaries
+        for shape_id in by_segment.get(getattr(item, "segment_name", None), ())
+    }
+    if boundaries and not excluded:
+        import newton
+
+        flags = np.asarray(
+            model.shape_flags.numpy()
+            if hasattr(model.shape_flags, "numpy")
+            else model.shape_flags
+        )
+        excluded = {
+            shape_id
+            for shape_id in shape_ids
+            if int(flags[shape_id]) & int(newton.ShapeFlags.COLLIDE_PARTICLES)
+            and not int(flags[shape_id]) & int(newton.ShapeFlags.COLLIDE_SHAPES)
+        }
+    parent_inverse = None
+    if getattr(binding, "body_id", 0) is None:
+        get_world_pose = getattr(entity, "get_world_pose", None)
+        if not callable(get_world_pose):
+            return None
+        parent_inverse = torch.as_tensor(
+            np.linalg.inv(get_world_pose()), dtype=torch.float32
+        )
+    return _from_newton_shapes(
+        model,
+        [index for index in shape_ids if index not in excluded],
+        include_disabled=True,
+        parent_inverse=parent_inverse,
+    )
+
+
 def _from_newton_link(
     binding: object, link_name: str
 ) -> list[CollisionShapeDesc] | None:
@@ -286,13 +362,23 @@ def _from_newton_link(
     links = getattr(binding, "_links", None)
     if model is None or links is None:
         return None
-    import newton
-    from embodichain.utils.math import matrix_from_quat
-    from ..rigid_object import CollisionShapeDesc
-
     link = next((link for link in links if link.name == link_name), None)
     if link is None:
         return []
+    return _from_newton_shapes(model, link.shape_ids)
+
+
+def _from_newton_shapes(
+    model: object,
+    shape_ids: list[int] | tuple[int, ...],
+    *,
+    include_disabled: bool = False,
+    parent_inverse: torch.Tensor | None = None,
+) -> list[CollisionShapeDesc]:
+    """Decode prepared Newton shape resources without merging body-local pieces."""
+    import newton
+    from embodichain.utils.math import matrix_from_quat
+    from ..rigid_object import CollisionShapeDesc
 
     def tensor(value, dtype=torch.float32):
         return torch.as_tensor(
@@ -310,9 +396,13 @@ def _from_newton_link(
         newton.GeoType.BOX: RigidBodyShape.BOX,
         newton.GeoType.SPHERE: RigidBodyShape.SPHERE,
         newton.GeoType.CAPSULE: RigidBodyShape.CAPSULE,
+        newton.GeoType.CYLINDER: RigidBodyShape.CONVEX,
+        newton.GeoType.PLANE: RigidBodyShape.PLANE,
     }
-    for index, shape_id in enumerate(link.shape_ids):
-        if not int(flags[shape_id]) & int(newton.ShapeFlags.COLLIDE_SHAPES):
+    for index, shape_id in enumerate(shape_ids):
+        if not include_disabled and not int(flags[shape_id]) & int(
+            newton.ShapeFlags.COLLIDE_SHAPES
+        ):
             continue
         kind = newton.GeoType(int(kinds[shape_id]))
         if kind not in mapping:
@@ -323,6 +413,8 @@ def _from_newton_link(
         pose = torch.eye(4)
         pose[:3, :3] = matrix_from_quat(transform[3:].reshape(1, 4))[0]
         pose[:3, 3] = transform[:3]
+        if parent_inverse is not None:
+            pose = parent_inverse @ pose
         shape = CollisionShapeDesc(f"shape_{index}", mapping[kind], pose)
         scale = scales[shape_id]
         if kind in {newton.GeoType.CONVEX_MESH, newton.GeoType.MESH}:
@@ -333,7 +425,19 @@ def _from_newton_link(
             shape.triangles = tensor(source.indices, torch.int32).reshape(-1, 3)
         elif kind == newton.GeoType.BOX:
             shape.half_extents = scale
-        else:
+        elif kind == newton.GeoType.CYLINDER:
+            from dexsim.utility.primitive_mesh import generate_cylinder_mesh
+
+            divisions = 128
+            vertices, triangles, _, _ = generate_cylinder_mesh(
+                float(scale[0]) / math.cos(math.pi / divisions),
+                2 * float(scale[1]),
+                divide=divisions,
+                axis="z",
+            )
+            shape.vertices = tensor(vertices).reshape(-1, 3)
+            shape.triangles = tensor(triangles, torch.int32).reshape(-1, 3)
+        elif kind in {newton.GeoType.SPHERE, newton.GeoType.CAPSULE}:
             shape.radius = float(scale[0])
             if kind == newton.GeoType.CAPSULE:
                 shape.half_height = float(scale[1])
@@ -446,12 +550,32 @@ def _from_descriptor(entity: object) -> list[CollisionShapeDesc] | None:
     # Match native shape queries: disabling contact response keeps geometry
     # available to planners, including moving obstacles that exert no impulses.
     for shape_idx, collision in enumerate(collisions):
+        if _is_particle_boundary(collision):
+            continue
         geometry_type = getattr(collision, "geometry_type", None)
         geometry_type = getattr(geometry_type, "value", geometry_type)
-        local_pose = torch.as_tensor(
-            getattr(collision, "local_transform", torch.eye(4)),
-            dtype=torch.float32,
-        ).reshape(4, 4)
+        local_pose = (
+            torch.as_tensor(
+                getattr(collision, "local_transform", torch.eye(4)),
+                dtype=torch.float32,
+            )
+            .reshape(4, 4)
+            .clone()
+        )
+        basis = body_scale[:, None] * local_pose[:3, :3]
+        shape_scale = torch.linalg.vector_norm(basis, dim=0)
+        if bool((shape_scale <= 0).any()):
+            raise ValueError("Collision shape scale must be positive.")
+        rotation = basis / shape_scale[None, :]
+        if not torch.allclose(
+            rotation.T @ rotation, torch.eye(3), atol=1e-5, rtol=1e-5
+        ):
+            raise ValueError(
+                "A rotated collision shape with nonuniform body scale cannot "
+                "be represented by a rigid planner pose."
+            )
+        local_pose[:3, :3] = rotation
+        local_pose[:3, 3] *= body_scale
         name = str(getattr(collision, "segment_name", None) or f"shape_{shape_idx}")
 
         if geometry_type == GeometryType.CUBE.value:
@@ -461,22 +585,30 @@ def _from_descriptor(entity: object) -> list[CollisionShapeDesc] | None:
                     name=name,
                     shape_type=RigidBodyShape.BOX,
                     local_pose=local_pose.clone(),
-                    half_extents=(0.5 * size * body_scale).clone(),
+                    half_extents=(0.5 * size * shape_scale).clone(),
                 )
             )
             continue
         if geometry_type == GeometryType.SPHERE.value:
+            if not torch.allclose(shape_scale, shape_scale[0].expand_as(shape_scale)):
+                raise ValueError(
+                    "Nonuniform sphere scaling is not supported by collision planning."
+                )
             shapes.append(
                 CollisionShapeDesc(
                     name=name,
                     shape_type=RigidBodyShape.SPHERE,
                     local_pose=local_pose.clone(),
-                    radius=float(collision.radius) * float(body_scale[0]),
+                    radius=float(collision.radius) * float(shape_scale[0]),
                 )
             )
             continue
         if geometry_type == GeometryType.CAPSULE.value:
-            scale = float(body_scale[0])
+            if not torch.allclose(shape_scale, shape_scale[0].expand_as(shape_scale)):
+                raise ValueError(
+                    "Nonuniform capsule scaling is not supported by collision planning."
+                )
+            scale = float(shape_scale[0])
             shapes.append(
                 CollisionShapeDesc(
                     name=name,
@@ -484,6 +616,38 @@ def _from_descriptor(entity: object) -> list[CollisionShapeDesc] | None:
                     local_pose=local_pose.clone(),
                     radius=float(collision.radius) * scale,
                     half_height=float(collision.half_height) * scale,
+                )
+            )
+            continue
+        if geometry_type == GeometryType.CYLINDER.value:
+            if not torch.allclose(shape_scale, shape_scale[0].expand_as(shape_scale)):
+                raise ValueError(
+                    "Nonuniform cylinder scaling is not supported by collision planning."
+                )
+            from dexsim.utility.primitive_mesh import generate_cylinder_mesh
+
+            # The simulator retains an analytic cylinder. The planner consumes
+            # a conservative circumscribed convex proxy at its voxel resolution.
+            divisions = 128
+            radius = float(collision.radius) / math.cos(math.pi / divisions)
+            vertices, triangles, _, _ = generate_cylinder_mesh(
+                radius,
+                2.0 * float(collision.half_height),
+                divide=divisions,
+                axis=collision.axis or "z",
+            )
+            shapes.append(
+                CollisionShapeDesc(
+                    name=name,
+                    shape_type=RigidBodyShape.CONVEX,
+                    local_pose=local_pose,
+                    vertices=torch.as_tensor(vertices, dtype=torch.float32)
+                    .reshape(-1, 3)
+                    .mul(shape_scale.reshape(1, 3))
+                    .clone(),
+                    triangles=torch.as_tensor(triangles, dtype=torch.int32)
+                    .reshape(-1, 3)
+                    .clone(),
                 )
             )
             continue
@@ -508,7 +672,7 @@ def _from_descriptor(entity: object) -> list[CollisionShapeDesc] | None:
                     vertices=(
                         torch.as_tensor(vertices, dtype=torch.float32)
                         .reshape(-1, 3)
-                        .mul(body_scale.reshape(1, 3))
+                        .mul(shape_scale.reshape(1, 3))
                         .clone()
                     ),
                     triangles=torch.as_tensor(triangles, dtype=torch.int32)

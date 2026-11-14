@@ -30,6 +30,7 @@ import numpy as np
 import pytest
 import torch
 
+
 import embodichain.lab.sim.sim_manager as sim_manager_module
 import embodichain.lab.visualization as visualization_module
 from embodichain.lab.sim.cfg import (
@@ -2338,6 +2339,7 @@ def test_robot_mounted_camera_backend_lifecycle(
 
 def test_default_plane_authors_repeated_uv_before_spawn() -> None:
     sim = object.__new__(SimulationManager)
+    sim.sim_config = SimulationManagerCfg()
     sim._spawn_scene = MagicMock()
     sim._spawn_scene.handles.return_value = []
     sim._spawn_default_plane_material = object()
@@ -2358,6 +2360,43 @@ def test_default_plane_authors_repeated_uv_before_spawn() -> None:
             dtype=np.float32,
         ),
     )
+
+
+def test_ground_plane_can_be_disabled_before_declaration() -> None:
+    sim = object.__new__(SimulationManager)
+    sim.sim_config = SimulationManagerCfg(enable_ground_plane=False)
+    sim._spawn_scene = MagicMock()
+    sim._declare_spawn_default_plane()
+    sim._spawn_scene.declare.assert_not_called()
+
+
+def test_ground_plane_uses_explicit_portable_contact_material() -> None:
+    from embodichain.lab.sim.cfg import (
+        CollisionPropertiesCfg,
+        RigidBodyMaterialCfg,
+        RigidBodyPhysicsCfg,
+    )
+
+    sim = object.__new__(SimulationManager)
+    sim.sim_config = SimulationManagerCfg(
+        ground_plane_attrs=RigidBodyPhysicsCfg(
+            collision_props=CollisionPropertiesCfg(contact_offset=0, rest_offset=0),
+            material_props=RigidBodyMaterialCfg(
+                dynamic_friction=0.7, static_friction=0.7
+            ),
+        )
+    )
+    sim.physics = SimpleNamespace(name="default", solver_type=None)
+    sim._spawn_scene = MagicMock()
+    sim._spawn_scene.handles.return_value = []
+    sim._spawn_default_plane_material = None
+    sim._declare_spawn_default_plane()
+    collision = sim._spawn_scene.declare.call_args.args[2].collisions[0]
+    assert collision.dexsim.contact_offset == 0
+    assert collision.dexsim.dynamic_friction == pytest.approx(0.7)
+    assert collision.newton.margin == 0
+    assert collision.newton.gap == 0
+    assert collision.newton.mu == pytest.approx(0.7)
 
 
 @pytest.mark.parametrize("num_envs", [1, 8])
@@ -3493,6 +3532,56 @@ def test_replace_rigid_object_commits_only_after_new_declaration() -> None:
     assert sim._rigid_objects["box"] is replacement
 
 
+@pytest.mark.parametrize("backend,num_envs", [("newton", 1), ("dexsim", 2)])
+def test_replace_invalid_variants_preserves_existing_spawn_object(backend, num_envs):
+    from embodichain.lab.sim.spawn.scene import SpawnScene, _AssetDeclaration
+    from embodichain.lab.sim.cfg import RigidObjectCfg
+    from embodichain.lab.sim.shapes import CubeCfg
+    from dexsim.spawn import ObjectDesc
+
+    old = object()
+    original = ObjectDesc(name="box")
+    scene = object.__new__(SpawnScene)
+    scene._num_envs = num_envs
+    scene._assets = {
+        "box": _AssetDeclaration(kind="rigid_object", descriptor=original, facade=old)
+    }
+    objects = [original]
+    scene.builder = SimpleNamespace(
+        backend=backend,
+        is_finalized=False,
+        result=None,
+        mesh_objects=objects,
+        scene_entities=[],
+        cables=[],
+        particle_sets=[],
+        remove_object=MagicMock(side_effect=lambda uid: objects.pop()),
+    )
+    scene._register_material_batches = MagicMock()
+    sim = object.__new__(SimulationManager)
+    sim.device = torch.device("cpu")
+    sim.physics = SimpleNamespace(
+        name="newton" if backend == "newton" else "default", solver_type="mujoco_warp"
+    )
+    sim._rigid_objects = {"box": old}
+    sim._spawn_scene = scene
+    sim._validate_visual_config = lambda cfg: None
+    cfg = RigidObjectCfg(
+        uid="box", shape=CubeCfg(), env_variants={1: RigidObjectCfg(shape=CubeCfg())}
+    )
+
+    with pytest.raises(
+        (ValueError, NotImplementedError), match="env_variants|Newton backend"
+    ):
+        sim.replace_rigid_object(cfg)
+
+    assert sim._rigid_objects["box"] is old
+    assert scene._assets["box"].descriptor is original
+    assert objects == [original]
+    scene.builder.remove_object.assert_not_called()
+    scene._register_material_batches.assert_not_called()
+
+
 def test_replace_missing_rigid_object_does_not_mutate_scene() -> None:
     from embodichain.lab.sim.cfg import RigidObjectCfg
 
@@ -4199,3 +4288,61 @@ def test_targeted_particle_material_schedule_validates_before_registration() -> 
             {"stiffness": ((0.0, 1000.0),)}, uid="cloth"
         )
     builder.add_runtime_control.assert_not_called()
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_configure_collision_when_ground_is_disabled(enabled):
+    from embodichain.lab.sim.sim_manager import SimulationManager
+
+    manager = SimpleNamespace(
+        spawn_result=None, sim_config=SimpleNamespace(enable_ground_plane=False)
+    )
+    if enabled:
+        with pytest.raises(ValueError, match="ground plane is disabled"):
+            SimulationManager.configure_ground_plane_collision(manager, enabled=True)
+    else:
+        assert (
+            SimulationManager.configure_ground_plane_collision(manager, enabled=False)
+            is None
+        )
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_group_file_batches_reject_before_losing_appearance(explicit):
+    from embodichain.lab.sim.cfg import (
+        RigidObjectCfg,
+        RigidObjectGroupCfg,
+        VisualElementCfg,
+    )
+    from embodichain.lab.sim.shapes import (
+        CompoundShapeCfg,
+        CubeCfg,
+        MeshCfg,
+        MeshCollisionCfg,
+        ShapePartCfg,
+    )
+    from embodichain.lab.sim.sim_manager import SimulationManager
+
+    mesh = MeshCfg(
+        fpath="part.obj", collision=MeshCollisionCfg(approximation="convex_hull")
+    )
+    if explicit:
+        member = RigidObjectCfg(
+            shape=CubeCfg(),
+            visuals=[
+                VisualElementCfg(id="file", representation=mesh),
+                VisualElementCfg(id="box", representation=CubeCfg()),
+            ],
+        )
+    else:
+        member = RigidObjectCfg(
+            shape=CompoundShapeCfg(
+                parts=[
+                    ShapePartCfg(shape=mesh),
+                    ShapePartCfg(shape=CubeCfg()),
+                ]
+            )
+        )
+    cfg = RigidObjectGroupCfg(uid="group", rigid_objects={"piece": member})
+    with pytest.raises(NotImplementedError, match="declare individual RigidObjects"):
+        SimulationManager.add_rigid_object_group(SimpleNamespace(), cfg)

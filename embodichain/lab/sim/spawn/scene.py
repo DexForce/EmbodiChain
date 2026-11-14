@@ -197,6 +197,8 @@ class SpawnScene:
             value = getattr(descriptor, name, None)
             if value is not None:
                 self._bind_resource_materials(value)
+        for variant in (getattr(descriptor, "env_variants", None) or {}).values():
+            self._bind_resource_materials(variant)
 
     @property
     def arena_names(self) -> tuple[str, ...]:
@@ -252,6 +254,23 @@ class SpawnScene:
             self._require_mutable_topology()
         return declaration_only
 
+    def _validate_rigid_variants(self, descriptor: Any) -> None:
+        """Check variant compatibility before publishing or replacing assets."""
+        if isinstance(descriptor, (tuple, list)):
+            for member in descriptor:
+                self._validate_rigid_variants(member)
+            return
+        variants = getattr(descriptor, "env_variants", None) or {}
+        if variants:
+            if getattr(self.builder, "backend", None) != "newton":
+                raise NotImplementedError(
+                    "Per-environment rigid variants require the Newton backend."
+                )
+            if max(variants) >= self._num_envs:
+                raise ValueError(
+                    "env_variants contains an index outside the configured environment count."
+                )
+
     def _register_material_batches(self, batches: Iterable[dict[str, Any]]) -> None:
         """Check all material definitions before publishing a declaration batch."""
         definitions = {}
@@ -278,20 +297,33 @@ class SpawnScene:
     ) -> None:
         """Add a descriptor and associate it with an EmbodiChain facade."""
         declaration_only = self._preflight_declaration(kind, uid)
+        self._validate_rigid_variants(descriptor)
         if materials:
             self.builder.materials.update(self._resolve_materials(materials))
         self._bind_resource_materials(descriptor)
         self._initialize_facade_declaration(facade)
         binding = None
-        if facade is not None and (
-            getattr(getattr(facade, "cfg", None), "visuals", None) is not None
-            or getattr(getattr(facade, "cfg", None), "link_visuals", {})
+        from ..cfg.visuals import (
+            _file_visual_binding_elements,
+            _uses_descriptor_visuals,
+        )
+
+        file_elements = _file_visual_binding_elements(getattr(facade, "cfg", None))
+
+        if (
+            facade is not None
+            and not _uses_descriptor_visuals(getattr(facade, "cfg", None))
+            and (
+                getattr(getattr(facade, "cfg", None), "visuals", None) is not None
+                or getattr(getattr(facade, "cfg", None), "link_visuals", {})
+                or file_elements is not None
+            )
         ):
             from ._visuals import _VisualBinding
             from dexsim.scene import Scene
 
             if self._material_resources.renderer != "no-render":
-                if self.builder.backend != "dexsim":
+                if self.builder.backend != "dexsim" and file_elements is None:
                     raise NotImplementedError(
                         "Explicit visual composition currently requires the Default backend."
                     )

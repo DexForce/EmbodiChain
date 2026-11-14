@@ -22,6 +22,7 @@ from collections.abc import Mapping
 from dataclasses import MISSING, field
 import os
 import warnings
+import numpy as np
 from typing import Any, Dict, Literal
 
 from dexsim.types import ActorType
@@ -67,7 +68,7 @@ class RigidObjectCfg(ObjectBaseCfg):
     # TODO: supoort basic primitive shapes, such as box, sphere, etc cfg and spawn method.
 
     visual_shape: ShapeCfg | None = None
-    """Optional independent render geometry; shape remains collision geometry."""
+    """Deprecated input alias normalized into :attr:`visuals`."""
 
     particle_collision_shape: ShapeCfg | None = None
     """Optional Newton SDF mesh for particles on this same rigid body.
@@ -104,8 +105,135 @@ class RigidObjectCfg(ObjectBaseCfg):
     use config.
     """
 
+    env_variants: dict[int, RigidObjectCfg] | None = None
+    """Preparation-time procedural rigid replacements indexed by environment ID.
+
+    Omitted environments use this configuration. Each replacement supplies its
+    own shape, physics, scale, mesh visuals and initial pose; its UID identifies the source
+    asset, while the resulting object retains the parent's logical UID. Nested
+    variants are unsupported. Requires the DexSim assembly variants capability
+    and the Newton backend; topology is fixed until a scene rebuild. USD source,
+    per-variant semantic proxies and Gaussian visuals are rejected. An explicit
+    parent semantic_shape is shared; otherwise each row uses its own shape.
+    """
+
     def __post_init__(self) -> None:
         self._resolve_procedural_defaults()
+        self._normalize_visuals()
+        self._validate_env_variants()
+
+    def _normalize_visuals(self) -> None:
+        """Resolve legacy appearance inputs into the single visual-element list."""
+        from ..shapes import CompoundShapeCfg
+
+        if self.env_variants is not None and not isinstance(self.env_variants, Mapping):
+            raise TypeError(
+                "env_variants must map environment indices to rigid configs."
+            )
+        from .visuals import _visual_elements
+        from scipy.spatial.transform import Rotation
+
+        parts = (
+            self.shape.visual_parts
+            if isinstance(self.shape, CompoundShapeCfg)
+            else None
+        )
+        parts_owner = self.shape
+        sources = sum(
+            value is not None for value in (self.visuals, self.visual_shape, parts)
+        )
+        if sources > 1:
+            raise ValueError(
+                "Specify only one appearance input: visuals, visual_shape or shape.visual_parts."
+            )
+        if self.visual_shape is not None:
+            if (
+                isinstance(self.visual_shape, CompoundShapeCfg)
+                and self.visual_shape.visual_parts is not None
+            ):
+                parts_owner = self.visual_shape
+                parts = self.visual_shape.visual_parts
+            else:
+                self.visuals = [VisualElementCfg(representation=self.visual_shape)]
+            self.visual_shape = None
+            warnings.warn(
+                "visual_shape is deprecated; use visuals.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        if parts is not None:
+            self.visuals = []
+            for index, part in enumerate(parts):
+                pose = np.eye(4, dtype=np.float32)
+                pose[:3, :3] = Rotation.from_quat(part.quaternion).as_matrix()
+                pose[:3, 3] = part.position
+                representation = part.shape.copy()
+                if representation.visual_material is None:
+                    representation.visual_material = parts_owner.visual_material
+                self.visuals.append(
+                    VisualElementCfg(
+                        id=f"part_{index}",
+                        representation=representation,
+                        local_pose=pose,
+                    )
+                )
+            if parts_owner is self.shape:
+                self.shape = self.shape.copy()
+                self.shape.visual_parts = None
+            warnings.warn(
+                "shape.visual_parts is deprecated; use visuals.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        self.visuals = _visual_elements(self.visuals)
+
+    def _validate_env_variants(self) -> None:
+        """Reject variant fields without a per-environment runtime owner."""
+        from ..shapes import CompoundShapeCfg
+
+        def requests_uv(shape: ShapeCfg | None) -> bool:
+            if isinstance(shape, CompoundShapeCfg):
+                if isinstance(shape.parts, type(MISSING)):
+                    return False
+                return any(requests_uv(part.shape) for part in shape.parts)
+            return bool(getattr(shape, "compute_uv", False))
+
+        for env_id, variant in (self.env_variants or {}).items():
+            if isinstance(env_id, bool) or not isinstance(env_id, int) or env_id < 0:
+                raise ValueError(
+                    "env_variants keys must be non-negative environment indices."
+                )
+            if not isinstance(variant, RigidObjectCfg) or variant.env_variants:
+                raise ValueError(
+                    "env_variants requires flat RigidObjectCfg replacements."
+                )
+            unsupported = []
+            if variant.source is not None or str(
+                getattr(variant.shape, "fpath", "")
+            ).lower().endswith((".usd", ".usda", ".usdc", ".usdz")):
+                unsupported.append("source")
+            if variant.semantic_shape is not None:
+                unsupported.append("semantic_shape")
+            if variant.source_pose_mode != "auto":
+                unsupported.append("source_pose_mode")
+            if variant.asset_physics_mode != "preserve":
+                unsupported.append("asset_physics_mode")
+            variant._normalize_visuals()
+            if any(
+                isinstance(element.representation, GaussianSplatCfg)
+                for element in variant.visuals or ()
+            ):
+                unsupported.append("Gaussian visuals")
+            if any(not element.visible for element in variant.visuals or ()):
+                unsupported.append("visuals.visible=False")
+            if requests_uv(variant.shape) or any(
+                requests_uv(element.representation) for element in variant.visuals or ()
+            ):
+                unsupported.append("compute_uv")
+            if unsupported:
+                raise ValueError(
+                    f"env_variants[{env_id}] does not support {', '.join(unsupported)}; configure shared semantics on the parent or declare separate objects."
+                )
 
     def _resolve_procedural_defaults(self) -> None:
         """Resolve defaults only after ordinary geometry is assembled."""
@@ -128,6 +256,31 @@ class RigidObjectCfg(ObjectBaseCfg):
     def from_dict(cls, init_dict: Dict[str, Any]) -> RigidObjectCfg:
         """Parse a rigid object and normalize legacy mesh collision ownership."""
         data = dict(init_dict)
+        if data.get("env_variants") is not None:
+            variants = data["env_variants"]
+            if not isinstance(variants, Mapping):
+                raise TypeError(
+                    "env_variants must map environment indices to rigid configs."
+                )
+            normalized = {}
+            for key, value in variants.items():
+                if isinstance(key, str) and key.isdecimal():
+                    key = int(key)
+                if isinstance(key, bool) or not isinstance(key, int) or key < 0:
+                    raise ValueError(
+                        "env_variants keys must be non-negative environment indices."
+                    )
+                if isinstance(value, Mapping):
+                    unknown = set(value) - cls.__dataclass_fields__.keys()
+                    if unknown:
+                        raise KeyError(
+                            f"Unknown env_variants[{key}] fields: {sorted(unknown)}"
+                        )
+                normalized[key] = (
+                    cls.from_dict(dict(value)) if isinstance(value, Mapping) else value
+                )
+            data["env_variants"] = normalized
+
         for key in ("visual_shape", "particle_collision_shape"):
             if isinstance(data.get(key), Mapping):
                 data[key] = ShapeCfg.from_dict(data[key])
@@ -176,6 +329,8 @@ class RigidObjectCfg(ObjectBaseCfg):
             if not {"init_pos", "init_rot", "init_local_pose"}.intersection(data):
                 cfg.init_local_pose = None
         cfg._resolve_procedural_defaults()
+        cfg._normalize_visuals()
+        cfg._validate_env_variants()
         return cfg
 
     def to_dexsim_body_type(self) -> ActorType:
@@ -253,12 +408,12 @@ class RigidObjectGroupCfg:
                     setattr(
                         cfg, key, attr.from_dict(value)
                     )  # Call from_dict on the attribute
-                elif key == "rigid_objects" and "folder_path" not in init_dict:
+                elif key == "rigid_objects" and not init_dict.get("folder_path"):
                     rigid_objects_cfg = {}
                     for obj_name, obj_cfg in value.items():
                         rigid_objects_cfg[obj_name] = RigidObjectCfg.from_dict(obj_cfg)
                     setattr(cfg, key, rigid_objects_cfg)
-                elif key == "rigid_objects" and "folder_path" in init_dict:
+                elif key == "rigid_objects" and init_dict.get("folder_path"):
                     folder_path = init_dict["folder_path"]
                     max_num = init_dict.get("max_num", 1)
                     rigid_objects_cfg = {}

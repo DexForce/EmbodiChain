@@ -73,7 +73,16 @@ from embodichain.lab.sim.cfg import (
     VolumeDeformableMeshingCfg,
     VolumeDeformableObjectCfg,
 )
-from embodichain.lab.sim.shapes import CubeCfg, LoadOption, MeshCfg, PlaneCfg
+from embodichain.lab.sim.shapes import (
+    CompoundShapeCfg,
+    CubeCfg,
+    CylinderCfg,
+    LoadOption,
+    MeshCfg,
+    PlaneCfg,
+    ShapeCfg,
+    ShapePartCfg,
+)
 from embodichain.lab.sim.objects import Articulation, RigidObject, RigidObjectGroup
 from embodichain.lab.sim.spawn.descriptors import (
     articulation_desc_from_cfg,
@@ -98,6 +107,251 @@ def test_packaged_usd_requires_typed_source_translation() -> None:
 
 RESTITUTION = 0.25
 DEFORMABLE_MESH_PATH = "/assets/deformable.obj"
+
+
+def test_compound_keeps_hole_and_one_parent_mass() -> None:
+    """Separated walls must not become a single hull spanning the aperture."""
+    cfg = RigidObjectCfg(
+        uid="hole",
+        shape=CompoundShapeCfg(
+            parts=[
+                ShapePartCfg(
+                    shape=CubeCfg(size=(0.01, 0.06, 0.02)), position=(-0.02, 0, 0)
+                ),
+                ShapePartCfg(
+                    shape=CubeCfg(size=(0.01, 0.06, 0.02)), position=(0.02, 0, 0)
+                ),
+            ]
+        ),
+        attrs=RigidBodyPhysicsCfg(
+            mass_props=MassPropertiesCfg(mass=2.0, inertia=(0.01, 0.02, 0.03))
+        ),
+    )
+
+    desc, _ = rigid_desc_from_cfg(cfg)
+
+    assert len(desc.collisions) == 2
+    assert len(desc.renders) == 2
+    assert [part.segment_name for part in desc.collisions] == [
+        "hole_part_0",
+        "hole_part_1",
+    ]
+    assert [part.segment_name for part in desc.renders] == [
+        "hole_part_0",
+        "hole_part_1",
+    ]
+    assert desc.physics.mass == pytest.approx(2.0)
+    np.testing.assert_allclose(desc.physics.inertia, np.diag([0.01, 0.02, 0.03]))
+    # Both wall AABBs exclude the centerline by 15 mm.
+    for collision in desc.collisions:
+        assert abs(collision.local_transform[0, 3]) - collision.size[
+            0
+        ] / 2 == pytest.approx(0.015)
+    assert [collision.render_source_index for collision in desc.collisions] == [0, 1]
+
+
+def test_compound_independent_visual_preserves_xyzw_pose() -> None:
+    cfg = RigidObjectCfg(
+        uid="compound",
+        shape=CompoundShapeCfg(
+            parts=[
+                ShapePartCfg(
+                    shape=CubeCfg(), position=(1, 2, 3), quaternion=(0.5, 0.5, 0.5, 0.5)
+                )
+            ],
+            visual_parts=[
+                ShapePartCfg(
+                    shape=CylinderCfg(radius=0.1, half_height=0.2), position=(4, 5, 6)
+                )
+            ],
+        ),
+    )
+
+    desc, _ = rigid_desc_from_cfg(cfg)
+
+    expected_rotation = [[0, 0, 1], [1, 0, 0], [0, 1, 0]]
+    np.testing.assert_allclose(
+        desc.collisions[0].local_transform[:3, :3], expected_rotation, atol=1e-7
+    )
+    np.testing.assert_allclose(desc.collisions[0].local_transform[:3, 3], [1, 2, 3])
+    assert desc.collisions[0].render_source_index is None
+    assert len(desc.renders) == 1
+    np.testing.assert_allclose(desc.renders[0].local_transform[:3, 3], [4, 5, 6])
+    assert desc.renders[0].radius == pytest.approx(0.1)
+    assert desc.renders[0].half_height == pytest.approx(0.2)
+
+
+def test_compound_shape_roundtrip_uses_public_nested_loader() -> None:
+    source = CompoundShapeCfg(
+        parts=[
+            ShapePartCfg(
+                shape=CylinderCfg(radius=0.01, half_height=0.03, axis="X"),
+                position=(0.1, 0.2, 0.3),
+            )
+        ],
+        visual_parts=[ShapePartCfg(shape=CubeCfg(size=(0.02, 0.02, 0.06)))],
+    )
+
+    decoded = ShapeCfg.from_dict(source.to_dict())
+    desc, _ = rigid_desc_from_cfg(RigidObjectCfg(uid="roundtrip", shape=decoded))
+
+    assert desc.collisions[0].axis == "x"
+    np.testing.assert_allclose(
+        desc.collisions[0].local_transform[:3, 3], [0.1, 0.2, 0.3]
+    )
+    assert desc.renders[0].size == pytest.approx([0.02, 0.02, 0.06])
+
+
+@pytest.mark.parametrize(
+    "collision",
+    [None, MeshCollisionCfg(approximation="convex_decomposition", max_hulls=2)],
+)
+def test_compound_rejects_implicit_or_reprocessed_convex_parts(collision) -> None:
+    with pytest.raises(ValueError, match="explicit approximation='convex_hull'"):
+        CompoundShapeCfg(
+            parts=[ShapePartCfg(shape=MeshCfg(fpath="wall.obj", collision=collision))]
+        )
+
+
+def test_compound_rejects_nested_parts_and_degenerate_quaternion() -> None:
+    compound = CompoundShapeCfg(parts=[ShapePartCfg(shape=CubeCfg())])
+    with pytest.raises(TypeError, match="nested compounds"):
+        ShapePartCfg(shape=compound)
+    with pytest.raises(ValueError, match="nonzero xyzw"):
+        ShapePartCfg(shape=CubeCfg(), quaternion=(0, 0, 0, 0))
+
+
+@pytest.mark.parametrize("reference", [(0.002, 1.0), (-1000.0, 0.0), (0.0, -10.0)])
+def test_raw_mujoco_contact_parameters_preserve_values_or_fail_closed(
+    reference,
+) -> None:
+    impedance = (0.8, 0.99, 0.0001, 0.5, 2.0)
+    cfg = RigidObjectCfg(
+        uid="raw_contact",
+        shape=CubeCfg(),
+        attrs=RigidBodyPhysicsCfg(
+            material_props=NewtonRigidBodyMaterialCfg(
+                solref=reference, solimp=impedance, solmix=0.7
+            )
+        ),
+    )
+    if not {"solref", "solimp", "solmix"}.issubset(
+        {item.name for item in fields(NewtonCollisionDesc)}
+    ):
+        with pytest.raises(NotImplementedError, match="cannot preserve raw MuJoCo"):
+            rigid_desc_from_cfg(cfg, newton_solver_type="mujoco_warp")
+    else:
+        descriptor, _ = rigid_desc_from_cfg(cfg, newton_solver_type="mujoco_warp")
+        contact = descriptor.collisions[0].newton
+        assert contact.solref == pytest.approx(reference)
+        assert contact.solimp == pytest.approx(impedance)
+        assert contact.solmix == pytest.approx(0.7)
+
+
+def test_prepared_variants_keep_one_logical_uid_or_fail_closed() -> None:
+    cfg = RigidObjectCfg.from_dict(
+        {
+            "uid": "logical",
+            "shape": {"shape_type": "Cube", "size": [0.01, 0.01, 0.01]},
+            "env_variants": {
+                "1": {
+                    "uid": "source_asset",
+                    "shape": {
+                        "shape_type": "Cylinder",
+                        "radius": 0.02,
+                        "half_height": 0.03,
+                    },
+                    "attrs": {"mass_props": {"mass": 2.0}},
+                }
+            },
+        }
+    )
+    assert cfg.env_variants[1].uid == "source_asset"
+    if "env_variants" not in {item.name for item in fields(ObjectDesc)}:
+        with pytest.raises(NotImplementedError, match="per-environment rigid variants"):
+            rigid_desc_from_cfg(cfg)
+    else:
+        descriptor, _ = rigid_desc_from_cfg(cfg)
+        replacement = descriptor.env_variants[1]
+        assert descriptor.name == replacement.name == "logical"
+        assert replacement.collisions[0].radius == pytest.approx(0.02)
+        assert replacement.physics.mass == pytest.approx(2.0)
+        assert cfg.env_variants[1].uid == "source_asset"
+
+
+@pytest.mark.parametrize(
+    "parameters",
+    [
+        {"solref": (0.002, -1)},
+        {"solref": (0, 1)},
+        {"solimp": (0.9, 0.95, 0, 0.5, 2)},
+        {"solimp": (0.9, 0.95, 0.001, 0.5)},
+        {"solmix": -1},
+    ],
+)
+def test_invalid_raw_contact_parameters_fail_at_configuration(parameters) -> None:
+    with pytest.raises(ValueError):
+        NewtonRigidBodyMaterialCfg(**parameters)
+
+
+@pytest.mark.parametrize("typed", [False, True])
+def test_legacy_contact_loader_migrates_once_with_material_precedence(typed):
+    material = {"solref": None, "solmix": 0.9}
+    if typed:
+        material = NewtonRigidBodyMaterialCfg(**material)
+    with pytest.warns(DeprecationWarning, match="material_props"):
+        cfg = RigidBodyPhysicsCfg.from_dict(
+            {
+                "collision_props": {
+                    "backend": "newton",
+                    "solref": [-1000, 0],
+                    "solmix": 0.2,
+                    "condim": 4,
+                },
+                "material_props": material,
+            }
+        )
+    assert not hasattr(cfg.collision_props, "solref")
+    assert cfg.material_props.solref == [-1000, 0]
+    assert cfg.material_props.solmix == 0.9
+    restored = RigidBodyPhysicsCfg.from_dict(cfg.to_dict())
+    assert restored.to_dict() == cfg.to_dict()
+    assert "solref" not in cfg.to_dict()["collision_props"]
+    descriptor, _ = rigid_desc_from_cfg(
+        RigidObjectCfg(uid="migrated", shape=CubeCfg(), attrs=restored),
+        newton_solver_type="dexuni",
+    )
+    assert descriptor.collisions[0].newton.solref == pytest.approx([-1000, 0])
+    assert descriptor.collisions[0].newton.condim == 4
+
+
+@pytest.mark.parametrize("backend", [None, "NEWTON"])
+@pytest.mark.parametrize(
+    "material_kind", ["typed_common", "mapping_common", "mapping_newton"]
+)
+def test_contact_migration_preserves_sparse_envelope_and_common_material(
+    backend, material_kind
+):
+    collision = {"solref": [-1000, 0]}
+    if backend is not None:
+        collision["backend"] = backend
+    material = (
+        RigidBodyMaterialCfg(dynamic_friction=0.7)
+        if material_kind == "typed_common"
+        else {
+            "backend": "common" if material_kind == "mapping_common" else "NEWTON",
+            "dynamic_friction": 0.7,
+        }
+    )
+    with pytest.warns(DeprecationWarning, match="material_props"):
+        cfg = RigidBodyPhysicsCfg.from_dict(
+            {"collision_props": collision, "material_props": material}
+        )
+    assert isinstance(cfg.collision_props, NewtonCollisionPropertiesCfg)
+    assert cfg.collision_props.contact_offset is None
+    assert cfg.collision_props.rest_offset is None
+    assert cfg.material_props.solref == [-1000, 0]
+    assert cfg.material_props.dynamic_friction == 0.7
 
 
 def test_plane_config_roundtrip_preserves_static_per_environment_surface() -> None:
@@ -2091,6 +2345,137 @@ def test_grouped_link_physics_overrides_compose_after_source_resolution() -> Non
     assert finger.rigid_body.inertia is None
 
 
+@pytest.mark.parametrize("material_on_link", [False, True])
+def test_link_raw_contact_overrides_global_across_collision_and_material_slots(
+    material_on_link: bool,
+) -> None:
+    from embodichain.lab.sim.cfg import NewtonRigidBodyMaterialCfg
+
+    def properties(*, material: bool, reference: float, mixing: float):
+        values = {"solref": (reference, 1.0), "solmix": mixing}
+        if material:
+            return RigidBodyPhysicsCfg(
+                material_props=NewtonRigidBodyMaterialCfg(**values)
+            )
+        with pytest.warns(DeprecationWarning, match="material_props"):
+            return RigidBodyPhysicsCfg.from_dict(
+                {"collision_props": {"backend": "newton", **values}}
+            )
+
+    cfg = ArticulationCfg(
+        uid="robot",
+        fpath="robot.urdf",
+        asset_physics_mode="overlay",
+        attrs=properties(material=not material_on_link, reference=0.02, mixing=0.7),
+        link_attrs={
+            "fingers": LinkPhysicsOverrideCfg(
+                link_names_expr=["finger_.*"],
+                attrs=properties(
+                    material=material_on_link, reference=0.005, mixing=0.1
+                ),
+            )
+        },
+    )
+    descriptor = _resolved_articulation_desc()
+    configure_articulation_desc(descriptor, cfg, newton_solver_type="mujoco_warp")
+    base = descriptor.get_link_desc("base").collisions[0].newton
+    finger = descriptor.get_link_desc("finger_left").collisions[0].newton
+    assert base.solref == pytest.approx((0.02, 1.0))
+    assert base.solmix == pytest.approx(0.7)
+    assert finger.solref == pytest.approx((0.005, 1.0))
+    assert finger.solmix == pytest.approx(0.1)
+
+
+@pytest.mark.parametrize("instanced", [False, True])
+def test_rigid_usd_rejects_parser_loss_of_disabled_body_colliders(
+    tmp_path, monkeypatch, instanced
+):
+    from pxr import Usd, UsdGeom, UsdPhysics
+    from embodichain.lab.sim.spawn import usd
+
+    path = tmp_path / "fixture.usda"
+    stage = Usd.Stage.CreateNew(str(path))
+    body = UsdGeom.Xform.Define(stage, "/Fixture").GetPrim()
+    UsdPhysics.RigidBodyAPI.Apply(body).CreateRigidBodyEnabledAttr(False)
+    if instanced:
+        stage.CreateClassPrim("/Prototype")
+        UsdPhysics.CollisionAPI.Apply(
+            UsdGeom.Cube.Define(stage, "/Prototype/wall").GetPrim()
+        )
+        instance = UsdGeom.Xform.Define(stage, "/Fixture/Instance").GetPrim()
+        instance.GetReferences().AddInternalReference("/Prototype")
+        instance.SetInstanceable(True)
+    else:
+        UsdPhysics.CollisionAPI.Apply(
+            UsdGeom.Cube.Define(stage, "/Fixture/wall").GetPrim()
+        )
+    stage.GetRootLayer().Save()
+    # The parser's empty result cannot erase the independently authored wall.
+    parsed = SimpleNamespace(collisions=[], usd=SimpleNamespace(prim_path="/Fixture"))
+    monkeypatch.setattr(usd, "_parse_singleton", lambda *args, **kwargs: (None, parsed))
+    cfg = RigidObjectCfg(uid="fixture", shape=MeshCfg(fpath=str(path)))
+    with pytest.raises(NotImplementedError, match="dropped collision pieces"):
+        usd.rigid_desc_from_usd(cfg)
+
+
+@pytest.mark.parametrize("selected", ["contact", "visual"])
+def test_rigid_usd_collider_check_uses_selected_variant_without_editing_source(
+    tmp_path, monkeypatch, selected
+) -> None:
+    from pxr import Usd, UsdGeom, UsdPhysics
+    from embodichain.lab.sim.cfg import UsdSourceCfg
+    from embodichain.lab.sim.spawn import usd
+
+    path = tmp_path / "variants.usda"
+    stage = Usd.Stage.CreateNew(str(path))
+    body = UsdGeom.Xform.Define(stage, "/Fixture").GetPrim()
+    stage.SetDefaultPrim(body)
+    UsdPhysics.RigidBodyAPI.Apply(body).CreateRigidBodyEnabledAttr(False)
+    wall = UsdGeom.Cube.Define(stage, "/Fixture/wall").GetPrim()
+    variants = body.GetVariantSets().AddVariantSet("physics")
+    for name in ("contact", "visual"):
+        variants.AddVariant(name)
+        variants.SetVariantSelection(name)
+        with variants.GetVariantEditContext():
+            if name == "contact":
+                UsdPhysics.CollisionAPI.Apply(wall)
+    # Inspecting a selection must not change another reader's default stage.
+    default = "visual" if selected == "contact" else "contact"
+    variants.SetVariantSelection(default)
+    stage.GetRootLayer().Save()
+    cfg = RigidObjectCfg(
+        uid="fixture",
+        source=UsdSourceCfg(
+            file_path=str(path),
+            source_prim_path="/Fixture",
+            variants={"/Fixture": {"physics": selected}},
+        ),
+    )
+    # Independently model parser collider loss, including on SDKs that fixed it.
+    scene, parsed = usd._parse_singleton(
+        path, "mesh_objects", "rigid object", source=cfg.source
+    )
+    parsed.collisions = []
+    monkeypatch.setattr(
+        usd, "_parse_singleton", lambda *args, **kwargs: (scene, parsed)
+    )
+    if selected == "contact":
+        with pytest.raises(NotImplementedError, match="dropped collision pieces"):
+            usd.rigid_desc_from_usd(cfg)
+    else:
+        descriptor, _ = usd.rigid_desc_from_usd(cfg)
+        assert descriptor.collisions == []
+        assert descriptor.renders
+    assert variants.GetVariantSelection() == default
+    reopened = Usd.Stage.Open(str(path))
+    assert (
+        reopened.GetPrimAtPath("/Fixture")
+        .GetVariantSet("physics")
+        .GetVariantSelection()
+        == default
+    )
+
+
 def test_global_articulation_mass_properties_can_recompute_inertia() -> None:
     cfg = ArticulationCfg(
         uid="robot",
@@ -2575,8 +2960,12 @@ def test_spawn_post_config_only_applies_render_uv() -> None:
     render_body.set_projective_uv.assert_called_once_with()
 
 
-@pytest.mark.parametrize("enabled", [True, False])
-def test_newton_mimic_stabilizer_can_be_disabled(monkeypatch, enabled) -> None:
+@pytest.mark.parametrize(
+    "enabled,reference", [(True, None), (False, None), (False, (0.002, 1.0))]
+)
+def test_newton_mimic_stabilizer_can_be_disabled(
+    monkeypatch, enabled, reference
+) -> None:
     configure = Mock(return_value=True)
     monkeypatch.setattr(
         "embodichain.lab.sim.objects.articulation._configure_newton_mimic_compliance",
@@ -2585,7 +2974,9 @@ def test_newton_mimic_stabilizer_can_be_disabled(monkeypatch, enabled) -> None:
     articulation = object.__new__(Articulation)
     articulation.cfg = SimpleNamespace(
         compute_uv=False,
-        root_props=ArticulationRootPropertiesCfg(newton_mimic_stabilizer=enabled),
+        root_props=ArticulationRootPropertiesCfg(
+            newton_mimic_stabilizer=enabled, newton_mimic_solref=reference
+        ),
     )
     articulation._entities = [Mock(joint_dof_layout=[])]
     articulation._prepared_default_root_topology_revision = -1
@@ -2598,7 +2989,10 @@ def test_newton_mimic_stabilizer_can_be_disabled(monkeypatch, enabled) -> None:
     articulation._apply_spawn_config()
 
     assert articulation._newton_mimic_compliance_configured is enabled
-    assert configure.called is enabled
+    assert configure.called is (enabled or reference is not None)
+    if configure.called:
+        assert configure.call_args.kwargs["stabilize"] is enabled
+        assert configure.call_args.kwargs["solref"] == reference
 
 
 def test_rigid_object_spawn_applies_projective_uv() -> None:
@@ -2606,7 +3000,7 @@ def test_rigid_object_spawn_applies_projective_uv() -> None:
     entity = Mock()
     entity.get_render_body.return_value = render_body
     rigid_object = object.__new__(RigidObject)
-    rigid_object.cfg = SimpleNamespace(
+    rigid_object.cfg = RigidObjectCfg(
         shape=MeshCfg(
             compute_uv=True,
             project_direction=[1.0, 2.0, 3.0],

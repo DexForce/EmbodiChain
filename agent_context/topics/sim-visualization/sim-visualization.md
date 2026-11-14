@@ -49,8 +49,9 @@ VisualizationBackend
 
 Legacy Mesh-backed `VisualObject` assets export as `visual_object` nodes with
 root poses and live per-environment visibility. They share the mesh manifest/frame
-protocol without entering physical registries. Explicit `visuals`/`link_visuals`
-composition currently rejects Viser rather than publishing incomplete geometry;
+protocol without entering physical registries. Procedural rigid-body mesh
+`visuals` are owner render descriptors and use ordinary mesh export. Companion
+`visuals`/`link_visuals` composition currently rejects Viser rather than publishing incomplete geometry;
 Gaussian resources require a separate typed protocol/backend extension.
 
 The simulation owns physics and assets. Scene export is read-only. When

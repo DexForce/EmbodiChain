@@ -198,11 +198,15 @@ class URDFCfg:
                 transform = comp_config.get("transform", np.eye(4))
 
                 # Extract additional params (exclude known keys)
-                params = {
-                    k: v
-                    for k, v in comp_config.items()
-                    if k not in ["component_type", "urdf_path", "transform"]
-                }
+                params = dict(comp_config.get("params", {}))
+                params.update(
+                    {
+                        k: v
+                        for k, v in comp_config.items()
+                        if k
+                        not in ["component_type", "urdf_path", "transform", "params"]
+                    }
+                )
 
                 # Add the component
                 self.add_component(component_type, urdf_path, transform, **params)
@@ -211,7 +215,7 @@ class URDFCfg:
             # Accept both list and dict; serialization round-trips an empty
             # dict when no sensors are configured (the field default).
             if isinstance(sensors, dict) and not sensors:
-                self.sensors = []
+                self.sensors = {}
             elif not isinstance(sensors, (list, dict)):
                 logger.log_error(
                     f"sensors must be a list of dicts or a dict, got {type(sensors)}"
@@ -339,6 +343,8 @@ class URDFCfg:
         Returns:
             URDFCfg: Returns self to allow method chaining.
         """
+        if isinstance(self.sensors, dict):
+            self.sensors = list(self.sensors.values())
         self.sensors.append({"sensor_name": sensor_name, **sensor_config})
         return self
 
@@ -350,7 +356,7 @@ class URDFCfg:
         """
         components = list(self.components.items())
         # If there is only one component, return its URDF path directly.
-        if len(components) == 1 and not self.force_assembly:
+        if len(components) == 1 and not self.force_assembly and not self.sensors:
             _, comp_config = components[0]
             return comp_config["urdf_path"]
 

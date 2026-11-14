@@ -112,6 +112,7 @@ from embodichain.lab.sim.cfg import (
     WindowCameraPoseCfg,
     LightCfg,
     RigidObjectCfg,
+    RigidBodyPhysicsCfg,
     VisualObjectCfg,
     UsdSourceCfg,
     UsdImportCfg,
@@ -132,6 +133,9 @@ from embodichain.lab.sim.spawn.descriptors import (
     articulation_desc_from_cfg,
     configure_articulation_desc,
     rigid_desc_from_cfg,
+    _resolve_rigid_physics,
+    _compile_default_collision,
+    _compile_newton_collision,
     visual_desc_from_cfg,
     surface_deformable_desc_from_cfg,
     volume_deformable_desc_from_cfg,
@@ -263,10 +267,14 @@ class SimulationManagerCfg:
         startup_summary: Literal["compact", "full", "off"] = "compact",
         dexsim_startup_info: bool = False,
         scene_node_capacity: int | None = None,
+        enable_ground_plane: bool = True,
+        ground_plane_attrs: RigidBodyPhysicsCfg | None = None,
     ) -> None:
         self.startup_summary = startup_summary
         self.dexsim_startup_info = dexsim_startup_info
         self.scene_node_capacity = scene_node_capacity
+        self.enable_ground_plane = enable_ground_plane
+        self.ground_plane_attrs = ground_plane_attrs
         self.width = width
         self.height = height
         self.headless = headless
@@ -388,6 +396,17 @@ class SimulationManagerCfg:
 
     num_envs: int = 1
     """The number of parallel environments (arenas) to simulate."""
+
+    enable_ground_plane: bool = True
+    """Whether to declare the shared static ground at world Z=0."""
+
+    ground_plane_attrs: RigidBodyPhysicsCfg | None = None
+    """Optional contact/material settings for the shared ground.
+
+    ``None`` retains the established default material. Explicit settings use
+    the normal rigid-body descriptor compiler; mass values are ignored because
+    the ground is static. Disable the ground for contact-isolation experiments.
+    """
 
     arena_space: float = 5.0
     """The distance between each arena when building multiple arenas."""
@@ -1017,7 +1036,11 @@ class SimulationManager:
         Returns:
             List[str]: list of all assets uid.
         """
-        uid_list = ["default_plane"]
+        uid_list = (
+            ["default_plane"]
+            if getattr(self.sim_config, "enable_ground_plane", True)
+            else []
+        )
         uid_list.extend(list(self._lights.keys()))
         uid_list.extend(list(self._sensors.keys()))
         uid_list.extend(list(self._robots.keys()))
@@ -1895,7 +1918,7 @@ class SimulationManager:
             self._env = result.get_arena("default")
             self._arenas = [result.get_arena(name) for name in scene.arena_names]
             self.__dict__.pop("arena_offsets", None)
-            if self._default_plane is None:
+            if self._default_plane is None and self.sim_config.enable_ground_plane:
                 self._bind_default_plane(scene.handles("default_plane")[0])
 
         # Runtime readiness belongs to the SimulationManager. Keep this and
@@ -2523,6 +2546,9 @@ class SimulationManager:
     def _declare_spawn_default_plane(self) -> None:
         """Declare the global ground in the World's Spawn scene."""
 
+        if not self.sim_config.enable_ground_plane:
+            return
+
         from dexsim.spawn import (
             CollisionApproximation,
             CollisionDesc,
@@ -2559,6 +2585,18 @@ class SimulationManager:
             static_friction=0.5,
         )
         collision.newton = NewtonCollisionDesc(mu=0.5)
+        if self.sim_config.ground_plane_attrs is not None:
+            physics = _resolve_rigid_physics(
+                self.sim_config.ground_plane_attrs,
+                newton_solver_type=self._active_newton_solver_type,
+            )
+            collision.dexsim = _compile_default_collision(physics)
+            collision.newton = _compile_newton_collision(
+                physics,
+                newton_solver_type=self._active_newton_solver_type,
+                author_shape_defaults=True,
+            )
+            collision.enable_collision = physics.collision_enabled
         collision.render_source_index = 0
         descriptor = ObjectDesc(
             name="default_plane",
@@ -2604,9 +2642,17 @@ class SimulationManager:
 
         Raises:
             RuntimeError: The scene physics has already been prepared.
+            ValueError: The ground is disabled but enabling or editing it was requested.
         """
         if self.spawn_result is not None:
             raise RuntimeError("Ground collision must be configured before prepare().")
+        if not self.sim_config.enable_ground_plane:
+            if not enabled and newton is None and geometry is None:
+                return
+            raise ValueError(
+                "The default ground plane is disabled; enable_ground_plane must "
+                "be set before constructing the simulation."
+            )
         if geometry is not None:
             from dataclasses import fields
             from dexsim.spawn import GeometryDesc
@@ -3029,13 +3075,25 @@ class SimulationManager:
         return dict(result) if legacy_result else result
 
     def _validate_visual_config(self, cfg: object) -> None:
-        from .cfg.visuals import GaussianSplatCfg, _visual_elements
+        from .cfg.visuals import (
+            GaussianSplatCfg,
+            _visual_elements,
+            _uses_descriptor_visuals,
+        )
+
+        if isinstance(cfg, RigidObjectCfg):
+            cfg._normalize_visuals()
+            cfg._validate_env_variants()
 
         groups = getattr(cfg, "link_visuals", {})
         values = getattr(cfg, "visuals", None)
         if values is not None:
             groups = {None: values}
-        if groups and self.sim_config.visualization.backend == "viser":
+        if (
+            groups
+            and not _uses_descriptor_visuals(cfg)
+            and self.sim_config.visualization.backend == "viser"
+        ):
             raise NotImplementedError(
                 "Explicit visual composition is not yet supported by Viser; use native cameras or a native window."
             )
@@ -3306,7 +3364,8 @@ class SimulationManager:
                 rigid_obj._source_visual_elements = source_elements
             declarations.append((cfg.uid, descriptor, materials, rigid_obj))
 
-        for uid, _, _, _ in declarations:
+        for uid, descriptor, _, _ in declarations:
+            self._spawn_scene._validate_rigid_variants(descriptor)
             if replace:
                 self._spawn_scene._require_removable(uid)
             else:
@@ -3927,8 +3986,14 @@ class SimulationManager:
             The stable Group facade. During initial scene construction it is
             bound to Spawn handles by :meth:`prepare`.
         """
+        from .cfg.visuals import _file_visual_binding_elements, _uses_descriptor_visuals
+
         if isinstance(cfg.rigid_objects, dict) and any(
-            getattr(member, "visuals", None) is not None
+            (
+                getattr(member, "visuals", None) is not None
+                and not _uses_descriptor_visuals(member)
+            )
+            or _file_visual_binding_elements(member) is not None
             for member in cfg.rigid_objects.values()
         ):
             raise NotImplementedError(
@@ -3978,6 +4043,7 @@ class SimulationManager:
                     f"Rigid object group member {index} has no rigid-body physics."
                 )
             descriptor.physics.actor_type = actor_type
+            self._spawn_scene._validate_rigid_variants(descriptor)
             self._spawn_scene._require_available_uid(descriptor.name)
             material_batches.append(materials)
             descriptors.append(descriptor)

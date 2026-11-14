@@ -61,6 +61,12 @@ are environment, environment/link and environment/object respectively.
 snapshots: setters/randomizers must not mutate them. Reset restores selected
 rows before episode initialization events run.
 
+Visual and semantic environment selections share strict index validation before
+geometry reads or visibility writes. Descriptor-owned visual operations use each
+selected row's effective variant config. A visibility command rejects any selected
+row without explicit visuals before writing; reset restores only selected explicit
+visual rows, preserving implicit and unselected visibility.
+
 Manager reset restores all selected Newton articulations before one complete
 Scene batch clears drive targets, dynamics, warm-start state, kinematics and
 external wrenches. MuJoCo-Warp and DexUni cannot safely clear a selected world's
