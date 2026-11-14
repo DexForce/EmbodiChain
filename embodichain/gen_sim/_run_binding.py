@@ -196,6 +196,12 @@ def _ground_ids(
             raise ValueError(
                 f"Unresolved or invalid runtime {group} bindings: {values}"
             )
+    if {"left", "right"} <= requested:
+        assigned = result["resources"]
+        if assigned["left"] == assigned["right"] or any(
+            side in resources and assigned[side] != side for side in ("left", "right")
+        ):
+            raise ValueError("Dual-arm bindings must preserve distinct declared sides")
     if len(set(result["objects"].values())) != len(required):
         raise ValueError("Distinct logical objects must retain distinct native UIDs")
     for key, uid in result["objects"].items():
@@ -314,7 +320,11 @@ def _generated_scene_data(
             "source_prim_path": value["source_prim_path"],
         }
         entries[entry["uid"]] = entry
-        category = "background" if entry["uid"] == "table" else "rigid_object"
+        category = (
+            "background"
+            if entry["body_type"] in {"static", "kinematic"}
+            else "rigid_object"
+        )
         data[category].append(entry)
     return data, entries
 
@@ -343,7 +353,12 @@ def _physical_generated_scene(
             "asset_physics_mode": "preserve",
             "source_pose_mode": "preserve",
         }
-        category = "background" if value["uid"] == "table" else "rigid_object"
+        category = (
+            "background"
+            if value["physics"].get("body_type", value.get("body_type", "dynamic"))
+            in {"static", "kinematic"}
+            else "rigid_object"
+        )
         result[category].append(item)
     return result
 
@@ -525,11 +540,17 @@ def _bind_deployment(
     )
     segment_bindings = []
     occupied: dict[str, list[tuple[float, float, float]]] = {}
+    retained_placements = {}
+    runtime_services = deepcopy(cfg.binding.get("runtime_services", {}))
     for node in graph["nodes"]:
         call = node["call"]
         cid = call["call_id"] if call["kind"] == "registered" else call["kind"]
         skill = catalog[cid]["skill"]
-        key = "pick" if skill == "pick_up" else skill
+        key = (
+            cid
+            if call["kind"] == "registered"
+            else ("pick" if skill == "pick_up" else skill)
+        )
         resources = call.get("resources", {})
         call["resources"] = {
             slot: bindings["resources"][value] for slot, value in resources.items()
@@ -539,6 +560,51 @@ def _bind_deployment(
                 skill, {"primary": bindings["resources"]["default_primary"]}
             )
         options.setdefault(key, {"kind": skill})
+        if cid == "hand_over":
+            options[key].setdefault("release_at_target", False)
+            options[key].setdefault("arm_selection", "bound")
+            if (
+                options[key]["release_at_target"] is not False
+                or options[key]["arm_selection"] != "bound"
+            ):
+                raise ValueError(
+                    "Handover must preserve the named receiver until Place"
+                )
+
+        if cid == "simulation.coordinated_transport":
+            ref = annotations[node["id"]]["reference"]
+            obj = call["arguments"]["object"]
+            placement = (resolved_placements or {}).get(node["id"])
+            if placement is None or call["arguments"]["target"] != ref:
+                raise ValueError(
+                    "Coordinated release requires qualified support geometry"
+                )
+            options[key].setdefault("release", True)
+            if options[key]["release"] is not True:
+                raise ValueError("Transport must release at the qualified support")
+
+            if not any(
+                a["kind"] == "antipodal_grasp" for a in rigid[obj]["affordances"]
+            ):
+                rigid[obj]["affordances"].append(
+                    dict(entity_id=f"paired_grasp_{node['id']}", kind="antipodal_grasp")
+                )
+            lowerers = runtime_services.setdefault("registered_semantic_lowerers", [])
+            entry = next(
+                (r for r in lowerers if r["kind"] == "coordinated_transport"), None
+            )
+            if entry is None:
+                entry = dict(kind="coordinated_transport", routes=[])
+                lowerers.append(entry)
+            entry["routes"].append(
+                dict(
+                    object_id=obj,
+                    target_id=ref,
+                    reference_entity_id=ref,
+                    relative_pose=placement["object_target_pose"],
+                )
+            )
+
         monitors.setdefault(
             key, {"monitor_id": "builtin.composite_effect", "revision": "1"}
         )
@@ -595,6 +661,26 @@ def _bind_deployment(
                     "displacement": displacement,
                 }
             ]
+        if call["kind"] == "place" and validators:
+            retained_placements[subject] = dict(
+                kind="object_relative_position",
+                object=subject,
+                reference=reference,
+                reference_frame="parent",
+                position_offset=[pose[i] for i in (3, 7, 11)],
+                position_tolerance=[0.04, 0.04, 0.012],
+            )
+        if cid == "simulation.coordinated_transport":
+            post = [dict(kind="wait_stable", entity=obj)]
+            validators = [
+                dict(
+                    kind="object_near_relative_target",
+                    object=obj,
+                    reference=ref,
+                    displacement=placement["displacement"],
+                ),
+                *[v for v in retained_placements.values() if v["reference"] == obj],
+            ]
         selected = cfg.binding.get("segments", {}).get(node["id"], {})
         if set(selected) - {"post", "validators"}:
             raise ValueError("Segment bindings only support post and validators")
@@ -618,7 +704,7 @@ def _bind_deployment(
         },
         "scene_binding": semantic_scene,
         "profile": additions,
-        "runtime_services": deepcopy(cfg.binding.get("runtime_services", {})),
+        "runtime_services": runtime_services,
     }
     embodiment = runtime["embodiment"]
     (root / "embodiment.yaml").write_text(yaml.safe_dump(embodiment, sort_keys=False))

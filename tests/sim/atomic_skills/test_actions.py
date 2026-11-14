@@ -8651,6 +8651,16 @@ def test_coordinated_pick_holds_environment_with_dense_ik_joint_jump() -> None:
     )
 
 
+def test_coordinated_calibrated_handles_require_distinct_rigid_frames() -> None:
+    pair = torch.eye(4).repeat(2, 1, 1)
+    with pytest.raises(ValueError, match="distinct"):
+        CoordinatedPickmentOptions(paired_object_to_eef=pair)
+    pair[1, 1, 3] = 0.2
+    options = CoordinatedPickmentOptions(paired_object_to_eef=pair)
+    pair[1, 1, 3] = 0
+    assert options.paired_object_to_eef[1, 1, 3].item() == pytest.approx(0.2)
+
+
 def test_coordinated_pick_fails_when_affordance_has_no_grasp() -> None:
     generator = _dual_motion_generator()
     action = _bind_action(

@@ -1,0 +1,140 @@
+{
+  "spec_digest": "9b473114a09eaca62377a978067bf5c41c703adb3a9e6ce864d0125c619b3ae5",
+  "graph_digest": "de93f5a1883176c141b5fbe32ff94ee908e863eaec0cd672ac0e5c7686cfd529",
+  "scene_digest": "bc3a08ee6fd4bd5c4d5ee71c05043601f964516504a01360bade15586405f2c4",
+  "deployment_digest": "099717d637792408f683d262dae5fefc137b7154c699b4be68f8c84205fac23a",
+  "program_digest": "f1c879d0e898acde33f472f1c1b1250f7709b09895192c1926173484e052df7c",
+  "static_checks": {
+    "arms": true,
+    "ordered_transfers": true,
+    "shared_plate_and_final_support": true,
+    "reject_arm": true,
+    "reject_tray": true,
+    "reject_order": true
+  },
+  "qualified": "accepted",
+  "milestone_producers": {
+    "m1": [
+      "call_2",
+      "terminal"
+    ],
+    "m2": [
+      "call_3",
+      "terminal"
+    ],
+    "m3": [
+      "call_5",
+      "terminal"
+    ],
+    "m4": [
+      "call_6",
+      "terminal"
+    ],
+    "m5": [
+      "call_7",
+      "acquire"
+    ],
+    "m6": [
+      "call_7",
+      "release"
+    ],
+    "final_apple": [
+      "call_3",
+      "terminal"
+    ],
+    "final_orange": [
+      "call_6",
+      "terminal"
+    ],
+    "final_tray": [
+      "call_7",
+      "release"
+    ]
+  },
+  "execution": "succeeded",
+  "segments": [
+    {
+      "node": "call_1",
+      "start": 0,
+      "end": 560,
+      "success": true,
+      "holders": {
+        "right": "apple"
+      }
+    },
+    {
+      "node": "call_2",
+      "start": 560,
+      "end": 1150,
+      "success": true,
+      "holders": {
+        "left": "apple"
+      }
+    },
+    {
+      "node": "call_3",
+      "start": 1150,
+      "end": 1743,
+      "success": true,
+      "holders": {}
+    },
+    {
+      "node": "call_4",
+      "start": 1743,
+      "end": 2284,
+      "success": true,
+      "holders": {
+        "right": "orange"
+      }
+    },
+    {
+      "node": "call_5",
+      "start": 2284,
+      "end": 3062,
+      "success": true,
+      "holders": {
+        "left": "orange"
+      }
+    },
+    {
+      "node": "call_6",
+      "start": 3062,
+      "end": 3640,
+      "success": true,
+      "holders": {}
+    },
+    {
+      "node": "call_7",
+      "start": 3640,
+      "end": 4096,
+      "success": true,
+      "holders": {}
+    }
+  ],
+  "ordered": true,
+  "verified_transfers": true,
+  "tray_lift_m": 0.06610369682312012,
+  "terminal": {
+    "final_apple": {
+      "subject": "apple",
+      "reference": "tray",
+      "footprint_margin_m": 0.039705260255454775,
+      "vertical_gap_m": 0.0018424288210908725,
+      "satisfied": true
+    },
+    "final_orange": {
+      "subject": "orange",
+      "reference": "tray",
+      "footprint_margin_m": 0.019698900422589483,
+      "vertical_gap_m": 0.001736589483915904,
+      "satisfied": true
+    },
+    "final_tray": {
+      "subject": "tray",
+      "reference": "service_pad",
+      "footprint_margin_m": 0.02876409931515808,
+      "vertical_gap_m": 0.0017473389322694866,
+      "satisfied": true
+    }
+  }
+}

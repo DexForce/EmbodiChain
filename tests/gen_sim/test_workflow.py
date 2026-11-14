@@ -1064,3 +1064,31 @@ def test_grounded_hybrid_placement_uses_scene_qualification(run_cfg, seen):
                 run_cfg.execution_policy,
                 base / "prepared",
             )
+
+
+def test_dual_arm_scene_binding_rejects_resource_alias(monkeypatch):
+    from embodichain.gen_sim._run_binding import _ground_ids
+    from embodichain.gen_sim.services import compat
+
+    # Even a valid object match must not allow a resolver to alias both arms.
+    monkeypatch.setattr(
+        compat,
+        "structured_call",
+        lambda **kw: {
+            "objects": {"fruit": "apple"},
+            "resources": {"right": "left", "left": "left"},
+        },
+    )
+    with pytest.raises(ValueError, match="distinct declared sides"):
+        _ground_ids(
+            {"objects": [{"id": "fruit", "provenance": "observed"}]},
+            {"transfer": {"object": "fruit"}},
+            {
+                "nodes": [
+                    {"call": {"resources": {"source": "right", "destination": "left"}}}
+                ]
+            },
+            {"apple": {}},
+            {"resources": [{"resource_id": "left"}, {"resource_id": "right"}]},
+            services=None,
+        )

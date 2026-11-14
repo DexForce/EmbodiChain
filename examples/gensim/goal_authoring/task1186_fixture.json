@@ -1,0 +1,107 @@
+{
+  "instruction": "右臂将苹果递给左臂，由左臂放入盘子；再以同样方式放入橙子。两手释放后，用双臂把装有水果的盘子搬到桌面中央的服务垫上。",
+  "operations": [
+    {
+      "template": "E4",
+      "object": "apple",
+      "source": "right",
+      "destination": "left",
+      "quote": "右臂将苹果递给左臂"
+    },
+    {
+      "template": "E1",
+      "object": "apple",
+      "primary": "left",
+      "reference": "tray",
+      "relation": "inside",
+      "quote": "由左臂放入盘子"
+    },
+    {
+      "template": "E4",
+      "object": "orange",
+      "source": "right",
+      "destination": "left",
+      "quote": "再以同样方式放入橙子"
+    },
+    {
+      "template": "E1",
+      "object": "orange",
+      "primary": "left",
+      "reference": "tray",
+      "relation": "inside",
+      "quote": "再以同样方式放入橙子"
+    },
+    {
+      "template": "E5",
+      "object": "tray",
+      "reference": "service_pad",
+      "relation": "on",
+      "quote": "用双臂把装有水果的盘子搬到桌面中央的服务垫上"
+    }
+  ],
+  "packet": {
+    "image_sha256": "25416a5fdc9cd7de1e3d2bd824c66c7905752e9a99085783ee7f9cf55c6da9ff",
+    "grounding": {
+      "objects": [
+        {
+          "id": "apple",
+          "description": "red apple",
+          "bbox": [
+            723,
+            396,
+            812,
+            518
+          ],
+          "provenance": "observed"
+        },
+        {
+          "id": "orange",
+          "description": "orange fruit",
+          "bbox": [
+            833,
+            411,
+            919,
+            528
+          ],
+          "provenance": "observed"
+        },
+        {
+          "id": "tray",
+          "description": "white round plate with two handles",
+          "bbox": [
+            72,
+            286,
+            351,
+            510
+          ],
+          "provenance": "observed"
+        },
+        {
+          "id": "service_pad",
+          "description": "circular service mat outline at table center",
+          "bbox": [
+            388,
+            298,
+            677,
+            557
+          ],
+          "provenance": "observed"
+        }
+      ],
+      "bindings": {
+        "apple": [
+          "apple"
+        ],
+        "orange": [
+          "orange"
+        ],
+        "tray": [
+          "tray"
+        ],
+        "service_pad": [
+          "service_pad"
+        ]
+      }
+    }
+  }
+}

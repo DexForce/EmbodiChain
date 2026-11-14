@@ -166,7 +166,21 @@ class CoordinatedPickmentOptions(SkillOptions):
     grasp_seed: int = 17_393
     """Deterministic seed isolated around coordinated grasp sampling."""
 
+    paired_object_to_eef: torch.Tensor | None = None
+    """Installation-calibrated left/right TCP transforms in the rigid object's frame."""
+
     def __post_init__(self) -> None:
+        if self.paired_object_to_eef is not None:
+            from .pick_up import _validate_single_se3
+
+            pair = self.paired_object_to_eef
+            if not isinstance(pair, torch.Tensor) or pair.shape != (2, 4, 4):
+                raise ValueError("paired_object_to_eef requires two rigid transforms")
+            for transform in pair:
+                _validate_single_se3(transform, "paired_object_to_eef")
+            if torch.allclose(pair[0, :3, 3], pair[1, :3, 3]):
+                raise ValueError("Coordinated grasp sites must be distinct")
+            object.__setattr__(self, "paired_object_to_eef", pair.clone())
         if self.object_motion_keyframes < 2:
             raise ValueError("object_motion_keyframes must be at least 2.")
         for name in ("pre_grasp_distance", "lift_height", "retreat_distance"):
@@ -642,6 +656,14 @@ class CoordinatedPickment(AtomicSkill[CoordinatedPickGoal, CoordinatedPickmentOp
                 "dual-arm grasps."
             )
         semantics.affordance.require_whole_object_mesh()
+        if options.paired_object_to_eef is not None:
+            pair = object_poses[:, None] @ options.paired_object_to_eef.to(object_poses)
+            return (
+                pair[:, 0],
+                pair[:, 1],
+                torch.ones(len(object_poses), dtype=torch.bool, device=self.device),
+            )
+
         approach_direction = options.approach_direction.to(
             device=self.device, dtype=torch.float32
         )

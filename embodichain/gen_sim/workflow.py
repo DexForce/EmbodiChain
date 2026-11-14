@@ -121,7 +121,18 @@ def load_task_plan(path: str | Path) -> dict[str, Any]:
             or image["sha256"] != manifest["image_sha256"]
         ):
             raise ValueError("Hybrid publication identity mismatch")
-        if verify_witness(spec, graph, support_targets={})["status"] != "covered":
+        if (
+            verify_witness(
+                spec,
+                graph,
+                support_targets={
+                    g["reference"]: g["reference"]
+                    for g in doc["objectives"]["goal"]
+                    if g.get("reference")
+                },
+            )["status"]
+            != "covered"
+        ):
             raise ValueError("Uncovered hybrid placement")
         projection = _scene_projection(doc, graph, read("scene_grounding"))
         if any(read(k) != v for k, v in projection.items()):
@@ -741,7 +752,7 @@ def qualify_task_scene(
     *,
     services: GenSimServices | None = None,
 ) -> Path:
-    """Bind and statically qualify one rigid E1 plan.
+    """Bind and statically qualify a supported rigid manipulation plan.
 
     Args:
         task_plan_dir: Verified Task Engine publication.
@@ -815,8 +826,6 @@ def qualify_task_scene(
             {**p.get("arguments", {}), "relation": p.get("relation")}
             for p in placements
         ]
-        if plan["schema_version"] == "embodichain.hybrid-task-plan/v1":
-            steps = [{"task_type": "E1", "relation": goals[0]["relation"]}]
         if len(plan["task_document"]["objectives"]["milestones"]) != 1:
             steps = []
     else:
@@ -830,7 +839,7 @@ def qualify_task_scene(
             {},
         )
         steps = candidate.get("draft", {}).get("steps")
-    if (
+    if plan["schema_version"] != "embodichain.hybrid-task-plan/v1" and (
         not isinstance(steps, list)
         or len(steps) != 1
         or steps[0].get("task_type") != "E1"
@@ -927,9 +936,11 @@ def qualify_task_scene(
     try:
         for node in graph["nodes"]:
             call = node["call"]
-            if call["kind"] != "place" or not ({"on", "inside"} & call.keys()):
+            if call.get("call_id") != "simulation.coordinated_transport" and (
+                call["kind"] != "place" or not ({"on", "inside"} & call.keys())
+            ):
                 continue
-            subject = call["object"]
+            subject = call.get("arguments", call)["object"]
             reference = annotations[node["id"]]["reference"]
             pose, displacement = _placement(
                 entries[bindings["objects"][subject]],
@@ -975,6 +986,7 @@ def prepare_task_deployment(
     execution_policy: str | Path,
     output_dir: str | Path,
     *,
+    handover_pose: Mapping[str, Any] | None = None,
     skill_options: Mapping[str, Mapping[str, Any]] | None = None,
     expected_revisions: Mapping[str, str] | None = None,
 ) -> Path:
@@ -987,6 +999,7 @@ def prepare_task_deployment(
         runtime_config: Trusted robot and physical runtime configuration.
         execution_policy: Trusted execution policy configuration.
         output_dir: Fresh deployment publication directory.
+        handover_pose: Trusted installation exchange pose for handovers.
         skill_options: Optional trusted deployment-side Semantic Call parameters.
         expected_revisions: Optional caller-selected input digests.
 
@@ -1019,6 +1032,7 @@ def prepare_task_deployment(
     }
     revisions = {
         **expected,
+        "handover_pose_digest": canonical_hash(dict(handover_pose or {})),
         "skill_options_digest": canonical_hash(dict(skill_options or {})),
         "spec_digest": plan.get("spec_digest"),
         "graph_digest": plan.get("semantic_graph_sha256"),
@@ -1040,6 +1054,15 @@ def prepare_task_deployment(
         )
     output = Path(output_dir).expanduser().absolute()
     output.mkdir(parents=True, exist_ok=False)
+    profile_binding = {"action_options": dict(skill_options or {})}
+    runtime_services = {}
+    if handover_pose is not None:
+        profile_binding["grounding_providers"] = {
+            "hand_over": "simulation.configured_handover_pose"
+        }
+        runtime_services["handover_pose_providers"] = [
+            {**handover_pose, "kind": "configured_pose"}
+        ]
     cfg = _RunCfg(
         image=_source_image(plan_root),
         instruction=plan["instruction"],
@@ -1047,7 +1070,7 @@ def prepare_task_deployment(
         runtime=runtime_path,
         execution_policy=policy_path,
         task_id=plan["task_id"],
-        binding={"profile": {"action_options": dict(skill_options or {})}},
+        binding={"profile": profile_binding, "runtime_services": runtime_services},
     )
     runtime, policy, profile = _load_runtime(cfg)
     deployment = _bind_deployment(

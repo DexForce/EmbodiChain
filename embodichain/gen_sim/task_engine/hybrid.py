@@ -563,35 +563,33 @@ def verify_witness(spec, graph, *, support_targets, bindings=None):
 
 
 def _scene_projection(doc, graph, packet):
-    """Project a grounded, single rigid placement; never synthesize observations."""
+    """Project the rigid objects and destinations of a checked manipulation sequence."""
     from .image_planning import _validate_grounding
     from ..task_spec.publication import project_scene_requirements
 
     goals = doc["objectives"]["goal"]
     nodes = graph["nodes"]
-    if (
-        len(goals) != 1
-        or len(doc["objectives"]["milestones"]) != 1
-        or len(nodes) != 2
-        or [n["call"]["kind"] for n in nodes] != ["pick", "place"]
-    ):
-        raise ValueError(
-            "Generated-scene qualification requires a single rigid pick/place"
+    destinations = {g["subject"]: g for g in goals if g["predicate"] == "relation"}
+    annotations = {}
+    if not nodes or len(destinations) != len(goals):
+        raise ValueError("Grounded manipulation requires terminal placement relations")
+    for n in nodes:
+        c = n["call"]
+        carry = c.get("call_id") == "simulation.coordinated_transport"
+        if not carry and c["kind"] not in {"pick", "hand_over", "place"}:
+            raise ValueError("Unsupported grounded manipulation call")
+        subject = c.get("arguments", c)["object"]
+        goal = destinations.get(subject)
+        if not goal or goal["relation"] not in {"on", "inside"}:
+            raise ValueError("Missing frozen destination for " + subject)
+        relation, reference = goal["relation"], goal["reference"]
+        if (carry and (relation != "on" or c["arguments"]["target"] != reference)) or (
+            c["kind"] == "place" and c.get(relation) != reference
+        ):
+            raise ValueError("Placement witness does not match the frozen objective")
+        annotations[n["id"]] = dict(
+            object=subject, reference=reference, relation=relation
         )
-    goal = goals[0]
-    subject, reference, relation = (
-        goal.get("subject"),
-        goal.get("reference"),
-        goal.get("relation"),
-    )
-    if (
-        goal["predicate"] != "relation"
-        or relation not in {"on", "inside"}
-        or nodes[0]["call"]["object"] != subject
-        or nodes[1]["call"]["object"] != subject
-        or nodes[1]["call"].get(relation) != reference
-    ):
-        raise ValueError("Placement witness does not match the frozen objective")
     if any(
         c.get("constraint") or c["resolution"] != "resolved"
         for c in doc["interpretation"]["clauses"]
@@ -616,16 +614,7 @@ def _scene_projection(doc, graph, packet):
         "scene_requirements": project_scene_requirements(doc),
         "image_grounding": grounding,
         "plan_coverage": {"role_entities": grounding["bindings"]},
-        "semantic_graph_validation": {
-            "source": {
-                "annotations": {
-                    n["id"]: dict(
-                        object=subject, reference=reference, relation=relation
-                    )
-                    for n in nodes
-                }
-            }
-        },
+        "semantic_graph_validation": {"source": {"annotations": annotations}},
     }
 
 
