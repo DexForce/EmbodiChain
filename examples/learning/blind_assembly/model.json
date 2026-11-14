@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "id": "blind-peg-default-rizon4s-robotiq2f85-seed0",
+  "description": "Native PPO development policy; validation-selected update 850 from the historical 1000-update run.",
+  "url": "https://raw.githubusercontent.com/DexForce/EmbodiChain/520c89e7ec49634758e7a3827ef52798376883c7/default-assets-peg.zip",
+  "sha256": "57fa36357a5035590ffc582218d3db9d9530f62f09f0da7de029d695eba07537",
+  "bytes": 16591253,
+  "artifact_commit": "520c89e7ec49634758e7a3827ef52798376883c7",
+  "checkpoint_sha256": "68c9625efbb7f85c07e22b1b2b0111e1a5e83d4ac386121927c57e0a898da116",
+  "replay_code_revision": "fb10cdaefb8b266bcccdfade7975053e9bf98ba0",
+  "runtime": {
+    "python": "3.11",
+    "torch": "2.7.1+cu128",
+    "mujoco": "3.15.0",
+    "mujoco_warp": "3.15.0",
+    "newton": "1.7.0",
+    "warp_lang": "1.17.0",
+    "dexsim_python_revision": "528daf12fd44b9383b30165ac484cf79b574e873",
+    "dexsim_profile": "recorded historical source-contact overlay, unchanged native libraries; exact hashes retained in evidence/provenance",
+    "mujoco_warp_overlay": "historical external runtime with EPA horizon 128; exact provenance retained in bundle evidence",
+    "gpu": "NVIDIA GeForce RTX 5090 32 GiB"
+  },
+  "evaluation": {
+    "episodes": 8192,
+    "num_envs": 1024,
+    "seed": 20000,
+    "allocation": "balanced; 8 completions per arena",
+    "successes": 7275,
+    "metrics": {
+      "eval/avg_length": 44.3267822265625,
+      "eval/avg_reward": 1.8052978515625,
+      "eval/completed_episodes": 8192.0,
+      "eval/episodes_per_env_max": 8.0,
+      "eval/episodes_per_env_min": 8.0,
+      "eval/metrics/success.assembly.captured": 0.917236328125,
+      "eval/metrics/success.assembly.depth": 0.01585678632136478,
+      "eval/metrics/success.assembly.grasped": 0.8946533203125,
+      "eval/metrics/success.assembly.penetration": 3.502875783687838e-06,
+      "eval/metrics/success.assembly.radial_error": 0.001681215323152463,
+      "eval/metrics/success.assembly.tilt": 0.017064441032392352,
+      "eval/success_ci95_high": 0.894707999842371,
+      "eval/success_ci95_low": 0.8810512717278793,
+      "eval/success_rate": 0.8880615234375,
+      "eval/success_samples": 8192.0
+    }
+  },
+  "installed_wheel_evaluation": {
+    "episodes": 8192,
+    "num_envs": 1024,
+    "seed": 20000,
+    "source_successes": 7275,
+    "installed_wheel_successes": 7288,
+    "same_score": false,
+    "metrics": {
+      "eval/avg_length": 44.5372314453125,
+      "eval/avg_reward": 1.810546875,
+      "eval/completed_episodes": 8192.0,
+      "eval/episodes_per_env_max": 8.0,
+      "eval/episodes_per_env_min": 8.0,
+      "eval/metrics/success.assembly.captured": 0.9219970703125,
+      "eval/metrics/success.assembly.depth": 0.01592557853564358,
+      "eval/metrics/success.assembly.grasped": 0.8963623046875,
+      "eval/metrics/success.assembly.penetration": 3.624470350420644e-06,
+      "eval/metrics/success.assembly.radial_error": 0.0016546392112644082,
+      "eval/metrics/success.assembly.tilt": 0.01714781531280707,
+      "eval/success_ci95_high": 0.8962517007076952,
+      "eval/success_ci95_low": 0.8826799113880076,
+      "eval/success_rate": 0.8896484375,
+      "eval/success_samples": 8192.0
+    },
+    "small_sample_protocol": {
+      "episodes": 64,
+      "num_envs": 64,
+      "source_successes": 46,
+      "installed_successes": 42
+    },
+    "scope": "isolated wheel in a system-site-packages venv; Torch and explicit private SDK profile reused; source paths absent from PYTHONPATH"
+  },
+  "preview": {
+    "video_url": "https://raw.githubusercontent.com/DexForce/EmbodiChain/520c89e7ec49634758e7a3827ef52798376883c7/preview.mp4",
+    "gif_url": "https://raw.githubusercontent.com/DexForce/EmbodiChain/520c89e7ec49634758e7a3827ef52798376883c7/preview.gif",
+    "contact_sheet_url": "https://raw.githubusercontent.com/DexForce/EmbodiChain/520c89e7ec49634758e7a3827ef52798376883c7/contact_sheet.png",
+    "seeds": [
+      30000,
+      30001,
+      30002
+    ],
+    "successes": 3,
+    "episodes": 3
+  },
+  "evidence_url": "https://github.com/DexForce/EmbodiChain/blob/520c89e7ec49634758e7a3827ef52798376883c7/reproduction.json",
+  "limitations": [
+    "single geometry and training seed; not the heterogeneous paper distribution",
+    "95% engineering target is not met",
+    "solver iteration-budget warnings and SDK teardown entity accounting warning remain",
+    "native capacity/precision qualification for new SDK MR !1562 is separate and incomplete",
+    "full 1000-update training was not repeated during this split"
+  ]
+}

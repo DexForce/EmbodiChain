@@ -113,6 +113,12 @@ through collection and PPO epochs, then update for the next rollout. Actor
 export excludes critic and contact decoder; inference alignment does not
 qualify task learning or simulator throughput.
 
+Blind-assembly observation producers live in the manager observation package.
+Their `history_layout` and `proprioception_convention` must match the policy
+version. Official peg study/development profiles select `official_v1`; other
+profiles retain their declared legacy layout. Examples under
+`examples/learning/blind_assembly/` own actor export and native preview.
+
 ## Episode evaluation and saved resources
 
 Auto-reset preserves completed-row observations and IDs for timeout bootstrap;

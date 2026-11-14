@@ -1,0 +1,83 @@
+# Application-owned mount, TCP and hand drives; the catalog robot remains a bare arm.
+# Identity flange mount; TCP is an engineering convention, not hardware calibration.
+embodiment_id: flexiv_rizon4s_robotiq2f85
+simulation:
+  class_type: FlexivRizon4S
+  uid: FlexivRizon4SRobotiq
+  urdf_cfg:
+    base_link_name: assembled_base
+    fname: flexiv_rizon4s_robotiq2f85
+    components:
+    - component_type: hand
+      urdf_path: Robotiq2F85/Robotiq2F85.urdf
+  control_parts:
+    eef:
+    - finger_joint
+  solver_cfg:
+    arm:
+      class_type: PytorchSolver
+      root_link_name: base_link
+      end_link_name: robotiq_85_base_link
+      tcp:
+      - - 0.0
+        - -1.0
+        - 0.0
+        - 0.0
+      - - 1.0
+        - 0.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+        - 0.145
+      - - 0.0
+        - 0.0
+        - 0.0
+        - 1.0
+      num_samples: 1
+  root_props:
+    newton_mimic_solref:
+    - 0.002
+    - 1.0
+  joint_drive_props:
+    stiffness:
+      finger_joint: 100.0
+    damping:
+      finger_joint: 10.0
+    max_effort:
+      finger_joint: 5.0
+    max_velocity:
+      finger_joint: 2.0
+  link_attrs:
+    default_pad_contacts:
+      link_names_expr:
+      - right_inner_finger
+      - left_inner_finger
+      attrs:
+        collision_props:
+          contact_offset: 0.0
+          rest_offset: 0.0
+          condim: 4
+        material_props:
+          static_friction: 1.0
+          dynamic_friction: 1.0
+          ke: 40000.0
+          kd: 40.0
+          torsional_friction: 0.02
+          rolling_friction: 0.001
+  init_qpos:
+  - 0.0
+  - 0.0
+  - 0.0
+  - 1.57
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+sensor: []

@@ -128,3 +128,13 @@ first access or attach explicitly on the Robot device; see
 
 Diagnose drive/mimic failures at descriptor lowering and binding before adding
 model-specific post-bind fixes. A hand control part need not have an IK solver.
+
+`FlexivRizon4SCfg` remains the bare seven-joint arm. Application embodiments
+attach tools with `urdf_cfg.components` and own the mount, solver TCP, EEF
+control parts, hand drives and contact overrides. The preset assembles those
+ordinary component overrides into the same source for simulation and FK; it
+contains no hand selection or assembly-task metadata. The canonical example is
+`configs/components/embodiments/flexiv_rizon4s_robotiq2f85.yaml` under the tasks
+extension. Assembly grasp assumptions and exact-dynamics qualification gates
+belong to the physical task environment. Historical reference conversion is
+owned by [assembly asset preparation](../assembly-assets/assembly-assets.md), not a robot type.

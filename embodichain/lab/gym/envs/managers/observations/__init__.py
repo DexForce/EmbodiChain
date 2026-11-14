@@ -16,11 +16,13 @@
 """Observation functors for environment managers.
 
 Existing imports and configuration names resolve from this package. The
-implementation modules group general and locomotion observations.
+implementation modules group general, assembly and locomotion observations.
 """
 
 from __future__ import annotations
 
 from ._common import *
+from ._assembly import *
+
 from ._common import _capture_proprioception
 from ._locomotion import *
