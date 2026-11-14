@@ -6089,3 +6089,20 @@ Terrain scan
    RayLidarCfg
    RayDepthCamera
    RayDepthCameraCfg
+
+
+Official sensor presets
+-----------------------
+
+.. currentmodule:: embodichain_sensors
+
+.. autosummary::
+
+   VLP16Cfg
+
+.. currentmodule:: embodichain_sensors.vlp16
+
+.. autosummary::
+
+   VLP16Cfg
+   VLP16_REGISTRATION
