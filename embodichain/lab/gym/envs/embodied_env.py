@@ -60,7 +60,7 @@ from embodichain.lab.sim.cfg import (
     LightCfg,
 )
 from embodichain.lab.sim.objects import Robot
-from embodichain.lab.sim.sensors import BaseSensor, Camera, SensorCfg
+from embodichain.lab.sim.sensors import BaseSensor, Camera, CameraCfg, SensorCfg
 from embodichain.lab.sim.types import EnvObs, EnvAction
 from embodichain.lab.gym.envs import BaseEnv, EnvCfg
 from embodichain.lab.gym.envs._physical_replay import _PhysicalReplay, _ReplaySurface
@@ -1340,16 +1340,18 @@ class EmbodiedEnv(BaseEnv):
             validation_cameras,
         )
         from embodichain.lab.sim import SimulationManager
+        from embodichain.lab.sim.sensors.registry import _resolve_sensor_factory
 
         if super()._requires_native_renderer():
             return True
         if self.cfg.enable_sensor:
             for sensor_cfg in self._sensor_configs():
-                sensor_factory = SimulationManager.SUPPORTED_SENSOR_TYPES.get(
-                    sensor_cfg.sensor_type
+                _, sensor_factory, _ = _resolve_sensor_factory(
+                    sensor_cfg.sensor_type, SimulationManager.SUPPORTED_SENSOR_TYPES
                 )
-                if isinstance(sensor_factory, type) and issubclass(
-                    sensor_factory, Camera
+                if isinstance(sensor_cfg, CameraCfg) or (
+                    isinstance(sensor_factory, type)
+                    and issubclass(sensor_factory, Camera)
                 ):
                     return True
         for _, _, term in self._iter_configured_functors():

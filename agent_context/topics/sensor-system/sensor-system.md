@@ -5,6 +5,8 @@
 | Change or question | Start here |
 |---|---|
 | Sensor config decoding and buffer interface | `embodichain/lab/sim/sensors/base_sensor.py` → `SensorCfg`, `BaseSensor` |
+| Registration, package discovery and construction contracts | `embodichain/lab/sim/sensors/registry.py` |
+| Explicit clock and joint-state service | `embodichain/lab/sim/sensors/context.py` → `SensorContext` |
 | Exported sensor/config names | `embodichain/lab/sim/sensors/__init__.py` |
 | Image configuration, data flags, extrinsics | `embodichain/lab/sim/sensors/camera.py` → `CameraCfg`, `Camera` |
 | Two-eye transforms and attachment | `embodichain/lab/sim/sensors/stereo.py` → `StereoCameraCfg`, `StereoCamera` |
@@ -16,10 +18,60 @@
 | Fixed contact-buffer scatter | `embodichain/lab/sim/sensors/contact/_warp/scatter.py` |
 
 Sensors inherit `BaseSensor`/`BatchEntity` and expose per-environment data through
-a TensorDict buffer. `SensorCfg.from_dict()` resolves `sensor_type + "Cfg"`
-from the sensor registry, so names are case-sensitive. Read concrete config
+a TensorDict buffer. `SensorCfg.from_dict()` and `SimulationManager.add_sensor()`
+resolve the same case-sensitive `SensorRegistration`. Read concrete config
 classes for image dimensions, enabled outputs, intrinsics and filter defaults;
 these are source-owned values.
+
+## External sensor packages
+
+Use `register_sensor()` for explicit registration, or an `embodichain.sensors`
+entry point whose name is the sensor type and whose value exports a
+`SensorRegistration`. Discovery checks duplicate identifiers before importing
+implementations; only the selected plugin is loaded. Names/configuration
+classes/factories share one owner in `registry.py`. Installed packages are
+discovered once per process; errors name the offending entry point and retain
+the original cause. Do not combine explicit and installed registration for the
+same identifier. Version 1 is the supported extension API.
+
+Concurrent resolutions share one in-flight load and its result or failure;
+same-thread recursive imports and cycles of registry waits across loading
+threads fail explicitly. Python module import locks are outside this wait
+graph; plugin modules must avoid cyclic module imports. Legacy factory overrides are
+selected before importing any installed implementation with the same name.
+
+Gym renderer-demand prediction and USD mounted-camera preflight use the same
+factory resolution, including legacy overrides; registering a Camera subclass
+must not require a second dictionary mutation. A CameraCfg declaration reserves
+rendering and permits mounted-camera preflight for callable factories without
+constructing them. Typed nested configclasses are
+decoded from annotations, including required and nullable fields.
+Inherited annotations resolve in their declaring module. Partial nested
+overrides retain calibrated defaults even through custom decoders; non-nullable
+nested configurations reject explicit null during decoding.
+Other nested inputs must be mappings or compatible constructed config objects;
+invalid scalars and sequences fail at the decode boundary.
+
+New factories accept `factory(cfg, *, context)`. `SensorContext` supplies the
+device, instance count, manager clock and public joint-state snapshots; external
+sensors must not inspect private manager/backend objects. The state provider
+returns owned `qpos`/`qvel` tensors, in articulation joint order and physical
+joint units. State lookup uses physical robot/articulation ownership so a
+same-named sensor or light cannot shadow the source. Context-backed `BaseSensor` construction never discovers arena
+counts through a singleton. Runtime providers hold weak manager ownership and
+reject use once destruction has been requested.
+
+Builtin camera/contact constructors retain their owner adapters. Existing
+`SUPPORTED_SENSOR_TYPES` overrides and explicitly registered
+`legacy_factory=True` factories retain the old calling convention; new plugins
+use the registry. Context factories returning Camera instances also use manager
+parent binding and cleanup on attachment failure. StereoCamera subclasses and
+aliases remain unsupported for Gaussian capture, regardless of creation order.
+Generalized non-camera mounting, sampling periods and output
+descriptors are separate runtime-contract work, not guarantees of this initial
+extension path. The independently installable example and usage instructions
+live in
+[external joint encoder](../../../examples/sim/sensors/external_joint_encoder/README.md).
 
 ## Ownership and resolution
 
@@ -134,6 +186,7 @@ quota are integration contracts. Generic image tiling belongs to
 
 | Changed boundary | Existing coverage |
 |---|---|
+| Explicit/discovered registration, nested decoding, context ownership and installed wheel | `tests/sim/sensors/test_sensor_registry.py` |
 | Parent parsing and instance validation | `tests/sim/sensors/test_attachment.py` |
 | Native render-node query | `tests/sim/objects/test_articulation.py` |
 | Camera/stereo attachment and buffers | `tests/sim/sensors/test_camera.py`, `test_stereo.py` in that directory |

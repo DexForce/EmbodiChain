@@ -2979,6 +2979,161 @@ def _make_camera_attachment_manager(num_envs: int = 2) -> SimulationManager:
     return sim
 
 
+@pytest.mark.parametrize("failure", [None, "parent", "attachment"])
+@pytest.mark.parametrize(
+    "factory_mode", ["context_class", "context_function", "legacy_function"]
+)
+def test_context_camera_uses_manager_attachment_at_the_current_revision(
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str | None,
+    factory_mode: str,
+) -> None:
+    from embodichain.lab.sim.sensors import (
+        SensorRegistration,
+        register_sensor,
+        registry,
+    )
+
+    @configclass
+    class ContextCameraCfg(CameraCfg):
+        sensor_type: str = "ContextCamera"
+
+    sim = _make_camera_attachment_manager()
+    asset, nodes = _make_camera_parent_asset()
+    sim._robots["arm"] = asset
+    cfg = ContextCameraCfg(
+        uid="camera",
+        extrinsics=CameraCfg.ExtrinsicsCfg(
+            parent="missing" if failure == "parent" else "arm/wrist"
+        ),
+    )
+    camera = object.__new__(Camera)
+    camera.cfg = cfg
+    camera._is_attached = False
+    camera.destroy = MagicMock()
+    camera.attach_to_parent_nodes = MagicMock(
+        side_effect=(
+            RuntimeError("attachment failed")
+            if failure == "attachment"
+            else lambda parents: setattr(camera, "_is_attached", True)
+        )
+    )
+    calls = []
+
+    class ContextCamera(Camera):
+        def __new__(cls, config, *, context):
+            calls.append(context.num_instances)
+            return camera
+
+    def context_factory(config, *, context):
+        return ContextCamera(config, context=context)
+
+    def legacy_factory(config, device):
+        calls.append(sim.num_envs)
+        return camera
+
+    factory = {
+        "context_class": ContextCamera,
+        "context_function": context_factory,
+        "legacy_function": legacy_factory,
+    }[factory_mode]
+    monkeypatch.setattr(registry, "_registrations", registry._registrations.copy())
+    register_sensor(
+        SensorRegistration(
+            "ContextCamera",
+            ContextCameraCfg,
+            factory,
+            legacy_factory=factory_mode == "legacy_function",
+        )
+    )
+    if failure:
+        with pytest.raises(
+            (ValueError, RuntimeError), match="was not found|attachment failed"
+        ):
+            sim.add_sensor(cfg)
+        assert not sim._sensors
+        assert calls == ([] if failure == "parent" else [sim.num_envs])
+        assert camera.destroy.call_count == int(failure == "attachment")
+    else:
+        assert sim.add_sensor(cfg) is camera
+        assert camera.is_attached
+        camera.attach_to_parent_nodes.assert_called_once_with(nodes)
+        revision = sim._camera_attachment_topology_revision
+        sim.prepare()
+        assert sim._camera_attachment_topology_revision == revision
+        camera.attach_to_parent_nodes.assert_called_once_with(nodes)
+
+
+@pytest.mark.parametrize("scene_first", [False, True])
+@pytest.mark.parametrize("typed_stereo", [False, True])
+@pytest.mark.parametrize("callable_factory", [False, True])
+def test_gaussian_capture_rejects_registered_stereo_aliases(
+    monkeypatch: pytest.MonkeyPatch,
+    scene_first: bool,
+    typed_stereo: bool,
+    callable_factory: bool,
+) -> None:
+    from embodichain.lab.sim.sensors import (
+        SensorRegistration,
+        register_sensor,
+        registry,
+    )
+
+    @configclass
+    class AliasStereoCfg(StereoCameraCfg if typed_stereo else CameraCfg):
+        sensor_type: str = "AliasStereo"
+
+    camera = object.__new__(StereoCamera)
+    camera.cfg = AliasStereoCfg(uid="stereo")
+    camera.destroy = MagicMock()
+
+    class AliasStereo(StereoCamera):
+        def __new__(cls, *_args, **_kwargs):
+            return camera
+
+    monkeypatch.setattr(registry, "_registrations", registry._registrations.copy())
+    register_sensor(
+        SensorRegistration(
+            "AliasStereo",
+            AliasStereoCfg,
+            (lambda cfg, device: camera) if callable_factory else AliasStereo,
+            legacy_factory=True,
+        )
+    )
+    sim = _make_camera_attachment_manager()
+    if scene_first:
+        sim._spawn_scene.has_gaussians = True
+        with pytest.raises(NotImplementedError, match="StereoCamera"):
+            sim.add_sensor(camera.cfg)
+        assert sim._sensors == {}
+        assert camera.destroy.call_count == int(callable_factory and not typed_stereo)
+    else:
+        from dexsim.types import Renderer
+        from embodichain.lab.sim.cfg import GaussianRenderCfg
+
+        sim._sensors[camera.uid or "stereo"] = camera
+        sim.sim_config = SimulationManagerCfg(
+            num_envs=1,
+            render_cfg=RenderCfg(
+                renderer="hybrid",
+                gaussian=GaussianRenderCfg(enabled=True),
+                denoising=DenoisingCfg(window="off", offscreen="off"),
+            ),
+        )
+        sim.num_envs = 1
+        sim.physics.name = "default"
+        sim._world = SimpleNamespace(
+            get_renderer_type=lambda: Renderer.HYBRID,
+            get_gaussian_effective_config=lambda: {"normalized": {"enabled": True}},
+        )
+        monkeypatch.setattr(
+            sim_manager_module, "_has_native_gaussian_renders", lambda desc: True
+        )
+        # Exercise the actual preflight used when Gaussian USD assets follow a camera.
+        with pytest.raises(NotImplementedError, match="StereoCamera"):
+            sim._prepare_native_usd_gaussians([object()])
+
+
 @pytest.mark.parametrize("stereo", [False, True])
 @pytest.mark.parametrize("state", ["failed_bind", "pending_changes", "needs_rebuild"])
 def test_add_camera_waits_for_parent_readiness_and_next_prepare(

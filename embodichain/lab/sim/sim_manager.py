@@ -96,9 +96,13 @@ from embodichain.lab.sim.sensors import (
     Camera,
     CameraCfg,
     StereoCamera,
+    StereoCameraCfg,
     ContactSensor,
+    SensorContext,
 )
+from embodichain.lab.sim.sensors import _builtin_sensor_factories
 from embodichain.lab.sim.sensors.attachment import resolve_parent_nodes
+from embodichain.lab.sim.sensors.registry import _resolve_sensor_factory
 from embodichain.lab.sim.cfg import (
     CableObjectCfg,
     RenderCfg,
@@ -546,11 +550,9 @@ class SimulationManager:
     _cleanup_queue: queue.Queue = queue.Queue()
     _DEFAULT_PLANE_GIZMO_TARGET_ID = (1 << 64) - 1
 
-    SUPPORTED_SENSOR_TYPES = {
-        "Camera": Camera,
-        "StereoCamera": StereoCamera,
-        "ContactSensor": ContactSensor,
-    }
+    # Compatibility overrides for pre-registry factories. New extensions use
+    # register_sensor()/embodichain.sensors, shared with SensorCfg.from_dict().
+    SUPPORTED_SENSOR_TYPES = dict(_builtin_sensor_factories)
 
     def __new__(
         cls,
@@ -2924,7 +2926,7 @@ class SimulationManager:
                 "Gaussian recording requires a managed Camera, not the native viewer recorder."
             )
         for sensor in self._sensors.values():
-            self._validate_gaussian_camera(sensor.cfg)
+            self._validate_gaussian_camera(sensor.cfg, type(sensor))
         return True
 
     def add_usd(
@@ -3096,10 +3098,15 @@ class SimulationManager:
         ):
             raise ValueError("Hybrid standalone NRD omits Gaussian composition.")
         for sensor in self._sensors.values():
-            self._validate_gaussian_camera(sensor.cfg)
+            self._validate_gaussian_camera(sensor.cfg, type(sensor))
 
-    def _validate_gaussian_camera(self, cfg: object) -> None:
-        if getattr(cfg, "sensor_type", None) == "StereoCamera":
+    def _validate_gaussian_camera(
+        self, cfg: object, sensor_factory: object = None
+    ) -> None:
+        if isinstance(cfg, StereoCameraCfg) or (
+            isinstance(sensor_factory, type)
+            and issubclass(sensor_factory, StereoCamera)
+        ):
             raise NotImplementedError(
                 "Gaussian capture metadata is currently qualified for Camera; StereoCamera is not yet supported."
             )
@@ -4699,8 +4706,6 @@ class SimulationManager:
         Returns:
             BaseSensor: The added sensor instance handle.
         """
-        if getattr(getattr(self, "_spawn_scene", None), "has_gaussians", False) is True:
-            self._validate_gaussian_camera(sensor_cfg)
         sensor_type = sensor_cfg.sensor_type
         uid = sensor_cfg.uid
         if uid is None:
@@ -4709,18 +4714,50 @@ class SimulationManager:
         if uid in self._sensors:
             raise ValueError(f"Sensor {uid!r} already exists.")
 
-        sensor_factory = self.SUPPORTED_SENSOR_TYPES.get(sensor_type)
-        if sensor_factory is None:
-            raise ValueError(
-                f"Unsupported sensor type {sensor_type!r}. Supported types: "
-                f"{sorted(self.SUPPORTED_SENSOR_TYPES)}."
-            )
-        if sensor_type == "ContactSensor" and not self.physics.supports_contact_sensor:
+        registration, sensor_factory, legacy_factory = _resolve_sensor_factory(
+            sensor_type, self.SUPPORTED_SENSOR_TYPES
+        )
+        has_gaussians = (
+            getattr(getattr(self, "_spawn_scene", None), "has_gaussians", False) is True
+        )
+        if has_gaussians:
+            self._validate_gaussian_camera(sensor_cfg, sensor_factory)
+        if (
+            legacy_factory
+            and sensor_type == "ContactSensor"
+            and not self.physics.supports_contact_sensor
+        ):
             raise NotImplementedError(
                 f"ContactSensor is not supported by the {self.physics.name} "
                 "physics backend."
             )
-        if isinstance(sensor_factory, type) and issubclass(sensor_factory, Camera):
+        if not legacy_factory:
+            if not isinstance(sensor_cfg, registration.config_cls):
+                raise TypeError(
+                    f"Sensor {sensor_type!r} requires {registration.config_cls.__name__}."
+                )
+            sensor_cfg.validate()
+            self.prepare()
+            if (
+                isinstance(sensor_cfg, CameraCfg)
+                and sensor_cfg.extrinsics.parent is not None
+            ):
+                # Validate before allocating native resources in a context factory.
+                self._resolve_spawn_sensor_parent_nodes(sensor_cfg.extrinsics.parent)
+            sensor = sensor_factory(
+                sensor_cfg, context=SensorContext.from_manager(self)
+            )
+            if not isinstance(sensor, BaseSensor):
+                raise TypeError(
+                    f"Sensor factory {sensor_type!r} must return BaseSensor."
+                )
+            if isinstance(sensor, Camera):
+                try:
+                    self._attach_camera_parent(sensor)
+                except Exception:
+                    sensor.destroy()
+                    raise
+        elif isinstance(sensor_factory, type) and issubclass(sensor_factory, Camera):
             if len(self._arenas) != self.num_envs:
                 raise RuntimeError(
                     "Camera creation requires all Spawn Arenas to be "
@@ -4771,10 +4808,27 @@ class SimulationManager:
             # Custom native sensors require a prepared physics scene; cameras
             # only depend on the pre-created Arenas.
             self.prepare()
+            if (
+                isinstance(sensor_cfg, CameraCfg)
+                and sensor_cfg.extrinsics.parent is not None
+            ):
+                self._resolve_spawn_sensor_parent_nodes(sensor_cfg.extrinsics.parent)
             # Preserve custom test/plugin factories whose two-argument
             # constructor predates the manager-owned render context.
             sensor = sensor_factory(sensor_cfg, self.device)
+            if isinstance(sensor_cfg, CameraCfg) and isinstance(sensor, Camera):
+                try:
+                    self._attach_camera_parent(sensor)
+                except Exception:
+                    sensor.destroy()
+                    raise
 
+        if has_gaussians and isinstance(sensor, Camera):
+            try:
+                self._validate_gaussian_camera(sensor.cfg, type(sensor))
+            except Exception:
+                sensor.destroy()
+                raise
         self._sensors[uid] = sensor
         self.notify_visualization_topology_changed()
         return sensor
