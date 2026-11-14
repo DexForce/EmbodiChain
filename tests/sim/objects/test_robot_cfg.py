@@ -155,6 +155,7 @@ def test_arx5_source_chain_commands_and_ik_roundtrip(
     assert restored.fpath == str(source)
     assert restored.init_qpos == cfg.init_qpos
     assert restored.root_props.self_collision_enabled is True
+    assert restored.joint_drive_props.drive_type == "force"
     chain = restored.build_pk_serial_chain()["arm"]
     assert chain.get_joint_parameter_names() == restored.control_parts["arm"]
     solver_cfg = restored.solver_cfg["arm"]

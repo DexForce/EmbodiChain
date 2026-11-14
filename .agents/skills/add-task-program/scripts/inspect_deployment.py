@@ -113,6 +113,14 @@ def inspect_deployment(
             "Task integration expects program_id "
             f"{deployment.program_id!r}, got {program.program_id!r}."
         )
+    if (
+        isinstance(task_program, Mapping)
+        and task_program.get("execution", "expert") == "policy"
+    ):
+        # Use the production decoder/validator, without mutating Gym's registry.
+        from embodichain.lab.gym.utils.gym_utils import config_to_cfg
+
+        config_to_cfg(dict(payload), source_path=deployment_path, _register_env=False)
     compiled = catalog.preflight(program, strict_contracts=strict_contracts)
     calls = tuple(
         compiled_call.call
@@ -132,6 +140,8 @@ def inspect_deployment(
         "scene_registry": deployment.selection.scene_registry,
         "robot_profile": deployment.selection.robot_profile,
         "runtime_preset": deployment.selection.runtime_preset,
+        "execution": task_program.get("execution", "expert"),
+        "action_owners": task_program.get("action_owners", {}),
         "segment_count": compiled.segment_count,
         "call_count": len(calls),
         "semantic_calls": semantic_calls,

@@ -789,6 +789,9 @@ class BaseEnv(gym.Env):
     ) -> None:
         """Dispatch a final post-reset boundary to optional recording consumers."""
 
+    def _after_observation(self, frame: ObservationFrame) -> None:
+        """Publish transition measurements before reward and termination consumers."""
+
     def evaluate(self, **kwargs) -> Dict[str, Any]:
         """
         Evaluate whether the environment is currently in a success state by returning a dictionary with a "success" key or
@@ -1180,6 +1183,7 @@ class BaseEnv(gym.Env):
                 with self._profiler.section("get_obs"):
                     observation_frame = self._capture_observation(**kwargs)
                     obs = observation_frame.policy
+            self._after_observation(observation_frame)
             with self._profiler.section("get_info"):
                 info = self.get_info(**kwargs)
             with self._profiler.section("reward"):
