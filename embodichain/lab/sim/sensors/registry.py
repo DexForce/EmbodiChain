@@ -63,6 +63,7 @@ _registrations: dict[str, SensorRegistration] = {}
 _entry_points: dict[str, metadata.EntryPoint] = {}
 _discovered = False
 _loading: dict[str, tuple[int, Future[SensorRegistration]]] = {}
+_waiting_on: dict[int, tuple[int, Future[SensorRegistration]]] = {}
 _registry_lock = RLock()
 
 
@@ -142,8 +143,10 @@ def get_sensor_registration(sensor_type: str) -> SensorRegistration:
     """Resolve a sensor's config and factory, loading only that plugin.
 
     Concurrent callers share the active load's registration or exception.
-    Re-entry on the importing thread is recursive loading; a failed load can
-    be retried by a later call. Registry locks are released during imports.
+    Re-entry on the importing thread or a cycle of registry waits across loading
+    threads fails explicitly; a failed load can be retried by a later call.
+    Registry locks are released during imports. Python module import locks are
+    outside this wait graph; plugin modules must avoid cyclic module imports.
 
     Args:
         sensor_type: Case-sensitive registered identifier.
@@ -174,9 +177,26 @@ def get_sensor_registration(sensor_type: str) -> SensorRegistration:
             _loading[sensor_type] = (get_ident(), future)
         else:
             future = pending[1]
+            waiter = get_ident()
+            owner = pending[0]
+            while not future.done():
+                if owner == waiter:
+                    raise RuntimeError(
+                        f"Cyclic loading dependency for sensor {sensor_type!r}."
+                    )
+                edge = _waiting_on.get(owner)
+                if edge is None or edge[1].done():
+                    break
+                owner = edge[0]
+            if not future.done():
+                _waiting_on[waiter] = (pending[0], future)
     # Never hold the registry lock across imports or while waiting on another loader.
     if pending is not None:
-        return future.result()
+        try:
+            return future.result()
+        finally:
+            with _registry_lock:
+                _waiting_on.pop(waiter, None)
     try:
         try:
             registration = entry.load()

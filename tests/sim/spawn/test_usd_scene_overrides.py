@@ -331,6 +331,7 @@ def test_import_recipe_selects_subtree_and_namespaces_runtime_identity(tmp_path)
     [
         ("base", "wrist", "hybrid", "Camera", True),
         ("base", "wrist", "hybrid", "ExternalCamera", True),
+        ("base", "wrist", "hybrid", "CallableCamera", True),
         ("missing", "wrist", "hybrid", "Camera", False),
         ("base", "Robot", "hybrid", "Camera", False),
         ("base", "wrist", "no-render", "Camera", False),
@@ -354,19 +355,26 @@ def test_robot_metadata_preserves_source_identity_and_preflights_sensor_binding(
     from embodichain.utils import configclass
 
     camera_cfg_type = CameraCfg
-    if sensor_type == "ExternalCamera":
+    if sensor_type in ("ExternalCamera", "CallableCamera"):
+        registered_type = sensor_type
 
         @configclass
         class ExternalCameraCfg(CameraCfg):
-            sensor_type: str = "ExternalCamera"
+            sensor_type: str = registered_type
 
         class ExternalCamera(Camera):
             pass
 
+        def create_camera(cfg, *, context):
+            pytest.fail("USD preflight must not construct a camera")
+
         monkeypatch.setattr(registry, "_registrations", registry._registrations.copy())
         register_sensor(
             SensorRegistration(
-                "ExternalCamera", ExternalCameraCfg, ExternalCamera, legacy_factory=True
+                sensor_type,
+                ExternalCameraCfg,
+                create_camera if sensor_type == "CallableCamera" else ExternalCamera,
+                legacy_factory=sensor_type != "CallableCamera",
             )
         )
         camera_cfg_type = ExternalCameraCfg
