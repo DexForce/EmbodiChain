@@ -35,10 +35,10 @@ from .extensions import (
     ControlPartEvidenceProviderFactory,
     RegisteredSemanticLowererFactory,
 )
-from embodichain.lab.sim.atomic_actions import (
-    ActionOptions,
+from embodichain.lab.sim.atomic_skills import (
+    SkillOptions,
     Affordance,
-    AtomicActionEngine,
+    AtomicSkillEngine,
     AxisAlign,
     AxisAlignAffordance,
     AxisAlignGoal,
@@ -71,6 +71,7 @@ from embodichain.lab.sim.atomic_actions import (
     Slide,
     SlideAffordance,
     SlideGoal,
+    SlideJointTarget,
     SlideOptions,
     sample_initial_articulation_geometry,
 )
@@ -178,7 +179,7 @@ class _ParkLowerer(RegisteredSemanticLowerer):
         *,
         context: PlanningContext,
         bound: BoundSemanticCall,
-        option_template: ActionOptions,
+        option_template: SkillOptions,
     ) -> SemanticLowering:
         """Construct a named joint goal whose posture stays in the profile."""
         del context, bound
@@ -219,7 +220,7 @@ class _AxisAlignLowerer(RegisteredSemanticLowerer):
         *,
         context: PlanningContext,
         bound: BoundSemanticCall,
-        option_template: ActionOptions,
+        option_template: SkillOptions,
     ) -> SemanticLowering:
         """Construct one typed axis-alignment goal and attach effect."""
         del context, bound
@@ -286,7 +287,7 @@ class _AxisAlignLowererFactory(RegisteredSemanticLowererFactory):
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> RegisteredSemanticLowerer:
         """Resolve exact axis-aware grasp semantics for every allowed object."""
         del simulation
@@ -329,7 +330,7 @@ class _ParkLowererFactory(RegisteredSemanticLowererFactory):
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> RegisteredSemanticLowerer:
         """Validate runtime ownership and return one fresh Park lowerer."""
         del simulation, scene_registry
@@ -345,8 +346,8 @@ class _AntipodalGraspPoseGeneratorFactory:
     model_id: str
     min_opening_width: float
     max_opening_width: float
+    gripper_json: str
     point_spacing: float = 0.012
-    side: str | None = None
     root_from_tcp: tuple[float, ...] | None = None
     root_from_contact_frame: tuple[float, ...] | None = None
     sample_count: int | None = None
@@ -357,17 +358,62 @@ class _AntipodalGraspPoseGeneratorFactory:
     filter_ground_collision: bool | None = None
     force_refresh: bool | None = None
 
+    def validate_binding(self, robot: object, target_id: str) -> None:
+        """Reject a static service snapshot bound to different physical hardware."""
+        import json
+
+        expected = json.loads(self.gripper_json)
+        declaration = expected.get("binding")
+        if declaration is None:
+            return
+        bindings = getattr(getattr(robot, "cfg", None), "gripper_bindings", {})
+        selected = bindings.get(declaration["instance"])
+        if selected is None or selected["declaration"]["control_part"] != target_id:
+            raise ValueError(
+                "Configured grasp service has no matching actual gripper binding."
+            )
+        actual = selected["defaults"]
+        expected_binding = {
+            key: value for key, value in declaration.items() if key != "instance"
+        }
+        if json.dumps(selected["declaration"], sort_keys=True) != json.dumps(
+            expected_binding, sort_keys=True
+        ):
+            raise ValueError(
+                "Configured grasp service disagrees with the actual hand installation."
+            )
+        for key in ("fpath", "joint_commands", "default_root_from_tcp", "mesh_paths"):
+            if json.dumps(actual.get(key, {}), sort_keys=True) != json.dumps(
+                expected.get(key, {}), sort_keys=True
+            ):
+                raise ValueError(
+                    f"Configured grasp service disagrees with actual gripper {key}."
+                )
+
+        def physical_model(values):
+            return {
+                key: value
+                for key, value in values.items()
+                if key not in {"min_opening_width", "max_opening_width"}
+            }
+
+        if json.dumps(physical_model(actual), sort_keys=True) != json.dumps(
+            physical_model(expected), sort_keys=True
+        ):
+            raise ValueError(
+                "Configured grasp calibration or geometry disagrees with the actual gripper."
+            )
+
     def __call__(self) -> GraspPoseGenerator:
         """Create a fresh configured antipodal grasp-pose generator."""
-        from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
         from embodichain.toolkits.graspkit.pg_grasp import (
             AntipodalGraspPoseGenerator,
             AntipodalGraspPoseGeneratorCfg,
             GraspAnnotationCfg,
             ParallelJawGraspCollisionCfg,
         )
-        from embodichain.toolkits.graspkit.pg_grasp.model_geometry import (
-            get_parallel_jaw_collision_geometry,
+        from embodichain.lab.sim.utility.gripper_geometry import (
+            build_gripper_collision_geometry,
         )
         import numpy as np
 
@@ -391,27 +437,16 @@ class _AntipodalGraspPoseGeneratorFactory:
         if self.force_refresh is not None:
             annotation_kwargs["force_refresh"] = self.force_refresh
 
-        geometry_kwargs = {}
-        if self.root_from_contact_frame is not None:
-            geometry_kwargs["root_from_contact_frame"] = np.asarray(
-                self.root_from_contact_frame
-            ).reshape(4, 4)
+        import json
+
+        defaults = json.loads(self.gripper_json)
         return AntipodalGraspPoseGenerator(
-            ParallelJawGripperModelCfg(
-                model_id=self.model_id,
-                min_opening_width=self.min_opening_width,
-                max_opening_width=self.max_opening_width,
-            ),
-            collision_geometry=get_parallel_jaw_collision_geometry(
-                self.model_id,
+            model_id=defaults["model_id"],
+            min_opening_width=defaults["min_opening_width"],
+            max_opening_width=defaults["max_opening_width"],
+            collision_geometry=build_gripper_collision_geometry(
+                defaults,
                 point_spacing=self.point_spacing,
-                side=self.side,
-                root_from_tcp=(
-                    None
-                    if self.root_from_tcp is None
-                    else np.asarray(self.root_from_tcp).reshape(4, 4)
-                ),
-                **geometry_kwargs,
             ),
             algorithm_cfg=AntipodalGraspPoseGeneratorCfg(**algorithm_kwargs),
             collision_cfg=ParallelJawGraspCollisionCfg(**collision_kwargs),
@@ -431,6 +466,7 @@ class _ArticulationLinkSlideLowerer(RegisteredSemanticLowerer):
         link_entity_id: str,
         *,
         target_pose_mode: str = "live",
+        joint_target: tuple[str, str, int] | None = None,
     ) -> None:
         if not isinstance(semantics, ObjectSemantics):
             raise TypeError("semantics must be ObjectSemantics.")
@@ -442,6 +478,7 @@ class _ArticulationLinkSlideLowerer(RegisteredSemanticLowerer):
             field_name="link_entity_id",
         )
         self._target_pose_mode = _slide_target_pose_mode(target_pose_mode)
+        self._joint_target = joint_target
 
     def lower(
         self,
@@ -449,7 +486,7 @@ class _ArticulationLinkSlideLowerer(RegisteredSemanticLowerer):
         *,
         context: PlanningContext,
         bound: BoundSemanticCall,
-        option_template: ActionOptions,
+        option_template: SkillOptions,
     ) -> SemanticLowering:
         """Validate the configured payload and construct one typed Slide goal."""
         del bound
@@ -459,10 +496,15 @@ class _ArticulationLinkSlideLowerer(RegisteredSemanticLowerer):
             )
         arguments = dict(call.arguments)
         configured_arguments = {"handle": self._link_entity_id}
-        if arguments != configured_arguments:
+        if self._joint_target is not None:
+            configured_arguments["position"] = arguments.get("position")
+        if arguments != configured_arguments or (
+            self._joint_target is not None and "position" not in arguments
+        ):
             raise ValueError(
-                f"{self.call_id} arguments must name only the configured handle; "
-                "motion options belong to the selected policy preset."
+                f"{self.call_id} arguments must name the configured handle"
+                + (" and position; " if self._joint_target is not None else "; ")
+                + "motion options belong to the selected policy preset."
             )
         validate_semantic_call_payload(
             {
@@ -492,6 +534,16 @@ class _ArticulationLinkSlideLowerer(RegisteredSemanticLowerer):
             goal=SlideGoal(
                 semantics=self._semantics,
                 target_pose=target_pose,
+                joint_target=(
+                    SlideJointTarget(
+                        self._joint_target[0],
+                        self._joint_target[1],
+                        arguments["position"],
+                        axis_sign=self._joint_target[2],
+                    )
+                    if self._joint_target is not None
+                    else None
+                ),
             )
         )
 
@@ -512,6 +564,10 @@ class _ArticulationLinkSlideLowererFactory(RegisteredSemanticLowererFactory):
 
     target_pose_mode: str = "live"
 
+    @property
+    def _configured_joint_target(self) -> tuple[str, int] | None:
+        return None
+
     def __post_init__(self) -> None:
         for field_name in (
             "articulation_id",
@@ -522,6 +578,16 @@ class _ArticulationLinkSlideLowererFactory(RegisteredSemanticLowererFactory):
         if self.translation_axis is not None:
             object.__setattr__(self, "translation_axis", _axis(self.translation_axis))
         _slide_target_pose_mode(self.target_pose_mode)
+        joint_target = self._configured_joint_target
+        if joint_target is not None:
+            if type(joint_target) is not tuple or len(joint_target) != 2:
+                raise TypeError("joint_target must contain a joint name and axis sign.")
+            SlideJointTarget(
+                self.articulation_id,
+                joint_target[0],
+                0.0,
+                axis_sign=joint_target[1],
+            )
 
     def create(
         self,
@@ -529,7 +595,7 @@ class _ArticulationLinkSlideLowererFactory(RegisteredSemanticLowererFactory):
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> RegisteredSemanticLowerer:
         """Build one fresh lowerer from the configured live link."""
         if engine.robot is not robot:
@@ -580,6 +646,29 @@ class _ArticulationLinkSlideLowererFactory(RegisteredSemanticLowererFactory):
                 body_scale=articulation.cfg.body_scale,
             ).to_object_geometry()
         affordance_kwargs: dict[str, object] = {}
+        joint_target = self._configured_joint_target
+        if joint_target is not None:
+            chain = articulation.get_parent_joint_chain(native_link_name)
+            joint = next(
+                (item for item in chain if item.name == joint_target[0]),
+                None,
+            )
+            if joint is None or joint.joint_type != "prismatic":
+                raise ValueError("Slide joint_target must name a prismatic ancestor.")
+            if (
+                self.translation_axis is None
+                and sum(item.joint_type != "fixed" for item in chain) != 1
+            ):
+                raise ValueError(
+                    "Slide joint_target requires an unambiguous axis or an explicit translation_axis."
+                )
+            if joint.joint_limits is None or not all(
+                math.isfinite(value) for value in joint.joint_limits
+            ):
+                raise ValueError("Slide joint_target requires finite joint limits.")
+            affordance_kwargs.update(
+                joint_name=joint.name, joint_limits=joint.joint_limits
+            )
         if self.translation_axis is not None:
             affordance_kwargs["translation_axis"] = torch.tensor(
                 self.translation_axis,
@@ -608,7 +697,26 @@ class _ArticulationLinkSlideLowererFactory(RegisteredSemanticLowererFactory):
             semantics,
             self.link_entity_id,
             target_pose_mode=self.target_pose_mode,
+            joint_target=(
+                (self.articulation_id, *joint_target)
+                if joint_target is not None
+                else None
+            ),
         )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class _ArticulationLinkJointTargetSlideLowererFactory(
+    _ArticulationLinkSlideLowererFactory
+):
+    """Register the explicit joint target without changing handle-only fingerprints."""
+
+    revision: ClassVar[str] = "5"
+    joint_target: tuple[str, int]
+
+    @property
+    def _configured_joint_target(self) -> tuple[str, int]:
+        return self.joint_target
 
 
 class _MoveHeldObjectLowerer(RegisteredSemanticLowerer):
@@ -636,7 +744,7 @@ class _MoveHeldObjectLowerer(RegisteredSemanticLowerer):
         *,
         context: PlanningContext,
         bound: BoundSemanticCall,
-        option_template: ActionOptions,
+        option_template: SkillOptions,
     ) -> SemanticLowering:
         """Construct one late-bound object-space transport goal."""
         del context, bound
@@ -712,7 +820,7 @@ class _MoveHeldObjectLowererFactory(RegisteredSemanticLowererFactory):
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> RegisteredSemanticLowerer:
         """Build one lowerer after validating its live reference entity."""
         del simulation
@@ -791,7 +899,7 @@ class _RelativePlaceLowerer(RegisteredSemanticLowerer):
         *,
         context: PlanningContext,
         bound: BoundSemanticCall,
-        option_template: ActionOptions,
+        option_template: SkillOptions,
     ) -> SemanticLowering:
         """Resolve fresh object/reference poses and preserve the held grasp."""
         if type(option_template) is not PlaceOptions:
@@ -879,7 +987,7 @@ class _RelativePlaceLowerer(RegisteredSemanticLowerer):
         route = self._resolve_route(call)
         if picked_object.entity_id != route.object_id:
             return None
-        options = bound.preset.action_option_template(call.semantic_id)
+        options = bound.preset.skill_option_template(call.semantic_id)
         if type(options) is not PlaceOptions:
             raise TypeError(
                 "Relative Place look-ahead requires an exact PlaceOptions template."
@@ -996,7 +1104,7 @@ class _RelativePlaceLowererFactory(RegisteredSemanticLowererFactory):
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> RegisteredSemanticLowerer:
         """Canonicalize all object/reference IDs before constructing a lowerer."""
         del simulation
@@ -1131,7 +1239,7 @@ class _CoordinatedTransportLowerer(RegisteredSemanticLowerer):
         *,
         context: PlanningContext,
         bound: BoundSemanticCall,
-        option_template: ActionOptions,
+        option_template: SkillOptions,
     ) -> SemanticLowering:
         """Construct one late-bound coordinated object target."""
         del bound
@@ -1258,7 +1366,7 @@ class _CoordinatedTransportLowererFactory(RegisteredSemanticLowererFactory):
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> RegisteredSemanticLowerer:
         """Resolve grasp semantics and validate all live target references."""
         del simulation
@@ -1364,7 +1472,7 @@ class _PourLowerer(RegisteredSemanticLowerer):
         *,
         context: PlanningContext,
         bound: BoundSemanticCall,
-        option_template: ActionOptions,
+        option_template: SkillOptions,
     ) -> SemanticLowering:
         """Construct the typed goal while policy presets own the tilt angle."""
         del context, bound
@@ -1399,7 +1507,7 @@ class _PourLowerer(RegisteredSemanticLowerer):
             or previous_target.pose.relative_pose is None
         ):
             return ()
-        options = bound.preset.action_option_template(call.semantic_id)
+        options = bound.preset.skill_option_template(call.semantic_id)
         if type(options) is not PourOptions:
             raise TypeError(
                 "Configured Pour look-ahead requires an exact PourOptions template."
@@ -1464,7 +1572,7 @@ class _PourLowererFactory(RegisteredSemanticLowererFactory):
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> RegisteredSemanticLowerer:
         """Validate the object's selected grasp semantics before construction."""
         del simulation
@@ -1528,7 +1636,7 @@ class _PushObjectLowerer(RegisteredSemanticLowerer):
         *,
         context: PlanningContext,
         bound: BoundSemanticCall,
-        option_template: ActionOptions,
+        option_template: SkillOptions,
     ) -> SemanticLowering:
         """Construct a late-bound object and target push goal."""
         del context, bound
@@ -1604,7 +1712,7 @@ class _PushObjectLowererFactory(RegisteredSemanticLowererFactory):
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> RegisteredSemanticLowerer:
         """Validate configured scene entities and create one fresh lowerer."""
         del simulation
@@ -1801,7 +1909,7 @@ class _JointPositionConstraintEvidenceProviderFactory(
         simulation: object,
         robot: object,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
         scene_provider: SceneProvider,
     ) -> EffectEvidenceProvider:
         """Bind a fresh evidence provider to the exact assembled robot."""

@@ -2298,8 +2298,8 @@ def _make_curobo_engine(
     *,
     use_cuda_graph: bool = False,
 ) -> object:
-    from embodichain.lab.sim.atomic_actions import (
-        AtomicActionEngine,
+    from embodichain.lab.sim.atomic_skills import (
+        AtomicSkillEngine,
     )
     from embodichain.lab.sim.motion.motion_generator import (
         MotionGenCfg,
@@ -2315,7 +2315,7 @@ def _make_curobo_engine(
             )
         )
     )
-    engine = AtomicActionEngine(motion_generator)
+    engine = AtomicSkillEngine(motion_generator)
     return engine
 
 
@@ -2323,8 +2323,8 @@ def _make_curobo_engine(
 @pytest.mark.slow
 def test_curobo_reuses_non_graph_backend():
     from embodichain.lab.sim import SimulationManager
-    from embodichain.lab.sim.atomic_actions import (
-        ActionInvocation,
+    from embodichain.lab.sim.atomic_skills import (
+        SkillInvocation,
         EndEffectorPoseGoal,
         MotionPolicy,
     )
@@ -2341,7 +2341,7 @@ def test_curobo_reuses_non_graph_backend():
 
         result = engine.compile(
             (
-                ActionInvocation(
+                SkillInvocation(
                     "move_end_effector",
                     EndEffectorPoseGoal(xpos=target),
                     binding,
@@ -2361,7 +2361,7 @@ def test_curobo_reuses_non_graph_backend():
 
         result = engine.compile(
             (
-                ActionInvocation(
+                SkillInvocation(
                     "move_end_effector",
                     EndEffectorPoseGoal(xpos=target),
                     binding,
@@ -2382,8 +2382,8 @@ def test_curobo_reuses_non_graph_backend():
 @pytest.mark.slow
 def test_curobo_uses_accelerator_with_cpu_physics():
     from embodichain.lab.sim import SimulationManager
-    from embodichain.lab.sim.atomic_actions import (
-        ActionInvocation,
+    from embodichain.lab.sim.atomic_skills import (
+        SkillInvocation,
         EndEffectorPoseGoal,
         MotionPolicy,
     )
@@ -2400,7 +2400,7 @@ def test_curobo_uses_accelerator_with_cpu_physics():
 
         result = engine.compile(
             (
-                ActionInvocation(
+                SkillInvocation(
                     "move_end_effector",
                     EndEffectorPoseGoal(xpos=target),
                     binding,

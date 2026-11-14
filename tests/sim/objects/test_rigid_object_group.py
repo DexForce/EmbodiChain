@@ -35,6 +35,10 @@ from dexsim.types import ActorType
 
 DUCK_PATH = "ToyDuck/toy_duck.glb"
 TABLE_PATH = "ShopTableSimple/shop_table_simple.ply"
+# These small scenes do not inspect pixels; leave room for all tested links.
+TEST_SCENE_NODE_CAPACITY = 512
+TEST_VIEWPORT_SIZE = 64
+
 NUM_ARENAS = 4
 Z_TRANSLATION = 2.0
 # Newton converts principal-frame inertia diagonals through a float32 full
@@ -70,6 +74,62 @@ def test_cpu_body_data_reads_angular_velocity_from_angular_api():
     body_view.fetch_linear_velocity.assert_not_called()
 
 
+@pytest.mark.no_sim
+@pytest.mark.parametrize("env_ids", [None, [2, 0], torch.tensor([2, 0]), []])
+def test_group_reset_preserves_prepared_variant_poses_and_selection(env_ids):
+    from embodichain.lab.sim.shapes import CubeCfg
+
+    explicit_pose = torch.tensor(
+        [[0, 0, 1, 9], [1, 0, 0, 8], [0, 1, 0, 7], [0, 0, 0, 1]],
+        dtype=torch.float32,
+    )
+    member = RigidObjectCfg(
+        shape=CubeCfg(),
+        init_pos=(1, 0, 0),
+        env_variants={
+            1: RigidObjectCfg(shape=CubeCfg(), init_pos=(5, 0, 0), init_rot=(0, 0, 90)),
+            2: RigidObjectCfg(shape=CubeCfg(), init_local_pose=explicit_pose.tolist()),
+        },
+    )
+    group = object.__new__(RigidObjectGroup)
+    group.device = torch.device("cpu")
+    group.cfg = RigidObjectGroupCfg(
+        rigid_objects={
+            "variant": member,
+            "constant": RigidObjectCfg(shape=CubeCfg(), init_pos=(-1, 0, 0)),
+        }
+    )
+    group._entities = [[object(), object()] for _ in range(3)]
+    group._declared_num_objects = 2
+    group._all_indices = [0, 1, 2]
+    group._all_obj_indices = [0, 1]
+    state = torch.eye(4).repeat(3, 2, 1, 1)
+    state[:, :, :3, 3] = -99
+    expected = state.clone()
+    ids = list(range(3)) if env_ids is None else [int(index) for index in env_ids]
+    initial = torch.eye(4).repeat(3, 2, 1, 1)
+    initial[:, 1, 0, 3] = -1
+    initial[0, 0, 0, 3] = 1
+    initial[1, 0] = torch.tensor(
+        [[0, -1, 0, 5], [1, 0, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]],
+        dtype=torch.float32,
+    )
+    initial[2, 0] = explicit_pose
+    expected[ids] = initial[ids]
+    group._restore_default_physical_properties = Mock()
+    group.clear_dynamics = Mock()
+
+    def write_pose(poses, *, env_ids):
+        state[env_ids] = poses
+
+    group.set_local_pose = Mock(side_effect=write_pose)
+
+    group.reset(env_ids)
+
+    torch.testing.assert_close(state, expected, atol=1e-6, rtol=0)
+    group.clear_dynamics.assert_called_once_with(env_ids=ids)
+
+
 class BaseRigidObjectGroupTest:
     """Shared test logic for CPU and CUDA."""
 
@@ -79,6 +139,9 @@ class BaseRigidObjectGroupTest:
             device=device,
             num_envs=NUM_ARENAS,
             physics_cfg=physics_cfg_for_backend(physics),
+            scene_node_capacity=TEST_SCENE_NODE_CAPACITY,
+            width=TEST_VIEWPORT_SIZE,
+            height=TEST_VIEWPORT_SIZE,
         )
         self.sim = SimulationManager(config)
         self.physics = physics
@@ -275,23 +338,20 @@ class BaseRigidObjectGroupTest:
             self.obj_group.uid not in self.sim.asset_uids
         ), "Object group UID still present after removal"
 
-    def test_set_physical_visible(self):
-        self.obj_group.set_physical_visible(visible=True)
-        self.obj_group.set_physical_visible(visible=False)
-
-    def test_set_visible(self):
+    def test_visibility_controls(self):
+        """Collision debug and render visibility accept both toggle states."""
         self.obj_group.set_visible(visible=True)
         self.obj_group.set_visible(visible=False)
+        # Restore the initial render state before creating collision overlays.
+        self.obj_group.set_visible(visible=True)
+        self.obj_group.set_physical_visible(visible=True)
+        self.obj_group.set_physical_visible(visible=False)
 
     def teardown_method(self):
         """Clean up resources after each test method."""
         self.sim.destroy(exit_process=False)
         self.__dict__.clear()
-        import gc
-
-        gc.collect()
         SimulationManager.flush_cleanup_queue()
-        gc.collect()
 
 
 class TestRigidObjectGroupCPU(BaseRigidObjectGroupTest):

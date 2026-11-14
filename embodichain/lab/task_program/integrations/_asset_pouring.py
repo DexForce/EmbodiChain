@@ -148,7 +148,12 @@ def prepare_pour_adaptation(
     program: dict[str, Any],
 ) -> _PreparedPour:
     """Validate selected evidence and remove only the calibration being replaced."""
+    from .configured import _normalize_skill_options_key
+
     cfg.validate()
+    integration["profile"] = _normalize_skill_options_key(
+        integration["profile"], path="task integration.profile"
+    )
     for value in (
         cfg.bottle_role,
         cfg.cup_role,
@@ -237,7 +242,7 @@ def prepare_pour_adaptation(
     ]
     if len(grasps) != 1:
         raise ValueError("Pour bottle needs exactly one antipodal grasp")
-    options = integration["profile"]["action_options"]
+    options = integration["profile"]["skill_options"]
     pick_options = options.get("pick", {})
     pour_options = options.get("simulation.pour", {})
     angle = pour_options.get("rotate_angle")

@@ -13,7 +13,7 @@ decision is which environment boundary the prompt requires.
 | Differentiable dynamics or APG | Differentiable lightweight env | `trainer.learning_env` |
 
 Do not use a simulator Gym config for APG. Differentiable algorithms require a
-`DifferentiableVecEnv` and are rejected on the simulator path.
+`DifferentiableEnvProtocol` and are rejected on the simulator path.
 
 ## Simulator Gym RL
 
@@ -25,7 +25,7 @@ measured success, failure and optional truncation condition functors. The ID
 must be free or match an identical configuration-owned declaration.
 
 Virtual target poses are reset-owned and recorded for single-environment dynamic
-replay. Keep `rl_task` and `task_program` in separate deployments. See the owning
+replay. Combine `rl_task` and `task_program` only in explicit `task_program.execution: policy` mode with complete policy resource ownership; expert execution remains exclusive. See the policy-stage subset and reward/termination bindings in the configuration contract. See the owning
 [configuration contract](../../../../agent_context/topics/env-framework/configuration.md#configuration-owned-manipulation-rl)
 and [user guide](../../../../docs/source/guides/configured_manipulation_rl.md).
 
@@ -71,7 +71,7 @@ extensions/embodichain_tasks/embodichain_tasks/<category_path>/<task_name>.py
 ```
 
 Register the factory with `@register_learning_env` and implement the
-`LearningVecEnv` structural contract:
+`LearningEnvProtocol` structural contract:
 
 - `num_envs`, `device`, `single_observation_space`, and
   `single_action_space`;
@@ -81,7 +81,7 @@ Register the factory with `@register_learning_env` and implement the
 - `close()`.
 
 For APG or another differentiable algorithm, implement
-`DifferentiableVecEnv.detach_state()` as the truncated-backpropagation
+`DifferentiableEnvProtocol.detach_state()` as the truncated-backpropagation
 boundary. It must detach dynamic state without resetting or resampling the
 task.
 

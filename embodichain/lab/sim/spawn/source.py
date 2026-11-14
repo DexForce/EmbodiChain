@@ -29,6 +29,7 @@ from dexsim.spawn import (
     CollisionDesc,
     DexsimCollisionDesc,
     DexsimPhysicsDesc,
+    JointDesc,
     NewtonJointDesc,
     RigidBodyPhysicsDesc,
 )
@@ -400,6 +401,8 @@ def _apply_dexsim_source_overlay(
     calls limited to links marked by :func:`configure_articulation_desc`.
     Newton-only blocks may still be present in the copied descriptor for
     backend parity; this Default-only pass intentionally ignores them.
+    Partial joint drives are completed from each native instance before the
+    setter is called, preserving omitted properties and the current drive mode.
     """
     binding = getattr(handle, "_physics_binding", None)
     if binding is None:
@@ -453,7 +456,58 @@ def _apply_dexsim_source_overlay(
         _restore_dexsim_mass_override(rigid_body, link)
 
     if effective.joints:
+        _complete_dexsim_joint_drives(binding, effective.joints)
         _apply_dexsim_joint_properties(binding, effective.joints)
+
+
+def _complete_dexsim_joint_drives(binding: Any, joints: list[JointDesc]) -> None:
+    """Fill omitted drive fields before Default's non-sparse native setter."""
+    drive_fields = (
+        "stiffness",
+        "damping",
+        "max_force",
+        "max_velocity",
+        "joint_friction",
+    )
+    selected = [
+        joint
+        for joint in joints
+        if joint.dof_count
+        and joint.dexsim is not None
+        and (
+            joint.armature is not None
+            or joint.dexsim.drive_mode is not None
+            or any(
+                getattr(joint.dexsim, name) is not None
+                for name in drive_fields
+                if name != "max_velocity"
+            )
+        )
+    ]
+    if not selected:
+        return
+
+    joint_indices = {
+        name: index for index, name in enumerate(binding.get_actived_joint_names())
+    }
+    stiffness, damping, effort, velocity, friction, armature, modes = (
+        binding.get_drive()
+    )
+    for joint in selected:
+        index = joint_indices[joint.name]
+        # Native set_drive() supplies unrelated defaults for omitted arguments.
+        # Read each instance in cache order and preserve its actual values.
+        for name, values in zip(
+            drive_fields,
+            (stiffness, damping, effort, velocity, friction),
+            strict=True,
+        ):
+            if getattr(joint.dexsim, name) is None:
+                setattr(joint.dexsim, name, float(values[index]))
+        if joint.dexsim.drive_mode is None:
+            joint.dexsim.drive_mode = modes[index]
+        if joint.armature is None:
+            joint.armature = float(armature[index])
 
 
 def _restore_dexsim_mass_override(rigid_body: Any, link: Any) -> None:

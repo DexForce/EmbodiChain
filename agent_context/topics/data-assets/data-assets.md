@@ -15,6 +15,7 @@ Online sampling and demonstration persistence belong to
 | Locked download and ZIP integrity | `embodichain/data/dataset.py`: `EmbodiChainDataset`, `_dataset_download_lock()` |
 | Shared class discovery | `embodichain/data/_asset_registry.py`: core modules and `embodichain.assets` catalogs |
 | Robot-owned asset definitions | `extensions/embodichain_robots/_asset_catalog.py` → vendor/model `assets.py` |
+| YAM source conversion and reproducible archive | `scripts/tools/prepare_yam_i2rt_assets.py` → [source and published assets](../../../docs/source/resources/robot/i2rt/yam.md#published-assets-and-offline-use) |
 | CLI list/download | `embodichain/data/download.py`: `get_registry()`, `download_asset()` |
 | Default material catalog / provenance | `embodichain/_material_catalog.py` → `embodichain/data/default_materials.py`; `embodichain/data/default_materials.json` |
 | Default material archive | `embodichain/data/assets/materials.py`: `DefaultMaterials` |
@@ -49,6 +50,17 @@ both ZIP integrity repair and the Open3D constructor's download/extraction.
 Keep the lock outside the directory repair may delete. POSIX uses `flock`;
 Windows uses a polled byte lock. Direct Open3D subclasses do not automatically
 receive the project's locking/repair behavior.
+
+For `hf-mirror.com/datasets/DexForceAI/embodichain_data/` descriptors, the shared
+dataset base appends the matching official `huggingface.co` URL after the
+declared sources. Open3D tries it when an earlier download or checksum check
+fails, retaining the descriptor's revision, digest and extraction subdirectory.
+Custom hosts and other repositories are unchanged; failure of every source
+still raises a download error.
+
+The `task` category registers `PourCupAssets` runtime meshes and
+`PourCupDemoData` historical recordings through `assets/task_assets.py`.
+Both use the shared download cache and class-prefixed paths.
 
 The CLI honors an asset class's optional `cache_prefix` when checking readiness
 and ensuring extraction; otherwise the class name is the cache entry.

@@ -30,7 +30,7 @@ from typing import Any
 import numpy as np
 import torch
 
-from embodichain.learning.rl.env import ScheduledDifferentiableVecEnv
+from embodichain.learning.rl.env import ScheduledDifferentiableEnvProtocol
 
 __all__: list[str] = []
 
@@ -178,7 +178,7 @@ def _metadata(trainer: Any) -> dict[str, Any]:
             trainer_config["gradient_accumulation_steps"] = (
                 trainer.cfg.gradient_accumulation_steps
             )
-            if not isinstance(trainer.env, ScheduledDifferentiableVecEnv):
+            if not isinstance(trainer.env, ScheduledDifferentiableEnvProtocol):
                 trainer_config["update_horizon"] = trainer.update_horizon
     return {
         "trainer": _type_name(trainer),

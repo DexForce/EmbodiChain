@@ -34,6 +34,23 @@ def is_newton_scene(scene: object) -> bool:
     return isinstance(scene, Scene) and scene.backend == "newton"
 
 
+def _supports_newton_position_targets(scene: Scene) -> bool:
+    """Query the finalized solver contract while preserving legacy SDK support."""
+    query = getattr(scene, "dynamics_capabilities", None)
+    if query is None:
+        from dexsim.engine import newton_physics
+
+        if hasattr(newton_physics, "NewtonSolverExtension"):
+            raise RuntimeError(
+                "Newton solver extensions require a compatible DexSim SDK with "
+                "Scene.dynamics_capabilities() for articulation initialization."
+            )
+        # Released SDKs predating extensions accept the existing target channels.
+        return True
+    fields = query().supported_control_fields
+    return fields is None or "joint_target_q" in fields
+
+
 def _create_newton_standalone_state_sync(
     model: Any,
     body_ids: Sequence[int],
@@ -90,6 +107,7 @@ def _stabilize_newton_mimic_target_write(
     qvel_limits: torch.Tensor,
     articulation_view: Any,
     device: torch.device,
+    clamp_target_qpos: bool = True,
 ) -> None:
     """Keep Newton mimic follower-drive targets on the commanded relation."""
     if not configured:
@@ -137,8 +155,9 @@ def _stabilize_newton_mimic_target_write(
         )
         return
 
-    limits = qpos_limits[env_ids][:, follower_ids_tensor, :]
-    targets = targets.clamp(limits[..., 0], limits[..., 1])
+    if clamp_target_qpos:
+        limits = qpos_limits[env_ids][:, follower_ids_tensor, :]
+        targets = targets.clamp(limits[..., 0], limits[..., 1])
     articulation_view.apply_qpos(
         targets,
         env_ids,
@@ -178,6 +197,22 @@ def _default_mujoco_mimic_solref(physics_dt: float, num_substeps: int) -> np.nda
     )
 
 
+def _supports_newton_mimic_compliance(result: Scene | None) -> bool:
+    """Whether the finalized solver can configure the opt-in mimic stabilizer."""
+    if result is None or result.backend != "newton":
+        return False
+    from dexsim.engine.newton_physics.backend_registry import get_newton_backend
+
+    backend = get_newton_backend(result.world)
+    return bool(
+        backend is not None
+        and backend.solver_type in {"mujoco_warp", "dexuni"}
+        and not backend.cfg.requires_grad
+        and not (backend.model is not None and backend.model.requires_grad)
+        and backend.mujoco_solver is not None
+    )
+
+
 def _configure_newton_mimic_compliance(
     *,
     result: Scene | None,
@@ -185,6 +220,7 @@ def _configure_newton_mimic_compliance(
     state_joint_names: Sequence[str],
     mimic_ids: Sequence[int],
     mimic_parents: Sequence[int],
+    stabilize: bool = True,
     solref: Sequence[float] | None = None,
     solimp: Sequence[float] | None = None,
 ) -> bool:
@@ -198,8 +234,10 @@ def _configure_newton_mimic_compliance(
     tracks the leader's target relation between solver updates. Keeping the
     native equality rows enabled preserves mechanical force coupling; the drive
     is only a stabilizer and never mirrors measured follower state.
+    With ``stabilize=False``, only explicit equality parameters are changed;
+    follower drives, targets and unspecified equality parameters are retained.
     """
-    if result is None or result.backend != "newton" or not mimic_ids:
+    if not mimic_ids or not _supports_newton_mimic_compliance(result):
         return False
 
     from dexsim.engine.newton_physics.backend_registry import get_newton_backend
@@ -207,10 +245,13 @@ def _configure_newton_mimic_compliance(
     backend = get_newton_backend(result.world)
     if (
         backend is None
-        or backend.solver_type != "mujoco_warp"
+        or backend.solver_type not in {"mujoco_warp", "dexuni"}
         or backend.cfg.requires_grad
         or (backend.model is not None and backend.model.requires_grad)
     ):
+        return False
+    solver = backend.mujoco_solver
+    if solver is None:
         return False
 
     relation_names = [
@@ -223,9 +264,10 @@ def _configure_newton_mimic_compliance(
         raise RuntimeError("Newton Scene articulation has no finalized runtime.")
 
     model = runtime.model
-    target_ke = np.asarray(model.joint_target_ke.numpy()).reshape(-1)
-    target_kd = np.asarray(model.joint_target_kd.numpy()).reshape(-1)
-    target_mode = np.asarray(model.joint_target_mode.numpy()).reshape(-1)
+    if stabilize:
+        target_ke = np.asarray(model.joint_target_ke.numpy()).reshape(-1)
+        target_kd = np.asarray(model.joint_target_kd.numpy()).reshape(-1)
+        target_mode = np.asarray(model.joint_target_mode.numpy()).reshape(-1)
     expected_pairs: set[tuple[int, int]] = set()
     for entity in entities:
         binding = getattr(entity, "_physics_binding", None)
@@ -250,6 +292,8 @@ def _configure_newton_mimic_compliance(
                     "MuJoCo-Warp mimic compliance requires scalar joints."
                 )
             expected_pairs.add((int(child.joint_id), int(parent.joint_id)))
+            if not stabilize:
+                continue
             parent_dof = int(parent.qd_start)
             follower_ke.append(
                 float(target_ke[parent_dof]) * _MIMIC_FOLLOWER_TARGET_GAIN_RATIO
@@ -259,6 +303,8 @@ def _configure_newton_mimic_compliance(
             )
             follower_mode.append(int(target_mode[parent_dof]))
 
+        if not stabilize:
+            continue
         configured = entity.set_newton_drive(
             joint_ids=np.asarray(mimic_ids, dtype=np.int32),
             target_ke=np.asarray(follower_ke, dtype=np.float32),
@@ -287,28 +333,46 @@ def _configure_newton_mimic_compliance(
             f"Newton model has no mimic constraint for joint pair {error.args[0]}."
         ) from error
 
-    solver = runtime.solver
     mapping = getattr(solver, "mjc_eq_to_newton_mimic", None)
     mjw_model = getattr(solver, "mjw_model", None)
     if mapping is None or mjw_model is None:
         raise RuntimeError("MuJoCo-Warp did not materialize Newton mimic rows.")
 
     mapping_values = np.asarray(mapping.numpy())
+    if backend.solver_type == "dexuni":
+        from newton import Model
+
+        scene_rows = backend.get_mujoco_index_map(
+            Model.AttributeFrequency.CONSTRAINT_MIMIC
+        ).numpy()
+        mapping_values = mapping_values.copy()
+        valid = mapping_values >= 0
+        mapping_values[valid] = scene_rows[mapping_values[valid]]
     selected = np.isin(mapping_values, constraint_rows)
     if int(selected.sum()) != len(constraint_rows):
         raise RuntimeError(
             "MuJoCo-Warp mimic row mapping does not match the articulation."
         )
-    eq_solref = np.asarray(mjw_model.eq_solref.numpy()).copy()
-    mimic_solref = (
-        np.asarray(solref, dtype=np.float32)
-        if solref is not None
-        else _default_mujoco_mimic_solref(
-            float(backend.cfg.dt), int(backend.cfg.num_substeps)
+    update_reference = stabilize or solref is not None
+    if update_reference:
+        eq_solref = np.asarray(mjw_model.eq_solref.numpy()).copy()
+        mimic_solref = (
+            np.asarray(solref, dtype=np.float32)
+            if solref is not None
+            else _default_mujoco_mimic_solref(
+                float(backend.cfg.dt),
+                int(backend.cfg.num_substeps)
+                * int(
+                    getattr(
+                        getattr(backend.cfg, "solver_cfg", None),
+                        "sph_rigid_substeps",
+                        1,
+                    )
+                ),
+            )
         )
-    )
-    eq_solref[selected] = mimic_solref
-    mjw_model.eq_solref.assign(eq_solref)
+        eq_solref[selected] = mimic_solref
+        mjw_model.eq_solref.assign(eq_solref)
     if solimp is not None:
         eq_solimp = np.asarray(mjw_model.eq_solimp.numpy()).copy()
         eq_solimp[selected] = np.asarray(solimp, dtype=np.float32)
@@ -316,8 +380,9 @@ def _configure_newton_mimic_compliance(
 
     # Keep the optional CPU mirror coherent for debugging and CPU execution.
     mj_model = getattr(solver, "mj_model", None)
-    if mj_model is not None and len(eq_solref) > 0:
-        mj_model.eq_solref[:] = eq_solref[0]
-        if solimp is not None:
+    if mj_model is not None:
+        if update_reference and len(eq_solref) > 0:
+            mj_model.eq_solref[:] = eq_solref[0]
+        if solimp is not None and len(eq_solimp) > 0:
             mj_model.eq_solimp[:] = eq_solimp[0]
     return True

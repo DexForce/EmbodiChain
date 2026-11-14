@@ -35,14 +35,14 @@ from unittest.mock import Mock
 import pytest
 import torch
 
-from embodichain.lab.sim.atomic_actions import (
-    ActionBinding,
-    ActionInvocation,
+from embodichain.lab.sim.atomic_skills import (
+    SkillBinding,
+    SkillInvocation,
     ArticulationAffordanceGeometry,
     JointPositionGoal,
     MotionPolicy,
 )
-from embodichain.lab.sim.atomic_actions.plans import CompiledTrajectory, TimedTrajectory
+from embodichain.lab.sim.atomic_skills.plans import CompiledTrajectory, TimedTrajectory
 from embodichain.lab.sim.motion.planners import ToppraPlanOptions
 from embodichain.lab.sim.motion.planners.utils import PlanResult
 from embodichain.utils.math import axis_angle_to_rotation_matrix
@@ -137,7 +137,7 @@ def _atomic_case() -> BenchmarkCase:
         start_qpos=torch.zeros(1, 7),
         target_waypoints=target,
         reference_qpos=torch.zeros(1, 1, 7),
-        robot_id="franka_pgi",
+        robot_id="franka_robotiq",
         skill_id="move_end_effector",
         task_difficulty="simple",
         primary_success="task_success",
@@ -912,12 +912,12 @@ def _fake_articulation_geometry(*, joint_type: str) -> dict[str, torch.Tensor]:
     ).to_object_geometry()
 
 
-def test_atomic_suite_is_franka_pgi_and_curobo_only():
-    suite = load_suite("atomic_franka_pgi_smoke")
+def test_atomic_suite_is_franka_robotiq_and_curobo_only():
+    suite = load_suite("atomic_franka_robotiq_smoke")
 
-    assert suite.suite_version == "atomic_franka_pgi_smoke_v5"
-    assert suite.robot.id == "franka_pgi"
-    assert suite.robot.provider == "franka_pgi"
+    assert suite.suite_version == "atomic_franka_robotiq_smoke_v6"
+    assert suite.robot.id == "franka_robotiq"
+    assert suite.robot.provider == "franka_robotiq"
     assert [spec.id for spec in suite.planners if spec.enabled] == ["curobo"]
     assert [(track.id, track.scenario) for track in suite.enabled_tracks()] == [
         ("atomic-skill", "atomic_skill")
@@ -983,9 +983,9 @@ def test_atomic_suite_is_franka_pgi_and_curobo_only():
     gripper = suite.enabled_tracks()[0].config["gripper"]
     assert gripper == {
         "control_part": "eef",
-        "open_qpos": [0.0],
-        "grasp_qpos": [0.040],
-        "finger_links": ["gripper_finger1_link_1", "gripper_finger2_link_1"],
+        "open_qpos": [0.0] * 6,
+        "grasp_qpos": [0.7, -0.7, 0.7, -0.7, -0.7, 0.7],
+        "finger_links": ["left_inner_finger_pad", "right_inner_finger_pad"],
     }
     articulations = {
         item["id"]: item for item in suite.enabled_tracks()[0].config["articulations"]
@@ -1044,10 +1044,10 @@ def test_atomic_suite_is_franka_pgi_and_curobo_only():
 
 
 def test_randomized_atomic_suite_covers_four_interaction_skills_with_fixed_seed_sweep():
-    suite = load_suite("atomic_franka_pgi_randomized")
+    suite = load_suite("atomic_franka_robotiq_randomized")
     track = suite.enabled_tracks()[0]
 
-    assert suite.suite_version == "atomic_franka_pgi_randomized_v3"
+    assert suite.suite_version == "atomic_franka_robotiq_randomized_v4"
     assert track.id == "atomic-skill-randomized"
     assert track.config["seeds"] == list(range(101, 117))
     assert [item["id"] for item in track.config["skills"]] == [
@@ -1159,36 +1159,76 @@ def test_randomization_manifest_records_contract_and_seed():
     }
 
 
-def test_franka_pgi_robot_provider_exposes_arm_hand_and_tcp():
-    suite = load_suite("atomic_franka_pgi_smoke")
+def test_franka_robotiq_robot_provider_exposes_arm_hand_and_tcp(tmp_path):
+    suite = load_suite("atomic_franka_robotiq_smoke")
     cfg = create_robot_provider(suite.robot).build_cfg()
 
     assert isinstance(cfg, RobotCfg)
-    assert cfg.uid == "benchmark_franka_pgi"
+    assert cfg.uid == "benchmark_franka_robotiq"
     # The suites were authored with the tutorial scenes' rotated base.
     assert list(cfg.init_rot) == [0.0, 0.0, 180.0]
     assert len(cfg.control_parts["arm"]) == 7
-    assert cfg.control_parts["eef"] == ["gripper_finger1_joint_1"]
+    assert len(cfg.control_parts["eef"]) == 6
     assert cfg.solver_cfg["arm"].end_link_name == "fr3_link8"
     # Suite overrides still apply on top of the shared configuration.
-    assert cfg.solver_cfg["arm"].tcp[2][3] == pytest.approx(0.15)
+    assert cfg.solver_cfg["arm"].tcp[2][3] == pytest.approx(0.21)
     assert cfg.attrs.material_props.static_friction == pytest.approx(1.0)
-    assert len(cfg.init_qpos) == 9
-    # The PGI assembly has no fr3 finger links for a stock contact override.
+    assert len(cfg.init_qpos) == 13
+    # The Robotiq assembly uses its own pads for contact overrides.
     assert all(
         "fr3_leftfinger" not in str(override.link_names_expr)
         for override in cfg.link_attrs.values()
     )
     contacts = cfg.link_attrs["newton_gripper_contacts"]
     assert set(contacts.link_names_expr) == {
-        "gripper_finger1_link_1",
-        "gripper_finger2_link_1",
+        "left_inner_finger_pad",
+        "right_inner_finger_pad",
     }
     assert contacts.attrs.collision_props.condim == 4
     assert contacts.attrs.material_props.ke == pytest.approx(40000.0)
     assert contacts.attrs.material_props.kd == pytest.approx(400.0)
     assert contacts.attrs.material_props.torsional_friction == pytest.approx(0.1)
     assert contacts.attrs.material_props.rolling_friction == pytest.approx(0.01)
+
+    cfg.urdf_cfg.fpath = str(tmp_path / "franka_robotiq.urdf")
+    links, joints = _assembled_link_and_joint_names(cfg)
+    from embodichain.utils.string import resolve_matching_names
+
+    assert set(contacts.link_names_expr) <= set(links)
+    assert len(joints) == len(cfg.init_qpos)
+    assert not any("fr3_finger" in name for name in joints)
+    for rules in (
+        cfg.joint_drive_props.stiffness,
+        cfg.joint_drive_props.damping,
+        cfg.joint_drive_props.max_effort,
+    ):
+        resolve_matching_names(list(rules), joints)
+    declared_joints = resolve_matching_names(cfg.control_parts["eef"], joints)[1]
+    tree = ET.parse(cfg.urdf_cfg.fpath)
+    joint_nodes = {joint.get("name"): joint for joint in tree.findall("joint")}
+    gripper = suite.enabled_tracks()[0].config["gripper"]
+    assert gripper["open_qpos"] == [0.0] * 6
+    for name, command in zip(declared_joints, gripper["grasp_qpos"], strict=True):
+        joint = joint_nodes[name]
+        limits = joint.find("limit")
+        assert float(limits.get("lower")) <= command <= float(limits.get("upper"))
+        mimic = joint.find("mimic")
+        if mimic is not None:
+            assert mimic.get("joint") == declared_joints[0]
+            assert command == pytest.approx(
+                gripper["grasp_qpos"][0] * float(mimic.get("multiplier"))
+                + float(mimic.get("offset", "0"))
+            )
+    # The flange chain and assembled solver must agree after mounting the hand.
+    solver_cfg = cfg.solver_cfg["arm"]
+    solver_cfg.urdf_path = cfg.urdf_cfg.fpath
+    solver_cfg.joint_names = cfg.control_parts["arm"]
+    qpos = torch.tensor([cfg.init_qpos[:7]])
+    torch.testing.assert_close(
+        solver_cfg.init_solver(device=torch.device("cpu")).get_fk(qpos),
+        cfg.build_pk_serial_chain()["arm"].forward_kinematics(qpos).get_matrix()
+        @ torch.tensor(solver_cfg.tcp),
+    )
 
 
 def test_atomic_invocation_uses_motion_generator_policy():
@@ -1220,7 +1260,7 @@ def test_contact_benchmarks_use_attributed_ik_interpolation(skill_id: str) -> No
     assert benchmark_motion_attribution(skill_id) == expected
     assert AtomicSkillScenario().trial_metadata(
         replace(_atomic_case(), skill_id=skill_id)
-    ) == {**expected, "timing_scope": "atomic_action_compile", "timing_is_solved": True}
+    ) == {**expected, "timing_scope": "atomic_skill_compile", "timing_is_solved": True}
 
 
 def test_noncontact_benchmarks_retain_selected_planner_attribution() -> None:
@@ -1292,10 +1332,10 @@ def test_atomic_scenario_supports_existing_adapter_options_hooks(
 
     adapter = Mock()
     adapter.atomic_plan_options = clock_options if clock_aware else legacy_options
-    invocation = ActionInvocation(
+    invocation = SkillInvocation(
         skill_id="move_joints",
         goal=JointPositionGoal(torch.zeros(1, 7)),
-        binding=Mock(spec=ActionBinding),
+        binding=Mock(spec=SkillBinding),
         motion_policy=MotionPolicy(strategy="motion_gen"),
     )
     provider = Mock(samples_grasps=False)
@@ -1466,7 +1506,7 @@ def test_new_atomic_skill_cases_freeze_reference_waypoints(
     )
     suite = Mock(
         suite_version="test_v1",
-        robot=Mock(id="franka_pgi"),
+        robot=Mock(id="franka_robotiq"),
         protocol=Mock(rotation_threshold_rad=0.1),
     )
     track = Mock(id="atomic-skill")
@@ -1547,7 +1587,7 @@ def test_fixed_held_object_case_keeps_pickup_and_transport_at_table_pose() -> No
     )
     suite = Mock(
         suite_version="test_v1",
-        robot=Mock(id="franka_pgi"),
+        robot=Mock(id="franka_robotiq"),
         protocol=Mock(rotation_threshold_rad=0.1),
     )
     track = Mock(id="atomic-skill")
@@ -1607,7 +1647,7 @@ def _compiled_replay_batch(
     return CompiledTrajectory(
         plan_success=torch.tensor(plan_success, dtype=torch.bool),
         trajectory=trajectory,
-        action_plans=(),
+        skill_plans=(),
         projected_context=Mock(),
     )
 
@@ -1776,8 +1816,8 @@ def test_atomic_primary_success_and_execution_efficiency_aggregate():
             algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
             adapter="curobo",
             config_hash="abc",
-            capabilities=frozenset({"eef_waypoint", "atomic_action"}),
-            supported_robots=("franka_pgi",),
+            capabilities=frozenset({"eef_waypoint", "atomic_skill"}),
+            supported_robots=("franka_robotiq",),
         )
     ]
     record = TrialRecord(
@@ -1845,8 +1885,8 @@ def test_planner_aggregates_report_bypassed_cases_under_effective_algorithm():
             algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
             adapter="curobo",
             config_hash="abc",
-            capabilities=frozenset({"eef_waypoint", "atomic_action"}),
-            supported_robots=("franka_pgi",),
+            capabilities=frozenset({"eef_waypoint", "atomic_skill"}),
+            supported_robots=("franka_robotiq",),
         )
     ]
     selected_record = TrialRecord(
@@ -1974,7 +2014,7 @@ def test_runner_preserves_preplan_attribution_after_planner_error(tmp_path):
         algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
         adapter="curobo",
         config_hash="abc",
-        capabilities=frozenset({"eef_waypoint", "atomic_action"}),
+        capabilities=frozenset({"eef_waypoint", "atomic_skill"}),
     )
 
     runner._run_plan_call(
@@ -2006,7 +2046,7 @@ def test_atomic_case_manifest_retains_robot_skill_object_and_parameters(tmp_path
 
     assert payload["case_schema_version"] == 3
     assert serialized["domain"] is None
-    assert serialized["robot_id"] == "franka_pgi"
+    assert serialized["robot_id"] == "franka_robotiq"
     assert serialized["skill_id"] == "move_end_effector"
     assert serialized["primary_success"] == "task_success"
     assert serialized["case_parameters"]["sample_count"] == 80
@@ -2169,7 +2209,7 @@ def test_video_cfg_from_args_and_summary_notes():
 
 
 def test_runner_skips_video_outside_measured_phase(tmp_path):
-    suite = load_suite("atomic_franka_pgi_smoke")
+    suite = load_suite("atomic_franka_robotiq_smoke")
     specs = [spec for spec in suite.planners if spec.enabled]
     runner = BenchmarkRunner(
         suite,
@@ -2274,7 +2314,7 @@ def test_physical_evaluator_dispatch_preserves_row_results_and_execution_gates(
     }
     compiled = replace(
         _compiled_replay_batch([True, True]),
-        action_plans=(
+        skill_plans=(
             SimpleNamespace(
                 skill_id="pick_up",
                 diagnostics=SimpleNamespace(
@@ -2288,7 +2328,7 @@ def test_physical_evaluator_dispatch_preserves_row_results_and_execution_gates(
         case,
         robot,
         "arm",
-        load_suite("atomic_franka_pgi_smoke"),
+        load_suite("atomic_franka_robotiq_smoke"),
         planning_time_ms=2.0,
     )
     assert [row.task_success for row in result.outcomes] == [
@@ -2298,7 +2338,7 @@ def test_physical_evaluator_dispatch_preserves_row_results_and_execution_gates(
     assert result.outcomes[1].failure_code == "object_not_lifted"
     assert result.outcomes[1].failure_stage == "lift"
     assert result.metadata["packed_motion_groups"] == [
-        {"action_index": 0, "skill_id": "pick_up", **batch_trace}
+        {"skill_index": 0, "skill_id": "pick_up", **batch_trace}
     ]
     assert result.outcomes[0].stages[0].measurements["height_m"] == pytest.approx(0.1)
     if not motion_ok:
@@ -2314,7 +2354,7 @@ def test_runner_freezes_domain_manifest_before_each_planner(
     from embodichain_benchmarks.motion_generation import runner as runner_module
     from embodichain_benchmarks.motion_generation.config import DomainCfg
 
-    suite = load_suite("atomic_franka_pgi_smoke")
+    suite = load_suite("atomic_franka_robotiq_smoke")
     suite.tracks = [suite.enabled_tracks()[0]]
     suite.tracks[0].domain = DomainCfg(id="nominal", version="v1", kind="nominal")
     specs = [suite.planners[0], replace(suite.planners[0], id="second")]
@@ -2503,7 +2543,7 @@ def test_move_joints_case_uses_canonical_snapshot_for_targets(tmp_path: Path) ->
         scenario = Mock(robot=robot, control_part="arm")
         case = create_atomic_skill_provider("move_joints").generate_case(
             scenario,
-            Mock(suite_version="snapshot_test_v1", robot=Mock(id="franka_pgi")),
+            Mock(suite_version="snapshot_test_v1", robot=Mock(id="franka_robotiq")),
             Mock(id="atomic-skill"),
             config,
             seed=103,

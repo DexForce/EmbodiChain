@@ -101,6 +101,14 @@ class EnvCfg:
     only end when the task is successfully completed or failed.
     """
 
+    episode_context_in_info: bool = True
+    """Include owned episode-context snapshots in step and reset info.
+
+    Disable for batched RL consumers that do not read per-row provenance.
+    Episode lifecycle tracking, recorder metadata, and explicit
+    ``episode_context.snapshot()`` calls remain available.
+    """
+
     profiler: EnvProfilerCfg | None = None
     """Optional profiler for reset/step wall-time breakdown. ``None`` keeps
     the profiler disabled unless one is configured directly on ``sim_cfg``.
@@ -656,6 +664,23 @@ class BaseEnv(gym.Env):
         """
         pass
 
+    @property
+    def sensor_capture_metadata(self) -> dict[str, dict[str, object]]:
+        """Return capture identities and calibration separately from image tensors.
+
+        Recorders may serialize this snapshot beside observations. Gaussian
+        render/update failures propagate before an observation is returned.
+
+        Returns:
+            Sensor names mapped to their owned, nonempty capture metadata.
+        """
+        snapshots = {}
+        for name, sensor in self.sensors.items():
+            metadata = getattr(sensor, "capture_metadata", None)
+            if metadata:
+                snapshots[name] = metadata
+        return snapshots
+
     def _get_sensor_obs(self, **kwargs) -> TensorDict[str, any]:
         """Get the sensor observation from the environment.
 
@@ -764,6 +789,9 @@ class BaseEnv(gym.Env):
     ) -> None:
         """Dispatch a final post-reset boundary to optional recording consumers."""
 
+    def _after_observation(self, frame: ObservationFrame) -> None:
+        """Publish transition measurements before reward and termination consumers."""
+
     def evaluate(self, **kwargs) -> Dict[str, Any]:
         """
         Evaluate whether the environment is currently in a success state by returning a dictionary with a "success" key or
@@ -802,7 +830,8 @@ class BaseEnv(gym.Env):
         evaluate = self.evaluate(**kwargs)
         if evaluate:
             info.update(evaluate)
-        info["episode_context"] = self.episode_context.snapshot()
+        if getattr(self.cfg, "episode_context_in_info", True):
+            info["episode_context"] = self.episode_context.snapshot()
         return info
 
     def check_truncated(self, obs: EnvObs, info: TensorDict[str, Any]) -> torch.Tensor:
@@ -959,7 +988,8 @@ class BaseEnv(gym.Env):
                 observation or event functors.
 
         Returns:
-            A tuple containing the observations and infos.
+            The observations and info. Hosts that publish terminal reports
+            include consumed rows under `reset_episode_outcomes`.
         """
         options = {} if options is None else dict(options)
         prepare = options.pop("episode_prepare", None)
@@ -987,9 +1017,9 @@ class BaseEnv(gym.Env):
 
         with self._profiler.section("reset", is_root=True):
             with self._profiler.section("is_task_success"):
-                self._task_success = self.is_task_success()
+                self._task_success = self._task_success_before_reset(reset_ids)
             # Consume old buffers before any physical state or eligibility changes.
-            self._before_episode_reset(reset_ids, **options)
+            reset_outcomes = self._before_episode_reset(reset_ids, **options)
             context._begin_episode(reset_ids)
             try:
                 with self._profiler.section("reset_objects_state"):
@@ -1020,14 +1050,35 @@ class BaseEnv(gym.Env):
                 self._record_initial_observation(observation_frame, reset_ids)
                 with self._profiler.section("get_info"):
                     info = self.get_info(**options)
-                info["episode_context"] = context.snapshot()
+                if (
+                    getattr(self.cfg, "episode_context_in_info", True)
+                    and "episode_context" not in info
+                ):
+                    info["episode_context"] = context.snapshot()
+                if reset_outcomes:
+                    info["reset_episode_outcomes"] = reset_outcomes
             except BaseException as error:
                 context._abort_initialization(reset_ids, error)
                 raise
         return obs, info
 
-    def _before_episode_reset(self, env_ids: torch.Tensor, **kwargs: Any) -> None:
+    def _task_success_before_reset(self, env_ids: torch.Tensor) -> torch.Tensor:
+        """Return task acceptance for recording the rows about to be reset."""
+        return self.is_task_success()
+
+    def _before_episode_reset(
+        self, env_ids: torch.Tensor, **kwargs: Any
+    ) -> dict[int, dict[str, Any]] | None:
         """Consume old recording buffers before the selected physical rows change."""
+
+    def _seal_step_outcomes(
+        self,
+        env_ids: torch.Tensor,
+        terminated: torch.Tensor,
+        truncated: torch.Tensor,
+        info: dict[str, Any],
+    ) -> None:
+        """Publish completed transition outcomes before a row can reset."""
 
     def _after_episode_reset(self, obs: EnvObs, env_ids: torch.Tensor) -> None:
         """Seed selected recorders from the authoritative post-reset observation."""
@@ -1097,9 +1148,10 @@ class BaseEnv(gym.Env):
 
         Returns:
             Observation, reward, terminated, truncated, and an info mapping.
-            Auto-reset adds owned ``terminal_observation`` rows with their
+            Completed rows may carry environment-owned ``terminal_outcomes``.
+            Auto-reset also preserves owned ``terminal_observation`` rows,
             ``terminal_env_ids`` and a full ``terminal_observation_mask`` for
-            time-limit bootstrapping. Live observations contain reset states.
+            time-limit bootstrapping; live observations contain reset states.
         """
 
         if recording_active_mask is not None:
@@ -1133,6 +1185,7 @@ class BaseEnv(gym.Env):
                 with self._profiler.section("get_obs"):
                     observation_frame = self._capture_observation(**kwargs)
                     obs = observation_frame.policy
+            self._after_observation(observation_frame)
             with self._profiler.section("get_info"):
                 info = self.get_info(**kwargs)
             with self._profiler.section("reward"):
@@ -1165,33 +1218,37 @@ class BaseEnv(gym.Env):
                     **kwargs,
                 )
 
-            if not (
-                getattr(self, "_replay_no_auto_reset", False)
-                or getattr(self, "_demo_no_auto_reset", False)
-            ):
+            replay = getattr(self, "_replay_no_auto_reset", False)
+            no_auto_reset = getattr(self, "_demo_no_auto_reset", False)
+            # The demo executor owns completion after its segment validators run.
+            if not replay and getattr(self, "_demo_instruction_snapshot", None) is None:
                 reset_env_ids = dones.nonzero(as_tuple=False).squeeze(-1)
                 if len(reset_env_ids) > 0:
                     if isinstance(info, TensorDict):
-                        # Terminal rows have a smaller batch than live info.
-                        # The step API permits a plain mapping for this payload.
                         info = info.to_dict()
-                    # Preserve the terminal state before reset reuses observation
-                    # buffers. Only completed rows are copied, including their
-                    # history, so PPO can bootstrap time limits from V(s_{t+1}).
-                    info["terminal_env_ids"] = reset_env_ids.clone()
-                    info["terminal_observation_mask"] = (
-                        truncateds & ~terminateds
-                    ).clone()
-                    if isinstance(obs, TensorDict):
-                        # Tensor integer indexing already materializes independent
-                        # storage; cloning again duplicates every sensor buffer.
-                        info["terminal_observation"] = obs[reset_env_ids]
-                    else:
-                        info["terminal_observation"] = torch.utils._pytree.tree_map(
-                            lambda value: value[reset_env_ids], obs
-                        )
-                    with self._profiler.section("auto_reset"):
-                        obs, _ = self.reset(options={"reset_ids": reset_env_ids})
+                    self._seal_step_outcomes(
+                        reset_env_ids, terminateds, truncateds, info
+                    )
+                    if not no_auto_reset:
+                        # Snapshot completed rows before reset reuses buffers.
+                        info["terminal_env_ids"] = reset_env_ids.clone()
+                        info["terminal_observation_mask"] = (
+                            truncateds & ~terminateds
+                        ).clone()
+                        if isinstance(obs, TensorDict):
+                            info["terminal_observation"] = obs[reset_env_ids]
+                        else:
+                            info["terminal_observation"] = torch.utils._pytree.tree_map(
+                                lambda value: value[reset_env_ids], obs
+                            )
+                        with self._profiler.section("auto_reset"):
+                            obs, reset_info = self.reset(
+                                options={"reset_ids": reset_env_ids}
+                            )
+                        if reset_info.get("reset_episode_outcomes"):
+                            info.setdefault("terminal_outcomes", {}).update(
+                                reset_info["reset_episode_outcomes"]
+                            )
 
         return obs, rewards, terminateds, truncateds, info
 

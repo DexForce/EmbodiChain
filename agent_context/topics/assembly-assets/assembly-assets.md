@@ -30,9 +30,11 @@ fixed-anchor hinge trees. Never combine all source convex pieces into one hull
 or recompute authored inertia from overlapping pieces. Compiled MuJoCo geom
 poses already account for mesh recentering; convert frame and quaternion order
 once at the adapter boundary.
-For native compound visuals, `visual_parts=None` renders the collision parts;
-an explicit empty list hides them. Hinge export validates generated names and
-destinations before writing into the output directory.
+Native rigid appearance uses the owner's `visuals` list with body-local poses;
+an explicit empty list hides it without removing colliders. Raw source contact
+parameters belong to `attrs.material_props`, while contact envelopes, dimension
+and priority belong to `attrs.collision_props`. Hinge export validates generated
+names and destinations before writing into the output directory.
 
 `lab/sim/assembly/_visual.py` owns body-local OBJ visuals for native rigid objects and URDF
 moving links. The URDF visual origin stays identity because geom transforms
@@ -42,6 +44,9 @@ transform. Both preserve source mesh hard edges with explicit face normals.
 Native visual cache paths include the asset hash and `_VISUAL_FORMAT_VERSION`;
 bump the visual version when changing the rendered file format so the SDK
 cannot reuse a stale imported mesh.
+Rigid preview preparation validates every body name and OBJ/MTL destination
+before writing the batch. Cache symlinks cannot redirect output outside its
+preparation root; bodies with no visible surfaces retain empty appearance.
 
 The application-owned `assets.py:build_task_assembly` composes robot-held task geometry using public generators,
 including perforated gear cores and bosses. It records the changed topology
@@ -85,8 +90,18 @@ Source and active solver identities remain separate in results.
 Many-pegs endpoint seating and gear ratios do not replace those independent
 measurements. The harness cannot certify an unavailable health measurement: backend
 warnings, unsupported shapes and missing overflow accounting remain explicit.
+Single-peg and grid scoring share a bounded seating predicate: centered
+endpoints below the valid seat are failures, including floor passage.
 `examples/sim/assembly/` documents dependency patches and qualified boundaries;
 the source benchmark runner is `scripts/benchmark/assembly/precision.py`.
+The matrix host initializes installed SDK schemas before authoring USD and
+records geometry/ownership failures separately from independent source/direct
+cells. Each invocation owns a fresh run directory. Worker exit status, asset
+identity and configuration must match before its result is accepted.
+Historical SDK/PGS patches and standalone version-comparison material are
+linked from `scripts/patches/README.md`; the current asset layer retains the
+version-checked EPA overlay. Nominal robot preparation is shipped by the robot deployment
+layer together with its source asset registration, frame regression and API.
 
 Focused coverage lives under `tests/toolkits/assembly/`, `tests/sim/assembly/`,
 `tests/benchmark/assembly/` and `tests/gym/envs/tasks/test_blind_assembly.py`.

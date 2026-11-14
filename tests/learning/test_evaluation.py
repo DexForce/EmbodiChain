@@ -265,7 +265,7 @@ def test_evaluate_episodes_counts_actual_completions_and_restores_mode(
         num_episodes=4,
         device="cpu",
         seed=123,
-        on_episode=episodes.append,
+        on_scored_episode=episodes.append,
         **({"episode_allocation": "first_completed"} if explicit_legacy else {}),
     )
 
@@ -313,23 +313,34 @@ def test_balanced_evaluation_scores_fixed_quotas_despite_unequal_episode_lengths
             self.horizons = torch.tensor([3, 1, 1])
             self.physical_completions = torch.zeros(3, dtype=torch.long)
             self.control_steps = 0
+            self.owned_outcomes = []
 
         def step(self, action):
             observation, reward, done, truncated, info = super().step(action)
             self.physical_completions += done
             self.control_steps += 1
             info["success"] = torch.tensor([False, True, True])
+            info["terminal_outcomes"] = {
+                int(row): {
+                    "env_id": int(row),
+                    "physical": {"control": self.control_steps},
+                }
+                for row in done.nonzero(as_tuple=False).flatten()
+            }
+            self.owned_outcomes.extend(info["terminal_outcomes"].values())
             return observation, reward, done, truncated, info
 
     env = TimedOutcomeEnv()
     records = []
+    outcomes = []
     result = evaluate_episodes(
         policy=_DeterministicPolicy(),
         env=env,
         num_episodes=episodes,
         device="cpu",
         episode_allocation="balanced",
-        on_episode=records.append,
+        on_episode=outcomes.append,
+        on_scored_episode=records.append,
     )
     assert result["eval/completed_episodes"] == episodes
     assert result["eval/success_samples"] == episodes
@@ -346,6 +357,11 @@ def test_balanced_evaluation_scores_fixed_quotas_despite_unequal_episode_lengths
     )
     assert result["eval/metrics/terminal_step"] == pytest.approx(expected_length)
     assert len(records) == episodes
+    assert [outcome["env_id"] for outcome in outcomes] == [
+        record["env_id"] for record in records
+    ]
+    outcomes[0]["physical"]["control"] = -1
+    assert all(outcome["physical"]["control"] > 0 for outcome in env.owned_outcomes)
     assert [record["global_episode_index"] for record in records] == list(
         range(episodes)
     )
@@ -383,7 +399,7 @@ def test_episode_callback_omits_absent_success_and_restores_mode_on_failure() ->
             env=UnlabelledEnv(),
             num_episodes=4,
             device="cpu",
-            on_episode=reject,
+            on_scored_episode=reject,
         )
     assert policy.training
     assert len(records) == 1

@@ -27,9 +27,9 @@ inactive use fresh measured-position holds.
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping, MutableMapping
+from collections.abc import Callable, Iterator, Mapping, MutableMapping
 from copy import copy, deepcopy
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 import math
 from types import MappingProxyType
 from typing import Any, Literal, TYPE_CHECKING
@@ -41,6 +41,23 @@ from embodichain.compute.trajectory.stability import PositionRangeMonitor
 from ._joint_window import JointWindowRecord
 from embodichain.utils import configclass
 
+from embodichain.lab.evaluation import (
+    CompiledEvaluation,
+    EvaluationStatus,
+    RuleSession,
+)
+from embodichain.lab.evaluation.observations import (
+    _advance_observation,
+    _combine_selections,
+    _rule_report,
+)
+from embodichain.lab.evaluation._recording import _is_segment_start_field
+from embodichain.lab.evaluation._predicates import (
+    _joint_range,
+    _lift,
+    _relative_position,
+    _upright,
+)
 from embodichain.lab.gym.envs.objectives.conditions import evaluate_near_target
 from embodichain.lab.gym.envs.settling import (
     DynamicSettleMonitor,
@@ -51,10 +68,12 @@ from embodichain.lab.gym.envs.settling import (
 
 from embodichain.lab.task_program.compiler import (
     CompiledArticulationJointPositionValidator,
+    CompiledConditionValidator,
     CompiledObjectNearRelativeTargetValidator,
     CompiledObjectNearTargetValidator,
     CompiledObjectStateValidator,
     CompiledPostPolicy,
+    CompiledHoldPostPolicy,
     CompiledTaskProgramSegment,
     CompiledTaskProgramValidator,
 )
@@ -65,6 +84,9 @@ from .stability import (
 )
 
 if TYPE_CHECKING:
+    from embodichain.lab.gym.envs.episode_context import EpisodeContext
+    from embodichain.lab.gym.envs.managers.observation_types import ObservationFrame
+    from embodichain.lab.sim.atomic_skills.state import PlanningContext
     from embodichain.lab.sim.objects import Robot
     from embodichain.lab.sim.sim_manager import SimulationManager
     from embodichain.lab.sim.sensors.base_sensor import BaseSensor
@@ -304,9 +326,21 @@ class SimulationSegmentPolicyPort:
         self._validator_results: dict[int, dict[str, object]] = {}
         self._validator_active_masks: dict[int, torch.Tensor] = {}
         self._lift_baselines: dict[int, torch.Tensor] = {}
+        self._evaluation_specs: dict[str, CompiledEvaluation] = {}
+        self._evaluation_groups: tuple[
+            tuple[tuple[str, ...], CompiledEvaluation], ...
+        ] = ()
+        self._evaluation_fields: tuple[str, ...] = ()
+        self._evaluation_initial = {}
+        self._evaluation_sessions: dict[str, RuleSession] = {}
+        self._evaluation_start: int | None = None
+        self._evaluation_active: torch.Tensor | None = None
+        self._evaluation_rows: tuple[int, ...] = ()
         self._lifetime = _PolicyLifetime()
         self._observation_clock: SupportControlClock | None = None
         self._observation_generation = 0
+        self._hold_observer = None
+        self._target_observer = None
         self._condition_runtime = None
         conditions = {
             name: cfg
@@ -425,11 +459,21 @@ class SimulationSegmentPolicyPort:
         """
         self._require_open()
         session = copy(self)
+        session._hold_observer = None
+        session._target_observer = None
         session._post_policy_results = {}
         session._post_policy_success = {}
         session._validator_results = {}
         session._validator_active_masks = {}
         session._lift_baselines = {}
+        session._evaluation_specs = {}
+        session._evaluation_groups = ()
+        session._evaluation_fields = ()
+        session._evaluation_initial = {}
+        session._evaluation_sessions = {}
+        session._evaluation_start = None
+        session._evaluation_active = None
+        session._evaluation_rows = ()
         if self._condition_runtime is not None:
             session._condition_runtime = self._condition_runtime.new_session()
         return session
@@ -446,9 +490,13 @@ class SimulationSegmentPolicyPort:
         table, and entities resolved when the port was constructed. It never
         samples velocity or qpos and never emits a controller action.
         """
-        if type(policy) is not CompiledPostPolicy:
+        if type(policy) not in (CompiledPostPolicy, CompiledHoldPostPolicy):
             raise TypeError("policy must be exactly CompiledPostPolicy.")
         self._validate_segment_membership(segment, policy, kind="post policy")
+        if type(policy) is CompiledHoldPostPolicy:
+            if self._step_dt is None or policy.entity.entity_id not in self._objects:
+                raise ValueError("Hold requires a rigid object and control step_dt.")
+            return
         if policy.cfg.kind != "wait_stable":
             raise ValueError(
                 f"Unsupported compiled post-policy kind {policy.cfg.kind!r}."
@@ -526,6 +574,11 @@ class SimulationSegmentPolicyPort:
         self._require_open()
         self.validate_policy(policy, segment=segment)
         active_mask = self._validate_active_mask(active_mask)
+        if type(policy) is CompiledHoldPostPolicy:
+            yield from self._hold_actions(
+                policy, segment=segment, active_mask=active_mask
+            )
+            return
         preset = self._settle_presets[policy.cfg.preset]
         if type(preset) is SimulationJointStabilityConditionCfg:
             yield from self._joint_condition_actions(
@@ -608,6 +661,190 @@ class SimulationSegmentPolicyPort:
                 return
             yield self._hold_robot_qpos(active_mask)
             elapsed_steps += 1
+
+    def bind_target_observer(
+        self, observer: Callable[[str, object], torch.Tensor | None]
+    ) -> None:
+        """Bind a bridge-local reader of targets frozen during call grounding."""
+        if not callable(observer):
+            raise TypeError("Target observer must be callable.")
+        self._target_observer = observer
+
+    def bind_hold_observer(
+        self,
+        observer: Callable[
+            [str, torch.Tensor],
+            tuple[PlanningContext, torch.Tensor, torch.Tensor | None],
+        ],
+    ) -> None:
+        """Bind the bridge's measured runtime observer to this policy session."""
+        if not callable(observer):
+            raise TypeError("Hold observer must be callable.")
+        self._hold_observer = observer
+
+    def _hold_actions(self, policy, *, segment, active_mask):
+        from embodichain.lab.task_program.semantics.calls import (
+            SemanticRelativePose,
+        )
+        from embodichain.lab.sim.atomic_skills.goals import resolve_pose_goal
+
+        cfg = policy.cfg
+        clock = self.observation_clock
+        if clock is None or not callable(self._hold_observer):
+            raise ValueError(
+                "Hold requires a bound execution clock and measured observer."
+            )
+        start = clock.step_index
+        start_time = clock.now()
+        required = math.ceil(cfg.duration_s / self._step_dt)
+        accepted = active_mask.clone()
+        key = id(policy)
+        target = None
+        elapsed = 0
+        status = "cancelled"
+        reasons = [None] * active_mask.numel()
+        observed_samples = torch.zeros_like(active_mask, dtype=torch.long)
+        valid_pose_samples = torch.zeros_like(observed_samples)
+        attachment_samples = torch.zeros_like(observed_samples)
+        maximum_position_error = torch.zeros_like(active_mask, dtype=torch.float32)
+        maximum_orientation_error = torch.zeros_like(maximum_position_error)
+        try:
+            for tick in range(required + 1):
+                self._require_open()
+                self.validate_observation_scope(clock)
+                if clock.step_index != start + tick or not math.isclose(
+                    clock.now(),
+                    start_time + tick * self._step_dt,
+                    rel_tol=0,
+                    abs_tol=1e-8,
+                ):
+                    raise ValueError(
+                        "Hold requires acknowledged consecutive environment steps."
+                    )
+                if not accepted.any():
+                    status = "failed" if active_mask.any() else "skipped"
+                    break
+                context, attached, previous_target = self._hold_observer(
+                    cfg.object, accepted
+                )
+                self.validate_observation_scope(clock)
+                if clock.step_index != start + tick:
+                    raise ValueError("Hold observation changed its execution clock.")
+                if target is None:
+                    preceding = segment.calls[-1]
+                    reuse = getattr(
+                        getattr(preceding.call, "object", None), "entity_id", None
+                    ) == cfg.object and any(
+                        item == policy.target_selection
+                        for item in preceding.target_selections
+                    )
+                    declaration = policy.target_pose
+                    target = (
+                        previous_target.clone()
+                        if reuse and previous_target is not None
+                        else resolve_pose_goal(
+                            (
+                                declaration.to_goal()
+                                if type(declaration) is SemanticRelativePose
+                                else declaration.to_matrix()
+                            ),
+                            context,
+                            name="hold.at",
+                        )
+                    )
+                pose = context.scene.entities[cfg.object].pose.to(target)
+                if pose.ndim == 2:
+                    pose = pose.unsqueeze(0).expand(active_mask.numel(), -1, -1)
+                if target.ndim == 2:
+                    target = target.unsqueeze(0).expand_as(pose).clone()
+                position_error, rotation_error = rigid_pose_displacement(target, pose)
+                finite = torch.isfinite(position_error) & torch.isfinite(rotation_error)
+                within = (
+                    finite
+                    & (position_error <= cfg.position_tolerance)
+                    & (rotation_error <= cfg.orientation_tolerance)
+                )
+                current = attached & within
+                observed_samples += accepted.to(torch.long)
+                valid_pose = accepted & finite
+                valid_pose_samples += valid_pose.to(torch.long)
+                attachment_samples += (accepted & attached).to(torch.long)
+                maximum_position_error = torch.maximum(
+                    maximum_position_error, torch.where(valid_pose, position_error, 0.0)
+                )
+                maximum_orientation_error = torch.maximum(
+                    maximum_orientation_error,
+                    torch.where(valid_pose, rotation_error, 0.0),
+                )
+                diagnostics = (
+                    torch.stack((accepted & ~current, attached, finite), dim=-1)
+                    .detach()
+                    .cpu()
+                    .tolist()
+                )
+                for row, (failed, row_attached, row_finite) in enumerate(diagnostics):
+                    if failed:
+                        reasons[row] = (
+                            "attachment_unavailable_or_lost"
+                            if not row_attached
+                            else (
+                                "invalid_observation"
+                                if not row_finite
+                                else "pose_out_of_tolerance"
+                            )
+                        )
+                accepted &= current
+                elapsed = tick
+                if not accepted.any():
+                    status = "failed"
+                    break
+                if tick == required:
+                    status = (
+                        "satisfied"
+                        if bool((accepted | ~active_mask).all())
+                        else "failed"
+                    )
+                    break
+                if accepted.any():
+                    yield self._hold_robot_qpos(accepted)
+        except GeneratorExit:
+            raise
+        except BaseException:
+            status = "interrupted"
+            raise
+        finally:
+            if status not in ("satisfied", "failed", "skipped"):
+                accepted = torch.zeros_like(active_mask)
+            self._post_policy_success[key] = accepted.clone()
+            self._post_policy_results[key] = dict(
+                kind="hold",
+                status=status,
+                object_id=cfg.object,
+                target_id=policy.target_selection.target_id,
+                duration_s=cfg.duration_s,
+                elapsed_s=elapsed * self._step_dt,
+                required_steps=required,
+                elapsed_steps=elapsed,
+                position_tolerance=cfg.position_tolerance,
+                orientation_tolerance=cfg.orientation_tolerance,
+                env_ids=self._env_ids.cpu().tolist(),
+                active_mask=active_mask.cpu().tolist(),
+                accepted_mask=accepted.cpu().tolist(),
+                failure_reasons=reasons,
+                observation_count=observed_samples.cpu().tolist(),
+                attachment_verified_observations=attachment_samples.cpu().tolist(),
+                max_position_error=_json_speed_values(
+                    torch.where(
+                        valid_pose_samples > 0, maximum_position_error, float("nan")
+                    )
+                ),
+                max_orientation_error=_json_speed_values(
+                    torch.where(
+                        valid_pose_samples > 0, maximum_orientation_error, float("nan")
+                    )
+                ),
+                target_pose=None if target is None else target.detach().cpu().tolist(),
+            )
 
     def _joint_condition_actions(
         self,
@@ -768,11 +1005,11 @@ class SimulationSegmentPolicyPort:
         segment: Any,
     ) -> torch.Tensor:
         """Return the latest independently owned per-row settling result."""
-        if type(policy) is not CompiledPostPolicy:
+        if type(policy) not in (CompiledPostPolicy, CompiledHoldPostPolicy):
             raise TypeError("policy must be exactly CompiledPostPolicy.")
         self._validate_segment_membership(segment, policy, kind="post policy")
         if (
-            type(self._settle_presets.get(policy.cfg.preset))
+            type(self._settle_presets.get(getattr(policy.cfg, "preset", None)))
             is SimulationStabilityConditionCfg
         ):
             return self._condition_runtime.post_policy_result(policy, segment=segment)
@@ -793,11 +1030,11 @@ class SimulationSegmentPolicyPort:
         Joint-window records become available on completion, cancellation or
         interruption, with execution termination separate from row conditions.
         """
-        if type(policy) is not CompiledPostPolicy:
+        if type(policy) not in (CompiledPostPolicy, CompiledHoldPostPolicy):
             raise TypeError("policy must be exactly CompiledPostPolicy.")
         self._validate_segment_membership(segment, policy, kind="post policy")
         if (
-            type(self._settle_presets.get(policy.cfg.preset))
+            type(self._settle_presets.get(getattr(policy.cfg, "preset", None)))
             is SimulationStabilityConditionCfg
         ):
             return self._condition_runtime.post_policy_metadata(policy, segment=segment)
@@ -820,6 +1057,45 @@ class SimulationSegmentPolicyPort:
             if active_mask is None
             else self._validate_active_mask(active_mask)
         )
+        from .bindings import _bind_evaluation_joint_names
+
+        self._evaluation_specs = _bind_evaluation_joint_names(
+            {
+                validator.cfg.ref: validator.spec
+                for validator in segment.validators
+                if type(validator) is CompiledConditionValidator
+            },
+            self._robot,
+        )
+        self._evaluation_groups = _combine_selections(self._evaluation_specs)
+        required = tuple(
+            dict.fromkeys(
+                field
+                for spec in self._evaluation_specs.values()
+                for field in spec.required_fields
+            )
+        )
+        self._evaluation_fields = tuple(
+            field for field in required if not _is_segment_start_field(field)
+        )
+        self._evaluation_initial = {}
+        self._evaluation_sessions.clear()
+        self._evaluation_start = None
+        self._evaluation_active = None
+        self._evaluation_rows = ()
+        if self._evaluation_specs:
+            clock = self.observation_clock
+            if clock is None:
+                raise ValueError("Condition validators require a bound control clock.")
+            self._evaluation_start = clock.step_index + 1
+            self._evaluation_active = active.clone()
+            self._evaluation_rows = tuple(
+                self._row_indices[active].detach().cpu().tolist()
+            )
+            for field in required:
+                if _is_segment_start_field(field):
+                    uid = field.removeprefix("rigid_objects/").rsplit("/", 1)[0]
+                    self._evaluation_initial[field] = self._segment_start_pose(uid)
         for validator in segment.validators:
             self.validate_validator(validator, segment=segment)
             if type(validator) is CompiledObjectStateValidator:
@@ -835,6 +1111,100 @@ class SimulationSegmentPolicyPort:
                         require_finite=False,
                     )
 
+    def _segment_start_pose(self, uid):
+        from embodichain.lab.gym.envs.managers.observation_types import (
+            ObservationSample,
+        )
+        from embodichain.lab.gym.envs.managers.observations import _state_descriptor
+
+        pose = (
+            self._simulation.get_rigid_object(uid)
+            .get_local_pose(to_matrix=False)
+            .detach()
+            .clone()
+        )
+        valid = torch.isfinite(pose).all(-1) & (pose[:, 3:] != 0).any(-1)
+        descriptor = _state_descriptor(uid, "segment_start_pose", (7,), pose.dtype, ())
+        return ObservationSample(descriptor, pose, valid, (None,) * len(pose))
+
+    def _observe_segment_frame(
+        self, frame: ObservationFrame, *, step: int, episode_owner: EpisodeContext
+    ) -> None:
+        start = self._evaluation_start
+        if start is None or not self._evaluation_rows:
+            return
+        self._require_open()
+        if self._evaluation_initial:
+            frame = replace(frame, fields={**frame.fields, **self._evaluation_initial})
+        measurements = {}
+        for refs, spec in self._evaluation_groups:
+            session = self._evaluation_sessions.get(refs[0])
+            if session is None:
+                rows = self._evaluation_rows
+                session = RuleSession(
+                    spec,
+                    env_ids=rows,
+                    episode_ids=tuple(episode_owner.episode_ids[row] for row in rows),
+                    start_step=start,
+                    device=self._env_ids.device,
+                    scope=f"segment@{start}",
+                )
+                self._evaluation_sessions.update(dict.fromkeys(refs, session))
+            _advance_observation(
+                session,
+                frame,
+                step=step,
+                episode_owner=episode_owner,
+                measurements=measurements,
+            )
+
+    def _validate_condition(
+        self, validator: CompiledConditionValidator
+    ) -> torch.Tensor:
+        active = self._evaluation_active
+        if active is None or validator.cfg.ref not in self._evaluation_specs:
+            raise RuntimeError(
+                "Condition validation requires the current segment to start."
+            )
+        session = self._evaluation_sessions.get(validator.cfg.ref)
+        status = torch.full_like(self._env_ids, EvaluationStatus.NOT_RUN)
+        status[active] = EvaluationStatus.UNAVAILABLE
+        witness_steps = torch.full(
+            (active.numel(), 2), -1, dtype=torch.long, device=active.device
+        )
+        witness_revisions = torch.full_like(witness_steps, -1)
+        graph_trace = {}
+        if session is not None:
+            snapshot = session.snapshot(closed=True)
+            root = snapshot.rules[validator.cfg.ref]
+            status[active] = root.status
+            if root.witness_steps is not None:
+                witness_steps[active] = root.witness_steps
+                witness_revisions[active] = root.witness_revisions
+            graph_trace = {
+                "evaluation_identity": self._evaluation_specs[
+                    validator.cfg.ref
+                ].identity,
+                "rules": {
+                    name: _rule_report(snapshot.rules[name])
+                    for name, _ in validator.spec._nodes
+                },
+            }
+        accepted = status == EvaluationStatus.SATISFIED
+        self._validator_results[id(validator)] = {
+            "kind": validator.cfg.kind,
+            "ref": validator.cfg.ref,
+            "env_ids": self._env_ids.cpu().tolist(),
+            "status": [
+                EvaluationStatus(value).name.lower() for value in status.cpu().tolist()
+            ],
+            **graph_trace,
+            "witness_steps": witness_steps.cpu().tolist(),
+            "witness_revisions": witness_revisions.cpu().tolist(),
+            "accepted_mask": accepted.cpu().tolist(),
+        }
+        return accepted
+
     def validate_validator(
         self,
         validator: Any,
@@ -843,6 +1213,7 @@ class SimulationSegmentPolicyPort:
     ) -> None:
         """Validate one validator against static bindings without observation."""
         if type(validator) not in (
+            CompiledConditionValidator,
             CompiledObjectNearTargetValidator,
             CompiledObjectNearRelativeTargetValidator,
             CompiledArticulationJointPositionValidator,
@@ -850,6 +1221,8 @@ class SimulationSegmentPolicyPort:
         ):
             raise TypeError("validator must be an exact compiled validator.")
         self._validate_segment_membership(segment, validator, kind="validator")
+        if type(validator) is CompiledConditionValidator:
+            return
         if type(validator) is CompiledObjectStateValidator:
             for ref in (validator.object, validator.reference):
                 if ref is not None and ref.entity_id not in self._objects:
@@ -915,6 +1288,8 @@ class SimulationSegmentPolicyPort:
         """
         self._require_open()
         self.validate_validator(validator, segment=segment)
+        if type(validator) is CompiledConditionValidator:
+            return self._validate_condition(validator)
         if type(validator) is CompiledObjectStateValidator:
             return self._validate_object_state(validator)
         if type(validator) is CompiledArticulationJointPositionValidator:
@@ -927,10 +1302,26 @@ class SimulationSegmentPolicyPort:
         entity = self._objects[entity_id]
         pose = self._read_pose(entity, entity_id=entity_id)
         current_position = pose[:, :3, 3]
-        target_position = validator.target_pose.position.to(
-            device=current_position.device,
-            dtype=current_position.dtype,
+        from embodichain.lab.task_program.semantics.calls import (
+            SemanticRelativePose,
         )
+
+        if type(validator.target_pose) is SemanticRelativePose:
+            if not callable(self._target_observer):
+                raise ValueError(
+                    "Scene-relative acceptance requires a grounded target observer."
+                )
+            resolved = self._target_observer(entity_id, validator.target_pose)
+            if resolved is None:
+                raise ValueError(
+                    "Scene-relative acceptance has no matching grounded call target."
+                )
+            target_position = resolved.to(current_position)[..., :3, 3]
+        else:
+            target_position = validator.target_pose.position.to(
+                device=current_position.device,
+                dtype=current_position.dtype,
+            )
         if target_position.dim() == 1:
             target_position = target_position.unsqueeze(0).expand_as(current_position)
         elif target_position.shape != current_position.shape:
@@ -968,6 +1359,7 @@ class SimulationSegmentPolicyPort:
     ) -> Mapping[str, object]:
         """Return an owned JSON-safe trace for one completed validator."""
         if type(validator) not in (
+            CompiledConditionValidator,
             CompiledObjectNearTargetValidator,
             CompiledObjectNearRelativeTargetValidator,
             CompiledArticulationJointPositionValidator,
@@ -999,10 +1391,14 @@ class SimulationSegmentPolicyPort:
         reference_position = reference_pose[:, :3, 3]
         displacement = object_position.new_tensor(validator.cfg.displacement)
         target_position = reference_position + displacement
-        error = torch.linalg.vector_norm(object_position - target_position, dim=1)
-        accepted = torch.isfinite(error) & (
-            error <= float(validator.cfg.position_tolerance)
+        dtype = torch.promote_types(object_position.dtype, target_position.dtype)
+        measured = evaluate_near_target(
+            object_position.to(dtype),
+            target_position.to(dtype),
+            float(validator.cfg.position_tolerance),
         )
+        error = measured.metrics["distance"]
+        accepted = measured.satisfied & torch.isfinite(error)
         self._validator_results[id(validator)] = {
             "kind": validator.cfg.kind,
             "object_id": object_id,
@@ -1039,13 +1435,12 @@ class SimulationSegmentPolicyPort:
                     "object_lifted requires begin_segment before execution."
                 )
             baseline = baseline.to(device=pose.device, dtype=pose.dtype)
-            lift = pose[:, 2, 3] - baseline[:, 2, 3]
-            accepted &= torch.isfinite(baseline).all(dim=(1, 2))
-            accepted &= lift >= float(validator.cfg.minimum_lift)
+            measured = _lift(pose, baseline, float(validator.cfg.minimum_lift))
+            accepted &= measured.valid & measured.satisfied
             evidence = {
                 "minimum_lift": validator.cfg.minimum_lift,
                 "initial_height": _json_speed_values(baseline[:, 2, 3]),
-                "measured_lift": _json_speed_values(lift),
+                "measured_lift": _json_speed_values(measured.metrics["lift"]),
             }
         elif validator.cfg.kind == "object_relative_position":
             assert validator.reference is not None
@@ -1054,17 +1449,15 @@ class SimulationSegmentPolicyPort:
                 entity_id=validator.reference.entity_id,
                 require_finite=False,
             ).to(device=pose.device, dtype=pose.dtype)
-            accepted &= torch.isfinite(reference).all(dim=(1, 2))
-            offset = pose.new_tensor(validator.cfg.position_offset)
-            displacement = pose[:, :3, 3] - reference[:, :3, 3]
-            if validator.cfg.reference_frame == "parent":
-                displacement = torch.bmm(
-                    reference[:, :3, :3].transpose(1, 2), displacement.unsqueeze(-1)
-                ).squeeze(-1)
-            error = torch.abs(displacement - offset)
-            for axis, tolerance in enumerate(validator.cfg.position_tolerance):
-                if tolerance is not None:
-                    accepted &= error[:, axis] < tolerance
+            measured = _relative_position(
+                pose,
+                reference,
+                pose.new_tensor(validator.cfg.position_offset),
+                validator.cfg.position_tolerance,
+                parent_axes=validator.cfg.reference_frame == "parent",
+            )
+            accepted &= measured.satisfied
+            error = measured.metrics["position_error"]
             evidence = {
                 "reference_id": validator.reference.entity_id,
                 "reference_frame": validator.cfg.reference_frame,
@@ -1073,11 +1466,11 @@ class SimulationSegmentPolicyPort:
                 "position_error": [_json_speed_values(row) for row in error],
             }
         elif validator.cfg.kind == "object_upright":
-            tilt = torch.rad2deg(torch.acos(pose[:, 2, 2].clamp(-1.0, 1.0)))
-            accepted &= tilt < float(validator.cfg.maximum_tilt_degrees)
+            measured = _upright(pose, float(validator.cfg.maximum_tilt_degrees))
+            accepted &= measured.satisfied
             evidence = {
                 "maximum_tilt_degrees": validator.cfg.maximum_tilt_degrees,
-                "tilt_degrees": _json_speed_values(tilt),
+                "tilt_degrees": _json_speed_values(measured.metrics["tilt_degrees"]),
             }
         else:
             raise ValueError(
@@ -1112,11 +1505,13 @@ class SimulationSegmentPolicyPort:
                 f"outside articulation {entity_id!r} qpos width {qpos.shape[1]}."
             )
         position = qpos[:, joint_index]
-        accepted = torch.isfinite(position)
-        if validator.cfg.minimum_position is not None:
-            accepted &= position >= float(validator.cfg.minimum_position)
-        if validator.cfg.maximum_position is not None:
-            accepted &= position <= float(validator.cfg.maximum_position)
+        accepted = _joint_range(
+            {"position": position},
+            {
+                "lower": validator.cfg.minimum_position,
+                "upper": validator.cfg.maximum_position,
+            },
+        ).satisfied
         self._validator_results[id(validator)] = {
             "kind": validator.cfg.kind,
             "articulation_id": entity_id,
@@ -1278,7 +1673,7 @@ class SimulationSegmentPolicyPort:
             raise TypeError("segment must be exactly CompiledTaskProgramSegment.")
         values = (
             segment.post_policies
-            if type(member) is CompiledPostPolicy
+            if type(member) in (CompiledPostPolicy, CompiledHoldPostPolicy)
             else segment.validators
         )
         if not any(value is member for value in values):

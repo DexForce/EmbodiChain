@@ -19,12 +19,16 @@
 from __future__ import annotations
 
 from embodichain.lab.sim.cfg import RobotCfg
-from .._atomic_fixtures import _create_franka_pgi_cfg, _create_franka_native_hand_cfg
+from .._atomic_fixtures import (
+    _create_franka_pgi_cfg,
+    _create_franka_native_hand_cfg,
+    _create_franka_robotiq_cfg,
+)
 
 from ..registry import register_robot_provider
 from .base import RobotProvider
 
-__all__ = ["FrankaPandaProvider", "FrankaPgiProvider"]
+__all__ = ["FrankaPandaProvider", "FrankaPgiProvider", "FrankaRobotiqProvider"]
 
 
 class FrankaPandaProvider(RobotProvider):
@@ -43,10 +47,10 @@ class FrankaPandaProvider(RobotProvider):
 
 
 class FrankaPgiProvider(RobotProvider):
-    """Build the benchmark-owned Franka + PGI assembly used by the Atomic Skill suites.
+    """Build the legacy Franka + PGI assembly for custom benchmark suites.
 
     The suites were authored with the base rotated 180 degrees, as in the
-    atomic-action tutorial scenes, so the provider keeps that rotation; suite
+    atomic-skill tutorial scenes, so the provider keeps that rotation; suite
     overrides apply on top.
     """
 
@@ -61,5 +65,29 @@ class FrankaPgiProvider(RobotProvider):
         )
 
 
+class FrankaRobotiqProvider(RobotProvider):
+    """Build the Franka arm with Robotiq 2F-140 for Atomic Skill suites.
+
+    The seven-joint arm ends at ``fr3_link8``; its TCP carries the mounted
+    hand's rotation and 0.21 m tool offset. The six-joint ``eef`` group follows
+    the authored Robotiq linkage order. Suite overrides apply last.
+    """
+
+    def build_cfg(self) -> RobotCfg:
+        """Build an independent assembly with the suites' rotated base.
+
+        Returns:
+            Robot configuration with arm solver, gripper drives and contacts.
+        """
+        return _create_franka_robotiq_cfg(
+            {
+                "uid": "benchmark_franka_robotiq",
+                "init_rot": [0.0, 0.0, 180.0],
+                **dict(self.spec.config),
+            }
+        )
+
+
+register_robot_provider("franka_robotiq", FrankaRobotiqProvider)
 register_robot_provider("franka_panda", FrankaPandaProvider)
 register_robot_provider("franka_pgi", FrankaPgiProvider)

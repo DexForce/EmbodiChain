@@ -29,10 +29,44 @@ import shutil
 import hashlib
 import time
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Iterator
 import open3d as o3d
 
 from embodichain.utils import logger
+
+_HF_ASSET_MIRROR = "https://hf-mirror.com/datasets/DexForceAI/embodichain_data/"
+_HF_ASSET_ORIGIN = "https://huggingface.co/datasets/DexForceAI/embodichain_data/"
+
+
+def _with_asset_origin_fallback(
+    descriptor: o3d.data.DataDescriptor,
+) -> o3d.data.DataDescriptor:
+    """Append the official source for known mirrored asset URLs."""
+    urls = list(descriptor.urls)
+    for url in descriptor.urls:
+        if url.startswith(_HF_ASSET_MIRROR):
+            origin = _HF_ASSET_ORIGIN + url[len(_HF_ASSET_MIRROR) :]
+            if origin not in urls:
+                urls.append(origin)
+    if urls == list(descriptor.urls):
+        return descriptor
+    return o3d.data.DataDescriptor(urls, descriptor.md5, descriptor.extract_in_subdir)
+
+
+def _dataset_cache_paths(path: str, prefix: str) -> tuple[Path, Path]:
+    """Resolve one cache entry and reject paths outside its configured root."""
+    if not prefix or prefix in {".", "..", ".locks"} or "/" in prefix or "\\" in prefix:
+        raise ValueError(f"Dataset prefix must name one cache entry: {prefix!r}")
+    root = Path(path).resolve()
+    entries = []
+    for category in ("download", "extract"):
+        parent = root / category
+        entry = parent / prefix
+        if parent.resolve() != parent or entry.resolve() != entry:
+            raise ValueError(f"Dataset cache entry must stay within {parent}: {entry}")
+        entries.append(entry)
+    return entries[0], entries[1]
 
 
 @contextmanager
@@ -47,7 +81,12 @@ def _dataset_download_lock(path: str, prefix: str) -> Iterator[None]:
         path: Root of the EmbodiChain data cache.
         prefix: Dataset cache directory name.
     """
-    lock_dir = os.path.join(path, "download", ".locks")
+    download_path, _ = _dataset_cache_paths(path, prefix)
+    lock_dir = download_path.parent / ".locks"
+    if lock_dir.resolve() != lock_dir:
+        raise ValueError(
+            f"Dataset cache lock directory must not be a symlink: {lock_dir}"
+        )
     os.makedirs(lock_dir, exist_ok=True)
     lock_path = os.path.join(lock_dir, f"{prefix}.lock")
 
@@ -84,6 +123,7 @@ def _dataset_download_lock(path: str, prefix: str) -> Iterator[None]:
 
 class EmbodiChainDataset(o3d.data.DownloadDataset):
     def __init__(self, prefix, data_descriptor, path):
+        data_descriptor = _with_asset_origin_fallback(data_descriptor)
         with _dataset_download_lock(path, prefix):
             # Perform the zip file and extracted contents check. If the zip is
             # not valid, the parent class downloads and extracts it again.
@@ -92,28 +132,13 @@ class EmbodiChainDataset(o3d.data.DownloadDataset):
 
     def check_zip(self, prefix, data_descriptor, path):
         """Check the integrity of the zip file and its extracted contents."""
-        # Path to the downloaded zip file
+        # Validate both entries before removing an archive or extracted data.
+        zip_dir_path, extracted_path = _dataset_cache_paths(path, prefix)
         zip_file_name = os.path.split(data_descriptor.urls[0])[1]
-        zip_dir_path = os.path.join(path, "download", f"{prefix}")
-        zip_path = os.path.join(path, "download", f"{prefix}", f"{zip_file_name}")
-        # Path to the extracted directory
-        extracted_path = os.path.join(path, "extract", prefix)
-
-        def is_safe_path(path_to_check):
-            """Verify if the path is within safe directory boundaries"""
-            return (
-                "embodichain_data/download" in path_to_check
-                or "embodichain_data/extract" in path_to_check
-            )
+        zip_path = zip_dir_path / zip_file_name
 
         def safe_remove_directory(dir_path):
-            """Safely remove a directory after path validation"""
-            if not is_safe_path(dir_path):
-                logger.log_warning(
-                    f"Safety check failed, refusing to delete directory: {dir_path}"
-                )
-                return False
-
+            """Remove an entry whose configured cache boundary was validated."""
             if os.path.exists(dir_path):
                 try:
                     shutil.rmtree(dir_path)

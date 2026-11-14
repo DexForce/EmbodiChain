@@ -26,7 +26,7 @@ import numpy as np
 import torch
 
 from embodichain.data_pipeline.real2sim import SkillMotionPrototype
-from embodichain.lab.sim.atomic_actions import JointPositionTarget
+from embodichain.lab.sim.atomic_skills import JointPositionTarget
 from embodichain.lab.sim.motion.expansion.real2sim_collision import (
     BoxCollisionBody,
     CollisionPhase,
@@ -42,12 +42,12 @@ from embodichain.lab.sim.motion.expansion.gripper_contact import (
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.motion.refinement import MotionRefinementCfg
-    from embodichain.lab.sim.atomic_actions import (
-        ActionPlan,
-        AtomicActionEngine,
+    from embodichain.lab.sim.atomic_skills import (
+        SkillPlan,
+        AtomicSkillEngine,
         PlanTransform,
         PlanningContext,
-        ResolvedActionRequest,
+        ResolvedSkillRequest,
     )
     from embodichain.lab.sim.objects import Robot
     from embodichain.lab.task_program.runtime.expansion import TaskProgramPlanRequest
@@ -88,12 +88,12 @@ def _support_errors(
 
 
 def _semantic_release_pose(
-    request: ResolvedActionRequest, context: PlanningContext
+    request: ResolvedSkillRequest, context: PlanningContext
 ) -> np.ndarray:
     """Resolve the requested object pose independently of approximate IK/FK."""
-    from embodichain.lab.sim.atomic_actions.goals import resolve_pose_goal
-    from embodichain.lab.sim.atomic_actions.primitives.place import PlaceGoal
-    from embodichain.lab.sim.atomic_actions.trajectory_ops import resolve_pose_target
+    from embodichain.lab.sim.atomic_skills.goals import resolve_pose_goal
+    from embodichain.lab.sim.atomic_skills.primitives.place import PlaceGoal
+    from embodichain.lab.sim.atomic_skills.trajectory_ops import resolve_pose_target
 
     if not isinstance(request.goal, PlaceGoal):
         raise ValueError("source-backed tabletop Place requires a direct PlaceGoal")
@@ -438,9 +438,9 @@ class TabletopPrototypeCollisionValidator:
 
     def validate(
         self,
-        request: ResolvedActionRequest,
+        request: ResolvedSkillRequest,
         context: PlanningContext,
-        plan: ActionPlan,
+        plan: SkillPlan,
     ) -> SampledCollisionReport:
         """Check source identity, contact permissions and sampled geometry."""
         if context.batch_size != 1 or plan.joint_trajectory is None:
@@ -576,9 +576,9 @@ class TabletopPrototypeCollisionValidator:
 
     def __call__(
         self,
-        request: ResolvedActionRequest,
+        request: ResolvedSkillRequest,
         context: PlanningContext,
-        plan: ActionPlan,
+        plan: SkillPlan,
     ) -> bool:
         """Implement the Task Program plan-transform collision callback."""
         return self.validate(request, context, plan).accepted
@@ -723,7 +723,7 @@ class TabletopCollisionGuardFactory:
         request: TaskProgramPlanRequest,
         context: PlanningContext,
         *,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> PlanningContext:
         """Forward explicit delegate preparation without changing source ownership.
 
@@ -752,7 +752,7 @@ class TabletopCollisionGuardFactory:
         )
 
     def create_plan_transform(
-        self, request: TaskProgramPlanRequest, *, engine: AtomicActionEngine
+        self, request: TaskProgramPlanRequest, *, engine: AtomicSkillEngine
     ) -> PlanTransform:
         """Build one call's validator and optional expansion transform."""
         downstream = (

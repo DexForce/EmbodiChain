@@ -34,9 +34,18 @@ from embodichain.compute.kinematics.manipulability import (
 from .dls import damped_least_squares_step, solve_dls_ik
 from .pose_error import pose_error
 from .serial_chain import SerialChainKinematics
+from .features import heading_rotation, heading_kinematic_features
+from .matrix import matrix_product, matrix_vector_product
+from .tree import TreeKinematics, LinkKinematics
 from .types import DifferentiableIKCfg, DifferentiableIKResult
 
 __all__ = [
+    "matrix_product",
+    "matrix_vector_product",
+    "heading_rotation",
+    "heading_kinematic_features",
+    "TreeKinematics",
+    "LinkKinematics",
     "damped_least_squares_step",
     "solve_dls_ik",
     "pose_error",

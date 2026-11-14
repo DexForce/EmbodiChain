@@ -34,11 +34,50 @@ from embodichain.toolkits.assembly._surface import (
 )
 
 if TYPE_CHECKING:
-    from embodichain.toolkits.assembly.model import AssemblyBody, AssemblyGeometry
+    from embodichain.toolkits.assembly.model import (
+        AssemblyAsset,
+        AssemblyBody,
+        AssemblyGeometry,
+    )
 
 __all__: list[str] = []
 
 _VISUAL_FORMAT_VERSION = 2
+
+
+def _write_rigid_visual_meshes(
+    asset: AssemblyAsset, work_dir: str | Path
+) -> dict[str, Path]:
+    """Preflight the entire rigid preview batch before publishing OBJ/MTL files.
+
+    Invisible bodies retain empty appearance. User-authored body names and
+    existing cache symlinks cannot redirect either file outside preparation.
+    """
+    root = Path(work_dir).resolve()
+    output = root / asset.content_hash / f"visual_v{_VISUAL_FORMAT_VERSION}"
+    if not output.resolve().is_relative_to(root):
+        raise ValueError(f"Assembly output escapes its preparation directory: {output}")
+    targets: list[tuple[AssemblyBody, Path]] = []
+    for body in asset.bodies:
+        if body.joint.kind == "hinge":
+            continue
+        if (
+            not isinstance(body.name, str)
+            or not body.name
+            or body.name in {".", ".."}
+            or any(char in body.name for char in ("/", "\\", "\0"))
+        ):
+            raise ValueError(f"Unsafe assembly body name {body.name!r}.")
+        if not any(geometry.visible for geometry in body.geometries):
+            continue
+        target = output / f"{body.name}.obj"
+        for path in (target, target.with_suffix(".mtl")):
+            if path.is_symlink() or not path.resolve().is_relative_to(output.resolve()):
+                raise ValueError(
+                    f"Assembly output escapes its preparation directory: {path}"
+                )
+        targets.append((body, target))
+    return {body.name: write_visual_mesh(body, path) for body, path in targets}
 
 
 @contextmanager

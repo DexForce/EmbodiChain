@@ -95,6 +95,7 @@ class ARX5Cfg(RobotCfg):
             )
         }
         self.joint_drive_props = JointDrivePropertiesCfg(
+            drive_type="force",
             stiffness={"arm": 1e4, "eef": 1e3},
             damping={"arm": 1e3, "eef": 1e2},
             max_effort={"arm": 100.0, "eef": 40.0},

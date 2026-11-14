@@ -78,6 +78,29 @@ def installed_benchmark(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path,
         assert "embodichain_benchmarks/__init__.py" in entries
         assert "embodichain_benchmarks/motion_generation/api.py" in entries
         assert "embodichain/cli/benchmark.py" in entries
+        assert "embodichain_benchmarks/assembly/robot_reference.py" in entries
+        assert "embodichain_robots/flexiv/rizon4s/rizon4s_sources.json" in entries
+        for filename in (
+            "apply_mujoco_warp_epa_horizon.py",
+            "mujoco_warp_epa_horizon.patch",
+            "mujoco_warp_epa_horizon_3_15.patch",
+        ):
+            assert any(
+                name.endswith(f"/data/share/embodichain/assembly_patches/{filename}")
+                for name in entries
+            ), filename
+        assert not any(
+            name.endswith(
+                (
+                    "dexsim_assembly_contact.patch",
+                    "dexsim_assembly_variants.patch",
+                    "dexsim_continuous_joint.patch",
+                    "newton_cpu_pgs.patch",
+                    "newton_cpu_pgs.md",
+                )
+            )
+            for name in entries
+        )
         suites = {
             Path(name).name
             for name in entries
@@ -112,6 +135,21 @@ def installed_benchmark(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path,
         / "lib"
         / f"python{sys.version_info.major}.{sys.version_info.minor}"
         / "site-packages"
+    )
+    # A nested venv inherits the base interpreter's packages, not the calling
+    # venv's dependencies. Make those installed dependency directories visible
+    # without activating their editable finders or exposing checkout paths.
+    dependency_paths = [
+        str(Path(entry).resolve())
+        for entry in sys.path
+        if entry
+        and (
+            Path(entry).name in {"site-packages", "dist-packages"}
+            or any(Path(entry).glob("*.dist-info"))
+        )
+    ]
+    (site_packages / "test_dependencies.pth").write_text(
+        "\n".join(dependency_paths) + "\n"
     )
     (site_packages / "inherited_benchmark.pth").write_text(str(inherited) + "\n")
     interpreter = target / "bin/python"
@@ -186,6 +224,11 @@ import torch
 assert build_support_object_target_pose(torch.eye(4), torch.device("cpu")).shape == (4, 4)
 from embodichain_benchmarks.motion_generation.artifacts import environment_metadata
 assert environment_metadata()["git_commit"] is None
+from embodichain.data import get_data_class
+from embodichain_benchmarks.assembly import robot_reference
+assert Path(robot_reference.__file__).is_relative_to(target)
+assert get_data_class("FlexivRizon4SMenagerie").__module__ == "embodichain_robots.flexiv.rizon4s._menagerie_assets"
+assert files("embodichain_robots.flexiv.rizon4s").joinpath("rizon4s_sources.json").is_file()
 from embodichain.cli.main import main
 try:
     main(["benchmark", "motion-generation", "--help"])
@@ -225,3 +268,19 @@ print("installed benchmark suites and CLI passed")
     )
     assert cli.returncode == 0, cli.stdout + cli.stderr
     assert "--suite" in cli.stdout
+    robot_cli = subprocess.run(
+        [
+            str(target / "bin/python"),
+            "-I",
+            "-m",
+            "embodichain_benchmarks.assembly.robot_reference",
+            "--help",
+        ],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert robot_cli.returncode == 0, robot_cli.stdout + robot_cli.stderr
+    assert "--gripper-model" in robot_cli.stdout
