@@ -423,6 +423,7 @@ def _motion_policy_to_metadata(policy: MotionPolicy) -> dict[str, object]:
         "velocity_targets": policy.velocity_targets,
         "interpolation_mode": policy.interpolation_mode,
         "ik_seed_mode": policy.ik_seed_mode,
+        **({"phase_paths": dict(policy.phase_paths)} if policy.phase_paths else {}),
         "sample_count_retries": list(policy.sample_count_retries),
         "require_final_velocity": policy.require_final_velocity,
         "final_velocity_rejection": policy.final_velocity_rejection,

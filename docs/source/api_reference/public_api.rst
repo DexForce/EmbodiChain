@@ -1662,6 +1662,43 @@ and durable episode-boundary recovery. See the offline expansion example.
    ExpansionCoverage
    EpisodeCoverage
 
+.. autosummary::
+
+   ExpansionWorkloadCfg
+   WorkloadExecutionCfg
+   WorkloadAssignment
+   WorkloadRowResult
+   WorkloadSource
+   WorkloadProgramExecutor
+   export_expansion_episodes
+
+.. autosummary::
+
+   GymExpansionHostExtensions
+   ExpansionRowContext
+   ExpansionValidator
+   MeasuredExpansionValidator
+   MeasuredTrajectory
+   record_reference_trajectory
+   preview_expansion_comparison
+
+embodichain.lab.expansion.acceptance
+------------------------------------
+
+Measured task and physical acceptance share a host port. Geometry uses independent
+Newton queries; native contacts inspect every physical sample and optionally
+require sustained finger contact and bounded object drift. Tasks declare all
+permissions and thresholds; missing or dropped evidence rejects the trajectory.
+
+.. currentmodule:: embodichain.lab.expansion.acceptance
+
+.. autosummary::
+
+   MeasuredExpansionValidator
+
+.. autoclass:: MeasuredExpansionValidator
+   :members:
+
 embodichain.lab.expansion.artifacts
 -----------------------------------
 
@@ -1674,6 +1711,29 @@ Typed content-addressed numeric, media and source references. Paths remain conta
    ArtifactReference
    EpisodeArtifactManifest
    resolve_artifact_path
+
+embodichain.lab.expansion.comparison
+------------------------------------
+
+Reference and accepted expansion recordings share a measured timeline. The
+native viewer retains robot/object ghost resources, supports pause and selection,
+and publishes render states with physics disabled. Collection is an optional
+caller-owned callback, and the environment factory retains task/asset ownership.
+
+.. currentmodule:: embodichain.lab.expansion.comparison
+
+.. autosummary::
+
+   MeasuredTrajectory
+   record_reference_trajectory
+   preview_expansion_comparison
+
+.. autoclass:: MeasuredTrajectory
+   :members:
+
+.. autofunction:: record_reference_trajectory
+
+.. autofunction:: preview_expansion_comparison
 
 embodichain.lab.expansion.configured
 ------------------------------------
@@ -1766,6 +1826,21 @@ attempts at episode boundaries. Native failures invalidate the active host.
    ExpansionRecipeSource
    PreparingExpansionHost
 
+embodichain.lab.expansion.episode_export
+----------------------------------------
+
+.. currentmodule:: embodichain.lab.expansion.episode_export
+
+Export each confirmed qualified trajectory to an independently readable LeRobot
+dataset, retaining its portable T+1 evidence, source hashes and recording journal.
+Export uses frozen evidence and opens no simulation World.
+
+.. autosummary::
+
+   export_expansion_episodes
+
+.. autofunction:: export_expansion_episodes
+
 embodichain.lab.expansion.export
 --------------------------------
 
@@ -1787,6 +1862,30 @@ The native Gym adapter owns World preparation, parameter readback and Task Progr
 .. autosummary::
 
    GymExpansionHost
+
+embodichain.lab.expansion.host_extensions
+-----------------------------------------
+
+Runtime extension callbacks select collection rendering, a scene source, measured
+acceptance, immutable recipe transforms and per-row Task Program plan factories.
+The native host continues to own preparation, clocks, state capture and receipts.
+
+.. currentmodule:: embodichain.lab.expansion.host_extensions
+
+.. autosummary::
+
+   ExpansionValidator
+   ExpansionRowContext
+   GymExpansionHostExtensions
+
+.. autoclass:: ExpansionValidator
+   :members:
+
+.. autoclass:: ExpansionRowContext
+   :members:
+
+.. autoclass:: GymExpansionHostExtensions
+   :members:
 
 embodichain.lab.expansion.journal
 ---------------------------------
@@ -1919,6 +2018,32 @@ Apply one native visual profile per compatible World cohort. Render complete rec
    load_visual_profiles
    render_observation_variants
    inspect_observation_variants
+
+embodichain.lab.expansion.workloads
+-----------------------------------
+
+.. currentmodule:: embodichain.lab.expansion.workloads
+
+Rolling Task Program execution in one caller-owned World with capacity
+``workload_count * batch_size``. Sources retain task-owned scene proposals and
+required physical qualification; native session and sink receipts remain the
+authority for admission and committed quotas. Preparing rows settle through
+ordinary World steps while live trajectories retain every control boundary.
+
+.. autosummary::
+
+   ExpansionWorkloadCfg
+   WorkloadExecutionCfg
+   WorkloadAssignment
+   WorkloadRowResult
+   WorkloadSource
+   WorkloadProgramExecutor
+
+.. autoclass:: WorkloadProgramExecutor
+   :members:
+
+.. autoclass:: WorkloadSource
+   :members:
 
 embodichain.lab.expansion.workflow
 ----------------------------------
@@ -3654,6 +3779,32 @@ embodichain.lab.sim.sensors.camera
    Camera
    CameraCfg
 
+embodichain.lab.sim.sensors.contact
+-----------------------------------
+
+.. currentmodule:: embodichain.lab.sim.sensors.contact
+
+.. autosummary::
+
+   ContactPermissionChecker
+
+embodichain.lab.sim.sensors.contact.permissions
+-----------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.sensors.contact.permissions
+
+Check complete native contact buffers against explicit actor/frame permissions.
+The host chooses the original physical sampling rate; unavailable impulse,
+unknown actors and dropped evidence cannot pass. Results are owned device-side
+row summaries, suitable for every-substep observers without Python contact lists.
+
+.. autosummary::
+
+   ContactPermissionChecker
+
+.. autoclass:: ContactPermissionChecker
+   :members:
+
 embodichain.lab.sim.sensors.contact.sensor
 ------------------------------------------
 
@@ -4293,6 +4444,8 @@ native simulation windows and browser visualization.
    MarkerPrototypeCfg
    MarkerGroup
 
+   MarkerFramePublisher
+
 embodichain.lab.visualization.markers.cfg
 ----------------------------------------
 
@@ -4302,6 +4455,22 @@ embodichain.lab.visualization.markers.cfg
 
    MarkerPrototypeCfg
    MarkerGroupCfg
+
+embodichain.lab.visualization.markers.frame
+-------------------------------------------
+
+The frame publisher stages multiple marker groups and submits one native visual
+batch. Hidden instances retain their resources and actual visibility; later
+frames transform only visible instances. Publishing never advances physics.
+
+.. currentmodule:: embodichain.lab.visualization.markers.frame
+
+.. autosummary::
+
+   MarkerFramePublisher
+
+.. autoclass:: MarkerFramePublisher
+   :members:
 
 embodichain.lab.visualization.markers.group
 ------------------------------------------

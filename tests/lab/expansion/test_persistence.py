@@ -30,7 +30,10 @@ from embodichain.lab.expansion.contracts import (
     ValidationCheck,
     ValidationResult,
 )
-from embodichain.lab.expansion.persistence import ArtifactEpisodeSink
+from embodichain.lab.expansion.persistence import (
+    ArtifactEpisodeSink,
+    load_expansion_episode,
+)
 from embodichain.data_pipeline.recording.media import MediaSpool
 
 
@@ -61,6 +64,42 @@ def test_staging_has_no_credit_and_recovery_never_reruns_physics(tmp_path):
     with pytest.raises(ValueError, match="different episode"):
         sink.submit(replace(data, actions=data.actions + 1), submission_id=0)
     assert len(sink.inspect()) == 1
+
+
+def test_verified_episode_reads_own_tensors_and_invalidate_changed_bytes(tmp_path):
+    sink = ArtifactEpisodeSink(tmp_path)
+    data = replace(episode(), metadata={"nested": {"values": [1, 2]}})
+    receipt = sink.submit(data, submission_id=0)
+    first = load_expansion_episode(receipt.storage_id)
+    second = load_expansion_episode(receipt.storage_id)
+    first.actions.fill_(99)
+    first.observations["joint_positions"].fill_(88)
+    third = load_expansion_episode(receipt.storage_id)
+    torch.testing.assert_close(second.actions, data.actions, rtol=0, atol=0)
+    torch.testing.assert_close(third.actions, data.actions, rtol=0, atol=0)
+    torch.testing.assert_close(
+        third.observations["joint_positions"],
+        data.observations["joint_positions"],
+        rtol=0,
+        atol=0,
+    )
+    from embodichain.lab.gym.envs._json import json_safe_copy
+
+    projected = json_safe_copy(third.metadata, field_name="metadata")
+    projected["nested"]["values"][0] = 55
+    assert third.metadata["nested"]["values"][0] == 1
+    external = {"nested": [3]}
+    owned = type(third.metadata)(external)
+    external["nested"][0] = 99
+    assert owned["nested"][0] == 3
+    with pytest.raises(ValueError, match="finite"):
+        type(third.metadata)({"invalid": float("nan")})
+    with pytest.raises(ValueError, match="finite"):
+        type(third.metadata["nested"]["values"])((float("inf"),))
+    path = Path(receipt.storage_id)
+    path.write_bytes(b"invalid replaced evidence")
+    with pytest.raises((ValueError, OSError)):
+        load_expansion_episode(path)
 
 
 def test_media_alignment_is_required_before_receipt(tmp_path):

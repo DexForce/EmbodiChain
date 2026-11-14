@@ -391,7 +391,7 @@ class MarkerGroup:
             xyzw = (rotation * Rotation.from_quat(xyzw)).as_quat()
         return xyz + self._origins[env_id], xyzw
 
-    def snapshot(self) -> tuple[MeshMarkerOverlay, ...]:
+    def snapshot(self, *, visible_only: bool = False) -> tuple[MeshMarkerOverlay, ...]:
         """Return detached world-space snapshots without querying parent assets.
 
         Returns:
@@ -408,6 +408,10 @@ class MarkerGroup:
             ):
                 raise ValueError("World positions must be finite float32 values.")
             for index, prototype_index in enumerate(state["prototype_indices"]):
+                if visible_only and not (
+                    self._visible[env_id] and state["visible"][index]
+                ):
+                    continue
                 prototype = prototypes[prototype_index]
                 rgba = (
                     prototype.color

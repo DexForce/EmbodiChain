@@ -48,6 +48,7 @@ from ._gym_context import GymHostContext, PreparedRow
 from ._gym_recipe import GymRecipeBuilder
 from ._gym_prepare import GymCohortPreparer
 from ._gym_execution import GymCohortExecutor
+from .host_extensions import GymExpansionHostExtensions
 
 __all__ = ["GymExpansionHost"]
 
@@ -93,12 +94,17 @@ class GymExpansionHost:
         root: Path,
         journal: ExpansionJournal,
         source_artifacts: Mapping[str, object],
+        *,
+        extensions: GymExpansionHostExtensions | None = None,
     ) -> None:
         self._context = GymHostContext(
             cfg, report, root, journal, source_artifacts, cfg.batch_size
         )
+        self._context.extensions = extensions or GymExpansionHostExtensions()
+        if not isinstance(self._context.extensions, GymExpansionHostExtensions):
+            raise TypeError("extensions must be GymExpansionHostExtensions")
         self._recipe_builder = GymRecipeBuilder(self._context)
-        self._context.recipe = self._recipe_builder.recipe
+        self._context.recipe = self.recipe
         self._preparer = GymCohortPreparer(self._context)
         self._executor = GymCohortExecutor(self._context)
         try:
@@ -123,6 +129,9 @@ class GymExpansionHost:
         environment_cfg.record_trajectory = False
         environment_cfg.sim_cfg.headless = True
         _configure_sensor_capture(environment_cfg, capture_media=cfg.capture_media)
+        extensions = self._context.extensions
+        if extensions.collection_renderer is not None:
+            environment_cfg.sim_cfg.render_cfg.renderer = extensions.collection_renderer
         from embodichain.lab.sim.profiler import ProfilerCfg
 
         environment_cfg.profiler = ProfilerCfg(
@@ -170,6 +179,17 @@ class GymExpansionHost:
                 env, cfg.collision_profile, root / "collision"
             )
         self._context.collision = collision
+        if extensions.validator_factory is not None:
+            if collision is not None:
+                raise ValueError("choose a collision profile or an extension validator")
+            self._context.collision = collision = extensions.validator_factory(
+                env, root
+            )
+            if collision is None or not all(
+                callable(getattr(collision, method, None))
+                for method in ("prepare", "sample", "close")
+            ):
+                raise TypeError("validator_factory must return a measured validator")
         profile = None
         if cfg.source == "real2sim":
             from embodichain.lab.task_program.integrations.simulation.real2sim_collection import (
@@ -208,6 +228,12 @@ class GymExpansionHost:
         self._context.collision = collision
         self._context.profile = profile
         self._context.scene_source = scene_source
+        if extensions.scene_source_factory is not None:
+            if scene_source is not None:
+                raise ValueError("choose a scene atlas or an extension scene source")
+            self._context.scene_source = extensions.scene_source_factory(env)
+            if not callable(getattr(self._context.scene_source, "candidate", None)):
+                raise TypeError("scene_source_factory must return a candidate source")
         self._context.motion_profile = motion_profile
         self._context.motion_recipes = motion_recipes
         self._context.names = names
@@ -448,7 +474,9 @@ class GymExpansionHost:
 
     def recipe(self, ordinal: int) -> ExpansionRecipe:
         """Sample a pinned recipe without mutating the World."""
-        return self._recipe_builder.recipe(ordinal)
+        recipe = self._recipe_builder.recipe(ordinal)
+        transform = self._context.extensions.recipe_transform
+        return recipe if transform is None else transform(recipe)
 
     def prepare_batch(
         self, requests: tuple[RecipeAttempt, ...], session: ExpansionSession

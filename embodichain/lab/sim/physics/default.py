@@ -44,7 +44,7 @@ class DefaultPhysicsBackend(PhysicsBackend):
         world_config.speed_tolerance = cfg.speed_tolerance
         if self._manager.device.type == "cuda":
             world_config.enable_gpu_sim = True
-            world_config.direct_gpu_api = True
+            world_config.direct_gpu_api = cfg.direct_gpu_api
 
     def activate(self, sim_config: "SimulationManagerCfg") -> None:
         cfg = sim_config.physics_cfg

@@ -80,6 +80,15 @@ with visual origins. URDF FK accepts all `joint_names`, including caller-resolve
 mimic joints. Multiple poses can be displayed in one environment. Tasks own
 motion loading, sampling and alignment.
 
+`MarkerFramePublisher` stages caller-owned groups for one cross-group native
+publication. Initial preload retains hidden resources; subsequent frames upload
+visible instances and change real visibility without moving hidden geometry.
+`MarkerGroup.snapshot(visible_only=True)` preserves original instance IDs while
+omitting hidden meshes. Close the publisher before its World. The measured
+reference/ghost timeline and keyboard playback live in
+`lab/expansion/comparison.py`; task/environment and collection ownership stay
+with the caller.
+
 `RobotMarkersAppearanceCfg` selects source appearance or a base-color override,
 with adjustable opacity. Source textures and material parameters are preserved;
 opaque visuals use scene lighting. Transparent shading may differ by renderer.

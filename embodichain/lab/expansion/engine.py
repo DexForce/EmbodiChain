@@ -225,6 +225,8 @@ class ExpansionEngine:
         self._write_failures: set[str] = set()
         self._resolved_receipts: dict[tuple[str, int], CommitReceipt] = {}
         self._failed = False
+        self._row_assignments: dict[int, ExpansionAssignment] = {}
+        self._started_rows: set[int] = set()
         self.timings: dict[str, float] = {}
 
     def _measure(self, name, operation, *args, **kwargs):
@@ -327,6 +329,8 @@ class ExpansionEngine:
         return self._drain()
 
     def _drain(self, *, one_batch: bool = False) -> Mapping[str, object]:
+        if self._row_assignments:
+            raise RuntimeError("finish active rolling rows before draining a cohort")
         if self._failed:
             raise RuntimeError(
                 "host failed; construct a new host before further execution"
@@ -475,6 +479,122 @@ class ExpansionEngine:
             if one_batch:
                 break
         return self._snapshot()
+
+    def admit_row(self, item: PreparedEpisodeWorkItem) -> ExpansionAssignment | None:
+        """Admit one independently prepared physical row through the native session.
+
+        Args:
+            item: Host-owned candidate proposed in this session, bound to its
+                actual World row. Cohort collection remains unchanged.
+
+        Returns:
+            Assigned episode/commit identity, or None for rejected preparation
+            or session backpressure. No rollout starts until
+            :meth:`mark_row_started` is called after a consumed command.
+        """
+        if self._configured_cfg is not None or self._failed:
+            raise RuntimeError("row admission requires a healthy custom engine")
+        if not isinstance(item, PreparedEpisodeWorkItem):
+            raise TypeError("rolling admission requires PreparedEpisodeWorkItem")
+        if (
+            not 0 <= item.env_id < self.cfg.batch_size
+            or item.env_id in self._row_assignments
+        ):
+            raise ValueError("physical row is outside capacity or already assigned")
+        self.flush()
+        self.enqueue((item,))
+        identity = item.candidate.identity
+        try:
+            checked = self._measure("admission", self.host.validate_plan, item)
+            if not checked.accepted:
+                self.session.release(identity, reason="planning_validation_failed")
+                self._queue.remove(item)
+                return None
+            self.session.add_prepared_episode(item.candidate, checked)
+            self._admitted.add(identity.candidate_id)
+            ready = self.session.take_ready(
+                identity.scene_case_id,
+                identity.initial_state_id,
+                episode_byte_budget=self.cfg.episode_byte_budget,
+                candidate_id=identity.candidate_id,
+            )
+            if ready is None:
+                self.session.release(identity, reason="row_admission_backpressure")
+                self._queue.remove(item)
+                return None
+            episode_id, commit_id = self.session.episode_ids(identity)
+            assignment = ExpansionAssignment(item, item.env_id, episode_id, commit_id)
+            self._row_assignments[item.env_id] = assignment
+            return assignment
+        except BaseException:
+            self._failed = True
+            self.session.release(identity, reason="row_admission_failed")
+            if item in self._queue:
+                self._queue.remove(item)
+            raise
+
+    def mark_row_started(self, assignment: ExpansionAssignment) -> None:
+        """Count a rolling rollout after its first actual World command.
+
+        Args:
+            assignment: Exact identity returned by :meth:`admit_row`.
+        """
+        row = assignment.env_id
+        if self._row_assignments.get(row) != assignment or row in self._started_rows:
+            raise ValueError("unexpected or repeated rolling rollout start")
+        self.session.mark_rollout_started(assignment.item.spec.identity)
+        self._started_rows.add(row)
+
+    def complete_row(
+        self, assignment: ExpansionAssignment, episode: ExpertEpisode | None
+    ) -> CommitReceipt | None:
+        """Qualify and persist a row using ordinary native receipt accounting.
+
+        Args:
+            assignment: Exact active row identity returned by :meth:`admit_row`.
+            episode: Measured evidence for the consumed commands, or rejection.
+
+        Returns:
+            Confirmed native receipt or None for rejected evidence. Unconfirmed
+            writes raise and retain pending evidence for the normal reconciliation
+            API; a physical slot cannot earn quota before persistence confirms.
+        """
+        row = assignment.env_id
+        if self._row_assignments.get(row) != assignment:
+            raise ValueError("completion does not identify an active rolling row")
+        identity = assignment.item.spec.identity
+        if episode is not None and (
+            not isinstance(episode, ExpertEpisode)
+            or episode.identity != identity
+            or row not in self._started_rows
+            or (episode.episode_id, episode.commit_id)
+            != (assignment.episode_id, assignment.commit_id)
+        ):
+            self._failed = True
+            self.session.release(identity, reason="invalid_measured_evidence")
+            raise ValueError("host returned mismatched or unstarted evidence")
+        receipt = None
+        if episode is None:
+            self.session.release(identity, reason="host_rejected")
+        else:
+            accepted = self.session.accept_episode(episode)
+            if accepted:
+                self._pending[episode.commit_id] = episode
+            callback = getattr(self.host, "on_acceptance", None)
+            if callback is not None:
+                callback(assignment, episode, accepted)
+            if accepted:
+                self.flush()
+                key = episode.commit_id, self._submission_ids.get(episode.commit_id, 0)
+                receipt = self._resolved_receipts.get(key)
+                if receipt is None or not receipt.confirmed:
+                    raise RuntimeError(
+                        "unconfirmed persistence cannot release a rolling row"
+                    )
+        self._queue.remove(assignment.item)
+        del self._row_assignments[row]
+        self._started_rows.discard(row)
+        return receipt
 
     def run_source(self, source: ExpansionRecipeSource) -> Mapping[str, object]:
         """Drive bounded source batches through the same admission/execution/writer core.

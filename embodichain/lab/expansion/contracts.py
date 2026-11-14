@@ -115,19 +115,9 @@ def _poses(values: Mapping[str, torch.Tensor], name: str) -> Mapping[str, torch.
 
 
 def _json(value: object) -> object:
-    if value is None or type(value) in (str, bool, int):
-        return value
-    if type(value) is float and math.isfinite(value):
-        return value
-    if isinstance(value, (list, tuple)):
-        return tuple(_json(item) for item in value)
-    if isinstance(value, Mapping):
-        result = {}
-        for key, item in value.items():
-            _text(key, "metadata key")
-            result[key] = _json(item)
-        return MappingProxyType(result)
-    raise ValueError("metadata must contain only finite JSON values")
+    from embodichain.utils._owned_json import freeze_metadata
+
+    return freeze_metadata(value)
 
 
 def _phases(

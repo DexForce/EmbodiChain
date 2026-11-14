@@ -207,8 +207,32 @@ class MotionGenOptions:
     retains its own Torch-only fork; no outer action counter is reused.
     """
 
+    waypoint_modes: tuple[Literal["joint", "cartesian"], ...] = field(
+        default=(), kw_only=True
+    )
+    """Explicit path mode from the preceding pose to each supplied waypoint.
+
+    Supported for fixed-grid sequential ``ik_interp``. Empty retains ordinary
+    planning. Consecutive equal modes share a native request; the total sample
+    count and interval remain unchanged. No robot or target-name inference occurs.
+    """
+
     def __post_init__(self) -> None:
         """Validate backend-neutral motion generation options."""
+        if type(self.waypoint_modes) is not tuple or any(
+            mode not in ("joint", "cartesian") for mode in self.waypoint_modes
+        ):
+            raise ValueError("waypoint_modes must be a tuple of joint/cartesian modes")
+        if self.waypoint_modes and (
+            self.strategy != "ik_interp"
+            or self.interpolation_mode != "fixed_grid"
+            or self.ik_seed_mode != "sequential"
+            or self.is_linear
+            or self.preserve_cartesian_samples
+        ):
+            raise ValueError(
+                "waypoint_modes requires unsampled fixed-grid sequential ik_interp"
+            )
         segment_retries = self.segment_sample_count_retries
         if (
             type(segment_retries) is not tuple
@@ -761,11 +785,24 @@ class MotionGenerator:
         Raises:
             ValueError: If targets or options violate the motion contract.
         """
+        # The optional expansion scope collects requests on the World owner.
+        # It is inert for ordinary callers and preserves native budget scopes.
+        from embodichain.lab.expansion._planning_batches import _try_motion
+
+        handled, result = _try_motion(self, target_states, options, defer_recovery)
+        if handled:
+            return result
         if not target_states:
             raise ValueError("target_states must contain at least one waypoint.")
         options = MotionGenOptions() if options is None else options
         # Options are mutable config objects; revalidate at the call boundary.
         options.__post_init__()
+        if options.waypoint_modes:
+            from ._phase_paths import generate_phase_paths
+
+            return generate_phase_paths(
+                self, target_states, options, defer_recovery=defer_recovery
+            )
         if type(defer_recovery) is not bool:
             raise TypeError("defer_recovery must be a boolean.")
         linear_keyframes = (

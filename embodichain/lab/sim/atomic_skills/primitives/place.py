@@ -307,6 +307,13 @@ class Place(AtomicSkill[PlaceGoal | AssembleGoal, PlaceOptions]):
             # motion generator resolves backend defaults when no explicit
             # planner options were supplied.
             motion_options.sample_count = None
+        paths = request.motion_policy.phase_paths
+        if any(name in paths for name in ("pre_place", "place", "retreat")):
+            motion_options.waypoint_modes = (
+                paths.get("pre_place", "joint"),
+                *(paths.get("place", "joint"),) * (down_xpos.shape[1] - 1),
+                *(paths.get("retreat", "joint"),) * back_xpos.shape[1],
+            )
         motion_result = self.motion_generator.generate(
             build_pose_plan_states(torch.cat([down_xpos, back_xpos], dim=1)),
             options=motion_options,

@@ -260,6 +260,10 @@ class RuntimeCommandFrame:
     hold_duration: torch.Tensor
 
     def __post_init__(self) -> None:
+        from ._command_batches import validate_frame
+
+        if validate_frame(self):
+            return
         if isinstance(self.commands, (str, bytes)):
             raise TypeError("commands must be an iterable of EndpointCommand values.")
         try:
@@ -410,6 +414,10 @@ class TimedCommandSequence:
     env_ids: torch.Tensor
 
     def __post_init__(self) -> None:
+        from ._command_batches import validate_sequence
+
+        if validate_sequence(self):
+            return
         if not isinstance(self.env_ids, torch.Tensor):
             raise TypeError("env_ids must be a torch.Tensor.")
         if (

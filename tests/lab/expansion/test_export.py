@@ -29,6 +29,61 @@ from embodichain.data_pipeline.recording.media import MediaSpool, _digest
 from embodichain.lab.expansion import export as module
 
 
+def test_per_episode_export_uses_real_sdk_and_preserves_portable_boundaries(tmp_path):
+    from embodichain.lab.expansion import (
+        export_expansion_episodes,
+        load_expansion_episode,
+    )
+    from lerobot.datasets.lerobot_dataset import LeRobotDataset
+
+    sink = ArtifactEpisodeSink(tmp_path)
+    for ordinal in range(2):
+        parent = episode()
+        parent = replace(
+            parent,
+            identity=replace(
+                parent.identity,
+                candidate_id=f"candidate-{ordinal}",
+                geometry_family_id=f"family-{ordinal}",
+            ),
+            episode_id=f"episode-{ordinal}",
+            commit_id=f"commit-{ordinal}",
+            observations={
+                "joint_positions": torch.cat(
+                    (
+                        parent.observations["joint_positions"],
+                        parent.observations["joint_positions"] + 0.03,
+                    ),
+                    dim=1,
+                ),
+                "joint_velocities": torch.zeros(3, 2),
+                "joint_efforts": torch.zeros(3, 2),
+            },
+            actions=torch.cat((parent.actions, parent.actions + 0.03), dim=1),
+            metadata={
+                "expert_action_spec": {
+                    "joint_names": ["joint_0", "joint_1"],
+                    "joint_command_mode": "position",
+                    "step_dt": 0.1,
+                },
+                "source_episode_uuids": ["source"],
+            },
+        )
+        sink.submit(parent, submission_id=0)
+    result = export_expansion_episodes(tmp_path)
+    assert result["episodes"] == 2
+    assert export_expansion_episodes(tmp_path) == result
+    for row in result["datasets"]:
+        path = Path(result["directory"]) / row["dataset_path"]
+        data = LeRobotDataset(path.name, root=path, download_videos=False)
+        assert data.num_episodes == 1 and len(data) == 2
+        receipts = ArtifactEpisodeSink(path / "embodichain_artifacts").inspect()
+        assert len(receipts) == 1 and receipts[0].episode_id == row["episode_id"]
+        saved = load_expansion_episode(receipts[0].storage_id)
+        assert len(saved.timestamps) == len(saved.actions) + 1 == 3
+        torch.testing.assert_close(data[0]["action"], saved.actions[0], rtol=0, atol=0)
+
+
 def test_export_includes_visual_children_without_new_physical_receipts(
     tmp_path, monkeypatch
 ):

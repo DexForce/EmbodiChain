@@ -41,6 +41,7 @@ dependencies = [
   "ortools",
   "prettytable",
   "psutil>=5.9",
+  "greenlet>=3.2,<4",
   "black==26.10.1",
   "fvcore",
   "h5py",

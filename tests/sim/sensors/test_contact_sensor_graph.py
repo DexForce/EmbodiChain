@@ -23,7 +23,11 @@ import torch
 import warp as wp
 
 from dexsim.scene import ContactActorInfo, ContactBuffer, ContactQueryCapabilities
-from embodichain.lab.sim.sensors import ContactSensor, ContactSensorCfg
+from embodichain.lab.sim.sensors import (
+    ContactPermissionChecker,
+    ContactSensor,
+    ContactSensorCfg,
+)
 
 pytestmark = [pytest.mark.gpu, pytest.mark.no_sim]
 
@@ -209,8 +213,14 @@ def test_sensor_graph_samples_once_reuses_and_recaptures(caller_kind: str) -> No
 
 
 @pytest.mark.parametrize("history_sample", [False, True])
-def test_cached_sample_is_ready_on_another_cuda_stream(history_sample: bool) -> None:
-    """A cached update must wait for the producer's outstanding device work."""
+@pytest.mark.parametrize(
+    "dropped_count",
+    [pytest.param(0, id="forbidden-contact"), pytest.param(3, id="dropped-evidence")],
+)
+def test_cached_sample_is_ready_on_another_cuda_stream(
+    history_sample: bool, dropped_count: int
+) -> None:
+    """Permission checks and cached updates wait for the pending sensor sample."""
     wp.init()
     device = torch.device("cuda:0")
     query = _CudaQuery(device)
@@ -238,6 +248,12 @@ def test_cached_sample_is_ready_on_another_cuda_stream(history_sample: bool) -> 
         if history_sample
         else None
     )
+    checker = ContactPermissionChecker(
+        sensor,
+        ({0: "ground", 10: "cube"}, {0: "ground", 20: "cube"}),
+        allowed_contacts=(),
+        moving_frames=("cube",),
+    )
 
     def sample() -> None:
         if history_sample:
@@ -246,7 +262,10 @@ def test_cached_sample_is_ready_on_another_cuda_stream(history_sample: bool) -> 
             sensor.update()
 
     sample()  # Compile kernels before arranging the delayed producer.
+    checker.check()
     sensor.reset()
+    query.buffer.device_counts[0] = 0 if dropped_count else 2
+    query.buffer.device_counts[1] = dropped_count
     torch.cuda.synchronize(device)
     owner.physics_step_index += 1
     producer = torch.cuda.Stream(device=device)
@@ -255,14 +274,21 @@ def test_cached_sample_is_ready_on_another_cuda_stream(history_sample: bool) -> 
         torch.cuda._sleep(200_000_000)
         sample()
     with torch.cuda.stream(consumer):
+        # Check before a cached update can independently wait for the producer.
+        permissions = checker.check()
         sample()
         observed = sensor.get_data()["is_valid"].clone()
         force = history.force.clone() if history is not None else None
     consumer.synchronize()
-    assert observed.tolist() == [[True, False], [True, False]]
+    assert permissions.tolist() == (
+        [[4, 0, 0], [4, 0, 0]] if dropped_count else [[3, 0, 10], [3, 0, 20]]
+    )
+    assert observed.tolist() == [[not dropped_count, False]] * 2
     if force is not None:
         torch.testing.assert_close(
             force,
-            torch.tensor([[[0.0, 0.0, 2.0]], [[0.0, 0.0, 2.0]]], device=device),
+            torch.tensor(
+                [[[0.0, 0.0, 0.0 if dropped_count else 2.0]]] * 2, device=device
+            ),
         )
     producer.synchronize()

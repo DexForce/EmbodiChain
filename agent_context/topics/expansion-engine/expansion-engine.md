@@ -10,13 +10,18 @@ algorithms stay in `sim.motion.expansion`; scene and workspace algorithms stay i
 | Closed configuration and preflight | `embodichain/lab/expansion/configured.py` |
 | Canonical in-memory session, lifecycle limits and coverage port | `embodichain/lab/expansion/session.py`, `session_cfg.py`, `coverage.py` |
 | Shared scheduling, admission and commit ports | `embodichain/lab/expansion/engine.py` |
+| Rolling workload × B execution in one caller-owned World | `embodichain/lab/expansion/workloads.py` |
 | Job assembly, stage recovery and inspect | `embodichain/lab/expansion/workflow.py`, `stages.py` |
 | Native World ownership and compatibility facade | `embodichain/lab/expansion/host.py` |
+| Task-owned render/source/transform/acceptance ports | `embodichain/lab/expansion/host_extensions.py` |
+| Measured geometry, native substeps and sustained-contact acceptance | `embodichain/lab/expansion/acceptance.py` |
+| Physics-free measured reference/ghost comparison | `embodichain/lab/expansion/comparison.py` |
 | Native recipes, cohort preparation, step observation and episode assembly | `embodichain/lab/expansion/_gym_recipe.py`, `_gym_prepare.py`, `_gym_execution.py`, `_gym_frames.py`, `_gym_episode.py` |
 | Durable recipes, attempts and invocation budgets | `embodichain/lab/expansion/journal.py` |
 | Task Program execution with native or prototype motion | `embodichain/lab/expansion/program.py`, `real2sim.py` |
 | Source-pinned sampling and joint scene candidates | `embodichain/lab/expansion/recipes.py`, `scene.py` |
 | Artifact staging, checks and dataset export | `embodichain/lab/expansion/persistence.py`, `export.py` |
+| Portable one-episode dataset export | `embodichain/lab/expansion/episode_export.py` |
 | Native appearance and state rerender | `embodichain/lab/expansion/visual.py` |
 | Bounded media blocks | `embodichain/data_pipeline/recording/media.py` |
 
@@ -71,6 +76,23 @@ sampling, whole-cohort preparation, active-row frame buffering and measured epis
 assembly have separate owners. Preserve the host constructor, port methods and
 existing readout properties used by benchmark/showcase instrumentation.
 
+`GymExpansionHostExtensions` supplies non-owning callbacks for collection renderer,
+scene source, immutable recipe transformation, measured validator and row plan
+factory. `ExpansionRowContext` carries pinned identity without exposing mutable
+host buffers. Hosts retain preparation, control clocks, T+1 capture, attachment
+archival and confirmed receipts. Do not replace configured nominal sources with
+an extension transform. `MeasuredExpansionValidator` presents the same lifecycle
+for independent geometry and native contacts, including task-declared sustained
+finger contact and drift limits. Every original physical substep remains required;
+missing impulses, unknown actors and dropped samples reject acceptance.
+
+`preview_expansion_comparison` consumes a caller-owned environment factory and
+qualified measured episodes. Shared-time pause/switch controls retain the selected
+time; physics stays disabled and render updates do not mutate saved evidence.
+`MarkerFramePublisher` owns resident robot/object groups and publishes a coherent
+cross-group frame through the public marker layer. Task assets and any collection
+process orchestration remain outside the replay core.
+
 `TaskProgramDemoBridge.program_id` and `env_ids` expose binding identity without
 runtime traversal. `EmbodiedEnv.task_program_bridge_scope()` restores the borrowed
 bridge even after failure. `Real2SimTabletopSource` and explicit
@@ -82,7 +104,7 @@ journal/duplicate-submission behavior.
 Cohorts have fixed robot/joint topology, backend, clock, observation schema and
 World appearance. Native scene-atlas input retains the complete layout/installation
 candidate. Assets with different topology require separate deployment Worlds.
-All rows reset and settle together. Only the owner steps physics, and row generators
+The configured cohort path resets and settles its rows together. Only the owner steps physics, and row generators
 acknowledge commands only after successful steps. Early termination must drain the
 Task Program safe-stop handshake; completed rows stop contributing frames.
 Native vector rejection cancels the row across semantic lanes and masks retained
@@ -90,6 +112,21 @@ commands. Its safe hold uses the next ordinary step, preserving surviving rows'
 post-policy observation clock. Expected Real2Sim acceptance rejection retains
 measured checks and rejects only that row; source corruption and runtime errors
 still stop collection.
+
+`WorkloadProgramExecutor` is an optional rolling integration for custom native
+sources. Its supplied environment must have exactly `workload_count * batch_size`
+rows and be the sole live World in the process. Each workload owns quotas, local
+candidate ordinals and admission budgets; its B-row lane is reused after that
+group drains. Preparing rows settle through ordinary control steps while live
+rows continue to record and validate every boundary. The source owns scene
+proposals, bridge binding and all physical checks, using `ExpansionEngine.admit_row`,
+`mark_row_started` and `complete_row` instead of editing private engine queues.
+Only confirmed native receipts earn quota or permit reuse; duplicate identities
+cannot earn credit twice. Clock spans must equal each trajectory's command count.
+Compatible fixed-grid planning and pure solver requests can be cooperatively
+merged on the owner thread. Scoped planning budgets retain per-row charges;
+unsupported requests keep native execution. Export callbacks receive frozen
+group evidence and never access the World. See [rolling execution](workloads.md).
 
 Native numerical evidence has T submitted actions and T+1 measured states. It includes
 all represented dynamic scene entities, source/action semantics, physical parameters
@@ -102,6 +139,11 @@ has bounded transient copies; no per-candidate dense full-episode image array is
 Frame readers stream selected frames from stored blocks; full artifact audits still
 validate bounded blocks. LeRobot export streams confirmed parents and visual children through the existing
 recorder and checks the exact final journal identity set. ODS remains unchanged.
+`export_expansion_episodes` additionally publishes one portable LeRobot dataset
+per confirmed parent. Cached evidence reads still hash every file byte and
+reconstruct checked, independently owned numerical tensors; source/receipt/media
+inspection remains required. Immutable JSON nodes can be shared internally, while
+public mutable projections own separate containers.
 
 Pure visual replay requires complete scene state and an explicit observation-independent
 expert contract. Physics is disabled across the entire World; render-state publication

@@ -45,6 +45,38 @@ UR5_DH_PARAMETERS = {
 }
 
 
+@pytest.mark.parametrize(
+    "device", ["cpu", pytest.param("cuda:0", marks=pytest.mark.gpu)]
+)
+def test_tcp_offset_jacobian_uses_the_solver_device(tmp_path, device):
+    path = tmp_path / "one_joint.urdf"
+    path.write_text("""<robot name="offset">
+      <link name="base"/><link name="arm"/><link name="tool"/>
+      <joint name="joint" type="revolute"><parent link="base"/><child link="arm"/>
+        <axis xyz="0 0 1"/><limit lower="-3" upper="3" effort="10" velocity="2"/>
+      </joint>
+      <joint name="tip" type="fixed"><parent link="arm"/><child link="tool"/>
+        <origin xyz="1 0 0"/>
+      </joint>
+    </robot>""")
+    solver = PytorchSolverCfg(
+        urdf_path=str(path),
+        root_link_name="base",
+        end_link_name="tool",
+        joint_names=["joint"],
+    ).init_solver(device=device)
+    expected = torch.tensor(
+        [[[-0.2], [1.0], [0.0], [0.0], [0.0], [1.0]]], device=device
+    )
+    for locations in (
+        torch.tensor([0.0, 0.2, 0.0]),
+        torch.tensor([[0.0, 0.2, 0.0]], device=device),
+    ):
+        actual = solver.get_jacobian(torch.zeros(1, 1), locations=locations)
+        torch.testing.assert_close(actual, expected, rtol=0, atol=1e-6)
+        assert actual.device.type == torch.device(device).type
+
+
 @pytest.mark.parametrize("dtype", [np.float16, np.float32, np.float64])
 def test_nearest_weight_numpy_dtypes_update_tensor_in_place(dtype) -> None:
     solver = object.__new__(OPWSolver)

@@ -22,6 +22,7 @@ from .cfg import MarkerGroupCfg, MarkerPrototypeCfg
 from .group import MarkerGroup
 from .visualization_markers import VisualizationMarkers, VisualizationMarkersCfg
 from .robot_markers import RobotMarkers, RobotMarkersCfg, RobotMarkersAppearanceCfg
+from .frame import MarkerFramePublisher
 
 __all__ = [
     "RobotMarkers",
@@ -30,6 +31,7 @@ __all__ = [
     "MarkerGroupCfg",
     "MarkerPrototypeCfg",
     "MarkerGroup",
+    "MarkerFramePublisher",
     "VisualizationMarkers",
     "VisualizationMarkersCfg",
 ]

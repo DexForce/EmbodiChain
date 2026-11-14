@@ -727,6 +727,7 @@ class SimulationSegmentPolicyPort:
                 context, attached, previous_target = self._hold_observer(
                     cfg.object, accepted
                 )
+                attached = attached.to(device=active_mask.device)
                 self.validate_observation_scope(clock)
                 if clock.step_index != start + tick:
                     raise ValueError("Hold observation changed its execution clock.")
@@ -752,6 +753,7 @@ class SimulationSegmentPolicyPort:
                             name="hold.at",
                         )
                     )
+                target = target.to(device=active_mask.device)
                 pose = context.scene.entities[cfg.object].pose.to(target)
                 if pose.ndim == 2:
                     pose = pose.unsqueeze(0).expand(active_mask.numel(), -1, -1)
@@ -1883,7 +1885,14 @@ class SimulationSegmentPolicyPort:
             target.native_entity,
             entity_id=target.canonical_id,
         )
-        pose = pose.index_select(0, row_indices.to(pose.device))
+        # _read_pose already selects this port's bound physical rows. Convert
+        # the requested World IDs to local offsets instead of selecting twice
+        # with the original IDs (for example row 7 in a B=1 policy port).
+        matches = row_indices[:, None] == self._row_indices[None, :]
+        if not bool((matches.sum(dim=1) == 1).all()):
+            raise ValueError("Pose-delta settling requested an unbound physical row")
+        local = matches.long().argmax(dim=1).to(pose.device)
+        pose = pose.index_select(0, local)
         row_count = row_indices.numel()
         if previous_pose is None:
             speed = torch.full(

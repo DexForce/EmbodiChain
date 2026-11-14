@@ -141,6 +141,40 @@ def _frame(
     )
 
 
+@pytest.mark.gpu
+def test_cuda_sequence_snapshots_keep_ownership_and_revalidate_mutated_values() -> None:
+    target = JointPositionTarget("arm", (0, 1))
+    ids = torch.tensor([1, 5], device="cuda:0")
+    frames = tuple(
+        RuntimeCommandFrame(
+            commands=(
+                EndpointCommand(
+                    target,
+                    JointPositionPayload(
+                        torch.full((2, 2), 0.1 * (i + 1), device="cuda:0")
+                    ),
+                ),
+            ),
+            active_mask=torch.tensor([True, False], device="cuda:0"),
+            env_ids=ids,
+            hold_duration=torch.full((2,), 0.04, device="cuda:0"),
+        )
+        for i in range(3)
+    )
+    original = TimedCommandSequence(frames, ids)
+    copied = original.snapshot()
+    original.frames[0].commands[0].payload.positions.fill_(99)
+    assert copied.frames[0].commands[0].payload.positions[0, 0] == 0.1
+    copied.frames[0].commands[0].payload.positions.fill_(55)
+    assert copied.frames[1].commands[0].payload.positions[0, 0] == 0.2
+    original.frames[0].commands[0].payload.positions[0, 0] = float("nan")
+    with pytest.raises(ValueError, match="finite"):
+        original.snapshot()
+    copied.frames[0].hold_duration[0] = -0.1
+    with pytest.raises(ValueError, match="non-negative"):
+        copied.snapshot()
+
+
 def test_runtime_command_payload_is_abstract() -> None:
     with pytest.raises(TypeError):
         RuntimeCommandPayload()  # type: ignore[abstract]
