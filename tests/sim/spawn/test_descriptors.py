@@ -73,7 +73,13 @@ from embodichain.lab.sim.cfg import (
     VolumeDeformableMeshingCfg,
     VolumeDeformableObjectCfg,
 )
-from embodichain.lab.sim.shapes import CubeCfg, LoadOption, MeshCfg, PlaneCfg
+from embodichain.lab.sim.shapes import (
+    CubeCfg,
+    CylinderCfg,
+    LoadOption,
+    MeshCfg,
+    PlaneCfg,
+)
 from embodichain.lab.sim.objects import Articulation, RigidObject, RigidObjectGroup
 from embodichain.lab.sim.spawn.descriptors import (
     articulation_desc_from_cfg,
@@ -2859,3 +2865,29 @@ def test_shape_optical_transmission_reaches_spawn_material(kind):
         json.loads(next(iter(materials.values())).parameters_json)["transmission"]
         == 0.85
     )
+
+
+def test_cylinder_descriptor_preserves_full_height_and_local_axis() -> None:
+    cfg = RigidObjectCfg.from_dict(
+        {
+            "uid": "spool",
+            "shape": {"shape_type": "Cylinder", "radius": 0.0125, "height": 0.017},
+        }
+    )
+    assert isinstance(cfg.shape, CylinderCfg)
+    descriptor, _ = rigid_desc_from_cfg(cfg, newton_solver_type="dexuni")
+    geometry = descriptor.collisions[0]
+    assert geometry.radius == pytest.approx(0.0125)
+    assert geometry.half_height == pytest.approx(0.0085)
+    assert geometry.axis == "z"
+
+
+@pytest.mark.parametrize(
+    "radius,height", [(0.0, 1.0), (1.0, -0.1), (float("nan"), 1.0), (1.0, float("inf"))]
+)
+def test_cylinder_rejects_invalid_contact_geometry(
+    radius: float, height: float
+) -> None:
+    cfg = RigidObjectCfg(uid="spool", shape=CylinderCfg(radius=radius, height=height))
+    with pytest.raises(ValueError, match="finite and positive"):
+        rigid_desc_from_cfg(cfg, newton_solver_type="dexuni")

@@ -38,6 +38,7 @@ __all__ = [
     "CubeCfg",
     "PlaneCfg",
     "SphereCfg",
+    "CylinderCfg",
 ]
 
 
@@ -499,3 +500,12 @@ class SphereCfg(ShapeCfg):
 
     resolution: int = 20
     """Resolution of the sphere mesh. Defaults to 20."""
+
+
+@configclass
+class CylinderCfg(ShapeCfg):
+    """Native cylinder geometry, with full height measured along local Z."""
+
+    shape_type: str = "Cylinder"
+    radius: float = 0.01
+    height: float = 0.01

@@ -1,0 +1,13 @@
+task_key: route_the_cable
+title: Route the Cable
+summary: Task Program with material-coordinate pinches, measured slip and bounded
+  routing feedback.
+tags:
+- cable
+- deformable
+- manipulation
+- task_program_expert
+default_deployment: yam
+deployments:
+  yam:
+    config: task.yam.yaml

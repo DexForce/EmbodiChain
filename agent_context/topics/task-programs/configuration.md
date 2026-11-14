@@ -197,6 +197,13 @@ the closed-field decoder. Omitting `velocity_limit` preserves the Robot's
 ordered per-joint speed caps; an explicit scalar request is intersected with
 those caps rather than replacing them.
 
+Configured motion accepts `interpolate_position_step` for native Cartesian
+sampling. `MoveEndEffectorOptions.preserve_cartesian_samples` retains authored
+Cartesian samples; `MoveJointsOptions.preserve_samples` consumes explicitly
+sampled joint commands at the host cadence using `ik_interp`. These declarations
+retain normal Atomic velocity qualification and do not certify collision-free
+motion. Inactive sampling additions preserve existing integration fingerprints.
+
 Configured motion also accepts explicit `interpolation_mode` and `ik_seed_mode`.
 `fixed_grid` requires `acceleration_limit: null` and no scalar speed override;
 omission retains the existing adaptive policy and acceleration default.
@@ -210,6 +217,18 @@ preparation and pouring path from the held transform. Keep these geometry
 declarations in the integration and timing in the execution policy, rather
 than placing a precomputed bottle world pose in the program. Omitting `target`
 retains the original internal-axis pouring behavior.
+
+`scene_binding.cables` declares material-state native identities without rigid
+object semantics or root-pose providers. The allowlisted
+`runtime_services.cable_material` binds those identities to measured material
+coordinates and closed target declarations. Its calls lower to existing
+`PickUp(ContactGraspGoal)`, `MoveEndEffector`, and `MoveJoints` skills; the program
+owns stage ordering. The bridge captures contact references only after an
+acknowledged close frame and checks material slip after every consumed action.
+References are fresh per bridge, guarded by its episode scope, and mapped from
+selected robot rows to native cable arenas. Evaluation consumes qualified
+`cables/<uid>/<measurement>` channels, including strict endpoint geometry and
+episode slip. Keep routing acceptance in the deployment's named evaluation rules.
 
 The configured lowerer allowlist also exposes profile-owned Park, AxisAlign,
 relative Place and coordinated transport. Their declarations in

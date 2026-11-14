@@ -132,6 +132,7 @@ __all__ = [
     "FeedbackTerminalAcceptance",
     "GRASP_COMMAND",
     "GRASP_CAPABILITY",
+    "ContactGraspGoal",
     "GraspGoal",
     "HandOver",
     "HandOverGoal",
