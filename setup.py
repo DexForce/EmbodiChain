@@ -175,6 +175,7 @@ def get_package_data() -> dict[str, list[str]]:
             "**/*.json",
             "**/*.yaml",
             "**/*.yml",
+            "**/*.urdf",
             "**/README.md",
         ],
     }

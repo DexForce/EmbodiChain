@@ -1,9 +1,11 @@
 task_key: drawer_storage
 title: Drawer Storage
-summary: Open a drawer, store a cube and close it, with independent physical acceptance.
+summary: Open a drawer, store objects and close it, from a single cube to a four-object
+  long-horizon sequence.
 tags:
 - manipulation
 - drawer
+- long_horizon
 - task_program
 default_deployment: ur5
 deployments:
@@ -11,3 +13,5 @@ deployments:
     config: task.ur5.yaml
   franka:
     config: task.franka.yaml
+  ur5_long_horizon:
+    config: task.ur5.long_horizon.yaml

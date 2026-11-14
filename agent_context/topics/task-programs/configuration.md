@@ -50,7 +50,8 @@ Language instructions express intent; physical acceptance still depends on the
 selected effect authority and validators, not on the presence of a label.
 
 Measured segment validators can check lift from the segment's incoming pose,
-world-axis position relative to another live object, and object uprightness.
+position relative to another live rigid object or articulation link, and object
+uprightness.
 `object_near_relative_target` compares an object's measured position against a
 fresh reference position plus a declared world-axis displacement; it does not
 reuse the reference pose captured for planning.
@@ -236,21 +237,32 @@ requires the verified held-object transform. Coordinated transport must select
 the real primitive's release mode. Do not install frontend skill replacements.
 `move_held_object` additionally accepts an explicit `routes` declaration instead
 of its legacy single-target fields. Each route binds a canonical object, target
-ID and an inert absolute or scene-relative pose. These declarations live in
-`simulation/targets.py` and `simulation/transport.py`; lowering only constructs
-typed goals, retained-attachment effects and lookahead targets. It does not read
-live poses, select motion policy or replace the shared Atomic Skill. The original
-single-target decoder/factory and effect behavior remain unchanged. Mixed forms
+ID and an inert absolute or scene-relative pose, optionally preceded by
+`waypoints`. `preserve_current_object_orientation` retains the carried object's
+observed rotation while positions follow their declared frames. These
+declarations live in `simulation/targets.py` and `simulation/transport.py`;
+lowering resolves a fresh planning snapshot when waypoints or observed rotation
+are requested, places every resolved pose on the planning device, then
+constructs typed goals, retained-attachment effects and lookahead targets. It does not select motion policy or replace the shared
+Atomic Skill. The original single-target decoder/factory and effect behavior
+remain unchanged. Mixed forms
 and duplicate target IDs are rejected. The optional
 `RegisteredSemanticLowererSceneValidator` contract lets an immutable factory
 preflight its references against `SceneManifest` before runtime assembly; routed
 transport uses it for canonical object/reference checks.
-The routed-2 factory uses named transport goals and verified retention-only
+The routed-3 factory uses named transport goals and verified retention-only
 phases: grounding checks the exact object and every eligible input-hold row,
 then guards `transport` and requests terminal attachment verification. Projected
 presets reject this contract before motion planning or dispatch. The legacy
 single-target factory keeps its existing effectless behavior and identity.
 
+The configured `move_end_effector` lowerer exposes the existing Cartesian
+Atomic Skill through closed named routes of arena-frame SE(3) waypoints. Its
+call accepts only a configured `target` selector. Use it for empty-hand transit
+or deliberate contact motion; held-object transit requires the transport
+contract above. The lowerer declares `requires_unoccupied_slots = ("primary",)`,
+so grounding rejects the call with `unoccupied_resource_required` when the bound
+manipulator holds a verified object in any eligible environment.
 
 Container affordances may declare a local-z release clearance while retaining
 their original semantic target for final acceptance.
@@ -363,6 +375,11 @@ manifests and live registries retain the same identity.
 so reference rotation does not rotate their offset or per-axis tolerances.
 Select `reference_frame: parent` to measure both in the live reference frame,
 matching a target whose relative pose composes the complete parent transform.
+The reference may be an articulation link; the observer reads its current
+native link pose so acceptance follows a moving drawer floor after closure.
+Static validation sends this reference with role `object`; a validation context
+that declares `supports_link_references = True`, such as the integration
+catalog, receives `object_or_link` instead.
 
 
 ## Named evaluation rules

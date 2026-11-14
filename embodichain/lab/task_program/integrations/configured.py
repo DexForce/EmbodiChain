@@ -53,6 +53,7 @@ from ._configured_services import (
     _CoordinatedTransportRoute,
     _JointPositionConstraintEvidenceProviderFactory,
     _MoveHeldObjectLowererFactory,
+    _MoveEndEffectorLowererFactory,
     _ParkLowererFactory,
     _PourLowererFactory,
     _PourTargetBinding,
@@ -2533,6 +2534,7 @@ def _decode_registered_lowerer(
     | _AxisAlignLowererFactory
     | _CoordinatedTransportLowererFactory
     | _MoveHeldObjectLowererFactory
+    | _MoveEndEffectorLowererFactory
     | _ParkLowererFactory
     | RoutedMoveHeldObjectLowererFactory
     | _PourLowererFactory
@@ -2613,6 +2615,28 @@ def _decode_registered_lowerer(
                 path=f"{path}.object_ids",
             )
         )
+    if kind == "move_end_effector":
+        config = _mapping(value, path=path, required=frozenset({"kind", "routes"}))
+        routes = []
+        for index, value in enumerate(
+            _sequence(config["routes"], path=f"{path}.routes")
+        ):
+            route_path = f"{path}.routes[{index}]"
+            route = _mapping(
+                value, path=route_path, required=frozenset({"target_id", "poses"})
+            )
+            poses = tuple(
+                _finite_tuple(
+                    pose, path=f"{route_path}.poses[{pose_index}]", expected_length=16
+                )
+                for pose_index, pose in enumerate(
+                    _sequence(route["poses"], path=f"{route_path}.poses")
+                )
+            )
+            routes.append(
+                (_identifier(route["target_id"], path=f"{route_path}.target_id"), poses)
+            )
+        return _MoveEndEffectorLowererFactory(pose_routes=tuple(routes))
     if kind == "articulation_link_slide":
         config = _mapping(
             value,
@@ -2695,6 +2719,9 @@ def _decode_registered_lowerer(
                 item,
                 path=route_path,
                 required=frozenset({"object_id", "target_id", "pose"}),
+                optional=frozenset(
+                    {"preserve_current_object_orientation", "waypoints"}
+                ),
             )
             routes.append(
                 HeldObjectTransportRoute(
@@ -2705,6 +2732,19 @@ def _decode_registered_lowerer(
                         route["target_id"], path=f"{route_path}.target_id"
                     ),
                     pose=_decode_goal_pose(route["pose"], path=f"{route_path}.pose"),
+                    waypoints=tuple(
+                        _decode_goal_pose(value, path=f"{route_path}.waypoints[{i}]")
+                        for i, value in enumerate(
+                            _sequence(
+                                route.get("waypoints", []),
+                                path=f"{route_path}.waypoints",
+                            )
+                        )
+                    ),
+                    preserve_current_object_orientation=_boolean(
+                        route.get("preserve_current_object_orientation", False),
+                        path=f"{route_path}.preserve_current_object_orientation",
+                    ),
                 )
             )
         return RoutedMoveHeldObjectLowererFactory(routes=tuple(routes))
@@ -2940,7 +2980,7 @@ def _decode_registered_lowerer(
     raise ValueError(
         f"Unsupported {path}.kind {kind!r}; supported kinds are "
         "['press', 'twist', 'open_door', 'articulation_link_slide', 'axis_align', 'coordinated_transport', "
-        "'move_held_object', 'park', 'place_relative', 'pour', 'push_object']."
+        "'move_end_effector', 'move_held_object', 'park', 'place_relative', 'pour', 'push_object']."
     )
 
 
@@ -3006,6 +3046,7 @@ class _DecodedRuntimeServices:
         | _AxisAlignLowererFactory
         | _CoordinatedTransportLowererFactory
         | _MoveHeldObjectLowererFactory
+        | _MoveEndEffectorLowererFactory
         | _ParkLowererFactory
         | RoutedMoveHeldObjectLowererFactory
         | _PourLowererFactory

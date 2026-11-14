@@ -19,9 +19,11 @@
 from __future__ import annotations
 
 import ast
+from fnmatch import fnmatch
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -38,6 +40,7 @@ _SETUP_PATH = _REPOSITORY_ROOT / "setup.py"
 _CONFIG_PACKAGE = "embodichain_tasks.configs"
 _CONFIG_SOURCE = _REPOSITORY_ROOT / "extensions" / "embodichain_tasks" / "configs"
 _PROGRAMS = (
+    Path("tasks/manipulation/drawer_storage/task_program/program.long_horizon.yaml"),
     Path("tasks/manipulation/carton_stocking/task_program/program.yaml"),
     Path("tasks/manipulation/hand_over/task_program/program.bar.yaml"),
     Path("tasks/manipulation/repeated_pick_place/task_program/program.tabletop.yaml"),
@@ -56,6 +59,11 @@ _PROGRAMS = (
     ),
 )
 _DEPLOYMENTS = {
+    Path("tasks/manipulation/drawer_storage/task.ur5.long_horizon.yaml"): (
+        "drawer_storage_long_horizon",
+        "task_program_drawer_storage_long_horizon",
+        "ur5_dh_pgi_140_80_full_closure",
+    ),
     Path("tasks/manipulation/repeated_pick_place/task.tianji_marvin.yaml"): (
         "repeated_tabletop_cube_pick_place",
         "repeated_pick_place_tabletop",
@@ -283,6 +291,19 @@ _RESOURCE_PATHS = frozenset(
         ),
         Path("components/execution_policies/real2sim_verified.yaml"),
         *_DUAL_ARM_RESOURCES,
+        Path("components/embodiments/ur5_dh_pgi_140_80_full_closure.yaml"),
+        *(
+            Path("tasks/manipulation/drawer_storage") / name
+            for name in (
+                "env.long_horizon.yaml",
+                "catalog.yaml",
+                "README.md",
+                "assets/bedside_cabinet.urdf",
+                "task_program/evaluation.long_horizon.yaml",
+                "task_program/integration.long_horizon.yaml",
+                "task_program/execution_policy.long_horizon.yaml",
+            )
+        ),
         *_PROGRAMS,
         *_DEPLOYMENTS,
         *(
@@ -452,6 +473,7 @@ def test_setup_stages_all_official_task_programs(
         "**/*.json",
         "**/*.yaml",
         "**/*.yml",
+        "**/*.urdf",
         "**/README.md",
     ]
     expected_outputs = {
@@ -559,8 +581,27 @@ print(json.dumps(decoded_deployments, sort_keys=True))
     }
 
 
+def test_drawer_storage_readme_links_survive_wheel_installation() -> None:
+    """Relative README links target packaged files; previews use stable URLs."""
+    readme = _CONFIG_SOURCE / "tasks/manipulation/drawer_storage/README.md"
+    patterns = get_package_data()[_CONFIG_PACKAGE]
+    targets = re.findall(r"\]\(([^)\s#]+)", readme.read_text(encoding="utf-8"))
+    relative = [
+        (readme.parent / target).resolve().relative_to(_CONFIG_SOURCE.resolve())
+        for target in targets
+        if re.match(r"[a-z][a-z0-9+.-]*:", target) is None
+    ]
+
+    assert relative
+    assert [
+        path
+        for path in relative
+        if not any(fnmatch(path.as_posix(), pattern) for pattern in patterns)
+    ] == []
+
+
 def test_installed_wheel_registers_drawer_storage(tmp_path: Path) -> None:
-    """Register both drawer deployments from installed YAML and discover the catalog."""
+    """Register every drawer deployment from installed YAML and discover the catalog."""
     source = tmp_path / "source"
     source.mkdir()
     for name in ("setup.py", "pyproject.toml", "README.md", "VERSION", "MANIFEST.in"):
@@ -628,7 +669,11 @@ assert not (installed / "embodichain_tasks/manipulation/drawer_storage.py").exis
 assert (configs / "task_program/evaluation.yaml").is_file()
 assert "embodichain_tasks" not in sys.modules
 
-for name, open_positions in (("ur5", (0.0,)), ("franka", (0.04, 0.04))):
+for name, open_positions, contained, clearance_fields in (
+    ("ur5", (0.0,), "cube_contained", 3),
+    ("franka", (0.04, 0.04), "cube_contained", 3),
+    ("ur5.long_horizon", (0.0,), "paper_cup_contained", 6),
+):
     path = configs / f"task.{name}.yaml"
     raw = load_config(path)
     assert raw["id"] not in registry
@@ -638,8 +683,8 @@ for name, open_positions in (("ur5", (0.0,)), ("franka", (0.04, 0.04))):
     registration = spec.task_program_registration
     rules = registration.evaluation_conditions
     assert rules["hand_open"].parameters["hand_open"]["positions"] == open_positions
-    assert len(rules["fingers_clear"].required_fields) == 3
-    assert "cube_contained" in registration.evaluation_final_refs
+    assert len(rules["fingers_clear"].required_fields) == clearance_fields
+    assert contained in registration.evaluation_final_refs
 
 import embodichain_tasks
 from embodichain.cli.list_task import _collect_environment_entries
@@ -649,6 +694,7 @@ assert "embodichain_tasks.manipulation.drawer_storage" not in sys.modules
 assert {entry.env_id for entry in _collect_environment_entries()} >= {
     "TaskProgramDrawerStorage-UR5-v1",
     "TaskProgramDrawerStorage-Franka-v1",
+    "TaskProgramDrawerStorage-UR5-LongHorizon-v1",
 }
 
 """,

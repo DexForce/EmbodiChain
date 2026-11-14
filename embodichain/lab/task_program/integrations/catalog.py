@@ -27,7 +27,7 @@ import math
 from _thread import LockType
 from threading import Lock
 from types import MappingProxyType
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 import torch
 
 from embodichain.lab.evaluation import CompiledEvaluation
@@ -68,6 +68,7 @@ from embodichain.lab.task_program.semantics import (
     SceneAffordanceRef,
     SceneArticulationRef,
     SceneEntityRef,
+    SceneLinkRef,
     SceneManifest,
     SceneObjectRef,
     SceneRegistry,
@@ -601,6 +602,9 @@ def _planning_contracts(factories):
 class TaskProgramIntegrationCatalog:
     """Provider-free integration directory owned by one task registration."""
 
+    supports_link_references: ClassVar[bool] = True
+    """Validate relative-position references as objects or articulation links."""
+
     scene_registry_id: str
     robot_profile_id: str
     scene: SceneManifest
@@ -1060,6 +1064,7 @@ class TaskProgramIntegrationCatalog:
             "articulation": (SceneArticulationRef,),
             "affordance": (SceneAffordanceRef,),
             "object_or_affordance": (SceneObjectRef, SceneAffordanceRef),
+            "object_or_link": (SceneObjectRef, SceneLinkRef),
         }
         expected_types = expected.get(role)
         if expected_types is None:

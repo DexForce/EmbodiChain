@@ -1,0 +1,164 @@
+graph:
+  roots:
+  - drink_can_contained
+  - water_bottle_contained
+  - coffee_cup_contained
+  - paper_cup_contained
+  - rail_closed
+  - hand_open
+  - fingers_clear
+  rules:
+    # Points are each scaled convex hull's support vertices along the six
+    # axes and eight diagonals, so they stay on the surface of round and
+    # tapered objects. The interior is assets/bedside_cabinet.urdf in the
+    # drawer_bottom frame, from the floor top to the side-wall top.
+    drink_can_contained:
+      kind: corner_containment
+      bindings: {pose: rigid_objects/drink_can/frame, frame: links/drawer_floor/frame}
+      params:
+        corners:
+        - [0.0203, 0.0192, 0.0]
+        - [-0.0203, 0.0192, 0.0]
+        - [0.0113, 0.0279, -0.0114]
+        - [-0.0032, -0.0287, 0.0162]
+        - [0.0, 0.0192, 0.0203]
+        - [0.0, -0.0249, -0.0203]
+        - [-0.0139, -0.0258, -0.014]
+        - [-0.0139, -0.0258, 0.0139]
+        - [-0.0114, 0.0278, -0.0116]
+        - [-0.0114, 0.0278, 0.0112]
+        - [0.0139, -0.0258, -0.014]
+        - [0.0139, -0.0258, 0.0139]
+        - [0.0114, 0.0278, -0.0116]
+        - [0.0114, 0.0278, 0.0112]
+        lower: [-0.1572, -0.118, 0.0064]
+        upper: [0.1572, 0.1212, 0.086]
+        tolerance: 0.001
+    water_bottle_contained:
+      kind: corner_containment
+      bindings: {pose: rigid_objects/water_bottle/frame, frame: links/drawer_floor/frame}
+      params:
+        corners:
+        - [0.0194, 0.0004, 0.0077]
+        - [-0.0206, -0.0012, -0.0263]
+        - [-0.0005, 0.02, 0.0085]
+        - [-0.0004, -0.0196, -0.0267]
+        - [0.0008, 0.0043, 0.0384]
+        - [0.0124, 0.0087, -0.0327]
+        - [-0.0153, -0.0116, -0.03]
+        - [-0.0067, -0.0073, 0.0375]
+        - [-0.0149, 0.0121, -0.0297]
+        - [-0.0064, 0.0075, 0.0378]
+        - [0.0121, -0.0122, -0.0315]
+        - [0.0073, -0.0066, 0.0378]
+        - [0.0143, 0.0109, -0.0318]
+        - [0.0065, 0.0081, 0.0378]
+        lower: [-0.1572, -0.118, 0.0064]
+        upper: [0.1572, 0.1212, 0.086]
+        tolerance: 0.001
+    coffee_cup_contained:
+      kind: corner_containment
+      bindings: {pose: rigid_objects/coffee_cup/frame, frame: links/drawer_floor/frame}
+      params:
+        corners:
+        - [0.0199, 0.0001, -0.0064]
+        - [-0.0201, 0.0001, -0.0064]
+        - [-0.0001, 0.0201, -0.019]
+        - [0.0008, -0.0333, 0.0067]
+        - [0.0168, 0.0056, 0.02]
+        - [-0.0001, 0.0067, -0.0192]
+        - [-0.0162, -0.0117, -0.0191]
+        - [-0.0147, -0.0105, 0.0199]
+        - [-0.0162, 0.0118, -0.0191]
+        - [-0.0107, 0.0146, 0.0199]
+        - [0.0116, -0.0161, -0.0191]
+        - [0.0105, -0.0145, 0.0199]
+        - [0.0116, 0.0162, -0.0191]
+        - [0.0105, 0.0146, 0.0199]
+        lower: [-0.1572, -0.118, 0.0064]
+        upper: [0.1572, 0.1212, 0.086]
+        tolerance: 0.001
+    paper_cup_contained:
+      kind: corner_containment
+      bindings: {pose: rigid_objects/paper_cup/frame, frame: links/drawer_floor/frame}
+      params:
+        corners:
+        - [0.0242, 0.0054, 0.028]
+        - [-0.0277, 0.0055, 0.0261]
+        - [-0.0014, 0.0316, 0.0249]
+        - [-0.0014, -0.0211, 0.0291]
+        - [0.0089, -0.0175, 0.0307]
+        - [-0.0086, 0.0164, -0.0307]
+        - [-0.0131, -0.0125, -0.0282]
+        - [-0.0192, -0.0138, 0.0289]
+        - [-0.0118, 0.0142, -0.0306]
+        - [-0.0201, 0.0233, 0.0255]
+        - [0.014, -0.0125, -0.027]
+        - [0.0163, -0.0133, 0.0302]
+        - [0.0131, 0.014, -0.0296]
+        - [0.0174, 0.0229, 0.027]
+        lower: [-0.1572, -0.118, 0.0064]
+        upper: [0.1572, 0.1212, 0.086]
+        tolerance: 0.001
+    rail_closed:
+      kind: joint_range
+      bindings: {position: articulations/drawer/qpos/cabinet_to_drawer}
+      params: {lower: -0.003, upper: 0.005}
+    hand_open:
+      kind: command_preset_match
+      bindings: {position: robot/primary_manipulator/grasp/qpos}
+      params: {preset: open, tolerance: 0.002}
+    first_finger_near_drink_can:
+      kind: link_object_distance
+      bindings: {position: robot_links/first_grasp_finger/position, target: rigid_objects/drink_can/pose}
+      params: {tolerance: 0.08, inclusive: true}
+    first_finger_near_water_bottle:
+      kind: link_object_distance
+      bindings: {position: robot_links/first_grasp_finger/position, target: rigid_objects/water_bottle/pose}
+      params: {tolerance: 0.08, inclusive: true}
+    first_finger_near_coffee_cup:
+      kind: link_object_distance
+      bindings: {position: robot_links/first_grasp_finger/position, target: rigid_objects/coffee_cup/pose}
+      params: {tolerance: 0.08, inclusive: true}
+    first_finger_near_paper_cup:
+      kind: link_object_distance
+      bindings: {position: robot_links/first_grasp_finger/position, target: rigid_objects/paper_cup/pose}
+      params: {tolerance: 0.08, inclusive: true}
+    second_finger_near_drink_can:
+      kind: link_object_distance
+      bindings: {position: robot_links/second_grasp_finger/position, target: rigid_objects/drink_can/pose}
+      params: {tolerance: 0.08, inclusive: true}
+    second_finger_near_water_bottle:
+      kind: link_object_distance
+      bindings: {position: robot_links/second_grasp_finger/position, target: rigid_objects/water_bottle/pose}
+      params: {tolerance: 0.08, inclusive: true}
+    second_finger_near_coffee_cup:
+      kind: link_object_distance
+      bindings: {position: robot_links/second_grasp_finger/position, target: rigid_objects/coffee_cup/pose}
+      params: {tolerance: 0.08, inclusive: true}
+    second_finger_near_paper_cup:
+      kind: link_object_distance
+      bindings: {position: robot_links/second_grasp_finger/position, target: rigid_objects/paper_cup/pose}
+      params: {tolerance: 0.08, inclusive: true}
+    finger_near_object:
+      kind: any
+      refs:
+      - first_finger_near_drink_can
+      - first_finger_near_water_bottle
+      - first_finger_near_coffee_cup
+      - first_finger_near_paper_cup
+      - second_finger_near_drink_can
+      - second_finger_near_water_bottle
+      - second_finger_near_coffee_cup
+      - second_finger_near_paper_cup
+    fingers_clear:
+      kind: not
+      refs: [finger_near_object]
+final_acceptance:
+- drink_can_contained
+- water_bottle_contained
+- coffee_cup_contained
+- paper_cup_contained
+- rail_closed
+- hand_open
+- fingers_clear

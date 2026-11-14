@@ -70,6 +70,7 @@ SceneReferenceRole: TypeAlias = Literal[
     "articulation",
     "affordance",
     "object_or_affordance",
+    "object_or_link",
 ]
 
 _MAX_INPUT_DEPTH = 128
@@ -148,6 +149,11 @@ class TaskProgramValidationContext(Protocol):
     Implementations may resolve profile, scene, preset, catalog, affordance, and
     resource IDs, but must not observe simulation state, construct planners, or
     execute calls.
+
+    ``object_relative_position`` references are validated with role
+    ``"object"``. A context that also accepts articulation links there opts in
+    with the class attribute ``supports_link_references = True``; it then
+    receives role ``"object_or_link"`` for those references instead.
     """
 
     def validate_integration(
@@ -1184,6 +1190,16 @@ def _call_context(
         ) from exc
 
 
+def _relative_reference_role(
+    context: TaskProgramValidationContext,
+) -> SceneReferenceRole:
+    """Return the relative-position reference role this context accepts."""
+    supports_links = getattr(type(context), "supports_link_references", False)
+    if type(supports_links) is not bool:
+        raise TypeError("supports_link_references must be a bool.")
+    return "object_or_link" if supports_links else "object"
+
+
 def validate_task_program(
     config: TaskProgramCfg,
     context: TaskProgramValidationContext,
@@ -1290,7 +1306,7 @@ def validate_task_program(
                         _call_context(
                             context.validate_scene_reference,
                             validator.reference,
-                            role="object",
+                            role=_relative_reference_role(context),
                             path=(*validator_path, "reference"),
                         )
                 elif type(validator) is ObjectNearRelativeTargetValidatorCfg:

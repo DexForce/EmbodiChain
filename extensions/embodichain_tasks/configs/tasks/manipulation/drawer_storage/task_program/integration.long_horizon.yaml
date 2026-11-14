@@ -1,0 +1,494 @@
+integration_id: drawer_storage_long_horizon_v1
+program_id: drawer_storage_long_horizon
+requires:
+  scene_contract: drawer_storage_long_horizon_scene_v1
+  embodiment_contract: single_arm_parallel_gripper
+scene_binding:
+  contract_id: drawer_storage_long_horizon_scene_v1
+  registry_id: task_program_drawer_storage_long_horizon
+  rigid_objects:
+  - entity_id: drink_can
+    simulation_uid: drink_can
+    dynamics: dynamic
+    semantic_type: drink_can
+    affordances:
+    - entity_id: drink_can_grasp
+      kind: antipodal_grasp
+  - entity_id: water_bottle
+    simulation_uid: water_bottle
+    dynamics: dynamic
+    semantic_type: water_bottle
+    affordances:
+    - entity_id: water_bottle_grasp
+      kind: antipodal_grasp
+  - entity_id: coffee_cup
+    simulation_uid: coffee_cup
+    dynamics: dynamic
+    semantic_type: coffee_cup
+    affordances:
+    - entity_id: coffee_cup_grasp
+      kind: antipodal_grasp
+  - entity_id: paper_cup
+    simulation_uid: paper_cup
+    dynamics: dynamic
+    semantic_type: paper_cup
+    affordances:
+    - entity_id: paper_cup_grasp
+      kind: antipodal_grasp
+  articulations:
+  - entity_id: drawer
+    simulation_uid: drawer
+    dynamics: dynamic
+    semantic_type: drawer
+  links:
+  - entity_id: drawer_handle
+    articulation_id: drawer
+    native_link_name: large_handle_bar
+    dynamics: dynamic
+    semantic_type: handle
+  - entity_id: drawer_floor
+    articulation_id: drawer
+    native_link_name: drawer_bottom
+    dynamics: dynamic
+    semantic_type: drawer_floor
+    affordances:
+    - entity_id: drink_can_slot
+      kind: container
+      object_target_pose: [0.0, 1.0, 0.0, -0.09, -1.0, 0.0, 0.0, -0.04, 0.0, 0.0, 1.0, 0.026654031999999994, 0.0,
+        0.0, 0.0, 1.0]
+      native_name: drink_can_slot
+    - entity_id: water_bottle_slot
+      kind: container
+      object_target_pose: [0.0, 1.0, 0.0, -0.03, -1.0, 0.0, 0.0, -0.04, 0.0, 0.0, 1.0, 0.03910540237426757, 0.0,
+        0.0, 0.0, 1.0]
+      native_name: water_bottle_slot
+    - entity_id: coffee_cup_slot
+      kind: container
+      object_target_pose: [0.0, 1.0, 0.0, 0.03, -1.0, 0.0, 0.0, -0.04, 0.0, 0.0, 1.0, 0.025648928874731067, 0.0,
+        0.0, 0.0, 1.0]
+      native_name: coffee_cup_slot
+    - entity_id: paper_cup_slot
+      kind: container
+      object_target_pose: [0.0, 1.0, 0.0, 0.09, -1.0, 0.0, 0.0, -0.04, 0.0, 0.0, 1.0, 0.03711463499999999, 0.0,
+        0.0, 0.0, 1.0]
+      native_name: paper_cup_slot
+profile:
+  defaults:
+    pick_up:
+      primary: primary_manipulator
+    place:
+      primary: primary_manipulator
+    slide:
+      primary: primary_manipulator
+    move_end_effector:
+      primary: primary_manipulator
+    move_held_object:
+      primary: primary_manipulator
+  action_options:
+    pick:
+      kind: pick_up
+      hand_interp_steps: 16
+      grasp_settle_steps: 30
+      pre_grasp_distance: 0.1
+      lift_height: 0.44
+      fixed_object_to_eef: [1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.005, 0.0, 0.0, 0.0, 1.0]
+    place:
+      kind: place
+      hand_interp_steps: 16
+      release_settle_steps: 30
+      lift_height: 0.07
+      preserve_current_object_orientation: true
+      cartesian_waypoint_count: 8
+    simulation.articulation_link_slide:
+      kind: slide
+      hand_interp_steps: 12
+      approach_distance: 0.1
+      translation_distance: 0.224
+      release_retreat_distance: 0.0
+    simulation.move_end_effector:
+      kind: move_end_effector
+    simulation.move_held_object:
+      kind: move_held_object
+  effect_monitors:
+    pick:
+      monitor_id: builtin.composite_effect
+      revision: '1'
+      params:
+        consecutive_samples: 1
+    place:
+      monitor_id: builtin.composite_effect
+      revision: '1'
+      params:
+        consecutive_samples: 1
+    simulation.move_held_object:
+      monitor_id: builtin.composite_effect
+      revision: '1'
+      params:
+        consecutive_samples: 1
+runtime_services:
+  grasp_pose_generator_overrides:
+    eef:
+      # One canonical approach keeps the handle grasp identical across seeds.
+      approach_direction_samples: 1
+  registered_semantic_lowerers:
+  - kind: articulation_link_slide
+    articulation_id: drawer
+    articulation_simulation_uid: drawer
+    link_entity_id: drawer_handle
+    target_pose_mode: snapshot
+  - kind: move_end_effector
+    routes:
+    - target_id: clear_open_handle
+      poses:
+      - [-0.049065377563238144, 0.2339440882205963, -0.971011221408844, -0.35, 3.6013957469549496e-06, 0.9721821546554565,
+        0.2342260330915451, -0.02, 0.9987956285476685, 0.011488891206681728, -0.04770132526755333, 0.457, 0.0, 0.0,
+        0.0, 1.0]
+      - [-0.049065377563238144, 0.2339440882205963, -0.971011221408844, -0.35, 3.6013957469549496e-06, 0.9721821546554565,
+        0.2342260330915451, -0.02, 0.9987956285476685, 0.011488891206681728, -0.04770132526755333, 0.5, 0.0, 0.0,
+        0.0, 1.0]
+      - [-0.049065377563238144, 0.2339440882205963, -0.971011221408844, -0.35, 3.6013957469549496e-06, 0.9721821546554565,
+        0.2342260330915451, -0.02, 0.9987956285476685, 0.011488891206681728, -0.04770132526755333, 0.55, 0.0, 0.0,
+        0.0, 1.0]
+      - [-0.049065377563238144, 0.2339440882205963, -0.971011221408844, -0.35, 3.6013957469549496e-06, 0.9721821546554565,
+        0.2342260330915451, -0.02, 0.9987956285476685, 0.011488891206681728, -0.04770132526755333, 0.63, 0.0, 0.0,
+        0.0, 1.0]
+      - [1.0, 0.0, 0.0, -0.3, 0.0, -1.0, 0.0, -0.3, 0.0, 0.0, -1.0, 0.72, 0.0, 0.0, 0.0, 1.0]
+    - target_id: clear_loaded_drawer
+      poses:
+      - [1.0, 0.0, 0.0, -0.46, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.615, 0.0, 0.0, 0.0, 1.0]
+      - [1.0, 0.0, 0.0, -0.3, 0.0, -1.0, 0.0, -0.3, 0.0, 0.0, -1.0, 0.72, 0.0, 0.0, 0.0, 1.0]
+    - target_id: push_drawer_closed
+      poses:
+      - [0.0, 0.0, -1.0, -0.375, 1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.457, 0.0, 0.0, 0.0, 1.0]
+      - [0.0, 0.0, -1.0, -0.3990909090909091, 1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.457, 0.0, 0.0, 0.0, 1.0]
+      - [0.0, 0.0, -1.0, -0.4231818181818182, 1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.457, 0.0, 0.0, 0.0, 1.0]
+      - [0.0, 0.0, -1.0, -0.44727272727272727, 1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.457, 0.0, 0.0, 0.0, 1.0]
+      - [0.0, 0.0, -1.0, -0.4713636363636364, 1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.457, 0.0, 0.0, 0.0, 1.0]
+      - [0.0, 0.0, -1.0, -0.4954545454545455, 1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.457, 0.0, 0.0, 0.0, 1.0]
+      - [0.0, 0.0, -1.0, -0.5195454545454545, 1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.457, 0.0, 0.0, 0.0, 1.0]
+      - [0.0, 0.0, -1.0, -0.5436363636363637, 1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.457, 0.0, 0.0, 0.0, 1.0]
+      - [0.0, 0.0, -1.0, -0.5677272727272727, 1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.457, 0.0, 0.0, 0.0, 1.0]
+      - [0.0, 0.0, -1.0, -0.5918181818181818, 1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.457, 0.0, 0.0, 0.0, 1.0]
+      - [0.0, 0.0, -1.0, -0.615909090909091, 1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.457, 0.0, 0.0, 0.0, 1.0]
+      - [0.0, 0.0, -1.0, -0.64, 1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.457, 0.0, 0.0, 0.0, 1.0]
+      - [0.0, 0.0, -1.0, -0.6066666666666667, 1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.457, 0.0, 0.0, 0.0, 1.0]
+      - [0.0, 0.0, -1.0, -0.5733333333333334, 1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.457, 0.0, 0.0, 0.0, 1.0]
+      - [0.0, 0.0, -1.0, -0.54, 1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.457, 0.0, 0.0, 0.0, 1.0]
+      - [0.0, 0.0, -1.0, -0.54, 1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.62, 0.0, 0.0, 0.0, 1.0]
+    - target_id: approach_drawer_close
+      poses:
+      - [0.0, 0.0, -1.0, -0.34, 1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.62, 0.0, 0.0, 0.0, 1.0]
+      - [0.0, 0.0, -1.0, -0.34, 1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.457, 0.0, 0.0, 0.0, 1.0]
+      - [0.0, 0.0, -1.0, -0.375, 1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.457, 0.0, 0.0, 0.0, 1.0]
+  - kind: move_held_object
+    routes:
+    - object_id: drink_can
+      target_id: support_drink_can
+      pose:
+        kind: scene_entity
+        entity_id: drawer_floor
+        relative_pose: [0.0, 1.0, 0.0, -0.09, -1.0, 0.0, 0.0, -0.04, 0.0, 0.0, 1.0, 0.026654031999999994, 0.0, 0.0,
+          0.0, 1.0]
+      preserve_current_object_orientation: true
+    - object_id: water_bottle
+      target_id: support_water_bottle
+      pose:
+        kind: scene_entity
+        entity_id: drawer_floor
+        relative_pose: [0.0, 1.0, 0.0, -0.03, -1.0, 0.0, 0.0, -0.04, 0.0, 0.0, 1.0, 0.03910540237426757, 0.0, 0.0,
+          0.0, 1.0]
+      preserve_current_object_orientation: true
+    - object_id: coffee_cup
+      target_id: support_coffee_cup
+      pose:
+        kind: scene_entity
+        entity_id: drawer_floor
+        relative_pose: [0.0, 1.0, 0.0, 0.03, -1.0, 0.0, 0.0, -0.04, 0.0, 0.0, 1.0, 0.025648928874731067, 0.0, 0.0,
+          0.0, 1.0]
+      preserve_current_object_orientation: true
+    - object_id: paper_cup
+      target_id: support_paper_cup
+      pose:
+        kind: scene_entity
+        entity_id: drawer_floor
+        relative_pose: [0.0, 1.0, 0.0, 0.09, -1.0, 0.0, 0.0, -0.04, 0.0, 0.0, 1.0, 0.03711463499999999, 0.0, 0.0,
+          0.0, 1.0]
+      preserve_current_object_orientation: true
+    - object_id: drink_can
+      target_id: transport_drink_can
+      pose:
+        kind: pose
+        position: [-0.5755, -0.09, 0.525]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      waypoints:
+      - kind: pose
+        position: [-0.39, -0.09, 0.635]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.399275, -0.09, 0.6295000000000001]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.40855, -0.09, 0.624]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.417825, -0.09, 0.6185]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.42710000000000004, -0.09, 0.613]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.436375, -0.09, 0.6075]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.44565, -0.09, 0.602]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.454925, -0.09, 0.5965]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.4642, -0.09, 0.591]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.47347500000000003, -0.09, 0.5855]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.48275, -0.09, 0.58]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.49202500000000005, -0.09, 0.5745]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.5013000000000001, -0.09, 0.5690000000000001]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.510575, -0.09, 0.5635]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.51985, -0.09, 0.558]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.5291250000000001, -0.09, 0.5525]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.5384, -0.09, 0.547]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.547675, -0.09, 0.5415]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.5569500000000001, -0.09, 0.536]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.566225, -0.09, 0.5305]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      preserve_current_object_orientation: true
+    - object_id: water_bottle
+      target_id: transport_water_bottle
+      pose:
+        kind: pose
+        position: [-0.5755, -0.03, 0.525]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      waypoints:
+      - kind: pose
+        position: [-0.39, -0.03, 0.635]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.399275, -0.03, 0.6295000000000001]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.40855, -0.03, 0.624]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.417825, -0.03, 0.6185]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.42710000000000004, -0.03, 0.613]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.436375, -0.03, 0.6075]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.44565, -0.03, 0.602]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.454925, -0.03, 0.5965]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.4642, -0.03, 0.591]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.47347500000000003, -0.03, 0.5855]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.48275, -0.03, 0.58]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.49202500000000005, -0.03, 0.5745]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.5013000000000001, -0.03, 0.5690000000000001]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.510575, -0.03, 0.5635]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.51985, -0.03, 0.558]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.5291250000000001, -0.03, 0.5525]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.5384, -0.03, 0.547]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.547675, -0.03, 0.5415]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.5569500000000001, -0.03, 0.536]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.566225, -0.03, 0.5305]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      preserve_current_object_orientation: true
+    - object_id: coffee_cup
+      target_id: transport_coffee_cup
+      pose:
+        kind: pose
+        position: [-0.5755, 0.03, 0.525]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      waypoints:
+      - kind: pose
+        position: [-0.39, 0.03, 0.635]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.399275, 0.03, 0.6295000000000001]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.40855, 0.03, 0.624]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.417825, 0.03, 0.6185]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.42710000000000004, 0.03, 0.613]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.436375, 0.03, 0.6075]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.44565, 0.03, 0.602]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.454925, 0.03, 0.5965]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.4642, 0.03, 0.591]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.47347500000000003, 0.03, 0.5855]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.48275, 0.03, 0.58]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.49202500000000005, 0.03, 0.5745]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.5013000000000001, 0.03, 0.5690000000000001]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.510575, 0.03, 0.5635]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.51985, 0.03, 0.558]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.5291250000000001, 0.03, 0.5525]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.5384, 0.03, 0.547]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.547675, 0.03, 0.5415]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.5569500000000001, 0.03, 0.536]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.566225, 0.03, 0.5305]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      preserve_current_object_orientation: true
+    - object_id: paper_cup
+      target_id: transport_paper_cup
+      pose:
+        kind: pose
+        position: [-0.5755, 0.09, 0.525]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      waypoints:
+      - kind: pose
+        position: [-0.39, 0.09, 0.635]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.399275, 0.09, 0.6295000000000001]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.40855, 0.09, 0.624]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.417825, 0.09, 0.6185]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.42710000000000004, 0.09, 0.613]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.436375, 0.09, 0.6075]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.44565, 0.09, 0.602]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.454925, 0.09, 0.5965]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.4642, 0.09, 0.591]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.47347500000000003, 0.09, 0.5855]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.48275, 0.09, 0.58]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.49202500000000005, 0.09, 0.5745]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.5013000000000001, 0.09, 0.5690000000000001]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.510575, 0.09, 0.5635]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.51985, 0.09, 0.558]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.5291250000000001, 0.09, 0.5525]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.5384, 0.09, 0.547]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.547675, 0.09, 0.5415]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.5569500000000001, 0.09, 0.536]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      - kind: pose
+        position: [-0.566225, 0.09, 0.5305]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+      preserve_current_object_orientation: true
+  control_part_evidence:
+    kind: joint_position_constraint
+    control_parts:
+    - eef
+    open_qpos: [0.0]
+    minimum_displacement: 0.005

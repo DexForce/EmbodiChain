@@ -1,0 +1,79 @@
+embodiment_id: ur5_dh_pgi_140_80_full_closure
+simulation:
+  class_type: URRobot
+  robot_type: ur5
+  uid: UR5
+  urdf_cfg: {}
+  joint_drive_props:
+    stiffness:
+      gripper_finger1_joint_1: 3000.0
+    damping:
+      gripper_finger1_joint_1: 300.0
+    max_effort:
+      gripper_finger1_joint_1: 10000.0
+  link_attrs:
+    newton_gripper_contacts:
+      link_names_expr:
+      - gripper_finger[12]_link_1
+      attrs:
+        collision_props:
+          backend: newton
+          condim: 4
+        material_props:
+          backend: newton
+          ke: 40000.0
+          kd: 400.0
+          torsional_friction: 0.1
+          rolling_friction: 0.01
+sensor:
+- sensor_type: Camera
+  uid: cam_overhead
+  width: 320
+  height: 240
+  intrinsics: [250.0, 250.0, 160.0, 120.0]
+  extrinsics:
+    eye: [-0.5, -0.9, 0.88]
+    target: [-0.5, 0.1, 0.2]
+    up: [0.0, 0.0, 1.0]
+skill_profile:
+  contract_id: single_arm_parallel_gripper
+  profile_id: ur5_dh_pgi_140_80_full_closure
+  evaluation_links:
+    first_grasp_finger: gripper_finger1_link_1
+    second_grasp_finger: gripper_finger2_link_1
+  resources:
+  - resource_id: primary_manipulator
+    endpoints:
+    - endpoint_id: motion
+      control_part: arm
+      capabilities:
+      - kinematics.batch_inverse
+      - motion.cartesian_pose
+      - kinematics.forward
+    - endpoint_id: grasp
+      control_part: eef
+      capabilities:
+      - interaction.grasp
+      command_preset: parallel_jaw_commands
+      gripper: eef
+  command_presets: []
+  runtime_services:
+    grasp_pose_generators:
+      eef:
+        kind: antipodal_parallel_jaw
+        sample_count: 1000
+        point_spacing: 0.012
+        filter_ground_collision: false
+grippers:
+  eef:
+    class_type: DHPGI14080
+    mode: mounted
+    motion_part: arm
+    control_part: eef
+    component_type: hand
+    control_joint_names:
+    - gripper_finger1_joint_1
+    commands:
+      grasp:
+        gripper_finger1_joint_1: 0.04
+        gripper_finger2_joint_1: 0.04

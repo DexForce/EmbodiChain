@@ -44,6 +44,8 @@ from embodichain.lab.sim.atomic_skills import (
     HandOverOptions,
     HeldObjectState,
     MotionPolicy,
+    MoveEndEffector,
+    MoveEndEffectorOptions,
     ObjectSemantics,
     PickUp,
     PickUpOptions,
@@ -1130,11 +1132,10 @@ def test_place_effect_spec_binds_source_and_verified_detach_baseline() -> None:
     assert isinstance(gate_relation, HeldObjectStateExpectation)
     assert gate_relation.expectation_id == "source"
     assert gate_relation.relation is HeldObjectRelation.DETACHED
-    assert len(gate.effect_spec.clauses) == 2
-    gate_pose, gate_constraint = gate.effect_spec.clauses
-    assert isinstance(gate_pose, PoseRelationClause)
-    assert gate_pose.expectation is PoseRelationExpectation.SEPARATED
-    torch.testing.assert_close(gate_pose.baseline_object_to_endpoint, object_to_eef)
+    # A released object may still be beside the gripper before retraction.
+    # Full pose separation remains required by the terminal effect above.
+    assert len(gate.effect_spec.clauses) == 1
+    (gate_constraint,) = gate.effect_spec.clauses
     assert isinstance(gate_constraint, BinaryEffectClause)
     assert gate_constraint.expected is False
     assert grounded.invocation.phase_effect_gates == (gate.requirement,)
@@ -1386,6 +1387,77 @@ def test_registered_state_preserving_call_keeps_held_dependency() -> None:
     assert workflow.calls[1].symbolic_writes == frozenset()
     assert workflow.effect_dependencies[0].producer_index == 0
     assert workflow.calls[0].downstream_object_targets == ()
+
+
+def test_cartesian_transit_requires_unoccupied_hand_in_eligible_rows() -> None:
+    """Payload-free Cartesian transit cannot carry a verified held object."""
+    from embodichain.lab.task_program.integrations._configured_services import (
+        _MoveEndEffectorLowerer,
+    )
+
+    call_id = "simulation.move_end_effector"
+    registry, _ = _scene_registry()
+    templates = _skill_option_templates()
+    templates[call_id] = MoveEndEffectorOptions()
+    profile = _profile(preset=_preset("safe", skill_option_templates=templates))
+    manifest = SemanticIntegrationManifest(
+        scene=SceneManifest.from_registry(registry),
+        robot_profile=profile,
+        call_catalog=builtin_semantic_call_catalog().with_descriptor(
+            SemanticCallDescriptor(
+                call_id=call_id,
+                spec_type=RegisteredSemanticCall,
+                target_descriptor=MoveEndEffector.descriptor(),
+            )
+        ),
+    )
+    bound = manifest.bind(registry, _engine(profile))
+    route = (("outside", (tuple(torch.eye(4).flatten().tolist()),)),)
+    compiler = SemanticCallCompiler(
+        bound, registered_lowerers=(_MoveEndEffectorLowerer(route),)
+    )
+    workflow = compiler.analyze(
+        (
+            Pick(object=SceneObjectRef("cube")),
+            RegisteredSemanticCall(call_id=call_id, arguments={"target": "outside"}),
+            Place(
+                object=SceneObjectRef("cube"),
+                at=SemanticPose((0.3, 0.0, 0.2), (0.0, 0.0, 0.0, 1.0)),
+            ),
+        )
+    )
+    held = _held_context(
+        registry,
+        ObjectSemantics(
+            affordance=AntipodalAffordance(), geometry={}, entity_id="cube"
+        ),
+        torch.eye(4).repeat(2, 1, 1),
+        env_mask=torch.tensor([False, True]),
+    )
+
+    with pytest.raises(SemanticValidationError) as error:
+        compiler.ground(workflow, 1, held)
+
+    assert error.value.diagnostic.code == "unoccupied_resource_required"
+    assert error.value.diagnostic.path == (
+        "workflow",
+        1,
+        "call",
+        "resources",
+        "primary",
+    )
+    assert error.value.diagnostic.candidates == ("1",)
+    free_row = compiler.ground(
+        workflow, 1, held, eligible_mask=torch.tensor([True, False])
+    )
+    assert free_row.invocation.goal.xpos.shape == (2, 1, 4, 4)
+    compiler.ground(workflow, 1, _context(registry))
+
+    class _UnknownSlotLowerer(_MoveEndEffectorLowerer):
+        requires_unoccupied_slots = ("missing",)
+
+    with pytest.raises(ValueError, match="requires_unoccupied_slots"):
+        SemanticCallCompiler(bound, registered_lowerers=(_UnknownSlotLowerer(route),))
 
 
 def test_registered_monitor_without_effect_grounder_fails_during_analysis() -> None:

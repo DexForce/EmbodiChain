@@ -1,0 +1,533 @@
+<?xml version="1.0"?>
+<!--
+Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->
+<!-- Derived from Drawer/model_split_links_with_inertials.urdf; uniform 0.8 scale
+     is baked into geometry, origins, prismatic limits and inertias. -->
+<robot name="single_drawer_bedside_cabinet_080">
+  <material name="walnut">
+    <color rgba="0.34 0.16 0.075 1" />
+  </material>
+  <material name="walnut_edge">
+    <color rgba="0.24 0.095 0.038 1" />
+  </material>
+  <material name="drawer_inside">
+    <color rgba="0.61 0.43 0.25 1" />
+  </material>
+  <material name="matte_brass">
+    <color rgba="0.72 0.49 0.16 1" />
+  </material>
+  <material name="rail_steel">
+    <color rgba="0.28 0.3 0.31 1" />
+  </material>
+  <link name="cabinet">
+    <inertial>
+      <origin xyz="-2.545768e-18 0.02649432 0.2864608" rpy="0 0 0" />
+      <mass value="0.1" />
+      <inertia ixx="0.003087104" ixy="1.8333888e-19" ixz="-9.96192e-19" iyy="0.0043922688" iyz="1.3445696e-05" izz="0.0034588096" />
+    </inertial>
+  </link>
+  <link name="drawer">
+    <inertial>
+      <origin xyz="0 0.0988808 -0.02205384" rpy="0 0 0" />
+      <mass value="0.1" />
+      <inertia ixx="0.0011696448" ixy="2.8627328e-22" ixz="3.5896e-20" iyy="0.0014591552" iyz="8.812928e-05" izz="0.0023881024" />
+    </inertial>
+  </link>
+  <joint name="cabinet_to_drawer" type="prismatic">
+    <origin xyz="0 -0.164 0.356" rpy="0 0 0" />
+    <parent link="cabinet" />
+    <child link="drawer" />
+    <axis xyz="0 -1 0" />
+    <limit effort="90" velocity="0.28" lower="0" upper="0.228" />
+    <dynamics damping="2" friction="1" />
+  </joint>
+  <link name="top">
+    <visual name="top">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.432 0.352 0.028" />
+      </geometry>
+      <material name="walnut" />
+    </visual>
+    <collision name="top">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.432 0.352 0.028" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <mass value="0.1" />
+      <inertia ixx="0.00103906666667" ixy="0" ixz="0" iyy="0.00156173333333" iyz="0" izz="0.00258773333333" />
+    </inertial>
+  </link>
+  <joint name="cabinet_to_top_fixed" type="fixed">
+    <origin xyz="0 0 0.466" rpy="0 0 0" />
+    <parent link="cabinet" />
+    <child link="top" />
+  </joint>
+  <link name="side_0">
+    <visual name="side_0">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.028 0.32 0.324" />
+      </geometry>
+      <material name="walnut" />
+    </visual>
+    <collision name="side_0">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.028 0.32 0.324" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <mass value="0.1" />
+      <inertia ixx="0.00172813333333" ixy="0" ixz="0" iyy="0.000881333333331" iyz="0" izz="0.000859866666669" />
+    </inertial>
+  </link>
+  <joint name="cabinet_to_side_0_fixed" type="fixed">
+    <origin xyz="-0.202 0.008 0.29" rpy="0 0 0" />
+    <parent link="cabinet" />
+    <child link="side_0" />
+  </joint>
+  <link name="side_1">
+    <visual name="side_1">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.028 0.32 0.324" />
+      </geometry>
+      <material name="walnut" />
+    </visual>
+    <collision name="side_1">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.028 0.32 0.324" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <mass value="0.1" />
+      <inertia ixx="0.00172813333333" ixy="0" ixz="0" iyy="0.000881333333331" iyz="0" izz="0.000859866666669" />
+    </inertial>
+  </link>
+  <joint name="cabinet_to_side_1_fixed" type="fixed">
+    <origin xyz="0.202 0.008 0.29" rpy="0 0 0" />
+    <parent link="cabinet" />
+    <child link="side_1" />
+  </joint>
+  <link name="back">
+    <visual name="back">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.376 0.02 0.324" />
+      </geometry>
+      <material name="walnut_edge" />
+    </visual>
+    <collision name="back">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.376 0.02 0.324" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <mass value="0.1" />
+      <inertia ixx="0.000878133333331" ixy="0" ixz="0" iyy="0.00205293333333" iyz="0" izz="0.00118146666667" />
+    </inertial>
+  </link>
+  <joint name="cabinet_to_back_fixed" type="fixed">
+    <origin xyz="0 0.158 0.29" rpy="0 0 0" />
+    <parent link="cabinet" />
+    <child link="back" />
+  </joint>
+  <link name="base_shelf">
+    <visual name="base_shelf">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.376 0.32 0.028" />
+      </geometry>
+      <material name="walnut" />
+    </visual>
+    <collision name="base_shelf">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.376 0.32 0.028" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <mass value="0.1" />
+      <inertia ixx="0.000859866666669" ixy="0" ixz="0" iyy="0.00118466666667" iyz="0" izz="0.00203146666667" />
+    </inertial>
+  </link>
+  <joint name="cabinet_to_base_shelf_fixed" type="fixed">
+    <origin xyz="0 0.008 0.142" rpy="0 0 0" />
+    <parent link="cabinet" />
+    <child link="base_shelf" />
+  </joint>
+  <link name="foot_0">
+    <visual name="foot_0">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.052 0.052 0.128" />
+      </geometry>
+      <material name="walnut_edge" />
+    </visual>
+    <collision name="foot_0">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.052 0.052 0.128" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <mass value="0.1" />
+      <inertia ixx="0.000159066666667" ixy="0" ixz="0" iyy="0.000159066666667" iyz="0" izz="4.50666666667e-05" />
+    </inertial>
+  </link>
+  <joint name="cabinet_to_foot_0_fixed" type="fixed">
+    <origin xyz="-0.164 -0.104 0.064" rpy="0 0 0" />
+    <parent link="cabinet" />
+    <child link="foot_0" />
+  </joint>
+  <link name="foot_1">
+    <visual name="foot_1">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.052 0.052 0.128" />
+      </geometry>
+      <material name="walnut_edge" />
+    </visual>
+    <collision name="foot_1">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.052 0.052 0.128" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <mass value="0.1" />
+      <inertia ixx="0.000159066666667" ixy="0" ixz="0" iyy="0.000159066666667" iyz="0" izz="4.50666666667e-05" />
+    </inertial>
+  </link>
+  <joint name="cabinet_to_foot_1_fixed" type="fixed">
+    <origin xyz="0.164 -0.104 0.064" rpy="0 0 0" />
+    <parent link="cabinet" />
+    <child link="foot_1" />
+  </joint>
+  <link name="foot_2">
+    <visual name="foot_2">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.052 0.052 0.128" />
+      </geometry>
+      <material name="walnut_edge" />
+    </visual>
+    <collision name="foot_2">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.052 0.052 0.128" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <mass value="0.1" />
+      <inertia ixx="0.000159066666667" ixy="0" ixz="0" iyy="0.000159066666667" iyz="0" izz="4.50666666667e-05" />
+    </inertial>
+  </link>
+  <joint name="cabinet_to_foot_2_fixed" type="fixed">
+    <origin xyz="-0.164 0.104 0.064" rpy="0 0 0" />
+    <parent link="cabinet" />
+    <child link="foot_2" />
+  </joint>
+  <link name="foot_3">
+    <visual name="foot_3">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.052 0.052 0.128" />
+      </geometry>
+      <material name="walnut_edge" />
+    </visual>
+    <collision name="foot_3">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.052 0.052 0.128" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <mass value="0.1" />
+      <inertia ixx="0.000159066666667" ixy="0" ixz="0" iyy="0.000159066666667" iyz="0" izz="4.50666666667e-05" />
+    </inertial>
+  </link>
+  <joint name="cabinet_to_foot_3_fixed" type="fixed">
+    <origin xyz="0.164 0.104 0.064" rpy="0 0 0" />
+    <parent link="cabinet" />
+    <child link="foot_3" />
+  </joint>
+  <link name="runner_0">
+    <visual name="runner_0">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0192 0.248 0.02" />
+      </geometry>
+      <material name="rail_steel" />
+    </visual>
+    <collision name="runner_0">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0192 0.248 0.02" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <mass value="0.1" />
+      <inertia ixx="0.000515866666667" ixy="0" ixz="0" iyy="6.40533333331e-06" iyz="0" izz="0.000515605333333" />
+    </inertial>
+  </link>
+  <joint name="cabinet_to_runner_0_fixed" type="fixed">
+    <origin xyz="-0.1784 0.02 0.292" rpy="0 0 0" />
+    <parent link="cabinet" />
+    <child link="runner_0" />
+  </joint>
+  <link name="runner_1">
+    <visual name="runner_1">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0192 0.248 0.02" />
+      </geometry>
+      <material name="rail_steel" />
+    </visual>
+    <collision name="runner_1">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0192 0.248 0.02" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <mass value="0.1" />
+      <inertia ixx="0.000515866666667" ixy="0" ixz="0" iyy="6.40533333331e-06" iyz="0" izz="0.000515605333333" />
+    </inertial>
+  </link>
+  <joint name="cabinet_to_runner_1_fixed" type="fixed">
+    <origin xyz="0.1784 0.02 0.292" rpy="0 0 0" />
+    <parent link="cabinet" />
+    <child link="runner_1" />
+  </joint>
+  <link name="drawer_front">
+    <visual name="drawer_front">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.38 0.016 0.14" />
+      </geometry>
+      <material name="walnut" />
+    </visual>
+    <collision name="drawer_front">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.38 0.016 0.14" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <mass value="0.1" />
+      <inertia ixx="0.000165466666667" ixy="0" ixz="0" iyy="0.00136666666667" iyz="0" izz="0.00120546666667" />
+    </inertial>
+  </link>
+  <joint name="drawer_to_drawer_front_fixed" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="drawer" />
+    <child link="drawer_front" />
+  </joint>
+  <link name="drawer_bottom">
+    <visual name="drawer_bottom">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.34 0.268 0.0128" />
+      </geometry>
+      <material name="drawer_inside" />
+    </visual>
+    <collision name="drawer_bottom">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.34 0.268 0.0128" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <mass value="0.1" />
+      <inertia ixx="0.000599898666667" ixy="0" ixz="0" iyy="0.000964698666669" iyz="0" izz="0.00156186666667" />
+    </inertial>
+  </link>
+  <joint name="drawer_to_drawer_bottom_fixed" type="fixed">
+    <origin xyz="0 0.126 -0.052" rpy="0 0 0" />
+    <parent link="drawer" />
+    <child link="drawer_bottom" />
+  </joint>
+  <link name="drawer_side_0">
+    <visual name="drawer_side_0">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0128 0.268 0.092" />
+      </geometry>
+      <material name="drawer_inside" />
+    </visual>
+    <collision name="drawer_side_0">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0128 0.268 0.092" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <mass value="0.1" />
+      <inertia ixx="0.000669066666669" ixy="0" ixz="0" iyy="7.18986666669e-05" iyz="0" izz="0.000599898666667" />
+    </inertial>
+  </link>
+  <joint name="drawer_to_drawer_side_0_fixed" type="fixed">
+    <origin xyz="-0.1636 0.126 -0.012" rpy="0 0 0" />
+    <parent link="drawer" />
+    <child link="drawer_side_0" />
+  </joint>
+  <link name="drawer_side_1">
+    <visual name="drawer_side_1">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0128 0.268 0.092" />
+      </geometry>
+      <material name="drawer_inside" />
+    </visual>
+    <collision name="drawer_side_1">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0128 0.268 0.092" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <mass value="0.1" />
+      <inertia ixx="0.000669066666669" ixy="0" ixz="0" iyy="7.18986666669e-05" iyz="0" izz="0.000599898666667" />
+    </inertial>
+  </link>
+  <joint name="drawer_to_drawer_side_1_fixed" type="fixed">
+    <origin xyz="0.1636 0.126 -0.012" rpy="0 0 0" />
+    <parent link="drawer" />
+    <child link="drawer_side_1" />
+  </joint>
+  <link name="drawer_back">
+    <visual name="drawer_back">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.34 0.0128 0.092" />
+      </geometry>
+      <material name="drawer_inside" />
+    </visual>
+    <collision name="drawer_back">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.34 0.0128 0.092" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <mass value="0.1" />
+      <inertia ixx="7.18986666669e-05" ixy="0" ixz="0" iyy="0.00103386666667" iyz="0" izz="0.000964698666669" />
+    </inertial>
+  </link>
+  <joint name="drawer_to_drawer_back_fixed" type="fixed">
+    <origin xyz="0 0.2536 -0.012" rpy="0 0 0" />
+    <parent link="drawer" />
+    <child link="drawer_back" />
+  </joint>
+  <link name="large_handle_bar">
+    <visual name="large_handle_bar">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.0128" length="0.224" />
+      </geometry>
+      <material name="matte_brass" />
+      <interact type="translate" />
+    </visual>
+    <collision name="large_handle_bar">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.0128" length="0.224" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <mass value="0.1" />
+      <inertia ixx="0.000422203098836" ixy="0" ixz="0" iyy="0.000422203098836" iyz="0" izz="8.1395310057e-06" />
+    </inertial>
+  </link>
+  <joint name="drawer_to_large_handle_bar_fixed" type="fixed">
+    <origin xyz="0 -0.056 0.0096" rpy="0 1.5708 0" />
+    <parent link="drawer" />
+    <child link="large_handle_bar" />
+  </joint>
+  <link name="handle_mount_0">
+    <visual name="handle_mount_0">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0256 0.052 0.0256" />
+      </geometry>
+      <material name="matte_brass" />
+    </visual>
+    <collision name="handle_mount_0">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0256 0.052 0.0256" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <mass value="0.1" />
+      <inertia ixx="2.79946666667e-05" ixy="0" ixz="0" iyy="1.09226666667e-05" iyz="0" izz="2.79946666667e-05" />
+    </inertial>
+  </link>
+  <joint name="drawer_to_handle_mount_0_fixed" type="fixed">
+    <origin xyz="-0.0896 -0.03 0.0096" rpy="0 0 0" />
+    <parent link="drawer" />
+    <child link="handle_mount_0" />
+  </joint>
+  <link name="handle_mount_1">
+    <visual name="handle_mount_1">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0256 0.052 0.0256" />
+      </geometry>
+      <material name="matte_brass" />
+    </visual>
+    <collision name="handle_mount_1">
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.0256 0.052 0.0256" />
+      </geometry>
+    </collision>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <mass value="0.1" />
+      <inertia ixx="2.79946666667e-05" ixy="0" ixz="0" iyy="1.09226666667e-05" iyz="0" izz="2.79946666667e-05" />
+    </inertial>
+  </link>
+  <joint name="drawer_to_handle_mount_1_fixed" type="fixed">
+    <origin xyz="0.0896 -0.03 0.0096" rpy="0 0 0" />
+    <parent link="drawer" />
+    <child link="handle_mount_1" />
+  </joint>
+</robot>
