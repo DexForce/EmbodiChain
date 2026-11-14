@@ -314,6 +314,7 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
                 f"Locomotion action term must expose {required_state}; "
                 f"missing {missing_state}."
             )
+        self._locomotion_action_term = action_term
         self.locomotion_action = action_term.raw_actions
         self.last_locomotion_action = action_term.previous_raw_actions
         self.encoder_bias = action_term.position_bias

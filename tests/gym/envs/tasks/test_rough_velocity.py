@@ -23,7 +23,7 @@ from contextlib import nullcontext
 from copy import copy
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 import numpy as np
 import pytest
@@ -37,6 +37,8 @@ from dexsim.spawn import (
 )
 
 from embodichain.lab.gym.envs.episode_context import EpisodeContext
+from embodichain.lab.gym.envs.managers.action_manager import ActionTermCfg
+from embodichain.lab.gym.envs.managers.actions import DefaultJointPositionAction
 from embodichain.lab.sim.sim_manager import SimulationManager
 from embodichain_tasks.locomotion.velocity.rough.curriculum import (
     TerrainCurriculum,
@@ -59,6 +61,56 @@ from embodichain_tasks.locomotion.velocity.rough.mdp import (
 )
 
 __all__ = []
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize("explicit_pd", [False, True])
+def test_runtime_uses_configured_action_targets(explicit_pd: bool) -> None:
+    """Configured scale, offset and encoder bias reach both drive modes."""
+    config = load_config("g1_rough")
+    env = object.__new__(RoughVelocityEnv)
+    env._num_envs = 2
+    env.sim = SimpleNamespace(device=torch.device("cpu"))
+    env.robot = SimpleNamespace(
+        joint_names=list(config.joint_names),
+        cfg=SimpleNamespace(init_qpos=config.default_joint_position),
+        body_data=SimpleNamespace(
+            articulation_view=SimpleNamespace(apply_state=Mock())
+        ),
+    )
+    term = DefaultJointPositionAction(
+        ActionTermCfg(
+            params={
+                "joint_names": config.joint_names,
+                "preserve_order": True,
+                "offset": -0.3,
+                "scale": 0.1,
+                "clip": None,
+            }
+        ),
+        env,
+    )
+    env.action_manager = SimpleNamespace(
+        get_term=lambda name: term, action_trace=lambda: None
+    )
+    env._bind_locomotion_action_state()
+    env.encoder_bias[:] = torch.tensor([[0.02], [0.04]])
+    action = torch.tensor([[1.0], [2.0]]).expand(2, config.action_dim)
+    term.process_actions(action)
+    env.velocity_task_config = config
+    env._reference_constants = RoughVelocityConstants.from_config(config, action)
+    env.explicit_pd_effort_control = explicit_pd
+    env.policy_joint_ids = torch.arange(config.action_dim)
+    env._position_target = torch.empty_like(action)
+
+    env._step_action(action)
+
+    # offset + scale * action - bias: -0.3 + 0.1 * [1, 2] - [0.02, 0.04].
+    expected = torch.tensor([[-0.22], [-0.14]]).expand_as(action)
+    torch.testing.assert_close(env._position_target, expected)
+    if not explicit_pd:
+        applied = env.robot.body_data.articulation_view.apply_state.call_args
+        torch.testing.assert_close(applied.kwargs["target_qpos"], expected)
 
 
 @pytest.mark.no_sim
@@ -142,6 +194,8 @@ def test_joint_acceleration_matches_reference_update_interval(
         nonlocal step
         assert dt == 0.005 and count == 1
         step += 1
+        if kwargs.get("after_substep") is not None:
+            kwargs["after_substep"](dt)
 
     def update_control_state(self, **kwargs):
         current = fetch_state()["qvel"]
@@ -154,6 +208,8 @@ def test_joint_acceleration_matches_reference_update_interval(
         body_data=SimpleNamespace(fetch_state=fetch_state), set_qf=lambda *a, **kw: None
     )
     env.sim = SimpleNamespace(update=advance)
+    sensor = Mock(requires_substep_update=True)
+    env.sensors = {"contacts": sensor}
     env._position_target = torch.zeros(1, 2)
     env._kp = torch.ones(2)
     env._kd = torch.ones(2)
@@ -168,11 +224,36 @@ def test_joint_acceleration_matches_reference_update_interval(
         EmbodiChainVelocityEnv, "_update_sim_state", update_control_state
     )
     env._advance_physics()
+    sensor.begin_control_step.assert_called_once_with()
+    assert sensor.update_physics_step.call_args_list == [call(0.005)] * 4
     assert sampled_steps == ([0, 1, 2, 3] if native_go2 else [3])
     torch.testing.assert_close(env._applied_effort, -velocities[3])
     env._update_sim_state()
     expected = [[150.0, 50.0]] if native_go2 else [[200.0, 400.0]]
     torch.testing.assert_close(env._joint_acceleration, torch.tensor(expected))
+
+
+@pytest.mark.no_sim
+def test_graph_motor_samples_substep_sensors() -> None:
+    """Graph-driven motors preserve the sensor control-step lifecycle."""
+    env = object.__new__(RoughVelocityEnv)
+    env.sim_cfg = SimpleNamespace(physics_dt=0.005)
+    env.cfg = SimpleNamespace(sim_steps_per_control=4)
+    env._graph_motor = object()
+    sensor = Mock(requires_substep_update=True)
+    env.sensors = {"contacts": sensor}
+    env._sample_reference_contacts = Mock()
+
+    def advance(dt, count, *, after_substep=None, **kwargs):
+        for _ in range(count):
+            if after_substep is not None:
+                after_substep(dt)
+
+    env.sim = SimpleNamespace(update=advance)
+    env._advance_physics()
+    sensor.begin_control_step.assert_called_once_with()
+    assert sensor.update_physics_step.call_args_list == [call(0.005)] * 4
+    env._sample_reference_contacts.assert_called_once_with()
 
 
 @pytest.mark.no_sim

@@ -37,7 +37,6 @@ from .mdp import (
     RoughVelocityConstants,
     build_observation,
     observation_terms,
-    action_target,
     compute_rewards,
     compute_termination,
     dc_motor_effort,
@@ -255,14 +254,8 @@ class RoughVelocityEnv(EmbodiChainVelocityEnv):
             self.robot.set_com_pose(pose, link_names=[name])
 
     def _step_action(self, action: torch.Tensor) -> torch.Tensor:
-        """Write unbounded reference targets through the Spawn batch state API."""
-        self._position_target.copy_(
-            action_target(
-                self.velocity_task_config,
-                self.locomotion_action,
-                constants=self._reference_constants,
-            )
-        )
+        """Write processed action targets through the Spawn batch state API."""
+        self._position_target.copy_(self._locomotion_action_term.processed_actions)
         if not self.explicit_pd_effort_control:
             self.robot.body_data.articulation_view.apply_state(
                 None, self.policy_joint_ids, target_qpos=self._position_target
@@ -272,9 +265,25 @@ class RoughVelocityEnv(EmbodiChainVelocityEnv):
 
     def _advance_physics(self) -> None:
         """Update actuator effort at 200 Hz and sample lazy contacts at 50 Hz."""
+        sensors = [
+            sensor for sensor in self.sensors.values() if sensor.requires_substep_update
+        ]
+        for sensor in sensors:
+            sensor.begin_control_step()
+
+        def sample_substep(dt: float) -> None:
+            for sensor in sensors:
+                sensor.update_physics_step(dt)
+
+        after_substep = sample_substep if sensors else None
         if getattr(self, "_graph_motor", None) is not None:
             for _ in range(self.cfg.sim_steps_per_control):
-                self.sim.update(self.physics_dt, 1, render_final_step=False)
+                self.sim.update(
+                    self.physics_dt,
+                    1,
+                    after_substep=after_substep,
+                    render_final_step=False,
+                )
             self._sample_reference_contacts()
             return
         for step in range(self.cfg.sim_steps_per_control):
@@ -284,7 +293,12 @@ class RoughVelocityEnv(EmbodiChainVelocityEnv):
             ):
                 # Implicit drives run in the solver. Only the final pre-step
                 # effort and velocity are consumed by control-step rewards.
-                self.sim.update(self.physics_dt, 1, render_final_step=False)
+                self.sim.update(
+                    self.physics_dt,
+                    1,
+                    after_substep=after_substep,
+                    render_final_step=False,
+                )
                 continue
             state = self.robot.body_data.fetch_state()
             velocity = state["qvel"][:, self.policy_joint_ids]
@@ -307,7 +321,9 @@ class RoughVelocityEnv(EmbodiChainVelocityEnv):
             else:
                 effort = effort.clamp(-self._effort_limit, self._effort_limit)
             self._applied_effort.copy_(effort)
-            self.sim.update(self.physics_dt, 1, render_final_step=False)
+            self.sim.update(
+                self.physics_dt, 1, after_substep=after_substep, render_final_step=False
+            )
         self._sample_reference_contacts()
 
     def _sample_reference_contacts(self) -> None:
