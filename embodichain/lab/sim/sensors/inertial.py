@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Finite-difference pose, velocity, acceleration and IMU sensors."""
+"""Pose, velocity, acceleration and IMU sensors."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Literal
 import torch
 
 from embodichain.utils import configclass
-from embodichain.utils.math import matrix_from_quat
+from embodichain.utils.math import matrix_from_quat, quat_mul
 
 from .base_sensor import SensorCfg
 from .state import _ReadOnlySensor
@@ -46,8 +46,18 @@ class PVACfg(SensorCfg):
     link_name: str | None = None
     offset: SensorCfg.OffsetCfg = SensorCfg.OffsetCfg()
 
+    acceleration_source: Literal["finite_difference", "native", "auto"] = (
+        "finite_difference"
+    )
+    """Acceleration acquisition mode. Auto selects the source at bind time.
+
+    Native sampling currently requires a dynamic rigid object on CUDA Newton
+    MuJoCo Warp with RNE enabled. Auto falls back to finite differences when
+    the backend or target is unsupported. Native mode raises during binding.
+    """
+
     def get_data_types(self) -> list[str]:
-        """Return measured PVA fields and finite-difference validity."""
+        """Return measured PVA fields and acceleration validity."""
         return [
             "pose",
             "linear_velocity",
@@ -70,7 +80,7 @@ class IMUCfg(PVACfg):
 
 
 class PVA(_ReadOnlySensor):
-    """Sample pose, velocity and finite-difference acceleration.
+    """Sample pose, velocity and acceleration at a body-mounted point.
 
     Args:
         config: Frame and acquisition configuration.
@@ -90,6 +100,22 @@ class PVA(_ReadOnlySensor):
         self._previous_valid = torch.zeros(
             self.num_instances, dtype=torch.bool, device=self.device
         )
+        source = self.cfg.acceleration_source
+        if source not in ("finite_difference", "native", "auto"):
+            raise ValueError(f"Unknown acceleration_source {source!r}.")
+        factory = self.context.acceleration_factory
+        self._read_native = (
+            factory(self.cfg.asset_uid, self.cfg.link_name)
+            if source != "finite_difference" and factory is not None
+            else None
+        )
+        if source == "native" and self._read_native is None:
+            raise NotImplementedError(
+                f"Native acceleration is unavailable for {self.cfg.asset_uid!r} "
+                f"(link={self.cfg.link_name!r}). Use a supported dynamic rigid body "
+                "on CUDA Newton MuJoCo Warp with RNE enabled, or choose auto."
+            )
+        self._native_after_step = self.context.clock.physics_step_index
         self._last_time = None
         for name in self.cfg.get_data_types():
             if name == "acceleration_valid":
@@ -99,38 +125,67 @@ class PVA(_ReadOnlySensor):
                     (self.num_instances, 7 if name == "pose" else 3), device=self.device
                 )
 
-    def update(self, **kwargs: object) -> None:
-        """Sample the configured point and difference consecutive valid velocities."""
-        from embodichain.utils.math import quat_mul
+    def on_unbind(self) -> None:
+        """Release the acceleration reader for the previous topology."""
+        self._read_native = None
 
+    def update(self, **kwargs: object) -> None:
+        """Sample the configured point using the source selected at bind time."""
+        if self._bound_topology is None:
+            return
         now = self.context.clock.now()
-        if now == self._last_time:
+        if now == self._last_time or (
+            self._read_native is not None
+            and self.context.clock.physics_step_index <= self._native_after_step
+        ):
             return
         state = self.context.state.get_frame_state(
             self.cfg.asset_uid, self.cfg.link_name
         )
         pose = state["pose"]
-        offset = matrix_from_quat(pose[:, 3:]) @ self._offset_position
+        rotation = matrix_from_quat(pose[:, 3:])
+        offset = rotation @ self._offset_position
         orientation = quat_mul(
             pose[:, 3:], self._offset_quat.expand(self.num_instances, -1)
         )
         angular = state["angular_velocity"]
-        linear = state["linear_velocity"] + torch.linalg.cross(angular, offset)
-        elapsed = now - self._last_time if self._last_time is not None else 0.0
-        if elapsed > 0:
-            dv = (linear - self._previous_linear) / elapsed
-            dw = (angular - self._previous_angular) / elapsed
-            valid = self._previous_valid
+        if self._read_native is not None:
+            dv, dw, com_offset = self._read_native()
+            arm = (
+                rotation @ (self._offset_position - com_offset).unsqueeze(-1)
+            ).squeeze(-1)
+            point_velocity = torch.linalg.cross(angular, arm)
+            linear = state["linear_velocity"] + point_velocity
+            dv = (
+                dv
+                + torch.linalg.cross(dw, arm)
+                + torch.linalg.cross(angular, point_velocity)
+            )
+            valid = torch.isfinite(dv).all(dim=1) & torch.isfinite(dw).all(dim=1)
         else:
-            dv = dw = torch.zeros_like(linear)
-            valid = torch.zeros_like(self._previous_valid)
-        dv = torch.where(valid[:, None], dv, 0)
-        dw = torch.where(valid[:, None], dw, 0)
+            linear = state["linear_velocity"] + torch.linalg.cross(angular, offset)
+            elapsed = now - self._last_time if self._last_time is not None else 0.0
+            if elapsed > 0:
+                dv = (linear - self._previous_linear) / elapsed
+                dw = (angular - self._previous_angular) / elapsed
+                valid = self._previous_valid
+            else:
+                dv = dw = torch.zeros_like(linear)
+                valid = torch.zeros_like(self._previous_valid)
+
         self._data_buffer["acceleration_valid"].copy_(valid)
-        self._publish(pose[:, :3] + offset, orientation, linear, angular, dv, dw)
-        self._previous_linear.copy_(linear)
-        self._previous_angular.copy_(angular)
-        self._previous_valid.fill_(True)
+        self._publish(
+            pose[:, :3] + offset,
+            orientation,
+            linear,
+            angular,
+            torch.where(valid[:, None], dv, 0),
+            torch.where(valid[:, None], dw, 0),
+        )
+        if self._read_native is None:
+            self._previous_linear.copy_(linear)
+            self._previous_angular.copy_(angular)
+            self._previous_valid.fill_(True)
         self._last_time = now
 
     def _publish(self, position, orientation, linear, angular, dv, dw) -> None:
@@ -144,7 +199,7 @@ class PVA(_ReadOnlySensor):
             self._data_buffer[name].copy_(value)
 
     def reset(self, env_ids: Sequence[int] | torch.Tensor | None = None) -> None:
-        """Invalidate the selected environments' finite-difference history."""
+        """Invalidate acceleration and history for the selected environments."""
         super().reset(env_ids)
         rows = (
             slice(None)
@@ -152,6 +207,8 @@ class PVA(_ReadOnlySensor):
             else torch.as_tensor(env_ids, device=self.device, dtype=torch.long)
         )
         self._previous_valid[rows] = False
+        if self._read_native is not None:
+            self._native_after_step = self.context.clock.physics_step_index
 
     def get_data_descriptors(self) -> dict[str, dict[str, object]]:
         """Return arena-relative kinematic quantities and their units."""
@@ -165,6 +222,10 @@ class PVA(_ReadOnlySensor):
         }.items():
             if name in fields:
                 fields[name].update(unit=unit, frame="arena")
+        if self._bound_topology is not None:
+            fields["acceleration_valid"]["source"] = (
+                "native" if self._read_native is not None else "finite_difference"
+            )
         return fields
 
 

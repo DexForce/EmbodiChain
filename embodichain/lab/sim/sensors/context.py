@@ -111,6 +111,11 @@ class SensorContext:
         contact_factory: Optional factory for a bound, sensor-owned contact reader.
         ray_factory: Optional factory taking target UIDs and an explicit geometry
             source ("collision" or "visual").
+        acceleration_factory: Optional asset/link factory returning a completed-step
+            reader or None for unsupported targets. The reader returns world-axis
+            linear acceleration at the center of mass, angular acceleration, and
+            the center-of-mass offset in body-local axes, all batched by environment.
+            Returned buffers may be reused by the provider.
     """
 
     device: torch.device
@@ -120,6 +125,14 @@ class SensorContext:
     contact_factory: Callable[[ContactSensorCfg], ContactSensor] | None = None
     ray_factory: (
         Callable[[tuple[str, ...], Literal["collision", "visual"]], RayScene] | None
+    ) = None
+
+    acceleration_factory: (
+        Callable[
+            [str, str | None],
+            Callable[[], tuple[torch.Tensor, torch.Tensor, torch.Tensor]] | None,
+        ]
+        | None
     ) = None
 
     @classmethod
@@ -140,6 +153,7 @@ class SensorContext:
             services,
             services.create_contact_reader,
             services.create_ray_scene,
+            services.create_acceleration_reader,
         )
 
 
@@ -220,6 +234,16 @@ class _ManagerSensorServices:
             dtype=torch.float32,
             device=manager.device,
         ).clone()
+
+    def create_acceleration_reader(
+        self, asset_uid: str, link_name: str | None
+    ) -> Callable[[], tuple[torch.Tensor, torch.Tensor, torch.Tensor]] | None:
+        factory = getattr(
+            getattr(self._manager(), "physics", None),
+            "_create_body_acceleration_reader",
+            None,
+        )
+        return None if factory is None else factory(asset_uid, link_name)
 
     def create_contact_reader(self, cfg: ContactSensorCfg) -> ContactSensor:
         from .contact import ContactSensor
