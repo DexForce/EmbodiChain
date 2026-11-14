@@ -323,7 +323,10 @@ class SceneExporter:
             return {}
         measured = []
         for mesh in scene.geometry.values():
+            if not isinstance(mesh, trimesh.Trimesh):
+                return {}
             visual = mesh.visual
+            material = getattr(visual, "material", None)
             if visual.kind == "vertex":
                 colors = np.asarray(visual.vertex_colors)
             elif visual.kind == "face":
@@ -351,7 +354,21 @@ class SceneExporter:
                 or not np.isfinite(colors).all()
             ):
                 return {}
-            if colors.shape[1] == 4 and (colors[:, 3] < 250).any():
+            # glTF alpha coverage is material-defined, even without a texture.
+            # OPAQUE ignores alpha; MASK discards values below alphaCutoff;
+            # BLEND is opaque only at alpha=1. Unknown modes stay unverified.
+            alpha_mode = getattr(material, "alphaMode", None) or "OPAQUE"
+            if alpha_mode == "MASK":
+                cutoff = getattr(material, "alphaCutoff", None)
+                cutoff = 0.5 if cutoff is None else float(cutoff)
+                if not np.isfinite(cutoff) or not 0 <= cutoff <= 1:
+                    return {}
+                if colors.shape[1] == 4 and (colors[:, 3] / 255.0 < cutoff).any():
+                    return {}
+            elif alpha_mode == "BLEND":
+                if colors.shape[1] == 4 and (colors[:, 3] != 255).any():
+                    return {}
+            elif alpha_mode != "OPAQUE":
                 return {}
             labels = [
                 name

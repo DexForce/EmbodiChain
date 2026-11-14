@@ -209,6 +209,31 @@ def _ground_ids(
     return result
 
 
+def _deployment_asset_sources(
+    scene_data: dict[str, Any], *, generated_scene: dict[str, Any] | None = None
+) -> dict[str, dict[str, Any]]:
+    """Identify runtime inputs independently of proxy geometry and property proofs."""
+    if generated_scene is not None:
+        return {
+            item["uid"]: {
+                "path": generated_scene["runtime_asset"]["path"],
+                "source_prim_path": item["source_prim_path"],
+            }
+            for item in generated_scene["objects"]
+        }
+    return {
+        item["uid"]: {
+            "path": (
+                item.get("fpath")
+                if category == "articulation"
+                else item["shape"]["fpath"]
+            )
+        }
+        for category in ("background", "rigid_object", "articulation")
+        for item in scene_data.get(category, [])
+    }
+
+
 def _physical_scene(export: Path, data: dict[str, Any], assets: Path) -> dict[str, Any]:
     import numpy as np
     import trimesh
@@ -222,6 +247,7 @@ def _physical_scene(export: Path, data: dict[str, Any], assets: Path) -> dict[st
 
     if data.get("format") != "embodichain.scene-export/v1":
         raise ValueError("Unsupported scene export format")
+    sources = _deployment_asset_sources(data)
     result: dict[str, Any] = {}
     for category in ("background", "rigid_object", "articulation"):
         result[category] = []
@@ -239,7 +265,7 @@ def _physical_scene(export: Path, data: dict[str, Any], assets: Path) -> dict[st
                     )
                 path = _resolve_asset_path(
                     config_dir=export,
-                    raw_path=entry.get("fpath"),
+                    raw_path=sources[entry["uid"]]["path"],
                     suffix=".usdc",
                     uid=entry["uid"],
                     label=category,
@@ -256,7 +282,7 @@ def _physical_scene(export: Path, data: dict[str, Any], assets: Path) -> dict[st
             else:
                 path = _resolve_asset_path(
                     config_dir=export,
-                    raw_path=entry["shape"]["fpath"],
+                    raw_path=sources[entry["uid"]]["path"],
                     suffix=".glb",
                     uid=entry["uid"],
                     label=category,
@@ -466,6 +492,9 @@ def _bind_deployment(
             else {item["uid"]: item for item in generated_scene["objects"]}
         ),
         asset_root=export,
+        asset_sources=_deployment_asset_sources(
+            scene_data, generated_scene=generated_scene
+        ),
     )
     write_run_json(
         cfg.output / "scene_role_report.json", {"roles": role_report, "issues": issues}

@@ -82,8 +82,11 @@ relations/table regions; directional vocabularies require quarter turns.
 - `scene_export/` contains scene/config/graph JSON and mesh/articulation assets;
   imported/exported graph node IDs must equal object IDs.
 - Rigid exports carry conservatively measured uniform GLB color properties and
-  content-bound provenance. Descriptions, textures and mixed appearance cannot
-  supply this adapter's property proof; absent measurements remain unverified.
+  content-bound provenance. Opacity follows the material's alpha mode; unsupported
+  geometry, textures and mixed appearance leave the measurement unverified.
+  Role checks verify measured proofs against the mesh the deployment consumes,
+  including the legacy `shape.fpath` selection. Proxy GLB proofs cannot certify
+  the appearance of packaged USD prims; a runtime-material measurement is required.
 - Editable state is Y-up and runtime output Z-up. Preserve `body_scale` separately.
   Native execution bakes scale/axis conversion into run-owned OBJ vertices and
   isolated material sidecars; GLB node transforms alone are insufficient.

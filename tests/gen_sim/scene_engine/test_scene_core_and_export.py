@@ -161,7 +161,12 @@ def test_object_physics_rejects_invalid_values(
         ("red", "red"),
         ("blue", "blue"),
         ("mixed", None),
+        ("mesh_with_lines", None),
         ("material", "red"),
+        ("material_masked_invisible", None),
+        ("material_masked_visible", "red"),
+        ("material_blended", None),
+        ("material_opaque_alpha", "red"),
         ("material_with_vertex_color", None),
         ("textured", None),
     ],
@@ -174,9 +179,17 @@ def test_scene_export_carries_measured_appearance(tmp_path, appearance, expected
     table_path = tmp_path / "table.glb"
     table_path.write_bytes(b"glTF-table")
     mesh = trimesh.creation.box()
-    if appearance in {"material", "material_with_vertex_color", "textured"}:
+    if appearance.startswith("material") or appearance == "textured":
+        alpha, mode, cutoff = {
+            "material_masked_invisible": (250, "MASK", 0.99),
+            "material_masked_visible": (250, "MASK", 0.9),
+            "material_blended": (250, "BLEND", 0.5),
+            "material_opaque_alpha": (0, "OPAQUE", 0.5),
+        }.get(appearance, (255, "OPAQUE", 0.5))
         material = trimesh.visual.material.PBRMaterial(
-            baseColorFactor=[255, 0, 0, 255],
+            baseColorFactor=[255, 0, 0, alpha],
+            alphaMode=mode,
+            alphaCutoff=cutoff,
             baseColorTexture=(
                 Image.new("RGB", (2, 2), "blue") if appearance == "textured" else None
             ),
@@ -196,6 +209,10 @@ def test_scene_export_carries_measured_appearance(tmp_path, appearance, expected
         if appearance == "mixed":
             mesh.visual.vertex_colors[0] = [0, 0, 255, 255]
     asset_path = tmp_path / "asset.glb"
+    if appearance == "mesh_with_lines":
+        mesh = trimesh.Scene(
+            [mesh, trimesh.load_path(np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]))]
+        )
     mesh.export(asset_path)
     table = _scene_object(
         object_id="table",

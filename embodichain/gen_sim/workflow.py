@@ -572,6 +572,7 @@ def _check_scene_roles(
     assets: Mapping[str, Any],
     *,
     asset_root: Path,
+    asset_sources: Mapping[str, Mapping[str, Any]],
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Check frozen properties and bind any measured proofs to deployed assets."""
     if "task_document" not in plan:
@@ -625,18 +626,15 @@ def _check_scene_roles(
                     if isinstance(proof, Mapping) and proof.get("value") == measured:
                         try:
                             root = asset_root.resolve()
-                            mesh = _artifact_path(
-                                root,
-                                (
-                                    asset.get("mesh_path")
-                                    if "mesh_path" in asset
-                                    else asset.get("shape", {}).get("fpath")
-                                ),
-                            )
-                            source = _artifact_path(root, proof.get("source"))
-                            available = source == mesh and _file_hash(
-                                mesh
-                            ) == proof.get("sha256")
+                            deployed = asset_sources.get(uid, {})
+                            # A proxy GLB cannot certify a packaged USD prim.
+                            # This adapter does not measure package materials.
+                            if "source_prim_path" not in deployed:
+                                mesh = _artifact_path(root, deployed.get("path"))
+                                source = _artifact_path(root, proof.get("source"))
+                                available = source == mesh and _file_hash(
+                                    mesh
+                                ) == proof.get("sha256")
                         except (OSError, ValueError, TypeError):
                             available = False
                 if available and measured == expected:
@@ -713,6 +711,7 @@ def qualify_task_scene(
     """
     from ._run_binding import (
         _generated_scene_data,
+        _deployment_asset_sources,
         _ground_ids,
         _load_runtime,
         _placement,
@@ -866,6 +865,7 @@ def qualify_task_scene(
         bindings,
         {item["uid"]: item for item in scene["objects"]},
         asset_root=scene_root,
+        asset_sources=_deployment_asset_sources({}, generated_scene=scene),
     )
     if issues:
         return _publish_qualification(
