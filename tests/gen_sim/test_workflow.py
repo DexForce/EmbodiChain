@@ -425,12 +425,62 @@ def test_default_scene_route_enforces_frozen_role_properties(
     run_cfg.instruction = "Put the red cube on the table"
 
     def scene(image, output, **kwargs):
+        from embodichain.gen_sim.scene_engine.core.scene import Scene
+        from embodichain.gen_sim.scene_engine.core.scene_object import (
+            SceneObject,
+            ObjectPhysics,
+        )
+        from embodichain.gen_sim.scene_engine.core.scene_graph import (
+            SceneGraph,
+            SceneGraphNode,
+        )
+        from embodichain.gen_sim.scene_engine.pipeline.utils.scene_exporter import (
+            SceneExporter,
+        )
+
         _write_scene(output)
         path = output / "scene_export/scene_config.json"
         value = json.loads(path.read_text())
-        if color is not None:
-            value["rigid_object"][0]["properties"] = {"color": color}
-        path.write_text(json.dumps(value))
+        objects = []
+        for entry in [*value["background"], *value["rigid_object"]]:
+            mesh_path = path.parent / entry["shape"]["fpath"]
+            if entry["uid"] == "cube_native" and color is not None:
+                mesh = trimesh.load_mesh(mesh_path, process=False)
+                mesh.visual.vertex_colors = (
+                    [255, 0, 0, 255] if color == "red" else [0, 0, 255, 255]
+                )
+                mesh.export(mesh_path)
+            x, y, z = entry["init_pos"]
+            objects.append(
+                SceneObject(
+                    id=entry["uid"],
+                    kind="table" if entry["uid"] == "table" else "asset",
+                    category=entry["category"],
+                    name=entry["name"],
+                    description="red cube",
+                    simready_glb_path=str(mesh_path),
+                    pos=[x, z, -y],
+                    rot=[0, 0, 0],
+                    scale=[1, 1, 1],
+                    physics=ObjectPhysics(
+                        body_type="kinematic" if entry["uid"] == "table" else "dynamic",
+                        attrs=entry["attrs"],
+                        max_convex_hull_num=1,
+                    ),
+                )
+            )
+        SceneExporter(
+            scene=Scene(objects=objects),
+            scene_graph=SceneGraph(
+                nodes=[
+                    SceneGraphNode(object_id="table", parent_id=None),
+                    SceneGraphNode(
+                        object_id="cube_native", parent_id="table", parent_relation="on"
+                    ),
+                ]
+            ),
+            output_root=output,
+        ).export()
 
     monkeypatch.setattr(generate, "generate_scene_from_image", scene)
     execute = Mock(
@@ -453,6 +503,51 @@ def test_default_scene_route_enforces_frozen_role_properties(
             )
             assert role_report["issues"][0]["role_id"] == "role_001"
     assert execute.call_count == int(color == "red")
+
+
+def test_unstructured_role_clause_is_not_covered_by_another_property(
+    run_cfg, monkeypatch
+):
+    from embodichain.gen_sim.scene_engine.pipeline import generate
+    from embodichain.gen_sim import _run_execution
+
+    instruction = "Put the red waterproof cube on the table"
+    run_cfg.instruction = instruction
+
+    def scene(image, output, **kwargs):
+        _write_scene(output)
+        path = output / "scene_export/scene_config.json"
+        value = json.loads(path.read_text())
+        value["rigid_object"][0]["properties"] = {"color": "red", "waterproof": False}
+        path.write_text(json.dumps(value))
+
+    monkeypatch.setattr(generate, "generate_scene_from_image", scene)
+    execute = Mock(side_effect=AssertionError("Unverified qualifier executed"))
+    monkeypatch.setattr(_run_execution, "_execute_deployment", execute)
+    with _services(required_color="red") as services:
+        grounding = services.get("task_image_grounding").responses[0]
+        grounding["clauses"].append(
+            dict(
+                id="waterproof",
+                quote="waterproof",
+                target="role_001",
+                origin="explicit",
+                resolution="pending_binding",
+            )
+        )
+        services.get("task_semantic_planning").responses[0]["requirements"][0][
+            "quote"
+        ] = instruction
+        with pytest.raises(ValueError, match="unverified_instruction_qualifier"):
+            _run(run_cfg, services=services)
+    execute.assert_not_called()
+    plan = json.loads(
+        (run_cfg.output / "task/semantic_graph_validation.json").read_text()
+    )
+    assert {r["clause_id"]: r["status"] for r in plan["qualifier_coverage"]} == {
+        "required_color": "covered",
+        "waterproof": "unverified",
+    }
 
 
 def test_annotation_change_after_planning_rejects_binding_before_execution(

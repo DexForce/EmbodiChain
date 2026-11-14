@@ -172,6 +172,23 @@ def _validate_clause_coverage(
                             for b in bindings
                         )
                     )
+                    if implements:
+                        later = graph["nodes"][graph["nodes"].index(node) + 1 :]
+                        implements = not any(
+                            (
+                                target not in target_groups
+                                or following["task_instance_id"]
+                                in target_groups[target]
+                            )
+                            and matches_role(
+                                annotations[following["id"]]["object"], {ann["object"]}
+                            )
+                            and validate_semantic_call_payload(following["call"])[
+                                "effect"
+                            ]
+                            != "preserve"
+                            for following in later
+                        )
                 else:
                     # The catalog pour primitive restores its source orientation.
                     implements = call.get("call_id") == "simulation.pour"
@@ -182,9 +199,6 @@ def _validate_clause_coverage(
                 raise ValueError(
                     f"Instruction qualifier {clause['id']!r} is not implemented: {kind}"
                 )
-        elif not constraint and target in roles and roles[target]["properties"]:
-            # Legacy clauses can retain their already structured role properties.
-            covered = True
         report.append(
             {
                 "clause_id": clause["id"],

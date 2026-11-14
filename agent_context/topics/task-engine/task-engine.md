@@ -62,7 +62,9 @@ and route checks. The catalog must import without `lab.sim`, Gym or DexSim.
 `semantic_plan_validation.py` checks task producers, source identity, topology,
 held-object/arm state, structured instruction qualifiers and deferred binding needs.
 Qualifier witnesses must reference their frozen target and implementing calls;
-return-to-origin also requires its source-pose binding. Unsupported meanings
+return-to-origin also requires its source-pose binding and must be the subject's
+final pose-changing operation in the targeted milestone. Each clause needs its
+own structured meaning; an unrelated role property cannot cover it. Unsupported meanings
 remain unverified and cannot authorize a revision or deployment.
 Task producer obligations derive from the existing task affordances and catalog
 capabilities rather than per-E-type construction branches. Explicit part parents

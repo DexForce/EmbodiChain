@@ -155,6 +155,72 @@ def test_object_physics_rejects_invalid_values(
         )
 
 
+@pytest.mark.parametrize(
+    "appearance,expected",
+    [
+        ("red", "red"),
+        ("blue", "blue"),
+        ("mixed", None),
+        ("material", "red"),
+        ("textured", None),
+    ],
+)
+def test_scene_export_carries_measured_appearance(tmp_path, appearance, expected):
+    import hashlib
+    import trimesh
+    from PIL import Image
+
+    table_path = tmp_path / "table.glb"
+    table_path.write_bytes(b"glTF-table")
+    mesh = trimesh.creation.box()
+    if appearance in {"material", "textured"}:
+        material = trimesh.visual.material.PBRMaterial(
+            baseColorFactor=[255, 0, 0, 255],
+            baseColorTexture=(
+                Image.new("RGB", (2, 2), "blue") if appearance == "textured" else None
+            ),
+        )
+        mesh.visual = trimesh.visual.TextureVisuals(
+            uv=np.zeros((len(mesh.vertices), 2)), material=material
+        )
+    else:
+        mesh.visual.vertex_colors = (
+            [0, 0, 255, 255] if appearance == "blue" else [255, 0, 0, 255]
+        )
+        if appearance == "mixed":
+            mesh.visual.vertex_colors[0] = [0, 0, 255, 255]
+    asset_path = tmp_path / "asset.glb"
+    mesh.export(asset_path)
+    table = _scene_object(
+        object_id="table",
+        kind="table",
+        glb_path=table_path,
+        physics=_physics("kinematic"),
+    )
+    asset = _scene_object(
+        object_id="asset",
+        kind="asset",
+        glb_path=asset_path,
+        physics=_physics("dynamic"),
+    )
+    asset.description = "red waterproof cube"
+    scene = Scene(objects=[table, asset])
+    path = SceneExporter(
+        scene=scene, scene_graph=_scene_graph(scene), output_root=tmp_path / "export"
+    ).export()
+    entry = json.loads(path.read_text())["rigid_object"][0]
+    if expected is None:
+        assert "properties" not in entry
+    else:
+        assert entry["properties"] == {"color": expected}
+        proof = entry["property_evidence"]["color"]
+        assert (
+            proof["sha256"]
+            == hashlib.sha256((path.parent / proof["source"]).read_bytes()).hexdigest()
+        )
+    assert "waterproof" not in entry.get("properties", {})
+
+
 def test_scene_export_copies_meshes_and_converts_y_up_pose(tmp_path: Path) -> None:
     table_glb = tmp_path / "table.glb"
     asset_glb = tmp_path / "cup.glb"

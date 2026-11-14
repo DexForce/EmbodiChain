@@ -66,6 +66,22 @@ test("unified evidence follows the selected environment", async ({ page }) => {
   await expect(detail).toContainText(/Control steps\s*0\s*–\s*60/);
   await expect(detail).not.toContainText("env 1 capture ended");
 });
+test("unified failure banner follows the selected row", async ({ page }) => {
+  await page.goto(pathToFileURL(join(root, "unified-mixed-outcome.html")).href);
+  await page.locator('button[data-key="call:step_01__call_02"]').click();
+  const selector = page
+    .locator(".rv-detail")
+    .getByRole("combobox", { name: "Environment" });
+  await selector.selectOption("1");
+  await expect(page.locator(".rv-detail .rv-result")).toContainText("Passed");
+  await expect(page.locator(".rv-alert")).toHaveCount(0);
+  await selector.selectOption("0");
+  await expect(page.locator(".rv-alert")).toContainText(
+    "Gripper release check failed",
+  );
+  await selector.selectOption("all");
+  await expect(page.locator(".rv-alert")).toBeVisible();
+});
 const cases = [
   "static-absent",
   "static-spec",

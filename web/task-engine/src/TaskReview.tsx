@@ -394,12 +394,12 @@ export default function TaskReview({
   );
   const run =
     review.attempt && "calls" in review.attempt ? review.attempt : null;
-  const failure = calls.find((c) => run?.calls[c.id]?.success === false);
+  const initialFailure = calls.find((c) => run?.calls[c.id]?.success === false);
   const [open, setOpen] = useState<Set<string>>(
     () =>
       new Set(
-        failure
-          ? [failure.task_instance_id]
+        initialFailure
+          ? [initialFailure.task_instance_id]
           : groups.length === 1
             ? [groups[0].id]
             : [],
@@ -475,6 +475,7 @@ export default function TaskReview({
   const envs = [
     ...new Set(Object.values(run?.calls || {}).flatMap((s) => s.env_ids)),
   ];
+  const failure = calls.find((c) => status(c) === false);
   const selectedRole = spec.configuration.roles.find(
     (r) => selected === "role:" + r.id,
   );

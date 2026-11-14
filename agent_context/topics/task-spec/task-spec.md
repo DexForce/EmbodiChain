@@ -54,6 +54,10 @@ physical authenticity of caller-provided measurements.
 The identified-capture wrapper rejects trajectory frames beyond its declared
 capture step. Frozen structured qualifiers participate in the v1 task semantic
 identity; Task Engine checks their implementing calls separately from physical proof.
+The capture evaluator also reports explicit qualifiers without a trusted physical
+evidence adapter as unavailable and withholds certification, even when all base
+goals and milestones pass. Graph witnesses and caller-supplied booleans do not
+provide that proof.
 Bounded `always` and `eventually` windows share their per-slot conclusion
 with the batched Lab evaluator through Compute. TaskSpec's Python result
 exposes inclusive witness and violation steps while retaining its canonical

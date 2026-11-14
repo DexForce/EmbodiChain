@@ -471,6 +471,14 @@ def build_fixtures(output: Path, reference: Path | None = None) -> None:
             (output / "unified-multi.html").write_text(
                 _viewer_document({**data, "review": rows})
             )
+            rows["attempt"]["calls"][call_id]["successes"][1] = True
+            rows["attempt"]["calls"][call_id]["failure_reasons"][1] = None
+            rows["attempt"]["calls"][call_id]["issues"] = rows["attempt"]["calls"][
+                call_id
+            ]["issues"][:1]
+            (output / "unified-mixed-outcome.html").write_text(
+                _viewer_document({**data, "review": rows})
+            )
         (output / f"{name}.html").write_text(html)
         (output / f"{name}.json").write_text(
             json.dumps(data, ensure_ascii=False, indent=2)

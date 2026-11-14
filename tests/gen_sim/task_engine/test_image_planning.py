@@ -384,7 +384,9 @@ def test_explicit_role_properties_survive_standalone_scene_projection(source_ima
         )
 
 
-@pytest.mark.parametrize("damage", ["remove_restoration", "quote_only_pick"])
+@pytest.mark.parametrize(
+    "damage", ["remove_restoration", "quote_only_pick", "move_after_restoration"]
+)
 def test_frozen_restoration_qualifier_checks_node_semantics_on_revision_and_load(
     source_image,
     tmp_path,
@@ -452,9 +454,21 @@ def test_frozen_restoration_qualifier_checks_node_semantics_on_revision_and_load
             relation="inside",
             intent={k: v for k, v in ann["intent"].items() if k != "return_to_origin"},
         )
-    else:
+    elif damage == "quote_only_pick":
         broken["requirements"][1]["node_ids"] = ["n0"]
         broken["requirements"][0]["node_ids"].append("n3")
+    else:
+        pick = deepcopy(proposal["nodes"][0])
+        pick.update(id="later_pick", depends_on=["n3"])
+        place = deepcopy(pick)
+        place.update(
+            id="later_place",
+            depends_on=["later_pick"],
+            call=dict(kind="place", object="source", inside="tray_slot", resources={}),
+        )
+        place["semantic"].update(relation="inside", reference="tray")
+        broken["nodes"].extend([pick, place])
+        broken["requirements"][0]["node_ids"].extend(["later_pick", "later_place"])
     rejected = tmp_path / "rejected-revision"
     with pytest.raises(ValueError, match="qualifier.*return_to_origin"):
         revise_task_plan(

@@ -436,6 +436,8 @@ def evaluate_attempt_observations(
 
     Returns:
         Predicate report bound to the capture identity and content digest.
+        Explicit qualifiers without a trusted physical evidence adapter remain
+        unavailable and prevent certification, regardless of graph coverage.
 
     Raises:
         ValueError: The capture refers to another attempt, has no capture step,
@@ -474,8 +476,26 @@ def evaluate_attempt_observations(
     spec = TaskSpec.from_dict(
         {"roles": verified["configuration"]["roles"], **verified["objectives"]}
     )
+    report = evaluate_task_spec(spec, observations).to_dict()
+    qualifiers = [
+        {
+            "clause_id": clause["id"],
+            "target": clause["target"],
+            "status": "unavailable",
+            "reason": "No trusted physical evidence adapter for this frozen qualifier",
+        }
+        for clause in verified["interpretation"]["clauses"]
+        if clause["origin"] == "explicit"
+    ]
+    # Graph witnesses and arbitrary booleans in a capture are not physical proof.
+    # Keep certification closed until a qualifier-specific evidence owner exists.
+    if qualifiers:
+        report["certificate_ready"] = False
+        if report["status"] != "failed":
+            report["status"] = "unavailable"
     return {
-        **evaluate_task_spec(spec, observations).to_dict(),
+        **report,
+        "qualifiers": qualifiers,
         "identity": dict(expected),
         "capture_step": capture["step"],
         "capture_digest": canonical_hash(capture),

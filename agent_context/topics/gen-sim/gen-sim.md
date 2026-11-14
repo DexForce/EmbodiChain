@@ -81,6 +81,9 @@ relations/table regions; directional vocabularies require quarter turns.
 
 - `scene_export/` contains scene/config/graph JSON and mesh/articulation assets;
   imported/exported graph node IDs must equal object IDs.
+- Rigid exports carry conservatively measured uniform GLB color properties and
+  content-bound provenance. Descriptions, textures and mixed appearance cannot
+  supply this adapter's property proof; absent measurements remain unverified.
 - Editable state is Y-up and runtime output Z-up. Preserve `body_scale` separately.
   Native execution bakes scale/axis conversion into run-owned OBJ vertices and
   isolated material sidecars; GLB node transforms alone are insufficient.
