@@ -11,22 +11,11 @@ task_program:
         skill_options:
           pick:
             fixed_object_to_eef:
-            - 0
-            - -1
-            - 0
-            - 0
-            - -1
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - -1
-            - 0.02
-            - 0
-            - 0
-            - 0
-            - 1
+              position: [0.0, 0.0, 0.02]
+              rotation_matrix:
+              - [0.0, -1.0, 0.0]
+              - [-1.0, 0.0, 0.0]
+              - [0.0, 0.0, -1.0]
             lift_height: 0.08
           place:
             lift_height: 0.08

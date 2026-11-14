@@ -7,7 +7,7 @@ scene_binding:
   contract_id: cloth_fold_table_v1
   registry_id: cloth_fold_table
 profile:
-  action_options:
+  skill_options:
     simulation.kinematic_joint_replay: {kind: move_joints}
   defaults: {}
   effect_monitors: {}

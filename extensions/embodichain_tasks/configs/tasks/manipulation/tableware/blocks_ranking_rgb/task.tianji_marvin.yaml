@@ -15,22 +15,8 @@ task_program:
             lift_height: 0.08
             hand_interp_steps: 40
             fixed_object_to_eef:
-            - 1.0
-            - 0.0
-            - 0.0
-            - 0.0
-            - 0.0
-            - -1.0
-            - 0.0
-            - 0.0
-            - 0.0
-            - 0.0
-            - -1.0
-            - 0.0325
-            - 0.0
-            - 0.0
-            - 0.0
-            - 1.0
+              position: [0.0, 0.0, 0.0325]
+              quaternion_xyzw: [1.0, 0.0, 0.0, 0.0]
           place:
             lift_height: 0.08
             hand_interp_steps: 40

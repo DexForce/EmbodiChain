@@ -11,22 +11,8 @@ task_program:
         skill_options:
           pick:
             fixed_object_to_eef:
-            - 1.0
-            - 0.0
-            - 0.0
-            - 0.0
-            - 0.0
-            - -1.0
-            - 0.0
-            - 0.0
-            - 0.0
-            - 0.0
-            - -1.0
-            - -0.01
-            - 0.0
-            - 0.0
-            - 0.0
-            - 1.0
+              position: [0.0, 0.0, -0.01]
+              quaternion_xyzw: [1.0, 0.0, 0.0, 0.0]
   execution_policy:
     component: ../../../components/execution_policies/motion_gen_verified.yaml
     overrides:

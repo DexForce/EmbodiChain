@@ -13,22 +13,11 @@ task_program:
           pick:
             lift_height: 0.08
             fixed_object_to_eef:
-            - 0.293976277
-            - 0.295520157
-            - 0.908980608
-            - 0.02
-            - 0.09093748
-            - -0.955336511
-            - 0.28118059
-            - 0.0
-            - 0.951476812
-            - 0.0
-            - -0.307720125
-            - 0.0
-            - 0.0
-            - 0.0
-            - 0.0
-            - 1.0
+              position: [0.02, 0.0, 0.0]
+              rotation_matrix:
+              - [0.293976277, 0.295520157, 0.908980608]
+              - [0.09093748, -0.955336511, 0.28118059]
+              - [0.951476812, 0.0, -0.307720125]
             cartesian_lift: true
   execution_policy:
     component: ../../../../components/execution_policies/trajectory_open_loop.yaml

@@ -23,22 +23,11 @@ task_program:
             grasp_settle_steps: 30
             # Includes the calibrated fingertip clearance.
             fixed_object_to_eef:
-            - 0.0
-            - -0.8660254037844386
-            - 0.5
-            - -0.017598076211353314
-            - -1.0
-            - 0.0
-            - 0.0
-            - 0.0
-            - 0.0
-            - -0.5
-            - -0.8660254037844386
-            - 0.030480762113533157
-            - 0.0
-            - 0.0
-            - 0.0
-            - 1.0
+              position: [-0.017598076211353314, 0.0, 0.030480762113533157]
+              rotation_matrix:
+              - [0.0, -0.8660254037844386, 0.5]
+              - [-1.0, 0.0, 0.0]
+              - [0.0, -0.5, -0.8660254037844386]
             approach_along_grasp_axis: true
           place:
             lift_height: 0.08
@@ -49,8 +38,6 @@ task_program:
     component: ../../../../components/execution_policies/sequential_ik_projected_manipulation.yaml
     overrides:
       motion:
-        ik_seed_mode: sequential
-        sample_count: 220
         velocity_limit: 0.2
         acceleration_limit: 0.5
 embodiment:

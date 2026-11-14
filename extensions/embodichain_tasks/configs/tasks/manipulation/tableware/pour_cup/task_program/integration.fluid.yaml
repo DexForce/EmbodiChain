@@ -30,7 +30,7 @@ profile:
       primary: primary_manipulator
     move_held_object:
       primary: primary_manipulator
-  action_options:
+  skill_options:
     pick:
       kind: pick_up
       hand_interp_steps: 10
@@ -42,22 +42,11 @@ profile:
       - 0.0
       - 0.0
       fixed_object_to_eef:
-      - 0.0
-      - 0.0
-      - -1.0
-      - 0.065
-      - 0.0
-      - 1.0
-      - 0.0
-      - 0.0
-      - 1.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 1.0
+        position: [0.065, 0.0, 0.0]
+        rotation_matrix:
+        - [0.0, 0.0, -1.0]
+        - [0.0, 1.0, 0.0]
+        - [1.0, 0.0, 0.0]
     simulation.pour:
       kind: pour
       rotate_angle: 1.3962634015954636
@@ -76,21 +65,7 @@ runtime_services:
     target_id: receiver_pour_pose
     reference_entity_id: receiver
     relative_pose:
-    - 1.0
-    - 0.0
-    - 0.0
-    - 0.005
-    - 0.0
-    - 1.0
-    - 0.0
-    - 0.09
-    - 0.0
-    - 0.0
-    - 1.0
-    - 0.17
-    - 0.0
-    - 0.0
-    - 0.0
-    - 1.0
+      position: [0.005, 0.09, 0.17]
+      quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
   - kind: pour
     object_id: cup

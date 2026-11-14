@@ -25,22 +25,11 @@ scene_binding:
       kind: container
       native_name: interior
       object_target_pose:
-      - 0.0
-      - -1.0
-      - 0.0
-      - 0.0
-      - 1.0
-      - 0.0
-      - 0.0
-      - 0.105
-      - 0.0
-      - 0.0
-      - 1.0
-      - -0.027
-      - 0.0
-      - 0.0
-      - 0.0
-      - 1.0
+        position: [0.0, 0.105, -0.027]
+        rotation_matrix:
+        - [0.0, -1.0, 0.0]
+        - [1.0, 0.0, 0.0]
+        - [0.0, 0.0, 1.0]
       release_clearance: 0.015
   rigid_objects:
   - entity_id: cube
@@ -56,7 +45,7 @@ profile:
       primary: primary_manipulator
     place:
       primary: primary_manipulator
-  action_options:
+  skill_options:
     simulation.articulation_link_slide:
       kind: slide
       direction: pull
@@ -72,22 +61,8 @@ profile:
       pre_grasp_distance: 0.20
       initial_lift_height: 0.20
       fixed_object_to_eef:
-      - 1.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - -1.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - -1.0
-      - 0.015
-      - 0.0
-      - 0.0
-      - 0.0
-      - 1.0
+        position: [0.0, 0.0, 0.015]
+        quaternion_xyzw: [1.0, 0.0, 0.0, 0.0]
     place:
       kind: place
       lift_height: 0.16

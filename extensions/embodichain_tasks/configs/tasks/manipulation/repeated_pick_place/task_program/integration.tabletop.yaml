@@ -33,22 +33,8 @@ profile:
       pre_grasp_distance: 0.08
       # Keep the distal fingertips above the 750 mm support during pickup.
       fixed_object_to_eef:
-        - 1.0
-        - 0.0
-        - 0.0
-        - 0.0
-        - 0.0
-        - -1.0
-        - 0.0
-        - 0.0
-        - 0.0
-        - 0.0
-        - -1.0
-        - 0.0325
-        - 0.0
-        - 0.0
-        - 0.0
-        - 1.0
+        position: [0.0, 0.0, 0.0325]
+        quaternion_xyzw: [1.0, 0.0, 0.0, 0.0]
     place:
       kind: place
       hand_interp_steps: 20

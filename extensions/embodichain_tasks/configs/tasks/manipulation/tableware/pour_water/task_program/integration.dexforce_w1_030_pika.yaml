@@ -30,22 +30,11 @@ profile:
       hand_interp_steps: 44
       grasp_settle_steps: 100
       fixed_object_to_eef:
-      - 0.0
-      - 0.0
-      - 1.0
-      - -0.005
-      - 1.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 1.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 1.0
+        position: [-0.005, 0.0, 0.0]
+        rotation_matrix:
+        - [0.0, 0.0, 1.0]
+        - [1.0, 0.0, 0.0]
+        - [0.0, 1.0, 0.0]
     simulation.pour:
       kind: pour
       rotate_angle: 1.0471975511965976
@@ -66,38 +55,10 @@ runtime_services:
     target:
       receiver_id: cup
       source_mouth_pose:
-      - 1.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 1.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 1.0
-      - 0.0697246268391609
-      - 0.0
-      - 0.0
-      - 0.0
-      - 1.0
+        position: [0.0, 0.0, 0.0697246268391609]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
       receiver_mouth_pose:
-      - 1.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 1.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 1.0
-      - 0.04387804865837097
-      - 0.0
-      - 0.0
-      - 0.0
-      - 1.0
+        position: [0.0, 0.0, 0.04387804865837097]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
       receiver_radius: 0.025
       mouth_radius: 0.012

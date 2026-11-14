@@ -22,43 +22,15 @@ scene_binding:
       native_name: red_neighbor
       object_target_frame: world_axes
       object_target_pose:
-      - 1.0
-      - 0.0
-      - 0.0
-      - -0.08
-      - 0.0
-      - 1.0
-      - 0.0
-      - 0
-      - 0.0
-      - 0.0
-      - 1.0
-      - 0.08
-      - 0.0
-      - 0.0
-      - 0.0
-      - 1.0
+        position: [-0.08, 0.0, 0.08]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
     - entity_id: blue_placement
       kind: support_surface
       native_name: blue_neighbor
       object_target_frame: world_axes
       object_target_pose:
-      - 1.0
-      - 0.0
-      - 0.0
-      - 0.08
-      - 0.0
-      - 1.0
-      - 0.0
-      - 0
-      - 0.0
-      - 0.0
-      - 1.0
-      - 0.08
-      - 0.0
-      - 0.0
-      - 0.0
-      - 1.0
+        position: [0.08, 0.0, 0.08]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
   - entity_id: block_3
     dynamics: dynamic
     semantic_type: block
@@ -79,22 +51,11 @@ profile:
       hand_interp_steps: 10
       grasp_settle_steps: 45
       fixed_object_to_eef:
-      - 0.307720125
-      - 0.0
-      - 0.951476812
-      - 0.025
-      - 0.0
-      - -1.0
-      - 0.0
-      - 0.0
-      - 0.951476812
-      - 0.0
-      - -0.307720125
-      - -0.025
-      - 0.0
-      - 0.0
-      - 0.0
-      - 1.0
+        position: [0.025, 0.0, -0.025]
+        rotation_matrix:
+        - [0.307720125, 0.0, 0.951476812]
+        - [0.0, -1.0, 0.0]
+        - [0.951476812, 0.0, -0.307720125]
     place:
       kind: place
       lift_height: 0.15

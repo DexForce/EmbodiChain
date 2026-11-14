@@ -11,22 +11,11 @@ task_program:
         skill_options:
           pick:
             fixed_object_to_eef:
-            - 0.0
-            - 0.0
-            - 1.0
-            - 0.01
-            - 1.0
-            - 0.0
-            - 0.0
-            - 0.0
-            - 0.0
-            - 1.0
-            - 0.0
-            - -0.02
-            - 0.0
-            - 0.0
-            - 0.0
-            - 1.0
+              position: [0.01, 0.0, -0.02]
+              rotation_matrix:
+              - [0.0, 0.0, 1.0]
+              - [1.0, 0.0, 0.0]
+              - [0.0, 1.0, 0.0]
   execution_policy:
     component: ../../../../components/execution_policies/trajectory_open_loop_dual_arm_manipulation.yaml
     overrides:

@@ -848,7 +848,8 @@ def test_pour_water_mouth_alignment_and_measured_checkpoints() -> None:
 
     integration = _tableware_integration_payload("pour_water")
     lowerer = integration["runtime_services"]["registered_semantic_lowerers"][0]
-    relative = torch.tensor(lowerer["relative_pose"], dtype=torch.float64).reshape(4, 4)
+    decoded = _decode_registered_lowerer(lowerer, path="transport")
+    relative = torch.tensor(decoded.relative_pose, dtype=torch.float64).reshape(4, 4)
     registration = deployment.integration.registration
     axis = torch.tensor(
         registration.scene_binding.antipodal_grasps[0].internal_axis,
@@ -1051,7 +1052,9 @@ def test_move_held_object_lowerer_rejects_non_se3_relative_pose() -> None:
     payload = deepcopy(_tableware_integration_payload("pour_water"))
     services = payload["runtime_services"]
     lowerer = services["registered_semantic_lowerers"][0]
-    lowerer["relative_pose"][-1] = 2.0
+    malformed = torch.eye(4, dtype=torch.float64).flatten().tolist()
+    malformed[-1] = 2.0
+    lowerer["relative_pose"] = malformed
 
     with pytest.raises(ValueError, match="bottom row"):
         _decode_configured_task_program_integration(payload)
@@ -4940,3 +4943,319 @@ def test_contact_path_options_decode_and_keep_inactive_identity() -> None:
     ):
         with pytest.raises((ValueError, TypeError)):
             _decode_skill_options(declaration, path="options")
+
+
+@pytest.mark.parametrize("orientation", ["quaternion_xyzw", "rotation_matrix"])
+def test_compact_pose_keeps_legacy_integration_identity(orientation: str) -> None:
+    """Authoring shape must not change the resolved transform or registration."""
+    path = _CONFIG_DIRECTORY / "repeated_pick_place/task.tianji_marvin.yaml"
+    config = load_config(path)
+    physical = _physical_components(path, config)
+    _, declaration, _ = _resolve_task_program_components(
+        config["task_program"], base_dir=path.parent
+    )
+    legacy = [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -1.0,
+        0.05,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+    ]
+    compact = {
+        "position": [0.0, 0.0, 0.05],
+        orientation: (
+            [1.0, 0.0, 0.0, 0.0]
+            if orientation == "quaternion_xyzw"
+            else [[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]]
+        ),
+    }
+    fingerprints = []
+    for value in (legacy, compact):
+        source = deepcopy(declaration)
+        source["profile"]["skill_options"]["pick"]["fixed_object_to_eef"] = value
+        selection = {**config["task_program"], "integration": {"inline": source}}
+        deployment = _load_configured_task_program_deployment(
+            task_program=selection,
+            skill_profile=physical.embodiment_skill_profile,
+            base_dir=path.parent,
+        )
+        fingerprints.append(deployment.integration.integration_fingerprint)
+        options = _decode_skill_options(
+            {"kind": "pick_up", "fixed_object_to_eef": value}, path="pick"
+        )
+        torch.testing.assert_close(
+            options.fixed_object_to_eef,
+            torch.tensor(legacy, dtype=torch.float32).reshape(4, 4),
+            rtol=0,
+            atol=0,
+        )
+    assert fingerprints[0] == fingerprints[1]
+
+
+def test_compact_matrix_preserves_rounded_calibration_numbers() -> None:
+    from embodichain.lab.task_program.integrations.configured import _pose_matrix
+    import struct
+
+    rotation = [
+        [0.307720125, 0.0, 0.951476812],
+        [0.0, -1.0, -0.0],
+        [0.951476812, 0.0, -0.307720125],
+    ]
+    expected = [
+        0.307720125,
+        0.0,
+        0.951476812,
+        0.025,
+        0.0,
+        -1.0,
+        -0.0,
+        0.0,
+        0.951476812,
+        0.0,
+        -0.307720125,
+        -0.025,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+    ]
+    actual = _pose_matrix(
+        {"position": [0.025, 0.0, -0.025], "rotation_matrix": rotation}, path="pose"
+    )
+    assert struct.pack("16d", *actual) == struct.pack("16d", *expected)
+
+
+@pytest.mark.parametrize(
+    "pose",
+    [
+        {"position": [0, 0, 0]},
+        {"position": [0, 0, 0], "quaternion_xyzw": [0, 0, 0, 0]},
+        {"position": [0, 0, 0], "quaternion_xyzw": [0, 0, 0, 1], "frame": "world"},
+        {
+            "position": [0, 0, 0],
+            "quaternion_xyzw": [0, 0, 0, 1],
+            "rotation_matrix": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+        },
+        {"position": [0, 0, 0], "rotation_matrix": [[1, 0, 0], [0, 1, 0]]},
+        {"position": [0, 0, 0], "rotation_matrix": [[2, 0, 0], [0, 1, 0], [0, 0, 1]]},
+    ],
+)
+def test_compact_pose_rejects_ambiguous_or_invalid_orientation(
+    pose: dict[str, object],
+) -> None:
+    from embodichain.lab.task_program.integrations.configured import _pose_matrix
+
+    with pytest.raises((TypeError, ValueError)):
+        _pose_matrix(pose, path="pose")
+
+
+def test_inspector_explains_backend_parameter_owners_and_monitor_defaults(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import runpy
+
+    inspector = runpy.run_path(
+        str(
+            _REPOSITORY_ROOT
+            / ".agents/skills/add-task-program/scripts/inspect_deployment.py"
+        )
+    )
+    path = _CONFIG_DIRECTORY / "repeated_pick_place/task.tianji_marvin.yaml"
+    registered_before = dict(REGISTERED_ENVS)
+    summary = inspector["inspect_deployment"](path, explain=True)
+    view = summary["resolved_configuration"]
+    assert summary["physics"] == view["physics"]["value"] == "default"
+    assert view["physics"]["source"]["file"].endswith("envs/tabletop.default.yaml")
+    left = next(r for r in view["resources"] if r["resource_id"] == "left")
+    assert (
+        next(e for e in left["endpoints"] if e["endpoint_id"] == "motion")[
+            "control_part"
+        ]
+        == "left_arm"
+    )
+    assert view["resource_source"]["file"].endswith("embodiments/tianji_marvin.yaml")
+    assert (
+        view["runtime_services"]["values"]["control_part_evidence"][
+            "minimum_displacement"
+        ]
+        == 0.004
+    )
+    entries = {(p["scope"], tuple(p["path"])): p for p in view["parameters"]}
+    speed = entries["execution_policy", ("motion", "velocity_limit")]
+    assert speed["value"] == 0.2
+    assert speed["source"]["kind"] == "component"
+    assert speed["source"]["file"].endswith("sequential_ik_verified.yaml")
+    lift = entries["integration", ("profile", "skill_options", "pick", "lift_height")]
+    assert lift["value"] == 0.05
+    assert lift["source"]["kind"] == "deployment_override"
+    assert lift["source"]["file"] == str(path.resolve())
+    monitors = {(p["monitor"], p["parameter"]): p for p in view["monitor_parameters"]}
+    assert monitors["place", "attached_translation_threshold"]["value"] == 0.01
+    assert monitors["place", "attached_translation_threshold"]["source"][
+        "file"
+    ].endswith("integration.tabletop.yaml")
+    assert monitors["place", "attached_rotation_threshold"]["value"] == 0.2
+    assert (
+        monitors["place", "attached_rotation_threshold"]["source"]["kind"]
+        == "sdk_default"
+    )
+    assert dict(REGISTERED_ENVS) == registered_before
+    assert inspector["main"]([str(path), "--explain"]) == 0
+    text = capsys.readouterr().out
+    assert "physics=default" in text
+    assert "SDK default (CompositeEffectMonitorCfg)" in text
+
+
+def test_compact_quaternion_normalization_has_one_rotation_identity() -> None:
+    from embodichain.lab.task_program.integrations.configured import _pose_matrix
+    import struct
+
+    expected = (
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+    )
+    for quaternion in ([2.0, 0.0, 0.0, 0.0], [-2.0, 0.0, 0.0, 0.0]):
+        actual = _pose_matrix(
+            {"position": [0, 0, 0], "quaternion_xyzw": quaternion}, path="pose"
+        )
+        assert struct.pack("16d", *actual) == struct.pack("16d", *expected)
+
+
+@pytest.mark.parametrize("style", ["inline", "component_override"])
+def test_inspector_tracks_policy_inline_and_override_origins(
+    evaluation_deployment, style: str
+) -> None:
+    import runpy
+    import yaml
+
+    path, _, _ = evaluation_deployment
+    config = load_config(path)
+    component = config["task_program"]["execution_policy"]
+    original = load_config(component)
+    if style == "inline":
+        tuned = deepcopy(original)
+        tuned["motion"]["velocity_limit"] = 0.3
+        tuned["planner"] = {"type": "toppra"}
+        config["task_program"]["execution_policy"] = {"inline": tuned}
+        expected_path = [
+            "task_program",
+            "execution_policy",
+            "inline",
+            "motion",
+            "velocity_limit",
+        ]
+    else:
+        config["task_program"]["execution_policy"] = {
+            "component": component,
+            "overrides": {"motion": {"velocity_limit": 0.3}},
+        }
+        expected_path = [
+            "task_program",
+            "execution_policy",
+            "overrides",
+            "motion",
+            "velocity_limit",
+        ]
+    path.write_text(yaml.safe_dump(config))
+    inspector = runpy.run_path(
+        str(
+            _REPOSITORY_ROOT
+            / ".agents/skills/add-task-program/scripts/inspect_deployment.py"
+        )
+    )
+    summary = inspector["inspect_deployment"](path, explain=True)
+    parameter = next(
+        p
+        for p in summary["resolved_configuration"]["parameters"]
+        if p["scope"] == "execution_policy"
+        and p["path"] == ["motion", "velocity_limit"]
+    )
+    assert parameter["value"] == 0.3
+    assert parameter["source"]["file"] == str(path.resolve())
+    assert parameter["source"]["path"] == expected_path
+    assert load_config(component) == original
+    if style == "inline":
+        derived = next(
+            p
+            for p in summary["resolved_configuration"]["parameters"]
+            if p["scope"] == "execution_policy" and p["path"] == ["planner", "config"]
+        )
+        assert derived["value"] == {}
+        assert derived["source"]["kind"] == "derived"
+        assert derived["source"]["path"] == [
+            "task_program",
+            "execution_policy",
+            "inline",
+            "planner",
+        ]
+
+
+def test_inspector_reports_newton_from_selected_environment() -> None:
+    import runpy
+
+    inspector = runpy.run_path(
+        str(
+            _REPOSITORY_ROOT
+            / ".agents/skills/add-task-program/scripts/inspect_deployment.py"
+        )
+    )
+    path = _CONFIG_DIRECTORY / "cloth_fold/task.w1.yaml"
+    summary = inspector["inspect_deployment"](path, explain=True)
+    assert summary["physics"] == "newton"
+    assert summary["resolved_configuration"]["physics"]["source"]["file"] == str(
+        path.parent / "env.yaml"
+    )
+
+
+def test_inspector_json_stdout_contains_only_the_result(tmp_path: Path) -> None:
+    import json
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(
+                _REPOSITORY_ROOT
+                / ".agents/skills/add-task-program/scripts/inspect_deployment.py"
+            ),
+            str(_CONFIG_DIRECTORY / "repeated_pick_place/task.tianji_marvin.yaml"),
+            "--explain",
+            "--json",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    data = json.loads(result.stdout)
+    assert data["errors"] == []
+    assert data["deployments"][0]["physics"] == "default"
+    assert data["deployments"][0]["resolved_configuration"]["components"][
+        "integration"
+    ].endswith("integration.tabletop.yaml")

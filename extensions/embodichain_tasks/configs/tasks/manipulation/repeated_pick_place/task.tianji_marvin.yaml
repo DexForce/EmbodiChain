@@ -12,32 +12,13 @@ task_program:
             cartesian_lift: true
             lift_height: 0.05
             fixed_object_to_eef:
-            - 1.0
-            - 0.0
-            - 0.0
-            - 0.0
-            - 0.0
-            - -1.0
-            - 0.0
-            - 0.0
-            - 0.0
-            - 0.0
-            - -1.0
-            - 0.05
-            - 0.0
-            - 0.0
-            - 0.0
-            - 1.0
+              position: [0.0, 0.0, 0.05]
+              quaternion_xyzw: [1.0, 0.0, 0.0, 0.0]
             grasp_settle_steps: 45
             hand_interp_steps: 40
           place:
             lift_height: 0.02
             cartesian_approach: true
-  execution_policy:
-    component: ../../../components/execution_policies/sequential_ik_verified.yaml
-    overrides:
-      motion:
-        velocity_limit: 0.2
-        ik_seed_mode: sequential
+  execution_policy: ../../../components/execution_policies/sequential_ik_verified.yaml
 embodiment:
   component: ../../../components/embodiments/tianji_marvin.yaml

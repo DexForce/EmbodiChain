@@ -472,6 +472,7 @@ topics:
   - embodichain/lab/task_program/integrations/invocation_policy.py
   - embodichain/lab/task_program/integrations/composition.py
   - embodichain/lab/task_program/integrations/_configured_composition.py
+  - .agents/skills/add-task-program/scripts/inspect_deployment.py
   - embodichain/lab/gym/envs/task_program/
   - embodichain/agents/mllm/task_program.py
   watch_paths: [extensions/embodichain_tasks/configs/components/embodiments/, extensions/embodichain_tasks/configs/components/execution_policies/,
