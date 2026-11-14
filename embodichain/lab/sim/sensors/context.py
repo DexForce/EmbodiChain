@@ -29,6 +29,7 @@ from tensordict import TensorDict
 if TYPE_CHECKING:
     from embodichain.lab.sim.sim_manager import SimulationManager
     from .contact import ContactSensor, ContactSensorCfg
+    from .ray import RayScene
 
 __all__ = ["SensorClock", "SensorStateProvider", "SensorContext"]
 
@@ -111,6 +112,7 @@ class SensorContext:
         clock: Simulation clock and completed-substep identity.
         state: Public physical state acquisition service.
         contact_factory: Optional factory for a bound, sensor-owned contact reader.
+        ray_factory: Optional factory for a topology-scoped collision query scene.
     """
 
     device: torch.device
@@ -118,6 +120,7 @@ class SensorContext:
     clock: SensorClock
     state: SensorStateProvider
     contact_factory: Callable[[ContactSensorCfg], ContactSensor] | None = None
+    ray_factory: Callable[[tuple[str, ...]], RayScene] | None = None
 
     @classmethod
     def from_manager(cls, manager: SimulationManager) -> SensorContext:
@@ -136,6 +139,7 @@ class SensorContext:
             services,
             services,
             services.create_contact_reader,
+            services.create_ray_scene,
         )
 
 
@@ -243,3 +247,19 @@ class _ManagerSensorServices:
                 f"{getattr(manager.physics, 'solver_type', None)} ({manager.device})."
             )
         return ContactSensor(cfg, manager.device, owner=manager)
+
+    def create_ray_scene(self, targets: tuple[str, ...]) -> RayScene:
+        from .ray import _build_collision_scene
+
+        manager = self._manager()
+        result = manager.spawn_result
+        if result is None:
+            raise RuntimeError("Ray queries require a prepared scene.")
+        revision = int(result.topology_revision)
+        cached_revision, scenes = getattr(manager, "_sensor_ray_scenes", (None, {}))
+        if cached_revision != revision:
+            scenes = {}
+            manager._sensor_ray_scenes = (revision, scenes)
+        if targets not in scenes:
+            scenes[targets] = _build_collision_scene(manager, targets)
+        return scenes[targets]

@@ -33,6 +33,7 @@ from .contact import (
     ArticulationContactFilterCfg,
 )
 from .contact_resultant import ContactResultant, ContactResultantCfg
+from .ray import RayScene, TerrainScan, TerrainScanCfg
 from .registry import (
     SensorRegistration,
     register_sensor,
@@ -43,6 +44,9 @@ from .registry import (
 
 __all__ = [
     "BaseSensor",
+    "RayScene",
+    "TerrainScan",
+    "TerrainScanCfg",
     "ContactResultant",
     "ContactResultantCfg",
     "PVA",
@@ -91,3 +95,5 @@ register_sensor(SensorRegistration("IMU", IMUCfg, IMU))
 register_sensor(
     SensorRegistration("ContactResultant", ContactResultantCfg, ContactResultant)
 )
+
+register_sensor(SensorRegistration("TerrainScan", TerrainScanCfg, TerrainScan))
