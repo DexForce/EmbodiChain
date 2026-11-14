@@ -590,7 +590,10 @@ class BaseEnv(gym.Env):
     def _advance_physics(self) -> None:
         """Advance physics and sample opted-in sensors after each substep."""
         sensors = [
-            sensor for sensor in self.sensors.values() if sensor.requires_substep_update
+            sensor
+            for sensor in self.sensors.values()
+            if sensor.requires_substep_update
+            and getattr(getattr(sensor, "cfg", None), "sample_phase", None) is None
         ]
         if not sensors:
             self.sim.update(
@@ -699,7 +702,11 @@ class BaseEnv(gym.Env):
         with self._profiler.section("sensor_fetch"):
             for sensor_name, sensor in self.sensors.items():
                 with self._profiler.section(f"sensor_update.{sensor_name}"):
-                    if not sensor.requires_substep_update:
+                    if (
+                        not sensor.requires_substep_update
+                        and getattr(getattr(sensor, "cfg", None), "sample_phase", None)
+                        is None
+                    ):
                         sensor.update(fetch_only=fetch_only)
                 with self._profiler.section(f"sensor_get_data.{sensor_name}"):
                     obs[sensor_name] = sensor.get_data()
@@ -1032,6 +1039,8 @@ class BaseEnv(gym.Env):
                     )
                 for sensor in self.sensors.values():
                     sensor.reset(env_ids=reset_ids)
+                    if isinstance(sensor, BaseSensor):
+                        sensor._invalidate_samples(reset_ids)
                 with self._profiler.section("initialize_episode"):
                     self._initialize_episode(reset_ids, **options)
                 if prepare is not None:

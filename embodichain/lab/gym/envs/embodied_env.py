@@ -1346,6 +1346,8 @@ class EmbodiedEnv(BaseEnv):
             return True
         if self.cfg.enable_sensor:
             for sensor_cfg in self._sensor_configs():
+                if getattr(sensor_cfg, "sample_phase", None) == "render":
+                    return True
                 _, sensor_factory, _ = _resolve_sensor_factory(
                     sensor_cfg.sensor_type, SimulationManager.SUPPORTED_SENSOR_TYPES
                 )
@@ -3369,7 +3371,10 @@ class EmbodiedEnv(BaseEnv):
             return super()._advance_physics()
 
         sensors = [
-            sensor for sensor in self.sensors.values() if sensor.requires_substep_update
+            sensor
+            for sensor in self.sensors.values()
+            if sensor.requires_substep_update
+            and getattr(getattr(sensor, "cfg", None), "sample_phase", None) is None
         ]
         for sensor in sensors:
             sensor.begin_control_step()
