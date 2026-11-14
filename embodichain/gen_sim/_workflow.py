@@ -130,15 +130,23 @@ def _run(cfg: _RunCfg, *, services: GenSimServices | None = None) -> dict[str, A
                 load_scene_generation_provider,
             )
 
-            update("running")
-            task = plan_image_task(
-                source,
-                cfg.instruction,
-                output / "task",
-                task_id=cfg.task_id,
-                services=run,
-            )
-            update("succeeded")
+            if cfg.task is not None:
+                # Reuse a published plan read-only, as --scene reuses a scene.
+                task = output / "task"
+                shutil.copytree(cfg.task, task)
+                manifest["task_reused_from"] = str(cfg.task)
+                update("reused")
+            else:
+                update("running")
+                task = plan_image_task(
+                    source,
+                    cfg.instruction,
+                    output / "task",
+                    task_id=cfg.task_id,
+                    services=run,
+                    max_repairs=cfg.planning_repairs,
+                )
+                update("succeeded")
             stage = "scene"
             update("running")
             scene = cfg.scene
@@ -220,7 +228,10 @@ def _run(cfg: _RunCfg, *, services: GenSimServices | None = None) -> dict[str, A
             manifest["runtime_evidence_status"] = "running"
             update("running")
             report = _execute_deployment(
-                deployment, device=cfg.device, headless=cfg.headless
+                deployment,
+                device=cfg.device,
+                headless=cfg.headless,
+                recording=output / "recording" if cfg.recording else None,
             )
             write_run_json(output / "execution_report.json", report)
             manifest["runtime_evidence_status"] = report["status"]

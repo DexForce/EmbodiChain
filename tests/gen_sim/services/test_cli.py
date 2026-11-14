@@ -115,6 +115,27 @@ def test_validate_resolves_current_profiles_without_network(
     }
 
 
+def test_validate_text_report_lists_configured_roles(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config, env = _write_current_profiles(tmp_path, "http://127.0.0.1:1")
+    main(
+        [
+            "gensim",
+            "services",
+            "validate",
+            "--config",
+            str(config),
+            "--env-file",
+            str(env),
+        ]
+    )
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[-1] == "model services: ok"
+    assert len(lines) == 4
+    assert all(": configured [" in line for line in lines[:-1])
+
+
 def test_validate_rejects_an_incomplete_adapter_profile(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -25,6 +25,74 @@ from typing import Any
 __all__: list[str] = []
 
 
+class _EpisodeRecording:
+    """Record every camera and the native state at each executed control step.
+
+    Frames come from the environment's own sensor observations, so the video
+    shows the actual executed motion rather than a re-rendered replay.
+    """
+
+    def __init__(self, env: Any, root: Path) -> None:
+        self.env = env
+        self.root = root
+        self.fps = 1.0 / float(env.step_dt)
+        self.frames: dict[str, list[Any]] = {}
+        self.states: list[dict[str, Any]] = []
+
+    def observe(self, observation: Any) -> None:
+        """Append the observation's camera frames and the native object state."""
+        import numpy as np
+
+        sensors = observation.get("sensor", {}) if observation is not None else {}
+        for uid in list(sensors.keys()):
+            data = sensors[uid]
+            if "color" not in data.keys():
+                continue
+            frame = data["color"][0, ..., :3]
+            frame = frame.detach().cpu().numpy() if hasattr(frame, "detach") else frame
+            self.frames.setdefault(uid, []).append(np.asarray(frame, dtype=np.uint8))
+        step = len(self.states)
+        robot = observation.get("robot", {}) if observation is not None else {}
+        state: dict[str, Any] = {
+            "control_step": step,
+            "control_time_s": step / self.fps,
+            "qpos": (
+                robot["qpos"][0].detach().cpu().tolist()
+                if "qpos" in robot.keys()
+                else None
+            ),
+            "objects": {},
+        }
+        for uid in self.env.sim.get_rigid_object_uid_list():
+            pose = self.env.sim.get_rigid_object(uid).get_local_pose(to_matrix=True)
+            state["objects"][uid] = pose[0, :3, 3].detach().cpu().tolist()
+        self.states.append(state)
+
+    def write(self, report: dict[str, Any] | None) -> dict[str, Any]:
+        """Encode one H.264 video per camera and the state timeline."""
+        import json
+        from dexsim.utility import images_to_video
+
+        self.root.mkdir(parents=True, exist_ok=True)
+        cameras = {}
+        for uid, frames in self.frames.items():
+            images_to_video(frames, str(self.root), uid, fps=self.fps)
+            height, width = frames[0].shape[:2]
+            cameras[uid] = {"frames": len(frames), "width": width, "height": height}
+        (self.root / "states.jsonl").write_text(
+            "".join(json.dumps(state) + "\n" for state in self.states)
+        )
+        manifest = {
+            "schema_version": "embodichain.gensim-native-recording/v1",
+            "fps": self.fps,
+            "frames": len(self.states),
+            "cameras": cameras,
+            "episode_completed": None if report is None else report.get("completed"),
+        }
+        (self.root / "recording.json").write_text(json.dumps(manifest, indent=2))
+        return manifest
+
+
 def _execute_deployment(
     path: Path,
     *,
@@ -32,6 +100,7 @@ def _execute_deployment(
     headless: bool,
     reset_observer: Callable[[Any], None] | None = None,
     step_observer: Callable[[Any, Any, Any], None] | None = None,
+    recording: Path | None = None,
 ) -> dict[str, Any]:
     from embodichain.lab.gym.envs.demo import execute_demo_episode
     from embodichain.lab.gym.utils.gym_utils import config_to_cfg
@@ -51,16 +120,35 @@ def _execute_deployment(
         cfg.sim_cfg.device = device
     cfg.sim_cfg.headless = headless
     env = None
+    recorder = None
     try:
         env = get_env_spec(data["id"]).make(cfg=cfg)
         reset_result = env.reset(options={"save_data": False})
+        if recording is not None:
+            recorder = _EpisodeRecording(env, recording)
+            recorder.observe(reset_result[0])
         if reset_observer is not None:
             reset_observer(reset_result[0])
         kwargs = {"episode_index": 0}
-        if step_observer is not None:
-            kwargs["step_observer"] = step_observer
-        result = execute_demo_episode(env, **kwargs)
+        if step_observer is not None or recorder is not None:
+
+            def observe(active: Any, action: Any, observation: Any) -> None:
+                if recorder is not None:
+                    recorder.observe(observation)
+                if step_observer is not None:
+                    step_observer(active, action, observation)
+
+            kwargs["step_observer"] = observe
+        result = None
+        try:
+            result = execute_demo_episode(env, **kwargs)
+        finally:
+            if recorder is not None and result is None and recorder.states:
+                # An interrupted episode still keeps its recorded frames.
+                recorder.write(None)
         report = result.to_metadata()
+        if recorder is not None:
+            report["recording"] = recorder.write(report)
         report.update(
             status="succeeded" if result.completed and result.all_success else "failed",
             all_success=result.all_success,

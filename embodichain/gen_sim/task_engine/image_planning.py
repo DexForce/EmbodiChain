@@ -59,6 +59,10 @@ class SemanticPlanningError(ValueError):
         self.artifacts = artifacts
 
 
+def _repairs(count: int) -> str:
+    return "one repair" if count == 1 else f"{count} repairs"
+
+
 def _json_response(text: str) -> Any:
     text = text.strip()
     if text.startswith("```"):
@@ -77,6 +81,7 @@ def generate_semantic_task_graph_from_image(
     image_caller: Callable[..., str] | None = None,
     planning_caller: Callable[..., str] | None = None,
     services: GenSimServices | None = None,
+    max_repairs: int = 1,
 ) -> dict[str, Any]:
     """Generate a full catalog-constrained graph, retaining unresolved bindings.
 
@@ -90,13 +95,17 @@ def generate_semantic_task_graph_from_image(
         planning_caller: Optional text completion provider for semantic planning.
         services: Optional caller-owned run providing interpretation, grounding
             and semantic-planning roles.
+        max_repairs: Diagnostic repairs allowed per grounding/planning stage.
+            Each repair re-runs the complete strict validation.
     Returns:
         JSON artifacts including a canonical graph, catalog snapshot, visual
         evidence, explicit pending bindings, attempts and phase-specific coverage.
     Raises:
-        SemanticPlanningError: Generation fails after one diagnostic repair.
+        SemanticPlanningError: Generation fails after the allowed repairs.
         ValueError: Invalid input image or task request.
     """
+    if type(max_repairs) is not int or max_repairs < 0:
+        raise ValueError("max_repairs must be a nonnegative integer")
     from PIL import Image
 
     task_id, instruction = task_id.strip(), instruction.strip()
@@ -142,7 +151,7 @@ def generate_semantic_task_graph_from_image(
         )
         references = candidate["scene_request"]["references"]
         errors = []
-        for attempt in range(2):
+        for attempt in range(max_repairs + 1):
             raw = image_caller(
                 system_prompt=_GROUNDING_PROMPT,
                 user_prompt=json.dumps(
@@ -165,7 +174,8 @@ def generate_semantic_task_graph_from_image(
                 audit["errors"] = errors
         else:
             raise ValueError(
-                "Visual grounding invalid after one repair: " + str(errors)
+                f"Visual grounding invalid after {_repairs(max_repairs)}: "
+                + str(errors)
             )
         for step in candidate["draft"]["steps"]:
             for role in ("object", "target"):
@@ -194,7 +204,7 @@ def generate_semantic_task_graph_from_image(
             },
         }
         errors = []
-        for attempt in range(2):
+        for attempt in range(max_repairs + 1):
             raw = planning_caller(
                 system_prompt=(
                     _PLANNING_PROMPT
@@ -238,7 +248,8 @@ def generate_semantic_task_graph_from_image(
                 audit["errors"] = errors
         else:
             raise ValueError(
-                "Semantic planning invalid after one repair: " + str(errors)
+                f"Semantic planning invalid after {_repairs(max_repairs)}: "
+                + str(errors)
             )
         if hashlib.sha256(image.read_bytes()).hexdigest() != digest:
             raise ValueError("Input image changed")
@@ -475,7 +486,7 @@ For hidden contents explicitly named in the instruction, use instruction_declare
 _PLANNING_PROMPT = """Plan the COMPLETE original instruction as canonical Semantic Calls from the supplied catalog ONLY. Return JSON only:
 {nodes:[{id:unique_identifier,step_id:source_step_id,call:canonical_call,depends_on:[earlier_node_ids],semantic:{object:logical_entity_id,reference:logical_entity_id_or_null,relation:string_or_null,intent:{all_applicable_intent_fields:their_exact_source_values}}}],requirements:[{id:unique_identifier,quote:exact_substring_of_original_instruction,node_ids:[implementing_node_ids]}]}.
 Follow the task_producer_obligations and their declared semantics EXACTLY; required producers are derived from task affordances and catalog capabilities. Calls must be JSON OBJECTS, never JSON-encoded strings. quotes must be literal source instruction text; do not put source intent field names or JSON fragments into quote. Cover every original clause, not just the candidate summary. Requirements must quote all distinct obligations including restoration, release, ordering, location, orientation and arm direction. Every call must have a requirement. Keep every candidate step and its identity and intent. Canonical built-ins: pick {kind:pick,object:ID,resources:{}}; place {kind:place,object:ID,inside:AFFORDANCE_ID or on:AFFORDANCE_ID,resources:{}}; hand_over {kind:hand_over,object:ID,resources:{source:ARM,destination:OTHER_ARM}}. Registered calls use {kind:registered,call_id:catalog_id,arguments:exact_catalog_arguments,resources:{} for an unspecified single arm (or primary:ARM when constrained, source/destination for hand_over, left/right for coordinated transport)}. Omit resources consistently for unspecified single-arm operations: the robot profile is unknown. Only use named arms when requested or logically required by a handover; those names still require a runtime resource profile. Use the key primary literally, NEVER slots. If resources are omitted for acquisition, omit them throughout that held-object chain; do not mix unspecified and named arms. For a named handover, the acquisition MUST explicitly use resources:{primary:SOURCE_ARM}, the hand_over must use resources:{source:SOURCE_ARM,destination:RECEIVING_ARM}, and every following held/release call must use resources:{primary:RECEIVING_ARM}. Map the Task Engine intent side labels with resource_identity: left_arm maps to logical resource left and right_arm maps to logical resource right. Keep left_arm/right_arm verbatim in semantic.intent, but use left/right in call.resources. These logical side IDs are NOT robot control-part names; custom configured identifiers remain unchanged. A named handover source is NOT unspecified, even if the acquisition itself has no explicit arm in the instruction.
-Order nodes by source steps and serialize operations with dependencies; include a dependency on the preceding node, so resource and held-object state is unambiguous. A pick acquires an object; axis_align also acquires and aligns it (do not pick again); place releases it; hand_over transfers an already held object; pour and move_held_object require a held object and preserve the grasp. A subsequent pick must follow a release. simulation.pour already restores the source orientation: for 回正 annotate restore_upright=true on the pour, NEVER add axis_align on a held pouring source. axis_align always acquires an UNHELD object. After pouring use move_held_object then place with intent.return_to_origin=true when 原位 is requested. Control calls (press/twist/slide/open_door) operate on their target without a pick and finish with the hand released. Coordinated transport acquires with both hands then releases at target; both hands must be free beforehand. Respect the terminal behavior and cleanup semantics of each source task contract, including transfer recipients, restoration and release. Preserve the explicitly requested source and recipient identities through later reuses. A later separate source pickup must happen after release.
+Order nodes by source steps and serialize operations with dependencies; include a dependency on the preceding node, so resource and held-object state is unambiguous. A pick acquires an object; axis_align also acquires and aligns it (do not pick again); place releases it; hand_over transfers an already held object; pour and move_held_object require a held object and preserve the grasp. A subsequent pick must follow a release. A step with terminal_behavior=hold ends holding its object: use terminal_hold_requires_one_of, i.e. pick then exactly one simulation.move_held_object whose semantic.reference and semantic.relation are the step target and relation (null for E2), and never place it; that held transport also realizes an upright orientation_goal, so do not add axis_align. simulation.pour already restores the source orientation: for 回正 annotate restore_upright=true on the pour, NEVER add axis_align on a held pouring source. axis_align always acquires an UNHELD object. After pouring use move_held_object then place with intent.return_to_origin=true when 原位 is requested. Control calls (press/twist/slide/open_door) operate on their target without a pick and finish with the hand released. Coordinated transport acquires with both hands then releases at target; both hands must be free beforehand. Respect the terminal behavior and cleanup semantics of each source task contract, including transfer recipients, restoration and release. Preserve the explicitly requested source and recipient identities through later reuses. A later separate source pickup must happen after release.
 Use builtin place for inside (e.g. inside__tray__cup logical affordance ID), NOT simulation.place_relative which does NOT support inside. Use simulation.place_relative for right_of and other catalog relations. For any placement, semantic.reference is the actual logical destination and semantic.relation is the requested relation. For return-to-origin place on an origin-support logical affordance alias and semantic.intent.return_to_origin=true; semantic.reference MUST be the source object ID itself (or null), NEVER an invented source_pose/source_support/origin entity. The pose alias belongs ONLY in call.arguments.target or place.on. The original pose is deferred in a source_pose binding, not an extra observed scene object. move_held_object's arguments contain ONLY a logical target identifier (no invented poses); semantic.reference identifies the destination, e.g. pouring recipient. simulation.pour arguments contain ONLY object; semantic.reference MUST identify the pouring recipient. simulation.axis_align arguments contain ONLY object; orientation semantics belong to intent. Slide arguments contain ONLY handle logical ID; requested open/closed state belongs to intent and pending runtime policy. Press/twist arguments contain ONLY object; requested target_state, coarse twist_goal_mode, target_setting etc belong to intent and pending runtime policy. Open door uses object and state open|closed.
 semantic.intent MUST retain each applicable source step field verbatim including relation, orientation_goal, target_state, terminal_behavior, direction, layout, axis, pour_goal_mode and twist_goal_mode (skip none); do not invent a numeric angle for coarse twist or fluid evidence for motion-only pouring. Include target_setting only when explicitly requested. Represent upright vs either-end vertical distinctly. Never invent a registered call, target pose, joint value, controller, or trajectory. Unknown calibration, affordance, source pose and policies remain binding requirements derived from catalog. Do not omit or simplify unsupported original requirements."""
 

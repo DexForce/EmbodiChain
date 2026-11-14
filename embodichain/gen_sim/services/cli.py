@@ -72,9 +72,11 @@ def _emit(report: dict[str, Any], *, as_json: bool) -> None:
         print(f"failed: {report['error']}: {report['detail']}")
         return
     for item in report.get("roles", []):
-        suffix = f" ({item['error']})" if item["status"] == "failed" else ""
+        # Validation reports carry no per-role status; only doctor runs checks.
+        status = item.get("status", "configured")
+        suffix = f" ({item['error']})" if status == "failed" else ""
         print(
-            f"{item['role']}: {item['status']}{suffix} "
+            f"{item['role']}: {status}{suffix} "
             f"[{item['profile']} -> {item['adapter']}]"
         )
     print(f"model services: {report['status']}")

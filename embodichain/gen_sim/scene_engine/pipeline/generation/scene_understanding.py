@@ -194,6 +194,14 @@ Examples:
 
 Return JSON only, with exactly one key: selected_mask_index. Use a one-based
 candidate index or null. Do not include Markdown or any other text."""
+_VISUAL_SEGMENTATION_PROMPT_SYSTEM_PROMPT = """You write prompts for an open-vocabulary text-prompted image segmenter.
+The segmenter found no mask for the listed objects using their category and names.
+Look at the image and return JSON only: {"prompts": ["..."]}.
+Give up to 6 distinct short noun phrases (2-5 words) that describe how these objects
+look from this exact viewpoint: color, material, shape or a visible part, such as
+"tool with black handle" or "red cube". Do not repeat prompts that found nothing.
+"""
+
 _ASSET_ASSIGNMENT_SYSTEM_PROMPT = """You assign outlined mask candidates to a group of scene assets.
 The image is the original scene with numbered candidate mask outlines. The
 number labels identify candidates only; they are not scene content. Use the
@@ -738,6 +746,8 @@ def _segment_table(
         ("description", table.description),
         ("table", "table"),
         ("plane", "plane"),
+        # Seamless tabletops that fill the frame have no table outline.
+        ("surface", "surface"),
     ):
         candidates = union_overlapping_mask_candidates(
             build_mask_candidates(
@@ -906,6 +916,22 @@ def _segment_assets(
             build_mask_candidates(mask_rles),
             min_iou=0.8,
         )
+        if len(candidates) < len(assets):
+            # Category and name prompts can miss an unusual viewpoint; ask the
+            # VLM for appearance phrases once. Assignment validation is unchanged.
+            for prompt in _visual_segmentation_prompts(
+                image_path, assets, prompts, vlm_client=vlm_client
+            ):
+                mask_rles.extend(
+                    image_segmentation_client.segment_single_object(
+                        image_path=image_path,
+                        prompt=prompt,
+                    )
+                )
+            candidates = union_overlapping_mask_candidates(
+                build_mask_candidates(mask_rles),
+                min_iou=0.8,
+            )
         # If the number of candidate is less than the grouped assets,
         # raise error directly.
         if len(candidates) < len(assets):
@@ -939,6 +965,44 @@ def _segment_assets(
                     output_path=Path(masks_output_root) / f"{asset.id}_mask.png",
                 )
             )
+
+
+def _visual_segmentation_prompts(
+    image_path: str | Path,
+    assets: list[SceneObject],
+    tried_prompts: list[str],
+    *,
+    vlm_client: VisionClient,
+    max_prompts: int = 6,
+) -> list[str]:
+    """Return VLM appearance phrases not yet tried for one asset group."""
+    assets_text = "\n".join(
+        f"- name: {asset.name}; description: {asset.description}" for asset in assets
+    )
+    response_text = vlm_client.complete(
+        image_path=image_path,
+        system_prompt=_VISUAL_SEGMENTATION_PROMPT_SYSTEM_PROMPT,
+        user_prompt=(
+            f"Objects:\n{assets_text}\n\n"
+            f"Prompts that found nothing: {json.dumps(tried_prompts)}"
+        ),
+    )
+    try:
+        payload = json.loads(_strip_json_code_fence(response_text))
+    except json.JSONDecodeError:
+        return []
+    values = payload.get("prompts") if isinstance(payload, dict) else None
+    if not isinstance(values, list):
+        return []
+    tried = {prompt.strip().casefold() for prompt in tried_prompts}
+    prompts = []
+    for value in values:
+        if not isinstance(value, str) or not value.strip():
+            continue
+        prompt = value.strip()
+        if prompt.casefold() not in tried and prompt not in prompts:
+            prompts.append(prompt)
+    return prompts[:max_prompts]
 
 
 def _validate_asset_candidates_with_vlm(

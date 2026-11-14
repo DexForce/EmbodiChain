@@ -53,6 +53,9 @@ def semantic_plan_rules() -> dict[str, Any]:
         Required catalog capabilities and candidate calls for each task contract.
     """
     catalog = semantic_planning_catalog()["calls"]
+    held_transport = sorted(
+        cid for cid, call in catalog.items() if "transportable" in call["capabilities"]
+    )
     return {
         key: {
             "semantics": contract.semantics,
@@ -65,9 +68,27 @@ def semantic_plan_rules() -> dict[str, Any]:
                 if set(call["capabilities"])
                 & (contract.required_affordances - {"graspable"})
             ),
+            # A held single-arm result ends in held transport, not release.
+            **(
+                {"terminal_hold_requires_one_of": held_transport}
+                if contract.resource_mode == "single_arm"
+                and contract.moves_primary_object
+                and "terminal_behavior" in contract.applicable_intent_fields
+                else {}
+            ),
         }
         for key, contract in TASK_CONTRACTS.items()
     }
+
+
+def _producer_ids(step: dict[str, Any]) -> set[str]:
+    """Return the calls that can produce one source step's semantic goal."""
+    rules = semantic_plan_rules()[step["task_type"]]
+    if step.get("terminal_behavior") == "hold" and (
+        "terminal_hold_requires_one_of" in rules
+    ):
+        return set(rules["terminal_hold_requires_one_of"])
+    return set(rules["requires_one_of"])
 
 
 def validate_semantic_plan(
@@ -186,9 +207,15 @@ def validate_semantic_plan(
             set(binding)
             != {"id", "node_id", "kind", "parameter", "subject", "value", "source"}
             or binding["node_id"] not in nodes
-            or binding["subject"] not in entities
         ):
             raise ValueError("Malformed runtime binding requirement")
+        if binding["subject"] not in entities:
+            # Name the identity error so a repair can correct the subject.
+            raise ValueError(
+                f"Node {binding['node_id']} semantic.object "
+                f"{binding['subject']!r} is not a grounded entity ID; use one "
+                f"of {sorted(entities)}. Task role IDs are not entity IDs."
+            )
         node = nodes[binding["node_id"]]
         ann = annotations[binding["node_id"]]
         allowed = set(validate_semantic_call_payload(node["call"])["runtime_bindings"])
@@ -224,6 +251,30 @@ def validate_semantic_plan(
 
     def ancestors(nid: str) -> set[str]:
         return dependency_ancestors[nid]
+
+    # A one-shot repair can only fix what one diagnostic names, so report every
+    # placement relation mismatch together instead of the first one alone.
+    relation_mismatches = []
+    for node in graph["nodes"]:
+        call = node["call"]
+        if call["kind"] != "place":
+            continue
+        destination = "inside" if "inside" in call else "on" if "on" in call else None
+        relation = annotations.get(node["id"], {}).get("relation")
+        if destination is not None and relation != destination:
+            relation_mismatches.append((node["id"], destination, relation))
+    if len(relation_mismatches) > 1:
+        raise ValueError(
+            "Placement nodes use place.on/inside but declare a different "
+            "semantic.relation: "
+            + "; ".join(
+                f"{node_id} uses place.{destination} with relation={relation!r}"
+                for node_id, destination, relation in relation_mismatches
+            )
+            + ". Set EVERY listed placement node relation to its place "
+            "destination kind; a relative relation such as right_of requires "
+            "simulation.place_relative instead of builtin place."
+        )
 
     for node in graph["nodes"]:
         cid = node["call"].get("call_id", node["call"]["kind"])
@@ -425,9 +476,7 @@ def validate_semantic_plan(
     for step_id, step in steps.items():
         group = next(g for g in graph["task_groups"] if g["id"] == step_id)
         calls = [nodes[n] for n in group["node_ids"]]
-        if not set(effects[n["id"]] for n in calls) & set(
-            semantic_plan_rules()[step["task_type"]]["requires_one_of"]
-        ):
+        if not set(effects[n["id"]] for n in calls) & _producer_ids(step):
             raise ValueError(
                 f"Missing semantic producer for {step_id}:{step['task_type']}"
             )
@@ -449,7 +498,7 @@ def validate_semantic_plan(
             )
         ):
             raise ValueError("Requested printed knob setting was lost")
-        producer_ids = set(semantic_plan_rules()[step["task_type"]]["requires_one_of"])
+        producer_ids = _producer_ids(step)
         for subject in grounding["bindings"].get(f"{step_id}.object", []):
             producers = [
                 n
@@ -475,6 +524,14 @@ def validate_semantic_plan(
             )
         target = grounding["bindings"].get(f"{step_id}.target")
         if step.get("terminal_behavior") == "hold":
+            if "terminal_hold_requires_one_of" in semantic_plan_rules()[
+                step["task_type"]
+            ] and any(effects[n["id"]] == "simulation.axis_align" for n in calls):
+                raise ValueError(
+                    f"{step_id} ends holding its object: acquire it with pick; "
+                    "the held transport realizes any upright orientation, so "
+                    "remove simulation.axis_align."
+                )
             if TASK_CONTRACTS[step["task_type"]].resource_mode == "coordinated":
                 raise ValueError(
                     "Coordinated hold requires a matching hold call; the current transport call releases"
@@ -482,7 +539,7 @@ def validate_semantic_plan(
             if any(obj not in held_after[calls[-1]["id"]] for obj in expected or []):
                 raise ValueError("Requested terminal hold is not retained")
         if target:
-            placement_goal = (
+            placement_goal = step.get("terminal_behavior") != "hold" and (
                 "placeable" in TASK_CONTRACTS[step["task_type"]].required_affordances
                 or step.get("terminal_behavior") == "place"
             )
