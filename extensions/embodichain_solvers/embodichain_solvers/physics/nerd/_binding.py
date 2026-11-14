@@ -350,7 +350,10 @@ class NeRDBinding:
         self.contact_thickness = torch.tensor(
             slot_thickness, device=self.device, dtype=torch.float32
         )
-        gravity = _torch(model.gravity)[self.world_ids].clone()
+        # The export fixes gravity. A requires-grad Newton model can expose it
+        # as a leaf, but caching its normalization graph would reuse a freed
+        # graph after the first policy backward/TBPTT boundary.
+        gravity = _torch(model.gravity).detach()[self.world_ids].clone()
         self.gravity = gravity
         self.gravity_dir = gravity / gravity.norm(dim=-1, keepdim=True).clamp_min(1e-12)
         self.plane_normal = torch.tensor([0.0, 0.0, 1.0], device=self.device)

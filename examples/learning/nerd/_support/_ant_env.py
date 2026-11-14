@@ -17,7 +17,7 @@
 """Ant control through the registered NeRD dynamics solver."""
 
 from __future__ import annotations
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any, TYPE_CHECKING
 import gymnasium as gym
 import numpy as np
@@ -31,12 +31,9 @@ from embodichain.lab.sim.cfg import NewtonPhysicsCfg, RenderCfg
 from embodichain.lab.visualization import VisualizationCfg
 from embodichain.lab.sim.sim_manager import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects.articulation import Articulation
-from examples.learning.nerd._support._scene_assets import (
-    make_reference_articulation,
-    reference_profile,
-)
 from embodichain_solvers.physics.nerd._binding import NeRDBinding
-from embodichain_models.dynamics.nerd.codec import quat_rotate
+from ._scene_setup import reference_friction, declare_reference_scene
+from ._task_reset import sample_task_reset
 from ._task_values import reference_task_values
 from embodichain.learning.rl.env import register_learning_env
 
@@ -59,19 +56,26 @@ class AntDynamicsEnv(DifferentiableEnv):
         self.random_reset = (cfg.extensions or {}).get("random_reset", True)
         if not isinstance(self.random_reset, bool):
             raise TypeError("random_reset must be boolean")
-        self._profile = reference_profile("ant")
+        self._reset_source = kwargs.pop("reset_source", None)
+        self._physics_profile = (cfg.extensions or {}).get("physics_profile", "native")
+        if self._physics_profile not in {"native", "warp_reference"}:
+            raise ValueError("Unsupported reference physics profile")
         self._binding: NeRDBinding | None = None
         if cfg.robot is not None:
             raise ValueError(
                 "AntDynamics owns its reference robot; configure robot: null"
             )
-        if cfg.sim_cfg is not None and bool(cfg.sim_cfg.enable_ground_plane) != True:
-            raise ValueError("AntDynamics requires enable_ground_plane: true")
+        if cfg.sim_cfg is not None and bool(cfg.sim_cfg.enable_ground_plane) != (
+            self._physics_profile == "native"
+        ):
+            raise ValueError("AntDynamics ground plane must match physics_profile")
         super().__init__(cfg, step_mode="dynamics", **kwargs)
 
     def _declare_robot(self, **kwargs: Any) -> Articulation:
         del kwargs
-        return self.sim.add_articulation_descriptor(make_reference_articulation("ant"))
+        solver = self.cfg.sim_cfg.physics_cfg.solver_cfg
+        friction = reference_friction("ant", self._physics_profile, solver)
+        return declare_reference_scene(self.sim, "ant", self._physics_profile, friction)
 
     def _setup_robot(self, **kwargs: Any) -> Articulation:
         del kwargs
@@ -89,6 +93,12 @@ class AntDynamicsEnv(DifferentiableEnv):
             -np.inf, np.inf, shape=(27,), dtype=np.float32
         )
         return self.robot
+
+    def _init_sim_state(self, **kwargs: Any) -> None:
+        # The global static plane has one instance, outside per-world episodes.
+        if self._physics_profile == "warp_reference":
+            self.add_detached_uids_for_reset(["reference_ground"])
+        super()._init_sim_state(**kwargs)
 
     def _action_to_control(
         self, action: torch.Tensor, state: FunctionalSolverState
@@ -116,46 +126,13 @@ class AntDynamicsEnv(DifferentiableEnv):
         )
         count = ids.numel()
         generator = self.get_generator("ant_dynamics_reset")
-        q = (
-            torch.tensor(self._profile["default_q"], device=self.device)
-            .expand(count, -1)
-            .clone()
+        q, qd = (
+            self._reset_source(ids)
+            if self._reset_source is not None
+            else sample_task_reset(
+                "ant", count, self.device, generator, self.random_reset
+            )
         )
-        qd = torch.zeros(count, self._profile["qd_dim"], device=self.device)
-        if self.random_reset:
-            q[:, :3] += (
-                2 * torch.rand(count, 3, device=self.device, generator=generator) - 1
-            ) * q.new_tensor((0.2, 0.2, 0.1))
-            axis = 2 * torch.rand(count, 3, device=self.device, generator=generator) - 1
-            axis = axis / axis.norm(dim=-1, keepdim=True).clamp_min(1e-9)
-            angle = (
-                2 * torch.rand(count, 1, device=self.device, generator=generator) - 1
-            ) * (torch.pi / 6)
-            q[:, 3:7] = torch.cat(
-                (axis * torch.sin(angle / 2), torch.cos(angle / 2)), -1
-            )
-            q[:, 7:] += 0.2 * (
-                2 * torch.rand(count, 8, device=self.device, generator=generator) - 1
-            )
-            qd[:, :3] = quat_rotate(
-                q[:, 3:7],
-                0.1
-                * (
-                    2 * torch.rand(count, 3, device=self.device, generator=generator)
-                    - 1
-                ),
-            )
-            qd[:, 3:6] = quat_rotate(
-                q[:, 3:7],
-                0.25
-                * (
-                    2 * torch.rand(count, 3, device=self.device, generator=generator)
-                    - 1
-                ),
-            )
-            qd[:, 6:] = 0.25 * (
-                2 * torch.rand(count, 8, device=self.device, generator=generator) - 1
-            )
         self.robot.set_state(
             root_pose=q[:, :7],
             root_velocity=qd[:, :6],
@@ -199,6 +176,10 @@ def make_ant_dynamics_env(
     max_episode_steps: int = 1000,
     random_reset: bool = True,
     seed: int | None = None,
+    physics_profile: str = "native",
+    reset_source: (
+        Callable[[torch.Tensor], tuple[torch.Tensor, torch.Tensor]] | None
+    ) = None,
 ) -> AntDynamicsEnv:
     """Build the same task for the existing differentiable RL trainer.
 
@@ -209,6 +190,8 @@ def make_ant_dynamics_env(
         max_episode_steps: Control-step episode limit.
         random_reset: Sample task-specific initial states when true.
         seed: Optional initial RNG seed; explicit reset seeds take precedence.
+        physics_profile: Asset and contact domain recorded by the model.
+        reset_source: Optional workflow-owned callable returning selected initial states.
 
     Returns:
         A registered task implementing the DifferentiableEnvProtocol.
@@ -227,7 +210,7 @@ def make_ant_dynamics_env(
         num_envs=num_envs,
         device=device,
         arena_space=0.0,
-        enable_ground_plane=True,
+        enable_ground_plane=physics_profile == "native",
         enable_entity_gizmo=False,
         robot_ik_gizmo=None,
         render_cfg=RenderCfg(renderer="no-render"),
@@ -242,6 +225,6 @@ def make_ant_dynamics_env(
         max_episode_steps=max_episode_steps,
         seed=seed,
         robot=None,
-        extensions={"random_reset": random_reset},
+        extensions={"random_reset": random_reset, "physics_profile": physics_profile},
     )
-    return AntDynamicsEnv(cfg)
+    return AntDynamicsEnv(cfg, reset_source=reset_source)

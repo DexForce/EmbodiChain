@@ -51,10 +51,9 @@ from embodichain.lab.sim.cfg import NewtonPhysicsCfg, RenderCfg
 from embodichain.lab.visualization import VisualizationCfg
 
 from embodichain_solvers.physics.nerd._binding import NeRDBinding
+from ._scene_setup import reference_friction, declare_reference_scene
 from ._generation import _sample, _positive_integer, _sha256, _write_json
 from ._scene_assets import (
-    _ant_reference_friction,
-    make_reference_articulation,
     reference_profile,
 )
 
@@ -72,7 +71,12 @@ def _runtime_identity(device: torch.device) -> dict[str, Any]:
     sources.update(
         {
             name: Path(__file__).with_name(name)
-            for name in ("_scene.py", "_scene_assets.py", "_reference_assets.py")
+            for name in (
+                "_scene.py",
+                "_scene_setup.py",
+                "_scene_assets.py",
+                "_reference_assets.py",
+            )
         }
     )
     return {
@@ -148,34 +152,7 @@ class DynamicsSimulation:
         )
         neural = solver_cfg.get("solver_type") == "nerd"
         self._featherstone_teacher = solver_cfg.get("solver_type") == "featherstone"
-        friction_mapping = None
-        if robot == "ant" and physics_profile == "warp_reference":
-            if self._featherstone_teacher:
-                friction_mapping = _ant_reference_friction()
-                delta = friction_mapping["friction_smoothing"]
-                requested = solver_cfg.setdefault("friction_smoothing", delta)
-                if isinstance(requested, bool) or requested != delta:
-                    raise ValueError(
-                        "Ant warp_reference requires the coupled contact mapping: "
-                        f"friction_smoothing={delta} with scaled shape/ground mu."
-                    )
-            elif neural:
-                # Older exports predate the Featherstone friction conversion.
-                # Their original material domain must still be reconstructed;
-                # the provider then validates the actual physics signature.
-                options = solver_cfg.get("options", {})
-                checkpoint = Path(options["checkpoint"])
-                exported = json.loads((checkpoint / "manifest.json").read_text())
-                recorded = exported.get("reference_friction_mapping")
-                if recorded is not None:
-                    expected = _ant_reference_friction()
-                    if not isinstance(recorded, Mapping) or any(
-                        recorded.get(key) != value
-                        for key, value in expected.items()
-                        if key != "interpretation"
-                    ):
-                        raise ValueError("Unsupported Ant reference friction mapping")
-                    friction_mapping = dict(recorded)
+        friction_mapping = reference_friction(robot, physics_profile, solver_cfg)
         if self._featherstone_teacher:
             interval = solver_cfg.get("update_mass_matrix_interval", 1)
             if type(interval) is not int or interval < 1 or num_substeps % interval:
@@ -215,44 +192,9 @@ class DynamicsSimulation:
         self.sim = SimulationManager(cfg, requires_native_renderer=False)
         self.articulation = None
         try:
-            if robot == "ant" and physics_profile == "warp_reference":
-                # The old ModelBuilder's shared plane has different material
-                # defaults from SimulationManager's ordinary default plane.
-                from dexsim.spawn import (
-                    CollisionDesc,
-                    GeometryDesc,
-                    NewtonCollisionDesc,
-                    ObjectDesc,
-                    RigidBodyPhysicsDesc,
-                )
-
-                collision = CollisionDesc.from_geometry(GeometryDesc.plane(1000.0))
-                collision.newton = NewtonCollisionDesc(
-                    ke=1e5,
-                    kd=1e3,
-                    kf=1e3,
-                    mu=(friction_mapping["ground_mu"] if friction_mapping else 0.5),
-                    margin=1e-5,
-                    gap=0.05,
-                    mu_torsional=0.0,
-                    mu_rolling=0.0,
-                )
-                self.sim.add_rigid_object_descriptor(
-                    ObjectDesc(
-                        name="reference_ground",
-                        collisions=[collision],
-                        physics=RigidBodyPhysicsDesc.static(),
-                        per_env=False,
-                    )
-                )
-            descriptor = make_reference_articulation(robot, physics_profile)
-            if friction_mapping is not None:
-                # Scale every freshly authored Ant shape, including the shared
-                # plane above, before Spawn finalizes the physical model.
-                for link in descriptor.links:
-                    for collision in link.collisions:
-                        collision.newton.mu *= friction_mapping["material_mu_scale"]
-            self.articulation = self.sim.add_articulation_descriptor(descriptor)
+            self.articulation = declare_reference_scene(
+                self.sim, robot, physics_profile, friction_mapping
+            )
             self.sim.prepare()
             self.binding = NeRDBinding.from_metadata(
                 dict(self.sim.spawn_result.dynamics_metadata()), robot
@@ -265,7 +207,12 @@ class DynamicsSimulation:
             self.manifest["collector"] = "scene"
             self.manifest["collector_source_sha256"] = {
                 name: _sha256(Path(__file__).with_name(name))
-                for name in ("_scene.py", "_scene_assets.py", "_reference_assets.py")
+                for name in (
+                    "_scene.py",
+                    "_scene_setup.py",
+                    "_scene_assets.py",
+                    "_reference_assets.py",
+                )
             }
             self.manifest["teacher"] = {
                 "solver": solver_cfg,

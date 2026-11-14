@@ -17,7 +17,7 @@
 """Cartpole control through the registered NeRD dynamics solver."""
 
 from __future__ import annotations
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any, TYPE_CHECKING
 import gymnasium as gym
 import numpy as np
@@ -31,11 +31,9 @@ from embodichain.lab.sim.cfg import NewtonPhysicsCfg, RenderCfg
 from embodichain.lab.visualization import VisualizationCfg
 from embodichain.lab.sim.sim_manager import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects.articulation import Articulation
-from examples.learning.nerd._support._scene_assets import (
-    make_reference_articulation,
-    reference_profile,
-)
 from embodichain_solvers.physics.nerd._binding import NeRDBinding
+from ._scene_setup import reference_friction, declare_reference_scene
+from ._task_reset import sample_task_reset
 from ._task_values import reference_task_values
 from embodichain.learning.rl.env import register_learning_env
 
@@ -58,7 +56,10 @@ class CartpoleDynamicsEnv(DifferentiableEnv):
         self.random_reset = (cfg.extensions or {}).get("random_reset", True)
         if not isinstance(self.random_reset, bool):
             raise TypeError("random_reset must be boolean")
-        self._profile = reference_profile("cartpole")
+        self._reset_source = kwargs.pop("reset_source", None)
+        self._physics_profile = (cfg.extensions or {}).get("physics_profile", "native")
+        if self._physics_profile not in {"native", "warp_reference"}:
+            raise ValueError("Unsupported reference physics profile")
         self._binding: NeRDBinding | None = None
         if cfg.robot is not None:
             raise ValueError(
@@ -70,8 +71,10 @@ class CartpoleDynamicsEnv(DifferentiableEnv):
 
     def _declare_robot(self, **kwargs: Any) -> Articulation:
         del kwargs
-        return self.sim.add_articulation_descriptor(
-            make_reference_articulation("cartpole")
+        solver = self.cfg.sim_cfg.physics_cfg.solver_cfg
+        friction = reference_friction("cartpole", self._physics_profile, solver)
+        return declare_reference_scene(
+            self.sim, "cartpole", self._physics_profile, friction
         )
 
     def _setup_robot(self, **kwargs: Any) -> Articulation:
@@ -117,17 +120,13 @@ class CartpoleDynamicsEnv(DifferentiableEnv):
         )
         count = ids.numel()
         generator = self.get_generator("cartpole_dynamics_reset")
-        q = (
-            torch.tensor(self._profile["default_q"], device=self.device)
-            .expand(count, -1)
-            .clone()
+        q, qd = (
+            self._reset_source(ids)
+            if self._reset_source is not None
+            else sample_task_reset(
+                "cartpole", count, self.device, generator, self.random_reset
+            )
         )
-        qd = torch.zeros(count, self._profile["qd_dim"], device=self.device)
-        if self.random_reset:
-            q = (
-                2 * torch.rand(count, 2, device=self.device, generator=generator) - 1
-            ) * q.new_tensor((1.0, torch.pi))
-            qd = 2 * torch.rand(count, 2, device=self.device, generator=generator) - 1
         self.robot.set_state(
             qpos=q, qvel=qd, env_ids=ids, joint_ids=self._joint_ids, clear_dynamics=True
         )
@@ -162,6 +161,10 @@ def make_cartpole_dynamics_env(
     max_episode_steps: int = 500,
     random_reset: bool = True,
     seed: int | None = None,
+    physics_profile: str = "native",
+    reset_source: (
+        Callable[[torch.Tensor], tuple[torch.Tensor, torch.Tensor]] | None
+    ) = None,
 ) -> CartpoleDynamicsEnv:
     """Build the same task for the existing differentiable RL trainer.
 
@@ -172,6 +175,8 @@ def make_cartpole_dynamics_env(
         max_episode_steps: Control-step episode limit.
         random_reset: Sample task-specific initial states when true.
         seed: Optional initial RNG seed; explicit reset seeds take precedence.
+        physics_profile: Asset and contact domain recorded by the model.
+        reset_source: Optional workflow-owned callable returning selected initial states.
 
     Returns:
         A registered task implementing the DifferentiableEnvProtocol.
@@ -205,6 +210,6 @@ def make_cartpole_dynamics_env(
         max_episode_steps=max_episode_steps,
         seed=seed,
         robot=None,
-        extensions={"random_reset": random_reset},
+        extensions={"random_reset": random_reset, "physics_profile": physics_profile},
     )
-    return CartpoleDynamicsEnv(cfg)
+    return CartpoleDynamicsEnv(cfg, reset_source=reset_source)

@@ -83,9 +83,15 @@ def _check_task_and_trainer(
     deployment["physics_config"]["solver_cfg"]["options"]["checkpoint"] = str(
         checkpoint
     )
-    env = build_env(
-        deployment["id"], config_to_cfg(deployment, source_path=deployment_path)
-    )
+    parsed = config_to_cfg(deployment, source_path=deployment_path)
+    if robot == "ant":
+        # Native SDK config objects share the same supported factory contract.
+        from dexsim.engine.newton_physics import RegisteredNewtonSolverCfg
+
+        parsed.sim_cfg.physics_cfg.solver_cfg = RegisteredNewtonSolverCfg(
+            solver_type="nerd", options={"checkpoint": str(checkpoint)}
+        )
+    env = build_env(deployment["id"], parsed)
     try:
         obs1, _ = env.reset(seed=9)
         saved = obs1.detach().clone()
@@ -122,7 +128,7 @@ def _check_task_and_trainer(
     cfg["trainer"].update(
         device="cpu",
         num_envs=2,
-        iterations=1,
+        iterations=2,
         segment_length=2,
         update_horizon=2,
         enable_eval=False,
@@ -153,7 +159,7 @@ def _check_task_and_trainer(
     os.chdir(tmp_path)
     result = train_from_config(path)
     assert result is not None
-    assert result["global_step"] == 4
+    assert result["global_step"] == 8
     assert list((tmp_path / "outputs").rglob("*.pt"))
     assert result["last_train_metrics"]["train/skipped_update"] == 0
     if algorithm == "apg_actor_critic":
@@ -171,7 +177,7 @@ def _check_task_and_trainer(
         ("cartpole", "Cartpole", "apg_actor_critic"),
     ],
 )
-def test_actual_registered_task_and_one_apg_update(
+def test_actual_registered_task_and_multiple_apg_updates(
     tmp_path: Path, robot: str, title: str, algorithm: str
 ) -> None:
     code = "import importlib.util,sys;from pathlib import Path;s=importlib.util.spec_from_file_location('neural_task_test',sys.argv[1]);m=importlib.util.module_from_spec(s);s.loader.exec_module(m);m._check_task_and_trainer(Path(sys.argv[2]),sys.argv[3],sys.argv[4],sys.argv[5])"

@@ -40,3 +40,11 @@ Run G1/Go2 reset and inference checks, then G1 training/checkpoint tests on both
 ```bash
 pytest tests/gym/envs/tasks/test_locomotion_cuda.py --run-gpu -v --junitxml=outputs/locomotion-tests.xml
 ```
+
+## Cartpole / Ant differentiable policy comparison
+
+The [NeRD policy benchmark](nerd_policy.md) compares APG and PPO with paired
+actors, reset streams and transition budgets across three seeds, then evaluates
+every checkpoint in matched analytical physics. It writes training/evaluation
+curves, raw episode records, seed statistics and separate training/setup/evaluation
+timing. Use its committed recipe and fresh output directory.

@@ -132,3 +132,20 @@ rollout and paper-scale accuracy are separate claims.
 See the [NeRD guide](../../../docs/source/features/neural_dynamics/nerd.md) and
 [model API](../../../docs/source/api_reference/model_catalogs.rst) for the
 resource format and runtime interfaces.
+
+## APG / PPO policy benchmark
+
+The [source-checkout benchmark](../../../scripts/benchmark/rl/nerd_policy.md)
+trains both algorithms in the same frozen NeRD export across paired seeds and
+evaluates every policy checkpoint in matched analytical physics. Its shared
+recipe fixes policy initialization, episode-indexed reset streams, budgets and
+held-out evaluation starts. Reports include PNG/SVG training curves, episode
+returns, survival/failure metrics, raw CSV/JSON and separate training/setup/evaluation
+time. This fixed-budget comparison is separate from supervised-model acceptance
+and paper-scale convergence qualification.
+
+The task factories accept `physics_profile="warp_reference"` for the published
+reference exports, in addition to the existing `native` profile. Scene collection
+and the tasks share physical robot/ground declarations; the solver still checks
+the actual signature. The benchmark supplies a workflow-owned reset-state source
+without changing normal task resets or the generic differentiable environment.
