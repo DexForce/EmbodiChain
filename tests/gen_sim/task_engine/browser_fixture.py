@@ -471,6 +471,15 @@ def build_fixtures(output: Path, reference: Path | None = None) -> None:
             (output / "unified-multi.html").write_text(
                 _viewer_document({**data, "review": rows})
             )
+            inactive = deepcopy(rows)
+            inactive["attempt"]["calls"][call_id].update(
+                active=[True, False],
+                start_steps=[0, 5],
+                end_steps=[60, 5],
+            )
+            (output / "unified-inactive.html").write_text(
+                _viewer_document({**data, "review": inactive})
+            )
             rows["attempt"]["calls"][call_id]["successes"][1] = True
             rows["attempt"]["calls"][call_id]["failure_reasons"][1] = None
             rows["attempt"]["calls"][call_id]["issues"] = rows["attempt"]["calls"][

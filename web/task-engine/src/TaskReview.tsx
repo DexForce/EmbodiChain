@@ -489,10 +489,21 @@ export default function TaskReview({
     : null;
   const seg = selectedCall && run?.calls[selectedCall.id];
   const rowIndex = seg ? seg.env_ids.indexOf(Number(env)) : -1;
+  const rowActive = rowIndex >= 0 && seg?.active?.[rowIndex] === true;
   const startStep =
-    seg && (env === "all" ? seg.start_step : seg.start_steps?.[rowIndex]);
+    seg &&
+    (env === "all"
+      ? seg.start_step
+      : rowActive
+        ? seg.start_steps?.[rowIndex]
+        : null);
   const endStep =
-    seg && (env === "all" ? seg.end_step : seg.end_steps?.[rowIndex]);
+    seg &&
+    (env === "all"
+      ? seg.end_step
+      : rowActive
+        ? seg.end_steps?.[rowIndex]
+        : null);
   const events = (s: Observation) =>
     s.issues.filter(
       (issue) =>

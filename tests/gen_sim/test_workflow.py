@@ -413,11 +413,22 @@ def test_unresolved_native_binding_retains_failure_and_never_executes(
     assert (run_cfg.output / "service_calls.json").is_file()
 
 
-@pytest.mark.parametrize("color", [None, "blue", "red"])
+@pytest.mark.parametrize(
+    "color,stale_evidence",
+    [
+        (None, None),
+        ("blue", None),
+        ("red", None),
+        ("red", "mesh"),
+        ("red", "source"),
+        ("red", "sha256"),
+    ],
+)
 def test_default_scene_route_enforces_frozen_role_properties(
     run_cfg: _RunCfg,
     monkeypatch: pytest.MonkeyPatch,
     color: str | None,
+    stale_evidence: str | None,
 ) -> None:
     from embodichain.gen_sim.scene_engine.pipeline import generate
     from embodichain.gen_sim import _run_execution
@@ -482,18 +493,41 @@ def test_default_scene_route_enforces_frozen_role_properties(
             output_root=output,
         ).export()
 
+    if stale_evidence is not None:
+        # Reuse an exported workspace, exactly as --scene does, after its proof
+        # source, digest or actual deployment mesh has changed.
+        prepared = run_cfg.output.parent / "prepared_scene"
+        scene(None, prepared)
+        config_path = prepared / "scene_export/scene_config.json"
+        config = json.loads(config_path.read_text())
+        asset = config["rigid_object"][0]
+        proof = asset["property_evidence"]["color"]
+        mesh_path = config_path.parent / asset["shape"]["fpath"]
+        if stale_evidence == "mesh":
+            mesh = trimesh.load_mesh(mesh_path, process=False)
+            mesh.visual.vertex_colors = [0, 0, 255, 255]
+            mesh.export(mesh_path)
+        elif stale_evidence == "source":
+            other = mesh_path.with_name("other-red.glb")
+            other.write_bytes(mesh_path.read_bytes())
+            proof["source"] = other.relative_to(config_path.parent).as_posix()
+        else:
+            proof["sha256"] = "0" * 64
+        config_path.write_text(json.dumps(config))
+        run_cfg.scene = prepared
+
     monkeypatch.setattr(generate, "generate_scene_from_image", scene)
     execute = Mock(
         return_value=dict(status="succeeded", completed=True, all_success=True)
     )
     monkeypatch.setattr(_run_execution, "_execute_deployment", execute)
     with _services(required_color="red") as services:
-        if color == "red":
+        if color == "red" and stale_evidence is None:
             assert _run(run_cfg, services=services)["execution_ready"] is True
         else:
             expected = (
                 "asset_property_unverified"
-                if color is None
+                if color is None or stale_evidence is not None
                 else "asset_property_mismatch"
             )
             with pytest.raises(ValueError, match=expected):
@@ -502,7 +536,8 @@ def test_default_scene_route_enforces_frozen_role_properties(
                 (run_cfg.output / "scene_role_report.json").read_text()
             )
             assert role_report["issues"][0]["role_id"] == "role_001"
-    assert execute.call_count == int(color == "red")
+            assert "property:color" not in role_report["roles"]["role_001"]["verified"]
+    assert execute.call_count == int(color == "red" and stale_evidence is None)
 
 
 def test_unstructured_role_clause_is_not_covered_by_another_property(

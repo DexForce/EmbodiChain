@@ -82,6 +82,21 @@ test("unified failure banner follows the selected row", async ({ page }) => {
   await selector.selectOption("all");
   await expect(page.locator(".rv-alert")).toBeVisible();
 });
+test("unified inactive row has no recorded control-step range", async ({
+  page,
+}) => {
+  await page.goto(pathToFileURL(join(root, "unified-inactive.html")).href);
+  await page.locator('button[data-key="call:step_01__call_02"]').click();
+  const detail = page.locator(".rv-detail");
+  const selector = detail.getByRole("combobox", { name: "Environment" });
+  await selector.selectOption("1");
+  await expect(detail).toContainText(/Control steps\s*Not recorded/);
+  await expect(detail).not.toContainText(/Control steps\s*5\s*–\s*5/);
+  await selector.selectOption("0");
+  await expect(detail).toContainText(/Control steps\s*0\s*–\s*60/);
+  await selector.selectOption("all");
+  await expect(detail).toContainText(/Control steps\s*0\s*–\s*60/);
+});
 const cases = [
   "static-absent",
   "static-spec",

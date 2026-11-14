@@ -570,8 +570,10 @@ def _check_scene_roles(
     plan: Mapping[str, Any],
     bindings: Mapping[str, Any],
     assets: Mapping[str, Any],
+    *,
+    asset_root: Path,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """Check explicit frozen properties; retain unknown v1 affordances as pending."""
+    """Check frozen properties and bind any measured proofs to deployed assets."""
     if "task_document" not in plan:
         return {}, []
     members = _load_json(Path(plan["root"]) / "plan_coverage.json", "coverage")[
@@ -616,6 +618,27 @@ def _check_scene_roles(
             for key, expected in role["properties"].items():
                 available = isinstance(properties, Mapping) and key in properties
                 measured = properties[key] if available else None
+                if available and "property_evidence" in asset:
+                    proofs = asset["property_evidence"]
+                    proof = proofs.get(key) if isinstance(proofs, Mapping) else None
+                    available = False
+                    if isinstance(proof, Mapping) and proof.get("value") == measured:
+                        try:
+                            root = asset_root.resolve()
+                            mesh = _artifact_path(
+                                root,
+                                (
+                                    asset.get("mesh_path")
+                                    if "mesh_path" in asset
+                                    else asset.get("shape", {}).get("fpath")
+                                ),
+                            )
+                            source = _artifact_path(root, proof.get("source"))
+                            available = source == mesh and _file_hash(
+                                mesh
+                            ) == proof.get("sha256")
+                        except (OSError, ValueError, TypeError):
+                            available = False
                 if available and measured == expected:
                     row["verified"].append("property:" + key)
                 else:
@@ -839,7 +862,10 @@ def qualify_task_scene(
             ],
         )
     role_report, issues = _check_scene_roles(
-        plan, bindings, {item["uid"]: item for item in scene["objects"]}
+        plan,
+        bindings,
+        {item["uid"]: item for item in scene["objects"]},
+        asset_root=scene_root,
     )
     if issues:
         return _publish_qualification(

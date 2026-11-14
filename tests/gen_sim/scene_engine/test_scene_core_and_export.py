@@ -162,6 +162,7 @@ def test_object_physics_rejects_invalid_values(
         ("blue", "blue"),
         ("mixed", None),
         ("material", "red"),
+        ("material_with_vertex_color", None),
         ("textured", None),
     ],
 )
@@ -173,7 +174,7 @@ def test_scene_export_carries_measured_appearance(tmp_path, appearance, expected
     table_path = tmp_path / "table.glb"
     table_path.write_bytes(b"glTF-table")
     mesh = trimesh.creation.box()
-    if appearance in {"material", "textured"}:
+    if appearance in {"material", "material_with_vertex_color", "textured"}:
         material = trimesh.visual.material.PBRMaterial(
             baseColorFactor=[255, 0, 0, 255],
             baseColorTexture=(
@@ -183,6 +184,11 @@ def test_scene_export_carries_measured_appearance(tmp_path, appearance, expected
         mesh.visual = trimesh.visual.TextureVisuals(
             uv=np.zeros((len(mesh.vertices), 2)), material=material
         )
+        if appearance == "material_with_vertex_color":
+            # A red factor multiplied by blue COLOR_0 is black, not red.
+            mesh.visual.vertex_attributes["color"] = np.tile(
+                [0, 0, 255, 255], (len(mesh.vertices), 1)
+            ).astype(np.uint8)
     else:
         mesh.visual.vertex_colors = (
             [0, 0, 255, 255] if appearance == "blue" else [255, 0, 0, 255]

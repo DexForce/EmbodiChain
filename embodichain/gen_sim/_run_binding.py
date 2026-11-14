@@ -465,6 +465,7 @@ def _bind_deployment(
             if generated_scene is None
             else {item["uid"]: item for item in generated_scene["objects"]}
         ),
+        asset_root=export,
     )
     write_run_json(
         cfg.output / "scene_role_report.json", {"roles": role_report, "issues": issues}

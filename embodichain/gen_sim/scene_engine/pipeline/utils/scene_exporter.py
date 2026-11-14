@@ -303,8 +303,9 @@ class SceneExporter:
     def _appearance_metadata(path: Path) -> dict[str, object]:
         """Measure only uniform opaque palette colors in the exported GLB.
 
-        Descriptions, default material colors, textures and mixed appearance
-        cannot certify a named color through this conservative adapter.
+        Descriptions, default material colors, textures, combined material/vertex
+        channels and mixed appearance cannot certify a named color through this
+        conservative adapter.
         """
         import trimesh
 
@@ -332,6 +333,9 @@ class SceneExporter:
                 if (
                     getattr(material, "baseColorTexture", None) is not None
                     or getattr(material, "image", None) is not None
+                    # glTF multiplies COLOR_0 by the material factor. The
+                    # single-channel palette adapter cannot qualify both.
+                    or visual.vertex_attributes.get("color") is not None
                 ):
                     return {}
                 color = getattr(material, "baseColorFactor", None)
