@@ -1063,3 +1063,50 @@ def test_render_sampling_advances_only_cameras_with_rendered_groups() -> None:
     assert right.get_data()["frame"].eq(1).all()
     for key, value in first_left.items():
         torch.testing.assert_close(left.get_sample_metadata()[key], value)
+
+
+def test_state_reference_sensors_reorder_joints_and_compose_frames() -> None:
+    from tensordict import TensorDict
+    from embodichain.lab.sim.sensors import (
+        FrameTransformCfg,
+        JointEncoderCfg,
+        SensorCfg,
+    )
+
+    manager = _manager()
+    manager._robots["arm"] = SimpleNamespace(
+        joint_names=["a", "b"],
+        get_qpos=lambda: torch.tensor([[1.0, 2.0], [3.0, 4.0]]),
+        get_qvel=lambda: torch.tensor([[5.0, 6.0], [7.0, 8.0]]),
+        link_names=["tip"],
+        body_state=torch.tensor(
+            [[[2.0, 3.0, 0.0, 0.0, 0.0, 0.0, 1.0, *([0.0] * 6)]]]
+        ).expand(2, -1, -1),
+    )
+    encoder = manager.add_sensor(
+        SensorCfg.from_dict(
+            {
+                "uid": "enc",
+                "sensor_type": "JointEncoder",
+                "asset_uid": "arm",
+                "joint_names": ["b", "a"],
+            }
+        )
+    )
+    transform = manager.add_sensor(
+        FrameTransformCfg(
+            uid="frame",
+            target_uid="arm",
+            target_link="tip",
+            source_offset=SensorCfg.OffsetCfg(pos=(1.0, 0.0, 0.0)),
+            target_offset=SensorCfg.OffsetCfg(pos=(0.0, 1.0, 0.0)),
+        )
+    )
+    manager._sample_managed_sensors("physics", 12, 0.1)
+    torch.testing.assert_close(
+        encoder.get_data()["qpos"], torch.tensor([[2.0, 1.0], [4.0, 3.0]])
+    )
+    torch.testing.assert_close(
+        transform.get_data()["transform"][:, :3, 3],
+        torch.tensor([[1.0, 4.0, 0.0]]).expand(2, -1),
+    )
