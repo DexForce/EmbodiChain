@@ -159,7 +159,8 @@ with a deprecation warning. Explicit non-None material values win in that block;
 after migration, link-local values override global material values normally.
 Sparse global and named-link robot overlays preserve portable preset fields
 when promoting collision/material groups to a backend subtype. Nested compound
-and variant collision mesh paths resolve through the Gym data-root loader.
+and variant collision mesh paths, including each decoded particle-only boundary,
+resolve through the Gym data-root loader.
 Use per-link overlays for contact intent, not
 finalized solver-array mutations. `has_particle_collision` is
 per-shape participation; Arena isolation remains scene-owned.

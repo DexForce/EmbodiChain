@@ -121,6 +121,107 @@ def test_legacy_visual_mesh_preserves_existing_relative_path(tmp_path, monkeypat
     assert cfg.visuals[0].representation.fpath == "appearance.obj"
 
 
+@pytest.mark.parametrize("path_kind", ["bare", "nested", "parent", "absolute"])
+def test_legacy_visual_descriptors_preserve_deferred_file_paths(
+    tmp_path, monkeypatch, path_kind
+):
+    from embodichain.data import constants
+    from embodichain.lab.sim.shapes import MeshCfg
+
+    paths = {
+        "bare": "cup.glb",
+        "nested": "./future/cup.obj",
+        "parent": "../cup.ply",
+        "absolute": str(tmp_path / "missing.obj"),
+    }
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        constants, "EMBODICHAIN_DEFAULT_DATA_ROOT", str(tmp_path / "data")
+    )
+    path = paths[path_kind]
+    with pytest.warns(DeprecationWarning, match="visuals"):
+        cfg = RigidObjectCfg(
+            uid="deferred", shape=CubeCfg(), visual_shape=MeshCfg(fpath=path)
+        )
+    descriptor, _ = rigid_desc_from_cfg(cfg)
+    assert descriptor.renders[0].file_path == path
+    assert cfg.visuals[0].representation.fpath == path
+
+
+def test_visual_catalog_reference_still_uses_registered_asset_resolution(
+    tmp_path, monkeypatch
+):
+    from embodichain.data import constants, dataset
+    from embodichain.lab.sim.cfg.visuals import _resolve_visual_path
+
+    class Asset:
+        extract_dir = str(tmp_path / "downloaded")
+
+    monkeypatch.setattr(
+        constants, "EMBODICHAIN_DEFAULT_DATA_ROOT", str(tmp_path / "data")
+    )
+    monkeypatch.setattr(
+        dataset, "get_data_class", lambda name: Asset if name == "KnownMeshes" else None
+    )
+    assert _resolve_visual_path("KnownMeshes/cup.glb") == str(
+        tmp_path / "downloaded" / "cup.glb"
+    )
+
+
+def test_deferred_visual_resolution_does_not_hide_known_catalog_failures(monkeypatch):
+    from embodichain.lab.sim.cfg.visuals import _resolve_visual_path
+    from embodichain.data import _asset_registry
+
+    def fail(path):
+        raise AttributeError("registered catalog failure")
+
+    monkeypatch.setattr("embodichain.data.get_data_path", fail)
+    monkeypatch.setattr(_asset_registry, "_asset_specs", lambda: {"KnownMeshes": {}})
+    with pytest.raises(AttributeError, match="registered catalog failure"):
+        _resolve_visual_path("KnownMeshes/cup.glb")
+
+
+@pytest.mark.parametrize("proxy", [False, True])
+def test_semantic_queries_without_file_companions_never_read_empty_render_geometry(
+    proxy,
+):
+    from embodichain.lab.sim.objects import RigidObject
+    from embodichain.lab.sim.shapes import MeshCfg
+
+    cfg = RigidObjectCfg(
+        uid="renderless",
+        shape=CubeCfg(size=(0.2, 0.3, 0.4)),
+        visuals=[
+            VisualElementCfg(id="file", representation=MeshCfg(fpath="deferred.obj")),
+            VisualElementCfg(id="box", representation=CubeCfg()),
+        ],
+        semantic_shape=CubeCfg(size=(0.7, 0.8, 0.9)) if proxy else None,
+    )
+    owner = object.__new__(RigidObject)
+    owner.cfg, owner.device, owner._entities = (
+        cfg,
+        torch.device("cpu"),
+        [object(), object()],
+    )
+    owner.get_body_scale = lambda ids: torch.tensor(
+        [[1.0] * 3 if i == 0 else [2.0] * 3 for i in ids]
+    )
+    owner.get_vertices = MagicMock(
+        side_effect=AssertionError("empty native render read")
+    )
+    owner.get_triangles = MagicMock(
+        side_effect=AssertionError("empty native render read")
+    )
+    vertices, faces = owner.get_semantic_mesh([1, 0])
+    expected = torch.tensor([0.7, 0.8, 0.9] if proxy else [0.2, 0.3, 0.4])
+    torch.testing.assert_close(
+        vertices.amax(1) - vertices.amin(1), torch.stack([expected * 2, expected])
+    )
+    assert faces.shape[0] == 2 and faces.shape[1] > 0
+    owner.get_vertices.assert_not_called()
+    owner.get_triangles.assert_not_called()
+
+
 @pytest.mark.parametrize(
     "layout", ["files", "file_array", "file_primitive", "compound"]
 )

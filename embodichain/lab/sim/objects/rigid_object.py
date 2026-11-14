@@ -1990,10 +1990,14 @@ class RigidObject(BatchEntity):
             )
         binding = getattr(self, "_visual_binding", None)
         if binding is None:
-            from ..cfg.visuals import _uses_descriptor_visuals
+            from ..cfg.visuals import (
+                _file_visual_binding_elements,
+                _uses_descriptor_visuals,
+            )
 
             if self.cfg.semantic_shape is None and (
                 _uses_descriptor_visuals(self.cfg)
+                or _file_visual_binding_elements(self.cfg) is not None
                 or getattr(self.cfg, "env_variants", None)
             ):
                 from ..spawn._visuals import _semantic_mesh_arrays

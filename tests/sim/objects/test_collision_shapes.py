@@ -68,6 +68,56 @@ class _DescriptorEntity:
         return None
 
 
+@pytest.mark.subprocess_sim
+def test_no_render_file_appearance_semantics_are_safe_in_native_cpu_process(tmp_path):
+    import subprocess
+    import sys
+
+    path = tmp_path / "appearance.obj"
+    path.write_text("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
+    program = """
+import resource
+import sys
+import torch
+from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.sim.cfg import DefaultPhysicsCfg, RenderCfg, RigidObjectCfg, VisualElementCfg
+from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
+
+resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+sim = SimulationManager(SimulationManagerCfg(
+    headless=True, device='cpu', enable_ground_plane=False, startup_summary='off',
+    physics_cfg=DefaultPhysicsCfg(), render_cfg=RenderCfg(renderer='no-render'),
+))
+try:
+    controls = [VisualElementCfg(id='file', representation=MeshCfg(fpath=sys.argv[1]))]
+    objects = []
+    for name, visuals in [('single', controls), ('batch', [*controls, VisualElementCfg(id='box', representation=CubeCfg())])]:
+        objects.append(sim.add_rigid_object(RigidObjectCfg(
+            uid=name, body_type='static', shape=CubeCfg(size=(0.2, 0.3, 0.4)), visuals=visuals,
+        )))
+    sim.prepare()
+    for obj in objects:
+        assert getattr(obj, '_visual_binding', None) is None
+        vertices, faces = obj.get_semantic_mesh([0])
+        torch.testing.assert_close((vertices.amax(1)-vertices.amin(1))[0], torch.tensor([0.2, 0.3, 0.4]))
+        assert faces.numel() > 0
+    print('NORENDER_SEMANTICS_PASSED', flush=True)
+finally:
+    sim.destroy(exit_process=False)
+    SimulationManager.flush_cleanup_queue()
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", program, str(path)],
+        capture_output=True,
+        text=True,
+        timeout=90,
+    )
+    assert (
+        result.returncode == 0
+    ), f"exit={result.returncode}\n{result.stdout}\n{result.stderr}"
+    assert "NORENDER_SEMANTICS_PASSED" in result.stdout
+
+
 def _box_geometry(half_extents):
     geometry = BoxGeometry()
     geometry.half_extents = half_extents

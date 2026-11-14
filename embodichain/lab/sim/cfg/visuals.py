@@ -279,11 +279,23 @@ def _file_visual_binding_elements(cfg: object) -> list[VisualElementCfg] | None:
 
 
 def _resolve_visual_path(path: str | Path) -> str:
-    """Preserve existing local files before resolving data-root or catalog paths."""
+    """Resolve known resources while preserving deferred local file references."""
     from embodichain.data import get_data_path
 
     local = Path(path)
-    return str(local.resolve()) if local.is_file() else get_data_path(str(path))
+    if local.is_file():
+        return str(local.resolve())
+    try:
+        return get_data_path(str(path))
+    except AttributeError:
+        from embodichain.data._asset_registry import _asset_specs
+
+        # Keep failures from registered assets visible. An unknown file-like
+        # reference may legitimately be generated before materialization.
+        namespace = str(path).split("/", 1)[0]
+        if namespace in _asset_specs() or (not local.suffix and len(local.parts) == 1):
+            raise
+        return str(path)
 
 
 def _uses_descriptor_visuals(cfg: object) -> bool:

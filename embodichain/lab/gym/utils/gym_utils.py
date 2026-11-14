@@ -755,11 +755,12 @@ def config_to_cfg(
         if isinstance(asset, RigidObjectCfg):
             if isinstance(asset.shape, CompoundShapeCfg):
                 resolve_shape_paths(asset.shape)
+            resolve_shape_paths(asset.particle_collision_shape)
             for variant in (asset.env_variants or {}).values():
                 resolve_asset_paths(variant)
 
     def _resolve_mesh_asset_paths(obj_dict: dict[str, Any]) -> None:
-        for key in ("visual_shape", "particle_collision_shape"):
+        for key in ("visual_shape",):
             shape = obj_dict.get(key)
             if (
                 shape is not None

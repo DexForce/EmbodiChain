@@ -2877,6 +2877,18 @@ def test_nested_physical_mesh_paths_resolve_from_data_root(
             "shape": {"shape_type": "Cube"},
             "env_variants": {"1": {"body_type": body_type, "shape": compound}},
         }
+    boundary = {
+        "shape_type": "Mesh",
+        "fpath": "meshes/piece.obj",
+        "collision": {"approximation": "sdf", "force_sdf": False},
+    }
+    obj["particle_collision_shape"] = deepcopy(boundary)
+    if body_type == "dynamic":
+        obj["attrs"] = {"mass_props": {"mass": 1.0, "inertia": np.eye(3).tolist()}}
+    if variant:
+        obj["env_variants"]["1"]["particle_collision_shape"] = deepcopy(boundary)
+        if body_type == "dynamic":
+            obj["env_variants"]["1"]["attrs"] = deepcopy(obj["attrs"])
     entries = (
         [{"uid": "group", "rigid_objects": {"piece": obj}}]
         if collection == "rigid_object_group"
@@ -2895,9 +2907,16 @@ def test_nested_physical_mesh_paths_resolve_from_data_root(
     parsed = getattr(cfg, collection)[0]
     if collection == "rigid_object_group":
         parsed = parsed.rigid_objects["piece"]
+    from embodichain.lab.sim.spawn.descriptors import rigid_desc_from_cfg
+
+    descriptor, _ = rigid_desc_from_cfg(parsed, newton_solver_type="dexuni")
+    assert descriptor.collisions[-1].file_path == str(path)
     if variant:
         parsed = parsed.env_variants[1]
+        descriptor = descriptor.env_variants[1]
     assert parsed.shape.parts[0].shape.fpath == str(path)
+    assert parsed.particle_collision_shape.fpath == str(path)
+    assert descriptor.collisions[-1].file_path == str(path)
 
 
 @pytest.mark.parametrize("owner", ["inline", "environment", "scene"])
