@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "resource_directory": "worldparticle",
+  "files": [
+    {
+      "path": "checkpoints/cloth_on_ball/config.yaml",
+      "sha256": "146fd67e05f0239f0f9fe0735622ff53070a54935d36f683282fce14160d17bb",
+      "size": 2266
+    },
+    {
+      "path": "checkpoints/cloth_on_ball/final.ckpt",
+      "sha256": "b39d2d691c1a2be8eb2a990b8e7a06c43ad9b2519073de3855fd0aae4f4bdc61",
+      "size": 1881230368
+    },
+    {
+      "path": "checkpoints/deep_lagrange_dataset/config.yaml",
+      "sha256": "22b9fe28d50df5ac9b736e672119cd87291b4aeec46c572dbf969d8cfb78500d",
+      "size": 1850
+    },
+    {
+      "path": "checkpoints/deep_lagrange_dataset/final.ckpt",
+      "sha256": "2183963f89ab8c45d7a47c9f0fe86cae42df3d28d9ec76b3ad58c8827f9fa63e",
+      "size": 1551226938
+    },
+    {
+      "path": "checkpoints/fancy_fluid/config.yaml",
+      "sha256": "f63b3cc65ecca2df1334e6b465097452cfa85ed23d0b64b0e879757e3ea9be41",
+      "size": 2156
+    },
+    {
+      "path": "checkpoints/fancy_fluid/final.ckpt",
+      "sha256": "1dce523ef994b6ca80d3cd9de7572de117c1c87ba36d51bf5fcf913be24938d9",
+      "size": 1880632297
+    },
+    {
+      "path": "checkpoints/inverse_design/config.yaml",
+      "sha256": "cfa44b462ccc8f6a002dc52f5fe3e54dea17483bbb013a84e398c69054321a57",
+      "size": 2248
+    },
+    {
+      "path": "checkpoints/inverse_design/final.ckpt",
+      "sha256": "7a958a9c6467556208e8bb86f3881f98c64b420faba3a166536177f18403223f",
+      "size": 1880631328
+    },
+    {
+      "path": "cloth-demo-manifest.json",
+      "sha256": "4b1dd3b64b6fa847b3a1ba213315356c6b7db00533e8ef02fc95deaed5229a4c",
+      "size": 338
+    },
+    {
+      "path": "data/cloth_on_ball/10/10.npz",
+      "sha256": "e8ff07c0ebd007a0127a6d3242438dd1d824768342cbdec1504de4568b3c1f7c",
+      "size": 12951512
+    },
+    {
+      "path": "data/deep_lagrange_demo/initial.npz",
+      "sha256": "baa68f4202771a8119320ddb6a64496e25854f8140b5860b28da5d4dfd41701b",
+      "size": 27262
+    },
+    {
+      "path": "data/fancy_fluid/66/66.npz",
+      "sha256": "9da7c229f89ea892ecee00453e4d3fcba605efa9e6e9ea0bb3d351c7b85cf7bd",
+      "size": 93993402
+    },
+    {
+      "path": "data/inverse_design/0/0.npz",
+      "sha256": "2f03b6521b6ed82feff316f2d832195cb029fef1031a60bd9382d806bba024d6",
+      "size": 3714858
+    },
+    {
+      "path": "deep-fluid-demo.json",
+      "sha256": "512875381452861e02e68dbc772e50d5d2e1f040c4be800c856fac30c4a9a5c2",
+      "size": 1016
+    },
+    {
+      "path": "demo-manifest.json",
+      "sha256": "42f03c5246771b2e390536f20e010aebcacba47892ab4dea9164bb564bb1fd80",
+      "size": 618
+    },
+    {
+      "path": "inverse-demo-manifest.json",
+      "sha256": "cb2109b7fb14b282afdffdacec72a681a42f345248c9f0799aaa1e439fc16eff",
+      "size": 757
+    },
+    {
+      "path": "weights-manifest.json",
+      "sha256": "f4ea1e38a06d772ba5b25904d552fd18908f2a1a8f0b64d10d234b592b86b214",
+      "size": 1920
+    },
+    {
+      "path": "data/inverse_design/0/case_input.json",
+      "sha256": "7e5cc4e424e995d1747cc37b68e1df5f47786d4917329052ffa0a629fcf7521f",
+      "size": 2243
+    },
+    {
+      "path": "data/inverse_design/0/config.json",
+      "sha256": "54b11940c7bca9090f459f338606bf4666bebbf63b116f5c104827f8b8a6de24",
+      "size": 7014
+    }
+  ]
+}

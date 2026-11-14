@@ -1371,12 +1371,14 @@ def test_start_visualization_prepares_only_when_assets_are_declared(
         (False, True, "viser", False),
     ],
 )
+@pytest.mark.parametrize("enable_default_ground", [True, False])
 def test_constructor_starts_visualization_after_default_scene(
     monkeypatch: pytest.MonkeyPatch,
     headless: bool,
     entity_gizmo: bool,
     backend: str,
     expected_gizmo: bool,
+    enable_default_ground: bool,
 ) -> None:
     lifecycle: list[str] = []
     spawn_scene = MagicMock()
@@ -1458,6 +1460,7 @@ def test_constructor_starts_visualization_after_default_scene(
         SimulationManagerCfg(
             startup_summary="off",
             num_envs=3,
+            enable_default_ground=enable_default_ground,
             headless=headless,
             enable_entity_gizmo=entity_gizmo,
             visualization=VisualizationCfg(backend=backend),
@@ -1471,7 +1474,7 @@ def test_constructor_starts_visualization_after_default_scene(
         "arenas",
         "resources",
         "background",
-        "plane",
+        *(["plane"] if enable_default_ground else []),
         "lighting",
         "visualization:3",
     ] + (["entity_gizmo"] if expected_gizmo else [])

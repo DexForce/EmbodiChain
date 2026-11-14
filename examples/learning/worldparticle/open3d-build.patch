@@ -1,0 +1,31 @@
+diff --git a/3rdparty/cmake/FindPytorch.cmake b/3rdparty/cmake/FindPytorch.cmake
+index 08bf18b..cef4fd7 100644
+--- a/3rdparty/cmake/FindPytorch.cmake
++++ b/3rdparty/cmake/FindPytorch.cmake
+@@ -17,9 +17,9 @@
+ # "80-real" to "8.0" and "80" to "8.0+PTX":
+ macro(translate_arch_string input output)
+     if("${input}" MATCHES "[0-9]+-real")
+-        string(REGEX REPLACE "([1-9])([0-9])-real" "\\1.\\2" version "${input}")
++        string(REGEX REPLACE "([1-9][0-9]*)([0-9])-real" "\\1.\\2" version "${input}")
+     elseif("${input}" MATCHES "([0-9]+)")
+-        string(REGEX REPLACE "([1-9])([0-9])" "\\1.\\2+PTX" version "${input}")
++        string(REGEX REPLACE "([1-9][0-9]*)([0-9])" "\\1.\\2+PTX" version "${input}")
+     elseif("${input}" STREQUAL "native")
+         set(version "Auto")
+     else()
+diff --git a/3rdparty/glfw/glfw.cmake b/3rdparty/glfw/glfw.cmake
+index b9573a9..3fd4b7a 100644
+--- a/3rdparty/glfw/glfw.cmake
++++ b/3rdparty/glfw/glfw.cmake
+@@ -15,6 +15,10 @@ ExternalProject_Add(
+         -DGLFW_BUILD_EXAMPLES=OFF
+         -DGLFW_BUILD_TESTS=OFF
+         -DGLFW_BUILD_DOCS=OFF
++        -DGLFW_BUILD_WAYLAND=OFF
++        -DCMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}
++        -DCMAKE_INCLUDE_PATH=${CMAKE_INCLUDE_PATH}
++        -DCMAKE_LIBRARY_PATH=${CMAKE_LIBRARY_PATH}
+     BUILD_BYPRODUCTS
+         <INSTALL_DIR>/${Open3D_INSTALL_LIB_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}${GLFW_LIB_NAME}${CMAKE_STATIC_LIBRARY_SUFFIX}
+ )

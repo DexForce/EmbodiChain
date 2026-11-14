@@ -33,6 +33,7 @@ Use the following canonical packages for the current model directions:
 | Model family | Public package | Landing status |
 | --- | --- | --- |
 | Ordinary state/visual BC | `embodichain_models.policy.bc` | Target for the BC follow-up; not created yet. |
+| WorldParticle | `embodichain_models.dynamics.worldparticle` | Official frozen particle models; native solver integration owned by `lab/sim/physics/worldparticle.py`. |
 | Visual ACT | `embodichain_models.policy.act` | Official LeRobot ACT configuration, provenance and simulator inference. |
 | NeRD | `embodichain_models.dynamics.nerd` | Implemented in this change. |
 | Robot world model (RWM) | `embodichain_models.dynamics.rwm` | Implemented. |

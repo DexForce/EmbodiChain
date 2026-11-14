@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "platform": "linux-x86_64",
+  "python": "3.12",
+  "minimum_glibc": "2.35",
+  "torch": "2.7.1+cu128",
+  "cxx11_abi": true,
+  "cuda": "12.8",
+  "cuda_architectures": [
+    "sm_120"
+  ],
+  "open3d_source": "https://github.com/isl-org/Open3D",
+  "open3d_revision": "1e7b17438687a0b0c1e5a7187321ac7044afe275",
+  "open3d_patch": "open3d-build.patch",
+  "wheels": [
+    {
+      "filename": "open3d-0.19.0+1e7b174-1torch271cu128sm120-cp312-cp312-manylinux_2_35_x86_64.whl",
+      "url": "http://192.168.3.43:8080/packages/open3d-0.19.0%2B1e7b174-1torch271cu128sm120-cp312-cp312-manylinux_2_35_x86_64.whl",
+      "sha256": "209bcee758d25953bcc4cab284ad4fb17f5aace0a3e1e3c296750511bf4257ad",
+      "size": 443543617
+    },
+    {
+      "filename": "flash_attn-2.8.3+cu12torch2.7cxx11abiTRUE-cp312-cp312-linux_x86_64.whl",
+      "url": "http://192.168.3.43:8080/packages/flash_attn-2.8.3%2Bcu12torch2.7cxx11abiTRUE-cp312-cp312-linux_x86_64.whl",
+      "sha256": "cafd4f708725e1be95495a86cbf418cfada08e707c8a797def61488a2a3c4f72",
+      "size": 256028810
+    }
+  ],
+  "open3d_patch_sha256": "853748f047ba02fa256c4aa0179c9fa18a67173036be20d8d758a65e5c991a1e",
+  "numpy": "2.2.6",
+  "relocation": {
+    "build_tag": "1torch271cu128sm120",
+    "input_sha256": "b054609fddb72b97eeb324c7370e94b244b4f78f82552cea859b041b150d00ec",
+    "elf_libraries": [
+      {
+        "path": "open3d/cuda/open3d_torch_ops.so",
+        "runpath": "$ORIGIN/..:$ORIGIN/../../torch/lib:$ORIGIN/../../nvidia/cuda_runtime/lib"
+      },
+      {
+        "path": "open3d/cuda/pybind.cpython-312-x86_64-linux-gnu.so",
+        "runpath": "$ORIGIN/..:$ORIGIN/../../torch/lib:$ORIGIN/../../nvidia/cuda_runtime/lib"
+      },
+      {
+        "path": "open3d/libtbb.so.12",
+        "runpath": "$ORIGIN:$ORIGIN/../torch/lib:$ORIGIN/../nvidia/cuda_runtime/lib"
+      }
+    ]
+  },
+  "torchvision": "0.22.1+cu128",
+  "integration": "EmbodiChain; NumPy2 compatibility requires the recorded end-to-end validation"
+}

@@ -439,14 +439,8 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     ) -> NewtonCfg:
         """Convert this config to ``dexsim.engine.newton_physics.NewtonCfg``."""
         from dexsim.engine.newton_physics import (
-            DexUniSolverCfg,
-            FeatherstoneSolverCfg,
-            MJWarpSolverCfg,
             NewtonCfg,
             NewtonCollisionPipelineCfg as DexsimNewtonCollisionPipelineCfg,
-            SemiImplicitSolverCfg,
-            VBDSolverCfg,
-            XPBDSolverCfg,
         )
 
         torch_device = (
@@ -458,23 +452,37 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
             else str(torch_device)
         )
 
-        solver_cfg_map: dict[str, type] = {
-            "dexuni": DexUniSolverCfg,
-            "mujoco_warp": MJWarpSolverCfg,
-            "xpbd": XPBDSolverCfg,
-            "semi_implicit": SemiImplicitSolverCfg,
-            "featherstone": FeatherstoneSolverCfg,
-            "vbd": VBDSolverCfg,
-        }
-        solver_cfg = _newton_solver_cfg_to_dexsim(
-            solver_cfg=self.solver_cfg,
-            solver_cfg_map=solver_cfg_map,
-        )
+        if self.solver_cfg is not None and not isinstance(self.solver_cfg, Mapping):
+            # Explicit SDK configs (including external Providers) already own
+            # solver selection. Do not resolve unrelated built-in solver APIs.
+            solver_cfg = _newton_solver_cfg_to_dexsim(self.solver_cfg, {})
+        else:
+            from dexsim.engine.newton_physics import (
+                DexUniSolverCfg,
+                FeatherstoneSolverCfg,
+                MJWarpSolverCfg,
+                SemiImplicitSolverCfg,
+                VBDSolverCfg,
+                XPBDSolverCfg,
+            )
 
+            solver_cfg_map: dict[str, type] = {
+                "dexuni": DexUniSolverCfg,
+                "mujoco_warp": MJWarpSolverCfg,
+                "xpbd": XPBDSolverCfg,
+                "semi_implicit": SemiImplicitSolverCfg,
+                "featherstone": FeatherstoneSolverCfg,
+                "vbd": VBDSolverCfg,
+            }
+            solver_cfg = _newton_solver_cfg_to_dexsim(
+                solver_cfg=self.solver_cfg,
+                solver_cfg_map=solver_cfg_map,
+            )
         solver_name = "dexuni" if solver_cfg is None else str(solver_cfg.solver_type)
         if (
             self.requires_grad
-            and solver_name in solver_cfg_map
+            and solver_name
+            in {"dexuni", "mujoco_warp", "xpbd", "semi_implicit", "featherstone", "vbd"}
             and solver_name != "semi_implicit"
         ):
             logger.log_error(

@@ -263,9 +263,11 @@ class SimulationManagerCfg:
         startup_summary: Literal["compact", "full", "off"] = "compact",
         dexsim_startup_info: bool = False,
         scene_node_capacity: int | None = None,
+        enable_default_ground: bool = True,
     ) -> None:
         self.startup_summary = startup_summary
         self.dexsim_startup_info = dexsim_startup_info
+        self.enable_default_ground = enable_default_ground
         self.scene_node_capacity = scene_node_capacity
         self.width = width
         self.height = height
@@ -337,6 +339,13 @@ class SimulationManagerCfg:
 
     height: int = 1080
     """The height of the simulation window."""
+
+    enable_default_ground: bool = True
+    """Declare the built-in collision/render plane.
+
+    Disable explicitly for solvers whose boundaries are authored model inputs.
+    Other scene objects and custom boundary visuals remain caller-owned.
+    """
 
     headless: bool = False
     """Whether to run without an automatically opened native window.
@@ -776,7 +785,8 @@ class SimulationManager:
         if self.has_native_renderer:
             self._init_sim_resources()
             self.set_default_background()
-        self._declare_spawn_default_plane()
+        if sim_config.enable_default_ground:
+            self._declare_spawn_default_plane()
         if self.has_native_renderer:
             self.set_default_global_lighting()
 
@@ -1017,7 +1027,7 @@ class SimulationManager:
         Returns:
             List[str]: list of all assets uid.
         """
-        uid_list = ["default_plane"]
+        uid_list = ["default_plane"] if self.sim_config.enable_default_ground else []
         uid_list.extend(list(self._lights.keys()))
         uid_list.extend(list(self._sensors.keys()))
         uid_list.extend(list(self._robots.keys()))
@@ -1895,7 +1905,7 @@ class SimulationManager:
             self._env = result.get_arena("default")
             self._arenas = [result.get_arena(name) for name in scene.arena_names]
             self.__dict__.pop("arena_offsets", None)
-            if self._default_plane is None:
+            if self._default_plane is None and self.sim_config.enable_default_ground:
                 self._bind_default_plane(scene.handles("default_plane")[0])
 
         # Runtime readiness belongs to the SimulationManager. Keep this and
@@ -3589,14 +3599,27 @@ class SimulationManager:
         solver_type = self._active_newton_solver_type
         if solver_type == "dexuni" and getattr(self, "_fluid_objects", {}):
             raise NotImplementedError("DexUni fluids cannot coexist with deformables.")
-        supported_solvers = {"dexuni", "xpbd", "semi_implicit", "vbd"}
-        if solver_type not in supported_solvers:
-            raise NotImplementedError(
-                f"Newton solver {solver_type!r} does not support deformable "
-                "particle sets; select one of 'dexuni', 'xpbd', "
-                "'semi_implicit', or 'vbd'."
-            )
+        # External Providers declare supported particle kinds at Spawn build;
+        # DexSim validates those capabilities before materializing this object.
+        supported_solvers = {
+            "dexuni",
+            "xpbd",
+            "semi_implicit",
+            "vbd",
+            "provider",
+        }
         physics_cfg = self.sim_config.physics_cfg
+        if solver_type not in supported_solvers:
+            from dexsim.engine.newton_physics import RegisteredNewtonSolverCfg
+
+            # Registered names retain their entry-point identity rather than
+            # the direct factory's "provider" type. Spawn validates their
+            # actual particle capabilities during finalization.
+            if not isinstance(physics_cfg.solver_cfg, RegisteredNewtonSolverCfg):
+                raise NotImplementedError(
+                    f"Newton solver {solver_type!r} does not support deformable "
+                    "particle sets; select a particle solver or an external Provider."
+                )
         if isinstance(physics_cfg, NewtonPhysicsCfg) and physics_cfg.requires_grad:
             raise NotImplementedError(
                 "Newton deformable state mutation is unavailable when "
