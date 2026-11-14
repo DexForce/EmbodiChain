@@ -223,6 +223,14 @@ def _uses_descriptor_visuals(cfg: object) -> bool:
     )
 
 
+def _descriptor_visual_env_ids(cfg: object, env_ids: list[int]) -> list[int]:
+    """Select rows whose effective rigid config owns descriptor mesh visuals."""
+    variants = getattr(cfg, "env_variants", None) or {}
+    return [
+        index for index in env_ids if _uses_descriptor_visuals(variants.get(index, cfg))
+    ]
+
+
 @configclass
 class GaussianRenderCfg:
     """Native CUDA Gaussian raster settings; disabled for existing scenes.

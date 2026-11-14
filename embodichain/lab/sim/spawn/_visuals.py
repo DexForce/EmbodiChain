@@ -481,22 +481,9 @@ class _VisualBinding:
         self.visibility[ids] = visible
 
     def indices(self, env_ids: Any) -> list[int]:
-        if isinstance(env_ids, torch.Tensor):
-            env_ids = env_ids.detach().cpu().tolist()
-        ids = (
-            list(range(self.owner.num_instances)) if env_ids is None else list(env_ids)
-        )
-        if any(
-            isinstance(i, bool)
-            or not isinstance(i, (int, np.integer))
-            or i < 0
-            or i >= self.owner.num_instances
-            for i in ids
-        ):
-            raise IndexError("Visual environment indices are out of range.")
-        if len(set(ids)) != len(ids):
-            raise ValueError("Visual environment indices must be unique.")
-        return ids
+        from ..common import _validated_env_ids
+
+        return _validated_env_ids(env_ids, self.owner.num_instances)
 
     def reset(self, env_ids: Any = None) -> None:
         ids = self.indices(env_ids)

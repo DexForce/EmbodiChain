@@ -26,8 +26,29 @@ from embodichain.lab.sim.cfg import ObjectBaseCfg
 from embodichain.utils import logger
 import dexsim
 from copy import deepcopy
+from numbers import Integral
 
 T = TypeVar("T")
+
+
+def _validated_env_ids(
+    env_ids: Sequence[int] | torch.Tensor | None, count: int
+) -> list[int]:
+    """Validate complete visual/semantic selections before reading or writing."""
+    if isinstance(env_ids, torch.Tensor):
+        env_ids = env_ids.detach().cpu().tolist()
+    ids = list(range(count)) if env_ids is None else list(env_ids)
+    if any(
+        isinstance(index, bool)
+        or not isinstance(index, Integral)
+        or index < 0
+        or index >= count
+        for index in ids
+    ):
+        raise IndexError("Visual environment indices are out of range.")
+    if len(set(ids)) != len(ids):
+        raise ValueError("Visual environment indices must be unique.")
+    return [int(index) for index in ids]
 
 
 @dataclass
@@ -154,7 +175,7 @@ class BatchEntity(ABC):
         )
 
     def set_visual_visibility(
-        self, visible: bool, env_ids: Sequence[int] | None = None
+        self, visible: bool, env_ids: Sequence[int] | torch.Tensor | None = None
     ) -> None:
         """Set visibility of configured visual elements in selected environments.
 
@@ -163,16 +184,26 @@ class BatchEntity(ABC):
             env_ids: Environment indices, or None for all environments.
 
         Raises:
-            ValueError: If the entity has no explicit visual composition.
+            IndexError: If a selected environment index is invalid.
+            TypeError: If visible is not a boolean.
+            ValueError: If a selected row has no explicit visual composition.
+                Duplicate environment IDs are also rejected before any writes.
         """
         binding = getattr(self, "_visual_binding", None)
         if binding is None:
-            from .cfg.visuals import _uses_descriptor_visuals
+            from .cfg.visuals import _descriptor_visual_env_ids
 
-            if _uses_descriptor_visuals(self.cfg):
-                self.set_visible(visible, env_ids=env_ids)
-                return
-            raise ValueError("Explicit visuals are required for this operation.")
+            if not isinstance(visible, bool):
+                raise TypeError("visible must be a bool.")
+            ids = _validated_env_ids(env_ids, self.num_instances)
+            visual_ids = _descriptor_visual_env_ids(self.cfg, ids)
+            if len(visual_ids) != len(ids):
+                raise ValueError(
+                    "Explicit visuals are required for every selected environment."
+                )
+            if ids:
+                self.set_visible(visible, env_ids=ids)
+            return
         binding.set_visible(visible, env_ids)
 
     def set_gaussian_visual_state(

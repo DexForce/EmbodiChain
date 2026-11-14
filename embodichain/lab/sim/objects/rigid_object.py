@@ -1959,7 +1959,7 @@ class RigidObject(BatchEntity):
         )
 
     def get_semantic_mesh(
-        self, env_ids: Sequence[int] | None = None
+        self, env_ids: Sequence[int] | torch.Tensor | None = None
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Return independent scaled semantic vertices and triangle indices.
 
@@ -1971,11 +1971,21 @@ class RigidObject(BatchEntity):
 
         Returns:
             Owner-local vertices of shape (B, V, 3) with body scaling applied,
-            and triangle indices of shape (B, F, 3).
+            and triangle indices of shape (B, F, 3). Empty selections return
+            typed ``(0, 0, 3)`` tensors without reading geometry or scales.
 
         Raises:
-            ValueError: If no semantic surface or explicit proxy is available.
+            IndexError: If an environment index is invalid.
+            ValueError: If indices repeat, or no semantic surface is available.
         """
+        from ..common import _validated_env_ids
+
+        ids = _validated_env_ids(env_ids, self.num_instances)
+        if not ids:
+            return (
+                torch.empty((0, 0, 3), dtype=torch.float32, device=self.device),
+                torch.empty((0, 0, 3), dtype=torch.int32, device=self.device),
+            )
         binding = getattr(self, "_visual_binding", None)
         if binding is None:
             from ..cfg.visuals import _uses_descriptor_visuals
@@ -1986,22 +1996,12 @@ class RigidObject(BatchEntity):
             ):
                 from ..spawn._visuals import _semantic_mesh_arrays
 
-                ids = (
-                    list(range(self.num_instances))
-                    if env_ids is None
-                    else [int(index) for index in env_ids]
-                )
                 meshes = [
                     _semantic_mesh_arrays(
                         (self.cfg.env_variants or {}).get(index, self.cfg).shape
                     )
                     for index in ids
                 ]
-                if not ids:
-                    return (
-                        torch.empty((0, 0, 3), device=self.device),
-                        torch.empty((0, 0, 3), dtype=torch.int32, device=self.device),
-                    )
                 if (
                     len({(vertices.shape, faces.shape) for vertices, faces in meshes})
                     != 1
@@ -2028,13 +2028,10 @@ class RigidObject(BatchEntity):
                         raise ValueError(
                             "Semantic mesh is unavailable for Gaussian-only USD appearance; configure semantic_shape."
                         )
-                return self.get_vertices(env_ids, scale=True), self.get_triangles(
-                    env_ids
-                )
+                return self.get_vertices(ids, scale=True), self.get_triangles(ids)
             from ..spawn._visuals import _semantic_mesh_arrays
 
             vertices, faces = _semantic_mesh_arrays(self.cfg.semantic_shape)
-            ids = list(range(self.num_instances)) if env_ids is None else env_ids
             vertices = torch.as_tensor(vertices, device=self.device)
             faces = torch.as_tensor(faces, dtype=torch.int32, device=self.device)
             return (
@@ -2043,7 +2040,6 @@ class RigidObject(BatchEntity):
             )
         if binding.semantic is None or binding.semantic[0].shape[1] == 0:
             raise ValueError("Semantic mesh is unavailable; configure semantic_shape.")
-        ids = binding.indices(env_ids)
         vertices, faces = binding.semantic
         return (
             vertices[ids].clone() * self.get_body_scale(ids).unsqueeze(1),
@@ -2278,10 +2274,13 @@ class RigidObject(BatchEntity):
         if binding is not None:
             binding.reset(local_env_ids)
         else:
-            from ..cfg.visuals import _uses_descriptor_visuals
+            from ..common import _validated_env_ids
+            from ..cfg.visuals import _descriptor_visual_env_ids
 
-            if _uses_descriptor_visuals(self.cfg):
-                self.set_visible(True, env_ids=local_env_ids)
+            ids = _validated_env_ids(local_env_ids, self.num_instances)
+            visual_ids = _descriptor_visual_env_ids(self.cfg, ids)
+            if visual_ids:
+                self.set_visible(True, env_ids=visual_ids)
         self.restore_visual_material(env_ids=local_env_ids)
 
         # Preserve the legacy Default-backend attribute reset before restoring

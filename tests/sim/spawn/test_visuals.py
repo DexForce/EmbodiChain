@@ -229,6 +229,151 @@ def test_rigid_variant_semantics_follow_physical_shape_and_shared_proxy():
         RigidObjectCfg.from_dict({"env_variants": {"1": {"unknown_appearance": []}}})
 
 
+def _semantic_selection_owner(mode):
+    from embodichain.lab.sim.objects import RigidObject
+
+    owner = object.__new__(RigidObject)
+    owner.device = torch.device("cpu")
+    owner._entities = [object(), object()]
+    owner.cfg = RigidObjectCfg(
+        uid="selected",
+        shape=CubeCfg(size=(0.1, 0.1, 0.1)),
+        visuals=[VisualElementCfg(representation=CubeCfg())],
+        env_variants={1: RigidObjectCfg(shape=CubeCfg(size=(0.8, 0.8, 0.8)))},
+    )
+    owner.get_body_scale = MagicMock(side_effect=lambda ids: torch.ones((len(ids), 3)))
+    vertices = torch.tensor(
+        [[[-0.05, 0, 0], [0.05, 0, 0]], [[-0.4, 0, 0], [0.4, 0, 0]]]
+    )
+    faces = torch.empty((2, 0, 3), dtype=torch.int32)
+    owner.get_vertices = MagicMock(
+        side_effect=lambda ids, **kwargs: vertices[ids].clone()
+    )
+    owner.get_triangles = MagicMock(side_effect=lambda ids: faces[ids].clone())
+    if mode == "proxy":
+        owner.cfg.semantic_shape = CubeCfg(size=(0.1, 0.1, 0.1))
+    elif mode == "companion":
+        binding = object.__new__(_VisualBinding)
+        binding.owner, binding.semantic = owner, (vertices, faces)
+        owner._visual_binding = binding
+    elif mode == "native":
+        owner.cfg.visuals = owner.cfg.env_variants = None
+    return owner
+
+
+@pytest.mark.parametrize("mode", ["descriptor", "proxy", "companion", "native"])
+@pytest.mark.parametrize(
+    "ids,error",
+    [
+        ([-1], IndexError),
+        ([True], IndexError),
+        ([1.9], IndexError),
+        ([2], IndexError),
+        ([0, 0], ValueError),
+        (torch.tensor([1.0]), IndexError),
+    ],
+)
+def test_semantic_selection_rejects_invalid_ids_before_geometry_reads(
+    mode, ids, error, monkeypatch
+):
+    import embodichain.lab.sim.spawn._visuals as visual_module
+
+    owner = _semantic_selection_owner(mode)
+    decode = MagicMock(
+        side_effect=AssertionError("invalid selection must precede decoding")
+    )
+    monkeypatch.setattr(visual_module, "_semantic_mesh_arrays", decode)
+    with pytest.raises(error):
+        owner.get_semantic_mesh(ids)
+    decode.assert_not_called()
+    owner.get_body_scale.assert_not_called()
+    owner.get_vertices.assert_not_called()
+    owner.get_triangles.assert_not_called()
+
+
+@pytest.mark.parametrize("mode", ["descriptor", "proxy", "companion", "native"])
+@pytest.mark.parametrize(
+    "ids", [None, [1, 0], np.array([1, 0], dtype=np.int64), torch.tensor([1, 0]), []]
+)
+def test_semantic_selection_preserves_valid_order_and_empty_batches(mode, ids):
+    owner = _semantic_selection_owner(mode)
+    vertices, faces = owner.get_semantic_mesh(ids)
+    expected_ids = [0, 1] if ids is None else [int(index) for index in ids]
+    assert vertices.shape[0] == faces.shape[0] == len(expected_ids)
+    if not expected_ids:
+        assert vertices.shape == faces.shape == (0, 0, 3)
+        assert vertices.dtype == torch.float32 and faces.dtype == torch.int32
+        owner.get_body_scale.assert_not_called()
+        owner.get_vertices.assert_not_called()
+        owner.get_triangles.assert_not_called()
+    if expected_ids:
+        widths = [0.1, 0.1] if mode == "proxy" else [0.1, 0.8]
+        torch.testing.assert_close(
+            vertices[:, :, 0].amax(1) - vertices[:, :, 0].amin(1),
+            torch.tensor([widths[index] for index in expected_ids]),
+        )
+
+
+@pytest.mark.parametrize("mode", ["descriptor", "proxy", "companion", "native"])
+def test_empty_semantic_selection_does_not_require_geometry_handles(mode):
+    owner = _semantic_selection_owner(mode)
+    # Use the real geometry/scale methods with deliberately non-render handles.
+    # Any helper access would fail instead of supplying mock-only empty shapes.
+    for name in ("get_body_scale", "get_vertices", "get_triangles"):
+        del owner.__dict__[name]
+    vertices, faces = owner.get_semantic_mesh([])
+    assert vertices.shape == faces.shape == (0, 0, 3)
+    assert vertices.dtype == torch.float32 and faces.dtype == torch.int32
+
+
+@pytest.mark.parametrize("parent_explicit", [False, True])
+def test_variant_visual_visibility_and_reset_use_selected_effective_configs(
+    parent_explicit,
+):
+    from embodichain.lab.sim.objects import RigidObject
+
+    element = VisualElementCfg(representation=CubeCfg())
+    owner = object.__new__(RigidObject)
+    owner.cfg = RigidObjectCfg(
+        uid="visibility",
+        shape=CubeCfg(),
+        visuals=[element] if parent_explicit else None,
+        env_variants={
+            1: RigidObjectCfg(shape=CubeCfg(), visuals=[element]),
+            2: RigidObjectCfg(shape=CubeCfg()),
+        },
+    )
+    owner.device = torch.device("cpu")
+    owner._all_indices = [0, 1, 2]
+    owner._spawn_result = object()
+    owner._data = None
+    visible = [True, True, True]
+    owner._entities = [
+        SimpleNamespace(
+            set_visible=lambda value, index=index: visible.__setitem__(index, value)
+        )
+        for index in range(3)
+    ]
+    owner.restore_visual_material = MagicMock()
+    owner._restore_default_physical_properties = MagicMock()
+    owner.clear_dynamics = MagicMock()
+    owner.set_local_pose = MagicMock()
+
+    owner.set_visible(False)
+    owner.set_visual_visibility(True, env_ids=torch.tensor([1]))
+    assert visible == [False, True, False]
+    owner.set_visual_visibility(False, env_ids=[1])
+    with pytest.raises(ValueError, match="Explicit visuals"):
+        owner.set_visual_visibility(True, env_ids=[1, 2])
+    assert visible == [False, False, False]
+    owner.set_visual_visibility(True, env_ids=[])
+    assert visible == [False, False, False]
+    owner.reset(env_ids=torch.tensor([2, 1]))
+    assert visible == [False, True, False]
+    owner.reset(env_ids=[])
+    assert visible == [False, True, False]
+
+
 @pytest.mark.parametrize("slot", ["shape", "visuals", "compound"])
 def test_variants_reject_post_load_uv_at_each_geometry_owner(slot):
     from embodichain.lab.sim.shapes import (
@@ -309,6 +454,7 @@ def test_compound_semantic_mesh_preserves_every_part_transform_and_face_offset(
     )
     owner = SimpleNamespace(
         cfg=RigidObjectCfg(semantic_shape=shape),
+        num_instances=2,
         device=torch.device("cpu"),
         get_body_scale=lambda ids: torch.tensor([[2, 3, 4]], dtype=torch.float32),
     )

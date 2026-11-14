@@ -380,6 +380,11 @@ def test_native_prepared_variants_keep_mass_reset_and_rebuild(solver: str) -> No
         assert len(body.get_collision_shapes(1, allow_heterogeneous=True)) == (
             2 if solver == "semi_implicit" else 1
         )
+        body.set_visible(False, env_ids=[0, 1])
+        body.set_visual_visibility(True, env_ids=torch.tensor([1]))
+        assert not body._entities[0].is_visible()
+        assert body._entities[1].is_visible()
+        body.set_visual_visibility(False, env_ids=[1])
         sim.update(step=1)
         first_pose = body.get_local_pose()[0].clone()
         first_group_pose = group.get_local_pose()[0].clone()
@@ -388,6 +393,8 @@ def test_native_prepared_variants_keep_mass_reset_and_rebuild(solver: str) -> No
         torch.testing.assert_close(body.get_local_pose()[0], first_pose)
         torch.testing.assert_close(group.get_local_pose()[0], first_group_pose)
         assert body.get_local_pose()[1, 2] == 2.0
+        assert not body._entities[0].is_visible()
+        assert body._entities[1].is_visible()
         assert group.get_local_pose()[1, 0, 2] == 2.0
         sim.add_rigid_object(
             RigidObjectCfg(
