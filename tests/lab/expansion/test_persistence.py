@@ -88,6 +88,14 @@ def test_verified_episode_reads_own_tensors_and_invalidate_changed_bytes(tmp_pat
     projected = json_safe_copy(third.metadata, field_name="metadata")
     projected["nested"]["values"][0] = 55
     assert third.metadata["nested"]["values"][0] == 1
+    external = {"nested": [3]}
+    owned = type(third.metadata)(external)
+    external["nested"][0] = 99
+    assert owned["nested"][0] == 3
+    with pytest.raises(ValueError, match="finite"):
+        type(third.metadata)({"invalid": float("nan")})
+    with pytest.raises(ValueError, match="finite"):
+        type(third.metadata["nested"]["values"])((float("inf"),))
     path = Path(receipt.storage_id)
     path.write_bytes(b"invalid replaced evidence")
     with pytest.raises((ValueError, OSError)):

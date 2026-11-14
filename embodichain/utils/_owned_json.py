@@ -32,14 +32,29 @@ _ATOMS = frozenset((str, bool, int, type(None)))
 class _FrozenTuple(tuple):
     __slots__ = ()
 
+    def __new__(cls, values):
+        return super().__new__(cls, (freeze_metadata(value) for value in values))
+
 
 class _FrozenMap(Mapping):
     """Own validated immutable children; expose no mutable backing dictionary."""
 
     __slots__ = ("_data", "_strict", "_encoded")
 
-    def __init__(self, values, strict):
-        object.__setattr__(self, "_data", MappingProxyType(values))
+    def __init__(self, values):
+        if not isinstance(values, Mapping):
+            raise ValueError("metadata must contain only finite JSON values")
+        owned, strict = {}, True
+        for key, value in values.items():
+            if not isinstance(key, str) or not key.strip():
+                raise ValueError("metadata key must be a nonempty string")
+            item = freeze_metadata(value)
+            owned[key] = item
+            strict &= _key_valid(key) and _strict_keys(item)
+        # Validate and detach even direct construction of a node's public type.
+        # Reusing a supposedly immutable wrapper over a caller-owned dictionary
+        # would permit later mutation to invalidate its finite-JSON proof.
+        object.__setattr__(self, "_data", MappingProxyType(owned))
         object.__setattr__(self, "_strict", strict)
         object.__setattr__(self, "_encoded", None)
 
@@ -99,17 +114,7 @@ def freeze_metadata(value: object) -> object:
             raise ValueError("metadata must contain only finite JSON values")
         return value
     if isinstance(value, (list, tuple)):
-        return _FrozenTuple(freeze_metadata(item) for item in value)
+        return _FrozenTuple(value)
     if isinstance(value, Mapping):
-        result = {}
-        strict = True
-        for key, item in value.items():
-            # The expansion contract accepts whitespace around nonempty keys;
-            # the Gym JSON-copy contract is stricter. Retain both behaviours.
-            if not isinstance(key, str) or not key.strip():
-                raise ValueError("metadata key must be a nonempty string")
-            owned = freeze_metadata(item)
-            result[key] = owned
-            strict &= _key_valid(key) and _strict_keys(owned)
-        return _FrozenMap(result, strict)
+        return _FrozenMap(value)
     raise ValueError("metadata must contain only finite JSON values")

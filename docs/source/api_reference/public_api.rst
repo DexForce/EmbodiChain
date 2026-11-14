@@ -1777,7 +1777,7 @@ attempts at episode boundaries. Native failures invalidate the active host.
    PreparingExpansionHost
 
 embodichain.lab.expansion.episode_export
----------------------------------------
+----------------------------------------
 
 .. currentmodule:: embodichain.lab.expansion.episode_export
 
@@ -1946,7 +1946,7 @@ Apply one native visual profile per compatible World cohort. Render complete rec
    inspect_observation_variants
 
 embodichain.lab.expansion.workloads
-----------------------------------
+-----------------------------------
 
 .. currentmodule:: embodichain.lab.expansion.workloads
 
@@ -3706,7 +3706,7 @@ embodichain.lab.sim.sensors.camera
    CameraCfg
 
 embodichain.lab.sim.sensors.contact
-----------------------------------
+-----------------------------------
 
 .. currentmodule:: embodichain.lab.sim.sensors.contact
 
@@ -3715,7 +3715,7 @@ embodichain.lab.sim.sensors.contact
    ContactPermissionChecker
 
 embodichain.lab.sim.sensors.contact.permissions
-----------------------------------------------
+-----------------------------------------------
 
 .. currentmodule:: embodichain.lab.sim.sensors.contact.permissions
 
