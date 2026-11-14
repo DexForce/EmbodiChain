@@ -5,12 +5,6 @@ configured Dual UR5 embodiment, and runs Pick and Place through the existing
 verified Task Program executor. The source contains a static table and a
 dynamic cube, with no robot. The left arm performs the task.
 
-[![Verified USD scene pick/place replay](media/demo.gif)](media/demo.mp4?raw=1)
-
-[Download the 19-second MP4](media/demo.mp4?raw=1) or [view a still frame](media/poster.png). The clip renders the recorded
-poses from a successful 477-control-step execution. Lift, acquisition/release,
-placement, uprightness and settling are checked during the original execution.
-
 From the repository root:
 
 ```bash
