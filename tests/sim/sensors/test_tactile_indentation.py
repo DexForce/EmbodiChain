@@ -71,8 +71,8 @@ def test_curved_indentation_matches_dense_and_analytic_solids(device: str) -> No
     context = SensorContext(
         torch.device(device), 4, None, None, ray_factory=lambda *_: scene
     )
-    filtered = TactileIndentation(cfg, context=context)
-    dense = TactileIndentation(cfg.replace(use_candidates=False), context=context)
+    filtered = TactileIndentation(cfg.replace(use_candidates=True), context=context)
+    dense = TactileIndentation(cfg, context=context)
     for sensor in (filtered, dense):
         sensor._bind(1, lambda: poses)
         sensor._sample(1, 0.01, 1, 0.01)
