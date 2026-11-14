@@ -474,51 +474,47 @@ def _compile_usd_import(
         source.materials.update(materials)
         if isinstance(cfg, RobotCfg) and cfg.enable_sensor:
             for sensor_cfg in cfg.sensors:
-                if not isinstance(sensor_cfg, CameraCfg):
-                    raise TypeError("RobotCfg.sensors supports mounted cameras only.")
                 from embodichain.lab.sim.sim_manager import SimulationManager
+                from embodichain.lab.sim.sensors.attachment import _qualify_robot_mount
 
                 factories = (
                     SimulationManager.SUPPORTED_SENSOR_TYPES
                     if manager is None
                     else manager.SUPPORTED_SENSOR_TYPES
                 )
-                _, sensor_factory, _ = _resolve_sensor_factory(
+                _, sensor_factory, legacy = _resolve_sensor_factory(
                     sensor_cfg.sensor_type, factories
                 )
-                if not isinstance(sensor_factory, type) or not issubclass(
-                    sensor_factory, Camera
-                ):
-                    raise ValueError(
-                        f"Unsupported mounted camera type {sensor_cfg.sensor_type!r}."
-                    )
-                if issubclass(sensor_factory, StereoCamera) and not isinstance(
-                    sensor_cfg, StereoCameraCfg
-                ):
+                if isinstance(sensor_cfg, CameraCfg):
+                    if not isinstance(sensor_factory, type) or not issubclass(
+                        sensor_factory, Camera
+                    ):
+                        raise ValueError(
+                            f"Unsupported mounted camera type {sensor_cfg.sensor_type!r}."
+                        )
+                    if issubclass(sensor_factory, StereoCamera) and not isinstance(
+                        sensor_cfg, StereoCameraCfg
+                    ):
+                        raise TypeError(
+                            "StereoCamera requires a StereoCameraCfg configuration."
+                        )
+                    if manager is not None:
+                        manager._require_native_renderer("Mounted cameras")
+                elif legacy:
                     raise TypeError(
-                        "StereoCamera requires a StereoCameraCfg configuration."
+                        "Nonvisual mounted sensors require a context-backed registration."
                     )
-                if manager is not None:
-                    manager._require_native_renderer("Mounted cameras")
-                if not isinstance(sensor_cfg.uid, str) or not sensor_cfg.uid.strip():
-                    raise ValueError("Mounted sensors require a non-empty uid.")
-                if sensor_cfg.uid in sensor_uids:
-                    raise ValueError(f"Sensor {sensor_cfg.uid!r} already exists.")
-                sensor_uids.add(sensor_cfg.uid)
-                parent = sensor_cfg.extrinsics.parent
-                if not isinstance(parent, str) or not parent.strip():
-                    raise ValueError("Mounted sensors require a parent link.")
-                link_name = parent.removeprefix(f"{uid}/")
-                if not link_name or "/" in link_name:
-                    raise ValueError(
-                        f"Mounted sensor {sensor_cfg.uid!r} must refer to a local link on robot {uid!r}."
-                    )
+                bound_cfg = _qualify_robot_mount(sensor_cfg, uid, sensor_uids)
+                offset = (
+                    bound_cfg.extrinsics
+                    if isinstance(bound_cfg, CameraCfg)
+                    else bound_cfg.mount
+                )
+                link_name = offset.parent.removeprefix(f"{uid}/")
                 if link_name not in {link.name for link in descriptor.links}:
                     raise ValueError(
                         f"Mounted sensor {sensor_cfg.uid!r} refers to unknown link {link_name!r} on robot {uid!r}."
                     )
-                bound_cfg = deepcopy(sensor_cfg)
-                bound_cfg.extrinsics.parent = f"{uid}/{link_name}"
                 mounted_sensors.append(bound_cfg)
         facade = (
             None if manager is None else facade_type(cfg=cfg, device=manager.device)

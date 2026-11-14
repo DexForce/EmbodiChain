@@ -671,3 +671,65 @@ def test_wheel_installed_external_sensor_supports_python_yaml_and_manager(
     """)
     env = dict(os.environ, PYTHONPATH=os.pathsep.join((str(target), str(REPO_ROOT))))
     run([sys.executable, "-c", script], env=env, cwd=tmp_path)
+
+
+def test_managed_sensor_mount_rebind_and_failed_binding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events = []
+
+    class MountedProbe(_Probe):
+        def on_bind(self) -> None:
+            events.append("bind")
+            assert self.get_mount_pose().shape == (2, 4, 4)
+            if self.cfg.options.gain < 0:
+                raise RuntimeError("bind failed")
+
+        def on_unbind(self) -> None:
+            events.append("unbind")
+
+        def destroy(self) -> None:
+            events.append("destroy")
+
+    register_sensor(SensorRegistration("TestProbe", _ProbeCfg, MountedProbe))
+    manager = _manager()
+    manager._rigid_objects = {}
+    parent = torch.eye(4).expand(2, -1, -1).clone()
+    parent[1, 0, 3] = 4.0
+    manager._robots["robot"] = SimpleNamespace(
+        link_names=["tip"],
+        num_instances=2,
+        get_link_pose=lambda name, to_matrix: parent,
+    )
+    cfg = _ProbeCfg(
+        uid="probe",
+        asset_uid="robot",
+        options=_Options(gain=-1.0),
+        mount=SensorCfg.OffsetCfg(parent="robot/tip", pos=(0.0, 1.0, 0.0)),
+    )
+    with pytest.raises(RuntimeError, match="bind failed"):
+        manager.add_sensor(cfg)
+    assert manager._sensors == {}
+    assert events == ["bind", "unbind", "destroy"]
+
+    cfg.options.gain = 1.0
+    sensor = manager.add_sensor(cfg)
+    torch.testing.assert_close(
+        sensor.get_mount_pose()[:, :3, 3],
+        torch.tensor([[0.0, 1.0, 0.0], [4.0, 1.0, 0.0]]),
+    )
+    manager._bind_sensor(sensor, 1)
+    manager._bind_sensor(sensor, 1)
+    manager.remove_asset(sensor.uid)
+    assert events == [
+        "bind",
+        "unbind",
+        "destroy",
+        "bind",
+        "unbind",
+        "bind",
+        "unbind",
+        "destroy",
+    ]
+    with pytest.raises(RuntimeError, match="no live mount"):
+        sensor.get_mount_pose()

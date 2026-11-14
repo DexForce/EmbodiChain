@@ -3007,6 +3007,10 @@ def test_context_camera_uses_manager_attachment_at_the_current_revision(
     camera.cfg = cfg
     camera._is_attached = False
     camera.destroy = MagicMock()
+    camera._bound_topology = None
+    camera._sample_metadata = None
+    camera.on_bind = MagicMock()
+    camera.on_unbind = MagicMock()
     camera.attach_to_parent_nodes = MagicMock(
         side_effect=(
             RuntimeError("attachment failed")
