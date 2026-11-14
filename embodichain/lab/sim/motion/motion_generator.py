@@ -761,6 +761,13 @@ class MotionGenerator:
         Raises:
             ValueError: If targets or options violate the motion contract.
         """
+        # The optional expansion scope collects requests on the World owner.
+        # It is inert for ordinary callers and preserves native budget scopes.
+        from embodichain.lab.expansion._planning_batches import _try_motion
+
+        handled, result = _try_motion(self, target_states, options, defer_recovery)
+        if handled:
+            return result
         if not target_states:
             raise ValueError("target_states must contain at least one waypoint.")
         options = MotionGenOptions() if options is None else options

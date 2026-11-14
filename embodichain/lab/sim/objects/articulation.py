@@ -2027,8 +2027,8 @@ class Articulation(BatchEntity):
                 )
         if (
             (root_pose is not None or qpos is not None)
-            and self.device.type == "cpu"
             and not self._data.is_newton_backend
+            and not self._world.get_physics_scene().is_direct_gpu()
         ):
             # Direct root/joint writes update native kinematics, but CPU link
             # transforms are published by World.update. Do not advance physics

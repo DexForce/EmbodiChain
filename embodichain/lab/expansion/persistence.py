@@ -18,12 +18,14 @@
 
 from __future__ import annotations
 from dataclasses import asdict, replace
+from collections import OrderedDict
 import hashlib
 import json
 import os
 from pathlib import Path
 import tempfile
 import shutil
+from threading import RLock
 import numpy as np
 from embodichain.lab.gym.envs._json import json_safe_copy
 from .contracts import ExpertEpisode, CommitReceipt
@@ -38,6 +40,10 @@ from embodichain.data_pipeline.recording.media import (
 from .artifacts import ArtifactReference, EpisodeArtifactManifest, resolve_artifact_path
 
 __all__ = ["ArtifactEpisodeSink", "load_expansion_episode"]
+
+_EPISODE_CACHE = OrderedDict()
+_EPISODE_CACHE_LOCK = RLock()
+_EPISODE_CACHE_BYTES = 0
 
 
 def _source_references(metadata):
@@ -65,6 +71,45 @@ def load_expansion_episode(path: str | Path) -> ExpertEpisode:
     Legacy staged episodes remain readable in place. New artifacts carry only
     relative references and can be moved without changing their frozen bytes.
     """
+    global _EPISODE_CACHE_BYTES
+    path = Path(path).resolve()
+    # Re-read all evidence bytes on every call. Path/mtime keys alone could
+    # conceal tampering; this cache only avoids repeated parsing/JSON ownership.
+    with path.open("rb") as stream:
+        digest = hashlib.file_digest(stream, "sha256").digest()
+    with _EPISODE_CACHE_LOCK:
+        cached = _EPISODE_CACHE.get(path)
+        if cached is not None and cached[0] == digest:
+            _EPISODE_CACHE.move_to_end(path)
+            # Construction retains every numeric check and owns fresh tensors.
+            return replace(cached[1])
+    episode = _load_expansion_episode(path)
+    with path.open("rb") as stream:
+        if hashlib.file_digest(stream, "sha256").digest() != digest:
+            raise ValueError("Evidence changed while loading")
+    prototype = replace(episode)
+    size = sum(
+        value.numel() * value.element_size()
+        for value in (
+            prototype.actions,
+            prototype.timestamps,
+            *prototype.observations.values(),
+        )
+    )
+    with _EPISODE_CACHE_LOCK:
+        previous = _EPISODE_CACHE.pop(path, None)
+        if previous is not None:
+            _EPISODE_CACHE_BYTES -= previous[2]
+        if size <= 64 * 1024 * 1024:
+            _EPISODE_CACHE[path] = digest, prototype, size
+            _EPISODE_CACHE_BYTES += size
+        while len(_EPISODE_CACHE) > 16 or _EPISODE_CACHE_BYTES > 128 * 1024 * 1024:
+            _, (_, _, released) = _EPISODE_CACHE.popitem(last=False)
+            _EPISODE_CACHE_BYTES -= released
+    return episode
+
+
+def _load_expansion_episode(path: Path) -> ExpertEpisode:
     from embodichain.lab.gym.envs.managers.real2sim_collection import (
         load_staged_real2sim_episode,
     )

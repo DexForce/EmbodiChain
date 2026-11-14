@@ -1662,6 +1662,16 @@ and durable episode-boundary recovery. See the offline expansion example.
    ExpansionCoverage
    EpisodeCoverage
 
+.. autosummary::
+
+   ExpansionWorkloadCfg
+   WorkloadExecutionCfg
+   WorkloadAssignment
+   WorkloadRowResult
+   WorkloadSource
+   WorkloadProgramExecutor
+   export_expansion_episodes
+
 embodichain.lab.expansion.artifacts
 -----------------------------------
 
@@ -1765,6 +1775,21 @@ attempts at episode boundaries. Native failures invalidate the active host.
    ExpansionWorkItem
    ExpansionRecipeSource
    PreparingExpansionHost
+
+embodichain.lab.expansion.episode_export
+---------------------------------------
+
+.. currentmodule:: embodichain.lab.expansion.episode_export
+
+Export each confirmed qualified trajectory to an independently readable LeRobot
+dataset, retaining its portable T+1 evidence, source hashes and recording journal.
+Export uses frozen evidence and opens no simulation World.
+
+.. autosummary::
+
+   export_expansion_episodes
+
+.. autofunction:: export_expansion_episodes
 
 embodichain.lab.expansion.export
 --------------------------------
@@ -1919,6 +1944,32 @@ Apply one native visual profile per compatible World cohort. Render complete rec
    load_visual_profiles
    render_observation_variants
    inspect_observation_variants
+
+embodichain.lab.expansion.workloads
+----------------------------------
+
+.. currentmodule:: embodichain.lab.expansion.workloads
+
+Rolling Task Program execution in one caller-owned World with capacity
+``workload_count * batch_size``. Sources retain task-owned scene proposals and
+required physical qualification; native session and sink receipts remain the
+authority for admission and committed quotas. Preparing rows settle through
+ordinary World steps while live trajectories retain every control boundary.
+
+.. autosummary::
+
+   ExpansionWorkloadCfg
+   WorkloadExecutionCfg
+   WorkloadAssignment
+   WorkloadRowResult
+   WorkloadSource
+   WorkloadProgramExecutor
+
+.. autoclass:: WorkloadProgramExecutor
+   :members:
+
+.. autoclass:: WorkloadSource
+   :members:
 
 embodichain.lab.expansion.workflow
 ----------------------------------
@@ -3653,6 +3704,32 @@ embodichain.lab.sim.sensors.camera
 
    Camera
    CameraCfg
+
+embodichain.lab.sim.sensors.contact
+----------------------------------
+
+.. currentmodule:: embodichain.lab.sim.sensors.contact
+
+.. autosummary::
+
+   ContactPermissionChecker
+
+embodichain.lab.sim.sensors.contact.permissions
+----------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.sensors.contact.permissions
+
+Check complete native contact buffers against explicit actor/frame permissions.
+The host chooses the original physical sampling rate; unavailable impulse,
+unknown actors and dropped evidence cannot pass. Results are owned device-side
+row summaries, suitable for every-substep observers without Python contact lists.
+
+.. autosummary::
+
+   ContactPermissionChecker
+
+.. autoclass:: ContactPermissionChecker
+   :members:
 
 embodichain.lab.sim.sensors.contact.sensor
 ------------------------------------------

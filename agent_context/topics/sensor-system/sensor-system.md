@@ -125,6 +125,14 @@ changing filtering, force assumptions, topology handling or actor metadata.
 Geometry-only contacts and multiple backend-emitted rows per actor pair are
 valid; sensor adaptation does not synthesize a common contact manifold.
 
+`ContactPermissionChecker` consumes complete native samples with explicit
+actor/frame permissions, returning owned per-row device summaries. It does not
+choose the host's sampling frequency or relax unavailable-impulse/loss gates.
+Global static actors retain their explicit row memberships. Rebind after query
+topology changes. Default CUDA dynamics can select ordinary reporting through
+`DefaultPhysicsCfg.direct_gpu_api=False` when static actor identity is required;
+this is independent of the physics device and leaves CPU defaults unchanged.
+
 The contact scatter kernel remains sensor-owned because its columns, IDs and
 quota are integration contracts. Generic image tiling belongs to
 `embodichain/compute/image/_warp/tiling.py`; compatibility exports under

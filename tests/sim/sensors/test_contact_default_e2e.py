@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import pytest
 import warp as wp
+import torch
 
 from embodichain.lab.sim.cfg import (
     DefaultPhysicsCfg,
@@ -26,7 +27,7 @@ from embodichain.lab.sim.cfg import (
     RigidBodyPhysicsCfg,
     RigidObjectCfg,
 )
-from embodichain.lab.sim.sensors import ContactSensorCfg
+from embodichain.lab.sim.sensors import ContactSensorCfg, ContactPermissionChecker
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.lab.sim.sim_manager import SimulationManager, SimulationManagerCfg
 
@@ -34,15 +35,19 @@ pytestmark = pytest.mark.requires_sim
 
 
 @pytest.mark.parametrize(
-    ("device", "expected_contacts_per_env"),
+    ("device", "expected_contacts_per_env", "direct_gpu_api"),
     [
-        pytest.param("cpu", 4, id="cpu"),
-        pytest.param("cuda:0", 4, marks=pytest.mark.gpu, id="cuda"),
+        pytest.param("cpu", 4, True, id="cpu"),
+        pytest.param("cuda:0", 4, True, marks=pytest.mark.gpu, id="cuda"),
+        pytest.param(
+            "cuda:0", 4, False, marks=pytest.mark.gpu, id="cuda-native-reports"
+        ),
     ],
 )
 def test_default_contact_sensor_preserves_contact_multiplicity(
     device: str,
     expected_contacts_per_env: int,
+    direct_gpu_api: bool,
 ) -> None:
     wp.init()
     if device.startswith("cuda") and not wp.is_cuda_available():
@@ -53,7 +58,7 @@ def test_default_contact_sensor_preserves_contact_multiplicity(
             headless=True,
             num_envs=2,
             arena_space=2.0,
-            physics_cfg=DefaultPhysicsCfg(device=device),
+            physics_cfg=DefaultPhysicsCfg(device=device, direct_gpu_api=direct_gpu_api),
         )
     )
     try:
@@ -110,6 +115,51 @@ def test_default_contact_sensor_preserves_contact_multiplicity(
             sensor.get_actor_info(actor_id).path.endswith("/cube")
             for actor_id in cube_actor_ids
         )
+        assert sim.is_use_gpu_physics == device.startswith("cuda")
+        assert sim.get_world().get_physics_scene().is_direct_gpu() == (
+            device.startswith("cuda") and direct_gpu_api
+        )
+        if device == "cpu" or not direct_gpu_api:
+            maps = [{} for _ in range(2)]
+            for uid in ("cube", "ground", "default_plane"):
+                values = sensor.get_actor_ids(uid)[:, 0].cpu().tolist()
+                for row, actor in enumerate(values):
+                    maps[row][actor] = uid
+            checker = ContactPermissionChecker(
+                sensor,
+                maps,
+                allowed_contacts=(("cube", "ground"),),
+                moving_frames=("cube",),
+            )
+            accepted = checker.check()
+            assert accepted[:, 0].cpu().tolist() == [0, 0]
+            refused = ContactPermissionChecker(
+                sensor, maps, allowed_contacts=(), moving_frames=("cube",)
+            )
+            assert refused.check()[:, 0].cpu().tolist() == [3, 3]
+            assert accepted[:, 0].cpu().tolist() == [0, 0]
+            if device.startswith("cuda"):
+                other = torch.cuda.Stream()
+                with torch.cuda.stream(other):
+                    repeated = checker.check()
+                other.synchronize()
+                assert repeated[:, 0].cpu().tolist() == [0, 0]
+            bounded = sim.add_sensor(
+                ContactSensorCfg(
+                    uid="bounded",
+                    rigid_uid_list=["cube"],
+                    filter_need_both_actor=False,
+                    max_contacts_per_env=1,
+                )
+            )
+            bounded.update()
+            overflow = ContactPermissionChecker(
+                bounded,
+                maps,
+                allowed_contacts=(("cube", "ground"),),
+                moving_frames=("cube",),
+            )
+            assert overflow.check()[:, 0].cpu().tolist() == [4, 4]
     finally:
         sim.destroy(exit_process=False)
         SimulationManager.flush_cleanup_queue()

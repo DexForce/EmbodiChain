@@ -176,6 +176,13 @@ class MeasuredTaskMonitor:
         Returns:
             Physical truth value; unknown entities/joints are configuration errors.
         """
+        cached = getattr(self, "_batch_predicates", None)
+        if cached is not None:
+            from ._measured_batch import _MeasuredChecks
+
+            key = _MeasuredChecks.key(condition)
+            if key in cached:
+                return bool(cached[key][self.env_id])
         kind = condition["kind"]
         if kind == "joint_range":
             index = env.robot.joint_names.index(condition["joint"])
@@ -273,6 +280,47 @@ class MeasuredTaskMonitor:
                     and np.all(points <= condition["upper"])
                 )
         return bool(not passed if condition.get("negate", False) else passed)
+
+    @staticmethod
+    def batch_scope(
+        env: Any,
+        monitors: Sequence[MeasuredTaskMonitor],
+        *,
+        extra_conditions: Sequence[Mapping[str, object]] = (),
+    ) -> object:
+        """Share one measured numeric boundary across independent event monitors.
+
+        Args:
+            env: Live environment or complete measured-state facade.
+            monitors: Distinct physical-row monitors, already reset for this episode.
+            extra_conditions: Additional validated initial checks to read in this scope.
+
+        Returns:
+            Context manager. Inside it, predicate arithmetic uses one packed
+            readback; ordered events, counters and reports still belong to each
+            native monitor. Unsupported fast paths keep the scalar predicate.
+            No cached physical values survive the scope.
+        """
+        from ._measured_batch import _MeasuredChecks
+
+        selected = {monitor.env_id: monitor for monitor in monitors}
+        if not selected or len(selected) != len(monitors):
+            raise ValueError(
+                "batch_scope requires unique nonempty physical-row monitors"
+            )
+        if any(not 0 <= row < env.num_envs for row in selected):
+            raise ValueError("monitor row is outside the measured environment")
+        first = next(iter(selected.values()))
+        conditions = [first._validate(c) for c in extra_conditions]
+        final, events = [], []
+        for monitor in selected.values():
+            final.extend(monitor.final_checks)
+            events.extend({"conditions": values} for _, values, _ in monitor.events)
+        return _MeasuredChecks(
+            env,
+            {"initial_checks": conditions, "final_checks": final, "events": events},
+            selected,
+        ).boundary()
 
     def observe(self, env: Any, action: Any) -> None:
         """Record consecutive event predicates at actual control boundaries."""

@@ -133,6 +133,15 @@ class PhysicsBackendCfg:
 class DefaultPhysicsCfg(PhysicsBackendCfg):
     """Configuration selector for the Default physics backend."""
 
+    direct_gpu_api: bool = True
+    """Use Direct GPU state access when dynamics run on CUDA.
+
+    False retains GPU dynamics with ordinary state/contact reporting. The
+    pinned Direct GPU contact API cannot identify static actors, so consumers
+    requiring complete contact identities must explicitly select False.
+    This option does not select the physics device or change contact sampling.
+    """
+
     cache_material: bool = False
     """Reuse identical physics materials across objects and environment clones.
 
@@ -168,6 +177,8 @@ class DefaultPhysicsCfg(PhysicsBackendCfg):
 
     def __post_init__(self) -> None:
         """Decode mapping input for the nested GPU-memory configuration."""
+        if type(self.direct_gpu_api) is not bool:
+            raise TypeError("direct_gpu_api must be a bool.")
         if isinstance(self.gpu_memory, Mapping):
             self.gpu_memory = GPUMemoryCfg(**self.gpu_memory)
         if not isinstance(self.gpu_memory, GPUMemoryCfg):

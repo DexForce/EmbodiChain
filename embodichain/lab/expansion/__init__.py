@@ -60,6 +60,13 @@ __all__ = [
     "load_expansion_episode",
     "resolve_expansion_job",
     "build_expansion_report",
+    "ExpansionWorkloadCfg",
+    "WorkloadExecutionCfg",
+    "WorkloadAssignment",
+    "WorkloadRowResult",
+    "WorkloadSource",
+    "WorkloadProgramExecutor",
+    "export_expansion_episodes",
 ]
 
 
@@ -98,6 +105,13 @@ def __getattr__(name: str) -> object:
         "load_expansion_episode": "persistence",
         "resolve_expansion_job": "configured",
         "build_expansion_report": "reporting",
+        "ExpansionWorkloadCfg": "workloads",
+        "WorkloadExecutionCfg": "workloads",
+        "WorkloadAssignment": "workloads",
+        "WorkloadRowResult": "workloads",
+        "WorkloadSource": "workloads",
+        "WorkloadProgramExecutor": "workloads",
+        "export_expansion_episodes": "episode_export",
     }.get(name, "engine")
     module = f"{__name__}.{owner}"
     value = getattr(import_module(module), name)

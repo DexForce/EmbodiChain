@@ -19,6 +19,8 @@
 ``Camera``, ``StereoCamera``, and ``ContactSensor`` all derive from ``BaseSensor`` and expose batched ``TensorDict`` data buffers.
 """
 
+from __future__ import annotations
+
 from .base_sensor import BaseSensor, SensorCfg
 from .camera import Camera, CameraCfg
 from .stereo import StereoCamera, StereoCameraCfg
@@ -26,4 +28,5 @@ from .contact import (
     ContactSensor,
     ContactSensorCfg,
     ArticulationContactFilterCfg,
+    ContactPermissionChecker,
 )

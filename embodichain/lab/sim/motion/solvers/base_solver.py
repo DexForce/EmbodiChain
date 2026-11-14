@@ -697,9 +697,15 @@ class BaseSolver(metaclass=ABCMeta):
 
         # Ensure locations is a tensor if provided
         if locations is not None:
+            from pytorch_kinematics import Transform3d
+
             locations = torch.as_tensor(
                 locations, dtype=torch.float32, device=self.device
             )
+            # PK 0.10 constructs a CPU Transform3d for raw offset tensors.
+            # Supply its declared device instead of mixing CPU homogeneous
+            # padding with CUDA offsets inside the dependency.
+            locations = Transform3d(pos=locations, dtype=qpos.dtype, device=qpos.device)
 
         # Compute the Jacobian using the kinematics chain
         J = self.pk_serial_chain.jacobian(th=qpos, locations=locations)
