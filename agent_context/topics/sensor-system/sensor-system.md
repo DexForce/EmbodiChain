@@ -10,7 +10,7 @@
 | Exported sensor/config names | `embodichain/lab/sim/sensors/__init__.py` |
 | Joint encoder and relative frame transforms | `embodichain/lab/sim/sensors/state.py` |
 | Finite-difference PVA and IMU | `embodichain/lab/sim/sensors/inertial.py` |
-| Collision ray provider and terrain scan | `embodichain/lab/sim/sensors/ray.py` |
+| Collision/visual ray provider, terrain scan, geometric LiDAR and ray depth | `embodichain/lab/sim/sensors/ray.py` |
 | Image configuration, data flags, extrinsics | `embodichain/lab/sim/sensors/camera.py` → `CameraCfg`, `Camera` |
 | Two-eye transforms and attachment | `embodichain/lab/sim/sensors/stereo.py` → `StereoCameraCfg`, `StereoCamera` |
 | Parent-name resolution | `embodichain/lab/sim/sensors/attachment.py` → `resolve_parent_nodes` |
@@ -188,6 +188,14 @@ quota are integration contracts. Generic image tiling belongs to
 `utils.warp.kernels` do not change those owners.
 
 ## Focused validation
+
+Ray queries default to cooked collision shapes. Select `geometry_source: visual`
+for authored procedural or array-backed render geometry of rigid and visual
+objects. Visual queries use authored surfaces with no renderer or shading
+dependency. Meshes and static poses are cached per scene topology revision.
+Use kinematic targets for movable geometry. Target mesh topology, vertex data
+and scale must be shared across replicas. Replace an asset to change cached
+geometry. Each dynamic instance supplies its current arena-frame pose.
 
 | Changed boundary | Existing coverage |
 |---|---|

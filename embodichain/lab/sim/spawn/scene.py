@@ -32,7 +32,7 @@ from .._material_presets import (
 )
 
 if TYPE_CHECKING:
-    from dexsim.spawn import ConstraintDesc
+    from dexsim.spawn import ConstraintDesc, ObjectDesc
 
 __all__ = ["SpawnScene"]
 
@@ -711,6 +711,13 @@ class SpawnScene:
         if any(path not in result.handles for path in paths):
             return ()
         return tuple(result.handles[path] for path in paths)
+
+    def rigid_geometry_descriptor(self, uid: str) -> ObjectDesc:
+        """Borrow the authored geometry of a declared rigid or visual object."""
+        declaration = self._assets[uid]
+        if declaration.kind not in ("rigid_object", "visual_object"):
+            raise ValueError(f"{uid!r} has no rigid geometry descriptor.")
+        return declaration.descriptor
 
     def _initialize_facade_declaration(self, facade: Any | None) -> None:
         """Give a Spawn facade the instance count owned by this scene.
