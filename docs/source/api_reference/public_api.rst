@@ -6015,8 +6015,16 @@ Reference state sensors
    FrameTransformCfg
 
 
-Finite-difference inertial sensors
-----------------------------------
+Inertial sensors
+----------------
+
+PVA and IMU use finite differences by default. Set
+``acceleration_source="native"`` for dynamic rigid bodies on CUDA Newton
+MuJoCo Warp with RNE enabled. ``"auto"`` selects native acquisition when the
+configured target supports it and finite differences otherwise. Native
+acceleration is the final solver substep result, transported from the
+center of mass to the sensor point. After a reset it becomes valid on the next
+sampled physics step. The ``acceleration_valid`` descriptor reports the bound source.
 
 .. currentmodule:: embodichain.lab.sim.sensors
 

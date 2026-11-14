@@ -9,7 +9,7 @@
 | Explicit clock and joint-state service | `embodichain/lab/sim/sensors/context.py` → `SensorContext` |
 | Exported sensor/config names | `embodichain/lab/sim/sensors/__init__.py` |
 | Joint encoder and relative frame transforms | `embodichain/lab/sim/sensors/state.py` |
-| Finite-difference PVA and IMU | `embodichain/lab/sim/sensors/inertial.py` |
+| PVA and IMU, including opt-in native acceleration | `embodichain/lab/sim/sensors/inertial.py` |
 | Collision/visual ray provider, terrain scan, geometric LiDAR and ray depth | `embodichain/lab/sim/sensors/ray.py` |
 | Curved pad geometry and indentation depth | `embodichain/lab/sim/sensors/tactile_indentation.py` |
 | Official VLP-16 preset | `extensions/embodichain_sensors/vlp16.py` and the `embodichain.sensors` entry point |

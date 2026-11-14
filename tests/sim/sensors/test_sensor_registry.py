@@ -817,7 +817,22 @@ def test_imu_distinguishes_freefall_from_rest_and_partial_reset() -> None:
     manager.sim_config.physics_cfg = SimpleNamespace(gravity=(0.0, 0.0, -9.81))
     body_state = torch.tensor([[[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, *([0.0] * 6)]]] * 2)
     manager._robots["arm"] = SimpleNamespace(link_names=["tip"], body_state=body_state)
-    sensor = manager.add_sensor(IMUCfg(uid="imu", asset_uid="arm", link_name="tip"))
+    with pytest.raises(NotImplementedError, match="Native acceleration"):
+        manager.add_sensor(
+            IMUCfg(
+                uid="strict",
+                asset_uid="arm",
+                link_name="tip",
+                acceleration_source="native",
+            )
+        )
+    sensor = manager.add_sensor(
+        IMUCfg(uid="imu", asset_uid="arm", link_name="tip", acceleration_source="auto")
+    )
+    assert (
+        sensor.get_data_descriptors()["acceleration_valid"]["source"]
+        == "finite_difference"
+    )
     manager._sample_managed_sensors("physics", 12, 0.1)
     assert not sensor.get_data()["acceleration_valid"].any()
     body_state[1, 0, 9] = -0.981

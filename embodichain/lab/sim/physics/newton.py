@@ -18,7 +18,7 @@
 from __future__ import annotations
 
 import importlib
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING
 import weakref
 
@@ -63,6 +63,7 @@ class NewtonPhysicsBackend(PhysicsBackend):
         self._differentiable_runtime = None
         self._runtime_device: str | None = None
         self._configured_solver_type: str | None = None
+        self._rne_available = False
         self._fluid_render_clip_key: tuple[object, ...] | None = None
         self._fluid_render_clip_z: torch.Tensor | None = None
         self._fluid_render_dirty = False
@@ -101,7 +102,30 @@ class NewtonPhysicsBackend(PhysicsBackend):
         )
         self._configured_solver_type = str(newton_cfg.solver_cfg.solver_type)
         self._runtime_device = str(newton_cfg.device)
+        self._rne_available = (
+            self._configured_solver_type == "mujoco_warp"
+            and self._runtime_device.startswith("cuda")
+            and not newton_cfg.requires_grad
+            and not getattr(newton_cfg.solver_cfg, "use_mujoco_cpu", True)
+            and getattr(newton_cfg.solver_cfg, "rne_mode", "disabled") != "disabled"
+        )
         world_config.newton_cfg = newton_cfg
+
+    def _create_body_acceleration_reader(
+        self, asset_uid: str, link_name: str | None
+    ) -> Callable[[], tuple[torch.Tensor, torch.Tensor, torch.Tensor]] | None:
+        if not self._rne_available or link_name is not None:
+            return None
+        asset = self._manager._rigid_objects.get(asset_uid)
+        if asset is None or asset.is_non_dynamic or asset.body_data is None:
+            return None
+
+        data = asset.body_data
+
+        def read() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+            return data.lin_acc, data.ang_acc, data.com_pose[:, :3]
+
+        return read
 
     def activate(self, sim_config: "SimulationManagerCfg") -> None:
         del sim_config
