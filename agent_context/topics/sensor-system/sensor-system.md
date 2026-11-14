@@ -128,6 +128,8 @@ valid; sensor adaptation does not synthesize a common contact manifold.
 `ContactPermissionChecker` consumes complete native samples with explicit
 actor/frame permissions, returning owned per-row device summaries. It does not
 choose the host's sampling frequency or relax unavailable-impulse/loss gates.
+Eager checks wait for the latest sensor sample on their CUDA stream without
+refreshing contacts or advancing histories.
 Global static actors retain their explicit row memberships. Rebind after query
 topology changes. Default CUDA dynamics can select ordinary reporting through
 `DefaultPhysicsCfg.direct_gpu_api=False` when static actor identity is required;

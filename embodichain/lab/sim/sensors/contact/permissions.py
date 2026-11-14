@@ -123,6 +123,9 @@ class ContactPermissionChecker:
     def check(self) -> torch.Tensor:
         """Return owned per-row ``(reason, actor0, actor1)`` integer summaries.
 
+        Eager CUDA checks wait for the latest sensor sample on the caller's
+        stream without refreshing contacts or advancing histories.
+
         Returns:
             Tensor ``(B, 3)`` on the sensor device. Reason zero passes; one means
             unavailable applied impulse, two unknown/cross-row actor, three
@@ -140,6 +143,8 @@ class ContactPermissionChecker:
 
         if self._ready is not None:
             torch.cuda.current_stream(self.device).wait_event(self._ready)
+        # The checker event orders its own buffers, not the sensor's producer.
+        self.sensor._wait_for_sample()
         data = self.sensor.get_data()
         if id(self.sensor._query.actors) != self._actors_token:
             raise RuntimeError(
