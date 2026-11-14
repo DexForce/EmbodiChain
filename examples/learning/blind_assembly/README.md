@@ -31,8 +31,8 @@ See each task's configuration README for the observation and success contracts.
 Generation requires the pinned mjfit provider described in
 [the assembly examples](../../sim/assembly/README.md). Loading saved manifests
 and bundled checkpoint resources does not require generation. Raw contact
-capabilities require the SDK integration described in
-[the dependency notes](../../../scripts/patches/README.md).
+parameters require a supporting SDK with the matching public descriptor fields;
+unsupported builds fail explicitly.
 
 ## Actor export and native preview
 

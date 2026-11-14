@@ -26,7 +26,7 @@ The exact replay uses historical DexSim source revision
 `528daf12fd44b9383b30165ac484cf79b574e873` with source-contact forwarding.
 Prepare that SDK through its normal build/package process, using the
 historical contact patch and binary hashes described in the bundle's evidence
-and [dependency notes](../../../scripts/patches/README.md).
+and [archived runtime material](https://github.com/DexForce/EmbodiChain/tree/e15c945a8976b06b447f933400d12e5bd936dd3a/scripts).
 The unextended `dexsim_engine==0.5.1rc1` wheel alone is insufficient for raw
 contact parameters. SDK binaries are not redistributed with the model.
 The earlier dev integration was tracked separately by
@@ -36,17 +36,10 @@ smoke checks use the installed 0.6.0rc1 package without the historical overlay.
 A new SDK/solver profile requires a new evaluation and must not inherit the
 historical result.
 
-Create the version-guarded MuJoCo Warp capacity overlay before a fresh process:
-
-```bash
-python scripts/patches/apply_mujoco_warp_epa_horizon.py --output /tmp/assembly-epa128
-export PYTHONPATH="/tmp/assembly-epa128:${ASSEMBLY_SDK_ROOT:?Set the prepared SDK directory}${PYTHONPATH:+:$PYTHONPATH}"
-```
-
-`ASSEMBLY_SDK_ROOT` is the prepared directory containing `dexsim/`, not a
-Dexverse repository root. This explicitly selects the historical SDK without
-editing an installed dependency. The EPA helper verifies source hashes and
-changes only the capacity constant, retaining overflow warnings.
+Current source and distributions do not provide dependency-overlay tooling.
+Reconstruct historical measurements only with the external runtime recorded in
+the bundle's provenance; its capacity modification remains part of that
+historical profile rather than the current SDK installation.
 
 ## Download and replay
 

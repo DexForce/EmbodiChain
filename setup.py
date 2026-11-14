@@ -230,17 +230,7 @@ def main() -> None:
         packages=get_packages(),
         package_dir=get_package_dir(),
         package_data=get_package_data(),
-        data_files=[
-            *get_example_data_files(),
-            (
-                "share/embodichain/assembly_patches",
-                [
-                    path.relative_to(THIS_DIR).as_posix()
-                    for path in sorted((THIS_DIR / "scripts" / "patches").iterdir())
-                    if path.suffix in {".patch", ".md", ".py"}
-                ],
-            ),
-        ],
+        data_files=get_example_data_files(),
         cmdclass={"clean": CleanCommand},
         include_package_data=False,
     )

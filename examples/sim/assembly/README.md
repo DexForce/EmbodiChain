@@ -108,14 +108,10 @@ remain unchanged.
 
 Newton's raw source contacts and preparation-time rigid variants require an SDK
 exposing the matching public descriptor fields. Unsupported builds fail
-explicitly. Capability notes and the immutable historical runtime archive are in
-[`scripts/patches/README.md`](../../../scripts/patches/README.md). Development-only
+explicitly. Development-only
 `--backend-contacts` selects native default contacts and is recorded as such.
 Default cannot reproduce raw MuJoCo contact semantics; it is a measured
 comparison backend. Default's cylinder cooking also uses a polygonal proxy.
-Wheels include the version-checked EPA helper and patches under
-`share/embodichain/assembly_patches/`; historical SDK and CPU PGS patches remain
-in the archive rather than the current distribution.
 
 ```bash
 embodichain run-example sim/assembly/drop_peg --backend newton --route direct

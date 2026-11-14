@@ -17,7 +17,7 @@
     "warp_lang": "1.17.0",
     "dexsim_python_revision": "528daf12fd44b9383b30165ac484cf79b574e873",
     "dexsim_profile": "recorded historical source-contact overlay, unchanged native libraries; exact hashes retained in evidence/provenance",
-    "mujoco_warp_overlay": "EPA horizon 128, version- and source-hash-guarded helper",
+    "mujoco_warp_overlay": "historical external runtime with EPA horizon 128; exact provenance retained in bundle evidence",
     "gpu": "NVIDIA GeForce RTX 5090 32 GiB"
   },
   "evaluation": {

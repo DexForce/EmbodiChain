@@ -54,7 +54,6 @@ def installed_benchmark(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path,
         "extensions/embodichain_tasks",
         "extensions/embodichain_benchmarks",
         "extensions/embodichain_models",
-        "scripts/patches",
     ):
         shutil.copytree(root / name, source / name, ignore=ignore)
     built = subprocess.run(
@@ -80,26 +79,8 @@ def installed_benchmark(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path,
         assert "embodichain/cli/benchmark.py" in entries
         assert "embodichain_benchmarks/assembly/robot_reference.py" in entries
         assert "embodichain_robots/flexiv/rizon4s/rizon4s_sources.json" in entries
-        for filename in (
-            "apply_mujoco_warp_epa_horizon.py",
-            "mujoco_warp_epa_horizon.patch",
-            "mujoco_warp_epa_horizon_3_15.patch",
-        ):
-            assert any(
-                name.endswith(f"/data/share/embodichain/assembly_patches/{filename}")
-                for name in entries
-            ), filename
         assert not any(
-            name.endswith(
-                (
-                    "dexsim_assembly_contact.patch",
-                    "dexsim_assembly_variants.patch",
-                    "dexsim_continuous_joint.patch",
-                    "newton_cpu_pgs.patch",
-                    "newton_cpu_pgs.md",
-                )
-            )
-            for name in entries
+            "share/embodichain/assembly_patches/" in name for name in entries
         )
         suites = {
             Path(name).name

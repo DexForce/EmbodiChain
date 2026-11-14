@@ -92,15 +92,13 @@ measurements. The harness cannot certify an unavailable health measurement: back
 warnings, unsupported shapes and missing overflow accounting remain explicit.
 Single-peg and grid scoring share a bounded seating predicate: centered
 endpoints below the valid seat are failures, including floor passage.
-`examples/sim/assembly/` documents dependency patches and qualified boundaries;
+`examples/sim/assembly/` documents SDK capabilities and qualified boundaries;
 the source benchmark runner is `scripts/benchmark/assembly/precision.py`.
 The matrix host initializes installed SDK schemas before authoring USD and
 records geometry/ownership failures separately from independent source/direct
 cells. Each invocation owns a fresh run directory. Worker exit status, asset
 identity and configuration must match before its result is accepted.
-Historical SDK/PGS patches and standalone version-comparison material are
-linked from `scripts/patches/README.md`; the current asset layer retains the
-version-checked EPA overlay. Nominal robot preparation is shipped by the robot deployment
+Nominal robot preparation is shipped by the robot deployment
 layer together with its source asset registration, frame regression and API.
 
 Focused coverage lives under `tests/toolkits/assembly/`, `tests/sim/assembly/`,
