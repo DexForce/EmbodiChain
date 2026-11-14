@@ -20,6 +20,7 @@ import sys
 import torch
 
 from abc import abstractmethod
+from collections.abc import Callable
 from typing import (
     Dict,
     List,
@@ -101,6 +102,9 @@ class SensorCfg(ObjectBaseCfg):
         return []
 
     sensor_type: str = "BaseSensor"
+
+    mount: OffsetCfg | None = None
+    """Physical attachment for context-backed sensors. Cameras use extrinsics."""
 
     @classmethod
     def from_dict(cls, init_dict: Dict[str, Any]) -> "SensorCfg":
@@ -279,9 +283,55 @@ class BaseSensor(BatchEntity):
         )
 
         self._entities = [None for _ in range(num_envs)]
+        self._mount_pose = None
+        self._bound_topology = None
         self._build_sensor_from_config(config, device=device)
-
         super().__init__(config, self._entities, device)
+
+    def on_bind(self) -> None:
+        """Prepare resources for the current topology after the scene is bound."""
+
+    def on_unbind(self) -> None:
+        """Release topology-scoped resources, including after a failed bind.
+
+        Implementations should tolerate partially initialized resources.
+        """
+
+    def get_mount_pose(self) -> torch.Tensor:
+        """Read the physical mount pose on the sensor device.
+
+        Returns:
+            Arena-relative homogeneous transforms with shape (environments, 4, 4).
+
+        Raises:
+            RuntimeError: The sensor has no live mount binding.
+        """
+        if self._mount_pose is None:
+            raise RuntimeError(f"Sensor {self.uid!r} has no live mount binding.")
+        return self._mount_pose()
+
+    def _bind(
+        self, topology: int, mount_pose: Callable[[], torch.Tensor] | None
+    ) -> None:
+        if self._bound_topology == topology:
+            return
+        self._unbind()
+        self._bound_topology = topology
+        self._mount_pose = mount_pose
+        try:
+            self.on_bind()
+        except BaseException:
+            self._unbind()
+            raise
+
+    def _unbind(self) -> None:
+        if self._bound_topology is None:
+            return
+        self._bound_topology = None
+        try:
+            self.on_unbind()
+        finally:
+            self._mount_pose = None
 
     @cached_property
     def num_instances(self) -> int:
