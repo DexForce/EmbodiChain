@@ -32,6 +32,7 @@ from .contact import (
     ContactSensorCfg,
     ArticulationContactFilterCfg,
 )
+from .contact_grid import ContactGrid, ContactGridCfg
 from .contact_resultant import ContactResultant, ContactResultantCfg
 from .ray import (
     RayScene,
@@ -59,6 +60,8 @@ __all__ = [
     "RayScene",
     "TerrainScan",
     "TerrainScanCfg",
+    "ContactGrid",
+    "ContactGridCfg",
     "ContactResultant",
     "ContactResultantCfg",
     "PVA",
@@ -103,6 +106,8 @@ register_sensor(SensorRegistration("FrameTransform", FrameTransformCfg, FrameTra
 
 register_sensor(SensorRegistration("PVA", PVACfg, PVA))
 register_sensor(SensorRegistration("IMU", IMUCfg, IMU))
+
+register_sensor(SensorRegistration("ContactGrid", ContactGridCfg, ContactGrid))
 
 register_sensor(
     SensorRegistration("ContactResultant", ContactResultantCfg, ContactResultant)

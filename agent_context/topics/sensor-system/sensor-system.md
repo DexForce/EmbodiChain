@@ -17,6 +17,7 @@
 | Parent-name resolution | `embodichain/lab/sim/sensors/attachment.py` → `resolve_parent_nodes` |
 | Creation, preparation and attachment coordination | `embodichain/lab/sim/sim_manager.py` → `add_sensor`, `prepare` |
 | Contact query adaptation and actor metadata | `embodichain/lab/sim/sensors/contact/sensor.py` |
+| Planar contact array and measurement validity | `embodichain/lab/sim/sensors/contact_grid.py` |
 | Contact resultant reference sensor | `embodichain/lab/sim/sensors/contact_resultant.py` |
 | Joint and contact acquisition windows | `embodichain/lab/sim/sensors/contact/observation.py` |
 | Native support observations and pair ownership | `embodichain/lab/sim/sensors/support_observation.py` |
@@ -187,6 +188,12 @@ The contact scatter kernel remains sensor-owned because its columns, IDs and
 quota are integration contracts. Generic image tiling belongs to
 `embodichain/compute/image/_warp/tiling.py`; compatibility exports under
 `utils.warp.kernels` do not change those owners.
+
+ContactGrid bins native contact rows on the mount-local XY plane. Its count
+and impulse vectors are per cell. Read component validity, report completeness
+and the native impulse duration before consuming or normalizing a sample.
+The contact query owns topology and loss semantics. The fixed grid scatter
+kernel is private to the sensor adapter.
 
 ## Focused validation
 
