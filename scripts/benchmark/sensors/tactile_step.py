@@ -90,7 +90,7 @@ def _benchmark_variant(
         alternate[:active, 0] += 0.001
         grid = None
         indent = None
-        if variant in ("grid", "both"):
+        if variant in ("grid", "both-dense", "both-screened"):
             grid = sim.add_sensor(
                 ContactGridCfg(
                     uid="contact_grid",
@@ -101,7 +101,7 @@ def _benchmark_variant(
                     max_plane_distance=0.015,
                 )
             )
-        if variant in ("dense", "screened", "both"):
+        if variant in ("dense", "screened", "both-dense", "both-screened"):
             indent = sim.add_sensor(
                 TactileIndentationCfg(
                     uid="indentation",
@@ -111,7 +111,7 @@ def _benchmark_variant(
                     resolution=(resolution, resolution),
                     curvature_radius=0.10,
                     max_depth=0.03,
-                    use_candidates=variant != "dense",
+                    use_candidates=variant in ("screened", "both-screened"),
                 )
             )
 
@@ -214,7 +214,14 @@ def main() -> None:
         active_counts = sorted({round(count * fraction) for fraction in args.fractions})
         for active in active_counts:
             dense = None
-            for variant in ("off", "grid", "dense", "screened", "both"):
+            for variant in (
+                "off",
+                "grid",
+                "dense",
+                "screened",
+                "both-dense",
+                "both-screened",
+            ):
                 result, observed = _benchmark_variant(
                     count,
                     active / count,
@@ -226,7 +233,7 @@ def main() -> None:
                 )
                 if variant == "dense":
                     dense = observed
-                if variant in ("screened", "both"):
+                if variant in ("screened", "both-dense", "both-screened"):
                     for first, second in zip(observed, dense, strict=True):
                         torch.testing.assert_close(first, second, atol=1e-6, rtol=0.0)
                     result["matches_dense"] = True
