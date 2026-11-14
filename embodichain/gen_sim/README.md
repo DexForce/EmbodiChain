@@ -96,6 +96,46 @@ never creates capabilities, rewrites control-part names or chooses physics.
 
 ## Outputs and verdicts
 
+The v2 task-plan manifest publishes `task_spec_v1.json` and the selected
+semantic graph. The v0.1 normative source remains available as `task_spec.json`.
+Use `load_task_plan` to verify the publication. Scene providers receive
+`scene_requirements.json`; an agent provider can consume the associated
+`scene_agent_messages.json`. Expansion clients read `expansion_requirements.json`
+or project a frozen document against supported dimensions in Python.
+
+Open `task/semantic_task_graph.html` for the plan and `task_review.html` beside
+the run manifest for measured call evidence. Click an action in the canvas
+to inspect its step interval and recorded failure events. Existing runs can
+publish a fresh offline view with
+`embodichain gensim task view --plan RUN/task --run RUN --output review.html`.
+Omit `--run` to review only the frozen task and graph.
+
+To revise graph calls against a published spec and its original grounding:
+
+```bash
+embodichain gensim task revise --parent outputs/task --proposal proposed_nodes.json \
+  --expected-spec-digest "$SPEC_DIGEST" --expected-graph-digest "$GRAPH_DIGEST" \
+  --expected-plan-digest "$PLAN_DIGEST" \
+  --output outputs/task-revision-2
+```
+
+The proposal uses the semantic planner response fields `nodes` and
+`requirements`. Each accepted revision publishes a new immutable plan
+directory and records the parent manifest digest.
+`load_task_plan` returns `plan_digest` (the SHA-256 of `task_plan_manifest.json`)
+for the complete publication, including
+semantic annotations and binding requests. Revision requests and native attempt
+evidence bind this identity as well as the spec and graph digests.
+
+Frozen clauses can carry structured `constraint` declarations for role properties,
+return-to-origin and orientation restoration. Coverage checks their target, calls
+and required bindings; unsupported meanings remain visibly unverified and block
+revision and deployment. Both scene routes enforce explicit role properties.
+An absent property measurement is unverified. Existing `generated-scene/v1`
+providers may omit optional affordance metadata; those capabilities stay pending
+while qualification continues to geometry checks. Explicit incompatible metadata
+still rejects the scene.
+
 A new run directory contains:
 
 - `source_image.*`: the input frozen for the run, with a SHA-256 in the manifest;

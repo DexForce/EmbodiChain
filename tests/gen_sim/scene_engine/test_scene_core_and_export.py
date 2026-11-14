@@ -155,6 +155,95 @@ def test_object_physics_rejects_invalid_values(
         )
 
 
+@pytest.mark.parametrize(
+    "appearance,expected",
+    [
+        ("red", "red"),
+        ("blue", "blue"),
+        ("mixed", None),
+        ("mesh_with_lines", None),
+        ("material", "red"),
+        ("material_masked_invisible", None),
+        ("material_masked_visible", "red"),
+        ("material_blended", None),
+        ("material_opaque_alpha", "red"),
+        ("material_with_vertex_color", None),
+        ("textured", None),
+    ],
+)
+def test_scene_export_carries_measured_appearance(tmp_path, appearance, expected):
+    import hashlib
+    import trimesh
+    from PIL import Image
+
+    table_path = tmp_path / "table.glb"
+    table_path.write_bytes(b"glTF-table")
+    mesh = trimesh.creation.box()
+    if appearance.startswith("material") or appearance == "textured":
+        alpha, mode, cutoff = {
+            "material_masked_invisible": (250, "MASK", 0.99),
+            "material_masked_visible": (250, "MASK", 0.9),
+            "material_blended": (250, "BLEND", 0.5),
+            "material_opaque_alpha": (0, "OPAQUE", 0.5),
+        }.get(appearance, (255, "OPAQUE", 0.5))
+        material = trimesh.visual.material.PBRMaterial(
+            baseColorFactor=[255, 0, 0, alpha],
+            alphaMode=mode,
+            alphaCutoff=cutoff,
+            baseColorTexture=(
+                Image.new("RGB", (2, 2), "blue") if appearance == "textured" else None
+            ),
+        )
+        mesh.visual = trimesh.visual.TextureVisuals(
+            uv=np.zeros((len(mesh.vertices), 2)), material=material
+        )
+        if appearance == "material_with_vertex_color":
+            # A red factor multiplied by blue COLOR_0 is black, not red.
+            mesh.visual.vertex_attributes["color"] = np.tile(
+                [0, 0, 255, 255], (len(mesh.vertices), 1)
+            ).astype(np.uint8)
+    else:
+        mesh.visual.vertex_colors = (
+            [0, 0, 255, 255] if appearance == "blue" else [255, 0, 0, 255]
+        )
+        if appearance == "mixed":
+            mesh.visual.vertex_colors[0] = [0, 0, 255, 255]
+    asset_path = tmp_path / "asset.glb"
+    if appearance == "mesh_with_lines":
+        mesh = trimesh.Scene(
+            [mesh, trimesh.load_path(np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]))]
+        )
+    mesh.export(asset_path)
+    table = _scene_object(
+        object_id="table",
+        kind="table",
+        glb_path=table_path,
+        physics=_physics("kinematic"),
+    )
+    asset = _scene_object(
+        object_id="asset",
+        kind="asset",
+        glb_path=asset_path,
+        physics=_physics("dynamic"),
+    )
+    asset.description = "red waterproof cube"
+    scene = Scene(objects=[table, asset])
+    path = SceneExporter(
+        scene=scene, scene_graph=_scene_graph(scene), output_root=tmp_path / "export"
+    ).export()
+    entry = json.loads(path.read_text())["rigid_object"][0]
+    if expected is None:
+        assert "properties" not in entry
+    else:
+        assert entry["properties"] == {"color": expected}
+        proof = entry["property_evidence"]["color"]
+        assert (
+            proof["sha256"]
+            == hashlib.sha256((path.parent / proof["source"]).read_bytes()).hexdigest()
+        )
+    assert "waterproof" not in entry.get("properties", {})
+
+
 def test_scene_export_copies_meshes_and_converts_y_up_pose(tmp_path: Path) -> None:
     table_glb = tmp_path / "table.glb"
     asset_glb = tmp_path / "cup.glb"

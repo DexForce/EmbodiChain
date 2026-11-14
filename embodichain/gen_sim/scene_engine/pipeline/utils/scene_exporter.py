@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 import shutil
 import time
@@ -246,8 +247,8 @@ class SceneExporter:
             else:
                 asset_root.unlink()
 
-    @staticmethod
     def _scene_object_config(
+        self,
         *,
         scene_object: SceneObject,
         asset_relative_path: str,
@@ -273,6 +274,7 @@ class SceneExporter:
         )
 
         return {
+            **self._appearance_metadata(self.export_root / asset_relative_path),
             "uid": scene_object.id,
             "category": scene_object.category,
             "name": scene_object.name,
@@ -295,6 +297,100 @@ class SceneExporter:
             "support_contour_xy": scene_object.support_contour_xy,
             "support_optimization_rect_xy": scene_object.support_optimization_rect_xy,
             "max_convex_hull_num": scene_object.physics.max_convex_hull_num,
+        }
+
+    @staticmethod
+    def _appearance_metadata(path: Path) -> dict[str, object]:
+        """Measure only uniform opaque palette colors in the exported GLB.
+
+        Descriptions, default material colors, textures, combined material/vertex
+        channels and mixed appearance cannot certify a named color through this
+        conservative adapter.
+        """
+        import trimesh
+
+        palette = {
+            "red": (255, 0, 0),
+            "green": (0, 255, 0),
+            "blue": (0, 0, 255),
+            "white": (255, 255, 255),
+            "black": (0, 0, 0),
+            "yellow": (255, 255, 0),
+        }
+        try:
+            scene = trimesh.load_scene(path, process=False)
+        except (OSError, ValueError, TypeError, NotImplementedError):
+            return {}
+        measured = []
+        for mesh in scene.geometry.values():
+            if not isinstance(mesh, trimesh.Trimesh):
+                return {}
+            visual = mesh.visual
+            material = getattr(visual, "material", None)
+            if visual.kind == "vertex":
+                colors = np.asarray(visual.vertex_colors)
+            elif visual.kind == "face":
+                colors = np.asarray(visual.face_colors)
+            elif visual.kind == "texture":
+                material = visual.material
+                if (
+                    getattr(material, "baseColorTexture", None) is not None
+                    or getattr(material, "image", None) is not None
+                    # glTF multiplies COLOR_0 by the material factor. The
+                    # single-channel palette adapter cannot qualify both.
+                    or visual.vertex_attributes.get("color") is not None
+                ):
+                    return {}
+                color = getattr(material, "baseColorFactor", None)
+                if color is None:
+                    return {}
+                colors = np.asarray(color).reshape(1, -1)
+            else:
+                return {}
+            if (
+                colors.ndim != 2
+                or colors.shape[1] not in {3, 4}
+                or not len(colors)
+                or not np.isfinite(colors).all()
+            ):
+                return {}
+            # glTF alpha coverage is material-defined, even without a texture.
+            # OPAQUE ignores alpha; MASK discards values below alphaCutoff;
+            # BLEND is opaque only at alpha=1. Unknown modes stay unverified.
+            alpha_mode = getattr(material, "alphaMode", None) or "OPAQUE"
+            if alpha_mode == "MASK":
+                cutoff = getattr(material, "alphaCutoff", None)
+                cutoff = 0.5 if cutoff is None else float(cutoff)
+                if not np.isfinite(cutoff) or not 0 <= cutoff <= 1:
+                    return {}
+                if colors.shape[1] == 4 and (colors[:, 3] / 255.0 < cutoff).any():
+                    return {}
+            elif alpha_mode == "BLEND":
+                if colors.shape[1] == 4 and (colors[:, 3] != 255).any():
+                    return {}
+            elif alpha_mode != "OPAQUE":
+                return {}
+            labels = [
+                name
+                for name, rgb in palette.items()
+                if (np.abs(colors[:, :3].astype(float) - rgb) <= 32).all()
+            ]
+            if len(labels) != 1:
+                return {}
+            measured.append(labels[0])
+        if not measured or len(set(measured)) != 1:
+            return {}
+        color = measured[0]
+        return {
+            "properties": {"color": color},
+            "property_evidence": {
+                "color": {
+                    "value": color,
+                    "method": "uniform_opaque_srgb_palette/v1",
+                    "source": path.relative_to(path.parents[2]).as_posix(),
+                    "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                }
+            },
         }
 
     def _articulation_config(

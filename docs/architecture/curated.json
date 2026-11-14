@@ -3595,14 +3595,14 @@
         },
         {
           "path": "embodichain/gen_sim/task_engine/_image_run.py",
-          "symbol": "_plan_image_task",
+          "symbol": "plan_image_task",
           "start_line": 99,
           "end_line": 103,
           "excerpt": "            \"pending_bindings\": len(result[\"binding_requirements\"]),\n            \"execution_ready\": False,\n            \"runtime_evidence_status\": \"not_run\",\n            \"image_sha256\": result[\"image_grounding\"][\"image_sha256\"],\n            \"integration_status\": \"unbound\","
         },
         {
           "path": "embodichain/gen_sim/task_engine/semantic_plan_validation.py",
-          "symbol": "validate_semantic_plan",
+          "symbol": "_validate_interpreted_plan",
           "start_line": 549,
           "end_line": 556,
           "excerpt": "        \"status\": \"covered\",\n        \"semantic_status\": \"valid\",\n        \"visual_status\": (\"complete\" if observed == total else \"pending\"),\n        \"pending_bindings\": len(bindings),\n        \"visual_observed_entities\": observed,\n        \"visual_total_entities\": total,\n        \"execution_ready\": False,\n        \"runtime_evidence_status\": \"not_run\","

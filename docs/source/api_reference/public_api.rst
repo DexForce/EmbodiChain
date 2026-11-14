@@ -1162,6 +1162,7 @@ execution remains with the ordinary task runner.
    prepare_task_deployment
    qualify_task_scene
    resume_scene_generation
+   revise_task_plan
    submit_scene_generation
 
 .. autofunction:: cancel_scene_generation
@@ -1182,6 +1183,7 @@ execution remains with the ordinary task runner.
 
 .. autofunction:: resume_scene_generation
 
+.. autofunction:: revise_task_plan
 .. autofunction:: submit_scene_generation
 
 embodichain.gen_sim.task_engine.evidence
@@ -1497,6 +1499,36 @@ normalization are standard-library-only.
 
 .. autofunction:: evaluate_pour_evidence
 
+
+embodichain.gen_sim.task_spec.publication
+-----------------------------------------
+
+Publish a task with independent episode and generalization identities. Scene
+providers consume the initial conditions and achievable goals, while expansion
+consumers check requested coverage against their available dimensions.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.publication
+
+.. autosummary::
+
+   freeze_task_spec
+   decode_task_document
+   project_scene_requirements
+   project_expansion_requirements
+   scene_agent_messages
+   evaluate_attempt_observations
+
+.. autofunction:: freeze_task_spec
+
+.. autofunction:: decode_task_document
+
+.. autofunction:: project_scene_requirements
+
+.. autofunction:: project_expansion_requirements
+
+.. autofunction:: scene_agent_messages
+
+.. autofunction:: evaluate_attempt_observations
 
 embodichain.gen_sim.task_spec.registry
 --------------------------------------

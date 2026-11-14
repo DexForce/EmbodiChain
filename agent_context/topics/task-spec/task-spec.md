@@ -1,5 +1,12 @@
 # Task specification
 
+Image task plans publish the authoring document in `task_spec_v1.json` and
+retain the normative v0.1 source for evidence bindings and replay. The v2
+plan manifest pins the graph and document independently. Scene projections
+distinguish initial predicates from achievable goals. Expansion projections
+distinguish permission to vary from required coverage. Neither projection
+supplies an observed outcome.
+
 `embodichain.gen_sim.task_spec` owns a simulator-independent normative task
 contract, evidence evaluation and a content-addressed cache. Core protocol/cache
 and evidence cold imports use only the standard library. Physical proof rechecks
@@ -13,6 +20,7 @@ of those owners.
 |---|---|
 | Task roles and required properties | `contracts.py`: `RoleSpec` |
 | Normative identity and ordered milestones | `spec.py`: `TaskSpec`, `MilestoneSpec` |
+| Frozen v1 authoring documents, projections and identified captures | `publication.py` |
 | Predicate vocabulary and temporal windows | `expressions.py` |
 | Structure validation and evidence evaluation | `validation.py` |
 | Placement binding, physical proof checks and certificate assembly | `evidence.py` |
@@ -43,6 +51,13 @@ hold at the same snapshot strictly after its predecessors. Missing evidence and
 incomplete temporal windows cannot certify success. Only an entirely satisfied
 evaluation sets `certificate_ready`; the evaluator does not establish the
 physical authenticity of caller-provided measurements.
+The identified-capture wrapper rejects trajectory frames beyond its declared
+capture step. Frozen structured qualifiers participate in the v1 task semantic
+identity; Task Engine checks their implementing calls separately from physical proof.
+The capture evaluator also reports explicit qualifiers without a trusted physical
+evidence adapter as unavailable and withholds certification, even when all base
+goals and milestones pass. Graph witnesses and caller-supplied booleans do not
+provide that proof.
 Bounded `always` and `eventually` windows share their per-slot conclusion
 with the batched Lab evaluator through Compute. TaskSpec's Python result
 exposes inclusive witness and violation steps while retaining its canonical

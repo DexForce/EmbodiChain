@@ -110,6 +110,25 @@ def render_semantic_task_graph_html(
     Raises:
         ValueError: A report or companion identity does not match this graph.
     """
+    return _viewer_document(
+        _graph_data(
+            graph,
+            execution_report,
+            task_spec=task_spec,
+            validation=validation,
+            presentation=presentation,
+        )
+    )
+
+
+def _graph_data(
+    graph: Mapping[str, Any],
+    execution_report: Mapping[str, Any] | None = None,
+    *,
+    task_spec: TaskSpec | Mapping[str, Any] | None = None,
+    validation: Mapping[str, Any] | None = None,
+    presentation: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     selected = validate_semantic_task_graph(graph)
     spec = (
         None
@@ -188,7 +207,7 @@ def render_semantic_task_graph_html(
             **dict(presentation or {}),
         },
     }
-    return _viewer_document(data)
+    return data
 
 
 def write_semantic_task_graph_html(

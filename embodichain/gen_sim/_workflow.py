@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 import hashlib
 from pathlib import Path
 import shutil
+import uuid
 from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -98,10 +99,12 @@ def _run(cfg: _RunCfg, *, services: GenSimServices | None = None) -> dict[str, A
     manifest: dict[str, Any] = {
         "schema_version": "embodichain.gensim-run/v1",
         "task_id": cfg.task_id,
+        "policy_sha256": hashlib.sha256(cfg.execution_policy.read_bytes()).hexdigest(),
         "instruction": cfg.instruction,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "image_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
         "status": "running",
+        "run_id": uuid.uuid4().hex,
         "stages": {},
         "execution_ready": False,
         "runtime_evidence_status": "not_run",
@@ -119,6 +122,7 @@ def _run(cfg: _RunCfg, *, services: GenSimServices | None = None) -> dict[str, A
         with service_scope(services) as run:
             from .workflow import (
                 load_generated_scene,
+                load_task_plan,
                 materialize_scene_generation,
                 plan_image_task,
                 prepare_task_deployment,
@@ -138,6 +142,12 @@ def _run(cfg: _RunCfg, *, services: GenSimServices | None = None) -> dict[str, A
                 task_id=cfg.task_id,
                 services=run,
             )
+            plan = load_task_plan(task)
+            manifest["task_id"] = plan["task_id"]
+            manifest["instruction"] = plan["instruction"]
+            manifest["spec_digest"] = plan.get("spec_digest")
+            manifest["graph_digest"] = plan["semantic_graph_sha256"]
+            manifest["plan_digest"] = plan["plan_digest"]
             update("succeeded")
             stage = "scene"
             update("running")
@@ -151,7 +161,7 @@ def _run(cfg: _RunCfg, *, services: GenSimServices | None = None) -> dict[str, A
                     cfg.scene_provider["id"], provider_profile
                 )
                 request = SceneGenerationRequest(
-                    task_id=cfg.task_id,
+                    task_id=plan["task_id"],
                     image_path=source,
                     image_sha256=manifest["image_sha256"],
                     requirements_path=requirements,
@@ -163,7 +173,9 @@ def _run(cfg: _RunCfg, *, services: GenSimServices | None = None) -> dict[str, A
                 )
                 request_key = hashlib.sha256(
                     (
-                        cfg.scene_provider["id"] + request.request_hash + cfg.task_id
+                        cfg.scene_provider["id"]
+                        + request.request_hash
+                        + plan["task_id"]
                     ).encode("utf-8")
                 ).hexdigest()
                 job = submit_scene_generation(
@@ -181,6 +193,11 @@ def _run(cfg: _RunCfg, *, services: GenSimServices | None = None) -> dict[str, A
             update("succeeded")
             stage = "binding"
             update("running")
+            if (
+                hashlib.sha256(cfg.execution_policy.read_bytes()).hexdigest()
+                != manifest["policy_sha256"]
+            ):
+                raise ValueError("Execution policy changed after task planning")
             if (scene / "generated_scene.json").is_file():
                 load_generated_scene(scene)
                 qualification = qualify_task_scene(
@@ -208,21 +225,90 @@ def _run(cfg: _RunCfg, *, services: GenSimServices | None = None) -> dict[str, A
                     cfg.runtime,
                     cfg.execution_policy,
                     output / "prepared",
+                    expected_revisions={"plan_digest": manifest["plan_digest"]},
                 )
             else:
                 deployment = _bind_deployment(
-                    cfg, scene, task, runtime, policy, profile, services=run
+                    cfg,
+                    scene,
+                    task,
+                    runtime,
+                    policy,
+                    profile,
+                    services=run,
+                    expected_plan_digest=manifest["plan_digest"],
                 )
             manifest["deployment"] = str(deployment)
             update("succeeded")
             stage = "execution"
             manifest["execution_ready"] = True
             manifest["runtime_evidence_status"] = "running"
+            from .task_spec import canonical_hash
+
+            bundle_files = {}
+            for path in deployment.parent.rglob("*"):
+                if path.is_file():
+                    digest = hashlib.sha256()
+                    with path.open("rb") as stream:
+                        while block := stream.read(1024 * 1024):
+                            digest.update(block)
+                    bundle_files[path.relative_to(deployment.parent).as_posix()] = (
+                        digest.hexdigest()
+                    )
+            manifest["attempt_id"] = uuid.uuid4().hex
+            manifest["bundle_digest"] = canonical_hash(bundle_files)
+            manifest["program_digest"] = bundle_files["program.json"]
+            manifest["scene_digest"] = hashlib.sha256(
+                (
+                    (scene / "generated_scene.json")
+                    if (scene / "generated_scene.json").is_file()
+                    else (scene / "scene_export" / "scene_config.json")
+                ).read_bytes()
+            ).hexdigest()
             update("running")
             report = _execute_deployment(
                 deployment, device=cfg.device, headless=cfg.headless
             )
             write_run_json(output / "execution_report.json", report)
+            write_run_json(
+                output / "attempt_feedback.json",
+                {
+                    "schema_version": "embodichain.attempt-feedback/v1",
+                    **{
+                        key: manifest[key]
+                        for key in (
+                            "run_id",
+                            "attempt_id",
+                            "spec_digest",
+                            "graph_digest",
+                            "plan_digest",
+                            "bundle_digest",
+                            "scene_digest",
+                            "program_digest",
+                            "policy_sha256",
+                        )
+                    },
+                    "static_validation": "validated",
+                    "planning_feasibility": "see_execution_segments",
+                    "execution": report["status"],
+                    "physical_verdict": "unavailable",
+                    "persistence": "unverified",
+                    "capture_step": report.get("length"),
+                    "execution_report": "execution_report.json",
+                    "execution_report_digest": canonical_hash(report),
+                    "issues": [
+                        {
+                            "node_id": s.get("name"),
+                            "code": s.get("failure_reason"),
+                            "expected": "segment success",
+                            "measured": s.get("success"),
+                        }
+                        for s in report.get("segments", [])
+                        if s.get("success") is False
+                    ],
+                    "missing_evidence": ["independent_task_spec_evaluation"],
+                },
+            )
             manifest["runtime_evidence_status"] = report["status"]
             manifest["status"] = (
                 "succeeded"
@@ -230,6 +316,13 @@ def _run(cfg: _RunCfg, *, services: GenSimServices | None = None) -> dict[str, A
                 else "failed"
             )
             update(manifest["status"])
+            from .task_engine._review import write_review
+
+            try:
+                write_review(task, output / "task_review.html", output)
+            except (ValueError, OSError, KeyError, TypeError) as error:
+                manifest["review_error"] = str(error)
+                write_run_json(output / "run_manifest.json", manifest)
     except BaseException as error:
         manifest["status"] = (
             "interrupted" if isinstance(error, KeyboardInterrupt) else "failed"

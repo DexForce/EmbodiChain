@@ -14,7 +14,7 @@
 // limitations under the License.
 // ----------------------------------------------------------------------------
 
-import { StrictMode } from "react";
+import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ReactFlowProvider } from "@xyflow/react";
 import "@fontsource-variable/inter/wght.css";
@@ -23,21 +23,42 @@ import "@xyflow/react/dist/style.css";
 import "@embodichain/graph-ui/style.css";
 import "./style.css";
 import App from "./App";
+import TaskReview, { type Review } from "./TaskReview";
 import type { ViewerData } from "./types";
 const element = document.getElementById("graph-data");
 const root = document.getElementById("root");
 if (!root || !element?.textContent)
   throw new Error("Task graph declaration is unavailable.");
-const data = JSON.parse(element.textContent) as ViewerData;
+const data = JSON.parse(element.textContent) as ViewerData & {
+  review?: Review;
+};
 if (
   !Array.isArray(data.graph?.nodes) ||
   !Array.isArray(data.graph?.task_groups)
 )
   throw new Error("Unsupported task graph declaration.");
+function Viewer() {
+  const [advanced, setAdvanced] = useState(false);
+  if (!data.review) return <App data={data} />;
+  return advanced ? (
+    <>
+      <button className="rv-back" onClick={() => setAdvanced(false)}>
+        ← Task review
+      </button>
+      <App data={data} />
+    </>
+  ) : (
+    <TaskReview
+      data={data}
+      review={data.review}
+      onAdvanced={() => setAdvanced(true)}
+    />
+  );
+}
 createRoot(root).render(
   <StrictMode>
     <ReactFlowProvider>
-      <App data={data} />
+      <Viewer />
     </ReactFlowProvider>
   </StrictMode>,
 );

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 from collections import deque
+import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -48,7 +49,9 @@ class _ScriptedChat:
         return ChatResponse(text=json.dumps(self.responses.popleft()))
 
 
-def _services(*, missing_object: bool = False) -> GenSimServices:
+def _services(
+    *, missing_object: bool = False, required_color: str | None = None
+) -> GenSimServices:
     def selector(reference: str = "") -> dict:
         return dict(
             kind="scene_ref" if reference else "none",
@@ -130,6 +133,23 @@ def _services(*, missing_object: bool = False) -> GenSimServices:
             )
         ],
     }
+    if required_color is not None:
+        grounding["role_properties"] = {"role_001": {"color": required_color}}
+        grounding["clauses"] = [
+            dict(
+                id="required_color",
+                quote=required_color,
+                target="role_001",
+                origin="explicit",
+                resolution="resolved",
+                constraint={
+                    "kind": "role_property",
+                    "key": "color",
+                    "value": required_color,
+                },
+            )
+        ]
+        plan["requirements"][0]["quote"] = f"Put the {required_color} cube on the table"
     return GenSimServices(
         GenSimServicesCfg(),
         injected={
@@ -237,6 +257,10 @@ def test_workflow_generates_binds_and_preserves_actual_execution_verdict(
         load_configured_task_program_deployment,
     )
 
+    if not success:
+        run_cfg.instruction += " \n"
+        run_cfg.task_id = " gensim_task "
+
     monkeypatch.setattr(
         generate,
         "generate_scene_from_image",
@@ -255,7 +279,7 @@ def test_workflow_generates_binds_and_preserves_actual_execution_verdict(
         )
         program = deployment.load_program()
         physical.validate_scene_bindings(deployment.scene_binding)
-        assert program.instruction == run_cfg.instruction
+        assert program.instruction == run_cfg.instruction.strip()
         assert (
             deployment.scene_binding["rigid_objects"][0]["simulation_uid"]
             == "cube_native"
@@ -273,12 +297,82 @@ def test_workflow_generates_binds_and_preserves_actual_execution_verdict(
         manifest = _run(run_cfg, services=services)
         assert services.get("task_semantic_planning") is not None
     assert len(executed) == 1
+    assert manifest["task_id"] == run_cfg.task_id.strip()
+    assert manifest["instruction"] == run_cfg.instruction.strip()
     assert manifest["execution_ready"] is True
     assert manifest["status"] == ("succeeded" if success else "failed")
     assert manifest["runtime_evidence_status"] == manifest["status"]
     assert manifest["task_spec_verdict"] == "not_evaluated"
     receipt = json.loads((run_cfg.output / "execution_report.json").read_text())
     assert receipt["all_success"] is success
+    import re
+
+    def review_payload(path):
+        return json.loads(
+            re.search(
+                r'<script id="graph-data" type="application/json">(.*?)</script>',
+                path.read_text(),
+                re.S,
+            )[1]
+        )["review"]
+
+    assert (
+        review_payload(run_cfg.output / "task_review.html")["attempt"]["status"]
+        == receipt["status"]
+    )
+    assert (
+        review_payload(run_cfg.output / "task" / "semantic_task_graph.html")["attempt"]
+        is None
+    )
+    from embodichain.gen_sim.task_engine._review import write_review
+
+    plan_root = run_cfg.output / "task"
+    from embodichain.gen_sim.workflow import load_task_plan, revise_task_plan
+
+    plan = load_task_plan(plan_root)
+    graph = json.loads((plan_root / "semantic_task_graph.json").read_text())
+    source = json.loads((plan_root / "semantic_graph_validation.json").read_text())[
+        "source"
+    ]
+    proposal = {
+        "nodes": [
+            dict(
+                id=n["id"],
+                step_id=n["task_instance_id"],
+                call=n["call"],
+                depends_on=n["depends_on"],
+                semantic=source["annotations"][n["id"]],
+            )
+            for n in graph["nodes"]
+        ],
+        "requirements": source["requirements"],
+    }
+    proposal["nodes"][0]["semantic"]["intent"][
+        "description"
+    ] = "different deployment intent"
+    revised_plan = revise_task_plan(
+        plan_root,
+        proposal,
+        run_cfg.output / "revised-plan",
+        expected_spec_digest=plan["spec_digest"],
+        expected_graph_digest=plan["semantic_graph_sha256"],
+        expected_plan_digest=plan["plan_digest"],
+    )
+    assert (
+        load_task_plan(revised_plan)["semantic_graph_sha256"]
+        == plan["semantic_graph_sha256"]
+    )
+    different_plan = run_cfg.output / "different-plan.html"
+    write_review(revised_plan, different_plan, run_cfg.output)
+    assert "error" in review_payload(different_plan)["attempt"]
+
+    feedback_path = run_cfg.output / "attempt_feedback.json"
+    feedback = json.loads(feedback_path.read_text())
+    feedback["attempt_id"] = "stale"
+    feedback_path.write_text(json.dumps(feedback))
+    alternate = run_cfg.output / "stale-review.html"
+    write_review(run_cfg.output / "task", alternate, run_cfg.output)
+    assert "error" in review_payload(alternate)["attempt"]
     unbound = json.loads((run_cfg.output / "task/run_manifest.json").read_text())
     assert unbound["execution_ready"] is False
     binding = yaml.safe_load(
@@ -317,6 +411,520 @@ def test_unresolved_native_binding_retains_failure_and_never_executes(
     )
     assert (run_cfg.output / "task/semantic_task_graph.json").is_file()
     assert (run_cfg.output / "service_calls.json").is_file()
+
+
+@pytest.mark.parametrize(
+    "color,stale_evidence",
+    [
+        (None, None),
+        ("blue", None),
+        ("red", None),
+        ("red", "mesh"),
+        ("red", "deployment_mesh"),
+        ("red", "source"),
+        ("red", "sha256"),
+    ],
+)
+def test_default_scene_route_enforces_frozen_role_properties(
+    run_cfg: _RunCfg,
+    monkeypatch: pytest.MonkeyPatch,
+    color: str | None,
+    stale_evidence: str | None,
+) -> None:
+    from embodichain.gen_sim.scene_engine.pipeline import generate
+    from embodichain.gen_sim import _run_execution
+
+    run_cfg.instruction = "Put the red cube on the table"
+
+    def scene(image, output, **kwargs):
+        from embodichain.gen_sim.scene_engine.core.scene import Scene
+        from embodichain.gen_sim.scene_engine.core.scene_object import (
+            SceneObject,
+            ObjectPhysics,
+        )
+        from embodichain.gen_sim.scene_engine.core.scene_graph import (
+            SceneGraph,
+            SceneGraphNode,
+        )
+        from embodichain.gen_sim.scene_engine.pipeline.utils.scene_exporter import (
+            SceneExporter,
+        )
+
+        _write_scene(output)
+        path = output / "scene_export/scene_config.json"
+        value = json.loads(path.read_text())
+        objects = []
+        for entry in [*value["background"], *value["rigid_object"]]:
+            mesh_path = path.parent / entry["shape"]["fpath"]
+            if entry["uid"] == "cube_native" and color is not None:
+                mesh = trimesh.load_mesh(mesh_path, process=False)
+                mesh.visual.vertex_colors = (
+                    [255, 0, 0, 255] if color == "red" else [0, 0, 255, 255]
+                )
+                mesh.export(mesh_path)
+            x, y, z = entry["init_pos"]
+            objects.append(
+                SceneObject(
+                    id=entry["uid"],
+                    kind="table" if entry["uid"] == "table" else "asset",
+                    category=entry["category"],
+                    name=entry["name"],
+                    description="red cube",
+                    simready_glb_path=str(mesh_path),
+                    pos=[x, z, -y],
+                    rot=[0, 0, 0],
+                    scale=[1, 1, 1],
+                    physics=ObjectPhysics(
+                        body_type="kinematic" if entry["uid"] == "table" else "dynamic",
+                        attrs=entry["attrs"],
+                        max_convex_hull_num=1,
+                    ),
+                )
+            )
+        SceneExporter(
+            scene=Scene(objects=objects),
+            scene_graph=SceneGraph(
+                nodes=[
+                    SceneGraphNode(object_id="table", parent_id=None),
+                    SceneGraphNode(
+                        object_id="cube_native", parent_id="table", parent_relation="on"
+                    ),
+                ]
+            ),
+            output_root=output,
+        ).export()
+
+    if stale_evidence is not None:
+        # Reuse an exported workspace, exactly as --scene does, after its proof
+        # source, digest or actual deployment mesh has changed.
+        prepared = run_cfg.output.parent / "prepared_scene"
+        scene(None, prepared)
+        config_path = prepared / "scene_export/scene_config.json"
+        config = json.loads(config_path.read_text())
+        asset = config["rigid_object"][0]
+        proof = asset["property_evidence"]["color"]
+        mesh_path = config_path.parent / asset["shape"]["fpath"]
+        if stale_evidence == "mesh":
+            mesh = trimesh.load_mesh(mesh_path, process=False)
+            mesh.visual.vertex_colors = [0, 0, 255, 255]
+            mesh.export(mesh_path)
+        elif stale_evidence == "deployment_mesh":
+            # The legacy runtime loads shape.fpath even if mesh_path is present.
+            asset["mesh_path"] = asset["shape"]["fpath"]
+            blue_path = mesh_path.with_name("deployed-blue.glb")
+            blue = trimesh.load_mesh(mesh_path, process=False)
+            blue.visual.vertex_colors = [0, 0, 255, 255]
+            blue.export(blue_path)
+            asset["shape"]["fpath"] = blue_path.relative_to(
+                config_path.parent
+            ).as_posix()
+        elif stale_evidence == "source":
+            other = mesh_path.with_name("other-red.glb")
+            other.write_bytes(mesh_path.read_bytes())
+            proof["source"] = other.relative_to(config_path.parent).as_posix()
+        else:
+            proof["sha256"] = "0" * 64
+        config_path.write_text(json.dumps(config))
+        run_cfg.scene = prepared
+
+    monkeypatch.setattr(generate, "generate_scene_from_image", scene)
+    execute = Mock(
+        return_value=dict(status="succeeded", completed=True, all_success=True)
+    )
+    monkeypatch.setattr(_run_execution, "_execute_deployment", execute)
+    with _services(required_color="red") as services:
+        if color == "red" and stale_evidence is None:
+            assert _run(run_cfg, services=services)["execution_ready"] is True
+        else:
+            expected = (
+                "asset_property_unverified"
+                if color is None or stale_evidence is not None
+                else "asset_property_mismatch"
+            )
+            with pytest.raises(ValueError, match=expected):
+                _run(run_cfg, services=services)
+            role_report = json.loads(
+                (run_cfg.output / "scene_role_report.json").read_text()
+            )
+            assert role_report["issues"][0]["role_id"] == "role_001"
+            assert "property:color" not in role_report["roles"]["role_001"]["verified"]
+    assert execute.call_count == int(color == "red" and stale_evidence is None)
+
+
+def test_unstructured_role_clause_is_not_covered_by_another_property(
+    run_cfg, monkeypatch
+):
+    from embodichain.gen_sim.scene_engine.pipeline import generate
+    from embodichain.gen_sim import _run_execution
+
+    instruction = "Put the red waterproof cube on the table"
+    run_cfg.instruction = instruction
+
+    def scene(image, output, **kwargs):
+        _write_scene(output)
+        path = output / "scene_export/scene_config.json"
+        value = json.loads(path.read_text())
+        value["rigid_object"][0]["properties"] = {"color": "red", "waterproof": False}
+        path.write_text(json.dumps(value))
+
+    monkeypatch.setattr(generate, "generate_scene_from_image", scene)
+    execute = Mock(side_effect=AssertionError("Unverified qualifier executed"))
+    monkeypatch.setattr(_run_execution, "_execute_deployment", execute)
+    with _services(required_color="red") as services:
+        grounding = services.get("task_image_grounding").responses[0]
+        grounding["clauses"].append(
+            dict(
+                id="waterproof",
+                quote="waterproof",
+                target="role_001",
+                origin="explicit",
+                resolution="pending_binding",
+            )
+        )
+        services.get("task_semantic_planning").responses[0]["requirements"][0][
+            "quote"
+        ] = instruction
+        with pytest.raises(ValueError, match="unverified_instruction_qualifier"):
+            _run(run_cfg, services=services)
+    execute.assert_not_called()
+    plan = json.loads(
+        (run_cfg.output / "task/semantic_graph_validation.json").read_text()
+    )
+    assert {r["clause_id"]: r["status"] for r in plan["qualifier_coverage"]} == {
+        "required_color": "covered",
+        "waterproof": "unverified",
+    }
+
+
+def test_annotation_change_after_planning_rejects_binding_before_execution(
+    run_cfg: _RunCfg,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from embodichain.gen_sim.scene_engine.pipeline import generate
+    from embodichain.gen_sim import _run_execution
+
+    def changed_scene(image, output, **kwargs):
+        _write_scene(output)
+        root = run_cfg.output / "task"
+        path = root / "semantic_graph_validation.json"
+        value = json.loads(path.read_text())
+        annotation = value["source"]["annotations"]["pick_cube"]
+        annotation["intent"]["description"] = "revised after planning"
+        for binding in value["source"]["bindings"]:
+            if binding["node_id"] == "pick_cube":
+                binding["value"] = annotation
+        path.write_text(json.dumps(value))
+        manifest_path = root / "task_plan_manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["artifacts"][path.name] = hashlib.sha256(path.read_bytes()).hexdigest()
+        manifest_path.write_text(json.dumps(manifest))
+
+    monkeypatch.setattr(generate, "generate_scene_from_image", changed_scene)
+    execute = Mock(side_effect=AssertionError("A stale deployment executed"))
+    monkeypatch.setattr(_run_execution, "_execute_deployment", execute)
+    with (
+        _services() as services,
+        pytest.raises(ValueError, match="Stale task plan revision"),
+    ):
+        _run(run_cfg, services=services)
+    execute.assert_not_called()
+    assert not (run_cfg.output / "deployment").exists()
+
+
+def _provider_scene(
+    root: Path, plan: dict, *, affordances: list[str] | None, properties: dict | None
+) -> Path:
+    """Use real measured GLB geometry with the v1 provider metadata boundary."""
+    _write_scene(root)
+    entries = json.loads((root / "scene_export/scene_config.json").read_text())
+    package = root / "scene.usdz"
+    package.write_bytes(b"provider-package-not-opened-by-static-preflight")
+    objects = []
+    for entry in [*entries["background"], *entries["rigid_object"]]:
+        mesh = root / "scene_export" / entry["shape"]["fpath"]
+        item = dict(
+            uid=entry["uid"],
+            kind="rigid",
+            name=entry["name"],
+            description=entry["description"],
+            category=entry["category"],
+            source_prim_path="/Scene/" + entry["uid"],
+            mesh_path=mesh.relative_to(root).as_posix(),
+            mesh_sha256=hashlib.sha256(mesh.read_bytes()).hexdigest(),
+            pose=dict(
+                position=entry["init_pos"],
+                rotation_euler_xyz_degrees=entry["init_rot"],
+                scale=entry["body_scale"],
+            ),
+            physics=dict(body_type=entry["body_type"], attrs=entry["attrs"]),
+        )
+        if entry["uid"] == "cube_native":
+            if affordances is not None:
+                item["affordances"] = affordances
+            if properties is not None:
+                item["properties"] = properties
+        objects.append(item)
+    manifest = dict(
+        schema_version="embodichain.generated-scene/v1",
+        scene_id="provider-scene",
+        source={"image_sha256": plan["image_sha256"]},
+        requirements_sha256=hashlib.sha256(
+            (Path(plan["root"]) / "scene_requirements.json").read_bytes()
+        ).hexdigest(),
+        coordinates=dict(editable_frame="Y-up", runtime_frame="Z-up", units="m"),
+        runtime_asset=dict(
+            path=package.name, sha256=hashlib.sha256(package.read_bytes()).hexdigest()
+        ),
+        objects=objects,
+        graph=dict(
+            nodes=[dict(object_id=o["uid"], parent_id=None) for o in objects],
+            relations=[],
+        ),
+        artifacts={
+            p.relative_to(root).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+            for p in [package, *(root / "scene_export").glob("*.glb")]
+        },
+    )
+    (root / "generated_scene.json").write_text(json.dumps(manifest))
+    return root
+
+
+@pytest.mark.parametrize(
+    "affordances,color,required_color,expected",
+    [
+        (None, None, None, "accepted"),
+        ([], None, None, "missing_asset_capability"),
+        (["graspable", "placeable"], "red", "red", "accepted"),
+        (None, "blue", "red", "asset_property_mismatch"),
+        (None, None, "red", "asset_property_unverified"),
+    ],
+)
+def test_provider_v1_qualification_preserves_optional_metadata_and_frozen_properties(
+    run_cfg: _RunCfg,
+    affordances,
+    color,
+    required_color,
+    expected,
+) -> None:
+    from embodichain.gen_sim.workflow import (
+        load_task_plan,
+        plan_image_task,
+        prepare_task_deployment,
+        qualify_task_scene,
+    )
+
+    instruction = (
+        "Put the cube on the table"
+        if required_color is None
+        else "Put the red cube on the table"
+    )
+    with _services(required_color=required_color) as services:
+        task = plan_image_task(
+            run_cfg.image,
+            instruction,
+            run_cfg.output.parent / "plan",
+            services=services,
+        )
+        plan = load_task_plan(task)
+        scene = _provider_scene(
+            run_cfg.output.parent / "provider-scene",
+            plan,
+            affordances=affordances,
+            properties=None if color is None else {"color": color},
+        )
+        qualification = qualify_task_scene(
+            task,
+            scene,
+            run_cfg.runtime,
+            run_cfg.execution_policy,
+            run_cfg.output.parent / "qualified",
+            services=services,
+        )
+    report = json.loads((qualification / "scene_qualification.json").read_text())
+    assert report["status"] == ("accepted" if expected == "accepted" else "rejected")
+    if expected == "accepted":
+        assert not report["issues"]
+        if affordances is None:
+            assert set(report["roles"]["role_001"]["pending"]) == {
+                "graspable",
+                "placeable",
+            }
+        deployment = prepare_task_deployment(
+            task,
+            scene,
+            qualification,
+            run_cfg.runtime,
+            run_cfg.execution_policy,
+            run_cfg.output.parent / "prepared",
+        )
+        assert deployment.is_file()
+    else:
+        assert report["issues"][0]["code"] == expected
+
+
+def test_provider_proxy_color_cannot_certify_deployed_usdz(run_cfg: _RunCfg) -> None:
+    from pxr import Sdf, Usd, UsdGeom, UsdUtils
+    from embodichain.gen_sim.workflow import (
+        load_generated_scene,
+        load_task_plan,
+        plan_image_task,
+        qualify_task_scene,
+    )
+    from embodichain.gen_sim._run_binding import (
+        _bind_deployment,
+        _load_runtime,
+        _physical_generated_scene,
+    )
+
+    with _services(required_color="red") as services:
+        task = plan_image_task(
+            run_cfg.image,
+            "Put the red cube on the table",
+            run_cfg.output.parent / "plan",
+            services=services,
+        )
+        plan = load_task_plan(task)
+        scene = _provider_scene(
+            run_cfg.output.parent / "provider-scene",
+            plan,
+            affordances=None,
+            properties={"color": "red"},
+        )
+        manifest_path = scene / "generated_scene.json"
+        manifest = json.loads(manifest_path.read_text())
+        obj = next(o for o in manifest["objects"] if o["uid"] == "cube_native")
+        proxy_path = scene / obj["mesh_path"]
+        proxy = trimesh.load_mesh(proxy_path, process=False)
+        proxy.visual.vertex_colors = [255, 0, 0, 255]
+        proxy.export(proxy_path)
+        obj["mesh_sha256"] = hashlib.sha256(proxy_path.read_bytes()).hexdigest()
+        obj["property_evidence"] = {
+            "color": dict(
+                value="red", source=obj["mesh_path"], sha256=obj["mesh_sha256"]
+            )
+        }
+        # A real blue USD prim is loaded while the correctly hashed proxy is red.
+        layer = scene / "blue.usda"
+        stage = Usd.Stage.CreateNew(str(layer))
+        for item in manifest["objects"]:
+            cube = UsdGeom.Cube.Define(stage, item["source_prim_path"])
+            cube.CreateDisplayColorAttr([(0.0, 0.0, 1.0)])
+        stage.GetRootLayer().Save()
+        package = scene / manifest["runtime_asset"]["path"]
+        package.unlink()
+        assert UsdUtils.CreateNewUsdzPackage(Sdf.AssetPath(str(layer)), str(package))
+        manifest["runtime_asset"]["sha256"] = hashlib.sha256(
+            package.read_bytes()
+        ).hexdigest()
+        for relative in manifest["artifacts"]:
+            manifest["artifacts"][relative] = hashlib.sha256(
+                (scene / relative).read_bytes()
+            ).hexdigest()
+        manifest_path.write_text(json.dumps(manifest))
+        verified = load_generated_scene(scene)
+        physical = _physical_generated_scene(scene, verified, scene / "copied")
+        source = physical["rigid_object"][0]["source"]
+        loaded = Usd.Stage.Open(source["file_path"])
+        assert UsdGeom.Cube(
+            loaded.GetPrimAtPath(source["source_prim_path"])
+        ).GetDisplayColorAttr().Get()[0] == (0.0, 0.0, 1.0)
+        qualification = qualify_task_scene(
+            task,
+            scene,
+            run_cfg.runtime,
+            run_cfg.execution_policy,
+            run_cfg.output.parent / "qualified",
+            services=services,
+        )
+    report = json.loads((qualification / "scene_qualification.json").read_text())
+    assert report["status"] == "rejected"
+    assert report["issues"][0]["code"] == "asset_property_unverified"
+    assert "property:color" not in report["roles"]["role_001"]["verified"]
+    # Binding must recheck the runtime identity even if bindings were preselected.
+    run_cfg.output.mkdir()
+    runtime, policy, profile = _load_runtime(run_cfg)
+    with pytest.raises(ValueError, match="asset_property_unverified"):
+        _bind_deployment(
+            run_cfg,
+            scene,
+            task,
+            runtime,
+            policy,
+            profile,
+            services=None,
+            expected_plan_digest=plan["plan_digest"],
+            generated_scene=verified,
+            resolved_bindings=report["bindings"],
+        )
+    assert not (run_cfg.output / "deployment").exists()
+
+
+def test_attempt_review_retains_per_environment_evidence(tmp_path: Path) -> None:
+    from embodichain.gen_sim.task_engine._review import _attempt
+    from embodichain.gen_sim.task_spec import canonical_hash
+
+    identity = dict(
+        spec_digest="spec",
+        graph_digest="graph",
+        plan_digest="plan",
+        bundle_digest="bundle",
+        scene_digest="scene",
+        program_digest="program",
+        policy_sha256="policy",
+        run_id="run",
+        attempt_id="attempt",
+    )
+    event = dict(
+        kind="phase_effect_gate_failed",
+        message="env 1 release failed",
+        timestamp=2.0,
+        env_mask=[False, True],
+    )
+    report = dict(
+        status="failed",
+        segments=[
+            dict(
+                name="place",
+                success=False,
+                failure_reason="release_failed",
+                start_step=0,
+                end_step=60,
+                active=[False, True],
+                successes=[False, False],
+                start_steps=[0, 5],
+                end_steps=[0, 30],
+                failure_reasons=[None, "truncated"],
+                metadata={"runtime": {"env_ids": [1], "events": [event]}},
+            )
+        ],
+    )
+    feedback = dict(
+        schema_version="embodichain.attempt-feedback/v1",
+        **identity,
+        execution="failed",
+        physical_verdict="unavailable",
+        execution_report_digest=canonical_hash(report),
+    )
+    for name, value in {
+        "run_manifest": identity,
+        "attempt_feedback": feedback,
+        "execution_report": report,
+    }.items():
+        (tmp_path / (name + ".json")).write_text(json.dumps(value))
+    result = _attempt(
+        {
+            "spec_digest": "spec",
+            "semantic_graph_sha256": "graph",
+            "plan_digest": "plan",
+        },
+        tmp_path,
+        {"place"},
+    )
+    row = result["calls"]["place"]
+    assert row["env_ids"] == [0, 1]
+    assert row["failure_reasons"][1] == "truncated"
+    assert (row["start_steps"][1], row["end_steps"][1]) == (5, 30)
+    assert row["issues"][0]["env_mask"] == [False, True]
 
 
 def test_run_configuration_resolves_owner_paths_and_cli_overrides(

@@ -70,6 +70,151 @@ def semantic_plan_rules() -> dict[str, Any]:
     }
 
 
+def _validate_clause_coverage(
+    document: dict[str, Any],
+    requirements: list[dict[str, Any]],
+    graph: dict[str, Any],
+    annotations: dict[str, Any],
+    bindings: list[dict[str, Any]],
+    target_groups: dict[str, list[str]],
+    grounding: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Pair frozen qualifiers with their target and an actual implementing call."""
+    roles = {r["id"]: r for r in document["configuration"]["roles"]}
+    entities = {
+        role: {
+            e["id"]
+            for ref in document["interpretation"]["references"]
+            if ref["role_id"] == role
+            for e in ref["entities"]
+        }
+        for role in roles
+    }
+    predicates = {p["id"]: [p] for p in document["objectives"]["goal"]}
+    predicates.update(
+        {m["id"]: m["achieve"] for m in document["objectives"]["milestones"]}
+    )
+    entity_by_id = {item["id"]: item for item in grounding["objects"]}
+
+    def matches_role(uid: str | None, subjects: set[str]) -> bool:
+        seen = set()
+        while uid is not None and uid not in seen:
+            if uid in subjects:
+                return True
+            seen.add(uid)
+            uid = entity_by_id.get(uid, {}).get("parent")
+        return False
+
+    report = []
+    for clause in document["interpretation"]["clauses"]:
+        if clause["origin"] != "explicit":
+            continue
+        quoted = [r for r in requirements if clause["quote"] in r["quote"]]
+        if not quoted:
+            raise ValueError(f"Graph omits instruction qualifier {clause['id']!r}")
+        target = clause["target"]
+        target_roles = (
+            {target}
+            if target in roles
+            else {
+                p.get("subject", p.get("arguments", {}).get("subject"))
+                for p in predicates.get(target, [])
+            }
+            & roles.keys()
+        )
+        subjects = {entity for role in target_roles for entity in entities[role]}
+        node_ids = {node_id for r in quoted for node_id in r["node_ids"]}
+        candidates = [
+            n
+            for n in graph["nodes"]
+            if n["id"] in node_ids
+            and (
+                target not in target_groups
+                or n["task_instance_id"] in target_groups[target]
+            )
+            and (
+                matches_role(annotations[n["id"]]["object"], subjects)
+                or matches_role(annotations[n["id"]]["reference"], subjects)
+            )
+        ]
+        if not candidates:
+            raise ValueError(
+                f"Instruction qualifier {clause['id']!r} references the wrong target"
+            )
+        constraint = clause.get("constraint", {})
+        kind = constraint.get("kind")
+        covered = False
+        if kind == "role_property":
+            covered = (
+                target in roles
+                and constraint["key"] in roles[target]["properties"]
+                and roles[target]["properties"][constraint["key"]]
+                == constraint["value"]
+            )
+            if not covered:
+                raise ValueError(
+                    f"Instruction qualifier {clause['id']!r} has no frozen role property"
+                )
+        elif kind in {"return_to_origin", "restore_upright"}:
+            witnessed = set()
+            for node in candidates:
+                ann = annotations[node["id"]]
+                call = node["call"]
+                if kind == "return_to_origin":
+                    implements = (
+                        validate_semantic_call_payload(call)["effect"] == "release"
+                        and ann["intent"].get("return_to_origin") is True
+                        and ann["reference"] in {None, ann["object"]}
+                        and any(
+                            b["node_id"] == node["id"]
+                            and b["kind"] == "source_pose"
+                            and b["subject"] == ann["object"]
+                            for b in bindings
+                        )
+                    )
+                    if implements:
+                        later = graph["nodes"][graph["nodes"].index(node) + 1 :]
+                        implements = not any(
+                            (
+                                target not in target_groups
+                                or following["task_instance_id"]
+                                in target_groups[target]
+                            )
+                            and matches_role(
+                                annotations[following["id"]]["object"], {ann["object"]}
+                            )
+                            and validate_semantic_call_payload(following["call"])[
+                                "effect"
+                            ]
+                            != "preserve"
+                            for following in later
+                        )
+                else:
+                    # The catalog pour primitive restores its source orientation.
+                    implements = call.get("call_id") == "simulation.pour"
+                if implements:
+                    witnessed.add(ann["object"])
+            covered = bool(subjects) and subjects <= witnessed
+            if not covered:
+                raise ValueError(
+                    f"Instruction qualifier {clause['id']!r} is not implemented: {kind}"
+                )
+        report.append(
+            {
+                "clause_id": clause["id"],
+                "target": target,
+                "status": "covered" if covered else "unverified",
+                "node_ids": [n["id"] for n in candidates],
+                "reason": (
+                    "structured_declaration"
+                    if covered
+                    else "unsupported_or_unstructured_qualifier"
+                ),
+            }
+        )
+    return report
+
+
 def validate_semantic_plan(
     graph: dict[str, Any],
     candidate: dict[str, Any],
@@ -95,11 +240,26 @@ def validate_semantic_plan(
             request; these suggestions never change the input or establish
             validity without a complete subsequent validation.
     """
-    graph = validate_semantic_task_graph(graph)
     candidate = validate_task_candidate(candidate)
+    return _validate_interpreted_plan(
+        graph,
+        candidate["draft"],
+        candidate["scene_request"]["references"],
+        grounding,
+        annotations,
+        requirements,
+        bindings,
+    )
+
+
+def _validate_interpreted_plan(
+    graph, draft, references, grounding, annotations, requirements, bindings
+):
+    """Check an executable witness against resolved source intent."""
+    graph = validate_semantic_task_graph(graph)
     if (
-        graph["task_id"] != candidate["draft"]["task_id"]
-        or graph["instruction"] != candidate["draft"]["instruction"]
+        graph["task_id"] != draft["task_id"]
+        or graph["instruction"] != draft["instruction"]
     ):
         raise ValueError("Plan source identity mismatch")
     for entity in grounding["objects"]:
@@ -128,7 +288,7 @@ def validate_semantic_plan(
                 raise ValueError("Invalid normalized image evidence")
         elif box is not None:
             raise ValueError("Unobserved entities cannot have boxes")
-    steps = {s["id"]: s for s in candidate["draft"]["steps"]}
+    steps = {s["id"]: s for s in draft["steps"]}
     nodes = {n["id"]: n for n in graph["nodes"]}
     entities = {o["id"] for o in grounding["objects"]}
     entity_by_id = {o["id"]: o for o in grounding["objects"]}
@@ -159,9 +319,7 @@ def validate_semantic_plan(
             raise ValueError("Invalid semantic annotation: intent must be a dictionary")
     if set(g["id"] for g in graph["task_groups"]) != set(steps):
         raise ValueError("Graph must retain every source step")
-    _validate_reference_identity(
-        grounding["bindings"], candidate["scene_request"]["references"]
-    )
+    _validate_reference_identity(grounding["bindings"], references)
     expected_refs = {
         f"{step['id']}.{role}"
         for step in steps.values()
