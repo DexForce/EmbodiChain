@@ -38,6 +38,7 @@ class ResolvedGymComponents:
             Program deployment composer.
         scene_config: Optional physical scene projection for semantic binding checks.
         evaluation: Optional owned evaluation component declaration.
+        usd_scene_inventory: Optional preflighted USD source/resource identity.
 
     Resolver calls own their nested data independently. The mappings remain
     mutable for explicit declaration assembly; this is not a sealed identity.
@@ -49,6 +50,7 @@ class ResolvedGymComponents:
     embodiment_skill_profile: dict[str, object] | None
     scene_config: dict[str, object] | None
     evaluation: dict[str, object] | None = None
+    usd_scene_inventory: dict[str, object] | None = None
 
     def validate_scene_bindings(self, binding: Mapping[str, object]) -> None:
         """Check semantic native roots against the resolved physical scene.
@@ -63,7 +65,11 @@ class ResolvedGymComponents:
 
         if self.scene_config is None:
             raise ValueError("Scene binding validation requires a physical scene.")
-        _validate_scene_binding_targets(binding, simulation=self.scene_config)
+        _validate_scene_binding_targets(
+            binding,
+            simulation=self.scene_config,
+            usd_scene_inventory=self.usd_scene_inventory,
+        )
 
 
 def resolve_gym_components(

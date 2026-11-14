@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import zipfile
 
 import numpy as np
 import pytest
@@ -26,6 +27,7 @@ from PIL import Image
 from dexsim.kit.usd import parse_usd
 
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd import (
+    _externalize_glb_textures,
     build_scene_usd,
     build_scene_usdz,
 )
@@ -42,9 +44,9 @@ from embodichain.lab.sim.shapes import MeshCfg
 pytestmark = [pytest.mark.requires_sim, pytest.mark.renderer]
 
 
-@pytest.mark.parametrize("packaged", [False, True], ids=["usda", "usdz"])
+@pytest.mark.parametrize("delivery", ["usda", "usdz", "asset_package"])
 def test_exported_usd_texture_matches_native_gltf(
-    tmp_path: Path, packaged: bool
+    tmp_path: Path, delivery: str
 ) -> None:
     # An asymmetric atlas detects a vertical inversion; primary colours also
     # avoid colour-space rounding obscuring the orientation comparison.
@@ -90,9 +92,17 @@ def test_exported_usd_texture_matches_native_gltf(
         ),
         encoding="utf-8",
     )
+    reference_gltf = _externalize_glb_textures(
+        source_glb=mesh_root / "table.glb", destination_root=tmp_path / "reference_gltf"
+    )
     usd_path = build_scene_usd(output_root=tmp_path)
-    if packaged:
+    if delivery == "usdz":
         usd_path = build_scene_usdz(scene_usd_path=usd_path)
+    elif delivery == "asset_package":
+        relocated = tmp_path / "relocated package"
+        with zipfile.ZipFile(tmp_path / "scene_package.zip") as package:
+            package.extractall(relocated)
+        usd_path = relocated / "asset.usda"
     parsed = parse_usd(str(usd_path))
     source_prim = next(
         item.usd.prim_path for item in parsed.mesh_objects if item.name == "table"
@@ -125,9 +135,7 @@ def test_exported_usd_texture_matches_native_gltf(
         reference = sim.add_visual_object(
             VisualObjectCfg(
                 uid="gltf_reference",
-                shape=MeshCfg(
-                    fpath=str(tmp_path / "scene_usd/assets/table/model.gltf")
-                ),
+                shape=MeshCfg(fpath=str(reference_gltf)),
             )
         )
         exported = sim.add_visual_object(
@@ -163,7 +171,7 @@ def test_exported_usd_texture_matches_native_gltf(
             if material.base_color_map is not None
             and "embodichain-usdz-textures-" in material.base_color_map
         ]
-        if packaged:
+        if delivery == "usdz":
             assert texture_files
             assert all(path.is_file() for path in texture_files)
         sim.set_ground_plane_visibility(False)

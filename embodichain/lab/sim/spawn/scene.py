@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, fields, replace
 from typing import TYPE_CHECKING, Any, Callable, Literal
 
@@ -85,6 +85,7 @@ class SpawnScene:
         )
         self._assets: dict[str, _AssetDeclaration] = {}
         self._usd_texture_files = _UsdTextureFiles()
+        self._usd_source_files = ExitStack()
         if renderer is None:
             from dexsim.types import Renderer
 
@@ -685,6 +686,7 @@ class SpawnScene:
             self.builder.result = None
             self._assets.clear()
             self._usd_texture_files.close()
+            self._usd_source_files.close()
             getattr(self, "_no_render_material_definitions", {}).clear()
             if hasattr(self, "_material_resources"):
                 self._material_resources.close()

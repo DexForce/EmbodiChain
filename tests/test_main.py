@@ -543,7 +543,9 @@ def test_preview_scene_help_includes_output_and_viser_options(
 
     assert exc_info.value.code == 0
     output = capsys.readouterr().out
-    assert "--output_root" in output
+    assert "--usd-file" in output
+    assert "--simulate" in output
+    assert "--output_root" not in output
     assert "--viser" in output
 
 

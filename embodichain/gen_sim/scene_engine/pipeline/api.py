@@ -394,6 +394,13 @@ def _export_materialization(
         scene_graph=scene_graph,
         output_root=output_root,
     ).export()
+    from embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd import (
+        build_scene_usd,
+        build_scene_usdz,
+    )
+
+    scene_usd_path = build_scene_usd(output_root=output_root)
+    build_scene_usdz(scene_usd_path=scene_usd_path)
     log_info("Completed Scene Export")
     return SceneMaterialization(
         scene=scene,

@@ -263,7 +263,9 @@ class SimulationManagerCfg:
         startup_summary: Literal["compact", "full", "off"] = "compact",
         dexsim_startup_info: bool = False,
         scene_node_capacity: int | None = None,
+        default_ground: bool = True,
     ) -> None:
+        self.default_ground = default_ground
         self.startup_summary = startup_summary
         self.dexsim_startup_info = dexsim_startup_info
         self.scene_node_capacity = scene_node_capacity
@@ -392,6 +394,13 @@ class SimulationManagerCfg:
     arena_space: float = 5.0
     """The distance between each arena when building multiple arenas."""
 
+    default_ground: bool = True
+    """Declare the manager-owned global colliding ground plane.
+
+    Disable for whole-scene USD preview so only authored colliders are loaded.
+    This does not control Viser's nonphysical grid or source-authored ground.
+    """
+
     physics_cfg: PhysicsBackendCfg = field(default_factory=DefaultPhysicsCfg)
     """Physics backend configuration (type selects default vs Newton backend).
 
@@ -419,6 +428,8 @@ class SimulationManagerCfg:
 
     def __post_init__(self) -> None:
         """Validate physics and apply visualization-dependent defaults."""
+        if not isinstance(self.default_ground, bool):
+            raise TypeError("default_ground must be a boolean.")
         if self.startup_summary not in ("compact", "full", "off"):
             raise ValueError("startup_summary must be 'compact', 'full', or 'off'.")
         validate_physics_cfg(self.physics_cfg)
@@ -776,7 +787,8 @@ class SimulationManager:
         if self.has_native_renderer:
             self._init_sim_resources()
             self.set_default_background()
-        self._declare_spawn_default_plane()
+        if sim_config.default_ground:
+            self._declare_spawn_default_plane()
         if self.has_native_renderer:
             self.set_default_global_lighting()
 
@@ -1017,7 +1029,11 @@ class SimulationManager:
         Returns:
             List[str]: list of all assets uid.
         """
-        uid_list = ["default_plane"]
+        uid_list = (
+            ["default_plane"]
+            if getattr(getattr(self, "sim_config", None), "default_ground", True)
+            else []
+        )
         uid_list.extend(list(self._lights.keys()))
         uid_list.extend(list(self._sensors.keys()))
         uid_list.extend(list(self._robots.keys()))
@@ -1895,7 +1911,7 @@ class SimulationManager:
             self._env = result.get_arena("default")
             self._arenas = [result.get_arena(name) for name in scene.arena_names]
             self.__dict__.pop("arena_offsets", None)
-            if self._default_plane is None:
+            if self._default_plane is None and self.sim_config.default_ground:
                 self._bind_default_plane(scene.handles("default_plane")[0])
 
         # Runtime readiness belongs to the SimulationManager. Keep this and
@@ -2954,6 +2970,9 @@ class SimulationManager:
         validated at ``prepare()``;
         native creation failures do not promise rollback.
 
+        Standard AssetRevision ZIPs are validated by the SDK and extracted
+        into Spawn-owned files kept until scene teardown. Returned facade
+        sources address the resolved USD; the caller's recipe is unchanged.
         Gaussian USD references retain the single-Arena, Default-physics and
         Hybrid-renderer requirements; use explicit GaussianSplatCfg visuals
         for replicated Arenas. NoRender omits Gaussian render resources.
@@ -2988,6 +3007,13 @@ class SimulationManager:
             usd=usd,
             asset_cfgs=asset_cfgs,
         )
+        recipe.validate_import()
+        if recipe.source.file_path.lower().endswith(".zip"):
+            from .spawn._usd_scene import _open_usd_scene_source
+
+            recipe = self._spawn_scene._usd_source_files.enter_context(
+                _open_usd_scene_source(recipe)
+            )
         plan = _compile_usd_import(self, recipe)
         plan.source.materials = self._spawn_scene._resolve_materials(
             plan.source.materials
@@ -4864,7 +4890,7 @@ class SimulationManager:
         scene = self._spawn_scene
         if uid not in scene:
             return False
-        if uid == "default_plane":
+        if uid == "default_plane" and self.sim_config.default_ground:
             raise ValueError("The Spawn-owned default plane cannot be removed.")
 
         scene._require_removable(uid)

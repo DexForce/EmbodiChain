@@ -84,8 +84,8 @@ COMMANDS = (
     ),
     Command(
         name="preview-scene",
-        target="embodichain.gen_sim.scene_engine.cli.preview:main",
-        help="Preview a generated Scene Engine scene export.",
+        target="embodichain.lab.scripts.preview_scene:main",
+        help="Preview a standard USD scene without advancing physics by default.",
     ),
     Command(
         name="preview-asset",

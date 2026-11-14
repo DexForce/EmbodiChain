@@ -7,7 +7,7 @@
 | Public simulation facade | `embodichain/lab/sim/__init__.py` |
 | World, registries, readiness and stepping | `embodichain/lab/sim/sim_manager.py` → `SimulationManager`, `SimulationManagerCfg` |
 | Declaration, source resolution and binding | `embodichain/lab/sim/spawn/scene.py`, `spawn/source.py`, `spawn/descriptors.py` |
-| USD import recipes, preflight and source-path results | `cfg/usd.py`, `spawn/usd_import.py`, `spawn/usd_result.py` |
+| USD import recipes, preflight and source-path results | `cfg/usd.py`, `spawn/usd_import.py`, `spawn/_usd_scene.py`, `spawn/usd_result.py` |
 | Fresh static USD reads and owned authored link meshes | `embodichain/lab/sim/spawn/source_geometry.py` |
 | Manager-level backend hooks and capabilities | `embodichain/lab/sim/physics/` |
 | Object-level Scene batch adapters | `embodichain/lab/sim/objects/backends/scene.py`, `newton.py` |
@@ -18,6 +18,10 @@
 `cli.sim` supplies standalone arguments without importing runtime dependencies.
 [Environment configuration](../env-framework/configuration.md) owns runnable
 file/CLI composition and physics selection. Concrete defaults stay in configs.
+
+SimulationManagerCfg.default_ground controls the manager-owned colliding plane
+(default enabled). Whole-scene preview disables it so source physics is not
+augmented; Viser's display grid and source-authored ground are separate.
 
 ## Ownership
 
@@ -49,6 +53,16 @@ Default; cross-object/world constraints require `add_usd()`.
 Source, texture and visual-rebuild rules
 are in [articulation adapters](articulation-adapters.md),
 [rendering](rendering.md) and [scene geometry](../scene-services/geometry.md).
+
+Whole-scene imports also admit standard AssetRevision ZIPs through SDK package
+validation. `spawn/_usd_scene.py` resolves their declared USD entrypoint and
+retains the original address/digest in the static environment inventory.
+`SpawnScene` owns the extraction context until native Scene closure; ZIP-imported
+facades address the resolved USD during that lifetime. Singleton USD sources do
+not accept arbitrary ZIPs. The same descriptor compiler supports manager-free
+identity/override/constraint preflight without constructing object facades.
+Configured Gym ownership and semantic binding are described by
+[USD environments](../env-framework/configuration.md#whole-scene-usd-environments).
 
 `spawn.source_geometry` owns fresh authored reads and `LinkMesh`, with optional
 per-assembly snapshots and no global source cache. Captured identity/order and

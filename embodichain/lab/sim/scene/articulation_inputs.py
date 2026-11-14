@@ -48,7 +48,11 @@ def _fixed_base(config: dict[str, Any]) -> bool:
 
 @dataclass(frozen=True, slots=True)
 class PrismaticBinding:
-    """Source-qualified prismatic geometry and explicitly selected endpoints."""
+    """Source-qualified geometry with optional open/closed endpoint semantics.
+
+    Geometry inspection preserves an unknown ``closed_position``. Resolving
+    an open/closed target requires an explicit source or task-owned declaration.
+    """
 
     object_id: str
     joint: str
@@ -105,11 +109,8 @@ class PrismaticBinding:
             len(self.limits) != 2
             or not np.isfinite(self.limits).all()
             or self.limits[0] >= self.limits[1]
-            or (self.closed_position is None and min(map(abs, self.limits)) > 1e-6)
         ):
-            raise ValueError(
-                "Prismatic limits require a zero closed endpoint and a finite open endpoint."
-            )
+            raise ValueError("Prismatic limits must be finite and strictly increasing.")
         if self.limits[1] - self.limits[0] <= 0.004:
             raise ValueError(
                 "Prismatic endpoints must be distinguishable at millimetre resolution."
@@ -144,14 +145,18 @@ class PrismaticBinding:
 
         Returns:
             The matching authored joint coordinate in runtime metres.
+
+        Raises:
+            ValueError: The state is invalid or closed-position semantics are unknown.
         """
         if state not in {"open", "closed"}:
             raise ValueError("Prismatic target state must be open or closed.")
-        closed = (
-            min(self.limits, key=abs)
-            if self.closed_position is None
-            else self.closed_position
-        )
+        if self.closed_position is None:
+            raise ValueError(
+                "Prismatic open/closed targets require an explicit closed_position "
+                "in the binding or gen_sim:closedPosition in the source USD."
+            )
+        closed = self.closed_position
         return (
             closed
             if state == "closed"
@@ -484,7 +489,7 @@ def inspect_prismatic(
 def inspect_prismatic_part(
     config: dict[str, Any], part_id: str, *, source: UsdSourceSnapshot | None = None
 ) -> PrismaticBinding:
-    """Resolve one catalog part into an executable binding.
+    """Resolve one catalog part into a source-qualified physical binding.
 
     Args:
         config: Existing physical asset declaration.
@@ -492,7 +497,7 @@ def inspect_prismatic_part(
         source: Optional shared static read matching the declared asset.
 
     Returns:
-        The selected physical binding.
+        The selected binding; open/closed targets require declared endpoint semantics.
     """
     source = read_usd_source(config["fpath"] if source is None else source)
     matches = [

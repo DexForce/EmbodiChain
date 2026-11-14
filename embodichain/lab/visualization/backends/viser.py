@@ -143,6 +143,9 @@ class ViserBackend(VisualizationBackend):
         self.allow_commands = allow_commands
         self._server_factory = server_factory
         self._server: object | None = None
+        self._preview_control_state: tuple[bool, int, bool] | None = None
+        self._preview_folder: object | None = None
+        self._preview_status: object | None = None
         self._endpoint: str | None = None
         self._thread_id: int | None = None
         self._run_id: str | None = None
@@ -295,6 +298,7 @@ class ViserBackend(VisualizationBackend):
             except queue.Empty:
                 break
         self._server.gui.reset()
+        self._preview_folder = self._preview_status = None
         self._camera_env_dropdown = None
         self._camera_uid_dropdown = None
         self._replay_control_folder = None
@@ -311,6 +315,9 @@ class ViserBackend(VisualizationBackend):
                 "may mutate the simulation."
             )
         self._register_replay_control()
+        if self._preview_control_state is not None:
+            running, steps, visible = self._preview_control_state
+            self.publish_preview_control(running=running, steps=steps, visible=visible)
         env_ids = sorted(self._environment_ids(manifest))
         if self._selected_scene_env not in env_ids:
             self._selected_scene_env = env_ids[0] if env_ids else None
@@ -1827,6 +1834,67 @@ class ViserBackend(VisualizationBackend):
                     handle.image = image.image
         return True
 
+    def publish_preview_camera(
+        self, *, eye: tuple[float, float, float], target: tuple[float, float, float]
+    ) -> None:
+        """Initialize the navigation view on the GUI worker.
+
+        Args:
+            eye: Viewer eye in resolved world meters/Z-up.
+            target: Look-at position in the same frame.
+        """
+        self._assert_update_thread()
+        if self._server is None:
+            raise RuntimeError("Viser must be started before setting its camera.")
+        self._server.initial_camera.position = eye
+        self._server.initial_camera.look_at = target
+
+    def publish_preview_control(
+        self, *, running: bool, steps: int, visible: bool
+    ) -> None:
+        """Display preview controls; callbacks enqueue commands without native writes.
+
+        Args:
+            running: Current physics mode.
+            steps: Committed step count.
+            visible: Whether to display the preview panel.
+        """
+        self._assert_update_thread()
+        self._preview_control_state = (running, steps, visible)
+        if self._server is None:
+            raise RuntimeError(
+                "Viser must be started before publishing preview controls."
+            )
+        if not visible:
+            if self._preview_folder is not None:
+                self._preview_folder.remove()
+            self._preview_folder = self._preview_status = None
+            return
+        if self._preview_folder is None:
+            self._preview_folder = self._server.gui.add_folder("Scene preview")
+            with self._preview_folder:
+                self._preview_status = self._server.gui.add_markdown("")
+                for label, command in (
+                    ("Play", "play"),
+                    ("Pause", "pause"),
+                    ("Step", "step"),
+                    ("Reset to source", "reset"),
+                    ("Stop", "stop"),
+                ):
+                    button = self._server.gui.add_button(
+                        label, disabled=not self.allow_commands
+                    )
+
+                    @button.on_click
+                    def on_click(event: object, value: str = command) -> None:
+                        sink = getattr(self, "_preview_command_sink", None)
+                        if self.allow_commands and sink is not None:
+                            sink(value)
+
+        self._preview_status.content = (
+            f"{'Running' if running else 'Paused'} · Physics steps: {steps}"
+        )
+
     def publish_replay_control(
         self,
         *,
@@ -1872,6 +1940,8 @@ class ViserBackend(VisualizationBackend):
         self._server.flush()
         self._server.stop()
         self._server = None
+        self._preview_control_state = None
+        self._preview_folder = self._preview_status = None
         self._endpoint = None
         self._run_id = None
         self._scene_revision = -1

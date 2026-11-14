@@ -12,6 +12,11 @@ one `UsdSourceSnapshot` per assembly; live state remains Object-owned.
 creates content-addressed Default-only compensation without editing originals.
 Source proofs do not certify cooked shapes or physical paths.
 
+`PrismaticBinding` permits unknown closed-position semantics during inspection;
+`target()` and `axis_sign` require an explicit source or binding coordinate.
+No endpoint is inferred from proximity to zero. Press controls retain their
+separate released/pressed coordinate contract in `press_inputs.py`.
+
 `rigid_mesh.capture_rigid_mesh` owns scaled semantic vertices and matching
 triangles as CPU data with the env axis intact. It reads no poses, preserves
 order/winding/duplicates, and substitutes no hull or box for missing topology.

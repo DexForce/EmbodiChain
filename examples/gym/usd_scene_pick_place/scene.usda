@@ -1,0 +1,51 @@
+#usda 1.0
+(
+    defaultPrim = "World"
+    metersPerUnit = 1
+    kilogramsPerUnit = 1
+    upAxis = "Z"
+)
+
+def Xform "World"
+{
+    def PhysicsScene "PhysicsScene"
+    {
+        vector3f physics:gravityDirection = (0, 0, -1)
+        float physics:gravityMagnitude = 9.81
+    }
+
+    def Material "contact_material" (
+        prepend apiSchemas = ["PhysicsMaterialAPI"]
+    )
+    {
+        float physics:staticFriction = 0.99
+        float physics:dynamicFriction = 0.97
+        float physics:restitution = 0
+    }
+
+    def Cube "table" (
+        prepend apiSchemas = ["PhysicsCollisionAPI", "MaterialBindingAPI"]
+    )
+    {
+        double size = 1
+        double3 xformOp:translate = (0.6, 0, 0.73)
+        double3 xformOp:scale = (0.6, 1, 0.04)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        color3f[] primvars:displayColor = [(0.4, 0.3, 0.2)]
+        rel material:binding:physics = </World/contact_material>
+    }
+
+    def Cube "cube" (
+        prepend apiSchemas = ["PhysicsCollisionAPI", "PhysicsRigidBodyAPI", "PhysicsMassAPI", "MaterialBindingAPI"]
+    )
+    {
+        double size = 0.05
+        double3 xformOp:translate = (0.45, 0.15, 0.777)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+        float physics:mass = 0.05
+        float physxRigidBody:linearDamping = 0.2
+        float physxRigidBody:angularDamping = 0.2
+        color3f[] primvars:displayColor = [(0.2, 0.5, 0.8)]
+        rel material:binding:physics = </World/contact_material>
+    }
+}

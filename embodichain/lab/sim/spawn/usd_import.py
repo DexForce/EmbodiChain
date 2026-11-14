@@ -98,10 +98,11 @@ def _compile_usd_import(
     physics_backend: str = "default",
     device_type: str = "cpu",
 ) -> _UsdImportPlan:
-    """Plan source identities and descriptors, optionally declaring facades.
+    """Compile source identities and descriptors, optionally declaring facades.
 
     Without a manager, no World or facade is created and Gaussian appearance
-    remains descriptive metadata. Native admission belongs to the manager path.
+    remains descriptive metadata. Identity, overrides and constraints use the
+    same compiler; native admission belongs to the manager path.
     """
     recipe.validate_import()
     solver_type = None if manager is None else manager._active_newton_solver_type
@@ -472,6 +473,8 @@ def _compile_usd_import(
             descriptor.per_env = False
         source.materials.update(materials)
         if isinstance(cfg, RobotCfg) and cfg.enable_sensor:
+            if manager is None and cfg.sensors:
+                raise ValueError("Static environment imports do not bind USD robots.")
             for sensor_cfg in cfg.sensors:
                 if not isinstance(sensor_cfg, CameraCfg):
                     raise TypeError("RobotCfg.sensors supports mounted cameras only.")

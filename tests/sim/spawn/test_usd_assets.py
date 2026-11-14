@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+from contextlib import ExitStack
 from pathlib import Path
 from types import SimpleNamespace
 from zipfile import ZIP_STORED, ZipFile
@@ -105,15 +106,21 @@ def test_spawn_close_releases_texture_files_after_native_scene(
     cache = _UsdTextureFiles()
     resolved = cache.resolve({"image": MaterialDesc(name="image", base_color_map=uri)})
     target = Path(resolved["image"].base_color_map)
+    source = tmp_path / "scene.usda"
+    source.write_text("#usda 1.0\n")
+    source_files = ExitStack()
+    source_files.callback(source.unlink)
 
     def close_native() -> None:
         assert target.is_file()
+        assert source.is_file()
         if close_error:
             raise RuntimeError("native close failed")
 
     scene = object.__new__(SpawnScene)
     scene._assets = {"image": object()}
     scene._usd_texture_files = cache
+    scene._usd_source_files = source_files
     scene.builder = SimpleNamespace(result=SimpleNamespace(close=close_native))
     if close_error:
         with pytest.raises(RuntimeError, match="native close failed"):
@@ -121,5 +128,6 @@ def test_spawn_close_releases_texture_files_after_native_scene(
     else:
         scene.close()
     assert not target.exists()
+    assert not source.exists()
     assert not scene._assets
     assert scene.builder.result is None

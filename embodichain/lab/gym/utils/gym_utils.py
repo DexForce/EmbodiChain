@@ -895,6 +895,7 @@ def config_to_cfg(
         _validate_scene_binding_targets(
             deployment.scene_binding,
             simulation=component_resolution.scene_config,
+            usd_scene_inventory=component_resolution.usd_scene_inventory,
         )
         configured_task_program_deployment = deployment
         configured_task_program_integration = deployment.integration
@@ -1000,6 +1001,15 @@ def config_to_cfg(
     env_cfg.num_envs = config.get("num_envs", 1)
     env_cfg.seed = config.get("seed", None)
     env_cfg.enable_sensor = config.get("enable_sensor", True)
+    from embodichain.lab.sim.cfg import UsdImportCfg
+
+    env_cfg.usd_scene = (
+        UsdImportCfg.from_dict(config["usd_scene"]) if "usd_scene" in config else None
+    )
+    env_cfg._usd_scene_inventory = component_resolution.usd_scene_inventory
+    env_cfg.default_ground = config.get("default_ground")
+    if env_cfg.default_ground is not None and type(env_cfg.default_ground) is not bool:
+        raise TypeError("default_ground must be a bool or None.")
     ground_plane_visible = config.get("ground_plane_visible")
     if ground_plane_visible is not None and type(ground_plane_visible) is not bool:
         raise TypeError("ground_plane_visible must be a bool or None.")
@@ -1022,6 +1032,11 @@ def config_to_cfg(
         viser_server = ViserServerCfg(**viser_server_config)
 
     env_cfg.sim_cfg = SimulationManagerCfg(
+        default_ground=(
+            env_cfg.usd_scene is None
+            if env_cfg.default_ground is None
+            else env_cfg.default_ground
+        ),
         startup_summary=config.get("startup_summary", "compact"),
         dexsim_startup_info=config.get("dexsim_startup_info", False),
         scene_node_capacity=config.get("scene_node_capacity"),

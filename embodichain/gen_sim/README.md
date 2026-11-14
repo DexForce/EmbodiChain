@@ -8,7 +8,7 @@ embodichain gensim asset ingest --input raw_asset --category cup --output output
 embodichain gensim scene generate --image table.png --output outputs/scene
 embodichain gensim scene edit --scene outputs/scene --prompt "Move the cup to the left"
 embodichain gensim scene expand --scene outputs/scene --config layouts.yaml
-embodichain gensim scene preview --scene outputs/scene --viser
+embodichain gensim scene preview --usd-file outputs/scene/scene_usd/scene.usda --viser
 embodichain gensim task plan --image table.png --instruction "Put the cup on the tray" --output outputs/task
 embodichain gensim services validate --config model_services.json --env-file services.env
 embodichain gensim services doctor --config model_services.json --env-file services.env
@@ -17,7 +17,8 @@ embodichain gensim ui --host 127.0.0.1 --port 7860
 
 Domain operations share their application implementation with the existing
 `asset-engine`, `scene-engine`, `scene-randomization`, `preview-scene`, and
-`task-engine` commands. Existing argument spellings remain accepted. New commands
+`task-engine` commands. Preview uses the Lab-owned standard USD file interface;
+the old workspace/manifest preview arguments have been removed. New commands
 use `--input`, `--output`, `--scene`, `--prompt`, and hyphenated option names.
 The new scene operation is named `expand`; the legacy top-level command remains
 `scene-randomization`.
@@ -25,6 +26,26 @@ The new scene operation is named `expand`; the legacy top-level command remains
 Scene editing modifies the selected workspace in place. Task planning requires a
 fresh output directory and ends with an unbound semantic graph and offline HTML
 viewer. Its output alone does not construct a robot or execute a task.
+
+Scene generation, editing and staged materialization produce an editable
+`scene_export/`, a Z-up/metre/kilogram `scene_usd/scene.usda`, a relocatable
+`scene_usd/scene.usdz`, and **`scene_package.zip`** for DexSim AssetRevision
+`2.0-draft` interchange. The ZIP contains a canonical `asset.usda` entry with
+default prim `/Asset`, its USD/texture dependency closure, `asset.json`, and
+`reports/dexsim-packaging.json` / `reports/dexsim-registry.json`. DexSim's
+packager validates the JSON schema, byte digests and cross-object references.
+Its processed-USD packaging support is required; an export failure fails the
+operation while retaining the editable workspace for diagnosis.
+
+The AssetRevision describes packaging provenance. A scene with multiple
+independent bodies is not automatically one rigidbody or articulation:
+`asset_kind` remains unknown until classified. Unmeasured quality facts stay
+null, the quality summary is `incomplete`, and no runtime capabilities or
+certification are granted by packaging. Preview consumes the standard USD file
+without interpreting GenSim UID or
+initial-state tags. No scene manifest or copied native-asset preview package is
+produced. The import owner resolves the USD-authored state; old custom metadata
+is not restored by preview.
 
 The UI launcher uses the active Python interpreter, preserves the selected SDK
 import root, and retains the existing UI's process cleanup and authentication.
