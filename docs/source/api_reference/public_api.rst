@@ -6034,6 +6034,28 @@ Finite-difference inertial sensors
    IMUCfg
 
 
+Planar contact grid
+-------------------
+
+Contact grids bin the latest solver contact report into a mounted metric
+surface. Use the per-quantity validity fields and the native impulse duration
+when consuming the outputs.
+
+.. currentmodule:: embodichain.lab.sim.sensors
+
+.. autosummary::
+
+   ContactGrid
+   ContactGridCfg
+
+.. currentmodule:: embodichain.lab.sim.sensors.contact_grid
+
+.. autosummary::
+
+   ContactGrid
+   ContactGridCfg
+
+
 Contact-resultant sensor
 ------------------------
 
