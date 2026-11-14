@@ -191,8 +191,10 @@ def test_manager_rejects_non_particle_newton_solver(solver_type: str) -> None:
 @pytest.mark.parametrize(
     "config_type", [SurfaceDeformableObjectCfg, VolumeDeformableObjectCfg]
 )
+@pytest.mark.parametrize("solver_form", ["dexuni", "direct", "registered", "mapping"])
 def test_manager_declares_deformables_with_supported_solver(
     config_type: type[DeformableObjectCfg],
+    solver_form: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from embodichain.lab.sim.shapes import MeshCfg
@@ -200,9 +202,35 @@ def test_manager_declares_deformables_with_supported_solver(
 
     sim = object.__new__(SimulationManager)
     sim.physics = NewtonPhysicsBackend(SimpleNamespace())
-    sim.physics._configured_solver_type = "dexuni"
+    from dexsim.engine.newton_physics import (
+        ProviderNewtonSolverCfg,
+        RegisteredNewtonSolverCfg,
+    )
+    from dexsim.engine import newton_physics
+
+    normalize = newton_physics.normalize_newton_solver_name
+    monkeypatch.setattr(
+        newton_physics,
+        "normalize_newton_solver_name",
+        lambda name: name if name == "custom_particles" else normalize(name),
+    )
+
+    solver = None
+    if solver_form == "direct":
+        solver = ProviderNewtonSolverCfg(provider_factory=lambda: object())
+    elif solver_form == "registered":
+        solver = RegisteredNewtonSolverCfg("custom_particles")
+    elif solver_form == "mapping":
+        solver = {"solver_type": "custom_particles", "options": {}}
+    sim.physics._configured_solver_type = (
+        "dexuni"
+        if solver_form == "dexuni"
+        else "provider" if solver_form == "direct" else "custom_particles"
+    )
     sim.device = torch.device("cuda")
-    sim.sim_config = SimpleNamespace(physics_cfg=NewtonPhysicsCfg())
+    physics_cfg = NewtonPhysicsCfg(solver_cfg=solver)
+    sim.sim_config = SimpleNamespace(physics_cfg=physics_cfg)
+    sim._world_config = SimpleNamespace(newton_cfg=physics_cfg.to_dexsim_cfg(0))
     sim._deformable_objects = {}
     sim._visualization_topology_revision = 0
     builder = SimpleNamespace(

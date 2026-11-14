@@ -19,6 +19,9 @@ World-model naming does not introduce a parallel `world_models` domain.
 | Request | Owner |
 |---|---|
 | NeRD network, portable checkpoint, physical codec | `extensions/embodichain_models/embodichain_models/dynamics/nerd/{model,checkpoint,codec}.py` |
+| Online canonical state/history, injected FK/contact geometry and prediction | Model package `transition.py`, `geometry.py` |
+| Lightweight Cartpole/Ant learning factories | Example `_support/{_cartpole_env,_ant_env,_model_env,_model_factory}.py` |
+| Optional native Provider, indices and physics admission | `extensions/embodichain_solvers/embodichain_solvers/physics/nerd/` |
 | Committed HDF5 shards and bounded windows | Model package `data.py`, private `_resident.py` |
 | Encoding, frozen moments and offline errors | Model package `integration.py` |
 | Objective and common trainer factory | Model package `supervised.py`, `sl_recipe.py` |
@@ -34,11 +37,21 @@ Direct `embodichain train-sl --config FILE` works independently of example
 bootstrap. An explicitly selected `dynamics.train.*.yaml` uses the historical
 trainer for controlled comparisons and its legacy checkpoint contract.
 
-The extension imports neither examples nor simulation. Generation uses Newton's
+The model extension imports neither examples nor simulation. Generation uses Newton's
 built-in Featherstone/MuJoCo solvers directly without a DexSim custom solver or
-Scene API. Native learned-solver deployment and functional Gym integration are
-separate consumers. There are no NeRD-specific core `compute/dynamics`,
+Scene API. Native learned-solver deployment and lightweight learning environments
+are separate consumers of the same independent transition. There are no NeRD-specific core `compute/dynamics`,
 `data_pipeline/dynamics`, `learning/dynamics` modules or core `dynamics` command.
+
+Online rollout owns canonical `q`, COM `qd`, named history and valid lengths in
+`NeRDState`. `NeRDTransition.step` computes contact conditioning from that same
+state through injected FK; geometry caches only detached fixed tensors. Offline
+SL continues to accept measured contact features. Learning reset/terminal/TBPTT
+semantics use the existing [learning contract](../rl-learning/rl-learning.md).
+Full reset creates independent episode graphs; partial reset preserves peers.
+The optional native adapter retains indexing, physical admission and publication.
+The FK-only reference factory isolates SDK descriptor lowering without creating
+a World, Scene or solver; signatures guard that SDK compatibility surface.
 
 ## RigidFormer author model
 

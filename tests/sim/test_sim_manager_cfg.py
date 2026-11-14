@@ -138,6 +138,88 @@ def test_newton_physics_cfg_preserves_dexsim_dexuni_default() -> None:
 
 
 @pytest.mark.no_sim
+@pytest.mark.parametrize("form", ["direct", "registered", "mapping"])
+def test_external_provider_options_do_not_require_unrelated_builtin_exports(
+    monkeypatch, form
+):
+    from dexsim.engine import newton_physics
+    from dexsim.engine.newton_physics import (
+        ProviderNewtonSolverCfg,
+        RegisteredNewtonSolverCfg,
+    )
+
+    options = {"checkpoint": "/models/example"}
+    normalize = newton_physics.normalize_newton_solver_name
+    # Unit-test conversion independently of this checkout's installation.
+    # Actual entry-point discovery is covered by the installed-wheel probe.
+    monkeypatch.setattr(
+        newton_physics,
+        "normalize_newton_solver_name",
+        lambda name: name if name == "nerd" else normalize(name),
+    )
+    if form == "direct":
+        solver = ProviderNewtonSolverCfg(
+            provider_factory=lambda: object(), options=options
+        )
+    elif form == "registered":
+        solver = RegisteredNewtonSolverCfg("nerd", options=options)
+    else:
+        solver = {"solver_type": "nerd", "options": options}
+    monkeypatch.delattr(newton_physics, "DexUniSolverCfg")
+    config = NewtonPhysicsCfg(solver_cfg=solver, collision_cfg=None)
+    native = config.to_dexsim_cfg(0)
+    assert native.solver_cfg.options == options
+    if form == "direct":
+        assert native.solver_cfg is config.solver_cfg
+    else:
+        assert native.solver_cfg.solver_type == "nerd"
+
+
+@pytest.mark.no_sim
+def test_registered_builtin_cannot_bypass_gradient_or_identity_guards(monkeypatch):
+    from dexsim.engine.newton_physics import RegisteredNewtonSolverCfg
+    from dexsim.engine import newton_physics
+
+    normalize = newton_physics.normalize_newton_solver_name
+    monkeypatch.setattr(
+        newton_physics,
+        "normalize_newton_solver_name",
+        lambda name: name if name == "nerd" else normalize(name),
+    )
+
+    with pytest.raises(RuntimeError, match="gradient mode"):
+        NewtonPhysicsCfg(
+            requires_grad=True,
+            solver_cfg=RegisteredNewtonSolverCfg(
+                "mjwarp", options={"use_mujoco_cpu": True}
+            ),
+        ).to_dexsim_cfg(0)
+    with pytest.raises(ValueError, match="cannot override"):
+        NewtonPhysicsCfg(
+            solver_cfg=RegisteredNewtonSolverCfg(
+                "mjwarp", options={"solver_type": "xpbd"}
+            )
+        ).to_dexsim_cfg(0)
+    with pytest.raises(ValueError, match="belong in options"):
+        NewtonPhysicsCfg(
+            solver_cfg={"solver_type": "nerd", "checkpoint": "model"}
+        ).to_dexsim_cfg(0)
+
+
+@pytest.mark.no_sim
+def test_default_ground_is_creation_owned_and_serialized():
+    cfg = SimulationManagerCfg(enable_default_ground=False)
+    assert cfg.to_dict()["enable_default_ground"] is False
+    sim = object.__new__(SimulationManager)
+    sim.sim_config = cfg
+    sim._spawn_scene = MagicMock()
+    sim._declare_spawn_default_plane()
+    sim._spawn_scene.declare.assert_not_called()
+    with pytest.raises(TypeError, match="boolean"):
+        SimulationManagerCfg(enable_default_ground="false")
+
+
+@pytest.mark.no_sim
 def test_newton_physics_cfg_forwards_cuda_default_to_dexsim() -> None:
     """The concrete Newton device default reaches the native config unchanged."""
     cfg = NewtonPhysicsCfg()

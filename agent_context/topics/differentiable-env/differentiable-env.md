@@ -93,6 +93,13 @@ The public differentiable package exposes no solver stepper, trajectory, or
 gradient-rollout API. Add those capabilities as a separate future design when
 Newton dynamics are ready for end-to-end validation.
 
+Model-based training is a separate consumer of the existing
+`DifferentiableEnvProtocol` and shared collector/trainer, including RWM and the
+NeRD lightweight reference factories. It does not add a dynamics mode to this
+Warp environment or route model prediction through SimulationManager. The
+generic `sim.diff.kinematics.differentiable_fk` helper supplies first-order
+q/qd gradients using independently owned Warp storage; it does not step physics.
+
 ## Source of truth
 
 - `embodichain/lab/gym/envs/differentiable_env.py`

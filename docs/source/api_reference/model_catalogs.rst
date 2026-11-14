@@ -33,6 +33,9 @@ network as buffers.
    load_model
    convert_legacy_checkpoint
    NeRDStateCodec
+   NeRDGeometry
+   NeRDState
+   NeRDTransition
    NeRDObjective
    make_nerd_batch
    NeRDWindowSource
@@ -52,6 +55,12 @@ network as buffers.
 
 .. autoclass:: NeRDStateCodec
 
+.. autoclass:: NeRDGeometry
+
+.. autoclass:: NeRDState
+
+.. autoclass:: NeRDTransition
+
 .. autoclass:: NeRDObjective
 
 .. autofunction:: make_nerd_batch
@@ -59,6 +68,50 @@ network as buffers.
 .. autoclass:: NeRDWindowSource
 
 .. autofunction:: build_supervised_trainer
+
+Graph-connected rollout and contact geometry
+--------------------------------------------
+
+The rollout computes current-state FK and contact features before encoding,
+history advancement, prediction and decoding. The geometry owns only detached
+fixed parameters and receives a tensor FK callable; neither implementation
+imports a simulator. State and history are explicit and treated as immutable.
+Learning environments own reset and TBPTT boundaries. Offline supervised
+objectives may continue using measured contact features.
+
+.. currentmodule:: embodichain_models.dynamics.nerd.geometry
+
+.. autosummary::
+
+   NeRDGeometry
+
+.. currentmodule:: embodichain_models.dynamics.nerd.transition
+
+.. autosummary::
+
+   NeRDState
+   NeRDTransition
+
+Optional native NeRD deployment
+-------------------------------
+
+The Provider maps native coordinates and controls into the same independent
+transition. It owns inference history and resource validation; SDK Scene owns
+publication, reset baselines and scheduling. The lightweight learning route
+does not construct this solver. Support remains limited to the recorded
+Cartpole/Ant physical domains, without general contact-force reports or
+external wrenches.
+
+.. currentmodule:: embodichain_solvers.physics.nerd.provider
+
+.. autosummary::
+
+   NeRDProvider
+   NeuralRobotDynamicSolver
+
+.. autoclass:: NeRDProvider
+
+.. autoclass:: NeuralRobotDynamicSolver
 
 Network and normalization
 --------------------------

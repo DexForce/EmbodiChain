@@ -263,7 +263,11 @@ class SimulationManagerCfg:
         startup_summary: Literal["compact", "full", "off"] = "compact",
         dexsim_startup_info: bool = False,
         scene_node_capacity: int | None = None,
+        enable_default_ground: bool = True,
     ) -> None:
+        if not isinstance(enable_default_ground, bool):
+            raise TypeError("enable_default_ground must be boolean")
+        self.enable_default_ground = enable_default_ground
         self.startup_summary = startup_summary
         self.dexsim_startup_info = dexsim_startup_info
         self.scene_node_capacity = scene_node_capacity
@@ -314,6 +318,13 @@ class SimulationManagerCfg:
 
     width: int = 1920
     """The width of the simulation window."""
+
+    enable_default_ground: bool = True
+    """Declare the built-in physical/render ground at scene creation.
+
+    Disable for contact-free scenes or models with explicitly authored boundaries.
+    This is a creation-time setting, not a runtime collision visibility toggle.
+    """
 
     startup_summary: Literal["compact", "full", "off"] = "compact"
     """Startup table detail. ``off`` disables both simulation and Gym summaries."""
@@ -1017,7 +1028,7 @@ class SimulationManager:
         Returns:
             List[str]: list of all assets uid.
         """
-        uid_list = ["default_plane"]
+        uid_list = ["default_plane"] if self.sim_config.enable_default_ground else []
         uid_list.extend(list(self._lights.keys()))
         uid_list.extend(list(self._sensors.keys()))
         uid_list.extend(list(self._robots.keys()))
@@ -1895,7 +1906,7 @@ class SimulationManager:
             self._env = result.get_arena("default")
             self._arenas = [result.get_arena(name) for name in scene.arena_names]
             self.__dict__.pop("arena_offsets", None)
-            if self._default_plane is None:
+            if self._default_plane is None and self.sim_config.enable_default_ground:
                 self._bind_default_plane(scene.handles("default_plane")[0])
 
         # Runtime readiness belongs to the SimulationManager. Keep this and
@@ -2522,6 +2533,9 @@ class SimulationManager:
 
     def _declare_spawn_default_plane(self) -> None:
         """Declare the global ground in the World's Spawn scene."""
+
+        if not self.sim_config.enable_default_ground:
+            return
 
         from dexsim.spawn import (
             CollisionApproximation,
@@ -3590,13 +3604,44 @@ class SimulationManager:
         if solver_type == "dexuni" and getattr(self, "_fluid_objects", {}):
             raise NotImplementedError("DexUni fluids cannot coexist with deformables.")
         supported_solvers = {"dexuni", "xpbd", "semi_implicit", "vbd"}
-        if solver_type not in supported_solvers:
+        if solver_type in {"mujoco_warp", "featherstone"}:
             raise NotImplementedError(
-                f"Newton solver {solver_type!r} does not support deformable "
-                "particle sets; select one of 'dexuni', 'xpbd', "
-                "'semi_implicit', or 'vbd'."
+                f"Newton solver {solver_type!r} does not support deformable particle sets."
             )
         physics_cfg = self.sim_config.physics_cfg
+        if solver_type not in supported_solvers:
+            from dexsim.engine.newton_physics import (
+                ProviderNewtonSolverCfg,
+                RegisteredNewtonSolverCfg,
+            )
+
+            native_config = getattr(
+                getattr(getattr(self, "_world_config", None), "newton_cfg", None),
+                "solver_cfg",
+                physics_cfg.solver_cfg,
+            )
+            external = (
+                isinstance(native_config, ProviderNewtonSolverCfg)
+                and native_config.solver_type == "provider"
+            ) or (
+                isinstance(native_config, RegisteredNewtonSolverCfg)
+                and solver_type
+                not in {
+                    "dexuni",
+                    "mujoco_warp",
+                    "xpbd",
+                    "semi_implicit",
+                    "featherstone",
+                    "vbd",
+                }
+            )
+            if not external:
+                raise NotImplementedError(
+                    f"Newton solver {solver_type!r} does not support deformable "
+                    "particle sets; select a particle solver or an external Provider."
+                )
+            # Finalized particle-kind/device support is validated by the SDK
+            # from the Provider's actual capabilities, not its registered name.
         if isinstance(physics_cfg, NewtonPhysicsCfg) and physics_cfg.requires_grad:
             raise NotImplementedError(
                 "Newton deformable state mutation is unavailable when "

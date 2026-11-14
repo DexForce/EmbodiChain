@@ -265,7 +265,10 @@ def test_bind_retries_only_incomplete_declarations() -> None:
     assert second.bind_attempts == 2
 
 
-def test_declare_initializes_facade_with_spawn_instance_count() -> None:
+@pytest.mark.parametrize("per_env,instances", [(True, 3), (False, 1)])
+def test_declare_initializes_facade_with_spawn_instance_count(
+    per_env, instances
+) -> None:
     scene = object.__new__(SpawnScene)
     scene._num_envs = 3
     scene.builder = SimpleNamespace(
@@ -279,11 +282,11 @@ def test_declare_initializes_facade_with_spawn_instance_count() -> None:
     scene.declare(
         "rigid_object",
         "cube",
-        SimpleNamespace(name="cube", per_env=True),
+        SimpleNamespace(name="cube", per_env=per_env),
         facade=facade,
     )
 
-    assert facade.declared_num_instances == 3
+    assert facade.declared_num_instances == instances
 
 
 @pytest.mark.parametrize("failure", ["duplicate", "partial_add"])

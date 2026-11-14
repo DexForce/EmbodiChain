@@ -21,6 +21,11 @@ device, not a separate environment tensor device.
 `None` retains the native default. Gym accepts the former in `physics_config`
 and the latter at the top level through `config_to_cfg()`.
 
+`SimulationManagerCfg.enable_default_ground` controls creation of the built-in
+physical/render plane, defaults true, and is not a runtime visibility switch.
+Contact-free or model-authored-boundary scenes disable it explicitly. A Gym
+environment component owns this setting; deployments cannot repeat it.
+
 Newton `solver_cfg=None` preserves DexSim's scene-aware `DexUniSolverCfg`.
 DexUni resolves its ownership and contact paths from the complete Spawn scene;
 the configured solver type is exposed through `NewtonPhysicsBackend.solver_type`.

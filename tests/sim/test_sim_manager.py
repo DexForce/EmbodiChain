@@ -2338,6 +2338,7 @@ def test_robot_mounted_camera_backend_lifecycle(
 
 def test_default_plane_authors_repeated_uv_before_spawn() -> None:
     sim = object.__new__(SimulationManager)
+    sim.sim_config = SimulationManagerCfg()
     sim._spawn_scene = MagicMock()
     sim._spawn_scene.handles.return_value = []
     sim._spawn_default_plane_material = object()

@@ -66,6 +66,48 @@ Its model-only `best.pt` supports export; optimizer recovery uses `last.pt`.
 Historical configuration paths resolve relative to the file, and explicit CLI
 path overrides resolve from the working directory.
 
+## Differentiable policy training and native deployment
+
+`NeRDTransition` owns the complete current-state FK/contact, codec, history,
+prediction and decoding path. `NeRDGeometry` caches detached fixed parameters
+and receives its FK callable at construction. The model package imports no
+Newton or DexSim modules. Offline supervised batches still use measured contacts.
+
+The Cartpole/Ant factories use the same `trainer.learning_env` route as RWM:
+they own canonical state/history and task rules, not a World, Scene or solver.
+Ant injects the generic Newton FK gradient bridge using an FK-only model.
+Reference construction shares native descriptor lowering and validates the
+complete recorded physics signature, joint order, COM, contacts, gravity and dt.
+The export selects its recorded physical profile unless explicitly confirmed.
+Do not relabel an incompatible export or equate direct-builder teacher records
+with Scene-generated records.
+
+Set the agent recipe's `checkpoint` to a matching export, then run:
+
+```bash
+embodichain run-example learning/nerd train-policy --config examples/learning/nerd/configs/cartpole/agents/apg.nerd.yaml
+```
+
+The task returns pre-reset terminal rewards and a full graph-connected
+`terminal_observation` batch, resets only completed rows into new storage and
+uses `detach_state()` as the explicit TBPTT boundary. Existing RWM and Warp
+kinematic environments retain their own execution contracts.
+
+Optional native deployment lives in `embodichain_solvers.physics.nerd` and uses
+the existing `nerd` solver entry point or a direct SDK Provider configuration.
+Its native and functional adapters call the same transition. SDK Scene owns
+native scheduling/publication; no NeRD functional forwarding is added to
+`SimulationManager`. Native support remains limited to the recorded reference
+robots and fixed plane/contact policy.
+
+The [paired policy benchmark](../../../scripts/benchmark/rl/nerd_policy.md)
+trains APG/PPO in the same frozen transition and evaluates policies against
+matched analytical physics. Reference scenes use public SDK SceneBuilder and
+batched state interfaces. This protocol compares algorithms/transfer, not
+NeRD versus analytical-training speed or model accuracy. Run reports remain
+bound to their recorded source, weights and runtime; this migration requires
+fresh results rather than relabeling previous experiments.
+
 ## Teacher and research workflows
 
 ```bash

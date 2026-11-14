@@ -1022,6 +1022,7 @@ def config_to_cfg(
         viser_server = ViserServerCfg(**viser_server_config)
 
     env_cfg.sim_cfg = SimulationManagerCfg(
+        enable_default_ground=config.get("enable_default_ground", True),
         startup_summary=config.get("startup_summary", "compact"),
         dexsim_startup_info=config.get("dexsim_startup_info", False),
         scene_node_capacity=config.get("scene_node_capacity"),
