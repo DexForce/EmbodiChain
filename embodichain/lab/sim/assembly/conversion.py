@@ -93,6 +93,7 @@ def to_rigid_config(
         RigidBodyMaterialCfg,
         RigidBodyPhysicsCfg,
         RigidObjectCfg,
+        VisualElementCfg,
     )
     from embodichain.lab.sim.shapes import CompoundShapeCfg
     from scipy.spatial.transform import Rotation
@@ -133,23 +134,33 @@ def to_rigid_config(
             rest_offset=0.0,
             condim=reference.condim,
             priority=reference.priority,
-            solref=tuple(reference.solref),
-            solimp=tuple(reference.solimp),
-            solmix=reference.solmix,
         )
         if backend == "newton" and source_contact
         else CollisionPropertiesCfg(contact_offset=0.0, rest_offset=0.0)
     )
-    shape = CompoundShapeCfg(
-        parts=[_shape_part(g) for g in collisions],
-        visual_parts=[_shape_part(g) for g in body.geometries if g.visible],
-    )
+    shape = CompoundShapeCfg(parts=[_shape_part(g) for g in collisions])
+    visuals: list[VisualElementCfg] = []
+    for index, geometry in enumerate(body.geometries):
+        if not geometry.visible:
+            continue
+        part = _shape_part(geometry)
+        local_pose = np.eye(4)
+        local_pose[:3, :3] = Rotation.from_quat(part.quaternion).as_matrix()
+        local_pose[:3, 3] = part.position
+        visuals.append(
+            VisualElementCfg(
+                id=f"geometry_{index}",
+                representation=part.shape,
+                local_pose=local_pose,
+            )
+        )
     transform = np.eye(4)
     transform[:3, :3] = Rotation.from_quat(body.quaternion).as_matrix()
     transform[:3, 3] = body.position
     return RigidObjectCfg(
         uid=uid or body.name,
         shape=shape,
+        visuals=visuals,
         init_local_pose=transform,
         body_type=body.body_type,
         attrs=RigidBodyPhysicsCfg(
@@ -164,6 +175,9 @@ def to_rigid_config(
                     dynamic_friction=reference.friction[0],
                     torsional_friction=reference.friction[1],
                     rolling_friction=reference.friction[2],
+                    solref=tuple(reference.solref) if source_contact else None,
+                    solimp=tuple(reference.solimp) if source_contact else None,
+                    solmix=reference.solmix if source_contact else None,
                 )
                 if backend == "newton"
                 else RigidBodyMaterialCfg(

@@ -36,6 +36,7 @@ __all__ = [
     "ShapeCfg",
     "MeshCfg",
     "CubeCfg",
+    "PlaneCfg",
     "SphereCfg",
     "CylinderCfg",
     "ShapePartCfg",
@@ -73,6 +74,9 @@ class MeshCollisionCfg:
     ``None`` selects ``visacd`` when compiling mesh collision geometry.
     VisACD requires a DexSim build with CUDA/OptiX support.
     """
+
+    force_sdf: bool | None = None
+    """Optional Newton SDF strategy override; False uses an eagerly baked SDF."""
 
     sdf_resolution: int | None = None
     """Maximum SDF grid resolution; valid only for the ``sdf`` strategy."""
@@ -129,6 +133,7 @@ class MeshCollisionCfg:
             )
 
         sdf_values = {
+            "force_sdf": self.force_sdf,
             "sdf_resolution": self.sdf_resolution,
             "is_hydroelastic": self.is_hydroelastic,
             "sdf_narrow_band_range": self.sdf_narrow_band_range,
@@ -190,6 +195,9 @@ class MeshCollisionCfg:
             "force_sdf",
             "sdf_max_resolution",
         }
+        explicit_force_sdf = data.get("force_sdf") if "approximation" in data else None
+        if "approximation" in data:
+            legacy_fields.discard("force_sdf")
         has_legacy_fields = bool(legacy_fields.intersection(data))
         if has_legacy_fields:
             warnings.warn(
@@ -233,6 +241,8 @@ class MeshCollisionCfg:
 
         if data.get("sdf_resolution") == 0:
             data.pop("sdf_resolution")
+        if explicit_force_sdf is not None:
+            data["force_sdf"] = explicit_force_sdf
         return cls(**data)
 
 
@@ -244,6 +254,7 @@ def _mesh_collision_cfg_init_with_legacy_max_hulls(
     approximation: MeshCollisionApproximation | None = None,
     max_hulls: int | None = None,
     acd_method: Literal["visacd", "coacd", "vhacd"] | None = None,
+    force_sdf: bool | None = None,
     sdf_resolution: int | None = None,
     is_hydroelastic: bool | None = None,
     sdf_narrow_band_range: tuple[float, float] | None = None,
@@ -286,6 +297,7 @@ def _mesh_collision_cfg_init_with_legacy_max_hulls(
         approximation="convex_hull" if approximation is None else approximation,
         max_hulls=max_hulls,
         acd_method=acd_method,
+        force_sdf=force_sdf,
         sdf_resolution=sdf_resolution,
         is_hydroelastic=is_hydroelastic,
         sdf_narrow_band_range=sdf_narrow_band_range,
@@ -470,6 +482,20 @@ class CubeCfg(ShapeCfg):
 
 
 @configclass
+class PlaneCfg(ShapeCfg):
+    """Infinite static collision plane with a finite visual surface.
+
+    The plane lies in local XY with normal +Z. Use the rigid object's initial
+    pose to position or rotate it. Configure ``body_type="static"``.
+    """
+
+    shape_type: str = "Plane"
+
+    size: List[float] = [1.0, 1.0]
+    """Visual width and length in metres; collision remains infinite."""
+
+
+@configclass
 class SphereCfg(ShapeCfg):
     """Configuration parameters for a sphere shape."""
 
@@ -556,9 +582,9 @@ class CompoundShapeCfg(ShapeCfg):
     """Several convex collision shapes belonging to one rigid body.
 
     ``parts`` are independent collision shapes, never merged for cooking.
-    Optional ``visual_parts`` replace their rendered appearance. If omitted,
-    collision parts are rendered using their own materials, falling back to
-    :attr:`visual_material`. An explicitly empty list hides all visuals.
+    Collision parts are rendered using their own materials, falling back to
+    :attr:`visual_material`. The owning rigid config can replace appearance
+    through its ``visuals`` list; an empty list hides all visuals.
     Overlapping collision volumes require explicit body mass/inertia to avoid
     double counting during geometry integration.
     """
@@ -566,6 +592,12 @@ class CompoundShapeCfg(ShapeCfg):
     shape_type: str = "Compound"
     parts: Sequence[ShapePartCfg] = MISSING
     visual_parts: Sequence[ShapePartCfg] | None = None
+    """Deprecated input alias; RigidObjectCfg migrates it into owner visuals.
+
+    New configurations supply VisualElementCfg entries on RigidObjectCfg.visuals.
+    This field is cleared during normalization and cannot be combined with
+    another appearance input.
+    """
 
     def __post_init__(self) -> None:
         """Validate the flat part layout and explicit convex representation."""

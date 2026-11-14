@@ -24,7 +24,7 @@ import json
 import pytest
 import torch
 
-from embodichain.lab.sim.atomic_actions import (
+from embodichain.lab.sim.atomic_skills import (
     ArticulationJointState,
     CommandAcknowledgement,
     EndpointCommand,

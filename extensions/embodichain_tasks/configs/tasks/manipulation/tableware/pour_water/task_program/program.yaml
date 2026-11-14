@@ -12,11 +12,6 @@ targets:
       # Open above the support instead of driving a held bottle into the table.
       - position: [0.75, -0.1, 0.969]
         quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
-  bottle_pour_pose:
-    kind: cyclic_pose
-    values:
-      - position: [0.7776451358490485, 0.04643509710227371, 1.101]
-        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
   cup_rest_pose:
     kind: cyclic_pose
     values:
@@ -28,15 +23,33 @@ program:
     - kind: segment
       name: pick_bottle
       instruction: Grasp and lift the bottle.
+      contract:
+        prerequisites:
+          - {kind: released, ref: bottle}
+        outcomes:
+          - {kind: call_effect, ref: 0, assurance: projected}
+          - {kind: held, ref: bottle}
+          - {kind: validator, ref: 0}
+          - {kind: unsupported, ref: physical_attachment, required: false}
       steps:
         kind: invoke
         call:
           kind: pick
           object: bottle
           grasp: bottle_grasp
+      validators:
+        - {kind: condition, ref: bottle_lifted}
     - kind: segment
       name: move_bottle_above_cup
       instruction: Move the held bottle above the cup.
+      contract:
+        prerequisites:
+          - {kind: held, ref: bottle}
+        outcomes:
+          - {kind: call_effect, ref: 0, assurance: projected}
+          - {kind: held, ref: bottle}
+          - {kind: validator, ref: 0}
+          - {kind: unsupported, ref: physical_attachment, required: false}
       steps:
         kind: invoke
         call:
@@ -46,13 +59,18 @@ program:
             target: cup_pour_pose
       # Read the physical bottle pose before allowing the pour segment.
       validators:
-        - kind: object_near_target
-          object: bottle
-          target: bottle_pour_pose
-          position_tolerance: 0.01
+        - {kind: condition, ref: bottle_above_cup}
     - kind: segment
       name: pour_water
       instruction: Tilt the bottle to pour water into the cup and return it upright.
+      contract:
+        prerequisites:
+          - {kind: held, ref: bottle}
+          - {kind: condition, ref: bottle_above_cup}
+        outcomes:
+          - {kind: call_effect, ref: 0, assurance: projected}
+          - {kind: held, ref: bottle}
+          - {kind: unsupported, ref: liquid_transfer, required: false}
       steps:
         kind: invoke
         call:
@@ -63,6 +81,17 @@ program:
     - kind: segment
       name: return_bottle
       instruction: Place the bottle back on the table and release it.
+      contract:
+        prerequisites:
+          - {kind: held, ref: bottle}
+        outcomes:
+          - {kind: call_effect, ref: 0, assurance: projected}
+          - {kind: released, ref: bottle}
+          - {kind: post_policy, ref: 0}
+          - {kind: post_policy, ref: 1}
+          - {kind: validator, ref: 0}
+          - {kind: validator, ref: 1}
+          - {kind: unsupported, ref: physical_release, required: false}
       steps:
         kind: invoke
         call:

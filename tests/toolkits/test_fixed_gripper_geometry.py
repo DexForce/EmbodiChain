@@ -72,6 +72,29 @@ def test_urdf_collision_geometry_respects_joint_mesh_and_tcp_frames(
     arguments["joint_positions"] = {"finger_joint": 0.041}
     with pytest.raises(ValueError, match="Invalid fixed opening"):
         FixedGripperCollisionGeometry.from_urdf(urdf, **arguments)
+    arguments["joint_positions"] = {"finger_joint": -0.02}
+    with pytest.raises(ValueError, match="Invalid fixed opening"):
+        FixedGripperCollisionGeometry.from_urdf(urdf, **arguments)
+    arguments["joint_limits"] = {"finger_joint": [-0.04, 0.0]}
+    corrected = FixedGripperCollisionGeometry.from_urdf(urdf, **arguments)
+    np.testing.assert_allclose(
+        corrected.points.amin(0), expected[0] + [0, -0.06, 0], atol=2e-9
+    )
+    np.testing.assert_allclose(
+        corrected.points.amax(0), expected[1] + [0, -0.06, 0], atol=2e-9
+    )
+    assert corrected.provenance["joint_limits"] == {"finger_joint": [-0.04, 0.0]}
+    arguments["joint_limits"] = {"finger_joint": [-0.01, 0.0]}
+    with pytest.raises(ValueError, match="Invalid fixed opening"):
+        FixedGripperCollisionGeometry.from_urdf(urdf, **arguments)
+    for bounds in ([0.04, 0.0], [np.nan, 0.0], [-0.04, np.inf], [0.0]):
+        arguments["joint_limits"] = {"finger_joint": bounds}
+        with pytest.raises(ValueError, match="finite ordered pair"):
+            FixedGripperCollisionGeometry.from_urdf(urdf, **arguments)
+    for name in ("unknown_joint", "tcp_joint"):
+        arguments["joint_limits"] = {name: [-0.04, 0.0]}
+        with pytest.raises(ValueError, match="movable source joint"):
+            FixedGripperCollisionGeometry.from_urdf(urdf, **arguments)
 
 
 @pytest.mark.parametrize("kind", ["prismatic", "revolute", "continuous"])
@@ -179,6 +202,10 @@ def test_revolute_mimic_open_state_and_virtual_tcp(tmp_path: Path) -> None:
     world_grasp[:3, 3] = torch.tensor([0.2, 0.3, 0.4])
     world_tcp = geometry.canonical_to_tcp_poses(world_grasp)
     torch.testing.assert_close(world_tcp[:3, 3], torch.tensor([0.2, 0.2, 0.4]))
+    kwargs["joint_limits"] = {"follower": [-1.0, 0.0]}
+    with pytest.raises(ValueError, match="Invalid fixed opening"):
+        FixedGripperCollisionGeometry.from_urdf(path, **kwargs)
+    kwargs["joint_limits"] = {"follower": [-2.0, 0.0]}
     kwargs["joint_positions"] = {"drive": np.pi / 2, "follower": np.pi / 2}
     with pytest.raises(ValueError, match="contradicts mimic"):
         FixedGripperCollisionGeometry.from_urdf(path, **kwargs)

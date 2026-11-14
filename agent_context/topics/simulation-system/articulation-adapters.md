@@ -13,6 +13,11 @@ resolves source metadata before its first immutable build. Do not implement
 initial configuration as finalize-then-rebuild or duplicate descriptor writes
 inside `Articulation._apply_spawn_config()`.
 
+URDF continuous joints retain unbounded source limits during resolution. Native
+Skeleton metadata may expose zero-filled limits; those must not become a locked
+joint at the Newton boundary. Caller-authored limits and later config overlays
+retain precedence over the source default.
+
 `ArticulationRootPropertiesCfg` separates root intent from link physics.
 Fixed-base/self-collision settings enter common descriptors, independently of
 the source overlay policy; explicit `None` preserves USD intent and selects
@@ -21,12 +26,26 @@ the native articulation before Direct GPU initialization and initial reset.
 Iteration counts are configured together because the native setter is atomic.
 Applying them only during facade binding is too late for captured GPU settings.
 
+`root_props.newton_gravity_compensation` is Newton creation intent applied in
+both asset physics modes; omission preserves the source/default policy. It
+compensates articulation link weight without removing payload gravity or
+contact reactions. DexSim checks the resolved solver's MuJoCo support.
+URDF mimic joints on Newton keep the configured follower drives and the
+native MuJoCo equality by default, matching a plain DexSim scene; reset starts
+followers on their mimic relation. `root_props.newton_mimic_stabilizer=True`
+opts in to the Default-parity stabilizer (follower drive = 1 % of the leader,
+mirrored follower targets, retuned equality `solref`).
+
 `joint_drive_props` is the sole joint-property entry point; sparse fields retain
 source values. `drive_type` describes the response and `target_mode` the active
 command components. Lowering masks inactive gains: none/effort clear both,
 velocity clears position gain. Newton rejects active acceleration drives;
 non-MuJoCo position mode is gain-based emulation with zero velocity target.
 Exact field options and defaults remain in `cfg/articulation.py`.
+Newton-specific `joint_drive_props.passive_damping` lowers to passive DOF
+damping, separately from the drive's velocity gain. It retains the same
+exact-name/regex/control-part matching and remains active for passive or effort
+target modes. Applied Newton-only settings are rejected on Default.
 
 `spawn/source.py` retains authored URDF passive damping and friction in the
 Newton joint descriptor before configured overlays. Passive damping is
@@ -58,6 +77,13 @@ DexSim's batch fetch and converts the root-pose layout once. Returned tensors
 are borrowed buffers, not snapshots; clone values that must survive later
 reads. Fetch after reset or direct writes rather than caching across them.
 
+`Articulation.set_state()` writes selected root, joint and drive fields in one
+backend operation. Current joint positions are clipped to joint limits.
+Position targets are also clipped by default; `clamp_target_qpos=False` retains
+raw PD targets while physical joint limits remain enabled. `set_qpos()` exposes
+the same target-only option. Keep this distinction when a task records motor
+commands for learned dynamics.
+
 `Articulation.set_root_velocity()` writes selected world-frame linear and
 angular velocities as `(N, 6)` rows. The Scene adapter validates the complete
 input before writing one selected batch; other environment rows are preserved.
@@ -84,17 +110,32 @@ output tensors. Public inertia/COM remain principal moments plus `xyz + xyzw`;
 scalar descriptors expose body-frame mat33. Runtime writes compose the pair
 before DexSim, and reset restores the saved pair together to avoid reordering
 principal axes between two writes.
+COM writes pass environment rows and link columns directly to
+`ArticulationBatch.apply_link_com_local_pose(rows=..., link_ids=...)`. Property
+selection does not need a selected batch's joint/link state routing buffers;
+DexSim retains descriptor updates and solver-constant refresh ownership.
 
 ## Mimic coupling
 
+On DexSim Default, `ArticulationCfg.mimic_compliance` maps exact mimic master
+names to natural-frequency and damping-ratio settings. The articulation
+preparation hook applies them to all replicas on each topology revision,
+before Default Direct GPU initialization. The public
+`Articulation.set_mimic_compliance()` writes the prepared articulation for
+selected environments. Both paths resolve names against each instance's
+native active-joint cache order and keep the authored ratios and offsets.
+Use zero for both parameters for hard coupling. Newton rejects these settings.
+
 MuJoCo-Warp mimic joints retain native equality constraints and contact-force
 coupling. `_configure_newton_mimic_compliance()` adjusts only the selected
-articulation's equality rows, respecting the solver's time-constant safety
-floor; a weak follower drive stabilizes updates. Optional root fields
+articulation's equality rows. Optional root fields
 `newton_mimic_solref` and `newton_mimic_solimp` select a per-articulation
-MuJoCo profile; omission preserves the existing compliance approximation.
-Contact impedance remains separate. Command targets propagate the
-authored leader relation. Never copy measured follower state or disable the
+MuJoCo profile independently of `newton_mimic_stabilizer`. Explicit profiles
+retain follower drives and unspecified equality parameters. The opt-in
+stabilizer additionally configures weak follower drives, propagates commanded
+leader targets and supplies a Default-inspired reference when none is authored;
+solver timestep safety remains native-owned. Contact impedance remains separate.
+Never copy measured follower state or disable the
 native equality, which would turn the follower into an independent servo.
 Keep private Newton runtime access in the backend helper, with generic
 Articulation owning name mappings, resets and target propagation.
@@ -113,7 +154,7 @@ lifetime ends with the asset. Camera name resolution belongs to sensors.
 
 `get_link_vert_face()` and named-state `compute_fk()` stay deterministic and
 domain-neutral; stochastic affordance sampling and semantic keys belong to
-Atomic Action adapters. Newton link mesh export concatenates every render mesh
+Atomic Skill adapters. Newton link mesh export concatenates every render mesh
 with triangle offsets, and returns empty arrays for zero-mesh links.
 
 USD `build_pk_chain` uses resolved Spawn descriptors in
@@ -134,3 +175,5 @@ FREE-joint synchronization, mesh export and no-op root writes;
 `tests/sim/objects/test_articulation.py` for topology/FK. Source configuration
 and root timing are covered by `tests/sim/spawn/test_descriptors.py` and
 `tests/sim/test_sim_manager.py`.
+`tests/sim/test_dexuni_two_way.py` compares contact-limited dynamic fingers
+against the same one-way commands, including CUDA Graph and reset.

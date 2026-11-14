@@ -31,11 +31,11 @@ from dataclasses import dataclass
 import math
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from embodichain.lab.sim.atomic_actions.engine import AtomicActionEngine
+from embodichain.lab.sim.atomic_skills.engine import AtomicSkillEngine
 from embodichain.lab.sim.motion.expansion import (
     CombinedExpansionProfile,
 )
-from embodichain.lab.sim.atomic_actions.runner import (
+from embodichain.lab.sim.atomic_skills.runner import (
     ExecutionRunnerCfg,
     ObservationProvider,
 )
@@ -110,6 +110,7 @@ from embodichain.lab.task_program.language.schema import (
     TaskProgramIntegrationCfg,
 )
 from embodichain.lab.task_program.compiler import (
+    CompiledConditionValidator,
     CompiledTaskProgram,
     TaskProgramCompiler,
 )
@@ -184,10 +185,10 @@ class TaskProgramEnvironmentFactory(Protocol):
             Profile whose ID matches :attr:`robot_profile_id`.
         """
 
-    def create_atomic_action_engine(
+    def create_atomic_skill_engine(
         self,
         profile: RobotSkillProfile,
-    ) -> AtomicActionEngine:
+    ) -> AtomicSkillEngine:
         """Create an engine for exactly ``profile`` and its motion backend.
 
         Args:
@@ -201,7 +202,7 @@ class TaskProgramEnvironmentFactory(Protocol):
         self,
         *,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
         clock: EnvironmentStepClock,
         runtime_scope_guard: Callable[[], None] | None = None,
     ) -> PlanningObservationPort:
@@ -221,7 +222,7 @@ class TaskProgramEnvironmentFactory(Protocol):
         self,
         *,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
         observation_provider: PlanningObservationPort,
     ) -> Iterable[EffectEvidenceProvider]:
         """Create exact-version providers used by semantic effect monitors.
@@ -244,7 +245,7 @@ class ParallelCommandSafetyValidatorProvider(Protocol):
         self,
         *,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
         observation_provider: PlanningObservationPort,
     ) -> ParallelCommandSafetyValidator:
         """Create the live gate for the exact assembled runtime components."""
@@ -267,7 +268,7 @@ class _RegistrationOwningTaskProgramFactory(Protocol):
         self,
         *,
         scene_registry: SceneRegistry,
-        engine: AtomicActionEngine,
+        engine: AtomicSkillEngine,
     ) -> tuple[RegisteredSemanticLowerer, ...]:
         """Create fresh lowerers owned by the exact task registration."""
 
@@ -281,7 +282,7 @@ class TaskProgramRuntimeAssembly:
         scene_registry: Authoritative live scene registry.
         robot_profile: Declarative robot resource profile.
         manifest: Static scene/profile/call integration manifest.
-        engine: Bound atomic action engine.
+        engine: Bound atomic skill engine.
         compiler: Bound Semantic Call compiler.
         observation_provider: Shared planning and full-qpos provider.
         evidence_collector: Exact-version semantic evidence collector.
@@ -297,7 +298,7 @@ class TaskProgramRuntimeAssembly:
     scene_registry: SceneRegistry
     robot_profile: RobotSkillProfile
     manifest: SemanticIntegrationManifest
-    engine: AtomicActionEngine
+    engine: AtomicSkillEngine
     compiler: SemanticCallCompiler
     observation_provider: PlanningObservationPort
     evidence_collector: EffectEvidenceCollector
@@ -650,11 +651,11 @@ class TaskProgramEnvironmentAdapter:
         if self._registration is not None:
             self._registration.validate_robot_profile(profile)
 
-        engine = self._factory.create_atomic_action_engine(profile)
+        engine = self._factory.create_atomic_skill_engine(profile)
         self._validate_registration_ownership()
-        if not isinstance(engine, AtomicActionEngine):
+        if not isinstance(engine, AtomicSkillEngine):
             raise TypeError(
-                "create_atomic_action_engine() must return an AtomicActionEngine."
+                "create_atomic_skill_engine() must return an AtomicSkillEngine."
             )
         if self._registration is not None:
             self._registration.validate_engine(engine)
@@ -1131,6 +1132,17 @@ class TaskProgramEnvironmentAdapter:
                     "SegmentValidatorPort was installed."
                 )
             for validator in segment.validators:
+                if type(validator) is CompiledConditionValidator:
+                    catalog = self._integration_catalog
+                    if (
+                        catalog is None
+                        or catalog.evaluation_conditions.get(validator.cfg.ref)
+                        != validator.spec
+                    ):
+                        raise TaskProgramBridgeError(
+                            f"Compiled evaluation condition {validator.cfg.ref!r} differs "
+                            "from the registered deployment rule."
+                        )
                 assert self._validator_port is not None
                 self._validator_port.validate_validator(
                     validator,

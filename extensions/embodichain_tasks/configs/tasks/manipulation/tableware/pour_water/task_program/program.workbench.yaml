@@ -1,6 +1,5 @@
 program_id: pour_water_with_right_arm
-instruction: Pour water from the bottle into the cup and return the bottle to the
-  table.
+instruction: Pour water from the bottle into the cup and return the bottle to the table.
 targets:
   bottle_return_pose:
     kind: cyclic_pose
@@ -39,50 +38,36 @@ targets:
       - 0.0
       - 1.0
 program:
-  kind: sequence
-  items:
-  - kind: segment
-    name: pick_bottle
-    instruction: Grasp and lift the bottle.
-    steps:
-      kind: invoke
-      call:
-        kind: pick
-        object: bottle
-        grasp: bottle_grasp
-  - kind: segment
-    name: pour_water
-    instruction: Approach the cup, tilt while controlling the bottle mouth, then return
-      upright and withdraw.
-    steps:
-      kind: invoke
-      call:
-        kind: registered
-        call_id: simulation.pour
-        arguments:
-          object: bottle
-  - kind: segment
-    name: return_bottle
-    instruction: Place the bottle back on the table and release it.
-    steps:
-      kind: invoke
-      call:
-        kind: place
-        object: bottle
-        at:
-          kind: target_ref
-          target: bottle_release_pose
-    post:
-    - kind: wait_stable
-      entity: bottle
-    - kind: wait_stable
-      entity: cup
-    validators:
-    - kind: object_near_target
+- segment: pick_bottle
+  instruction: Grasp and lift the bottle.
+  steps:
+    pick:
       object: bottle
-      target: bottle_return_pose
-      position_tolerance: 0.05
-    - kind: object_near_target
-      object: cup
-      target: cup_rest_pose
-      position_tolerance: 0.002
+      grasp: bottle_grasp
+- segment: pour_water
+  instruction: Approach the cup, tilt while controlling the bottle mouth, then return upright and withdraw.
+  steps:
+    registered:
+      call_id: simulation.pour
+      arguments:
+        object: bottle
+- segment: return_bottle
+  instruction: Place the bottle back on the table and release it.
+  steps:
+    place:
+      object: bottle
+      at: bottle_release_pose
+  post:
+  - kind: wait_stable
+    entity: bottle
+  - kind: wait_stable
+    entity: cup
+  validators:
+  - kind: object_near_target
+    object: bottle
+    target: bottle_return_pose
+    position_tolerance: 0.05
+  - kind: object_near_target
+    object: cup
+    target: cup_rest_pose
+    position_tolerance: 0.002

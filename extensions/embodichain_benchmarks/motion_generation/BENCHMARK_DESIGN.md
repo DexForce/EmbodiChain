@@ -22,7 +22,7 @@ alone establishes neither trajectory validity nor physical success.
   interaction and generalization suites exercise physical tasks.
 
 There is no combined score across these families. The separate
-`atomic-action-profile` command diagnoses individual actions and does not enter
+`atomic-skill-profile` command diagnoses individual actions and does not enter
 this framework's rankings.
 
 ## 2. Ownership and fixed inputs
@@ -137,7 +137,7 @@ capture; NMG construction includes checkpoint loading. Prepare/warm each
 required input shape before measuring it.
 
 The measured operation is `planner_call` for Motion Planning and
-`atomic_action_compile` for Atomic Skills. Their report fields are
+`atomic_skill_compile` for Atomic Skills. Their report fields are
 `planning_time_ms` and `compile_time_ms`. Physics execution and end-to-end time
 are separate, and compile latency is never ranked against a bare planner call.
 Validation, case generation, reporting and optional video capture are outside
@@ -202,7 +202,7 @@ execution. The raw `task_success` field retains that overall meaning. Custom
 providers without a physical evaluator can still implement `task_result()`;
 the built-ins do not maintain a second scoring path.
 
-The Atomic Action runtime's `PhysicalEvidenceRequest`, `PhysicalEvidenceBatch`
+The Atomic Skill runtime's `PhysicalEvidenceRequest`, `PhysicalEvidenceBatch`
 and `PhysicalEvidenceFrame` provide a separate evidence port for execution
 verifiers, phase gates and held-object guards. `ExecutionRunner` can collect an
 aligned frame after a fresh observation. Primitives declare evidence

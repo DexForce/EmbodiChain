@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import os
 import json
 import hashlib
@@ -60,6 +62,8 @@ class URDFAssemblySignatureManager:
             str: MD5 hash representing the assembly configuration
         """
         signature_data = {
+            # Rebuild assemblies cached before OBJ mtllib dependencies were copied.
+            "mesh_copy_version": 1,
             "output_filename": os.path.basename(output_path),
             "components": {},
             # Optional metadata that can affect the assembly even if the

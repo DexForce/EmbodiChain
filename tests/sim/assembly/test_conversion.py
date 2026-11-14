@@ -78,9 +78,10 @@ def test_hinge_export_rejects_names_and_symlinks_outside_output(tmp_path: Path) 
     assert outside.read_text() == "preserve"
 
 
-def test_source_collision_only_body_remains_invisible() -> None:
+def test_source_collision_only_body_remains_invisible(tmp_path: Path) -> None:
     from embodichain.toolkits.assembly import AssemblyBody, AssemblyGeometry
     from embodichain.lab.sim.spawn.descriptors import rigid_desc_from_cfg
+    from embodichain.lab.sim.assembly._visual import _write_rigid_visual_meshes
 
     body = AssemblyBody(
         name="hidden",
@@ -90,6 +91,72 @@ def test_source_collision_only_body_remains_invisible() -> None:
     descriptor, _ = rigid_desc_from_cfg(cfg)
     assert len(descriptor.collisions) == 1
     assert descriptor.renders == []
+    assert (
+        _write_rigid_visual_meshes(AssemblyAsset(bodies=[body]), tmp_path / "runtime")
+        == {}
+    )
+    assert not (tmp_path / "runtime").exists()
+
+
+@pytest.mark.parametrize("name_kind", ["traversal", "absolute", "backslash"])
+def test_rigid_preview_preflights_all_names_before_writing(
+    tmp_path: Path, name_kind: str
+) -> None:
+    from embodichain.toolkits.assembly import AssemblyBody, AssemblyGeometry
+    from embodichain.lab.sim.assembly._visual import _write_rigid_visual_meshes
+
+    names = {
+        "traversal": "../../../outside",
+        "absolute": str(tmp_path / "outside"),
+        "backslash": "..\\outside",
+    }
+    good = AssemblyBody(
+        name="safe", geometries=[AssemblyGeometry(kind="box", size=[0.01] * 3)]
+    )
+    bad = good.copy()
+    bad.name = names[name_kind]
+    asset = AssemblyAsset.load(
+        AssemblyAsset(bodies=[good, bad]).save(tmp_path / "asset.json")
+    )
+    with pytest.raises(ValueError, match="Unsafe assembly body name"):
+        _write_rigid_visual_meshes(asset, tmp_path / "runtime")
+    assert not (tmp_path / "runtime").exists()
+    assert not list(tmp_path.glob("*.obj"))
+    assert not list(tmp_path.glob("*.mtl"))
+
+
+@pytest.mark.parametrize("destination", ["obj", "mtl", "directory"])
+def test_rigid_preview_rejects_cache_symlinks(tmp_path: Path, destination: str) -> None:
+    from embodichain.toolkits.assembly import AssemblyBody, AssemblyGeometry
+    from embodichain.lab.sim.assembly._visual import _write_rigid_visual_meshes
+
+    asset = AssemblyAsset(
+        bodies=[
+            AssemblyBody(
+                name="part", geometries=[AssemblyGeometry(kind="box", size=[0.01] * 3)]
+            )
+        ]
+    )
+    work = tmp_path / "runtime"
+    path = _write_rigid_visual_meshes(asset, work)["part"]
+    outside = tmp_path / "outside"
+    if destination == "directory":
+        outside.mkdir()
+        path.with_suffix(".mtl").unlink()
+        path.unlink()
+        path.parent.rmdir()
+        path.parent.symlink_to(outside, target_is_directory=True)
+    else:
+        outside.write_text("preserve")
+        target = path if destination == "obj" else path.with_suffix(".mtl")
+        target.unlink()
+        target.symlink_to(outside)
+    with pytest.raises(ValueError, match="escapes its preparation directory"):
+        _write_rigid_visual_meshes(asset, work)
+    if destination == "directory":
+        assert not list(outside.iterdir())
+    else:
+        assert outside.read_text() == "preserve"
 
 
 def test_hinge_visual_export_keeps_body_local_appearance_and_source_physics(
@@ -219,17 +286,43 @@ def test_usd_hinge_is_a_real_joint_with_a_fixed_anchor(tmp_path) -> None:
     assert parsed.articulations[0].fixed_base
 
 
-def test_contact_priority_and_mixing_survive_native_config_conversion() -> None:
+@pytest.mark.parametrize("source_contact", [False, True])
+@pytest.mark.parametrize("hinged", [False, True])
+def test_contact_priority_and_mixing_survive_native_config_conversion(
+    tmp_path: Path, source_contact: bool, hinged: bool
+) -> None:
     pytest.importorskip("mujoco")
     xml = SOURCE.replace(
         "<worldbody>", '<default><geom priority="3" solmix="0.7"/></default><worldbody>'
     )
-    body = import_mjcf(xml).bodies[0]
-    native = to_rigid_config(
-        body,
-    )
-    assert native.attrs.collision_props.priority == 3
-    assert native.attrs.collision_props.solmix == pytest.approx(0.7)
+    if hinged:
+        xml = xml.replace(
+            '<freejoint name="part_joint"/>', '<joint name="part_joint" type="hinge"/>'
+        )
+    asset = import_mjcf(xml)
+    if hinged:
+        attrs = (
+            to_articulation_configs(asset, tmp_path, source_contact=source_contact)[
+                "part"
+            ]
+            .link_attrs["moving_part"]
+            .attrs
+        )
+    else:
+        attrs = to_rigid_config(asset.bodies[0], source_contact=source_contact).attrs
+    if source_contact:
+        assert attrs.collision_props.priority == 3
+        assert attrs.material_props.solmix == pytest.approx(0.7)
+        np.testing.assert_allclose(
+            attrs.material_props.solref, asset.bodies[0].geometries[0].solref
+        )
+        np.testing.assert_allclose(
+            attrs.material_props.solimp, asset.bodies[0].geometries[0].solimp
+        )
+    else:
+        assert attrs.material_props.solmix is None
+        assert attrs.material_props.solref is None
+        assert attrs.material_props.solimp is None
 
 
 def test_separate_visual_mesh_never_enters_collision_parts() -> None:
@@ -244,7 +337,21 @@ def test_separate_visual_mesh_never_enters_collision_parts() -> None:
     cfg = to_rigid_config(body, source_contact=False)
     assert isinstance(cfg.shape, CompoundShapeCfg)
     assert len(cfg.shape.parts) == 2
-    assert len(cfg.shape.visual_parts) == 3
+    assert cfg.shape.visual_parts is None
+    assert len(cfg.visuals) == 3
+    np.testing.assert_allclose(cfg.visuals[0].local_pose[:3, 3], [-0.02, 0, 0])
+    np.testing.assert_allclose(cfg.visuals[1].local_pose[:3, 3], [0.03, 0.01, 0])
+    from scipy.spatial.transform import Rotation
+    from embodichain.lab.sim.spawn.descriptors import rigid_desc_from_cfg
+
+    np.testing.assert_allclose(
+        cfg.visuals[1].local_pose[:3, :3],
+        Rotation.from_euler("XYZ", [0.2, 0.4, -0.1]).as_matrix(),
+        atol=1e-15,
+    )
+    descriptor, _ = rigid_desc_from_cfg(cfg)
+    assert len(descriptor.collisions) == 2
+    assert len(descriptor.renders) == 3
     assert cfg.attrs.mass_props.mass == 2.0
 
 
@@ -255,7 +362,7 @@ def test_native_visual_obj_preserves_source_triangles_and_body_ownership(
     from dataclasses import asdict
 
     from embodichain.toolkits.assembly import AssemblyBody, AssemblyGeometry
-    from embodichain.lab.sim.assembly._visual import write_visual_mesh
+    from embodichain.lab.sim.assembly._visual import _write_rigid_visual_meshes
 
     source_vertices = [[0, 0, 0], [0.01, 0, 0], [0, 0.01, 0]]
     body = AssemblyBody(
@@ -280,7 +387,7 @@ def test_native_visual_obj_preserves_source_triangles_and_body_ownership(
         ],
     )
     original = asdict(body)
-    output = write_visual_mesh(body, tmp_path / "part.obj")
+    output = _write_rigid_visual_meshes(AssemblyAsset(bodies=[body]), tmp_path)["part"]
     lines = output.read_text().splitlines()
     vertices = np.array(
         [list(map(float, line.split()[1:])) for line in lines if line.startswith("v ")]

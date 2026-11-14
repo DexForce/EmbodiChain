@@ -17,7 +17,7 @@
 """Read-only native hand/rigid geometry capture using the shared object decoder.
 
 No collision query, grasp acceptance policy, or experiment revision is selected
-here. Atomic Actions compose these observations with GraspKit qualification.
+here. Atomic Skills compose these observations with GraspKit qualification.
 """
 
 from __future__ import annotations

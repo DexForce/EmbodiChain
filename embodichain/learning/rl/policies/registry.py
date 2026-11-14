@@ -114,6 +114,8 @@ def build_policy(
 
     Built-in MLP policies still resolve flattened `obs_dim` / `action_dim`, while
     custom policies may accept richer `obs_space` / `action_space` inputs.
+    Policies with ``from_config(config, *, obs_space, action_space, device)``
+    own configuration decoding and space validation.
     """
     name = policy_block["name"].lower()
     if name not in _POLICY_REGISTRY:
@@ -169,6 +171,12 @@ def build_policy(
             device=device,
             actor=actor,
             actor_obs_groups=actor_obs_groups,
+        )
+
+    factory = getattr(policy_cls, "from_config", None)
+    if factory is not None:
+        return factory(
+            policy_block, obs_space=obs_space, action_space=action_space, device=device
         )
 
     init_params = inspect.signature(policy_cls.__init__).parameters

@@ -9,6 +9,7 @@
 | Observation manager + built-in functors | `managers/observation_manager.py`, `managers/observations/` |
 | Reward manager + built-in functors | `managers/reward_manager.py`, `managers/rewards.py` |
 | Event manager + built-in functors | `managers/event_manager.py`, `managers/events.py` |
+| Episode camera recording events | `managers/record.py` |
 | Action manager + built-in terms | `managers/action_manager.py`, `managers/actions.py` |
 | RL termination manager + condition functors | `managers/termination_manager.py`, `managers/conditions.py` |
 | Dataset manager + built-in recorders | `managers/dataset_manager.py`, `managers/datasets.py`, `managers/async_datasets.py` |
@@ -106,8 +107,12 @@ matching their source functions/parameters, including callable strings and
 omitted default arguments. Env only supplies the declarations. Recording-only
 fields never enlarge policy observations or policy rollout allocation.
 
-`observations.get_entity_state` derives native UID, quantity, arena/joint frame,
-representation, shape, dtype and joint order from its source. Immutable
+`observations.get_entity_state` derives native UID, quantity, reference frame,
+representation, shape, dtype and joint order from its source. Cable
+`segment_state_w` uses world coordinates and a segment axis; its descriptor
+includes COM linear velocity and angular velocity alongside position and XYZW
+orientation. Recording declares these fields through `trajectory_observation_cfgs`,
+so cable observations share the ordinary acquisition and history lifecycle. Immutable
 schema descriptors are reused by semantic value; no simulation handles enter
 the bounded cache. Pose acquisition uses the resolved UID without constructing
 another `SceneEntityCfg` during each step. Explicit boundaries
@@ -179,6 +184,22 @@ seed stream because the name is part of the stream identity.
 Event and observation calls have per-functor profiling through
 `ManagerBase._call_functor()`; reward/action/dataset calls do not yet use that
 helper. See [profiling](../env-framework/profiling.md).
+
+### Camera recording
+
+`record_camera_data` is an interval event, independent of policy dataset
+recording. It renders its camera group before reading the buffers because
+interval events precede observation rendering. Views use arena-relative camera
+extrinsics. It retains separate owned CPU frames and episode counters per row.
+It captures only the event's selected `env_ids` within `max_env_num`, preserving
+their original arena IDs; `None` captures all views within that limit. Selected
+save/discard only touches those rows. `fps=None` follows control frequency for
+an every-step recording event; an explicit fps fixes the output cadence.
+
+Reset commits or discards frames via `save_and_clear` / `discard_and_clear`.
+Close discards uncommitted frames, so a host ending without reset must explicitly
+commit its last episode. Source and regression tests live in `record.py` and
+`tests/gym/envs/managers/test_record.py`.
 
 ## Change sites and validation
 

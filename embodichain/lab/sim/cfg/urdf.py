@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+__all__ = ["URDFCfg"]
+
 from dataclasses import field
 import os
 from typing import Any, Dict, List
@@ -46,6 +48,9 @@ class URDFCfg:
 
     sensors: Dict[str, Dict[str, str | np.ndarray]] = field(default_factory=dict)
     """Dictionary of sensors to be attached to the robot."""
+
+    force_assembly: bool = False
+    """Materialize even one component when a fixed mounting root is required."""
 
     use_signature_check: bool = True
     """Whether to use signature check when merging URDFs."""
@@ -106,11 +111,14 @@ class URDFCfg:
         base_link_name: str = "base_link",
         component_prefix: list[tuple[str, str | None]] | None = None,
         name_case: dict[str, str] | None = None,
+        *,
+        force_assembly: bool = False,
     ):
         """
         Initialize URDFCfg with optional list of components and output path settings.
 
         Args:
+            force_assembly: Materialize a fixed mounting root even for one component.
             components (list[dict[str, str | np.ndarray]] | None): List of component configurations. Each dict should contain:
                 - 'component_type' (str): The type/name of the component (e.g., 'chassis', 'arm', 'hand').
                 - 'urdf_path' (str): Path to the component's URDF file.
@@ -126,6 +134,9 @@ class URDFCfg:
                 list of (component_type, prefix) pairs to override default
                 component name prefixes.
         """
+        if type(force_assembly) is not bool:
+            raise TypeError("force_assembly must be a bool.")
+        self.force_assembly = force_assembly
         self.components = {}
         self.sensors = sensors or {}
         self.fpath = fpath
@@ -204,7 +215,7 @@ class URDFCfg:
             # Accept both list and dict; serialization round-trips an empty
             # dict when no sensors are configured (the field default).
             if isinstance(sensors, dict) and not sensors:
-                self.sensors = []
+                self.sensors = {}
             elif not isinstance(sensors, (list, dict)):
                 logger.log_error(
                     f"sensors must be a list of dicts or a dict, got {type(sensors)}"
@@ -278,9 +289,25 @@ class URDFCfg:
                     logger.log_error(f"URDF path '{urdf_path}' does not exist.")
                     raise FileNotFoundError(f"URDF path '{urdf_path}' does not exist.")
 
+        subtree = params.pop("source_root_link", None)
+        mesh_paths = params.pop("mesh_paths", {})
+        if subtree is not None:
+            from embodichain.data.urdf import materialize_urdf_subtree
+
+            urdf_path = str(
+                materialize_urdf_subtree(
+                    urdf_path,
+                    subtree,
+                    mesh_paths={
+                        key: _get_data_path(value) for key, value in mesh_paths.items()
+                    },
+                )
+            )
         if transform is None:
             transform = np.eye(4)
 
+        nested_params = params.pop("params", {})
+        params = {**nested_params, **params}
         self.components[component_type] = {
             "urdf_path": urdf_path,
             "transform": np.array(transform),
@@ -316,6 +343,8 @@ class URDFCfg:
         Returns:
             URDFCfg: Returns self to allow method chaining.
         """
+        if isinstance(self.sensors, dict):
+            self.sensors = list(self.sensors.values())
         self.sensors.append({"sensor_name": sensor_name, **sensor_config})
         return self
 
@@ -327,7 +356,7 @@ class URDFCfg:
         """
         components = list(self.components.items())
         # If there is only one component, return its URDF path directly.
-        if len(components) == 1 and not self.sensors:
+        if len(components) == 1 and not self.force_assembly and not self.sensors:
             _, comp_config = components[0]
             return comp_config["urdf_path"]
 
@@ -421,6 +450,7 @@ class URDFCfg:
                 "fpath_prefix", EMBODICHAIN_DEFAULT_DATA_ROOT + "/assembled"
             ),
             use_signature_check=use_signature_check,
+            force_assembly=init_dict.get("force_assembly", False),
             base_link_name=base_link_name,
             component_prefix=component_prefix,
             name_case=name_case,

@@ -22,7 +22,7 @@ from unittest.mock import Mock
 import pytest
 import torch
 
-from embodichain.lab.sim.objects.articulation import ArticulationData
+from embodichain.lab.sim.objects.articulation import Articulation, ArticulationData
 from embodichain.lab.sim.objects.backends.scene import SceneArticulationView
 
 pytestmark = pytest.mark.no_sim
@@ -113,3 +113,40 @@ def test_other_backend_keeps_one_scalar_read_per_link() -> None:
     torch.testing.assert_close(
         pose, torch.tensor([4.0, 5.0, 6.0, 0.0, 0.0, 0.0, 1.0]).expand(2, 2, 7)
     )
+
+
+@pytest.mark.parametrize("status", [2, -1, -2])
+def test_newton_com_write_preserves_selection_pose_and_native_status(
+    status: int,
+) -> None:
+    art = object.__new__(Articulation)
+    art.device = torch.device("cpu")
+    art._spawn_result = object()
+    art._declared_num_instances = 3
+    art._entities = [Mock(), Mock(), Mock()]
+    view = object.__new__(SceneArticulationView)
+    view.device = art.device
+    view.batch = Mock()
+    view._row_indices = torch.arange(3)
+    view.batch.apply_link_com_local_pose.return_value = status
+    art._data = SimpleNamespace(
+        is_newton_backend=True,
+        link_names=["base", "tip"],
+        articulation_view=view,
+    )
+    pose = torch.tensor([1.0, 2.0, 3.0, 0.1, 0.2, 0.3, 0.4]).repeat(2, 2, 1)
+    pose[..., 3:] /= torch.linalg.vector_norm(pose[..., 3:], dim=-1, keepdim=True)
+    original = pose.clone()
+    if status < 0:
+        with pytest.raises(RuntimeError, match=f"apply_link_com_local_pose.*{status}"):
+            art.set_com_pose(pose, link_names=["tip", "base"], env_ids=[2, 0])
+    else:
+        art.set_com_pose(pose, link_names=["tip", "base"], env_ids=[2, 0])
+    args, kwargs = view.batch.apply_link_com_local_pose.call_args
+    assert torch.as_tensor(kwargs["link_ids"]).tolist() == [1, 0]
+    assert torch.as_tensor(kwargs["rows"]).tolist() == [2, 0]
+    view.batch.select.assert_not_called()
+    torch.testing.assert_close(args[0][..., :4], original[..., 3:])
+    torch.testing.assert_close(args[0][..., 4:], original[..., :3])
+    torch.testing.assert_close(pose, original)
+    assert all(not entity.mock_calls for entity in art._entities)

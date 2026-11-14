@@ -593,18 +593,20 @@ def test_support_registry_close_does_not_allow_reassembly_of_same_native_pair():
 
 
 @pytest.mark.parametrize(
-    "kind,startup",
+    "kind,startup,semantic_geometry",
     [
-        ("stack", "complete"),
-        ("supported_placement", "complete"),
-        ("supported_region", "complete"),
-        ("stack", "cold"),
-        ("stack", "row_reset"),
-        ("stack", "clock_drift"),
+        ("stack", "complete", False),
+        ("supported_placement", "complete", False),
+        ("supported_region", "complete", False),
+        ("stack", "cold", False),
+        ("stack", "row_reset", False),
+        ("stack", "clock_drift", False),
+        ("supported_placement", "complete", True),
+        ("supported_region", "complete", True),
     ],
 )
 def test_standard_condition_port_consumes_qualified_support_on_the_original_grid(
-    kind, startup
+    kind, startup, semantic_geometry
 ):
     from embodichain.lab.task_program import decode_task_program, TaskProgramCompiler
     from embodichain.lab.gym.envs.task_program.bridge import EnvironmentStepClock
@@ -625,6 +627,18 @@ def test_standard_condition_port_consumes_qualified_support_on_the_original_grid
 
     wp.init()
     sim = _Simulation(2)
+    if semantic_geometry:
+
+        def no_visual_mesh(**kwargs):
+            raise AssertionError("Gaussian appearance has no triangle mesh")
+
+        for body in sim.objects.values():
+            vertices, triangles = body.get_vertices(), body.get_triangles()
+            body.get_semantic_mesh = lambda v=vertices, f=triangles: (
+                v.clone(),
+                f.clone(),
+            )
+            body.get_vertices = body.get_triangles = no_visual_mesh
     sim.objects["payload"].pose[:, 2, 3] = 0.2
     sim.query.buffer.data[:, 2] = 0.1
     binding = SimulationSceneBinding(
@@ -997,7 +1011,7 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
         SkillPolicyPreset,
         EffectAssurance,
     )
-    from embodichain.lab.sim.atomic_actions import CARTESIAN_POSE_CAPABILITY
+    from embodichain.lab.sim.atomic_skills import CARTESIAN_POSE_CAPABILITY
     from embodichain.lab.task_program.integrations.simulation.observations import (
         SimulationSupportObservationCollector,
     )
@@ -1025,7 +1039,7 @@ def test_collector_uses_actual_bridge_session_and_never_resamples_recorded_suppo
         presets=(
             SkillPolicyPreset(
                 "default",
-                action_option_templates={},
+                skill_option_templates={},
                 effect_assurance=EffectAssurance.PROJECTED,
             ),
         ),

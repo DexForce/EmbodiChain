@@ -29,6 +29,7 @@ Datasets
 
 .. automodule:: embodichain.data_pipeline.datasets
    :members:
+   :exclude-members: MotionLibrary, MotionStartSampler, MotionStartSamplerCfg
    :undoc-members:
    :show-inheritance:
 
@@ -47,6 +48,22 @@ Depth Video
 
 Online Data Engine
 ------------------
+
+``OnlineDataEngineCfg.gym_config_path`` selects a JSON/YAML source instead of
+an already loaded ``gym_config`` mapping. Buffer allocation and the producer
+share its loaded declaration and absolute source path. The forkserver worker
+discovers task packages and executes init hooks before decoding custom terms.
+``OnlineDataEngine.resolved_gym_config`` returns an owned physical projection;
+flow control validates producer counts through this public declaration for
+both source paths and dictionaries.
+
+The optional ``episode_runner`` import string selects a callable with the
+``execute_demo_episode`` argument/result contract. It owns reset and task
+qualification; the engine still owns bounded retries, accepted-row publication
+and cleanup. The default runner and expert-controller recording remain unchanged.
+Explicit policy-request recording also supports managed position-only experts:
+labels come from their converted ActionManager requests, while execution keeps
+the exact FK targets.
 
 .. automodule:: embodichain.data_pipeline.engine
    :members:

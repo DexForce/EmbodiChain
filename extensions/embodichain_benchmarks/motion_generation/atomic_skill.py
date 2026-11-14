@@ -24,12 +24,12 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import torch
-    from embodichain.lab.sim.atomic_actions import (
-        ActionInvocation,
+    from embodichain.lab.sim.atomic_skills import (
+        SkillInvocation,
         SceneSnapshot,
         TaskState,
     )
-    from embodichain.lab.sim.atomic_actions.plans import CompiledTrajectory
+    from embodichain.lab.sim.atomic_skills.plans import CompiledTrajectory
     from .config import SuiteCfg, TrackCfg
     from .contracts import (
         ExecutionObservation,
@@ -49,7 +49,7 @@ __all__ = [
 
 
 class AtomicSkillCaseProvider(ABC):
-    """Generate and ground one Atomic Action without planner-specific logic."""
+    """Generate and ground one Atomic Skill without planner-specific logic."""
 
     skill_id: str
     requires_gripper = False
@@ -75,7 +75,7 @@ class AtomicSkillCaseProvider(ABC):
         scenario: "AtomicSkillScenario",
         case: BenchmarkCase,
         adapter: "PlannerAdapter",
-    ) -> ActionInvocation:
+    ) -> SkillInvocation:
         """Ground the case into one planner-independent action invocation."""
 
     def object_id(self, case: BenchmarkCase) -> str | None:
@@ -100,7 +100,7 @@ class AtomicSkillCaseProvider(ABC):
 
     def prefix_invocations(
         self, scenario: "AtomicSkillScenario", case: BenchmarkCase
-    ) -> tuple[ActionInvocation, ...]:
+    ) -> tuple[SkillInvocation, ...]:
         """Return actions compiled before this skill to establish its precondition.
 
         A skill that needs a held object, such as Pour, returns the PickUp that
@@ -193,7 +193,7 @@ _ATOMIC_SKILL_PROVIDERS: dict[str, AtomicSkillProviderType] = {}
 def register_atomic_skill_provider(
     skill_id: str, provider_type: AtomicSkillProviderType
 ) -> None:
-    """Register one Atomic Action case provider."""
+    """Register one Atomic Skill case provider."""
     if not skill_id:
         raise ValueError("Atomic skill id must not be empty.")
     previous = _ATOMIC_SKILL_PROVIDERS.get(skill_id)
@@ -203,12 +203,12 @@ def register_atomic_skill_provider(
 
 
 def atomic_skill_provider_names() -> tuple[str, ...]:
-    """Return registered Atomic Action case providers."""
+    """Return registered Atomic Skill case providers."""
     return tuple(sorted(_ATOMIC_SKILL_PROVIDERS))
 
 
 def create_atomic_skill_provider(skill_id: str) -> AtomicSkillCaseProvider:
-    """Construct one registered Atomic Action case provider."""
+    """Construct one registered Atomic Skill case provider."""
     try:
         provider_type = _ATOMIC_SKILL_PROVIDERS[skill_id]
     except KeyError as exc:

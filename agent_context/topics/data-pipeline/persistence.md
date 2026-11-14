@@ -48,6 +48,10 @@
 8. Async enqueue clones all tensor payloads to CPU and deep-copies metadata in the caller
    before reset reuses the buffer. One FIFO worker is the sole LeRobot accessor and assigns
    deterministic episode order.
+   Reset reports `queued` for accepted async payloads and `persisted` for
+   successful synchronous commits, using the exported episode or fragment
+   UUID. The committed sidecar contains the durable receipt. Finalization
+   still surfaces worker errors. A selected custom recorder can omit receipts.
    Policy contracts snapshot the manager-owned flat raw action after validation
    and before the next control step. Synchronous, asynchronous, and fragment
    persistence retain identical descriptor order and clone before live buffers

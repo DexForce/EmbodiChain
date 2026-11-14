@@ -164,8 +164,9 @@ recipe interface or use the physical snapshot-restoration workflow.
 Physical capture, restoration and rigid pose changes support selected rows with
 fixed topology. ``apply_changes`` broadcasts one change set;
 ``apply_changes_batch`` takes one change set per selected environment ID.
-Settling requires a full-world selection because the host callback advances
-every row. Mesh support detection selects a main horizontal contour, optionally
+Settling requires the full physical entity set and every environment row because
+the host callback advances the whole world. A group subset cannot certify world
+stability. Mesh support detection selects a main horizontal contour, optionally
 preserving holes, and layout uses fixed-orientation XY AABBs. Changed orientations
 require measured footprints for post-settle layout checks. These services do not
 provide general room construction, exact mesh collision, or full solver checkpoints.
@@ -231,6 +232,7 @@ that package's normal simulation dependency requirements.
    SceneChangeResult
    apply_changes
    apply_changes_batch
+   apply_group_transform
    SceneCheck
    SceneCheckReport
    SettlingCfg
@@ -241,7 +243,7 @@ that package's normal simulation dependency requirements.
 embodichain.lab.sim.scene.composition
 -------------------------------------
 
-Fragments copy existing configurations and optional anchor transforms. Composition transforms poses and namespaces UIDs without changing body scales or physics ownership. ``declare_fragment`` declares through an existing manager; the caller still invokes ``prepare()``. Native declaration failures do not promise rollback.
+Fragments copy rigid, visual and articulation configurations and optional anchor transforms. Composition transforms poses and namespaces UIDs without changing body scales, entity types or physics ownership. ``declare_fragment`` preflights UIDs and required add methods before declaring through the existing manager; the caller still invokes ``prepare()``. Robots remain embodiment-owned. Native declaration failures do not promise rollback.
 
 .. currentmodule:: embodichain.lab.sim.scene.composition
 
@@ -336,7 +338,7 @@ Layout problems name fixed and movable entities, full-box bounds, displacement p
 embodichain.lab.sim.scene.query
 -------------------------------
 
-A view reads existing physical bindings and cloned poses while retaining the environment dimension. It rejects unsupported entities and changed bindings. It is not a second scene registry or a general raycast/contact-query API.
+A view reads existing bindings and cloned poses while retaining the environment dimension. The default selects the whole supported physical scene. ``entity_uids`` selects an explicit ordered group and may include pure visual objects. ``members()`` exposes the complete group; ``entities()`` retains only physical members for existing state services. Selected bindings and environment capacity are checked before reads or writes. Unselected entities do not become group members. The view owns no simulator resources or additional registry.
 
 .. currentmodule:: embodichain.lab.sim.scene.query
 
@@ -352,7 +354,7 @@ A view reads existing physical bindings and cloned poses while retaining the env
 embodichain.lab.sim.scene.state
 -------------------------------
 
-Snapshots own immutable arena-local physical state, including velocities, joints, controller targets and efforts. Restore preflights ownership, backend, binding, topology and current joint limits before writes. By default saved joint positions or targets outside those limits are rejected. Callers may explicitly pass ``qpos_tolerance`` to allow small measured-position excursions to be clipped and then verify the actual round trip; controller targets remain strict. Restore does not step and cannot be used as a full backend checkpoint. Native failures may leave partial writes.
+Snapshots own immutable arena-local physical state, including velocities, joints, controller targets and efforts. Pure visual group members are excluded from the snapshot and remain unchanged by physical restoration. Restore preflights ownership, backend, binding, topology and current joint limits before writes. By default saved joint positions or targets outside those limits are rejected. Callers may explicitly pass ``qpos_tolerance`` to allow small measured-position excursions to be clipped and then verify the actual round trip; controller targets remain strict. Restore does not step and cannot be used as a full backend checkpoint. Native failures may leave partial writes.
 
 .. currentmodule:: embodichain.lab.sim.scene.state
 
@@ -372,7 +374,16 @@ Snapshots own immutable arena-local physical state, including velocities, joints
 embodichain.lab.sim.scene.operations
 ------------------------------------
 
-Change sets require an explicit movable-entity allowlist. Application preflights all rigid-body changes, clears their dynamics and publishes render state. ``apply_changes`` applies the same poses to every selected row; ``apply_changes_batch`` takes distinct change sets keyed by exactly the selected environment IDs and preflights every row before writes. Returned invalidations must be handled by the host; observations and planner bindings cannot be reused solely because simulation time is unchanged.
+Change sets require an explicit movable-entity allowlist. Application preflights all rigid/visual changes, clears dynamics only for rigid bodies and publishes render state. ``apply_changes`` applies the same poses to every selected row; ``apply_changes_batch`` takes distinct change sets keyed by exactly the selected environment IDs and preserves the view's entity selection while preflighting every row before writes. Returned invalidations must be handled by the host; observations and planner bindings cannot be reused solely because simulation time is unchanged.
+
+``apply_group_transform`` applies one proper arena-local delta to every member of an explicit visual/static-rigid group. Targets are ``delta @ current_pose``, preserving relative transforms and entity types in all selected rows. To relocate a known root from A to B, use ``B @ inverse(A)``. Dynamic, kinematic and articulated members are rejected; no automatic attachment or physical merging is inferred. Native failures may leave partial writes, matching the existing scene-operation contract.
+
+For a USD scene whose visual and collision prims are separate entities::
+
+   assets = sim.add_usd("library", usd_path)
+   sim.prepare()
+   library = SceneView(sim, entity_uids=tuple(obj.uid for obj in assets.values()))
+   apply_group_transform(library, delta, movable_uids=library.entity_uids)
 
 .. currentmodule:: embodichain.lab.sim.scene.operations
 
@@ -383,6 +394,7 @@ Change sets require an explicit movable-entity allowlist. Application preflights
    SceneChangeResult
    apply_changes
    apply_changes_batch
+   apply_group_transform
 
 .. automodule:: embodichain.lab.sim.scene.operations
    :members:
@@ -445,7 +457,7 @@ subsequent rigid reads reject replaced owners. No query, grasp policy or
 experiment revision is selected here.
 
 GraspKit owns discrete geometric qualification through an injected collision
-backend. ``ActionPlanningServices`` binds an explicitly supplied geometric policy
+backend. ``SkillPlanningServices`` binds an explicitly supplied geometric policy
 and owns query lifetimes. Captured geometry does not establish physical acquisition or release.
 
 .. currentmodule:: embodichain.lab.sim.scene.native_hand

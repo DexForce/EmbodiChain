@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from copy import deepcopy
 from typing import Any, Literal
 
 import numpy as np
@@ -129,6 +130,15 @@ def _is_per_env_scalar_metric(value: Any, num_envs: int) -> bool:
     return array.ndim == 1 or array.shape[1:] in {(1,)}
 
 
+def _terminal_episode_outcome(
+    info: Mapping[str, Any], env_id: int
+) -> dict[str, Any] | None:
+    outcomes = info.get("terminal_outcomes")
+    if isinstance(outcomes, Mapping) and env_id in outcomes:
+        return deepcopy(outcomes[env_id])
+    return None
+
+
 @torch.no_grad()
 def evaluate_episodes(
     *,
@@ -138,9 +148,10 @@ def evaluate_episodes(
     device: torch.device | str,
     seed: int | None = None,
     on_step: Callable[[dict[str, Any]], None] | None = None,
+    on_episode: Callable[[dict[str, Any]], None] | None = None,
     observation_transform: Callable[[torch.Tensor], torch.Tensor] | None = None,
     episode_allocation: Literal["first_completed", "balanced"] = "first_completed",
-    on_episode: Callable[[dict[str, Any]], None] | None = None,
+    on_scored_episode: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, float]:
     """Evaluate exactly ``num_episodes`` completed asynchronous episodes.
 
@@ -151,6 +162,8 @@ def evaluate_episodes(
         device: Policy device.
         seed: Optional environment reset seed.
         on_step: Optional callback for raw step info.
+        on_episode: Optional callback for each selected environment-owned terminal
+            outcome when the environment provides one.
         observation_transform: Optional frozen preprocessing transform, such as
             a running observation normalizer.
         episode_allocation: ``first_completed`` preserves the legacy completion
@@ -159,7 +172,7 @@ def evaluate_episodes(
             Finished-quota rows keep stepping and resetting naturally, but their
             additional episodes are unscored. Equal quotas avoid censoring slow
             episodes when parallel successes and failures have different lengths.
-        on_episode: Optional callback invoked once for each scored episode,
+        on_scored_episode: Optional callback invoked once for each scored episode,
             after allocation filtering. Receives plain Python values with
             zero-based ``global_episode_index``, ``env_id``, ``return``, integer
             ``length``, optional numeric ``success`` and scalar ``metrics``.
@@ -240,6 +253,11 @@ def evaluate_episodes(
             selected_metrics: dict[str, list[float]] = {}
 
             if isinstance(info, Mapping):
+                if on_episode is not None:
+                    for env_id in selected.tolist():
+                        outcome = _terminal_episode_outcome(info, env_id)
+                        if outcome is not None:
+                            on_episode(outcome)
                 if "success" in info:
                     selected_successes = _selected_values(info["success"], selected)
                     successes.extend(selected_successes)
@@ -251,10 +269,10 @@ def evaluate_episodes(
                             continue
                         values = _selected_values(value, selected)
                         metric_values.setdefault(str(name), []).extend(values)
-                        if on_episode is not None:
+                        if on_scored_episode is not None:
                             selected_metrics[str(name)] = values
 
-            if on_episode is not None and selected_returns:
+            if on_scored_episode is not None and selected_returns:
                 selected_env_ids = selected.detach().cpu().tolist()
                 for index, env_id in enumerate(selected_env_ids):
                     record = {
@@ -269,7 +287,7 @@ def evaluate_episodes(
                     }
                     if selected_successes is not None:
                         record["success"] = selected_successes[index]
-                    on_episode(record)
+                    on_scored_episode(record)
 
             current_return[done_indices] = 0.0
             current_length[done_indices] = 0

@@ -12,9 +12,24 @@ Read this when the request needs these details. [Topic overview](task-programs.m
 - one bounded program tree.
 
 Supported nodes are `SequenceCfg`, `RepeatCfg`, `SegmentCfg`, `InvokeCfg`, and
-`ParallelCfg` with an owned `BarrierCfg`. Built-in call configs are `PickCfg`,
-`PlaceCfg`, and `HandOverCfg`; `RegisteredSemanticCallCfg` is the allowlisted
-extension form.
+`ParallelCfg` with an owned `BarrierCfg`. Built-in call configs include
+`PickCfg`, `PlaceCfg`, `HandOverCfg`, and `MoveHeldObjectCfg`;
+`RegisteredSemanticCallCfg` is the allowlisted extension form. The loader's
+`language/authoring.py` expands list/action shorthand into this same bounded AST
+and keeps a separate source map for authored diagnostics. Canonical locations
+and historical fingerprints remain stable. Demo Skill aliases require the
+selected deployment catalog; raw asset paths never belong in a program call.
+
+Task-owned targets accept `pose`, repeat-local `cyclic_pose`, and `scene_relative`.
+Relative targets declare `parent` or `world_axes` and freeze at call grounding;
+compilation only resolves identities. Typed retained transport uses the existing
+Atomic goal and registered retention lifecycle, with verified assurance and a
+standard effect monitor. The legacy registered transport remains a distinct
+compatibility contract. `hold` post-policies require fresh attachment and pose
+evidence throughout an acknowledged duration window, through the normal bridge.
+The owning runtime observer supplies evidence; policy code never advances time.
+See the [authoring guide](../../../docs/source/overview/task_program/authoring.md)
+for syntax, units and target sampling rules.
 
 The program's root `instruction` owns its overall task language; each explicit
 segment may declare a finer `instruction`. The compiler freezes both levels,
@@ -79,6 +94,20 @@ factories, and registered-call lowerers. Adapter creation calls
 Reconstructing a registration with `dataclasses.replace` does not duplicate its
 scene-derived standard grounders; duplicate custom grounders remain errors.
 
+The configured articulation-link Slide lowerer can bind an explicit
+`joint_target: {joint_name: ..., axis_sign: -1|1}`. Its call then requires
+`handle` and an absolute joint `position`; direction and distance remain policy
+options. The factory checks the handle's prismatic ancestor and finite limits;
+multiple active ancestors require an explicit translation axis. Without this
+binding the existing handle-only call keeps its factory and fingerprint. The
+joint-target factory includes the authored target in its registration fingerprint.
+
+Configured action options may add clearance waypoints before a native motion.
+PickUp's `initial_lift_height` adds a world-Z offset to the starting TCP pose
+before moving toward pre-grasp. Slide's `push_approach_offset` adds a waypoint
+at a world XYZ offset from pre-grasp for pushes. These offsets are in metres
+and belong in the deployment integration.
+
 `runtime_services.settle_presets` is the closed serialized route to this same
 registration-owned table. Omission retains the existing dynamic presets; an
 explicit table owns its complete named selection. Components may contribute
@@ -123,10 +152,21 @@ remain host responsibilities; configured nominal sources retain their static
 program preflight. Private loader aliases remain available for existing internal
 callers, with the same result types and composition rules.
 
+The optional `runtime_services.demo_skills` named table is expanded during
+composition into existing registered lowerers and occurrence-bound nominal sources.
+Asset hashes, roles and held-state contracts are checked before live assembly;
+each repeat occurrence is sealed to its actual compiled index and fingerprint.
+Explicit old source bindings retain stale-identity rejection, and duplicate
+source ownership is an error. Configured Demo Skills require one physical row
+and sequential programs. Catalog planning contracts expose selected lowerer
+arguments and Demo Skill roles without constructing a simulator.
+
 Ownership is explicit rather than a generic deep merge:
 
 - `program.yaml` owns task flow, targets, post-policies, and validators; it
   contains neither robot IDs nor an `integration` selection;
+- optional `evaluation.component` owns named measured segment rules; the
+  program uses `kind: condition` with a `ref` to select one;
 - task-local `integration.yaml` owns required contracts, its nested semantic
   `scene_binding`, semantic defaults, action options, effect monitors, and
   task-specific runtime services;
@@ -175,6 +215,22 @@ The configured lowerer allowlist also exposes profile-owned Park, AxisAlign,
 relative Place and coordinated transport. Their declarations in
 `integrations/_configured_services.py` select exact Atomic Skill descriptors;
 the closed decoder in `configured.py` owns accepted options and route fields.
+
+The configured `kinematic_joint_replay` lowerer selects a physical replay source
+by ID and maps named phases to contiguous intervals. It obtains the environment's
+already verified and ordered command snapshot and emits `TimedTrajectory` /
+`JointPositionGoal` for `MoveJoints`; it owns no file reader or playback cursor.
+The optional `create_for_environment` factory hook receives the live host through
+standard registration assembly, including selected-row factories, without
+changing existing factories' `create` contract. The host is weakly referenced.
+
+The physical `simulation.replay` declaration owns the digest and cadence.
+Newton interpolates registered source positions inside each physics step while
+cloth physics continues. Canonical world-space centroid fields carry the verified
+mesh SHA and sorted particle selection. Ordinary `evaluation.component` supplies
+`near_target` rules; source identity, topology and finite coordinates qualify
+evidence. Reaching the final replay frame qualifies completion. Shared final
+measurement, sealing and offline replay own physical outcomes.
 Relative Place resolves a live reference plus world-axis displacement and
 requires the verified held-object transform. Coordinated transport must select
 the real primitive's release mode. Do not install frontend skill replacements.
@@ -207,13 +263,25 @@ limits are carried into these explicit options, while omitted limits retain
 Robot speed caps and the planner's acceleration default. Sampling count remains
 owned by `motion.sample_count`.
 
-Grasp generators select toolkit-owned geometry with a string `model` ID;
-an inline mapping is a custom calibration and its `model_id` does not trigger
-catalog lookup. The catalog is owned by
-`embodichain/toolkits/graspkit/pose_generator.py`, with source provenance in
-`embodichain/toolkits/graspkit/README.md`. Embodiments may omit algorithm and
-collision fields to use GraspKit defaults; task-specific tuning belongs in
-the allowlisted `grasp_pose_generator_overrides` mapping.
+Embodiment `grippers` explicitly selects model-owned physical defaults. Grasp
+endpoints opt into a binding with `gripper`; composition fills omitted command
+presets and generator physical descriptions before strict Task Program decoding.
+A standalone configured generator accepts an explicit `gripper` description or
+catalog-class selection; the former `model` string/mapping route is removed.
+Concrete hand Cfgs own flat physical fields and the explicit `grasp_generators`
+allowlist. Composition selects a unique supported default kind, or checks an
+explicit policy kind against that allowlist. An empty list grants no service;
+endpoints still require an explicit binding and grasp capability. GraspKit
+receives projected scalar limits and numerical geometry. Search
+and collision policy retain toolkit defaults and the task allowlist. Duplicate
+explicit service ownership is rejected. See the [robot binding owner](../robot-system/robot-system.md)
+for assembly, source identity and TCP validation.
+Capability compatibility does not establish task-geometry compatibility. The
+qualified Pika and dual-Robotiq deployments under `repeated_pick_place` and
+`hand_over` select their own workspace, grasp strategy and execution policy;
+reuse their complete deployment instead of transplanting an embodiment into
+another robot's fixed-grasp integration. Their segment validators and physical
+replay checks are independent of command-generation success.
 
 `runtime_services.hand_geometries` declares explicit hand calibration by grasp
 endpoint target ID. Its `sampled_parallel_jaw` entries reference an existing
@@ -296,6 +364,142 @@ so reference rotation does not rotate their offset or per-axis tolerances.
 Select `reference_frame: parent` to measure both in the live reference frame,
 matching a target whose relative pose composes the complete parent transform.
 
+
+## Named evaluation rules
+
+### Segment acceptance contracts
+
+Use an explicit segment when an outcome can be described and verified at a
+meaningful boundary given its incoming state. For example, grasp and lift a
+bottle as one subgoal. Keep a tightly coupled transport and tilt in one
+segment when the intended outcome is a combined maneuver with no useful
+intermediate acceptance boundary. A segment may contain one call or a
+sequence of calls. It can depend on state produced by earlier segments.
+
+An optional `contract` names incoming `prerequisites` and required or
+diagnostic `outcomes`. The segment's `instruction` remains the language
+label. For example, the transport segment can require
+`{kind: held, ref: bottle}` before dispatch and name
+`{kind: validator, ref: 0}` in its outcomes. The validator can refer to a
+shared named condition. An incoming `condition` selects an instantaneous
+exported rule and acquires its raw fields at the segment boundary. Use a
+named temporal validator for observations acquired during the segment.
+
+`held` and `released` read symbolic TaskState. Report their authority as
+symbolic even when a task also records a measured lift or pose.
+`call_effect` references a local sequential call index and declares
+`assurance: projected|verified`. Verified references require a verifying
+preset and effect monitor. `validator` and `post_policy` reuse existing
+zero-based segment indices and cached results. An `unsupported` capability
+reports unavailable evidence, and blocks acceptance when it is required.
+
+Use `inspect_deployment.py --strict-contracts` to require each segment to
+have an instruction and contract. Contracts work with canonical and shorthand
+segments; strict diagnostics retain the authored configuration paths. Combine
+with `--explain` to inspect the normalized declaration and effective bindings.
+This checks declaration structure,
+bindings and supported authorities. The runtime checks measured truth at
+the incoming or outgoing boundary. Segment reports and dataset fragments
+retain the instruction, separate evidence statuses and the acceptance mask.
+Programs that omit contracts keep the existing execution path.
+
+### Shared rule components
+
+Select the library in the runnable deployment.
+
+```yaml
+evaluation:
+  component: task_program/evaluation.yaml
+```
+
+The selected component exports named roots of one rule graph.
+
+```yaml
+graph:
+  roots: [near_support, hold_near_support]
+  rules:
+    near_support:
+      kind: near_target
+      bindings:
+        position: rigid_objects/payload/pose
+        target: rigid_objects/support_surface/pose
+      params: {tolerance: 0.12}
+    hold_near_support:
+      kind: hold_for
+      ref: near_support
+      end: 3
+      steps: 2
+
+final_acceptance: [near_support]
+```
+
+Pose bindings supply XYZ translation in metres. Optional `axes` and
+`inclusive` select coordinates and the threshold boundary. Typed bindings
+resolve through the integration's scene and embodiment before execution.
+Rigid-body velocities use `lin_vel` and `ang_vel`. Joint predicates select
+`articulations/<entity>/qpos/<joint>`. Link-distance predicates use
+`links/<entity>/position`. Corner containment uses
+`rigid_objects/<entity>/frame` and `links/<entity>/frame` with declared
+object-local corners and link-frame bounds. Command matching uses `qpos`
+and `command` on the same `robot/<resource>/<endpoint>` binding.
+The robot resolves the native joint order. The command channel records the
+current controller target. `command_preset_match` instead takes one measured
+`qpos` input and resolves `params.preset` through that endpoint's embodiment
+command preset. Live assembly binds the Robot-resolved native joint names and
+order into the compiled rule identity. Recorded and live descriptors must match
+that order; an unresolved preset or foreign layout is unavailable. Standalone
+compiled preset rules can declare `joint_names` alongside `positions`.
+An embodiment can declare `skill_profile.evaluation_links`
+as logical aliases to native robot links. Use `robot_links/<alias>/position`
+for measured link distance. Trusted Python hosts can pass an
+`evaluation_registry` when loading the deployment. YAML contains only
+registered kind IDs and inert parameters.
+
+`near_frame_target` compares a measured XYZ position with a target offset in
+an observed object's frame. In a configured deployment its
+`params.transport_target` can select the target ID of an existing
+`move_held_object` lowerer. The rule then uses that lowerer's local offset
+and checks that its reference binding names the same object.
+
+The `lift` predicate can bind its `baseline` to
+`rigid_objects/<entity>/segment_start_frame`. Segment execution captures that
+pose before issuing the first action. Recorded evaluation reads the preceding
+capture stored as a distinct raw channel on the first consumed control slot.
+A missing segment-start capture yields unavailable evidence.
+
+Boolean rules name child rules in `refs`. Temporal rules select one `ref`
+and inclusive slot offsets `start` and `end`. `hold_for` requires
+consecutive `steps`. Milestones name simultaneous `refs` and optional
+predecessors in `after`.
+
+```yaml
+validators:
+  - kind: condition
+    ref: hold_near_support
+```
+
+Each segment occurrence starts at its first consumed control step. The window
+includes post-policy steps within its bound. Missing or invalid observations
+interrupt a hold. Rules that reference the same compiled temporal node with
+the same evidence qualification share its history within the occurrence.
+Validation traces retain each selected rule's identity, measurements,
+thresholds, witness steps and acquisition revisions.
+
+`final_acceptance` and `process_constraints` select instantaneous roots.
+Program overrides keep these deployment-owned selections. The bridge checks
+process constraints after consumed steps and routes rejected rows through its
+existing safe hold. The rules and bindings participate in registration
+identity. Roots sharing a normalized predicate and binding reuse its raw
+measurement within each qualified frame and row cohort. A fresh capture or
+separate evaluation scope measures its own inputs.
+
+An ordered placement objective component can set `condition` to an exported
+root over its object's position and velocities. The objective advances the rule
+with each measured sample and keeps its result independent of termination and
+persistence. The snapshot reports the configured rule's status and witness
+separately from the raw measurement-validity flag. With trajectory recording
+disabled, segment and process checks acquire only their active fields.
+Final-only fields are sampled at final queries and sealing.
 
 ## Asset role requirements
 
