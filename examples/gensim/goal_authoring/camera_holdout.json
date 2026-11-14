@@ -1,0 +1,5 @@
+{
+  "camera01":{"scene":"cobotmagic_Commercial_pour_water_001","instruction":"拿起水瓶朝杯子演示一次倾倒动作，不需要倒出水，然后把瓶放回原位。","expected":"pour bottle @cup;restore bottle"},
+  "camera02":{"scene":"cobotmagic_Commercial_rearrange_tableware_001","instruction":"先把餐叉放在盘子左边，然后把汤勺放在同一个盘子的右边。","expected":"left_of fork @plate;right_of spoon @plate"},
+  "camera03":{"scene":"carton","instruction":"先打开白色柜子的最底层抽屉，再把同一个抽屉完全关好。","expected":"open @drawer;closed @drawer"}
+}

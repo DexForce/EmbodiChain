@@ -1,5 +1,28 @@
 # Task Engine semantic contracts
 
+`gensim task plan --route goal` authors a normative contract before requesting
+an ordered call witness. It accepts text, an optional image, or an external
+agent proposal. `goal_planning.py` owns the goal-authoring manifest, exact
+operand coverage, resource checks and optional configured deployment preflight.
+Goal-route publication requires a verbatim instruction quote per terminal goal
+and milestone ID. Graph repair is bounded to two additional model proposals
+against the frozen objective; inspect `planning_history.json` for each candidate,
+pre-call holdings, checked coverage and the selected round. Source matching
+establishes traceability, not semantic entailment.
+The default template route retains the existing image plan and revision format.
+The opt-in hybrid route composes quoted E1–E9 operations into goal contracts
+and ordered calls. Orientation, pour receiver, original support, slider endpoint
+and twist mode can require occurrence-bound deployment parameters. The hybrid
+validator checks symbolic declaration coverage, including acquisition versus
+release in coordinated transport. Physical evidence and calibrated installation
+remain separate; motion-only pouring never establishes liquid transfer.
+Before freezing the hybrid objective, source checks distinguish explicit pour
+motion, requested liquid transfer and ambiguous outcomes. A separately prompted
+source audit checks omissions and invented actions against both the declarations and their expanded calls and occurrence bindings. During expansion, a following placement or pour can reuse the same held object; explicit incompatible arms remain errors. Diagnostics feed a bounded
+reinterpretation; a failed audit prevents plan publication.
+See the [20-case comparison](../../../examples/gensim/goal_authoring/REPORT.md)
+for the current qualification boundary.
+
 `gensim task revise` validates a planner proposal against the frozen v1
 document and grounding in a published plan. The caller supplies expected spec,
 graph and complete publication digests plus a new output directory. The complete

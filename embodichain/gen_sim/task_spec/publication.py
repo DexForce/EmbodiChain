@@ -58,7 +58,7 @@ def freeze_task_spec(
         role_descriptions: Source descriptions keyed by logical role ID.
         interpretation: Resolved role references and entity provenance.
         generalization: Permitted variations and required coverage targets.
-        source_kind: Image or prepared-scene input discriminator.
+        source_kind: Image, prepared-scene or original instruction text discriminator.
         interpreted_steps: Frozen instruction intent used for graph coverage.
         clauses: Quoted requirements associated with roles, goals or milestones.
             Optional structured constraints identify role properties or supported
@@ -75,7 +75,12 @@ def freeze_task_spec(
     raw = validate_task_spec(spec)
     instruction = raw["instruction"]
     if (
-        source_kind not in {"image", "prepared_scene"}
+        source_kind == "text"
+        and image_sha256 != hashlib.sha256(instruction.encode()).hexdigest()
+    ):
+        raise ValueError("Text source digest does not match the instruction")
+    if (
+        source_kind not in {"image", "prepared_scene", "text"}
         or not image_ref
         or len(image_sha256) != 64
         or any(c not in "0123456789abcdef" for c in image_sha256)
@@ -281,7 +286,11 @@ def decode_task_document(
     Raises:
         ValueError: The declaration or its content identity has changed.
     """
-    kind = "image" if "image" in value["inputs"] else "prepared_scene"
+    kind = next(
+        (k for k in ("image", "prepared_scene", "text") if k in value["inputs"]), None
+    )
+    if kind is None:
+        raise ValueError("Missing source input")
     image = value["inputs"][kind]
     standalone = source is None
     if source is None:

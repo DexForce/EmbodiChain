@@ -1,0 +1,10 @@
+{
+  "h01":{"scene":"task1173","instruction":"将蓝杯放在鼠标垫上。只让咖啡壶朝蓝杯演示倒水姿势，不需要倒出液体，最后把壶放回原位。","expected":"on cup @pad;pour pot cup;restore pot"},
+  "h02":{"scene":"task1179","instruction":"请把壶里的水倒进碗里，必须有水进入碗，再把壶放回原处。","expected":"pour kettle bowl;restore kettle","requires_fluid":true},
+  "h03":{"scene":"task1189","instruction":"先把倒下的杯子扶正，放在接杯垫上，然后按启动按钮。","expected":"align cup;on cup @pad;press button"},
+  "h04":{"scene":"task1185","instruction":"把餐碗移入服务托盘，再把纸杯放在餐碗右边。","expected":"inside @bowl @tray;right_of cup @bowl"},
+  "h05":{"scene":"task1176","instruction":"先按确认按钮，再打开抽屉，把魔方放进抽屉后把抽屉关好。","expected":"press button;open @drawer;inside cube @drawer;closed @drawer"},
+  "h06":{"scene":"task1186","instruction":"右手把橙子递给左手，左手将它放进盘子。苹果留在原处。","expected":"right_left orange;land orange @plate","protected":"apple"},
+  "h07":{"scene":"task1187","instruction":"把杯子放上杯垫，拿水壶对准这个杯子倾倒一次，然后把水壶放回原处。","expected":"on @cup coaster;pour kettle @cup;restore kettle","ambiguous":true},
+  "h08":{"scene":"task1183","instruction":"粗转定时旋钮一次，随后把木勺和白碗依次放在备料垫上。","expected":"coarse knob;on spoon @prep;on bowl @prep"}
+}

@@ -1,0 +1,8 @@
+{
+  "objective": {
+    "sources":{"closed":"关上铰链门"},
+    "roles": [{"id":"door","kind":"articulation","properties":{"joint_kind":"revolute"}}],
+    "goal": [{"id":"closed","predicate":"articulation_joint_near","subject":"door","arguments":{"joint_kind":"revolute","target_state":"closed"}}]
+  },
+  "calls": [{"kind":"registered","call_id":"simulation.open_door","arguments":{"object":"door","state":"closed"},"resources":{}}]
+}
