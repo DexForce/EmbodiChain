@@ -6076,6 +6076,10 @@ Terrain scan
    RayScene
    TerrainScan
    TerrainScanCfg
+   RayLidar
+   RayLidarCfg
+   RayDepthCamera
+   RayDepthCameraCfg
 
 .. currentmodule:: embodichain.lab.sim.sensors.ray
 
@@ -6084,3 +6088,7 @@ Terrain scan
    RayScene
    TerrainScan
    TerrainScanCfg
+   RayLidar
+   RayLidarCfg
+   RayDepthCamera
+   RayDepthCameraCfg

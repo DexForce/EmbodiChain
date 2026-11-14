@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 from collections.abc import Callable
 import weakref
 
@@ -109,7 +109,8 @@ class SensorContext:
         clock: Simulation clock and completed-substep identity.
         state: Public physical state acquisition service.
         contact_factory: Optional factory for a bound, sensor-owned contact reader.
-        ray_factory: Optional factory for a topology-scoped collision query scene.
+        ray_factory: Optional factory taking target UIDs and an explicit geometry
+            source ("collision" or "visual").
     """
 
     device: torch.device
@@ -117,7 +118,9 @@ class SensorContext:
     clock: SensorClock
     state: SensorStateProvider
     contact_factory: Callable[[ContactSensorCfg], ContactSensor] | None = None
-    ray_factory: Callable[[tuple[str, ...]], RayScene] | None = None
+    ray_factory: (
+        Callable[[tuple[str, ...], Literal["collision", "visual"]], RayScene] | None
+    ) = None
 
     @classmethod
     def from_manager(cls, manager: SimulationManager) -> SensorContext:
@@ -229,8 +232,12 @@ class _ManagerSensorServices:
             )
         return ContactSensor(cfg, manager.device, owner=manager)
 
-    def create_ray_scene(self, targets: tuple[str, ...]) -> RayScene:
-        from .ray import _build_collision_scene
+    def create_ray_scene(
+        self,
+        targets: tuple[str, ...],
+        source: Literal["collision", "visual"] = "collision",
+    ) -> RayScene:
+        from .ray import _build_ray_scene
 
         manager = self._manager()
         result = manager.spawn_result
@@ -241,6 +248,7 @@ class _ManagerSensorServices:
         if cached_revision != revision:
             scenes = {}
             manager._sensor_ray_scenes = (revision, scenes)
-        if targets not in scenes:
-            scenes[targets] = _build_collision_scene(manager, targets)
-        return scenes[targets]
+        key = (targets, source)
+        if key not in scenes:
+            scenes[key] = _build_ray_scene(manager, targets, source)
+        return scenes[key]
