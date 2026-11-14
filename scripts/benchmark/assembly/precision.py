@@ -32,6 +32,7 @@ from pathlib import Path
 import platform
 import subprocess
 import sys
+import tempfile
 
 from embodichain.toolkits.assembly import AssemblyAsset, build_assembly
 from embodichain_benchmarks.assembly.precision import (
@@ -59,6 +60,13 @@ def run_all_benchmarks(args: argparse.Namespace) -> Path:
         )
     directory = Path(args.output).resolve()
     directory.mkdir(parents=True, exist_ok=True)
+    directory = Path(tempfile.mkdtemp(prefix="run_", dir=directory))
+    # The host authors USD before inspecting it. Register installed SDK schemas
+    # first; the portable exporter itself must remain independent of DexSim.
+    try:
+        import dexsim.kit.usd
+    except ImportError:
+        pass
     rows = []
     geometry = []
     selections = []
@@ -92,8 +100,18 @@ def run_all_benchmarks(args: argparse.Namespace) -> Path:
             )
     for name, asset in selections:
         manifest = asset.save(directory / f"{asset.content_hash}.json")
-        usd = asset.write_usd(directory / f"{asset.content_hash}.usda")
-        geometry.append({"config": name, **compare_usd_geometry(asset, usd)})
+        try:
+            usd = asset.write_usd(directory / f"{asset.content_hash}.usda")
+            measured = compare_usd_geometry(asset, usd)
+        except (
+            ImportError,
+            RuntimeError,
+            ValueError,
+            NotImplementedError,
+            OSError,
+        ) as error:
+            measured = {"passed": False, "reason": str(error)}
+        geometry.append({"config": name, **measured})
         for backend in args.backends:
             for route in (
                 args.routes if backend in {"newton", "default"} else ["direct"]
@@ -151,15 +169,32 @@ def run_all_benchmarks(args: argparse.Namespace) -> Path:
                                 completed.stdout + "\n" + completed.stderr,
                                 encoding="utf-8",
                             )
-                            if cell.exists():
-                                result = json.loads(cell.read_text())
-                            else:
+                            if completed.returncode != 0:
                                 result = {
                                     "backend": backend,
                                     "route": route,
                                     "status": "failed",
                                     "reason": f"Process exit {completed.returncode}: {completed.stderr[-1800:]}",
                                 }
+                            else:
+                                try:
+                                    result = json.loads(cell.read_text())
+                                    if (
+                                        not isinstance(result, dict)
+                                        or result.get("asset_sha256")
+                                        != asset.content_hash
+                                        or result.get("config") != asdict(cfg)
+                                    ):
+                                        raise ValueError(
+                                            "Cell output does not match this asset and configuration."
+                                        )
+                                except (OSError, ValueError) as error:
+                                    result = {
+                                        "backend": backend,
+                                        "route": route,
+                                        "status": "failed",
+                                        "reason": str(error),
+                                    }
                         except subprocess.TimeoutExpired:
                             result = {
                                 "backend": backend,
@@ -171,6 +206,7 @@ def run_all_benchmarks(args: argparse.Namespace) -> Path:
                             config_name=name,
                             requested_num_envs=worlds,
                             timestep=timestep,
+                            asset_sha256=asset.content_hash,
                         )
                         result.setdefault("num_envs", worlds)
                         cell.write_text(
@@ -242,9 +278,23 @@ def run_all_benchmarks(args: argparse.Namespace) -> Path:
     ]
     for row in rows:
         measured = next(g for g in geometry if g["config"] == row["config_name"])
+        values = [
+            "unmeasured" if measured.get(key) is None else f"{measured[key]:.3g}"
+            for key in (
+                "geometry_error_m",
+                "mass_relative_error",
+                "inertia_relative_error",
+            )
+        ]
         lines.append(
-            f"| {row['config_name']} | {row['backend']}/{row['route']} | {row['status']} | {row.get('metrics', {}).get('success_rate', 'unmeasured')} | {measured['geometry_error_m']:.3g} | {measured['mass_relative_error']:.3g} | {measured['inertia_relative_error']:.3g} |"
+            f"| {row['config_name']} | {row['backend']}/{row['route']} | {row['status']} | {row.get('metrics', {}).get('success_rate', 'unmeasured')} | {' | '.join(values)} |"
         )
+    for measured in geometry:
+        if measured.get("reason"):
+            lines += [
+                "",
+                f"- {measured['config']} geometry/ownership: {measured['reason'].replace(chr(10), ' ')}",
+            ]
     lines += [
         "",
         "## Leaderboard",

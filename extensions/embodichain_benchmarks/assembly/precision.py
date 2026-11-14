@@ -69,6 +69,11 @@ def compare_usd_geometry(asset: AssemblyAsset, usd_file: str | Path) -> dict[str
     This checks the authored stage rather than its backend cooking. Collider
     ownership is also checked through DexSim's public USD parser when present.
     """
+    # Register native physics schemas before opening a stage in a fresh process.
+    try:
+        from dexsim.kit.usd import parse_usd
+    except ImportError:
+        parse_usd = None
     from pxr import Usd, UsdGeom, UsdPhysics
     from scipy.spatial.transform import Rotation
 
@@ -174,11 +179,7 @@ def compare_usd_geometry(asset: AssemblyAsset, usd_file: str | Path) -> dict[str
                 float(np.linalg.norm(target - source) / np.linalg.norm(source)),
             )
     ownership = "unmeasured"
-    try:
-        from dexsim.kit.usd import parse_usd
-    except ImportError:
-        pass
-    else:
+    if parse_usd is not None:
         parsed = parse_usd(str(usd_file), root_name="assembly")
         counts = [
             len(body.collisions) for body in parsed.mesh_objects if body.collisions
@@ -336,6 +337,8 @@ def _score(
 
         metrics = _score_many_pegs(asset, initial, final)
     elif kind == "peg":
+        from ._many_metrics import _seating_mask
+
         fell = initial["peg"][..., 2] - final["peg"][..., 2]
         scale = float(asset.config.get("scale", 1.0))
         # mjfit's body origins are the plate/insertion-section midpoints.
@@ -351,8 +354,12 @@ def _score(
         # Falling onto the rim (the usual 5 mm spawn gap), or falling outside
         # the plate, is not insertion. This is a coarse endpoint check only;
         # clearance/tilt/contact accuracy is qualified by separate probes.
-        inserted = (insertion >= thickness - tolerance) & (
-            lateral <= clearance + tolerance
+        inserted = _seating_mask(
+            relative,
+            insertion,
+            thickness=thickness,
+            tolerance=tolerance,
+            clearance=clearance,
         )
         metrics = {
             "fall_m": float(np.mean(fell)),
@@ -654,6 +661,11 @@ def _run_embodichain(
     )
 
     ground_enabled, ground_attrs = _source_floor_attributes(asset, cfg)
+    visual_paths: dict[str, Path] = {}
+    if native_window and cfg.route == "direct":
+        from embodichain.lab.sim.assembly._visual import _write_rigid_visual_meshes
+
+        visual_paths = _write_rigid_visual_meshes(asset, cfg.work_dir)
     physics = (
         NewtonPhysicsCfg(
             gravity=asset.source_options.get("gravity", [0, 0, -9.81]),
@@ -741,24 +753,15 @@ def _run_embodichain(
                         source_contact=cfg.source_contact,
                         backend=cfg.backend,
                     )
-                    if native_window:
-                        from embodichain.lab.sim.assembly._visual import (
-                            _VISUAL_FORMAT_VERSION,
-                            write_visual_mesh,
-                        )
+                    if body.name in visual_paths:
                         from embodichain.lab.sim.cfg import VisualElementCfg
                         from embodichain.lab.sim.shapes import MeshCfg
 
-                        visual_path = write_visual_mesh(
-                            body,
-                            Path(cfg.work_dir)
-                            / asset.content_hash
-                            / f"visual_v{_VISUAL_FORMAT_VERSION}"
-                            / f"{body.name}.obj",
-                        )
                         body_cfg.visuals = [
                             VisualElementCfg(
-                                representation=MeshCfg(fpath=str(visual_path.resolve()))
+                                representation=MeshCfg(
+                                    fpath=str(visual_paths[body.name])
+                                )
                             )
                         ]
                     body_cfg.attrs.collision_props.contact_offset = cfg.contact_offset

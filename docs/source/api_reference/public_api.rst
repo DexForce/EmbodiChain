@@ -5244,7 +5244,6 @@ Historical assembly reference preparation
 .. toctree::
    :maxdepth: 1
 
-   assembly_robot_reference
 
 Stability execution ownership
 ----------------------------

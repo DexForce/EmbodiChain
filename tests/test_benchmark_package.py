@@ -79,14 +79,26 @@ def installed_benchmark(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path,
         assert "embodichain_benchmarks/motion_generation/api.py" in entries
         assert "embodichain/cli/benchmark.py" in entries
         for filename in (
-            "dexsim_assembly_contact.patch",
-            "dexsim_assembly_variants.patch",
             "apply_mujoco_warp_epa_horizon.py",
+            "mujoco_warp_epa_horizon.patch",
+            "mujoco_warp_epa_horizon_3_15.patch",
         ):
             assert any(
                 name.endswith(f"/data/share/embodichain/assembly_patches/{filename}")
                 for name in entries
             ), filename
+        assert not any(
+            name.endswith(
+                (
+                    "dexsim_assembly_contact.patch",
+                    "dexsim_assembly_variants.patch",
+                    "dexsim_continuous_joint.patch",
+                    "newton_cpu_pgs.patch",
+                    "newton_cpu_pgs.md",
+                )
+            )
+            for name in entries
+        )
         suites = {
             Path(name).name
             for name in entries

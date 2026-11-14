@@ -63,12 +63,13 @@ rigid object; per-piece collision colors are available in the recorded view
 and inspection USD. The offset peg is an intentional blocking control. Success
 requires seating through the plate and lateral alignment, not just falling the
 initial spawn gap. Source gear PGS remains unsupported by MuJoCo Warp. Select `--solver cg`
-explicitly for the measured Warp comparison profile. To retain the source PGS,
-select `--use-mujoco-cpu --solver pgs` and apply the separate optional Newton
-CPU patch described below. The executor and solver choice remain in each trace. Generated traces report the selected solver and measured outcome.
+explicitly for the measured Warp comparison profile. The independent CPU
+reference supports `--backend mujoco_cpu --solver pgs`. Historical Newton CPU
+PGS profiles are retained in the runtime archive linked below. Generated traces
+record the executor, selected solver and measured outcome.
 
-For the native DexSim rendering window, use a desktop display and the patched
-SDK runtime described below. The preview uses Hybrid rendering, 16 samples per
+For the native DexSim rendering window, use a desktop display and a supporting
+SDK runtime. The preview uses Hybrid rendering, 16 samples per
 pixel and OptiX denoising, with a camera framed around the centimetre-scale part:
 
 ```bash
@@ -105,15 +106,16 @@ includes the visual format version (`visual_v2`); regenerate old exported
 assets to obtain these normals. Geometry, collision pieces and mass properties
 remain unchanged.
 
-For Newton's exact raw source contacts and preparation-time rigid variants,
-apply the reproducible SDK patches described in
-[`scripts/patches/README.md`](../../../scripts/patches/README.md). The unpatched
-SDK fails explicitly when those capabilities are requested. Development-only
+Newton's raw source contacts and preparation-time rigid variants require an SDK
+exposing the matching public descriptor fields. Unsupported builds fail
+explicitly. Capability notes and the immutable historical runtime archive are in
+[`scripts/patches/README.md`](../../../scripts/patches/README.md). Development-only
 `--backend-contacts` selects native default contacts and is recorded as such.
 Default cannot reproduce raw MuJoCo contact semantics; it is a measured
 comparison backend. Default's cylinder cooking also uses a polygonal proxy.
-Wheels include these patches under `share/embodichain/assembly_patches/` in the
-installation prefix; source distributions retain `scripts/patches/`.
+Wheels include the version-checked EPA helper and patches under
+`share/embodichain/assembly_patches/`; historical SDK and CPU PGS patches remain
+in the archive rather than the current distribution.
 
 ```bash
 embodichain run-example sim/assembly/drop_peg --backend newton --route direct
@@ -135,7 +137,11 @@ python -m scripts.benchmark.assembly.precision --configs circle --probe S2 --rou
 python -m scripts.benchmark.assembly.precision --configs circle --clearances .00002 .00005 .0001 .0002 --probe S2 --routes direct --backends mujoco_cpu
 ```
 
-The report writes exactly three comparison tables and companion raw JSON.
+Each invocation creates a fresh `run_*` directory below `--output`, containing
+three comparison tables, companion raw JSON and isolated worker logs. Geometry
+or USD ownership failures remain visible in the report while independent
+source/direct cells continue. Worker crashes and mismatched output identities
+are reported as failures; earlier runs are never reused.
 Unmeasured memory and unavailable overflow accounting are marked explicitly.
 Passive success is distinct from S0/S2/S3/S4 clearance qualification.
 The constrained reference probes in `embodichain_benchmarks.assembly.probes` use
@@ -146,7 +152,7 @@ floor's friction and contact parameters through `ground_plane_attrs`; this
 avoids measuring a different floor under an otherwise identical assembly.
 
 The pinned historical reference environment is described in
-[`reference-requirements.txt`](../../../scripts/benchmark/assembly/reference-requirements.txt).
+[the archived reference environment](https://github.com/DexForce/EmbodiChain/blob/e15c945a8976b06b447f933400d12e5bd936dd3a/scripts/benchmark/assembly/reference-requirements.txt).
 It is independent of the installed EmbodiChain runtime; each run records its
 actual versions. Generated measurements and recordings belong in `outputs/`.
 These examples do not establish paper-level training or precision qualification.

@@ -26,6 +26,22 @@ from embodichain.toolkits.assembly import AssemblyAsset
 __all__: list[str] = []
 
 
+def _seating_mask(
+    relative: np.ndarray,
+    insertion: np.ndarray,
+    *,
+    thickness: float,
+    tolerance: float,
+    clearance: float,
+) -> np.ndarray:
+    """Accept finite centered endpoints within the authored seating depth."""
+    return (
+        (np.abs(insertion - thickness) <= tolerance)
+        & (np.max(np.abs(relative[..., :2]), axis=-1) <= clearance + tolerance)
+        & np.isfinite(relative).all(axis=-1)
+    )
+
+
 def _score_many_pegs(
     asset: AssemblyAsset,
     initial: Mapping[str, np.ndarray],
@@ -63,10 +79,12 @@ def _score_many_pegs(
         fell = (
             np.asarray(initial[peg_name])[..., 2] - np.asarray(final[peg_name])[..., 2]
         )
-        seated = (
-            (np.abs(insertion - thickness) <= tolerance)
-            & (lateral <= clearance + tolerance)
-            & np.isfinite(relative).all(axis=-1)
+        seated = _seating_mask(
+            relative,
+            insertion,
+            thickness=thickness,
+            tolerance=tolerance,
+            clearance=clearance,
         )
         all_successes.append(np.ravel(seated))
         all_falls.append(np.ravel(fell))

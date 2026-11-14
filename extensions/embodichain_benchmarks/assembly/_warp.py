@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""Prescribed screw-speed boundary for the independent MuJoCo Warp probe."""
+"""Device-resident boundaries and history for assembly reference probes."""
 
 from __future__ import annotations
 
@@ -31,3 +31,17 @@ def constrain_screw_velocity(qvel: wp.array2d(dtype=wp.float32), dof: int, rate:
     qvel[row, dof + 3] = 0.0
     qvel[row, dof + 4] = 0.0
     qvel[row, dof + 5] = -rate
+
+
+@wp.kernel
+def record_probe_state(
+    qpos: wp.array2d(dtype=float),
+    overflow: wp.array(dtype=int),
+    history: wp.array3d(dtype=float),
+    health: wp.array(dtype=int),
+    step_index: int,
+):
+    world, coordinate = wp.tid()
+    history[world, step_index, coordinate] = qpos[world, coordinate]
+    if coordinate == 0:
+        wp.atomic_or(health, world, overflow[world])
