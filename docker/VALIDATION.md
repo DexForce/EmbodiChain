@@ -1,9 +1,10 @@
-# Published container images
+# Container qualification and published images
 
 > Historical qualification below includes Python 3.10 results from an earlier
 > dependency profile. This checkout requires Python 3.11 or newer;
-> the main CI uses Python 3.12.
-> The current Docker locks select DexSim 0.6.0rc1; the published image digests
+> the main CI explicitly activates Python 3.11 in the dual-profile image;
+> the public image and the internal image's interactive default use Python 3.12.
+> The current Docker locks select DexSim 0.6.0rc2; the published image digests
 > and qualification runs below describe the earlier DexSim 0.5.1rc1 images.
 
 Source commit: `c42e8a0b0857ae00aeeb21d414d30318abb2e171`.
@@ -112,6 +113,99 @@ Temporary registry credentials were removed from the publishing runner, the
 GitHub secret was deleted and its absence verified, and local Docker login
 credentials were deleted.
 
-The PR's main, dataset and documentation workflows now use the formal internal
-tag and retain explicit `py311` activation. The SDK matrix continues selecting
-Python 3.10/3.11/3.12 independently.
+At that historical promotion, the main, dataset and documentation workflows
+used the formal internal tag with explicit `py311` activation, and the SDK
+matrix selected Python 3.10/3.11/3.12. The current checkout's SDK matrix selects
+Python 3.11 and 3.12; its main test job still explicitly activates `py311`.
+
+## DexSim 0.6.0rc1 build and dependency follow-up — 2026-11-09
+
+Runtime and Dockerfile revision:
+`c1af874bae7f0a6bc53691a8b2b9d2e063d80e57`.
+Build host: Linux amd64, Docker 29.6.0, BuildKit 0.34.2. The Dockerfile retains
+the CUDA 12.8 Ubuntu 22.04 base-image digest recorded in source.
+
+### Python distribution checks
+
+The current package requires Python `>=3.11`. The installation guide now
+lists Python 3.11/3.12, and distinguishes the `py312` interactive image default
+from the main workflow's explicit `py311` activation.
+
+The published DexSim 0.6.0rc1 wheels resolved successfully with isolated pip
+dry-runs targeting CPython 3.11 and 3.12 on `manylinux_2_31_x86_64`.
+Downloaded hashes matched both the profiles and locks:
+
+| ABI | SHA256 |
+| --- | --- |
+| cp311 | `f3cef56bd987b3166b871d7d9f29b2f2d6ceb274cf47ca9a598c51d6a6785718` |
+| cp312 | `f84c0f1763689b6d57f63308b417932237325666c20d1e3379bafbb7cdad7076` |
+
+Both published wheel metadata records require `newton[sim]==1.7.0` and
+`warp-lang==1.17.0` on Linux. A newly built EmbodiChain 0.3.2 wheel accepted
+the Python 3.11/3.12 targets and rejected Python 3.10 through `Requires-Python`.
+The wheel's dependency metadata also passed the PyPI direct-URL check.
+
+Both profile inputs were re-resolved with uv 0.12.5 against the checked-in
+constraints, including the `gensim` and `policy-deploy` extras. The 309 py311
+and 298 py312 requirements matched their lock files without dependency drift.
+
+### Actual container builds
+
+Both Dockerfile targets completed, including wheel installation with
+`--no-deps` and the subsequent `uv pip check`. Final checks reported:
+
+| Image/environment | Compatible installed packages |
+| --- | ---: |
+| public / py312 | 299 |
+| public / isolated blender311 | 28 |
+| internal / py311, including test tools | 312 |
+| internal / py312, including test tools | 301 |
+
+Local OCI manifest digests:
+
+| Target | Digest |
+| --- | --- |
+| public | `sha256:75c8cb268415817394a012e1de2543da6017cec53cba44fafc0d5e2cdb538010` |
+| internal | `sha256:0fd4288482984fa5e04a668b24b3296c5d28a2d31f7b4c715734c054e78afd9d` |
+
+Both exported OCI configurations were checked against their config digests,
+the runtime revision label and the `EMBODICHAIN_ENV=py312` default.
+BuildKit cache and OCI exports used a dedicated secondary-disk directory;
+the existing Docker builder remained selected.
+
+The first build reached the Miniforge download and failed on an upstream
+HTTP 504. The Dockerfile now retries the official alias within the same pinned
+26.9.4-1 release. Both paths retain the original installer SHA256 check
+(`571b410272cc434f28bc6c5c49ca8ffd4a4d1bcba9f57f1b6baccdb46446cfcc`).
+The successful builds used that fallback. An interrupted internal build was
+resumed from its completed dependency cache before the final successful export.
+
+The build procedure used a dedicated `docker-container` Buildx builder:
+
+```bash
+for target in public internal; do
+  docker buildx build --builder pr829-validation --platform linux/amd64 \
+    --network host --allow network.host --progress plain \
+    --file docker/Dockerfile --target "$target" \
+    --build-arg SOURCE_REVISION=c1af874bae7f0a6bc53691a8b2b9d2e063d80e57 \
+    --output "type=oci,dest=$target.oci.tar" .
+done
+```
+
+Release/workflow regressions passed 46 tests. The Sphinx dummy build completed
+with existing repository diagnostics; the updated installation page retained
+no system messages and included the corrected version matrix and image-scope
+note. Black 26.10.1 and API documentation coverage (4440/4440) passed.
+
+This follow-up qualifies distribution availability, resolution, container
+builds and installed dependencies. It does not rerun the full GPU, media and
+Blender behavior checks in `docker/validate.sh`. The candidates were exported
+locally; published image tags and the historical native qualification above
+were not promoted or reused as evidence for DexSim 0.6.0rc1.
+
+The concurrent fluid update `e14fc4e78d4074ec448b4042fc09ea926bffd179` was
+preserved during integration. Its dependency-relevant inputs (`pyproject.toml`,
+`VERSION`, `setup.py`, Dockerfile, installer, profiles and locks) are unchanged
+from the qualified snapshot. Post-integration checks passed 46 regressions,
+Black (2312 files unchanged), context validation and API coverage (4449/4449).
+The container results above do not qualify the added fluid runtime behavior.

@@ -28,12 +28,23 @@ import torch
 
 from embodichain.utils import configclass, is_configclass, logger
 
+from .visuals import GaussianSplatCfg, VisualElementCfg, _visual_elements
 from .asset import AssetPhysicsMode, ObjectBaseCfg, _resolve_asset_physics_mode
 from .source import UsdSourceCfg, _raise_removed_source_fields, _usd_source_from_value
 from .rigid import (
     RigidBodyPhysicsCfg,
     _rigid_body_physics_from_dict,
 )
+
+__all__ = [
+    "ArticulationRootPropertiesCfg",
+    "LinkPhysicsOverrideCfg",
+    "link_attrs_from_dict",
+    "JointDrivePropertiesCfg",
+    "NewtonJointDrivePropertiesCfg",
+    "MimicComplianceCfg",
+    "ArticulationCfg",
+]
 
 
 def _normalize_joint_target_mode(value: object) -> int:
@@ -67,18 +78,18 @@ class ArticulationRootPropertiesCfg:
 
     ``fixed_base`` and ``self_collision_enabled`` are consumed by both
     backends. ``sleep_threshold`` and the solver-iteration fields are supported
-    only by the Default backend and are ignored by Newton. By default, the
-    articulation root is fixed and self-collision is disabled. Explicit
-    ``None`` values preserve the source value or backend/import default.
+    only by the Default backend and are ignored by Newton. Unset values
+    preserve USD intent; URDF and procedural imports resolve to a fixed root
+    without self-collision.
     """
 
-    fixed_base: bool | None = True
+    fixed_base: bool | None = None
     """Whether the articulation root is rigidly fixed to the world frame.
 
     Set to ``None`` to preserve the source value or backend/import default.
     """
 
-    self_collision_enabled: bool | None = False
+    self_collision_enabled: bool | None = None
     """Whether non-filtered link pairs in the articulation may self-collide.
 
     Newton may still apply source-authored or Spawn-owned filtering to adjacent
@@ -94,6 +105,30 @@ class ArticulationRootPropertiesCfg:
 
     min_velocity_iters: int | None = None
     """Default-only minimum root velocity-solver iterations (0 to 255)."""
+
+    newton_gravity_compensation: float | None = None
+    """MuJoCo link-weight compensation fraction in [0, 1], on Newton only.
+
+    ``None`` preserves the source/default policy; zero retains gravity and one
+    compensates every link in this articulation. Payload gravity and contact
+    reactions remain active. This creation setting applies in both asset
+    physics modes, independently of DexUni's coupling policy. The finalized
+    Newton solver must support MuJoCo gravity compensation.
+    """
+
+    newton_mimic_stabilizer: bool = False
+    """Whether URDF mimic joints are tuned toward Default-backend behavior.
+
+    ``False`` (default) keeps the configured follower drives and Newton's
+    native mimic constraint, as a plain DexSim scene does; reset starts each
+    follower on its mimic relation so the constraint does not kick on the
+    first step. On MuJoCo-Warp and
+    DexUni, ``True`` opts in to a Default-parity stabilizer: each mimic
+    follower's drive becomes one percent of its leader's gains (replacing the
+    follower gains in :attr:`ArticulationCfg.joint_drive_props`), follower
+    targets follow the mimic relation, and the MuJoCo equality ``solref`` is
+    retuned.
+    """
 
     def __post_init__(self) -> None:
         """Require the two values consumed by the atomic Default setter."""
@@ -280,6 +315,24 @@ class JointDrivePropertiesCfg:
     * For angular joints, the unit is kg-m^2/s/rad (N-m-s/rad).
     """
 
+    limit_stiffness: Dict[str, float] | float | None = None
+    """Newton joint-limit restoring gain, separate from the drive stiffness.
+
+    Scalars and joint-rule mappings follow :attr:`stiffness`. ``None`` keeps
+    the source/backend limit gain. With Newton's MuJoCo solver, explicitly
+    setting both limit gains to zero selects MuJoCo's default limit response
+    (``solref=[0.02, 1.0]``); it does not remove the joint limits. Other Newton
+    solvers interpret these gains according to their joint-limit model.
+    """
+
+    limit_damping: Dict[str, float] | float | None = None
+    """Newton joint-limit damping gain, separate from the drive damping.
+
+    ``None`` keeps the source/backend value. See :attr:`limit_stiffness` for
+    the MuJoCo solver's explicit-zero behavior. The Default backend does not
+    consume either Newton limit gain.
+    """
+
     max_effort: Dict[str, float] | float | None = None
     """Maximum drive effort [N for prismatic, N*m for revolute joints].
 
@@ -378,13 +431,76 @@ class JointDrivePropertiesCfg:
 
 @configclass
 class NewtonJointDrivePropertiesCfg(JointDrivePropertiesCfg):
-    """Compatibility subtype for serialized Newton joint-drive configs.
+    """Joint-drive configuration with Newton-specific passive dynamics.
 
     ``target_mode`` is now portable and lives on
     :class:`JointDrivePropertiesCfg`. The subtype remains so existing
-    ``backend="newton"`` dictionaries and round trips retain their type; new
-    robot definitions should use the common class.
+    ``backend="newton"`` dictionaries and round trips retain their type. Use
+    the common class when no Newton-specific dynamics are required.
     """
+
+    passive_damping: dict[str, float] | float | None = None
+    """Nonnegative passive joint damping, independent of drive damping.
+
+    Uses the same joint-name, regex and robot control-part rules as the drive
+    gains. Apply it with ``asset_physics_mode='overlay'``; ``None`` preserves
+    source damping. Unlike :attr:`damping`, this
+    lowers to Newton's ``JointDofConfig.damping`` and remains active when the
+    drive target mode is ``none`` or ``effort``. It requires Newton and is
+    consumed by MuJoCo-backed solvers, including dynamic DexUni.
+    """
+
+
+@configclass
+class MimicComplianceCfg:
+    """DexSim Default compliance for the followers of one mimic master.
+
+    Both parameters must be finite and nonnegative. Use zero for both
+    parameters to request hard coupling. The source multiplier and offset
+    continue to define each follower's relation to the master.
+    """
+
+    natural_frequency: float = field()
+    """Native mimic constraint natural frequency."""
+
+    damping_ratio: float = field()
+    """Dimensionless native mimic constraint damping ratio."""
+
+    def __post_init__(self) -> None:
+        """Validate the parameters before they are converted to native floats."""
+        max_float = float(np.finfo(np.float32).max)
+        for name in ("natural_frequency", "damping_ratio"):
+            value = getattr(self, name)
+            if isinstance(value, (bool, np.bool_)) or not isinstance(
+                value, numbers.Real
+            ):
+                raise TypeError(f"Mimic compliance {name} must be a real number.")
+            if not 0 <= value <= max_float:
+                raise ValueError(
+                    f"Mimic compliance {name} must be finite, nonnegative, "
+                    "and representable as a native float."
+                )
+
+
+def _mimic_compliance_from_dict(
+    value: Mapping[str, MimicComplianceCfg | Mapping[str, float]] | None,
+) -> dict[str, MimicComplianceCfg] | None:
+    """Parse exact joint names and validate their compliance pairs."""
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise TypeError("mimic_compliance must be a mapping keyed by joint name.")
+    settings = {}
+    for name, entry in value.items():
+        if not isinstance(name, str) or not name:
+            raise ValueError("mimic_compliance keys must be nonempty joint names.")
+        if isinstance(entry, MimicComplianceCfg):
+            settings[name] = entry.copy()
+        elif isinstance(entry, Mapping):
+            settings[name] = MimicComplianceCfg(**entry)
+        else:
+            raise TypeError(f"Invalid mimic compliance configuration for {name!r}.")
+    return settings
 
 
 @configclass
@@ -395,14 +511,36 @@ class ArticulationCfg(ObjectBaseCfg):
     such as joint drive properties, physical attributes.
     """
 
+    link_visuals: dict[
+        str, list[VisualElementCfg | GaussianSplatCfg] | GaussianSplatCfg
+    ] = field(default_factory=dict, kw_only=True)
+    # configclass copies inherited annotations into extension constructors.
+    # Keep this type concrete so subclasses need not import visual configs.
+    __annotations__["link_visuals"] = dict[
+        str, list[VisualElementCfg | GaussianSplatCfg] | GaussianSplatCfg
+    ]
+    """Appearance replacements keyed by exact source link name.
+
+    A single Gaussian resource may omit its element wrapper. Multiple elements
+    require explicit VisualElementCfg IDs within each link.
+    """
+
     fpath: str = None
     """Path to the articulation asset file."""
 
     source: UsdSourceCfg | None = field(default=None, kw_only=True)
     """USD source asset; mutually exclusive with :attr:`fpath`."""
 
-    body_scale: tuple | list = (1.0, 1.0, 1.0)
+    body_scale: tuple | list | None = None
     """Scale of the articulation in the simulation world frame."""
+
+    def __post_init__(self) -> None:
+        path = self.source.file_path if self.source is not None else self.fpath
+        if path is None or not str(path).lower().endswith(
+            (".usd", ".usda", ".usdc", ".usdz")
+        ):
+            if self.body_scale is None:
+                self.body_scale = (1.0, 1.0, 1.0)
 
     compute_uv: bool = False
     """Whether to compute the UV mapping for the articulation link.
@@ -438,9 +576,8 @@ class ArticulationCfg(ObjectBaseCfg):
 
     Fixed-base and self-collision intent is portable. Root sleep and solver
     iterations are Default-only fields and are ignored by Newton. The portable
-    fields default to a fixed base with self-collision disabled. Set either
-    field to ``None`` to preserve an authored USD/backend value; URDF imports
-    then use the established fixed-base, self-collision-off defaults.
+    fields default to ``None`` so USD imports retain their authored values.
+    URDF imports retain the fixed-base, self-collision-off defaults.
     """
 
     joint_drive_props: JointDrivePropertiesCfg | None = None
@@ -448,6 +585,17 @@ class ArticulationCfg(ObjectBaseCfg):
 
     ``None`` preserves source drive properties. Individual ``None`` fields in
     a provided config also preserve the corresponding source values.
+    """
+
+    mimic_compliance: dict[str, MimicComplianceCfg] | None = field(
+        default=None, kw_only=True
+    )
+    """DexSim Default compliance settings keyed by exact mimic master names.
+
+    During scene preparation, the settings apply to all replicas and are
+    reapplied after topology changes. They apply in both asset physics modes.
+    An omitted or empty mapping keeps native behavior. Newton rejects a
+    nonempty mapping and has its own optional mimic stabilizer.
     """
 
     init_qpos: torch.Tensor | np.ndarray | Sequence[float] = None
@@ -497,10 +645,16 @@ class ArticulationCfg(ObjectBaseCfg):
         _raise_removed_articulation_cfg_fields(init_dict)
         cfg = cls()
         for key, value in init_dict.items():
-            if key == "source":
+            if key == "link_visuals":
+                cfg.link_visuals = {
+                    name: _visual_elements(elements) for name, elements in value.items()
+                }
+            elif key == "source":
                 cfg.source = _usd_source_from_value(value)
             elif key == "link_attrs" and isinstance(value, dict):
                 cfg.link_attrs = link_attrs_from_dict(value)
+            elif key == "mimic_compliance":
+                cfg.mimic_compliance = _mimic_compliance_from_dict(value)
             elif key == "attrs" and isinstance(value, Mapping):
                 cfg.attrs = _rigid_body_physics_from_dict(value)
             elif key == "joint_drive_props" and isinstance(value, Mapping):
@@ -529,9 +683,23 @@ class ArticulationCfg(ObjectBaseCfg):
         else:
             from scipy.spatial.transform import Rotation as R
 
+            cfg.init_local_pose = np.asarray(cfg.init_local_pose)
             cfg.init_pos = tuple(cfg.init_local_pose[:3, 3])
             cfg.init_rot = tuple(
                 R.from_matrix(cfg.init_local_pose[:3, :3]).as_euler("xyz", degrees=True)
             )
+
+        path = cfg.source.file_path if cfg.source is not None else cfg.fpath
+        if path is not None and str(path).lower().endswith(
+            (".usd", ".usda", ".usdc", ".usdz")
+        ):
+            if "body_scale" not in init_dict:
+                cfg.body_scale = None
+            if (
+                "init_local_pose" in init_dict and init_dict["init_local_pose"] is None
+            ) or not {"init_pos", "init_rot", "init_local_pose"}.intersection(
+                init_dict
+            ):
+                cfg.init_local_pose = None
 
         return cfg

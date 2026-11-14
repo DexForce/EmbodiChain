@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from dataclasses import field
+from typing import Literal
 
 # Resolve inherited ObjectBaseCfg annotations in runtime type inspection.
 import numpy as np
@@ -26,6 +27,7 @@ import numpy as np
 from embodichain.utils import configclass
 from ..shapes import ShapeCfg
 from .asset import ObjectBaseCfg
+from .visuals import GaussianSplatCfg, VisualElementCfg
 from .source import UsdSourceCfg
 
 __all__ = ["VisualObjectCfg"]
@@ -37,10 +39,22 @@ class VisualObjectCfg(ObjectBaseCfg):
 
     Like :class:`~embodichain.lab.sim.cfg.RigidObjectCfg`, ``MeshCfg.fpath``
     supplies ordinary mesh files such as OBJ, STL, GLB and glTF.
-    ``source=UsdSourceCfg(...)`` optionally selects one mesh object from a
-    source USD scene. Explicit
+    ``source=UsdSourceCfg(...)`` optionally selects one object from a source
+    USD scene, including an external Gaussian PLY visual. Explicit
     visual-object creation uses only its appearance; USD physics is omitted.
     Whole-scene import instead preserves each entity's authored physical type.
+    """
+
+    visuals: list[VisualElementCfg | GaussianSplatCfg] | GaussianSplatCfg | None = (
+        field(default=None, kw_only=True)
+    )
+    __annotations__["visuals"] = (
+        list[VisualElementCfg | GaussianSplatCfg] | GaussianSplatCfg | None
+    )
+    """Render replacement; one Gaussian may omit its element wrapper.
+
+    None preserves source appearance; [] removes it. Multiple elements require
+    explicit VisualElementCfg IDs.
     """
 
     shape: ShapeCfg | None = None
@@ -49,8 +63,46 @@ class VisualObjectCfg(ObjectBaseCfg):
     source: UsdSourceCfg | None = field(default=None, kw_only=True)
     """USD source asset; mutually exclusive with :attr:`shape`."""
 
-    body_scale: tuple[float, float, float] = (1.0, 1.0, 1.0)
+    body_scale: tuple[float, float, float] | None = None
     """Scale applied to the visual geometry, independently of its root pose."""
 
     visible: bool = True
     """Initial visibility restored by reset."""
+
+    def __post_init__(self) -> None:
+        if self.shape is None and self.source is None:
+            return
+        path = (
+            self.source.file_path
+            if self.source is not None
+            else getattr(self.shape, "fpath", None)
+        )
+        if path is None or not str(path).lower().endswith(
+            (".usd", ".usda", ".usdc", ".usdz")
+        ):
+            if self.body_scale is None:
+                self.body_scale = (1.0, 1.0, 1.0)
+
+    @classmethod
+    def from_dict(cls, init_dict: dict) -> VisualObjectCfg:
+        """Decode a visual configuration, retaining omitted USD scale.
+
+        Args:
+            init_dict: Asset configuration fields.
+
+        Returns:
+            Visual configuration with procedural or source defaults.
+        """
+        cfg = super().from_dict(init_dict)
+        path = (
+            cfg.source.file_path
+            if cfg.source is not None
+            else getattr(cfg.shape, "fpath", None)
+        )
+        if (
+            path is not None
+            and str(path).lower().endswith((".usd", ".usda", ".usdc", ".usdz"))
+            and "body_scale" not in init_dict
+        ):
+            cfg.body_scale = None
+        return cfg

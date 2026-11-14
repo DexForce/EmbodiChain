@@ -219,6 +219,9 @@ def test_hand_over_gym_config_builds_dual_ur5_pgi_scene() -> None:
     assert cfg.robot.solver_cfg["left_arm"].end_link_name == "left_ee_link"
     assert cfg.robot.solver_cfg["right_arm"].root_link_name == "right_base_link"
     assert cfg.robot.solver_cfg["right_arm"].end_link_name == "right_ee_link"
+    from embodichain.lab.sim.utility.gripper_binding import prepare_robot_grippers
+
+    prepare_robot_grippers(cfg.robot)
     assert cfg.robot.solver_cfg["right_arm"].tcp[2][3] == pytest.approx(0.155)
     assert list(cfg.robot.init_qpos) == pytest.approx(
         [

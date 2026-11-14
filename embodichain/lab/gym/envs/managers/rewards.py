@@ -28,6 +28,20 @@ if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
 
 
+__all__ = [
+    "distance_between_objects",
+    "joint_velocity_penalty",
+    "action_smoothness_penalty",
+    "joint_limit_penalty",
+    "orientation_alignment",
+    "success_reward",
+    "reaching_behind_object",
+    "distance_to_target",
+    "incremental_distance_to_target",
+    "program_stage_reward",
+]
+
+
 def distance_between_objects(
     env: EmbodiedEnv,
     obs: dict,
@@ -633,3 +647,44 @@ def incremental_distance_to_target(
     env._reward_states[state_key] = current_dist.clone()
 
     return reward
+
+
+def program_stage_reward(
+    env: EmbodiedEnv,
+    obs: dict,
+    action: EnvAction,
+    info: dict,
+    stage: str,
+    mode: str,
+    scope: str | None = None,
+    metric: str | None = None,
+    scale: float = 1.0,
+) -> torch.Tensor:
+    """Shape a reward from the transition's shared measured stage cache.
+
+    Args:
+        env: Policy-owned deployment with Task Program declarations.
+        obs: Existing policy observation, unused by this read-only adapter.
+        action: Existing policy action, unused by this read-only adapter.
+        info: Existing transition report, unused by this read-only adapter.
+        stage: Authored stage name or exact expanded occurrence ID.
+        mode: satisfied, first_achievement, rising, or metric.
+        scope: Required occurrence/episode scope for a first-achievement bonus.
+        metric: Exact scalar measurement key for metric mode.
+        scale: Explicit linear shaping scale; RewardCfg owns the final weight.
+
+    Returns:
+        One shaped value per environment; missing evidence contributes zero.
+    """
+    from math import isfinite
+
+    if (
+        isinstance(scale, bool)
+        or not isinstance(scale, (int, float))
+        or not isfinite(scale)
+    ):
+        raise ValueError("Program reward scale must be finite.")
+    progress = getattr(env, "task_program_progress", None)
+    if progress is None:
+        raise ValueError("program_stage_reward requires policy Task Program execution.")
+    return progress.reward(stage, mode=mode, scope=scope, metric=metric) * scale

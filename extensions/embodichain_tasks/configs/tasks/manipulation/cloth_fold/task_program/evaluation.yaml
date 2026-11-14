@@ -1,0 +1,30 @@
+graph:
+  roots:
+  - centroid_pair_0
+  - centroid_pair_1
+  rules:
+    centroid_pair_0:
+      kind: near_target
+      bindings:
+        position: deformables/cloth/a99816d80199900c2180b97be83835acf7f7c148d89007469d37e731d92f7b79/47,48,96,97/centroid
+        target: deformables/cloth/a99816d80199900c2180b97be83835acf7f7c148d89007469d37e731d92f7b79/1958,1959,2007,2008/centroid
+      params:
+        tolerance: 0.015
+        axes:
+        - 0
+        - 1
+        inclusive: true
+    centroid_pair_1:
+      kind: near_target
+      bindings:
+        position: deformables/cloth/a99816d80199900c2180b97be83835acf7f7c148d89007469d37e731d92f7b79/0,1,49,50/centroid
+        target: deformables/cloth/a99816d80199900c2180b97be83835acf7f7c148d89007469d37e731d92f7b79/1911,1912,1960,1961/centroid
+      params:
+        tolerance: 0.015
+        axes:
+        - 0
+        - 1
+        inclusive: true
+final_acceptance:
+- centroid_pair_0
+- centroid_pair_1

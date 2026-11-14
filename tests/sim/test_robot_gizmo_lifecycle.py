@@ -141,6 +141,7 @@ def managed_robot(monkeypatch: pytest.MonkeyPatch):
         "_articulations",
         "_deformable_objects",
         "_sensors",
+        "_lights",
     ):
         setattr(sim, registry, {})
     sim._spawn_scene = MagicMock()

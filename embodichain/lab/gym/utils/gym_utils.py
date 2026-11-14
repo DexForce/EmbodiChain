@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import os
+import math
 import hashlib
 import json
 from threading import Lock
@@ -41,6 +42,8 @@ from embodichain.utils.utility import get_class_instance
 from dexsim.utility import log_debug, log_error
 
 if TYPE_CHECKING:
+    from embodichain.lab.gym.envs.embodied_env import EmbodiedEnvCfg
+    from embodichain.lab.evaluation import PredicateRegistry
     from embodichain.lab.gym.envs.managers.cfg import RLTaskCfg
     from embodichain.lab.sim.cfg import RobotCfg
     from embodichain.lab.sim.sensors import SensorCfg
@@ -86,6 +89,39 @@ def _declared_physics_backend(config: Mapping[str, object]) -> str:
             f"got {backend!r}."
         )
     return backend
+
+
+def configure_fluid_spacing(cfg: EmbodiedEnvCfg, spacing: float) -> None:
+    """Apply one procedural-fluid spacing override to an assembled Gym config.
+
+    Args:
+        cfg: Environment configuration owning the fluid and DexUni solver.
+        spacing: Positive particle spacing in metres.
+
+    Raises:
+        ValueError: If the source or solver cannot be resampled consistently.
+    """
+    if not math.isfinite(spacing) or spacing <= 0:
+        raise ValueError("particle spacing must be finite and positive")
+    if len(cfg.fluid_object) != 1:
+        raise ValueError("particle spacing override requires one fluid object")
+    fluid = cfg.fluid_object[0]
+    if fluid.spawn.kind == "points":
+        raise ValueError("particle spacing requires a procedural volume source")
+    solver = cfg.sim_cfg.physics_cfg.solver_cfg
+    if solver.get("solver_type") != "dexuni" or not isinstance(
+        solver.get("sph_cfg"), dict
+    ):
+        raise ValueError("fluid spacing override requires DexUni with sph_cfg")
+    scale = spacing / fluid.particle_spacing
+    if fluid.render.render_radius is not None:
+        fluid.render.render_radius *= scale
+    for key in ("cell_size", "kernel_radius"):
+        if key in fluid.render.mesh_surface:
+            fluid.render.mesh_surface[key] *= scale
+    fluid.particle_spacing = spacing
+    fluid.particle_radius = 0.3 * spacing
+    solver["sph_cfg"]["particle_support_radius"] = 2.25 * spacing
 
 
 def register_manager_modules(modules: list[str]) -> None:
@@ -511,7 +547,13 @@ def _decode_rl_task(value: object, modules: Sequence[str]) -> RLTaskCfg:
     return RLTaskCfg(**groups)
 
 
-def _register_configured_rl(config: Mapping[str, Any], max_episode_steps: int) -> None:
+def _register_configured_rl(
+    config: Mapping[str, Any],
+    max_episode_steps: int,
+    *,
+    integration=None,
+    program_identity=None,
+) -> None:
     from gymnasium.envs.registration import registry as gym_registry
     from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
     from embodichain.lab.gym.utils.registration import (
@@ -545,6 +587,13 @@ def _register_configured_rl(config: Mapping[str, Any], max_episode_steps: int) -
         "physics": config["physics"],
         "max_episode_steps": max_episode_steps,
     }
+    if integration is not None:
+        signature["task_program"] = {
+            "integration": integration.integration_fingerprint,
+            "program": program_identity,
+            "execution": config["task_program"].get("execution", "expert"),
+            "action_owners": config["task_program"].get("action_owners"),
+        }
     signature["manager_order"] = {
         name: list(config["env"].get(name, {}))
         for name in ("events", "observations", "rewards", "actions")
@@ -593,6 +642,9 @@ def _register_configured_rl(config: Mapping[str, Any], max_episode_steps: int) -
             env_id,
             max_episode_steps=max_episode_steps,
             supports_rl=True,
+            task_program_adapter_factory=(
+                None if integration is None else integration.adapter_factory
+            ),
         )
         REGISTERED_ENVS[env_id]._configured_rl_fingerprint = fingerprint
 
@@ -604,6 +656,8 @@ def config_to_cfg(
     source_path: str | os.PathLike[str] | None = None,
     task_program_path_override: str | os.PathLike[str] | None = None,
     component_sources: Mapping[str, Mapping[str, object]] | None = None,
+    evaluation_registry: PredicateRegistry | None = None,
+    _register_env: bool = True,
 ) -> "EmbodiedEnvCfg":
     """Parser configuration file into cfgs for env initialization.
 
@@ -615,6 +669,9 @@ def config_to_cfg(
     policy. Inline ``robot``, ``sensor``, and scene fields remain valid when
     their corresponding component selector is absent. A resolved config
     containing ``task_program`` composes its semantic and policy components.
+    Explicit ``task_program.execution: policy`` loads those declarations with
+    complete policy action ownership and an ``rl_task``, without activating the
+    expert adapter. The default expert execution remains exclusive with RL.
     Set ``enable_sensor`` to ``False`` to keep an embodiment's sensor
     declaration while skipping sensor acquisition.
     Every resolved environment explicitly owns one ``physics`` backend and an
@@ -628,6 +685,8 @@ def config_to_cfg(
     Args:
         config (dict): The configuration dictionary containing an optional
             environment component plus an embodiment component or inline robot.
+        evaluation_registry: Optional trusted registry for the selected rule library.
+        _register_env: Internal preflight switch; False validates without registering.
         manager_modules (list): List of module paths for dataset, event, observation, and reward managers.
             If not provided, uses default module paths.
         source_path: Optional path of the Gym configuration source file.
@@ -645,15 +704,13 @@ def config_to_cfg(
     """
 
     from embodichain.lab.sim.cfg import (
-        DenoisingCfg,
         RigidObjectCfg,
         VisualObjectCfg,
         MeshCfg,
         RigidObjectGroupCfg,
         ArticulationCfg,
+        CableObjectCfg,
         LightCfg,
-        DLSSCfg,
-        NRDCfg,
         RenderCfg,
         physics_cfg_for_backend,
     )
@@ -684,6 +741,16 @@ def config_to_cfg(
         elif isinstance(asset, ArticulationCfg) and path is not None:
             asset.fpath = get_data_path(path)
 
+    def _resolve_mesh_asset_paths(obj_dict: dict[str, Any]) -> None:
+        for key in ("visual_shape", "particle_collision_shape"):
+            shape = obj_dict.get(key)
+            if (
+                shape is not None
+                and shape.get("shape_type") == "Mesh"
+                and shape.get("fpath") is not None
+            ):
+                shape["fpath"] = get_data_path(shape["fpath"])
+
     @configclass
     class ComponentCfg:
         """Configuration for env events.
@@ -694,10 +761,22 @@ def config_to_cfg(
         pass
 
     if "rl_task" in config:
-        if "task_program" in config or task_program_path_override is not None:
+        if ("task_program" in config or task_program_path_override is not None) and (
+            not isinstance(config.get("task_program"), Mapping)
+            or config["task_program"].get("execution", "expert") != "policy"
+        ):
             raise ValueError("rl_task and task_program cannot share one deployment.")
 
     env_cfg = EmbodiedEnvCfg()
+    if isinstance(config.get("task_program"), Mapping):
+        env_cfg.task_program_execution = config["task_program"].get(
+            "execution", "expert"
+        )
+        env_cfg.task_program_action_owners = deepcopy(
+            config["task_program"].get("action_owners", {})
+        )
+        if env_cfg.task_program_execution == "policy" and "rl_task" not in config:
+            raise ValueError("Policy Task Program declarations require rl_task.")
 
     removed_task_program_fields = sorted(
         field
@@ -787,11 +866,32 @@ def config_to_cfg(
             _load_configured_task_program_deployment,
         )
 
+        program_selectors = deepcopy(config["task_program"])
+        if task_program_path_override is not None:
+            if not isinstance(task_program_path_override, (str, os.PathLike)):
+                raise TypeError("task_program_path must be a string or path.")
+            program_selectors["program"] = str(
+                Path(task_program_path_override).expanduser().resolve()
+            )
         deployment = _load_configured_task_program_deployment(
-            task_program=config["task_program"],
+            task_program=program_selectors,
             skill_profile=component_resolution.embodiment_skill_profile,
+            evaluation=component_resolution.evaluation,
+            evaluation_registry=evaluation_registry,
             base_dir=base_dir,
         )
+        from embodichain.lab.task_program.integrations.demo_skill import (
+            _ConfiguredDemoSkillSource,
+        )
+
+        if (
+            any(
+                isinstance(source, _ConfiguredDemoSkillSource)
+                for source in deployment.integration.adapter_factory.nominal_motion_sources
+            )
+            and config.get("num_envs", 1) != 1
+        ):
+            raise ValueError("configured Demo Skills require num_envs == 1")
         _validate_scene_binding_targets(
             deployment.scene_binding,
             simulation=component_resolution.scene_config,
@@ -801,8 +901,38 @@ def config_to_cfg(
         configured_task_program_selection = deployment.selection
         configured_task_program_id = deployment.program_id
         configured_task_program_path = deployment.program_path
+
     elif "robot" not in config:
         log_error("Missing required config key: robot")
+
+    if "acceptance" in config:
+        raise ValueError("Use evaluation.component for measured final rules.")
+    if "replay" in config:
+        from embodichain.lab.gym.utils._replay import _decode_authored_joint_stream
+
+        env_cfg.replay = _decode_authored_joint_stream(
+            config["replay"], base_dir=base_dir
+        )
+    if "replay_surface" in config:
+        from embodichain.lab.gym.envs._physical_replay import _load_replay_surface
+
+        if env_cfg.replay is None:
+            raise ValueError("replay_surface requires explicit simulation.replay.")
+        env_cfg.replay_surface = _load_replay_surface(config["replay_surface"])
+    if env_cfg.objective is not None and env_cfg.objective.condition is not None:
+        from embodichain.lab.gym.envs.objectives.ordered_placement import (
+            _objective_fields,
+            _objective_rule,
+        )
+
+        registration = getattr(
+            configured_task_program_integration, "registration", None
+        )
+        rule = _objective_rule(
+            env_cfg.objective,
+            getattr(registration, "evaluation_conditions", {}),
+        )
+        _objective_fields(env_cfg.objective.object_uid, rule)
 
     if (
         task_program_path_override is not None
@@ -876,12 +1006,6 @@ def config_to_cfg(
     env_cfg.ground_plane_visible = ground_plane_visible
 
     render_config = deepcopy(config.get("render_cfg", {}))
-    if isinstance(render_config.get("denoising"), dict):
-        render_config["denoising"] = DenoisingCfg(**render_config["denoising"])
-    if isinstance(render_config.get("dlss"), dict):
-        render_config["dlss"] = DLSSCfg(**render_config["dlss"])
-    if isinstance(render_config.get("nrd"), dict):
-        render_config["nrd"] = NRDCfg(**render_config["nrd"])
     if "renderer" in config:
         # Keep the existing flat renderer option as the command-line override.
         render_config["renderer"] = config["renderer"]
@@ -905,7 +1029,7 @@ def config_to_cfg(
         enable_entity_gizmo=config.get("enable_entity_gizmo", True),
         robot_ik_gizmo=config.get("robot_ik_gizmo", {}),
         device=config.get("device"),
-        render_cfg=RenderCfg(**render_config),
+        render_cfg=RenderCfg.from_dict(render_config),
         gpu_id=config.get("gpu_id", 0),
         arena_space=config.get("arena_space", 5.0),
         physics_cfg=physics_cfg,
@@ -942,6 +1066,12 @@ def config_to_cfg(
         ]
         env_cfg.light.indirect = config["light"].get("indirect", None)
 
+    # Fluids use one typed declaration path for inline and component scenes.
+    from embodichain.lab.sim.cfg import FluidObjectCfg
+
+    env_cfg.fluid_object = [
+        FluidObjectCfg.from_dict(item) for item in config.get("fluid_object", [])
+    ]
     for visual_dict in config.get("visual_object", []):
         visual = VisualObjectCfg.from_dict(visual_dict)
         resolve_asset_paths(visual)
@@ -950,6 +1080,7 @@ def config_to_cfg(
     # parser background objects config
     if "background" in config:
         for obj_dict in config["background"]:
+            _resolve_mesh_asset_paths(obj_dict)
             # Set to static object if not specified.
             obj_dict["body_type"] = (
                 "static" if "body_type" not in obj_dict else obj_dict["body_type"]
@@ -961,6 +1092,7 @@ def config_to_cfg(
     # parser scene objects config
     if "rigid_object" in config:
         for obj_dict in config["rigid_object"]:
+            _resolve_mesh_asset_paths(obj_dict)
             cfg = RigidObjectCfg.from_dict(obj_dict)
             resolve_asset_paths(cfg)
             env_cfg.rigid_object.append(cfg)
@@ -969,6 +1101,8 @@ def config_to_cfg(
         for obj_dict in config["rigid_object_group"]:
             if "folder_path" in obj_dict:
                 obj_dict["folder_path"] = get_data_path(obj_dict["folder_path"])
+            for rigid_obj in obj_dict["rigid_objects"].values():
+                _resolve_mesh_asset_paths(rigid_obj)
             cfg = RigidObjectGroupCfg.from_dict(obj_dict)
             for member in cfg.rigid_objects.values():
                 resolve_asset_paths(member)
@@ -980,6 +1114,16 @@ def config_to_cfg(
             resolve_asset_paths(cfg)
             env_cfg.articulation.append(cfg)
 
+    env_cfg.cable_object = []
+    for value in config.get("cable_object", []):
+        cable = CableObjectCfg.from_dict(value)
+        if (
+            isinstance(cable.visual_shape, MeshCfg)
+            and cable.visual_shape.fpath is not None
+        ):
+            cable.visual_shape.fpath = get_data_path(cable.visual_shape.fpath)
+        env_cfg.cable_object.append(cable)
+
     env_cfg.control_parts = config["env"].get("control_parts", None)
     env_cfg.sim_steps_per_control = config["env"].get("sim_steps_per_control", 4)
     ignore_terminations = config["env"].get(
@@ -988,6 +1132,12 @@ def config_to_cfg(
     if type(ignore_terminations) is not bool:
         raise TypeError("env.ignore_terminations must be a bool.")
     env_cfg.ignore_terminations = ignore_terminations
+    episode_context_in_info = config["env"].get(
+        "episode_context_in_info", env_cfg.episode_context_in_info
+    )
+    if type(episode_context_in_info) is not bool:
+        raise TypeError("env.episode_context_in_info must be a bool.")
+    env_cfg.episode_context_in_info = episode_context_in_info
     task_instruction = config["env"].get("task_instruction")
     if task_instruction is not None and (
         type(task_instruction) is not str
@@ -1087,6 +1237,12 @@ def config_to_cfg(
                 )
                 obs_params_modified["params"]["entity_cfg"] = entity_cfg
 
+            if "entity_cfgs" in obs_params_modified["params"]:
+                obs_params_modified["params"]["entity_cfgs"] = [
+                    SceneEntityCfg(**item)
+                    for item in obs_params_modified["params"]["entity_cfgs"]
+                ]
+
             # Find the function from multiple modules using the utility function
             obs_func = find_function_from_modules(
                 obs_params["func"],
@@ -1115,7 +1271,7 @@ def config_to_cfg(
                 name=obs_params_modified["name"],
                 params=obs_params_modified["params"],
                 consumers=tuple(consumers),
-                extra=obs_params_modified.get("extra", {}),
+                extra=deepcopy(obs_params_modified.get("extra", {})),
             )
 
             setattr(env_cfg.observations, obs_name, observation)
@@ -1242,9 +1398,32 @@ def config_to_cfg(
                 raise ValueError(
                     "Configured RL virtual targets must be sampled in reset mode."
                 )
-        _register_configured_rl(config, env_cfg.max_episode_steps)
+        if env_cfg.task_program_execution == "policy":
+            from embodichain.lab.task_program.integrations.progress import (
+                _validate_policy_deployment,
+            )
+            from embodichain.lab.task_program.integrations import (
+                task_program_fingerprint,
+            )
 
-    if configured_task_program_integration is not None:
+            compiled_policy_program = _validate_policy_deployment(
+                env_cfg, configured_task_program_integration.registration
+            )
+            if _register_env:
+                _register_configured_rl(
+                    config,
+                    env_cfg.max_episode_steps,
+                    integration=configured_task_program_integration,
+                    program_identity=task_program_fingerprint(compiled_policy_program),
+                )
+        elif _register_env:
+            _register_configured_rl(config, env_cfg.max_episode_steps)
+
+    if (
+        _register_env
+        and configured_task_program_integration is not None
+        and "rl_task" not in config
+    ):
         from embodichain.lab.gym.envs.task_program.registration import (
             _register_configured_task_program_integration,
         )
@@ -1454,6 +1633,7 @@ def add_env_launcher_args_to_parser(
     )
     parser.add_argument(
         "--record_trajectory",
+        "--record-trajectory",
         help="Whether to record per-object kinematic trajectories (for replay). "
         "Episodes auto-save to --trajectory_save_dir (or "
         "~/.cache/embodichain_data/trajectories/<run_id>/ by default).",
@@ -1462,6 +1642,7 @@ def add_env_launcher_args_to_parser(
     )
     parser.add_argument(
         "--trajectory_save_dir",
+        "--trajectory-save-dir",
         help="Directory for auto-saved trajectories (default: "
         "~/.cache/embodichain_data/trajectories/<run_id>/).",
         default=None,
@@ -1570,7 +1751,9 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
             if cli_visualization.env_ids is None
             else list(cli_visualization.env_ids)
         )
-        visualization["allow_commands"] = cli_visualization.allow_commands
+        # Enabling the viewer must preserve a deployment's explicit read-only
+        # policy, especially while an expert owns the robot drive targets.
+        visualization.setdefault("allow_commands", cli_visualization.allow_commands)
         legacy_server = visualization.pop("server", {})
         viser_server = deepcopy(visualization.get("viser_server", legacy_server))
         viser_server["host"] = cli_visualization.viser_server.host
@@ -1962,6 +2145,7 @@ __all__ = [
     "cat_tensor_with_ids",
     "clip_and_scale_action",
     "config_to_cfg",
+    "configure_fluid_spacing",
     "convert_observation_to_space",
     "dict_array_to_torch_inplace",
     "fetch_data_from_dict",
@@ -1985,6 +2169,8 @@ def init_rollout_buffer_from_config(
     state_dim: int,
     device: Union[str, torch.device] = "cpu",
     action_dim: int | None = None,
+    *,
+    source_path: str | os.PathLike[str] | None = None,
 ) -> TensorDict:
     """Initialize a rollout buffer based on the environment configuration.
 
@@ -2001,6 +2187,8 @@ def init_rollout_buffer_from_config(
         batch_size (int): The batch size for the rollout buffer.
         state_dim (int): The dimension of the flattened state vector.
         action_dim: Stored action width, defaulting to state_dim.
+        source_path: Owning Gym configuration file for relative component paths.
+            None preserves resolution from the current working directory.
 
     Returns:
         TensorDict: A TensorDict containing the initialized rollout buffer with keys 'obs', 'actions' and 'rewards'.
@@ -2012,7 +2200,12 @@ def init_rollout_buffer_from_config(
     if action_dim is not None and (type(action_dim) is not int or action_dim < 1):
         raise ValueError("action_dim must be a positive integer or None")
 
-    config = _resolve_gym_components(config, base_dir=Path.cwd()).config
+    from embodichain.utils.config_paths import resolve_config_path
+
+    base_dir = (
+        resolve_config_path(source_path).resolve().parent if source_path else Path.cwd()
+    )
+    config = _resolve_gym_components(config, base_dir=base_dir).config
 
     # TODO: Currently we use this method to pre-allocate a rollout buffer with fixed size for simplicity.
     # Parse extra observations from observation functors in 'add' mode
@@ -2318,6 +2511,29 @@ def build_trajectory_buffer(
                     device=device,
                 )
                 for uid, obj in rigid_items.items()
+            },
+            batch_size=[num_envs, max_steps],
+            device=device,
+        )
+
+    cables = {
+        uid: obj
+        for uid, obj in getattr(env.sim, "_cable_objects", {}).items()
+        if uids is None or uid in uids
+    }
+    if cables:
+        states["cables"] = TensorDict(
+            {
+                uid: TensorDict(
+                    {
+                        "segment_state_w": _zeros(
+                            num_envs, max_steps, obj.data.num_segments, 13
+                        )
+                    },
+                    batch_size=[num_envs, max_steps],
+                    device=device,
+                )
+                for uid, obj in cables.items()
             },
             batch_size=[num_envs, max_steps],
             device=device,

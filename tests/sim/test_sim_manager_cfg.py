@@ -35,6 +35,8 @@ from embodichain.lab.sim.physics import DefaultPhysicsBackend, NewtonPhysicsBack
 from embodichain.lab.sim.physics import newton as newton_physics
 from embodichain.lab.sim import sim_manager
 
+pytestmark = pytest.mark.no_sim
+
 
 def test_simulation_manager_cfg_uses_default_physics_cfg() -> None:
     cfg = SimulationManagerCfg()
@@ -182,8 +184,9 @@ def test_newton_physics_cfg_requires_dexsim_dexuni_api(
 
 
 @pytest.mark.no_sim
-def test_newton_gradient_mode_rejects_default_solver() -> None:
-    cfg = NewtonPhysicsCfg(solver_cfg=None, requires_grad=True)
+@pytest.mark.parametrize("solver_cfg", [None, {}])
+def test_newton_gradient_mode_rejects_default_solver(solver_cfg) -> None:
+    cfg = NewtonPhysicsCfg(solver_cfg=solver_cfg, requires_grad=True)
 
     with pytest.raises(RuntimeError, match="explicit.*semi_implicit"):
         cfg.to_dexsim_cfg(gpu_id=0)
@@ -272,6 +275,7 @@ def test_newton_warp_log_suppression_covers_world_update() -> None:
         _visualization_sim_step=0,
         _visualization_sim_time=0.0,
         _pending_record_dt=0.0,
+        _refresh_marker_attachments=lambda: None,
         _window_record_state=None,
         render_frame=lambda **_kwargs: nullcontext(),
         _log_scene_summary=lambda: None,
@@ -481,6 +485,8 @@ def test_newton_physics_cfg_preserves_automatic_dexuni_defaults(solver_mapping) 
 @pytest.mark.parametrize(
     "solver_mapping",
     [
+        {"solver_type": "auto"},
+        {"class_type": "AutoSolverCfg"},
         {"solver_type": "unknown_solver"},
         {"class_type": "UnknownSolverCfg"},
     ],
@@ -543,6 +549,32 @@ def test_newton_physics_cfg_directly_accepts_dexsim_solver_cfg_object() -> None:
     assert isinstance(dexsim_cfg.solver_cfg, XPBDSolverCfg)
     assert dexsim_cfg.solver_cfg.iterations == 8
     assert dexsim_cfg.solver_cfg.enable_restitution is True
+
+
+@pytest.mark.no_sim
+def test_newton_physics_cfg_direct_provider_skips_name_discovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dexsim.engine import newton_physics
+
+    provider_cfg_type = getattr(newton_physics, "ProviderNewtonSolverCfg", None)
+    if provider_cfg_type is None:
+        pytest.skip("DexSim direct-provider configuration is unavailable")
+
+    def unexpected_discovery() -> None:
+        pytest.fail("A direct provider must not scan installed entry points")
+
+    monkeypatch.setattr(
+        "dexsim.engine.newton_physics.solver_extensions._entry_points",
+        unexpected_discovery,
+    )
+    provider_cfg = provider_cfg_type(provider_factory=lambda: object())
+
+    native = NewtonPhysicsCfg(solver_cfg=provider_cfg).to_dexsim_cfg(gpu_id=0)
+
+    assert isinstance(native.solver_cfg, provider_cfg_type)
+    assert native.solver_cfg.provider_factory is provider_cfg.provider_factory
+    assert native.solver_cfg.options == provider_cfg.options
 
 
 @pytest.mark.no_sim

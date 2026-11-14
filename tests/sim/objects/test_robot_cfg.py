@@ -124,6 +124,7 @@ def test_arx5_source_chain_commands_and_ik_roundtrip(
     assert restored.fpath == str(source)
     assert restored.init_qpos == cfg.init_qpos
     assert restored.root_props.self_collision_enabled is True
+    assert restored.joint_drive_props.drive_type == "force"
     chain = restored.build_pk_serial_chain()["arm"]
     assert chain.get_joint_parameter_names() == restored.control_parts["arm"]
     solver_cfg = restored.solver_cfg["arm"]
@@ -1684,35 +1685,41 @@ def test_ur_robot_unknown_type_raises():
 @pytest.mark.no_sim
 def test_original_panda_robotiq_tcp_linkage_limits_and_model_isolation(
     monkeypatch,
+    tmp_path: Path,
 ) -> None:
     from embodichain_robots.franka import cfg as panda
     from embodichain_robots.robotiq.two_finger import robotiq85_joint_positions
     import pinocchio as pin
 
     fixtures = Path(__file__).parents[2] / "fixtures/kinematics"
-    # Keep the shared Robotiq_V2 geometry distinct from the separate 2F85
-    # archive; both are registered after the EEF ownership migration.
+    # Keep the arm fixture, but validate the selected hand's actual geometry.
     sources = {
         "FrankaPandaArm/Panda/PandaExactV1.urdf": fixtures / "panda_original.urdf",
-        "Robotiq/robotiq_arg2f_85/robotiq_arg2f_85.urdf": fixtures
-        / "robotiq85_linkage.urdf",
     }
 
     def source(name):
         return str(sources[name]) if not Path(name).is_absolute() else name
 
     monkeypatch.setattr(panda, "get_data_path", source)
-    monkeypatch.setattr("embodichain.lab.sim.cfg.get_data_path", source)
     from embodichain_tasks.configs import get_config_path
     from embodichain.utils.utility import load_config
     from embodichain.lab.gym.utils.gym_utils import _robot_cfg_from_dict
 
-    declaration = load_config(
-        get_config_path("components/embodiments/franka_panda_robotiq85.yaml")
-    )["simulation"]
+    from embodichain.lab.gym.utils.composition import resolve_gym_components
+
+    component = get_config_path("components/embodiments/franka_panda_robotiq85.yaml")
+    physical = resolve_gym_components(
+        {"embodiment": {"component": str(component)}}, base_dir=Path(component).parent
+    )
+    declaration = physical.config["robot"]
     cfg = _robot_cfg_from_dict(declaration)
+    cfg.urdf_cfg.fpath = str(tmp_path / "panda_robotiq85.urdf")
     restored = panda.FrankaCfg.from_dict(cfg.to_dict())
     assert restored.control_parts == cfg.control_parts
+    from embodichain.lab.sim.utility.gripper_binding import prepare_robot_grippers
+
+    prepare_robot_grippers(cfg)
+    prepare_robot_grippers(restored)
     chain = restored.build_pk_serial_chain()["arm"]
     assert chain.get_joint_parameter_names() == [f"Joint{i}" for i in range(1, 8)]
     flange = chain.forward_kinematics(torch.zeros(1, 7)).get_matrix()

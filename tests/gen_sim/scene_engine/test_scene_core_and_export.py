@@ -36,7 +36,6 @@ from embodichain.gen_sim.scene_engine.core.scene_object import (
     SceneObject,
 )
 from embodichain.gen_sim.scene_engine.cli.preview import (
-    _add_articulations,
     _setup_viser_joint_control,
     preview_scene_export,
 )
@@ -45,6 +44,7 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.scene_importer import (
     SceneExportImporter,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd import (
+    _add_articulations,
     _add_objects,
     _apply_runtime_textures_to_usd,
     _copy_runtime_texture,
@@ -696,8 +696,8 @@ def test_schema_v2_usd_preview_uses_direct_simulation_import(
         def __init__(self) -> None:
             self.calls: list[dict[str, str]] = []
 
-        def add_usd(self, **kwargs: str) -> dict[str, object]:
-            self.calls.append(kwargs)
+        def add_usd(self, cfg) -> dict[str, object]:
+            self.calls.append({"name": cfg.name, "file_path": cfg.source.file_path})
             return {"/World/Scene/Entities/drawer": drawer}
 
         def prepare(self) -> None:
@@ -768,11 +768,11 @@ def test_preview_prepares_before_viser_joint_control(
             events.append("flush")
 
     monkeypatch.setattr(
-        "embodichain.gen_sim.scene_engine.cli.preview.SimulationManager",
+        "embodichain.lab.sim.SimulationManager",
         FakeSimulationManager,
     )
     monkeypatch.setattr(
-        "embodichain.gen_sim.scene_engine.cli.preview.load_scene_export_into_sim",
+        "embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd.load_scene_export_into_sim",
         lambda **_: events.append("load") or [],
     )
     monkeypatch.setattr(
@@ -780,7 +780,7 @@ def test_preview_prepares_before_viser_joint_control(
         lambda **_: events.append("controller") or None,
     )
     monkeypatch.setattr(
-        "embodichain.gen_sim.scene_engine.cli.preview.SimulationManager.flush_cleanup_queue",
+        "embodichain.lab.sim.SimulationManager.flush_cleanup_queue",
         lambda: events.append("flush"),
     )
 
@@ -1246,8 +1246,11 @@ def test_preview_initial_display_does_not_integrate_physics(
         def flush_cleanup_queue() -> None:
             events.append("flush")
 
-    monkeypatch.setattr(preview, "SimulationManager", FakeSimulation)
-    monkeypatch.setattr(preview, "load_scene_export_into_sim", lambda **_: [])
+    monkeypatch.setattr("embodichain.lab.sim.SimulationManager", FakeSimulation)
+    monkeypatch.setattr(
+        "embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd.load_scene_export_into_sim",
+        lambda **_: [],
+    )
     preview.preview_scene_export(output_root=root, headless=headless)
 
     expected = ["prepare", "publish"]
@@ -1310,9 +1313,10 @@ def test_preview_pose_playback_renders_without_physics(
         events.append(f"callback:{callback_count}")
         return callback_count == 2
 
-    monkeypatch.setattr(preview, "SimulationManager", FakeSimulation)
+    monkeypatch.setattr("embodichain.lab.sim.SimulationManager", FakeSimulation)
     monkeypatch.setattr(
-        preview, "load_scene_export_into_sim", lambda **_: events.append("load") or []
+        "embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd.load_scene_export_into_sim",
+        lambda **_: events.append("load") or [],
     )
     monkeypatch.setattr(preview.time, "sleep", lambda _: None)
     preview.preview_scene_export(

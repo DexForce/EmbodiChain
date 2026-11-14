@@ -2087,7 +2087,7 @@
       "kind": "module",
       "topic_ids": [],
       "summary": "Defines parallel-jaw gripper models and grasp-pose generation interfaces.",
-      "details": "Input: target meshes and explicit parallel-jaw gripper geometry. Output: candidate grasp poses or annotated contact pairs, depending on the operation. Entry: the public AntipodalGraspPoseGenerator API for generation, or embodichain annotate-grasp for interactive region annotation. Shared interfaces and gripper models are defined by graspkit.pose_generator.",
+      "details": "Input: target meshes, explicit scalar opening limits and numerical hand collision geometry. Output: candidate grasp poses or annotated contact pairs. Entry: AntipodalGraspPoseGenerator, or embodichain annotate-grasp through its Lab launcher. GraspKit owns numerical interfaces and algorithms; concrete physics and generator support declarations belong to hand Cfg defaults beside robot assets.",
       "boundaries": [
         "A geometric grasp candidate is not proof of successful physical grasping."
       ],
@@ -3005,21 +3005,21 @@
     },
     {
       "id": "gripper-model",
-      "label": "Parallel-jaw gripper model",
+      "label": "Parallel-jaw gripper configuration",
       "kind": "class",
       "topic_ids": [],
-      "summary": "Defines physical gripper dimensions independently of the sampling algorithm.",
-      "details": "Input: opening limits, finger dimensions, palm depth, and a model identifier. Output: validated geometry configuration shared by compatible parallel-jaw generators. Entry: ParallelJawGripperModelCfg or get_parallel_jaw_gripper_model().",
+      "summary": "Owns native hand physics, calibration and declared grasp-generator support.",
+      "details": "Input: source asset, contact-width bounds, native links and commands, contact/TCP calibration and supported generator kinds. Output: independently controllable hand configuration with shared pure defaults. Concrete values belong to model-owned robot defaults. Entry: ParallelJawGripperCfg or resolve_gripper_defaults().",
       "boundaries": [
-        "A gripper geometry description is not a robot controller."
+        "GraspKit receives numerical scalar limits and collision geometry; it does not consume this Cfg."
       ],
       "evidence": [
         {
-          "path": "embodichain/toolkits/graspkit/pose_generator.py",
-          "symbol": "ParallelJawGripperModelCfg",
-          "start_line": 49,
-          "end_line": 49,
-          "excerpt": "class ParallelJawGripperModelCfg:"
+          "path": "embodichain/lab/sim/cfg/gripper.py",
+          "symbol": "ParallelJawGripperCfg",
+          "start_line": 48,
+          "end_line": 48,
+          "excerpt": "class ParallelJawGripperCfg(RobotCfg):"
         }
       ],
       "documentation": [
@@ -3145,7 +3145,7 @@
       ],
       "evidence": [
         {
-          "path": "embodichain/toolkits/graspkit/scripts/annotate_grasp.py",
+          "path": "embodichain/lab/scripts/annotate_grasp.py",
           "symbol": "cli",
           "start_line": 35,
           "end_line": 35,
@@ -3341,16 +3341,16 @@
         {
           "path": "embodichain/lab/sim/scene/query.py",
           "symbol": "SceneView.__init__",
-          "start_line": 40,
-          "end_line": 44,
-          "excerpt": "        self.sim = sim\n        self.env_ids = tuple(env_ids)\n        self._num_envs = getattr(sim, \"num_envs\", 1)\n        self._validate_selection()\n        self.topology = self.describe_entities()"
+          "start_line": 47,
+          "end_line": 54,
+          "excerpt": "        self.sim = sim\n        self.env_ids = tuple(env_ids)\n        if isinstance(entity_uids, str):\n            raise ValueError(\"entity_uids must be a nonempty sequence of UIDs\")\n        self.entity_uids = None if entity_uids is None else tuple(entity_uids)\n        self._num_envs = getattr(sim, \"num_envs\", 1)\n        self._validate_selection()\n        self.topology = self.describe_entities()"
         },
         {
           "path": "embodichain/lab/sim/scene/operations.py",
           "symbol": "apply_changes_batch",
-          "start_line": 123,
-          "end_line": 130,
-          "excerpt": "def apply_changes_batch(\n    view: SceneView, changes: Mapping[int, SceneChangeSet]\n) -> SceneChangeResult:\n    \"\"\"Apply distinct per-arena changes after preflighting the entire selection.\n\n    Args:\n        view: Ordered set of physical rows to prepare.\n        changes: Exactly one change set for every selected environment index."
+          "start_line": 130,
+          "end_line": 137,
+          "excerpt": "def apply_changes_batch(\n    view: SceneView, changes: Mapping[int, SceneChangeSet]\n) -> SceneChangeResult:\n    \"\"\"Apply distinct per-arena rigid/visual changes after preflighting all rows.\n\n    Args:\n        view: Ordered set of physical rows to prepare.\n        changes: Exactly one change set for every selected environment index."
         },
         {
           "path": "embodichain/lab/sim/scene/validation.py",
@@ -3594,10 +3594,10 @@
           "excerpt": "    template = TaskSpec("
         },
         {
-          "path": "embodichain/gen_sim/task_engine/cli.py",
-          "symbol": "main",
-          "start_line": 104,
-          "end_line": 108,
+          "path": "embodichain/gen_sim/task_engine/_image_run.py",
+          "symbol": "_plan_image_task",
+          "start_line": 99,
+          "end_line": 103,
           "excerpt": "            \"pending_bindings\": len(result[\"binding_requirements\"]),\n            \"execution_ready\": False,\n            \"runtime_evidence_status\": \"not_run\",\n            \"image_sha256\": result[\"image_grounding\"][\"image_sha256\"],\n            \"integration_status\": \"unbound\","
         },
         {
@@ -3632,7 +3632,7 @@
       "evidence": [
         {
           "path": "embodichain/lab/task_program/compiler/program.py",
-          "symbol": "TaskProgramCompiler.compile",
+          "symbol": "TaskProgramCompiler._compile",
           "start_line": 1738,
           "end_line": 1740,
           "excerpt": "        targets = self._compile_targets(config.targets)\n        root = self._compile_node(\n            config.program,"
@@ -3650,7 +3650,7 @@
       "evidence": [
         {
           "path": "embodichain/lab/task_program/compiler/program.py",
-          "symbol": "TaskProgramCompiler.compile",
+          "symbol": "TaskProgramCompiler._compile",
           "start_line": 1751,
           "end_line": 1756,
           "excerpt": "        return _materialize_program(\n            program_id=config.program_id,\n            instruction=config.instruction,\n            integration=integration,\n            targets=targets,\n            root=root,"
@@ -3712,9 +3712,9 @@
         {
           "path": "embodichain/lab/gym/envs/embodied_env.py",
           "symbol": "EmbodiedEnv.create_task_program_bridge",
-          "start_line": 2242,
-          "end_line": 2242,
-          "excerpt": "        return self._checked_task_program_adapter().create_bridge("
+          "start_line": 3932,
+          "end_line": 3932,
+          "excerpt": "        bridge = self._checked_task_program_adapter().create_bridge("
         }
       ]
     },
@@ -4289,9 +4289,9 @@
         {
           "path": "embodichain/lab/scripts/run_task.py",
           "symbol": "cli",
-          "start_line": 1680,
-          "end_line": 1680,
-          "excerpt": "    env = gymnasium.make(id=gym_config[\"id\"], cfg=env_cfg, **action_config)"
+          "start_line": 2180,
+          "end_line": 2180,
+          "excerpt": "        env = gymnasium.make(id=gym_config[\"id\"], cfg=env_cfg, **action_config)"
         }
       ]
     },
@@ -4568,7 +4568,7 @@
           "symbol": "<module>",
           "start_line": 94,
           "end_line": 94,
-          "excerpt": "        target=\"embodichain.toolkits.graspkit.scripts.annotate_grasp:cli\","
+          "excerpt": "        target=\"embodichain.lab.scripts.annotate_grasp:cli\","
         }
       ]
     },
@@ -5561,7 +5561,7 @@
       "scope": "Invoked by annotate-grasp with interactive selection enabled.",
       "evidence": [
         {
-          "path": "embodichain/toolkits/graspkit/scripts/annotate_grasp.py",
+          "path": "embodichain/lab/scripts/annotate_grasp.py",
           "symbol": "cli",
           "start_line": 107,
           "end_line": 107,
@@ -5584,24 +5584,6 @@
           "start_line": 386,
           "end_line": 386,
           "excerpt": "        backend = _AntipodalMeshBackend("
-        }
-      ]
-    },
-    {
-      "id": "antipodal-generator-reads-gripper-model",
-      "source": "antipodal-generator",
-      "target": "gripper-model",
-      "relation": "reads",
-      "description": "Reads physical gripper dimensions when preparing a mesh backend.",
-      "provenance": "source-reviewed",
-      "scope": "The model configuration is separate from algorithm and collision policies.",
-      "evidence": [
-        {
-          "path": "embodichain/toolkits/graspkit/pg_grasp/pose_generator.py",
-          "symbol": "AntipodalGraspPoseGenerator._backend",
-          "start_line": 382,
-          "end_line": 382,
-          "excerpt": "        model = self._gripper_model"
         }
       ]
     },
@@ -5666,14 +5648,14 @@
       "relation": "constructs",
       "description": "Creates the assembly helper for this responsibility.",
       "provenance": "source-reviewed",
-      "scope": "Fresh local helper created during merge_urdfs; constructor injection does not select this merge-time instance.",
+      "scope": "Creates a default component manager during initialization when none is injected; merge reuses the selected instance.",
       "evidence": [
         {
           "path": "embodichain/toolkits/urdf_assembly/urdf_assembly_manager.py",
-          "symbol": "URDFAssemblyManager.merge_urdfs",
-          "start_line": 875,
-          "end_line": 875,
-          "excerpt": "        component_manager = URDFComponentManager("
+          "symbol": "URDFAssemblyManager.__init__",
+          "start_line": 159,
+          "end_line": 159,
+          "excerpt": "            else URDFComponentManager(self.mesh_manager, name_case=self._name_case)"
         }
       ]
     },
@@ -5684,14 +5666,14 @@
       "relation": "constructs",
       "description": "Creates the assembly helper for this responsibility.",
       "provenance": "source-reviewed",
-      "scope": "Fresh local helper created during merge_urdfs; constructor injection does not select this merge-time instance.",
+      "scope": "Creates a default sensor manager during initialization when none is injected; merge reuses it with an isolated working cache.",
       "evidence": [
         {
           "path": "embodichain/toolkits/urdf_assembly/urdf_assembly_manager.py",
-          "symbol": "URDFAssemblyManager.merge_urdfs",
-          "start_line": 883,
-          "end_line": 883,
-          "excerpt": "        sensor_manager = URDFSensorManager(mesh_manager)"
+          "symbol": "URDFAssemblyManager.__init__",
+          "start_line": 164,
+          "end_line": 164,
+          "excerpt": "            else URDFSensorManager(self.mesh_manager)"
         }
       ]
     },
@@ -5702,14 +5684,14 @@
       "relation": "constructs",
       "description": "Creates the assembly helper for this responsibility.",
       "provenance": "source-reviewed",
-      "scope": "Fresh local helper created during merge_urdfs; constructor injection does not select this merge-time instance.",
+      "scope": "Creates a default mesh manager during initialization when none is injected; merge updates the selected managers to the output directory.",
       "evidence": [
         {
           "path": "embodichain/toolkits/urdf_assembly/urdf_assembly_manager.py",
-          "symbol": "URDFAssemblyManager.merge_urdfs",
-          "start_line": 873,
-          "end_line": 873,
-          "excerpt": "        mesh_manager = URDFMeshManager(output_dir)"
+          "symbol": "URDFAssemblyManager.__init__",
+          "start_line": 152,
+          "end_line": 152,
+          "excerpt": "            else URDFMeshManager(output_dir=\".\")"
         }
       ]
     },
@@ -5738,13 +5720,13 @@
       "relation": "constructs",
       "description": "Creates the assembly helper for this responsibility.",
       "provenance": "source-reviewed",
-      "scope": "Fresh local connection helper created during merge_urdfs.",
+      "scope": "Creates a fresh connection helper in the merge implementation.",
       "evidence": [
         {
           "path": "embodichain/toolkits/urdf_assembly/urdf_assembly_manager.py",
-          "symbol": "URDFAssemblyManager.merge_urdfs",
-          "start_line": 878,
-          "end_line": 878,
+          "symbol": "URDFAssemblyManager._merge_urdfs",
+          "start_line": 762,
+          "end_line": 762,
           "excerpt": "        connection_manager = URDFConnectionManager("
         }
       ]
@@ -5883,9 +5865,9 @@
         {
           "path": "embodichain/lab/sim/scene/composition.py",
           "symbol": "declare_fragment",
-          "start_line": 205,
-          "end_line": 205,
-          "excerpt": "            sim.add_rigid_object(cfg)"
+          "start_line": 220,
+          "end_line": 221,
+          "excerpt": "    for method, cfg in declarations:\n        getattr(sim, method)(cfg)"
         }
       ]
     },
@@ -6978,7 +6960,6 @@
         "cli-calls-grasp-annotation",
         "grasp-annotation-constructs-antipodal-generator",
         "antipodal-generator-constructs-grasp-backend",
-        "antipodal-generator-reads-gripper-model",
         "antipodal-generator-imports-grasp-tools",
         "grasp-backend-constructs-grasp-sampler",
         "grasp-backend-constructs-grasp-collision",

@@ -1,0 +1,15 @@
+graph:
+  roots: [bottle_lifted, bottle_above_cup]
+  rules:
+    bottle_lifted:
+      kind: lift
+      bindings:
+        pose: rigid_objects/bottle/frame
+        baseline: rigid_objects/bottle/segment_start_frame
+      params: {minimum_lift: 0.02}
+    bottle_above_cup:
+      kind: near_frame_target
+      bindings:
+        position: rigid_objects/bottle/pose
+        reference: rigid_objects/cup/frame
+      params: {transport_target: cup_pour_pose, tolerance: 0.01}

@@ -280,15 +280,16 @@ def test_newton_contact_overlays_are_scoped_in_packaged_manipulation_configs() -
     assert cube_physics.num_substeps == 20
     assert cube_physics.collision_cfg is None
     assert cube_physics.solver_cfg == {
-        "solver_type": "mujoco_warp",
-        "solver": "newton",
-        "integrator": "implicitfast",
-        "iterations": 20,
-        "ls_iterations": 100,
-        "cone": "elliptic",
-        "impratio": 1000.0,
-        "use_mujoco_contacts": True,
-        "enable_multiccd": True,
+        "solver_type": "dexuni",
+        "mujoco_options": {
+            "solver": "newton",
+            "integrator": "implicitfast",
+            "iterations": 20,
+            "ls_iterations": 100,
+            "cone": "elliptic",
+            "impratio": 1000.0,
+            "enable_multiccd": True,
+        },
     }
     cube_collision = cube_cfg.rigid_object[0].attrs.collision_props
     assert isinstance(cube_collision, NewtonCollisionPropertiesCfg)
@@ -480,6 +481,9 @@ def test_cube_variant_extends_by_data_without_motion_generation_code() -> None:
             },
         )
     )
+    from embodichain.lab.task_program.language.authoring import normalize_task_program
+
+    payload = normalize_task_program(payload).declaration
     payload["program"]["count"] = 4
 
     config = _decode_deployed_program(
@@ -524,8 +528,18 @@ def test_open_drawer_program_compiles_to_registered_slide_call() -> None:
 
 def test_open_drawer_config_owns_registered_lowerer_factory() -> None:
     """The decoded registration owns call discovery and fresh live lowerers."""
-    registration = _drawer_integration().registration
+    integration = _drawer_integration()
+    registration = integration.registration
 
+    # The joint-target extension must preserve the shipped handle-only deployment.
+    assert (
+        registration.fingerprint
+        == "c8767354951735e47897e046ba35bc26b8e8f47433915174655d4c5247ec2a88"
+    )
+    assert (
+        integration.integration_fingerprint
+        == "aede0eed53368155b3d58bf288188079f9278fd883e342197ee38c101123b7da"
+    )
     assert tuple(registration.catalog.registered_semantic_lowerer_declarations) == (
         _OPEN_DRAWER_CALL_ID,
     )
@@ -967,3 +981,64 @@ def test_vertical_slice_payloads_expose_no_motion_layer_fields() -> None:
 
 
 __all__: list[str] = []
+
+
+def test_slide_joint_targets_are_intent_not_motion_options() -> None:
+    from embodichain.lab.task_program.integrations._configured_services import (
+        _ArticulationLinkSlideLowerer,
+    )
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_registered_lowerer,
+    )
+
+    factory = _decode_registered_lowerer(
+        {
+            "kind": "articulation_link_slide",
+            "articulation_id": "drawer",
+            "articulation_simulation_uid": "drawer",
+            "link_entity_id": "drawer_handle",
+            "joint_target": {"joint_name": "rail", "axis_sign": -1},
+        },
+        path="lowerer",
+    )
+    assert factory.joint_target == ("rail", -1)
+    semantics = ObjectSemantics(
+        label="handle",
+        entity_id="drawer_handle",
+        geometry={},
+        affordance=SlideAffordance(
+            mesh_vertices=torch.zeros(3, 3),
+            mesh_triangles=torch.tensor([[0, 1, 2]]),
+            joint_name="rail",
+            joint_limits=(0.0, 0.3),
+        ),
+    )
+    lowerer = _ArticulationLinkSlideLowerer(
+        semantics, "drawer_handle", joint_target=("drawer", "rail", -1)
+    )
+    options = SlideOptions()
+    for position in (0.18, 0.0):
+        goal = lowerer.lower(
+            RegisteredSemanticCall(
+                call_id=_OPEN_DRAWER_CALL_ID,
+                arguments={"handle": "drawer_handle", "position": position},
+            ),
+            context=None,
+            bound=None,
+            option_template=options,
+        ).goal
+        assert goal.joint_target.position == position
+        assert goal.joint_target.joint_name == "rail"
+    assert options.direction == "pull"
+    for value in [True, float("nan")]:
+        # Registered payload decoding may reject nonfinite values first.
+        with pytest.raises((TypeError, ValueError)):
+            lowerer.lower(
+                RegisteredSemanticCall(
+                    call_id=_OPEN_DRAWER_CALL_ID,
+                    arguments={"handle": "drawer_handle", "position": value},
+                ),
+                context=None,
+                bound=None,
+                option_template=options,
+            )

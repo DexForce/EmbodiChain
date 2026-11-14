@@ -6,7 +6,7 @@ Return to the [simulation overview](simulation-system.md) for lifecycle entry.
 ## Backend, solver and device resolution
 
 `SimulationManagerCfg.physics_cfg` selects the backend by config type.
-`cfg/simulation.py` owns `PhysicsBackendCfg`, `DefaultPhysicsCfg` and
+`cfg/physics.py` owns `PhysicsBackendCfg`, `DefaultPhysicsCfg` and
 `NewtonPhysicsCfg`; do not add another backend string to the manager config.
 Gym's file-owned selector and composition rules belong to
 [environment configuration](../env-framework/configuration.md).
@@ -25,10 +25,39 @@ Newton `solver_cfg=None` preserves DexSim's scene-aware `DexUniSolverCfg`.
 DexUni resolves its ownership and contact paths from the complete Spawn scene;
 the configured solver type is exposed through `NewtonPhysicsBackend.solver_type`.
 Do not guess a solver-specific robot preset while scene ownership is unresolved.
-Gradient mode requires an explicit
-`semi_implicit` solver. Read exact solver options/defaults in
-`cfg/simulation.py` and the installed DexSim config types; do not substitute a
+Explicit selection uses `dexuni`; `contact_mode="auto"` retains the native
+contact-path policy. Expert settings use the native option groups
+(`vbd_options`, `mujoco_options`, `collision_options`); unknown solver names
+are rejected for mappings and native config objects, and flat DexUni options
+are rejected by native validation.
+Fluid settings belong under [DexUni's nested DFSPH configuration](fluids.md);
+there is no separate fluid solver family. Robot presets select
+`newton_dexuni` before the MuJoCo aliases and portable fallbacks. Gradient mode
+requires an explicit `semi_implicit` solver or a direct/named provider supporting
+the requested gradient mode. Functional Scene calls additionally require its
+functional dynamics service. Python callers pass DexSim's
+`ProviderNewtonSolverCfg` with a provider class/zero-argument factory directly
+through `solver_cfg`; this path does not inspect installed metadata. DexSim
+creates fresh instances per model build. Installed `dexsim.newton_solvers`
+names pass through to DexSim's `RegisteredNewtonSolverCfg`; unregistered names
+remain errors. Read exact solver options/defaults in `cfg/physics.py` and the
+installed DexSim config types; do not substitute a
 hardcoded fallback when an expected DexSim API is absent.
+`mesh_bvh_constructor` selects the mesh and heightfield query acceleration
+structure. `None` keeps the native default.
+
+The spring-slider provider lives only in
+`scripts/tutorials/sim/simple_newton_solver/`; see its
+[tutorial](../../../docs/source/tutorial/simple_newton_solver.rst) for functional
+Scene stepping. It is not a packaged solver or registered entry point.
+
+Articulation initialization also calls `reset(clear_dynamics=False)` without a
+later coordinated clear. Preserve its position hold targets and mimic target
+propagation when the solver accepts them. Query the finalized public
+`Scene.dynamics_capabilities().supported_control_fields`; only an explicit
+exclusion of `joint_target_q` suppresses that command. Released SDKs predating
+extensions retain their unrestricted target behavior. Extension SDKs missing
+the query require an upgrade instead of guessing support from solver names.
 
 `collision_cfg` owns the external Newton contact pipeline. Its
 `update_interval=None` updates at the first local solver substep; positive `k`
@@ -38,6 +67,21 @@ MuJoCo-Warp with `use_mujoco_contacts=True`) need their own configuration;
 external-pipeline tuning does not configure internal contact generation.
 The manual differentiable trajectory requires the external pipeline; see
 [differentiable environment](../differentiable-env/differentiable-env.md).
+
+DexUni preserves its one-way contact policy unless `coupling="two_way"` is
+explicit. Two-way feedback requires dynamically integrated MuJoCo joints and
+supports full-surface rigid-soft feedback in current DexSim builds. Native
+validation owns compatible contact modes and option combinations. Prescribed kinematic trajectories
+cannot respond to contact reactions. Forward solver expert options through
+`NewtonPhysicsCfg.solver_cfg`; DexSim owns their validation and dispatch.
+The current [DFSPH composition](fluids.md) remains one-way even when DexUni's
+rigid/soft coupling options are set to two-way.
+Articulation gravity compensation and passive damping are separate creation
+settings; see [articulation adapters](articulation-adapters.md).
+`async_sync`, `rigid_transform_sync_mode`, `capture_acquire_timeout` and
+`capture_wait_log_interval` pass straight to DexSim `NewtonCfg`. Solver
+diagnostics (graph status, effective VBD options, contact capacity) are read
+from `sim.spawn_result.get_solver_diagnostics()` after `prepare()`.
 
 Capability checks remain explicit: Default owns native rigid constraints and
 Newton deformables are separate. Contact support is rechecked after Newton
@@ -52,9 +96,25 @@ MuJoCo force reports are unavailable. See `physics/` and
 `"overlay"` applies non-`None` config fields after source translation. The
 same policy covers USD rigid objects and USD/URDF articulations. Generic rigid
 objects/articulations preserve by default; Robot configs overlay their authored
-drives. Preserve-mode articulation configs warn about ignored overlay fields.
+drives. Preserve mode keeps the source actor and scale even when saved config
+fields contain legacy defaults; explicit actor/scale changes require overlay.
+Preserve-mode articulation configs warn about ignored overlay fields.
 Root import intent is handled separately in
 [articulation adapters](articulation-adapters.md).
+
+Unset USD actor type, scale, root flags and placement retain parsed source
+values. An explicit singleton `source_pose_mode` replaces, preserves or offsets
+the source transform. Singleton translation resolves a runtime-owned config
+copy, preserving caller placement intent for repeated imports and Gym
+replacement comparisons. Returned facade configs store resolved absolute poses
+in `config` mode, so copying them for replacement retains source offsets and
+scene placement without applying them again. Sparse pose keys preserve explicit
+zero values; only omitted pose fields retain source placement in `auto` mode.
+Non-USD rigid and URDF articulation imports keep their
+dynamic/unit-scale and fixed-root defaults respectively. Whole-scene
+`add_usd(UsdImportCfg(...))` applies sparse dictionary fields before Spawn
+declaration. Source subtree and variants belong to its `source`; namespace and
+scene placement belong to the import recipe.
 
 `RigidBodyPhysicsCfg` is the single grouped schema. `mass_props`,
 `rigid_props`, `collision_props` and `material_props` each own one physical

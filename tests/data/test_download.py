@@ -55,8 +55,9 @@ def test_migrated_robot_assets_keep_legacy_class_identity() -> None:
 
     registry = download.get_registry()
     for name, spec in ROBOT_ASSETS.items():
-        if spec["category"] == "eef":
-            continue  # EEF imports deliberately have no legacy compatibility surface.
+        if spec["category"] == "eef" or name in {"AgibotG2", "YamI2rt"}:
+            # EEFs and new model-owned assets have no legacy core import surface.
+            continue
         module, _, symbol = spec["class_path"].partition(":")
         canonical = getattr(import_module(module), symbol)
         legacy = (
@@ -68,11 +69,16 @@ def test_migrated_robot_assets_keep_legacy_class_identity() -> None:
                 else "so101_assets" if name == "SO101FollowerAssets" else "robot_assets"
             )
         )
-        assert (
-            getattr(import_module("embodichain.data.assets." + legacy), name)
-            is canonical
-        )
-        assert getattr(assets, name) is canonical
+        if name in {"AgibotG1", "AgilexPiperX"}:
+            assert not hasattr(import_module("embodichain.data.assets." + legacy), name)
+            assert not hasattr(assets, name)
+            assert not hasattr(assets, name)
+        else:
+            assert (
+                getattr(import_module("embodichain.data.assets." + legacy), name)
+                is canonical
+            )
+            assert getattr(assets, name) is canonical
         assert get_data_class(name) is canonical
         assert dict(registry[spec["category"]])[name] is canonical
         assert canonical.__module__ == module
@@ -143,6 +149,7 @@ def test_asset_resolution_preserves_explicit_extra_modules(monkeypatch) -> None:
         "embodichain_robots.arx.arx5.assets",
         "embodichain_robots.brainco.revo1.assets",
         "embodichain_robots.agilex.pika.assets",
+        "embodichain_robots.agibot.g1.assets",
         "embodichain_robots.franka.assets",
         "embodichain_robots.the_robot_studio.so101.assets",
         "embodichain_robots.unitree.go2.assets",
@@ -226,11 +233,13 @@ def test_robot_asset_listing_includes_locomotion_and_existing_robots(capsys) -> 
     names = [name for name, _ in registry["robot"]]
     assert set(LOCOMOTION_ASSETS).issubset(names)
     assert {
+        "AgibotG1",
         "UnitreeH1",
         "UnitreeH1Usd",
         "CartPole",
         "FlexivRizon4S",
         "SO101FollowerAssets",
+        "AgibotG2",
     }.issubset(names)
     assert names == sorted(set(names))
     assert all(not name.startswith("_") for name in names)
@@ -342,8 +351,9 @@ def test_eef_catalog_preserves_ids_without_legacy_exports(monkeypatch, capsys) -
     monkeypatch.setattr(EmbodiChainDataset, "__init__", unexpected_download)
     assert util.find_spec("embodichain.data.assets.eef_assets") is None
     entries = download.get_registry()["eef"]
-    assert {name for name, _ in entries} == set(EEF_ARCHIVES)
-    assert len(entries) == len(EEF_ARCHIVES)
+    expected_ids = EEF_ARCHIVES.keys() | {"AgxGripper"}
+    assert {name for name, _ in entries} == expected_ids
+    assert len(entries) == len(expected_ids)
     for name, cls in entries:
         assert cls is get_data_class(name)
         assert cls.__module__.startswith("embodichain_robots.")
@@ -353,7 +363,7 @@ def test_eef_catalog_preserves_ids_without_legacy_exports(monkeypatch, capsys) -
     )
     download.cmd_list(Namespace(category="eef"))
     output = capsys.readouterr().out
-    for name in EEF_ARCHIVES:
+    for name in expected_ids:
         assert name in output
 
 
