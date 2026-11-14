@@ -5660,6 +5660,278 @@ lowering still validates calibrated scene and route bindings.
 .. autofunction:: validate_semantic_call_payload
 
 
+embodichain.data.assets.rl_assets
+---------------------------------
+
+Robot, reset-state and frozen-terrain archives use the standard asset cache.
+
+.. currentmodule:: embodichain.data.assets.rl_assets
+
+.. autosummary::
+
+   UnitreeG1Rough
+   G1RoughTerrains
+   ShadowHandPen
+   LeapHandCubeFaceTurn
+   LeapHandCube
+
+.. autoclass:: UnitreeG1Rough
+   :members:
+
+.. autoclass:: G1RoughTerrains
+   :members:
+
+.. autoclass:: ShadowHandPen
+   :members:
+
+.. autoclass:: LeapHandCubeFaceTurn
+   :members:
+
+.. autoclass:: LeapHandCube
+   :members:
+
+
+embodichain_tasks.locomotion.velocity.g1_rough
+----------------------------------------------
+
+The G1 Rough environment registers the 37-action rough-terrain locomotion task with terrain height observations.
+
+.. currentmodule:: embodichain_tasks.locomotion.velocity.g1_rough
+
+.. autosummary::
+
+   UnitreeG1RoughEnv
+
+.. autoclass:: UnitreeG1RoughEnv
+   :members:
+
+
+embodichain_tasks.locomotion.velocity.rough
+-------------------------------------------
+
+Load rough-terrain velocity task configurations from a supplied scene bundle. The loader validates robot joint order, shared initial states and terrain inputs.
+
+.. currentmodule:: embodichain_tasks.locomotion.velocity.rough
+
+.. autosummary::
+
+   load_rough_env_cfg
+
+.. autofunction:: load_rough_env_cfg
+
+
+embodichain_tasks.locomotion.velocity.rough.config
+--------------------------------------------------
+
+Packaged task definitions retain policy joint order, observation dimensions and fixed physics/control periods.
+
+.. currentmodule:: embodichain_tasks.locomotion.velocity.rough.config
+
+.. autosummary::
+
+   RoughVelocityConfig
+   load_config
+
+.. autoclass:: RoughVelocityConfig
+   :members:
+
+.. autofunction:: load_config
+
+
+embodichain_tasks.locomotion.velocity.rough.curriculum
+------------------------------------------------------
+
+Terrain assignment and selected-row curriculum updates use terminal positions and commands before resetting each episode.
+
+.. currentmodule:: embodichain_tasks.locomotion.velocity.rough.curriculum
+
+.. autosummary::
+
+   TerrainCurriculum
+
+.. autoclass:: TerrainCurriculum
+   :members:
+
+
+embodichain_tasks.locomotion.velocity.rough.environment
+-------------------------------------------------------
+
+Resolve the rough-terrain deployment against exported robot and terrain assets, with optional training randomization and contact generation selection.
+
+.. currentmodule:: embodichain_tasks.locomotion.velocity.rough.environment
+
+.. autosummary::
+
+   load_rough_env_cfg
+
+.. autofunction:: load_rough_env_cfg
+
+
+embodichain_tasks.locomotion.velocity.rough.mdp
+-----------------------------------------------
+
+Pure Torch state, action, observation, reward and termination functions share the rough-terrain task definitions. Device constants cache fixed values and reward joint selectors.
+
+.. currentmodule:: embodichain_tasks.locomotion.velocity.rough.mdp
+
+.. autosummary::
+
+   RoughVelocityState
+   RoughVelocityReward
+   RoughVelocityConstants
+   action_target
+   observation_terms
+   build_observation
+   compute_rewards
+   compute_termination
+   dc_motor_effort
+   update_contact_times
+
+.. autoclass:: RoughVelocityState
+   :members:
+
+.. autoclass:: RoughVelocityReward
+   :members:
+
+.. autoclass:: RoughVelocityConstants
+   :members:
+
+.. autofunction:: action_target
+
+.. autofunction:: observation_terms
+
+.. autofunction:: build_observation
+
+.. autofunction:: compute_rewards
+
+.. autofunction:: compute_termination
+
+.. autofunction:: dc_motor_effort
+
+.. autofunction:: update_contact_times
+
+
+embodichain_tasks.locomotion.velocity.rough.runtime
+---------------------------------------------------
+
+The runtime adapts the shared task definitions to EmbodiChain managers, state and sensors. Explicit motors retain the configured outer physics cadence; implicit torque telemetry is sampled before the final physical step.
+
+.. currentmodule:: embodichain_tasks.locomotion.velocity.rough.runtime
+
+.. autosummary::
+
+   RoughVelocityEnv
+
+.. autoclass:: RoughVelocityEnv
+   :members:
+
+
+embodichain_tasks.locomotion.velocity.rough.terrain
+---------------------------------------------------
+
+The scanner evaluates 187 torso-relative terrain rays and replays a fixed-buffer CUDA graph when the geometry and buffers remain unchanged.
+
+.. currentmodule:: embodichain_tasks.locomotion.velocity.rough.terrain
+
+.. autosummary::
+
+   HeightScanner
+
+.. autoclass:: HeightScanner
+   :members:
+
+
+embodichain_tasks.manipulation.dexterous
+----------------------------------------
+
+USD-native Shadow Hand and LEAP Hand dexterous manipulation RL environments built on ``EmbodiedEnv``.
+
+.. currentmodule:: embodichain_tasks.manipulation.dexterous
+
+.. autosummary::
+
+   LeapCubeFaceTurnEnv
+   LeapCubeReorientEnv
+   LeapCubeRotateZAxisEnv
+   ShadowPenContinuousEnv
+   ShadowPenFixedEnv
+
+
+embodichain_tasks.manipulation.dexterous.leap_cube_face_turn
+------------------------------------------------------------
+
+LEAP Hand top-layer articulated cube face-turning environment (``LeapCubeFaceTurnRL-v1``).
+
+.. currentmodule:: embodichain_tasks.manipulation.dexterous.leap_cube_face_turn
+
+.. autosummary::
+
+   LeapCubeFaceTurnEnv
+
+.. autoclass:: LeapCubeFaceTurnEnv
+   :members:
+
+
+embodichain_tasks.manipulation.dexterous.leap_cube_reorient
+-----------------------------------------------------------
+
+LEAP Hand in-hand cube 3D orientation tracking environment (``LeapCubeReorientRL-v1``).
+
+.. currentmodule:: embodichain_tasks.manipulation.dexterous.leap_cube_reorient
+
+.. autosummary::
+
+   LeapCubeReorientEnv
+
+.. autoclass:: LeapCubeReorientEnv
+   :members:
+
+
+embodichain_tasks.manipulation.dexterous.leap_cube_rotate_z
+-----------------------------------------------------------
+
+LEAP Hand continuous cube Z-axis rotation environment (``LeapCubeRotateZAxisRL-v1``).
+
+.. currentmodule:: embodichain_tasks.manipulation.dexterous.leap_cube_rotate_z
+
+.. autosummary::
+
+   LeapCubeRotateZAxisEnv
+
+.. autoclass:: LeapCubeRotateZAxisEnv
+   :members:
+
+
+embodichain_tasks.manipulation.dexterous.shadow_pen_continuous
+--------------------------------------------------------------
+
+Shadow Hand continuous multi-pose pen-spinning environment (``ShadowPenContinuousRL-v1``).
+
+.. currentmodule:: embodichain_tasks.manipulation.dexterous.shadow_pen_continuous
+
+.. autosummary::
+
+   ShadowPenContinuousEnv
+
+.. autoclass:: ShadowPenContinuousEnv
+   :members:
+
+
+embodichain_tasks.manipulation.dexterous.shadow_pen_fixed
+---------------------------------------------------------
+
+Shadow Hand fixed-grasp pen-spinning environment (``ShadowPenFixedRL-v1``).
+
+.. currentmodule:: embodichain_tasks.manipulation.dexterous.shadow_pen_fixed
+
+.. autosummary::
+
+   ShadowPenFixedEnv
+
+.. autoclass:: ShadowPenFixedEnv
+   :members:
+
+
 Parallel-jaw hand configuration and composition
 ----------------------------------------------
 

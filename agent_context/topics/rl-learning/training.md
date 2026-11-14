@@ -43,6 +43,14 @@ Variable-horizon APG transition budgets use the actual update count to check
 an explicit restored LR horizon.
 Legacy standard/APG-v1 files restore available fields and report missing metadata
 or RNG. `checkpoint.py` owns shared validation and atomic persistence.
+Optional environment training state uses the same v2 file and is collected per
+rank. Environments implement `get_training_state`, side-effect-free
+`validate_training_state`, and `load_training_state`; validation runs before
+learning state changes, and restoration precedes the fresh episode reset.
+Missing state in older files produces a warning for environments with these
+hooks. G1 Rough uses them for terrain assignments and its task generator,
+requiring the original terrain map and per-rank environment count. Its first
+reset preserves the restored assignments; physical episodes still restart.
 Configuration snapshots are frozen from loaded data on the first save; later
 saves update the run manifest without rewriting those snapshots. Final saves
 reuse the current update's periodic or best checkpoint. Subsequent saves and final

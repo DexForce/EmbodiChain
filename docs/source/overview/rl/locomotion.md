@@ -5,6 +5,7 @@ Locomotion environments use the same task registration, configuration loader, ac
 | Task configuration directory | Environment ID | Action / actor / critic dimensions |
 |---|---|---|
 | `locomotion/velocity/g1_flat` | `UnitreeG1FlatRL-v1` | 29 / 98 / 113 |
+| `locomotion/velocity/g1_rough` | `UnitreeG1RoughRL-v1` | 37 / 310 / 310 |
 | `locomotion/velocity/h1_2_flat` | `UnitreeH1_2FlatRL-v1` | 27 / 92 / 107 |
 | `locomotion/velocity/go1_flat` | `UnitreeGo1FlatRL-v1` | 12 / 48 / 72 |
 | `locomotion/velocity/go2_flat` | `UnitreeGo2FlatRL-v1` | 12 / 47 / 74 |
@@ -13,7 +14,7 @@ Locomotion environments use the same task registration, configuration loader, ac
 | `classic_control/humanoid` | `HumanoidRun-v1` | 17 / 63 / 63 |
 
 Paths in this table are relative to `embodichain_tasks/configs/tasks/`.
-Each directory contains `env.yaml` and `agents/ppo.yaml` for the default backend, plus `env.newton.yaml` and `agents/ppo.newton.yaml` for Newton. Capability registration is `RL`.
+Flat-terrain velocity tasks and `humanoid` ship `env.yaml` and `agents/ppo.yaml` for the default backend alongside `env.newton.yaml` and `agents/ppo.newton.yaml` for Newton; `g1_rough` ships a single Newton DexUni deployment in `env.yaml` and `agents/ppo.yaml`. Capability registration is `RL`.
 
 The six velocity task deployments declare the generic
 `joint_position.default_offset@1` action contract. The contract describes the
@@ -45,6 +46,40 @@ Preserve every file in a robot archive, including USD payload layers, meshes, te
 Velocity tasks convert normalized joint actions to offsets around the task's default pose. Task definitions retain joint order, gains, command ranges, reward weights and episode limits. Contacts are collected after each physics substep, including contacts that do not persist until the end of a control interval. Actor and privileged critic observations remain separate.
 
 Humanoid uses clipped effort actions (`[-0.4, 0.4]`) multiplied by per-joint motor gears and limited by joint effort bounds. The benchmark's progress potential divides distance by the physics timestep; it deliberately retains that original reward scaling. The maximum episode length is 900 control steps at 60 Hz.
+
+## G1 rough terrain with DexUni
+
+`g1_rough/env.yaml` (`g1_rough/agents/ppo.yaml`) configures
+`UnitreeG1RoughRL-v1` on `physics: newton` with `solver_type: dexuni`
+(`joint_mode: dynamic`, `contact_mode: auto`, `use_mujoco_cpu: false`,
+`use_mujoco_contacts: false`) and Newton explicit heightfield contact generation
+(`broad_phase: explicit`, `reduce_contacts: true`, `max_triangle_pairs: 2500000`).
+
+The separate `UnitreeG1Rough` and `G1RoughTerrains` asset packages provide the
+37-joint model and terrain inputs. They do not replace `UnitreeG1Locomotion`.
+
+Use `embodichain train-rl --config CONFIG --resume CHECKPOINT` to restore learning
+state and the saved terrain levels/types. `trainer.iterations` is the cumulative
+update target. The first reset uses the restored terrain assignments without
+advancing the curriculum; later episode resets resume normal progression.
+Physical state and partial episodes restart. Curriculum state is stored per rank
+in the shared schema-v2 checkpoint and validated before learning state changes.
+Restore requires the original terrain map and per-rank environment count.
+The local G1 validation uses a single training process. Older checkpoints without
+environment state warn that terrain assignments cannot be restored.
+
+`g1_rough/env.yaml` sets `env.episode_context_in_info: false` to avoid
+building per-row provenance dictionaries on every control step. Episode state,
+curriculum restoration and recorder metadata remain active. Set the option to
+`true` when a consumer needs the context snapshot in step/reset info; this is
+the shared environment default.
+
+On a single NVIDIA RTX PRO 5000 Blackwell (72 GB) GPU at `4096` parallel
+environments, `g1_rough/agents/ppo.yaml` (`150 + 10` resumed updates,
+`15,728,640` transitions) sustains `67,576` steady SPS (`84,131` peak resumed
+SPS), improving `episode_length_avg_100` from `24.0` to `39.09` (`eval-policy`
+over `64` episodes: `avg_length=45.25`, `avg_reward=-3.40`,
+`linear_velocity_error=0.649`, `root_height=0.789 m`).
 
 ## PPO configuration
 

@@ -350,6 +350,24 @@ def _validate(trainer: Any, payload: Any, scheduler: str) -> list[str]:
         normalizers = payload["normalizer_by_rank"][rank]
         expected = _policy_normalizers(policy)
         _validate_state_layout(expected, normalizers, "rank normalizer")
+    environment_states = payload.get("environment_state_by_rank")
+    environment_state = None
+    if environment_states is not None:
+        if not isinstance(environment_states, list) or len(
+            environment_states
+        ) != getattr(trainer, "world_size", 1):
+            raise ValueError(
+                "Checkpoint environment state must contain one entry per rank."
+            )
+        environment_state = environment_states[getattr(trainer, "rank", 0)]
+    if environment_state is not None:
+        validate = getattr(trainer.env, "validate_training_state", None)
+        load = getattr(trainer.env, "load_training_state", None)
+        if not callable(validate) or not callable(load):
+            raise ValueError("Environment cannot restore checkpoint training state.")
+        validate(environment_state)
+    elif callable(getattr(trainer.env, "get_training_state", None)):
+        unavailable.append("environment training state")
     normalizer = getattr(trainer, "observation_normalizer", None)
     saved_normalizer = payload.get("observation_normalizer")
     if (normalizer is None) != (saved_normalizer is None):
@@ -375,7 +393,8 @@ def _validate(trainer: Any, payload: Any, scheduler: str) -> list[str]:
     return (
         unavailable
         if version == _SCHEMA_VERSION
-        else ["configuration metadata", "per-rank RNG", "per-rank normalizers"]
+        else unavailable
+        + ["configuration metadata", "per-rank RNG", "per-rank normalizers"]
     )
 
 
@@ -409,6 +428,8 @@ def _save(trainer: Any, path: str | Path, extra: Mapping[str, Any]) -> str:
             "rng": _capture_rng(trainer.algorithm.device),
             "normalizer": _policy_normalizers(policy),
         }
+        get_state = getattr(trainer.env, "get_training_state", None)
+        local["environment"] = get_state() if callable(get_state) else None
     except Exception as exc:
         error = exc
     _sync_errors(error, distributed)
@@ -426,6 +447,7 @@ def _save(trainer: Any, path: str | Path, extra: Mapping[str, Any]) -> str:
                 "world_size": len(ranks),
                 "rng_by_rank": [value["rng"] for value in ranks],
                 "normalizer_by_rank": [value["normalizer"] for value in ranks],
+                "environment_state_by_rank": [value["environment"] for value in ranks],
                 "global_step": trainer.global_step,
                 "num_updates": trainer.num_updates,
                 "policy": policy.state_dict(),
@@ -488,6 +510,9 @@ def _load(trainer: Any, path: str | Path, scheduler: str) -> dict[str, Any]:
         trainer.best_checkpoint_path = None
         trainer.latest_checkpoint_path = str(path)
         trainer._last_saved_update = None
+        environment_states = payload.get("environment_state_by_rank")
+        if environment_states is not None and environment_states[rank] is not None:
+            trainer.env.load_training_state(environment_states[rank])
         if hasattr(trainer.collector, "obs_td"):
             trainer.collector.obs_td = trainer.collector._reset_env()
             trainer.curr_ret.zero_()

@@ -1017,7 +1017,9 @@ class SimulationManager:
         Returns:
             List[str]: list of all assets uid.
         """
-        uid_list = ["default_plane"]
+        uid_list = (
+            [] if getattr(self, "_ground_plane_removed", False) else ["default_plane"]
+        )
         uid_list.extend(list(self._lights.keys()))
         uid_list.extend(list(self._sensors.keys()))
         uid_list.extend(list(self._robots.keys()))
@@ -1895,7 +1897,7 @@ class SimulationManager:
             self._env = result.get_arena("default")
             self._arenas = [result.get_arena(name) for name in scene.arena_names]
             self.__dict__.pop("arena_offsets", None)
-            if self._default_plane is None:
+            if self._default_plane is None and "default_plane" in scene:
                 self._bind_default_plane(scene.handles("default_plane")[0])
 
         # Runtime readiness belongs to the SimulationManager. Keep this and
@@ -2568,6 +2570,7 @@ class SimulationManager:
             per_env=False,
         )
         self._spawn_default_plane_descriptor = descriptor
+        self._ground_plane_removed = False
 
         if hasattr(descriptor, "render_categories"):
             descriptor.render_categories = self._GROUND_RENDER_CATEGORY
@@ -2634,6 +2637,25 @@ class SimulationManager:
         handles = self._spawn_scene.handles("default_plane")
         if handles:
             self._bind_default_plane(handles[0])
+
+    def remove_ground_plane(self) -> None:
+        """Remove the default global ground plane before preparing scene physics.
+
+        Use this when an imported scene stage already authors its own per-arena
+        ground geometry and solver ownership domain.
+
+        Raises:
+            RuntimeError: The scene physics has already been prepared.
+        """
+        if self.spawn_result is not None:
+            raise RuntimeError(
+                "The default ground plane must be removed before prepare()."
+            )
+        if self._spawn_scene is not None and "default_plane" in self._spawn_scene:
+            self._spawn_scene.remove("default_plane")
+        self._spawn_default_plane_descriptor = None
+        self._default_plane = None
+        self._ground_plane_removed = True
 
     def set_default_global_lighting(self) -> None:
         """Set default global lighting for the scene.
@@ -5968,6 +5990,33 @@ class SimulationManager:
                 "DexSim Scene articulation clear_dynamics failed with "
                 f"status {status}."
             )
+
+    def clear_articulation_dynamics(
+        self,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+    ) -> None:
+        """Clear dynamic state and solver history for all articulations in selected worlds.
+
+        Args:
+            env_ids: Environment indices whose articulation dynamics should be cleared.
+                Defaults to all environments when ``None``.
+        """
+        articulation_uids = tuple(self._robots) + tuple(self._articulations)
+        if not articulation_uids:
+            return
+        if self.physics.name == "newton":
+            batch = self._newton_articulation_reset_batch(articulation_uids, env_ids)
+            self._clear_newton_articulation_dynamics(batch)
+            return
+        ids = (
+            None
+            if env_ids is None
+            else torch.as_tensor(env_ids, dtype=torch.long).reshape(-1).tolist()
+        )
+        for robot in self._robots.values():
+            robot.clear_dynamics(env_ids=ids)
+        for articulation in self._articulations.values():
+            articulation.clear_dynamics(env_ids=ids)
 
     def export_usd(self, fpath: str) -> bool:
         """Export the current simulation scene to a USD file.

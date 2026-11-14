@@ -101,6 +101,7 @@ official = "embodichain_robots._catalog:ROBOT_CONFIGS"
 
 [project.entry-points."embodichain.assets"]
 official_robots = "embodichain_robots._asset_catalog:ROBOT_ASSETS"
+official_rl = "embodichain.data.assets.rl_assets:_ASSET_CATALOG"
 
 [tool.uv.sources]
 bpy = { index = "blender" }
