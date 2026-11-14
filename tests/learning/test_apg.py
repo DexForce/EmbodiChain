@@ -18,13 +18,14 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 import pytest
 import torch
-import torch.nn as nn
 from gymnasium.spaces import Box
 from tensordict import TensorDict
+from torch import nn
 
 from embodichain.learning.rl.algo import (
     APG,
@@ -34,14 +35,14 @@ from embodichain.learning.rl.algo import (
     get_registered_algo_names,
     segmented_discounted_return,
 )
-from embodichain.learning.rl.gradients import (
-    BatchedGradientNormStats,
-    clip_batched_gradient_norm,
-)
 from embodichain.learning.rl.collector import (
     DifferentiableCollector,
     DifferentiableRollout,
     DifferentiableTransition,
+)
+from embodichain.learning.rl.gradients import (
+    BatchedGradientNormStats,
+    clip_batched_gradient_norm,
 )
 from embodichain.learning.rl.policies import ActorOnly
 from embodichain.learning.rl.utils import LRSchedulerCfg, OptimizerCfg
@@ -179,6 +180,47 @@ def test_complete_discounted_return_stops_after_first_done() -> None:
     )
 
     assert torch.equal(returns, torch.tensor([2.0]))
+
+
+def test_complete_bootstrap_keeps_value_gradient_and_masks_finished_rows() -> None:
+    policy = _make_policy()
+    with torch.no_grad():
+        policy.actor.weight.fill_(2.0)
+    algorithm = APG(APGCfg(device="cpu", gamma=0.5, max_grad_norm=100.0), policy)
+    observation = torch.zeros((3, 1))
+    transitions = tuple(
+        DifferentiableTransition(
+            observation=observation,
+            policy_output=TensorDict({}, batch_size=[3]),
+            reward=policy.actor.weight.sum() * torch.zeros(3),
+            terminated=torch.tensor([False, index == 0, False]),
+            truncated=torch.tensor([False, False, index == 1]),
+            next_observation=observation,
+            info={},
+        )
+        for index in range(2)
+    )
+    rollout = DifferentiableRollout(observation, transitions)
+    terminal_value = policy.actor.weight.sum() * torch.tensor([2.0, 3.0, 4.0])
+    # Only the first row bootstraps: .5**2 * (2*w) = 1 at w=2.
+    torch.testing.assert_close(
+        complete_discounted_return(rollout, 0.5, terminal_value=terminal_value),
+        torch.tensor([1.0, 0.0, 0.0]),
+    )
+    algorithm.begin_update()
+    algorithm.accumulate_complete_rollout(rollout, terminal_value=terminal_value)
+    # Loss is -(.5**2 * 2*w)/3, hence d(loss)/dw = -1/6.
+    torch.testing.assert_close(policy.actor.weight.grad, torch.tensor([[-1.0 / 6.0]]))
+    metrics = algorithm.finish_update()
+    assert metrics["objective"] == pytest.approx(1.0 / 3.0)
+
+
+def test_complete_bootstrap_rejects_broadcast_value_rows() -> None:
+    rollout = DifferentiableCollector(
+        _LinearDifferentiableEnv(), _make_policy(), torch.device("cpu")
+    ).collect(2)
+    with pytest.raises(ValueError, match="one value per environment"):
+        complete_discounted_return(rollout, 0.99, terminal_value=torch.zeros((1, 1)))
 
 
 def test_action_adjoint_clip_is_per_environment_and_overflow_safe() -> None:
