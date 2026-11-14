@@ -44,6 +44,194 @@ from embodichain.lab.sim.sim_manager import SimulationManager
 pytestmark = pytest.mark.no_sim
 
 
+@pytest.mark.parametrize("wrapper", ["rigid", "group", "environment"])
+def test_integer_variant_keys_survive_nested_serialization(wrapper):
+    from embodichain.lab.sim.cfg import RigidObjectGroupCfg
+    from embodichain.lab.gym.envs import EmbodiedEnvCfg
+
+    cfg = RigidObjectCfg(
+        uid="piece",
+        shape=CubeCfg(),
+        env_variants={
+            1: RigidObjectCfg(shape=CubeCfg(size=(0.2, 0.3, 0.4))),
+        },
+    )
+    if wrapper == "group":
+        group = RigidObjectGroupCfg(uid="group", rigid_objects={"piece": cfg})
+        restored = RigidObjectGroupCfg.from_dict(group.to_dict()).rigid_objects["piece"]
+    elif wrapper == "environment":
+        data = EmbodiedEnvCfg(rigid_object=[cfg]).to_dict()
+        restored = RigidObjectCfg.from_dict(data["rigid_object"][0])
+    else:
+        restored = RigidObjectCfg.from_dict(cfg.to_dict())
+    assert list(restored.env_variants) == [1]
+    np.testing.assert_allclose(restored.env_variants[1].shape.size, [0.2, 0.3, 0.4])
+
+
+@pytest.mark.parametrize("group", [False, True])
+@pytest.mark.parametrize("canonical", [False, True])
+def test_projective_uv_skips_replacement_rows(group, canonical):
+    from embodichain.lab.sim.cfg import RigidObjectGroupCfg
+    from embodichain.lab.sim.objects import RigidObject, RigidObjectGroup
+    from embodichain.lab.sim.shapes import MeshCfg
+
+    mesh = MeshCfg(
+        vertices=[[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+        triangles=[[0, 1, 2]],
+        compute_uv=True,
+        project_direction=[0, 0, 1],
+    )
+    cfg = RigidObjectCfg(
+        shape=CubeCfg() if canonical else mesh,
+        visuals=[VisualElementCfg(representation=mesh)] if canonical else None,
+        env_variants={1: RigidObjectCfg(shape=CubeCfg())},
+    )
+    bodies = [MagicMock(), MagicMock(), MagicMock()]
+    entities = [
+        SimpleNamespace(get_render_body=lambda body=body: body) for body in bodies
+    ]
+    if group:
+        owner = SimpleNamespace(
+            cfg=RigidObjectGroupCfg(rigid_objects={"piece": cfg}),
+            _entities=[[entity] for entity in entities],
+        )
+        RigidObjectGroup._apply_spawn_visual_uv(owner)
+    else:
+        RigidObject._apply_spawn_visual_uv(SimpleNamespace(cfg=cfg, _entities=entities))
+    bodies[1].set_projective_uv.assert_not_called()
+    for index in (0, 2):
+        bodies[index].set_projective_uv.assert_called_once()
+        np.testing.assert_allclose(
+            bodies[index].set_projective_uv.call_args.args[0], [0, 0, 1]
+        )
+
+
+def test_legacy_visual_mesh_preserves_existing_relative_path(tmp_path, monkeypatch):
+    from embodichain.lab.sim.shapes import MeshCfg
+
+    path = tmp_path / "appearance.obj"
+    path.write_text("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
+    monkeypatch.chdir(tmp_path)
+    with pytest.warns(DeprecationWarning, match="visuals"):
+        cfg = RigidObjectCfg(
+            uid="piece", shape=CubeCfg(), visual_shape=MeshCfg(fpath="appearance.obj")
+        )
+    descriptor, _ = rigid_desc_from_cfg(cfg)
+    assert descriptor.renders[0].file_path == str(path)
+    assert cfg.visuals[0].representation.fpath == "appearance.obj"
+
+
+@pytest.mark.parametrize(
+    "layout", ["files", "file_array", "file_primitive", "compound"]
+)
+def test_file_visual_batches_use_supported_singleton_imports(
+    tmp_path, monkeypatch, layout
+):
+    from dexsim.spawn.adapters import common
+    from embodichain.lab.sim.shapes import (
+        MeshCfg,
+        MeshCollisionCfg,
+        CompoundShapeCfg,
+        ShapePartCfg,
+    )
+
+    paths = []
+    for index in range(2):
+        path = tmp_path / f"part_{index}.obj"
+        path.write_text("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
+        paths.append(path)
+    visuals = [
+        VisualElementCfg(id=f"part_{i}", representation=MeshCfg(fpath=str(p)))
+        for i, p in enumerate(paths)
+    ]
+    if layout == "file_array":
+        visuals[1].representation = MeshCfg(
+            vertices=[[0, 0, 0], [1, 0, 0], [0, 1, 0]], triangles=[[0, 1, 2]]
+        )
+    elif layout == "file_primitive":
+        visuals[1].representation = CubeCfg()
+    elif layout == "compound":
+        visuals = [
+            VisualElementCfg(
+                representation=CompoundShapeCfg(
+                    parts=[
+                        ShapePartCfg(
+                            shape=MeshCfg(
+                                fpath=str(path),
+                                collision=MeshCollisionCfg(approximation="convex_hull"),
+                            ),
+                            position=(0.25, 0, 0) if index == 0 else (0, 0, 0.25),
+                        )
+                        for index, path in enumerate(paths)
+                    ]
+                ),
+                local_pose=np.array(
+                    [[0, -1, 0, 1], [1, 0, 0, 2], [0, 0, 1, 3], [0, 0, 0, 1]],
+                    dtype=np.float32,
+                ),
+                scale=2,
+            )
+        ]
+    cfg = RigidObjectCfg(uid="batch", shape=CubeCfg(), visuals=visuals)
+    descriptor, _ = rigid_desc_from_cfg(cfg, newton_solver_type="mujoco_warp")
+    assert descriptor.renders == []
+    assert len(descriptor.collisions) == 1
+    assert descriptor.collisions[0].render_source_index is None
+    spawn = SimpleNamespace(
+        builder=SimpleNamespace(materials={}),
+        _resolve_materials=lambda values: values,
+        _bind_resource_materials=lambda descriptor: None,
+    )
+    owner = SimpleNamespace(
+        cfg=cfg, uid="batch", num_instances=1, device=torch.device("cpu")
+    )
+    binding = _VisualBinding(owner, spawn)
+    if layout == "compound":
+        np.testing.assert_allclose(
+            binding.elements[0].descriptor.renders[0].local_transform[:3, 3],
+            [1, 2.5, 3],
+        )
+        np.testing.assert_allclose(
+            binding.elements[1].descriptor.renders[0].local_transform[:3, 3],
+            [1, 2, 3.5],
+        )
+    arena = MagicMock()
+    arena.create_actor.return_value.get_render_body.return_value.add_mesh.return_value = (
+        0
+    )
+    arena.load_actor.return_value.get_render_body.return_value.get_mesh_count.return_value = (
+        0
+    )
+    monkeypatch.setattr(common, "_attach_then_name", lambda *args, **kwargs: None)
+    monkeypatch.setattr(common, "refresh_render_body_materials", lambda *args: None)
+    for element in binding.elements:
+        assert len(element.descriptor.renders) == 1
+        common.create_render_actor(arena, element.descriptor, {})
+    expected_files = paths[:1] if layout in {"file_array", "file_primitive"} else paths
+    assert [call.args[0] for call in arena.load_actor.call_args_list] == [
+        str(p) for p in expected_files
+    ]
+    assert arena.create_actor.called is (len(expected_files) == 1)
+
+
+def test_file_visual_variant_batch_fails_before_unsupported_materialization(tmp_path):
+    from embodichain.lab.sim.shapes import MeshCfg
+
+    cfg = RigidObjectCfg(
+        uid="batch",
+        shape=CubeCfg(),
+        visuals=[
+            VisualElementCfg(
+                id=f"part_{i}", representation=MeshCfg(fpath=str(tmp_path / f"{i}.obj"))
+            )
+            for i in range(2)
+        ],
+        env_variants={1: RigidObjectCfg(shape=CubeCfg())},
+    )
+    with pytest.raises(NotImplementedError, match="file appearance with env_variants"):
+        rigid_desc_from_cfg(cfg, newton_solver_type="mujoco_warp")
+
+
 @pytest.mark.parametrize(
     "alias", ["visual_shape", "visual_parts", "nested_visual_shape"]
 )

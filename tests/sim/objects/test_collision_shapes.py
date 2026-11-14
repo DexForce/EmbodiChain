@@ -19,6 +19,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+import torch
 from dexsim.engine import BoxGeometry
 from dexsim.spawn.descs import CollisionDesc, GeometryDesc
 from dexsim.types import RigidBodyShape
@@ -589,6 +590,109 @@ def test_get_collision_shapes_reads_new_spawned_body_descriptor():
     assert len(shapes) == 1
     assert shapes[0].shape_type == RigidBodyShape.BOX
     assert shapes[0].half_extents.tolist() == pytest.approx([0.1, 0.2, 0.3])
+
+
+def test_particle_only_file_boundary_is_excluded_from_rigid_collision_queries():
+    from dexsim.spawn import NewtonCollisionDesc
+
+    entity = _DescriptorEntity(
+        CollisionDesc.from_geometry(GeometryDesc.cube((0.2, 0.4, 0.6)))
+    )
+    boundary = CollisionDesc.from_geometry(GeometryDesc.mesh(file_path="particles.obj"))
+    boundary.enable_collision = False
+    boundary.newton = NewtonCollisionDesc(has_particle_collision=True)
+    entity.object_desc.collisions.append(boundary)
+    owner = RigidObject.__new__(RigidObject)
+    owner.uid = "platform"
+    owner._entities = [entity]
+    shapes = owner.get_collision_shapes()
+    assert len(shapes) == 1
+    assert shapes[0].shape_type == RigidBodyShape.BOX
+
+
+@pytest.mark.parametrize("static", [False, True])
+def test_file_compound_reads_independent_cooked_newton_shapes(static):
+    import numpy as np
+    import newton
+    from scipy.spatial.transform import Rotation
+    from dexsim.spawn import CollisionApproximation, NewtonCollisionDesc
+
+    solid = CollisionDesc.from_geometry(
+        GeometryDesc.mesh(file_path="solid.obj", segment_name="solid"),
+        approximation=CollisionApproximation.CONVEX_HULL,
+    )
+    box = CollisionDesc.from_geometry(
+        GeometryDesc.cube((0.2, 0.3, 0.4), segment_name="box")
+    )
+    boundary = CollisionDesc.from_geometry(
+        GeometryDesc.mesh(file_path="particles.obj", segment_name="boundary")
+    )
+    boundary.enable_collision = False
+    boundary.newton = NewtonCollisionDesc(has_particle_collision=True)
+    vertices = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=np.float32)
+    mesh = SimpleNamespace(
+        vertices=vertices, indices=np.array([0, 1, 2, 0, 3, 1, 0, 2, 3, 1, 3, 2])
+    )
+    local = np.repeat(np.eye(4)[None], 3, axis=0)
+    local[0, :3, 3] = [0.2, 0.6, 1.2]
+    local[1, :3, 3] = [-0.2, 0, 0.8]
+    world = np.eye(4)
+    world[:3, :3] = Rotation.from_euler("z", 90, degrees=True).as_matrix()
+    world[:3, 3] = [10, 20, 30]
+    poses = world @ local if static else local
+    transforms = np.concatenate(
+        (poses[:, :3, 3], Rotation.from_matrix(poses[:, :3, :3]).as_quat()), axis=1
+    ).astype(np.float32)
+    model = SimpleNamespace(
+        shape_flags=np.array(
+            [
+                0,
+                int(newton.ShapeFlags.COLLIDE_SHAPES),
+                int(newton.ShapeFlags.COLLIDE_PARTICLES),
+            ]
+        ),
+        shape_type=np.array(
+            [
+                int(newton.GeoType.CONVEX_MESH),
+                int(newton.GeoType.BOX),
+                int(newton.GeoType.MESH),
+            ]
+        ),
+        shape_scale=np.array([[2, 2, 2], [0.2, 0.3, 0.4], [1, 1, 1]], dtype=np.float32),
+        shape_transform=transforms,
+        shape_source=[mesh, None, mesh],
+    )
+    binding = SimpleNamespace(
+        _runtime=SimpleNamespace(model=model),
+        shape_ids=(0, 1, 2),
+        body_id=None if static else 0,
+        shape_ids_by_segment={"solid": (0,), "box": (1,), "boundary": (2,)},
+    )
+    entity = SimpleNamespace(
+        object_desc=SimpleNamespace(
+            collisions=[solid, box, boundary], body_scale=(2, 2, 2)
+        ),
+        _physics_binding=binding,
+        native=lambda: None,
+        get_world_pose=lambda: world,
+    )
+    owner = RigidObject.__new__(RigidObject)
+    owner.uid = "compound"
+    owner._entities = [entity]
+    shapes = owner.get_collision_shapes()
+    assert [shape.shape_type for shape in shapes] == [
+        RigidBodyShape.CONVEX,
+        RigidBodyShape.BOX,
+    ]
+    torch.testing.assert_close(shapes[0].vertices, torch.tensor(vertices) * 2)
+    torch.testing.assert_close(shapes[1].half_extents, torch.tensor([0.2, 0.3, 0.4]))
+    for shape, expected in zip(shapes, local):
+        torch.testing.assert_close(
+            shape.local_pose,
+            torch.tensor(expected, dtype=torch.float32),
+            atol=3e-6,
+            rtol=1e-5,
+        )
 
 
 def test_compound_cylinder_query_preserves_parts_and_scaled_local_positions() -> None:

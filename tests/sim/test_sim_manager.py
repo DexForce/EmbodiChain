@@ -30,6 +30,7 @@ import numpy as np
 import pytest
 import torch
 
+
 import embodichain.lab.sim.sim_manager as sim_manager_module
 import embodichain.lab.visualization as visualization_module
 from embodichain.lab.sim.cfg import (
@@ -4287,3 +4288,61 @@ def test_targeted_particle_material_schedule_validates_before_registration() -> 
             {"stiffness": ((0.0, 1000.0),)}, uid="cloth"
         )
     builder.add_runtime_control.assert_not_called()
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_configure_collision_when_ground_is_disabled(enabled):
+    from embodichain.lab.sim.sim_manager import SimulationManager
+
+    manager = SimpleNamespace(
+        spawn_result=None, sim_config=SimpleNamespace(enable_ground_plane=False)
+    )
+    if enabled:
+        with pytest.raises(ValueError, match="ground plane is disabled"):
+            SimulationManager.configure_ground_plane_collision(manager, enabled=True)
+    else:
+        assert (
+            SimulationManager.configure_ground_plane_collision(manager, enabled=False)
+            is None
+        )
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_group_file_batches_reject_before_losing_appearance(explicit):
+    from embodichain.lab.sim.cfg import (
+        RigidObjectCfg,
+        RigidObjectGroupCfg,
+        VisualElementCfg,
+    )
+    from embodichain.lab.sim.shapes import (
+        CompoundShapeCfg,
+        CubeCfg,
+        MeshCfg,
+        MeshCollisionCfg,
+        ShapePartCfg,
+    )
+    from embodichain.lab.sim.sim_manager import SimulationManager
+
+    mesh = MeshCfg(
+        fpath="part.obj", collision=MeshCollisionCfg(approximation="convex_hull")
+    )
+    if explicit:
+        member = RigidObjectCfg(
+            shape=CubeCfg(),
+            visuals=[
+                VisualElementCfg(id="file", representation=mesh),
+                VisualElementCfg(id="box", representation=CubeCfg()),
+            ],
+        )
+    else:
+        member = RigidObjectCfg(
+            shape=CompoundShapeCfg(
+                parts=[
+                    ShapePartCfg(shape=mesh),
+                    ShapePartCfg(shape=CubeCfg()),
+                ]
+            )
+        )
+    cfg = RigidObjectGroupCfg(uid="group", rigid_objects={"piece": member})
+    with pytest.raises(NotImplementedError, match="declare individual RigidObjects"):
+        SimulationManager.add_rigid_object_group(SimpleNamespace(), cfg)

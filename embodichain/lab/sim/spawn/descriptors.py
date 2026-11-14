@@ -357,6 +357,16 @@ def rigid_desc_from_cfg(
     """Translate a rigid-object config into a DexSim Spawn descriptor."""
     cfg._normalize_visuals()
     cfg._validate_env_variants()
+    from ..cfg.visuals import _file_visual_binding_elements
+
+    if cfg.env_variants and any(
+        _file_visual_binding_elements(item) is not None
+        for item in (cfg, *cfg.env_variants.values())
+    ):
+        raise NotImplementedError(
+            "Multi-segment file appearance with env_variants requires SDK support "
+            "for file renders in one actor; use array geometry or separate objects."
+        )
     uid = _required_uid(cfg.uid, "Rigid object")
     if _is_usd_path(_asset_file_path(cfg)):
         raise NotImplementedError(
@@ -415,7 +425,7 @@ def rigid_desc_from_cfg(
             ),
         )
         collision.render_source_index = (
-            None if cfg.visuals is not None or not cfg.render_enabled else index
+            None if cfg.visuals is not None or not renders else index
         )
         collisions.append(collision)
 
@@ -519,8 +529,14 @@ def _compile_rigid_renders(
     uid: str, cfg: RigidObjectCfg
 ) -> tuple[list[RenderDesc], dict[str, MaterialDesc]]:
     """Compile canonical mesh visuals directly on their physical owner."""
-    from embodichain.lab.sim.cfg.visuals import _uses_descriptor_visuals
+    from embodichain.lab.sim.cfg.visuals import (
+        _file_visual_binding_elements,
+        _resolve_visual_path,
+        _uses_descriptor_visuals,
+    )
 
+    if _file_visual_binding_elements(cfg) is not None:
+        return [], {}
     if not _uses_descriptor_visuals(cfg):
         return _compile_shape_renders(uid, cfg.shape)
     renders = []
@@ -530,8 +546,6 @@ def _compile_rigid_renders(
             raise NotImplementedError(
                 "Descriptor mesh visuals require visible=True; hide all visuals with visuals=[]."
             )
-        from embodichain.data import get_data_path
-
         representation = element.representation.copy()
         leaves = (
             [part.shape for part in representation.parts]
@@ -540,7 +554,7 @@ def _compile_rigid_renders(
         )
         for leaf in leaves:
             if isinstance(leaf, MeshCfg) and not _is_missing(leaf.fpath) and leaf.fpath:
-                leaf.fpath = get_data_path(leaf.fpath)
+                leaf.fpath = _resolve_visual_path(leaf.fpath)
         current, definitions = _compile_shape_renders(
             f"{uid}__{element.id}", representation
         )

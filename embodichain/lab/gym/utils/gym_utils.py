@@ -729,6 +729,18 @@ def config_to_cfg(
     from embodichain.utils import configclass
     from embodichain.data import get_data_path
     from embodichain.lab.sim.cfg.source import _asset_file_path
+    from embodichain.lab.sim.shapes import CompoundShapeCfg
+
+    def resolve_shape_paths(shape: object) -> None:
+        if (
+            isinstance(shape, MeshCfg)
+            and isinstance(shape.fpath, (str, Path))
+            and shape.fpath
+        ):
+            shape.fpath = get_data_path(shape.fpath)
+        elif isinstance(shape, CompoundShapeCfg):
+            for part in shape.parts:
+                resolve_shape_paths(part.shape)
 
     def resolve_asset_paths(
         asset: RigidObjectCfg | VisualObjectCfg | ArticulationCfg,
@@ -740,6 +752,11 @@ def config_to_cfg(
             asset.shape.fpath = get_data_path(path)
         elif isinstance(asset, ArticulationCfg) and path is not None:
             asset.fpath = get_data_path(path)
+        if isinstance(asset, RigidObjectCfg):
+            if isinstance(asset.shape, CompoundShapeCfg):
+                resolve_shape_paths(asset.shape)
+            for variant in (asset.env_variants or {}).values():
+                resolve_asset_paths(variant)
 
     def _resolve_mesh_asset_paths(obj_dict: dict[str, Any]) -> None:
         for key in ("visual_shape", "particle_collision_shape"):

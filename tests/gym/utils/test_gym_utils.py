@@ -2835,7 +2835,69 @@ def test_mesh_asset_paths_resolve_collision_and_visual_geometry(
     if collection == "rigid_object_group":
         parsed = parsed.rigid_objects["cup"]
     assert parsed.shape.fpath == paths["TaskMeshes/collision.obj"]
-    assert parsed.visual_shape.fpath == paths["TaskMeshes/visual.glb"]
+    assert parsed.visual_shape is None
+    assert parsed.visuals[0].representation.fpath == paths["TaskMeshes/visual.glb"]
+
+
+@pytest.mark.parametrize(
+    "collection", ["background", "rigid_object", "rigid_object_group"]
+)
+@pytest.mark.parametrize("variant", [False, True])
+def test_nested_physical_mesh_paths_resolve_from_data_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, collection: str, variant: bool
+) -> None:
+    from embodichain.data import constants
+
+    root = tmp_path / "data"
+    path = root / "meshes" / "piece.obj"
+    path.parent.mkdir(parents=True)
+    path.write_text("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.chdir(outside)
+    monkeypatch.setattr(constants, "EMBODICHAIN_DEFAULT_DATA_ROOT", str(root))
+    compound = {
+        "shape_type": "Compound",
+        "parts": [
+            {
+                "shape": {
+                    "shape_type": "Mesh",
+                    "fpath": "meshes/piece.obj",
+                    "collision": {"approximation": "convex_hull"},
+                }
+            }
+        ],
+    }
+    body_type = "static" if collection == "background" else "dynamic"
+    obj = {"uid": "piece", "body_type": body_type, "shape": compound}
+    if variant:
+        obj = {
+            "uid": "piece",
+            "body_type": body_type,
+            "shape": {"shape_type": "Cube"},
+            "env_variants": {"1": {"body_type": body_type, "shape": compound}},
+        }
+    entries = (
+        [{"uid": "group", "rigid_objects": {"piece": obj}}]
+        if collection == "rigid_object_group"
+        else [obj]
+    )
+    cfg = config_to_cfg(
+        {
+            "id": "EmbodiedEnv-v1",
+            "physics": "newton",
+            "env": {},
+            "robot": {"uid": "robot"},
+            collection: entries,
+        },
+        manager_modules=DEFAULT_MANAGER_MODULES,
+    )
+    parsed = getattr(cfg, collection)[0]
+    if collection == "rigid_object_group":
+        parsed = parsed.rigid_objects["piece"]
+    if variant:
+        parsed = parsed.env_variants[1]
+    assert parsed.shape.parts[0].shape.fpath == str(path)
 
 
 @pytest.mark.parametrize("owner", ["inline", "environment", "scene"])

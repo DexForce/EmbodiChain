@@ -21,10 +21,17 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
+from pathlib import Path
 import numpy as np
 import torch
 
-from ..cfg.visuals import GaussianSplatCfg, VisualElementCfg, _visual_elements
+from ..cfg.visuals import (
+    GaussianSplatCfg,
+    VisualElementCfg,
+    _visual_elements,
+    _file_visual_binding_elements,
+    _resolve_visual_path,
+)
 
 
 def _semantic_mesh_arrays(shape: Any) -> tuple[np.ndarray, np.ndarray]:
@@ -32,7 +39,6 @@ def _semantic_mesh_arrays(shape: Any) -> tuple[np.ndarray, np.ndarray]:
     from ..cfg import VisualObjectCfg
     from .descriptors import visual_desc_from_cfg
     from dexsim.spawn.adapters.common import generated_mesh
-    from embodichain.data import get_data_path
 
     descriptor, _ = visual_desc_from_cfg(VisualObjectCfg(uid="semantic", shape=shape))
     if not descriptor.renders:
@@ -45,7 +51,7 @@ def _semantic_mesh_arrays(shape: Any) -> tuple[np.ndarray, np.ndarray]:
             import trimesh
 
             mesh = trimesh.load(
-                get_data_path(geometry.file_path), force="mesh", process=False
+                _resolve_visual_path(geometry.file_path), force="mesh", process=False
             )
             transform = np.asarray(geometry.local_transform, dtype=np.float32)
             vertices = (
@@ -108,6 +114,9 @@ class _VisualBinding:
         groups = getattr(cfg, "link_visuals", {})
         if hasattr(cfg, "visuals"):
             groups = {None: cfg.visuals} if cfg.visuals is not None else {}
+        file_elements = _file_visual_binding_elements(cfg)
+        if file_elements is not None:
+            groups = {None: file_elements}
         self.groups = {
             link: _visual_elements(elements) for link, elements in groups.items()
         }
@@ -146,8 +155,13 @@ class _VisualBinding:
                         sh_coefficients=representation.sh_coefficients,
                     )
                 else:
-                    if hasattr(representation, "fpath"):
-                        representation.fpath = get_data_path(representation.fpath)
+                    if (
+                        isinstance(getattr(representation, "fpath", None), (str, Path))
+                        and representation.fpath
+                    ):
+                        representation.fpath = _resolve_visual_path(
+                            representation.fpath
+                        )
                     descriptor, materials = visual_desc_from_cfg(
                         VisualObjectCfg(
                             uid=name,
@@ -255,6 +269,8 @@ class _VisualBinding:
             and hasattr(owner.cfg, "semantic_shape")
         ):
             shape = owner.cfg.semantic_shape
+            if shape is None and _file_visual_binding_elements(owner.cfg) is not None:
+                shape = owner.cfg.shape
             if shape is None:
                 vertices, faces = [], []
                 for handle in owner._entities:

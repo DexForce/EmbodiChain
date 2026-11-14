@@ -570,15 +570,31 @@ class SceneExporter:
             selected_env_ids = list(self._env_ids)
             for object_index, object_name in enumerate(object_names):
                 object_component = safe_path_component(object_name)
-                vertices_by_env = asset.get_object_vertices(
-                    object_index,
-                    env_ids=selected_env_ids,
-                    scale=True,
+                members = (
+                    getattr(getattr(asset, "cfg", None), "rigid_objects", {}) or {}
                 )
-                faces_by_env = asset.get_object_triangles(
-                    object_index,
-                    env_ids=selected_env_ids,
-                )
+                member_cfg = members.get(object_name)
+                if getattr(member_cfg, "env_variants", None):
+                    vertices_by_env = [
+                        asset.get_object_vertices(
+                            object_index, env_ids=[env_id], scale=True
+                        )[0]
+                        for env_id in selected_env_ids
+                    ]
+                    faces_by_env = [
+                        asset.get_object_triangles(object_index, env_ids=[env_id])[0]
+                        for env_id in selected_env_ids
+                    ]
+                else:
+                    vertices_by_env = asset.get_object_vertices(
+                        object_index,
+                        env_ids=selected_env_ids,
+                        scale=True,
+                    )
+                    faces_by_env = asset.get_object_triangles(
+                        object_index,
+                        env_ids=selected_env_ids,
+                    )
                 for selected_index, env_id in enumerate(self._env_ids):
                     vertices = vertices_by_env[selected_index]
                     faces = faces_by_env[selected_index]

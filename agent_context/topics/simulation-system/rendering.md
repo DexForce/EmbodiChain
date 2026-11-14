@@ -4,6 +4,21 @@ Read this for physics/render synchronization, native-window/offscreen image
 processing and readiness reporting. Return to the
 [simulation overview](simulation-system.md).
 
+## Rigid file appearance
+
+`RigidObjectCfg.visuals` remains the appearance owner. SDK 0.6 cannot combine
+multiple file-backed render segments on one actor, so Spawn imports each segment
+through a separate visual object and tracks the physical owner's pose on Default
+and Newton. This also covers a compound physical shape whose default appearance
+mixes files and primitives. Physical collision pieces and semantic geometry stay
+independent; imported file materials and UVs use the native file importer.
+Existing relative files retain their working-directory meaning before data-root
+or registry resolution. Multi-segment file appearance with `env_variants` rejects
+before declaration; use array geometry or separate logical objects for that case.
+Group members requiring this companion composition also reject before declaration;
+declare separate rigid objects. Single-mesh projective UV mapping uses each row's effective configuration, preserving
+a replacement row that does not request projection.
+
 ## NoRender initialization
 
 `RenderCfg(renderer="no-render")` selects `Renderer.NORENDER` and requires

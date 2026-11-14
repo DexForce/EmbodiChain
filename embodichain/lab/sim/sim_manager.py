@@ -2642,9 +2642,17 @@ class SimulationManager:
 
         Raises:
             RuntimeError: The scene physics has already been prepared.
+            ValueError: The ground is disabled but enabling or editing it was requested.
         """
         if self.spawn_result is not None:
             raise RuntimeError("Ground collision must be configured before prepare().")
+        if not self.sim_config.enable_ground_plane:
+            if not enabled and newton is None and geometry is None:
+                return
+            raise ValueError(
+                "The default ground plane is disabled; enable_ground_plane must "
+                "be set before constructing the simulation."
+            )
         if geometry is not None:
             from dataclasses import fields
             from dexsim.spawn import GeometryDesc
@@ -3978,11 +3986,14 @@ class SimulationManager:
             The stable Group facade. During initial scene construction it is
             bound to Spawn handles by :meth:`prepare`.
         """
-        from .cfg.visuals import _uses_descriptor_visuals
+        from .cfg.visuals import _file_visual_binding_elements, _uses_descriptor_visuals
 
         if isinstance(cfg.rigid_objects, dict) and any(
-            getattr(member, "visuals", None) is not None
-            and not _uses_descriptor_visuals(member)
+            (
+                getattr(member, "visuals", None) is not None
+                and not _uses_descriptor_visuals(member)
+            )
+            or _file_visual_binding_elements(member) is not None
             for member in cfg.rigid_objects.values()
         ):
             raise NotImplementedError(

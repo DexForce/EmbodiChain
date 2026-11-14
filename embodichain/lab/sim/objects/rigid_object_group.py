@@ -27,14 +27,13 @@ from embodichain.lab.sim import BatchEntity
 from embodichain.lab.sim.cfg import RigidObjectGroupCfg
 from embodichain.lab.sim.material import VisualMaterial
 from embodichain.lab.sim.objects.backends.scene import SceneRigidBodyView
-from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.utils.math import (
     matrix_from_euler,
     matrix_from_quat,
     quat_from_matrix,
 )
 
-from .rigid_object import _build_cfg_init_pose
+from .rigid_object import _apply_entity_visual_uv, _build_cfg_init_pose
 from ._mesh_utils import get_combined_triangles, get_combined_vertices
 
 if TYPE_CHECKING:
@@ -368,27 +367,13 @@ class RigidObjectGroup(BatchEntity):
         self.reset()
 
     def _apply_spawn_visual_uv(self) -> None:
-        """Apply configured projective UV mapping to grouped render bodies."""
-        member_cfgs = list(self.cfg.rigid_objects.values())
-        for object_index, member_cfg in enumerate(member_cfgs):
-            shape = member_cfg.shape
-            if not isinstance(shape, MeshCfg) or not shape.compute_uv:
-                continue
-
-            project_direction = np.asarray(
-                shape.project_direction,
-                dtype=np.float32,
-            )
-            for row in self._entities:
-                render_body = row[object_index].get_render_body()
-                if render_body is None:
-                    continue
-                project_uv = getattr(render_body, "set_projective_uv", None)
-                if project_uv is None:
-                    raise NotImplementedError(
-                        "compute_uv requires a render body with set_projective_uv()."
-                    )
-                project_uv(project_direction)
+        """Apply grouped UV requests using each member row's effective config."""
+        for object_index, member_cfg in enumerate(self.cfg.rigid_objects.values()):
+            variants = member_cfg.env_variants or {}
+            for env_id, row in enumerate(self._entities):
+                _apply_entity_visual_uv(
+                    variants.get(env_id, member_cfg), row[object_index]
+                )
 
     def bind_spawn(self, result: Scene) -> None:
         """Atomically bind the declaration facade to env-major Spawn handles."""

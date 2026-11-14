@@ -43,7 +43,7 @@ domain-contract validator. Domain loaders add their own checks.
 
 | Operation | Contract |
 |---|---|
-| `to_dict()` | Recursively converts configs; tensors remain tensors, callables become strings |
+| `to_dict()` | Recursively converts configs; preserves integer mapping keys, tensors remain tensors, callables become strings |
 | Custom `to_dict()` | A custom method anywhere in the MRO is preserved, including on decorated subclasses |
 | `replace(**kwargs)` / `copy(**kwargs)` | Construct a replacement through the dataclass helper and initialization hooks |
 | Custom `__post_init__` | Runs before configclass's copying hook |

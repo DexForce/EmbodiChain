@@ -92,8 +92,10 @@ mass/COM/inertia applies once to the parent. `CylinderCfg` retains a native
 cylinder descriptor, but cooking fidelity remains backend-specific.
 Rigid appearance has one canonical `visuals` list. Legacy `visual_shape` and
 compound `visual_parts` migrate into that list with a warning and are cleared;
-competing inputs fail. Procedural rigid mesh elements lower directly on the
-body for both physics backends. Gaussian and other companion visuals keep
+competing inputs fail. Procedural arrays and singleton mesh files lower on the
+body for both physics backends. File-containing render batches use separate
+singleton imports with owner pose tracking; see [rendering](rendering.md).
+Gaussian and other companion visuals keep
 their separate binding capabilities. Semantic queries retain the physical
 surface unless the parent config explicitly selects a shared proxy.
 

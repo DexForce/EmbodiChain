@@ -205,6 +205,87 @@ def _visual_elements(value: object) -> list[VisualElementCfg] | None:
     return elements
 
 
+def _file_visual_binding_elements(cfg: object) -> list[VisualElementCfg] | None:
+    """Split file-containing render batches into supported singleton imports."""
+    from .rigid_object import RigidObjectCfg
+    from ..shapes import CompoundShapeCfg, MeshCfg
+
+    if (
+        not isinstance(cfg, RigidObjectCfg)
+        or cfg.source is not None
+        or not cfg.render_enabled
+        or str(getattr(cfg.shape, "fpath", ""))
+        .lower()
+        .endswith((".usd", ".usda", ".usdc", ".usdz"))
+    ):
+        return None
+    elements = cfg.visuals
+    if elements is None:
+        if cfg.shape is None:
+            return None
+        elements = [VisualElementCfg(representation=cfg.shape)]
+    if not all(isinstance(e.representation, ShapeCfg) and e.visible for e in elements):
+        return None
+    leaves = [
+        part.shape
+        for element in elements
+        for part in (
+            element.representation.parts
+            if isinstance(element.representation, CompoundShapeCfg)
+            else ()
+        )
+    ]
+    leaves += [
+        e.representation
+        for e in elements
+        if not isinstance(e.representation, CompoundShapeCfg)
+    ]
+    if len(leaves) < 2 or not any(
+        isinstance(shape, MeshCfg)
+        and isinstance(shape.fpath, (str, Path))
+        and shape.fpath
+        for shape in leaves
+    ):
+        return None
+    from scipy.spatial.transform import Rotation
+
+    result = []
+    used = {element.id for element in elements}
+    for element in elements:
+        if not isinstance(element.representation, CompoundShapeCfg):
+            result.append(element)
+            continue
+        for index, part in enumerate(element.representation.parts):
+            name = f"{element.id}_part_{index}"
+            while name in used:
+                name += "_"
+            used.add(name)
+            part.__post_init__()
+            transform = np.eye(4, dtype=np.float32)
+            transform[:3, :3] = Rotation.from_quat(part.quaternion).as_matrix()
+            transform[:3, 3] = np.asarray(part.position) * element.scale
+            representation = part.shape.copy()
+            if representation.visual_material is None:
+                representation.visual_material = element.representation.visual_material
+            result.append(
+                VisualElementCfg(
+                    id=name,
+                    representation=representation,
+                    local_pose=element.local_pose @ transform,
+                    scale=element.scale,
+                )
+            )
+    return result
+
+
+def _resolve_visual_path(path: str | Path) -> str:
+    """Preserve existing local files before resolving data-root or catalog paths."""
+    from embodichain.data import get_data_path
+
+    local = Path(path)
+    return str(local.resolve()) if local.is_file() else get_data_path(str(path))
+
+
 def _uses_descriptor_visuals(cfg: object) -> bool:
     """Whether procedural rigid mesh appearance can lower on the owning body."""
     from .rigid_object import RigidObjectCfg
@@ -220,6 +301,7 @@ def _uses_descriptor_visuals(cfg: object) -> bool:
             isinstance(element.representation, ShapeCfg) and element.visible
             for element in cfg.visuals
         )
+        and _file_visual_binding_elements(cfg) is None
     )
 
 

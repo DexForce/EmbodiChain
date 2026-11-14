@@ -126,6 +126,25 @@ class CollisionShapeDesc:
     triangles: torch.Tensor | None = None
 
 
+def _apply_entity_visual_uv(cfg: RigidObjectCfg, entity: object) -> None:
+    """Apply UV projection only when this row's effective appearance requests it."""
+    shape = getattr(cfg, "visual_shape", None) or cfg.shape
+    visuals = cfg.visuals
+    if visuals is not None:
+        shape = visuals[0].representation if len(visuals) == 1 else None
+    if not isinstance(shape, MeshCfg) or not shape.compute_uv:
+        return
+    render_body = entity.get_render_body()
+    if render_body is None:
+        return
+    project_uv = getattr(render_body, "set_projective_uv", None)
+    if project_uv is None:
+        raise NotImplementedError(
+            "compute_uv requires a render body with set_projective_uv()."
+        )
+    project_uv(np.asarray(shape.project_direction, dtype=np.float32))
+
+
 def _build_cfg_init_pose(
     cfg: RigidObjectCfg, env_ids: Sequence[int] | torch.Tensor, device: torch.device
 ) -> torch.Tensor:
@@ -555,27 +574,10 @@ class RigidObject(BatchEntity):
         self._has_collision_visible_node = False
 
     def _apply_spawn_visual_uv(self) -> None:
-        """Apply configured projective UV mapping to spawned render bodies."""
-        shape = getattr(self.cfg, "visual_shape", None) or getattr(
-            self.cfg, "shape", None
-        )
-        visuals = getattr(self.cfg, "visuals", None)
-        if visuals is not None:
-            shape = visuals[0].representation if len(visuals) == 1 else None
-        if not isinstance(shape, MeshCfg) or not shape.compute_uv:
-            return
-
-        project_direction = np.asarray(shape.project_direction, dtype=np.float32)
-        for entity in self._entities:
-            render_body = entity.get_render_body()
-            if render_body is None:
-                continue
-            project_uv = getattr(render_body, "set_projective_uv", None)
-            if project_uv is None:
-                raise NotImplementedError(
-                    "compute_uv requires a render body with set_projective_uv()."
-                )
-            project_uv(project_direction)
+        """Apply projection using each row's complete replacement configuration."""
+        variants = self.cfg.env_variants or {}
+        for env_id, entity in enumerate(self._entities):
+            _apply_entity_visual_uv(variants.get(env_id, self.cfg), entity)
 
     def bind_spawn(
         self,
