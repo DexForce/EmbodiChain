@@ -77,6 +77,9 @@ def installed_benchmark(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path,
         assert "embodichain_benchmarks/__init__.py" in entries
         assert "embodichain_benchmarks/motion_generation/api.py" in entries
         assert "embodichain/cli/benchmark.py" in entries
+        assert not any(
+            "share/embodichain/assembly_patches/" in name for name in entries
+        )
         suites = {
             Path(name).name
             for name in entries

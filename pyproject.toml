@@ -60,6 +60,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+assembly = [
+  "mujoco>=3.3",
+]
 geometry = [
   # Optional mesh inputs for pure numerical geometry; no simulation/FCL backend.
   "trimesh>=4.9",

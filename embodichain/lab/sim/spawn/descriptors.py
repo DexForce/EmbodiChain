@@ -484,7 +484,7 @@ def rigid_desc_from_cfg(
         if "env_variants" not in {item.name for item in fields(ObjectDesc)}:
             raise NotImplementedError(
                 "This DexSim build cannot prepare per-environment rigid variants. "
-                "Apply scripts/patches/dexsim_assembly_variants.patch to the DexSim source and rebuild."
+                "Install a DexSim build exposing ObjectDesc.env_variants."
             )
         if not per_env:
             raise ValueError("env_variants requires per_env=True.")
@@ -2120,8 +2120,8 @@ def _compile_newton_collision(
     if unsupported_fields:
         raise NotImplementedError(
             "This DexSim build cannot preserve raw MuJoCo contact parameters "
-            f"{sorted(unsupported_fields)}. Apply scripts/patches/"
-            "dexsim_assembly_contact.patch to the DexSim source and rebuild; "
+            f"{sorted(unsupported_fields)}. Install a DexSim build exposing these "
+            "NewtonCollisionDesc fields; "
             "ke/kd are not an equivalent replacement for authored solimp."
         )
     contact_offset, rest_offset = _common_collision_envelope(physics)

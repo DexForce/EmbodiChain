@@ -104,6 +104,13 @@ canonicalization and pose-only playback boundaries.
 
 ## Runtime and extension boundaries
 
+GenSim can consume precision assembly through the reusable
+`embodichain/toolkits/assembly/` API; see
+[assembly assets and precision](../assembly-assets/assembly-assets.md)
+for pinned mjfit adaptation, portable manifests and native/USD construction.
+It does not use Scene Engine inference or the general SimReady decomposition
+pipeline, because approximate recooking can consume an assembly's clearance.
+
 Live generation/execution share a process and retain `hybrid`: renderer
 selection is process-wide and closing a temporary World does not reset it.
 

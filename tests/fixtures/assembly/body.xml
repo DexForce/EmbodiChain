@@ -1,0 +1,8 @@
+<mujoco>
+<compiler angle="radian"/>
+<worldbody><body name="part" pos=".1 .2 .3" euler=".2 -.3 .4">
+<freejoint name="part_joint"/>
+<inertial pos=".001 .002 .003" mass="2" diaginertia=".01 .02 .025" euler=".1 .2 .3"/>
+<geom name="piece_a" type="box" size=".01 .02 .03" pos="-.02 0 0"/>
+<geom name="piece_b" type="cylinder" size=".01 .02" pos=".03 .01 0" euler=".2 .4 -.1"/>
+</body></worldbody></mujoco>
