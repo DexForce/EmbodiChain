@@ -6045,6 +6045,32 @@ sampled physics step. The ``acceleration_valid`` descriptor reports the bound so
    IMUCfg
 
 
+Joint reaction wrench
+---------------------
+
+Enable ``NewtonPhysicsCfg.enable_joint_wrenches`` before preparing a CUDA
+Newton MuJoCo Warp scene with RNE enabled. A ``JointWrench`` selects a native
+parent/child articulation joint. It reads the final solver substep's reaction
+exerted by the parent on the child, expressed at the configured sensor
+offset from the child link origin. Force is in newtons and torque in
+newton-metres. Both vectors use sensor axes. Check ``wrench_valid`` after
+initialization and reset.
+
+.. currentmodule:: embodichain.lab.sim.sensors
+
+.. autosummary::
+
+   JointWrench
+   JointWrenchCfg
+
+.. currentmodule:: embodichain.lab.sim.sensors.joint_wrench
+
+.. autosummary::
+
+   JointWrench
+   JointWrenchCfg
+
+
 Planar contact grid
 -------------------
 

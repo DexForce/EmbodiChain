@@ -28,6 +28,7 @@ from tensordict import TensorDict
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.sim_manager import SimulationManager
+    from .base_sensor import SensorCfg
     from .contact import ContactSensor, ContactSensorCfg
     from .ray import RayScene
 
@@ -116,6 +117,10 @@ class SensorContext:
             linear acceleration at the center of mass, angular acceleration, and
             the center-of-mass offset in body-local axes, all batched by environment.
             Returned buffers may be reused by the provider.
+        joint_wrench_factory: Optional asset/joint and child-mount factory
+            returning a completed-step reader. It fills the supplied per-row
+            force, torque and validity buffers. The wrench is expressed at the
+            sensor origin in sensor axes.
     """
 
     device: torch.device
@@ -131,6 +136,14 @@ class SensorContext:
         Callable[
             [str, str | None],
             Callable[[], tuple[torch.Tensor, torch.Tensor, torch.Tensor]] | None,
+        ]
+        | None
+    ) = None
+
+    joint_wrench_factory: (
+        Callable[
+            [str, str, SensorCfg.OffsetCfg, torch.Tensor, torch.Tensor, torch.Tensor],
+            Callable[[], None],
         ]
         | None
     ) = None
@@ -154,6 +167,7 @@ class SensorContext:
             services.create_contact_reader,
             services.create_ray_scene,
             services.create_acceleration_reader,
+            services.create_joint_wrench_reader,
         )
 
 
@@ -244,6 +258,26 @@ class _ManagerSensorServices:
             None,
         )
         return None if factory is None else factory(asset_uid, link_name)
+
+    def create_joint_wrench_reader(
+        self,
+        asset_uid: str,
+        joint_name: str,
+        offset: SensorCfg.OffsetCfg,
+        force: torch.Tensor,
+        torque: torch.Tensor,
+        valid: torch.Tensor,
+    ) -> Callable[[], None]:
+        factory = getattr(
+            getattr(self._manager(), "physics", None),
+            "_create_joint_wrench_reader",
+            None,
+        )
+        if factory is None:
+            raise NotImplementedError(
+                "JointWrench requires a native joint wrench provider."
+            )
+        return factory(asset_uid, joint_name, offset, force, torque, valid)
 
     def create_contact_reader(self, cfg: ContactSensorCfg) -> ContactSensor:
         from .contact import ContactSensor
