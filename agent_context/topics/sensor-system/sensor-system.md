@@ -34,10 +34,17 @@ discovered once per process; errors name the offending entry point and retain
 the original cause. Do not combine explicit and installed registration for the
 same identifier. Version 1 is the supported extension API.
 
+Concurrent resolutions share one in-flight load and its result or failure;
+same-thread recursive imports fail explicitly. Legacy factory overrides are
+selected before importing any installed implementation with the same name.
+
 Gym renderer-demand prediction and USD mounted-camera preflight use the same
 factory resolution, including legacy overrides; registering a Camera subclass
 must not require a second dictionary mutation. Typed nested configclasses are
 decoded from annotations, including required and nullable fields.
+Inherited annotations resolve in their declaring module. Partial nested
+overrides retain calibrated defaults even through custom decoders; non-nullable
+nested configurations reject explicit null during decoding.
 
 New factories accept `factory(cfg, *, context)`. `SensorContext` supplies the
 device, instance count, manager clock and public joint-state snapshots; external
@@ -51,7 +58,10 @@ reject use once destruction has been requested.
 Builtin camera/contact constructors retain their owner adapters. Existing
 `SUPPORTED_SENSOR_TYPES` overrides and explicitly registered
 `legacy_factory=True` factories retain the old calling convention; new plugins
-use the registry. Generalized non-camera mounting, sampling periods and output
+use the registry. Context factories returning Camera instances also use manager
+parent binding and cleanup on attachment failure. StereoCamera subclasses and
+aliases remain unsupported for Gaussian capture, regardless of creation order.
+Generalized non-camera mounting, sampling periods and output
 descriptors are separate runtime-contract work, not guarantees of this initial
 extension path. The independently installable example and usage instructions
 live in
