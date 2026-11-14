@@ -34,6 +34,7 @@ from embodichain.utils.math import (
     quat_from_matrix,
 )
 
+from .rigid_object import _build_cfg_init_pose
 from ._mesh_utils import get_combined_triangles, get_combined_vertices
 
 if TYPE_CHECKING:
@@ -670,30 +671,12 @@ class RigidObjectGroup(BatchEntity):
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
         env, _, _ = self._selected_indices(env_ids)
         self._restore_default_physical_properties(env)
-        member_poses = []
-        for cfg in self.cfg.rigid_objects.values():
-            if cfg.init_local_pose is not None:
-                member_poses.append(
-                    torch.as_tensor(
-                        cfg.init_local_pose,
-                        dtype=torch.float32,
-                        device=self.device,
-                    ).reshape(4, 4)
-                )
-                continue
-            pose = torch.eye(4, dtype=torch.float32, device=self.device)
-            pose[:3, 3] = torch.as_tensor(
-                cfg.init_pos, dtype=torch.float32, device=self.device
-            )
-            rotation = torch.as_tensor(
-                cfg.init_rot, dtype=torch.float32, device=self.device
-            )
-            pose[:3, :3] = matrix_from_euler(
-                (rotation * torch.pi / 180.0).reshape(1, 3), "XYZ"
-            )[0]
-            member_poses.append(pose)
-        pose = torch.stack(member_poses).repeat(len(env), 1, 1)
-        self.set_local_pose(pose.reshape(len(env), self.num_objects, 4, 4), env_ids=env)
+        member_poses = [
+            _build_cfg_init_pose(cfg, env, self.device)
+            for cfg in self.cfg.rigid_objects.values()
+        ]
+        pose = torch.stack(member_poses, dim=1)
+        self.set_local_pose(pose, env_ids=env)
         self.clear_dynamics(env_ids=env)
 
     def set_physical_visible(

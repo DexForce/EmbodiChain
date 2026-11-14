@@ -191,8 +191,8 @@ def build_fixtures(output: Path, reference: Path | None = None) -> None:
                         runtime=dict(
                             env_ids=[7, 2, 19],
                             events=[
-                                dict(kind="action_planned", timestamp=1.0 + index),
-                                dict(kind="action_completed", timestamp=1.5 + index),
+                                dict(kind="skill_planned", timestamp=1.0 + index),
+                                dict(kind="skill_completed", timestamp=1.5 + index),
                             ],
                         )
                     ),

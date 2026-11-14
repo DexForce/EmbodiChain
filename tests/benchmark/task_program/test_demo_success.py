@@ -232,6 +232,37 @@ def test_each_seed_executes_once_without_retry_and_discards_data() -> None:
     ]
 
 
+def test_named_case_retains_shared_reset_outcomes_in_raw_artifact(tmp_path):
+    outcome = {
+        "identity": {"env_id": 0, "episode_uuid": "source-episode", "seed": 11},
+        "execution": {"source": "task_program"},
+        "physical": {"final_acceptance": {"physical_satisfied": True}},
+        "acceptance": {"accepted": True},
+        "termination": {"truncated": False},
+        "persistence": {"dataset_selected": False, "dataset": [], "trajectory": None},
+    }
+
+    class ReportingEnv(_FakeEnv):
+        def reset(self, **kwargs):
+            super().reset(**kwargs)
+            return None, (
+                {} if "seed" in kwargs else {"reset_episode_outcomes": {0: outcome}}
+            )
+
+    trials = collect_demo_success_trials(
+        [DemoSuccessCase("stack-shared-rules", (11,))],
+        lambda case: ReportingEnv(),
+        episode_executor=_EpisodeExecutor([_result((True,))]),
+        clock=_clock([0.0, 0.1]),
+        memory_sampler=_memory_sampler([MemorySnapshot(100.0, 0.0, 0.0)] * 2),
+    )
+    raw = write_raw_trials(tmp_path / "trials.json", trials)
+    (trial,) = load_raw_trials(raw)
+    assert trial.case_id == "stack-shared-rules"
+    assert trial.seed == 11
+    assert trial.episode_result["episode_outcomes"] == [outcome]
+
+
 def test_executor_error_is_counted_and_next_seed_still_executes() -> None:
     env = _FakeEnv(num_envs=2)
     calls: list[int | None] = []

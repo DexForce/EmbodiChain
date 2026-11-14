@@ -237,7 +237,7 @@ def test_marvin_stack_open_fingers_clear_the_cube_support() -> None:
     asset = Path(cfg.robot.fpath)
     robot_xml = ET.parse(asset).getroot()
     preset = deployment.integration.registration.robot_profile_binding.presets[0]
-    grasp = preset.action_option_templates["pick"].fixed_object_to_eef.numpy()
+    grasp = preset.skill_option_templates["pick"].fixed_object_to_eef.numpy()
 
     def origin_pose(origin: ET.Element | None) -> np.ndarray:
         result = np.eye(4)
@@ -365,19 +365,35 @@ def test_marvin_pour_lowers_scene_and_targets_without_changing_program_steps(
     assert scene == original_scene
     program = load_config(path.parent / payload["task_program"]["program"])
     original_program = load_config(path.parent / reference["task_program"]["program"])
+    from embodichain.lab.task_program.language.authoring import normalize_task_program
+
+    program = normalize_task_program(program).declaration
+    original_program = normalize_task_program(original_program).declaration
     targets, original_targets = program.pop("targets"), original_program.pop("targets")
-    assert targets.keys() == original_targets.keys()
-    for name, target in targets.items():
-        position = target["values"][0].pop("position")
-        original_position = original_targets[name]["values"][0].pop("position")
+    assert targets.keys() - original_targets.keys() == {"bottle_pour_pose"}
+    assert original_targets.keys() <= targets.keys()
+    for name, target in original_targets.items():
+        position = targets[name]["values"][0].pop("position")
+        original_position = target["values"][0].pop("position")
         assert position[:2] == original_position[:2]
         assert position[2] == pytest.approx(original_position[2] - 0.125)
-        assert target == original_targets[name]
+        assert targets[name] == target
+    marvin_segments = program["program"]["items"]
+    cobot_segments = original_program["program"]["items"]
+    assert cobot_segments[0].pop("validators") == [
+        {"kind": "condition", "ref": "bottle_lifted"}
+    ]
+    assert cobot_segments[1].pop("validators") == [
+        {"kind": "condition", "ref": "bottle_above_cup"}
+    ]
+    assert marvin_segments[1].pop("validators")[0]["target"] == "bottle_pour_pose"
+    for segment in cobot_segments:
+        assert segment.pop("contract")["outcomes"]
     assert program == original_program
     cfg = config_to_cfg(payload, source_path=path)
     assert cfg.target_control_frequency == 100
     preset = deployment.integration.registration.robot_profile_binding.presets[0]
     assert preset.motion_policy.sample_count == 160
-    assert preset.action_option_templates[
+    assert preset.skill_option_templates[
         "simulation.pour"
     ].rotate_angle == pytest.approx(-torch.pi / 3)

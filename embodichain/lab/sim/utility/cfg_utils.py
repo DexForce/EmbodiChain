@@ -344,6 +344,7 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
                     "fname",
                     "fpath_prefix",
                     "use_signature_check",
+                    "force_assembly",
                 ):
                     if field in user_urdf_cfg:
                         setattr(base_cfg.urdf_cfg, field, user_urdf_cfg[field])
@@ -352,13 +353,6 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
                         {"sensors": user_urdf_cfg["sensors"]}
                     )
                     base_cfg.urdf_cfg.sensors = decoded.sensors
-                if "component_prefix" in user_urdf_cfg:
-                    decoded = type(base_cfg.urdf_cfg).from_dict(
-                        {"component_prefix": user_urdf_cfg["component_prefix"]}
-                    )
-                    prefixes = dict(base_cfg.urdf_cfg.component_prefix)
-                    prefixes.update(decoded.component_prefix)
-                    base_cfg.urdf_cfg.component_prefix = list(prefixes.items())
                 # Merge name_case policy if the override specifies one.
                 user_name_case = user_urdf_cfg.get("name_case")
                 if isinstance(user_name_case, dict):
@@ -366,6 +360,18 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
                         base_cfg.urdf_cfg.name_case = dict(user_name_case)
                     else:
                         base_cfg.urdf_cfg.name_case.update(user_name_case)
+
+                if "component_prefix" in user_urdf_cfg:
+                    from embodichain.toolkits.urdf_assembly.name_normalizer import (
+                        NameNormalizer,
+                    )
+
+                    prefixes = {
+                        **dict(base_cfg.urdf_cfg.component_prefix),
+                        **dict(user_urdf_cfg["component_prefix"] or {}),
+                    }
+                    NameNormalizer.resolve_component_prefixes(prefixes)
+                    base_cfg.urdf_cfg.component_prefix = list(prefixes.items())
 
                 components = user_urdf_cfg.get("components", [])
                 # to_dict serializes components as a dict keyed by type;
@@ -407,4 +413,8 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
             if hasattr(robot_cfg, key):
                 setattr(base_cfg, key, getattr(robot_cfg, key))
 
+    if base_cfg.gripper_bindings:
+        from .gripper_binding import _apply_gripper_tcp_defaults
+
+        _apply_gripper_tcp_defaults(base_cfg, override_cfg_dict.get("solver_cfg"))
     return base_cfg

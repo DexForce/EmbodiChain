@@ -353,7 +353,32 @@ def _populate_dual_cfg(
             for side, comp_type, _ in _SIDES
         ]
     )
+    from copy import deepcopy
+    from embodichain.toolkits.urdf_assembly.name_normalizer import NameNormalizer
+
+    cfg.urdf_cfg.name_case = deepcopy(base_cfg.urdf_cfg.name_case)
     name_case = cfg.urdf_cfg.name_case
+    normalizer = NameNormalizer(name_case)
+    hand_joint_maps = {side: {} for side, _, _ in _SIDES}
+    hand_link_maps = {side: {} for side, _, _ in _SIDES}
+    for side, _, prefix in _SIDES:
+        for binding in base_cfg.gripper_bindings.values():
+            for native, actual in binding["joint_names"].items():
+                hand_joint_maps[side][actual] = normalizer.component_name(
+                    "joint", native, prefix
+                )
+            for native, actual in binding["link_names"].items():
+                hand_link_maps[side][actual] = normalizer.component_name(
+                    "link", native, prefix
+                )
+            for field, native_field in (
+                ("root_link", "root_link"),
+                ("reference_link", "reference_link"),
+            ):
+                if binding.get(field):
+                    hand_link_maps[side][binding[field]] = normalizer.component_name(
+                        "link", binding["defaults"][native_field], prefix
+                    )
 
     # control_parts: duplicate every base part into left_/right_ with prefixed
     # joint names (generic over all base parts, e.g. arm *and* eef).
@@ -361,7 +386,10 @@ def _populate_dual_cfg(
     for part_name, joints in base_control.items():
         for side, _comp, prefix in _SIDES:
             new_control[f"{side}_{part_name}"] = [
-                _prefixed_name(j, prefix, "joint", name_case) for j in joints
+                hand_joint_maps[side].get(
+                    j, _prefixed_name(j, prefix, "joint", name_case)
+                )
+                for j in joints
             ]
     if dual_part:
         new_control["dual_arm"] = (
@@ -376,7 +404,10 @@ def _populate_dual_cfg(
     for side, _comp, prefix in _SIDES:
         if use_assembled:
             root = _prefixed_name(base_solver.root_link_name, prefix, "link", name_case)
-            end = _prefixed_name(base_solver.end_link_name, prefix, "link", name_case)
+            end = hand_link_maps[side].get(
+                base_solver.end_link_name,
+                _prefixed_name(base_solver.end_link_name, prefix, "link", name_case),
+            )
         else:
             root = base_solver.root_link_name
             end = base_solver.end_link_name
@@ -388,8 +419,115 @@ def _populate_dual_cfg(
     cfg.joint_drive_props = _mirror_joint_drive_props(
         base_cfg.joint_drive_props, name_case
     )
+    cfg.mimic_compliance = None
+    if base_cfg.mimic_compliance is not None:
+        cfg.mimic_compliance = {
+            hand_joint_maps[side].get(
+                name, _prefixed_name(name, prefix, "joint", name_case)
+            ): compliance.copy()
+            for side, _comp, prefix in _SIDES
+            for name, compliance in base_cfg.mimic_compliance.items()
+        }
     cfg.attrs = base_cfg.attrs.copy()
     cfg.root_props = base_cfg.root_props.copy()
+
+    # Preserve explicitly bound hands when composing a complete single-arm model.
+    cfg.gripper_bindings = {}
+    for side, _comp, prefix in _SIDES:
+        for instance, original in base_cfg.gripper_bindings.items():
+            binding = deepcopy(original)
+            declaration = binding["declaration"]
+            declaration["motion_part"] = f"{side}_{declaration['motion_part']}"
+            declaration["control_part"] = f"{side}_{declaration['control_part']}"
+            component = declaration.get("component_type")
+            if declaration["mode"] == "mounted":
+                source = base_components[component]
+                declaration["component_type"] = f"{side}_{component}"
+                cfg.urdf_cfg.component_prefix.append(
+                    (declaration["component_type"], prefix)
+                )
+                cfg.urdf_cfg.add_component(
+                    declaration["component_type"],
+                    source["urdf_path"],
+                    source["transform"],
+                    **source.get("params", {}),
+                )
+            else:
+                declaration["component_type"] = f"{side}_{arm_part}"
+            for field, kind in (("joint_names", "joint"), ("link_names", "link")):
+                binding[field] = {
+                    native: normalizer.component_name(kind, native, prefix)
+                    for native, actual in binding[field].items()
+                }
+            binding["root_link"] = normalizer.component_name(
+                "link", binding["defaults"]["root_link"], prefix
+            )
+            if binding.get("reference_link"):
+                binding["reference_link"] = normalizer.component_name(
+                    "link", binding["defaults"]["reference_link"], prefix
+                )
+            new_instance = f"{side}_{instance}"
+            binding["defaults"]["binding"] = {
+                "instance": new_instance,
+                **deepcopy(declaration),
+            }
+            cfg.gripper_bindings[new_instance] = binding
+    if base_cfg.gripper_bindings:
+        import xml.etree.ElementTree as ET
+        from embodichain.utils.string import resolve_matching_names_values
+
+        limits = base_cfg.qpos_limits
+        source_path = base_cfg.fpath or deepcopy(base_cfg.urdf_cfg).assemble_urdf()
+        source_names = [
+            joint.get("name")
+            for joint in ET.parse(source_path).findall("joint")
+            if joint.get("type") != "fixed"
+        ]
+        if isinstance(limits, dict):
+            _, names, values = resolve_matching_names_values(limits, source_names)
+            limits = dict(zip(names, values))
+        elif limits is not None:
+            if hasattr(limits, "detach"):
+                limits = limits.detach().cpu().numpy()
+            rows = np.asarray(limits)
+            if rows.shape != (len(source_names), 2):
+                raise ValueError(
+                    "Base qpos_limits must match complete source-order joints."
+                )
+            limits = dict(zip(source_names, rows.tolist()))
+        if limits is not None:
+            cfg.qpos_limits = {
+                hand_joint_maps[side].get(
+                    name, _prefixed_name(name, prefix, "joint", name_case)
+                ): deepcopy(value)
+                for side, _comp, prefix in _SIDES
+                for name, value in limits.items()
+            }
+        # Resolve authored joint/control-part rules before renaming so regexes
+        # and custom hand prefixes use the same final names as assembly.
+        from embodichain.lab.sim.spawn.descriptors import _joint_property_matches
+
+        for prop in (*_DRIVE_PROPS, "target_mode"):
+            configured = getattr(base_cfg.joint_drive_props, prop, None)
+            if isinstance(configured, dict):
+                resolved = _joint_property_matches(
+                    configured,
+                    source_names,
+                    property_name=prop,
+                    numeric_only=prop != "target_mode",
+                    control_parts=base_control,
+                )
+                setattr(
+                    cfg.joint_drive_props,
+                    prop,
+                    {
+                        hand_joint_maps[side].get(
+                            name, _prefixed_name(name, prefix, "joint", name_case)
+                        ): deepcopy(value)
+                        for side, _comp, prefix in _SIDES
+                        for name, value in resolved
+                    },
+                )
 
 
 def build_dual_arm_cfg(
@@ -436,6 +574,8 @@ class DualArmRobotCfg(RobotCfg):
     ``base_link``. The left/right ``control_parts``, per-arm ``solver_cfg`` and
     mirrored ``joint_drive_props`` are derived automatically by
     :func:`build_dual_arm_cfg`.
+    The base robot's ``mimic_compliance`` entries are copied to the
+    corresponding master joints on both assembled arms.
 
     Example:
 

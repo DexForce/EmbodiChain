@@ -560,6 +560,8 @@ def test_base_env_preserves_terminal_rows_before_reused_reset_storage(
     env._get_termination_flags = lambda obs, info: BaseEnv._get_termination_flags(
         env, obs, info
     )
+    env._seal_step_outcomes = lambda *args: BaseEnv._seal_step_outcomes(env, *args)
+    env._after_observation = lambda *args: BaseEnv._after_observation(env, *args)
     _, _, _, _, info = BaseEnv.step(env, torch.zeros(3, 1))
     torch.testing.assert_close(
         info["terminal_observation"]["state"], torch.tensor([[3.0], [7.0]])

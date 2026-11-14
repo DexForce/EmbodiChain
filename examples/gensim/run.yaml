@@ -1,0 +1,11 @@
+schema_version: embodichain.gensim-run/v1
+
+# Supply your photograph here or override it with --image.
+image: table.png
+instruction: Put the cup on the tray.
+output: ../../outputs/gensim-run-001
+
+runtime: runtime.dual_ur5.yaml
+execution_policy: extensions/embodichain_tasks/configs/components/execution_policies/motion_gen_verified.yaml
+task_id: generated_tabletop_task
+headless: true

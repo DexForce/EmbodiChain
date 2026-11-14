@@ -36,6 +36,7 @@ import torch
 
 from embodichain.utils import logger
 from embodichain.lab.gym.envs.demo import DEMO_ANNOTATION_KEYS
+from .dataset_manager import _DatasetSaveReceipts
 from .datasets import LeRobotRecorder
 
 __all__ = ["AsyncLeRobotRecorder"]
@@ -210,7 +211,7 @@ class AsyncLeRobotRecorder(LeRobotRecorder):
         extra: Optional[Dict] = None,
         use_videos: bool = False,
         **kwargs,
-    ) -> None:
+    ) -> _DatasetSaveReceipts | None:
         """Enqueue completed episodes for background saving.
 
         Reads each env's rollout-buffer slice, clones it to CPU (so the worker
@@ -250,6 +251,7 @@ class AsyncLeRobotRecorder(LeRobotRecorder):
             if len(env_ids) == 0:
                 return
 
+            receipts: dict[int, list[str]] = {}
             for env_id in env_ids.cpu().tolist():
                 step = self._episode_length(env_id)
                 # Initial reset may reach the recorder before the first
@@ -296,6 +298,11 @@ class AsyncLeRobotRecorder(LeRobotRecorder):
                     )
                 for payload in payloads:
                     self._enqueue_payload(payload)
+                    if payload[-1] is not None and "episode_uuid" in payload[-1]:
+                        receipts.setdefault(env_id, []).append(
+                            payload[-1]["episode_uuid"]
+                        )
+            return _DatasetSaveReceipts("queued", receipts)
 
     def _enqueue_payload(self, payload: tuple) -> None:
         """Enqueue one payload and account for bounded-queue backpressure."""

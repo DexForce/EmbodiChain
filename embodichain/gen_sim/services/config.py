@@ -25,6 +25,7 @@ import os
 from pathlib import Path
 from typing import Any
 from .errors import ServiceConfigurationError
+from ..env import _iter_env_file
 
 __all__: list[str] = []
 DEFAULT_JSON = (
@@ -37,23 +38,10 @@ def read_env(path: Path) -> dict[str, str]:
     """Read an optional dotenv without mutating process environment."""
     if not path.is_file():
         return {}
-    values: dict[str, str] = {}
-    for number, line in enumerate(path.read_text().splitlines(), 1):
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        line = line.removeprefix("export ")
-        if "=" not in line:
-            continue
-        key, value = (part.strip() for part in line.split("=", 1))
-        if not key.isidentifier():
-            raise ServiceConfigurationError(f"Invalid dotenv key at line {number}")
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-            value = value[1:-1]
-        else:
-            value = value.split(" #", 1)[0].rstrip()
-        values[key] = value
-    return values
+    try:
+        return dict(_iter_env_file(path))
+    except ValueError as error:
+        raise ServiceConfigurationError(str(error)) from error
 
 
 def _load_services_config(

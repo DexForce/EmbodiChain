@@ -233,7 +233,11 @@ class UsdSceneBinding:
         """Import a schema-v2 USD stage and bind every indexed entity."""
         path = Path(stage_path).expanduser().resolve()
         index = UsdSceneIndex.load(path, require_schema=True)
-        assets = sim.add_usd(name=path.stem, file_path=str(path))
+        from embodichain.lab.sim.cfg import UsdImportCfg, UsdSourceCfg
+
+        assets = sim.add_usd(
+            UsdImportCfg(name=path.stem, source=UsdSourceCfg(file_path=str(path)))
+        )
         bindings: list[UsdEntityBinding] = []
         for desc in index.entities:
             runtime = assets.get(desc.prim_path)

@@ -1,0 +1,959 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+from __future__ import annotations
+
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+import json
+import numpy as np
+import pytest
+import torch
+
+from embodichain.lab.sim.cfg import (
+    GaussianSplatCfg,
+    GaussianRenderCfg,
+    VisualElementCfg,
+    VisualObjectCfg,
+    RigidObjectCfg,
+    ArticulationCfg,
+    RobotCfg,
+)
+from embodichain.lab.sim.shapes import CubeCfg
+from embodichain.lab.sim.spawn._visuals import _VisualBinding
+from embodichain.lab.sim.spawn.descriptors import (
+    visual_desc_from_cfg,
+    rigid_desc_from_cfg,
+)
+from embodichain.lab.sim.cfg.visuals import _visual_elements
+from embodichain.lab.sim.sim_manager import SimulationManager
+
+pytestmark = pytest.mark.no_sim
+
+
+@pytest.mark.parametrize(
+    "alias", ["visual_shape", "visual_parts", "nested_visual_shape"]
+)
+def test_legacy_rigid_appearance_normalizes_and_rejects_competing_inputs(alias):
+    from embodichain.lab.sim.shapes import CompoundShapeCfg, ShapePartCfg
+
+    def config(*, canonical=False):
+        kwargs = {"uid": "legacy", "shape": CubeCfg()}
+        if canonical:
+            kwargs["visuals"] = []
+        if alias == "visual_shape":
+            kwargs["visual_shape"] = CubeCfg(size=(2, 3, 4))
+        elif alias == "nested_visual_shape":
+            kwargs["visual_shape"] = CompoundShapeCfg(
+                parts=[ShapePartCfg(shape=CubeCfg())],
+                visual_parts=[
+                    ShapePartCfg(shape=CubeCfg(size=(2, 3, 4)), position=(1, 2, 3))
+                ],
+            )
+        else:
+            kwargs["shape"] = CompoundShapeCfg(
+                parts=[ShapePartCfg(shape=CubeCfg())],
+                visual_parts=[
+                    ShapePartCfg(shape=CubeCfg(size=(2, 3, 4)), position=(1, 2, 3))
+                ],
+            )
+        return RigidObjectCfg(**kwargs)
+
+    with pytest.warns(DeprecationWarning, match="visuals"):
+        cfg = config()
+    assert cfg.visual_shape is None
+    assert getattr(cfg.shape, "visual_parts", None) is None
+    assert len(cfg.visuals) == 1
+    restored = RigidObjectCfg.from_dict(cfg.to_dict())
+    assert restored.visual_shape is None
+    assert restored.visuals[0].id == cfg.visuals[0].id
+    assert (
+        restored.visuals[0].representation.to_dict()
+        == cfg.visuals[0].representation.to_dict()
+    )
+    np.testing.assert_array_equal(
+        restored.visuals[0].local_pose, cfg.visuals[0].local_pose
+    )
+    desc, _ = rigid_desc_from_cfg(restored, newton_solver_type="dexuni")
+    assert desc.renders[0].size == (2, 3, 4)
+    assert desc.collisions[0].size == (1, 1, 1)
+    with pytest.raises(ValueError, match="one appearance input"):
+        config(canonical=True)
+
+
+def test_canonical_rigid_mesh_visuals_preserve_transform_and_semantic_surface():
+    from embodichain.lab.sim.objects import RigidObject
+
+    pose = np.eye(4, dtype=np.float32)
+    pose[:3, 3] = [1, 2, 3]
+    cfg = RigidObjectCfg(
+        uid="canonical",
+        shape=CubeCfg(size=(0.1, 0.2, 0.3)),
+        visuals=[
+            VisualElementCfg(
+                id="outer",
+                representation=CubeCfg(size=(2, 3, 4)),
+                local_pose=pose,
+                scale=2,
+            )
+        ],
+    )
+    desc, _ = rigid_desc_from_cfg(cfg, newton_solver_type="dexuni")
+    np.testing.assert_allclose(desc.renders[0].local_transform[:3, :3], np.eye(3) * 2)
+    np.testing.assert_allclose(desc.renders[0].local_transform[:3, 3], [1, 2, 3])
+    assert desc.collisions[0].render_source_index is None
+    owner = SimpleNamespace(
+        cfg=cfg,
+        device=torch.device("cpu"),
+        num_instances=2,
+        get_body_scale=lambda ids: torch.ones((len(ids), 3)),
+    )
+    vertices, _ = RigidObject.get_semantic_mesh(owner, [0, 1])
+    torch.testing.assert_close(
+        vertices.amax(1) - vertices.amin(1),
+        torch.tensor([[0.1, 0.2, 0.3]]).repeat(2, 1),
+    )
+
+
+@pytest.mark.parametrize("compound", [False, True])
+def test_canonical_visual_paths_resolve_data_root_without_mutating_cfg(
+    tmp_path, monkeypatch, compound
+):
+    from embodichain.data import constants
+    from embodichain.lab.sim.shapes import (
+        MeshCfg,
+        MeshCollisionCfg,
+        CompoundShapeCfg,
+        ShapePartCfg,
+    )
+
+    path = tmp_path / "asset_bank" / "appearance.obj"
+    path.parent.mkdir()
+    path.write_text("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
+    monkeypatch.setattr(constants, "EMBODICHAIN_DEFAULT_DATA_ROOT", str(tmp_path))
+    mesh = MeshCfg(
+        fpath="asset_bank/appearance.obj",
+        collision=MeshCollisionCfg(approximation="convex_hull"),
+    )
+    representation = (
+        CompoundShapeCfg(parts=[ShapePartCfg(shape=mesh)]) if compound else mesh
+    )
+    cfg = RigidObjectCfg(
+        uid="asset",
+        shape=CubeCfg(),
+        visuals=[VisualElementCfg(representation=representation)],
+    )
+    descriptor, _ = rigid_desc_from_cfg(cfg, newton_solver_type="dexuni")
+    assert descriptor.renders[0].file_path == str(path)
+    source = cfg.visuals[0].representation
+    assert (
+        source.parts[0].shape if compound else source
+    ).fpath == "asset_bank/appearance.obj"
+
+
+@pytest.mark.parametrize(
+    "unsupported",
+    [
+        "semantic_shape",
+        "source",
+        "Gaussian visuals",
+        "source_pose_mode",
+        "asset_physics_mode",
+    ],
+)
+def test_rigid_variants_reject_fields_without_per_environment_runtime_support(
+    unsupported,
+):
+    from embodichain.lab.sim.cfg import UsdSourceCfg
+
+    variant = RigidObjectCfg(shape=CubeCfg())
+    if unsupported == "semantic_shape":
+        variant.semantic_shape = CubeCfg()
+    elif unsupported == "source":
+        variant.source = UsdSourceCfg(file_path="asset.usda")
+    elif unsupported == "Gaussian visuals":
+        variant.visuals = [
+            VisualElementCfg(representation=GaussianSplatCfg(file_path="scan.ply"))
+        ]
+    elif unsupported == "source_pose_mode":
+        variant.source_pose_mode = "preserve"
+    else:
+        variant.asset_physics_mode = "overlay"
+    with pytest.raises(ValueError, match=unsupported):
+        RigidObjectCfg(shape=CubeCfg(), env_variants={1: variant})
+
+
+def test_rigid_variant_semantics_follow_physical_shape_and_shared_proxy():
+    from embodichain.lab.sim.objects import RigidObject
+
+    cfg = RigidObjectCfg(
+        uid="variants",
+        shape=CubeCfg(size=(0.1, 0.1, 0.1)),
+        env_variants={
+            1: RigidObjectCfg(
+                shape=CubeCfg(size=(0.8, 0.8, 0.8)),
+                visuals=[VisualElementCfg(representation=CubeCfg(size=(2, 2, 2)))],
+            )
+        },
+    )
+    owner = object.__new__(RigidObject)
+    owner.cfg, owner.device, owner._entities = (
+        cfg,
+        torch.device("cpu"),
+        [object(), object()],
+    )
+    owner.get_body_scale = lambda ids: torch.ones((len(ids), 3))
+    vertices, _ = owner.get_semantic_mesh([1, 0])
+    torch.testing.assert_close(
+        vertices[:, :, 0].amax(1) - vertices[:, :, 0].amin(1), torch.tensor([0.8, 0.1])
+    )
+    cfg.semantic_shape = CubeCfg(size=(0.3, 0.3, 0.3))
+    vertices, _ = owner.get_semantic_mesh([1, 0])
+    torch.testing.assert_close(
+        vertices[:, :, 0].amax(1) - vertices[:, :, 0].amin(1), torch.tensor([0.3, 0.3])
+    )
+    with pytest.raises(KeyError, match="Unknown env_variants"):
+        RigidObjectCfg.from_dict({"env_variants": {"1": {"unknown_appearance": []}}})
+
+
+def _semantic_selection_owner(mode):
+    from embodichain.lab.sim.objects import RigidObject
+
+    owner = object.__new__(RigidObject)
+    owner.device = torch.device("cpu")
+    owner._entities = [object(), object()]
+    owner.cfg = RigidObjectCfg(
+        uid="selected",
+        shape=CubeCfg(size=(0.1, 0.1, 0.1)),
+        visuals=[VisualElementCfg(representation=CubeCfg())],
+        env_variants={1: RigidObjectCfg(shape=CubeCfg(size=(0.8, 0.8, 0.8)))},
+    )
+    owner.get_body_scale = MagicMock(side_effect=lambda ids: torch.ones((len(ids), 3)))
+    vertices = torch.tensor(
+        [[[-0.05, 0, 0], [0.05, 0, 0]], [[-0.4, 0, 0], [0.4, 0, 0]]]
+    )
+    faces = torch.empty((2, 0, 3), dtype=torch.int32)
+    owner.get_vertices = MagicMock(
+        side_effect=lambda ids, **kwargs: vertices[ids].clone()
+    )
+    owner.get_triangles = MagicMock(side_effect=lambda ids: faces[ids].clone())
+    if mode == "proxy":
+        owner.cfg.semantic_shape = CubeCfg(size=(0.1, 0.1, 0.1))
+    elif mode == "companion":
+        binding = object.__new__(_VisualBinding)
+        binding.owner, binding.semantic = owner, (vertices, faces)
+        owner._visual_binding = binding
+    elif mode == "native":
+        owner.cfg.visuals = owner.cfg.env_variants = None
+    return owner
+
+
+@pytest.mark.parametrize("mode", ["descriptor", "proxy", "companion", "native"])
+@pytest.mark.parametrize(
+    "ids,error",
+    [
+        ([-1], IndexError),
+        ([True], IndexError),
+        ([1.9], IndexError),
+        ([2], IndexError),
+        ([0, 0], ValueError),
+        (torch.tensor([1.0]), IndexError),
+    ],
+)
+def test_semantic_selection_rejects_invalid_ids_before_geometry_reads(
+    mode, ids, error, monkeypatch
+):
+    import embodichain.lab.sim.spawn._visuals as visual_module
+
+    owner = _semantic_selection_owner(mode)
+    decode = MagicMock(
+        side_effect=AssertionError("invalid selection must precede decoding")
+    )
+    monkeypatch.setattr(visual_module, "_semantic_mesh_arrays", decode)
+    with pytest.raises(error):
+        owner.get_semantic_mesh(ids)
+    decode.assert_not_called()
+    owner.get_body_scale.assert_not_called()
+    owner.get_vertices.assert_not_called()
+    owner.get_triangles.assert_not_called()
+
+
+@pytest.mark.parametrize("mode", ["descriptor", "proxy", "companion", "native"])
+@pytest.mark.parametrize(
+    "ids", [None, [1, 0], np.array([1, 0], dtype=np.int64), torch.tensor([1, 0]), []]
+)
+def test_semantic_selection_preserves_valid_order_and_empty_batches(mode, ids):
+    owner = _semantic_selection_owner(mode)
+    vertices, faces = owner.get_semantic_mesh(ids)
+    expected_ids = [0, 1] if ids is None else [int(index) for index in ids]
+    assert vertices.shape[0] == faces.shape[0] == len(expected_ids)
+    if not expected_ids:
+        assert vertices.shape == faces.shape == (0, 0, 3)
+        assert vertices.dtype == torch.float32 and faces.dtype == torch.int32
+        owner.get_body_scale.assert_not_called()
+        owner.get_vertices.assert_not_called()
+        owner.get_triangles.assert_not_called()
+    if expected_ids:
+        widths = [0.1, 0.1] if mode == "proxy" else [0.1, 0.8]
+        torch.testing.assert_close(
+            vertices[:, :, 0].amax(1) - vertices[:, :, 0].amin(1),
+            torch.tensor([widths[index] for index in expected_ids]),
+        )
+
+
+@pytest.mark.parametrize("mode", ["descriptor", "proxy", "companion", "native"])
+def test_empty_semantic_selection_does_not_require_geometry_handles(mode):
+    owner = _semantic_selection_owner(mode)
+    # Use the real geometry/scale methods with deliberately non-render handles.
+    # Any helper access would fail instead of supplying mock-only empty shapes.
+    for name in ("get_body_scale", "get_vertices", "get_triangles"):
+        del owner.__dict__[name]
+    vertices, faces = owner.get_semantic_mesh([])
+    assert vertices.shape == faces.shape == (0, 0, 3)
+    assert vertices.dtype == torch.float32 and faces.dtype == torch.int32
+
+
+@pytest.mark.parametrize("parent_explicit", [False, True])
+def test_variant_visual_visibility_and_reset_use_selected_effective_configs(
+    parent_explicit,
+):
+    from embodichain.lab.sim.objects import RigidObject
+
+    element = VisualElementCfg(representation=CubeCfg())
+    owner = object.__new__(RigidObject)
+    owner.cfg = RigidObjectCfg(
+        uid="visibility",
+        shape=CubeCfg(),
+        visuals=[element] if parent_explicit else None,
+        env_variants={
+            1: RigidObjectCfg(shape=CubeCfg(), visuals=[element]),
+            2: RigidObjectCfg(shape=CubeCfg()),
+        },
+    )
+    owner.device = torch.device("cpu")
+    owner._all_indices = [0, 1, 2]
+    owner._spawn_result = object()
+    owner._data = None
+    visible = [True, True, True]
+    owner._entities = [
+        SimpleNamespace(
+            set_visible=lambda value, index=index: visible.__setitem__(index, value)
+        )
+        for index in range(3)
+    ]
+    owner.restore_visual_material = MagicMock()
+    owner._restore_default_physical_properties = MagicMock()
+    owner.clear_dynamics = MagicMock()
+    owner.set_local_pose = MagicMock()
+
+    owner.set_visible(False)
+    owner.set_visual_visibility(True, env_ids=torch.tensor([1]))
+    assert visible == [False, True, False]
+    owner.set_visual_visibility(False, env_ids=[1])
+    with pytest.raises(ValueError, match="Explicit visuals"):
+        owner.set_visual_visibility(True, env_ids=[1, 2])
+    assert visible == [False, False, False]
+    owner.set_visual_visibility(True, env_ids=[])
+    assert visible == [False, False, False]
+    owner.reset(env_ids=torch.tensor([2, 1]))
+    assert visible == [False, True, False]
+    owner.reset(env_ids=[])
+    assert visible == [False, True, False]
+
+
+@pytest.mark.parametrize("slot", ["shape", "visuals", "compound"])
+def test_variants_reject_post_load_uv_at_each_geometry_owner(slot):
+    from embodichain.lab.sim.shapes import (
+        MeshCfg,
+        CompoundShapeCfg,
+        ShapePartCfg,
+        MeshCollisionCfg,
+    )
+
+    mesh = MeshCfg(
+        fpath="surface.obj",
+        compute_uv=True,
+        collision=MeshCollisionCfg(approximation="convex_hull"),
+    )
+    variant = RigidObjectCfg(shape=CubeCfg())
+    if slot == "shape":
+        variant.shape = mesh
+    elif slot == "visuals":
+        variant.visuals = [VisualElementCfg(representation=mesh)]
+    else:
+        variant.shape = CompoundShapeCfg(parts=[ShapePartCfg(shape=mesh)])
+    with pytest.raises(ValueError, match="compute_uv"):
+        RigidObjectCfg(shape=CubeCfg(), env_variants={0: variant})
+
+
+def test_variant_shape_can_be_assembled_before_final_validation():
+    from embodichain.lab.sim.shapes import CompoundShapeCfg, ShapePartCfg
+
+    variant = RigidObjectCfg(shape=CompoundShapeCfg())
+    cfg = RigidObjectCfg(uid="deferred", shape=CubeCfg(), env_variants={0: variant})
+    cfg.env_variants[0].shape.parts = [
+        ShapePartCfg(shape=CubeCfg(size=(0.2, 0.3, 0.4)))
+    ]
+    cfg.validate()
+    descriptor, _ = rigid_desc_from_cfg(cfg, newton_solver_type="dexuni")
+    assert descriptor.env_variants[0].collisions[0].size == (0.2, 0.3, 0.4)
+
+
+@pytest.mark.parametrize("file_backed", [False, True])
+def test_compound_semantic_mesh_preserves_every_part_transform_and_face_offset(
+    tmp_path, file_backed
+):
+    from embodichain.lab.sim.objects import RigidObject
+    from embodichain.lab.sim.shapes import CompoundShapeCfg, ShapePartCfg, MeshCfg
+
+    from embodichain.lab.sim.shapes import MeshCollisionCfg
+
+    mesh_vertices = [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]]
+    mesh_faces = [[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]]
+    if file_backed:
+        pytest.importorskip("trimesh")
+        path = tmp_path / "tetrahedron.obj"
+        path.write_text(
+            "v 0 0 0\nv 1 0 0\nv 0 1 0\nv 0 0 1\n"
+            "f 1 3 2\nf 1 2 4\nf 1 4 3\nf 2 3 4\n"
+        )
+        mesh = MeshCfg(
+            fpath=str(path), collision=MeshCollisionCfg(approximation="convex_hull")
+        )
+    else:
+        mesh = MeshCfg(
+            vertices=mesh_vertices,
+            triangles=mesh_faces,
+            collision=MeshCollisionCfg(approximation="convex_hull"),
+        )
+    # Cyclic rotation maps (x, y, z) to (z, x, y).
+    shape = CompoundShapeCfg(
+        parts=[
+            ShapePartCfg(
+                shape=CubeCfg(size=(2, 4, 6)),
+                position=(1, 2, 3),
+                quaternion=(0.5, 0.5, 0.5, 0.5),
+            ),
+            ShapePartCfg(
+                shape=mesh, position=(10, 20, 30), quaternion=(0.5, 0.5, 0.5, 0.5)
+            ),
+        ],
+    )
+    owner = SimpleNamespace(
+        cfg=RigidObjectCfg(semantic_shape=shape),
+        num_instances=2,
+        device=torch.device("cpu"),
+        get_body_scale=lambda ids: torch.tensor([[2, 3, 4]], dtype=torch.float32),
+    )
+
+    vertices, faces = RigidObject.get_semantic_mesh(owner, [1])
+
+    assert vertices.shape[1] > 4
+    torch.testing.assert_close(
+        vertices[0, :-4].amin(dim=0), torch.tensor([-4, 3, 4], dtype=torch.float32)
+    )
+    torch.testing.assert_close(
+        vertices[0, :-4].amax(dim=0), torch.tensor([8, 9, 20], dtype=torch.float32)
+    )
+    torch.testing.assert_close(
+        vertices[0, -4:],
+        torch.tensor(
+            [[20, 60, 120], [20, 63, 120], [20, 60, 124], [22, 60, 120]],
+            dtype=torch.float32,
+        ),
+    )
+    expected_faces = torch.tensor(mesh_faces, dtype=torch.int32) + vertices.shape[1] - 4
+    assert torch.equal(faces[0, -4:], expected_faces)
+    assert faces.min() >= 0 and faces.max() < vertices.shape[1]
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"file_path": "scene.usdz"},
+        {"file_path": "scene.gsq", "lod_path": "scene.dgslod"},
+        {"file_path": "scene.ply", "lod_enabled": True},
+        {"file_path": "scene.ply", "lod_detail_scale": float("nan")},
+        {"file_path": "scene.ply", "type": "mesh"},
+    ],
+)
+def test_gaussian_resource_rejects_unsupported_contracts(kwargs):
+    with pytest.raises(ValueError):
+        GaussianSplatCfg(**kwargs)
+
+
+def test_visual_config_roundtrip_and_explicit_empty_replacement():
+    data = {
+        "uid": "room",
+        "visuals": [
+            {
+                "id": "scan",
+                "representation": {"type": "gaussian_splat", "file_path": "room.ply"},
+            }
+        ],
+    }
+    cfg = VisualObjectCfg.from_dict(data)
+    assert isinstance(cfg.visuals[0].representation, GaussianSplatCfg)
+    desc, _ = visual_desc_from_cfg(cfg)
+    assert desc.physics is None and desc.collisions == [] and desc.renders == []
+    assert VisualObjectCfg.from_dict({"uid": "empty", "visuals": []}).visuals == []
+    assert VisualObjectCfg(uid="legacy", shape=CubeCfg()).visuals is None
+    link = ArticulationCfg.from_dict({"link_visuals": {"tool": data["visuals"]}})
+    assert isinstance(link.link_visuals["tool"][0], VisualElementCfg)
+
+
+@pytest.mark.parametrize(
+    "cfg_type", [VisualObjectCfg, RigidObjectCfg, ArticulationCfg, RobotCfg]
+)
+def test_gaussian_visual_config_serialization_roundtrip(tmp_path, cfg_type):
+    pose = np.eye(4)
+    pose[:3, 3] = [0.1, 0.2, 0.3]
+    elements = [
+        VisualElementCfg(
+            id="scan",
+            representation=GaussianSplatCfg(
+                file_path="room.ply", color_gain=(0.7, 0.8, 0.9)
+            ),
+            local_pose=pose,
+            scale=1.5,
+        ),
+        VisualElementCfg(id="mesh", representation=CubeCfg(size=(0.2, 0.3, 0.4))),
+    ]
+    linked = issubclass(cfg_type, ArticulationCfg)
+    kwargs = {"link_visuals": {"tool": elements}} if linked else {"visuals": elements}
+    cfg = cfg_type(uid="owner", **kwargs)
+    if isinstance(cfg, RobotCfg):
+        path = tmp_path / "robot.json"
+        cfg.save_to_file(path)
+        data = json.loads(path.read_text())
+    else:
+        data = cfg.to_dict()
+    restored = cfg_type.from_dict(data)
+    actual = restored.link_visuals["tool"] if linked else restored.visuals
+    assert isinstance(actual[0].representation, GaussianSplatCfg)
+    assert actual[0].representation.file_path == "room.ply"
+    assert actual[0].representation.color_gain == (0.7, 0.8, 0.9)
+    np.testing.assert_allclose(actual[0].local_pose, pose)
+    assert actual[0].scale == 1.5
+    assert isinstance(actual[1].representation, CubeCfg)
+    assert tuple(actual[1].representation.size) == (0.2, 0.3, 0.4)
+
+
+@pytest.mark.parametrize(
+    "cfg_type,form",
+    [
+        (VisualObjectCfg, "direct"),
+        (RigidObjectCfg, "list"),
+        (ArticulationCfg, "mapping"),
+        (RobotCfg, "mapping_list"),
+    ],
+)
+def test_single_gaussian_shorthand_reaches_binding_and_roundtrips(
+    tmp_path, cfg_type, form
+):
+    from embodichain.lab.sim.common import BatchEntity
+
+    path = tmp_path / "scan.ply"
+    path.write_text("fixture")
+    resource = GaussianSplatCfg(file_path=str(path), color_gain=(0.7, 0.8, 0.9))
+    value = resource.to_dict() if form.startswith("mapping") else resource
+    if form in {"list", "mapping_list"}:
+        value = [value]
+    linked = issubclass(cfg_type, ArticulationCfg)
+    fields = {"link_visuals": {"tool": value}} if linked else {"visuals": value}
+    cfg = (
+        cfg_type.from_dict({"uid": "owner", **fields})
+        if form.startswith("mapping")
+        else cfg_type(uid="owner", **fields)
+    )
+    owner = SimpleNamespace(
+        cfg=cfg, uid="owner", num_instances=1, device=torch.device("cpu")
+    )
+    metadata = BatchEntity.get_visual_elements(owner)
+    assert len(metadata) == 1
+    assert metadata[0]["id"] == "appearance"
+    assert metadata[0]["representation"] == "gaussian_splat"
+    assert metadata[0]["link_name"] == ("tool" if linked else None)
+    binding = _VisualBinding(owner, SimpleNamespace())
+    element = binding.elements[0]
+    assert element.gaussian and element.config.id == "appearance"
+    assert element.config.representation.color_gain == (0.7, 0.8, 0.9)
+    np.testing.assert_array_equal(element.config.local_pose, np.eye(4))
+    restored = cfg_type.from_dict(cfg.to_dict())
+    actual = restored.link_visuals["tool"] if linked else restored.visuals
+    assert len(actual) == 1
+    assert actual[0].id == "appearance"
+    assert actual[0].representation.file_path == str(path)
+
+
+def test_multiple_gaussians_still_require_explicit_visual_element_ids():
+    resource = GaussianSplatCfg(file_path="scan.ply")
+    with pytest.raises(ValueError, match="single|one|explicit"):
+        _visual_elements([resource, resource])
+
+
+def test_invalid_binding_transform_and_duplicate_ids_reject():
+    with pytest.raises(ValueError, match="unique"):
+        _visual_elements([VisualElementCfg(representation=CubeCfg())] * 2)
+    pose = np.eye(4)
+    pose[0, 1] = 0.2
+    with pytest.raises(ValueError, match="rigid"):
+        VisualElementCfg(representation=CubeCfg(), local_pose=pose)
+    with pytest.raises(ValueError, match="uniform"):
+        VisualElementCfg(representation=CubeCfg(), scale=-1)
+
+
+def test_visual_replacement_does_not_compile_gaussians_as_collision_geometry():
+    cfg = RigidObjectCfg(uid="body", shape=CubeCfg(size=(0.2, 0.3, 0.4)))
+    before, _ = rigid_desc_from_cfg(cfg)
+    cfg.visuals = [
+        VisualElementCfg(representation=GaussianSplatCfg(file_path="scan.ply"))
+    ]
+    after, _ = rigid_desc_from_cfg(cfg)
+    assert before.physics == after.physics
+    assert before.collisions[0].size == after.collisions[0].size
+    assert before.body_scale.tolist() == after.body_scale.tolist()
+
+
+def _binding(tmp_path, link=None):
+    path = tmp_path / "scan.ply"
+    path.write_text("fixture")
+    element = VisualElementCfg(
+        id="scan", representation=GaussianSplatCfg(file_path=str(path))
+    )
+    element.local_pose[:3, 3] = [0.25, 0.5, 1]
+    pose = np.eye(4, dtype=np.float32)
+    pose[:3, :3] = [[0, -1, 0], [1, 0, 0], [0, 0, 1]]
+    pose[:3, 3] = [2, 3, 4]
+    cfg = (
+        VisualObjectCfg(uid="owner", visuals=[element])
+        if link is None
+        else ArticulationCfg(uid="owner", link_visuals={link: [element]})
+    )
+    owner = SimpleNamespace(
+        cfg=cfg,
+        uid="owner",
+        num_instances=4,
+        device=torch.device("cpu"),
+        link_names=["tool"],
+        get_local_pose=lambda **kw: torch.tensor(np.stack([pose] * 4)),
+        get_link_pose=lambda *a, **kw: torch.tensor(np.stack([pose] * 4)),
+        _entities=[],
+    )
+    spawn = SimpleNamespace(
+        builder=SimpleNamespace(), arena_names=tuple(f"arena_{i}" for i in range(4))
+    )
+    binding = _VisualBinding(owner, spawn)
+    roots = [np.eye(4, dtype=np.float32) for _ in range(4)]
+    for i, root in enumerate(roots):
+        root[0, 3] = i * 10
+    batch = MagicMock()
+    handles = {
+        f"arena_{i}/{binding.elements[0].name}": SimpleNamespace(
+            get_resource_id=lambda: 42
+        )
+        for i in range(4)
+    }
+    scene = SimpleNamespace(
+        topology_revision=1,
+        handles=handles,
+        clear_visual_meshes=MagicMock(),
+        create_gaussian_splat_batch=lambda h: batch,
+        get_arena=lambda name: SimpleNamespace(
+            get_root_node=lambda: SimpleNamespace(
+                get_world_pose=lambda: roots[int(name[-1])]
+            )
+        ),
+    )
+    spawn.builder.result = scene
+    return binding, scene, batch, roots, pose
+
+
+@pytest.mark.parametrize("link", [None, "tool"])
+def test_owner_and_link_compose_arena_offset_once_and_selectively_reset(tmp_path, link):
+    binding, scene, batch, roots, pose = _binding(tmp_path, link)
+    binding.sync()
+    expected = np.stack(
+        [r @ pose @ binding.elements[0].config.local_pose for r in roots]
+    )
+    np.testing.assert_allclose(batch.apply.call_args.kwargs["world_poses"], expected)
+    assert batch.apply.call_count == 1
+    binding.set_visible(False, [1, 3])
+    binding.sync()
+    assert batch.apply.call_args.kwargs["visible"].tolist() == [
+        True,
+        False,
+        True,
+        False,
+    ]
+    binding.reset([1])
+    binding.sync()
+    assert batch.apply.call_args.kwargs["visible"].tolist() == [True, True, True, False]
+    binding.describe()[0]["local_pose"][0, 3] = 999
+    assert binding.elements[0].config.local_pose[0, 3] == 0.25
+
+
+def test_unknown_link_and_unshared_resources_fail_preparation(tmp_path):
+    binding, scene, _, _, _ = _binding(tmp_path, "missing")
+    with pytest.raises(ValueError, match="Unknown visual link"):
+        binding.bind(scene)
+    binding, scene, _, _, _ = _binding(tmp_path)
+    scene.handles[f"arena_3/{binding.elements[0].name}"].get_resource_id = lambda: 43
+    with pytest.raises(RuntimeError, match="share"):
+        binding.bind(scene)
+
+
+def test_gaussian_capture_rejects_failure_and_wrong_group_without_overwriting_success():
+    sim = object.__new__(SimulationManager)
+    sim._world = SimpleNamespace(
+        get_gaussian_frame_status=lambda: dict(
+            valid=True, completed=True, outcome="SUCCESS", group_id=8, frame_index=42
+        ),
+        get_gaussian_output_contract=lambda: {
+            "depth": {"definition": "view-Z"},
+            "group_id": 8,
+            "frame_index": 42,
+            "completed": True,
+            "same_frame_identity": True,
+        },
+        get_renderer_type=lambda: SimpleNamespace(name="FASTRT"),
+    )
+    sim._visualization_sim_time = 0.1
+    sim.sim_config = SimpleNamespace(
+        render_cfg=SimpleNamespace(
+            tone_mapping_enabled=False,
+            tone_mapping_exposure=1,
+            denoising=SimpleNamespace(offscreen="off"),
+        )
+    )
+    sim._spawn_scene = SimpleNamespace(_gaussian_capture_state=lambda: {})
+    first = sim._capture_gaussian_status(8)
+    assert first["renderer"] == "FASTRT"
+    assert first["configured_offscreen_denoising"] == "off"
+    assert first["camera_pose_convention"] == "opengl"
+    with pytest.raises(RuntimeError, match="mismatch"):
+        sim._capture_gaussian_status(9)
+    original_contract = sim._world.get_gaussian_output_contract
+    sim._world.get_gaussian_output_contract = lambda: dict(
+        original_contract(), frame_index=43
+    )
+    with pytest.raises(RuntimeError, match="changed between"):
+        sim._capture_gaussian_status(8)
+    sim._world.get_gaussian_output_contract = original_contract
+    sim._world.get_gaussian_frame_status = lambda: dict(
+        valid=True, completed=True, outcome="ALLOCATION_FAILURE", group_id=8
+    )
+    with pytest.raises(RuntimeError, match="failed"):
+        sim._capture_gaussian_status(8)
+    assert first["status"]["outcome"] == "SUCCESS"
+
+
+@pytest.mark.parametrize(
+    "failure_stage", ["publication", "completion", "window_completion", "render"]
+)
+def test_failed_frame_cannot_republish_previous_camera_capture(tmp_path, failure_stage):
+    from embodichain.lab.sim.sensors import Camera
+
+    binding, scene, batch, _, _ = _binding(tmp_path)
+    sim = object.__new__(SimulationManager)
+    sim._spawn_scene = SimpleNamespace(
+        builder=SimpleNamespace(is_finalized=True, result=scene),
+        has_visual_composition=True,
+        has_gaussians=True,
+        sync_visuals=binding.sync,
+    )
+    sim.physics = SimpleNamespace(sync_render_state=MagicMock())
+    sim.sim_config = SimpleNamespace(render_cfg=SimpleNamespace(renderer="hybrid"))
+    sim._world = SimpleNamespace(
+        render_camera_group=MagicMock(),
+        _flush_render_updates=MagicMock(return_value=0),
+    )
+    camera = object.__new__(Camera)
+    camera.group_id = 8
+    camera._owner = lambda: sim
+    camera.cfg = SimpleNamespace()
+    camera._capture_metadata = {"valid": True, "frame_id": 41}
+    sim._sensors = {"camera": camera}
+    sim._gaussian_captures = {8: {"frame_id": 41}}
+    sim._render_state_published = False
+    if failure_stage == "window_completion":
+        sim.is_window_opened = True
+        sim._log_scene_summary = lambda: None
+        sim.render_camera_group([])
+        sim._world._flush_render_updates.assert_not_called()
+        assert batch.apply.called
+    failing_call = {
+        "publication": batch.apply,
+        "completion": sim._world._flush_render_updates,
+        "window_completion": sim._world._flush_render_updates,
+        "render": sim._world.render_camera_group,
+    }[failure_stage]
+    failing_call.side_effect = RuntimeError("native frame failure")
+    with pytest.raises(RuntimeError, match="native frame failure"):
+        sim.render_camera_group([8])
+    assert camera.capture_metadata["valid"] is False
+    with pytest.raises(RuntimeError, match="No completed Gaussian capture"):
+        camera.update(fetch_only=True)
+    # Clearing the native failure allows a full state publication, but an old
+    # image still cannot acquire a new capture identity without rendering.
+    failing_call.side_effect = None
+    sim.sync_render_state()
+    with pytest.raises(RuntimeError, match="No completed Gaussian capture"):
+        camera.update(fetch_only=True)
+    assert not hasattr(scene, "step")
+
+
+def test_companion_failure_rolls_back_declaration_without_deleting_existing_assets(
+    tmp_path,
+):
+    binding, scene, batch, roots, pose = _binding(tmp_path)
+    builder = binding.spawn.builder
+    binding.spawn.handles = lambda uid: ()
+    builder.scene_desc = SimpleNamespace(iter_entities=lambda: ())
+    builder.add_gaussian_splat = MagicMock(
+        side_effect=RuntimeError("invalid Gaussian data")
+    )
+    builder.remove_gaussian_splat = MagicMock()
+    with pytest.raises(RuntimeError, match="invalid Gaussian"):
+        binding.declare()
+    builder.remove_gaussian_splat.assert_called_once_with(binding.elements[0].name)
+    builder.remove_gaussian_splat.reset_mock()
+    builder.scene_desc.iter_entities = lambda: (
+        SimpleNamespace(name=binding.elements[0].name),
+    )
+    with pytest.raises(ValueError, match="already exist"):
+        binding.declare()
+    builder.remove_gaussian_splat.assert_not_called()
+
+
+def test_declared_visual_metadata_does_not_require_native_resources():
+    from embodichain.lab.sim.objects import VisualObject
+
+    obj = VisualObject(
+        VisualObjectCfg(
+            uid="scan",
+            visuals=[
+                VisualElementCfg(representation=GaussianSplatCfg(file_path="scan.ply"))
+            ],
+        )
+    )
+    metadata = obj.get_visual_elements()
+    assert (
+        metadata[0]["representation"] == "gaussian_splat"
+        and metadata[0]["resource_ids"] == ()
+    )
+    metadata[0]["local_pose"][0, 3] = 100
+    assert obj.cfg.visuals[0].local_pose[0, 3] == 0
+
+
+def test_gaussian_render_budget_and_missing_sidecar_validate_without_engine():
+    with pytest.raises(ValueError, match="nonnegative"):
+        GaussianRenderCfg(workspace_memory_budget_mb=-1)
+    with pytest.raises(TypeError, match="booleans"):
+        GaussianRenderCfg(enabled="yes")
+    with pytest.raises(ValueError, match="physical shape"):
+        rigid_desc_from_cfg(
+            RigidObjectCfg(
+                uid="missing",
+                visuals=[
+                    VisualElementCfg(
+                        representation=GaussianSplatCfg(file_path="scan.ply")
+                    )
+                ],
+            )
+        )
+
+
+def test_explicit_semantic_geometry_is_independent_without_visual_replacement():
+    from embodichain.lab.sim.objects import RigidObject
+
+    owner = SimpleNamespace(
+        cfg=RigidObjectCfg(
+            uid="body",
+            shape=CubeCfg(size=(1, 1, 1)),
+            semantic_shape=CubeCfg(size=(0.2, 0.3, 0.4)),
+        ),
+        num_instances=2,
+        device=torch.device("cpu"),
+        get_body_scale=lambda ids: torch.full((len(ids), 3), 2.0),
+    )
+    vertices, triangles = RigidObject.get_semantic_mesh(owner, [1])
+    torch.testing.assert_close(
+        vertices.amax(1) - vertices.amin(1), torch.tensor([[0.4, 0.6, 0.8]])
+    )
+    assert triangles.shape[0] == 1
+
+
+def test_robot_visual_annotations_resolve_across_configclass_inheritance():
+    from typing import get_type_hints
+    from embodichain.lab.sim.cfg import RobotCfg
+    from embodichain.lab.sim.robots import DualArmRobotCfg
+
+    def reflected(value):
+        pass
+
+    for cls in (ArticulationCfg, RobotCfg, DualArmRobotCfg):
+        reflected.__annotations__ = {
+            "value": cls.__init__.__annotations__["link_visuals"]
+        }
+        assert (
+            get_type_hints(reflected, globalns={}, localns={})["value"]
+            == dict[str, list[VisualElementCfg | GaussianSplatCfg] | GaussianSplatCfg]
+        )
+
+
+def test_visual_material_operations_reject_gaussian_only_selection(tmp_path):
+    binding, scene, _, _, _ = _binding(tmp_path)
+    binding.bind(scene)
+    with pytest.raises(TypeError, match="captured SH"):
+        binding.set_material(object(), [0])
+    with pytest.raises(TypeError, match="captured SH"):
+        binding.apply_material_inst(0, object())
+
+
+def test_gaussian_randomization_is_selective_validated_and_resettable(tmp_path):
+    binding, scene, batch, *_ = _binding(tmp_path)
+    binding.set_gaussian_state(
+        "scan",
+        [1, 3],
+        color_gain=[[0, 1, 0], [0.5, 0.5, 0.5]],
+        opacity_gain=[0.2, 0.8],
+        geometry_scales=[2, 0.5],
+        visible=[False, True],
+    )
+    binding.sync()
+    values = batch.apply.call_args.kwargs
+    np.testing.assert_array_equal(values["geometry_scales"], [1, 2, 1, 0.5])
+    np.testing.assert_array_equal(
+        values["color_gain"], [[1, 1, 1], [0, 1, 0], [1, 1, 1], [0.5, 0.5, 0.5]]
+    )
+    with pytest.raises(ValueError):
+        binding.set_gaussian_state("scan", [1], color_gain=[2, 2, 2], opacity_gain=-1)
+    np.testing.assert_array_equal(
+        binding.describe()[0]["instance_state"]["color_gain"][1], [0, 1, 0]
+    )
+    # Rebinding retains current values; reset restores only selected baseline rows.
+    scene.topology_revision += 1
+    binding.sync()
+    binding.reset([1])
+    binding.sync()
+    values = batch.apply.call_args.kwargs
+    np.testing.assert_array_equal(values["geometry_scales"], [1, 1, 1, 0.5])
+    np.testing.assert_array_equal(values["color_gain"][3], [0.5, 0.5, 0.5])
+    assert values["visible"].all()
+    snapshot = binding.describe()[0]["instance_state"]
+    snapshot["geometry_scales"][:] = 99
+    assert binding.gaussian_state[0]["geometry_scales"][0] == 1

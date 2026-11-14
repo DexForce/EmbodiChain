@@ -106,7 +106,7 @@ class SceneMeshSnapshot(dict[str, torch.Tensor]):
     """Rigid-only mapping compatibility plus ordered articulation components.
 
     Args:
-        rigid: Already-scaled visual-envelope vertices keyed by logical identity.
+        rigid: Already-scaled semantic-envelope vertices keyed by logical identity.
         components: Ordered link-local collision-input components.
         collision_roles: Neutral planner metadata. ``none`` never removes a collider.
         unavailable: Explicit failure for incomplete articulation input capture.
@@ -114,6 +114,8 @@ class SceneMeshSnapshot(dict[str, torch.Tensor]):
     Geometry capture owns its arrays and reads no live poses. This is neither a
     cooked-shape oracle nor continuous collision detection. An empty rigid-only
     result retains the existing unavailable/empty mapping behavior.
+    Legacy rigid-envelope metadata names also cover explicit semantic proxies;
+    they do not identify the current companion appearance.
     """
 
     components: tuple[SceneMeshComponent, ...]
@@ -197,7 +199,7 @@ def capture_scene_meshes(
         rigidized_uids: Explicit unsupported rigidized-articulation selection.
 
     Returns:
-        Owned scaled rigid visual vertices and convex connected collision-input
+        Owned scaled rigid semantic vertices and convex connected collision-input
         components. Articulation failures preserve captured rigid data and mark
         the result unavailable; rigid-only failures return an empty mapping.
         Default/USD materialization descriptors and the legacy USD-file route
@@ -217,9 +219,14 @@ def capture_scene_meshes(
     try:
         for entity_id, simulation_uid in rigid_uids.items():
             native = simulation.get_rigid_object(simulation_uid)
-            if native is None or not callable(getattr(native, "get_vertices", None)):
+            semantic_mesh = getattr(native, "get_semantic_mesh", None)
+            if callable(semantic_mesh):
+                vertices, _ = semantic_mesh()
+            elif callable(getattr(native, "get_vertices", None)):
+                vertices = native.get_vertices(scale=True)
+            else:
                 raise ValueError(f"scene_rigid_geometry_unavailable:{entity_id}")
-            rigid[entity_id] = _owned_vertices(native.get_vertices(scale=True))
+            rigid[entity_id] = _owned_vertices(vertices)
             roles[entity_id] = selected_roles.get(entity_id)
         if not articulated:
             return SceneMeshSnapshot._from_owned(rigid, collision_roles=roles)

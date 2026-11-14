@@ -1,0 +1,46 @@
+graph:
+  roots: [cube_contained, rail_closed, hand_open, fingers_clear]
+  rules:
+    cube_contained:
+      kind: corner_containment
+      bindings: {pose: rigid_objects/cube/frame, frame: links/drawer_tray/frame}
+      params:
+        corners:
+          - [-0.025, -0.025, -0.025]
+          - [-0.025, -0.025, 0.025]
+          - [-0.025, 0.025, -0.025]
+          - [-0.025, 0.025, 0.025]
+          - [0.025, -0.025, -0.025]
+          - [0.025, -0.025, 0.025]
+          - [0.025, 0.025, -0.025]
+          - [0.025, 0.025, 0.025]
+        # Interior of Drawer/model_split_links_with_inertials.urdf.
+        lower: [-0.1965, 0.01, -0.057]
+        upper: [0.1965, 0.309, 0.0425]
+        tolerance: 0.001
+    rail_closed:
+      kind: joint_range
+      bindings: {position: articulations/drawer/qpos/cabinet_to_drawer}
+      params: {lower: -0.001, upper: 0.01}
+    hand_open:
+      kind: command_preset_match
+      bindings: {position: robot/primary_manipulator/grasp/qpos}
+      params: {preset: open, tolerance: 0.002}
+    first_finger_near:
+      kind: link_object_distance
+      bindings: {position: robot_links/first_grasp_finger/position, target: rigid_objects/cube/pose}
+      params: {tolerance: 0.08, inclusive: true}
+    second_finger_near:
+      kind: link_object_distance
+      bindings: {position: robot_links/second_grasp_finger/position, target: rigid_objects/cube/pose}
+      params: {tolerance: 0.08, inclusive: true}
+    first_finger_clear:
+      kind: not
+      refs: [first_finger_near]
+    second_finger_clear:
+      kind: not
+      refs: [second_finger_near]
+    fingers_clear:
+      kind: all
+      refs: [first_finger_clear, second_finger_clear]
+final_acceptance: [cube_contained, rail_closed, hand_open, fingers_clear]

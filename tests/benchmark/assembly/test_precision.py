@@ -18,7 +18,10 @@
 from __future__ import annotations
 
 import json
+import argparse
 from pathlib import Path
+import subprocess
+import sys
 
 import numpy as np
 import pytest
@@ -49,14 +52,17 @@ def test_usd_precision_detects_changed_primitive_dimensions(tmp_path) -> None:
     assert measured["geometry_error_m"] >= 0.0019
 
 
-def test_precision_host_matches_source_floor_and_disables_missing_floor() -> None:
+@pytest.mark.parametrize("source_contact", [False, True])
+def test_precision_host_matches_source_floor_and_disables_missing_floor(
+    source_contact: bool,
+) -> None:
     pytest.importorskip("mujoco")
     from embodichain_benchmarks.assembly.precision import (
         PrecisionRunCfg,
         _source_floor_attributes,
     )
 
-    cfg = PrecisionRunCfg(backend="newton", source_contact=True)
+    cfg = PrecisionRunCfg(backend="newton", source_contact=source_contact)
     enabled, attrs = _source_floor_attributes(import_mjcf(SOURCE), cfg)
     assert not enabled and attrs is None
     floor_source = SOURCE.replace(
@@ -69,8 +75,16 @@ def test_precision_host_matches_source_floor_and_disables_missing_floor() -> Non
     assert enabled
     assert attrs.material_props.dynamic_friction == pytest.approx(1)
     assert attrs.material_props.torsional_friction == pytest.approx(0.01)
-    assert attrs.collision_props.solref == pytest.approx([0.002, 1])
-    assert attrs.collision_props.solimp == pytest.approx([0.99, 0.999, 0.001, 0.5, 2])
+    if source_contact:
+        assert attrs.material_props.solref == pytest.approx([0.002, 1])
+        assert attrs.material_props.solimp == pytest.approx(
+            [0.99, 0.999, 0.001, 0.5, 2]
+        )
+        assert attrs.material_props.solmix == pytest.approx(1)
+    else:
+        assert attrs.material_props.solref is None
+        assert attrs.material_props.solimp is None
+        assert attrs.material_props.solmix is None
     assert attrs.collision_props.contact_offset == 0
 
 
@@ -101,19 +115,194 @@ def test_peg_drop_distinguishes_seating_from_rim_and_outside_falls(
     seated = [0.0, 0.0, bottom + length / 2]
     rim_stop = [0.02 * scale, 0.0, bottom + thickness + length / 2 - 1e-7]
     outside_fall = [0.05 * scale, 0.0, bottom + length / 2]
+    over_inserted = [0.0, 0.0, bottom + length / 2 - thickness]
+    below_floor = [0.0, 0.0, bottom - length]
     asset = AssemblyAsset(config={"kind": "peg", "scale": scale})
 
     measured = _score(
         asset,
         {"peg": initial_peg, "plate": plate},
-        {"peg": np.array([seated, rim_stop, outside_fall]), "plate": plate},
+        {
+            "peg": np.array(
+                [seated, rim_stop, outside_fall, over_inserted, below_floor]
+            ),
+            "plate": plate,
+        },
         PrecisionRunCfg(),
     )
 
     # Every endpoint fell farther than 5 mm, but only the centered peg reached
     # the bottom of the bore. This expected count is independent of scoring.
-    assert measured["success_rate"] == pytest.approx(1 / 3)
+    assert measured["success_rate"] == pytest.approx(1 / 5)
     assert measured["required_insertion_depth_m"] == pytest.approx(thickness)
+
+
+def _matrix_args(output: Path, manifest: Path) -> argparse.Namespace:
+    return argparse.Namespace(
+        output=str(output),
+        configs=[str(manifest)],
+        clearances=None,
+        backends=["mujoco_cpu"],
+        routes=["direct"],
+        num_envs=[1],
+        timesteps=[0.001],
+        duration=0.002,
+        contact_offset=0.0,
+        rest_offset=0.0,
+        solver_iterations=100,
+        contact_capacity=4096,
+        backend_contacts=False,
+        solver=None,
+        use_mujoco_cpu=False,
+        solver_tolerance=None,
+        multiccd=None,
+        warp_reference_initialization="cpu_compiled",
+        probe="passive",
+        directions=4,
+        cell_timeout=60,
+    )
+
+
+def test_usd_comparison_registers_schemas_in_a_fresh_process(tmp_path: Path) -> None:
+    pytest.importorskip("mujoco")
+    pytest.importorskip("pxr")
+    pytest.importorskip("dexsim.kit.usd")
+    asset = import_mjcf(SOURCE)
+    manifest = asset.save(tmp_path / "asset.json")
+    usd = asset.write_usd(tmp_path / "asset.usda")
+    program = """
+import json
+import sys
+from embodichain.toolkits.assembly import AssemblyAsset
+from embodichain_benchmarks.assembly.precision import compare_usd_geometry
+result = compare_usd_geometry(AssemblyAsset.load(sys.argv[1]), sys.argv[2])
+assert result['passed'], result
+print('FRESH_USD_COMPARISON_PASSED')
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", program, str(manifest), str(usd)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "FRESH_USD_COMPARISON_PASSED" in result.stdout
+
+
+def test_fresh_matrix_records_usd_failure_and_runs_cpu_cells(tmp_path: Path) -> None:
+    pytest.importorskip("mujoco")
+    pytest.importorskip("pxr")
+    # Include a fixed plate: current SDKs can fail its ownership check, while
+    # the independent CPU reference remains meaningful and must still run.
+    source = SOURCE.replace('name="part"', 'name="peg"').replace(
+        "<worldbody>",
+        '<worldbody><body name="plate" pos="0 0 -1"><geom type="box" size=".02 .02 .005"/></body>',
+    )
+    asset = import_mjcf(source, config={"kind": "peg"})
+    manifest = asset.save(tmp_path / "asset.json")
+    output = tmp_path / "results"
+    script = (
+        Path(__file__).resolve().parents[3] / "scripts/benchmark/assembly/precision.py"
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "--configs",
+            str(manifest),
+            "--backends",
+            "mujoco_cpu",
+            "--duration",
+            "0.002",
+            "--output",
+            str(output),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=90,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    raw = next(output.glob("run_*/assembly_precision_*.json"))
+    report = json.loads(raw.read_text())
+    assert len(report["cells"]) == 1
+    cell = report["cells"][0]
+    assert cell["asset_sha256"] == asset.content_hash
+    assert cell["metrics"]["finite"] is True
+    assert cell["backend"] == "mujoco_cpu"
+    assert "schemas were registered" not in report["geometry"][0].get("reason", "")
+    assert raw.with_suffix(".md").is_file()
+
+
+@pytest.mark.parametrize("outcome", ["valid", "crash", "wrong_asset", "wrong_config"])
+def test_matrix_isolates_runs_and_checks_worker_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str
+) -> None:
+    pytest.importorskip("mujoco")
+    pytest.importorskip("pxr")
+    from scripts.benchmark.assembly import precision as matrix
+
+    asset = import_mjcf(SOURCE)
+    manifest = asset.save(tmp_path / "asset.json")
+    output = tmp_path / "results"
+    output.mkdir()
+    old = {
+        "backend": "mujoco_cpu",
+        "route": "direct",
+        "status": "passed",
+        "asset_sha256": "previous_run",
+    }
+    (output / "cell_0.json").write_text(json.dumps(old))
+
+    def unavailable_geometry(*args):
+        raise ValueError("ownership unavailable")
+
+    original_run = subprocess.run
+
+    def run_worker(command, **kwargs):
+        if "--cell-output" not in command:
+            return original_run(command, **kwargs)
+        if outcome != "crash":
+            config = json.loads(
+                Path(command[command.index("--cell-config") + 1]).read_text()
+            )
+            config.pop("constrained_probe")
+            config.pop("num_directions")
+            if outcome == "wrong_config":
+                config["duration"] = 123.0
+            result = {
+                "backend": "mujoco_cpu",
+                "route": "direct",
+                "status": "passed",
+                "asset_sha256": (
+                    "other_asset" if outcome == "wrong_asset" else asset.content_hash
+                ),
+                "config": config,
+            }
+            Path(command[command.index("--cell-output") + 1]).write_text(
+                json.dumps(result)
+            )
+        return subprocess.CompletedProcess(
+            command,
+            139 if outcome == "crash" else 0,
+            "",
+            "worker crashed" if outcome == "crash" else "",
+        )
+
+    monkeypatch.setattr(matrix, "compare_usd_geometry", unavailable_geometry)
+    monkeypatch.setattr(matrix.subprocess, "run", run_worker)
+    paths = [
+        matrix.run_all_benchmarks(_matrix_args(output, manifest)) for _ in range(2)
+    ]
+    assert paths[0].parent != paths[1].parent
+    assert json.loads((output / "cell_0.json").read_text()) == old
+    for path in paths:
+        report = json.loads(path.with_suffix(".json").read_text())
+        assert report["geometry"][0]["passed"] is False
+        assert report["geometry"][0]["reason"] == "ownership unavailable"
+        assert "unmeasured" in path.read_text()
+        assert report["cells"][0]["status"] == (
+            "passed" if outcome == "valid" else "failed"
+        )
 
 
 def test_many_pegs_scores_each_translated_cell_and_rejects_rim_or_floor_passage() -> (
@@ -280,42 +469,3 @@ def test_failed_precision_measurements_preserve_json_and_failure_reason(
     assert result["metrics"]["distance"] is None
     assert result["final_state"]["peg"] == [0.0, None, 0.0]
     assert result["nonfinite_measurement_count"] == 2
-
-
-def test_compiled_robot_tree_preserves_nonzero_joint_frame(tmp_path: Path) -> None:
-    import xml.etree.ElementTree as ET
-    import torch
-
-    mujoco = pytest.importorskip("mujoco")
-    pk = pytest.importorskip("pytorch_kinematics")
-    from embodichain_benchmarks.assembly.robot_reference import _append_model
-
-    source = mujoco.MjModel.from_xml_string("""<mujoco><worldbody>
-      <body name="base"><geom type="box" size=".1 .1 .1"/>
-       <body name="arm" pos=".1 .2 .3" euler="15 20 5">
-        <joint name="joint" axis="0 1 0" pos=".01 .02 .03" range="-90 90"/>
-        <geom type="box" pos=".02 0 .1" size=".02 .03 .1" mass="1"/>
-        <body name="tool" pos=".1 0 .2"><geom type="sphere" size=".01" mass=".01"/></body>
-       </body>
-      </body></worldbody></mujoco>""")
-    urdf = ET.Element("robot", name="reference")
-    _append_model(urdf, source, tmp_path)
-    chain = pk.build_serial_chain_from_urdf(
-        ET.tostring(urdf, encoding="unicode"),
-        end_link_name="tool",
-        root_link_name="base",
-    ).to(dtype=torch.float64)
-    data = mujoco.MjData(source)
-    for angle in [-0.7, 0, 0.65]:
-        data.qpos[0] = angle
-        mujoco.mj_forward(source, data)
-        actual = (
-            chain.forward_kinematics(torch.tensor([[angle]], dtype=torch.float64))
-            .get_matrix()[0]
-            .numpy()
-        )
-        tool_id = mujoco.mj_name2id(source, mujoco.mjtObj.mjOBJ_BODY, "tool")
-        expected = np.eye(4)
-        expected[:3, 3] = data.xpos[tool_id]
-        expected[:3, :3] = data.xmat[tool_id].reshape(3, 3)
-        np.testing.assert_allclose(actual, expected, atol=1e-7, rtol=1e-7)

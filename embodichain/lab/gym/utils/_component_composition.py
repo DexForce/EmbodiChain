@@ -62,6 +62,10 @@ _SCENE_SIMULATION_FIELDS = frozenset(
         "rigid_object",
         "rigid_object_group",
         "articulation",
+        "replay_surface",
+        "replay",
+        "cable_object",
+        "fluid_object",
     }
 )
 
@@ -152,14 +156,15 @@ def _resolve_local_resource_paths(value: object, *, base_dir: Path) -> None:
     """
     if isinstance(value, dict):
         for key, child in value.items():
+            if key == "fluid_object" and isinstance(child, list):
+                for fluid in child:
+                    spawn = fluid.get("spawn", {})
+                    path = spawn.get("file_path")
+                    if isinstance(path, str) and not Path(path).is_absolute():
+                        spawn["file_path"] = str((base_dir / path).resolve())
             if (
                 key
-                in {
-                    "fpath",
-                    "urdf_path",
-                    "xml_path",
-                    "assembly_manifest",
-                }
+                in {"fpath", "urdf_path", "xml_path", "trajectory", "assembly_manifest"}
                 and isinstance(child, str)
                 and child.startswith(("./", "../"))
             ):
@@ -317,7 +322,7 @@ def _resolve_embodiment_component(
         ),
         path="embodiment component",
         required=frozenset({"embodiment_id", "simulation", "sensor"}),
-        optional=frozenset({"skill_profile"}),
+        optional=frozenset({"skill_profile", "grippers"}),
     )
     _identifier(component["embodiment_id"], path="embodiment component.embodiment_id")
     simulation = _owned_mapping(
@@ -343,6 +348,10 @@ def _resolve_embodiment_component(
             component["skill_profile"],
             path="embodiment component.skill_profile",
         )
+    if "grippers" in component:
+        from embodichain.lab.gym.utils._gripper_composition import _expand_grippers
+
+        _expand_grippers(simulation, skill_profile, component["grippers"])
     return simulation, sensors, skill_profile
 
 
@@ -535,6 +544,25 @@ def _resolve_gym_components(
             if field_name in resolved
         }
 
+    evaluation = None
+    if "evaluation" in resolved:
+        if "task_program" not in resolved:
+            raise ValueError("evaluation.component requires a configured Task Program.")
+        selection = _mapping(
+            resolved.pop("evaluation"),
+            path="evaluation",
+            required=frozenset({"component"}),
+        )
+        path = _component_path(
+            selection["component"],
+            base_dir=selected_base_dir,
+            path="evaluation.component",
+            sources=sources,
+        )
+        evaluation = _load_yaml_component(
+            path, field_name="evaluation component", sources=sources
+        )
+
     return _ResolvedGymComponents(
         config=resolved,
         embodiment_selected=embodiment_selected,
@@ -543,4 +571,5 @@ def _resolve_gym_components(
         or scene_config is not None,
         embodiment_skill_profile=embodiment_skill_profile,
         scene_config=scene_config,
+        evaluation=evaluation,
     )

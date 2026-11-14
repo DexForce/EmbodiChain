@@ -78,7 +78,10 @@ def _env():
     env = object.__new__(EmbodiedEnv)
     env._num_envs = 2
     env.cfg = SimpleNamespace(
-        rl_task=_task(), task_program=None, ignore_terminations=False
+        rl_task=_task(),
+        task_program=None,
+        ignore_terminations=False,
+        episode_context_in_info=True,
     )
     env.pose = torch.eye(4).repeat(2, 1, 1)
     env.sim = SimpleNamespace(
@@ -118,6 +121,112 @@ def test_geometry_independent_axes_boundary_height_and_invalid_rows():
     assert evaluate_below_height(
         torch.tensor([[0.0, 0.0, -0.2], [0.0, 0.0, -0.1]]), -0.1
     ).satisfied.tolist() == [True, False]
+
+
+def test_near_target_functor_preserves_strict_boundary_and_invalid_rows():
+    env = _env()
+    boundary = torch.tensor(0.1)
+    below = torch.nextafter(boundary, torch.tensor(0.0))
+    env.pose[:, 0, 3] = torch.stack((boundary, below))
+    env.termination_manager.compute()
+    result = env.termination_manager.snapshot()["conditions"]["success.goal"]
+    assert result["satisfied"].tolist() == [False, True]
+    torch.testing.assert_close(
+        result["metrics"]["distance"], torch.stack((boundary, below)), rtol=0, atol=0
+    )
+
+    # Even on excluded axes, nonfinite physical measurements invalidate the row.
+    env.pose[1, 2, 3] = float("nan")
+    env.termination_manager.compute()
+    result = env.termination_manager.snapshot()["conditions"]["success.goal"]
+    assert result["valid"].tolist() == [True, False]
+    assert result["satisfied"].tolist() == [False, False]
+
+
+def test_registered_graph_is_an_rl_condition_with_cached_outcome_and_limits():
+    from embodichain.lab.evaluation import (
+        PredicateDefinition,
+        PredicateMeasurement,
+        builtin_predicates,
+    )
+    from embodichain.lab.gym.envs.managers.conditions import evaluation_condition
+
+    registry = builtin_predicates()
+
+    def clearance(values, params):
+        height = torch.minimum(values["position"][:, 2], values["same_position"][:, 2])
+        return PredicateMeasurement(
+            height >= params["minimum"], torch.isfinite(height), {"height": height}
+        )
+
+    registry.register(
+        "clearance_test",
+        PredicateDefinition(1, ("position", "same_position"), dict, clearance),
+    )
+    env = _env()
+    read_pose = Mock(side_effect=lambda **kwargs: env.pose)
+    env.sim.get_rigid_object = Mock(
+        return_value=SimpleNamespace(get_local_pose=read_pose)
+    )
+    cfg = RLTaskCfg(
+        success={
+            "clearance": ConditionCfg(
+                func=evaluation_condition,
+                params={
+                    "registry": registry,
+                    "sources": {
+                        "cube": {"rigid_object": "cube"},
+                        "alias": {"rigid_object": "cube"},
+                        "unused": {"rigid_object": "other"},
+                    },
+                    "root": "clear",
+                    "rules": {
+                        "clear": {
+                            "kind": "clearance_test",
+                            "bindings": {"position": "cube", "same_position": "alias"},
+                            "params": {"minimum": 0.1},
+                        }
+                    },
+                },
+            )
+        }
+    )
+    manager = TerminationManager(cfg, env)
+    env.sim.get_rigid_object.assert_called_once_with("cube")
+    env.pose[:, 2, 3] = torch.tensor([0.1, float("nan")])
+    manager.compute(time_out=torch.tensor([True, False]))
+    read_pose.assert_called_once_with(to_matrix=True)
+    evidence = manager.snapshot()["conditions"]["success.clearance"]["rules"]["clear"]
+    assert evidence["metrics"]["height"][0].item() == pytest.approx(0.1)
+    assert torch.isnan(evidence["metrics"]["height"][1])
+    assert evidence["parameters"] == {"minimum": 0.1}
+    assert manager.task_state()[0].tolist() == [False, False]
+    assert manager.terminated.tolist() == [False, True]
+    assert manager.truncated.tolist() == [True, False]
+    env.pose[:, 2, 3] = 0.1
+    assert manager.task_state()[0].tolist() == [False, False]
+    manager.compute()
+    assert manager.task_state()[0].tolist() == [True, True]
+
+    command = ConditionCfg(
+        func=evaluation_condition,
+        params={
+            "sources": {
+                "left": {"attribute": "left_qpos", "kind": "joint_positions"},
+                "right": {"attribute": "right_command", "kind": "joint_command"},
+            },
+            "root": "matched",
+            "rules": {
+                "matched": {
+                    "kind": "command_position_match",
+                    "bindings": {"position": "left", "command": "right"},
+                    "params": {"tolerance": 0.1},
+                },
+            },
+        },
+    )
+    with pytest.raises(RuntimeError, match="one joint layout"):
+        TerminationManager(RLTaskCfg(success={"matched": command}), env)
 
 
 def test_outcome_queries_partial_reset_and_invalid_failure():
@@ -169,7 +278,7 @@ def test_empty_success_set_never_accepts():
 def test_unconfigured_host_keeps_legacy_and_task_program_acceptance(task_program):
     env = _env()
     env.termination_manager = None
-    env.cfg = SimpleNamespace(task_program=task_program)
+    env.cfg = SimpleNamespace(task_program=task_program, episode_context_in_info=True)
     env.initialize_task_outcome([0])
     info = env.get_info()
     assert "task_outcome" not in info
@@ -337,6 +446,9 @@ def test_step_uses_one_condition_snapshot_for_obs_reward_flags_and_recording(
     monkeypatch, ignore_terminations
 ):
     env = _env()
+    env._demo_episode_metadata = [
+        env._new_demo_episode_metadata(row) for row in range(2)
+    ]
     env.cfg.events = None
     env.cfg.ignore_terminations = ignore_terminations
     env.cfg.rl_task.success["count"] = ConditionCfg(func=_CountingCondition)
@@ -370,6 +482,20 @@ def test_step_uses_one_condition_snapshot_for_obs_reward_flags_and_recording(
     assert info["task_outcome"]["truncation"].tolist() == truncated.tolist()
     assert info["metrics"]["success.count.count"].tolist() == [1, 1]
     assert env.termination_manager.snapshot()["steps"].tolist() == [1, 1]
+    reports = info["terminal_outcomes"]
+    assert set(reports) == ({1} if ignore_terminations else {0, 1})
+    assert reports[1]["physical"]["conditions"]["physical_success"] is True
+    assert reports[1]["acceptance"]["accepted"] is False
+    assert reports[1]["termination"]["truncated"] is True
+    assert reports[1]["persistence"] is None
+    reports[1]["physical"]["conditions"]["steps"] = -1
+    env.termination_manager.reset([1])
+    assert (
+        env.get_demo_episode_metadata(1)["episode_outcome"]["physical"]["conditions"][
+            "steps"
+        ]
+        == 1
+    )
 
 
 @pytest.mark.parametrize("ignore_terminations", [False, True])

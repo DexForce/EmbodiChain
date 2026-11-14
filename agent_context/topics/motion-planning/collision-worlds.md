@@ -36,6 +36,8 @@ old representation-selection behavior; inspect their config definitions.
 Native cylinders expose a circumscribed convex planning proxy per collider;
 the simulation retains analytic cylinders. Compound pieces are never combined
 into a single hull, and unsupported piece extraction fails explicitly.
+Disabling contact response retains planner geometry and does not permit a
+merged compound fallback.
 
 Generated robot YAML omits self-collision metadata. Both the motion planner
 and the exact trajectory collision checker load it through

@@ -34,7 +34,7 @@ from tensordict import TensorDict
 from embodichain.data_pipeline.real2sim import TrajectoryTimeMap, load_prototype
 from embodichain.data_pipeline.recording.journal import inspect_recording
 from embodichain.lab.gym.envs._json import json_safe_copy
-from embodichain.lab.sim.atomic_actions import InstantiatedSkillMotion
+from embodichain.lab.sim.atomic_skills import InstantiatedSkillMotion
 from embodichain.lab.sim.motion.expansion import (
     CandidateIdentity,
     CommitReceipt,

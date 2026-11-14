@@ -892,7 +892,7 @@ def run_warp_probe(asset: AssemblyAsset, cfg: ConstrainedProbeCfg) -> dict[str, 
             "status": "skipped",
             "reason": "Raw MuJoCo Warp probes require CUDA.",
         }
-    from ._probe_warp import record_probe_state
+    from ._warp import record_probe_state
 
     geometry = definition.geometry
     model = mujoco.MjModel.from_xml_string(definition.source_mjcf)

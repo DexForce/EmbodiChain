@@ -23,6 +23,8 @@ from unittest.mock import Mock
 import pytest
 
 from embodichain.gen_sim.scene_engine.cli import start
+from embodichain.gen_sim.scene_engine.pipeline import generate as generation
+from embodichain.gen_sim.scene_engine.pipeline import edit as editing
 from embodichain.gen_sim.scene_engine.configs import environment
 
 
@@ -125,7 +127,7 @@ def test_scene_engine_cli_forwards_validated_paths(
         captured["output_root"] = output_root
         captured["scene_z_rotation_degrees"] = scene_z_rotation_degrees
 
-    monkeypatch.setattr(start, "generate_scene_from_image", generate_scene)
+    monkeypatch.setattr(generation, "generate_scene_from_image", generate_scene)
     output_root = tmp_path / "output"
 
     start.cli_scene_engine(
@@ -186,7 +188,7 @@ def test_scene_engine_cli_edits_existing_output_without_an_image(
         captured["output_root"] = output_root
         captured["edit_prompt"] = edit_prompt
 
-    monkeypatch.setattr(start, "edit_scene", edit_scene)
+    monkeypatch.setattr(editing, "edit_scene", edit_scene)
     output_root = tmp_path / "existing_output"
 
     start.cli_scene_engine(None, output_root, edit_prompt="move the cup right")
@@ -217,8 +219,8 @@ def test_scene_engine_cli_generates_then_edits_when_both_inputs_exist(
     def edit_scene(*, output_root: Path, edit_prompt: str, services=None) -> None:
         call_order.append("edit")
 
-    monkeypatch.setattr(start, "generate_scene_from_image", generate_scene)
-    monkeypatch.setattr(start, "edit_scene", edit_scene)
+    monkeypatch.setattr(generation, "generate_scene_from_image", generate_scene)
+    monkeypatch.setattr(editing, "edit_scene", edit_scene)
 
     start.cli_scene_engine(
         image_path,

@@ -10,6 +10,8 @@
 | Chain/reduced-model construction | `embodichain/lab/sim/utility/solver_utils.py` |
 | Seed generation and retrieval | `embodichain/lab/sim/motion/solvers/qpos_seed_sampler.py`, `qpos_seed_sel_sampler.py` in that directory |
 | Pink posture integration | `embodichain/lab/sim/motion/solvers/null_space_posture_task.py` |
+| Floating-root full-tree FK and link-origin velocities | `embodichain/compute/kinematics/tree.py` → `TreeKinematics`, `LinkKinematics`; URDF geometry and explicit tensor joint order |
+| Batched matrix products shared with models/tasks | `embodichain/compute/kinematics/matrix.py` → `matrix_product`, `matrix_vector_product`; compiled small matrices and Torch fallback |
 | Analytical kernels | `embodichain/compute/kinematics/_warp/` |
 | Bounded B=1 waypoint branch search with solver callbacks | `embodichain/compute/kinematics/ik_path.py`; stateful adapter in `lab/sim/motion/ik.py` |
 

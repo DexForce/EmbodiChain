@@ -1,0 +1,18 @@
+# This file owns the backend. Select a different file for another backend.
+physics: default
+max_episode_steps: 10000
+num_envs: 1
+seed: 0
+arena_space: 5.0
+enable_sensor: false
+render_cfg:
+  # Scene generation initializes this process renderer before task execution.
+  renderer: hybrid
+env:
+  sim_steps_per_control: 4
+
+embodiment:
+  component: extensions/embodichain_tasks/configs/components/embodiments/dual_ur5_dh_pgi_140_80.yaml
+  # Example installation: calibrate this pose against your scene coordinates.
+  overrides:
+    init_pos: [0.15, 0.85, 0.0]

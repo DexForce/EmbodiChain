@@ -34,7 +34,7 @@ from embodichain.lab.task_program import (
     SegmentCfg,
     SequenceCfg,
 )
-from embodichain.lab.sim.atomic_actions import EntityState
+from embodichain.lab.sim.atomic_skills import EntityState
 from embodichain.lab.task_program.semantics.calls import Pick
 from embodichain.lab.task_program.semantics.scene import (
     SceneEntityRegistration,

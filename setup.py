@@ -24,7 +24,13 @@ from pathlib import Path
 
 from setuptools import Command, find_namespace_packages, setup
 
-__all__ = ["get_example_data_files", "get_package_dir", "get_packages", "get_version"]
+__all__ = [
+    "get_example_data_files",
+    "get_package_data",
+    "get_package_dir",
+    "get_packages",
+    "get_version",
+]
 
 logging.basicConfig(stream=sys.stderr, level=logging.INFO)
 logger = logging.getLogger()
@@ -33,13 +39,6 @@ THIS_DIR = Path(__file__).resolve().parent
 CORE_PACKAGE_PATTERNS = ["embodichain", "embodichain.*"]
 EXTENSIONS_DIR = THIS_DIR / "extensions"
 EXAMPLES_DIR = THIS_DIR / "examples"
-
-# Defer importing torch until it's actually needed (when building extensions).
-# This prevents `setup.py` from failing at import time in environments where
-# torch isn't available or isn't on the same interpreter.
-BuildExtension = None
-CppExtension = None
-CUDAExtension = None
 
 
 class CleanCommand(Command):
@@ -133,6 +132,54 @@ def get_package_dir() -> dict[str, str]:
     }
 
 
+def get_package_data() -> dict[str, list[str]]:
+    """Collect core resources and shared rules for discovered extension roots.
+
+    Returns:
+        Resource patterns keyed by installed package name. Extension resources
+        use the same rules for flat and nested layouts; task configurations
+        retain their separate source-directory mapping.
+    """
+    extension_patterns = [
+        "**/*.json",
+        "**/*.yaml",
+        "**/*.yml",
+        "**/*.urdf",
+        "**/README.md",
+        "**/LICENSE",
+        "**/LICENSE.*",
+        "**/THIRD_PARTY_LICENSES",
+        "**/preview.png",
+    ]
+    return {
+        "embodichain": ["VERSION"],
+        "embodichain.data": ["default_materials.json"],
+        "embodichain.compute.kinematics._warp": [
+            "ssik_LICENSE.txt",
+            "data/*.npz",
+            "data/*.json",
+        ],
+        "embodichain.gen_sim.asset_engine.configs": ["*.json"],
+        "embodichain.gen_sim.services": ["*.md", "*.example.json", "spec/**/*.md"],
+        "embodichain.gen_sim.task_engine": [
+            "defaults.yaml",
+            "_semantic_graph_viewer.html",
+            "_graph_react.css",
+            "_graph_react.js",
+            "_graph_react.LICENSE.txt",
+            "_graph_assets/*",
+        ],
+        **{name: list(extension_patterns) for name in _extension_package_dirs()},
+        "embodichain_tasks.configs": [
+            "tasks/manipulation/cloth_fold/task_program/trajectory.npz",
+            "**/*.json",
+            "**/*.yaml",
+            "**/*.yml",
+            "**/README.md",
+        ],
+    }
+
+
 def get_example_data_files() -> list[tuple[str, list[str]]]:
     """Preserve the ordinary examples tree as installed distribution data.
 
@@ -163,7 +210,7 @@ def get_version() -> str:
         return f.read().strip()
 
 
-def main():
+def main() -> None:
     # Extract version
     version = get_version()
 
@@ -174,10 +221,6 @@ def main():
         shutil.copyfile(src_version, dst_version)
         logger.info(f"Copied VERSION to {dst_version}")
 
-    cmdclass = {"clean": CleanCommand}
-    if BuildExtension is not None:
-        cmdclass["build_ext"] = BuildExtension.with_options(no_python_abi_suffix=True)
-
     setup(
         name="embodichain",
         version=version,
@@ -186,51 +229,7 @@ def main():
         description="An end-to-end, GPU-accelerated, and modular platform for building generalized Embodied Intelligence.",
         packages=get_packages(),
         package_dir=get_package_dir(),
-        package_data={
-            "embodichain": ["VERSION"],
-            "embodichain_models.dynamics.nerd": ["THIRD_PARTY_LICENSES"],
-            "embodichain_models.dynamics.rigidformer": [
-                "THIRD_PARTY_LICENSES",
-                "REFERENCE_SOURCES.json",
-                "configs/*.yaml",
-            ],
-            "embodichain.data": ["default_materials.json"],
-            "embodichain.compute.kinematics._warp": [
-                "ssik_LICENSE.txt",
-                "data/*.npz",
-                "data/*.json",
-            ],
-            "embodichain_robots": [
-                "README.md",
-                "**/README.md",
-                "_ssik_artifacts/*.py",
-                "_ssik_artifacts/*.json",
-                "_ssik_artifacts/LICENSE.txt",
-            ],
-            "embodichain_robots.unitree.go1": ["profile.json"],
-            "embodichain_robots.unitree.go2": ["profile.json"],
-            "embodichain_robots.unitree.g1": ["profile.json"],
-            "embodichain_robots.unitree.h1_2": ["profile.json"],
-            "embodichain_robots.anybotics.anymal_c": ["profile.json"],
-            "embodichain_robots.pollen_robotics.microduck": ["profile.json"],
-            "embodichain_benchmarks.motion_generation": ["suites/*.yaml"],
-            "embodichain.gen_sim.asset_engine.configs": ["*.json"],
-            "embodichain.gen_sim.services": ["README.md", "*.example.json"],
-            "embodichain.gen_sim.task_engine": [
-                "defaults.yaml",
-                "_semantic_graph_viewer.html",
-                "_graph_react.css",
-                "_graph_react.js",
-                "_graph_react.LICENSE.txt",
-                "_graph_assets/*",
-            ],
-            "embodichain_tasks.configs": [
-                "**/*.json",
-                "**/*.yaml",
-                "**/*.yml",
-                "**/README.md",
-            ],
-        },
+        package_data=get_package_data(),
         data_files=[
             *get_example_data_files(),
             (
@@ -242,7 +241,7 @@ def main():
                 ],
             ),
         ],
-        cmdclass=cmdclass,
+        cmdclass={"clean": CleanCommand},
         include_package_data=False,
     )
 
