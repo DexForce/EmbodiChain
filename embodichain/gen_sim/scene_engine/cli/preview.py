@@ -121,7 +121,7 @@ def preview_scene_export(
         joint_controller = _setup_viser_joint_control(
             sim=sim,
             articulations=articulations,
-            enabled=(is_viser or sim.sim_config.web) and joint_control,
+            enabled=is_viser and joint_control,
         )
         if headless and not is_viser and not sim.sim_config.web:
             sim.sync_render_state()

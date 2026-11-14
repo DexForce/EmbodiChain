@@ -190,7 +190,11 @@ def _asset_file_path(cfg: object) -> str | None:
         else getattr(cfg, "fpath", None)
     )
     if source is None:
-        if hasattr(cfg, "shape") and shape is None:
+        if (
+            hasattr(cfg, "shape")
+            and shape is None
+            and getattr(cfg, "visuals", None) is None
+        ):
             raise ValueError("Mesh objects require either shape or source.")
         return legacy_path
     if not isinstance(source, UsdSourceCfg):

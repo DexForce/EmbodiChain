@@ -48,10 +48,11 @@ VisualizationBackend
              └── ViserBackend → HTTP/WebSocket browser UI
 ```
 
-Render-only `VisualObject` meshes export as `visual_object` nodes with root poses
-and live per-environment visibility. They share the mesh manifest/frame protocol
-without entering physical-object registries; non-mesh representations require a
-separate protocol extension.
+Legacy Mesh-backed `VisualObject` assets export as `visual_object` nodes with
+root poses and live per-environment visibility. They share the mesh manifest/frame
+protocol without entering physical registries. Explicit `visuals`/`link_visuals`
+composition currently rejects Viser rather than publishing incomplete geometry;
+Gaussian resources require a separate typed protocol/backend extension.
 
 The experimental `dexsim-web` backend replaces the native window using the
 existing World renderer and a separate observer camera. It bypasses the Viser
@@ -134,7 +135,8 @@ this invariant.
 
 - WebRTC observes the existing scene without exporting meshes or stepping physics.
   Its observer has a dedicated group; task-camera buffers and transforms are read-only.
-  Explicit close persists until reopen and reuses the World-owned observer group.
+  Explicit close persists until reopen. Removing its final camera destroys the
+  native group, so the borrowed facade is discarded and reopening creates a new one.
   Application stop does not release the native listener; World teardown does.
 
 - Scene export must not mutate physics, actions, or asset state.
@@ -163,7 +165,8 @@ this invariant.
 | Symptom | Cause / action |
 |---|---|
 | `Visualization env_ids ... outside simulation range` | Selected IDs do not exist in the configured arenas. Validate them against `SimulationManager.num_envs`. |
-| Startup timeout or address-in-use error | The Viser worker did not become ready or the configured port is occupied. Select another port and inspect `visualization_health.worker_error`. |
+| Startup timeout, possibly just after Viser starts listening | The worker startup budget includes Viser frontend dependency installation/build and initial manifest publication. `VisualizationRuntime.start()` waits up to 120 seconds by default and returns as soon as ready; an unusually slow build may need a longer explicit `start(timeout=...)`. Inspect startup logs before retrying. |
+| Address-in-use error | The configured port is occupied. Select another port and inspect `visualization_health.worker_error`. |
 | Asset added after startup is missing | Step once, call `refresh_visualization()`, or mark topology dirty if the change bypassed manager APIs. |
 | Native marker creation reports missing render-actor support | Use a DexSim build exposing Scene render-only mesh lifecycle and generic RenderBody/MaterialInst overlay properties, or run with `--viser`. Overlay routing supports Hybrid, FastRT and OfflineRT. |
 | Newton Viser shows only the grid after declaring a robot | Check that Viser startup did not finalize an empty Spawn scene before asset declaration and that link poses remain finite after the first update. |

@@ -318,6 +318,7 @@ def test_replay_restores_wrapper_state_without_closing_caller_env(monkeypatch) -
     """Replay leaves the environment close to its CLI owner."""
     env = MagicMock()
     env.unwrapped = env
+    env.cfg = SimpleNamespace(fluid_object=[])
     replay_env = MagicMock()
     monkeypatch.setattr(
         run_task,
@@ -421,6 +422,115 @@ def test_generate_function_discards_retry_then_commits_once(monkeypatch) -> None
     assert env.reset_options == [{"save_data": False}, None]
 
 
+@pytest.mark.parametrize(
+    "physical,program_success", [(True, True), (False, True), (True, False)]
+)
+def test_fluid_qualification_gates_sidecar_commit(
+    monkeypatch, tmp_path, physical: bool, program_success: bool
+) -> None:
+    accepted = physical and program_success
+    env = _ResetTrackingEnv()
+    diagnostic_videos = []
+    env.event_manager = SimpleNamespace(
+        cfg=SimpleNamespace(record_camera=object()),
+        get_functor=lambda _: SimpleNamespace(
+            save_and_clear=lambda **kwargs: diagnostic_videos.append(kwargs)
+        ),
+    )
+    monkeypatch.setattr(
+        run_task,
+        "execute_demo_episode",
+        lambda *args, **kwargs: _episode_result(
+            success=program_success, reason="success"
+        ),
+    )
+    monkeypatch.setattr(
+        run_task,
+        "DemoQualification",
+        lambda *_: SimpleNamespace(
+            start=lambda: None,
+            after_step=lambda: None,
+            finish=lambda *_: {"accepted": physical},
+        ),
+    )
+    saved = []
+    monkeypatch.setattr(
+        run_task,
+        "_save_qualified_fluid_trajectory",
+        lambda *args, **kwargs: saved.append((args, kwargs)),
+    )
+    generated = generate_function(
+        env,
+        max_attempts=1,
+        reset_before=False,
+        fluid_recorder=object(),
+        qualification={"observations": {"metric": {"min": [1.0]}}},
+        qualification_output_dir=tmp_path,
+    )
+    assert generated is accepted
+    assert len(saved) == int(accepted)
+    assert diagnostic_videos == (
+        [] if accepted else [{"env_ids": [0], "purpose": "diagnostic"}]
+    )
+    assert env.reset_options == ([None] if accepted else [{"save_data": False}])
+    assert (tmp_path / "qualification_result.json").is_file()
+    assert (
+        json.loads((tmp_path / "qualification_result.json").read_text())["accepted"]
+        is accepted
+    )
+
+
+def test_fluid_recording_requires_ordinary_trajectory(capsys) -> None:
+    with pytest.raises(SystemExit, match="2"):
+        run_task.cli(["--gym-config", "task.yaml", "--record-fluid-state"])
+    assert "requires --record_trajectory" in capsys.readouterr().err
+
+
+def test_fluid_batch_prepare_does_not_publish_initial_camera_frames(
+    monkeypatch, tmp_path
+) -> None:
+    env = _ResetTrackingEnv()
+    monkeypatch.setattr(run_task, "generate_function", lambda *args, **kwargs: True)
+    run_task.main(
+        SimpleNamespace(
+            qualification_output_dir=str(tmp_path), record_trajectory=False
+        ),
+        env,
+        {
+            "id": GYM_ID,
+            "collection": {
+                "qualification": {"observations": {"metric": {"min": [1.0]}}}
+            },
+        },
+    )
+    assert env.reset_options == [{"save_data": False}, {"save_data": False}]
+
+
+def test_qualified_fluid_sources_keep_distinct_run_artifacts(tmp_path) -> None:
+    paths = []
+    target = SimpleNamespace(
+        _traj_steps=torch.tensor([1]),
+        get_demo_episode_metadata=lambda row: {"program_hash": "program"},
+        save_trajectory=lambda path, **kwargs: paths.append((path, kwargs)),
+        _set_fluid_trajectory_recorder=lambda recorder: None,
+    )
+    for run in ("first", "second"):
+        recorder = SimpleNamespace(
+            directory=tmp_path / f"fluid-state-{run}",
+            finish=lambda path, lengths, env_ids: {"manifests": [run]},
+            commit=lambda: None,
+        )
+        run_task._save_qualified_fluid_trajectory(
+            target, recorder, tmp_path, [0], batch=0
+        )
+    assert paths[0][0] != paths[1][0]
+    assert all(
+        item[1]["extra_meta"]["fluid_qualification"]
+        == {"kind": "task_program", "accepted": True, "program_hash": "program"}
+        for item in paths
+    )
+
+
 def test_source_bound_recording_cannot_bypass_real2sim_receipt() -> None:
     env = _ResetTrackingEnv()
     env._task_program_adapter = SimpleNamespace(_configured_nominal_sources=(object(),))
@@ -487,7 +597,7 @@ def test_cli_selects_configured_real2sim_owner_and_explicit_profile_override(
     monkeypatch.setattr(real2sim_collection, "load_real2sim_tabletop_profile", load)
     monkeypatch.setattr(real2sim_collection, "install_real2sim_tabletop_owner", install)
     monkeypatch.setattr(run_task.gymnasium, "make", lambda **_: env)
-    monkeypatch.setattr(run_task, "main", lambda *args: None)
+    monkeypatch.setattr(run_task, "main", lambda *args, **kwargs: None)
     monkeypatch.setattr(run_task, "_abort_and_close_env", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         "embodichain.lab.sim.sim_manager.SimulationManager.flush_cleanup_queue",
@@ -1620,3 +1730,51 @@ def test_replay_input_keeps_partial_lines_and_reads_queued_commands(
         sender.join()
         if writer is not None:
             os.close(writer)
+
+
+@pytest.mark.parametrize(
+    "problem", ["rejected", "diagnostic", "program_hash", "incomplete"]
+)
+def test_launcher_requires_a_qualified_program_before_fluid_replay(problem) -> None:
+    source = {
+        "meta": {
+            "artifact_purpose": "recording",
+            "num_envs": 1,
+            "fluid_qualification": {
+                "kind": "task_program",
+                "accepted": True,
+                "program_hash": "p",
+            },
+            "demo_episodes": [
+                {"completed": True, "success": True, "program_hash": "p"}
+            ],
+        }
+    }
+    run_task._validate_fluid_replay_source(source)
+    if problem == "rejected":
+        source["meta"]["fluid_qualification"]["accepted"] = False
+    elif problem == "diagnostic":
+        source["meta"]["artifact_purpose"] = "diagnostic"
+    elif problem == "program_hash":
+        source["meta"]["demo_episodes"][0]["program_hash"] = "other"
+    else:
+        source["meta"]["demo_episodes"][0]["completed"] = False
+    with pytest.raises(ValueError):
+        run_task._validate_fluid_replay_source(source)
+
+
+def test_fluid_replay_policy_runs_without_a_precreated_reader(monkeypatch) -> None:
+    env = SimpleNamespace(cfg=SimpleNamespace(fluid_object=[object()]))
+    env.unwrapped = env
+    monkeypatch.setattr(
+        run_task,
+        "load_trajectory",
+        lambda path: {
+            "meta": {"num_envs": 1, "num_steps": 1, "lengths": [1]},
+        },
+    )
+    wrapper = MagicMock()
+    monkeypatch.setattr(run_task, "ReplayWrapper", wrapper)
+    with pytest.raises(ValueError, match="accepted Task Program"):
+        run_task.replay(env, "source.pt")
+    wrapper.assert_not_called()

@@ -1294,10 +1294,12 @@ def test_start_visualization_rejects_open_native_window() -> None:
         sim.start_visualization()
 
 
-def test_start_visualization_does_not_prepare_an_empty_declaration_phase(
+@pytest.mark.parametrize("has_cable", [False, True], ids=["empty", "cable-only"])
+def test_start_visualization_prepares_only_when_assets_are_declared(
     monkeypatch: pytest.MonkeyPatch,
+    has_cable: bool,
 ) -> None:
-    """Starting Viser must not finalize Newton before assets are declared."""
+    """Viser prepares cable-only scenes but leaves an empty builder open."""
 
     class _Exporter:
         def __init__(self, sim: SimulationManager, cfg: object) -> None:
@@ -1313,6 +1315,7 @@ def test_start_visualization_does_not_prepare_an_empty_declaration_phase(
             self.captures = 0
 
         def start(self) -> None:
+            assert self.exporter.sim.prepare.call_count == int(has_cable)
             self.is_running = True
 
         def capture(self, **_kwargs: object) -> None:
@@ -1336,6 +1339,7 @@ def test_start_visualization_does_not_prepare_an_empty_declaration_phase(
     sim._rigid_object_groups = {}
     sim._fluid_objects = {}
     sim._deformable_objects = {}
+    sim._cable_objects = {"cable": object()} if has_cable else {}
     sim._articulations = {}
     sim._robots = {}
     sim._sensors = {}
@@ -1352,7 +1356,7 @@ def test_start_visualization_does_not_prepare_an_empty_declaration_phase(
 
     runtime = sim.start_visualization()
 
-    sim.prepare.assert_not_called()
+    assert sim.prepare.call_count == int(has_cable)
     sim.sync_render_state.assert_not_called()
     assert runtime is not None
     assert runtime.captures == 1
@@ -1532,13 +1536,13 @@ def test_empty_camera_group_does_not_publish_render_state() -> None:
 def test_empty_camera_group_still_publishes_for_an_open_window() -> None:
     sim = object.__new__(SimulationManager)
     sim.is_window_opened = True
-    sim.sync_render_state = MagicMock()
+    sim._publish_render_state = MagicMock()
     sim._world = SimpleNamespace(render_camera_group=MagicMock())
     sim._log_scene_summary = MagicMock()
 
     sim.render_camera_group([])
 
-    sim.sync_render_state.assert_called_once_with()
+    sim._publish_render_state.assert_called_once_with()
     sim._world.render_camera_group.assert_not_called()
 
 
@@ -1596,18 +1600,121 @@ def _make_render_frame_sim(*, window=False, viser=False, automatic_sync=False):
 
 @pytest.mark.parametrize("automatic_sync", [None, False, True])
 @pytest.mark.parametrize("window", [False, True])
+@pytest.mark.parametrize("defer_final_frame", [False, True])
 def test_window_publication_respects_consumers_with_all_newton_policies(
-    automatic_sync, window
+    automatic_sync, window, defer_final_frame
 ):
     sim, _, _, publications, rendered = _make_render_frame_sim(
         window=window, automatic_sync=automatic_sync
     )
+    sim._world._flush_render_updates = MagicMock(return_value=0)
     for _ in range(3):
-        sim.update(0.01, 1, render_final_step=False)
-        with sim.render_frame():
-            sim.render_camera_group([])
+        sim.update(0.01, 1, render_final_step=not defer_final_frame)
+        if defer_final_frame:
+            with sim.render_frame():
+                sim.render_camera_group([])
     assert publications == ([1, 2, 3] if window or automatic_sync is True else [])
     assert rendered == []
+    sim._world._flush_render_updates.assert_not_called()
+
+
+@pytest.mark.parametrize("camera", [False, True])
+def test_window_publication_waits_once_for_cameras_and_recording(camera: bool) -> None:
+    sim, _, state, publications, rendered = _make_render_frame_sim(window=True)
+    completed, recorded = [], []
+    sim._world._flush_render_updates = lambda: completed.append(state["published"]) or 0
+    sim._world.render_camera_group = lambda _: rendered.append(completed[-1])
+    sim._window_record_state = _WindowRecordState(
+        time_step=0.01,
+        max_memory_bytes=1024,
+        output_dir="unused",
+        video_name="unused",
+        save_kwargs={},
+        capture_from_sim_update=True,
+    )
+    sim._capture_window_record_frame = lambda _: recorded.append(completed[-1])
+    for value in (4, 7):
+        state["value"] = value
+        sim._pending_record_dt = 0.01
+        with sim.render_frame():
+            assert completed == publications[:-1]
+            if camera:
+                sim.render_camera_group([1])
+                sim.render_camera_group([2])
+    assert publications == completed == recorded == [4, 7]
+    assert rendered == ([4, 4, 7, 7] if camera else [])
+
+
+def test_window_camera_wait_failure_retries_without_republishing() -> None:
+    sim, _, state, publications, rendered = _make_render_frame_sim(window=True)
+    sim._world._flush_render_updates = MagicMock(side_effect=[-1, 0])
+    state["value"] = 5
+    with sim.render_frame():
+        with pytest.raises(
+            RuntimeError, match="Native render-state publication failed"
+        ):
+            sim.render_camera_group([1])
+        assert rendered == []
+        sim.render_camera_group([1])
+        sim.render_camera_group([2])
+    assert publications == [5]
+    assert rendered == [5, 5]
+    assert sim._world._flush_render_updates.call_count == 2
+
+
+def test_fluid_window_publication_completes_before_reusing_native_staging() -> None:
+    sim, _, state, _, rendered = _make_render_frame_sim(window=True)
+    sim._fluid_objects = {"water": object()}
+    pending = []
+    visible = []
+
+    def stage(_result):
+        # Native fluid staging drops an update when both copy slots are busy.
+        if len(pending) < 2:
+            pending.append(state["value"])
+
+    def complete():
+        if pending:
+            visible[:] = [pending[-1]]
+            pending.clear()
+        return 0
+
+    sim.physics.sync_render_state = stage
+    sim._world._flush_render_updates = complete
+    sim._world.render_camera_group = lambda _: rendered.append(visible[-1])
+    sim.update(0.01, 3, render_final_step=False)
+    with sim.render_frame():
+        sim.render_camera_group([1])
+    assert rendered == [3]
+
+
+@pytest.mark.parametrize("prior_steps", [0, 2])
+def test_window_record_wait_failure_preserves_due_frame_for_retry(
+    prior_steps: int,
+) -> None:
+    sim, _, state, _, _ = _make_render_frame_sim(window=True)
+    sim._window_record_state = _WindowRecordState(
+        time_step=(prior_steps + 1) * 0.01,
+        max_memory_bytes=1024,
+        output_dir="unused",
+        video_name="unused",
+        save_kwargs={},
+        capture_from_sim_update=True,
+    )
+    recorded = []
+    sim._capture_window_record_frame = lambda _: recorded.append(state["published"])
+    sim.update(0.01, prior_steps)
+    sim._world._flush_render_updates = MagicMock(side_effect=[-1, 0])
+    sim.update(0.01, 1, render_final_step=False)
+    with pytest.raises(RuntimeError, match="Native render-state publication failed"):
+        with sim.render_frame():
+            pass
+    assert recorded == []
+    with sim.render_frame():
+        pass
+    assert recorded == [prior_steps + 1]
+    assert sim._pending_record_dt == 0
+    assert sim._window_record_state.accumulated_sim_time == 0
 
 
 @pytest.mark.parametrize("camera", [False, True])
@@ -1699,8 +1806,9 @@ def test_render_frames_and_independent_reads_refresh_direct_state_writes():
     assert rendered == [4, 4, 7, 7, 9, 12]
 
 
-def test_explicit_publication_inside_frame_refreshes_after_state_edit():
-    sim, _, state, publications, rendered = _make_render_frame_sim()
+@pytest.mark.parametrize("window", [False, True])
+def test_explicit_publication_inside_frame_refreshes_after_state_edit(window):
+    sim, _, state, publications, rendered = _make_render_frame_sim(window=window)
     with sim.render_frame():
         sim.render_camera_group([1])
         state["value"] = 5
@@ -1782,6 +1890,8 @@ def test_register_kinematic_joint_trajectory_expands_each_arena() -> None:
         positions,
         fps=50.0,
         root_poses=root_poses,
+        joint_names=("joint_b", "joint_a"),
+        initialize_pose=True,
     )
 
     assert builder.add_runtime_control.call_count == sim.num_envs
@@ -1791,6 +1901,8 @@ def test_register_kinematic_joint_trajectory_expands_each_arena() -> None:
         control = control_call.args[0]
         assert control.target == f"arena_{env_index}/robot"
         assert control.fps == 50.0
+        assert control.joint_names == ("joint_b", "joint_a")
+        assert control.initialize_pose is True
         np.testing.assert_array_equal(
             control.joint_positions,
             positions[env_index].numpy(),
@@ -2369,6 +2481,8 @@ def test_prepare_initializes_runtime_for_backend_device_matrix(
     spawn_scene.bind.side_effect = lambda: events.append("bind")
 
     sim = object.__new__(SimulationManager)
+    sim._fluid_objects = {}
+    sim.num_envs = 1
     sync_render_state = MagicMock()
     sim.device = device
     sim._world = MagicMock()
@@ -2421,6 +2535,8 @@ def test_prepare_retries_runtime_and_binding_without_recommit() -> None:
     spawn_scene.builder.has_pending_changes = False
 
     sim = object.__new__(SimulationManager)
+    sim._fluid_objects = {}
+    sim.num_envs = 1
     sync_render_state = MagicMock()
     prepare_spawn_runtime = MagicMock(side_effect=[RuntimeError("first attempt"), None])
     sim.physics = SimpleNamespace(
@@ -2459,6 +2575,8 @@ def test_prepare_retries_camera_attachment_without_recommit() -> None:
     spawn_scene.builder.has_pending_changes = False
 
     sim = object.__new__(SimulationManager)
+    sim._fluid_objects = {}
+    sim.num_envs = 1
     sync_render_state = MagicMock()
     sim.physics = SimpleNamespace(
         name="default",
@@ -2498,6 +2616,8 @@ def test_prepare_syncs_render_state_once_per_topology_revision() -> None:
     sync_render_state = MagicMock(side_effect=lambda _result: events.append("sync"))
 
     sim = object.__new__(SimulationManager)
+    sim._fluid_objects = {}
+    sim.num_envs = 1
     sim.physics = SimpleNamespace(
         name="newton",
         prepare_spawn_runtime=MagicMock(),
@@ -2541,6 +2661,8 @@ def test_prepare_retries_render_state_sync_without_recommit() -> None:
     )
 
     sim = object.__new__(SimulationManager)
+    sim._fluid_objects = {}
+    sim.num_envs = 1
     sim.physics = SimpleNamespace(
         name="newton",
         prepare_spawn_runtime=MagicMock(),
@@ -2847,6 +2969,7 @@ def _make_camera_with_fake_views(
 
 def _make_camera_attachment_manager(num_envs: int = 2) -> SimulationManager:
     sim = object.__new__(SimulationManager)
+    sim._fluid_objects = {}
     sim.num_envs = num_envs
     sim.device = torch.device("cpu")
     sim._robots = {}
@@ -3408,6 +3531,8 @@ def test_prepare_detaches_camera_before_rebuilding_parent(rebuild: bool) -> None
 
     scene.commit.side_effect = commit
     sim = object.__new__(SimulationManager)
+    sim._fluid_objects = {}
+    sim.num_envs = 1
     sim._spawn_scene = scene
     sim._sensors = {"camera": camera}
     sim._default_plane = object()
@@ -3828,6 +3953,48 @@ def test_automatic_attachment_native_publication_only_when_parent_changes():
     assert sim._visualization_runtime.capture_calls == []
 
 
+@pytest.mark.parametrize(
+    "backend,captures_browser",
+    [("none", False), ("viser", True), ("dexsim-web", True)],
+)
+def test_render_frame_only_captures_browser_presentations(
+    backend, captures_browser
+) -> None:
+    sim, *_ = _make_render_frame_sim()
+    sim.sim_config.visualization.backend = backend
+    sim.capture_visualization_safely = MagicMock()
+
+    with sim.render_frame(force_visualization=True, capture_camera_images=False):
+        pass
+
+    if captures_browser:
+        sim.capture_visualization_safely.assert_called_once_with(
+            force=True, capture_camera_images=False
+        )
+    else:
+        sim.capture_visualization_safely.assert_not_called()
+
+
+def test_window_updates_attached_markers_without_waiting() -> None:
+    sim, _, pose = _attach_groups_for_host_update(1)
+    sim.sim_config.visualization.backend = "native"
+    sim.is_window_opened = True
+    published = []
+    sim._native_markers = SimpleNamespace(
+        publish=lambda name, markers: published.append(markers[0].position.copy())
+    )
+    sim._world._flush_render_updates = MagicMock(return_value=0)
+
+    def move_parent(_dt: float) -> None:
+        pose[:, 0] += 1
+
+    sim.update(step=2, after_substep=move_parent)
+
+    np.testing.assert_allclose(published, [[14, 0, 0], [15, 0, 0]])
+    assert sim.simulation_time == pytest.approx(0.02)
+    sim._world._flush_render_updates.assert_not_called()
+
+
 def test_automatic_attachment_native_failure_preserves_step_accounting():
     sim, groups, pose = _attach_groups_for_host_update(1)
     sim.sim_config.visualization.backend = "none"
@@ -4000,7 +4167,7 @@ def test_web_config_selects_headless_native_streaming(monkeypatch, tmp_path) -> 
     runtime_check.assert_called_once_with()
     assert config.headless and not world.open_windows
     assert world.webrtc_enabled and world.webrtc_port == 8766
-    assert world.webrtc_input_camera == "__embodichain_web_viewer"
+    assert world.webrtc_input_camera == "__embodichain_web_input_disabled"
     assert world.renderer == RenderCfg(renderer="fast-rt").to_dexsim_flags()
 
 
@@ -4286,7 +4453,7 @@ def test_marker_update_in_observer_waits_for_deferred_final_frame() -> None:
     assert runtime.capture_calls[0]["sim_step"] == 1
 
 
-def test_reset_fluid_selects_rows_and_honors_exclusions():
+def test_reset_fluids_selects_rows_and_honors_exclusions():
     sim = object.__new__(SimulationManager)
     sim.physics = NewtonPhysicsBackend(sim)
     sim.num_envs = 2
@@ -4300,10 +4467,10 @@ def test_reset_fluid_selects_rows_and_honors_exclusions():
         "_deformable_objects",
     ):
         setattr(sim, name, {})
-    fluid, excluded = MagicMock(), MagicMock()
-    sim._fluid_objects = {"water": fluid, "other": excluded}
-    sim.reset_objects_state(env_ids=[1], excluded_uids=["other"])
-    excluded.reset.assert_not_called()
+    fluid, excluded_fluid = MagicMock(), MagicMock()
+    sim._fluid_objects = {"water": fluid, "other_fluid": excluded_fluid}
+    sim.reset_objects_state(env_ids=[1], excluded_uids=["other_fluid"])
+    excluded_fluid.reset.assert_not_called()
     fluid.reset.assert_called_once_with([1])
 
 

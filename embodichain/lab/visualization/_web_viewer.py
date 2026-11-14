@@ -36,6 +36,10 @@ if TYPE_CHECKING:
 __all__: list[str] = []
 
 _CAMERA_NAME = "__embodichain_web_viewer"
+# The SDK's empty selector permits every camera. Reserve a different name for
+# this deny policy: sensor names end in _viewN; observer and recorder names are
+# distinct. Direct native camera callers must also leave this name unused.
+_NO_INPUT_CAMERA_NAME = "__embodichain_web_input_disabled"
 
 
 def _require_webrtc_runtime() -> None:
@@ -232,6 +236,9 @@ class _WebViewer:
         if self.camera is not None:
             self.camera.disable_control()
             self.camera.close_camera()
+            # The SDK returns a borrowed group and deletes it when its final
+            # camera is removed. Reopening must allocate a fresh group.
+            self.sim._web_camera_group = None
             self.arena.remove_camera(_CAMERA_NAME)
             self.camera = None
         self.group = None

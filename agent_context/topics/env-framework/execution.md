@@ -71,7 +71,12 @@ stable online language IDs. Language intent does not establish physical success.
   policy actions.
 - Descriptor-driven policy recording and policy-width trajectory recording do
   not accept `ControllerAction`; mixing those fixed layouts fails before action
-  processing. Expert recording continues to use `ExpertActionSpec`.
+  processing. Expert recording continues to use `ExpertActionSpec`. The position-only
+  `expert_trajectory.use_action_manager` opt-in converts joint targets through the
+  policy terms while retaining exact FK targets. With
+  `rollout_action_semantics="policy_request"`, it instead records the converted
+  ActionManager request and trace independently of expert joint width; unmanaged
+  direct controller commands remain rejected by this recording contract.
 - For raw-policy vector demos with staggered completion, ActionManager masks
   inactive rows after processing: selected qpos resources hold measured values,
   while qvel/qf resources receive zero commands.
@@ -128,16 +133,20 @@ stable online language IDs. Language intent does not establish physical success.
 ### Configured manipulation RL outcomes
 
 `EmbodiedEnvCfg.rl_task` optionally enables RL outcomes on `EmbodiedEnv`.
-Its ordinary loop calls `TerminationManager.compute()` once after physics and
+Its RL-only loop calls `TerminationManager.compute()` once after physics and
 interval events, supplying this transition's time-limit mask before observations
-and rewards. `BaseEnv._get_termination_flags()` lets the configured host return
+and rewards. Explicit Task Program policy mode first acquires the canonical
+observation, then `_after_observation` advances shared progress and computes
+termination before info/rewards read the caches. Reset captures never advance
+progress; the [policy stage contract](../task-programs/execution.md#policy-stage-progress)
+owns declaration and evidence restrictions. `BaseEnv._get_termination_flags()` lets the configured host return
 those cached Gym flags; recording does not finalize or recompute acceptance.
 Queries return owned tensors and never sample stateful conditions. No declared
 success terms means no default success; invalid evidence fails only its own rows.
 Failure or truncation excludes accepted success while retaining raw physical
 truth. `ignore_terminations` suppresses Gym termination flags without changing
-measured acceptance or disabling time limits. Legacy environments and Task
-Program keep their existing info-based termination and success rules.
+measured acceptance or disabling time limits. Legacy environments and expert Task
+Program execution keep their existing info-based termination and success rules.
 
 Reset consumes old buffers first, then clears selected condition rows and
 captures virtual targets after reset events and trusted preparation. Explicit
@@ -225,6 +234,7 @@ step(action)
   │     ├── robot.get_proprioception()[:, active_joint_ids]
   │     ├── _get_sensor_obs()
   │     └── _extend_obs()            # ObservationManager.compute()
+  ├── _after_observation()            # policy Task Program progress + termination
   ├── get_info() → evaluate()
   ├── get_reward() + _extend_reward()  # RewardManager.compute()
   ├── _postprocess_action(action)     # BaseEnv no-op; no action post mode
@@ -298,7 +308,8 @@ not orchestrate multiple experiments or qualify kinematic playback.
   cursors keep their accepted-versus-diagnostic semantics; there is no independent
   history instance or write lifecycle. Standard state fields use observation functors; the host
   does not perform a separate physics read in its write hook. Full robot state,
-  articulations and selected rigid objects retain their existing action schema.
+  articulations, selected rigid objects and cable segments share that acquisition
+  and retain their existing action schema.
   `cfg.trajectory_uids` restricts non-robot replay fields. Raw channels, T+1
   timing and lifetime queries are owned by the
   [recording contract](env-framework.md#expert-trajectory-contract).
@@ -311,6 +322,15 @@ not orchestrate multiple experiments or qualify kinematic playback.
   data and finalizes writes. Persistence failures propagate through the durability
   barrier. Defaults and paths live in `EmbodiedEnvCfg`/`save_trajectory`.
 - **Replay**: `ReplayWrapper(env, trajectory, mode)` wraps any `EmbodiedEnv`.
+  The private `gym/utils/_replay.py` owner supplies command sampling and row-local
+  cursors to both recorded replay and authored native-position replay. Authored
+  NPZ inputs contain commands, not fabricated recorded cloth states. Their
+  physical declaration is loaded once before scene preparation; native controls
+  register before `SimulationManager.prepare()`, then joint columns bind once
+  after native metadata is ready. The Task Program reads this bound snapshot.
+  Native replay requires resolved cadence compatibility and position-only targets;
+  extra velocity/effort commands fail before consumption. Holds freeze native time.
+  Episode metadata retains the source digest, joint orders and cadence.
   `kinematic` disables physics and writes recorded states (obs only, exact
   reproduction); `dynamic` feeds raw-policy actions through `env.step` so the
   `ActionManager` re-applies the transform. An expert trajectory with
@@ -331,6 +351,10 @@ not orchestrate multiple experiments or qualify kinematic playback.
   Use `evaluate_recorded_rules` to evaluate a compiled graph directly from a
   trusted trajectory in bounded chunks. It can use a recorded segment
   occurrence to select the matching control slots and acquisition revisions.
+  Qualified fluid recordings carry bounded particle-state sidecars. Kinematic
+  and control replay restore complete particle states at each recorded boundary;
+  dynamic replay restores only the initial particle state and recomputes later
+  fluid motion from recorded actions.
 - **Policy projection**: `rollout_buffer` retains actual policy observations,
   including sampled noise, and its existing obs/action/reward alignment for
   LeRobot/RL. It shares the acquisition boundary with raw history, rather than
@@ -338,6 +362,21 @@ not orchestrate multiple experiments or qualify kinematic playback.
   keeps its own cursor and layout. Internally allocated expert policy observations
   include the terminal T+1 slot in the backing store; the public T-transition
   view and existing dataset action/annotation alignment stay compatible.
+- **Cable observations**: `states.cables[uid].segment_state_w` and the matching
+  raw observation field share the T+1 rollout storage. `get_entity_state` describes
+  world segment position, XYZW orientation, COM linear velocity and angular
+  velocity, preserving each cable's segment topology and row validity. The field
+  records observations, not solver history. `ReplayWrapper` accepts dynamic
+  replay only when every recorded initial state matches the full reset; it
+  rejects scrubbing, partial reset and broadcasting world-space cable states.
+  Cable artifacts store `meta.arena_origins_w` in exported row order. Replay
+  translates captured reset positions into the source world frame for comparison,
+  allowing a per-environment export to replay at a different arena origin.
+  Raw observations, orientations and velocities retain their original meaning.
+  Older files without origin metadata require matching world placement.
+  `trajectory_state.restore_trajectory_state()` rejects cable entries before
+  any write. Use action replay to validate a new episode, not a visible-state
+  restore as a history-preserving checkpoint.
 - **Fixed action layout**: an ActionManager-backed trajectory uses the batched
   policy action space; a controller/expert trajectory uses the private
   `ExpertActionSpec` layout. One trajectory cannot mix these schemas.

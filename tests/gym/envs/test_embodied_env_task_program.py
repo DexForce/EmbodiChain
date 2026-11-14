@@ -61,6 +61,7 @@ def _uninitialized_env(cls: type[EmbodiedEnv], task_program: object) -> Embodied
     env._num_envs = 2
     env._task_program_adapter = None
     env._active_task_program_bridge = None
+    env._physical_replay = None
     return env
 
 

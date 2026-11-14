@@ -108,6 +108,7 @@ def test_list_robot_dispatch_reads_installed_catalogs(
     assert "Mimic" in output and "Joints" in output
     assert "Control" in output and "DOF" in output and "Parts" in output
     expected_ids = {
+        "AgibotG2",
         "AgibotG1",
         "YamI2rt",
         "FrankaPandaHand",

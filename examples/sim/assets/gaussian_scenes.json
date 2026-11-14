@@ -1,0 +1,58 @@
+{
+  "garden": {
+    "url": "https://huggingface.co/kishimisu/3d-gaussian-splatting-webgl/resolve/d9bd1af40261b318a95d0f5882228f332a4c1afd/garden.ply",
+    "sha256": "87e2fae3b155bcbb7faf9f55e0786f7aaec0e566f10255dc8b05156109d0682f",
+    "cache_dir": "GaussianGarden",
+    "download": "garden.ply",
+    "entry": "garden.ply",
+    "points": 4325323,
+    "eye": [
+      0.338164,
+      1.198655,
+      -2.544626
+    ],
+    "target": [
+      0.338164,
+      1.198655,
+      0.455374
+    ],
+    "up": [
+      -0.05554,
+      -0.928368,
+      -0.367486
+    ],
+    "source": "https://github.com/kishimisu/Gaussian-Splatting-WebGL",
+    "license": "Upstream capture terms apply; this repository distributes download metadata only. See the original 3DGS project and capture provider."
+  },
+  "library-usd": {
+    "url": "http://192.168.3.120/CoreEngine/DexSim/resources/simready-loading/20261104/gaussian-library-5cc314fb7a8ff1f5.zip",
+    "sha256": "5cc314fb7a8ff1f548aff19249643c902d5ea1f1d5f2180c1f03b490c7eedfe0",
+    "cache_dir": "GaussianLibraryUsd",
+    "download": "library.zip",
+    "entry": "asset.usda",
+    "points": 2000000,
+    "eye": [
+      0,
+      -1.55,
+      -4.6
+    ],
+    "target": [
+      0,
+      -1.15,
+      0.75
+    ],
+    "up": [
+      0,
+      -1,
+      0
+    ],
+    "source": "DexSim tools/ci/asset_loading_manifest.json: gaussian-library; base URL from python/dexsim/utility/resource_url.txt",
+    "license": "Internal DexSim acceptance corpus; requires the corporate network. No redistribution license is inferred.",
+    "members": {
+      "asset.usda": "ef854ce9166ea7b74ef7fd9ff7f1f8586df63fb8bc02fb87bb4c5e7e51a2954a",
+      "reports/conversion.json": "e483dcc16ec529bc497c3d76755069b8bd0d44df809a7a573bdb7b4c16e3a711",
+      "reports/dexsim-packaging.json": "c817c14ded21f392d1e5823e656b6e4d20f0e992bcaba2d464fa7335c0e02631",
+      "source/original.ply": "ce753ff95c75db926804cfdb414501932484fd25e8c60ff4f966b341a5be146d"
+    }
+  }
+}

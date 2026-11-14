@@ -35,6 +35,24 @@ import open3d as o3d
 
 from embodichain.utils import logger
 
+_HF_ASSET_MIRROR = "https://hf-mirror.com/datasets/DexForceAI/embodichain_data/"
+_HF_ASSET_ORIGIN = "https://huggingface.co/datasets/DexForceAI/embodichain_data/"
+
+
+def _with_asset_origin_fallback(
+    descriptor: o3d.data.DataDescriptor,
+) -> o3d.data.DataDescriptor:
+    """Append the official source for known mirrored asset URLs."""
+    urls = list(descriptor.urls)
+    for url in descriptor.urls:
+        if url.startswith(_HF_ASSET_MIRROR):
+            origin = _HF_ASSET_ORIGIN + url[len(_HF_ASSET_MIRROR) :]
+            if origin not in urls:
+                urls.append(origin)
+    if urls == list(descriptor.urls):
+        return descriptor
+    return o3d.data.DataDescriptor(urls, descriptor.md5, descriptor.extract_in_subdir)
+
 
 def _dataset_cache_paths(path: str, prefix: str) -> tuple[Path, Path]:
     """Resolve one cache entry and reject paths outside its configured root."""
@@ -105,6 +123,7 @@ def _dataset_download_lock(path: str, prefix: str) -> Iterator[None]:
 
 class EmbodiChainDataset(o3d.data.DownloadDataset):
     def __init__(self, prefix, data_descriptor, path):
+        data_descriptor = _with_asset_origin_fallback(data_descriptor)
         with _dataset_download_lock(path, prefix):
             # Perform the zip file and extracted contents check. If the zip is
             # not valid, the parent class downloads and extracts it again.

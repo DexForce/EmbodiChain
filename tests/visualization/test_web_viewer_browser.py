@@ -16,7 +16,8 @@
 
 """Opt-in GPU/Chrome acceptance; run serially with --run-gpu.
 
-Requires Playwright and WEBRTC_TEST_CHROME (or google-chrome on PATH).
+Video acceptance requires Playwright and WEBRTC_TEST_CHROME (or google-chrome
+on PATH). Native catalog and camera-lifecycle cases do not join RTC media.
 The native renderer needs the host's existing display/SDL environment.
 """
 
@@ -151,6 +152,11 @@ def test_native_browser_view_and_sensor_isolation(
                     page.locator("aside button, aside input, aside select").count() == 0
                 )
                 assert page.evaluate("window.RTC_ViewPeer.Config.Input") is False
+                description = page.evaluate("RTC_ReadSceneDescription()")
+                assert len(description["sources"]) == num_envs + 1
+                assert all(
+                    source["input"] is False for source in description["sources"]
+                )
 
                 # Observation gestures and forged old commands cannot edit the
                 # scene or advance physics through this information page.
@@ -168,7 +174,40 @@ def test_native_browser_view_and_sensor_isolation(
                     return response.status;
                 }""")
                 assert status == 403
-                current = ready()
+                before_input = ready()
+                page.evaluate("""async () => {
+                    // Bypass the supplied page's Input:false flag and HTTP
+                    // command route. The server must reject native RTC input.
+                    const description = await RTC_ReadSceneDescription();
+                    const peer = window.RTC_ViewPeer;
+                    const stream = description.sources.findIndex(
+                        source => source.name === state.camera_name);
+                    if (stream < 0 || peer.Channel?.readyState !== 'open')
+                        throw new Error('Native observer data channel unavailable');
+                    if (!Number.isSafeInteger(peer.InputSequence) || peer.InputSequence < 0)
+                        throw new Error('Native input sequence unavailable');
+                    const previousStream = peer.InputStream;
+                    const previousPermissions = peer.Config.InputStreams;
+                    const sequence = peer.InputSequence;
+                    try {
+                        peer.InputStream = stream;
+                        peer.Config.InputStreams = description.sources.map(() => true);
+                        // Use the SDK encoder and monotonic sequence. Its wheel
+                        // delta occupies X; Y must stay zero for a valid packet.
+                        if (!peer.SendInput(4, 0, 4, 0))
+                            throw new Error('SDK did not submit native wheel input');
+                    } finally {
+                        peer.InputStream = previousStream;
+                        peer.Config.InputStreams = previousPermissions;
+                    }
+                    if (peer.InputSequence !== sequence + 1)
+                        throw new Error('Native input sequence did not advance');
+                }""")
+                current = _wait(
+                    ready,
+                    lambda value: value
+                    and value["frames"] > before_input["frames"] + 2,
+                )
                 assert current["test_camera_pose"] == initial["test_camera_pose"]
                 assert current["test_cube_pose"] == initial["test_cube_pose"]
                 assert current["frames"] > initial["frames"]
@@ -229,3 +268,157 @@ def test_web_does_not_restrict_task_sensor_construction(tmp_path):
         "depth_size": [65, 49],
         "stereo_instances": 8,
     }
+
+
+def test_native_web_catalog_disables_input_without_joining_media():
+    """Qualify the native policy even when the streaming artifact cannot load."""
+    environment = dict(os.environ)
+    environment.pop("DEXSIM_WEBRTC_LIBRARY", None)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import json
+from pathlib import Path
+import resource
+import socket
+from tempfile import TemporaryDirectory
+import time
+from types import SimpleNamespace
+import urllib.request
+from unittest.mock import patch
+
+import dexsim
+
+from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.sim.cfg import RenderCfg
+from embodichain.lab.visualization import DexSimWebCfg, VisualizationCfg
+
+resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+with socket.socket() as candidate:
+    candidate.bind(("127.0.0.1", 0))
+    port = candidate.getsockname()[1]
+with TemporaryDirectory() as cache:
+    manager = SimpleNamespace(
+        _material_cache_dir=Path(cache),
+        physics=SimpleNamespace(configure_world=lambda *_: None),
+    )
+    config = SimulationManagerCfg(
+        web=True, startup_summary="off", render_cfg=RenderCfg(renderer="hybrid"),
+        visualization=VisualizationCfg(web=DexSimWebCfg(port=port)),
+    )
+    # The native catalog does not load the RTC library until a peer joins.
+    # Bypass only the media preflight; retain the production input policy.
+    with patch("embodichain.lab.visualization._web_viewer._require_webrtc_runtime"):
+        native_config = SimulationManager._convert_sim_config(manager, config)
+    world = dexsim.World(native_config)
+    world.set_manual_update(True)
+    cameras = []
+    try:
+        arena = world.get_env()
+        for name in ("__embodichain_web_viewer", "task_camera_view1"):
+            camera = arena.create_camera(name, 64, 64, True, dexsim.render.ViewFlags.COLOR)
+            camera.open_camera()
+            camera.disable_control()
+            camera.render(dexsim.render.ViewFlags.COLOR, dexsim.render.ViewFlags.NULL)
+            cameras.append(camera)
+        deadline = time.monotonic() + 10
+        description = {}
+        while time.monotonic() < deadline:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/stream", timeout=1) as response:
+                description = json.load(response)
+            if len(description.get("sources", [])) == 2:
+                break
+            time.sleep(0.05)
+        sources = description.get("sources", [])
+        assert len(sources) == 2, description
+        assert all(source["input"] is False for source in sources), description
+        print("Native camera catalog denies browser input.", flush=True)
+    finally:
+        for camera in cameras:
+            camera.close_camera()
+        cameras.clear()
+        world.quit()
+""",
+        ],
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=45,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Native camera catalog denies browser input." in result.stdout
+
+
+def test_native_observer_reopens_after_camera_group_removal():
+    """Exercise native camera ownership without loading WebRTC networking."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import resource
+from types import SimpleNamespace
+from unittest.mock import patch
+
+import dexsim
+
+from embodichain.lab.visualization import DexSimWebCfg
+from embodichain.lab.visualization._web_viewer import _WebViewer
+
+resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+
+
+class InertApplication:
+    def __init__(self, *_):
+        pass
+
+    def process(self, *_):
+        pass
+
+    def close(self):
+        pass
+
+
+cfg = dexsim.WorldConfig()
+cfg.open_windows = False
+cfg.webrtc_enabled = False
+cfg.renderer = dexsim.types.Renderer.FASTRT
+cfg.backend = dexsim.types.Backend.VULKAN
+cfg.log_startup_info = False
+world = dexsim.World(cfg)
+world.set_manual_update(True)
+sim = SimpleNamespace(
+    sim_config=SimpleNamespace(
+        visualization=SimpleNamespace(web=DexSimWebCfg(width=64, height=64)),
+    ),
+    _web_camera_group=None,
+    spawn_result=None,
+    get_env=world.get_env,
+    get_world=lambda: world,
+)
+viewer = None
+try:
+    # Only the application/network facade is inert. Group allocation, camera
+    # creation, rendering and removal all use the selected unmodified SDK.
+    with patch.object(dexsim, "WebApplication", InertApplication):
+        for _ in range(3):
+            viewer = _WebViewer(sim)
+            assert viewer.capture(force=True)
+            assert viewer.frames == 1
+            viewer.close()
+finally:
+    if viewer is not None:
+        viewer.close()
+    sim._web_camera_group = None
+    world.quit()
+print("Native observer reopened and rendered three times.", flush=True)
+""",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "reopened and rendered three times" in result.stdout

@@ -174,6 +174,7 @@ def test_information_page_rejects_application_commands_even_with_old_permissions
 
 def test_close_releases_owned_observer_without_touching_task_controls(viewer):
     app, camera, arena = viewer.application, viewer.camera, viewer.arena
+    viewer.sim._web_camera_group = viewer.group
     viewer.close()
     viewer.close()
     app.close.assert_called_once()
@@ -181,6 +182,7 @@ def test_close_releases_owned_observer_without_touching_task_controls(viewer):
     camera.close_camera.assert_called_once()
     arena.remove_camera.assert_called_once()
     assert viewer.closed and viewer.camera is None and viewer.group is None
+    assert viewer.sim._web_camera_group is None
     assert not viewer.capture(force=True)
 
 

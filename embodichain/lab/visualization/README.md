@@ -27,6 +27,10 @@ snapshot. `startup_summary: compact|full|off` also controls these details.
 
 The page is read-only: browser input is disabled and `/api/command` rejects
 application commands even for older configurations with `allow_commands=True`.
+The native RTC input allowlist also selects a reserved name that no
+EmbodiChain-managed camera uses: `__embodichain_web_input_disabled`. Hosts
+creating cameras through raw DexSim APIs must reserve this name as well; an
+empty allowlist would permit input to all cameras in the current SDK.
 Object editing, robot controls, keyboard shortcuts and replay sliders are owned
 by the native/Viser frontends or Python host. The Web integration supplies an
 observation view and initialization information, leaving general viewer GUI
@@ -87,8 +91,9 @@ responsive through `poll_viewer()` / `wait_for_input()` / `sleep()`.
 presentation is available through `viewer` and `visualization_health`.
 
 `close_viewer()` closes the application and observer without changing the task.
-It remains closed until explicitly reopened. The World-owned observer group is
-reused on reopen to avoid repeated native-buffer allocation. Destroying the
+It remains closed until explicitly reopened. Removing the last observer camera
+also destroys its native group; its Python facade is a borrowed reference and
+is cleared before removal. Reopening allocates a fresh group. Destroying the
 World and flushing deferred cleanup releases its listener/port; closing the
 application alone cannot stop the current SDK's listener. Health reports
 application readiness/errors; native peer count is unavailable (reported zero).

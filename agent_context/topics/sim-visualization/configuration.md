@@ -15,6 +15,9 @@ WebRTC calls to `capture_visualization()` pump application events and render
 the observer on the creator thread, including while physics is paused.
 The Web page is read-only and uses the same structured initialization data
 as the terminal. `allow_commands` applies to Viser and is disabled in Web mode.
+Native RTC input uses a reserved nonmatching camera selector, independently of
+frontend flags and the custom command route. Raw SDK camera factories must
+preserve that reservation; the viewer guide owns the name and policy.
 Its sensor restrictions, network and lifecycle boundaries are documented in
 [the viewer guide](../../../embodichain/lab/visualization/README.md).
 Following a Web observer while recording uses creator-thread simulation-time
@@ -38,7 +41,7 @@ are nested under `visualization.viser_server`; there is no top-level
 | `point_cloud_max_points` | `100000` | Deterministic per-cloud downsampling limit |
 | `sensor_image_fps` | `2.0` | Maximum RGB image capture rate; `None` captures once per eligible simulation step |
 | `soft_body_fps` | `5.0` | Maximum soft-body and cloth vertex capture rate |
-| `allow_commands` | `False` | Allow trusted Viser clients to drag configured Gizmos; common `--viser` launchers set this to `True` |
+| `allow_commands` | `False` | Allow trusted Viser clients to drag configured Gizmos; common `--viser` launchers enable commands when the deployment does not specify a policy |
 | `viser_server` | `ViserServerCfg()` | Server bind configuration |
 
 ### `ViserServerCfg`
@@ -95,7 +98,10 @@ manifest when manager APIs marked the topology dirty.
 
 `merge_args_with_gym_config()` makes `--viser` set `headless=True`, changes the
 backend to `"viser"`, and applies the CLI sampling/server overrides. A
-file-based config may also contain a `visualization` section. The old nested
+file-based config may also contain a `visualization` section. An explicit
+`visualization.allow_commands=False` remains read-only when `--viser` enables
+the viewer, so automated deployments can reserve robot drive targets for their
+expert. The old nested
 key `visualization.server` is accepted and normalized to
 `visualization.viser_server`.
 
@@ -106,9 +112,9 @@ limiting.
 
 `visualization_cfg_from_args()` only builds visualization config.
 `SimulationManagerCfg` makes the simulation headless whenever the resulting
-backend is `"viser"`. The common `--viser` option also enables Gizmo commands;
-there is no separate `--viser-gizmo` option. Programmatic configurations may
-retain `allow_commands=False` for read-only deployments.
+backend is `"viser"`. The common `--viser` option defaults to enabling Gizmo
+commands when no file policy is present; there is no separate `--viser-gizmo`
+option. Programmatic configurations retain their configured command policy.
 
 ### Asset preview
 

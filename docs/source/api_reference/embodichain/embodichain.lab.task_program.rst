@@ -40,6 +40,8 @@ embodichain.lab.task_program
       SequenceCfg
       RepeatCfg
       SegmentCfg
+      SegmentContractCfg
+      SegmentEvidenceCfg
       ParallelCfg
       BarrierCfg
       WaitStablePostCfg
@@ -433,6 +435,14 @@ MLLM frontend
 
 .. autofunction:: embodichain.agents.mllm.compile_mllm_task_program
 
+
+Segment acceptance contracts
+----------------------------
+
+.. autoclass:: SegmentContractCfg
+   :members:
+
+.. autoclass:: SegmentEvidenceCfg
 Shared targets and duration policies
 ------------------------------------
 

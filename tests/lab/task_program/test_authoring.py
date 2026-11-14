@@ -64,14 +64,28 @@ def _data():
     )
 
 
-def test_shorthand_and_canonical_share_compiled_identity_without_observation():
+@pytest.mark.parametrize("with_contract", [False, True])
+def test_shorthand_and_canonical_share_compiled_identity_without_observation(
+    with_contract,
+):
     data = _data()
+    if with_contract:
+        data["program"][0].update(
+            instruction="Move the held cube to its presentation pose.",
+            contract={
+                "outcomes": [
+                    {"kind": "call_effect", "ref": 0, "assurance": "projected"}
+                ]
+            },
+        )
     original = deepcopy(data)
     normalized = normalize_task_program(data)
     registry, provider = _scene_registry()
     compiler = TaskProgramCompiler(SceneManifest.from_registry(registry))
-    short = compiler.compile(decode_task_program(data))
-    canonical = compiler.compile(decode_task_program(normalized.declaration))
+    short = compiler.compile(decode_task_program(data), strict_contracts=with_contract)
+    canonical = compiler.compile(
+        decode_task_program(normalized.declaration), strict_contracts=with_contract
+    )
     assert task_program_fingerprint(short) == task_program_fingerprint(canonical)
     segment = next(short.iter_segments())
     assert type(segment.calls[0].call) is MoveHeldObjectCall
@@ -79,6 +93,17 @@ def test_shorthand_and_canonical_share_compiled_identity_without_observation():
     assert segment.post_policies[0].cfg.duration_s == 0.2
     assert provider.calls == 0
     assert data == original
+    if with_contract:
+        from embodichain.lab.task_program.compiler.program import (
+            TaskProgramCompileError,
+        )
+
+        for field in ("instruction", "contract"):
+            incomplete = deepcopy(data)
+            del incomplete["program"][0][field]
+            with pytest.raises(TaskProgramCompileError) as error:
+                compiler.compile(decode_task_program(incomplete), strict_contracts=True)
+            assert error.value.path == ("program", 0, field)
 
 
 @pytest.mark.parametrize("frame", ["parent", "world_axes"])

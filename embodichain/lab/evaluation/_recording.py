@@ -289,6 +289,14 @@ def evaluate_recorded_rules(
 
 
 def _matches_field(field, uid, quantity):
+    if field.startswith("deformables/"):
+        from ._deformable import _centroid_selection
+
+        try:
+            _centroid_selection(field)
+        except ValueError:
+            return False
+        return quantity == "centroid" and field == f"deformables/{uid}/centroid"
     if field.startswith("rigid_objects/"):
         if _is_segment_start_field(field):
             return (
@@ -355,7 +363,9 @@ def _field_projection(field, descriptor, expected_names=None):
         expected = expected_names[field]
         if expected is None or tuple(names) != tuple(expected):
             return None
-    if quantity in ("pose", "segment_start_pose"):
+    if quantity == "centroid" and field.startswith("deformables/"):
+        contract = ("world", "xyz", ("m",), (3,))
+    elif quantity in ("pose", "segment_start_pose"):
         contract = ("arena", "xyz_xyzw", ("m", "unitless"), (7,))
     elif quantity in ("lin_vel", "ang_vel"):
         unit = "m/s" if quantity == "lin_vel" else "rad/s"
