@@ -1,0 +1,1 @@
+{"model_services":{"roles":{"task_interpretation":"author","task_image_grounding":"author","task_semantic_planning":"author"},"profiles":{"author":{"adapter":"openai_compatible","base_url":{"env":"OPENAI_BASE_URL"},"api_key_env":"OPENAI_API_KEY","model":{"env":"OPENAI_MODEL"},"max_attempts":1,"timeout_s":60}}}}

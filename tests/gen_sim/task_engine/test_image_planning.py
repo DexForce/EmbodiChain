@@ -579,6 +579,7 @@ def test_unsupported_frozen_qualifier_remains_unverified(
         plan,
         {"objects": {"source": "source", "tray": "tray"}},
         {"source": {}, "tray": {}},
+        asset_root=tmp_path,
     )
     assert issues[0]["code"] == "unverified_instruction_qualifier"
     with pytest.raises(ValueError, match="Unverified instruction qualifiers"):
@@ -1192,3 +1193,126 @@ def test_repair_receives_explicit_intent_to_logical_resource_mapping(source_imag
         result["task_candidates"]["candidates"][0]["draft"]["steps"][0]["transfer_arm"]
         == "right_arm"
     )
+
+
+def test_hybrid_cli_compiles_pick_place_and_rejects_hinge(
+    source_image, tmp_path, monkeypatch
+):
+    from embodichain.gen_sim.services import compat
+    from embodichain.gen_sim.task_engine.cli import main
+    from embodichain.gen_sim.task_spec import canonical_hash
+    from embodichain.gen_sim.task_spec.publication import decode_task_document
+
+    root = Path(__file__).resolve().parents[3]
+    deployment = (
+        root
+        / "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.cobotmagic.yaml"
+    )
+    instruction = "把第二块积木放在第一块积木顶面"
+    from embodichain.gen_sim.task_engine import _image_run
+
+    def fixed_template(step, grounding, plan):
+        step["relation"] = "on"
+        grounding["objects"][0]["description"] = "第二块积木"
+        grounding["objects"][1]["description"] = "第一块积木顶面"
+        plan["requirements"][0]["quote"] = instruction
+        for node in plan["nodes"]:
+            node["semantic"].update(relation="on")
+            node["semantic"]["intent"]["relation"] = "on"
+            if node["call"]["kind"] == "place":
+                del node["call"]["inside"]
+                node["call"]["on"] = "on__tray__source"
+
+    monkeypatch.setattr(
+        _image_run,
+        "generate_semantic_task_graph_from_image",
+        lambda image, text, **_: _plan(image, instruction=text, mutate=fixed_template),
+    )
+    default = tmp_path / "default"
+    main(
+        [
+            "--image",
+            str(source_image),
+            "--instruction",
+            instruction,
+            "--output",
+            str(default),
+            "--task-id",
+            "case",
+        ]
+    )
+    legacy = json.loads((default / "task_plan_manifest.json").read_text())
+    assert legacy["semantic_graph_sha256"] == canonical_hash(
+        json.loads((default / legacy["graph_path"]).read_text())
+    )
+    assert (
+        legacy["spec_digest"]
+        == decode_task_document(
+            json.loads((default / legacy["spec_path"]).read_text())
+        )["spec_digest"]
+    )
+    op = dict(
+        template="E1",
+        object="block_2",
+        reference="block_1_top",
+        relation="on",
+        quote=instruction,
+    )
+    monkeypatch.setattr(
+        compat.VisionFacade, "complete", lambda *a, **kw: json.dumps([op])
+    )
+    monkeypatch.setattr(compat, "structured_call", lambda **kw: {"issues": []})
+    out = tmp_path / "hybrid"
+    main(
+        [
+            "--route",
+            "hybrid",
+            "--image",
+            str(source_image),
+            "--instruction",
+            instruction,
+            "--deployment",
+            str(deployment),
+            "--output",
+            str(out),
+        ]
+    )
+
+    def read(name):
+        return json.loads((out / (name + ".json")).read_text())
+
+    manifest = read("run_manifest")
+    graph = read("semantic_task_graph")
+    assert manifest["route"] == "hybrid"
+    assert (
+        manifest["spec_digest"]
+        == decode_task_document(read("task_spec_v1"))["spec_digest"]
+    )
+    assert manifest["graph_digest"] == canonical_hash(graph)
+    pick, place = [node["call"] for node in graph["nodes"]]
+    assert pick["kind"] == "pick" and place["kind"] == "place"
+    assert (
+        pick["object"] == place["object"] == "block_2" and place["on"] == "block_1_top"
+    )
+    assert pick["resources"] == place["resources"] == {}
+    check = read("deployment_preflight")
+    assert check["compilation"] == "passed", check
+    assert check["physical_verdict"] == "not_evaluated" and not check["execution_ready"]
+    out = tmp_path / "hinge"
+    main(
+        [
+            "--route",
+            "goal",
+            "--instruction",
+            "关上铰链门",
+            "--deployment",
+            str(deployment),
+            "--proposal",
+            str(root / "examples/gensim/goal_authoring/close_hinge.json"),
+            "--output",
+            str(out),
+        ]
+    )
+    check = read("deployment_preflight")
+    assert check["compilation"] == "rejected" and not check["execution_ready"]
+    assert "closing_direction_unsupported" in {i["code"] for i in check["issues"]}
