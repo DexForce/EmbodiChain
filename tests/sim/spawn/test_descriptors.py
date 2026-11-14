@@ -230,7 +230,7 @@ def test_raw_mujoco_contact_parameters_preserve_values_or_fail_closed(
         uid="raw_contact",
         shape=CubeCfg(),
         attrs=RigidBodyPhysicsCfg(
-            collision_props=NewtonCollisionPropertiesCfg(
+            material_props=NewtonRigidBodyMaterialCfg(
                 solref=reference, solimp=impedance, solmix=0.7
             )
         ),
@@ -291,7 +291,67 @@ def test_prepared_variants_keep_one_logical_uid_or_fail_closed() -> None:
 )
 def test_invalid_raw_contact_parameters_fail_at_configuration(parameters) -> None:
     with pytest.raises(ValueError):
-        NewtonCollisionPropertiesCfg(**parameters)
+        NewtonRigidBodyMaterialCfg(**parameters)
+
+
+@pytest.mark.parametrize("typed", [False, True])
+def test_legacy_contact_loader_migrates_once_with_material_precedence(typed):
+    material = {"solref": None, "solmix": 0.9}
+    if typed:
+        material = NewtonRigidBodyMaterialCfg(**material)
+    with pytest.warns(DeprecationWarning, match="material_props"):
+        cfg = RigidBodyPhysicsCfg.from_dict(
+            {
+                "collision_props": {
+                    "backend": "newton",
+                    "solref": [-1000, 0],
+                    "solmix": 0.2,
+                    "condim": 4,
+                },
+                "material_props": material,
+            }
+        )
+    assert not hasattr(cfg.collision_props, "solref")
+    assert cfg.material_props.solref == [-1000, 0]
+    assert cfg.material_props.solmix == 0.9
+    restored = RigidBodyPhysicsCfg.from_dict(cfg.to_dict())
+    assert restored.to_dict() == cfg.to_dict()
+    assert "solref" not in cfg.to_dict()["collision_props"]
+    descriptor, _ = rigid_desc_from_cfg(
+        RigidObjectCfg(uid="migrated", shape=CubeCfg(), attrs=restored),
+        newton_solver_type="dexuni",
+    )
+    assert descriptor.collisions[0].newton.solref == pytest.approx([-1000, 0])
+    assert descriptor.collisions[0].newton.condim == 4
+
+
+@pytest.mark.parametrize("backend", [None, "NEWTON"])
+@pytest.mark.parametrize(
+    "material_kind", ["typed_common", "mapping_common", "mapping_newton"]
+)
+def test_contact_migration_preserves_sparse_envelope_and_common_material(
+    backend, material_kind
+):
+    collision = {"solref": [-1000, 0]}
+    if backend is not None:
+        collision["backend"] = backend
+    material = (
+        RigidBodyMaterialCfg(dynamic_friction=0.7)
+        if material_kind == "typed_common"
+        else {
+            "backend": "common" if material_kind == "mapping_common" else "NEWTON",
+            "dynamic_friction": 0.7,
+        }
+    )
+    with pytest.warns(DeprecationWarning, match="material_props"):
+        cfg = RigidBodyPhysicsCfg.from_dict(
+            {"collision_props": collision, "material_props": material}
+        )
+    assert isinstance(cfg.collision_props, NewtonCollisionPropertiesCfg)
+    assert cfg.collision_props.contact_offset is None
+    assert cfg.collision_props.rest_offset is None
+    assert cfg.material_props.solref == [-1000, 0]
+    assert cfg.material_props.dynamic_friction == 0.7
 
 
 def test_plane_config_roundtrip_preserves_static_per_environment_surface() -> None:
@@ -2293,15 +2353,14 @@ def test_link_raw_contact_overrides_global_across_collision_and_material_slots(
 
     def properties(*, material: bool, reference: float, mixing: float):
         values = {"solref": (reference, 1.0), "solmix": mixing}
-        return RigidBodyPhysicsCfg(
-            **{
-                "material_props" if material else "collision_props": (
-                    NewtonRigidBodyMaterialCfg(**values)
-                    if material
-                    else NewtonCollisionPropertiesCfg(**values)
-                )
-            }
-        )
+        if material:
+            return RigidBodyPhysicsCfg(
+                material_props=NewtonRigidBodyMaterialCfg(**values)
+            )
+        with pytest.warns(DeprecationWarning, match="material_props"):
+            return RigidBodyPhysicsCfg.from_dict(
+                {"collision_props": {"backend": "newton", **values}}
+            )
 
     cfg = ArticulationCfg(
         uid="robot",

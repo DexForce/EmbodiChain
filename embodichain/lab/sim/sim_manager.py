@@ -3067,13 +3067,25 @@ class SimulationManager:
         return dict(result) if legacy_result else result
 
     def _validate_visual_config(self, cfg: object) -> None:
-        from .cfg.visuals import GaussianSplatCfg, _visual_elements
+        from .cfg.visuals import (
+            GaussianSplatCfg,
+            _visual_elements,
+            _uses_descriptor_visuals,
+        )
+
+        if isinstance(cfg, RigidObjectCfg):
+            cfg._normalize_visuals()
+            cfg._validate_env_variants()
 
         groups = getattr(cfg, "link_visuals", {})
         values = getattr(cfg, "visuals", None)
         if values is not None:
             groups = {None: values}
-        if groups and self.sim_config.visualization.backend == "viser":
+        if (
+            groups
+            and not _uses_descriptor_visuals(cfg)
+            and self.sim_config.visualization.backend == "viser"
+        ):
             raise NotImplementedError(
                 "Explicit visual composition is not yet supported by Viser; use native cameras or a native window."
             )
@@ -3966,8 +3978,11 @@ class SimulationManager:
             The stable Group facade. During initial scene construction it is
             bound to Spawn handles by :meth:`prepare`.
         """
+        from .cfg.visuals import _uses_descriptor_visuals
+
         if isinstance(cfg.rigid_objects, dict) and any(
             getattr(member, "visuals", None) is not None
+            and not _uses_descriptor_visuals(member)
             for member in cfg.rigid_objects.values()
         ):
             raise NotImplementedError(

@@ -303,9 +303,15 @@ class SpawnScene:
         self._bind_resource_materials(descriptor)
         self._initialize_facade_declaration(facade)
         binding = None
-        if facade is not None and (
-            getattr(getattr(facade, "cfg", None), "visuals", None) is not None
-            or getattr(getattr(facade, "cfg", None), "link_visuals", {})
+        from ..cfg.visuals import _uses_descriptor_visuals
+
+        if (
+            facade is not None
+            and not _uses_descriptor_visuals(getattr(facade, "cfg", None))
+            and (
+                getattr(getattr(facade, "cfg", None), "visuals", None) is not None
+                or getattr(getattr(facade, "cfg", None), "link_visuals", {})
+            )
         ):
             from ._visuals import _VisualBinding
             from dexsim.scene import Scene

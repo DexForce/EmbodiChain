@@ -238,17 +238,9 @@ def _resolve_rigid_physics(
             for name in ("collision_enabled", "contact_offset", "rest_offset"):
                 spec.default_collision_props.pop(name, None)
         elif isinstance(collision_props, NewtonCollisionPropertiesCfg):
-            collision_props.__post_init__()
             values = _configured_values(collision_props)
             for name in ("collision_enabled", "contact_offset", "rest_offset"):
                 values.pop(name, None)
-            # Normalize the original collision aliases before per-link specs
-            # merge. Raw contact impedance is material-owned on current SDKs;
-            # leaving it in two maps would let a global material override a
-            # more specific link collision setting during final lowering.
-            for name in ("solref", "solimp", "solmix"):
-                if name in values:
-                    spec.newton_material_props[name] = values.pop(name)
             spec.newton_collision_props = values
         elif (
             collision_props is not None
@@ -260,6 +252,7 @@ def _resolve_rigid_physics(
 
         material_props = cfg.material_props
         if isinstance(material_props, NewtonRigidBodyMaterialCfg):
+            material_props.__post_init__()
             values = _configured_values(material_props)
             for name in ("static_friction", "dynamic_friction", "restitution"):
                 values.pop(name, None)
@@ -362,6 +355,8 @@ def rigid_desc_from_cfg(
     newton_solver_type: str | None = None,
 ) -> tuple[ObjectDesc, dict[str, MaterialDesc]]:
     """Translate a rigid-object config into a DexSim Spawn descriptor."""
+    cfg._normalize_visuals()
+    cfg._validate_env_variants()
     uid = _required_uid(cfg.uid, "Rigid object")
     if _is_usd_path(_asset_file_path(cfg)):
         raise NotImplementedError(
@@ -393,9 +388,7 @@ def rigid_desc_from_cfg(
     else:
         parts = [None]
     renders, materials = (
-        _compile_shape_renders(uid, cfg.visual_shape or shape)
-        if cfg.render_enabled
-        else ([], {})
+        _compile_rigid_renders(uid, cfg) if cfg.render_enabled else ([], {})
     )
     collisions = []
     for index, part in enumerate(parts):
@@ -422,11 +415,7 @@ def rigid_desc_from_cfg(
             ),
         )
         collision.render_source_index = (
-            None
-            if cfg.visual_shape is not None
-            or not cfg.render_enabled
-            or (isinstance(shape, CompoundShapeCfg) and shape.visual_parts is not None)
-            else index
+            None if cfg.visuals is not None or not cfg.render_enabled else index
         )
         collisions.append(collision)
 
@@ -526,6 +515,47 @@ def _part_transform(part: ShapePartCfg) -> np.ndarray:
     return transform
 
 
+def _compile_rigid_renders(
+    uid: str, cfg: RigidObjectCfg
+) -> tuple[list[RenderDesc], dict[str, MaterialDesc]]:
+    """Compile canonical mesh visuals directly on their physical owner."""
+    from embodichain.lab.sim.cfg.visuals import _uses_descriptor_visuals
+
+    if not _uses_descriptor_visuals(cfg):
+        return _compile_shape_renders(uid, cfg.shape)
+    renders = []
+    materials = {}
+    for element in cfg.visuals:
+        if not element.visible:
+            raise NotImplementedError(
+                "Descriptor mesh visuals require visible=True; hide all visuals with visuals=[]."
+            )
+        from embodichain.data import get_data_path
+
+        representation = element.representation.copy()
+        leaves = (
+            [part.shape for part in representation.parts]
+            if isinstance(representation, CompoundShapeCfg)
+            else [representation]
+        )
+        for leaf in leaves:
+            if isinstance(leaf, MeshCfg) and not _is_missing(leaf.fpath) and leaf.fpath:
+                leaf.fpath = get_data_path(leaf.fpath)
+        current, definitions = _compile_shape_renders(
+            f"{uid}__{element.id}", representation
+        )
+        transform = element.local_pose.copy()
+        transform[:3, :3] *= element.scale
+        for render in current:
+            render.local_transform = transform @ render.local_transform
+        for key, material in definitions.items():
+            if key in materials and materials[key] != material:
+                raise ValueError(f"Conflicting visual material {key!r}.")
+            materials[key] = material
+        renders.extend(current)
+    return renders, materials
+
+
 def _compile_shape_renders(
     uid: str, shape: ShapeCfg
 ) -> tuple[list[RenderDesc], dict[str, MaterialDesc]]:
@@ -533,7 +563,11 @@ def _compile_shape_renders(
     if isinstance(shape, CompoundShapeCfg):
         shape.validate()
         shape.__post_init__()
-        parts = shape.parts if shape.visual_parts is None else shape.visual_parts
+        if shape.visual_parts is not None:
+            raise ValueError(
+                "Compound visual_parts requires a RigidObjectCfg owner; use owner.visuals."
+            )
+        parts = shape.parts
     else:
         parts = [None]
     renders = []

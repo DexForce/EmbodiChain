@@ -582,9 +582,9 @@ class CompoundShapeCfg(ShapeCfg):
     """Several convex collision shapes belonging to one rigid body.
 
     ``parts`` are independent collision shapes, never merged for cooking.
-    Optional ``visual_parts`` replace their rendered appearance. If omitted,
-    collision parts are rendered using their own materials, falling back to
-    :attr:`visual_material`. An explicitly empty list hides all visuals.
+    Collision parts are rendered using their own materials, falling back to
+    :attr:`visual_material`. The owning rigid config can replace appearance
+    through its ``visuals`` list; an empty list hides all visuals.
     Overlapping collision volumes require explicit body mass/inertia to avoid
     double counting during geometry integration.
     """
@@ -592,6 +592,12 @@ class CompoundShapeCfg(ShapeCfg):
     shape_type: str = "Compound"
     parts: Sequence[ShapePartCfg] = MISSING
     visual_parts: Sequence[ShapePartCfg] | None = None
+    """Deprecated input alias; RigidObjectCfg migrates it into owner visuals.
+
+    New configurations supply VisualElementCfg entries on RigidObjectCfg.visuals.
+    This field is cleared during normalization and cannot be combined with
+    another appearance input.
+    """
 
     def __post_init__(self) -> None:
         """Validate the flat part layout and explicit convex representation."""

@@ -167,6 +167,11 @@ class BatchEntity(ABC):
         """
         binding = getattr(self, "_visual_binding", None)
         if binding is None:
+            from .cfg.visuals import _uses_descriptor_visuals
+
+            if _uses_descriptor_visuals(self.cfg):
+                self.set_visible(visible, env_ids=env_ids)
+                return
             raise ValueError("Explicit visuals are required for this operation.")
         binding.set_visible(visible, env_ids)
 

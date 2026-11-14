@@ -152,10 +152,12 @@ DexSim global defaults.
 Newton `condim`, `contype` and `conaffinity` belong in collision descriptors
 before preparation; friction coefficients and raw MuJoCo `solref`, `solimp` and
 `solmix` belong in material properties. Explicit `solref` retains its native
-positive or direct-mode meaning. The original collision-property aliases
-normalize into that same material map before global/link overrides merge, so
-a link-local setting wins across either spelling. Within one properties block,
-explicit material values take precedence. Use per-link overlays for contact intent, not
+positive or direct-mode meaning. New typed declarations use only
+`NewtonRigidBodyMaterialCfg`; it owns validation. Legacy dictionary input with
+collision-owned raw contact keys migrates once in `RigidBodyPhysicsCfg.from_dict`
+with a deprecation warning. Explicit non-None material values win in that block;
+after migration, link-local values override global material values normally.
+Use per-link overlays for contact intent, not
 finalized solver-array mutations. `has_particle_collision` is
 per-shape participation; Arena isolation remains scene-owned.
 

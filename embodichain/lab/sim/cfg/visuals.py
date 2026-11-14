@@ -205,6 +205,24 @@ def _visual_elements(value: object) -> list[VisualElementCfg] | None:
     return elements
 
 
+def _uses_descriptor_visuals(cfg: object) -> bool:
+    """Whether procedural rigid mesh appearance can lower on the owning body."""
+    from .rigid_object import RigidObjectCfg
+
+    return (
+        isinstance(cfg, RigidObjectCfg)
+        and cfg.source is None
+        and not str(getattr(cfg.shape, "fpath", ""))
+        .lower()
+        .endswith((".usd", ".usda", ".usdc", ".usdz"))
+        and cfg.visuals is not None
+        and all(
+            isinstance(element.representation, ShapeCfg) and element.visible
+            for element in cfg.visuals
+        )
+    )
+
+
 @configclass
 class GaussianRenderCfg:
     """Native CUDA Gaussian raster settings; disabled for existing scenes.

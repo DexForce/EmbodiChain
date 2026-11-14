@@ -87,9 +87,15 @@ Caches also validate binding/topology identity, not only the step count.
 
 Procedural rigid geometry can be a `CompoundShapeCfg` of flat body-local
 `ShapePartCfg` entries. Spawn emits one physical body and multiple independent
-colliders; independent visual parts cannot become collision geometry. Explicit
+colliders; owner `visuals` cannot become collision geometry. Explicit
 mass/COM/inertia applies once to the parent. `CylinderCfg` retains a native
 cylinder descriptor, but cooking fidelity remains backend-specific.
+Rigid appearance has one canonical `visuals` list. Legacy `visual_shape` and
+compound `visual_parts` migrate into that list with a warning and are cleared;
+competing inputs fail. Procedural rigid mesh elements lower directly on the
+body for both physics backends. Gaussian and other companion visuals keep
+their separate binding capabilities. Semantic queries retain the physical
+surface unless the parent config explicitly selects a shared proxy.
 
 Preparation-time `RigidObjectCfg.env_variants` requires Newton and a supporting
 SDK. MuJoCo Warp requires compatible collider topology within a batch; arbitrary
@@ -99,6 +105,12 @@ than silently discarding requested settings. A dependency version alone does
 not qualify every geometry or solver profile.
 Rigid-object groups retain member variants on selected resets. Variant checks
 precede replacement removals and material registration for the complete batch.
+Variants accept procedural shapes, physics, scale, visible mesh appearance and
+initial poses. Per-variant USD sources, semantic proxies, Gaussian resources,
+hidden visual elements and post-load UV generation are rejected; parent
+semantic proxies remain shared across the batch. Default semantic surfaces
+follow each selected row's physical shape. Ragged surfaces require row-wise
+queries rather than an ambiguous dense batch.
 The default ground is separately owned by `SimulationManagerCfg`: disable it
 for constrained probes or author `ground_plane_attrs` to match a reference
 contact profile. Omitting that profile preserves the existing scene defaults.

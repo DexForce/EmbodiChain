@@ -44,12 +44,237 @@ from embodichain.lab.sim.sim_manager import SimulationManager
 pytestmark = pytest.mark.no_sim
 
 
+@pytest.mark.parametrize(
+    "alias", ["visual_shape", "visual_parts", "nested_visual_shape"]
+)
+def test_legacy_rigid_appearance_normalizes_and_rejects_competing_inputs(alias):
+    from embodichain.lab.sim.shapes import CompoundShapeCfg, ShapePartCfg
+
+    def config(*, canonical=False):
+        kwargs = {"uid": "legacy", "shape": CubeCfg()}
+        if canonical:
+            kwargs["visuals"] = []
+        if alias == "visual_shape":
+            kwargs["visual_shape"] = CubeCfg(size=(2, 3, 4))
+        elif alias == "nested_visual_shape":
+            kwargs["visual_shape"] = CompoundShapeCfg(
+                parts=[ShapePartCfg(shape=CubeCfg())],
+                visual_parts=[
+                    ShapePartCfg(shape=CubeCfg(size=(2, 3, 4)), position=(1, 2, 3))
+                ],
+            )
+        else:
+            kwargs["shape"] = CompoundShapeCfg(
+                parts=[ShapePartCfg(shape=CubeCfg())],
+                visual_parts=[
+                    ShapePartCfg(shape=CubeCfg(size=(2, 3, 4)), position=(1, 2, 3))
+                ],
+            )
+        return RigidObjectCfg(**kwargs)
+
+    with pytest.warns(DeprecationWarning, match="visuals"):
+        cfg = config()
+    assert cfg.visual_shape is None
+    assert getattr(cfg.shape, "visual_parts", None) is None
+    assert len(cfg.visuals) == 1
+    restored = RigidObjectCfg.from_dict(cfg.to_dict())
+    assert restored.visual_shape is None
+    assert restored.visuals[0].id == cfg.visuals[0].id
+    assert (
+        restored.visuals[0].representation.to_dict()
+        == cfg.visuals[0].representation.to_dict()
+    )
+    np.testing.assert_array_equal(
+        restored.visuals[0].local_pose, cfg.visuals[0].local_pose
+    )
+    desc, _ = rigid_desc_from_cfg(restored, newton_solver_type="dexuni")
+    assert desc.renders[0].size == (2, 3, 4)
+    assert desc.collisions[0].size == (1, 1, 1)
+    with pytest.raises(ValueError, match="one appearance input"):
+        config(canonical=True)
+
+
+def test_canonical_rigid_mesh_visuals_preserve_transform_and_semantic_surface():
+    from embodichain.lab.sim.objects import RigidObject
+
+    pose = np.eye(4, dtype=np.float32)
+    pose[:3, 3] = [1, 2, 3]
+    cfg = RigidObjectCfg(
+        uid="canonical",
+        shape=CubeCfg(size=(0.1, 0.2, 0.3)),
+        visuals=[
+            VisualElementCfg(
+                id="outer",
+                representation=CubeCfg(size=(2, 3, 4)),
+                local_pose=pose,
+                scale=2,
+            )
+        ],
+    )
+    desc, _ = rigid_desc_from_cfg(cfg, newton_solver_type="dexuni")
+    np.testing.assert_allclose(desc.renders[0].local_transform[:3, :3], np.eye(3) * 2)
+    np.testing.assert_allclose(desc.renders[0].local_transform[:3, 3], [1, 2, 3])
+    assert desc.collisions[0].render_source_index is None
+    owner = SimpleNamespace(
+        cfg=cfg,
+        device=torch.device("cpu"),
+        num_instances=2,
+        get_body_scale=lambda ids: torch.ones((len(ids), 3)),
+    )
+    vertices, _ = RigidObject.get_semantic_mesh(owner, [0, 1])
+    torch.testing.assert_close(
+        vertices.amax(1) - vertices.amin(1),
+        torch.tensor([[0.1, 0.2, 0.3]]).repeat(2, 1),
+    )
+
+
+@pytest.mark.parametrize("compound", [False, True])
+def test_canonical_visual_paths_resolve_data_root_without_mutating_cfg(
+    tmp_path, monkeypatch, compound
+):
+    from embodichain.data import constants
+    from embodichain.lab.sim.shapes import (
+        MeshCfg,
+        MeshCollisionCfg,
+        CompoundShapeCfg,
+        ShapePartCfg,
+    )
+
+    path = tmp_path / "asset_bank" / "appearance.obj"
+    path.parent.mkdir()
+    path.write_text("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
+    monkeypatch.setattr(constants, "EMBODICHAIN_DEFAULT_DATA_ROOT", str(tmp_path))
+    mesh = MeshCfg(
+        fpath="asset_bank/appearance.obj",
+        collision=MeshCollisionCfg(approximation="convex_hull"),
+    )
+    representation = (
+        CompoundShapeCfg(parts=[ShapePartCfg(shape=mesh)]) if compound else mesh
+    )
+    cfg = RigidObjectCfg(
+        uid="asset",
+        shape=CubeCfg(),
+        visuals=[VisualElementCfg(representation=representation)],
+    )
+    descriptor, _ = rigid_desc_from_cfg(cfg, newton_solver_type="dexuni")
+    assert descriptor.renders[0].file_path == str(path)
+    source = cfg.visuals[0].representation
+    assert (
+        source.parts[0].shape if compound else source
+    ).fpath == "asset_bank/appearance.obj"
+
+
+@pytest.mark.parametrize(
+    "unsupported",
+    [
+        "semantic_shape",
+        "source",
+        "Gaussian visuals",
+        "source_pose_mode",
+        "asset_physics_mode",
+    ],
+)
+def test_rigid_variants_reject_fields_without_per_environment_runtime_support(
+    unsupported,
+):
+    from embodichain.lab.sim.cfg import UsdSourceCfg
+
+    variant = RigidObjectCfg(shape=CubeCfg())
+    if unsupported == "semantic_shape":
+        variant.semantic_shape = CubeCfg()
+    elif unsupported == "source":
+        variant.source = UsdSourceCfg(file_path="asset.usda")
+    elif unsupported == "Gaussian visuals":
+        variant.visuals = [
+            VisualElementCfg(representation=GaussianSplatCfg(file_path="scan.ply"))
+        ]
+    elif unsupported == "source_pose_mode":
+        variant.source_pose_mode = "preserve"
+    else:
+        variant.asset_physics_mode = "overlay"
+    with pytest.raises(ValueError, match=unsupported):
+        RigidObjectCfg(shape=CubeCfg(), env_variants={1: variant})
+
+
+def test_rigid_variant_semantics_follow_physical_shape_and_shared_proxy():
+    from embodichain.lab.sim.objects import RigidObject
+
+    cfg = RigidObjectCfg(
+        uid="variants",
+        shape=CubeCfg(size=(0.1, 0.1, 0.1)),
+        env_variants={
+            1: RigidObjectCfg(
+                shape=CubeCfg(size=(0.8, 0.8, 0.8)),
+                visuals=[VisualElementCfg(representation=CubeCfg(size=(2, 2, 2)))],
+            )
+        },
+    )
+    owner = object.__new__(RigidObject)
+    owner.cfg, owner.device, owner._entities = (
+        cfg,
+        torch.device("cpu"),
+        [object(), object()],
+    )
+    owner.get_body_scale = lambda ids: torch.ones((len(ids), 3))
+    vertices, _ = owner.get_semantic_mesh([1, 0])
+    torch.testing.assert_close(
+        vertices[:, :, 0].amax(1) - vertices[:, :, 0].amin(1), torch.tensor([0.8, 0.1])
+    )
+    cfg.semantic_shape = CubeCfg(size=(0.3, 0.3, 0.3))
+    vertices, _ = owner.get_semantic_mesh([1, 0])
+    torch.testing.assert_close(
+        vertices[:, :, 0].amax(1) - vertices[:, :, 0].amin(1), torch.tensor([0.3, 0.3])
+    )
+    with pytest.raises(KeyError, match="Unknown env_variants"):
+        RigidObjectCfg.from_dict({"env_variants": {"1": {"unknown_appearance": []}}})
+
+
+@pytest.mark.parametrize("slot", ["shape", "visuals", "compound"])
+def test_variants_reject_post_load_uv_at_each_geometry_owner(slot):
+    from embodichain.lab.sim.shapes import (
+        MeshCfg,
+        CompoundShapeCfg,
+        ShapePartCfg,
+        MeshCollisionCfg,
+    )
+
+    mesh = MeshCfg(
+        fpath="surface.obj",
+        compute_uv=True,
+        collision=MeshCollisionCfg(approximation="convex_hull"),
+    )
+    variant = RigidObjectCfg(shape=CubeCfg())
+    if slot == "shape":
+        variant.shape = mesh
+    elif slot == "visuals":
+        variant.visuals = [VisualElementCfg(representation=mesh)]
+    else:
+        variant.shape = CompoundShapeCfg(parts=[ShapePartCfg(shape=mesh)])
+    with pytest.raises(ValueError, match="compute_uv"):
+        RigidObjectCfg(shape=CubeCfg(), env_variants={0: variant})
+
+
+def test_variant_shape_can_be_assembled_before_final_validation():
+    from embodichain.lab.sim.shapes import CompoundShapeCfg, ShapePartCfg
+
+    variant = RigidObjectCfg(shape=CompoundShapeCfg())
+    cfg = RigidObjectCfg(uid="deferred", shape=CubeCfg(), env_variants={0: variant})
+    cfg.env_variants[0].shape.parts = [
+        ShapePartCfg(shape=CubeCfg(size=(0.2, 0.3, 0.4)))
+    ]
+    cfg.validate()
+    descriptor, _ = rigid_desc_from_cfg(cfg, newton_solver_type="dexuni")
+    assert descriptor.env_variants[0].collisions[0].size == (0.2, 0.3, 0.4)
+
+
 @pytest.mark.parametrize("file_backed", [False, True])
 def test_compound_semantic_mesh_preserves_every_part_transform_and_face_offset(
     tmp_path, file_backed
 ):
     from embodichain.lab.sim.objects import RigidObject
     from embodichain.lab.sim.shapes import CompoundShapeCfg, ShapePartCfg, MeshCfg
+
+    from embodichain.lab.sim.shapes import MeshCollisionCfg
 
     mesh_vertices = [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]]
     mesh_faces = [[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]]
@@ -60,13 +285,18 @@ def test_compound_semantic_mesh_preserves_every_part_transform_and_face_offset(
             "v 0 0 0\nv 1 0 0\nv 0 1 0\nv 0 0 1\n"
             "f 1 3 2\nf 1 2 4\nf 1 4 3\nf 2 3 4\n"
         )
-        mesh = MeshCfg(fpath=str(path))
+        mesh = MeshCfg(
+            fpath=str(path), collision=MeshCollisionCfg(approximation="convex_hull")
+        )
     else:
-        mesh = MeshCfg(vertices=mesh_vertices, triangles=mesh_faces)
+        mesh = MeshCfg(
+            vertices=mesh_vertices,
+            triangles=mesh_faces,
+            collision=MeshCollisionCfg(approximation="convex_hull"),
+        )
     # Cyclic rotation maps (x, y, z) to (z, x, y).
     shape = CompoundShapeCfg(
-        parts=[ShapePartCfg(shape=CubeCfg())],
-        visual_parts=[
+        parts=[
             ShapePartCfg(
                 shape=CubeCfg(size=(2, 4, 6)),
                 position=(1, 2, 3),

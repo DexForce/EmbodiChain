@@ -559,6 +559,9 @@ class RigidObject(BatchEntity):
         shape = getattr(self.cfg, "visual_shape", None) or getattr(
             self.cfg, "shape", None
         )
+        visuals = getattr(self.cfg, "visuals", None)
+        if visuals is not None:
+            shape = visuals[0].representation if len(visuals) == 1 else None
         if not isinstance(shape, MeshCfg) or not shape.compute_uv:
             return
 
@@ -1975,6 +1978,46 @@ class RigidObject(BatchEntity):
         """
         binding = getattr(self, "_visual_binding", None)
         if binding is None:
+            from ..cfg.visuals import _uses_descriptor_visuals
+
+            if self.cfg.semantic_shape is None and (
+                _uses_descriptor_visuals(self.cfg)
+                or getattr(self.cfg, "env_variants", None)
+            ):
+                from ..spawn._visuals import _semantic_mesh_arrays
+
+                ids = (
+                    list(range(self.num_instances))
+                    if env_ids is None
+                    else [int(index) for index in env_ids]
+                )
+                meshes = [
+                    _semantic_mesh_arrays(
+                        (self.cfg.env_variants or {}).get(index, self.cfg).shape
+                    )
+                    for index in ids
+                ]
+                if not ids:
+                    return (
+                        torch.empty((0, 0, 3), device=self.device),
+                        torch.empty((0, 0, 3), dtype=torch.int32, device=self.device),
+                    )
+                if (
+                    len({(vertices.shape, faces.shape) for vertices, faces in meshes})
+                    != 1
+                ):
+                    raise ValueError(
+                        "Semantic meshes differ across environments; query one environment at a time."
+                    )
+                vertices = torch.as_tensor(
+                    np.stack([mesh[0] for mesh in meshes]), device=self.device
+                )
+                faces = torch.as_tensor(
+                    np.stack([mesh[1] for mesh in meshes]),
+                    dtype=torch.int32,
+                    device=self.device,
+                )
+                return vertices * self.get_body_scale(ids).unsqueeze(1), faces
             if self.cfg.semantic_shape is None:
                 if getattr(self.cfg, "source", None) is not None:
                     elements = self.get_visual_elements()
@@ -2234,6 +2277,11 @@ class RigidObject(BatchEntity):
         binding = getattr(self, "_visual_binding", None)
         if binding is not None:
             binding.reset(local_env_ids)
+        else:
+            from ..cfg.visuals import _uses_descriptor_visuals
+
+            if _uses_descriptor_visuals(self.cfg):
+                self.set_visible(True, env_ids=local_env_ids)
         self.restore_visual_material(env_ids=local_env_ids)
 
         # Preserve the legacy Default-backend attribute reset before restoring

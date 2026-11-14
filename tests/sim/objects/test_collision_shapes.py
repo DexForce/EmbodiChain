@@ -113,7 +113,7 @@ def test_prepared_variant_reset_pose_accepts_gym_tensor_indices() -> None:
 
 @pytest.mark.gpu
 @pytest.mark.requires_sim
-@pytest.mark.parametrize("solver", ["mujoco_warp", "dexuni"])
+@pytest.mark.parametrize("solver", ["mujoco_warp", "dexuni", "default"])
 def test_native_compound_aperture_and_parent_lifecycle(solver: str) -> None:
     """A falling peg traverses the aperture in both isolated arenas."""
     import numpy as np
@@ -122,10 +122,12 @@ def test_native_compound_aperture_and_parent_lifecycle(solver: str) -> None:
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
     from embodichain.lab.sim.cfg import (
         MassPropertiesCfg,
+        DefaultPhysicsCfg,
         NewtonPhysicsCfg,
         RenderCfg,
         RigidBodyPhysicsCfg,
         RigidObjectCfg,
+        VisualElementCfg,
     )
     from embodichain.lab.sim.shapes import CompoundShapeCfg, CubeCfg, ShapePartCfg
 
@@ -136,10 +138,14 @@ def test_native_compound_aperture_and_parent_lifecycle(solver: str) -> None:
             enable_entity_gizmo=False,
             num_envs=2,
             physics_dt=0.001,
-            physics_cfg=NewtonPhysicsCfg(
-                use_cuda_graph=False,
-                num_substeps=1,
-                solver_cfg={"solver_type": solver},
+            physics_cfg=(
+                DefaultPhysicsCfg()
+                if solver == "default"
+                else NewtonPhysicsCfg(
+                    use_cuda_graph=False,
+                    num_substeps=1,
+                    solver_cfg={"solver_type": solver},
+                )
             ),
             render_cfg=RenderCfg(renderer="hybrid"),
         )
@@ -161,9 +167,11 @@ def test_native_compound_aperture_and_parent_lifecycle(solver: str) -> None:
                             position=(0.02, 0, 0),
                         ),
                     ],
-                    # Independent appearance must never become collision geometry.
-                    visual_parts=[ShapePartCfg(shape=CubeCfg(size=(0.05, 0.06, 0.02)))],
                 ),
+                # Independent appearance must never become collision geometry.
+                visuals=[
+                    VisualElementCfg(representation=CubeCfg(size=(0.05, 0.06, 0.02)))
+                ],
             )
         )
         peg = sim.add_rigid_object(
@@ -217,6 +225,7 @@ def test_native_raw_mujoco_contact_parameters_reach_solver(solver: str) -> None:
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
     from embodichain.lab.sim.cfg import (
         NewtonCollisionPropertiesCfg,
+        NewtonRigidBodyMaterialCfg,
         NewtonPhysicsCfg,
         RenderCfg,
         RigidBodyPhysicsCfg,
@@ -246,9 +255,10 @@ def test_native_raw_mujoco_contact_parameters_reach_solver(solver: str) -> None:
                 shape=CubeCfg(size=(0.01, 0.01, 0.01)),
                 init_pos=(0, 0, 1),
                 attrs=RigidBodyPhysicsCfg(
-                    collision_props=NewtonCollisionPropertiesCfg(
-                        margin=0, gap=0, solref=reference, solimp=impedance, solmix=0.7
-                    )
+                    collision_props=NewtonCollisionPropertiesCfg(margin=0, gap=0),
+                    material_props=NewtonRigidBodyMaterialCfg(
+                        solref=reference, solimp=impedance, solmix=0.7
+                    ),
                 ),
             )
         )
@@ -292,6 +302,7 @@ def test_native_prepared_variants_keep_mass_reset_and_rebuild(solver: str) -> No
         RigidBodyPhysicsCfg,
         RigidObjectCfg,
         RigidObjectGroupCfg,
+        VisualElementCfg,
     )
     from embodichain.lab.sim.shapes import CompoundShapeCfg, CubeCfg, ShapePartCfg
 
@@ -334,6 +345,11 @@ def test_native_prepared_variants_keep_mass_reset_and_rebuild(solver: str) -> No
                 )
             },
         )
+        cfg.env_variants[1].visuals = [
+            VisualElementCfg(
+                id="outer", representation=CubeCfg(size=(0.08, 0.08, 0.08))
+            )
+        ]
         body = sim.add_rigid_object(cfg)
         member_cfg = cfg.copy()
         member_cfg.init_pos = (1, 0, 1)
@@ -342,6 +358,16 @@ def test_native_prepared_variants_keep_mass_reset_and_rebuild(solver: str) -> No
             RigidObjectGroupCfg(uid="group", rigid_objects={"member": member_cfg})
         )
         sim.prepare()
+        appearance = body.get_vertices(env_ids=[1], scale=True)
+        torch.testing.assert_close(
+            appearance.amax(1) - appearance.amin(1),
+            torch.full((1, 3), 0.08, device=sim.device),
+        )
+        semantic, _ = body.get_semantic_mesh([1])
+        expected_semantic_width = 0.065 if solver == "semi_implicit" else 0.02
+        assert (
+            semantic[:, :, 0].amax() - semantic[:, :, 0].amin()
+        ).item() == pytest.approx(expected_semantic_width)
         expected_masses = torch.tensor([1.0, 2.0], device=sim.device)
         torch.testing.assert_close(body.get_mass(), expected_masses)
         torch.testing.assert_close(group.get_mass(), expected_masses[:, None])
