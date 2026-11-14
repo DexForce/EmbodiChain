@@ -87,6 +87,48 @@ and [surface cloth](../../../sim_cloth.md). The
 [Newton Solver Guide](https://newton-physics.github.io/newton/stable/solvers/index.html)
 describes Newton's native solver options.
 
+## Common parameters
+
+Set timing and execution parameters on `NewtonPhysicsCfg`. DexUni's interaction
+parameters belong inside `solver_cfg`.
+
+| Parameter | Purpose | Selection guidance |
+| :--- | :--- | :--- |
+| `physics_dt` | Duration of one physics step, in seconds | Choose it with the task's control timing; changing it can also change the control period. |
+| `num_substeps` | Number of solver substeps per physics step | The solver interval is `physics_dt / num_substeps`. More substeps increase computation; assess stability and contact quality for the scene. |
+| `use_cuda_graph` | Request CUDA Graph execution | Enable it for compatible CUDA scenes; check runtime status to confirm capture. |
+| `solver_cfg.joint_mode` | Robot motion mode | Use `"dynamic"` for joint-driven dynamics or `"kinematic"` for prescribed motion. |
+| `solver_cfg.coupling` | Robot/environment feedback | `"one_way"` lets the environment respond without feeding its reaction back to robot motion. Use `"two_way"` with dynamic joints for supported contact feedback. |
+| `solver_cfg.contact_mode` | Contact configuration | Keep `"auto"` for general scene setup. |
+
+The following is an illustrative starting point for a dynamic robot scene,
+rather than a universal tuning preset:
+
+```python
+from embodichain.lab.sim.cfg import NewtonPhysicsCfg
+
+physics_cfg = NewtonPhysicsCfg(
+    device="cuda:0",
+    physics_dt=1.0 / 100.0,
+    num_substeps=10,
+    use_cuda_graph=True,
+    solver_cfg={
+        "solver_type": "dexuni",
+        "joint_mode": "dynamic",
+        "coupling": "one_way",
+        "contact_mode": "auto",
+    },
+    collision_cfg=None,
+)
+```
+
+This example uses a solver interval of `0.001 s`. For prescribed trajectory
+replay, select `joint_mode="kinematic"`. For compatible dynamic-joint scenes
+that need contact feedback, select `coupling="two_way"`.
+
+Elasticity, friction, and damping belong to the object or articulation material
+configuration. See the asset guides linked above for material settings.
+
 ## Current limitations
 
 - Cloth, soft bodies, cables, and liquids require CUDA and `requires_grad=False`.
