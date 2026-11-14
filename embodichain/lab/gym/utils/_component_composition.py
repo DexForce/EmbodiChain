@@ -163,7 +163,8 @@ def _resolve_local_resource_paths(value: object, *, base_dir: Path) -> None:
                     if isinstance(path, str) and not Path(path).is_absolute():
                         spawn["file_path"] = str((base_dir / path).resolve())
             if (
-                key in {"fpath", "urdf_path", "xml_path", "trajectory"}
+                key
+                in {"fpath", "urdf_path", "xml_path", "trajectory", "assembly_manifest"}
                 and isinstance(child, str)
                 and child.startswith(("./", "../"))
             ):

@@ -97,6 +97,22 @@ orbit/zoom and recorder view. Use
 camera changes; the [evaluation guide](../../../docs/source/guides/policy_evaluation.md)
 owns user controls.
 
+## Episode evaluation and saved resources
+
+Auto-reset preserves completed-row observations and IDs for timeout bootstrap;
+true termination suppresses bootstrap. Legacy environments retain their fallback.
+Evaluation defaults to first completion order; `balanced` allocates per-arena
+quotas before stepping. `on_episode` retains owned environment terminal reports;
+`on_scored_episode` emits one scalar record per scored completion after quota
+filtering. The native headless CLI retains both quota selection and terminal
+reports. Evaluation uses an independent environment and restores policy mode.
+
+Training snapshots freeze physical components relative to the declaring
+config before moving them into a run. `EmbodiedEnvCfg.resource_export` packages
+materialized task resources from the unwrapped environment and an owned frozen
+mapping; `./` paths including `assembly_manifest` resolve from the saved config.
+Resource packaging does not redefine checkpoint/resume compatibility.
+
 ## Invariants and validation
 
 Rollout kind, collector, payload and trainer must agree. APG requires graph-

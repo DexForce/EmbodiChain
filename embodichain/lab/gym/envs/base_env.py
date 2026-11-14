@@ -1147,9 +1147,11 @@ class BaseEnv(gym.Env):
                 rollout or segment boundaries.
 
         Returns:
-            The observation, reward, termination and truncation flags, and
-            info. Hosts that publish terminal reports include completed rows
-            under `terminal_outcomes`.
+            Observation, reward, terminated, truncated, and an info mapping.
+            Completed rows may carry environment-owned ``terminal_outcomes``.
+            Auto-reset also preserves owned ``terminal_observation`` rows,
+            ``terminal_env_ids`` and a full ``terminal_observation_mask`` for
+            time-limit bootstrapping; live observations contain reset states.
         """
 
         if recording_active_mask is not None:
@@ -1222,10 +1224,23 @@ class BaseEnv(gym.Env):
             if not replay and getattr(self, "_demo_instruction_snapshot", None) is None:
                 reset_env_ids = dones.nonzero(as_tuple=False).squeeze(-1)
                 if len(reset_env_ids) > 0:
+                    if isinstance(info, TensorDict):
+                        info = info.to_dict()
                     self._seal_step_outcomes(
                         reset_env_ids, terminateds, truncateds, info
                     )
                     if not no_auto_reset:
+                        # Snapshot completed rows before reset reuses buffers.
+                        info["terminal_env_ids"] = reset_env_ids.clone()
+                        info["terminal_observation_mask"] = (
+                            truncateds & ~terminateds
+                        ).clone()
+                        if isinstance(obs, TensorDict):
+                            info["terminal_observation"] = obs[reset_env_ids]
+                        else:
+                            info["terminal_observation"] = torch.utils._pytree.tree_map(
+                                lambda value: value[reset_env_ids], obs
+                            )
                         with self._profiler.section("auto_reset"):
                             obs, reset_info = self.reset(
                                 options={"reset_ids": reset_env_ids}

@@ -30,7 +30,7 @@ from embodichain.lab.gym.envs.managers.observation_types import (
     ObservationDescriptor,
     ObservationSample,
 )
-from .observation_manager import _current_capture
+from ..observation_manager import _current_capture
 from embodichain.lab.gym.envs.managers.cfg import SceneEntityCfg
 from embodichain.lab.gym.envs.managers.events import resolve_dict
 from embodichain.lab.gym.envs.managers import Functor, FunctorCfg

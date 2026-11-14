@@ -213,6 +213,39 @@ def test_cli_accepts_dexsim_renderer_names(renderer):
     assert args.renderer == renderer
 
 
+def test_headless_cli_passes_balanced_episode_allocation(tmp_path, monkeypatch):
+    module = importlib.import_module("embodichain.learning.rl.policy_evaluation.cli")
+    captures = []
+    runtime = SimpleNamespace(
+        policy=object(), env=SimpleNamespace(num_envs=2), close=lambda: None
+    )
+    native = SimpleNamespace(
+        runtime=runtime, trainer={}, device="cpu", seed=7, uses_simulator=False
+    )
+    monkeypatch.setattr(module, "_build_native_runtime", lambda *args, **kwargs: native)
+    monkeypatch.setattr(
+        module, "evaluate_episodes", lambda **kwargs: captures.append(kwargs) or {}
+    )
+    monkeypatch.setattr(module, "_flush_simulator", lambda *args: None)
+    monkeypatch.setattr(module, "_output_parent", lambda *args: tmp_path)
+    monkeypatch.setattr(module, "_headless_report", lambda *args: {"inputs": {}})
+    monkeypatch.setattr(
+        module, "write_evaluation_report", lambda parent, report: report
+    )
+    args = parse_args(("--episodes", "8", "--episode-allocation", "balanced"))
+    report = module._run_native_headless(args, object())
+    assert captures[0]["episode_allocation"] == "balanced"
+    assert report["inputs"]["episode_allocation"] == "balanced"
+
+
+@pytest.mark.parametrize("mode", [("--viewer",), ("--profile", "external")])
+def test_balanced_allocation_rejects_unsupported_viewer_or_profile(mode):
+    module = importlib.import_module("embodichain.learning.rl.policy_evaluation.cli")
+    args = parse_args(("--episode-allocation", "balanced", *mode))
+    with pytest.raises(ValueError, match="requires native headless"):
+        module.run(args)
+
+
 @pytest.mark.parametrize("keymap", ("wasd", "arrows"))
 def test_cli_accepts_dexsim_viewer_keymaps(keymap):
     args = parse_args(("--keymap", keymap))

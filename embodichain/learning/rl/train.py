@@ -652,7 +652,7 @@ def train_from_config(
         env=env,
         algorithm=algo,
         buffer_size=buffer_size,
-        batch_size=algo_cfg["batch_size"],
+        batch_size=int(algo.cfg.batch_size),
         writer=writer,
         eval_freq=eval_freq if enable_eval else 0,  # Disable eval if not enabled
         save_freq=save_freq,
@@ -746,6 +746,24 @@ def _checkpoint_context(cfg_data: dict, gym_data: dict | None = None) -> dict:
     return result
 
 
+def _freeze_gym_config(gym_data: dict, source_path: str | Path) -> dict:
+    """Freeze reusable physical components before relocating a task config.
+
+    Relative component and local asset paths belong to the original deployment,
+    not the run's ``configs`` directory. Configured Task Programs retain their
+    selectors because embodiment selection also carries semantic skill metadata.
+    """
+    if "task_program" in gym_data:
+        return deepcopy(gym_data)
+    from embodichain.lab.gym.utils._component_composition import (
+        _resolve_gym_components,
+    )
+
+    return _resolve_gym_components(
+        gym_data, base_dir=Path(source_path).expanduser().resolve().parent
+    ).config
+
+
 def _configure_checkpoints(
     trainer,
     cfg_data: dict,
@@ -769,7 +787,26 @@ def _configure_checkpoints(
     )
     snapshots = {train_path: trainer._checkpoint_config}
     if gym_path is not None:
-        snapshots[gym_path] = deepcopy(gym_data)
+        frozen_gym = _freeze_gym_config(gym_data, gym_config or config_path)
+        environment = getattr(trainer, "env", None)
+        environment = getattr(environment, "unwrapped", environment)
+        operation = getattr(getattr(environment, "cfg", None), "resource_export", None)
+        if "task_program" not in gym_data and operation is not None:
+            from embodichain.utils.string import string_to_callable
+
+            operation.validate()
+            export_gym_config = (
+                string_to_callable(operation.func)
+                if isinstance(operation.func, str)
+                else operation.func
+            )
+            config_dir.mkdir(parents=True, exist_ok=True)
+            frozen_gym = export_gym_config(
+                environment, frozen_gym, config_dir, **operation.params
+            )
+            if not isinstance(frozen_gym, dict):
+                raise TypeError("resource_export must return a Gym configuration dict.")
+        snapshots[gym_path] = frozen_gym
 
     def update_manifest(summary: dict) -> None:
         for path, data in snapshots.items():

@@ -219,7 +219,9 @@ def _build_gym_environment(
         base_dir=config_dir,
     )
     gym_config = load_config(gym_config_path)
-    env_cfg = config_to_cfg(gym_config, manager_modules=get_manager_modules())
+    env_cfg = config_to_cfg(
+        gym_config, manager_modules=get_manager_modules(), source_path=gym_config_path
+    )
     if num_envs is not None:
         env_cfg.num_envs = int(num_envs)
     if seed is not None:
