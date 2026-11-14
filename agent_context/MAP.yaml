@@ -55,7 +55,7 @@ topics:
     physics_config, ControllerAction, EnvProfiler, startup_summary, dexsim_startup_info,
     fluid Gym, 流体 Gym, fluid replay, 粒子回放, DemoQualification, ObjectMotionMetrics, ExpertTrajectoryCfg, joint_command_mode, position_velocity, qpos qvel, expert action schema, ObservationHistorySnapshot, ObservationFrame,
     EvaluationSpec, RuleSession, evaluate_recorded_rules,
-    task_instruction, resolve_demo_instruction,
+    task_instruction, resolve_demo_instruction, program_stage_reward, program_stage_condition,
     show-task, task catalog, task gallery, 任务画廊, physical_objective, 物理目标, RLTaskCfg, rl_task]
   paths: [topics/env-framework/env-framework.md]
   source_of_truth:
@@ -448,7 +448,7 @@ topics:
 - id: task-programs
   title: Embodied Task Program
   aliases: [task program, semantic call, 任务程序, 语义调用]
-  keywords: [TaskProgramCfg, kinematic_joint_replay, MoveHeldObjectCfg, HoldPostCfg, PoseTargetCfg,
+  keywords: [TaskProgramCfg, TaskProgramProgress, kinematic_joint_replay, MoveHeldObjectCfg, HoldPostCfg, PoseTargetCfg,
     SceneRelativePoseTargetCfg, normalize_task_program, demo_skills,
     SimulationSettleMonitorCfg, program.yaml, integration.yaml, scene_binding, SceneManifest, SkillPolicyPreset,
     hand_geometries,

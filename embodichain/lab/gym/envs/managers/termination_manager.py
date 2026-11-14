@@ -223,6 +223,12 @@ class TerminationManager(ManagerBase):
                     self._rule_results[key] = result.rule_results
                     self._rule_identities[key] = result.evaluation_identity
         self._initialized.fill_(True)
+        progress = getattr(self._env, "task_program_progress", None)
+        if progress is not None:
+            final, process_failed, gate_valid = progress.gates()
+            self._success &= final
+            self._failure |= process_failed
+            self._valid &= gate_valid
         self._failure |= ~self._valid
         self._terminated.copy_(self._accepted_success() | self._failure)
         if ignore_terminations:

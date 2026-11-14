@@ -25,7 +25,7 @@ measured success, failure and optional truncation condition functors. The ID
 must be free or match an identical configuration-owned declaration.
 
 Virtual target poses are reset-owned and recorded for single-environment dynamic
-replay. Keep `rl_task` and `task_program` in separate deployments. See the owning
+replay. Combine `rl_task` and `task_program` only in explicit `task_program.execution: policy` mode with complete policy resource ownership; expert execution remains exclusive. See the policy-stage subset and reward/termination bindings in the configuration contract. See the owning
 [configuration contract](../../../../agent_context/topics/env-framework/configuration.md#configuration-owned-manipulation-rl)
 and [user guide](../../../../docs/source/guides/configured_manipulation_rl.md).
 
