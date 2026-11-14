@@ -5988,3 +5988,25 @@ contracts. The package-level imports above are the convenient extension API.
    discover_sensor_plugins
    get_sensor_registration
    list_sensor_types
+
+
+Reference state sensors
+-----------------------
+
+.. currentmodule:: embodichain.lab.sim.sensors
+
+.. autosummary::
+
+   JointEncoder
+   JointEncoderCfg
+   FrameTransform
+   FrameTransformCfg
+
+.. currentmodule:: embodichain.lab.sim.sensors.state
+
+.. autosummary::
+
+   JointEncoder
+   JointEncoderCfg
+   FrameTransform
+   FrameTransformCfg

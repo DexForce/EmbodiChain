@@ -8,6 +8,7 @@
 | Registration, package discovery and construction contracts | `embodichain/lab/sim/sensors/registry.py` |
 | Explicit clock and joint-state service | `embodichain/lab/sim/sensors/context.py` → `SensorContext` |
 | Exported sensor/config names | `embodichain/lab/sim/sensors/__init__.py` |
+| Joint encoder and relative frame transforms | `embodichain/lab/sim/sensors/state.py` |
 | Image configuration, data flags, extrinsics | `embodichain/lab/sim/sensors/camera.py` → `CameraCfg`, `Camera` |
 | Two-eye transforms and attachment | `embodichain/lab/sim/sensors/stereo.py` → `StereoCameraCfg`, `StereoCamera` |
 | Parent-name resolution | `embodichain/lab/sim/sensors/attachment.py` → `resolve_parent_nodes` |

@@ -68,6 +68,25 @@ class SensorStateProvider(Protocol):
         """
         ...
 
+    def get_joint_names(self, asset_uid: str) -> tuple[str, ...]:
+        """Return joint names in the same order as get_joint_state()."""
+        ...
+
+    def get_frame_state(
+        self, asset_uid: str, link_name: str | None = None
+    ) -> TensorDict:
+        """Read owned arena-relative pose and velocities for an asset or link.
+
+        Args:
+            asset_uid: Physical asset identity.
+            link_name: Articulation link, or None for a rigid body/root.
+
+        Returns:
+            Pose in metres and xyzw, linear velocity in m/s and angular
+            velocity in rad/s, with one row per environment.
+        """
+        ...
+
 
 @dataclass(frozen=True)
 class SensorContext:
@@ -121,18 +140,54 @@ class _ManagerSensorServices:
         return self._manager().physics_step_index
 
     def get_joint_state(self, asset_uid: str) -> TensorDict:
-        manager = self._manager()
-        # Physical assets and sensors may deliberately share a UID. Generic
-        # get_asset() prefers sensor/light namespaces and cannot resolve state.
-        asset = manager._robots.get(asset_uid)
-        if asset is None:
-            asset = manager._articulations.get(asset_uid)
-        if asset is None or not all(
-            callable(getattr(asset, name, None)) for name in ("get_qpos", "get_qvel")
-        ):
-            raise ValueError(f"Asset {asset_uid!r} does not provide joint state.")
+        asset = self._physical_asset(asset_uid, require_joints=True)
         return TensorDict(
             {"qpos": asset.get_qpos().clone(), "qvel": asset.get_qvel().clone()},
+            batch_size=[self._manager().num_envs],
+            device=self._manager().device,
+        )
+
+    def get_joint_names(self, asset_uid: str) -> tuple[str, ...]:
+        return tuple(self._physical_asset(asset_uid, require_joints=True).joint_names)
+
+    def _physical_asset(self, uid: str, *, require_joints: bool = False):
+        manager = self._manager()
+        asset = manager._robots.get(uid)
+        if asset is None:
+            asset = manager._articulations.get(uid)
+        if asset is None and not require_joints:
+            asset = getattr(manager, "_rigid_objects", {}).get(uid)
+        if asset is None or (
+            require_joints and not callable(getattr(asset, "get_qpos", None))
+        ):
+            raise ValueError(
+                f"Asset {uid!r} does not provide {'joint' if require_joints else 'frame'} state."
+            )
+        return asset
+
+    def get_frame_state(
+        self, asset_uid: str, link_name: str | None = None
+    ) -> TensorDict:
+        manager = self._manager()
+        asset = self._physical_asset(asset_uid)
+        if link_name is not None:
+            if link_name not in getattr(asset, "link_names", ()):
+                raise ValueError(f"Unknown link {link_name!r} on {asset_uid!r}.")
+            index = asset.link_names.index(link_name)
+            state = asset.body_state[:, index]
+            pose, linear, angular = state[:, :7], state[:, 7:10], state[:, 10:13]
+        elif getattr(type(asset), "root_state", None) is not None:
+            state = asset.root_state
+            pose, linear, angular = state[:, :7], state[:, 7:10], state[:, 10:13]
+        else:
+            state = asset.body_state
+            pose, linear, angular = state[:, :7], state[:, 7:10], state[:, 10:13]
+        return TensorDict(
+            {
+                "pose": pose.expand(manager.num_envs, -1).clone(),
+                "linear_velocity": linear.expand(manager.num_envs, -1).clone(),
+                "angular_velocity": angular.expand(manager.num_envs, -1).clone(),
+            },
             batch_size=[manager.num_envs],
             device=manager.device,
         )
