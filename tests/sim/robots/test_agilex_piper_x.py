@@ -23,6 +23,7 @@ from pathlib import Path
 
 import pytest
 import torch
+from dexsim.types import DriveType
 
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
@@ -56,6 +57,24 @@ class TestAgilexPiperX:
     def teardown_method(self) -> None:
         self.sim.destroy(exit_process=False)
         SimulationManager.flush_cleanup_queue()
+
+    def test_arm_position_drive_tracks_target(self) -> None:
+        """The bare-arm preset creates active drives with source effort caps."""
+        cfg = resolve_robot_cfg("AgilexPiperX")
+        robot = self.sim.add_robot(cfg)
+        self.sim.prepare()
+        # The pinned PiPER-X URDF authors 100 N*m for all six arm joints.
+        torch.testing.assert_close(
+            robot.get_joint_drive(joint_ids=robot.get_joint_ids(name="arm"))[2],
+            torch.full((1, 6), 100.0),
+        )
+        assert robot.get_joint_drive_type() == [[DriveType.FORCE] * 6]
+        target = robot.get_qpos(name="arm").clone()
+        target[0, 0] = 0.2
+        robot.set_qpos(target, name="arm")
+        # One second at the fixture's 1 kHz physics cadence.
+        self.sim.update(step=1000, render_final_step=False)
+        assert robot.get_qpos(name="arm")[0, 0].item() == pytest.approx(0.2, abs=0.01)
 
     @pytest.mark.parametrize("mounted", [False, True], ids=["bare", "agx_gripper"])
     def test_flange_and_tcp_agree_with_simulation_and_round_trip_ik(

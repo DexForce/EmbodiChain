@@ -133,7 +133,13 @@ class _ConditionStabilityRuntime:
             for entity in (cfg.entity, cfg.reference):
                 if entity in self._support_vertices:
                     continue
-                vertices = self._objects[entity].get_vertices(scale=True)
+                native = self._objects[entity]
+                semantic_mesh = getattr(native, "get_semantic_mesh", None)
+                vertices = (
+                    semantic_mesh()[0]
+                    if callable(semantic_mesh)
+                    else native.get_vertices(scale=True)
+                )
                 if (
                     not isinstance(vertices, torch.Tensor)
                     or vertices.ndim != 3

@@ -23,7 +23,6 @@ under the area it improves.
 | Status | Planned capability |
 | --- | --- |
 | 🚧 | Optimize batch rendering throughput and latency on graphics cards (e.g. RTX series) and compute cards (e.g. A series). |
-| 🔬 | Add 3DGS support for rendering and data generation. |
 
 ### Physics
 

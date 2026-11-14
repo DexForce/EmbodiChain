@@ -33,6 +33,8 @@ import torch
 import numpy as np
 import gymnasium as gym
 
+from embodichain.lab.sim.cfg.fluid import FluidObjectCfg
+
 from dataclasses import MISSING, fields
 from typing import (
     TYPE_CHECKING,
@@ -55,12 +57,15 @@ from embodichain.lab.sim.cfg import (
     RigidObjectGroupCfg,
     ArticulationCfg,
     UsdImportCfg,
+    CableObjectCfg,
     LightCfg,
 )
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.sensors import BaseSensor, Camera, SensorCfg
 from embodichain.lab.sim.types import EnvObs, EnvAction
 from embodichain.lab.gym.envs import BaseEnv, EnvCfg
+from embodichain.lab.gym.envs._physical_replay import _PhysicalReplay, _ReplaySurface
+from embodichain.lab.gym.utils._replay import _AuthoredJointStream
 from embodichain.lab.gym.envs._startup_summary import format_functor_summary
 from embodichain.lab.gym.envs.objectives import (
     MeasuredRigidObjectState,
@@ -75,6 +80,7 @@ from embodichain.lab.gym.envs.demo import (
     DemoSegmentResult,
     _as_bool_tuple,
 )
+from embodichain.lab.gym.utils.trajectory_state import FluidTrajectoryRecorder
 from embodichain.lab.gym.envs.types import ControllerAction
 from embodichain.lab.gym.envs.expert_trajectory import (
     ExpertTrajectoryCfg,
@@ -317,6 +323,10 @@ class EmbodiedEnvCfg(EnvCfg):
 
     Without a USD scene, ``None`` preserves ``sim_cfg.default_ground``.
     """
+    cable_object: list[CableObjectCfg] = []
+    """Fixed-topology cables declared before simulation preparation."""
+    fluid_object: list[FluidObjectCfg] = []
+    """Fixed-count fluids owned by the physical environment component."""
 
     events: Union[object, None] = None
     """Event settings. Defaults to None, in which case no events are applied through the event manager.
@@ -437,7 +447,7 @@ class EmbodiedEnvCfg(EnvCfg):
     """Optional measured RL success, failure and truncation conditions.
 
     Configured conditions use cached per-step outcomes and recorded reset-target
-    context. Keep this declaration and ``task_program`` in separate deployments.
+    context. Task Program declarations may coexist only in explicit policy mode.
     """
 
     task_program: TaskProgramCfg | None = None
@@ -447,6 +457,17 @@ class EmbodiedEnvCfg(EnvCfg):
     requests an explicit environment compiler and bridge through the dedicated
     hooks. No live provider, planner, or callable is stored in this config.
     """
+
+    task_program_execution: Literal["expert", "policy"] = "expert"
+    """Action producer; policy mode loads declarations without an expert adapter."""
+    task_program_action_owners: dict[str, str] = {}
+    """Explicit policy ownership of the declared robot resource IDs."""
+
+    replay: _AuthoredJointStream | None = None
+    """Explicit physical command-stream replay, independent of semantic lowerers."""
+
+    replay_surface: _ReplaySurface | None = None
+    """Surface asset used by a configured native replay."""
 
 
 class _EpisodeMetadataRows(Sequence):
@@ -544,17 +565,32 @@ class EmbodiedEnv(BaseEnv):
         task_program_adapter_factory: TaskProgramAdapterFactory | None = None,
         **kwargs,
     ):
+        replay = getattr(cfg, "replay", None)
+        if replay is not None:
+            cfg = copy.deepcopy(cfg)
         rl_task = getattr(cfg, "rl_task", None)
         if rl_task is not None:
             if not isinstance(rl_task, RLTaskCfg):
                 raise TypeError("rl_task must be an RLTaskCfg or None.")
-            if (
+            if getattr(cfg, "task_program_execution", "expert") != "policy" and (
                 getattr(cfg, "task_program", None) is not None
                 or task_program_adapter_factory is not None
             ):
                 raise ValueError(
                     "rl_task and task_program cannot share one deployment."
                 )
+        if getattr(cfg, "task_program_execution", "expert") not in ("expert", "policy"):
+            raise ValueError("task_program_execution must be expert or policy.")
+        if getattr(cfg, "task_program_execution", "expert") == "policy" and (
+            rl_task is None
+            or cfg.task_program is None
+            or task_program_adapter_factory is None
+        ):
+            raise ValueError(
+                "Policy Task Program declarations require rl_task and a registered deployment."
+            )
+        self.task_program_progress = None
+        self._program_transition = 0
         self.termination_manager: (
             embodichain.lab.gym.envs.managers.TerminationManager | None
         ) = None
@@ -579,11 +615,29 @@ class EmbodiedEnv(BaseEnv):
         self._active_task_program_bridge: TaskProgramDemoBridge | None = None
 
         extensions = getattr(cfg, "extensions", {}) or {}
+        if replay is not None and any(
+            name.startswith("_") or hasattr(cfg, name) or hasattr(self, name)
+            for name in extensions
+        ):
+            raise ValueError(
+                "Extensions cannot override configured acceptance or environment fields."
+            )
 
+        if cfg.task_program_execution == "policy":
+            from embodichain.lab.task_program.integrations.progress import (
+                _validate_policy_extensions,
+            )
+
+            _validate_policy_extensions(cfg)
+            if any(hasattr(self, name) for name in extensions):
+                raise ValueError(
+                    "Policy extensions cannot override environment-owned state or methods."
+                )
         for name, value in extensions.items():
             setattr(cfg, name, value)
             setattr(self, name, value)
 
+        self._physical_replay = None if replay is None else _PhysicalReplay(cfg, replay)
         self.event_manager: EventManager | None = None
         self.observation_manager: ObservationManager | None = None
         self.reward_manager: RewardManager | None = None
@@ -601,6 +655,12 @@ class EmbodiedEnv(BaseEnv):
         self._expert_controller_qpos_history: list[list[torch.Tensor]] | None = None
 
         registration = getattr(task_program_adapter_factory, "registration", None)
+        if cfg.task_program_execution == "policy":
+            from embodichain.lab.task_program.integrations.progress import (
+                _validate_policy_deployment,
+            )
+
+            _validate_policy_deployment(cfg, registration)
         from embodichain.lab.gym.envs.objectives.ordered_placement import (
             _objective_rule,
         )
@@ -651,6 +711,32 @@ class EmbodiedEnv(BaseEnv):
                     (ref, bound[ref]) for ref, _ in self._process_evaluation_rules
                 )
                 self._physical_objective_rule = _objective_rule(cfg.objective, bound)
+                if cfg.task_program_execution == "policy":
+                    from embodichain.lab.task_program.integrations.progress import (
+                        TaskProgramProgress,
+                        _validate_policy_action_coverage,
+                    )
+
+                    _validate_policy_action_coverage(
+                        registration, self.robot, self.action_manager
+                    )
+
+                    self.task_program_progress = TaskProgramProgress(
+                        registration.catalog.preflight(
+                            cfg.task_program, strict_contracts=True
+                        ),
+                        bound,
+                        env_ids=tuple(range(self.num_envs)),
+                        # Unstarted rows expect their first reset (episode 0).
+                        # Frames remain unqualified while the owner is at -1.
+                        episode_ids=tuple(
+                            max(0, episode)
+                            for episode in self.episode_context.episode_ids
+                        ),
+                        device=self.device,
+                        final_rules=dict(self._final_acceptance_rules),
+                        process_rules=dict(self._process_evaluation_rules),
+                    )
             if self._explicit_policy_rollout and self.action_manager is None:
                 raise ValueError(
                     "policy_request rollout recording requires an ActionManager."
@@ -670,7 +756,10 @@ class EmbodiedEnv(BaseEnv):
                 dtype=np.float32,
             )
 
-            if task_program_adapter_factory is not None:
+            if (
+                task_program_adapter_factory is not None
+                and cfg.task_program_execution == "expert"
+            ):
                 from embodichain.lab.task_program.integrations import (
                     TaskProgramEnvironmentAdapter,
                 )
@@ -721,6 +810,7 @@ class EmbodiedEnv(BaseEnv):
                 )
 
             self._traj_buffer: TensorDict | None = None
+            self._fluid_trajectory_recorder: FluidTrajectoryRecorder | None = None
             self._traj_steps: torch.Tensor | None = None
             self._traj_raw_action: EnvAction | None = None
             self._trajectory_action_kind: str | None = None
@@ -976,6 +1066,26 @@ class EmbodiedEnv(BaseEnv):
                         policy[key] = storage[key]
                     # Existing consumers retain their transition-length view.
                     self.rollout_buffer = policy[:, : self._max_rollout_steps]
+        recorder = getattr(self, "_fluid_trajectory_recorder", None)
+        if recorder is not None:
+            recorder.capture(self, env_ids.tolist(), reset=True)
+
+    def _set_fluid_trajectory_recorder(
+        self, recorder: FluidTrajectoryRecorder | None
+    ) -> None:
+        """Bind one episode's fluid spool, or detach it after publication."""
+        if recorder is None:
+            self._fluid_trajectory_recorder = None
+            return
+        if not isinstance(recorder, FluidTrajectoryRecorder):
+            raise TypeError("recorder must be a FluidTrajectoryRecorder.")
+        if not self.cfg.record_trajectory or not self.cfg.fluid_object:
+            raise ValueError(
+                "Fluid recording requires trajectory and fluid configuration."
+            )
+        if self._fluid_trajectory_recorder is not None:
+            raise RuntimeError("A fluid trajectory recorder is already attached.")
+        self._fluid_trajectory_recorder = recorder
 
     def set_rollout_buffer(self, rollout_buffer: TensorDict) -> None:
         """Set the rollout buffer for episode data collection.
@@ -1045,6 +1155,9 @@ class EmbodiedEnv(BaseEnv):
         if not self.sim.has_native_renderer:
             self._filter_native_visual_functors()
 
+        if self._physical_replay is not None:
+            self._physical_replay.bind(self)
+
         # create event manager
         self.cfg: EmbodiedEnvCfg
         if self.cfg.events:
@@ -1054,13 +1167,17 @@ class EmbodiedEnv(BaseEnv):
             if "startup" in self.event_manager.available_modes:
                 self.event_manager.apply(mode="startup")
 
-        if self.cfg.observations or self.cfg.record_trajectory:
+        policy_program = (
+            getattr(getattr(self, "cfg", None), "task_program_execution", "expert")
+            == "policy"
+        )
+        if self.cfg.observations or self.cfg.record_trajectory or policy_program:
             recording = (
                 trajectory_observation_cfgs(self, self.cfg.trajectory_uids)
                 if self.cfg.record_trajectory
                 else {}
             )
-            if self.cfg.record_trajectory:
+            if self.cfg.record_trajectory or policy_program:
                 recording.update(getattr(self, "_evaluation_recording", {}))
             self.observation_manager = ObservationManager(
                 self.cfg.observations, self, recording=recording
@@ -1226,6 +1343,8 @@ class EmbodiedEnv(BaseEnv):
                     "articulation",
                     "visual_object",
                     "rigid_object_group",
+                    "cable_object",
+                    "fluid_object",
                 )
                 for item in getattr(self.cfg, field)
                 if item.uid is not None
@@ -1503,6 +1622,8 @@ class EmbodiedEnv(BaseEnv):
                     != self._usd_scene_inventory[field]
                 ):
                     raise ValueError(f"USD scene {field} changed since preflight.")
+        if self._physical_replay is not None:
+            self._physical_replay.prepare_scene(self)
 
     def _update_sim_state(self, **kwargs) -> None:
         """Perform the simulation step and apply events if configured.
@@ -1516,13 +1637,31 @@ class EmbodiedEnv(BaseEnv):
                     self.event_manager.apply(mode="interval")
 
         termination = getattr(self, "termination_manager", None)
-        if termination is not None:
+        if (
+            termination is not None
+            and getattr(getattr(self, "cfg", None), "task_program_execution", "expert")
+            != "policy"
+        ):
             # BaseEnv advances elapsed steps after rewards. Supply this
             # transition's deadline once; Gym flags later consume this cache.
             termination.compute(
                 self._elapsed_steps + 1 >= self.max_episode_steps,
                 ignore_terminations=self.cfg.ignore_terminations,
             )
+
+    def _after_observation(self, frame: ObservationFrame) -> None:
+        """Advance policy progress once before reward and termination read caches."""
+        progress = getattr(self, "task_program_progress", None)
+        if progress is None:
+            return
+        progress.advance(
+            frame, step=self._program_transition, episode_owner=self.episode_context
+        )
+        self._program_transition += 1
+        self.termination_manager.compute(
+            self._elapsed_steps + 1 >= self.max_episode_steps,
+            ignore_terminations=self.cfg.ignore_terminations,
+        )
 
     def _initialize_physical_objective(self) -> None:
         """Bind an optional objective to an existing measured rigid object."""
@@ -1573,6 +1712,12 @@ class EmbodiedEnv(BaseEnv):
             objective.reset(env_ids)
         if getattr(self, "termination_manager", None) is not None:
             self.initialize_task_outcome(env_ids)
+        progress = getattr(self, "task_program_progress", None)
+        if progress is not None:
+            ids = (
+                env_ids.tolist() if isinstance(env_ids, torch.Tensor) else list(env_ids)
+            )
+            progress.reset(ids, [self.episode_context.episode_ids[row] for row in ids])
 
     def _rl_target_keys(self) -> tuple[str, ...]:
         return tuple(
@@ -1678,7 +1823,11 @@ class EmbodiedEnv(BaseEnv):
         self.initialize_task_outcome()
 
     def _task_success_before_reset(self, env_ids: torch.Tensor) -> torch.Tensor:
-        rules = getattr(self, "_final_acceptance_rules", ())
+        rules = (
+            ()
+            if getattr(self, "task_program_progress", None) is not None
+            else getattr(self, "_final_acceptance_rules", ())
+        )
         rows = getattr(self, "_demo_episode_metadata", ())
         if not rows and not rules:
             return super()._task_success_before_reset(env_ids)
@@ -1819,6 +1968,15 @@ class EmbodiedEnv(BaseEnv):
                 "objective": metadata.get("physical_objective"),
                 "conditions": metadata.get("task_outcome"),
                 "final_acceptance": final,
+                **(
+                    {
+                        "stage_progress": _outcome_row(
+                            self.task_program_progress.snapshot(), env_id
+                        )
+                    }
+                    if getattr(self, "task_program_progress", None) is not None
+                    else {}
+                ),
             },
             "acceptance": {
                 "eligible": eligible,
@@ -1845,7 +2003,10 @@ class EmbodiedEnv(BaseEnv):
         if (
             "success" not in info
             or not getattr(self, "_demo_episode_metadata", None)
-            or getattr(self, "_final_acceptance_rules", ())
+            or (
+                getattr(self, "_final_acceptance_rules", ())
+                and getattr(self, "task_program_progress", None) is None
+            )
         ):
             return
         rows = env_ids.tolist()
@@ -2066,6 +2227,9 @@ class EmbodiedEnv(BaseEnv):
         self, env_ids: Sequence[int] | torch.Tensor | None = None, **kwargs: Any
     ) -> None:
         env_ids_to_process = self.episode_context._ids(env_ids)
+        replay = getattr(self, "_physical_replay", None)
+        if replay is not None:
+            replay.reset(self, env_ids_to_process)
         # Keep one shared provenance snapshot per seed epoch, even without a
         # recorder. Individual episode dictionaries and UUIDs stay lazy.
         seed = getattr(self.cfg, "seed", None)
@@ -2085,6 +2249,7 @@ class EmbodiedEnv(BaseEnv):
             self.dataset_manager is not None
             or getattr(self, "rollout_buffer", None) is not None
             or getattr(self, "_traj_buffer", None) is not None
+            or getattr(self, "task_program_progress", None) is not None
         ):
             episode_metadata = self._demo_episode_metadata = _EpisodeMetadataRows(
                 self.num_envs, self._new_demo_episode_metadata(0)
@@ -2252,6 +2417,13 @@ class EmbodiedEnv(BaseEnv):
         replan: bool = False,
     ) -> None:
         """Start annotation metadata for a new demonstration episode."""
+        if (
+            getattr(getattr(self, "cfg", None), "task_program_execution", "expert")
+            == "policy"
+        ):
+            raise RuntimeError(
+                "Policy-owned resources cannot start expert demonstration execution."
+            )
         selected = range(self.num_envs) if active_env_ids is None else active_env_ids
         bridge = getattr(self, "_active_task_program_bridge", None)
         if (not replan and getattr(bridge, "program_completed", False)) or (
@@ -2563,6 +2735,9 @@ class EmbodiedEnv(BaseEnv):
             self._demo_episode_metadata[env_id] = metadata
         self._demo_metadata_initialized = True
         metadata = copy.deepcopy(self._demo_episode_metadata[env_id])
+        replay = getattr(self, "_physical_replay", None)
+        if replay is not None:
+            metadata["replay_source"] = replay.snapshot.metadata()
         metadata["episode_context"] = self.episode_context.snapshot([env_id])[0]
         metadata.setdefault("segments", [])
         termination_manager = getattr(self, "termination_manager", None)
@@ -2890,17 +3065,27 @@ class EmbodiedEnv(BaseEnv):
                 "Trajectory recording requires an explicit observation frame and action."
             )
         manager._bind_schema(frame)
+        selected = (
+            active if active is not None else getattr(self, "_demo_active_mask", None)
+        )
         _write_raw_rollout(
             self._rollout_storage,
             self.episode_context,
             frame,
             action=self._traj_raw_action,
-            active=(
-                active
-                if active is not None
-                else getattr(self, "_demo_active_mask", None)
-            ),
+            active=selected,
         )
+        recorder = getattr(self, "_fluid_trajectory_recorder", None)
+        if recorder is not None:
+            ids = (
+                list(range(self.num_envs))
+                if selected is None
+                else torch.as_tensor(selected, dtype=torch.bool)
+                .nonzero()
+                .flatten()
+                .tolist()
+            )
+            recorder.capture(self, ids)
         self._traj_raw_action = None
 
     def _write_rl_rollout_step(
@@ -3241,6 +3426,9 @@ class EmbodiedEnv(BaseEnv):
             The raw policy tensor or applied controller value.
         """
 
+        replay = getattr(self, "_physical_replay", None)
+        if replay is not None:
+            return replay.consume(self, action)
         if isinstance(action, ControllerAction):
             if getattr(self, "_step_uses_action_manager", False):
                 self.action_manager.apply_action()
@@ -3256,8 +3444,18 @@ class EmbodiedEnv(BaseEnv):
             return action
         return EmbodiedEnv._apply_controller_action(self, action)
 
+    def _replay_snapshot(self, source_id: str):
+        """Return the host-owned command source after native robot binding."""
+        replay = self._physical_replay
+        if replay is None or replay.snapshot.source.stream_id != source_id:
+            raise ValueError(f"No physical replay source {source_id!r} is bound.")
+        return replay.snapshot
+
     def _advance_physics(self) -> None:
         """Connect manager callbacks to physics and sensor sampling."""
+        replay = getattr(self, "_physical_replay", None)
+        if replay is not None and replay.hold:
+            return
         manager = getattr(self, "action_manager", None)
         if not getattr(self, "_step_uses_action_manager", False) or manager is None:
             return super()._advance_physics()
@@ -3371,6 +3569,9 @@ class EmbodiedEnv(BaseEnv):
         outcome = getattr(self, "termination_manager", None)
         if outcome is not None:
             info["task_outcome"] = outcome.snapshot()
+        progress = getattr(self, "task_program_progress", None)
+        if progress is not None:
+            info["task_program_progress"] = progress.snapshot()
         if getattr(self.cfg, "episode_context_in_info", True):
             info["episode_context"] = self.episode_context.snapshot()
         return info
@@ -3421,6 +3622,14 @@ class EmbodiedEnv(BaseEnv):
         self._last_action_manager_qpos = None
         self._last_action_trace = None
         is_controller_action = isinstance(action, ControllerAction)
+        if (
+            is_controller_action
+            and getattr(getattr(self, "cfg", None), "task_program_execution", "expert")
+            == "policy"
+        ):
+            raise ValueError(
+                "Policy-owned resources require ActionManager policy actions."
+            )
         expert_cfg = getattr(getattr(self, "cfg", None), "expert_trajectory", None)
         managed_expert = is_controller_action and bool(
             getattr(expert_cfg, "use_action_manager", False)
@@ -3848,6 +4057,11 @@ class EmbodiedEnv(BaseEnv):
         for cfg in self.cfg.rigid_object_group:
             self.sim.add_rigid_object_group(cfg=cfg)
 
+        for cfg in self.cfg.cable_object:
+            self.sim.add_cable_object(cfg=cfg)
+        for cfg in self.cfg.fluid_object:
+            self.sim.add_fluid_object(cfg)
+
     def preview_sensor_data(
         self,
         name: str,
@@ -4029,18 +4243,49 @@ class EmbodiedEnv(BaseEnv):
             Atomic demo bridge whose segments are consumed lazily.
 
         """
+        if (
+            getattr(getattr(self, "cfg", None), "task_program_execution", "expert")
+            == "policy"
+        ):
+            raise RuntimeError(
+                "Policy-only Task Program declarations cannot activate an expert bridge."
+            )
         kwargs = {}
         if nominal_source_factory is not None:
             kwargs["nominal_source_factory"] = nominal_source_factory
         if plan_transform_factory is not None:
             kwargs["plan_transform_factory"] = plan_transform_factory
-        return self._checked_task_program_adapter().create_bridge(
+        bridge = self._checked_task_program_adapter().create_bridge(
             program,
             expansion_profile=expansion_profile,
             candidate_index=expansion_candidate_index,
             recipe_indices=expansion_recipe_indices,
             **kwargs,
         )
+        if any(
+            segment.contract is not None
+            and any(entry.spec is not None for entry in segment.contract.prerequisites)
+            for segment in program.iter_segments()
+        ):
+            from embodichain.lab.task_program.integrations.simulation.bindings import (
+                _bind_evaluation_joint_names,
+            )
+
+            bridge._contract_conditions = _bind_evaluation_joint_names(
+                {
+                    entry.ref: entry.spec
+                    for segment in program.iter_segments()
+                    if segment.contract is not None
+                    for entry in segment.contract.prerequisites
+                    if entry.spec is not None
+                },
+                self.robot,
+            )
+            bridge._contract_capture = lambda fields: _capture_evaluation_frame(
+                self, fields
+            )
+            bridge._contract_episode_owner = self.episode_context
+        return bridge
 
     @property
     def task_program_expansion_records(
@@ -4088,7 +4333,11 @@ class EmbodiedEnv(BaseEnv):
                 "Task Program completion mask must be bool with one value per "
                 "environment."
             )
-        return completion.to(device=self.device)
+        completion = completion.to(device=self.device)
+        replay = getattr(self, "_physical_replay", None)
+        if replay is not None and replay.frame(self) != replay.snapshot.steps:
+            return torch.zeros_like(completion)
+        return completion
 
     def _evaluate_final_task_acceptance(
         self,
@@ -4125,6 +4374,9 @@ class EmbodiedEnv(BaseEnv):
         if saved is not None:
             episodes, previous = saved
             mask = mask | qualified(episodes, previous)
+        replay = getattr(self, "_physical_replay", None)
+        if replay is not None and replay.frame(self) != replay.snapshot.steps:
+            return torch.zeros_like(mask)
         return mask
 
     def _finalize_demo_task_success(
@@ -4250,6 +4502,7 @@ class EmbodiedEnv(BaseEnv):
         env_ids: Sequence[int] | None = None,
         *,
         purpose: str = "recording",
+        extra_meta: Mapping[str, Any] | None = None,
     ) -> str:
         """Save a causally aligned trajectory to a ``.pt`` file.
 
@@ -4265,6 +4518,7 @@ class EmbodiedEnv(BaseEnv):
             env_ids: Env indices to save (default: all). Each saved env's actual
                 recorded length is stored in ``meta["lengths"]``.
             purpose: Normal recording or explicitly labeled diagnostic export.
+            extra_meta: Additional artifact metadata; standard fields cannot be replaced.
 
         Raises:
             RuntimeError: If trajectory recording was never enabled.
@@ -4350,6 +4604,12 @@ class EmbodiedEnv(BaseEnv):
                 self.get_demo_episode_metadata(int(env_id)) for env_id in env_ids
             ],
         }
+        if "cables" in states.keys():
+            # Cable observations retain world coordinates. Keep each exported
+            # row's origin so action replay can validate another arena placement.
+            meta["arena_origins_w"] = (
+                self.sim.arena_offsets[env_ids_t].detach().cpu().tolist()
+            )
         meta.update(self._trajectory_action_metadata())
         final_observations = _export_final_observations(
             getattr(self, "_final_acceptance_rules", ()),
@@ -4372,6 +4632,17 @@ class EmbodiedEnv(BaseEnv):
             meta["episode_uuid"] = meta["episode_uuids"][0]
             meta["source_episode_uuid"] = meta["source_episode_uuids"][0]
             meta["program_hash"] = meta["demo_episodes"][0].get("program_hash")
+        if extra_meta is not None:
+            if not isinstance(extra_meta, Mapping) or not all(
+                type(key) is str for key in extra_meta
+            ):
+                raise TypeError("extra_meta must be a string-keyed mapping.")
+            duplicate = set(extra_meta) & set(meta)
+            if duplicate:
+                raise ValueError(
+                    f"extra_meta cannot replace trajectory fields: {sorted(duplicate)}"
+                )
+            meta.update(copy.deepcopy(dict(extra_meta)))
         replay_path = str(Path(path).resolve())
         for episode in meta["demo_episodes"]:
             episode["trajectory_path"] = replay_path

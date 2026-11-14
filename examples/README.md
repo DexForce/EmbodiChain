@@ -13,6 +13,13 @@ embodichain run-example sim/atomic_skill --skill place --variants 8
 embodichain run-example sim/atomic_skill/coordinated_pickment --help
 ```
 
+The DexUni pouring example plans a fresh Franka grasp, pour and place sequence
+with live fluid physics. It requires CUDA and a DexSim build with DFSPH support:
+
+```bash
+embodichain run-example sim/demo/franka_dexuni_pour_demo --help
+```
+
 A directory with `__main__.py` can be selected by its directory path. All arguments
 after the path go to the script, including `--help`; an optional `--` separator is
 also accepted. `--list` discovers Python files from the directory without importing
@@ -111,15 +118,15 @@ python scripts/tutorials/sim/create_cable.py
 python scripts/tutorials/sim/create_cable.py --headless --renderer no-render --num-envs 2
 ```
 
-The cable examples use CUDA and DexSim `0.6.0rc1` (engine commit
-`1b968250ada2b06b210bc7aa08ef219769f01217`). The DexForce package index
+The cable examples use CUDA and DexSim `0.6.0rc2` (engine commit
+`dbaca660471d5aaa7e750093e7fe1c207465c4af`). The DexForce package index
 provides Linux x86_64 wheels for Python 3.11 and 3.12. To install the pinned
 engine in your EmbodiChain environment and check its build, run:
 
 ```bash
 python -m pip install --index-url https://pypi.org/simple \
   --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site \
-  dexsim-engine==0.6.0rc1
+  dexsim-engine==0.6.0rc2
 python -c "import dexsim; from dexsim.scene import SpawnedCable; print(dexsim.__version__, dexsim.__commit_id__)"
 ```
 
@@ -127,3 +134,10 @@ EmbodiChain defaults to DexUni when no solver is selected;
 legacy `auto`/`AutoSolverCfg` selections must migrate to `dexuni` or the concrete
 solver needed by the scene. Explicit `semi_implicit` remains required for
 Newton gradient mode.
+
+The [cable Viser demo](sim/demo/cable_viser.py) displays replicated segment
+capsules in the browser:
+
+```bash
+python -m embodichain run-example sim/demo/cable_viser --num-envs 2 --port 8080 --duration 12
+```

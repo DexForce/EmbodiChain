@@ -311,6 +311,17 @@ def _near_relative(arguments, params):
     return _near({"position": position.to(dtype), "target": target.to(dtype)}, params)
 
 
+def _near_frame_target(arguments, params):
+    import torch
+
+    position, reference = arguments["position"], arguments["reference"]
+    dtype = torch.promote_types(position.dtype, reference.dtype)
+    frame = _evaluation_pose_matrix(reference.to(dtype))
+    displacement = frame.new_tensor(params["displacement"])
+    target = frame[:, :3, :3] @ displacement + frame[:, :3, 3]
+    return _near({"position": position.to(dtype), "target": target}, params)
+
+
 def _lift_params(params):
     _keys(params, ("minimum_lift",))
     minimum = _finite(params["minimum_lift"], "minimum_lift")
@@ -490,6 +501,16 @@ def builtin_predicates() -> PredicateRegistry:
                 _near_relative_params,
                 _near_relative,
                 ("position", "position"),
+            ),
+        ),
+        (
+            "near_frame_target",
+            PredicateDefinition(
+                1,
+                ("position", "reference"),
+                _near_relative_params,
+                _near_frame_target,
+                ("position", "object_frame"),
             ),
         ),
         (

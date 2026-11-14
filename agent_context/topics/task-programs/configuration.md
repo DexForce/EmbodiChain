@@ -94,6 +94,20 @@ factories, and registered-call lowerers. Adapter creation calls
 Reconstructing a registration with `dataclasses.replace` does not duplicate its
 scene-derived standard grounders; duplicate custom grounders remain errors.
 
+The configured articulation-link Slide lowerer can bind an explicit
+`joint_target: {joint_name: ..., axis_sign: -1|1}`. Its call then requires
+`handle` and an absolute joint `position`; direction and distance remain policy
+options. The factory checks the handle's prismatic ancestor and finite limits;
+multiple active ancestors require an explicit translation axis. Without this
+binding the existing handle-only call keeps its factory and fingerprint. The
+joint-target factory includes the authored target in its registration fingerprint.
+
+Configured action options may add clearance waypoints before a native motion.
+PickUp's `initial_lift_height` adds a world-Z offset to the starting TCP pose
+before moving toward pre-grasp. Slide's `push_approach_offset` adds a waypoint
+at a world XYZ offset from pre-grasp for pushes. These offsets are in metres
+and belong in the deployment integration.
+
 `runtime_services.settle_presets` is the closed serialized route to this same
 registration-owned table. Omission retains the existing dynamic presets; an
 explicit table owns its complete named selection. Components may contribute
@@ -207,6 +221,22 @@ The configured lowerer allowlist also exposes profile-owned Park, AxisAlign,
 relative Place and coordinated transport. Their declarations in
 `integrations/_configured_services.py` select exact Atomic Skill descriptors;
 the closed decoder in `configured.py` owns accepted options and route fields.
+
+The configured `kinematic_joint_replay` lowerer selects a physical replay source
+by ID and maps named phases to contiguous intervals. It obtains the environment's
+already verified and ordered command snapshot and emits `TimedTrajectory` /
+`JointPositionGoal` for `MoveJoints`; it owns no file reader or playback cursor.
+The optional `create_for_environment` factory hook receives the live host through
+standard registration assembly, including selected-row factories, without
+changing existing factories' `create` contract. The host is weakly referenced.
+
+The physical `simulation.replay` declaration owns the digest and cadence.
+Newton interpolates registered source positions inside each physics step while
+cloth physics continues. Canonical world-space centroid fields carry the verified
+mesh SHA and sorted particle selection. Ordinary `evaluation.component` supplies
+`near_target` rules; source identity, topology and finite coordinates qualify
+evidence. Reaching the final replay frame qualifies completion. Shared final
+measurement, sealing and offline replay own physical outcomes.
 Relative Place resolves a live reference plus world-axis displacement and
 requires the verified held-object transform. Coordinated transport must select
 the real primitive's release mode. Do not install frontend skill replacements.
@@ -343,6 +373,44 @@ matching a target whose relative pose composes the complete parent transform.
 
 ## Named evaluation rules
 
+### Segment acceptance contracts
+
+Use an explicit segment when an outcome can be described and verified at a
+meaningful boundary given its incoming state. For example, grasp and lift a
+bottle as one subgoal. Keep a tightly coupled transport and tilt in one
+segment when the intended outcome is a combined maneuver with no useful
+intermediate acceptance boundary. A segment may contain one call or a
+sequence of calls. It can depend on state produced by earlier segments.
+
+An optional `contract` names incoming `prerequisites` and required or
+diagnostic `outcomes`. The segment's `instruction` remains the language
+label. For example, the transport segment can require
+`{kind: held, ref: bottle}` before dispatch and name
+`{kind: validator, ref: 0}` in its outcomes. The validator can refer to a
+shared named condition. An incoming `condition` selects an instantaneous
+exported rule and acquires its raw fields at the segment boundary. Use a
+named temporal validator for observations acquired during the segment.
+
+`held` and `released` read symbolic TaskState. Report their authority as
+symbolic even when a task also records a measured lift or pose.
+`call_effect` references a local sequential call index and declares
+`assurance: projected|verified`. Verified references require a verifying
+preset and effect monitor. `validator` and `post_policy` reuse existing
+zero-based segment indices and cached results. An `unsupported` capability
+reports unavailable evidence, and blocks acceptance when it is required.
+
+Use `inspect_deployment.py --strict-contracts` to require each segment to
+have an instruction and contract. Contracts work with canonical and shorthand
+segments; strict diagnostics retain the authored configuration paths. Combine
+with `--explain` to inspect the normalized declaration and effective bindings.
+This checks declaration structure,
+bindings and supported authorities. The runtime checks measured truth at
+the incoming or outgoing boundary. Segment reports and dataset fragments
+retain the instruction, separate evidence statuses and the acceptance mask.
+Programs that omit contracts keep the existing execution path.
+
+### Shared rule components
+
 Select the library in the runnable deployment.
 
 ```yaml
@@ -392,6 +460,12 @@ as logical aliases to native robot links. Use `robot_links/<alias>/position`
 for measured link distance. Trusted Python hosts can pass an
 `evaluation_registry` when loading the deployment. YAML contains only
 registered kind IDs and inert parameters.
+
+`near_frame_target` compares a measured XYZ position with a target offset in
+an observed object's frame. In a configured deployment its
+`params.transport_target` can select the target ID of an existing
+`move_held_object` lowerer. The rule then uses that lowerer's local offset
+and checks that its reference binding names the same object.
 
 The `lift` predicate can bind its `baseline` to
 `rigid_objects/<entity>/segment_start_frame`. Segment execution captures that

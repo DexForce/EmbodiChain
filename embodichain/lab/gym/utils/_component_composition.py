@@ -64,6 +64,10 @@ _SCENE_SIMULATION_FIELDS = frozenset(
         "rigid_object_group",
         "articulation",
         "usd_scene",
+        "replay_surface",
+        "replay",
+        "cable_object",
+        "fluid_object",
     }
 )
 
@@ -163,8 +167,14 @@ def _resolve_local_resource_paths(value: object, *, base_dir: Path) -> None:
                     if not selected.is_absolute():
                         selected = base_dir / selected
                     source["file_path"] = str(selected.resolve())
+            if key == "fluid_object" and isinstance(child, list):
+                for fluid in child:
+                    spawn = fluid.get("spawn", {})
+                    path = spawn.get("file_path")
+                    if isinstance(path, str) and not Path(path).is_absolute():
+                        spawn["file_path"] = str((base_dir / path).resolve())
             if (
-                key in {"fpath", "urdf_path", "xml_path"}
+                key in {"fpath", "urdf_path", "xml_path", "trajectory"}
                 and isinstance(child, str)
                 and child.startswith(("./", "../"))
             ):
@@ -606,6 +616,8 @@ def _resolve_gym_components(
             "articulation",
             "visual_object",
             "rigid_object_group",
+            "cable_object",
+            "fluid_object",
         ):
             for item in resolved.get(field, ()):
                 if item.get("uid"):

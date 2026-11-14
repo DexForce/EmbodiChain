@@ -86,3 +86,23 @@
 | Gradio conversion finishes without an artifact | Treat nonzero exit or absent `asset_simready.{glb,obj}` as failure; inspect the session's streamed subprocess output. |
 | Remote UI exposes or cannot serve a path | Change `app_env.py` allowed/blocked-root policy, not component callbacks. |
 | A new run kills an older run | Expected only within the same session token; otherwise inspect session-token propagation into `SessionProcessRegistry`. |
+
+## Grouped layouts
+
+Grouped randomization consumes a rigid-GLB table export and explicit support
+graph. Default SLSQP repair and opt-in CPU/CUDA rejection sampling have distinct
+proposal distributions. UID-addressed streams, logical ordinals and whole-attempt
+accounting preserve prefixes across batch sizes. GenSim owns group/member
+transforms, source/config snapshots and persisted canonical CPU-float64 poses.
+
+Versioned intra-group policies add explicit non-root XY/yaw targets and fixed
+roots; empty targets preserve the group path. Numeric postorder subtree proposals
+use dynamic envelopes. Materialized layouts still validate whole footprints,
+source identity and grouping assumptions. Candidate geometry does not prove
+stability or task acceptance; shared Scene services retain their own check and
+restore contracts.
+
+Baseline cache, persistence and loading modules own saved-run identity and
+pose-only playback. Restoring display evidence does not advance physics or turn
+rendered poses into a physical reset. Keep generation and replay artifact
+ownership separate from source exports and collection receipts.

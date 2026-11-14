@@ -58,7 +58,19 @@ from its supplied component snapshot. See
 | `configs/components/execution_policies/*.yaml` | Reusable execution policy | Physical environment/embodiment ownership |
 | `<task>/agents/<algorithm>.{json,yaml}` | Optional RL training configuration | Task identity or Python registration ownership |
 | `<task>/catalog.yaml` | Logical task key, presentation metadata and named deployment references | Gym registration or duplicated runtime settings |
+| Optional `evaluation.component` | Shared measured predicates and final/process rule selections | Scene setup, actions, or a second evaluator |
 | Optional `objective.component` | Independent physical evaluation declaration | Program completion, segment acceptance or persistence authority |
+
+A native joint replay declares `simulation.replay` with
+`kind: native_joint_positions`, a source ID, trajectory path, SHA-256 and FPS in
+the physical environment. Gym reads the authored positions once into its own
+snapshot; `replay_surface` qualifies the associated mesh and robot assets.
+Final particle-centroid criteria use the ordinary `evaluation.component` path.
+Public component composition, static inspection and runtime therefore receive
+the same compiled rules and registration identity. Mesh SHA and canonical
+particle groups remain part of observation identity. The
+[shared policy and outcome contract](../task-programs/configuration.md)
+owns capture, completion qualification and terminal evidence.
 
 Component files do not use compatibility `version` fields. Inline runnable
 Gym configs remain supported when no conflicting component selector is used.
@@ -249,7 +261,12 @@ Python task registration module. `config_to_cfg` decodes `RLTaskCfg`, reuses the
 ordinary manager and physical-component configuration, and registers the common
 host with explicit RL capability. Conditions are grouped as success, failure
 and truncation; their `func`/`params` use the manager registry and entity binding.
-The same deployment cannot select both `rl_task` and `task_program`.
+A deployment may combine `rl_task` and `task_program` only with explicit
+`task_program.execution: policy` and `action_owners` assigning every declared
+robot resource to `policy`. The default `expert` execution remains exclusive
+with RL. Policy mode loads declarations and integration metadata without
+creating an expert adapter. Its supported subset and consumer bindings are
+owned by [policy stage progress](../task-programs/execution.md#policy-stage-progress).
 
 The registration signature preserves manager ordering, measured conditions,
 physical declarations and episode limits while excluding runtime device, batch

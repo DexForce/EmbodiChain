@@ -386,6 +386,49 @@ def test_inventory_rejects_missing_target_uid_conflict_and_gravity(scene_files):
         _inspect_usd_scene(recipe, gravity=(0, 0, -1))
 
 
+@pytest.mark.parametrize("field", ["cable_object", "fluid_object"])
+@pytest.mark.parametrize("entrypoint", ["composition", "environment"])
+def test_particle_uid_conflicts_reject_before_world(
+    scene_files, monkeypatch, field, entrypoint
+):
+    from unittest.mock import Mock
+
+    from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+    from embodichain.lab.gym.utils.composition import resolve_gym_components
+    from embodichain.lab.gym.utils.gym_utils import config_to_cfg
+    from embodichain.lab.sim.cfg import CableObjectCfg, FluidObjectCfg
+
+    particle = (
+        CableObjectCfg(uid="target", points=((0, 0, 0), (0, 0, 0.1)), radius=0.005)
+        if field == "cable_object"
+        else FluidObjectCfg(
+            uid="target", spawn={"kind": "points", "positions": [[0, 0, 0]]}
+        )
+    )
+    particle.validate()
+    config = {
+        "id": "EmbodiedEnv-v1",
+        "physics": "newton",
+        "env": {},
+        "robot": {"uid": "robot"},
+        "usd_scene": _recipe(scene_files["usd"]).to_dict(),
+    }
+    if entrypoint == "composition":
+        config[field] = [particle.to_dict()]
+        with pytest.raises(ValueError, match="USD asset UID already exists.*target"):
+            resolve_gym_components(config, base_dir=scene_files["usd"].parent)
+    else:
+        cfg = config_to_cfg(config)
+        setattr(cfg, field, [particle])
+        factory = Mock(side_effect=AssertionError("World must not be allocated"))
+        monkeypatch.setattr(
+            "embodichain.lab.gym.envs.base_env.SimulationManager", factory
+        )
+        with pytest.raises(ValueError, match="USD asset UID already exists.*target"):
+            EmbodiedEnv(cfg)
+        factory.assert_not_called()
+
+
 def test_source_changes_and_corrupt_package_are_rejected(scene_files, tmp_path):
     recipe = _recipe(scene_files["usd"])
     inventory = _inspect_usd_scene(recipe)
