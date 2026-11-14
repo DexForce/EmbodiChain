@@ -6085,6 +6085,28 @@ Batched triangle ray queries
    cast_rays
 
 
+Tactile indentation
+-------------------
+
+Tactile indentation measures geometric overlap along calibrated probes on
+planar or curved surfaces. The geometry source and clipped depth are published
+independently from contact force or optical images.
+
+.. currentmodule:: embodichain.lab.sim.sensors
+
+.. autosummary::
+
+   TactileIndentation
+   TactileIndentationCfg
+
+.. currentmodule:: embodichain.lab.sim.sensors.tactile_indentation
+
+.. autosummary::
+
+   TactileIndentation
+   TactileIndentationCfg
+
+
 Terrain scan
 ------------
 

@@ -11,6 +11,7 @@
 | Joint encoder and relative frame transforms | `embodichain/lab/sim/sensors/state.py` |
 | Finite-difference PVA and IMU | `embodichain/lab/sim/sensors/inertial.py` |
 | Collision/visual ray provider, terrain scan, geometric LiDAR and ray depth | `embodichain/lab/sim/sensors/ray.py` |
+| Curved pad geometry and indentation depth | `embodichain/lab/sim/sensors/tactile_indentation.py` |
 | Official VLP-16 preset | `extensions/embodichain_sensors/vlp16.py` and the `embodichain.sensors` entry point |
 | Image configuration, data flags, extrinsics | `embodichain/lab/sim/sensors/camera.py` → `CameraCfg`, `Camera` |
 | Two-eye transforms and attachment | `embodichain/lab/sim/sensors/stereo.py` → `StereoCameraCfg`, `StereoCamera` |
@@ -196,6 +197,13 @@ The contact query owns topology and loss semantics. The fixed grid scatter
 kernel is private to the sensor adapter.
 
 ## Focused validation
+
+TactileIndentation uses the ray provider's topology and owner poses, with
+two outward-facing exit tests on each closed, consistently wound target. Its optional
+conservative pad-sphere/local-AABB gate has one candidate flag per environment
+and target and no truncated queue. Probe normals, distances and shape IDs
+describe geometric overlap. Profile the full sensing step before choosing
+candidate screening for workloads with all rows active.
 
 Ray queries default to cooked collision shapes. Select `geometry_source: visual`
 for authored procedural or array-backed render geometry of rigid and visual

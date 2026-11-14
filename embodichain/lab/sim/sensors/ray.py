@@ -84,10 +84,17 @@ class RayScene:
         Returns:
             Distances and shape indices. Misses are infinity and -1.
         """
+        meshes = self._posed_meshes()
+        return cast_rays(origins, directions, meshes, max_distance)
+
+    def _check_topology(self) -> None:
         if self._topology_is_current is not None and not self._topology_is_current():
             raise RuntimeError(
                 "Ray scene topology is stale. Reacquire the provider after prepare()."
             )
+
+    def _posed_meshes(self) -> list[tuple[TriangleRayMesh, torch.Tensor]]:
+        self._check_topology()
         poses = {}
         meshes = []
         for mesh, pose in self._meshes:
@@ -102,7 +109,7 @@ class RayScene:
                     poses[owner] = owner()
                 pose = poses[owner]
             meshes.append((mesh, pose))
-        return cast_rays(origins, directions, meshes, max_distance)
+        return meshes
 
 
 def _collision_mesh(shape: CollisionShapeDesc, device: torch.device) -> TriangleRayMesh:
