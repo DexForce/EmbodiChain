@@ -8,14 +8,12 @@ scene_binding:
   registry_id: robotiq140_tabletop
   rigid_objects:
   - entity_id: cube
-    simulation_uid: cube
     dynamics: dynamic
     semantic_type: cube
     affordances:
     - entity_id: cube_grasp
       kind: antipodal_grasp
   - entity_id: support_surface
-    simulation_uid: support_surface
     dynamics: static
     semantic_type: support_surface
 profile:

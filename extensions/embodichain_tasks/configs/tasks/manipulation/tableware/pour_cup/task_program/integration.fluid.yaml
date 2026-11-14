@@ -8,7 +8,6 @@ scene_binding:
   registry_id: task_program_pour_cup_fluid
   rigid_objects:
   - entity_id: cup
-    simulation_uid: cup
     dynamics: dynamic
     semantic_type: cup
     affordances:
@@ -19,7 +18,6 @@ scene_binding:
       - 0.0
       - 0.0
   - entity_id: receiver
-    simulation_uid: receiver
     dynamics: static
     semantic_type: bowl
 profile:

@@ -8,7 +8,6 @@ scene_binding:
   registry_id: task_program_drawer_storage
   articulations:
   - entity_id: drawer
-    simulation_uid: drawer
     dynamics: dynamic
     semantic_type: drawer
   links:
@@ -45,7 +44,6 @@ scene_binding:
       release_clearance: 0.015
   rigid_objects:
   - entity_id: cube
-    simulation_uid: cube
     dynamics: dynamic
     affordances:
     - entity_id: cube_grasp

@@ -240,9 +240,13 @@ def _integration_payload(task_name: str) -> dict[str, object]:
     )
 
 
-def _deployment_from_path(path: Path) -> ConfiguredTaskProgramDeployment:
+def _deployment_from_path(
+    path: Path, *, execution_policy: str | None = None
+) -> ConfiguredTaskProgramDeployment:
     """Return one fully composed production deployment."""
     config = load_config(path)
+    if execution_policy is not None:
+        config["task_program"]["execution_policy"] = execution_policy
     physical = _physical_components(path, config)
     assert physical.embodiment_skill_profile is not None
     return load_configured_task_program_deployment(
@@ -318,6 +322,9 @@ def test_public_composition_owns_declarations_and_defers_live_state(
     gym_before = dict(gym_registry)
     path = _config_path("hand_over")
     config = _gym_config("hand_over")
+    config["task_program"][
+        "execution_policy"
+    ] = "../../../components/execution_policies/motion_gen_verified.yaml"
     input_snapshot = deepcopy(config)
     physical = _physical_components(path, config)
     other = _physical_components(path, config)
@@ -411,7 +418,8 @@ def test_all_examples_decode_through_one_composable_integration_schema(
 def test_execution_policy_planner_config_reaches_configured_adapter() -> None:
     """The policy-owned planner selection stays outside semantic payloads."""
     deployment = _deployment_from_path(
-        _CONFIG_DIRECTORY / "hand_over" / "task.dual_ur5_dh_pgi_140_80.yaml"
+        _CONFIG_DIRECTORY / "hand_over" / "task.dual_ur5_dh_pgi_140_80.yaml",
+        execution_policy="../../../components/execution_policies/motion_gen_verified.yaml",
     )
 
     assert deployment.planner_config == {"type": "toppra", "config": {}}
@@ -435,6 +443,9 @@ def test_execution_policy_overrides_reach_runtime_without_changing_the_base(
     """A relative selector patches tuning while retaining the policy contract."""
     path = _config_path("hand_over")
     config = _gym_config("hand_over")
+    config["task_program"][
+        "execution_policy"
+    ] = "../../../components/execution_policies/motion_gen_verified.yaml"
     physical = _physical_components(path, config)
     program, task, base_policy = _resolve_task_program_components(
         config["task_program"], base_dir=path.parent
@@ -579,7 +590,8 @@ def test_single_task_program_composes_with_ur5_and_franka(
             "newton": "envs/newton.yaml",
         }
     )
-    assert ur5_config["task_program"] == franka_config["task_program"]
+    for field in ("program", "integration"):
+        assert ur5_config["task_program"][field] == franka_config["task_program"][field]
     assert ur5.program_path == franka.program_path
     assert ur5.program_id == franka.program_id == ur5_program.program_id
     assert franka_program.program_id == ur5_program.program_id
@@ -827,8 +839,8 @@ def test_pour_water_mouth_alignment_and_measured_checkpoints() -> None:
     assert positioning.steps.call.call_id == "simulation.move_held_object"
     assert pouring.steps.call.call_id == "simulation.pour"
     placement = returning.steps.call
-    release_position = program.targets[placement.at.target].values[0].position
-    rest_position = program.targets["bottle_return_pose"].values[0].position
+    release_position = program.targets[placement.at.target].position
+    rest_position = program.targets["bottle_return_pose"].position
     assert release_position[:2] == rest_position[:2]
     assert 0.006 <= release_position[2] - rest_position[2] <= 0.01
     cup_check = next(check for check in returning.validators if check.object == "cup")
@@ -2014,7 +2026,9 @@ def test_embodiment_grasp_defaults_reach_composed_deployments(
 
     assert generator.gripper_data["model_id"] == model_id
     assert generator.algorithm_cfg == AntipodalGraspPoseGeneratorCfg()
-    assert generator.collision_cfg == ParallelJawGraspCollisionCfg()
+    assert generator.collision_cfg == ParallelJawGraspCollisionCfg(
+        filter_ground_collision=not relative_path.startswith("open_drawer/")
+    )
     assert generator.collision_geometry.provenance["model_id"] == model_id
     assert generator.annotation_cfg == GraspAnnotationCfg()
     assert factory() is not generator
@@ -4646,7 +4660,26 @@ def test_invalid_evaluation_deployment_fails_before_registration(
 def test_legacy_task_program_identities_keep_pre_evaluation_values():
     from embodichain.lab.task_program.integrations import task_program_fingerprint
 
-    deployment = _deployment_from_path(_config_path("hand_over"))
+    path = _config_path("hand_over")
+    config = _gym_config("hand_over")
+    config["task_program"][
+        "execution_policy"
+    ] = "../../../components/execution_policies/motion_gen_verified.yaml"
+    physical = _physical_components(path, config)
+    _, declaration, _ = _resolve_task_program_components(
+        config["task_program"], base_dir=path.parent
+    )
+    # Pin the published pre-repair options to protect disabled-extension identity.
+    options = declaration["profile"]["skill_options"]["hand_over"]
+    options["hand_interp_steps"] = 10
+    options["hold_steps"] = 4
+    options["grasp_retract_distance"] = 0.0
+    config["task_program"]["integration"] = {"inline": declaration}
+    deployment = _load_configured_task_program_deployment(
+        task_program=config["task_program"],
+        skill_profile=physical.embodiment_skill_profile,
+        base_dir=path.parent,
+    )
     integration = deployment.integration
     registration = integration.registration
     assert "evaluation" not in registration.fingerprint_payload()
@@ -4774,3 +4807,136 @@ def test_final_acceptance_rejects_invalid_refs_before_registration(
     with pytest.raises(ValueError, match=message):
         config_to_cfg(config, source_path=path)
     assert config["id"] not in REGISTERED_ENVS
+
+
+def test_integration_tuning_is_owned_and_closed() -> None:
+    from embodichain.lab.task_program.integrations._configured_composition import (
+        _apply_integration_overrides,
+    )
+
+    source = {
+        "requires": {"embodiment_contract": "single"},
+        "profile": {
+            "defaults": {"pick_up": {"primary": "left"}},
+            "skill_options": {"pick": {"kind": "pick_up", "lift_height": 0.15}},
+        },
+    }
+    original = deepcopy(source)
+    result = _apply_integration_overrides(
+        source,
+        {
+            "profile": {
+                "defaults": {"pick_up": {"primary": "right"}},
+                "skill_options": {"pick": {"lift_height": 0.08}},
+            }
+        },
+    )
+    assert result["profile"]["skill_options"]["pick"] == {
+        "kind": "pick_up",
+        "lift_height": 0.08,
+    }
+    assert source == original
+    assert result["profile"]["defaults"] == {"pick_up": {"primary": "right"}}
+    for patch in (
+        {"scene_binding": {}},
+        {"requires": {"scene_contract": "other"}},
+        {"profile": {"skill_options": {"unknown": {}}}},
+        {"profile": {"skill_options": {"pick": {"kind": "place"}}}},
+        {"profile": {"defaults": {"unknown": {"primary": "right"}}}},
+        {"profile": {"defaults": {"pick_up": {"unknown": "right"}}}},
+    ):
+        with pytest.raises((ValueError, TypeError)):
+            _apply_integration_overrides(source, patch)
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_integration_selector_matches_explicit_configuration(
+    tmp_path: Path, legacy: bool
+) -> None:
+    """Selector tuning reaches the same registration as an explicit integration."""
+    path = _config_path("repeated_pick_place")
+    config = _gym_config("repeated_pick_place")
+    physical = _physical_components(path, config)
+    _, original, _ = _resolve_task_program_components(
+        config["task_program"], base_dir=path.parent
+    )
+    from embodichain.utils.utility import save_config
+
+    component = deepcopy(original)
+    if legacy:
+        component["profile"]["action_options"] = component["profile"].pop(
+            "skill_options"
+        )
+    save_config(tmp_path / "integration.yaml", component)
+    selection = deepcopy(config["task_program"])
+    selection["integration"] = {
+        "component": str(tmp_path / "integration.yaml"),
+        "overrides": {"profile": {"skill_options": {"pick": {"lift_height": 0.08}}}},
+    }
+    tuned = _load_configured_task_program_deployment(
+        task_program=selection,
+        skill_profile=physical.embodiment_skill_profile,
+        base_dir=path.parent,
+    )
+    explicit = deepcopy(original)
+    explicit["profile"]["skill_options"]["pick"]["lift_height"] = 0.08
+    selection["integration"] = {"inline": explicit}
+    expected = _load_configured_task_program_deployment(
+        task_program=selection,
+        skill_profile=physical.embodiment_skill_profile,
+        base_dir=path.parent,
+    )
+    assert (
+        tuned.integration.registration.fingerprint_payload()
+        == expected.integration.registration.fingerprint_payload()
+    )
+    assert load_config(tmp_path / "integration.yaml") == component
+    selection["integration"] = {
+        "component": str(tmp_path / "integration.yaml"),
+        "overrides": {"profile": {"skill_options": {"pick": {"lift_height": -1.0}}}},
+    }
+    with pytest.raises((ValueError, TypeError)):
+        _load_configured_task_program_deployment(
+            task_program=selection,
+            skill_profile=physical.embodiment_skill_profile,
+            base_dir=path.parent,
+        )
+    selection["integration"]["overrides"] = {
+        "profile": {"defaults": {"pick_up": {"primary": "undeclared_resource"}}}
+    }
+    with pytest.raises((ValueError, TypeError)):
+        invalid = _load_configured_task_program_deployment(
+            task_program=selection,
+            skill_profile=physical.embodiment_skill_profile,
+            base_dir=path.parent,
+        )
+        invalid.integration.registration.catalog.preflight(invalid.load_program())
+
+
+def test_contact_path_options_decode_and_keep_inactive_identity() -> None:
+    from embodichain.lab.task_program.integrations.catalog import _canonical_value
+    from embodichain.lab.sim.atomic_skills import HandOverOptions
+
+    pick = _decode_skill_options(
+        {"kind": "pick_up", "cartesian_lift": True}, path="options"
+    )
+    handover = _decode_skill_options(
+        {"kind": "hand_over", "grasp_retract_distance": 0.01}, path="options"
+    )
+    assert pick.cartesian_lift is True
+    assert handover.grasp_retract_distance == 0.01
+    assert "cartesian_lift" not in _canonical_value(PickUpOptions())["fields"]
+    from embodichain.lab.sim.atomic_skills import PlaceOptions
+
+    assert "cartesian_approach" not in _canonical_value(PlaceOptions())["fields"]
+    assert _decode_skill_options(
+        {"kind": "place", "cartesian_approach": True}, path="options"
+    ).cartesian_approach
+    assert "grasp_retract_distance" not in _canonical_value(HandOverOptions())["fields"]
+    assert _canonical_value(pick)["fields"]["cartesian_lift"] is True
+    for declaration in (
+        {"kind": "pick_up", "cartesian_lift": 1},
+        {"kind": "hand_over", "grasp_retract_distance": -0.01},
+    ):
+        with pytest.raises((ValueError, TypeError)):
+            _decode_skill_options(declaration, path="options")

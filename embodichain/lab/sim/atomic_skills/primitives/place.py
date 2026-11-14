@@ -27,6 +27,7 @@ from embodichain.utils.math import quat_error_magnitude, quat_from_matrix
 
 from embodichain.lab.sim.atomic_skills.primitives._helpers import (
     arm_qpos_from_state,
+    plan_named_arm_trajectory,
     require_shared_task_state_key,
     resolve_object_target,
     split_joint_trajectory_at_pose,
@@ -146,10 +147,15 @@ class PlaceOptions(SkillOptions):
     cartesian_waypoint_count: int = 1
     """Number of fixed-orientation Cartesian keyframes per translation segment."""
 
+    cartesian_approach: bool = False
+    """Follow the approach with sampled Cartesian poses under joint motion limits."""
+
     preserve_current_object_orientation: bool = False
     """Keep the held object's observed world orientation at the place target."""
 
     def __post_init__(self) -> None:
+        if type(self.cartesian_approach) is not bool:
+            raise TypeError("cartesian_approach must be boolean.")
         if self.hand_interp_steps < 1:
             raise ValueError("hand_interp_steps must be at least 1.")
         if type(self.release_settle_steps) is not int or self.release_settle_steps < 0:
@@ -291,7 +297,8 @@ class Place(AtomicSkill[PlaceGoal | AssembleGoal, PlaceOptions]):
             ),
         )
         down_xpos = torch.cat([approach_xpos.unsqueeze(1), place_xpos], dim=1)
-        down_xpos = self._translation_keyframes(start_xpos, down_xpos, options)
+        if not options.cartesian_approach:
+            down_xpos = self._translation_keyframes(start_xpos, down_xpos, options)
 
         back_xpos = self._translation_keyframes(
             place_xpos[:, -1], retract_xpos.unsqueeze(1), options
@@ -307,30 +314,64 @@ class Place(AtomicSkill[PlaceGoal | AssembleGoal, PlaceOptions]):
             # motion generator resolves backend defaults when no explicit
             # planner options were supplied.
             motion_options.sample_count = None
-        motion_result = self.motion_generator.generate(
-            build_pose_plan_states(torch.cat([down_xpos, back_xpos], dim=1)),
-            options=motion_options,
-        )
-        assert isinstance(motion_result.success, torch.Tensor)
-        assert motion_result.positions is not None
-        assert motion_result.dt is not None
-        down_arm, back_arm = split_joint_trajectory_at_pose(
-            motion_result.positions,
-            place_xpos[:, -1],
-            robot=self.robot,
-            control_part=control_part,
-            first_sample_count=n_down,
-            second_sample_count=n_back,
-            dt=motion_result.dt,
-            control_dt=context.control_dt,
-            arrival_indices=motion_result.waypoint_indices,
-            split_target_index=down_xpos.shape[1] - 1,
-            env_ids=self.planning_services.env_ids,
-        )
+        if options.cartesian_approach:
+            if request.motion_policy.strategy != "ik_interp":
+                raise ValueError("cartesian_approach requires strategy='ik_interp'.")
+            from embodichain.lab.sim.motion.ik import sample_cartesian_targets
+
+            sampled = sample_cartesian_targets(
+                start_xpos, build_pose_plan_states(down_xpos), n_down
+            )
+            down_success, down_arm = plan_named_arm_trajectory(
+                self.motion_generator,
+                control_part,
+                start_arm_qpos,
+                torch.stack([state.xpos for state in sampled], dim=1),
+                n_down,
+                request.motion_policy,
+                context.control_dt,
+                cartesian_linear=True,
+            )
+            if bool(down_success.any()):
+                back_success, back_arm = plan_named_arm_trajectory(
+                    self.motion_generator,
+                    control_part,
+                    down_arm[:, -1],
+                    back_xpos,
+                    n_back,
+                    request.motion_policy,
+                    context.control_dt,
+                )
+            else:
+                back_success = down_success.clone()
+                back_arm = down_arm[:, -1:].expand(-1, n_back, -1).clone()
+            motion_success = down_success & back_success
+        else:
+            motion_result = self.motion_generator.generate(
+                build_pose_plan_states(torch.cat([down_xpos, back_xpos], dim=1)),
+                options=motion_options,
+            )
+            assert isinstance(motion_result.success, torch.Tensor)
+            assert motion_result.positions is not None
+            assert motion_result.dt is not None
+            down_arm, back_arm = split_joint_trajectory_at_pose(
+                motion_result.positions,
+                place_xpos[:, -1],
+                robot=self.robot,
+                control_part=control_part,
+                first_sample_count=n_down,
+                second_sample_count=n_back,
+                dt=motion_result.dt,
+                control_dt=context.control_dt,
+                arrival_indices=motion_result.waypoint_indices,
+                split_target_index=down_xpos.shape[1] - 1,
+                env_ids=self.planning_services.env_ids,
+            )
+            motion_success = motion_result.success
         n_down = down_arm.shape[1]
         n_back = back_arm.shape[1]
         reach_arm_qpos = down_arm[:, -1, :]
-        success = motion_result.success & eligible
+        success = motion_success & eligible
 
         # A contact-blocked measured finger position does not retain the
         # closing effort of its grasp target. Continue that target for held

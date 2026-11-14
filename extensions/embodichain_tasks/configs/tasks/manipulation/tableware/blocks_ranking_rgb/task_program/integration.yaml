@@ -8,14 +8,12 @@ scene_binding:
   registry_id: task_program_blocks_ranking_rgb
   rigid_objects:
   - entity_id: block_1
-    simulation_uid: block_1
     dynamics: dynamic
     semantic_type: block
     affordances:
     - entity_id: block_1_grasp
       kind: antipodal_grasp
   - entity_id: block_2
-    simulation_uid: block_2
     dynamics: dynamic
     semantic_type: block
     affordances:
@@ -62,7 +60,6 @@ scene_binding:
       - 0.0
       - 1.0
   - entity_id: block_3
-    simulation_uid: block_3
     dynamics: dynamic
     semantic_type: block
     affordances:

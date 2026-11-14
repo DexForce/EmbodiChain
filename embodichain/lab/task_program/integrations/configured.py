@@ -1023,6 +1023,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                 "retreat_distance",
                 "retreat_steps",
                 "receive_pick_object_part",
+                "grasp_retract_distance",
                 "object_motion_keyframes",
                 "grasp_settle_steps",
                 "release_settle_steps",
@@ -1042,6 +1043,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                 "fixed_object_to_eef",
                 "max_approach_retract_z",
                 "cartesian_waypoint_count",
+                "cartesian_approach",
                 "preserve_current_object_orientation",
                 "direction",
                 "approach_distance",
@@ -1051,6 +1053,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                 "translation_distance",
                 "preshape_fraction",
                 "approach_along_grasp_axis",
+                "cartesian_lift",
                 "release_retreat_distance",
                 "push_approach_offset",
                 "rotate_angle",
@@ -1094,7 +1097,11 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                     "grasp_frame_to_eef",
                     "fixed_object_to_eef",
                     *(
-                        ("approach_along_grasp_axis", "initial_lift_height")
+                        (
+                            "approach_along_grasp_axis",
+                            "initial_lift_height",
+                            "cartesian_lift",
+                        )
                         if kind == "pick_up"
                         else ()
                     ),
@@ -1103,6 +1110,10 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
             ),
         )
         kwargs: dict[str, object] = {}
+        if "cartesian_lift" in config:
+            kwargs["cartesian_lift"] = _boolean(
+                config["cartesian_lift"], path=f"{path}.cartesian_lift"
+            )
         if "approach_along_grasp_axis" in config:
             kwargs["approach_along_grasp_axis"] = _boolean(
                 config["approach_along_grasp_axis"],
@@ -1221,11 +1232,16 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                     "lift_height",
                     "max_approach_retract_z",
                     "cartesian_waypoint_count",
+                    "cartesian_approach",
                     "preserve_current_object_orientation",
                 }
             ),
         )
         kwargs = {}
+        if "cartesian_approach" in config:
+            kwargs["cartesian_approach"] = _boolean(
+                config["cartesian_approach"], path=f"{path}.cartesian_approach"
+            )
         if "hand_interp_steps" in config:
             kwargs["hand_interp_steps"] = _integer(
                 config["hand_interp_steps"],
@@ -1630,6 +1646,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
             optional=frozenset(
                 {
                     "pre_grasp_distance",
+                    "grasp_retract_distance",
                     "lift_height",
                     "hand_interp_steps",
                     "hold_steps",
@@ -1643,6 +1660,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
         )
         kwargs = {}
         for field_name in (
+            "grasp_retract_distance",
             "pre_grasp_distance",
             "lift_height",
             "retreat_distance",

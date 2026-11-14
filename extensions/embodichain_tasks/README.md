@@ -314,3 +314,24 @@ source refinement, protected trajectory/time variants and measured LeRobot
 collection through the standard `run-task` owner. Its catalog exposes one
 Panda deployment; the standard task requires no example-generated configuration.
 See the task README for assets, accepted geometry and the 78-candidate benchmark.
+
+### Task integration tuning
+
+An integration selector can use `{component, overrides}` as well as a path.
+The `blocks_ranking_rgb` deployments share `task_program/integration.yaml` and
+retain robot-specific tuning in their deployment selectors. Overrides accept
+`integration_id`, `requires.embodiment_contract`, and existing
+`profile.skill_options` entries. The allowed option fields are
+`pre_grasp_distance`, `lift_height`, `hand_interp_steps`, `grasp_settle_steps`,
+`fixed_object_to_eef`, `preserve_current_object_orientation`,
+`release_settle_steps`, `approach_along_grasp_axis`, `cartesian_lift`,
+and `cartesian_approach`.
+Motion overrides also accept the existing `ik_seed_mode` enum; incompatible
+strategy/seed selections still fail the normal motion decoder.
+Existing `profile.defaults` call/slot bindings may select a different declared
+resource; new defaults and slots are rejected.
+Arrays replace whole values. Scene bindings, scene contracts, runtime services,
+and skill kinds cannot be overridden. New resource defaults and slots cannot be
+introduced. Resolved values still pass ordinary decoding and embodiment/policy
+contract checks after composition. Paths owned by
+the integration remain relative to its component file.

@@ -10,7 +10,6 @@ scene_binding:
   registry_id: task_program_rubiks_cube_pick_place
   rigidized_articulations:
     - entity_id: rubiks_cube
-      simulation_uid: rubiks_cube
       locked_qpos:
         top_turn: 0.0
       dynamics: dynamic

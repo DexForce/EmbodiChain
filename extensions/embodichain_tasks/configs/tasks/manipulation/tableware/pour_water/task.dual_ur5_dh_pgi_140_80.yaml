@@ -3,7 +3,30 @@ environment:
   component: env.tianji_marvin.yaml
 task_program:
   program: task_program/program.tianji_marvin.yaml
-  integration: task_program/integration.dual_ur5.yaml
+  integration:
+    component: task_program/integration.dual_arm.yaml
+    overrides:
+      integration_id: pour_water_dual_ur5_v1
+      profile:
+        skill_options:
+          pick:
+            fixed_object_to_eef:
+            - 0.0
+            - 0.0
+            - 1.0
+            - 0.01
+            - 1.0
+            - 0.0
+            - 0.0
+            - 0.0
+            - 0.0
+            - 1.0
+            - 0.0
+            - -0.02
+            - 0.0
+            - 0.0
+            - 0.0
+            - 1.0
   execution_policy:
     component: ../../../../components/execution_policies/trajectory_open_loop_dual_arm_manipulation.yaml
     overrides:

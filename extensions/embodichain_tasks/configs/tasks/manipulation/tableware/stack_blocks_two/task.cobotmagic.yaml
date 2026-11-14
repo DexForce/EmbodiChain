@@ -5,11 +5,44 @@ evaluation:
   component: task_program/evaluation.yaml
 task_program:
   program: task_program/program.yaml
-  integration: task_program/integration.yaml
+  integration:
+    component: task_program/integration.yaml
+    overrides:
+      profile:
+        skill_options:
+          pick:
+            lift_height: 0.08
+            fixed_object_to_eef:
+            - 0.293976277
+            - 0.295520157
+            - 0.908980608
+            - 0.02
+            - 0.09093748
+            - -0.955336511
+            - 0.28118059
+            - 0.0
+            - 0.951476812
+            - 0.0
+            - -0.307720125
+            - 0.0
+            - 0.0
+            - 0.0
+            - 0.0
+            - 1.0
+            cartesian_lift: true
   execution_policy:
     component: ../../../../components/execution_policies/trajectory_open_loop.yaml
     overrides:
       motion:
-        sample_count: 90
+        sample_count: 220
+        ik_seed_mode: sequential
+        velocity_limit: 0.2
+      recovery:
+        skill_timeout: 120.0
 embodiment:
   component: ../../../../components/embodiments/cobotmagic.yaml
+  overrides:
+    init_pos:
+    - 0.0
+    - 0.3
+    - 0.9

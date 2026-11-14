@@ -3,7 +3,33 @@ environment:
   component: env.dexforce_w1_030_pika.yaml
 task_program:
   program: task_program/program.workbench.yaml
-  integration: task_program/integration.dexforce_w1_030_pika.yaml
+  integration:
+    component: task_program/integration.tabletop.yaml
+    overrides:
+      integration_id: repeated_pick_place_dexforce_w1_030_pika_v1
+      profile:
+        skill_options:
+          pick:
+            fixed_object_to_eef:
+            - 0
+            - -1
+            - 0
+            - 0
+            - -1
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - -1
+            - 0.02
+            - 0
+            - 0
+            - 0
+            - 1
+            lift_height: 0.08
+          place:
+            lift_height: 0.08
   execution_policy: ../../../components/execution_policies/sequential_ik_verified.yaml
 embodiment:
   component: ../../../components/embodiments/dexforce_w1_030_pika.yaml

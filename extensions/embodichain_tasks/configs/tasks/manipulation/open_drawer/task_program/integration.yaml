@@ -10,7 +10,6 @@ scene_binding:
   registry_id: task_program_open_drawer
   articulations:
     - entity_id: drawer
-      simulation_uid: drawer
       dynamics: dynamic
       semantic_type: drawer
   links:
@@ -34,6 +33,10 @@ profile:
   effect_monitors: {}
 
 runtime_services:
+  # A suspended cabinet handle has no supporting tabletop beneath its grasp.
+  grasp_pose_generator_overrides:
+    eef:
+      filter_ground_collision: false
   registered_semantic_lowerers:
     - kind: articulation_link_slide
       articulation_id: drawer

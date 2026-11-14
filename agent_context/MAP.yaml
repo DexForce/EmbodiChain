@@ -578,6 +578,7 @@ topics:
   - embodichain/data/assets/materials.py
   - embodichain/data/assets/demo_assets.py
   - scripts/tools/prepare_yam_i2rt_assets.py
+  - scripts/tools/prepare_cloth_fold_assets.py
   - embodichain/data/default_materials.py
   - embodichain/data/default_materials.json
   - embodichain/_material_catalog.py

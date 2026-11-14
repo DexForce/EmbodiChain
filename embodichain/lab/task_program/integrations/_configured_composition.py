@@ -80,6 +80,7 @@ _EXECUTION_POLICY_OVERRIDE_FIELDS = {
             "velocity_limit",
             "acceleration_limit",
             "dynamic_collision_mode",
+            "ik_seed_mode",
         }
     ),
     "recovery": frozenset({"skill_timeout", "goal_rotation_threshold"}),
@@ -389,6 +390,95 @@ def _resolve_execution_policy(
     return policy_path, policy
 
 
+def _apply_integration_overrides(
+    source: object, overrides: object
+) -> dict[str, object]:
+    """Apply closed deployment tuning to an owned integration declaration."""
+    result = _owned_mapping(source, path="task integration")
+    patch = _mapping(
+        overrides,
+        path="integration.overrides",
+        required=frozenset(),
+        optional=frozenset({"integration_id", "requires", "profile"}),
+    )
+    if "integration_id" in patch:
+        result["integration_id"] = _identifier(
+            patch["integration_id"], path="integration.overrides.integration_id"
+        )
+    if "requires" in patch:
+        requirements = _mapping(
+            patch["requires"],
+            path="integration.overrides.requires",
+            required=frozenset(),
+            optional=frozenset({"embodiment_contract"}),
+        )
+        result["requires"].update(deepcopy(dict(requirements)))
+    if "profile" in patch:
+        result["profile"] = _owned_mapping(
+            _normalize_skill_options_key(
+                result["profile"], path="task integration.profile"
+            ),
+            path="task integration.profile",
+        )
+        profile = _mapping(
+            patch["profile"],
+            path="integration.overrides.profile",
+            required=frozenset(),
+            optional=frozenset({"defaults", "skill_options"}),
+        )
+        defaults = _owned_mapping(
+            profile.get("defaults", {}), path="integration.overrides.profile.defaults"
+        )
+        for name, value in defaults.items():
+            existing = result["profile"]["defaults"]
+            if name not in existing:
+                raise ValueError(
+                    f"Integration override names undeclared resource default {name!r}."
+                )
+            resources = _mapping(
+                value,
+                path=f"integration.overrides.profile.defaults.{name}",
+                required=frozenset(),
+                optional=frozenset(existing[name]),
+            )
+            for slot, resource in resources.items():
+                existing[name][slot] = _identifier(
+                    resource,
+                    path=f"integration.overrides.profile.defaults.{name}.{slot}",
+                )
+        options = _owned_mapping(
+            profile.get("skill_options", {}),
+            path="integration.overrides.profile.skill_options",
+        )
+        allowed = frozenset(
+            {
+                "pre_grasp_distance",
+                "lift_height",
+                "hand_interp_steps",
+                "grasp_settle_steps",
+                "release_settle_steps",
+                "approach_along_grasp_axis",
+                "cartesian_lift",
+                "cartesian_approach",
+                "fixed_object_to_eef",
+                "preserve_current_object_orientation",
+            }
+        )
+        for name, value in options.items():
+            if name not in result["profile"]["skill_options"]:
+                raise ValueError(
+                    f"Integration override names undeclared skill {name!r}."
+                )
+            fields = _mapping(
+                value,
+                path=f"integration.overrides.profile.skill_options.{name}",
+                required=frozenset(),
+                optional=allowed,
+            )
+            result["profile"]["skill_options"][name].update(deepcopy(dict(fields)))
+    return result
+
+
 def _resolve_task_program_components(
     value: object,
     *,
@@ -416,14 +506,30 @@ def _resolve_task_program_components(
             suffixes=frozenset({".json", ".yaml", ".yml"}),
         )
     )
-    if isinstance(declaration["integration"], Mapping):
+    integration_selector = declaration["integration"]
+    overrides = None
+    if (
+        isinstance(integration_selector, Mapping)
+        and "component" in integration_selector
+    ):
+        selector = _mapping(
+            integration_selector,
+            path="task_program.integration",
+            required=frozenset({"component"}),
+            optional=frozenset({"overrides"}),
+        )
+        integration_selector = selector["component"]
+        overrides = _owned_mapping(
+            selector.get("overrides", {}), path="integration.overrides"
+        )
+    if isinstance(integration_selector, Mapping):
         integration_path = None
         integration_source = _inline_component(
-            declaration["integration"], path="task_program.integration"
+            integration_selector, path="task_program.integration"
         )
     else:
         integration_path = _component_path(
-            declaration["integration"],
+            integration_selector,
             base_dir=base_dir,
             path="task_program.integration",
             suffixes=frozenset({".yaml", ".yml"}),
@@ -431,6 +537,8 @@ def _resolve_task_program_components(
         integration_source = _load_yaml_component(
             integration_path, field_name="task integration"
         )
+    if overrides is not None:
+        integration_source = _apply_integration_overrides(integration_source, overrides)
     integration_base = base_dir if integration_path is None else integration_path.parent
     integration = _mapping(
         integration_source,

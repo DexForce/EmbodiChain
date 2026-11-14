@@ -8,14 +8,12 @@ scene_binding:
   registry_id: carton_worktop
   rigid_objects:
   - entity_id: carton
-    simulation_uid: carton
     dynamics: dynamic
     semantic_type: carton
     affordances:
     - entity_id: carton_grasp
       kind: antipodal_grasp
   - entity_id: worktop
-    simulation_uid: worktop
     dynamics: static
     semantic_type: worktop
     affordances:

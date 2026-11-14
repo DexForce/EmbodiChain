@@ -106,6 +106,9 @@ class HandOverOptions(SkillOptions):
     pre_grasp_distance: float = 0.10
     """Distance from each grasp pose to its approach pose, in metres."""
 
+    grasp_retract_distance: float = 0.0
+    """Back off sampled grasp TCPs along their approach axis, in metres."""
+
     lift_height: float = 0.10
     """World-Z distance used to lift the object after the first grasp."""
 
@@ -141,7 +144,12 @@ class HandOverOptions(SkillOptions):
     """
 
     def __post_init__(self) -> None:
-        for name in ("pre_grasp_distance", "lift_height", "retreat_distance"):
+        for name in (
+            "pre_grasp_distance",
+            "lift_height",
+            "retreat_distance",
+            "grasp_retract_distance",
+        ):
             value = getattr(self, name)
             if not math.isfinite(value) or value < 0.0:
                 raise ValueError(f"{name} must be finite and non-negative.")
@@ -827,6 +835,11 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
             sample_key=(request.invocation_id or self.skill_id) + ":receive_grasp",
         )
         destination_grasp = destination_sample.poses
+        if options.grasp_retract_distance:
+            destination_grasp = translate_pose_world(
+                destination_grasp,
+                -destination_grasp[:, :3, 2] * options.grasp_retract_distance,
+            )
         grasp_success = destination_sample.success
         destination_pre_grasp = translate_pose_world(
             destination_grasp,
@@ -1310,6 +1323,11 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
         handover_grasp_success = handover_sample.success
         handover_grasp = handover_sample.poses
         handover_grasp = find_symmetric_nearest_xpos(handover_grasp, handover_start_eef)
+        if options.grasp_retract_distance:
+            handover_grasp = translate_pose_world(
+                handover_grasp,
+                -handover_grasp[:, :3, 2] * options.grasp_retract_distance,
+            )
         handover_pre_grasp = translate_pose_world(
             handover_grasp,
             -handover_grasp[:, :3, 2] * options.pre_grasp_distance,
@@ -1363,6 +1381,10 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
         receive_grasp_success = receive_sample.success
         receive_grasp = receive_sample.poses
         receive_grasp = find_symmetric_nearest_xpos(receive_grasp, receive_start_eef)
+        if options.grasp_retract_distance:
+            receive_grasp = translate_pose_world(
+                receive_grasp, -receive_grasp[:, :3, 2] * options.grasp_retract_distance
+            )
 
         receive_pre_grasp = translate_pose_world(
             receive_grasp,
