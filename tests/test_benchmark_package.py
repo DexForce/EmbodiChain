@@ -54,6 +54,7 @@ def installed_benchmark(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path,
         "extensions/embodichain_tasks",
         "extensions/embodichain_benchmarks",
         "extensions/embodichain_models",
+        "extensions/embodichain_sensors",
     ):
         shutil.copytree(root / name, source / name, ignore=ignore)
     built = subprocess.run(
@@ -239,3 +240,30 @@ print("installed benchmark suites and CLI passed")
     )
     assert cli.returncode == 0, cli.stdout + cli.stderr
     assert "--suite" in cli.stdout
+
+
+def test_bundled_vlp16_entry_point_accepts_yaml(
+    installed_benchmark: tuple[Path, Path],
+) -> None:
+    """Decode the nominal firing order from a real, non-editable installation."""
+    target, source = installed_benchmark
+    python = target / "bin/python"
+    run_dir = target.parent
+    completed = subprocess.run(
+        [
+            str(python),
+            "-I",
+            "-c",
+            "import yaml; from embodichain.lab.sim.sensors import SensorCfg; "
+            "from embodichain_sensors import VLP16Cfg; "
+            "cfg=SensorCfg.from_dict(yaml.safe_load('sensor_type: VLP16')); "
+            "assert isinstance(cfg,VLP16Cfg); assert cfg.horizontal_samples == 1800; "
+            "assert tuple(cfg.vertical_angles[::2]) == tuple(range(-15,0,2)); "
+            "assert tuple(cfg.vertical_angles[1::2]) == tuple(range(1,16,2))",
+        ],
+        cwd=run_dir,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr

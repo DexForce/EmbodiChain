@@ -11,6 +11,7 @@
 | Joint encoder and relative frame transforms | `embodichain/lab/sim/sensors/state.py` |
 | Finite-difference PVA and IMU | `embodichain/lab/sim/sensors/inertial.py` |
 | Collision/visual ray provider, terrain scan, geometric LiDAR and ray depth | `embodichain/lab/sim/sensors/ray.py` |
+| Official VLP-16 preset | `extensions/embodichain_sensors/vlp16.py` and the `embodichain.sensors` entry point |
 | Image configuration, data flags, extrinsics | `embodichain/lab/sim/sensors/camera.py` → `CameraCfg`, `Camera` |
 | Two-eye transforms and attachment | `embodichain/lab/sim/sensors/stereo.py` → `StereoCameraCfg`, `StereoCamera` |
 | Parent-name resolution | `embodichain/lab/sim/sensors/attachment.py` → `resolve_parent_nodes` |
@@ -194,7 +195,8 @@ for authored procedural or array-backed render geometry of rigid and visual
 objects. Visual queries use authored surfaces with no renderer or shading
 dependency. Meshes and static poses are cached per scene topology revision.
 Use kinematic targets for movable geometry. Target mesh topology, vertex data
-and scale must be shared across replicas. Replace an asset to change cached
+and scale must be shared across replicas. VLP16 adds the nominal firing-order
+elevation table through the bundled entry point. Replace an asset to change cached
 geometry. Each dynamic instance supplies its current arena-frame pose.
 
 | Changed boundary | Existing coverage |

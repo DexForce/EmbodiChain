@@ -99,6 +99,9 @@ embodichain_tasks = "embodichain_tasks"
 [project.entry-points."embodichain.robots"]
 official = "embodichain_robots._catalog:ROBOT_CONFIGS"
 
+[project.entry-points."embodichain.sensors"]
+VLP16 = "embodichain_sensors.vlp16:VLP16_REGISTRATION"
+
 [project.entry-points."embodichain.assets"]
 official_robots = "embodichain_robots._asset_catalog:ROBOT_ASSETS"
 

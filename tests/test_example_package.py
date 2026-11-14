@@ -65,6 +65,7 @@ def test_distribution_preserves_the_ordinary_examples_tree(tmp_path: Path) -> No
             "embodichain_robots",
             "embodichain_benchmarks",
             "embodichain_models",
+            "embodichain_sensors",
         }
         for name in get_packages()
     )
