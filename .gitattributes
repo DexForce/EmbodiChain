@@ -1,2 +1,0 @@
-# Empty unified-diff context lines intentionally retain their space prefix.
-scripts/patches/*.patch whitespace=-blank-at-eol,-blank-at-eof
