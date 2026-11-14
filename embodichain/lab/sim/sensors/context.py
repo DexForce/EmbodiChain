@@ -87,6 +87,10 @@ class SensorStateProvider(Protocol):
         """
         ...
 
+    def get_gravity(self) -> torch.Tensor:
+        """Return arena-frame gravitational acceleration in m/s²."""
+        ...
+
 
 @dataclass(frozen=True)
 class SensorContext:
@@ -191,3 +195,11 @@ class _ManagerSensorServices:
             batch_size=[manager.num_envs],
             device=manager.device,
         )
+
+    def get_gravity(self) -> torch.Tensor:
+        manager = self._manager()
+        return torch.as_tensor(
+            manager.sim_config.physics_cfg.gravity,
+            dtype=torch.float32,
+            device=manager.device,
+        ).clone()
