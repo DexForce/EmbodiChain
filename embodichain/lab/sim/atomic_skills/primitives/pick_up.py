@@ -404,6 +404,7 @@ class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
             # planner options were supplied.
             motion_options.sample_count = None
         waypoints = [pre_grasp_xpos, grasp_xpos, lift_xpos]
+        phase_names = ["pre_grasp", "grasp", "lift"]
         if options.initial_lift_height > 0.0:
             start_xpos = self.robot.compute_fk(
                 qpos=start_arm_qpos,
@@ -420,6 +421,12 @@ class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
                 start_xpos.new_tensor([0.0, 0.0, options.initial_lift_height]),
             )
             waypoints.insert(0, initial_lift)
+            phase_names.insert(0, "initial_lift")
+
+        if any(name in motion_policy.phase_paths for name in phase_names):
+            motion_options.waypoint_modes = tuple(
+                motion_policy.phase_paths.get(name, "joint") for name in phase_names
+            )
 
         motion_result = self.motion_generator.generate(
             build_pose_plan_states(torch.stack(waypoints, dim=1)),

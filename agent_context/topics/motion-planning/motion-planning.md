@@ -53,6 +53,13 @@ positions `(B, N, dof)`. Use `PlanState.single()` for one environment.
 duration is their sum. Failed results may omit positions. Planning timing never
 changes simulator `physics_dt`.
 
+`MotionGenOptions.waypoint_modes` explicitly selects joint/Cartesian paths to
+individual keyframes under fixed-grid sequential IK. Adjacent equal modes share
+ordinary native requests; composition retains the total control grid and row
+failure masks. No robot UID or waypoint count enables the behavior. Atomic
+`MotionPolicy.phase_paths` names the PickUp/Place phases that opt into this path;
+ordinary calls and other primitives retain their own planning semantics.
+
 `motion_gen` delegates timing to its backend. `ik_interp` needs explicit
 start/count/dt, rejects backend-specific options and uses minimum-jerk segments
 when limits apply. Adaptive timing and batched IK remain defaults. Explicit

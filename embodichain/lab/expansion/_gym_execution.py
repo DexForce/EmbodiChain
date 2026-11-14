@@ -18,10 +18,13 @@
 
 from __future__ import annotations
 from collections.abc import Callable
+from dataclasses import replace
 import time
 from embodichain.data_pipeline.recording.media import _atomic_json
 from embodichain.lab.expansion.program import TaskProgramBatchExecutor
 from .contracts import CandidateIdentity, ExpertEpisode
+from .contracts import SceneCase
+from .host_extensions import ExpansionRowContext
 
 from embodichain.lab.sim.scene.physics import capture_physics_properties
 from .engine import ExpansionAssignment
@@ -65,6 +68,14 @@ class GymCohortExecutor:
             for assignment in assigned
         }
         bridges, services = {}, {}
+        factories, adapters = {}, []
+        extension = ctx.extensions
+        if extension.plan_transform_factory is not None:
+            ctx.source_artifacts = {
+                key: value
+                for key, value in ctx.source_artifacts.items()
+                if not key.startswith("plan_")
+            }
         ctx.bridges, ctx.services = bridges, services
         phase_started = time.monotonic()
         prototype_profile = None
@@ -84,6 +95,44 @@ class GymCohortExecutor:
             record,
         ) in assignments.items():
             ordinal = ctx.requests[row].recipe.context.ordinal
+            if extension.plan_transform_factory is not None:
+                if (
+                    profile is not None
+                    or env.task_program_adapter.configured_nominal_sources
+                    or motion_profile is not None
+                ):
+                    raise ValueError(
+                        "an extension transform cannot replace a configured nominal/motion source"
+                    )
+                request = ctx.requests[row]
+                factory = extension.plan_transform_factory(
+                    env,
+                    ExpansionRowContext(
+                        row,
+                        identity,
+                        ordinal,
+                        request.attempt_id,
+                        directory,
+                        SceneCase(**record["case"]),
+                        request.recipe,
+                    ),
+                )
+                if factory is None:
+                    raise ValueError("plan_transform_factory returned no factory")
+                factories[row] = factory
+                adapter = (
+                    env.task_program_adapter
+                    if cfg.batch_size == 1
+                    else env.task_program_adapter.for_env_ids((row,))
+                )
+                if cfg.batch_size != 1:
+                    adapters.append(adapter)
+                bridges[row] = adapter.create_bridge(
+                    program,
+                    plan_transform_factory=factory,
+                    isolate_policy_sessions=True,
+                )
+                continue
             if profile is None:
                 from embodichain.lab.task_program.integrations.demo_skill import (
                     _ConfiguredDemoSkillSource,
@@ -168,9 +217,43 @@ class GymCohortExecutor:
             ),
         )
         timings["execute"] += time.monotonic() - phase_started
+        if factories:
+            expansions, accepted, reasons = (
+                [],
+                list(result.accepted),
+                list(result.reasons),
+            )
+            for index, row in enumerate(result.env_ids):
+                factory = factories[row]
+                records = tuple(factory.records)
+                assignments[row][4]["expansion"] = [
+                    record.to_metadata() for record in records
+                ]
+                portable = []
+                for number, record in enumerate(records):
+                    trace = record.to_metadata()
+                    if "plan_artifact" in trace:
+                        key = f"plan_{row}_{number}"
+                        ctx.source_artifacts[key] = trace.pop("plan_artifact")
+                        trace["plan_artifact_key"] = key
+                    portable.append(trace)
+                expansions.append(tuple(portable))
+                if extension.require_plan_transform and accepted[index] and not records:
+                    accepted[index], reasons[index] = (
+                        False,
+                        "requested_operator_not_applied",
+                    )
+            result = replace(
+                result,
+                expansion_records=tuple(expansions),
+                accepted=tuple(accepted),
+                reasons=tuple(reasons),
+            )
         physics_after = capture_physics_properties(view)
         episodes = GymEpisodeAssembler(ctx).assemble(
             assignments, collector, services, result, physics_after
         )
         ctx.services, ctx.bridges = services, bridges
+        for adapter in adapters:
+            adapter.close()
         return tuple(episodes[assignment.env_id] for assignment in assigned)

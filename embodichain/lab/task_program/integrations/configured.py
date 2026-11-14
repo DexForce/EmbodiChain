@@ -1706,6 +1706,7 @@ def _decode_motion_policy(value: object, *, path: str) -> MotionPolicy:
                 "plan_opts",
                 "interpolation_mode",
                 "ik_seed_mode",
+                "phase_paths",
                 "sample_count_retries",
                 "segment_sample_count_retries",
                 "segment_continuous_ik_recovery",
@@ -1718,6 +1719,7 @@ def _decode_motion_policy(value: object, *, path: str) -> MotionPolicy:
         config["sample_count"], path=f"{path}.sample_count", minimum=2
     )
     kwargs: dict[str, object] = {
+        "phase_paths": dict(config.get("phase_paths", {})),
         "strategy": _identifier(
             config.get("strategy", "ik_interp"),
             path=f"{path}.strategy",

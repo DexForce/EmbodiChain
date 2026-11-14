@@ -404,6 +404,7 @@ template contract.
    TaskProgramMappedRetimeRecord
    TaskProgramSameGridExpansionFactory
    TaskProgramSameGridExpansionRecord
+   TaskProgramNativeExpansionRecord
 
 .. autoclass:: TaskProgramSourceAdapter
    :members:
@@ -424,6 +425,9 @@ template contract.
    :members:
 
 .. autoclass:: TaskProgramSameGridExpansionRecord
+   :members:
+
+.. autoclass:: TaskProgramNativeExpansionRecord
    :members:
 
 .. currentmodule:: embodichain.lab.task_program

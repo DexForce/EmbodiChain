@@ -13,6 +13,9 @@ algorithms stay in `sim.motion.expansion`; scene and workspace algorithms stay i
 | Rolling workload × B execution in one caller-owned World | `embodichain/lab/expansion/workloads.py` |
 | Job assembly, stage recovery and inspect | `embodichain/lab/expansion/workflow.py`, `stages.py` |
 | Native World ownership and compatibility facade | `embodichain/lab/expansion/host.py` |
+| Task-owned render/source/transform/acceptance ports | `embodichain/lab/expansion/host_extensions.py` |
+| Measured geometry, native substeps and sustained-contact acceptance | `embodichain/lab/expansion/acceptance.py` |
+| Physics-free measured reference/ghost comparison | `embodichain/lab/expansion/comparison.py` |
 | Native recipes, cohort preparation, step observation and episode assembly | `embodichain/lab/expansion/_gym_recipe.py`, `_gym_prepare.py`, `_gym_execution.py`, `_gym_frames.py`, `_gym_episode.py` |
 | Durable recipes, attempts and invocation budgets | `embodichain/lab/expansion/journal.py` |
 | Task Program execution with native or prototype motion | `embodichain/lab/expansion/program.py`, `real2sim.py` |
@@ -72,6 +75,23 @@ native context and cannot independently close/reset/step competing Worlds. Recip
 sampling, whole-cohort preparation, active-row frame buffering and measured episode
 assembly have separate owners. Preserve the host constructor, port methods and
 existing readout properties used by benchmark/showcase instrumentation.
+
+`GymExpansionHostExtensions` supplies non-owning callbacks for collection renderer,
+scene source, immutable recipe transformation, measured validator and row plan
+factory. `ExpansionRowContext` carries pinned identity without exposing mutable
+host buffers. Hosts retain preparation, control clocks, T+1 capture, attachment
+archival and confirmed receipts. Do not replace configured nominal sources with
+an extension transform. `MeasuredExpansionValidator` presents the same lifecycle
+for independent geometry and native contacts, including task-declared sustained
+finger contact and drift limits. Every original physical substep remains required;
+missing impulses, unknown actors and dropped samples reject acceptance.
+
+`preview_expansion_comparison` consumes a caller-owned environment factory and
+qualified measured episodes. Shared-time pause/switch controls retain the selected
+time; physics stays disabled and render updates do not mutate saved evidence.
+`MarkerFramePublisher` owns resident robot/object groups and publishes a coherent
+cross-group frame through the public marker layer. Task assets and any collection
+process orchestration remain outside the replay core.
 
 `TaskProgramDemoBridge.program_id` and `env_ids` expose binding identity without
 runtime traversal. `EmbodiedEnv.task_program_bridge_scope()` restores the borrowed

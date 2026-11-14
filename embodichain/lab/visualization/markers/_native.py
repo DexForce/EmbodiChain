@@ -86,7 +86,9 @@ class NativeMarkerRenderer:
             isolate them with the camera's render-category filter.
     """
 
-    def __init__(self, scene: Scene, *, use_scene_for_overlays: bool = False) -> None:
+    def __init__(
+        self, scene: Scene, *, use_scene_for_overlays: bool = False, xray: bool = False
+    ) -> None:
         try:
             spawn = import_module("dexsim.spawn")
             required = (
@@ -111,6 +113,7 @@ class NativeMarkerRenderer:
         self._spawn = spawn
         self._scene = scene
         self._use_scene_for_overlays = use_scene_for_overlays
+        self._xray = xray
         self._groups: dict[str, dict[str, _Entry]] = {}
         self._texture_directory = TemporaryDirectory(
             prefix="embodichain-marker-textures-"
@@ -124,7 +127,10 @@ class NativeMarkerRenderer:
         """Declare one render-only object through its lifetime-owning Scene."""
         name = f"__embodichain_marker_{uuid4().hex}"
         if template is not None and hasattr(self._scene, "clone_mesh_object"):
-            return self._scene.clone_mesh_object(template.handle.path, name)
+            handle = self._scene.clone_mesh_object(template.handle.path, name)
+            if self._xray:
+                handle.get_material().set_depth_culling(False)
+            return handle
         scene_lighting = self._scene_lit(marker)
         use_scene = scene_lighting or self._use_scene_for_overlays
         parameters = (
@@ -235,7 +241,10 @@ class NativeMarkerRenderer:
             physics=None,
             per_env=False,
         )
-        return self._scene.add_mesh_object(desc, arena_name="default")
+        handle = self._scene.add_mesh_object(desc, arena_name="default")
+        if self._xray:
+            handle.get_material().set_depth_culling(False)
+        return handle
 
     def _discard(self, handle: SpawnedRigidBody) -> None:
         # Scene.close() invalidates the selected handles.
@@ -288,7 +297,13 @@ class NativeMarkerRenderer:
         if previous is None or previous.visible != marker.visible:
             handle.set_visible(marker.visible)
 
-    def publish(self, name: str, markers: tuple[MeshMarkerOverlay, ...]) -> None:
+    def publish(
+        self,
+        name: str,
+        markers: tuple[MeshMarkerOverlay, ...],
+        *,
+        retain_omitted: bool = False,
+    ) -> None:
         """Apply a complete group, staging replacements before releasing old meshes.
 
         Args:
@@ -296,7 +311,7 @@ class NativeMarkerRenderer:
             markers: Complete detached group snapshots in world coordinates.
         """
         previous = self._groups.get(name, {})
-        pending: dict[str, _Entry] = {}
+        pending: dict[str, _Entry] = dict(previous) if retain_omitted else {}
         created = []
         touched = []
         batch_enabled = hasattr(self._scene, "create_visual_object_batch")
@@ -304,6 +319,20 @@ class NativeMarkerRenderer:
         for entry in previous.values():
             templates.setdefault(id(entry.snapshot.vertices), entry)
         try:
+            if retain_omitted:
+                selected = {marker.overlay_id for marker in markers}
+                for key, entry in previous.items():
+                    if key not in selected and entry.snapshot.visible:
+                        touched.append(entry)
+                        hidden = replace(
+                            entry.snapshot,
+                            visible=False,
+                            _shared_geometry=entry.snapshot._geometry,
+                        )
+                        self._apply(
+                            entry.handle, hidden, entry.snapshot, transform=False
+                        )
+                        pending[key] = _Entry(entry.handle, hidden)
             for marker in markers:
                 entry = previous.get(marker.overlay_id)
                 if entry is not None and self._same_geometry(entry.snapshot, marker):
@@ -329,9 +358,9 @@ class NativeMarkerRenderer:
                 )
                 pending[marker.overlay_id] = _Entry(handle, marker)
                 templates.setdefault(id(marker.vertices), pending[marker.overlay_id])
-            if batch_enabled and pending:
+            if batch_enabled and markers:
                 transforms = _transforms(markers)
-                handles = tuple(entry.handle for entry in pending.values())
+                handles = tuple(pending[marker.overlay_id].handle for marker in markers)
                 cached = self._batches.get(name)
                 if (
                     cached is None

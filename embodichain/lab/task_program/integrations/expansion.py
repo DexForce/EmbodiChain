@@ -24,6 +24,7 @@ from dataclasses import dataclass, replace
 import hashlib
 from collections.abc import Callable, Mapping, Sequence
 import math
+from pathlib import Path
 from typing import ClassVar
 
 import torch
@@ -54,6 +55,7 @@ from embodichain.lab.sim.motion.expansion import (
 )
 from embodichain.lab.sim.atomic_skills.state import PlanningContext
 from embodichain.lab.task_program.runtime.expansion import TaskProgramPlanRequest
+from ._native_plan_expansion import TaskProgramNativeExpansionRecord
 
 __all__ = [
     "TaskProgramSourceAdapter",
@@ -63,6 +65,7 @@ __all__ = [
     "TaskProgramMappedRetimeRecord",
     "TaskProgramSameGridExpansionFactory",
     "TaskProgramSameGridExpansionRecord",
+    "TaskProgramNativeExpansionRecord",
 ]
 
 
@@ -193,6 +196,63 @@ class TaskProgramSameGridExpansionFactory:
     still pass the unchanged full-path motion and collision checks.
     """
 
+    @classmethod
+    def from_native_plan(
+        cls,
+        operator: str,
+        options: Mapping[str, object],
+        *,
+        seed: int,
+        scene_case: SceneCase,
+        revision: str,
+        output: Path | None = None,
+        episode_id: int = 0,
+    ) -> TaskProgramSameGridExpansionFactory:
+        """Expand live Atomic plans on their existing measured control grid.
+
+        Args:
+            operator: object_pose, affordance, joint_residual, via_points or nullspace_residual.
+            options: Task-owned phase allowlists, call selection, native operator
+                magnitudes, sampled motion/FK limits and proposal budget.
+            seed: Logical candidate seed, independent of physical row.
+            scene_case: Measured scene and initial-state identity.
+            revision: Pinned task/source revision.
+            output: Optional directory for hashed reference/candidate attachments.
+            episode_id: Logical affordance branch identity.
+
+        This source path retains native operators and Atomic reconstruction,
+        protects phase-boundary derivative stencils and never claims physical
+        success. The host must still perform measured collision/task acceptance.
+        """
+        from ._native_plan_expansion import _NativePlanExpansion
+
+        instance = object.__new__(cls)
+        instance._native_delegate = _NativePlanExpansion(
+            operator,
+            options,
+            seed=seed,
+            scene_case=scene_case,
+            revision=revision,
+            output=output,
+            episode_id=episode_id,
+        )
+        return instance
+
+    def prepare_planning_context(
+        self,
+        request: TaskProgramPlanRequest,
+        context: PlanningContext,
+        *,
+        engine: AtomicSkillEngine,
+    ) -> PlanningContext:
+        """Bind optional native affordance sampling before the ordinary planner."""
+        delegate = getattr(self, "_native_delegate", None)
+        return (
+            context
+            if delegate is None
+            else delegate.prepare_planning_context(request, context, engine=engine)
+        )
+
     def __init__(
         self,
         *,
@@ -306,8 +366,15 @@ class TaskProgramSameGridExpansionFactory:
         self._records: list[TaskProgramSameGridExpansionRecord] = []
 
     @property
-    def records(self) -> tuple[TaskProgramSameGridExpansionRecord, ...]:
+    def records(
+        self,
+    ) -> tuple[
+        TaskProgramSameGridExpansionRecord | TaskProgramNativeExpansionRecord, ...
+    ]:
         """Return successfully rebuilt call-level candidates."""
+        delegate = getattr(self, "_native_delegate", None)
+        if delegate is not None:
+            return delegate.records
         return tuple(
             replace(record, template=replace(record.template))
             for record in self._records
@@ -317,6 +384,9 @@ class TaskProgramSameGridExpansionFactory:
         self, request: TaskProgramPlanRequest, *, engine: AtomicSkillEngine
     ) -> PlanTransform | None:
         """Select the spatial transform for one compiled call occurrence."""
+        delegate = getattr(self, "_native_delegate", None)
+        if delegate is not None:
+            return delegate.create_plan_transform(request, engine=engine)
         if not isinstance(request, TaskProgramPlanRequest) or not isinstance(
             engine, AtomicSkillEngine
         ):

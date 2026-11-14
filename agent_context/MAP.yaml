@@ -198,7 +198,7 @@ topics:
 - id: expansion-engine
   title: Expansion Engine
   aliases: [Expansion Engine, offline expansion, 扩增引擎, 批量专家采集]
-  keywords: [ExpansionEngine, ExpansionRunCfg, ExpansionJobCfg, ExpansionSession, ExpansionSessionCfg, ExpansionCoverage, EpisodeCoverage, GymExpansionHost, ArtifactEpisodeSink, MediaSpool, render_observation_variants, WorkloadProgramExecutor, WorkloadExecutionCfg, workload_count]
+  keywords: [ExpansionEngine, ExpansionRunCfg, ExpansionJobCfg, ExpansionSession, ExpansionSessionCfg, ExpansionCoverage, EpisodeCoverage, GymExpansionHost, ArtifactEpisodeSink, MediaSpool, render_observation_variants, WorkloadProgramExecutor, WorkloadExecutionCfg, workload_count, GymExpansionHostExtensions, MeasuredExpansionValidator, MeasuredTrajectory, preview_expansion_comparison, 扩增虚影]
   paths: [topics/expansion-engine/expansion-engine.md]
   source_of_truth:
   - embodichain/lab/expansion/

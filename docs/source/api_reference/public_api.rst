@@ -1672,6 +1672,33 @@ and durable episode-boundary recovery. See the offline expansion example.
    WorkloadProgramExecutor
    export_expansion_episodes
 
+.. autosummary::
+
+   GymExpansionHostExtensions
+   ExpansionRowContext
+   ExpansionValidator
+   MeasuredExpansionValidator
+   MeasuredTrajectory
+   record_reference_trajectory
+   preview_expansion_comparison
+
+embodichain.lab.expansion.acceptance
+------------------------------------
+
+Measured task and physical acceptance share a host port. Geometry uses independent
+Newton queries; native contacts inspect every physical sample and optionally
+require sustained finger contact and bounded object drift. Tasks declare all
+permissions and thresholds; missing or dropped evidence rejects the trajectory.
+
+.. currentmodule:: embodichain.lab.expansion.acceptance
+
+.. autosummary::
+
+   MeasuredExpansionValidator
+
+.. autoclass:: MeasuredExpansionValidator
+   :members:
+
 embodichain.lab.expansion.artifacts
 -----------------------------------
 
@@ -1684,6 +1711,29 @@ Typed content-addressed numeric, media and source references. Paths remain conta
    ArtifactReference
    EpisodeArtifactManifest
    resolve_artifact_path
+
+embodichain.lab.expansion.comparison
+------------------------------------
+
+Reference and accepted expansion recordings share a measured timeline. The
+native viewer retains robot/object ghost resources, supports pause and selection,
+and publishes render states with physics disabled. Collection is an optional
+caller-owned callback, and the environment factory retains task/asset ownership.
+
+.. currentmodule:: embodichain.lab.expansion.comparison
+
+.. autosummary::
+
+   MeasuredTrajectory
+   record_reference_trajectory
+   preview_expansion_comparison
+
+.. autoclass:: MeasuredTrajectory
+   :members:
+
+.. autofunction:: record_reference_trajectory
+
+.. autofunction:: preview_expansion_comparison
 
 embodichain.lab.expansion.configured
 ------------------------------------
@@ -1812,6 +1862,30 @@ The native Gym adapter owns World preparation, parameter readback and Task Progr
 .. autosummary::
 
    GymExpansionHost
+
+embodichain.lab.expansion.host_extensions
+-----------------------------------------
+
+Runtime extension callbacks select collection rendering, a scene source, measured
+acceptance, immutable recipe transforms and per-row Task Program plan factories.
+The native host continues to own preparation, clocks, state capture and receipts.
+
+.. currentmodule:: embodichain.lab.expansion.host_extensions
+
+.. autosummary::
+
+   ExpansionValidator
+   ExpansionRowContext
+   GymExpansionHostExtensions
+
+.. autoclass:: ExpansionValidator
+   :members:
+
+.. autoclass:: ExpansionRowContext
+   :members:
+
+.. autoclass:: GymExpansionHostExtensions
+   :members:
 
 embodichain.lab.expansion.journal
 ---------------------------------
@@ -4370,6 +4444,8 @@ native simulation windows and browser visualization.
    MarkerPrototypeCfg
    MarkerGroup
 
+   MarkerFramePublisher
+
 embodichain.lab.visualization.markers.cfg
 ----------------------------------------
 
@@ -4379,6 +4455,22 @@ embodichain.lab.visualization.markers.cfg
 
    MarkerPrototypeCfg
    MarkerGroupCfg
+
+embodichain.lab.visualization.markers.frame
+-------------------------------------------
+
+The frame publisher stages multiple marker groups and submits one native visual
+batch. Hidden instances retain their resources and actual visibility; later
+frames transform only visible instances. Publishing never advances physics.
+
+.. currentmodule:: embodichain.lab.visualization.markers.frame
+
+.. autosummary::
+
+   MarkerFramePublisher
+
+.. autoclass:: MarkerFramePublisher
+   :members:
 
 embodichain.lab.visualization.markers.group
 ------------------------------------------
