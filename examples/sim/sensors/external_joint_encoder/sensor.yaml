@@ -1,0 +1,3 @@
+sensor_type: ExampleJointEncoder
+uid: joint_encoder
+asset_uid: robot

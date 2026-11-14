@@ -53,6 +53,7 @@ from embodichain.lab.sim.objects import (
     SurfaceDeformableObject,
 )
 from embodichain.lab.sim.sensors import Camera, CameraCfg, StereoCamera, StereoCameraCfg
+from embodichain.lab.sim.sensors.registry import _resolve_sensor_factory
 from .descriptors import _pose_from_cfg, configure_articulation_desc
 from .usd import (
     _configure_articulation_usd,
@@ -482,7 +483,9 @@ def _compile_usd_import(
                     if manager is None
                     else manager.SUPPORTED_SENSOR_TYPES
                 )
-                sensor_factory = factories.get(sensor_cfg.sensor_type)
+                _, sensor_factory, _ = _resolve_sensor_factory(
+                    sensor_cfg.sensor_type, factories
+                )
                 if not isinstance(sensor_factory, type) or not issubclass(
                     sensor_factory, Camera
                 ):
