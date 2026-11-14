@@ -59,7 +59,8 @@ class TactileIndentationCfg(SensorCfg):
     points: tuple[tuple[float, float, float], ...] | None = None
     normals: tuple[tuple[float, float, float], ...] | None = None
     max_depth: float = 0.005
-    use_candidates: bool = True
+    use_candidates: bool = False
+    """Enable conservative geometric culling for workloads that benefit from it."""
 
     def get_data_types(self) -> list[str]:
         """Return published layout-aligned fields."""
