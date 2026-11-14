@@ -364,7 +364,8 @@ topics:
   aliases: [rl learning, rl config, reinforcement learning, 强化学习, 训练配置]
   keywords: [train-rl, Trainer, trainer.gym_config, learning_env, RolloutKind, DifferentiableTrainer,
     PPO, GRPO, APG, APGActorCritic, apg_actor_critic, SyncCollector, ScheduledDifferentiableEnvProtocol, DifferentiableRolloutSpec,
-    complete rollout, full horizon, gradient accumulation, action adjoint, observation normalization]
+    complete rollout, full horizon, gradient accumulation, action adjoint, observation normalization,
+    ProprioceptiveActorCritic, temporal proprioception]
   paths: [topics/rl-learning/rl-learning.md]
   source_of_truth:
   - embodichain/learning/rl/train.py

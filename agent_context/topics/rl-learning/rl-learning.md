@@ -97,6 +97,22 @@ orbit/zoom and recorder view. Use
 camera changes; the [evaluation guide](../../../docs/source/guides/policy_evaluation.md)
 owns user controls.
 
+## Temporal proprioceptive policy
+
+The registered `proprioceptive_actor_critic` policy separates actor, critic and
+training-only label groups. `architecture_version` preserves history ordering
+and normalizer semantics: `legacy_v1` accepts previous history followed by the
+current frame; `official_v1` accepts current followed by history including
+current. Equal dimensions do not establish feature or checkpoint equivalence.
+Environment observation producers must use the matching layout and convention.
+
+Named training fields travel with the observation that produced each action.
+PPO's optional auxiliary decoder loss recomputes the latent in each minibatch
+so encoder gradients remain connected. Normalization statistics remain frozen
+through collection and PPO epochs, then update for the next rollout. Actor
+export excludes critic and contact decoder; inference alignment does not
+qualify task learning or simulator throughput.
+
 ## Episode evaluation and saved resources
 
 Auto-reset preserves completed-row observations and IDs for timeout bootstrap;
