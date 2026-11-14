@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
+from collections.abc import Callable
 import weakref
 
 import torch
@@ -27,6 +28,7 @@ from tensordict import TensorDict
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.sim_manager import SimulationManager
+    from .contact import ContactSensor, ContactSensorCfg
 
 __all__ = ["SensorClock", "SensorStateProvider", "SensorContext"]
 
@@ -104,13 +106,15 @@ class SensorContext:
         device: Device for sensor outputs.
         num_instances: Number of simulation environments.
         clock: Simulation clock and completed-substep identity.
-        state: Public joint-state acquisition service.
+        state: Public physical state acquisition service.
+        contact_factory: Optional factory for a bound, sensor-owned contact reader.
     """
 
     device: torch.device
     num_instances: int
     clock: SensorClock
     state: SensorStateProvider
+    contact_factory: Callable[[ContactSensorCfg], ContactSensor] | None = None
 
     @classmethod
     def from_manager(cls, manager: SimulationManager) -> SensorContext:
@@ -123,7 +127,13 @@ class SensorContext:
             Context without exposing native World or backend objects.
         """
         services = _ManagerSensorServices(manager)
-        return cls(manager.device, manager.num_envs, services, services)
+        return cls(
+            manager.device,
+            manager.num_envs,
+            services,
+            services,
+            services.create_contact_reader,
+        )
 
 
 class _ManagerSensorServices:
@@ -203,3 +213,14 @@ class _ManagerSensorServices:
             dtype=torch.float32,
             device=manager.device,
         ).clone()
+
+    def create_contact_reader(self, cfg: ContactSensorCfg) -> ContactSensor:
+        from .contact import ContactSensor
+
+        manager = self._manager()
+        if not manager.physics.supports_contact_sensor:
+            raise NotImplementedError(
+                f"Contact acquisition unavailable on {manager.physics_backend}/"
+                f"{getattr(manager.physics, 'solver_type', None)} ({manager.device})."
+            )
+        return ContactSensor(cfg, manager.device, owner=manager)

@@ -6035,3 +6035,21 @@ Finite-difference inertial sensors
    PVACfg
    IMU
    IMUCfg
+
+
+Contact-resultant sensor
+------------------------
+
+.. currentmodule:: embodichain.lab.sim.sensors
+
+.. autosummary::
+
+   ContactResultant
+   ContactResultantCfg
+
+.. currentmodule:: embodichain.lab.sim.sensors.contact_resultant
+
+.. autosummary::
+
+   ContactResultant
+   ContactResultantCfg
