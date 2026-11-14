@@ -6271,3 +6271,14 @@ Contact-resultant sensor
 
    ContactResultant
    ContactResultantCfg
+
+
+Batched triangle ray queries
+----------------------------
+
+.. currentmodule:: embodichain.compute.geometry.raycast
+
+.. autosummary::
+
+   TriangleRayMesh
+   cast_rays
