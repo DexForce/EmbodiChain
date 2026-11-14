@@ -1207,6 +1207,7 @@ def test_scene_export_rejects_backslash_in_object_id(tmp_path: Path) -> None:
         ).export()
 
 
+@pytest.mark.no_sim
 @pytest.mark.parametrize("headless", [True, False])
 def test_preview_initial_display_does_not_integrate_physics(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, headless: bool
@@ -1221,7 +1222,7 @@ def test_preview_initial_display_does_not_integrate_physics(
     class FakeSimulation:
         def __init__(self, cfg: object) -> None:
             self.sim_config = SimpleNamespace(
-                visualization=SimpleNamespace(backend="none")
+                visualization=SimpleNamespace(backend="none"), web=False
             )
 
         def prepare(self) -> None:
@@ -1230,7 +1231,7 @@ def test_preview_initial_display_does_not_integrate_physics(
         def sync_render_state(self) -> None:
             events.append("publish")
 
-        def open_window(self) -> None:
+        def open_viewer(self) -> None:
             assert events[-1] == "publish"
             events.append("open")
 
@@ -1259,7 +1260,8 @@ def test_preview_initial_display_does_not_integrate_physics(
     assert events == expected + ["destroy", "flush"]
 
 
-@pytest.mark.parametrize("backend", ["none", "viser"])
+@pytest.mark.no_sim
+@pytest.mark.parametrize("backend", ["none", "viser", "dexsim-web"])
 def test_preview_pose_playback_renders_without_physics(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend: str
 ) -> None:
@@ -1274,8 +1276,10 @@ def test_preview_pose_playback_renders_without_physics(
     class FakeSimulation:
         def __init__(self, cfg: object) -> None:
             self.sim_config = SimpleNamespace(
-                visualization=SimpleNamespace(backend=backend)
+                visualization=SimpleNamespace(backend=backend),
+                web=backend == "dexsim-web",
             )
+            self.visualization_runtime = None
 
         def prepare(self) -> None:
             events.append("prepare")
@@ -1283,7 +1287,7 @@ def test_preview_pose_playback_renders_without_physics(
         def sync_render_state(self) -> None:
             events.append("publish")
 
-        def open_window(self) -> None:
+        def open_viewer(self) -> None:
             events.append("open")
 
         @contextmanager
@@ -1316,20 +1320,21 @@ def test_preview_pose_playback_renders_without_physics(
     monkeypatch.setattr("embodichain.lab.sim.SimulationManager", FakeSimulation)
     monkeypatch.setattr(
         "embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd.load_scene_export_into_sim",
-        lambda **_: events.append("load") or [],
+        lambda **_: events.append("load")
+        or ([object()] if backend == "dexsim-web" else []),
     )
     monkeypatch.setattr(preview.time, "sleep", lambda _: None)
     preview.preview_scene_export(
         output_root=root,
         headless=backend == "viser",
         visualization=VisualizationCfg(backend=backend),
-        joint_control=False,
+        joint_control=backend == "dexsim-web",
         on_frame=on_frame,
         advance_physics=False,
     )
 
     initial = ["load", "prepare"]
-    if backend == "none":
+    if backend in {"none", "dexsim-web"}:
         initial += ["publish", "open"]
     assert events == initial + [
         "callback:1",

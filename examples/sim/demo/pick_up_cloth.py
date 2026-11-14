@@ -494,16 +494,16 @@ def main(args: argparse.Namespace | None = None) -> None:
         register_kinematic_trajectory(sim, grab_traj, settle_steps)
 
         sim.prepare()
-        if not args.headless:
-            sim.open_window()
+        if not args.headless or getattr(args, "web", False):
+            sim.open_viewer()
         sim.update(step=settle_steps)
-        if not args.headless:
-            input("Press Enter to start grabbing the cloth...")
+        if not args.headless or getattr(args, "web", False):
+            sim.wait_for_input("Press Enter to start grabbing the cloth...")
 
         # The initial trajectory row is already active after settling.
         sim.update(step=grab_traj.shape[1] - 1)
-        if not args.headless:
-            input("Press Enter to exit the simulation...")
+        if not args.headless or getattr(args, "web", False):
+            sim.wait_for_input("Press Enter to exit the simulation...")
     finally:
         sim.destroy()
 

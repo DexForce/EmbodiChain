@@ -64,6 +64,9 @@ def test_robot_entrypoint_selects_newton_backend(
         def open_window(self) -> None:
             pass
 
+        def open_viewer(self) -> None:
+            pass
+
         def destroy(self) -> None:
             pass
 

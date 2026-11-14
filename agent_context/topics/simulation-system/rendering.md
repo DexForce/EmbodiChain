@@ -59,6 +59,16 @@ add/finalize calls. `SpawnScene` temporarily excludes that table during those
 calls so texture binding is never attempted without a renderer, then restores
 the authored definitions for metadata and later declarations.
 
+## WebRTC observation view
+
+`visualization.backend="dexsim-web"` reserves native rendering before World
+construction and forces the local window closed. A dedicated observation camera
+is rendered from `render_frame()` without adding sensor renders. Paused callers
+pump `capture_visualization()` on the World creator thread. WebRTC application
+closure precedes sensor/scene teardown; its listener is released with World
+cleanup. Follow [visualization](../sim-visualization/sim-visualization.md) for
+the shared viewport API, interactions and native video-catalog limitations.
+
 ## Default scene presentation
 
 `SimulationManager.set_default_background()` authors the native ground material

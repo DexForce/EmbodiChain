@@ -202,8 +202,8 @@ def main(args: argparse.Namespace | None = None) -> None:
     logger.log_info(f"Running simulation with {args.num_envs} environment(s)")
     logger.log_info("Press Ctrl+C to stop the simulation")
 
-    if not args.headless:
-        sim.open_window()
+    if not args.headless or getattr(args, "web", False):
+        sim.open_viewer()
 
     run_simulation(sim)
 

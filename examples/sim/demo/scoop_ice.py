@@ -561,8 +561,8 @@ def main(args: argparse.Namespace | None = None) -> None:
     ice_cubes = create_ice_cubes(sim)
     sim.prepare()
 
-    if not args.headless:
-        sim.open_window()
+    if not args.headless or getattr(args, "web", False):
+        sim.open_viewer()
 
     # Randomize ice positions
     seed = resolve_seed(args.seed)

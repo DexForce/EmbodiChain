@@ -519,7 +519,7 @@ def main() -> None:
 
     serve_tutorial_scene(sim, args)
     if wait_for_user:
-        input("Press Enter to exit the simulation...")
+        sim.wait_for_input("Press Enter to exit the simulation...")
 
 
 if __name__ == "__main__":

@@ -119,13 +119,23 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--offline", action="store_true")
     parser.add_argument("--output", help="Evaluation output parent directory.")
-    return parser.parse_args(argv)
+    from embodichain.cli._visualization import add_viewer_args_to_parser
+
+    add_viewer_args_to_parser(parser, allow_viser=False)
+    args = parser.parse_args(argv)
+    if args.web:
+        args.viewer = True
+    return args
 
 
 def run(args: argparse.Namespace) -> Path:
     """Run Headless or Viewer evaluation and write ``evaluation.json``."""
     resolved = _resolve_input(args)
     if resolved.profile is not None:
+        if getattr(args, "web", False):
+            raise ValueError(
+                "--web is available for EmbodiChain simulator tasks; the external Motion Policy Kit does not expose WebRTC presentation."
+            )
         return _run_profile(args, resolved)
     discover_task_packages()
     execute_init_hooks()
@@ -377,6 +387,8 @@ def _build_native_runtime(
         )
     )
     if uses_simulator:
+        from embodichain.lab.visualization import visualization_cfg_from_args
+
         runtime = build_gym_policy_runtime(
             config,
             device=device,
@@ -387,6 +399,11 @@ def _build_native_runtime(
             gpu_id=args.gpu_id,
             seed=seed,
             config_dir=train_config.parent,
+            **(
+                {"visualization": visualization_cfg_from_args(args)}
+                if getattr(args, "web", False)
+                else {}
+            ),
         )
     else:
         runtime = build_learning_policy_runtime(
@@ -412,6 +429,22 @@ def _build_native_runtime(
 
 
 def _validate_native_options(args: argparse.Namespace) -> None:
+    if getattr(args, "web", False):
+        budgets = (args.episodes, args.control_steps, args.duration)
+        if all(value is None for value in budgets) or any(
+            value <= 0 or not np.isfinite(value)
+            for value in budgets
+            if value is not None
+        ):
+            raise ValueError(
+                "--web requires a finite positive --episodes, --control-steps, "
+                "or --duration budget so evaluation stops and writes evaluation.json."
+            )
+        if args.termination_behavior == "pause":
+            raise ValueError(
+                "--web cannot resume a paused evaluation; use "
+                "--termination-behavior auto_reset with the finite run budget."
+            )
     if args.viewer and args.renderer == "no-render":
         raise ValueError("--viewer requires a native renderer.")
     profile_options = {

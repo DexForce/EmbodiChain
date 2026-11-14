@@ -61,6 +61,9 @@ def simulation_rows(sim: SimulationManager) -> list[Row]:
     native_rendering = render.renderer != "no-render"
     gpu_name = getattr(sim, "_render_device_name", None) or "name unavailable"
     gpu = f"{gpu_name} · GPU {cfg.gpu_id}"
+    viewer = getattr(sim, "_web_viewer", None)
+    width = viewer.cfg.width if viewer is not None else cfg.width
+    height = viewer.cfg.height if viewer is not None else cfg.height
     rows = [
         (
             "Runtime",
@@ -85,7 +88,7 @@ def simulation_rows(sim: SimulationManager) -> list[Row]:
         (
             "Rendering",
             "Viewer resolution",
-            f"{cfg.width} × {cfg.height}" if native_rendering else "OFF",
+            f"{width} × {height}" if native_rendering else "OFF",
         ),
         (
             "Rendering",

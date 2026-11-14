@@ -1479,20 +1479,43 @@ def test_constructor_starts_visualization_after_default_scene(
     assert sim._arenas == []
 
 
-def test_render_camera_group_syncs_state_before_rendering() -> None:
+@pytest.mark.parametrize("in_render_frame", [False, True])
+def test_render_camera_group_syncs_state_before_rendering(
+    in_render_frame: bool,
+) -> None:
     lifecycle: list[str] = []
     sim = object.__new__(SimulationManager)
     sim.is_window_opened = False
-    sim._sensors = {}
+    sim._render_state_published = False if in_render_frame else None
+    camera = MagicMock(spec=Camera)
+    camera.group_id = 3
+    camera._capture_metadata = {"capture_sequence": 1}
+    camera._pending_capture_metadata = {"capture_sequence": 2}
+    camera._snapshot_render_metadata.side_effect = lambda: lifecycle.append("metadata")
+    other_camera = MagicMock(spec=Camera)
+    other_camera.group_id = 4
+    other_camera._capture_metadata = {"capture_sequence": 5}
+    sim._sensors = {"selected": camera, "other": other_camera}
     sim.sync_render_state = MagicMock(side_effect=lambda: lifecycle.append("sync"))
+
+    def render(_group_ids: list[int]) -> None:
+        assert camera._capture_metadata is None
+        assert camera._pending_capture_metadata is None
+        lifecycle.append("render")
+
     sim._world = SimpleNamespace(
-        render_camera_group=lambda _group_ids: lifecycle.append("render")
+        render_camera_group=render,
     )
+    sim.poll_viewer = lambda: lifecycle.append("viewer")
     sim._log_scene_summary = lambda: lifecycle.append("summary")
 
     sim.render_camera_group([3])
 
-    assert lifecycle == ["sync", "render", "summary"]
+    assert lifecycle == ["sync", "render", "metadata"] + (
+        [] if in_render_frame else ["viewer"]
+    ) + ["summary"]
+    assert other_camera._capture_metadata == {"capture_sequence": 5}
+    other_camera._snapshot_render_metadata.assert_not_called()
 
 
 def test_empty_camera_group_does_not_publish_render_state() -> None:
@@ -3243,6 +3266,62 @@ def test_headless_recording_uses_sim_time_and_captures_frames() -> None:
     )
 
 
+@pytest.mark.parametrize("use_sim_time", [None, True])
+def test_web_follow_recording_captures_pose_on_creator_thread(use_sim_time) -> None:
+    import threading
+
+    from embodichain.lab.visualization._web_viewer import _WebViewer
+
+    sim = _make_sim_manager()
+    viewer = object.__new__(_WebViewer)
+    viewer.owner = threading.get_ident()
+    pose = np.eye(4, dtype=np.float32)
+    pose[:3, 3] = [1.0, 2.0, 3.0]
+    viewer.camera = SimpleNamespace(get_world_pose=MagicMock(return_value=pose))
+    sim._web_viewer = viewer
+    sim.sync_render_state = MagicMock()
+
+    assert sim.start_window_record(use_sim_time=use_sim_time, fps=5, max_memory=1)
+    state = sim._window_record_state
+    assert state.capture_from_sim_update is True
+    assert sim._world.thread_runtime.add_loop_calls == []
+    sim._step_window_record_from_sim_update(state, physics_dt=0.2)
+
+    assert len(state.frames) == 1
+    viewer.camera.get_world_pose.assert_called_once()
+    np.testing.assert_array_equal(sim._window_record_camera.last_pose, pose)
+
+
+def test_web_follow_recording_rejects_wall_time_before_allocating_camera() -> None:
+    sim = _make_sim_manager()
+    sim._web_viewer = object()
+
+    with pytest.raises(ValueError, match="Web-follow recording requires use_sim_time"):
+        sim.start_window_record(use_sim_time=False)
+
+    assert sim._window_record_camera is None
+    assert sim._window_record_state is None
+    assert sim._world.thread_runtime.add_loop_calls == []
+
+
+@pytest.mark.parametrize("pose_source", ["fixed_pose", "pose_provider"])
+def test_web_custom_recording_pose_retains_wall_time_option(pose_source) -> None:
+    sim = _make_sim_manager()
+    sim._web_viewer = object()
+    pose = np.eye(4, dtype=np.float32)
+    pose[:3, 3] = [1.0, 2.0, 3.0]
+    source = pose if pose_source == "fixed_pose" else lambda: pose
+
+    assert sim.start_window_record(use_sim_time=False, **{pose_source: source})
+    state = sim._window_record_state
+    assert state.capture_from_sim_update is False
+    callback, _ = sim._world.thread_runtime.add_loop_calls[0]
+    callback(0.0)
+
+    assert len(state.frames) == 1
+    np.testing.assert_array_equal(sim._window_record_camera.last_pose, pose)
+
+
 def test_render_thread_recording_does_not_republish_render_state() -> None:
     """Native recording consumes state already published by simulation calls."""
     sim = _make_sim_manager(window=object())
@@ -3874,6 +3953,28 @@ def test_automatic_attachment_native_publication_only_when_parent_changes():
     assert sim._visualization_runtime.capture_calls == []
 
 
+@pytest.mark.parametrize(
+    "backend,captures_browser",
+    [("none", False), ("viser", True), ("dexsim-web", True)],
+)
+def test_render_frame_only_captures_browser_presentations(
+    backend, captures_browser
+) -> None:
+    sim, *_ = _make_render_frame_sim()
+    sim.sim_config.visualization.backend = backend
+    sim.capture_visualization_safely = MagicMock()
+
+    with sim.render_frame(force_visualization=True, capture_camera_images=False):
+        pass
+
+    if captures_browser:
+        sim.capture_visualization_safely.assert_called_once_with(
+            force=True, capture_camera_images=False
+        )
+    else:
+        sim.capture_visualization_safely.assert_not_called()
+
+
 def test_window_updates_attached_markers_without_waiting() -> None:
     sim, _, pose = _attach_groups_for_host_update(1)
     sim.sim_config.visualization.backend = "native"
@@ -4020,6 +4121,216 @@ def test_process_no_render_is_detected_after_world_cleanup(monkeypatch) -> None:
         lambda: SimpleNamespace(renderer=dexsim.types.Renderer.NORENDER),
     )
     assert SimulationManager._get_process_renderer() == "no-render"
+
+
+@pytest.mark.parametrize("num_envs,renderer", [(1, "no-render")])
+def test_web_rejects_unsupported_world_before_creation(num_envs, renderer) -> None:
+    with pytest.raises(ValueError, match="web"):
+        SimulationManagerCfg(
+            num_envs=num_envs,
+            render_cfg=RenderCfg(renderer=renderer),
+            visualization=VisualizationCfg(backend="dexsim-web"),
+        )
+
+
+def test_web_config_selects_headless_native_streaming(monkeypatch, tmp_path) -> None:
+    from embodichain.lab.visualization import DexSimWebCfg
+
+    runtime_check = MagicMock()
+    monkeypatch.setattr(
+        "embodichain.lab.visualization._web_viewer._require_webrtc_runtime",
+        runtime_check,
+    )
+    monkeypatch.setattr(SimulationManager, "_get_process_renderer", lambda: None)
+    monkeypatch.setattr(
+        "embodichain.lab.sim.utility.render_utils.select_default_renderer",
+        lambda _: "fast-rt",
+    )
+    monkeypatch.setattr(dexsim, "WebApplication", object, raising=False)
+    native = dexsim.WorldConfig()
+    world_fields = SimpleNamespace(
+        webrtc_enabled=False,
+        raytrace_config=native.raytrace_config,
+        postprocess_config=native.postprocess_config,
+    )
+    monkeypatch.setattr(dexsim, "WorldConfig", lambda: world_fields)
+    config = SimulationManagerCfg(
+        visualization=VisualizationCfg(
+            backend="dexsim-web", web=DexSimWebCfg(port=8766)
+        )
+    )
+    manager = SimpleNamespace(
+        _material_cache_dir=tmp_path,
+        physics=SimpleNamespace(configure_world=lambda *_: None),
+    )
+    world = SimulationManager._convert_sim_config(manager, config)
+    runtime_check.assert_called_once_with()
+    assert config.headless and not world.open_windows
+    assert world.webrtc_enabled and world.webrtc_port == 8766
+    assert world.webrtc_input_camera == "__embodichain_web_input_disabled"
+    assert world.renderer == RenderCfg(renderer="fast-rt").to_dexsim_flags()
+
+
+def test_web_preflight_reports_missing_dexsim_api(monkeypatch, tmp_path) -> None:
+    monkeypatch.delattr(dexsim, "WebApplication", raising=False)
+    config = SimulationManagerCfg(visualization=VisualizationCfg(backend="dexsim-web"))
+    manager = SimpleNamespace(_material_cache_dir=tmp_path)
+    with pytest.raises(RuntimeError, match="WebRTC-enabled DexSim"):
+        SimulationManager._convert_sim_config(manager, config)
+
+
+def test_web_is_a_top_level_mode_independent_of_environment_count():
+    config = SimulationManagerCfg(web=True, num_envs=8)
+    assert config.web and config.headless
+    assert config.visualization.backend == "dexsim-web"
+    assert config.num_envs == 8
+
+
+def test_closed_web_viewer_stays_closed_until_explicit_reopen() -> None:
+    sim = object.__new__(SimulationManager)
+    sim.sim_config = SimulationManagerCfg(web=True)
+    viewer = MagicMock()
+    sim._web_viewer = viewer
+    sim._visualization_runtime = None
+    sim.stop_visualization()
+    viewer.close.assert_called_once()
+    sim.start_visualization = MagicMock(side_effect=AssertionError("unexpected reopen"))
+    assert not sim.capture_visualization(force=True)
+    sim.start_visualization.assert_not_called()
+
+
+def test_web_open_viewer_keeps_information_display_separate_from_input_controls() -> (
+    None
+):
+    sim = object.__new__(SimulationManager)
+    sim.sim_config = SimulationManagerCfg(web=True)
+    sim._web_viewer = SimpleNamespace(closed=False)
+    sim._visualization_runtime = None
+    sim._window = None
+    sim.start_visualization = MagicMock()
+    sim._setup_viewer_controls = MagicMock()
+    assert sim.open_viewer()
+    assert sim.open_viewer()
+    assert sim.visualization_runtime is None
+    sim._setup_viewer_controls.assert_not_called()
+
+
+def test_web_terminal_wait_keeps_polling_without_advancing_physics(monkeypatch) -> None:
+    import os
+
+    if os.name == "nt":
+        pytest.skip("WebRTC terminal polling runs on its Linux host")
+    import threading
+
+    sim = object.__new__(SimulationManager)
+    sim.sim_config = SimulationManagerCfg(web=True)
+    sim.poll_viewer = MagicMock()
+    sim._world = MagicMock()
+    reader, writer = os.pipe()
+    timer = threading.Timer(0.1, lambda: os.write(writer, b"continue\n"))
+    try:
+        with os.fdopen(reader) as stream:
+            monkeypatch.setattr("sys.stdin", stream)
+            timer.start()
+            assert sim.wait_for_input() == "continue"
+        assert sim.poll_viewer.call_count > 0
+        sim._world.update.assert_not_called()
+    finally:
+        timer.join()
+        os.close(writer)
+
+
+def test_web_terminal_wait_reads_queued_lines_without_waiting_for_new_bytes(
+    monkeypatch,
+) -> None:
+    import os
+    import select
+
+    sim = object.__new__(SimulationManager)
+    sim.sim_config = SimulationManagerCfg(web=True)
+    sim.poll_viewer = MagicMock()
+    reader, writer = os.pipe()
+    original_select = select.select
+
+    def require_ready(*args):
+        ready = original_select(*args)
+        assert ready[0], "A queued terminal line must not wait for another write"
+        return ready
+
+    try:
+        with os.fdopen(reader, encoding="utf-8") as stream:
+            monkeypatch.setattr("sys.stdin", stream)
+            monkeypatch.setattr(select, "select", require_ready)
+            os.write(writer, b"first\nsecond\nlast")
+            assert sim.wait_for_input() == "first"
+            assert sim.wait_for_input() == "second"
+            os.close(writer)
+            writer = None
+            assert sim.wait_for_input() == "last"
+            with pytest.raises(EOFError):
+                sim.wait_for_input()
+    finally:
+        if writer is not None:
+            os.close(writer)
+
+
+def test_web_terminal_partial_unicode_line_keeps_polling_on_creator_thread(
+    monkeypatch,
+) -> None:
+    import os
+    import select
+    import threading
+
+    sim = object.__new__(SimulationManager)
+    sim.sim_config = SimulationManagerCfg(web=True)
+    owner = threading.get_ident()
+    idle = threading.Event()
+    reader, writer = os.pipe()
+
+    def poll():
+        assert threading.get_ident() == owner
+        if not select.select([reader], [], [], 0)[0]:
+            idle.set()
+
+    sim.poll_viewer = poll
+
+    def finish_line():
+        # The timeout also unblocks the old implementation so a regression
+        # fails an assertion instead of hanging this test indefinitely.
+        idle.wait(timeout=1)
+        os.write(writer, b"\xa9\n")
+
+    sender = threading.Thread(target=finish_line)
+    try:
+        with os.fdopen(reader, encoding="utf-8") as stream:
+            monkeypatch.setattr("sys.stdin", stream)
+            os.write(writer, b"caf\xc3")
+            sender.start()
+            assert sim.wait_for_input() == "café"
+            assert idle.is_set(), "A partial line must not block viewer polling"
+    finally:
+        sender.join()
+        os.close(writer)
+
+
+def test_stopping_web_visualization_stops_viewer_recording_before_camera_close():
+    sim = object.__new__(SimulationManager)
+    sim._window_record_state = SimpleNamespace(pose_provider=None, fixed_pose=None)
+    viewer = MagicMock()
+    sim._web_viewer = viewer
+    sim._visualization_runtime = None
+
+    def stop_record():
+        sim._window_record_state = None
+
+    def close():
+        assert sim._window_record_state is None
+
+    sim.stop_window_record = MagicMock(side_effect=stop_record)
+    viewer.close.side_effect = close
+    sim.stop_visualization()
+    sim.stop_window_record.assert_called_once()
+    viewer.close.assert_called_once()
 
 
 def test_after_substep_marker_refresh_precedes_visualization_capture() -> None:

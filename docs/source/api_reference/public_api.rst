@@ -1,6 +1,7 @@
 Public API Supplement
 =====================
 
+
 .. This page is maintained by the update-api-docs agent skill.
    docs/scripts/check_api_docs.py reads it but never writes it.
 
@@ -5658,6 +5659,19 @@ lowering still validates calibrated scene and route bindings.
 .. autofunction:: semantic_planning_catalog
 
 .. autofunction:: validate_semantic_call_payload
+
+Native WebRTC viewer configuration
+---------------------------------
+
+The experimental WebRTC viewer uses a dedicated observation camera in the
+existing World. It requires a WebRTC-enabled Linux/NVIDIA DexSim build; its
+native listener binds all IPv4 interfaces and lives until World teardown.
+
+.. autoclass:: embodichain.lab.visualization.DexSimWebCfg
+   :members:
+
+.. autoclass:: embodichain.lab.visualization.cfg.DexSimWebCfg
+   :no-index:
 
 
 Parallel-jaw hand configuration and composition

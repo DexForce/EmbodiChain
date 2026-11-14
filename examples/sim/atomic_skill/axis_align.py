@@ -247,7 +247,7 @@ def run(args: argparse.Namespace) -> None:
         return
 
     if wait_for_user:
-        input("Press Enter to replay the AxisAlign demo...")
+        sim.wait_for_input("Press Enter to replay the AxisAlign demo...")
     clear_after_step = compiled.segment(0, "manipulate").start
     replay_trajectory(
         sim,
@@ -261,7 +261,7 @@ def run(args: argparse.Namespace) -> None:
         compiled=compiled,
     )
     if wait_for_user:
-        input("Press Enter to exit the simulation...")
+        sim.wait_for_input("Press Enter to exit the simulation...")
 
 
 def main() -> None:

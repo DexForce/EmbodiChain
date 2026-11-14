@@ -107,7 +107,22 @@ class Environment:
         self.cfg = SimpleNamespace(sim_steps_per_control=4)
         self.action_manager = ActionManager()
         self.world = World()
-        self.sim = SimpleNamespace(get_world=lambda: self.world)
+        world = self.world
+
+        class Presentation:
+            viewer = world.window
+
+            def get_world(self):
+                return world
+
+            def poll_viewer(self):
+                pass
+
+            @property
+            def is_viewer_open(self):
+                return world.open
+
+        self.sim = Presentation()
         self.actions = []
         self.episode_step = 0
         self.reset_seeds = []

@@ -265,8 +265,8 @@ def main(args: argparse.Namespace | None = None) -> None:
 
     sim.prepare()
 
-    if not args.headless:
-        sim.open_window()
+    if not args.headless or getattr(args, "web", False):
+        sim.open_viewer()
 
     print(
         f"[INFO]: Running motion generator tutorial with {sim.num_envs} environment(s)"

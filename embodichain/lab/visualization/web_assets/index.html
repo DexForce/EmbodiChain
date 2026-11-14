@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>EmbodiChain · Web viewer</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <strong>EmbodiChain</strong>
+    <span>Simulation preview</span>
+    <span class="badge">Read-only</span>
+    <span id="RTC_Status" role="status">Connecting…</span>
+  </header>
+  <main>
+    <section id="main-view" aria-label="Simulation video">
+      <p id="waiting" role="status">Waiting for the first rendered frame…</p>
+    </section>
+    <aside aria-label="Initialization information">
+      <h1 id="summary-title">Initialization information</h1>
+      <p id="error" role="alert" hidden></p>
+      <p id="summary-disabled" hidden>Initialization summary is disabled.</p>
+      <table id="initialization-summary" aria-labelledby="summary-title">
+        <thead><tr><th scope="col">Section</th><th scope="col">Setting</th><th scope="col">Value</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <details id="task-cameras" hidden>
+        <summary>Task cameras</summary>
+        <p>Latest task-rendered RGB frames.</p>
+        <div id="sensor-views"></div>
+      </details>
+    </aside>
+  </main>
+  <div id="RTC_Videos" hidden></div>
+  <!-- DexSim 0.6 requires this playback hook even when its controls are hidden. -->
+  <button id="RTC_Stop" type="button" hidden tabindex="-1" aria-hidden="true">Stop viewing</button>
+  <script src="/browser.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -99,7 +99,10 @@ def _viser_enabled(args: argparse.Namespace) -> bool:
 
 def _visualization_enabled(args: argparse.Namespace) -> bool:
     """Whether workspace visualization has an active display backend."""
-    return bool(args.visualize and (_viser_enabled(args) or not args.headless))
+    return bool(
+        args.visualize
+        and (_viser_enabled(args) or getattr(args, "web", False) or not args.headless)
+    )
 
 
 def _resolve_control_part(robot, requested: str | None) -> str | None:
@@ -687,6 +690,8 @@ def main(args: argparse.Namespace) -> None:
                 analyzer.export_results(args.output, format=args.export_format)
 
         if visualize:
+            if getattr(args, "web", False):
+                sim.open_viewer()
             if not args.preview_cache and not viser:
                 log_info(
                     "Workspace visualization window open. Press Ctrl+C to exit.",

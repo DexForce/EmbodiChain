@@ -2978,3 +2978,48 @@ def test_configured_observation_consumers_decode_and_validate(consumers):
     else:
         with pytest.raises(ValueError, match="Invalid observation consumers"):
             config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+
+
+@pytest.mark.parametrize("selection", ["cli", "web", "backend"])
+def test_web_launcher_preserves_file_view_settings_and_applies_overrides(selection):
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser)
+    arguments = ["--web-port", "8766", "--web-fps", "24"]
+    if selection == "cli":
+        arguments.append("--web")
+    args = parser.parse_args(arguments)
+    config = {
+        "id": "Dummy-v0",
+        "physics": "default",
+        "visualization": {
+            "web": {"width": 640, "height": 360, "fps": 10},
+        },
+    }
+    if selection == "web":
+        config["web"] = True
+    elif selection == "backend":
+        config["visualization"]["backend"] = "dexsim-web"
+    merged = merge_args_with_gym_config(args, config)
+    if selection == "cli":
+        assert merged["headless"]
+        assert merged["visualization"]["backend"] == "dexsim-web"
+        assert merged["visualization"]["allow_commands"] is False
+    assert merged["visualization"]["web"] == {
+        "width": 640,
+        "height": 360,
+        "fps": 24,
+        "port": 8766,
+    }
+    assert "port" not in config["visualization"]["web"]
+    assert config["visualization"]["web"]["fps"] == 10
+
+
+def test_viser_cli_selection_overrides_authored_web_mode():
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser)
+    args = parser.parse_args(["--viser"])
+    merged = merge_args_with_gym_config(
+        args, {"id": "Dummy-v0", "physics": "default", "web": True}
+    )
+    assert merged["web"] is False
+    assert merged["visualization"]["backend"] == "viser"

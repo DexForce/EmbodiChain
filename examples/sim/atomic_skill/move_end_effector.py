@@ -116,7 +116,7 @@ def main() -> None:
         return
 
     if wait_for_user:
-        input("Press Enter to replay the MoveEndEffector demo...")
+        sim.wait_for_input("Press Enter to replay the MoveEndEffector demo...")
     replay_trajectory(
         sim,
         robot,
@@ -126,7 +126,7 @@ def main() -> None:
         hold_steps=POST_TRAJECTORY_STEPS,
     )
     if wait_for_user:
-        input("Press Enter to exit the simulation...")
+        sim.wait_for_input("Press Enter to exit the simulation...")
 
 
 if __name__ == "__main__":

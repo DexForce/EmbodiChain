@@ -97,6 +97,15 @@ orbit/zoom and recorder view. Use
 camera changes; the [evaluation guide](../../../docs/source/guides/policy_evaluation.md)
 owns user controls.
 
+`eval-policy --web` uses the same task adapter with a read-only native WebRTC
+viewport. It requires an explicit finite positive episode, control-step or
+duration budget so completion reaches report writing. Paused termination is
+rejected because Web has no resume input; use auto-reset termination. External
+Motion Policy Kit profiles do not expose Web configuration and are rejected.
+
+Web camera operations remain on the World creator thread; recording timing belongs to
+[visualization configuration](../sim-visualization/configuration.md).
+
 ## Invariants and validation
 
 Rollout kind, collector, payload and trainer must agree. APG requires graph-

@@ -285,7 +285,7 @@ def main() -> None:
     )
 
     if wait_for_user:
-        input("Press Enter to replay the PickUp demo...")
+        sim.wait_for_input("Press Enter to replay the PickUp demo...")
     # Rigid-object tutorials freeze the target with make_clear_dynamics_callback
     # at the start of the lift. That helper takes a RigidObject, and applying it
     # to this floating-base articulation clears the root velocity exactly as the
@@ -300,7 +300,7 @@ def main() -> None:
         hold_steps=POST_TRAJECTORY_STEPS,
     )
     if wait_for_user:
-        input("Press Enter to exit the simulation...")
+        sim.wait_for_input("Press Enter to exit the simulation...")
 
 
 if __name__ == "__main__":

@@ -16,7 +16,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import argparse
+import codecs
 from dataclasses import dataclass
 import json
 import os
@@ -1371,6 +1374,8 @@ class _ReplayControlInput:
     def __init__(self):
         self._fd = None
         self._term_attrs = None
+        self._decoder = None
+        self._pending_input = ""
         self.single_key = False
 
     def __enter__(self):
@@ -1409,22 +1414,38 @@ class _ReplayControlInput:
                 time.sleep(min(0.01, max(0.0, deadline - time.monotonic())))
             return None
 
-        if timeout is not None:
-            ready, _, _ = select.select([sys.stdin], [], [], timeout)
-            if not ready:
-                return None
-
-        if self.single_key:
-            value = sys.stdin.read(1)
-        else:
-            value = sys.stdin.readline()
-        if value == "":
-            raise EOFError
-        return value.lower() if self.single_key else value.strip().lower()
+        if self._decoder is None:
+            self._decoder = codecs.getincrementaldecoder(sys.stdin.encoding or "utf-8")(
+                errors=sys.stdin.errors or "strict"
+            )
+        deadline = None if timeout is None else time.monotonic() + timeout
+        while True:
+            if deadline is not None:
+                remaining = max(0.0, deadline - time.monotonic())
+                ready, _, _ = select.select([sys.stdin], [], [], remaining)
+                if not ready:
+                    return None
+            # TextIO reads can prefetch the next command or wait for an entire
+            # piped line after select reports only a partial line as ready.
+            chunk = os.read(sys.stdin.fileno(), 1)
+            value = self._decoder.decode(chunk, final=not chunk)
+            if self.single_key:
+                if value:
+                    return value.lower()
+            else:
+                self._pending_input += value
+                if "\n" in value or (not chunk and self._pending_input):
+                    command, self._pending_input = self._pending_input, ""
+                    return command.strip().lower()
+            if not chunk:
+                raise EOFError
 
 
 def _read_replay_control_command(
-    control_input: _ReplayControlInput, initial: str | None = None
+    control_input: _ReplayControlInput,
+    initial: str | None = None,
+    *,
+    poll: Callable[[], None] | None = None,
 ) -> str:
     """Read a command, collecting multi-digit jump targets until Enter."""
     command = control_input.read_key() if initial is None else initial
@@ -1436,7 +1457,13 @@ def _read_replay_control_command(
     digits = command
     print(digits, end="", flush=True)
     while True:
-        key = control_input.read_key()
+        if poll is not None:
+            poll()
+        key = control_input.read_key(
+            timeout=_REPLAY_CONTROL_POLL_INTERVAL if poll else None
+        )
+        if key is None:
+            continue
         if key in ("\r", "\n"):
             print()
             return digits
@@ -1496,10 +1523,14 @@ def _run_replay_control_loop(
             terminal_active = False
             return None
 
+    sim = getattr(replay_env.env, "sim", None)
+    web = getattr(getattr(sim, "sim_config", None), "web", False)
     seek(0)
     print(f"Trajectory has {num_steps} transitions (state indices 0..{max_step}).")
     try:
         while True:
+            if web:
+                sim.poll_viewer()
             if visualization_runtime is not None:
                 browser_step = visualization_runtime.drain_replay_control_command()
                 if browser_step is not None:
@@ -1550,7 +1581,7 @@ def _run_replay_control_loop(
             try:
                 if pending_command is not None:
                     initial = pending_command
-                elif visualization_runtime is not None:
+                elif visualization_runtime is not None or web:
                     initial = read_key(_REPLAY_CONTROL_POLL_INTERVAL)
                     if initial is None:
                         continue
@@ -1559,6 +1590,7 @@ def _run_replay_control_loop(
                 command = _read_replay_control_command(
                     control_input,
                     initial=initial,
+                    **({"poll": sim.poll_viewer} if web else {}),
                 )
             except (EOFError, KeyboardInterrupt):
                 break
@@ -1600,7 +1632,11 @@ def _replay_visualization_runtime(
 def replay_control(replay_env: ReplayWrapper) -> None:
     """Run an interactive, single-key kinematic trajectory scrubber."""
     visualization_runtime = _replay_visualization_runtime(replay_env)
-    if replay_env.env.sim_cfg.headless and visualization_runtime is None:
+    if (
+        replay_env.env.sim_cfg.headless
+        and not replay_env.env.sim_cfg.web
+        and visualization_runtime is None
+    ):
         log_warning(
             "control mode with --headless: no window to view the scrub. "
             "Re-run without --headless or enable --viser to see the replay."
@@ -1842,7 +1878,7 @@ def preview(env: gymnasium.Env) -> None:
     while end is False:
         print("Press `p` to enter embed mode to interact with the environment.")
         print("Press `q` to quit the simulation.")
-        txt = input()
+        txt = env.unwrapped.sim.wait_for_input()
         if txt == "p":
             try:
                 from IPython import embed
@@ -1853,7 +1889,15 @@ def preview(env: gymnasium.Env) -> None:
                 )
                 continue
 
-            embed()
+            if env.unwrapped.sim.sim_config.web:
+                import code
+
+                code.interact(
+                    local={"env": env, "sim": env.unwrapped.sim},
+                    readfunc=env.unwrapped.sim.wait_for_input,
+                )
+            else:
+                embed()
         elif txt == "q":
             end = True
 

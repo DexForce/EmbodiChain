@@ -18,6 +18,11 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from embodichain.lab.visualization import VisualizationCfg
+
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -205,6 +210,7 @@ def _build_gym_environment(
     simulation_device: torch.device,
     num_envs: int | None,
     headless: bool,
+    visualization: VisualizationCfg | None = None,
     renderer: str | None,
     gpu_id: int,
     seed: int | None = None,
@@ -230,6 +236,9 @@ def _build_gym_environment(
     env_cfg.sim_cfg.headless = headless
     if renderer is not None:
         env_cfg.sim_cfg.render_cfg = RenderCfg(renderer=renderer)
+    if visualization is not None:
+        env_cfg.sim_cfg.visualization = visualization
+        env_cfg.sim_cfg.__post_init__()
     env_cfg.sim_cfg.gpu_id = (
         simulation_device.index
         if simulation_device.type == "cuda" and simulation_device.index is not None
@@ -265,6 +274,7 @@ def build_gym_policy_runtime(
     device: torch.device,
     num_envs: int | None,
     headless: bool,
+    visualization: VisualizationCfg | None = None,
     renderer: str | None,
     gpu_id: int,
     seed: int | None = None,
@@ -280,6 +290,7 @@ def build_gym_policy_runtime(
         device: Policy tensor device.
         num_envs: Optional override for the number of environments.
         headless: Whether to suppress the native window.
+        visualization: Optional browser presentation override applied before World creation.
         renderer: Explicit renderer override; None preserves the task's render
             configuration, including demand-based auto selection.
         gpu_id: Renderer GPU index when the simulation device has no CUDA index.
@@ -298,6 +309,7 @@ def build_gym_policy_runtime(
         simulation_device=simulation_device or device,
         num_envs=num_envs,
         headless=headless,
+        **({"visualization": visualization} if visualization is not None else {}),
         renderer=renderer,
         gpu_id=gpu_id,
         seed=seed,

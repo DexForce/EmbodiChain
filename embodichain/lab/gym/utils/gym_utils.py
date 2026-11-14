@@ -1026,6 +1026,7 @@ def config_to_cfg(
         dexsim_startup_info=config.get("dexsim_startup_info", False),
         scene_node_capacity=config.get("scene_node_capacity"),
         headless=config.get("headless", False),
+        web=config.get("web", False),
         enable_entity_gizmo=config.get("enable_entity_gizmo", True),
         robot_ik_gizmo=config.get("robot_ik_gizmo", {}),
         device=config.get("device"),
@@ -1686,8 +1687,30 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
     if args.device is not None:
         merged_config["device"] = args.device
     viser_enabled = bool(getattr(args, "viser", False))
-    if args.headless is not None or viser_enabled:
-        merged_config["headless"] = bool(args.headless or viser_enabled)
+    web_enabled = bool(getattr(args, "web", False))
+    if web_enabled and viser_enabled:
+        raise ValueError("--web and --viser are mutually exclusive.")
+    if args.headless is not None or viser_enabled or web_enabled:
+        merged_config["headless"] = bool(args.headless or viser_enabled or web_enabled)
+    if web_enabled:
+        merged_config["web"] = True
+    if web_enabled or (
+        not viser_enabled
+        and (
+            merged_config.get("web", False)
+            or merged_config.get("visualization", {}).get("backend") == "dexsim-web"
+        )
+    ):
+        visualization = deepcopy(merged_config.get("visualization", {}))
+        if web_enabled:
+            visualization.update(backend="dexsim-web", allow_commands=False)
+        web = deepcopy(visualization.get("web", {}))
+        for name in ("port", "fps"):
+            value = getattr(args, f"web_{name}", None)
+            if value is not None:
+                web[name] = value
+        visualization["web"] = web
+        merged_config["visualization"] = visualization
     if args.renderer is not None:
         merged_config["renderer"] = args.renderer
     requested_physics = getattr(args, "physics", None)
@@ -1734,6 +1757,7 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
         merged_config["env"] = deepcopy(dict(env_config))
         merged_config["env"]["dataset"] = updated_datasets
     if viser_enabled:
+        merged_config["web"] = False
         from embodichain.lab.visualization.cli import visualization_cfg_from_args
 
         cli_visualization = visualization_cfg_from_args(args)

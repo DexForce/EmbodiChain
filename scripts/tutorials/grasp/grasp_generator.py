@@ -245,8 +245,8 @@ if __name__ == "__main__":
     sim.prepare()
 
     # get mug grasp pose
-    if not args.headless:
-        sim.open_window()
+    if not args.headless or getattr(args, "web", False):
+        sim.open_viewer()
 
     # Annotate part of the mug to be grasped by following the instructions in the visualization window:
     # 1. View grasp object in browser (e.g http://localhost:11801)
@@ -304,10 +304,10 @@ if __name__ == "__main__":
     logger.log_info(f"Get grasp pose cost time: {cost_time:.2f} seconds")
 
     grab_traj = get_grasp_traj(sim, robot, grasp_xpos)
-    input("Press Enter to start the grab mug demo...")
+    sim.wait_for_input("Press Enter to start the grab mug demo...")
     n_waypoint = grab_traj.shape[1]
     for i in range(n_waypoint):
         robot.set_qpos(grab_traj[:, i, :])
         sim.update(step=4)
         time.sleep(1e-2)
-    input("Press Enter to exit the simulation...")
+    sim.wait_for_input("Press Enter to exit the simulation...")

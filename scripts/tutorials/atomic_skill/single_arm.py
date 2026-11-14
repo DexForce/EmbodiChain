@@ -134,7 +134,7 @@ def main() -> None:
         ),
     )
     if wait:
-        input("Press Enter to finish the walkthrough...")
+        sim.wait_for_input("Press Enter to finish the walkthrough...")
 
 
 if __name__ == "__main__":

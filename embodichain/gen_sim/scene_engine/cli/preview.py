@@ -123,7 +123,7 @@ def preview_scene_export(
             articulations=articulations,
             enabled=is_viser and joint_control,
         )
-        if headless and not is_viser:
+        if headless and not is_viser and not sim.sim_config.web:
             sim.sync_render_state()
             print(f"Loaded scene preview headlessly: {source_path}")
             return
@@ -135,10 +135,10 @@ def preview_scene_export(
             # Publish restored native transforms before the first window frame.
             # Display initialization must not integrate imported dynamic bodies.
             sim.sync_render_state()
-            sim.open_window()
+            sim.open_viewer()
         print("Close with Ctrl-C.")
         while True:
-            if is_viser:
+            if is_viser or sim.sim_config.web:
                 # Browser commands are applied on the simulation thread before capture.
                 if joint_controller is not None:
                     joint_controller.update()

@@ -138,7 +138,7 @@ def run(args: argparse.Namespace) -> None:
         return
 
     if wait_for_user:
-        input("Press Enter to replay the MoveJoints demo...")
+        sim.wait_for_input("Press Enter to replay the MoveJoints demo...")
     replay_trajectory(
         sim,
         robot,
@@ -149,7 +149,7 @@ def run(args: argparse.Namespace) -> None:
         compiled=compiled,
     )
     if wait_for_user:
-        input("Press Enter to exit the simulation...")
+        sim.wait_for_input("Press Enter to exit the simulation...")
 
 
 def main() -> None:

@@ -93,9 +93,9 @@ def add_sim_args_to_parser(parser: argparse.ArgumentParser) -> None:
         type=int,
     )
 
-    from ._visualization import add_viser_args_to_parser
+    from ._visualization import add_viewer_args_to_parser
 
-    add_viser_args_to_parser(parser)
+    add_viewer_args_to_parser(parser)
 
 
 def _parse_seed(value: str) -> int:

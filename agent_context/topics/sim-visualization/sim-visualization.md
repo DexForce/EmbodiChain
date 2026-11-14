@@ -11,7 +11,8 @@
 | File | Role |
 |---|---|
 | `embodichain/lab/sim/sim_manager.py` | Owns visualization configuration, lifecycle, topology revisions, capture hooks, health, and telemetry |
-| `embodichain/lab/visualization/cfg.py` | `VisualizationCfg` and nested `ViserServerCfg` |
+| `embodichain/lab/visualization/cfg.py` | `VisualizationCfg`, `ViserServerCfg`, and `DexSimWebCfg` |
+| `embodichain/lab/visualization/_web_viewer.py` | Creator-thread WebRTC observer camera and application routes |
 | `embodichain/lab/visualization/cli.py` | Common `--viser*` arguments and standalone argument-to-config conversion |
 | `embodichain/lab/visualization/protocol.py` | Backend-neutral manifest, frame, mesh, camera, and overlay snapshots |
 | `embodichain/lab/visualization/scene_exporter.py` | Reads simulation assets and produces detached CPU snapshots |
@@ -52,6 +53,26 @@ root poses and live per-environment visibility. They share the mesh manifest/fra
 protocol without entering physical registries. Explicit `visuals`/`link_visuals`
 composition currently rejects Viser rather than publishing incomplete geometry;
 Gaussian resources require a separate typed protocol/backend extension.
+
+The experimental `dexsim-web` backend replaces the native window using the
+existing World renderer and a separate observer camera. It bypasses the Viser
+snapshot/worker pipeline above. `WebApplication` creation, request pumping,
+render scheduling and closure run on the World creator thread. Configuration
+must enable WebRTC before World construction, and startup checks the selected
+streaming library's loadability; Python API availability alone is insufficient.
+Native renderer selection is preserved. Top-level
+`SimulationManagerCfg.web` and common `--web` select it independently of arena
+count and task-sensor eligibility. `open_viewer()` / `viewer` provide the shared
+local/Web Python camera surface; explicit window APIs stay native.
+Paused and terminal loops use `poll_viewer()` / `wait_for_input()` on the creator
+thread. The Web page displays video and structured initialization information only;
+browser input is disabled and application commands are rejected. Its summary
+reuses the terminal rows from `sim/_startup_summary.py`; Gym publishes its
+combined initialization snapshot from `BaseEnv`. Native and Viser retain
+editing controls. `visualization_runtime` exposes only the Viser snapshot runtime.
+Native video-catalog restrictions remain an SDK media limitation.
+The listener binds all IPv4 interfaces and remains World-owned after application
+closure. See [WebRTC operation and limitations](../../../embodichain/lab/visualization/README.md).
 
 The simulation owns physics and assets. Scene export is read-only. When
 `allow_commands=True`, Viser Gizmo callbacks enqueue pose commands that
@@ -112,6 +133,12 @@ this invariant.
 
 ## Invariants
 
+- WebRTC observes the existing scene without exporting meshes or stepping physics.
+  Its observer has a dedicated group; task-camera buffers and transforms are read-only.
+  Explicit close persists until reopen. Removing its final camera destroys the
+  native group, so the borrowed facade is discarded and reopening creates a new one.
+  Application stop does not release the native listener; World teardown does.
+
 - Scene export must not mutate physics, actions, or asset state.
 - Gizmo commands mutate targets only after simulation-thread validation.
 - Simulation/DexSim reads stay on the simulation thread.
@@ -144,18 +171,20 @@ this invariant.
 | Native marker creation reports missing render-actor support | Use a DexSim build exposing Scene render-only mesh lifecycle and generic RenderBody/MaterialInst overlay properties, or run with `--viser`. Overlay routing supports Hybrid, FastRT and OfflineRT. |
 | Newton Viser shows only the grid after declaring a robot | Check that Viser startup did not finalize an empty Spawn scene before asset declaration and that link poses remain finite after the first update. |
 | A Newton articulation link is missing geometry or emits `mesh_id 0 out of range` | Export all render-body mesh segments and treat a zero-mesh link as empty geometry. Do not use the single-mesh articulation helper for Newton render bodies. |
-| Browser stops updating after an exporter/backend exception | `capture_visualization_safely()` latches the first error to protect simulation. Inspect health/logs, then stop and restart after fixing the cause. |
+| Browser video stops updating after an exporter/backend exception | `capture_visualization_safely()` latches the first error to protect simulation. Web keeps serving information and that error without retrying the renderer. Inspect health/logs, then restart after fixing the cause. |
 | Replicated soft body fails with a render-vertex-count mismatch | DexSim produced clone render topology different from the source. Use one environment or a compatible mesh until replication preserves the topology. |
 | Camera frustum exists but preview is blank | Color capture is disabled, no image has been captured yet, or the selected camera/environment is hidden. |
 | Stereo/contact sensor is absent | Current camera export accepts only `sensor_type == "Camera"`; non-mesh sensors are not exported. |
 | Browser lags or upload cost is high | Reduce scene/image/deformable FPS, select fewer environments, or lower point-cloud limits. |
 | Frame is counted as rejected | Its revision/run/node topology is stale, or dynamic vertex shape differs from the manifest. |
-| Port remains occupied during teardown | Call `stop_visualization()` or ensure `SimulationManager.destroy()` reaches its visualization cleanup. |
+| Port remains occupied during teardown | Stop Viser through `stop_visualization()`. The Web listener requires World destruction and a cleanup-queue flush. |
 
 ## Verification
 
 Relevant tests:
 
+- `tests/visualization/test_web_viewer.py`
+- `tests/visualization/test_web_viewer_browser.py` (opt-in GPU/Chrome)
 - `tests/visualization/test_cfg.py`
 - `tests/visualization/test_cli.py`
 - `tests/visualization/test_protocol.py`

@@ -4,6 +4,28 @@ Read this when the request needs these details. [Topic overview](sim-visualizati
 
 ## Configuration
 
+Top-level `SimulationManagerCfg.web=True` (Gym `web: true`) selects native
+WebRTC presentation, alongside headless/window selection. The compatibility
+`visualization.backend="dexsim-web"` spelling remains valid;
+`visualization.web` owns `DexSimWebCfg`. Shared launchers accept
+`--web`, mutually exclusive with `--viser`, and optional `--web-port` /
+`--web-fps` overrides, including when the file already selects Web.
+Browser modes force headless before World construction.
+WebRTC calls to `capture_visualization()` pump application events and render
+the observer on the creator thread, including while physics is paused.
+The Web page is read-only and uses the same structured initialization data
+as the terminal. `allow_commands` applies to Viser and is disabled in Web mode.
+Native RTC input uses a reserved nonmatching camera selector, independently of
+frontend flags and the custom command route. Raw SDK camera factories must
+preserve that reservation; the viewer guide owns the name and policy.
+Its sensor restrictions, network and lifecycle boundaries are documented in
+[the viewer guide](../../../embodichain/lab/visualization/README.md).
+Following a Web observer while recording uses creator-thread simulation-time
+capture. Explicit wall-clock capture requires a fixed or thread-safe custom pose
+source; it cannot read the observer from the render thread.
+
+The following snapshot and server settings describe the Viser backend.
+
 `SimulationManagerCfg.visualization` owns a `VisualizationCfg`. Server settings
 are nested under `visualization.viser_server`; there is no top-level
 `SimulationManagerCfg.viser_server`.
@@ -31,7 +53,7 @@ are nested under `visualization.viser_server`; there is no top-level
 | `label` | `"EmbodiChain"` | Browser application label |
 | `verbose` | `False` | Viser diagnostics |
 
-Validation rejects an unsupported backend, empty or duplicate explicit
+Viser configuration validation rejects an unsupported backend, empty or duplicate explicit
 `env_ids`, negative IDs, a violated optional environment limit, non-positive
 sampling rates, invalid server fields, and commands enabled without the Viser backend.
 `SceneExporter` performs the later check that every selected environment
