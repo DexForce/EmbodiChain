@@ -35,16 +35,22 @@ the original cause. Do not combine explicit and installed registration for the
 same identifier. Version 1 is the supported extension API.
 
 Concurrent resolutions share one in-flight load and its result or failure;
-same-thread recursive imports fail explicitly. Legacy factory overrides are
+same-thread recursive imports and cycles of registry waits across loading
+threads fail explicitly. Python module import locks are outside this wait
+graph; plugin modules must avoid cyclic module imports. Legacy factory overrides are
 selected before importing any installed implementation with the same name.
 
 Gym renderer-demand prediction and USD mounted-camera preflight use the same
 factory resolution, including legacy overrides; registering a Camera subclass
-must not require a second dictionary mutation. Typed nested configclasses are
+must not require a second dictionary mutation. A CameraCfg declaration reserves
+rendering and permits mounted-camera preflight for callable factories without
+constructing them. Typed nested configclasses are
 decoded from annotations, including required and nullable fields.
 Inherited annotations resolve in their declaring module. Partial nested
 overrides retain calibrated defaults even through custom decoders; non-nullable
 nested configurations reject explicit null during decoding.
+Other nested inputs must be mappings or compatible constructed config objects;
+invalid scalars and sequences fail at the decode boundary.
 
 New factories accept `factory(cfg, *, context)`. `SensorContext` supplies the
 device, instance count, manager clock and public joint-state snapshots; external

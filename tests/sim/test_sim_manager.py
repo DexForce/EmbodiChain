@@ -2980,9 +2980,13 @@ def _make_camera_attachment_manager(num_envs: int = 2) -> SimulationManager:
 
 
 @pytest.mark.parametrize("failure", [None, "parent", "attachment"])
+@pytest.mark.parametrize(
+    "factory_mode", ["context_class", "context_function", "legacy_function"]
+)
 def test_context_camera_uses_manager_attachment_at_the_current_revision(
     monkeypatch: pytest.MonkeyPatch,
     failure: str | None,
+    factory_mode: str,
 ) -> None:
     from embodichain.lab.sim.sensors import (
         SensorRegistration,
@@ -3021,9 +3025,26 @@ def test_context_camera_uses_manager_attachment_at_the_current_revision(
             calls.append(context.num_instances)
             return camera
 
+    def context_factory(config, *, context):
+        return ContextCamera(config, context=context)
+
+    def legacy_factory(config, device):
+        calls.append(sim.num_envs)
+        return camera
+
+    factory = {
+        "context_class": ContextCamera,
+        "context_function": context_factory,
+        "legacy_function": legacy_factory,
+    }[factory_mode]
     monkeypatch.setattr(registry, "_registrations", registry._registrations.copy())
     register_sensor(
-        SensorRegistration("ContextCamera", ContextCameraCfg, ContextCamera)
+        SensorRegistration(
+            "ContextCamera",
+            ContextCameraCfg,
+            factory,
+            legacy_factory=factory_mode == "legacy_function",
+        )
     )
     if failure:
         with pytest.raises(

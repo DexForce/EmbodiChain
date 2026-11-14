@@ -4808,9 +4808,20 @@ class SimulationManager:
             # Custom native sensors require a prepared physics scene; cameras
             # only depend on the pre-created Arenas.
             self.prepare()
+            if (
+                isinstance(sensor_cfg, CameraCfg)
+                and sensor_cfg.extrinsics.parent is not None
+            ):
+                self._resolve_spawn_sensor_parent_nodes(sensor_cfg.extrinsics.parent)
             # Preserve custom test/plugin factories whose two-argument
             # constructor predates the manager-owned render context.
             sensor = sensor_factory(sensor_cfg, self.device)
+            if isinstance(sensor_cfg, CameraCfg) and isinstance(sensor, Camera):
+                try:
+                    self._attach_camera_parent(sensor)
+                except Exception:
+                    sensor.destroy()
+                    raise
 
         if has_gaussians and isinstance(sensor, Camera):
             try:

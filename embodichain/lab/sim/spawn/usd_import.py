@@ -486,14 +486,16 @@ def _compile_usd_import(
                 _, sensor_factory, _ = _resolve_sensor_factory(
                     sensor_cfg.sensor_type, factories
                 )
-                if not isinstance(sensor_factory, type) or not issubclass(
+                if isinstance(sensor_factory, type) and not issubclass(
                     sensor_factory, Camera
                 ):
                     raise ValueError(
                         f"Unsupported mounted camera type {sensor_cfg.sensor_type!r}."
                     )
-                if issubclass(sensor_factory, StereoCamera) and not isinstance(
-                    sensor_cfg, StereoCameraCfg
+                if (
+                    isinstance(sensor_factory, type)
+                    and issubclass(sensor_factory, StereoCamera)
+                    and not isinstance(sensor_cfg, StereoCameraCfg)
                 ):
                     raise TypeError(
                         "StereoCamera requires a StereoCameraCfg configuration."

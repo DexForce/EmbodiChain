@@ -20,6 +20,7 @@ import sys
 import torch
 
 from abc import abstractmethod
+from collections.abc import Mapping
 from typing import (
     Dict,
     List,
@@ -169,21 +170,29 @@ def _decode_config_value(
         candidates = [item for item in get_args(annotation) if item is not type(None)]
         if len(candidates) == 1:
             annotation = candidates[0]
-    if isinstance(value, dict):
-        config_type = (
-            type(default)
-            if is_configclass(default)
-            else annotation if is_configclass(annotation) else None
-        )
-        if config_type is not None:
-            decoder = getattr(config_type, "from_dict", None)
-            if callable(decoder):
-                if is_configclass(default):
-                    defaults = _resolved_config_defaults(default, default.to_dict())
-                    value = _merge_config_overrides(defaults, value)
-                return decoder(value)
-            cfg = default if is_configclass(default) else config_type()
-            return _populate_sensor_config(cfg, value)
+    config_type = (
+        type(default)
+        if is_configclass(default)
+        else annotation if is_configclass(annotation) else None
+    )
+    if config_type is not None:
+        if isinstance(value, config_type) or (
+            is_configclass(annotation) and isinstance(value, annotation)
+        ):
+            return value
+        if not isinstance(value, Mapping):
+            raise ValueError(
+                f"Sensor configuration field {field_name!r} expects "
+                f"{config_type.__name__} or a mapping, received {type(value).__name__}."
+            )
+        decoder = getattr(config_type, "from_dict", None)
+        if callable(decoder):
+            if is_configclass(default):
+                defaults = _resolved_config_defaults(default, default.to_dict())
+                value = _merge_config_overrides(defaults, value)
+            return decoder(value)
+        cfg = default if is_configclass(default) else config_type()
+        return _populate_sensor_config(cfg, value)
     if isinstance(value, list) and get_origin(annotation) is list:
         args = get_args(annotation)
         if args:

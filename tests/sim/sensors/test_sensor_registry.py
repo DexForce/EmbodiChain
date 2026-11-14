@@ -126,6 +126,7 @@ def isolated_registry(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.setattr(registry, "_entry_points", {})
     monkeypatch.setattr(registry, "_discovered", False)
     monkeypatch.setattr(registry, "_loading", {})
+    monkeypatch.setattr(registry, "_waiting_on", {}, raising=False)
     monkeypatch.setattr(
         registry, "metadata", SimpleNamespace(entry_points=lambda **kwargs: ())
     )
@@ -210,7 +211,10 @@ def test_nested_required_and_optional_configurations_decode_from_annotations(
     assert SensorCfg.from_dict(cfg.to_dict()).to_dict() == cfg.to_dict()
 
 
-def test_registered_camera_is_recognized_before_creating_the_world() -> None:
+@pytest.mark.parametrize("callable_factory", [False, True])
+def test_registered_camera_is_recognized_before_creating_the_world(
+    callable_factory: bool,
+) -> None:
     from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
     from embodichain.lab.sim.sensors import Camera
 
@@ -221,9 +225,15 @@ def test_registered_camera_is_recognized_before_creating_the_world() -> None:
     class ExternalCamera(Camera):
         pass
 
+    def create_camera(cfg, *, context):
+        pytest.fail("Renderer prediction must not construct the sensor")
+
     register_sensor(
         SensorRegistration(
-            "ExternalCamera", ExternalCameraCfg, ExternalCamera, legacy_factory=True
+            "ExternalCamera",
+            ExternalCameraCfg,
+            create_camera if callable_factory else ExternalCamera,
+            legacy_factory=not callable_factory,
         )
     )
     env = object.__new__(EmbodiedEnv)
@@ -352,6 +362,37 @@ def test_non_nullable_nested_configuration_rejects_null(sensor_type: str) -> Non
         SensorCfg.from_dict({"sensor_type": sensor_type, "extrinsics": None})
 
 
+@pytest.mark.parametrize("invalid", [42, [], "invalid"])
+def test_nested_configuration_rejects_non_mapping_values(invalid: object) -> None:
+    with pytest.raises(ValueError, match="extrinsics.*ExtrinsicsCfg.*mapping"):
+        SensorCfg.from_dict({"sensor_type": "Camera", "extrinsics": invalid})
+
+
+def test_nested_configuration_preserves_constructed_configuration() -> None:
+    extrinsics = CameraCfg.ExtrinsicsCfg(parent="arm/tool", pos=(1.0, 2.0, 3.0))
+    cfg = SensorCfg.from_dict({"sensor_type": "Camera", "extrinsics": extrinsics})
+    cfg.validate()
+    assert cfg.extrinsics is extrinsics
+
+
+def test_constructed_configuration_accepts_declared_type_with_specialized_default() -> (
+    None
+):
+    @configclass
+    class SpecializedOptions(_Options):
+        calibration: float = 3.0
+
+    @configclass
+    class ConstructedProbeCfg(_ProbeCfg):
+        sensor_type: str = "ConstructedProbe"
+        options: _Options = SpecializedOptions()
+
+    register_sensor(SensorRegistration("ConstructedProbe", ConstructedProbeCfg, _Probe))
+    options = _Options(gain=7.0)
+    cfg = SensorCfg.from_dict({"sensor_type": "ConstructedProbe", "options": options})
+    assert cfg.options is options
+
+
 def test_duplicate_registration_and_api_mismatch_are_explicit() -> None:
     register_sensor(_registration())
     with pytest.raises(ValueError, match="already registered"):
@@ -477,6 +518,71 @@ def test_recursive_plugin_import_reports_error_and_allows_retry(
         get_sensor_registration("TestProbe")
     entry.load = _registration
     assert get_sensor_registration("TestProbe").config_cls is _ProbeCfg
+
+
+def test_concurrent_plugin_dependency_cycle_fails_without_hanging(
+    tmp_path: Path,
+) -> None:
+    """Keep a broken loader's threads inside a bounded subprocess."""
+    script = textwrap.dedent("""
+        from threading import Barrier, Thread
+        from types import SimpleNamespace
+        from embodichain.lab.sim.sensors import SensorCfg, SensorRegistration, get_sensor_registration
+        from embodichain.lab.sim.sensors import registry
+        from embodichain.utils import configclass
+
+        @configclass
+        class FirstCfg(SensorCfg):
+            sensor_type: str = 'FirstCycleSensor'
+
+        @configclass
+        class SecondCfg(SensorCfg):
+            sensor_type: str = 'SecondCycleSensor'
+
+        ready = Barrier(2)
+        errors = []
+
+        def load(other):
+            ready.wait(timeout=5)
+            get_sensor_registration(other)
+
+        entries = [
+            SimpleNamespace(name='FirstCycleSensor', value='first:SENSOR', load=lambda: load('SecondCycleSensor')),
+            SimpleNamespace(name='SecondCycleSensor', value='second:SENSOR', load=lambda: load('FirstCycleSensor')),
+        ]
+        registry.metadata = SimpleNamespace(entry_points=lambda **kwargs: entries)
+
+        def resolve(name):
+            try:
+                get_sensor_registration(name)
+            except RuntimeError as error:
+                errors.append(error)
+
+        threads = [Thread(target=resolve, args=(entry.name,), daemon=True) for entry in entries]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=5)
+        assert not any(thread.is_alive() for thread in threads), 'Cyclic plugin dependencies deadlocked'
+        assert len(errors) == 2
+        assert all('Cyclic loading' in str(error) for error in errors), errors
+        # A failed cycle must leave registrations retryable with corrected loaders.
+        expected = [SensorRegistration('FirstCycleSensor', FirstCfg, lambda cfg, **kwargs: None),
+                    SensorRegistration('SecondCycleSensor', SecondCfg, lambda cfg, **kwargs: None)]
+        for entry, registration in zip(entries, expected):
+            entry.load = lambda registration=registration: registration
+            assert get_sensor_registration(entry.name) is registration
+    """)
+    environment = dict(os.environ, PYTHONPATH=str(REPO_ROOT))
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=25,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_legacy_override_does_not_import_installed_plugin(
