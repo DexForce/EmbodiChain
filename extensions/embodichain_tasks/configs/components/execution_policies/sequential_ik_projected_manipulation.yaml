@@ -1,0 +1,27 @@
+policy_id: sequential_ik_projected_manipulation_v1
+preset_id: safe
+requires:
+  embodiment_contract: dual_arm_parallel_gripper
+planner:
+  type: toppra
+  config: {}
+motion:
+  strategy: ik_interp
+  sample_count: 220
+  ik_seed_mode: sequential
+  dynamic_collision_mode: 'off'
+tracking:
+  kind: joint_position
+  in_flight_max_abs_error: 1.0
+  terminal_max_abs_error: 1.0
+recovery:
+  max_replans: 0
+  max_skill_retries: 0
+  goal_rotation_threshold: 0.5
+workflow_recovery:
+  max_recovery_attempts: 0
+runner:
+  minimum_cycle_time: 0.0
+  hold_on_completion: false
+  hold_during_effect_verification: false
+effect_assurance: projected

@@ -2284,6 +2284,58 @@ def test_place_restores_grasp_pressure_only_for_held_rows() -> None:
     torch.testing.assert_close(context.robot.qpos[:, ARM_DOF:], observed)
 
 
+@pytest.mark.parametrize("failed_lift", [False, True])
+def test_pick_cartesian_lift_keeps_pose_path_and_failure_mask(
+    failed_lift: bool,
+) -> None:
+    generator = _motion_generator()
+    original_generate = generator.generate
+    captured = []
+
+    def generate(states, options=None):
+        captured.append((states, options))
+        result = original_generate(states, options=options)
+        if failed_lift and len(captured) == 2:
+            result.success[:] = False
+        return result
+
+    generator.generate = generate
+    action = _bind_action(generator, PickUp())
+    pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    context = _context(scene=_target_scene(pose, timestamp=0.0, version=0))
+    plan = _plan_action(
+        action,
+        SkillInvocation(
+            skill_id="pick_up",
+            goal=GraspGoal(semantics=_semantics(entity_id="target"), grasp_xpos=pose),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(strategy="ik_interp", sample_count=20),
+            skill_options=PickUpOptions(cartesian_lift=True, lift_height=0.1),
+        ),
+        context,
+    )
+    assert len(captured) == 2
+    states, options = captured[1]
+    assert options.preserve_cartesian_samples and options.is_linear
+    targets = torch.stack([state.xpos for state in states], dim=1)
+    torch.testing.assert_close(
+        targets[..., :2, 3], torch.zeros_like(targets[..., :2, 3])
+    )
+    torch.testing.assert_close(
+        targets[..., :3, :3], torch.eye(3).expand_as(targets[..., :3, :3])
+    )
+    torch.testing.assert_close(targets[:, -1, 2, 3], torch.full((NUM_ENVS,), 0.1))
+    assert plan.plan_success.tolist() == [not failed_lift] * NUM_ENVS
+    lift = plan.segment("lift")
+    hand = _joint_command_positions(plan, "hand")
+    torch.testing.assert_close(
+        hand[:, lift.start : lift.stop],
+        (torch.zeros_like if failed_lift else torch.ones_like)(
+            hand[:, lift.start : lift.stop]
+        ),
+    )
+
+
 def test_pick_holds_fully_closed_before_lifting_when_configured() -> None:
     generator = _motion_generator()
     generator.generate = Mock(wraps=generator.generate)
@@ -6948,6 +7000,39 @@ def test_handover_picks_with_nearer_arm_and_preserves_waypoint_rotations(
     }
 
 
+def test_handover_grasp_backoff_preserves_object_relative_calibration() -> None:
+    action = _bind_action(_dual_motion_generator(), HandOver())
+    semantics, _ = _handover_semantics()
+    pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    pose[:, :3, 3] = torch.tensor([-0.8, 0.1, 0.5])
+    action._resolve_grasp = Mock(
+        side_effect=lambda _affordance, sampled_pose, *_args, **kwargs: AffordanceSample(
+            success=torch.ones(NUM_ENVS, dtype=torch.bool),
+            poses=sampled_pose.clone(),
+            metadata={"key": kwargs["sample_key"]},
+        )
+    )
+    plan = _plan_action(
+        action,
+        SkillInvocation(
+            skill_id="hand_over",
+            goal=HandOverGoal(semantics, target_pose=torch.eye(4)),
+            binding=_dual_binding(action, "source", "destination"),
+            motion_policy=MotionPolicy(strategy="ik_interp", sample_count=24),
+            skill_options=HandOverOptions(
+                grasp_retract_distance=0.01, hand_interp_steps=2
+            ),
+        ),
+        _handover_context(pose),
+    )
+    assert plan.plan_success.all()
+    for candidate in plan.effect_candidates.held_object_updates.values():
+        torch.testing.assert_close(
+            candidate.object_to_eef[:, :3, 3],
+            torch.tensor([0.0, 0.0, -0.01]).expand(NUM_ENVS, -1),
+        )
+
+
 def test_handover_preserves_extended_pickup_phase_boundaries(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -9578,3 +9663,61 @@ def test_axis_align_rejects_invalid_alignment_offsets(offset: torch.Tensor) -> N
 def test_pickup_rejects_invalid_per_row_approach(direction: torch.Tensor) -> None:
     with pytest.raises(ValueError, match="approach_direction"):
         PickUpOptions(approach_direction=direction)
+
+
+def test_failed_pick_approach_does_not_plan_a_cartesian_lift() -> None:
+    generator = _motion_generator()
+    original = generator.generate
+
+    def fail(states, options=None):
+        result = original(states, options=options)
+        result.success[:] = False
+        return result
+
+    generator.generate = Mock(side_effect=fail)
+    action = _bind_action(generator, PickUp())
+    pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    plan = _plan_action(
+        action,
+        SkillInvocation(
+            skill_id="pick_up",
+            goal=GraspGoal(semantics=_semantics(entity_id="target"), grasp_xpos=pose),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(strategy="ik_interp", sample_count=20),
+            skill_options=PickUpOptions(cartesian_lift=True),
+        ),
+        _context(scene=_target_scene(pose, timestamp=0.0, version=0)),
+    )
+    assert not plan.plan_success.any()
+    generator.generate.assert_called_once()
+
+
+def test_place_cartesian_approach_preserves_goal_and_closing_pressure() -> None:
+    generator = _motion_generator()
+    generator.generate = Mock(wraps=generator.generate)
+    action = _bind_action(generator, Place())
+    task = TaskState(batch_size=NUM_ENVS, device="cpu", held_objects={"arm": _held()})
+    goal = torch.eye(4)
+    goal[0, 3] = 0.1
+    plan = _plan_action(
+        action,
+        SkillInvocation(
+            skill_id="place",
+            goal=PlaceGoal(goal),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(strategy="ik_interp", sample_count=20),
+            skill_options=PlaceOptions(cartesian_approach=True),
+        ),
+        _context(task),
+    )
+    states = generator.generate.call_args_list[0].args[0]
+    options = generator.generate.call_args_list[0].kwargs["options"]
+    assert options.preserve_cartesian_samples
+    torch.testing.assert_close(states[-1].xpos, goal.expand(NUM_ENVS, -1, -1))
+    assert plan.plan_success.all()
+    approach = plan.segment("approach")
+    hand = _joint_command_positions(plan, "hand")
+    torch.testing.assert_close(
+        hand[:, approach.start : approach.stop],
+        torch.ones_like(hand[:, approach.start : approach.stop]),
+    )

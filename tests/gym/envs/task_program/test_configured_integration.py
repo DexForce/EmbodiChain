@@ -240,9 +240,13 @@ def _integration_payload(task_name: str) -> dict[str, object]:
     )
 
 
-def _deployment_from_path(path: Path) -> ConfiguredTaskProgramDeployment:
+def _deployment_from_path(
+    path: Path, *, execution_policy: str | None = None
+) -> ConfiguredTaskProgramDeployment:
     """Return one fully composed production deployment."""
     config = load_config(path)
+    if execution_policy is not None:
+        config["task_program"]["execution_policy"] = execution_policy
     physical = _physical_components(path, config)
     assert physical.embodiment_skill_profile is not None
     return load_configured_task_program_deployment(
@@ -318,6 +322,9 @@ def test_public_composition_owns_declarations_and_defers_live_state(
     gym_before = dict(gym_registry)
     path = _config_path("hand_over")
     config = _gym_config("hand_over")
+    config["task_program"][
+        "execution_policy"
+    ] = "../../../components/execution_policies/motion_gen_verified.yaml"
     input_snapshot = deepcopy(config)
     physical = _physical_components(path, config)
     other = _physical_components(path, config)
@@ -411,7 +418,8 @@ def test_all_examples_decode_through_one_composable_integration_schema(
 def test_execution_policy_planner_config_reaches_configured_adapter() -> None:
     """The policy-owned planner selection stays outside semantic payloads."""
     deployment = _deployment_from_path(
-        _CONFIG_DIRECTORY / "hand_over" / "task.dual_ur5_dh_pgi_140_80.yaml"
+        _CONFIG_DIRECTORY / "hand_over" / "task.dual_ur5_dh_pgi_140_80.yaml",
+        execution_policy="../../../components/execution_policies/motion_gen_verified.yaml",
     )
 
     assert deployment.planner_config == {"type": "toppra", "config": {}}
@@ -435,6 +443,9 @@ def test_execution_policy_overrides_reach_runtime_without_changing_the_base(
     """A relative selector patches tuning while retaining the policy contract."""
     path = _config_path("hand_over")
     config = _gym_config("hand_over")
+    config["task_program"][
+        "execution_policy"
+    ] = "../../../components/execution_policies/motion_gen_verified.yaml"
     physical = _physical_components(path, config)
     program, task, base_policy = _resolve_task_program_components(
         config["task_program"], base_dir=path.parent
@@ -579,7 +590,8 @@ def test_single_task_program_composes_with_ur5_and_franka(
             "newton": "envs/newton.yaml",
         }
     )
-    assert ur5_config["task_program"] == franka_config["task_program"]
+    for field in ("program", "integration"):
+        assert ur5_config["task_program"][field] == franka_config["task_program"][field]
     assert ur5.program_path == franka.program_path
     assert ur5.program_id == franka.program_id == ur5_program.program_id
     assert franka_program.program_id == ur5_program.program_id
@@ -827,8 +839,8 @@ def test_pour_water_mouth_alignment_and_measured_checkpoints() -> None:
     assert positioning.steps.call.call_id == "simulation.move_held_object"
     assert pouring.steps.call.call_id == "simulation.pour"
     placement = returning.steps.call
-    release_position = program.targets[placement.at.target].values[0].position
-    rest_position = program.targets["bottle_return_pose"].values[0].position
+    release_position = program.targets[placement.at.target].position
+    rest_position = program.targets["bottle_return_pose"].position
     assert release_position[:2] == rest_position[:2]
     assert 0.006 <= release_position[2] - rest_position[2] <= 0.01
     cup_check = next(check for check in returning.validators if check.object == "cup")
@@ -836,7 +848,8 @@ def test_pour_water_mouth_alignment_and_measured_checkpoints() -> None:
 
     integration = _tableware_integration_payload("pour_water")
     lowerer = integration["runtime_services"]["registered_semantic_lowerers"][0]
-    relative = torch.tensor(lowerer["relative_pose"], dtype=torch.float64).reshape(4, 4)
+    decoded = _decode_registered_lowerer(lowerer, path="transport")
+    relative = torch.tensor(decoded.relative_pose, dtype=torch.float64).reshape(4, 4)
     registration = deployment.integration.registration
     axis = torch.tensor(
         registration.scene_binding.antipodal_grasps[0].internal_axis,
@@ -1039,7 +1052,9 @@ def test_move_held_object_lowerer_rejects_non_se3_relative_pose() -> None:
     payload = deepcopy(_tableware_integration_payload("pour_water"))
     services = payload["runtime_services"]
     lowerer = services["registered_semantic_lowerers"][0]
-    lowerer["relative_pose"][-1] = 2.0
+    malformed = torch.eye(4, dtype=torch.float64).flatten().tolist()
+    malformed[-1] = 2.0
+    lowerer["relative_pose"] = malformed
 
     with pytest.raises(ValueError, match="bottom row"):
         _decode_configured_task_program_integration(payload)
@@ -2014,7 +2029,9 @@ def test_embodiment_grasp_defaults_reach_composed_deployments(
 
     assert generator.gripper_data["model_id"] == model_id
     assert generator.algorithm_cfg == AntipodalGraspPoseGeneratorCfg()
-    assert generator.collision_cfg == ParallelJawGraspCollisionCfg()
+    assert generator.collision_cfg == ParallelJawGraspCollisionCfg(
+        filter_ground_collision=not relative_path.startswith("open_drawer/")
+    )
     assert generator.collision_geometry.provenance["model_id"] == model_id
     assert generator.annotation_cfg == GraspAnnotationCfg()
     assert factory() is not generator
@@ -4646,7 +4663,26 @@ def test_invalid_evaluation_deployment_fails_before_registration(
 def test_legacy_task_program_identities_keep_pre_evaluation_values():
     from embodichain.lab.task_program.integrations import task_program_fingerprint
 
-    deployment = _deployment_from_path(_config_path("hand_over"))
+    path = _config_path("hand_over")
+    config = _gym_config("hand_over")
+    config["task_program"][
+        "execution_policy"
+    ] = "../../../components/execution_policies/motion_gen_verified.yaml"
+    physical = _physical_components(path, config)
+    _, declaration, _ = _resolve_task_program_components(
+        config["task_program"], base_dir=path.parent
+    )
+    # Pin the published pre-repair options to protect disabled-extension identity.
+    options = declaration["profile"]["skill_options"]["hand_over"]
+    options["hand_interp_steps"] = 10
+    options["hold_steps"] = 4
+    options["grasp_retract_distance"] = 0.0
+    config["task_program"]["integration"] = {"inline": declaration}
+    deployment = _load_configured_task_program_deployment(
+        task_program=config["task_program"],
+        skill_profile=physical.embodiment_skill_profile,
+        base_dir=path.parent,
+    )
     integration = deployment.integration
     registration = integration.registration
     assert "evaluation" not in registration.fingerprint_payload()
@@ -4774,3 +4810,452 @@ def test_final_acceptance_rejects_invalid_refs_before_registration(
     with pytest.raises(ValueError, match=message):
         config_to_cfg(config, source_path=path)
     assert config["id"] not in REGISTERED_ENVS
+
+
+def test_integration_tuning_is_owned_and_closed() -> None:
+    from embodichain.lab.task_program.integrations._configured_composition import (
+        _apply_integration_overrides,
+    )
+
+    source = {
+        "requires": {"embodiment_contract": "single"},
+        "profile": {
+            "defaults": {"pick_up": {"primary": "left"}},
+            "skill_options": {"pick": {"kind": "pick_up", "lift_height": 0.15}},
+        },
+    }
+    original = deepcopy(source)
+    result = _apply_integration_overrides(
+        source,
+        {
+            "profile": {
+                "defaults": {"pick_up": {"primary": "right"}},
+                "skill_options": {"pick": {"lift_height": 0.08}},
+            }
+        },
+    )
+    assert result["profile"]["skill_options"]["pick"] == {
+        "kind": "pick_up",
+        "lift_height": 0.08,
+    }
+    assert source == original
+    assert result["profile"]["defaults"] == {"pick_up": {"primary": "right"}}
+    for patch in (
+        {"scene_binding": {}},
+        {"requires": {"scene_contract": "other"}},
+        {"profile": {"skill_options": {"unknown": {}}}},
+        {"profile": {"skill_options": {"pick": {"kind": "place"}}}},
+        {"profile": {"defaults": {"unknown": {"primary": "right"}}}},
+        {"profile": {"defaults": {"pick_up": {"unknown": "right"}}}},
+    ):
+        with pytest.raises((ValueError, TypeError)):
+            _apply_integration_overrides(source, patch)
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_integration_selector_matches_explicit_configuration(
+    tmp_path: Path, legacy: bool
+) -> None:
+    """Selector tuning reaches the same registration as an explicit integration."""
+    path = _config_path("repeated_pick_place")
+    config = _gym_config("repeated_pick_place")
+    physical = _physical_components(path, config)
+    _, original, _ = _resolve_task_program_components(
+        config["task_program"], base_dir=path.parent
+    )
+    from embodichain.utils.utility import save_config
+
+    component = deepcopy(original)
+    if legacy:
+        component["profile"]["action_options"] = component["profile"].pop(
+            "skill_options"
+        )
+    save_config(tmp_path / "integration.yaml", component)
+    selection = deepcopy(config["task_program"])
+    selection["integration"] = {
+        "component": str(tmp_path / "integration.yaml"),
+        "overrides": {"profile": {"skill_options": {"pick": {"lift_height": 0.08}}}},
+    }
+    tuned = _load_configured_task_program_deployment(
+        task_program=selection,
+        skill_profile=physical.embodiment_skill_profile,
+        base_dir=path.parent,
+    )
+    explicit = deepcopy(original)
+    explicit["profile"]["skill_options"]["pick"]["lift_height"] = 0.08
+    selection["integration"] = {"inline": explicit}
+    expected = _load_configured_task_program_deployment(
+        task_program=selection,
+        skill_profile=physical.embodiment_skill_profile,
+        base_dir=path.parent,
+    )
+    assert (
+        tuned.integration.registration.fingerprint_payload()
+        == expected.integration.registration.fingerprint_payload()
+    )
+    assert load_config(tmp_path / "integration.yaml") == component
+    selection["integration"] = {
+        "component": str(tmp_path / "integration.yaml"),
+        "overrides": {"profile": {"skill_options": {"pick": {"lift_height": -1.0}}}},
+    }
+    with pytest.raises((ValueError, TypeError)):
+        _load_configured_task_program_deployment(
+            task_program=selection,
+            skill_profile=physical.embodiment_skill_profile,
+            base_dir=path.parent,
+        )
+    selection["integration"]["overrides"] = {
+        "profile": {"defaults": {"pick_up": {"primary": "undeclared_resource"}}}
+    }
+    with pytest.raises((ValueError, TypeError)):
+        invalid = _load_configured_task_program_deployment(
+            task_program=selection,
+            skill_profile=physical.embodiment_skill_profile,
+            base_dir=path.parent,
+        )
+        invalid.integration.registration.catalog.preflight(invalid.load_program())
+
+
+def test_contact_path_options_decode_and_keep_inactive_identity() -> None:
+    from embodichain.lab.task_program.integrations.catalog import _canonical_value
+    from embodichain.lab.sim.atomic_skills import HandOverOptions
+
+    pick = _decode_skill_options(
+        {"kind": "pick_up", "cartesian_lift": True}, path="options"
+    )
+    handover = _decode_skill_options(
+        {"kind": "hand_over", "grasp_retract_distance": 0.01}, path="options"
+    )
+    assert pick.cartesian_lift is True
+    assert handover.grasp_retract_distance == 0.01
+    assert "cartesian_lift" not in _canonical_value(PickUpOptions())["fields"]
+    from embodichain.lab.sim.atomic_skills import PlaceOptions
+
+    assert "cartesian_approach" not in _canonical_value(PlaceOptions())["fields"]
+    assert _decode_skill_options(
+        {"kind": "place", "cartesian_approach": True}, path="options"
+    ).cartesian_approach
+    assert "grasp_retract_distance" not in _canonical_value(HandOverOptions())["fields"]
+    assert _canonical_value(pick)["fields"]["cartesian_lift"] is True
+    for declaration in (
+        {"kind": "pick_up", "cartesian_lift": 1},
+        {"kind": "hand_over", "grasp_retract_distance": -0.01},
+    ):
+        with pytest.raises((ValueError, TypeError)):
+            _decode_skill_options(declaration, path="options")
+
+
+@pytest.mark.parametrize("orientation", ["quaternion_xyzw", "rotation_matrix"])
+def test_compact_pose_keeps_legacy_integration_identity(orientation: str) -> None:
+    """Authoring shape must not change the resolved transform or registration."""
+    path = _CONFIG_DIRECTORY / "repeated_pick_place/task.tianji_marvin.yaml"
+    config = load_config(path)
+    physical = _physical_components(path, config)
+    _, declaration, _ = _resolve_task_program_components(
+        config["task_program"], base_dir=path.parent
+    )
+    legacy = [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -1.0,
+        0.05,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+    ]
+    compact = {
+        "position": [0.0, 0.0, 0.05],
+        orientation: (
+            [1.0, 0.0, 0.0, 0.0]
+            if orientation == "quaternion_xyzw"
+            else [[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]]
+        ),
+    }
+    fingerprints = []
+    for value in (legacy, compact):
+        source = deepcopy(declaration)
+        source["profile"]["skill_options"]["pick"]["fixed_object_to_eef"] = value
+        selection = {**config["task_program"], "integration": {"inline": source}}
+        deployment = _load_configured_task_program_deployment(
+            task_program=selection,
+            skill_profile=physical.embodiment_skill_profile,
+            base_dir=path.parent,
+        )
+        fingerprints.append(deployment.integration.integration_fingerprint)
+        options = _decode_skill_options(
+            {"kind": "pick_up", "fixed_object_to_eef": value}, path="pick"
+        )
+        torch.testing.assert_close(
+            options.fixed_object_to_eef,
+            torch.tensor(legacy, dtype=torch.float32).reshape(4, 4),
+            rtol=0,
+            atol=0,
+        )
+    assert fingerprints[0] == fingerprints[1]
+
+
+def test_compact_matrix_preserves_rounded_calibration_numbers() -> None:
+    from embodichain.lab.task_program.integrations.configured import _pose_matrix
+    import struct
+
+    rotation = [
+        [0.307720125, 0.0, 0.951476812],
+        [0.0, -1.0, -0.0],
+        [0.951476812, 0.0, -0.307720125],
+    ]
+    expected = [
+        0.307720125,
+        0.0,
+        0.951476812,
+        0.025,
+        0.0,
+        -1.0,
+        -0.0,
+        0.0,
+        0.951476812,
+        0.0,
+        -0.307720125,
+        -0.025,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+    ]
+    actual = _pose_matrix(
+        {"position": [0.025, 0.0, -0.025], "rotation_matrix": rotation}, path="pose"
+    )
+    assert struct.pack("16d", *actual) == struct.pack("16d", *expected)
+
+
+@pytest.mark.parametrize(
+    "pose",
+    [
+        {"position": [0, 0, 0]},
+        {"position": [0, 0, 0], "quaternion_xyzw": [0, 0, 0, 0]},
+        {"position": [0, 0, 0], "quaternion_xyzw": [0, 0, 0, 1], "frame": "world"},
+        {
+            "position": [0, 0, 0],
+            "quaternion_xyzw": [0, 0, 0, 1],
+            "rotation_matrix": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+        },
+        {"position": [0, 0, 0], "rotation_matrix": [[1, 0, 0], [0, 1, 0]]},
+        {"position": [0, 0, 0], "rotation_matrix": [[2, 0, 0], [0, 1, 0], [0, 0, 1]]},
+    ],
+)
+def test_compact_pose_rejects_ambiguous_or_invalid_orientation(
+    pose: dict[str, object],
+) -> None:
+    from embodichain.lab.task_program.integrations.configured import _pose_matrix
+
+    with pytest.raises((TypeError, ValueError)):
+        _pose_matrix(pose, path="pose")
+
+
+def test_inspector_explains_backend_parameter_owners_and_monitor_defaults(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import runpy
+
+    inspector = runpy.run_path(
+        str(
+            _REPOSITORY_ROOT
+            / ".agents/skills/add-task-program/scripts/inspect_deployment.py"
+        )
+    )
+    path = _CONFIG_DIRECTORY / "repeated_pick_place/task.tianji_marvin.yaml"
+    registered_before = dict(REGISTERED_ENVS)
+    summary = inspector["inspect_deployment"](path, explain=True)
+    view = summary["resolved_configuration"]
+    assert summary["physics"] == view["physics"]["value"] == "default"
+    assert view["physics"]["source"]["file"].endswith("envs/tabletop.default.yaml")
+    left = next(r for r in view["resources"] if r["resource_id"] == "left")
+    assert (
+        next(e for e in left["endpoints"] if e["endpoint_id"] == "motion")[
+            "control_part"
+        ]
+        == "left_arm"
+    )
+    assert view["resource_source"]["file"].endswith("embodiments/tianji_marvin.yaml")
+    assert (
+        view["runtime_services"]["values"]["control_part_evidence"][
+            "minimum_displacement"
+        ]
+        == 0.004
+    )
+    entries = {(p["scope"], tuple(p["path"])): p for p in view["parameters"]}
+    speed = entries["execution_policy", ("motion", "velocity_limit")]
+    assert speed["value"] == 0.2
+    assert speed["source"]["kind"] == "component"
+    assert speed["source"]["file"].endswith("sequential_ik_verified.yaml")
+    lift = entries["integration", ("profile", "skill_options", "pick", "lift_height")]
+    assert lift["value"] == 0.05
+    assert lift["source"]["kind"] == "deployment_override"
+    assert lift["source"]["file"] == str(path.resolve())
+    monitors = {(p["monitor"], p["parameter"]): p for p in view["monitor_parameters"]}
+    assert monitors["place", "attached_translation_threshold"]["value"] == 0.01
+    assert monitors["place", "attached_translation_threshold"]["source"][
+        "file"
+    ].endswith("integration.tabletop.yaml")
+    assert monitors["place", "attached_rotation_threshold"]["value"] == 0.2
+    assert (
+        monitors["place", "attached_rotation_threshold"]["source"]["kind"]
+        == "sdk_default"
+    )
+    assert dict(REGISTERED_ENVS) == registered_before
+    assert inspector["main"]([str(path), "--explain"]) == 0
+    text = capsys.readouterr().out
+    assert "physics=default" in text
+    assert "SDK default (CompositeEffectMonitorCfg)" in text
+
+
+def test_compact_quaternion_normalization_has_one_rotation_identity() -> None:
+    from embodichain.lab.task_program.integrations.configured import _pose_matrix
+    import struct
+
+    expected = (
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+    )
+    for quaternion in ([2.0, 0.0, 0.0, 0.0], [-2.0, 0.0, 0.0, 0.0]):
+        actual = _pose_matrix(
+            {"position": [0, 0, 0], "quaternion_xyzw": quaternion}, path="pose"
+        )
+        assert struct.pack("16d", *actual) == struct.pack("16d", *expected)
+
+
+@pytest.mark.parametrize("style", ["inline", "component_override"])
+def test_inspector_tracks_policy_inline_and_override_origins(
+    evaluation_deployment, style: str
+) -> None:
+    import runpy
+    import yaml
+
+    path, _, _ = evaluation_deployment
+    config = load_config(path)
+    component = config["task_program"]["execution_policy"]
+    original = load_config(component)
+    if style == "inline":
+        tuned = deepcopy(original)
+        tuned["motion"]["velocity_limit"] = 0.3
+        tuned["planner"] = {"type": "toppra"}
+        config["task_program"]["execution_policy"] = {"inline": tuned}
+        expected_path = [
+            "task_program",
+            "execution_policy",
+            "inline",
+            "motion",
+            "velocity_limit",
+        ]
+    else:
+        config["task_program"]["execution_policy"] = {
+            "component": component,
+            "overrides": {"motion": {"velocity_limit": 0.3}},
+        }
+        expected_path = [
+            "task_program",
+            "execution_policy",
+            "overrides",
+            "motion",
+            "velocity_limit",
+        ]
+    path.write_text(yaml.safe_dump(config))
+    inspector = runpy.run_path(
+        str(
+            _REPOSITORY_ROOT
+            / ".agents/skills/add-task-program/scripts/inspect_deployment.py"
+        )
+    )
+    summary = inspector["inspect_deployment"](path, explain=True)
+    parameter = next(
+        p
+        for p in summary["resolved_configuration"]["parameters"]
+        if p["scope"] == "execution_policy"
+        and p["path"] == ["motion", "velocity_limit"]
+    )
+    assert parameter["value"] == 0.3
+    assert parameter["source"]["file"] == str(path.resolve())
+    assert parameter["source"]["path"] == expected_path
+    assert load_config(component) == original
+    if style == "inline":
+        derived = next(
+            p
+            for p in summary["resolved_configuration"]["parameters"]
+            if p["scope"] == "execution_policy" and p["path"] == ["planner", "config"]
+        )
+        assert derived["value"] == {}
+        assert derived["source"]["kind"] == "derived"
+        assert derived["source"]["path"] == [
+            "task_program",
+            "execution_policy",
+            "inline",
+            "planner",
+        ]
+
+
+def test_inspector_reports_newton_from_selected_environment() -> None:
+    import runpy
+
+    inspector = runpy.run_path(
+        str(
+            _REPOSITORY_ROOT
+            / ".agents/skills/add-task-program/scripts/inspect_deployment.py"
+        )
+    )
+    path = _CONFIG_DIRECTORY / "cloth_fold/task.w1.yaml"
+    summary = inspector["inspect_deployment"](path, explain=True)
+    assert summary["physics"] == "newton"
+    assert summary["resolved_configuration"]["physics"]["source"]["file"] == str(
+        path.parent / "env.yaml"
+    )
+
+
+def test_inspector_json_stdout_contains_only_the_result(tmp_path: Path) -> None:
+    import json
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(
+                _REPOSITORY_ROOT
+                / ".agents/skills/add-task-program/scripts/inspect_deployment.py"
+            ),
+            str(_CONFIG_DIRECTORY / "repeated_pick_place/task.tianji_marvin.yaml"),
+            "--explain",
+            "--json",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    data = json.loads(result.stdout)
+    assert data["errors"] == []
+    assert data["deployments"][0]["physics"] == "default"
+    assert data["deployments"][0]["resolved_configuration"]["components"][
+        "integration"
+    ].endswith("integration.tabletop.yaml")

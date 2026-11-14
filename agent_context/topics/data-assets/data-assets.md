@@ -188,6 +188,17 @@ Task packages must already be installed; downloading weights does not register
 new environment implementations. Test the Hub boundary with fake downloads and
 validate a real selected-model download separately.
 
+## Qualified cloth replay inputs
+
+`scripts/tools/prepare_cloth_fold_assets.py` installs the pinned M02 input bundle
+into the normal data root. It uses the shared download lock, verifies archive
+and task-owned URDF/mesh SHA-256 values, includes URDF-relative visual and
+collision dependencies, and rejects conflicting local files. The packaged
+cloth task retains its qualified replay stream and 15 mm final centroid rules.
+The installer also supports an explicit custom root; launch with that same
+`EMBODICHAIN_DATA_ROOT`. It does not change the global root or substitute the
+generic W1 archive for the qualified robot.
+
 ## Failure diagnosis and change sites
 
 | Symptom | Inspect |

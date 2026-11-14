@@ -472,6 +472,7 @@ topics:
   - embodichain/lab/task_program/integrations/invocation_policy.py
   - embodichain/lab/task_program/integrations/composition.py
   - embodichain/lab/task_program/integrations/_configured_composition.py
+  - .agents/skills/add-task-program/scripts/inspect_deployment.py
   - embodichain/lab/gym/envs/task_program/
   - embodichain/agents/mllm/task_program.py
   watch_paths: [extensions/embodichain_tasks/configs/components/embodiments/, extensions/embodichain_tasks/configs/components/execution_policies/,
@@ -578,6 +579,7 @@ topics:
   - embodichain/data/assets/materials.py
   - embodichain/data/assets/demo_assets.py
   - scripts/tools/prepare_yam_i2rt_assets.py
+  - scripts/tools/prepare_cloth_fold_assets.py
   - embodichain/data/default_materials.py
   - embodichain/data/default_materials.json
   - embodichain/_material_catalog.py

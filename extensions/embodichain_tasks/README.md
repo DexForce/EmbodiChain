@@ -74,7 +74,7 @@ task_program:
 ```
 
 Overrides are limited to `motion.sample_count`, `motion.velocity_limit`,
-`motion.acceleration_limit`, `motion.dynamic_collision_mode`,
+`motion.acceleration_limit`, `motion.dynamic_collision_mode`, `motion.ik_seed_mode`,
 `recovery.skill_timeout` and `recovery.goal_rotation_threshold`. They patch
 only the declared fields; all other base values are retained. The resolved
 values pass the normal policy decoders, including integer, finite-number and
@@ -82,6 +82,48 @@ enum validation. Contracts, planner selection, tracking, runner and effect
 assurance stay in the base policy. The component path resolves from the
 deployment, just as a string reference does. Asset materialization writes the
 resolved policy into its standalone output.
+
+Omit overrides that repeat the selected policy's values. A string reference is
+sufficient when no tuning remains; for example, the Marvin repeated-pick/place
+deployment directly selects `sequential_ik_verified.yaml`.
+
+### Task Program transforms and resolved configuration
+
+Official integrations use `profile.skill_options`; the former `action_options`
+key remains accepted for existing configurations. Specifying both is an error.
+
+Integration transforms accept a compact position/orientation declaration:
+
+```yaml
+fixed_object_to_eef:
+  position: [0.0, 0.0, 0.05]
+  quaternion_xyzw: [1.0, 0.0, 0.0, 0.0]
+```
+
+Declare exactly one of `quaternion_xyzw` or a three-row `rotation_matrix`.
+Quaternions must be finite and nonzero and are normalized. A `rotation_matrix`
+retains its authored numbers without orthogonalization, allowing rounded legacy
+calibrations to keep their exact expanded transform and identity. Legacy flat
+16-number transforms remain supported; physical gripper geometry also retains
+its existing four-row matrix form. The shorthand preserves each field's frame:
+it does not change `object_target_frame` or convert parent/world coordinates.
+These forms describe calibration, not a guarantee of physical task success.
+
+Inspect the selected backend and composed parameters without starting simulation:
+
+```bash
+python .agents/skills/add-task-program/scripts/inspect_deployment.py \
+  extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.tianji_marvin.yaml \
+  --explain
+```
+
+Text output shows the physical backend, selected files, parameter values and
+their component/inline/deployment-override owners. Decoder-derived values are
+marked at their nearest authored owner. Built-in composite effect monitor
+defaults are expanded and marked as SDK defaults. Add `--json` for the
+`resolved_configuration` object, including typed runtime preset defaults.
+Provider-specific monitor defaults are not guessed. These are configuration
+facts; live effect measurements and acceptance still require execution.
 
 Task-facing trajectory expansion is an optional third owner. A runnable task
 can reference it without copying the robot or environment declaration:
@@ -314,3 +356,24 @@ source refinement, protected trajectory/time variants and measured LeRobot
 collection through the standard `run-task` owner. Its catalog exposes one
 Panda deployment; the standard task requires no example-generated configuration.
 See the task README for assets, accepted geometry and the 78-candidate benchmark.
+
+### Task integration tuning
+
+An integration selector can use `{component, overrides}` as well as a path.
+The `blocks_ranking_rgb` deployments share `task_program/integration.yaml` and
+retain robot-specific tuning in their deployment selectors. Overrides accept
+`integration_id`, `requires.embodiment_contract`, and existing
+`profile.skill_options` entries. The allowed option fields are
+`pre_grasp_distance`, `lift_height`, `hand_interp_steps`, `grasp_settle_steps`,
+`fixed_object_to_eef`, `preserve_current_object_orientation`,
+`release_settle_steps`, `approach_along_grasp_axis`, `cartesian_lift`,
+and `cartesian_approach`.
+Motion overrides also accept the existing `ik_seed_mode` enum; incompatible
+strategy/seed selections still fail the normal motion decoder.
+Existing `profile.defaults` call/slot bindings may select a different declared
+resource; new defaults and slots are rejected.
+Arrays replace whole values. Scene bindings, scene contracts, runtime services,
+and skill kinds cannot be overridden. New resource defaults and slots cannot be
+introduced. Resolved values still pass ordinary decoding and embodiment/policy
+contract checks after composition. Paths owned by
+the integration remain relative to its component file.

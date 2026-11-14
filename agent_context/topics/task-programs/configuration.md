@@ -180,10 +180,51 @@ Ownership is explicit rather than a generic deep merge:
   effect-assurance policy. Planner collision objects are attached from the
   selected live scene and are not serialized in the policy.
 
+`task_program.integration` also accepts a closed `{component, overrides}`
+selector. It loads the referenced integration relative to the deployment and
+applies an owned, allowlisted patch before ordinary contract/catalog validation.
+Overrides may select `integration_id`, `requires.embodiment_contract`, and
+existing `profile.skill_options` entries' grasp/placement tuning fields.
+`skill_options` is the canonical authoring key; the legacy `action_options`
+alias remains readable, and specifying both is rejected.
+Existing `profile.defaults` call/slot bindings may select another explicitly
+named resource; new call defaults and slots are rejected and the selected
+resource must still pass ordinary capability checks.
+Scene bindings, scene contracts, services and skill kinds cannot be overridden.
+New resource defaults and slots cannot be introduced. Arrays replace whole
+values; this is not generic deep merging. Component-owned asset paths remain relative to the integration file.
+The `blocks_ranking_rgb` and `stack_blocks_two` deployments demonstrate sharing
+a semantic scene while retaining explicitly calibrated robot-specific grasp parameters. Selecting a
+contract still requires the embodiment and execution policy to satisfy it.
+
+Integration transform fields also accept `{position, quaternion_xyzw}` or
+`{position, rotation_matrix}` in addition to their legacy flat matrices.
+`configured.py._pose_matrix` normalizes finite nonzero XYZW quaternions and
+retains explicit matrix coefficients without orthogonalization. Compact forms
+require exactly one orientation; coordinate-frame ownership is unchanged.
+Geometry/TCP declarations retain their existing four-row matrix form as well.
+
+The read-only deployment inspector's `--explain` output identifies the concrete
+physical backend and traces composed integration/policy fields to component,
+inline, or deployment-override locations. `--json` includes
+`resolved_configuration` and typed preset defaults. Built-in composite monitor
+defaults are resolved through `CompositeEffectMonitorCfg`; other providers'
+defaults are not inferred. Inspection neither constructs simulation nor provides
+physical-effect evidence. See the task package usage for the authoring forms.
+
+Contact-sensitive tasks may explicitly select pickup `cartesian_lift` or
+placement `cartesian_approach` in skill options. They require `ik_interp` and
+reuse Cartesian sampling and joint-limit retiming; ordinary calls retain their
+existing path and inactive-option fingerprints. Existing placement
+`cartesian_waypoint_count` remains a keyframe count. HandOver's optional
+`grasp_retract_distance` backs sampled TCPs away along their approach axis;
+its zero default preserves the published registration identity. None of these
+options changes effect or task-acceptance thresholds.
+
 `task_program.execution_policy` accepts a string path or a closed
 `{component, overrides}` selector. `_resolve_execution_policy()` in
 `integrations/_configured_composition.py` applies allowlisted motion/recovery
-scalar overrides to an owned copy, then validates the resolved values with the
+overrides to an owned copy, then validates the resolved values with the
 normal policy decoders. Contracts, planner selection, tracking and effect
 assurance remain component-owned. Paths in either form resolve from the runnable
 deployment. Reuse the base policy and declare tuning in the selector instead of

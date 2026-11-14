@@ -249,3 +249,15 @@ The runner cancels/holds safely before its once-only abort notification.
 | Pour | A supplied receiver/source-mouth target determines compensated geometry; omission retains local-axis mode. `PourOptions.rotation_duration` sets an optional minimum for each tilt/return leg. Local-axis mode stretches each row's native timing before control-grid resampling and batch padding, retaining planning policy and motion limits. Hosts measure mouth alignment/height during tilt and physical outcome. |
 | Held transport / Place / Pour | Continue the bound closing command until release; a contact-blocked measured aperture does not maintain closing effort. |
 | ExecuteDemoSkill | Internal demonstration events do not introduce independent recovery boundaries. |
+
+
+## Contact-path selection
+
+Pickup's optional `cartesian_lift` and placement's `cartesian_approach` use the
+existing sampled Cartesian path and joint-limit retiming with `ik_interp`.
+Pickup plans a separate straight world-Z lift only after a feasible approach;
+failed rows remain ineligible. Placement retains its closing pressure until
+release. The default paths remain unchanged. HandOver can explicitly retract
+sampled grasp TCPs through `grasp_retract_distance` before deriving transport
+and handover targets. The offset is a planning declaration; acquisition,
+retention and final acceptance still require the original physical evidence.

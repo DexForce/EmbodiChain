@@ -275,6 +275,63 @@ def _enum(value: object, enum_type: type[_EnumT], *, path: str) -> _EnumT:
         raise ValueError(f"{path} must be one of {choices}, got {selected!r}.") from exc
 
 
+def _pose_matrix(value: object, *, path: str) -> tuple[float, ...]:
+    """Decode a legacy flat transform or an explicit position/orientation pair.
+
+    Matrix rotations retain the authored numbers without orthogonalization.
+    Compact quaternions use the same XYZW convention as program pose targets.
+    Legacy tuples and explicit matrix coefficients retain the exact numerical
+    values used by registration identity.
+    """
+    if not isinstance(value, Mapping):
+        return _finite_tuple(value, path=path, expected_length=16)
+    config = _mapping(
+        value,
+        path=path,
+        required=frozenset({"position"}),
+        optional=frozenset({"quaternion_xyzw", "rotation_matrix"}),
+    )
+    if ("quaternion_xyzw" in config) == ("rotation_matrix" in config):
+        raise ValueError(
+            f"{path} must select exactly one of quaternion_xyzw or rotation_matrix."
+        )
+    position = _finite_tuple(
+        config["position"], path=f"{path}.position", expected_length=3
+    )
+    if "quaternion_xyzw" in config:
+        import torch
+
+        from embodichain.utils.math import xyz_quat_to_4x4_matrix
+
+        quaternion = _finite_tuple(
+            config["quaternion_xyzw"],
+            path=f"{path}.quaternion_xyzw",
+            expected_length=4,
+        )
+        norm = math.hypot(*quaternion)
+        if not math.isfinite(norm) or norm == 0.0:
+            raise ValueError(f"{path}.quaternion_xyzw must have a finite nonzero norm.")
+        normalized = tuple(component / norm for component in quaternion)
+        matrix = xyz_quat_to_4x4_matrix(
+            torch.tensor([position + normalized], dtype=torch.float64, device="cpu")
+        )[0].tolist()
+        for row in range(3):
+            for column in range(3):
+                if matrix[row][column] == 0.0:
+                    matrix[row][column] = 0.0
+    else:
+        rows = _sequence(config["rotation_matrix"], path=f"{path}.rotation_matrix")
+        if len(rows) != 3:
+            raise ValueError(f"{path}.rotation_matrix must have shape (3, 3).")
+        rotation = [
+            _finite_tuple(row, path=f"{path}.rotation_matrix[{i}]", expected_length=3)
+            for i, row in enumerate(rows)
+        ]
+        matrix = [list(row) + [position[i]] for i, row in enumerate(rotation)]
+        matrix.append([0.0, 0.0, 0.0, 1.0])
+    return _geometry_pose(matrix, path=path)
+
+
 def _nested_identifier_mapping(
     value: object,
     *,
@@ -549,10 +606,9 @@ def _decode_antipodal_grasp(
         ),
         aliases=_identifier_tuple(config.get("aliases", ()), path=f"{path}.aliases"),
         relative_pose=(
-            _finite_tuple(
+            _pose_matrix(
                 config["relative_pose"],
                 path=f"{path}.relative_pose",
-                expected_length=16,
             )
             if "relative_pose" in config
             else identity_pose
@@ -627,10 +683,9 @@ def _decode_rigidized_articulation_antipodal_grasp(
         ),
         aliases=_identifier_tuple(config.get("aliases", ()), path=f"{path}.aliases"),
         relative_pose=(
-            _finite_tuple(
+            _pose_matrix(
                 config["relative_pose"],
                 path=f"{path}.relative_pose",
-                expected_length=16,
             )
             if "relative_pose" in config
             else identity_pose
@@ -694,10 +749,9 @@ def _decode_placement_affordance(
         ),
     }
     if "object_target_pose" in config:
-        kwargs["object_target_pose"] = _finite_tuple(
+        kwargs["object_target_pose"] = _pose_matrix(
             config["object_target_pose"],
             path=f"{path}.object_target_pose",
-            expected_length=16,
         )
     if binding_type is ContainerAffordanceBinding:
         kwargs["release_clearance"] = _real(
@@ -1023,6 +1077,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                 "retreat_distance",
                 "retreat_steps",
                 "receive_pick_object_part",
+                "grasp_retract_distance",
                 "object_motion_keyframes",
                 "grasp_settle_steps",
                 "release_settle_steps",
@@ -1042,6 +1097,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                 "fixed_object_to_eef",
                 "max_approach_retract_z",
                 "cartesian_waypoint_count",
+                "cartesian_approach",
                 "preserve_current_object_orientation",
                 "direction",
                 "approach_distance",
@@ -1051,6 +1107,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                 "translation_distance",
                 "preshape_fraction",
                 "approach_along_grasp_axis",
+                "cartesian_lift",
                 "release_retreat_distance",
                 "push_approach_offset",
                 "rotate_angle",
@@ -1094,7 +1151,11 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                     "grasp_frame_to_eef",
                     "fixed_object_to_eef",
                     *(
-                        ("approach_along_grasp_axis", "initial_lift_height")
+                        (
+                            "approach_along_grasp_axis",
+                            "initial_lift_height",
+                            "cartesian_lift",
+                        )
                         if kind == "pick_up"
                         else ()
                     ),
@@ -1103,6 +1164,10 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
             ),
         )
         kwargs: dict[str, object] = {}
+        if "cartesian_lift" in config:
+            kwargs["cartesian_lift"] = _boolean(
+                config["cartesian_lift"], path=f"{path}.cartesian_lift"
+            )
         if "approach_along_grasp_axis" in config:
             kwargs["approach_along_grasp_axis"] = _boolean(
                 config["approach_along_grasp_axis"],
@@ -1177,10 +1242,9 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
             import torch
 
             kwargs["grasp_frame_to_eef"] = torch.tensor(
-                _finite_tuple(
+                _pose_matrix(
                     config["grasp_frame_to_eef"],
                     path=f"{path}.grasp_frame_to_eef",
-                    expected_length=16,
                 ),
                 dtype=torch.float32,
             ).reshape(4, 4)
@@ -1188,10 +1252,9 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
             import torch
 
             kwargs["fixed_object_to_eef"] = torch.tensor(
-                _finite_tuple(
+                _pose_matrix(
                     config["fixed_object_to_eef"],
                     path=f"{path}.fixed_object_to_eef",
-                    expected_length=16,
                 ),
                 dtype=torch.float32,
             ).reshape(4, 4)
@@ -1221,11 +1284,16 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                     "lift_height",
                     "max_approach_retract_z",
                     "cartesian_waypoint_count",
+                    "cartesian_approach",
                     "preserve_current_object_orientation",
                 }
             ),
         )
         kwargs = {}
+        if "cartesian_approach" in config:
+            kwargs["cartesian_approach"] = _boolean(
+                config["cartesian_approach"], path=f"{path}.cartesian_approach"
+            )
         if "hand_interp_steps" in config:
             kwargs["hand_interp_steps"] = _integer(
                 config["hand_interp_steps"],
@@ -1458,10 +1526,9 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
             import torch
 
             kwargs["contact_frame_to_eef"] = torch.tensor(
-                _finite_tuple(
+                _pose_matrix(
                     config["contact_frame_to_eef"],
                     path=f"{path}.contact_frame_to_eef",
-                    expected_length=16,
                 ),
                 dtype=torch.float32,
             ).reshape(4, 4)
@@ -1489,10 +1556,9 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                             path=f"{calibration_path}.control_part",
                         ),
                         contact_frame_to_eef=torch.tensor(
-                            _finite_tuple(
+                            _pose_matrix(
                                 calibration["contact_frame_to_eef"],
                                 path=f"{calibration_path}.contact_frame_to_eef",
-                                expected_length=16,
                             ),
                             dtype=torch.float32,
                         ).reshape(4, 4),
@@ -1630,6 +1696,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
             optional=frozenset(
                 {
                     "pre_grasp_distance",
+                    "grasp_retract_distance",
                     "lift_height",
                     "hand_interp_steps",
                     "hold_steps",
@@ -1643,6 +1710,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
         )
         kwargs = {}
         for field_name in (
+            "grasp_retract_distance",
             "pre_grasp_distance",
             "lift_height",
             "retreat_distance",
@@ -2242,6 +2310,8 @@ def _decode_robot_profile(value: object) -> SimulationRobotSkillProfileBinding:
 
 def _geometry_pose(value: object, *, path: str) -> tuple[float, ...]:
     """Freeze and validate one explicit rigid geometry/TCP transform."""
+    if isinstance(value, Mapping):
+        return _pose_matrix(value, path=path)
     import numpy as np
 
     rows = _sequence(value, path=path)
@@ -2509,10 +2579,9 @@ def _decode_goal_pose(
             relative_pose=(
                 None
                 if "relative_pose" not in config
-                else _finite_tuple(
+                else _pose_matrix(
                     config["relative_pose"],
                     path=f"{path}.relative_pose",
-                    expected_length=16,
                 )
             ),
         )
@@ -2727,10 +2796,9 @@ def _decode_registered_lowerer(
                 config["reference_entity_id"],
                 path=f"{path}.reference_entity_id",
             ),
-            relative_pose=_finite_tuple(
+            relative_pose=_pose_matrix(
                 config["relative_pose"],
                 path=f"{path}.relative_pose",
-                expected_length=16,
             ),
         )
     if kind == "coordinated_transport":
@@ -2782,10 +2850,9 @@ def _decode_registered_lowerer(
                         else None
                     ),
                     relative_pose=(
-                        _finite_tuple(
+                        _pose_matrix(
                             route["relative_pose"],
                             path=f"{route_path}.relative_pose",
-                            expected_length=16,
                         )
                         if has_pose
                         else None
@@ -2886,15 +2953,13 @@ def _decode_registered_lowerer(
                 receiver_id=_identifier(
                     target_config["receiver_id"], path=f"{path}.target.receiver_id"
                 ),
-                source_mouth_pose=_finite_tuple(
+                source_mouth_pose=_pose_matrix(
                     target_config["source_mouth_pose"],
                     path=f"{path}.target.source_mouth_pose",
-                    expected_length=16,
                 ),
-                receiver_mouth_pose=_finite_tuple(
+                receiver_mouth_pose=_pose_matrix(
                     target_config["receiver_mouth_pose"],
                     path=f"{path}.target.receiver_mouth_pose",
-                    expected_length=16,
                 ),
                 receiver_radius=_real(
                     target_config["receiver_radius"],
@@ -3323,10 +3388,9 @@ def _decode_runtime_services(
             target_entity_to_reference=(
                 None
                 if item.get("target_entity_to_reference") is None
-                else _finite_tuple(
+                else _pose_matrix(
                     item["target_entity_to_reference"],
                     path=f"{item_path}.target_entity_to_reference",
-                    expected_length=16,
                 )
             ),
             authority=_identifier(

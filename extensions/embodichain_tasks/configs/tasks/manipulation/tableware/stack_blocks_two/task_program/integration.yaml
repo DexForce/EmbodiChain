@@ -8,7 +8,6 @@ scene_binding:
   registry_id: task_program_stack_blocks_two
   rigid_objects:
   - entity_id: block_1
-    simulation_uid: block_1
     dynamics: dynamic
     semantic_type: block
     affordances:
@@ -17,24 +16,9 @@ scene_binding:
       native_name: top
       object_target_frame: world_axes
       object_target_pose:
-      - 1.0
-      - 0.0
-      - 0.0
-      - 0
-      - 0.0
-      - 1.0
-      - 0.0
-      - 0
-      - 0.0
-      - 0.0
-      - 1.0
-      - 0.05
-      - 0.0
-      - 0.0
-      - 0.0
-      - 1.0
+        position: [0.0, 0.0, 0.05]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
   - entity_id: block_2
-    simulation_uid: block_2
     dynamics: dynamic
     semantic_type: block
     affordances:
@@ -54,22 +38,11 @@ profile:
       hand_interp_steps: 10
       grasp_settle_steps: 45
       fixed_object_to_eef:
-      - 0.293976277
-      - 0.295520157
-      - 0.908980608
-      - 0.02
-      - 0.09093748
-      - -0.955336511
-      - 0.28118059
-      - 0.0
-      - 0.951476812
-      - 0.0
-      - -0.307720125
-      - -0.025
-      - 0.0
-      - 0.0
-      - 0.0
-      - 1.0
+        position: [0.02, 0.0, -0.025]
+        rotation_matrix:
+        - [0.293976277, 0.295520157, 0.908980608]
+        - [0.09093748, -0.955336511, 0.28118059]
+        - [0.951476812, 0.0, -0.307720125]
     place:
       kind: place
       lift_height: 0.1

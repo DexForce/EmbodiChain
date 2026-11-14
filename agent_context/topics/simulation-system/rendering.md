@@ -59,6 +59,12 @@ add/finalize calls. `SpawnScene` temporarily excludes that table during those
 calls so texture binding is never attempted without a renderer, then restores
 the authored definitions for metadata and later declarations.
 
+Explicit task render selections must be preserved during physical qualification.
+For example, the `pour_water` deployment is calibrated for the native glTF
+loader's axis conversion and owns `renderer: hybrid`. Forcing NoRender is not
+an equivalent qualification of that scene even when cameras are disabled.
+Headless native rendering still requires the host's offscreen display setup.
+
 ## Default scene presentation
 
 `SimulationManager.set_default_background()` authors the native ground material

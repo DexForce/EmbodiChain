@@ -3,9 +3,39 @@ environment:
   component: env.yaml
 task_program:
   program: task_program/program.yaml
-  integration: task_program/integration.tianji_marvin.yaml
+  integration:
+    component: task_program/integration.yaml
+    overrides:
+      integration_id: stack_blocks_two_dual_arm_v1
+      requires:
+        embodiment_contract: dual_arm_parallel_gripper
+      profile:
+        defaults:
+          pick_up:
+            primary: left
+          place:
+            primary: left
+        skill_options:
+          pick:
+            pre_grasp_distance: 0.08
+            lift_height: 0.08
+            hand_interp_steps: 20
+            grasp_settle_steps: 30
+            # Includes the calibrated fingertip clearance.
+            fixed_object_to_eef:
+              position: [-0.017598076211353314, 0.0, 0.030480762113533157]
+              rotation_matrix:
+              - [0.0, -0.8660254037844386, 0.5]
+              - [-1.0, 0.0, 0.0]
+              - [0.0, -0.5, -0.8660254037844386]
+            approach_along_grasp_axis: true
+          place:
+            lift_height: 0.08
+            hand_interp_steps: 20
+            preserve_current_object_orientation: false
+            release_settle_steps: 20
   execution_policy:
-    component: ../../../../components/execution_policies/motion_gen_projected_manipulation.yaml
+    component: ../../../../components/execution_policies/sequential_ik_projected_manipulation.yaml
     overrides:
       motion:
         velocity_limit: 0.2

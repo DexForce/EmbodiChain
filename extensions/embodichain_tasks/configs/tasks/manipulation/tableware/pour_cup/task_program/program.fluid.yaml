@@ -1,41 +1,38 @@
 program_id: pick_aim_pour_return_cup
 targets:
   cup_return_pose:
-    kind: cyclic_pose
-    values:
-    - position:
-      - -0.75
-      - 0.0
-      - 0.552
-      quaternion_xyzw:
-      - 0.0
-      - 0.0
-      - 0.0
-      - 1.0
+    kind: pose
+    position:
+    - -0.75
+    - 0.0
+    - 0.552
+    quaternion_xyzw:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
   cup_lift_pose:
-    kind: cyclic_pose
-    values:
-    - position:
-      - -0.75
-      - 0.0
-      - 0.672
-      quaternion_xyzw:
-      - 0.0
-      - 0.0
-      - 0.0
-      - 1.0
+    kind: pose
+    position:
+    - -0.75
+    - 0.0
+    - 0.672
+    quaternion_xyzw:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
   cup_pour_pose:
-    kind: cyclic_pose
-    values:
-    - position:
-      - -0.75
-      - -0.06
-      - 0.67
-      quaternion_xyzw:
-      - 0.0
-      - 0.0
-      - 0.0
-      - 1.0
+    kind: pose
+    position:
+    - -0.75
+    - -0.06
+    - 0.67
+    quaternion_xyzw:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
 program:
   kind: sequence
   items:
