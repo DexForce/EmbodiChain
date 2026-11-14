@@ -20,7 +20,7 @@ from contextlib import nullcontext
 import math
 from types import SimpleNamespace
 from typing import Any, Callable
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 import gymnasium as gym
 import numpy as np
@@ -298,14 +298,18 @@ def test_continuous_rotation_has_metrics_without_invented_binary_success(
 
 
 @pytest.mark.no_sim
-@pytest.mark.parametrize("task_id", ["M1", "M2"])
-def test_failure_at_time_limit_does_not_bootstrap(
-    env_factory: Callable[[str], DexterousManipulationEnv], task_id: str
+@pytest.mark.parametrize("task_id", list(TASK_SPECS))
+@pytest.mark.parametrize("ignore_terminations", [False, True])
+def test_time_limit_respects_ignored_terminations(
+    env_factory: Callable[[str], DexterousManipulationEnv],
+    task_id: str,
+    ignore_terminations: bool,
 ) -> None:
-    """True failure on the final step sets terminated=True and truncated=False."""
+    """Only effective failures suppress time-limit resets and bootstrapping."""
     from embodichain.learning.rl.algo.common import compute_gae
 
     env = env_factory(task_id)
+    env.cfg.ignore_terminations = ignore_terminations
     env._elapsed_steps.fill_(env.max_episode_steps - 1)
     env.task.step = lambda state, actions: (
         torch.zeros(2, env.policy_dim),
@@ -313,9 +317,20 @@ def test_failure_at_time_limit_does_not_bootstrap(
         torch.tensor([True, False]),
         {},
     )
+    env.task.after_step = lambda state, actions: (
+        {
+            "state": torch.zeros(2, env.policy_dim),
+            "privileged_state": torch.zeros(2, env.critic_dim),
+        },
+        torch.ones(2),
+        torch.tensor([True, False]),
+        torch.zeros(2, dtype=torch.bool),
+        {},
+    )
     _, reward, terminated, truncated, _ = env.step(torch.zeros(2, env.action_dim))
-    assert terminated.tolist() == [True, False]
-    assert truncated.tolist() == [False, True]
+    assert terminated.tolist() == [not ignore_terminations, False]
+    assert truncated.tolist() == [ignore_terminations, True]
+    assert env._elapsed_steps.tolist() == [0, 0]
     rollout = TensorDict(
         {
             "value": torch.full((2, 2), 10.0),
@@ -330,4 +345,64 @@ def test_failure_at_time_limit_does_not_bootstrap(
         batch_size=[2, 2],
     )
     _, returns = compute_gae(rollout, gamma=0.9, gae_lambda=0.95)
-    torch.testing.assert_close(returns[:, 0], torch.tensor([1.0, 10.0]))
+    expected = torch.tensor([10.0 if ignore_terminations else 1.0, 10.0])
+    torch.testing.assert_close(returns[:, 0], expected)
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize("task_id", list(TASK_SPECS))
+def test_physics_samples_opted_in_sensors(
+    env_factory: Callable[[str], DexterousManipulationEnv], task_id: str
+) -> None:
+    """Custom stepping samples each physics interval, including batched updates."""
+    env = env_factory(task_id)
+    sensor = Mock(requires_substep_update=True)
+    passive = Mock(requires_substep_update=False)
+    env.sensors = {"contacts": sensor, "camera": passive}
+
+    def advance(dt, count, *, after_substep=None, **kwargs):
+        for _ in range(count):
+            if after_substep is not None:
+                after_substep(dt)
+
+    env.sim.update = advance
+    env._advance_physics()
+    sensor.begin_control_step.assert_called_once_with()
+    assert (
+        sensor.update_physics_step.call_args_list
+        == [call(env.physics_dt)] * env.cfg.sim_steps_per_control
+    )
+    passive.begin_control_step.assert_not_called()
+    passive.update_physics_step.assert_not_called()
+
+
+@pytest.mark.no_sim
+def test_face_turn_freejoint_velocity_uses_body_origin(
+    env_factory: Callable[[str], DexterousManipulationEnv],
+) -> None:
+    """Convert COM velocity using each root's orientation without mutating state."""
+    env = env_factory("M3")
+    env._cube_root_com = torch.tensor([[0.0, 0.0, -0.01]] * 2)
+    half_angle = math.sqrt(0.5)
+    # Row 1 turns the local -Z COM offset into world -X by rotating about Y.
+    env._cube_art.get_local_pose = lambda: torch.tensor(
+        [[0, 0, 0, 0, 0, 0, 1], [0, 0, 0, 0, half_angle, 0, half_angle]]
+    )
+    com_velocity = torch.tensor([[0.0, 0.01, 0.0], [0.0, 0.02, 0.0]])
+    env._cube_art.body_data = SimpleNamespace(
+        root_lin_vel=com_velocity.clone(),
+        root_ang_vel=torch.tensor([[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]),
+    )
+    env._cube_art.get_qvel = lambda: torch.full((2, 1), 0.5)
+
+    state = DexterousManipulationEnv._read_physical_state(env)
+
+    # v_origin = v_com - omega x r; the second cross product is -0.01 Y.
+    torch.testing.assert_close(
+        state["qvel"][:, 16:19], torch.tensor([[0.0, 0.0, 0.0], [0.0, 0.03, 0.0]])
+    )
+    torch.testing.assert_close(
+        state["qvel"][:, 19:22], torch.tensor([[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0]])
+    )
+    torch.testing.assert_close(state["qvel"][:, 22], torch.full((2,), 0.5))
+    torch.testing.assert_close(env._cube_art.body_data.root_lin_vel, com_velocity)

@@ -375,6 +375,9 @@ class DexterousManipulationEnv(EmbodiedEnv):
         elif self.task_id == "M3":
             self._cube_art = self.sim.get_articulation("cube")
             self._face_joint_id = self._cube_art.joint_names.index("face_turn")
+            self._cube_root_com = self._cube_art.get_com_pose(
+                link_names=self._cube_art.root_link_name
+            )[:, 0, :3]
             detached_uids.append("cube")
         else:
             self._object = self.sim.get_rigid_object("cube")
@@ -532,6 +535,12 @@ class DexterousManipulationEnv(EmbodiedEnv):
             cube_quat_wxyz = _xyzw_to_wxyz(cube_pose_xyzw[:, 3:7])
             cube_linvel = self._cube_art.body_data.root_lin_vel
             cube_world_angvel = self._cube_art.body_data.root_ang_vel
+            # MJCF freejoint translation is measured at the body origin.
+            cube_linvel = cube_linvel - torch.cross(
+                cube_world_angvel,
+                rotate_wxyz(cube_quat_wxyz, self._cube_root_com),
+                dim=-1,
+            )
             cube_local_angvel = rotate_wxyz(
                 _invert_wxyz(cube_quat_wxyz), cube_world_angvel
             )
@@ -725,6 +734,20 @@ class DexterousManipulationEnv(EmbodiedEnv):
         return action
 
     def _advance_physics(self) -> None:
+        if self.is_shadow:
+            super()._advance_physics()
+            return
+        sensors = [
+            sensor for sensor in self.sensors.values() if sensor.requires_substep_update
+        ]
+        for sensor in sensors:
+            sensor.begin_control_step()
+
+        def sample_substep(dt: float) -> None:
+            for sensor in sensors:
+                sensor.update_physics_step(dt)
+
+        after_substep = sample_substep if sensors else None
         if self.task_id == "M3":
             assert self._cube_art is not None
             for _ in range(self.cfg.sim_steps_per_control):
@@ -733,20 +756,31 @@ class DexterousManipulationEnv(EmbodiedEnv):
                 self._cube_art.set_qf(
                     face_force[:, None], joint_ids=[self._face_joint_id]
                 )
-                self.sim.update(self.physics_dt, 1, render_final_step=False)
+                self.sim.update(
+                    self.physics_dt,
+                    1,
+                    after_substep=after_substep,
+                    render_final_step=False,
+                )
             return
         if self.task_id in ("M4", "M5"):
             substeps = self.cfg.sim_steps_per_control
             if substeps > 1:
-                self.sim.update(self.physics_dt, substeps - 1, render_final_step=False)
+                self.sim.update(
+                    self.physics_dt,
+                    substeps - 1,
+                    after_substep=after_substep,
+                    render_final_step=False,
+                )
             qpos_pre = self.robot.get_qpos()[:, self._actuated_joint_ids_tensor]
             qvel_pre = self.robot.get_qvel()[:, self._actuated_joint_ids_tensor]
             self._actuator_force.copy_(
                 self._kp * (self._ctrl - qpos_pre) - self._kd * qvel_pre
             )
-            self.sim.update(self.physics_dt, 1, render_final_step=False)
+            self.sim.update(
+                self.physics_dt, 1, after_substep=after_substep, render_final_step=False
+            )
             return
-        super()._advance_physics()
 
     def _update_sim_state(self, **kwargs: Any) -> None:
         super()._update_sim_state(**kwargs)
@@ -835,4 +869,5 @@ class DexterousManipulationEnv(EmbodiedEnv):
         truncated = self._step_truncated.clone()
         if self.cfg.ignore_terminations:
             terminated[:] = False
+            truncated = self._elapsed_steps >= self.max_episode_steps
         return terminated, truncated
