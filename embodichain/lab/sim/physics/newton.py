@@ -66,6 +66,7 @@ class NewtonPhysicsBackend(PhysicsBackend):
         self._runtime_device: str | None = None
         self._configured_solver_type: str | None = None
         self._rne_available = False
+        self._joint_wrenches_enabled = False
         self._joint_wrenches: _JointWrenchSource | None = None
         self._fluid_render_clip_key: tuple[object, ...] | None = None
         self._fluid_render_clip_z: torch.Tensor | None = None
@@ -112,7 +113,8 @@ class NewtonPhysicsBackend(PhysicsBackend):
             and not getattr(newton_cfg.solver_cfg, "use_mujoco_cpu", True)
             and getattr(newton_cfg.solver_cfg, "rne_mode", "disabled") != "disabled"
         )
-        if newton_physics_cfg.enable_joint_wrenches and not self._rne_available:
+        self._joint_wrenches_enabled = newton_physics_cfg.enable_joint_wrenches
+        if self._joint_wrenches_enabled and not self._rne_available:
             raise NotImplementedError(
                 "Joint wrench acquisition requires CUDA Newton MuJoCo Warp with RNE enabled."
             )
@@ -170,10 +172,7 @@ class NewtonPhysicsBackend(PhysicsBackend):
     def _prepare_scene_build(self) -> None:
         """Register requested observers and preflight cable declarations."""
         manager = self._manager
-        if (
-            manager.sim_config.physics_cfg.enable_joint_wrenches
-            and self._joint_wrenches is None
-        ):
+        if self._joint_wrenches_enabled and self._joint_wrenches is None:
             from ._joint_wrench import _JointWrenchSource
 
             source = _JointWrenchSource()
