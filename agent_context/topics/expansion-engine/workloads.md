@@ -22,6 +22,20 @@ difficult group does not silently borrow another group's B-row allocation.
 
 ## Source ports and native accounting
 
+`run_task_program_expansion` binds a deployment and a closed scene/motion
+configuration to `run_gym_expansion_workloads`. It owns bounded pose/follower
+proposals, grasp-policy snapshots, original-grid plan transforms, common measured
+acceptance and aggregate results. Configuration/viewer loaders do not import the
+simulator. Integrators retain task values and provenance inputs rather than
+copying these binding components. `derive_grasp_expansion_deployment` exposes the
+same immutable-source preparation for configuration preflight.
+
+`launch_expansion_preview`, `preview_expansion_results` and
+`stop_expansion_preview` manage a bounded Linux native service with recorded PID
+ownership. The preview reader accepts native aggregate results and derives path
+endpoints from recorded motion; downstream workflow-root unwrapping stays with
+the integrator. These APIs never recollect or advance physical time.
+
 `run_gym_expansion_workloads` is the public native composition for Task Program
 scene/plan workloads. `GymExpansionWorkload` supplies a pinned deployment,
 independent collection budget, artifacts and row callbacks. The facade opens one

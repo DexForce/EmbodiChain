@@ -313,7 +313,10 @@ def load_preview(
             raise ValueError(
                 "Preview plan has no qualified trajectories; inspect its rejection/unrun records"
             )
-    paths = [Path(p).expanduser().resolve() for p in outputs]
+    from .preview import _inputs, _recorded_eef
+
+    paths = _inputs([Path(p) for p in outputs])
+    eef_link = eef_link or _recorded_eef(paths)
     if len(set(paths)) != len(paths):
         raise ValueError("Duplicate output directory")
     if reference is not None:

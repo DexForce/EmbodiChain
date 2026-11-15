@@ -1672,6 +1672,13 @@ and durable episode-boundary recovery. See the offline expansion example.
    WorkloadProgramExecutor
    GymExpansionWorkload
    run_gym_expansion_workloads
+   load_task_program_expansion
+   load_expansion_viewer
+   run_task_program_expansion
+   derive_grasp_expansion_deployment
+   launch_expansion_preview
+   stop_expansion_preview
+   preview_expansion_results
    export_expansion_episodes
 
 .. autosummary::
@@ -1937,6 +1944,28 @@ Stage immutable numeric evidence and archived source attachments before publishi
 
    load_expansion_episode
 
+embodichain.lab.expansion.preview
+--------------------------------
+
+Launch, wait for or stop a bounded native result-preview service. Status and logs
+remain separate from saved episodes; PID ownership is checked before signalling.
+Inputs may be native jobs, aggregate scene/motion results or preview plans.
+Recorded motion supplies an endpoint when several robot solvers are present.
+
+.. currentmodule:: embodichain.lab.expansion.preview
+
+.. autosummary::
+
+   launch_expansion_preview
+   preview_expansion_results
+   stop_expansion_preview
+
+.. autofunction:: launch_expansion_preview
+
+.. autofunction:: preview_expansion_results
+
+.. autofunction:: stop_expansion_preview
+
 embodichain.lab.expansion.program
 ---------------------------------
 
@@ -2027,6 +2056,32 @@ Source-independent session limits. These settings are separate from deployment-o
    ExpansionValidationCfg
    ExpansionCollectionCfg
    ExpansionPersistenceCfg
+
+embodichain.lab.expansion.task_program_jobs
+------------------------------------------
+
+Load closed scene/motion declarations without simulator imports, derive local
+grasp policy snapshots and collect through the existing single-World workload
+engine. Caller-owned source hashes and runtime versions remain in confirmed
+episode evidence. Physical thresholds and protected phase boundaries are retained;
+the facade owns configuration binding, preparation, export and optional preview.
+
+.. currentmodule:: embodichain.lab.expansion.task_program_jobs
+
+.. autosummary::
+
+   load_task_program_expansion
+   load_expansion_viewer
+   run_task_program_expansion
+   derive_grasp_expansion_deployment
+
+.. autofunction:: load_task_program_expansion
+
+.. autofunction:: load_expansion_viewer
+
+.. autofunction:: run_task_program_expansion
+
+.. autofunction:: derive_grasp_expansion_deployment
 
 embodichain.lab.expansion.visual
 --------------------------------

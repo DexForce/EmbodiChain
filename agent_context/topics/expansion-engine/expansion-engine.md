@@ -12,6 +12,8 @@ algorithms stay in `sim.motion.expansion`; scene and workspace algorithms stay i
 | Shared scheduling, admission and commit ports | `embodichain/lab/expansion/engine.py` |
 | Rolling workload × B execution in one caller-owned World | `embodichain/lab/expansion/workloads.py` |
 | Native workload World, source/evidence assembly and bounded export | `embodichain/lab/expansion/gym_workloads.py` |
+| Declarative scene/motion jobs and pure configuration validation | `embodichain/lab/expansion/task_program_jobs.py`, `_task_program_config.py` |
+| Owned result-preview launch, wait and stop | `embodichain/lab/expansion/preview.py` |
 | Job assembly, stage recovery and inspect | `embodichain/lab/expansion/workflow.py`, `stages.py` |
 | Native World ownership and compatibility facade | `embodichain/lab/expansion/host.py` |
 | Task-owned render/source/transform/acceptance ports | `embodichain/lab/expansion/host_extensions.py` |

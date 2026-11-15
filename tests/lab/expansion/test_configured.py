@@ -22,6 +22,33 @@ import pytest
 from embodichain.lab.expansion import ExpansionEngine, load_expansion_job
 
 
+def test_task_program_declarations_are_pure_and_protect_contact_phases(tmp_path):
+    import json
+    import os
+    import subprocess
+    import sys
+    import yaml
+    from embodichain.lab.expansion import load_task_program_expansion
+
+    path = Path(__file__).parent / "fixtures/task_program_job.yaml"
+    code = "from embodichain.lab.expansion import load_task_program_expansion; import json,sys; value=load_task_program_expansion(sys.argv[1]); assert not any(k=='dexsim' or k.startswith('dexsim.') for k in sys.modules); print(json.dumps(value))"
+    process = subprocess.run(
+        [sys.executable, "-c", code, str(path)],
+        capture_output=True,
+        text=True,
+        check=True,
+        env={**os.environ},
+    )
+    value = json.loads(process.stdout)
+    assert (value["engine"]["workload_count"], value["engine"]["batch_size"]) == (2, 1)
+    assert value["trajectory"]["operators"] == ["object_pose", "joint_residual"]
+    value["trajectory"]["free_phases"]["pick_up"] = ["approach", "lift"]
+    invalid = tmp_path / "protected.yaml"
+    invalid.write_text(yaml.safe_dump(value))
+    with pytest.raises(ValueError, match="protected free phase"):
+        load_task_program_expansion(invalid)
+
+
 @pytest.mark.parametrize("name", ["default", "newton", "rgbd", "motion"])
 def test_example_preflight_resolves_owned_backend_and_budget(name, tmp_path):
     path = (

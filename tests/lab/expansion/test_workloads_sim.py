@@ -522,8 +522,38 @@ def _facade_probe(output: str) -> None:
     assert not SimulationManager._instances
 
 
+def _declarative_probe(output: str) -> None:
+    import json
+    from embodichain.lab.expansion import (
+        run_task_program_expansion,
+        ArtifactEpisodeSink,
+        load_expansion_episode,
+    )
+    from embodichain.lab.sim import SimulationManager
+
+    root = Path(__file__).resolve().parents[3]
+    result = run_task_program_expansion(
+        root
+        / "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml",
+        Path(__file__).parent / "fixtures/task_program_job.yaml",
+        output,
+    )
+    assert result["complete"], result
+    execution = json.loads((Path(output) / "workload-execution.json").read_text())
+    assert execution["world"]["world_count"] == 1 and execution["num_envs"] == 2
+    assert not SimulationManager._instances
+    for operator, group in result["operators"].items():
+        receipts = ArtifactEpisodeSink(group["directory"]).inspect()
+        assert len(receipts) == len(group["lerobot"]["datasets"]) == 1
+        episode = load_expansion_episode(receipts[0].storage_id)
+        assert episode.validation.accepted
+        assert len(episode.timestamps) == len(episode.actions) + 1
+        if operator == "joint_residual":
+            assert episode.metadata["expansion"]
+
+
 @pytest.mark.requires_sim
-@pytest.mark.parametrize("mode", ["executor", "facade"])
+@pytest.mark.parametrize("mode", ["executor", "facade", "declarative"])
 def test_rolling_workloads_keep_native_receipts_and_world_boundaries(tmp_path, mode):
     result = subprocess.run(
         [sys.executable, __file__, str(tmp_path), mode],
@@ -537,6 +567,6 @@ def test_rolling_workloads_keep_native_receipts_and_world_boundaries(tmp_path, m
 
 
 if __name__ == "__main__":
-    (_facade_probe if len(sys.argv) > 2 and sys.argv[2] == "facade" else _probe)(
-        sys.argv[1]
-    )
+    {"executor": _probe, "facade": _facade_probe, "declarative": _declarative_probe}[
+        sys.argv[2] if len(sys.argv) > 2 else "executor"
+    ](sys.argv[1])
