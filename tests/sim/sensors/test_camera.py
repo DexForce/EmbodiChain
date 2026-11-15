@@ -315,6 +315,7 @@ def test_cpu_camera_copy_keeps_previous_frame() -> None:
     camera.cfg = CameraCfg(uid="pinned", width=2, height=2, enable_depth=True)
     camera._data_buffer = TensorDict({}, batch_size=[2], device="cpu")
     camera._pending_capture_metadata = None
+    camera._owner_ref = lambda: None
     color = torch.full((2, 2, 2, 4), 11, dtype=torch.uint8, device="cuda")
     depth = torch.full((2, 2, 2), 1.0, device="cuda")
     group = MagicMock()
