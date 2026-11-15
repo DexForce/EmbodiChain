@@ -90,13 +90,13 @@ Provider lifecycle in `embodichain_solvers.physics` for native deployment.
 
 `physics.worldparticle.provider.WorldParticleProvider` owns native admission and
 delegates stream/state/force/write/reset machinery to the SDK's generic
-`ParticleInferenceSolver`. That facility requires a runtime newer than main's
-pinned SDK 0.6.0rc1; SDK 0.6.0rc2 has it. The historical operator profile uses
+`ParticleInferenceSolver`, included in main's SDK 0.6.0rc2 pin. The historical operator profile uses
 Torch 2.7.1 and must not replace main's Torch 2.11 dependencies. The showcase
 records runtime and immutable asset provenance. Its separate Torch 2.11 source
 build profile has local CUDA operator and four-checkpoint/two-step execution
-evidence; native deployment uses SDK 0.6.0rc2. Main pins and default-install
-native availability are unchanged. Tests with a small deterministic predictor
+evidence; native deployment uses SDK 0.6.0rc2. Compatible operator wheels remain
+local artifacts, so a default installation still needs operator provisioning.
+Tests with a small deterministic predictor
 qualify adapter behavior; real BF16 inference does not establish bitwise
 determinism, native/model parity or historical/paper accuracy.
 

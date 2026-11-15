@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import json
+from importlib.metadata import version
 from pathlib import Path
 
 import numpy as np
@@ -42,6 +43,13 @@ from embodichain.lab.sim.shapes import MeshCfg
 pytestmark = [pytest.mark.requires_sim, pytest.mark.renderer]
 
 
+@pytest.mark.skipif(
+    version("dexsim-engine") == "0.6.0rc2",
+    reason=(
+        "DexSim 0.6.0rc2 loses GLTF source material indices; temporary skip pending "
+        "DexSim !1613 and EmbodiChain source-material mapping adoption."
+    ),
+)
 @pytest.mark.parametrize("packaged", [False, True], ids=["usda", "usdz"])
 def test_exported_usd_texture_matches_native_gltf(
     tmp_path: Path, packaged: bool

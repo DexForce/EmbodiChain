@@ -28,6 +28,7 @@ from embodichain.toolkits.graspkit import (
 from embodichain.utils.math import pose_inv
 
 from ..models import BenchmarkCase
+from ._case_qualification import _CaseQualificationError
 
 __all__ = [
     "grasp_sample_count",
@@ -41,7 +42,7 @@ __all__ = [
 ]
 
 
-class _AntipodalGraspSearchError(RuntimeError):
+class _AntipodalGraspSearchError(_CaseQualificationError):
     """A bounded grasp pool has no independently solved complete pose chain."""
 
 

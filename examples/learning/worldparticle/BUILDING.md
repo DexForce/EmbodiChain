@@ -53,11 +53,10 @@ binary's hash or relabel a Torch 2.7 wheel as Torch 2.11. The Open3D relocation
 utility writes an adjacent JSON report of each patched ELF runpath.
 
 Install the two tagged wheels in the isolated environment, or extract them to
-a separate import directory. Main's SDK pin remains `0.6.0rc1`, which does not
-contain `ParticleInferenceSolver`. The model transition can run independently;
-native deployment was checked using SDK `0.6.0rc2` in a source checkout. A
-default-install SDK upgrade is a separate compatibility change, not hidden in
-an operator dependency extra.
+a separate import directory. Main now pins SDK `0.6.0rc2`, which contains
+`ParticleInferenceSolver`; native deployment was checked using this same SDK
+in a source checkout. The model transition can run independently. The remaining
+default-install prerequisite is distribution of compatible operator wheels.
 
 Validation covered CUDA fixed-radius search, BF16 FlashAttention against SDPA,
 all four published models for two native steps, and standalone execution on

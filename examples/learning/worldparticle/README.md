@@ -19,8 +19,8 @@ contains `ParticleInferenceSolver`.
 profile's immutable build provenance. They are not an installation profile for
 the main distribution. The main distribution's
 Python 3.12 training profile currently requires Torch 2.11 and Tensordict 0.15,
-which conflicts with those model operators. Main's pinned SDK 0.6.0rc1 also
-lacks the generic `ParticleInferenceSolver` required for native deployment.
+which conflicts with those historical model operators. Main now pins SDK
+0.6.0rc2, including the generic `ParticleInferenceSolver` for native deployment.
 The model loader rejects an unqualified runtime before loading weights; a
 missing SDK facility fails explicitly.
 
@@ -34,9 +34,9 @@ deterministic predictor. Real BF16 network rollouts do not establish bitwise
 determinism, native/standalone numerical parity, historical-runtime equivalence
 or long-horizon accuracy.
 
-No conflicting `worldparticle` dependency extra is provided, and the main
-Torch/SDK pins remain unchanged. The Torch 2.11 binaries remain local artifacts;
-operator distribution and a compatible default SDK must be resolved before
+No conflicting `worldparticle` dependency extra is provided. This integration
+preserves main's Torch 2.11 / SDK 0.6.0rc2 requirements. The Torch 2.11 binaries
+remain local artifacts; operator distribution must be resolved before
 advertising a default installable native runtime. Source-only
 experiments with the historical profile must use an isolated environment and
 the recorded wheel hashes. No environment, weight or native wheel is committed.

@@ -9,6 +9,7 @@ annotated-doc==0.0.5
 annotated-types==0.8.0
 anyio==4.15.1
 arm-pytorch-utilities==0.5.0
+arrow==1.4.0
 asttokens==3.0.2
 attrs==26.1.0
 av==15.1.0
@@ -46,7 +47,7 @@ datasets==4.8.5
 datetime==6.0
 decorator==5.3.1
 deepdiff==8.6.2
-dexsim-engine @ http://pyp.open3dv.site:2345/packages/dexsim_engine-0.6.0rc1-cp311-cp311-manylinux_2_31_x86_64.whl#sha256=f3cef56bd987b3166b871d7d9f29b2f2d6ceb274cf47ca9a598c51d6a6785718
+dexsim-engine @ http://pyp.open3dv.site:2345/packages/dexsim_engine-0.6.0rc2-cp311-cp311-manylinux_2_31_x86_64.whl#sha256=1246ab67937933863efd0ee24e2e8d4444da6cb4eb5c6e31ef7ab82b5e0b3e02
 diffusers==0.35.2
 dill==0.4.1
 distro==1.9.0
@@ -64,6 +65,7 @@ filelock==4.2.6
 flask==3.1.3
 flatbuffers==25.12.19
 fonttools==4.68.0
+fqdn==1.6.0
 freetype-py==2.5.1
 frozenlist==1.8.0
 fsspec==2026.2.0
@@ -99,6 +101,7 @@ ipdb==0.13.13
 ipython==9.18.0
 ipython-pygments-lexers==1.1.1
 ipywidgets==8.1.9
+isoduration==20.11.0
 itsdangerous==2.2.0
 janus==2.0.0
 jedi==0.20.1
@@ -122,6 +125,7 @@ langgraph-checkpoint==4.3.1
 langgraph-prebuilt==1.1.1
 langgraph-sdk==0.4.11
 langsmith==0.14.16
+lark==1.3.1
 lerobot==0.4.4
 libcoal==3.0.3
 libpinocchio==4.1.0
@@ -241,6 +245,9 @@ requests==2.34.2
 requests-toolbelt==1.0.0
 rerun-sdk==0.26.2
 retrying==1.4.2
+rfc3339-validator==0.1.4
+rfc3986-validator==0.1.1
+rfc3987-syntax==1.1.0
 rich==14.3.4
 rpds-py==2026.9.1
 rtree==1.4.1
@@ -287,6 +294,7 @@ typing-inspect==0.9.0
 typing-inspection==0.4.4
 tzdata==2026.6
 urdfdom-py==1.2.1.post1
+uri-template==1.3.0
 urllib3==2.8.0
 usd-core==26.11
 uuid-utils==0.19.0
@@ -298,6 +306,7 @@ vtk==9.5.2
 wandb==0.24.2
 warp-lang==1.17.0
 wcwidth==0.9.4
+webcolors==25.10.0
 websockets==15.0.1
 werkzeug==3.1.9
 wheel==0.48.0

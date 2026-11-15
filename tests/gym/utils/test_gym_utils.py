@@ -244,7 +244,7 @@ def test_config_to_cfg_rejects_invalid_physics_backend(backend: object) -> None:
 @pytest.mark.parametrize(
     ("backend", "physics_config", "field_name"),
     (
-        ("default", {"num_substeps": 2}, "num_substeps"),
+        ("default", {"requires_grad": True}, "requires_grad"),
         ("newton", {"enable_ccd": True}, "enable_ccd"),
     ),
 )
@@ -272,7 +272,7 @@ def test_config_to_cfg_rejects_other_backend_physics_fields(
 @pytest.mark.parametrize(
     ("backend", "physics_config", "config_type"),
     (
-        ("default", {"enable_ccd": True}, DefaultPhysicsCfg),
+        ("default", {"enable_ccd": True, "num_substeps": 2}, DefaultPhysicsCfg),
         ("newton", {"num_substeps": 2}, NewtonPhysicsCfg),
     ),
 )
@@ -293,6 +293,8 @@ def test_config_to_cfg_builds_declared_physics_config(
     cfg = config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
 
     assert type(cfg.sim_cfg.physics_cfg) is config_type
+    for name, value in physics_config.items():
+        assert getattr(cfg.sim_cfg.physics_cfg, name) == value
 
 
 @pytest.mark.parametrize(

@@ -13,7 +13,6 @@
     "sm_120"
   ],
   "native_sdk": "0.6.0rc2",
-  "main_sdk_pin": "0.6.0rc1",
   "native_facility": "dexsim.engine.newton_physics.particle_inference.ParticleInferenceSolver",
   "main_installable_native_deployment": false,
   "artifacts": "Local source builds, not uploaded. Rebuild using BUILDING.md; no native wheels are bundled.",
@@ -154,5 +153,9 @@
         "simulation_imports": false
       }
     ]
-  }
+  },
+  "main_sdk_pin_at_validation": "0.6.0rc1",
+  "current_main_sdk_pin": "0.6.0rc2",
+  "default_sdk_provides_native_facility": true,
+  "default_installation_limit": "The rebuilt Torch 2.11 operator wheels remain local artifacts; a published install profile is still required."
 }
