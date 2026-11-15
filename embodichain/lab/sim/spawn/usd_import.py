@@ -197,6 +197,8 @@ def _compile_usd_import(
     declarations = []
     mounted_sensors = []
     sensor_uids = set() if manager is None else set(manager._sensors)
+    if manager is not None:
+        sensor_uids.update(getattr(manager, "_pending_mounted_sensors", {}))
     robot_paths: set[str] = set()
     renamed = {}
     rigid_renames = {}

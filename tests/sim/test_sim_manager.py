@@ -3052,6 +3052,37 @@ def _make_camera_attachment_manager(num_envs: int = 2) -> SimulationManager:
     return sim
 
 
+def test_prepare_retries_deferred_mounted_sensor_after_factory_failure() -> None:
+    sim = _make_camera_attachment_manager()
+    cfg = CameraCfg(uid="pending")
+    sim._pending_mounted_sensors = {"pending": cfg}
+    sensor = object()
+    sim.add_sensor = MagicMock(side_effect=[RuntimeError("factory failed"), sensor])
+    with pytest.raises(RuntimeError, match="factory failed"):
+        sim.prepare()
+    assert sim._pending_mounted_sensors == {"pending": cfg}
+    sim.prepare()
+    assert not sim._pending_mounted_sensors
+    assert sim.add_sensor.call_count == 2
+
+
+def test_auto_sensor_uid_skips_deferred_mounted_reservations() -> None:
+    sim = _make_camera_attachment_manager()
+    sim._pending_mounted_sensors = {"camera_0": CameraCfg(uid="camera_0")}
+    camera = object.__new__(Camera)
+
+    class Factory(Camera):
+        def __new__(cls, cfg, *args, **kwargs):
+            camera.cfg = cfg
+            return camera
+
+    sim.SUPPORTED_SENSOR_TYPES = {"Camera": Factory}
+    sim.add_sensor(CameraCfg())
+    assert camera.cfg.uid == "camera_1"
+    assert sim.remove_asset("camera_0")
+    assert not sim._pending_mounted_sensors
+
+
 @pytest.mark.parametrize("failure", [None, "parent", "attachment"])
 @pytest.mark.parametrize(
     "factory_mode", ["context_class", "context_function", "legacy_function"]

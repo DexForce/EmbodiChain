@@ -47,6 +47,8 @@ from embodichain.lab.sim.sensors import (
 )
 from embodichain.lab.sim.sensors import registry
 from embodichain.utils import configclass
+from embodichain.lab.sim.cfg import RenderCfg
+from embodichain.lab.sim.shapes import MeshCollisionCfg
 
 pytestmark = pytest.mark.no_sim
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -56,6 +58,13 @@ EXAMPLE_DIR = REPO_ROOT / "examples/sim/sensors/external_joint_encoder"
 @configclass
 class _Options:
     gain: float = 2.0
+
+
+@configclass
+class _DecoderProbeCfg(SensorCfg):
+    sensor_type: str = "DecoderProbe"
+    render: RenderCfg = RenderCfg()
+    collision: MeshCollisionCfg = MeshCollisionCfg()
 
 
 @configclass
@@ -332,6 +341,19 @@ def test_camera_custom_decoder_preserves_calibration_defaults() -> None:
     assert cfg.extrinsics.quat == (0.0, 0.0, 1.0, 0.0)
     assert cfg.extrinsics.parent == "arm/tool"
     assert CalibratedCameraCfg().extrinsics.parent is None
+
+
+def test_custom_decoders_receive_only_authored_keys() -> None:
+    register_sensor(SensorRegistration("DecoderProbe", _DecoderProbeCfg, _Probe))
+    cfg = SensorCfg.from_dict(
+        {
+            "sensor_type": "DecoderProbe",
+            "render": {"preset": "gaussian"},
+            "collision": {"sdf_max_resolution": 32},
+        }
+    )
+    assert cfg.render.gaussian.enabled
+    assert cfg.collision.sdf_resolution == 32
 
 
 @pytest.mark.parametrize("gain", [None, 5.0])

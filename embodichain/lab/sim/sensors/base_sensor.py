@@ -92,6 +92,25 @@ class SensorCfg(ObjectBaseCfg):
                     logger.log_warning(f"Key '{key}' not found in {cls.__name__}.")
             return cfg
 
+        @classmethod
+        def from_dict_with_defaults(
+            cls, init_dict: dict, defaults: SensorCfg.OffsetCfg
+        ) -> SensorCfg.OffsetCfg:
+            """Decode mount overrides with explicitly supplied calibration defaults.
+
+            Args:
+                init_dict: Authored mount fields.
+                defaults: Owning configuration's calibrated mount.
+
+            Returns:
+                Decoded mount retaining unspecified calibration values.
+            """
+            return cls.from_dict(
+                _merge_config_overrides(
+                    _resolved_config_defaults(defaults, defaults.to_dict()), init_dict
+                )
+            )
+
     @abstractmethod
     def get_data_types(self) -> List[str]:
         """Get the data types supported by this sensor configuration.
@@ -187,9 +206,9 @@ def _decode_config_value(
             )
         decoder = getattr(config_type, "from_dict", None)
         if callable(decoder):
-            if is_configclass(default):
-                defaults = _resolved_config_defaults(default, default.to_dict())
-                value = _merge_config_overrides(defaults, value)
+            with_defaults = getattr(config_type, "from_dict_with_defaults", None)
+            if is_configclass(default) and callable(with_defaults):
+                return with_defaults(value, default)
             return decoder(value)
         cfg = default if is_configclass(default) else config_type()
         return _populate_sensor_config(cfg, value)

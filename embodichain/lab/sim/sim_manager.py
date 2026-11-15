@@ -1082,6 +1082,7 @@ class SimulationManager:
         )
         uid_list.extend(list(self._lights.keys()))
         uid_list.extend(list(self._sensors.keys()))
+        uid_list.extend(getattr(self, "_pending_mounted_sensors", {}))
         uid_list.extend(list(self._robots.keys()))
         uid_list.extend(getattr(self, "_visual_objects", {}))
         uid_list.extend(list(self._rigid_objects.keys()))
@@ -1990,6 +1991,24 @@ class SimulationManager:
             self._camera_attachment_topology_revision = topology_revision
         self._ready_spawn_topology_revision = topology_revision
         self._refresh_marker_attachments()
+        self._prepare_mounted_sensors()
+
+    def _prepare_mounted_sensors(self) -> None:
+        """Construct deferred USD cameras only after the caller finalizes the scene."""
+        if getattr(self, "_materializing_mounted_sensors", False):
+            return
+        pending = getattr(self, "_pending_mounted_sensors", {})
+        self._materializing_mounted_sensors = True
+        try:
+            for uid in tuple(pending):
+                cfg = pending.pop(uid)
+                try:
+                    self.add_sensor(cfg)
+                except Exception:
+                    pending[uid] = cfg
+                    raise
+        finally:
+            self._materializing_mounted_sensors = False
 
     def _prepare_spawn_runtime(self, result: Scene) -> None:
         """Prepare backend runtime buffers for one Spawn topology revision."""
@@ -3129,7 +3148,15 @@ class SimulationManager:
             registry[descriptor.name] = facade
             assets[source_path] = facade
         for sensor_cfg in plan.mounted_sensors:
-            self.add_sensor(sensor_cfg)
+            _, factory, legacy = _resolve_sensor_factory(
+                sensor_cfg.sensor_type, self.SUPPORTED_SENSOR_TYPES
+            )
+            if legacy and isinstance(factory, type) and issubclass(factory, Camera):
+                self.add_sensor(sensor_cfg)
+            else:
+                if not hasattr(self, "_pending_mounted_sensors"):
+                    self._pending_mounted_sensors = {}
+                self._pending_mounted_sensors[sensor_cfg.uid] = sensor_cfg
         self.notify_visualization_topology_changed()
         result = UsdImportResult(
             assets,
@@ -4309,6 +4336,7 @@ class SimulationManager:
         mounted_sensors = []
         if cfg.enable_sensor:
             sensor_uids = set(self._sensors)
+            sensor_uids.update(getattr(self, "_pending_mounted_sensors", {}))
             for sensor_cfg in cfg.sensors:
                 if not isinstance(sensor_cfg, CameraCfg):
                     raise TypeError("RobotCfg.sensors supports mounted cameras only.")
@@ -4839,9 +4867,15 @@ class SimulationManager:
         sensor_type = sensor_cfg.sensor_type
         uid = sensor_cfg.uid
         if uid is None:
-            uid = f"{sensor_type.lower()}_{len(self._sensors)}"
+            index = len(self._sensors)
+            uid = f"{sensor_type.lower()}_{index}"
+            while uid in self._sensors or uid in getattr(
+                self, "_pending_mounted_sensors", {}
+            ):
+                index += 1
+                uid = f"{sensor_type.lower()}_{index}"
             sensor_cfg.uid = uid
-        if uid in self._sensors:
+        if uid in self._sensors or uid in getattr(self, "_pending_mounted_sensors", {}):
             raise ValueError(f"Sensor {uid!r} already exists.")
 
         registration, sensor_factory, legacy_factory = _resolve_sensor_factory(
@@ -5031,6 +5065,10 @@ class SimulationManager:
         Returns:
             bool: True if the asset is removed successfully, otherwise False.
         """
+        pending = getattr(self, "_pending_mounted_sensors", {})
+        if uid in pending:
+            del pending[uid]
+            return True
         if uid in self._sensors:
             sensor = self._sensors.pop(uid)
             destroy = getattr(sensor, "destroy", None)
@@ -5055,6 +5093,7 @@ class SimulationManager:
         robot = self._robots.get(uid)
         if robot is not None and robot.cfg.enable_sensor:
             for sensor_cfg in robot.cfg.sensors:
+                pending.pop(sensor_cfg.uid, None)
                 sensor = self._sensors.get(sensor_cfg.uid)
                 if (
                     isinstance(sensor, Camera)

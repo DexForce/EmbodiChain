@@ -48,10 +48,13 @@ rendering and permits mounted-camera preflight for callable factories without
 constructing them. Typed nested configclasses are
 decoded from annotations, including required and nullable fields.
 Inherited annotations resolve in their declaring module. Partial nested
-overrides retain calibrated defaults even through custom decoders; non-nullable
+overrides retain calibrated defaults through default-aware decoders; non-nullable
 nested configurations reject explicit null during decoding.
 Other nested inputs must be mappings or compatible constructed config objects;
 invalid scalars and sequences fail at the decode boundary.
+Custom `from_dict()` methods receive only authored keys, preserving preset and
+alias semantics. A decoder may explicitly implement `from_dict_with_defaults`
+to receive its owning default separately; sensor mount offsets use this hook.
 
 New factories accept `factory(cfg, *, context)`. `SensorContext` supplies the
 device, instance count, manager clock and public joint-state snapshots; external
@@ -68,6 +71,10 @@ Builtin camera/contact constructors retain their owner adapters. Existing
 use the registry. Context factories returning Camera instances also use manager
 parent binding and cleanup on attachment failure. StereoCamera subclasses and
 aliases remain unsupported for Gaussian capture, regardless of creation order.
+USD-mounted cameras using context or callable factories remain queued until
+explicit `prepare()`, allowing multiple USD declarations before finalization.
+Pending names are reserved; factory failures retain declarations for retry and
+removal cancels them. Query constructed sensor handles after preparation.
 Generalized non-camera mounting, sampling periods and output
 descriptors are separate runtime-contract work, not guarantees of this initial
 extension path. The independently installable example and usage instructions
