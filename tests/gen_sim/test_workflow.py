@@ -420,6 +420,7 @@ def test_unresolved_native_binding_retains_failure_and_never_executes(
         ("blue", None),
         ("red", None),
         ("red", "mesh"),
+        ("red", "deployment_mesh"),
         ("red", "source"),
         ("red", "sha256"),
     ],
@@ -507,6 +508,16 @@ def test_default_scene_route_enforces_frozen_role_properties(
             mesh = trimesh.load_mesh(mesh_path, process=False)
             mesh.visual.vertex_colors = [0, 0, 255, 255]
             mesh.export(mesh_path)
+        elif stale_evidence == "deployment_mesh":
+            # The legacy runtime loads shape.fpath even if mesh_path is present.
+            asset["mesh_path"] = asset["shape"]["fpath"]
+            blue_path = mesh_path.with_name("deployed-blue.glb")
+            blue = trimesh.load_mesh(mesh_path, process=False)
+            blue.visual.vertex_colors = [0, 0, 255, 255]
+            blue.export(blue_path)
+            asset["shape"]["fpath"] = blue_path.relative_to(
+                config_path.parent
+            ).as_posix()
         elif stale_evidence == "source":
             other = mesh_path.with_name("other-red.glb")
             other.write_bytes(mesh_path.read_bytes())
@@ -749,6 +760,103 @@ def test_provider_v1_qualification_preserves_optional_metadata_and_frozen_proper
         assert deployment.is_file()
     else:
         assert report["issues"][0]["code"] == expected
+
+
+def test_provider_proxy_color_cannot_certify_deployed_usdz(run_cfg: _RunCfg) -> None:
+    from pxr import Sdf, Usd, UsdGeom, UsdUtils
+    from embodichain.gen_sim.workflow import (
+        load_generated_scene,
+        load_task_plan,
+        plan_image_task,
+        qualify_task_scene,
+    )
+    from embodichain.gen_sim._run_binding import (
+        _bind_deployment,
+        _load_runtime,
+        _physical_generated_scene,
+    )
+
+    with _services(required_color="red") as services:
+        task = plan_image_task(
+            run_cfg.image,
+            "Put the red cube on the table",
+            run_cfg.output.parent / "plan",
+            services=services,
+        )
+        plan = load_task_plan(task)
+        scene = _provider_scene(
+            run_cfg.output.parent / "provider-scene",
+            plan,
+            affordances=None,
+            properties={"color": "red"},
+        )
+        manifest_path = scene / "generated_scene.json"
+        manifest = json.loads(manifest_path.read_text())
+        obj = next(o for o in manifest["objects"] if o["uid"] == "cube_native")
+        proxy_path = scene / obj["mesh_path"]
+        proxy = trimesh.load_mesh(proxy_path, process=False)
+        proxy.visual.vertex_colors = [255, 0, 0, 255]
+        proxy.export(proxy_path)
+        obj["mesh_sha256"] = hashlib.sha256(proxy_path.read_bytes()).hexdigest()
+        obj["property_evidence"] = {
+            "color": dict(
+                value="red", source=obj["mesh_path"], sha256=obj["mesh_sha256"]
+            )
+        }
+        # A real blue USD prim is loaded while the correctly hashed proxy is red.
+        layer = scene / "blue.usda"
+        stage = Usd.Stage.CreateNew(str(layer))
+        for item in manifest["objects"]:
+            cube = UsdGeom.Cube.Define(stage, item["source_prim_path"])
+            cube.CreateDisplayColorAttr([(0.0, 0.0, 1.0)])
+        stage.GetRootLayer().Save()
+        package = scene / manifest["runtime_asset"]["path"]
+        package.unlink()
+        assert UsdUtils.CreateNewUsdzPackage(Sdf.AssetPath(str(layer)), str(package))
+        manifest["runtime_asset"]["sha256"] = hashlib.sha256(
+            package.read_bytes()
+        ).hexdigest()
+        for relative in manifest["artifacts"]:
+            manifest["artifacts"][relative] = hashlib.sha256(
+                (scene / relative).read_bytes()
+            ).hexdigest()
+        manifest_path.write_text(json.dumps(manifest))
+        verified = load_generated_scene(scene)
+        physical = _physical_generated_scene(scene, verified, scene / "copied")
+        source = physical["rigid_object"][0]["source"]
+        loaded = Usd.Stage.Open(source["file_path"])
+        assert UsdGeom.Cube(
+            loaded.GetPrimAtPath(source["source_prim_path"])
+        ).GetDisplayColorAttr().Get()[0] == (0.0, 0.0, 1.0)
+        qualification = qualify_task_scene(
+            task,
+            scene,
+            run_cfg.runtime,
+            run_cfg.execution_policy,
+            run_cfg.output.parent / "qualified",
+            services=services,
+        )
+    report = json.loads((qualification / "scene_qualification.json").read_text())
+    assert report["status"] == "rejected"
+    assert report["issues"][0]["code"] == "asset_property_unverified"
+    assert "property:color" not in report["roles"]["role_001"]["verified"]
+    # Binding must recheck the runtime identity even if bindings were preselected.
+    run_cfg.output.mkdir()
+    runtime, policy, profile = _load_runtime(run_cfg)
+    with pytest.raises(ValueError, match="asset_property_unverified"):
+        _bind_deployment(
+            run_cfg,
+            scene,
+            task,
+            runtime,
+            policy,
+            profile,
+            services=None,
+            expected_plan_digest=plan["plan_digest"],
+            generated_scene=verified,
+            resolved_bindings=report["bindings"],
+        )
+    assert not (run_cfg.output / "deployment").exists()
 
 
 def test_attempt_review_retains_per_environment_evidence(tmp_path: Path) -> None:

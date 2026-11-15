@@ -21,6 +21,7 @@ import json
 import hashlib
 from pathlib import Path
 import shutil
+import struct
 import time
 
 import numpy as np
@@ -300,6 +301,71 @@ class SceneExporter:
         }
 
     @staticmethod
+    def _opaque_glb_materials(path: Path) -> bool:
+        """Check authored opacity before Trimesh quantizes material factors."""
+        try:
+            with path.open("rb") as stream:
+                magic, version, length, size, kind = struct.unpack(
+                    "<4sIIII", stream.read(20)
+                )
+                if (
+                    magic != b"glTF"
+                    or version != 2
+                    or kind != 0x4E4F534A
+                    or length != path.stat().st_size
+                    or size > length - 20
+                ):
+                    return False
+                document = json.loads(stream.read(size))
+            materials = document.get("materials", [])
+            for mesh in document.get("meshes", []):
+                for primitive in mesh["primitives"]:
+                    material = (
+                        materials[primitive["material"]]
+                        if "material" in primitive
+                        else {}
+                    )
+                    mode = material.get("alphaMode", "OPAQUE")
+                    if mode == "OPAQUE":
+                        continue
+                    # Non-opaque vertex alpha needs its own accessor decoder.
+                    if "COLOR_0" in primitive.get("attributes", {}):
+                        return False
+                    alpha = material.get("pbrMetallicRoughness", {}).get(
+                        "baseColorFactor", [1, 1, 1, 1]
+                    )[3]
+                    if (
+                        isinstance(alpha, bool)
+                        or not isinstance(alpha, (int, float))
+                        or not np.isfinite(alpha)
+                        or not 0 <= alpha <= 1
+                    ):
+                        return False
+                    if mode == "MASK":
+                        cutoff = material.get("alphaCutoff", 0.5)
+                        if (
+                            isinstance(cutoff, bool)
+                            or not isinstance(cutoff, (int, float))
+                            or not np.isfinite(cutoff)
+                            or not 0 <= cutoff <= 1
+                            or alpha < cutoff
+                        ):
+                            return False
+                    elif mode != "BLEND" or alpha != 1:
+                        return False
+            return True
+        except (
+            OSError,
+            ValueError,
+            TypeError,
+            KeyError,
+            IndexError,
+            AttributeError,
+            struct.error,
+        ):
+            return False
+
+    @staticmethod
     def _appearance_metadata(path: Path) -> dict[str, object]:
         """Measure only uniform opaque palette colors in the exported GLB.
 
@@ -321,9 +387,14 @@ class SceneExporter:
             scene = trimesh.load_scene(path, process=False)
         except (OSError, ValueError, TypeError, NotImplementedError):
             return {}
+        if not SceneExporter._opaque_glb_materials(path):
+            return {}
         measured = []
         for mesh in scene.geometry.values():
+            if not isinstance(mesh, trimesh.Trimesh):
+                return {}
             visual = mesh.visual
+            material = getattr(visual, "material", None)
             if visual.kind == "vertex":
                 colors = np.asarray(visual.vertex_colors)
             elif visual.kind == "face":
@@ -350,8 +421,6 @@ class SceneExporter:
                 or not len(colors)
                 or not np.isfinite(colors).all()
             ):
-                return {}
-            if colors.shape[1] == 4 and (colors[:, 3] < 250).any():
                 return {}
             labels = [
                 name

@@ -580,6 +580,7 @@ def test_unsupported_frozen_qualifier_remains_unverified(
         {"objects": {"source": "source", "tray": "tray"}},
         {"source": {}, "tray": {}},
         asset_root=tmp_path,
+        asset_sources={},
     )
     assert issues[0]["code"] == "unverified_instruction_qualifier"
     with pytest.raises(ValueError, match="Unverified instruction qualifiers"):
