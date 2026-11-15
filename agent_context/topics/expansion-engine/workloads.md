@@ -22,6 +22,17 @@ difficult group does not silently borrow another group's B-row allocation.
 
 ## Source ports and native accounting
 
+`run_gym_expansion_workloads` is the public native composition for Task Program
+scene/plan workloads. `GymExpansionWorkload` supplies a pinned deployment,
+independent collection budget, artifacts and row callbacks. The facade opens one
+World, captures the original seeded nominal scene in row zero, and composes the
+existing session, frame collector, episode assembler and confirmed artifact sink.
+Different integration/grasp policies may share that World only when their
+physical configuration, program and cadence agree. Physical/visual/prototype
+operators remain on the cohort API; unsupported payloads fail explicitly.
+Frozen groups export through one bounded writer thread without World access.
+Fresh output is required; this facade does not resume interrupted collection.
+
 `WorkloadSource.prepare` runs inside the selected-row `episode_prepare` reset
 callback. It must not step physics, alter an active peer or mutate World-wide
 appearance/resources. Incompatible topology or shared resources require a

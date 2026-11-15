@@ -1670,6 +1670,8 @@ and durable episode-boundary recovery. See the offline expansion example.
    WorkloadRowResult
    WorkloadSource
    WorkloadProgramExecutor
+   GymExpansionWorkload
+   run_gym_expansion_workloads
    export_expansion_episodes
 
 .. autosummary::
@@ -1851,6 +1853,26 @@ Stream confirmed numeric episodes and observation children through the existing 
 .. autosummary::
 
    export_expansion_lerobot
+
+embodichain.lab.expansion.gym_workloads
+--------------------------------------
+
+The native workload facade owns one World containing W times B environments.
+Task packages supply pinned source declarations and row-local scene/plan ports;
+the facade retains native session admission, measured T+1 evidence, physical
+acceptance, confirmed receipts and one bounded artifact export thread.
+Integration policies may differ while physical topology and cadence must agree.
+
+.. currentmodule:: embodichain.lab.expansion.gym_workloads
+
+.. autosummary::
+
+   GymExpansionWorkload
+   run_gym_expansion_workloads
+
+.. autoclass:: GymExpansionWorkload
+
+.. autofunction:: run_gym_expansion_workloads
 
 embodichain.lab.expansion.host
 ------------------------------

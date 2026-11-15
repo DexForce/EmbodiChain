@@ -39,8 +39,10 @@ class ExpansionValidator(Protocol):
     terminal: Mapping[int, ValidationResult]
     results: Mapping[int, Any]
 
-    def prepare(self, snapshot: Any = None) -> None:
-        """Reset measured evidence after the host has settled its cohort."""
+    def prepare(
+        self, snapshot: Any = None, *, env_ids: tuple[int, ...] | None = None
+    ) -> None:
+        """Reset evidence after settling; rolling callers select independent rows."""
         ...
 
     def sample(self, ids: tuple[int, ...], action: Any, snapshot: Any = None) -> None:

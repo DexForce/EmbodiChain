@@ -11,6 +11,7 @@ algorithms stay in `sim.motion.expansion`; scene and workspace algorithms stay i
 | Canonical in-memory session, lifecycle limits and coverage port | `embodichain/lab/expansion/session.py`, `session_cfg.py`, `coverage.py` |
 | Shared scheduling, admission and commit ports | `embodichain/lab/expansion/engine.py` |
 | Rolling workload × B execution in one caller-owned World | `embodichain/lab/expansion/workloads.py` |
+| Native workload World, source/evidence assembly and bounded export | `embodichain/lab/expansion/gym_workloads.py` |
 | Job assembly, stage recovery and inspect | `embodichain/lab/expansion/workflow.py`, `stages.py` |
 | Native World ownership and compatibility facade | `embodichain/lab/expansion/host.py` |
 | Task-owned render/source/transform/acceptance ports | `embodichain/lab/expansion/host_extensions.py` |

@@ -347,10 +347,105 @@ def _probe(output: str) -> None:
         SimulationManager.flush_cleanup_queue()
 
 
+def _facade_probe(output: str) -> None:
+    import hashlib
+    import json
+    import torch
+    import yaml
+    from embodichain.lab.expansion import (
+        ArtifactEpisodeSink,
+        ExpansionRunCfg,
+        GymExpansionHostExtensions,
+        GymExpansionWorkload,
+        WorkloadExecutionCfg,
+        run_gym_expansion_workloads,
+        load_expansion_episode,
+    )
+    from embodichain.lab.expansion.collision import _MeasuredCollision
+    from embodichain.lab.gym.utils.registration import (
+        discover_task_packages,
+        execute_init_hooks,
+    )
+    from embodichain.lab.sim import SimulationManager
+
+    torch.set_num_threads(1)
+    root = Path(__file__).resolve().parents[3]
+    task = (
+        root
+        / "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place"
+    )
+    deployment = task / "task.ur5.yaml"
+    path = Path(output)
+    path.mkdir(exist_ok=True)
+    program = yaml.safe_load((task / "task_program/program.yaml").read_text())
+    program["program"]["repeat"]["count"] = 1
+    override = path / "program.yaml"
+    override.write_text(yaml.safe_dump(program))
+    digest = hashlib.sha256(deployment.read_bytes()).hexdigest()
+    discover_task_packages()
+    execute_init_hooks()
+    workloads = []
+    for name, target in (("pair", 2), ("queued", 1)):
+        cfg = ExpansionRunCfg(
+            deployment=str(deployment),
+            program=str(override),
+            output_dir=str(path / name),
+            target_episodes=target,
+            max_attempts=4,
+            max_steps=2500,
+            max_wall_time_s=240,
+            settling_steps=5,
+        )
+        report = {
+            "job_id": name,
+            "semantic_id": name,
+            "execution_id": name,
+            "recipe_revision": name,
+            "input_files": {"deployment": digest},
+            "runtime_versions": {},
+        }
+        workloads.append(GymExpansionWorkload(name, cfg, report, {}))
+    result = run_gym_expansion_workloads(
+        workloads,
+        WorkloadExecutionCfg(
+            workload_count=1, batch_size=2, max_steps=2500, settling_steps=5
+        ),
+        extensions=GymExpansionHostExtensions(
+            validator_factory=lambda env, output: _MeasuredCollision(
+                env,
+                str(
+                    root / "examples/expansion/scene_robot_feasibility/search.ur5.yaml"
+                ),
+                output,
+            )
+        ),
+        output_dir=path / "execution",
+    )
+    assert result["complete"], result
+    assert result["num_envs"] == 2 and result["world"]["world_count"] == 1
+    assert not SimulationManager._instances
+    for name, expected in (("pair", 2), ("queued", 1)):
+        group = result["workloads"][name]
+        assert group["complete"] and group["committed_episodes"] == expected
+        receipts = ArtifactEpisodeSink(path / name).inspect()
+        assert len(receipts) == len(group["lerobot"]["datasets"]) == expected
+        for receipt in receipts:
+            episode = load_expansion_episode(receipt.storage_id)
+            assert episode.validation.accepted
+            assert len(episode.timestamps) == len(episode.actions) + 1
+            execution = episode.metadata["execution"]
+            assert execution["world_control_end"] - execution[
+                "world_control_start"
+            ] + 1 == len(episode.actions)
+            assert execution["world"] == result["world"]
+    (path / "facade-result.json").write_text(json.dumps(result, indent=2))
+
+
 @pytest.mark.requires_sim
-def test_rolling_workloads_keep_native_receipts_and_world_boundaries(tmp_path):
+@pytest.mark.parametrize("mode", ["executor", "facade"])
+def test_rolling_workloads_keep_native_receipts_and_world_boundaries(tmp_path, mode):
     result = subprocess.run(
-        [sys.executable, __file__, str(tmp_path)],
+        [sys.executable, __file__, str(tmp_path), mode],
         cwd=Path(__file__).resolve().parents[3],
         env={**os.environ, "SDL_VIDEODRIVER": "offscreen", "OMP_NUM_THREADS": "1"},
         capture_output=True,
@@ -361,4 +456,6 @@ def test_rolling_workloads_keep_native_receipts_and_world_boundaries(tmp_path):
 
 
 if __name__ == "__main__":
-    _probe(sys.argv[1])
+    (_facade_probe if len(sys.argv) > 2 and sys.argv[2] == "facade" else _probe)(
+        sys.argv[1]
+    )
