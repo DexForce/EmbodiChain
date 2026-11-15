@@ -167,6 +167,12 @@ def test_object_physics_rejects_invalid_values(
         ("material_masked_visible", "red"),
         ("material_blended", None),
         ("material_opaque_alpha", "red"),
+        ("material_mask_float_below_cutoff", None),
+        ("material_mask_float_at_cutoff", "red"),
+        ("material_mask_fully_opaque", "red"),
+        ("material_blend_float", None),
+        ("material_blend_fully_opaque", "red"),
+        ("material_opaque_float", "red"),
         ("material_with_vertex_color", None),
         ("textured", None),
     ],
@@ -214,6 +220,47 @@ def test_scene_export_carries_measured_appearance(tmp_path, appearance, expected
             [mesh, trimesh.load_path(np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]))]
         )
     mesh.export(asset_path)
+    if appearance in {
+        "material_mask_float_below_cutoff",
+        "material_mask_float_at_cutoff",
+        "material_mask_fully_opaque",
+        "material_blend_float",
+        "material_blend_fully_opaque",
+        "material_opaque_float",
+    }:
+        # Patch the authored GLB JSON, bypassing Trimesh's uint8 factor setter.
+        # Preserve the geometry/binary chunks to exercise the real exporter.
+        import struct
+
+        data = asset_path.read_bytes()
+        chunk_size = struct.unpack_from("<I", data, 12)[0]
+        document = json.loads(data[20 : 20 + chunk_size])
+        mode, alpha, cutoff = {
+            "material_mask_float_below_cutoff": ("MASK", 0.999, 1.0),
+            "material_mask_float_at_cutoff": ("MASK", 0.999, 0.999),
+            "material_mask_fully_opaque": ("MASK", 1.0, 1.0),
+            "material_blend_float": ("BLEND", 0.999, 0.5),
+            "material_blend_fully_opaque": ("BLEND", 1.0, 0.5),
+            "material_opaque_float": ("OPAQUE", 0.999, 0.5),
+        }[appearance]
+        material = document["materials"][0]
+        material.update(alphaMode=mode, alphaCutoff=cutoff)
+        material["pbrMetallicRoughness"]["baseColorFactor"][3] = alpha
+        header = json.dumps(document).encode("utf-8")
+        header += b" " * (-len(header) % 4)
+        binary = data[20 + chunk_size :]
+        asset_path.write_bytes(
+            struct.pack(
+                "<4sIIII",
+                b"glTF",
+                2,
+                20 + len(header) + len(binary),
+                len(header),
+                0x4E4F534A,
+            )
+            + header
+            + binary
+        )
     table = _scene_object(
         object_id="table",
         kind="table",

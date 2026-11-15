@@ -82,7 +82,8 @@ relations/table regions; directional vocabularies require quarter turns.
 - `scene_export/` contains scene/config/graph JSON and mesh/articulation assets;
   imported/exported graph node IDs must equal object IDs.
 - Rigid exports carry conservatively measured uniform GLB color properties and
-  content-bound provenance. Opacity follows the material's alpha mode; unsupported
+  content-bound provenance. Opacity uses authored GLB floating-point alpha and
+  material mode before library color quantization; unsupported
   geometry, textures and mixed appearance leave the measurement unverified.
   Role checks verify measured proofs against the mesh the deployment consumes,
   including the legacy `shape.fpath` selection. Proxy GLB proofs cannot certify
