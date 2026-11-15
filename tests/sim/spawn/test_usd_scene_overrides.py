@@ -110,6 +110,7 @@ def test_callable_mounted_camera_keeps_multiple_usd_declarations_open(
     import dexsim.kit.usd
     from embodichain.lab.sim.cfg import RobotCfg
     from embodichain.lab.sim.sensors import (
+        BaseSensor,
         Camera,
         CameraCfg,
         SensorRegistration,
@@ -126,10 +127,22 @@ def test_callable_mounted_camera_keeps_multiple_usd_declarations_open(
     manager.num_envs = 1
     created = []
 
+    class TestCamera(Camera):
+        def _build_sensor_from_config(
+            self, config: CameraCfg, device: torch.device
+        ) -> None:
+            pass
+
     def factory(cfg, *args, **kwargs):
         assert manager._spawn_scene.builder.is_finalized
-        camera = object.__new__(Camera)
-        camera.cfg = cfg
+        camera = object.__new__(TestCamera)
+        BaseSensor.__init__(
+            camera,
+            cfg,
+            device=manager.device,
+            num_instances=manager.num_envs,
+            context=kwargs.get("context"),
+        )
         camera.attach_to_parent_nodes = MagicMock()
         created.append(camera)
         return camera
