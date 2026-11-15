@@ -422,6 +422,7 @@ def test_unresolved_native_binding_retains_failure_and_never_executes(
         ("red", "mesh"),
         ("red", "deployment_mesh"),
         ("red", "external_buffer"),
+        ("red", "external_texture"),
         ("red", "source"),
         ("red", "sha256"),
     ],
@@ -549,6 +550,46 @@ def test_default_scene_route_enforces_frozen_role_properties(
             assert trimesh.load_mesh(mesh_path, process=False).visual.vertex_colors[
                 0
             ].tolist() == [0, 0, 255, 255]
+        elif stale_evidence == "external_texture":
+            import struct
+            from PIL import Image
+
+            textured = trimesh.creation.box(extents=[0.04, 0.04, 0.04])
+            textured.visual = trimesh.visual.TextureVisuals(
+                uv=np.zeros((len(textured.vertices), 2)),
+                material=trimesh.visual.material.PBRMaterial(
+                    baseColorFactor=[255, 0, 0, 255],
+                    baseColorTexture=Image.new("RGB", (2, 2), "blue"),
+                ),
+            )
+            data = textured.export(file_type="glb")
+            size = struct.unpack_from("<I", data, 12)[0]
+            document = json.loads(data[20 : 20 + size])
+            document["images"][0] = {"uri": "blue.png"}
+            header = json.dumps(document).encode()
+            header += b" " * (-len(header) % 4)
+            binary = data[20 + size :]
+            mesh_path.write_bytes(
+                struct.pack(
+                    "<4sIIII",
+                    b"glTF",
+                    2,
+                    20 + len(header) + len(binary),
+                    len(header),
+                    0x4E4F534A,
+                )
+                + header
+                + binary
+            )
+            # A pre-fix proof measured the fallback factor while PNG was missing.
+            proof["sha256"] = hashlib.sha256(mesh_path.read_bytes()).hexdigest()
+            Image.new("RGB", (2, 2), "blue").save(mesh_path.with_name("blue.png"))
+            assert (
+                trimesh.load_mesh(
+                    mesh_path, process=False
+                ).visual.material.baseColorTexture
+                is not None
+            )
         elif stale_evidence == "source":
             other = mesh_path.with_name("other-red.glb")
             other.write_bytes(mesh_path.read_bytes())

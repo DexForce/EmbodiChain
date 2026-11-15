@@ -178,6 +178,7 @@ def test_object_physics_rejects_invalid_values(
         ("material_extension_opaque", None),
         ("material_with_vertex_color", None),
         ("textured", None),
+        ("textured_external", None),
     ],
 )
 def test_scene_export_carries_measured_appearance(tmp_path, appearance, expected):
@@ -188,7 +189,7 @@ def test_scene_export_carries_measured_appearance(tmp_path, appearance, expected
     table_path = tmp_path / "table.glb"
     table_path.write_bytes(b"glTF-table")
     mesh = trimesh.creation.box()
-    if appearance.startswith("material") or appearance == "textured":
+    if appearance.startswith("material") or appearance.startswith("textured"):
         alpha, mode, cutoff = {
             "material_masked_invisible": (250, "MASK", 0.99),
             "material_masked_visible": (250, "MASK", 0.9),
@@ -196,11 +197,17 @@ def test_scene_export_carries_measured_appearance(tmp_path, appearance, expected
             "material_opaque_alpha": (0, "OPAQUE", 0.5),
         }.get(appearance, (255, "OPAQUE", 0.5))
         material = trimesh.visual.material.PBRMaterial(
-            baseColorFactor=[255, 0, 0, alpha],
+            baseColorFactor=(
+                [255, 255, 255, alpha]
+                if appearance == "textured_external"
+                else [255, 0, 0, alpha]
+            ),
             alphaMode=mode,
             alphaCutoff=cutoff,
             baseColorTexture=(
-                Image.new("RGB", (2, 2), "blue") if appearance == "textured" else None
+                Image.new("RGB", (2, 2), "blue")
+                if appearance.startswith("textured")
+                else None
             ),
         )
         mesh.visual = trimesh.visual.TextureVisuals(
@@ -264,6 +271,29 @@ def test_scene_export_carries_measured_appearance(tmp_path, appearance, expected
             + header
             + binary
         )
+    if appearance == "textured_external":
+        import struct
+
+        data = asset_path.read_bytes()
+        size = struct.unpack_from("<I", data, 12)[0]
+        document = json.loads(data[20 : 20 + size])
+        document["images"][0] = {"uri": "blue.png"}
+        header = json.dumps(document).encode()
+        header += b" " * (-len(header) % 4)
+        binary = data[20 + size :]
+        asset_path.write_bytes(
+            struct.pack(
+                "<4sIIII",
+                b"glTF",
+                2,
+                20 + len(header) + len(binary),
+                len(header),
+                0x4E4F534A,
+            )
+            + header
+            + binary
+        )
+        Image.new("RGB", (2, 2), "blue").save(tmp_path / "blue.png")
     if appearance.startswith("material_extension"):
         import struct
 
@@ -327,6 +357,17 @@ def test_scene_export_carries_measured_appearance(tmp_path, appearance, expected
             proof["sha256"]
             == hashlib.sha256((path.parent / proof["source"]).read_bytes()).hexdigest()
         )
+    if appearance == "textured_external":
+        deployed = path.parent / "mesh_assets/asset/asset.glb"
+        assert not deployed.with_name("blue.png").exists()
+        original = hashlib.sha256(deployed.read_bytes()).hexdigest()
+        Image.new("RGB", (2, 2), "blue").save(deployed.with_name("blue.png"))
+        assert (
+            trimesh.load_mesh(deployed, process=False).visual.material.baseColorTexture
+            is not None
+        )
+        assert SceneExporter._appearance_metadata(deployed) == {}
+        assert hashlib.sha256(deployed.read_bytes()).hexdigest() == original
     assert "waterproof" not in entry.get("properties", {})
 
 
