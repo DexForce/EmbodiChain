@@ -197,7 +197,7 @@ def main() -> None:
     device = torch.device(args.device)
     if device.type != "cuda" or not torch.cuda.is_available():
         parser.error("Newton hydroelastic projection requires a CUDA device.")
-    if not hasattr(Scene, "get_hydroelastic_contact_binding"):
+    if not hasattr(Scene, "get_hydroelastic_contact_capabilities"):
         parser.error("Install a DexSim build with completed hydroelastic bindings.")
     variants = ("geometric", "export", "projection")
     if args.reverse:

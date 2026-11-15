@@ -274,7 +274,7 @@ are independent from the native impulse reported by ContactGrid.
 
 Set `TactileIndentationCfg.surface` to project the last external Newton
 hydroelastic collision pass onto the same probes. It requires a DexSim build
-with `Scene.get_hydroelastic_contact_binding()` and surface output enabled in
+with `Scene.get_hydroelastic_contact_capabilities()` and surface output enabled in
 the solver's collision pipeline. Mount on a physical pad body or articulation
 link in every arena. `target_uids` identify the opposing collision actors.
 The provider binds shape IDs for the current topology and uses the
@@ -288,6 +288,7 @@ from a missing or capacity-truncated snapshot. `surface_generation` and
 `surface_substep` identify the solver collision pass. Model rebuilds clear the
 output and rebind shapes before the next completed sample. Geometric depth,
 RGB, and the elastic load model keep their existing sampling contracts.
+Pads sampled together share one full-capacity Scene copy per completed step.
 
 Ray queries default to cooked collision shapes. Select `geometry_source: visual`
 for authored procedural or array-backed render geometry of rigid and visual

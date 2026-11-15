@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+import weakref
 
 import numpy as np
 import torch
@@ -52,16 +53,20 @@ class _HydroelasticPadSource:
     ) -> None:
         scene = manager.spawn_result
         if scene is None or not callable(
-            getattr(scene, "get_hydroelastic_contact_binding", None)
+            getattr(scene, "get_hydroelastic_contact_capabilities", None)
         ):
             raise NotImplementedError(
                 "Hydroelastic pad projection requires a DexSim SDK with completed contact bindings."
             )
+        capabilities = scene.get_hydroelastic_contact_capabilities()
+        if not capabilities.available:
+            raise NotImplementedError(capabilities.unavailable_reason)
         if mount.parent is None:
             raise ValueError(
                 "Hydroelastic pad projection requires a physical mount parent."
             )
         self.scene: Scene = scene
+        self._manager_ref = weakref.ref(manager)
         self.topology = scene.topology_revision
         env_by_name = {
             name: row for row, name in enumerate(manager._spawn_scene.arena_names)
@@ -78,6 +83,7 @@ class _HydroelasticPadSource:
             info = scene.get_hydroelastic_contact_binding(
                 (handle, link) if link else handle
             )
+            info.validate_topology(self.topology)
             if not info.shape_ids:
                 raise ValueError(f"Hydroelastic pad {asset!r} has no collision shapes.")
             bound_rows.add(env)
@@ -97,6 +103,7 @@ class _HydroelasticPadSource:
                 info = scene.get_hydroelastic_contact_binding(
                     (handle, link) if link else handle
                 )
+                info.validate_topology(self.topology)
                 opposing.update((shape, env) for shape in info.shape_ids)
         if not opposing or pad.keys() & opposing.keys():
             raise ValueError(
@@ -128,12 +135,48 @@ class _HydroelasticPadSource:
         return uid, link
 
     def read(self) -> HydroelasticContactSurface | None:
-        if self.topology != self.scene.topology_revision or self.scene.needs_rebuild:
+        manager = self._manager_ref()
+        if (
+            manager is None
+            or self.topology != self.scene.topology_revision
+            or self.scene.needs_rebuild
+        ):
             return None
+        step = self.scene.get_simulation_step()
+        reads = getattr(manager, "_hydroelastic_surface_reads", None)
+        key = (id(self.scene), self.topology, step)
+        if reads is not None and key in reads:
+            surface, stream, ready = reads[key]
+            if ready is not None:
+                consumer = torch.cuda.current_stream(surface.face_count.device)
+                if consumer != stream:
+                    consumer.wait_event(ready)
+                    for tensor in (
+                        surface.face_count,
+                        surface.vertices,
+                        surface.shape_pairs,
+                        surface.separation,
+                        surface.body_poses,
+                    ):
+                        tensor.record_stream(consumer)
+            return surface
+
         surface = self.scene.get_hydroelastic_contact_surface()
-        if surface is None or surface.step != self.scene.get_simulation_step():
+        if (
+            surface is None
+            or surface.step != step
+            or surface.topology_revision != self.topology
+        ):
+            if reads is not None:
+                reads[key] = (None, None, None)
             return None
-        return surface if surface.topology_revision == self.topology else None
+        if reads is not None:
+            stream = ready = None
+            if surface.face_count.is_cuda:
+                stream = torch.cuda.current_stream(surface.face_count.device)
+                ready = stream.record_event()
+            reads[key] = (surface, stream, ready)
+        return surface
 
 
 class _HydroelasticPadProjection:

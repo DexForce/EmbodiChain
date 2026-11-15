@@ -115,10 +115,11 @@ def test_scatter_same_arena_faces_and_report_truncation(device: str) -> None:
 @pytest.mark.parametrize("pad_kind", ["static", "kinematic"])
 def test_native_pad_uses_completed_surface_and_rebinds_after_rebuild(
     pad_kind: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from dexsim.scene import Scene
 
-    if not hasattr(Scene, "get_hydroelastic_contact_binding"):
+    if not hasattr(Scene, "get_hydroelastic_contact_capabilities"):
         pytest.skip(
             "The installed DexSim SDK does not export completed surface bindings."
         )
@@ -179,22 +180,35 @@ def test_native_pad_uses_completed_surface_and_rebinds_after_rebuild(
                 )
             )
         tool = sim.get_rigid_object("tool")
-        sensor = sim.add_sensor(
-            TactileIndentationCfg(
-                uid="grid",
-                target_uids=("tool",),
-                mount=SensorCfg.OffsetCfg(parent="pad", pos=(0.0, 0.0, 0.05)),
-                size=(0.1, 0.1),
-                resolution=(8, 8),
-                surface=TactileIndentationCfg.SurfaceCfg(max_distance=0.03),
-            )
+        config = TactileIndentationCfg(
+            uid="grid",
+            target_uids=("tool",),
+            mount=SensorCfg.OffsetCfg(parent="pad", pos=(0.0, 0.0, 0.05)),
+            size=(0.1, 0.1),
+            resolution=(8, 8),
+            surface=TactileIndentationCfg.SurfaceCfg(max_distance=0.03),
         )
+        sensor = sim.add_sensor(config)
+        second = sim.add_sensor(config.replace(uid="second-grid"))
         sim.prepare()
         scene = sim.spawn_result
         assert scene.get_hydroelastic_contact_surface() is None
+        get_surface = Scene.get_hydroelastic_contact_surface
+        reads = 0
+
+        def count_read(scene):
+            nonlocal reads
+            reads += 1
+            return get_surface(scene)
+
+        monkeypatch.setattr(Scene, "get_hydroelastic_contact_surface", count_read)
         sim.update(step=1, render_final_step=False)
+        assert reads == 1
         data = sensor.get_data()
-        first = scene.get_hydroelastic_contact_surface()
+        torch.testing.assert_close(
+            data["surface_face_count"], second.get_data()["surface_face_count"]
+        )
+        first = get_surface(scene)
         binding = scene.get_hydroelastic_contact_binding(
             sim._spawn_scene.handles("pad")[0]
         )
@@ -220,6 +234,7 @@ def test_native_pad_uses_completed_surface_and_rebinds_after_rebuild(
         zero_velocity = torch.zeros((2, 3), device=device)
         tool.set_velocity(zero_velocity, zero_velocity)
         sim.update(step=1, render_final_step=False)
+        assert reads == 2
         assert data["surface_face_count"][0].any()
         assert not data["surface_face_count"][1].any()
         assert data["surface_generation"].tolist() == [6, 6]
@@ -231,10 +246,11 @@ def test_native_pad_uses_completed_surface_and_rebinds_after_rebuild(
             )
         )
         sim.prepare()
-        assert sim.spawn_result.get_hydroelastic_contact_surface() is None
+        assert get_surface(sim.spawn_result) is None
         assert not sensor.get_data()["surface_complete"].any()
         assert sim.spawn_result.topology_revision != first.topology_revision
         sim.update(step=1, render_final_step=False)
+        assert reads == 3
         assert sensor.get_data()["surface_generation"].tolist() == [3, 3]
         torch.testing.assert_close(first.vertices, before_reset)
         torch.testing.assert_close(first.body_poses, held_poses)
