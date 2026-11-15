@@ -228,6 +228,7 @@ def test_project_metadata_has_no_direct_dependencies() -> None:
     ("version", "supported"),
     [
         ("0.6.0.dev11491", False),
+        ("0.6.0rc1", False),
         ("0.6.0rc2", True),
     ],
 )

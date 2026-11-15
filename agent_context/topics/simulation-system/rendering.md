@@ -125,6 +125,19 @@ and native controls have their own owners:
 [visualization](../sim-visualization/sim-visualization.md) and
 [native gizmos](../sim-visualization/native-gizmos.md).
 
+Native single-frame captures are configured by ``SimulationManagerCfg.window_capture``
+and use the **C** hotkey by default. Input callbacks enqueue requests; the next
+`render_frame()` consumes them on its caller's thread after state publication,
+including frames entered by `update()`. DexSim's synchronous window readback
+cannot run on its render owner. Closing a window discards pending requests;
+late callbacks from its old control cannot capture a reopened window.
+The manager copies a non-empty
+``Windows.get_picture()`` frame when DexSim provides one; renderers without
+native CPU readback may use the legacy missing/empty-frame offscreen fallback
+at the current window pose. A native readback exception returns no image and
+must not enter that fallback: an OS-closed window shell can outlive its camera.
+Unavailable captures never create an empty output file.
+
 ## Parented cameras
 
 `sensors/attachment.py:resolve_parent_nodes()` accepts an unambiguous link name

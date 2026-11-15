@@ -19,6 +19,7 @@ from __future__ import annotations
 from contextlib import nullcontext
 import gc
 import queue
+import threading
 
 from pathlib import Path
 
@@ -252,6 +253,24 @@ class FakeCamera:
         return np.full((4, 4, 4), 7, dtype=np.uint8)
 
 
+class FakeWindow:
+    """Native-window stub exposing picture and pose readback."""
+
+    def __init__(self, picture: np.ndarray | None) -> None:
+        self.picture = picture
+        self.pose = np.eye(4, dtype=np.float32)
+        self.input_controls: list[object] = []
+
+    def get_picture(self) -> np.ndarray | None:
+        return self.picture
+
+    def get_pose_matrix(self) -> np.ndarray:
+        return self.pose
+
+    def add_input_control(self, control: object) -> None:
+        self.input_controls.append(control)
+
+
 class FakePointCloud:
     """Point-cloud stub that records native rendering calls."""
 
@@ -436,6 +455,7 @@ def _make_sim_manager(
     sim._window_record_save_threads = []
     sim._window_record_hotkey_cfg = None
     sim._window_record_input_control = None
+    sim._window_capture_requests = queue.SimpleQueue()
     sim._window_camera_pose_hotkey_cfg = None
     sim._window_camera_pose_input_control = None
     sim._env = FakeEnv()
@@ -1172,6 +1192,20 @@ def test_open_window_is_idempotent() -> None:
 
     assert opened
     sim._world.open_window.assert_not_called()
+
+
+def test_open_window_registers_capture_hotkey_for_existing_window() -> None:
+    sim = _make_sim_manager(window=FakeWindow(np.ones((2, 2, 3), dtype=np.uint8)))
+    sim._window_capture_hotkey_cfg = {
+        "save_path": None,
+        "image_prefix": "capture",
+        "hotkey": "c",
+    }
+    sim._window_capture_input_control = None
+
+    assert sim.open_window()
+
+    assert len(sim._window.input_controls) == 1
 
 
 def test_entity_gizmo_delegates_to_dexsim_and_excludes_default_plane() -> None:
@@ -3181,6 +3215,135 @@ def test_window_camera_pose_to_look_at_uses_dexsim_world_up() -> None:
     np.testing.assert_allclose(eye, [1.0, 2.0, 3.0])
     np.testing.assert_allclose(look_at, [1.0, 2.0, 2.0])
     np.testing.assert_allclose(up, [0.0, 0.0, 1.0])
+
+
+def test_capture_window_returns_owned_picture_and_writes_png(tmp_path: Path) -> None:
+    source = np.full((3, 4, 3), 11, dtype=np.uint8)
+    sim = _make_sim_manager(window=FakeWindow(source))
+
+    captured = sim.capture_window(save_path=tmp_path / "viewport")
+
+    assert captured is not None
+    assert captured.flags.owndata
+    np.testing.assert_array_equal(captured, source)
+    assert (tmp_path / "viewport.png").read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    source[...] = 0
+    assert captured[0, 0, 0] == 11
+
+
+def test_capture_window_uses_pose_preserving_camera_fallback() -> None:
+    sim = _make_sim_manager(window=FakeWindow(np.empty((0,), dtype=np.uint8)))
+
+    captured = sim.capture_window()
+
+    assert captured is not None
+    assert captured.shape == (4, 4, 4)
+    assert sim._window_capture_camera is not None
+    assert sim._window_capture_camera.render_count == 1
+    np.testing.assert_array_equal(
+        sim._window_capture_camera.last_pose,
+        np.eye(4, dtype=np.float32),
+    )
+
+
+def test_capture_window_returns_none_without_an_open_window() -> None:
+    sim = _make_sim_manager()
+
+    assert sim.capture_window() is None
+
+
+def test_capture_window_native_failure_does_not_query_retired_camera(
+    tmp_path: Path,
+) -> None:
+    window = FakeWindow(None)
+    window.get_picture = MagicMock(side_effect=RuntimeError("Window is closed"))
+    window.get_pose_matrix = MagicMock()
+    sim = _make_sim_manager(window=window)
+
+    assert sim.capture_window(tmp_path / "closed.png") is None
+    window.get_pose_matrix.assert_not_called()
+    assert not (tmp_path / "closed.png").exists()
+
+
+def test_capture_window_hotkey_saves_one_frame_and_rejects_conflicts(
+    tmp_path: Path,
+) -> None:
+    window = FakeWindow(np.full((2, 2, 3), 3, dtype=np.uint8))
+    sim = _make_sim_manager(window=window)
+
+    assert sim.enable_window_capture_hotkey(save_path=tmp_path / "hotkey")
+    assert len(window.input_controls) == 1
+    sim._publish_render_state = MagicMock()
+    owner_thread = threading.get_ident()
+    get_picture = window.get_picture
+
+    def read_on_owner_thread() -> np.ndarray:
+        assert threading.get_ident() == owner_thread
+        return get_picture()
+
+    window.get_picture = MagicMock(side_effect=read_on_owner_thread)
+    callback = threading.Thread(
+        target=window.input_controls[0].on_key_down,
+        args=(dexsim.types.InputKey.SCANCODE_C.value,),
+    )
+    callback.start()
+    callback.join(timeout=1)
+    assert not callback.is_alive()
+    window.get_picture.assert_not_called()
+    assert not (tmp_path / "hotkey.png").exists()
+
+    with sim.render_frame():
+        pass
+
+    window.get_picture.assert_called_once()
+    assert (tmp_path / "hotkey.png").is_file()
+
+    with pytest.raises(ValueError, match="conflicts"):
+        sim.enable_window_capture_hotkey(hotkey=dexsim.types.InputKey.SCANCODE_R)
+
+
+def test_capture_window_hotkey_discards_requests_from_closed_window(
+    tmp_path: Path,
+) -> None:
+    sim = _make_sim_manager(window=FakeWindow(np.ones((2, 2, 3), dtype=np.uint8)))
+    sim._publish_render_state = MagicMock()
+    sim.capture_window = MagicMock()
+    assert sim.enable_window_capture_hotkey(save_path=tmp_path / "old")
+    old_control = sim._window_capture_input_control
+    old_control.on_key_down(dexsim.types.InputKey.SCANCODE_C.value)
+
+    sim.close_window()
+    sim._world.window = FakeWindow(np.ones((2, 2, 3), dtype=np.uint8))
+    assert sim.open_window()
+    # A late native callback must not capture the replacement window either.
+    old_control.on_key_down(dexsim.types.InputKey.SCANCODE_C.value)
+    with sim.render_frame():
+        pass
+    sim.capture_window.assert_not_called()
+
+    sim._window_capture_input_control.on_key_down(
+        dexsim.types.InputKey.SCANCODE_C.value
+    )
+    with sim.render_frame():
+        pass
+    sim.capture_window.assert_called_once()
+
+
+def test_capture_window_hotkey_applies_updated_key_and_output(tmp_path: Path) -> None:
+    window = FakeWindow(np.ones((2, 2, 3), dtype=np.uint8))
+    sim = _make_sim_manager(window=window)
+    sim._publish_render_state = MagicMock()
+    assert sim.enable_window_capture_hotkey(save_path=tmp_path / "old", hotkey="c")
+    assert sim.enable_window_capture_hotkey(save_path=tmp_path / "new", hotkey="x")
+    assert len(window.input_controls) == 1
+
+    window.input_controls[0].on_key_down(dexsim.types.InputKey.SCANCODE_C.value)
+    window.input_controls[0].on_key_down(dexsim.types.InputKey.SCANCODE_X.value)
+    with sim.render_frame():
+        pass
+
+    assert (tmp_path / "new.png").is_file()
+    assert not (tmp_path / "old.png").exists()
 
 
 def test_start_window_record_rejects_invalid_parameters() -> None:

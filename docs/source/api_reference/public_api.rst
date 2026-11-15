@@ -4619,9 +4619,12 @@ Resolve source geometry and project numerical generator inputs at the Sim bounda
    :nosignatures:
 
    build_gripper_collision_geometry
+   build_gripper_closing_geometry
    grasp_generator_parameters
 
 .. autofunction:: build_gripper_collision_geometry
+
+.. autofunction:: build_gripper_closing_geometry
 
 .. autofunction:: grasp_generator_parameters
 

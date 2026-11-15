@@ -33,7 +33,7 @@ from embodichain.compute.geometry import nearest_half_turn_pose
 
 from ..bindings import EndpointBinding
 from ..state import PlanningContext
-from ..trajectory_ops import build_pose_plan_states
+from ..trajectory_ops import _execution_samples, build_pose_plan_states
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
@@ -173,6 +173,7 @@ def resample_planned_trajectory(
     dt: torch.Tensor | None = None,
     control_dt: float | None = None,
     arrival_indices: torch.Tensor | None = None,
+    success: torch.Tensor | bool | None = None,
 ) -> torch.Tensor:
     """Put a planner path on a composite action's control-time grid.
 
@@ -192,6 +193,8 @@ def resample_planned_trajectory(
             Each visit without a stationary neighbor adds one control-period
             hold, including terminal visits that can become composite interiors.
             These pairs retain zero velocity targets after position-only assembly.
+        success: Optional planning mask. Failed candidates become zero-time
+            start holds and cannot extend the execution grid. Inputs are unchanged.
 
     Returns:
         A float32 control-command path with at least ``sample_count`` samples
@@ -224,6 +227,9 @@ def resample_planned_trajectory(
         raise ValueError("dt and control_dt must be supplied together.")
     if arrival_indices is not None and dt is None:
         raise ValueError("Arrival preservation requires explicit trajectory timing.")
+    trajectory, dt, arrival_indices = _execution_samples(
+        trajectory, dt, arrival_indices, success
+    )
     if dt is not None:
         assert control_dt is not None
         if arrival_indices is None:
@@ -329,6 +335,7 @@ def _named_arm_result(
             dt=result.dt,
             control_dt=interpolation_dt,
             arrival_indices=result.waypoint_indices,
+            success=result.success,
         )
 
 
@@ -420,6 +427,7 @@ def split_joint_trajectory_at_pose(
     split_target_index: int | None = None,
     env_ids: tuple[int, ...] | None = None,
     minimum_segment_duration: float | None = None,
+    success: torch.Tensor | bool | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Split at a declared target visit, or the closest pose when none is supplied.
 
@@ -440,6 +448,8 @@ def split_joint_trajectory_at_pose(
         minimum_segment_duration: Optional minimum duration in seconds for each
             row's moving segment. Native intervals are stretched before control
             resampling and batch padding, without speeding up longer segments.
+        success: Optional planning mask excluding failed candidates from both
+            phase durations while retaining the caller's original diagnostics.
 
     Returns:
         The resampled trajectory segments before and after the split pose.
@@ -450,6 +460,7 @@ def split_joint_trajectory_at_pose(
         raise ValueError("split_pose must have shape (B, 4, 4).")
     if first_sample_count < 2 or second_sample_count < 2:
         raise ValueError("Both split trajectory segments require at least two samples.")
+
     if minimum_segment_duration is not None and (
         dt is None
         or control_dt is None
@@ -457,6 +468,10 @@ def split_joint_trajectory_at_pose(
         or minimum_segment_duration <= 0.0
     ):
         raise ValueError("Minimum segment duration requires positive finite timing.")
+
+    trajectory, dt, arrival_indices = _execution_samples(
+        trajectory, dt, arrival_indices, success
+    )
 
     trajectory_xpos = robot.compute_batch_fk(
         qpos=trajectory,
