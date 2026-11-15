@@ -31,6 +31,7 @@ from embodichain.compute.image._tactile_rgb import _TactileRGB
 from embodichain.utils import configclass
 
 from .base_sensor import SensorCfg
+from ._hydroelastic_grid import _HydroelasticPadProjection
 from .ray import RayScene
 from .state import _ReadOnlySensor
 
@@ -38,6 +39,9 @@ if TYPE_CHECKING:
     from .context import SensorContext
 
 __all__ = ["TactileIndentation", "TactileIndentationCfg"]
+
+_SURFACE_GRID = ("surface_face_count", "surface_separation")
+_SURFACE_FRAME = ("surface_complete", "surface_generation", "surface_substep")
 
 
 @configclass
@@ -80,6 +84,13 @@ class TactileIndentationCfg(SensorCfg):
         marker_indices: tuple[int, ...] = ()
         """Optional ordered, row-major probe indices for sparse marker readout."""
 
+    @configclass
+    class SurfaceCfg:
+        """Project completed Newton hydroelastic face centroids onto probes."""
+
+        max_distance: float = 0.01
+        """Normal clearance for regular cells or nearest-point radius for explicit probes, in metres."""
+
     sensor_type: str = "TactileIndentation"
     sample_phase: Literal["physics"] = "physics"
     mount: SensorCfg.OffsetCfg = SensorCfg.OffsetCfg()
@@ -100,6 +111,9 @@ class TactileIndentationCfg(SensorCfg):
     shear: ShearCfg | None = None
     """Enable modeled contact loads and elastic displacement."""
 
+    surface: SurfaceCfg | None = None
+    """Enable physical pad and target face projection from the completed collision pass."""
+
     def get_data_types(self) -> list[str]:
         """Return published layout-aligned fields."""
         fields = ["depth", "hit", "shape_id"]
@@ -109,6 +123,8 @@ class TactileIndentationCfg(SensorCfg):
             fields.extend(("normal_force", "shear_force", "shear_displacement"))
             if self.shear.marker_indices:
                 fields.append("marker_displacement")
+        if self.surface is not None:
+            fields.extend((*_SURFACE_GRID, *_SURFACE_FRAME))
         return fields
 
 
@@ -140,12 +156,18 @@ class TactileIndentation(_ReadOnlySensor):
             )
         if not math.isfinite(config.max_depth) or config.max_depth <= 0:
             raise ValueError("max_depth must be finite and positive.")
+        if config.surface is not None and (
+            not math.isfinite(config.surface.max_distance)
+            or config.surface.max_distance <= 0
+        ):
+            raise ValueError("Surface projection distance must be finite and positive.")
         self._shear: _TactileShear | None = None
         self._markers: torch.Tensor | None = None
         self._rgb: _TactileRGB | None = None
         self._rgb_background: torch.Tensor | None = None
         self._scene: RayScene | None = None
         self._query: _IndentationQuery | None = None
+        self._surface: _HydroelasticPadProjection | None = None
         super().__init__(config, context=context)
 
     def _layout(self) -> tuple[torch.Tensor, torch.Tensor]:
@@ -224,8 +246,46 @@ class TactileIndentation(_ReadOnlySensor):
             self._bind_rgb(self.cfg.rgb, points)
         if self.cfg.shear is not None:
             self._bind_shear(self.cfg.shear, points, normals, len(scene._meshes))
+        if self.cfg.surface is not None:
+            self._bind_surface(self.cfg.surface, points, normals, shape)
         self._scene = scene
         self._query = query
+
+    def _bind_surface(
+        self,
+        cfg: TactileIndentationCfg.SurfaceCfg,
+        points: torch.Tensor,
+        normals: torch.Tensor,
+        shape: tuple[int, int, int],
+    ) -> None:
+        factory = self.context.hydroelastic_factory
+        if factory is None:
+            raise NotImplementedError(
+                "No hydroelastic pad projection provider is available."
+            )
+        source = factory(self.cfg.mount, tuple(self.cfg.target_uids))
+        data = self._data_buffer
+        data["surface_face_count"] = torch.zeros(
+            shape, device=self.device, dtype=torch.int32
+        )
+        data["surface_separation"] = torch.zeros(shape, device=self.device)
+        data["surface_complete"] = torch.zeros(
+            shape[0], device=self.device, dtype=torch.bool
+        )
+        for key in _SURFACE_FRAME[1:]:
+            data[key] = torch.full(
+                (shape[0],), -1, device=self.device, dtype=torch.int64
+            )
+        self._surface = _HydroelasticPadProjection(
+            source,
+            points,
+            normals,
+            data,
+            self.cfg.size,
+            self.cfg.resolution,
+            self.cfg.points is None,
+            cfg.max_distance,
+        )
 
     def _bind_rgb(
         self, cfg: TactileIndentationCfg.RGBCfg, points: torch.Tensor
@@ -313,6 +373,7 @@ class TactileIndentation(_ReadOnlySensor):
         )
 
     def on_unbind(self) -> None:
+        self._surface = None
         self._shear = None
         self._markers = None
         self._rgb = None
@@ -333,14 +394,16 @@ class TactileIndentation(_ReadOnlySensor):
             self._shear.reset(rows)
         if self._rgb_background is not None:
             self._data_buffer["rgb"][rows] = self._rgb_background
+        if self._surface is not None:
+            self._surface.reset(rows)
 
     def update(self, **kwargs: object) -> None:
-        """Refresh stateless depth and RGB, or retain the completed shear sample.
+        """Refresh stateless depth and RGB, or retain the completed contact sample.
 
-        With shear enabled, the scheduler updates all fields and advances the
-        relative-pose history together at the configured sample boundary.
+        With shear or surface projection enabled, the scheduler updates all
+        fields at the configured sample boundary.
         """
-        if self._shear is None:
+        if self._shear is None and self._surface is None:
             self._acquire_frame()
 
     def _acquire_sample(self, *, sample_dt: float, fetch_only: bool) -> None:
@@ -370,6 +433,8 @@ class TactileIndentation(_ReadOnlySensor):
                     self._markers,
                     out=self._data_buffer["marker_displacement"],
                 )
+        if self._surface is not None:
+            self._surface.sample()
 
     def get_data_descriptors(self) -> dict[str, dict[str, object]]:
         """Describe depth units, local direction and geometry provenance."""
@@ -381,6 +446,13 @@ class TactileIndentation(_ReadOnlySensor):
             fields["rgb"].update(
                 unit="normalized", frame="probe_grid", source="calibrated_depth_slope"
             )
+        if "surface_separation" in fields:
+            fields["surface_separation"].update(
+                unit="m",
+                frame="probe_grid",
+                source="newton_hydroelastic_face_centroids",
+            )
+            fields["surface_face_count"].update(frame="probe_grid")
         for name, unit, frame in (
             ("normal_force", "N", "surface_normal"),
             ("shear_force", "N", "surface_tangent"),

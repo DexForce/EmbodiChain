@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from embodichain.lab.sim.sim_manager import SimulationManager
     from .base_sensor import SensorCfg
     from .contact import ContactSensor, ContactSensorCfg
+    from ._hydroelastic_grid import _HydroelasticPadSource
     from .ray import RayScene
 
 __all__ = ["SensorClock", "SensorStateProvider", "SensorContext"]
@@ -124,6 +125,8 @@ class SensorContext:
             returning a completed-step reader. It fills the supplied per-row
             force, torque and validity buffers. The wrench is expressed at the
             sensor origin in sensor axes.
+        hydroelastic_factory: Optional physical-mount and opposing-target factory
+            for topology-scoped completed Newton surface projection.
     """
 
     device: torch.device
@@ -151,6 +154,10 @@ class SensorContext:
         | None
     ) = None
 
+    hydroelastic_factory: (
+        Callable[[SensorCfg.OffsetCfg, tuple[str, ...]], _HydroelasticPadSource] | None
+    ) = None
+
     @classmethod
     def from_manager(cls, manager: SimulationManager) -> SensorContext:
         """Build services owned by one explicitly selected manager.
@@ -171,6 +178,7 @@ class SensorContext:
             services.create_ray_scene,
             services.create_acceleration_reader,
             services.create_joint_wrench_reader,
+            services.create_hydroelastic_reader,
         )
 
 
@@ -186,6 +194,13 @@ class _ManagerSensorServices:
 
     def now(self) -> float:
         return self._manager().simulation_time
+
+    def create_hydroelastic_reader(
+        self, mount: SensorCfg.OffsetCfg, targets: tuple[str, ...]
+    ) -> _HydroelasticPadSource:
+        from ._hydroelastic_grid import _HydroelasticPadSource
+
+        return _HydroelasticPadSource(self._manager(), mount, targets)
 
     @property
     def physics_step_index(self) -> int:
