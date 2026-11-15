@@ -14,6 +14,7 @@
 | Joint and contact acquisition windows | `embodichain/lab/sim/sensors/contact/observation.py` |
 | Native support observations and pair ownership | `embodichain/lab/sim/sensors/support_observation.py` |
 | Fixed contact-buffer scatter | `embodichain/lab/sim/sensors/contact/_warp/scatter.py` |
+| Private native geometry-pair net forces | `embodichain/lab/sim/sensors/contact/_geometry_contact_sensor.py` |
 
 Sensors inherit `BaseSensor`/`BatchEntity` and expose per-environment data through
 a TensorDict buffer. `SensorCfg.from_dict()` resolves `sensor_type + "Cfg"`

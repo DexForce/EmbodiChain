@@ -1307,6 +1307,12 @@ def test_gaussian_preset_rejects_explicit_conflicts(data, message) -> None:
         RenderCfg.from_dict(data)
 
 
+@pytest.mark.parametrize("substeps", [0, True, 1.5])
+def test_default_physics_rejects_invalid_integration_substeps(substeps) -> None:
+    with pytest.raises(ValueError, match="num_substeps"):
+        DefaultPhysicsCfg(num_substeps=substeps)
+
+
 def test_render_cfg_defaults_to_dlss_rr_without_tone_mapping() -> None:
     """Default rendering enables DLSS RR and bypasses tone mapping."""
     world_config = dexsim.WorldConfig()

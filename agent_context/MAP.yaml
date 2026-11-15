@@ -359,7 +359,8 @@ topics:
   status: active
 - id: rl-learning
   title: RL Learning Pipeline
-  aliases: [rl learning, rl config, reinforcement learning, 强化学习, 训练配置]
+  aliases: [rl learning, rl config, reinforcement learning, 强化学习, 训练配置, Sharpa APG, 灵巧手 APG,
+    Wuji APG, Wuji 掌内转动]
   keywords: [train-rl, Trainer, trainer.gym_config, learning_env, RolloutKind, DifferentiableTrainer,
     PPO, GRPO, APG, APGActorCritic, apg_actor_critic, SyncCollector, ScheduledDifferentiableEnvProtocol, DifferentiableRolloutSpec,
     complete rollout, full horizon, gradient accumulation, action adjoint, observation normalization]
@@ -376,9 +377,13 @@ topics:
   - embodichain/learning/rl/utils/config.py
   - embodichain/learning/rl/algo/
   - embodichain/learning/rl/policies/
+  - embodichain/learning/rl/experimental/
   - embodichain/learning/models/
   - extensions/embodichain_tasks/configs/tasks/
-  watch_paths: [embodichain/learning/rl/, tests/learning/]
+  - examples/learning/sharpa_inhand/
+  - examples/learning/wuji_inhand/
+  watch_paths: [embodichain/learning/rl/, tests/learning/, examples/learning/sharpa_inhand/,
+    examples/learning/wuji_inhand/]
   related_topics: [simulation-system, env-framework, manager-functor, configclass-pattern]
   status: active
 - id: differentiable-env

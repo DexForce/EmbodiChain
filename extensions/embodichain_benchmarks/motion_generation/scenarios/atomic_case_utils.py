@@ -87,6 +87,61 @@ TASK_DIFFICULTIES = {"simple", "medium", "hard"}
 CASE_QPOS_RESOLUTION_RAD = 1.0e-4
 
 
+def _pre_pick_pose(
+    ready_pose: torch.Tensor,
+    object_pose: torch.Tensor,
+    config: Mapping[str, object],
+    *,
+    root_pose: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Construct the declared start above the object in the arena frame.
+
+    ``base_radial`` carries the ready tool tilt around the mounted base's Z
+    axis as the object azimuth changes. It avoids imposing the same world
+    orientation on every radial arm configuration. This only constructs an
+    input target: independent IK must still qualify the complete start pose.
+    """
+    mode = config.get("pre_pick_orientation", "world_fixed")
+    if mode not in {"world_fixed", "base_radial"}:
+        raise ValueError("pre_pick_orientation must be 'world_fixed' or 'base_radial'.")
+    height = float(config.get("pre_pick_height_m", 0.36))
+    if not math.isfinite(height):
+        raise ValueError("pre_pick_height_m must be finite.")
+    target = ready_pose.clone()
+    target[:, :2, 3] = object_pose[:, :2, 3]
+    target[:, 2, 3] = height
+    if mode == "world_fixed":
+        return target
+    if root_pose is None or root_pose.shape != ready_pose.shape:
+        raise ValueError("base_radial requires one mounted root pose per row.")
+    root_rotation = root_pose[:, :3, :3]
+    root_inverse_rotation = root_rotation.transpose(-1, -2)
+    origin = (
+        root_inverse_rotation
+        @ (ready_pose[:, :3, 3] - root_pose[:, :3, 3]).unsqueeze(-1)
+    ).squeeze(-1)
+    destination = (
+        root_inverse_rotation @ (target[:, :3, 3] - root_pose[:, :3, 3]).unsqueeze(-1)
+    ).squeeze(-1)
+    cross = origin[:, 0] * destination[:, 1] - origin[:, 1] * destination[:, 0]
+    dot = (origin[:, :2] * destination[:, :2]).sum(dim=-1)
+    angle = torch.atan2(cross, dot)
+    defined = (origin[:, :2].square().sum(-1) > 1e-12) & (
+        destination[:, :2].square().sum(-1) > 1e-12
+    )
+    angle = torch.where(defined, angle, 0.0)
+    rotation = torch.eye(3, dtype=target.dtype, device=target.device).repeat(
+        target.shape[0], 1, 1
+    )
+    rotation[:, 0, 0] = rotation[:, 1, 1] = angle.cos()
+    rotation[:, 0, 1] = -angle.sin()
+    rotation[:, 1, 0] = angle.sin()
+    target[:, :3, :3] = (
+        root_rotation @ rotation @ root_inverse_rotation @ ready_pose[:, :3, :3]
+    )
+    return target
+
+
 def case_name(config: Mapping[str, object]) -> str:
     """Return and validate a stable case name."""
     name = config.get("name")
