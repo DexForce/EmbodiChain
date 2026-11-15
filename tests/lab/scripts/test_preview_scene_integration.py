@@ -25,6 +25,7 @@ from pxr import Usd, UsdGeom, UsdPhysics, UsdLux, UsdShade, Sdf, UsdUtils
 import pytest
 
 from embodichain.lab.sim import SimulationManagerCfg
+from embodichain.lab.sim.cfg import DenoisingCfg, RenderCfg
 from embodichain.lab.scripts.preview_scene import preview_scene
 
 pytestmark = [pytest.mark.requires_sim, pytest.mark.renderer]
@@ -131,9 +132,14 @@ def test_scene_screenshot_and_explicit_physics_have_separate_step_counts(
     )
     stage.GetRootLayer().Save()
     image = tmp_path / "preview.png"
+    # Qualify USD appearance without requiring optional DLSS/NGX support on
+    # the CI graphics device. Keep the native image-content assertion below.
     paused = preview_scene(
         source,
-        sim_cfg=SimulationManagerCfg(headless=True),
+        sim_cfg=SimulationManagerCfg(
+            headless=True,
+            render_cfg=RenderCfg(denoising=DenoisingCfg(window="off", offscreen="off")),
+        ),
         screenshot=image,
         resolution=(64, 64),
     )
