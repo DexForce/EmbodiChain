@@ -145,7 +145,8 @@ TASK_CONTRACTS: Mapping[str, TaskContract] = MappingProxyType(
     {
         "E1": _contract(
             "E1",
-            "Pick, move, and place one object at a symbolic relation.",
+            "Pick, move, and place one object at a symbolic relation; "
+            "terminal_behavior=hold keeps it held at that relation instead.",
             frozenset(
                 {
                     "target",
@@ -154,6 +155,7 @@ TASK_CONTRACTS: Mapping[str, TaskContract] = MappingProxyType(
                     "orientation_goal",
                     "layout",
                     "axis",
+                    "terminal_behavior",
                 }
             ),
             "rigid_object",
@@ -166,8 +168,9 @@ TASK_CONTRACTS: Mapping[str, TaskContract] = MappingProxyType(
         ),
         "E2": _contract(
             "E2",
-            "Make one fallen object upright and place it stably.",
-            frozenset({"required_arm", "orientation_goal"}),
+            "Make one fallen object upright and place it stably; "
+            "terminal_behavior=hold keeps it lifted upright instead.",
+            frozenset({"required_arm", "orientation_goal", "terminal_behavior"}),
             "rigid_object",
             frozenset({"graspable", "orientable"}),
             "object_upright",
