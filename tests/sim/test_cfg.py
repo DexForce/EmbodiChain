@@ -288,6 +288,53 @@ def test_robot_cfg_merge_preserves_typed_backend_property_configs() -> None:
     assert merged.attrs.material_props.kd == 50.0
 
 
+@pytest.mark.parametrize("named_link", [False, True])
+@pytest.mark.parametrize("friction", [None, 0.0])
+def test_legacy_contact_promotion_preserves_portable_robot_defaults(
+    named_link: bool,
+    friction: float | None,
+) -> None:
+    from embodichain.lab.sim.cfg import (
+        CollisionPropertiesCfg,
+        RigidBodyMaterialCfg,
+        RigidBodyPhysicsCfg,
+        LinkPhysicsOverrideCfg,
+        RobotCfg,
+        NewtonCollisionPropertiesCfg,
+        NewtonRigidBodyMaterialCfg,
+    )
+    from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
+
+    attrs = RigidBodyPhysicsCfg(
+        collision_props=CollisionPropertiesCfg(contact_offset=0.1, rest_offset=0.04),
+        material_props=RigidBodyMaterialCfg(dynamic_friction=0.73),
+    )
+    cfg = RobotCfg(
+        attrs=attrs.copy(),
+        link_attrs={
+            "tip": LinkPhysicsOverrideCfg(
+                link_names_expr=["tip"],
+                attrs=attrs.copy(),
+            )
+        },
+    )
+    overlay = {"attrs": {"collision_props": {"solref": [0.002, 1.0]}}}
+    if friction is not None:
+        overlay["attrs"]["material_props"] = {"dynamic_friction": friction}
+    override = {"link_attrs": {"tip": overlay}} if named_link else overlay
+    with pytest.warns(DeprecationWarning, match="material_props"):
+        merged = merge_robot_cfg(cfg, override)
+    result = merged.link_attrs["tip"].attrs if named_link else merged.attrs
+    assert isinstance(result.collision_props, NewtonCollisionPropertiesCfg)
+    assert isinstance(result.material_props, NewtonRigidBodyMaterialCfg)
+    assert result.collision_props.contact_offset == pytest.approx(0.1)
+    assert result.collision_props.rest_offset == pytest.approx(0.04)
+    assert result.material_props.dynamic_friction == pytest.approx(
+        0.73 if friction is None else friction
+    )
+    assert result.material_props.solref == pytest.approx([0.002, 1.0])
+
+
 def test_robot_cfg_merge_preserves_sparse_link_physics_defaults() -> None:
     base = RobotCfg(
         link_attrs={
@@ -1327,6 +1374,12 @@ def test_gaussian_preset_preserves_explicit_nested_objects() -> None:
 def test_gaussian_preset_rejects_explicit_conflicts(data, message) -> None:
     with pytest.raises(ValueError, match=message):
         RenderCfg.from_dict(data)
+
+
+@pytest.mark.parametrize("substeps", [0, True, 1.5])
+def test_default_physics_rejects_invalid_integration_substeps(substeps) -> None:
+    with pytest.raises(ValueError, match="num_substeps"):
+        DefaultPhysicsCfg(num_substeps=substeps)
 
 
 def test_render_cfg_defaults_to_dlss_rr_without_tone_mapping() -> None:

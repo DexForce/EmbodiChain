@@ -13,8 +13,10 @@ import GenSim, simulation runtime, task packages or benchmark helpers.
 `build_assembly` produces source body-local geometry, independent visual parts,
 mass/COM/inertia, world attachments and source contact metadata. Loading a
 checksummed manifest does not import either generator or MuJoCo.
-Install the pinned Git revision of mjfit separately for generation; the
-`assembly` extra installs index-distributed MuJoCo only.
+Install the pinned Git revision of mjfit separately for generation. SDK
+profiles using `newton[sim]` obtain MuJoCo through Newton's dependency bounds;
+there is no assembly-specific extra or duplicate MuJoCo version constraint.
+Other profiles need MuJoCo explicitly only when compiling MJCF.
 
 `many.py:build_many_pegs` prepares the public sampler/build/grid composition as
 one scene with separately owned plate/peg bodies. Its manifest records each

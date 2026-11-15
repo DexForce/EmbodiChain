@@ -3000,7 +3000,7 @@ def test_rigid_object_spawn_applies_projective_uv() -> None:
     entity = Mock()
     entity.get_render_body.return_value = render_body
     rigid_object = object.__new__(RigidObject)
-    rigid_object.cfg = SimpleNamespace(
+    rigid_object.cfg = RigidObjectCfg(
         shape=MeshCfg(
             compute_uv=True,
             project_direction=[1.0, 2.0, 3.0],

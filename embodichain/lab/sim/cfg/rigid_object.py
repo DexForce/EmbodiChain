@@ -408,12 +408,12 @@ class RigidObjectGroupCfg:
                     setattr(
                         cfg, key, attr.from_dict(value)
                     )  # Call from_dict on the attribute
-                elif key == "rigid_objects" and "folder_path" not in init_dict:
+                elif key == "rigid_objects" and not init_dict.get("folder_path"):
                     rigid_objects_cfg = {}
                     for obj_name, obj_cfg in value.items():
                         rigid_objects_cfg[obj_name] = RigidObjectCfg.from_dict(obj_cfg)
                     setattr(cfg, key, rigid_objects_cfg)
-                elif key == "rigid_objects" and "folder_path" in init_dict:
+                elif key == "rigid_objects" and init_dict.get("folder_path"):
                     folder_path = init_dict["folder_path"]
                     max_num = init_dict.get("max_num", 1)
                     rigid_objects_cfg = {}
