@@ -8,7 +8,8 @@ See {doc}`/features/neural_dynamics` to compare the bundled NeRD, RWM and
 RigidFormer models and their shared supervised-training entry point.
 
 - {doc}`/features/neural_dynamics/nerd`: state/effort history, pinned Cartpole/Ant
-  resources, prediction, training and export.
+  resources, prediction, training/export, learning-env policy training and
+  optional native solver deployment.
 - {doc}`/features/neural_dynamics/rwm`: robot state increments, controlled
   fitting, differentiable prediction and replay.
 - {doc}`/features/neural_dynamics/rigidformer`: rigid geometry prediction,

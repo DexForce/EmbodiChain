@@ -95,6 +95,11 @@ objectives may continue using measured contact features.
 Optional native NeRD deployment
 -------------------------------
 
+The :doc:`NeRD guide </features/neural_dynamics/nerd>` distinguishes measured
+window prediction, online rollout, learning-env training and native inference.
+Its native quickstart links model preparation with step/reset/close and records
+the verified physical domain and execution environment.
+
 The Provider maps native coordinates and controls into the same independent
 transition. It owns inference history and resource validation; SDK Scene owns
 publication, reset baselines and scheduling. The lightweight learning route

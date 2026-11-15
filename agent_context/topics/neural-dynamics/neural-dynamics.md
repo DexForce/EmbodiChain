@@ -55,6 +55,10 @@ a World, Scene or solver; signatures guard that SDK compatibility surface.
 Its injected Newton backend uses the private `lab.sim.diff._newton_fk` gradient
 adapter. Reusable tensor FK/IK remains owned by `compute.kinematics` and
 `learning.layers`; the native adapter does not introduce another public FK API.
+The example's [native quickstart](../../../examples/learning/nerd/DEPLOYMENT.md)
+owns complete resource/configuration/step/reset/close instructions;
+[validation](../../../examples/learning/nerd/VALIDATION.md) owns measured budgets,
+runtime identity and viewer limits.
 
 ## RigidFormer author model
 
