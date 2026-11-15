@@ -19,6 +19,8 @@
 from __future__ import annotations
 
 import os
+import hashlib
+import json
 import random
 import tempfile
 import warnings
@@ -92,6 +94,12 @@ def _plain(value: Any) -> Any:
 
 def _type_name(value: Any) -> str:
     return f"{type(value).__module__}.{type(value).__qualname__}"
+
+
+def _gym_snapshot_fingerprint(config: Mapping[str, Any]) -> str:
+    """Identify the exact serializable Gym declaration recorded in a run."""
+    encoded = json.dumps(_plain(config), sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def _space_layout(space: Any) -> Any:
@@ -180,7 +188,7 @@ def _metadata(trainer: Any) -> dict[str, Any]:
             )
             if not isinstance(trainer.env, ScheduledDifferentiableEnvProtocol):
                 trainer_config["update_horizon"] = trainer.update_horizon
-    return {
+    metadata = {
         "trainer": _type_name(trainer),
         "trainer_config": trainer_config,
         "algorithm": _type_name(algorithm),
@@ -234,6 +242,10 @@ def _metadata(trainer: Any) -> dict[str, Any]:
         },
         "context": _plain(getattr(trainer, "_checkpoint_context", {})),
     }
+    snapshot_hash = getattr(trainer, "_checkpoint_gym_snapshot_hash", None)
+    if snapshot_hash is not None:
+        metadata["gym_snapshot_sha256"] = snapshot_hash
+    return metadata
 
 
 def _differences(saved: Any, current: Any, path: str = "metadata") -> list[str]:
@@ -305,6 +317,24 @@ def _validate(trainer: Any, payload: Any, scheduler: str) -> list[str]:
     if version == _SCHEMA_VERSION:
         saved_metadata = dict(payload["metadata"])
         current_metadata = _metadata(trainer)
+        snapshot_hash = saved_metadata.pop("gym_snapshot_sha256", None)
+        current_metadata.pop("gym_snapshot_sha256", None)
+        current_context = current_metadata["context"]
+        saved_context = saved_metadata.get("context")
+        if (
+            snapshot_hash is not None
+            and isinstance(saved_context, Mapping)
+            and "gym" in saved_context
+            and isinstance(current_context, Mapping)
+            and "gym" in current_context
+            and snapshot_hash == _gym_snapshot_fingerprint(current_context["gym"])
+        ):
+            # Accept only the snapshot actually recorded for this checkpoint;
+            # all remaining environment/training checks retain their identity.
+            saved_metadata["context"] = {
+                **saved_context,
+                "gym": current_context["gym"],
+            }
         if not saved_metadata.get("context") or not current_metadata["context"]:
             if bool(saved_metadata.get("context")) != bool(current_metadata["context"]):
                 unavailable.append("shared CLI configuration context")
@@ -488,6 +518,15 @@ def _load(trainer: Any, path: str | Path, scheduler: str) -> dict[str, Any]:
         trainer.best_checkpoint_path = None
         trainer.latest_checkpoint_path = str(path)
         trainer._last_saved_update = None
+        context = getattr(trainer, "_checkpoint_context", None)
+        original = (
+            payload["metadata"].get("context") or {}
+            if payload.get("schema_version") == _SCHEMA_VERSION
+            else {}
+        )
+        if context is not None and "gym" in context and "gym" in original:
+            # Retain the source identity across successive snapshot-based resumes.
+            context["gym"] = deepcopy(original["gym"])
         if hasattr(trainer.collector, "obs_td"):
             trainer.collector.obs_td = trainer.collector._reset_env()
             trainer.curr_ret.zero_()

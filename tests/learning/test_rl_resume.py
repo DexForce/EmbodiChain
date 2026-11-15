@@ -42,6 +42,14 @@ from embodichain.learning.rl.utils.trainer import Trainer
 from embodichain_tasks.classic_control.point_mass import PointMassEnv
 
 
+def _export_prepared_policy_resource(env, config, config_dir):
+    """Configured exporter fixture using the initialized policy environment."""
+    assert env.cfg.task_program_execution == "policy"
+    (config_dir / "prepared-resource.bin").write_bytes(env.prepared_resource)
+    env.export_calls += 1
+    return config
+
+
 def _trainer(
     directory: Path, algorithm: str = "ppo", scheduler: dict | None = None, **cfg
 ) -> Trainer:
@@ -818,7 +826,6 @@ def test_cli_flushes_cleanup_and_propagates_resume_error(monkeypatch):
 def test_componentized_gym_snapshot_reloads_after_source_components_are_removed(
     tmp_path, monkeypatch
 ):
-    from types import SimpleNamespace
     from embodichain.lab.gym.utils.gym_utils import (
         config_to_cfg,
         DEFAULT_MANAGER_MODULES,
@@ -862,9 +869,7 @@ def test_componentized_gym_snapshot_reloads_after_source_components_are_removed(
     deployment.write_text(yaml.safe_dump(gym_data))
     run = tmp_path / "run"
     run.mkdir()
-    checkpoint = run / "checkpoint.pt"
-    checkpoint.write_bytes(b"snapshot fixture")
-    trainer = SimpleNamespace(rank=0)
+    trainer = _trainer(run / "checkpoints")
     _configure_checkpoints(
         trainer,
         _config("ppo"),
@@ -873,9 +878,8 @@ def test_componentized_gym_snapshot_reloads_after_source_components_are_removed(
         gym_config=deployment,
         gym_data=gym_data,
     )
-    trainer._checkpoint_callback(
-        {"latest_checkpoint_path": str(checkpoint), "best_checkpoint_path": None}
-    )
+    trainer.train(16)
+    checkpoint = trainer.save_checkpoint()
     environment.unlink()
     embodiment.unlink()
     deployment.unlink()
@@ -892,6 +896,37 @@ def test_componentized_gym_snapshot_reloads_after_source_components_are_removed(
     assert cfg.robot.uid == "SnapshotRobot"
     assert cfg.robot.fpath == str(robot_file.resolve())
     assert gym_data["environment"]["component"] == "environment.yaml"
+    restored = _trainer(tmp_path / "restored" / "checkpoints")
+    _configure_checkpoints(
+        restored,
+        _config("ppo"),
+        "train.yaml",
+        tmp_path / "restored",
+        gym_config=snapshot,
+        gym_data=frozen,
+    )
+    restored.load_checkpoint(checkpoint)
+    assert restored.global_step == 16
+    assert restored._checkpoint_context["gym"] == gym_data
+    restored.train(32)
+    assert restored.global_step == 32
+    assert restored.num_updates == 2
+
+    changed = deepcopy(frozen)
+    changed["max_episode_steps"] += 1
+    incompatible = _trainer(tmp_path / "incompatible" / "checkpoints")
+    _configure_checkpoints(
+        incompatible,
+        _config("ppo"),
+        "train.yaml",
+        tmp_path / "incompatible",
+        gym_config=snapshot,
+        gym_data=changed,
+    )
+    before = deepcopy(incompatible.policy.state_dict())
+    with pytest.raises(ValueError, match="Incompatible checkpoint configuration"):
+        incompatible.load_checkpoint(checkpoint)
+    _assert_state_equal(before, incompatible.policy.state_dict())
 
 
 def test_gym_snapshot_export_hook_runs_on_unwrapped_environment(tmp_path):
@@ -951,8 +986,9 @@ def test_trainer_requests_timeout_bootstrap_only_when_algorithm_consumes_it(
 
 
 @pytest.mark.parametrize("inline", [False, True])
+@pytest.mark.parametrize("export_resources", [False, True])
 def test_saved_policy_task_program_reloads_from_unrelated_directory(
-    tmp_path, monkeypatch, inline
+    tmp_path, monkeypatch, inline, export_resources
 ):
     from types import SimpleNamespace
     from embodichain.lab.gym.utils.gym_utils import config_to_cfg
@@ -963,6 +999,17 @@ def test_saved_policy_task_program_reloads_from_unrelated_directory(
         / "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.policy.cobotmagic.yaml"
     )
     raw = yaml.safe_load(source.read_text())
+    if export_resources:
+        environment_file = resolve_config_path(
+            raw["environment"]["component"], base_dir=source.parent
+        )
+        component = yaml.safe_load(environment_file.read_text())
+        component.setdefault("env", {})["resource_export"] = {
+            "func": f"{__name__}:_export_prepared_policy_resource"
+        }
+        selected = tmp_path / "environment.yaml"
+        selected.write_text(yaml.safe_dump(component))
+        raw["environment"]["component"] = str(selected)
     if inline:
         for field in ("program", "integration", "execution_policy"):
             selected = raw["task_program"][field]
@@ -975,7 +1022,10 @@ def test_saved_policy_task_program_reloads_from_unrelated_directory(
     run.mkdir()
     checkpoint = run / "checkpoint.pt"
     checkpoint.write_bytes(b"snapshot fixture")
-    trainer = SimpleNamespace(rank=0)
+    environment = SimpleNamespace(
+        cfg=expected, prepared_resource=b"generated policy asset", export_calls=0
+    )
+    trainer = SimpleNamespace(rank=0, env=environment)
     _configure_checkpoints(
         trainer,
         _config("ppo"),
@@ -988,6 +1038,12 @@ def test_saved_policy_task_program_reloads_from_unrelated_directory(
         {"latest_checkpoint_path": str(checkpoint), "best_checkpoint_path": None}
     )
     snapshot = RunManifest.load(run).configs["gym"]
+    if export_resources:
+        assert environment.export_calls == 1
+        assert (
+            snapshot.parent / "prepared-resource.bin"
+        ).read_bytes() == environment.prepared_resource
+        assert expected.resource_export is not None
     # A same-named invalid component must not shadow the original owner.
     (snapshot.parent / "env.policy.yaml").write_text("invalid: component")
     elsewhere = tmp_path / "elsewhere"

@@ -113,6 +113,10 @@ class SyncCollector(BaseCollector):
                 self._to_env_action(step_td["action"])
             )
             next_obs_td = dict_to_tensordict(next_obs, self.device)
+            actor_obs, critic_obs = self._model_observations(next_obs_td)
+            rollout["obs"][:, step_idx + 1] = actor_obs
+            if critic_obs is not None:
+                rollout["critic_obs"][:, step_idx + 1] = critic_obs
             self._write_timeout_values(
                 rollout, step_idx, env_info, terminated, truncated
             )
@@ -129,11 +133,6 @@ class SyncCollector(BaseCollector):
                     terminated=terminated,
                     truncated=truncated,
                 )
-            actor_obs, critic_obs = self._model_observations(next_obs_td)
-            rollout["obs"][:, step_idx + 1] = actor_obs
-            if critic_obs is not None:
-                rollout["critic_obs"][:, step_idx + 1] = critic_obs
-
             if on_step_callback is not None:
                 on_step_callback(rollout[:, step_idx], env_info)
 
@@ -186,17 +185,27 @@ class SyncCollector(BaseCollector):
             return
         observation = dict_to_tensordict(terminal, self.device)
         actor_obs, critic_obs = self._model_observations(observation)
-        actor_obs = actor_obs[rows]
+        # Reconstruct the complete pre-reset batch. Batch-dependent critics
+        # still need peer rows in eval mode when only one row times out.
+        fields = {"obs": rollout["obs"][:, step_idx + 1].clone()}
+        terminal_ids = env_info.get("terminal_env_ids")
+        if terminal_ids is None:
+            fields["obs"].copy_(actor_obs)
+        else:
+            terminal_ids = terminal_ids.to(self.device)
+            fields["obs"][terminal_ids] = actor_obs.to(fields["obs"].dtype)
         if critic_obs is not None:
-            critic_obs = critic_obs[rows]
-        fields = {"obs": actor_obs}
-        if critic_obs is not None:
-            fields["critic_obs"] = critic_obs
+            fields["critic_obs"] = rollout["critic_obs"][:, step_idx + 1].clone()
+            if terminal_ids is None:
+                fields["critic_obs"].copy_(critic_obs)
+            else:
+                fields["critic_obs"][terminal_ids] = critic_obs.to(
+                    fields["critic_obs"].dtype
+                )
         terminal_td = TensorDict(
-            fields, batch_size=[actor_obs.shape[0]], device=self.device
+            fields, batch_size=[self.env.num_envs], device=self.device
         )
-        # A terminal subset can contain one row. Inference must neither require
-        # a training batch nor update BatchNorm statistics or sample Dropout.
+        # Value inference must not update running statistics or sample Dropout.
         modes = [(module, module.training) for module in self.policy.modules()]
         try:
             self.policy.eval()
@@ -204,7 +213,9 @@ class SyncCollector(BaseCollector):
         finally:
             for module, training in modes:
                 module.training = training
-        rollout["timeout_value"][env_ids, step_idx] = terminal_td["value"]
+        rollout["timeout_value"][env_ids, step_idx] = terminal_td["value"][env_ids].to(
+            rollout["timeout_value"].dtype
+        )
 
     def _reset_env(self) -> TensorDict:
         obs, _ = self.env.reset()

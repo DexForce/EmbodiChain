@@ -566,6 +566,7 @@ class EmbodiedEnv(BaseEnv):
     ):
         # Registered defaults and explicit config use the same pre-World path.
         # Copy before preparation so one reusable configuration can build peers.
+        preparation_seed = None
         if (
             scene_preparation is not None
             or resource_export is not None
@@ -586,9 +587,14 @@ class EmbodiedEnv(BaseEnv):
                     if isinstance(operation.func, str)
                     else operation.func
                 )
+                if cfg.seed is not None:
+                    preparation_seed = self._apply_process_seed(cfg.seed)
+                    cfg.seed = preparation_seed
                 cfg = prepare(cfg, **operation.params)
                 if not isinstance(cfg, EmbodiedEnvCfg):
                     raise TypeError("scene_preparation must return EmbodiedEnvCfg.")
+                if preparation_seed is not None:
+                    cfg.seed = preparation_seed
         replay = getattr(cfg, "replay", None)
         if replay is not None:
             cfg = copy.deepcopy(cfg)
@@ -714,7 +720,7 @@ class EmbodiedEnv(BaseEnv):
             if getattr(registration, "evaluation_conditions", None)
             else {}
         )
-        super().__init__(cfg, **kwargs)
+        super().__init__(cfg, _initialization_seed=preparation_seed, **kwargs)
 
         try:
             if self._evaluation_recording:

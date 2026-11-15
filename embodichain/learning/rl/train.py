@@ -33,6 +33,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from embodichain.learning.rl.checkpoint import (
     _atomic_write,
+    _gym_snapshot_fingerprint,
     _resolve_resume,
     _sync_errors,
     _validate_saved_files,
@@ -806,6 +807,7 @@ def _configure_checkpoints(
 ) -> None:
     trainer._checkpoint_context = deepcopy(_checkpoint_context(cfg_data, gym_data))
     trainer._checkpoint_config = deepcopy(cfg_data)
+    trainer._checkpoint_gym_snapshot_hash = None
     error = None
     try:
         if getattr(trainer, "rank", 0) == 0:
@@ -844,7 +846,7 @@ def _configure_checkpoint_files(
         environment = getattr(trainer, "env", None)
         environment = getattr(environment, "unwrapped", environment)
         operation = getattr(getattr(environment, "cfg", None), "resource_export", None)
-        if "task_program" not in gym_data and operation is not None:
+        if operation is not None:
             from embodichain.utils.string import string_to_callable
 
             operation.validate()
@@ -859,6 +861,8 @@ def _configure_checkpoint_files(
             )
             if not isinstance(frozen_gym, dict):
                 raise TypeError("resource_export must return a Gym configuration dict.")
+        frozen_gym = deepcopy(frozen_gym)
+        trainer._checkpoint_gym_snapshot_hash = _gym_snapshot_fingerprint(frozen_gym)
         snapshots[gym_path] = frozen_gym
 
     def update_manifest(summary: dict) -> None:

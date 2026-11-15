@@ -122,8 +122,10 @@ owns user controls.
 ## Episode evaluation and saved resources
 
 Auto-reset preserves completed-row observations and IDs for timeout bootstrap;
-only true timeouts enter terminal value inference, with module training modes
-restored after inference. GRPO does not request those values. True termination
+only true timeouts request terminal value inference. Complete pre-reset batches
+preserve batch-dependent critics; inputs and values use their rollout storage
+dtypes, and module training modes are restored afterward. GRPO does not request
+those values. True termination
 suppresses bootstrap. Legacy environments retain their fallback.
 Evaluation defaults to first completion order; `balanced` allocates per-arena
 quotas before stepping. `on_episode` retains owned environment terminal reports;
@@ -136,9 +138,11 @@ config before moving them into a run. `EmbodiedEnvCfg.resource_export` packages
 materialized task resources from the unwrapped environment and an owned frozen
 mapping. Explicit local physical-resource paths resolve from the saved config.
 Task Program snapshots retain embodiment skill metadata and bind physical and
-semantic resource references before relocation. Resource-packaging failures
-are synchronized across ranks before resume or training starts. Packaging does
-not redefine checkpoint/resume compatibility.
+semantic resource references before relocation. Policy Task Programs also run
+their configured resource exporters. Checkpoints bind the original declaration
+to the exact exported snapshot checksum so that saved Gym configs can resume
+without relaxing checks on changed parameters. Resource-packaging failures are
+synchronized across ranks before resume or training starts.
 
 ## Invariants and validation
 

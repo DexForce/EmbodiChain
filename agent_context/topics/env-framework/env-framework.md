@@ -95,7 +95,9 @@ recorded boundary. Missing or foreign evidence cannot satisfy a predicate.
 An owned `scene_preparation` functor prepares ordinary `EmbodiedEnvCfg` before
 World creation; registered defaults and explicit config use the same route.
 Explicit config wins. Preparation returns configuration and does not own a
-runtime environment. `resource_export` freezes generated task resources when
+runtime environment. The effective environment seed is resolved and applied
+before preparation; subsequent initialization reuses that seed and RNG stream.
+`resource_export` freezes generated task resources when
 saving native RL checkpoints; task-specific preparation/export stays in the
 task extension so registration can use ordinary `EmbodiedEnv`.
 
