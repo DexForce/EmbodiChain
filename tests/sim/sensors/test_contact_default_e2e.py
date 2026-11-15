@@ -35,19 +35,15 @@ pytestmark = pytest.mark.requires_sim
 
 
 @pytest.mark.parametrize(
-    ("device", "expected_contacts_per_env", "direct_gpu_api"),
+    ("device", "expected_contacts_per_env"),
     [
-        pytest.param("cpu", 4, True, id="cpu"),
-        pytest.param("cuda:0", 4, True, marks=pytest.mark.gpu, id="cuda"),
-        pytest.param(
-            "cuda:0", 4, False, marks=pytest.mark.gpu, id="cuda-native-reports"
-        ),
+        pytest.param("cpu", 4, id="cpu"),
+        pytest.param("cuda:0", 4, marks=pytest.mark.gpu, id="cuda"),
     ],
 )
 def test_default_contact_sensor_preserves_contact_multiplicity(
     device: str,
     expected_contacts_per_env: int,
-    direct_gpu_api: bool,
 ) -> None:
     wp.init()
     if device.startswith("cuda") and not wp.is_cuda_available():
@@ -58,7 +54,7 @@ def test_default_contact_sensor_preserves_contact_multiplicity(
             headless=True,
             num_envs=2,
             arena_space=2.0,
-            physics_cfg=DefaultPhysicsCfg(device=device, direct_gpu_api=direct_gpu_api),
+            physics_cfg=DefaultPhysicsCfg(device=device),
         )
     )
     try:
@@ -117,9 +113,9 @@ def test_default_contact_sensor_preserves_contact_multiplicity(
         )
         assert sim.is_use_gpu_physics == device.startswith("cuda")
         assert sim.get_world().get_physics_scene().is_direct_gpu() == (
-            device.startswith("cuda") and direct_gpu_api
+            device.startswith("cuda")
         )
-        if device == "cpu" or not direct_gpu_api:
+        if device == "cpu":
             maps = [{} for _ in range(2)]
             for uid in ("cube", "ground", "default_plane"):
                 values = sensor.get_actor_ids(uid)[:, 0].cpu().tolist()

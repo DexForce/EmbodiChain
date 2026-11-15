@@ -131,9 +131,8 @@ choose the host's sampling frequency or relax unavailable-impulse/loss gates.
 Eager checks wait for the latest sensor sample on their CUDA stream without
 refreshing contacts or advancing histories.
 Global static actors retain their explicit row memberships. Rebind after query
-topology changes. Default CUDA dynamics can select ordinary reporting through
-`DefaultPhysicsCfg.direct_gpu_api=False` when static actor identity is required;
-this is independent of the physics device and leaves CPU defaults unchanged.
+topology changes. Default CUDA dynamics use Direct GPU reporting; its static
+actor identity limitations remain explicit admission constraints.
 
 The contact scatter kernel remains sensor-owned because its columns, IDs and
 quota are integration contracts. Generic image tiling belongs to

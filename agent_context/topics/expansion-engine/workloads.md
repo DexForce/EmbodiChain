@@ -79,11 +79,10 @@ each native event state machine and receipts. `ContactPermissionChecker` checks
 all valid native contact slots with the original applied-impulse and loss gates;
 hosts still own sampling at every required physics substep.
 
-Default GPU dynamics may use ordinary reporting with
-`DefaultPhysicsCfg(direct_gpu_api=False)` when complete static contact identities
-are needed. It retains GPU dynamics; the Direct GPU buffer initialization flag
-alone is not a physics-device measurement. Physics devices and task qualification
-must be reported separately. Existing CPU deployments do not switch devices.
+Default GPU dynamics use Direct GPU reporting, whose static contact identity
+limitations remain explicit admission constraints. Physics devices and task
+qualification must be reported separately. Existing CPU deployments do not
+switch devices.
 
 ## Focused validation
 
