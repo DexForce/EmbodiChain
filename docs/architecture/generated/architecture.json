@@ -3,7 +3,7 @@
   "kind": "static-architecture",
   "coverage": "curated-sample",
   "repository": "DexForce/EmbodiChain",
-  "revision": "0dddef53b58269a2cc0af91b79e9b10c02d6da1d",
+  "revision": "9735907ccd916a58b84c71012e701a7d682ad460",
   "source_ref": "HEAD",
   "package_version": "0.3.2",
   "topic_index": "agent_context/MAP.yaml",
@@ -681,8 +681,8 @@
         {
           "path": "embodichain/lab/gym/utils/gym_utils.py",
           "symbol": "build_env_cfg_from_args",
-          "start_line": 1924,
-          "end_line": 1924,
+          "start_line": 1936,
+          "end_line": 1936,
           "excerpt": "def build_env_cfg_from_args("
         }
       ],
@@ -1152,8 +1152,8 @@
         {
           "path": "embodichain/lab/gym/envs/embodied_env.py",
           "symbol": "EmbodiedEnv",
-          "start_line": 495,
-          "end_line": 495,
+          "start_line": 505,
+          "end_line": 505,
           "excerpt": "class EmbodiedEnv(BaseEnv):"
         }
       ],
@@ -2097,8 +2097,8 @@
         {
           "path": "embodichain/learning/rl/algo/ppo.py",
           "symbol": "PPO",
-          "start_line": 51,
-          "end_line": 51,
+          "start_line": 53,
+          "end_line": 53,
           "excerpt": "class PPO(BaseAlgorithm[TensorDict]):"
         }
       ],
@@ -2519,8 +2519,8 @@
         {
           "path": "embodichain/learning/rl/buffer/standard_buffer.py",
           "symbol": "RolloutBuffer",
-          "start_line": 27,
-          "end_line": 27,
+          "start_line": 29,
+          "end_line": 29,
           "excerpt": "class RolloutBuffer:"
         }
       ],
@@ -4313,8 +4313,8 @@
         {
           "path": "embodichain/learning/rl/collector/sync_collector.py",
           "symbol": "SyncCollector.__init__",
-          "start_line": 44,
-          "end_line": 44,
+          "start_line": 54,
+          "end_line": 54,
           "excerpt": "        self.policy = policy"
         }
       ]
@@ -4374,8 +4374,8 @@
         {
           "path": "embodichain/lab/gym/utils/gym_utils.py",
           "symbol": "config_to_cfg",
-          "start_line": 822,
-          "end_line": 825,
+          "start_line": 824,
+          "end_line": 827,
           "excerpt": "    component_resolution = _resolve_gym_components(\n        config, base_dir=base_dir, component_sources=component_sources\n    )\n    config = component_resolution.config"
         }
       ]
@@ -4392,15 +4392,15 @@
         {
           "path": "embodichain/lab/gym/utils/gym_utils.py",
           "symbol": "config_to_cfg",
-          "start_line": 788,
-          "end_line": 788,
+          "start_line": 790,
+          "end_line": 790,
           "excerpt": "    env_cfg = EmbodiedEnvCfg()"
         },
         {
           "path": "embodichain/lab/gym/utils/gym_utils.py",
           "symbol": "build_env_cfg_from_args",
-          "start_line": 1982,
-          "end_line": 1987,
+          "start_line": 1994,
+          "end_line": 1999,
           "excerpt": "        cfg: EmbodiedEnvCfg = config_to_cfg(\n            gym_config,\n            manager_modules=get_manager_modules(),\n            source_path=gym_config_source_path,\n            task_program_path_override=getattr(args, \"task_program\", None),\n        )"
         },
         {
@@ -4643,8 +4643,8 @@
         {
           "path": "embodichain/lab/gym/envs/embodied_env.py",
           "symbol": "EmbodiedEnv.__init__",
-          "start_line": 764,
-          "end_line": 764,
+          "start_line": 801,
+          "end_line": 801,
           "excerpt": "                self.dataset_manager = DatasetManager(self.cfg.dataset, self)"
         }
       ]
@@ -4661,8 +4661,8 @@
         {
           "path": "embodichain/lab/gym/envs/embodied_env.py",
           "symbol": "EmbodiedEnv._init_sim_state",
-          "start_line": 1151,
-          "end_line": 1151,
+          "start_line": 1188,
+          "end_line": 1188,
           "excerpt": "            self.event_manager = EventManager(self.cfg.events, self)"
         }
       ]
@@ -4697,8 +4697,8 @@
         {
           "path": "embodichain/lab/gym/envs/embodied_env.py",
           "symbol": "EmbodiedEnv.create_task_program_bridge",
-          "start_line": 4162,
-          "end_line": 4162,
+          "start_line": 4199,
+          "end_line": 4199,
           "excerpt": "        bridge = self._checked_task_program_adapter().create_bridge("
         }
       ]
@@ -4715,8 +4715,8 @@
         {
           "path": "embodichain/lab/gym/envs/embodied_env.py",
           "symbol": "EmbodiedEnv.compile_task_program",
-          "start_line": 4099,
-          "end_line": 4099,
+          "start_line": 4136,
+          "end_line": 4136,
           "excerpt": "        return self._checked_task_program_adapter().compile(program)"
         }
       ]
@@ -4733,8 +4733,8 @@
         {
           "path": "embodichain/lab/gym/envs/embodied_env.py",
           "symbol": "EmbodiedEnv._declare_robot",
-          "start_line": 3823,
-          "end_line": 3823,
+          "start_line": 3860,
+          "end_line": 3860,
           "excerpt": "        return self.sim.add_robot(robot_cfg)"
         }
       ]
@@ -4751,8 +4751,8 @@
         {
           "path": "embodichain/lab/gym/envs/embodied_env.py",
           "symbol": "EmbodiedEnv",
-          "start_line": 495,
-          "end_line": 495,
+          "start_line": 505,
+          "end_line": 505,
           "excerpt": "class EmbodiedEnv(BaseEnv):"
         }
       ]
@@ -5323,8 +5323,8 @@
         {
           "path": "embodichain/learning/rl/utils/trainer.py",
           "symbol": "Trainer.__init__",
-          "start_line": 140,
-          "end_line": 140,
+          "start_line": 141,
+          "end_line": 141,
           "excerpt": "        self.collector = SyncCollector("
         }
       ]
@@ -6099,24 +6099,6 @@
           "start_line": 35,
           "end_line": 39,
           "excerpt": "from embodichain.learning.rl.env import (\n    DifferentiableRolloutSpec,\n    DifferentiableEnvProtocol,\n    ScheduledDifferentiableEnvProtocol,\n)"
-        }
-      ]
-    },
-    {
-      "id": "static-imports-0ac03406935a",
-      "source": "tasks",
-      "target": "config-loader",
-      "relation": "imports",
-      "description": "The selected source module declares an absolute import associated with this target.",
-      "provenance": "static-extracted",
-      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
-      "evidence": [
-        {
-          "path": "extensions/embodichain_tasks/embodichain_tasks/__init__.py",
-          "symbol": "<module>",
-          "start_line": 27,
-          "end_line": 27,
-          "excerpt": "from embodichain.lab.gym.utils.gym_utils import register_manager_modules"
         }
       ]
     },
@@ -7255,7 +7237,7 @@
       ]
     },
     {
-      "id": "static-imports-838e20361fa9",
+      "id": "static-imports-836569341ed7",
       "source": "ppo",
       "target": "configuration",
       "relation": "imports",
@@ -7266,8 +7248,8 @@
         {
           "path": "embodichain/learning/rl/algo/ppo.py",
           "symbol": "<module>",
-          "start_line": 26,
-          "end_line": 26,
+          "start_line": 27,
+          "end_line": 27,
           "excerpt": "from embodichain.utils import configclass"
         }
       ]
@@ -7431,6 +7413,24 @@
           "start_line": 95,
           "end_line": 102,
           "excerpt": "from embodichain.lab.sim.sensors import (\n    SensorCfg,\n    BaseSensor,\n    Camera,\n    CameraCfg,\n    StereoCamera,\n    ContactSensor,\n)"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-93cee5e09878",
+      "source": "tasks",
+      "target": "config-loader",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "extensions/embodichain_tasks/embodichain_tasks/__init__.py",
+          "symbol": "<module>",
+          "start_line": 30,
+          "end_line": 30,
+          "excerpt": "from embodichain.lab.gym.utils.gym_utils import register_manager_modules"
         }
       ]
     },
@@ -8595,7 +8595,7 @@
         "static-imports-237cf7f458f9",
         "static-imports-4f3a2a0975e3",
         "static-imports-2c1a15113c18",
-        "static-imports-838e20361fa9",
+        "static-imports-836569341ed7",
         "static-imports-6e4557b26941",
         "static-imports-a595aa28bca6",
         "static-imports-35d217cf64ea",
@@ -8610,7 +8610,7 @@
         "static-imports-7045336779d1",
         "static-imports-8dc5959ea472",
         "static-imports-72897e797d52",
-        "static-imports-0ac03406935a"
+        "static-imports-93cee5e09878"
       ],
       "groups": [
         {
