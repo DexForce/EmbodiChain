@@ -37,6 +37,11 @@ def run(config: str) -> None:
     parser.add_argument("--num-envs", type=int, default=1)
     parser.add_argument("--duration", type=float, default=1.5)
     parser.add_argument("--timestep", type=float, default=0.001)
+    parser.add_argument(
+        "--newton-solver",
+        choices=["mujoco_warp", "dexuni"],
+        help="Newton solver family; omission preserves mujoco_warp.",
+    )
     parser.add_argument("--solver", choices=["pgs", "cg", "newton"])
     parser.add_argument("--use-mujoco-cpu", action="store_true")
     parser.add_argument("--solver-tolerance", type=float)
@@ -45,6 +50,8 @@ def run(config: str) -> None:
     )
     parser.add_argument("--backend-contacts", action="store_true")
     args = parser.parse_args()
+    if args.newton_solver is not None and args.backend != "newton":
+        parser.error("--newton-solver requires --backend newton.")
     asset = (
         AssemblyAsset.load(args.config)
         if args.config.endswith(".json")
@@ -58,6 +65,7 @@ def run(config: str) -> None:
             num_envs=args.num_envs,
             duration=args.duration,
             timestep=args.timestep,
+            newton_solver=args.newton_solver,
             solver=args.solver,
             use_mujoco_cpu=args.use_mujoco_cpu,
             solver_tolerance=args.solver_tolerance,

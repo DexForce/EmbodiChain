@@ -204,6 +204,9 @@ assert "embodichain.lab.sim" not in sys.modules
 from embodichain.toolkits.assembly import native
 assert Path(native.__file__).is_relative_to(target)
 assert callable(native.prepare_native_configs)
+from embodichain_benchmarks.assembly.precision import PrecisionRunCfg
+profile = PrecisionRunCfg(backend="newton", newton_solver="dexuni", solver="cg")
+assert profile.to_dict()["newton_solver"] == "dexuni"
 assert "embodichain.lab.sim" not in sys.modules
 for source in Path(benchmark.__file__).parent.rglob("*.py"):
     for node in ast.walk(ast.parse(source.read_text())):
@@ -284,3 +287,21 @@ print("installed benchmark suites and CLI passed")
     )
     assert robot_cli.returncode == 0, robot_cli.stdout + robot_cli.stderr
     assert "--gripper-model" in robot_cli.stdout
+
+    for example in ("drop_peg", "visual_demo"):
+        help_result = subprocess.run(
+            [
+                str(target / "bin/embodichain"),
+                "run-example",
+                f"sim/assembly/{example}",
+                "--help",
+            ],
+            cwd=tmp_path,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert help_result.returncode == 0, help_result.stdout + help_result.stderr
+        assert "--newton-solver" in help_result.stdout
+        assert "dexuni" in help_result.stdout
