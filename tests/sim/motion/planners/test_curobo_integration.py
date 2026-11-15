@@ -52,7 +52,7 @@ from embodichain.lab.sim.motion.motion_generator import (
 from embodichain.lab.sim.motion.planners import PlanState
 from embodichain.lab.sim.motion.planners.utils import MoveType
 from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (  # noqa: E402
-    CuroboLinearConstraintCfg,
+    CuroboPoseConstraintCfg,
     CuroboPlanOptions,
     CuroboPlanner,
     CuroboPlannerCfg,
@@ -101,16 +101,18 @@ def _make_sim_robot(
 
 
 @pytest.mark.parametrize(
-    ("num_envs", "frame", "cuda_graph", "sim_device"),
+    ("num_envs", "frame", "cuda_graph", "sim_device", "kind"),
     [
-        (1, "goal", False, "cuda"),
-        (2, "base", False, "cuda"),
-        (1, "goal", True, "cuda"),
-        (1, "goal", False, "cpu"),
+        (1, "goal", False, "cuda", "line"),
+        (2, "base", False, "cuda", "line"),
+        (1, "goal", True, "cuda", "line"),
+        (1, "goal", False, "cpu", "line"),
+        (1, "goal", False, "cuda", "plane"),
+        (1, "base", False, "cuda", "orientation"),
     ],
 )
-def test_curobo_linear_path_checks_geometry_and_restores_cached_planner(
-    num_envs, frame, cuda_graph, sim_device
+def test_curobo_pose_path_checks_geometry_and_restores_cached_planner(
+    num_envs, frame, cuda_graph, sim_device, kind
 ):
     """Native constrained paths meet TCP tolerances without leaking into later calls."""
     sim, robot, block = _make_sim_robot(num_envs=num_envs, sim_device=sim_device)
@@ -134,12 +136,30 @@ def test_curobo_linear_path_checks_geometry_and_restores_cached_planner(
         target = start_pose.clone()
         direction = start_pose[0, :3, 2]
         target[:, :3, 3] -= direction * 0.08
-        constraint = CuroboLinearConstraintCfg(
+        constraint = CuroboPoseConstraintCfg.linear_motion(
             frame=frame,
             direction=(0.0, 0.0, 1.0) if frame == "goal" else tuple(direction.tolist()),
             position_tolerance=0.005,
             orientation_tolerance=0.05,
         )
+        if kind == "plane":
+            constraint = CuroboPoseConstraintCfg(
+                path_position_projector=(
+                    (1.0, 0.0, 0.0),
+                    (0.0, 0.0, 0.0),
+                    (0.0, 0.0, 0.0),
+                ),
+                frame=frame,
+            )
+        elif kind == "orientation":
+            constraint = CuroboPoseConstraintCfg(
+                path_rotation_projector=(
+                    (1.0, 0.0, 0.0),
+                    (0.0, 1.0, 0.0),
+                    (0.0, 0.0, 1.0),
+                ),
+                frame=frame,
+            )
         result = mg.generate(
             [PlanState.from_xpos(target)],
             MotionGenOptions(
@@ -153,17 +173,23 @@ def test_curobo_linear_path_checks_geometry_and_restores_cached_planner(
             qpos=result.positions, name=CONTROL_PART, to_matrix=True
         )
         delta = tcp[:, :, :3, 3] - target[:, None, :3, 3]
-        lateral = delta - (delta * direction).sum(-1, keepdim=True) * direction
-        assert (
-            float(torch.linalg.vector_norm(lateral, dim=-1).max())
-            <= constraint.position_tolerance
-        )
+        if kind == "line":
+            lateral = delta - (delta * direction).sum(-1, keepdim=True) * direction
+            assert (
+                float(torch.linalg.vector_norm(lateral, dim=-1).max())
+                <= constraint.position_tolerance
+            )
+        elif kind == "plane":
+            # The target TCP X axis is the authored plane normal.
+            normal_error = (delta * target[:, None, :3, 0]).sum(-1).abs()
+            assert float(normal_error.max()) <= constraint.position_tolerance
         rotation_cosine = (
             (tcp[:, :, :3, :3] * target[:, None, :3, :3]).sum((-2, -1)) - 1
         ) / 2
-        assert float(rotation_cosine.min()) >= math.cos(
-            constraint.orientation_tolerance
-        )
+        if kind != "plane":
+            assert float(rotation_cosine.min()) >= math.cos(
+                constraint.orientation_tolerance
+            )
         if num_envs == 2:
             # Only row one starts outside its requested line. It must retain
             # its start hold without invalidating row zero's valid trajectory.
@@ -187,6 +213,17 @@ def test_curobo_linear_path_checks_geometry_and_restores_cached_planner(
         # A subsequent diagonal move is incompatible with the old line. It must
         # succeed through the same cached backend with ordinary options.
         target[:, 1, 3] += 0.08
+        yaw = 0.15
+        target[:, :3, :3] = (
+            target.new_tensor(
+                [
+                    [math.cos(yaw), -math.sin(yaw), 0.0],
+                    [math.sin(yaw), math.cos(yaw), 0.0],
+                    [0.0, 0.0, 1.0],
+                ]
+            )
+            @ target[:, :3, :3]
+        )
         free = mg.generate(
             [PlanState.from_xpos(target)],
             MotionGenOptions(

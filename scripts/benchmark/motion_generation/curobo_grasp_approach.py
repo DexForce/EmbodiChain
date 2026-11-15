@@ -255,7 +255,7 @@ def run_all_benchmarks(args: argparse.Namespace) -> Path | None:
         MotionGenerator,
     )
     from embodichain.lab.sim.motion.planners import (
-        CuroboLinearConstraintCfg,
+        CuroboPoseConstraintCfg,
         CuroboPlanOptions,
         CuroboPlannerCfg,
         CuroboWorldCfg,
@@ -302,10 +302,10 @@ def run_all_benchmarks(args: argparse.Namespace) -> Path | None:
             )
         start = prepared.positions[:, -1].clone()
         del prepared
-        constraint = CuroboLinearConstraintCfg(
+        constraint = CuroboPoseConstraintCfg.linear_motion(
             position_tolerance=args.position_tolerance,
             orientation_tolerance=math.radians(args.orientation_tolerance_deg),
-            weight=args.weight,
+            non_terminal_scale=args.weight,
         )
         options = {
             "before": MotionGenOptions(start_qpos=start, control_part=part),

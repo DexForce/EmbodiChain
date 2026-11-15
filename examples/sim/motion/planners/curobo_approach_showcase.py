@@ -135,7 +135,7 @@ def _plan(robot: Any, fixture: list[Any], output: Path) -> tuple[Any, dict, dict
         CuroboPlannerCfg,
         CuroboPlanOptions,
         CuroboWorldCfg,
-        CuroboLinearConstraintCfg,
+        CuroboPoseConstraintCfg,
         MoveType,
         PlanState,
     )
@@ -166,7 +166,7 @@ def _plan(robot: Any, fixture: list[Any], output: Path) -> tuple[Any, dict, dict
         options = CuroboPlanOptions(
             path_constraints=(
                 [
-                    CuroboLinearConstraintCfg(
+                    CuroboPoseConstraintCfg.linear_motion(
                         position_tolerance=0.005,
                         orientation_tolerance=math.radians(3),
                     )

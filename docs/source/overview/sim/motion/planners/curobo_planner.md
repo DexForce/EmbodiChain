@@ -128,10 +128,11 @@ assert result.success.all()
 ~~~
 
 (curobo-linear-grasp-approaches)=
-## Line-constrained grasp approaches
+## Pose path constraints
 
-`CuroboPlanOptions.path_constraints` adds optional straight-line and
-target-orientation requirements to individual Cartesian segments. The adapter
+`CuroboPlanOptions.path_constraints` assigns optional `CuroboPoseConstraintCfg`
+values to individual Cartesian segments. The configuration wraps the path
+position/rotation fields of native `ToolPoseCriteria` using plain Python data. The adapter
 installs native cuRobo path costs, enables native path-tolerance checks, and
 then verifies the returned samples using the actual TCP geometry. Defaults
 remain unchanged when no path constraints are supplied.
@@ -167,7 +168,7 @@ from embodichain.lab.sim.motion.motion_generator import (
     MotionGenerator,
 )
 from embodichain.lab.sim.motion.planners import (
-    CuroboLinearConstraintCfg,
+    CuroboPoseConstraintCfg,
     CuroboPlanOptions,
     CuroboPlannerCfg,
     PlanState,
@@ -188,10 +189,10 @@ pre_grasp[:, :3, 3] -= grasp_pose[:, :3, 2] * 0.15
 lift = grasp_pose.clone()
 lift[:, 2, 3] += 0.16
 
-approach = CuroboLinearConstraintCfg(
+approach = CuroboPoseConstraintCfg.linear_motion(
     direction=(0.0, 0.0, 1.0),
     frame="goal",
-    weight=1.0,
+    non_terminal_scale=1.0,
     position_tolerance=0.005,
     orientation_tolerance=math.radians(3.0),
 )
@@ -209,20 +210,61 @@ This is an arm-motion planning example. Atomic Skills own the hand-closing,
 settling, effect verification, and execution boundaries between grasp arrival
 and lift; direct consumers must schedule those actions separately.
 
-| Setting | Meaning | Default |
-| --- | --- | --- |
-| `direction` | Nonzero line direction; normalized before use. | `(0.0, 0.0, 1.0)` |
-| `frame` | `goal`: target TCP axes; `base`: native planning-base axes. | `"goal"` |
-| `weight` | Positive native nonterminal residual scale. | `1.0` |
-| `position_tolerance` | Maximum perpendicular TCP distance, in meters. | `0.005` |
-| `orientation_tolerance` | Maximum target-relative TCP rotation, in radians. | `0.05`, approximately 2.86 degrees |
+### Data model and additional pose restrictions
 
-The constraint list must match the target count. Constrained entries require
-full-pose `EEF_MOVE` targets; joint targets and position-only or
-orientation-only modalities are rejected. Directions must be finite and
-nonzero, weights and tolerances must be finite and positive, and orientation
-tolerance cannot exceed pi. Approach distance belongs to pre-grasp waypoint
-construction, independently of this line configuration.
+`CuroboPoseConstraintCfg` stores two independent orthogonal 3x3 projectors.
+Each must be finite, symmetric (`P.T == P`), and idempotent (`P @ P == P`).
+A zero matrix disables that path component; identity constrains all three
+components. Both projectors default to zero, matching the native criteria's
+unconstrained path defaults. No cuRobo objects or GPU tensors are stored in the
+configuration, and it can round-trip through `to_dict()` and JSON.
+
+| Configuration field | Meaning | Default |
+| --- | --- | --- |
+| `path_position_projector` | Select target-relative TCP displacement components. | Zero 3x3 matrix |
+| `path_rotation_projector` | Select shortest rotation-vector components. | Zero 3x3 matrix |
+| `position_scale` | Uniform native position residual scale. | `1.0` |
+| `rotation_scale` | Uniform native rotation residual scale. | `1.0` |
+| `frame` | Shared projector frame: target TCP (`goal`) or native planning base (`base`). | `"goal"` |
+| `position_tolerance` | Unscaled projected TCP distance bound, in meters. | `0.005` |
+| `orientation_tolerance` | Unscaled projected rotation-vector bound, in radians. | `0.05`, approximately 2.86 degrees |
+
+`linear_motion()` is a convenience factory returning the same configuration
+class. It derives the position projector from `direction`, holds all target
+orientation axes by default, and optionally frees rotation about
+`rotation_axis`. `non_terminal_scale` initializes both scalar scales. These
+factory arguments are converted into projector/scale data; they are not
+separate fields of the resulting object.
+
+Other position/orientation combinations use the same compiler and validator:
+
+~~~python
+# Stay near the target TCP XY plane, without a path-orientation restriction.
+plane = CuroboPoseConstraintCfg(
+    path_position_projector=((0, 0, 0), (0, 0, 0), (0, 0, 1)),
+    position_tolerance=0.005,
+    frame="goal",
+)
+
+# Hold the target orientation while allowing free Cartesian path geometry.
+hold_orientation = CuroboPoseConstraintCfg(
+    path_rotation_projector=((1, 0, 0), (0, 1, 0), (0, 0, 1)),
+    orientation_tolerance=0.05,
+)
+
+# Follow a line and allow rotation about the target TCP Z axis.
+free_roll = CuroboPoseConstraintCfg.linear_motion(rotation_axis=(0, 0, 1))
+~~~
+
+The constraint list must match the target count. Configured entries require
+full-pose `EEF_MOVE` targets and preserved native samples; joint targets and
+partial terminal modalities are rejected. Full terminal goals remain owned by
+the existing waypoints. This configuration intentionally exposes no duplicate
+terminal-goal fields, native device objects, or unimplemented velocity/relative
+transform criteria. Scalars must be finite and positive, and orientation
+tolerance cannot exceed pi. Uniform scales allow projector frames to rotate
+through fixed tool/TCP transforms without introducing anisotropic-weight
+ambiguity. Approach distance remains part of waypoint construction.
 
 ### Line geometry and orientation
 
@@ -249,51 +291,54 @@ line, so reversing `direction` leaves the geometry unchanged. It does not
 enforce monotonic progress, a signed approach, or confinement between the two
 endpoints.
 
-Orientation is constrained relative to the complete target rotation, including
-rotation around the approach axis. With `R_e = R_g.T @ R(q)`, the adapter uses
-the rotation angle
+The factory's default rotation projector is identity, holding the complete
+target orientation. More generally the adapter computes a shortest rotation
+vector and checks only its projected components:
 
 :::{math}
-\theta=\operatorname{atan2}\left(
-    \frac{\|R_e-R_e^{\mathsf T}\|_F}{\sqrt{8}},
-    \frac{\operatorname{tr}(R_e)-1}{2}
-\right)
-\leq\varepsilon_R.
+\rho = \operatorname{Log}(R_g^{\mathsf T}R(q))^\vee,
+\qquad \|P_R\rho\|\leq\varepsilon_R.
 :::
 
-For valid rotation matrices, this gives the relative rotation angle. The
-`atan2` expression avoids the loss of small-angle resolution that can occur
-when using only `acos` of the trace in float32.
+This expression uses target TCP axes (`frame="goal"`). For planning-base axes,
+the relative rotation is `R(q) @ R_g.T` instead. A zero `P_R` disables the
+path-orientation bound. The implementation converts the relative matrix to a
+normalized quaternion and then uses the shared shortest axis-angle conversion,
+retaining small-angle resolution and handling rotations near pi. It skips
+rotation-vector work entirely when the rotation projector is zero.
 
 ### Native optimization costs and tolerance checks
 
-The adapter calls cuRobo V2-Fast's `ToolPoseCriteria.linear_motion()` with the
-configured direction and `non_terminal_scale=weight`. Intermediate position
-residuals use the line projector `P`; intermediate orientation residuals retain
-all rotation axes. Terminal position and orientation projectors remain full
-identity matrices. Existing goal, collision, dynamic-limit, and smoothness
-terms continue to participate in the solve.
+The adapter compiles `CuroboPoseConstraintCfg` into a native `ToolPoseCriteria`
+using its canonical path-position and path-rotation projector fields. Scalar
+scales become uniform three-axis native scale vectors. The terminal position
+and rotation projectors remain identity for the full-pose waypoint goals.
+Existing goal, collision, dynamic-limit, and smoothness terms continue to
+participate in the solve. Line, plane, and orientation-only configurations
+share this compilation path rather than separate constraint subclasses.
 
 For cuRobo 0.9, ignoring tolerance deadbands, these path contributions can be
 written as
 
 :::{math}
 C_{\mathrm{path}}=\sum_k\left[
-    \frac{c_p}{2}\|w e_{\perp,k}\|^2
-    +c_R\|w r_{R,k}\|^2
+    \frac{c_p}{2}\|w_p e_{\perp,k}\|^2
+    +c_R\|w_R P_R r_{R,k}\|^2
 \right].
 :::
 
-Here `c_p` and `c_R` are native cost weights, and `w` is this adapter's
-`weight`. The native rotation residual is twice the vector part of a
+Here `c_p` and `c_R` are native cost weights; `w_p` and `w_R` are this
+adapter's `position_scale` and `rotation_scale`. The native rotation residual
+is twice the vector part of a
 normalized, shortest-arc error quaternion: `r_R = 2 * vec(q_error)`. Its norm
 is `2 * sin(theta / 2)`, which approximates the rotation angle near zero.
-EmbodiChain's final check uses the rotation angle itself.
+EmbodiChain's final check projects the exact shortest rotation vector;
+identity projection gives the rotation angle itself.
 
 The position cost propagates through the robot's position Jacobian:
 
 :::{math}
-\nabla_q C_p=c_p w^2 J_{\mathrm{xyz}}(q)^{\mathsf T}
+\nabla_q C_p=c_p w_p^2 J_{\mathrm{xyz}}(q)^{\mathsf T}
 P\bigl(p(q)-p_g\bigr).
 :::
 
@@ -303,10 +348,10 @@ not turn the optimization into an exact Cartesian interpolation algorithm.
 
 The adapter also sets `path_tolerance` and `enforce_path_tolerance=True` in the
 native criteria. In cuRobo 0.9, residual scaling participates in both quadratic
-costs and native reported error distances, so changing `weight` can also change
-native feasibility decisions. At `weight=2`, the quadratic contribution is
-approximately four times larger outside deadbands. Start with `weight=1` when
-matching native checks to physical tolerances; increasing it does not guarantee
+costs and native reported error distances, so changing a scale can also change
+native feasibility decisions. At scale `2`, the corresponding quadratic
+contribution is approximately four times larger outside deadbands. Start with
+unit scales when matching native checks to physical tolerances; increasing it does not guarantee
 that a feasible path will be found. The final TCP checks always use unscaled
 meters and radians.
 
@@ -316,7 +361,8 @@ for the native residual definitions.
 
 ### Goal frames, planning bases, and TCP offsets
 
-With `frame="goal"`, a direction is expressed in the **target TCP frame**.
+With `frame="goal"`, projectors (and factory direction arguments) use the
+**target TCP frame**.
 For example, `(0, 0, 1)` follows the target TCP Z axis, which may point downward
 in the simulator frame. Its planning-base expression is `d_B = R_g @ d_goal`.
 With `frame="base"`, the supplied direction is already in the native planning
@@ -333,8 +379,8 @@ target and reconstructs the actual TCP with
 {}^B T_T(q)={}^B T_F(q)\,{}^F T_T.
 :::
 
-For goal-frame constraints, it also rotates the direction into the native
-tool's goal axes: `d_F = R_FT @ d_T`. A translated TCP offset makes the final
+For goal-frame constraints, both projectors rotate into the native tool goal
+axes as `P_F = R_FT @ P_T @ R_FT.T`. A translated TCP offset makes the final
 reconstruction important: even a small tool-orientation change can move the
 TCP sideways while the tool origin stays close to its line. The returned
 trajectory is checked at the TCP, including this fixed offset.
@@ -343,7 +389,7 @@ trajectory is checked at the TCP, including this fixed offset.
 
 After native planning, the adapter maps every returned joint sample back
 through native FK, reconstructs the TCP, and checks finite transforms,
-perpendicular position error, and rotation angle. Acceptance requires **every
+projected position error, and projected shortest rotation-vector error. Acceptance requires **every
 sample**, including the start and endpoint, to pass the unscaled tolerances.
 An optimizer success flag alone does not bypass this check.
 
@@ -363,8 +409,8 @@ Native criteria are installed only for the selected segment and restored to
 ordinary full-pose terminal costs with zero path costs in a `finally` block.
 This prevents a constrained approach from affecting later lifts or subsequent
 requests, including after exceptions. Each backend retains only its most
-recent pair of constrained/reset criteria, keyed by direction, frame, weight,
-and tolerances. Goals remain per-call inputs. Native updates copy values into
+recent compiled specification, keyed by projectors, frame, scales, and
+tolerances. Its TCP projector tensors are reused for postvalidation. Goals remain per-call inputs. Native updates copy values into
 fixed-address buffers, retaining CUDA Graph compatibility.
 
 ### Compare the example and interpret the result
@@ -393,12 +439,12 @@ produced the following snapshot:
 
 | Metric | Unconstrained approach | Constrained approach |
 | --- | --- | --- |
-| Maximum perpendicular TCP error | 5.82 mm | 4.59 mm |
-| Maximum target-orientation error | 0.21 degrees | 0.35 degrees |
-| Median planning latency | 12.46 ms | 19.26 ms |
+| Maximum perpendicular TCP error | 5.82 mm | 4.51 mm |
+| Maximum target-orientation error | 0.21 degrees | 0.37 degrees |
+| Median planning latency | 13.20 ms | 19.55 ms |
 | Attempts meeting 5 mm / 3 degree tolerances | 0 / 5 | 5 / 5 |
 
-The transverse error fell by about 21%, while planning latency and orientation
+The transverse error fell by about 23%, while planning latency and orientation
 error increased. Both orientation errors remain within the configured bound.
 Optimization balances several objectives and need only satisfy the accepted
 tube; it does not promise zero deviation or improvement in every metric.

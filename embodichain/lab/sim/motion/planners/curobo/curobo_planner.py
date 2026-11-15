@@ -48,7 +48,12 @@ from embodichain.compute.trajectory import differentiate_positions
 import yaml
 
 from embodichain.utils import configclass, logger
-from embodichain.utils.math import pose_inv, quat_from_matrix, quat_xyzw_to_wxyz
+from embodichain.utils.math import (
+    axis_angle_from_quat,
+    pose_inv,
+    quat_from_matrix,
+    quat_xyzw_to_wxyz,
+)
 
 from embodichain.lab.sim.motion.planners.base_planner import (
     BasePlanner,
@@ -77,7 +82,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "CuroboAutoGenCfg",
-    "CuroboLinearConstraintCfg",
+    "CuroboPoseConstraintCfg",
     "CuroboPlanOptions",
     "CuroboPlanner",
     "CuroboPlannerCfg",
@@ -519,59 +524,155 @@ class CuroboPlannerCfg(BasePlannerCfg):
     """
 
 
-@configclass
-class CuroboLinearConstraintCfg:
-    """Constrain one Cartesian segment to a line through its target TCP.
+def _pose_projector(value: object, name: str) -> tuple[tuple[float, float, float], ...]:
+    """Validate and own a plain-data orthogonal 3D projector."""
+    if (
+        not isinstance(value, (tuple, list))
+        or len(value) != 3
+        or any(not isinstance(row, (tuple, list)) or len(row) != 3 for row in value)
+        or any(
+            isinstance(x, bool)
+            or not isinstance(x, (int, float))
+            or not math.isfinite(x)
+            for row in value
+            for x in row
+        )
+    ):
+        raise ValueError(f"{name} must be a finite 3x3 matrix.")
+    matrix = tuple(tuple(float(x) for x in row) for row in value)
+    if any(abs(matrix[i][j] - matrix[j][i]) > 1e-6 for i in range(3) for j in range(3)):
+        raise ValueError(f"{name} must be symmetric.")
+    if any(
+        abs(sum(matrix[i][k] * matrix[k][j] for k in range(3)) - matrix[i][j]) > 1e-6
+        for i in range(3)
+        for j in range(3)
+    ):
+        raise ValueError(f"{name} must be idempotent.")
+    return matrix
 
-    The complete segment, including its start, must remain within the position
-    tolerance of the line and the orientation tolerance of the target. These
-    are sampled checks, not continuous collision or monotonic-motion guarantees.
+
+def _orthogonal_direction_projector(
+    direction: tuple[float, float, float],
+    name: str,
+) -> tuple[tuple[float, float, float], ...]:
+    """Construct the projector orthogonal to a nonzero configuration direction."""
+    if (
+        not isinstance(direction, (tuple, list))
+        or len(direction) != 3
+        or any(
+            isinstance(x, bool)
+            or not isinstance(x, (int, float))
+            or not math.isfinite(x)
+            for x in direction
+        )
+        or not 0 < math.hypot(*direction) < math.inf
+    ):
+        raise ValueError(f"{name} must contain three finite values with nonzero norm.")
+    unit = [x / math.hypot(*direction) for x in direction]
+    return tuple(
+        tuple(float(i == j) - unit[i] * unit[j] for j in range(3)) for i in range(3)
+    )
+
+
+@configclass
+class CuroboPoseConstraintCfg:
+    """Data-only path fields adapted from cuRobo's ``ToolPoseCriteria``.
+
+    Projectors select components of target-relative TCP displacement and the
+    shortest rotation vector. A zero projector disables that path component;
+    identity constrains all three components. Terminal goals remain owned by
+    the target waypoints. Native tensors are created lazily by the planner.
 
     Args:
-        direction: Nonzero line direction; its magnitude and sign are irrelevant.
-        frame: ``goal`` expresses direction in the target TCP frame; ``base``
-            uses the cuRobo planning base frame, independently in each environment.
-        weight: Positive nonterminal pose-cost scale used by the optimizer.
-        position_tolerance: Maximum perpendicular TCP distance in meters.
-        orientation_tolerance: Maximum target-relative rotation angle in radians.
+        path_position_projector: Symmetric, idempotent 3x3 position projector.
+        path_rotation_projector: Symmetric, idempotent 3x3 rotation projector.
+        position_scale: Positive uniform native position residual scale.
+        rotation_scale: Positive uniform native rotation residual scale.
+        position_tolerance: Unscaled projected TCP distance bound in meters.
+        orientation_tolerance: Unscaled projected rotation-vector bound in radians.
+        frame: ``goal`` uses the target TCP axes; ``base`` uses the native
+            planning-base axes, independently in each environment.
     """
 
-    direction: tuple[float, float, float] = (0.0, 0.0, 1.0)
-    frame: Literal["goal", "base"] = "goal"
-    weight: float = 1.0
+    path_position_projector: tuple[tuple[float, float, float], ...] = (
+        (0.0, 0.0, 0.0),
+        (0.0, 0.0, 0.0),
+        (0.0, 0.0, 0.0),
+    )
+    path_rotation_projector: tuple[tuple[float, float, float], ...] = (
+        (0.0, 0.0, 0.0),
+        (0.0, 0.0, 0.0),
+        (0.0, 0.0, 0.0),
+    )
+    position_scale: float = 1.0
+    rotation_scale: float = 1.0
     position_tolerance: float = 0.005
     orientation_tolerance: float = 0.05
+    frame: Literal["goal", "base"] = "goal"
 
     def __post_init__(self) -> None:
-        """Reject undefined directions and invalid weights or tolerances."""
-        if (
-            not isinstance(self.direction, (tuple, list))
-            or len(self.direction) != 3
-            or any(
-                isinstance(value, bool)
-                or not isinstance(value, (int, float))
-                or not math.isfinite(value)
-                for value in self.direction
-            )
-            or math.hypot(*self.direction) == 0.0
-            or not math.isfinite(math.hypot(*self.direction))
-        ):
-            raise ValueError(
-                "direction must contain three finite values with nonzero norm."
-            )
+        """Normalize plain matrix data and validate geometric acceptance bounds."""
+        for name in ("path_position_projector", "path_rotation_projector"):
+            setattr(self, name, _pose_projector(getattr(self, name), name))
         if self.frame not in ("goal", "base"):
             raise ValueError("frame must be 'goal' or 'base'.")
-        for name in ("weight", "position_tolerance", "orientation_tolerance"):
+        for name in (
+            "position_scale",
+            "rotation_scale",
+            "position_tolerance",
+            "orientation_tolerance",
+        ):
             value = getattr(self, name)
             if (
                 isinstance(value, bool)
                 or not isinstance(value, (int, float))
                 or not math.isfinite(value)
-                or value <= 0.0
+                or value <= 0
             ):
                 raise ValueError(f"{name} must be finite and positive.")
         if self.orientation_tolerance > math.pi:
             raise ValueError("orientation_tolerance must not exceed pi.")
+
+    @classmethod
+    def linear_motion(
+        cls,
+        direction: tuple[float, float, float] = (0.0, 0.0, 1.0),
+        *,
+        rotation_axis: tuple[float, float, float] | None = None,
+        non_terminal_scale: float = 1.0,
+        position_tolerance: float = 0.005,
+        orientation_tolerance: float = 0.05,
+        frame: Literal["goal", "base"] = "goal",
+    ) -> CuroboPoseConstraintCfg:
+        """Build line/rotation projectors without importing cuRobo or allocating tensors.
+
+        Args:
+            direction: Line direction; magnitude and sign do not change the line.
+            rotation_axis: Optional axis of free rotation. Omission holds the
+                complete target orientation, matching the native factory.
+            non_terminal_scale: Uniform scale for both native path residuals.
+            position_tolerance: Unscaled perpendicular TCP bound in meters.
+            orientation_tolerance: Unscaled projected rotation bound in radians.
+            frame: Shared reference frame for both projectors.
+
+        Returns:
+            A normal pose-constraint configuration with explicit projector data.
+        """
+        return cls(
+            path_position_projector=_orthogonal_direction_projector(
+                direction, "direction"
+            ),
+            path_rotation_projector=(
+                ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
+                if rotation_axis is None
+                else _orthogonal_direction_projector(rotation_axis, "rotation_axis")
+            ),
+            position_scale=non_terminal_scale,
+            rotation_scale=non_terminal_scale,
+            position_tolerance=position_tolerance,
+            orientation_tolerance=orientation_tolerance,
+            frame=frame,
+        )
 
 
 @configclass
@@ -610,11 +711,11 @@ class CuroboPlanOptions(PlanOptions):
     origins to coincide.
     """
 
-    path_constraints: list[CuroboLinearConstraintCfg | None] | None = None
+    path_constraints: list[CuroboPoseConstraintCfg | None] | None = None
     """Optional constraint for each segment arriving at the corresponding target.
 
     The list must match the target count. ``None`` entries retain unconstrained
-    paths; constrained entries require full-pose ``EEF_MOVE`` targets and
+    paths; configured entries require full-pose ``EEF_MOVE`` targets and
     ``CuroboPlannerCfg.preserve_plan_samples=True``. The optimizer's line costs
     are followed by independent TCP checks on every returned sample. Failure
     in one environment retains the ordinary failed-row start hold.
@@ -2521,9 +2622,9 @@ class CuroboPlanner(BasePlanner):
         for index, (target, constraint) in enumerate(zip(target_states, constraints)):
             if constraint is None:
                 continue
-            if not isinstance(constraint, CuroboLinearConstraintCfg):
+            if not isinstance(constraint, CuroboPoseConstraintCfg):
                 raise TypeError(
-                    "path_constraints entries must be linear configs or None."
+                    "path_constraints entries must be pose configs or None."
                 )
             constraint.__post_init__()
             if target.move_type != MoveType.EEF_MOVE or (
@@ -2531,87 +2632,91 @@ class CuroboPlanner(BasePlanner):
                 and options.waypoint_modalities[index] != "pose"
             ):
                 raise ValueError(
-                    "Linear path constraints require full-pose EEF_MOVE targets."
+                    "Pose path constraints require full-pose EEF_MOVE targets."
                 )
             if not self.cfg.preserve_plan_samples:
                 raise ValueError(
-                    "Linear path constraints require preserve_plan_samples=True."
+                    "Pose path constraints require preserve_plan_samples=True."
                 )
 
     @contextmanager
-    def _linear_constraint_scope(
-        self, backend: "_CuroboBackend", constraint: CuroboLinearConstraintCfg | None
+    def _pose_constraint_scope(
+        self, backend: "_CuroboBackend", constraint: CuroboPoseConstraintCfg | None
     ) -> Iterator[None]:
         """Apply a segment-local native cost and restore it even on failure."""
         if constraint is None:
             yield
             return
+        compiled = self._compile_pose_criteria(backend, constraint)
+        try:
+            backend.planner.update_tool_pose_criteria(
+                {backend.tool_frame: compiled.criteria}
+            )
+            yield
+        finally:
+            backend.planner.update_tool_pose_criteria(
+                {backend.tool_frame: compiled.baseline}
+            )
+
+    def _compile_pose_criteria(
+        self, backend: "_CuroboBackend", constraint: CuroboPoseConstraintCfg
+    ) -> "_CuroboPoseCriteria":
+        """Compile one bounded cache entry shared by native solving and TCP checks."""
         key = (
-            tuple(constraint.direction),
+            constraint.path_position_projector,
+            constraint.path_rotation_projector,
             constraint.frame,
-            constraint.weight,
+            constraint.position_scale,
+            constraint.rotation_scale,
             constraint.position_tolerance,
             constraint.orientation_tolerance,
         )
-        cached = getattr(backend, "linear_criteria_cache", None)
-        if cached is None or cached[0] != key:
-            cached = (key, *self._make_linear_criteria(backend, constraint))
-            # Retain only the most recent pair, bounding storage independently
-            # of the number of distinct requests. Native updates copy values.
-            backend.linear_criteria_cache = cached
-        _, criteria, baseline = cached
-        try:
-            backend.planner.update_tool_pose_criteria({backend.tool_frame: criteria})
-            yield
-        finally:
-            backend.planner.update_tool_pose_criteria({backend.tool_frame: baseline})
-
-    def _make_linear_criteria(
-        self, backend: "_CuroboBackend", constraint: CuroboLinearConstraintCfg
-    ) -> tuple[Any, Any]:
-        """Build native path and reset values once per distinct constraint."""
+        cached = getattr(backend, "pose_criteria_cache", None)
+        if cached is not None and cached[0] == key:
+            return cached[1]
         device_cfg = self._bindings.DeviceCfg(device=str(self._curobo_device))
-        direction = torch.tensor(
-            [
-                value / math.hypot(*constraint.direction)
-                for value in constraint.direction
-            ],
+        position = torch.tensor(
+            constraint.path_position_projector,
             device=self._curobo_device,
             dtype=torch.float32,
         )
+        rotation = position.new_tensor(constraint.path_rotation_projector)
+        native_position, native_rotation = position, rotation
         tool_to_tcp = backend.profile.tool_frame_to_tcp
         if constraint.frame == "goal" and tool_to_tcp is not None:
-            direction = (
-                torch.as_tensor(
-                    tool_to_tcp, device=self._curobo_device, dtype=direction.dtype
-                )[:3, :3]
-                @ direction
-            )
-        criteria = self._bindings.ToolPoseCriteria.linear_motion(
-            direction=direction,
-            non_terminal_scale=constraint.weight,
+            basis = position.new_tensor(tool_to_tcp)[:3, :3]
+            native_position = basis @ position @ basis.T
+            native_rotation = basis @ rotation @ basis.T
+        criteria = self._bindings.ToolPoseCriteria(
+            path_position_projector=native_position,
+            path_rotation_projector=native_rotation,
+            path_position_axis_scale=[constraint.position_scale] * 3,
+            path_rotation_axis_scale=[constraint.rotation_scale] * 3,
+            path_tolerance=[
+                constraint.position_tolerance,
+                constraint.orientation_tolerance,
+            ],
+            enforce_path_tolerance=True,
             project_distance_to_goal=constraint.frame == "goal",
             device_cfg=device_cfg,
         )
-        criteria.path_tolerance.copy_(
-            criteria.path_tolerance.new_tensor(
-                [constraint.position_tolerance, constraint.orientation_tolerance]
-            )
-        )
-        criteria.enforce_path_tolerance.fill_(True)
         baseline = self._bindings.ToolPoseCriteria(
             terminal_pose_axes_weight_factor=[1.0] * 6,
             non_terminal_pose_axes_weight_factor=[0.0] * 6,
             device_cfg=device_cfg,
         )
-        return criteria, baseline
+        compiled = _CuroboPoseCriteria(criteria, baseline, position, rotation)
+        # Only the most recent specification is retained. No goal or observed
+        # robot state is cached; native updates copy into fixed-address buffers.
+        backend.pose_criteria_cache = (key, compiled)
+        return compiled
 
-    def _linear_path_validity(
+    def _pose_path_validity(
         self,
         positions: torch.Tensor,
         target_xpos: torch.Tensor,
         backend: "_CuroboBackend",
-        constraint: CuroboLinearConstraintCfg,
+        constraint: CuroboPoseConstraintCfg,
         sim_base_pose_inv: torch.Tensor | None,
     ) -> torch.Tensor:
         """Check actual TCP geometry in bounded device-resident FK batches."""
@@ -2620,17 +2725,15 @@ class CuroboPlanner(BasePlanner):
         goal = self._sim_world_to_curobo_base_pose(
             target_xpos, backend, sim_base_pose_inv
         )
-        direction = goal.new_tensor(
-            [
-                value / math.hypot(*constraint.direction)
-                for value in constraint.direction
-            ]
-        )
-        direction = direction.expand(batch, -1)
-        if constraint.frame == "goal":
-            direction = (goal[:, :3, :3] @ direction[..., None]).squeeze(-1)
+        compiled = self._compile_pose_criteria(backend, constraint)
         tool_to_tcp = backend.profile.tool_frame_to_tcp
         offset = None if tool_to_tcp is None else goal.new_tensor(tool_to_tcp)
+        check_position = any(
+            x != 0 for row in constraint.path_position_projector for x in row
+        )
+        check_rotation = any(
+            x != 0 for row in constraint.path_rotation_projector for x in row
+        )
         validity = []
         # Bound native FK storage independently of the trajectory batch/horizon.
         chunk_size = 1024
@@ -2645,23 +2748,37 @@ class CuroboPlanner(BasePlanner):
                 torch.arange(start, start + joints.shape[0], device=goal.device)
                 // horizon
             )
-            delta = tcp[:, :3, 3] - goal[rows, :3, 3]
-            axis = direction[rows]
-            lateral = delta - (delta * axis).sum(dim=-1, keepdim=True) * axis
-            relative = goal[rows, :3, :3].transpose(-1, -2) @ tcp[:, :3, :3]
-            cosine = (relative.diagonal(dim1=-2, dim2=-1).sum(-1) - 1) / 2
-            sine = torch.linalg.matrix_norm(
-                relative - relative.transpose(-1, -2)
-            ) / math.sqrt(8)
-            angle = torch.atan2(sine, cosine)
-            validity.append(
-                torch.isfinite(tcp).all(dim=(-2, -1))
-                & (
-                    torch.linalg.vector_norm(lateral, dim=-1)
+            valid = torch.isfinite(tcp).all(dim=(-2, -1))
+            goal_rotation = goal[rows, :3, :3]
+            if check_position:
+                delta = tcp[:, :3, 3] - goal[rows, :3, 3]
+                if constraint.frame == "goal":
+                    delta = (
+                        goal_rotation.transpose(-1, -2) @ delta[..., None]
+                    ).squeeze(-1)
+                projected = delta @ compiled.position_projector.T
+                valid &= (
+                    torch.linalg.vector_norm(projected, dim=-1)
                     <= constraint.position_tolerance
                 )
-                & (angle <= constraint.orientation_tolerance)
-            )
+            if check_rotation:
+                relative = (
+                    goal_rotation.transpose(-1, -2) @ tcp[:, :3, :3]
+                    if constraint.frame == "goal"
+                    else tcp[:, :3, :3] @ goal_rotation.transpose(-1, -2)
+                )
+                quaternion = quat_from_matrix(relative)
+                quaternion = quaternion / torch.linalg.vector_norm(
+                    quaternion, dim=-1, keepdim=True
+                ).clamp_min(1e-12)
+                projected = (
+                    axis_angle_from_quat(quaternion) @ compiled.rotation_projector.T
+                )
+                valid &= (
+                    torch.linalg.vector_norm(projected, dim=-1)
+                    <= constraint.orientation_tolerance
+                )
+            validity.append(valid)
         return torch.cat(validity).reshape(batch, horizon).all(dim=-1)
 
     def _plan_segments(
@@ -2745,7 +2862,7 @@ class CuroboPlanner(BasePlanner):
                 with (
                     capture_mode,
                     torch.cuda.device(self._curobo_device),
-                    self._linear_constraint_scope(backend, constraint),
+                    self._pose_constraint_scope(backend, constraint),
                 ):
                     v2_result = backend.planner.plan_pose(
                         goal,
@@ -2810,7 +2927,7 @@ class CuroboPlanner(BasePlanner):
                 if constraint is not None:
                     assert target.xpos is not None
                     with torch.cuda.device(self._curobo_device):
-                        seg_success &= self._linear_path_validity(
+                        seg_success &= self._pose_path_validity(
                             seg_positions,
                             target.xpos,
                             backend,
@@ -3595,6 +3712,16 @@ class CuroboPlanner(BasePlanner):
 
 
 @dataclass
+class _CuroboPoseCriteria:
+    """Cached native criteria and unscaled TCP projectors owned by one backend."""
+
+    criteria: Any
+    baseline: Any
+    position_projector: torch.Tensor
+    rotation_projector: torch.Tensor
+
+
+@dataclass
 class _CuroboBackend:
     """Cached in-process V2 planner and its EmbodiChain-side metadata."""
 
@@ -3610,7 +3737,7 @@ class _CuroboBackend:
     gravity: tuple[float, float, float] | None = None
     motion_limits_key: str | None = None
     collision_checker: "Any | None" = None
-    linear_criteria_cache: tuple[tuple[object, ...], Any, Any] | None = None
+    pose_criteria_cache: tuple[tuple[object, ...], _CuroboPoseCriteria] | None = None
     # Lazily-built device-tensor caches for the shared post-processing. The
     # cuRobo joint order and the profile's fixed transforms are stable for a
     # planner's life, so these are built once on first use and reused across

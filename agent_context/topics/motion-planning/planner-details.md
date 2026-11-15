@@ -92,18 +92,25 @@ facade independently of the selected planner backend.
 
 ## Backend-specific boundaries
 
-### cuRobo linear approach segments
+### cuRobo pose path criteria
 
-`CuroboPlanOptions.path_constraints` assigns optional
-`CuroboLinearConstraintCfg` values to individual target-arrival segments.
-Directions use the target TCP (`goal`) or the native planning `base` frame.
-The entire constrained segment, including its start, must satisfy the line and
-target-orientation tolerances; this is not a late-activated approach cost.
-The adapter scopes native costs to that segment and restores cached planner
-criteria even on exceptions. Bounded native FK then validates the actual TCP,
-including its fixed tool offset, and rejects violating rows through the normal
-start-hold failure contract. Constraints require preserved native samples;
-resampling, monotonic progress and continuous validity are not certified.
+`CuroboPlanOptions.path_constraints` assigns data-only `CuroboPoseConstraintCfg`
+values to target-arrival segments. Position and rotation projectors select
+independent residual subspaces; zero disables a component. `linear_motion()`
+is a convenience factory returning that same configuration. The target TCP
+(`goal`) or native planning `base` frame is shared by both projectors. Endpoint
+semantics remain waypoint-owned; no duplicate terminal or device fields are
+exposed. Whole segments, including starts, are checked; activation windows and
+monotonic progress are not implied.
+
+One compiler builds native criteria and cached TCP projector tensors, rotating
+both through fixed tool calibration. Uniform component scales keep this
+conversion well-defined. Scoped native updates restore baseline criteria even
+on exceptions. Bounded device FK validates actual TCP displacement and shortest
+rotation-vector projections with unscaled physical tolerances, rejecting rows
+through the usual start hold. Preserved native samples are required; consumers
+must revalidate resampled paths. Adding another pose restriction uses projector
+data rather than another geometry-specific lifecycle or configuration subclass.
 
 ### TOPPRA
 
