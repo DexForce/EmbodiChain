@@ -29,6 +29,10 @@ assets remain outside Git and the wheel; preparation and task/benchmark
 workflows belong to `examples/learning/nerd`.
 
 `physics.worldparticle.provider` supplies the optional `worldparticle` name.
+See the [complete WorldParticle solver quickstart](../../examples/learning/worldparticle/DEPLOYMENT.md),
+[input contract](../../examples/learning/worldparticle/INPUTS.md),
+[operator installation/preflight](../../examples/learning/worldparticle/BUILDING.md#install-and-check-the-built-operators)
+and [measured execution record](../../examples/learning/worldparticle/VALIDATION.md).
 The independent `WorldParticleModel` owns features, topology, frozen network
 and coordinate conversion. The Provider validates native scene, particle count,
 dt, gravity and supported capabilities; callers must preserve authored particle

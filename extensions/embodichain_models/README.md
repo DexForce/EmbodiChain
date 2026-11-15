@@ -39,6 +39,14 @@ Use the following canonical packages for the current model directions:
 | RigidFormer | `embodichain_models.dynamics.rigidformer` | Native author architecture, official weights and shared-SL recipe. |
 | WorldParticle | `embodichain_models.dynamics.worldparticle` | Frozen particle transition; optional native deployment and operator qualification are separate. |
 
+WorldParticle's [showcase](../../examples/learning/worldparticle/README.md),
+[input contract](../../examples/learning/worldparticle/INPUTS.md),
+[native quickstart](../../examples/learning/worldparticle/DEPLOYMENT.md) and
+[operator installation/preflight](../../examples/learning/worldparticle/BUILDING.md)
+cover the frozen inference path. Its [execution record](../../examples/learning/worldparticle/VALIDATION.md)
+records full headless runs and bounded offscreen captures. It has no shared-SL
+recipe, learning-env or qualified functional-gradient/APG contract in this stage.
+
 Visual ACT's configuration and inference adapters are documented in the
 [API reference](../../docs/source/api_reference/visual_act.rst); its runnable
 workflow lives in [examples/learning/act](../../examples/learning/act/README.md).

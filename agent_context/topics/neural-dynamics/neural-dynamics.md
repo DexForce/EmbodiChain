@@ -96,8 +96,12 @@ delegates stream/state/force/write/reset machinery to the SDK's generic
 `ParticleInferenceSolver`, included in main's SDK 0.6.0rc2 pin. The historical operator profile uses
 Torch 2.7.1 and must not replace main's Torch 2.11 dependencies. The showcase
 records runtime and immutable asset provenance. Its separate Torch 2.11 source
-build profile has local CUDA operator and four-checkpoint/two-step execution
-evidence; native deployment uses SDK 0.6.0rc2. Compatible operator wheels remain
+build profile preserves its local operator/two-step evidence. The example's
+[native quickstart](../../../examples/learning/worldparticle/DEPLOYMENT.md),
+[input contract](../../../examples/learning/worldparticle/INPUTS.md) and
+[execution record](../../../examples/learning/worldparticle/VALIDATION.md) own
+reproduction details and current full-run/offscreen budgets. Native deployment
+uses SDK 0.6.0rc2. Compatible operator wheels remain
 local artifacts, so a default installation still needs operator provisioning.
 Tests with a small deterministic predictor
 qualify adapter behavior; real BF16 inference does not establish bitwise
@@ -168,6 +172,8 @@ owns model selection and the shared training entry point; the
 own their model principles and user workflows; the
 [RWM guide](../../../docs/source/features/neural_dynamics/rwm.md) covers prediction
 and replay under the linked robot-world-model contract. The
+[WorldParticle guide](../../../docs/source/features/neural_dynamics/worldparticle.md)
+owns frozen inference, operator provisioning and native demo navigation. The
 [model API](../../../docs/source/api_reference/model_catalogs.rst) owns exported
 definitions. Transition error, accumulated rollout error and paper-scale
 accuracy remain separate claims.

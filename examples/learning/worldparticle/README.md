@@ -7,6 +7,11 @@ is `embodichain_solvers.physics.worldparticle.provider.WorldParticleProvider`; t
 solver adapter is DexSim's model-independent `ParticleInferenceSolver`.
 Providers are constructed per scene through the existing Newton lifecycle.
 
+Start with [installation/build checks](BUILDING.md#install-and-check-the-built-operators),
+the [complete native solver quickstart](DEPLOYMENT.md), and the
+[input/coordinate contract](INPUTS.md). [VALIDATION.md](VALIDATION.md) records
+the full headless examples and bounded offscreen rendering checks.
+
 ## Runtime qualification
 
 The historical PR demo used a dedicated Python 3.12 environment with `dexsim_engine==0.6.0rc2`.
@@ -43,13 +48,37 @@ the recorded wheel hashes. No environment, weight or native wheel is committed.
 
 ## Independent transition and optional deployment
 
-Load an independent model and call it with world-space particle tensors:
+After preparing the default asset directory, run this independent tensor call
+from the repository root in the checked CUDA environment:
 
 ```python
+from pathlib import Path
+import numpy as np
+import torch
+import yaml
 from embodichain_models.dynamics.worldparticle import load_model
 
+assets = Path("outputs/worldparticle/assets").resolve()
+config_path = assets / "checkpoints/fancy_fluid/config.yaml"
+sample = assets / "data/fancy_fluid/66/66.npz"
+cfg = yaml.safe_load(config_path.read_text())
+R = np.asarray([[1., 0., 0.], [0., 0., -1.], [0., 1., 0.]], np.float32)
+options = {
+    "checkpoint": str(assets / "checkpoints/fancy_fluid/final.ckpt"),
+    "config": str(config_path),
+    "inputs": str(sample),
+    "model_to_world": R.tolist(),
+}
+with np.load(sample, allow_pickle=False) as data:
+    frame = int(cfg.get("frame_start", 0))
+    q = torch.tensor(data["position"][frame] @ R.T, dtype=torch.float32, device="cuda:0")
+    qd = torch.tensor(data["velocity"][frame] @ R.T, dtype=torch.float32, device="cuda:0")
+acceleration = torch.tensor(R @ np.asarray(cfg["gravity"], np.float32), device="cuda:0").expand_as(q)
 model = load_model(options, device="cuda:0")
-next_q, next_qd = model(q, qd, acceleration, dt)
+with torch.no_grad():
+    next_q, next_qd = model(q, qd, acceleration, float(cfg["timestep"]))
+assert torch.isfinite(next_q).all() and torch.isfinite(next_qd).all()
+print(next_q.shape, next_qd.shape)
 ```
 
 Acceleration includes gravity. The model owns
