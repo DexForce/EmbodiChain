@@ -193,8 +193,37 @@ def test_result_loader_rejects_incomplete_scene_and_budget(recorded_job, tmp_pat
         load_preview([path], reference=path)
     job["resolved_deployment"]["rigid_object"][0]["shape"]["shape_type"] = "Mesh"
     (path / "job.json").write_text(json.dumps(job))
-    with pytest.raises(ValueError, match="Cube"):
+    with pytest.raises(ValueError, match="asset is unavailable"):
         load_preview([path])
+
+
+def test_result_loader_keeps_real_mesh_spec_and_native_operator_labels(
+    recorded_job, tmp_path
+):
+    path, job, episode = recorded_job
+    mesh = tmp_path / "object.ply"
+    mesh.write_text(
+        "ply\nformat ascii 1.0\nelement vertex 3\nproperty float x\nproperty float y\nproperty float z\nelement face 1\nproperty list uchar int vertex_indices\nend_header\n0 0 0\n1 0 0\n0 1 0\n3 0 1 2\n"
+    )
+    job["resolved_deployment"]["rigid_object"][0]["shape"] = {
+        "shape_type": "Mesh",
+        "fpath": str(mesh),
+    }
+    (path / "job.json").write_text(json.dumps(job))
+    data = load_preview([path])
+    assert data.boxes["box"] is None
+    assert data.object_specs["box"]["shape"]["fpath"] == str(mesh)
+    from embodichain.lab.expansion._preview_data import annotations
+
+    result = annotations(
+        {
+            "source_env_id": 0,
+            "expansion": [{"env_id": 0, "operator": "joint_residual", "proposal": 3}],
+        },
+        data.clips[0].measured,
+    )
+    assert result["variant"] == "joint_residual"
+    assert result["affordance"] == "unrecorded"
 
 
 def test_filter_empty_intersection_and_phase_alignment(recorded_job):

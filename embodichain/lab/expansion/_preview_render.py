@@ -80,6 +80,8 @@ class NativeRenderer:
         publisher: Any,
         names: list[str],
         center: np.ndarray,
+        models: dict[str, Any] | None = None,
+        geometry: dict[str, Any] | None = None,
     ) -> None:
         from dexsim import spawn
         from embodichain.lab.visualization.markers import (
@@ -95,6 +97,28 @@ class NativeRenderer:
         scene = sim.spawn_result
         self.step = sim.physics_step_index
         self.previous = None
+        self.models = models or {}
+        self.geometry = geometry or {}
+        self.backgrounds = {
+            uid
+            for uid, spec in (data.object_specs or {}).items()
+            if spec.get("body_type") in {"static", "kinematic"}
+            and all(
+                np.allclose(
+                    c.measured.object_poses[uid],
+                    data.clips[0].measured.object_poses[uid][0],
+                    rtol=0,
+                    atol=1e-7,
+                )
+                for c in data.all_clips
+            )
+        }
+        self.moving_objects = [uid for uid in data.boxes if uid not in self.backgrounds]
+        for uid in self.backgrounds:
+            self.models[uid].set_local_pose(
+                data.clips[0].measured.object_poses[uid][0:1]
+            )
+            self.models[uid].set_visible(True)
         palette = [
             (0.18, 0.58, 1),
             (0.15, 0.9, 0.5),
@@ -141,13 +165,11 @@ class NativeRenderer:
                 markers(
                     f"preview_objects_{i}",
                     {
-                        uid: MarkerPrototypeCfg(
-                            shape="box", scale=size, color=(*color, 0.2)
-                        )
-                        for uid, size in data.boxes.items()
+                        uid: self._object_prototype(uid, color=(*color, 0.2))
+                        for uid in self.moving_objects
                     },
                 )
-                if data.boxes
+                if self.moving_objects
                 else None
             )
             self.objects.append(objects)
@@ -156,10 +178,10 @@ class NativeRenderer:
             )
             robot.set_visibility(False)
             if objects:
-                p = np.array([c.measured.object_poses[uid][0] for uid in data.boxes])
-                objects.visualize(
-                    p[:, :3], p[:, 3:], marker_indices=np.arange(len(data.boxes))
+                p = np.array(
+                    [c.measured.object_poses[uid][0] for uid in self.moving_objects]
                 )
+                objects.visualize(p[:, :3], p[:, 3:], marker_indices=np.arange(len(p)))
                 objects.set_visibility(False)
         self.selected = RobotMarkers(
             RobotMarkersCfg(
@@ -177,17 +199,13 @@ class NativeRenderer:
             markers(
                 "selected_objects",
                 {
-                    uid: MarkerPrototypeCfg(
-                        shape="box",
-                        scale=size,
-                        color=(0.9, 0.58, 0.2, 1),
-                        scene_lighting=True,
-                        unlit=False,
+                    uid: self._object_prototype(
+                        uid, color=(0.9, 0.58, 0.2, 1), scene_lighting=True, unlit=False
                     )
-                    for uid, size in data.boxes.items()
+                    for uid in self.moving_objects
                 },
             )
-            if data.boxes
+            if self.moving_objects and not self.models
             else None
         )
         self.paths = markers(
@@ -244,6 +262,16 @@ class NativeRenderer:
         self.camera.set_visual_overlay_enabled(True)
         publisher.publish(preload=True)
 
+    def _object_prototype(self, uid: str, **appearance: Any) -> Any:
+        from embodichain.lab.visualization.markers import MarkerPrototypeCfg
+
+        if uid in self.geometry:
+            vertices, faces = self.geometry[uid]
+            return MarkerPrototypeCfg(
+                shape="mesh", vertices=vertices, faces=faces, **appearance
+            )
+        return MarkerPrototypeCfg(shape="box", scale=self.data.boxes[uid], **appearance)
+
     def draw(self, state: PreviewState) -> bytes:
         v = state.values
         visible = state.visible()
@@ -298,20 +326,29 @@ class NativeRenderer:
             initial = [
                 p[0, :3]
                 for i in visible
-                for p in self.data.clips[i].measured.object_poses.values()
+                for uid, p in self.data.clips[i].measured.object_poses.items()
+                if uid not in self.backgrounds
             ]
             self.positions.visualize(np.asarray(initial).reshape(-1, 3))
             self.previous = tuple(visible)
         self.selected.set_visibility(bool(visible))
         if self.selected_objects:
             self.selected_objects.set_visibility(bool(visible))
+        for uid, obj in self.models.items():
+            if uid not in self.backgrounds:
+                obj.set_visible(bool(visible))
         if visible:
             c = self.data.clips[v["selected"]]
             f = state.frame_at(c)
             self.selected.visualize_link_poses(c.links[f, self.selected_order][None])
+            for uid in self.moving_objects:
+                if uid in self.models:
+                    self.models[uid].set_local_pose(
+                        c.measured.object_poses[uid][f : f + 1]
+                    )
             if self.selected_objects:
                 p = np.array(
-                    [c.measured.object_poses[uid][f] for uid in self.data.boxes]
+                    [c.measured.object_poses[uid][f] for uid in self.moving_objects]
                 )
                 self.selected_objects.visualize(
                     p[:, :3], p[:, 3:], marker_indices=np.arange(len(p))
@@ -334,7 +371,7 @@ class NativeRenderer:
                 robot.visualize_link_poses(c.links[f, order][None])
                 if objects:
                     p = np.array(
-                        [c.measured.object_poses[uid][f] for uid in self.data.boxes]
+                        [c.measured.object_poses[uid][f] for uid in self.moving_objects]
                     )
                     objects.visualize(
                         p[:, :3], p[:, 3:], marker_indices=np.arange(len(p))
@@ -366,6 +403,8 @@ class NativeRenderer:
             "ghost_count": ghost_count,
             "path_segments": self.paths.count if v["paths"] else 0,
             "grasp_targets": self.targets.count if v["targets"] else 0,
+            "scene_objects": len(self.data.boxes),
+            "fixed_backgrounds": len(self.backgrounds),
         }
         return buffer.getvalue()
 
@@ -400,10 +439,30 @@ def native_renderer(data: PreviewData, gpu: int = 0) -> Iterator[NativeRenderer]
     publisher = None
     try:
         sim.enable_physics(False)
+        models = {}
+        if data.object_specs is not None:
+            from embodichain.lab.sim.cfg import VisualObjectCfg
+
+            for index, (uid, spec) in enumerate(data.object_specs.items()):
+                visual = {
+                    key: value
+                    for key, value in spec.items()
+                    if key in {"shape", "source", "body_scale"} and value is not None
+                }
+                visual.update(uid=f"expansion_preview_asset_{index}", visible=False)
+                models[uid] = sim.add_visual_object(VisualObjectCfg.from_dict(visual))
         sim.prepare()
         sim.set_ground_plane_visibility(data.ground_visible)
+        geometry = {}
+        for uid, obj in models.items():
+            vertices = obj.get_vertices(env_ids=[0], scale=True)[0].cpu().numpy()
+            faces = obj.get_triangles(env_ids=[0])[0].cpu().numpy()
+            if not len(vertices) or not len(faces) or not np.isfinite(vertices).all():
+                raise ValueError(f"Recorded object has no finite visual mesh: {uid}")
+            geometry[uid] = vertices, faces
+            data.boxes[uid] = tuple(np.ptp(vertices, axis=0))
         publisher = MarkerFramePublisher(sim)
-        yield NativeRenderer(data, sim, publisher, names, center)
+        yield NativeRenderer(data, sim, publisher, names, center, models, geometry)
     finally:
         if publisher is not None:
             publisher.close()

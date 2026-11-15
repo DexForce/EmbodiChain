@@ -68,7 +68,8 @@ def annotations(metadata: Any, measured: MeasuredTrajectory) -> dict[str, Any]:
     branches, candidates, targets, phases = [], [], [], []
     phase_safe = True
     for segment in metadata.get("program_segments", ()):
-        for call in segment.get("metadata", {}).get("runtime", {}).get("calls", ()):
+        runtime = segment.get("runtime", segment.get("metadata", {}).get("runtime", {}))
+        for call in runtime.get("calls", ()):
             for event in call.get("events", ()):
                 if event.get("kind") == "trajectory_segment_entered":
                     mask = event.get("env_mask")
@@ -120,6 +121,8 @@ def annotations(metadata: Any, measured: MeasuredTrajectory) -> dict[str, Any]:
             sampling = sample.get("sampling") or {}
             overrides = sampling.get("branch_overrides")
             branch = overrides[row] if overrides else sampling.get("branch_override")
+            if branch is None and sampling.get("count") == 1:
+                branch = 0
             branches.append("unrecorded" if branch is None else str(branch))
             candidates.append(str(sample["candidate_ids"][row]))
             uid = (
@@ -159,6 +162,14 @@ def annotations(metadata: Any, measured: MeasuredTrajectory) -> dict[str, Any]:
         for r in records
         if r.get("trajectory_requested") is not None
     ]
+    if not variants:
+        variants = [
+            str(r["operator"])
+            for r in records
+            if r.get("operator")
+            in {"joint_residual", "via_points", "nullspace_residual"}
+        ]
+        variants = list(dict.fromkeys(variants))
     return dict(
         affordance="/".join(branches) or "unrecorded",
         variant="/".join(variants) or "unrecorded",
@@ -169,7 +180,53 @@ def annotations(metadata: Any, measured: MeasuredTrajectory) -> dict[str, Any]:
     )
 
 
-def _scene(job: dict[str, Any]) -> tuple[dict, dict[str, tuple[float, ...]]]:
+def _object_specs(cfg: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    objects = {}
+    for obj in [*(cfg.get("rigid_object") or []), *(cfg.get("background") or [])]:
+        uid = obj.get("uid")
+        if not isinstance(uid, str) or not uid or uid in objects:
+            raise ValueError("Preview requires unique recorded rigid object IDs")
+        if obj.get("visuals") is not None or obj.get("visual_shape"):
+            raise ValueError(
+                "Preview does not yet support explicit rigid visual replacements"
+            )
+        shape, source = obj.get("shape") or {}, obj.get("source")
+        if source:
+            if not isinstance(source, dict) or not source.get("file_path") or shape:
+                raise ValueError("Preview requires an unambiguous source object")
+            filename = source["file_path"]
+        elif shape.get("shape_type") == "Mesh":
+            filename = shape.get("fpath")
+        elif shape.get("shape_type") in {
+            "Cube",
+            "Sphere",
+            "Cylinder",
+            "Capsule",
+            "Cone",
+        }:
+            filename = None
+        else:
+            raise ValueError("Unsupported recorded rigid visual geometry")
+        if (source or shape.get("shape_type") == "Mesh") and (
+            not filename or not Path(filename).expanduser().is_file()
+        ):
+            raise ValueError(f"Recorded object asset is unavailable: {filename}")
+        scale = obj.get("body_scale")
+        if scale is not None and (
+            np.asarray(scale).shape != (3,)
+            or not np.isfinite(scale).all()
+            or np.any(np.asarray(scale) <= 0)
+        ):
+            raise ValueError("Invalid recorded object scale")
+        objects[uid] = {
+            key: obj[key]
+            for key in ("shape", "source", "body_scale", "body_type")
+            if key in obj
+        }
+    return objects
+
+
+def _scene(job: dict[str, Any]) -> tuple[dict, dict[str, tuple[float, ...] | None]]:
     cfg = job.get("resolved_deployment")
     if not isinstance(cfg, dict) or not isinstance(cfg.get("robot"), dict):
         raise ValueError(
@@ -178,7 +235,6 @@ def _scene(job: dict[str, Any]) -> tuple[dict, dict[str, tuple[float, ...]]]:
     unsupported = (
         "articulation",
         "rigid_object_group",
-        "background",
         "cable_object",
         "fluid_object",
         "soft_object",
@@ -187,7 +243,7 @@ def _scene(job: dict[str, Any]) -> tuple[dict, dict[str, tuple[float, ...]]]:
     )
     if any(cfg.get(k) for k in unsupported) or job.get("config", {}).get("scene_atlas"):
         raise ValueError(
-            "Preview currently supports a fixed layout, one URDF robot and Cube rigid objects only"
+            "Preview requires a fixed layout, one URDF robot and recorded rigid objects"
         )
     robot = cfg["robot"]
     if robot.get("visuals") or robot.get("link_visuals"):
@@ -195,23 +251,17 @@ def _scene(job: dict[str, Any]) -> tuple[dict, dict[str, tuple[float, ...]]]:
     if not np.allclose(robot.get("body_scale", [1, 1, 1]), [1, 1, 1]):
         raise ValueError("Scaled robot assets are not supported by this preview")
     boxes = {}
-    for obj in cfg.get("rigid_object", []):
+    for uid, obj in _object_specs(cfg).items():
         shape = obj.get("shape") or {}
-        if (
-            shape.get("shape_type") != "Cube"
-            or obj.get("source")
-            or obj.get("visuals")
-            or obj.get("visual_shape")
-        ):
-            raise ValueError(
-                "Preview requires Cube rigid geometry; no asset substitution is performed"
-            )
+        if shape.get("shape_type") != "Cube":
+            boxes[uid] = None
+            continue
         size = np.asarray(shape["size"], float) * np.asarray(
-            obj.get("body_scale", [1, 1, 1]), float
+            obj.get("body_scale") or [1, 1, 1], float
         )
         if size.shape != (3,) or not np.isfinite(size).all() or np.any(size <= 0):
             raise ValueError("Invalid recorded Cube dimensions")
-        boxes[obj["uid"]] = tuple(size)
+        boxes[uid] = tuple(size)
     return robot, boxes
 
 
@@ -221,9 +271,10 @@ class PreviewData:
     reference: PreviewClip | None
     asset: Path
     eef_link: str
-    boxes: dict[str, tuple[float, ...]]
+    boxes: dict[str, tuple[float, ...] | None]
     ground_visible: bool = True
     coverage: dict[str, Any] | None = None
+    object_specs: dict[str, dict[str, Any]] | None = None
 
     @property
     def all_clips(self) -> list[PreviewClip]:
@@ -272,6 +323,7 @@ def load_preview(
     asset = None
     boxes = None
     robot_spec = None
+    object_specs = None
     end = None
     ground = True
     seen = set()
@@ -282,10 +334,16 @@ def load_preview(
             raise ValueError(f"Not an expansion job output: {path} (missing job.json)")
         job = json.loads(job_path.read_text())
         robot, shapes = _scene(job)
+        recorded_specs = _object_specs(job["resolved_deployment"])
+        if object_specs is not None and recorded_specs != object_specs:
+            raise ValueError(
+                "Result directories disagree about recorded object geometry"
+            )
+        object_specs = recorded_specs
         spec = {k: robot.get(k) for k in ("uid", "control_parts", "solver_cfg")}
         if robot_spec is not None and (spec != robot_spec or shapes != boxes):
             raise ValueError(
-                "Result directories must share robot/control topology and Cube geometry"
+                "Result directories must share robot/control topology and object geometry"
             )
         robot_spec = spec
         boxes = shapes
@@ -371,7 +429,9 @@ def load_preview(
             else:
                 clips.append(clip)
                 clip.label = f"C-{len(clips):03d}"
-    return PreviewData(clips, reference_clip, asset, end, boxes, ground, coverage)
+    return PreviewData(
+        clips, reference_clip, asset, end, boxes, ground, coverage, object_specs
+    )
 
 
 class PreviewState:
