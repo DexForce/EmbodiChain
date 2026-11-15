@@ -42,12 +42,15 @@ _NOMINAL_QPOS = {
         [0.0, -math.pi / 2, math.pi / 2, -math.pi / 2, -math.pi / 2, 0.0],
         dtype=torch.float32,
     ),
+    # The V100 ready posture is independent of downstream task targets.
+    "piper": torch.tensor([0.0, 1.0, -1.2, 0.0, 0.6, 0.0], dtype=torch.float32),
 }
 _NEAR_SINGULARITY_QPOS = {
     "franka_panda": torch.tensor(
         [0.0, 0.0, 0.0, -0.15, 0.0, 0.20, 0.0], dtype=torch.float32
     ),
     "ur5": torch.tensor([0.0, -math.pi / 2, 0.0, 0.0, 0.0, 0.0], dtype=torch.float32),
+    "piper": torch.zeros(6, dtype=torch.float32),
 }
 
 

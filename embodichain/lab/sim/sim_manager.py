@@ -2248,9 +2248,11 @@ class SimulationManager:
 
         Args:
             physics_dt (float | None, optional): the time step for physics simulation. Defaults to None.
-            step (int, optional): the number of :meth:`World.update` calls per invocation. Defaults to 10.
+            step (int, optional): Number of manager physics intervals to advance.
+                Each interval may contain multiple native integration steps,
+                according to the backend configuration. Defaults to 10.
             after_substep: Observer called with the elapsed physics time after
-                each world update, before recording and visualization. It runs
+                each manager physics interval, before recording and visualization. It runs
                 inside this update call and is not retained by the manager.
             render_final_step: Render the final substep immediately. Gym defers
                 it until after interval events, then enters :meth:`render_frame`

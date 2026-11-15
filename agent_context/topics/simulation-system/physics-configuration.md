@@ -17,6 +17,11 @@ use `sim.device`; `gpu_id` selects the render GPU and fills an unindexed CUDA
 device, not a separate environment tensor device.
 
 `DefaultPhysicsCfg.cache_material` controls native material reuse.
+`DefaultPhysicsCfg.num_substeps` divides each manager physics interval into
+native integration steps (default one). Manager time, control/observer intervals
+and render publication keep the outer interval. This permits integration
+refinement without changing task durations; it does not add controller updates
+or contact observations between native steps.
 `SimulationManagerCfg.scene_node_capacity` sets World capacity before creation;
 `None` retains the native default. Gym accepts the former in `physics_config`
 and the latter at the top level through `config_to_cfg()`.
