@@ -185,3 +185,72 @@ def test_mjfit_nested_default_contact_profile_is_retained_on_analytic_probe_peg(
         for field in ("geom_solref", "geom_solimp", "geom_solmix", "geom_priority"):
             values = getattr(compiled, field)
             np.testing.assert_array_equal(values[peg_id], values[plate_geom])
+
+
+def test_native_constrained_probe_rejects_newton_selection_on_default_before_preparation():
+    from embodichain.toolkits.assembly import AssemblyAsset
+    from embodichain_benchmarks.assembly.probes import run_native_probe
+
+    with pytest.raises(ValueError, match="requires backend='newton'"):
+        run_native_probe(
+            AssemblyAsset(),
+            ConstrainedProbeCfg(),
+            backend="default",
+            newton_solver="dexuni",
+        )
+
+
+@pytest.mark.gpu
+@pytest.mark.subprocess_sim
+@pytest.mark.parametrize("family", ["mujoco_warp", "dexuni"])
+def test_native_solver_family_retains_colliders_and_seats_a_peg(tmp_path, family):
+    """A real prepared scene must use the selected solver and preserve behavior."""
+    import json
+    import subprocess
+    import sys
+
+    source = _square_asset()
+    xml = source.source_mjcf.replace(
+        "<worldbody>", '<worldbody><geom type="plane" size="1 1 .01"/>'
+    )
+    asset = import_mjcf(xml, config=source.config)
+    manifest = asset.save(tmp_path / "asset.json")
+    output = tmp_path / "result.json"
+    program = """
+import json, sys
+from pathlib import Path
+from embodichain.toolkits.assembly import AssemblyAsset
+from embodichain_benchmarks.assembly.precision import PrecisionRunCfg, run_passive_probe
+asset = AssemblyAsset.load(sys.argv[1])
+result = run_passive_probe(asset, PrecisionRunCfg(
+    backend='newton', newton_solver=sys.argv[3], duration=.2, work_dir=sys.argv[4]))
+Path(sys.argv[2]).write_text(json.dumps(result, allow_nan=False))
+"""
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            program,
+            str(manifest),
+            str(output),
+            family,
+            str(tmp_path / "runtime"),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    result = json.loads(output.read_text())
+    assert result["status"] == "unverified", result
+    assert result["newton_solver"] == family
+    assert result["solver_diagnostics"]["solver_type"] == family
+    assert result["metrics"]["finite"] is True
+    assert result["metrics"]["success_rate"] == 1.0
+    assert result["final_state"]["peg"][0][2] == pytest.approx(0.02, abs=5e-6)
+    assert result["collision_counts"] == {
+        "plate": {"expected": 4, "actual": 4},
+        "peg": {"expected": 1, "actual": 1},
+    }
+    if family == "dexuni":
+        assert result["solver_diagnostics"]["features"]["backend"] == "pure_mujoco"

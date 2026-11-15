@@ -36,6 +36,9 @@ SOURCE = (
 def test_usd_precision_detects_changed_primitive_dimensions(tmp_path) -> None:
     pytest.importorskip("mujoco")
     pytest.importorskip("pxr")
+    # This test consumes the native USD parser, so register its schemas before
+    # the portable exporter authors a stage, independent of collection order.
+    pytest.importorskip("dexsim.kit.usd")
     from pxr import Usd, UsdGeom
     from embodichain_benchmarks.assembly.precision import compare_usd_geometry
 
@@ -153,6 +156,7 @@ def _matrix_args(output: Path, manifest: Path) -> argparse.Namespace:
         contact_capacity=4096,
         backend_contacts=False,
         solver=None,
+        newton_solvers=None,
         use_mujoco_cpu=False,
         solver_tolerance=None,
         multiccd=None,
@@ -358,6 +362,15 @@ def test_many_pegs_scores_each_translated_cell_and_rejects_rim_or_floor_passage(
 @pytest.mark.parametrize(
     ("settings", "message"),
     [
+        ({"backend": "newton", "newton_solver": "unknown"}, "Newton solver must be"),
+        (
+            {"backend": "mujoco_cpu", "newton_solver": "dexuni"},
+            "requires backend='newton'",
+        ),
+        (
+            {"backend": "default", "newton_solver": "mujoco_warp"},
+            "requires backend='newton'",
+        ),
         ({"backend": "default", "solver": "cg"}, "Default does not accept"),
         ({"warp_reference_initialization": "unknown"}, "initialization must be"),
         (
@@ -469,3 +482,180 @@ def test_failed_precision_measurements_preserve_json_and_failure_reason(
     assert result["metrics"]["distance"] is None
     assert result["final_state"]["peg"] == [0.0, None, 0.0]
     assert result["nonfinite_measurement_count"] == 2
+
+
+@pytest.mark.parametrize("family", [None, "mujoco_warp", "dexuni"])
+@pytest.mark.parametrize("override", [False, True])
+def test_newton_family_routes_the_full_source_or_explicit_mujoco_profile(
+    family, override
+):
+    from embodichain_benchmarks.assembly.precision import (
+        PrecisionRunCfg,
+        _newton_solver_config,
+    )
+    from embodichain.lab.sim.cfg import NewtonPhysicsCfg
+
+    source = {"solver": 1, "integrator": 3}
+    cfg = PrecisionRunCfg(
+        backend="newton",
+        newton_solver=family,
+        solver_iterations=27,
+        contact_capacity=512,
+        **(
+            {
+                "solver": "cg",
+                "solver_tolerance": 0.0,
+                "enable_multiccd": False,
+                "use_mujoco_cpu": True,
+            }
+            if override
+            else {}
+        ),
+    )
+    mapped = _newton_solver_config(cfg, source, save_to_mjcf="probe.xml")
+    assert mapped["solver_type"] == (family or "mujoco_warp")
+    options = mapped["mujoco_options"] if family == "dexuni" else mapped
+    assert options["solver"] == ("cg" if override else 1)
+    assert options["integrator"] == 3
+    assert options["iterations"] == 27
+    assert options["nconmax"] == 512
+    assert options["njmax"] == 3072
+    assert options["save_to_mjcf"] == "probe.xml"
+    if override:
+        assert options["tolerance"] == 0.0
+        assert options["enable_multiccd"] is False
+        assert options["use_mujoco_cpu"] is True
+        assert options["separate_worlds"] is False
+    else:
+        assert "tolerance" not in options and "enable_multiccd" not in options
+    # Also exercise the real SDK option validation, without creating a World.
+    native = NewtonPhysicsCfg(solver_cfg=mapped).to_dexsim_cfg(0)
+    assert native.solver_cfg.solver_type == (family or "mujoco_warp")
+    if override:
+        if family == "dexuni":
+            assert native.solver_cfg.mujoco_options["tolerance"] == 0.0
+            assert native.solver_cfg.mujoco_options["enable_multiccd"] is False
+        else:
+            assert native.solver_cfg.tolerance == 0.0
+            assert native.solver_cfg.enable_multiccd is False
+    assert source == {"solver": 1, "integrator": 3}
+
+
+@pytest.mark.parametrize(
+    "active,features,error",
+    [
+        ("dexuni", None, "dispatch diagnostics"),
+        ("dexuni", {"backend": "vbd"}, "pure_mujoco dispatch"),
+        ("mujoco_warp", {"backend": "pure_mujoco"}, "Requested Newton solver"),
+    ],
+)
+def test_dexuni_missing_or_mismatched_dispatch_cannot_masquerade_as_a_profile(
+    active, features, error
+):
+    from types import SimpleNamespace
+    from embodichain_benchmarks.assembly.precision import (
+        PrecisionRunCfg,
+        _native_solver_metadata,
+    )
+
+    sim = SimpleNamespace(
+        physics=SimpleNamespace(solver_type=active),
+        spawn_result=SimpleNamespace(
+            get_solver_diagnostics=lambda: {"features": features} if features else None
+        ),
+    )
+    with pytest.raises((RuntimeError, NotImplementedError), match=error):
+        _native_solver_metadata(
+            sim, PrecisionRunCfg(backend="newton", newton_solver="dexuni"), {}
+        )
+
+
+def test_dexuni_metadata_reports_actual_dispatch_and_keeps_the_algorithm_separate():
+    from types import SimpleNamespace
+    from embodichain_benchmarks.assembly.precision import (
+        PrecisionRunCfg,
+        _native_solver_metadata,
+    )
+
+    diagnostics = {
+        "solver_type": "dexuni",
+        "features": {"backend": "pure_mujoco"},
+        "step_index": 3,
+    }
+    sim = SimpleNamespace(
+        physics=SimpleNamespace(solver_type="dexuni"),
+        spawn_result=SimpleNamespace(get_solver_diagnostics=lambda: diagnostics),
+    )
+    result = _native_solver_metadata(
+        sim,
+        PrecisionRunCfg(backend="newton", newton_solver="dexuni", solver="cg"),
+        {"solver": 0},
+    )
+    assert result["newton_solver"] == "dexuni"
+    assert result["runtime"] == "Newton/DexUni (pure_mujoco)"
+    assert result["active_solver"] == "cg"
+    assert result["solver_diagnostics"] == diagnostics
+    legacy = SimpleNamespace(
+        physics=SimpleNamespace(solver_type="mujoco_warp"),
+        spawn_result=SimpleNamespace(),
+    )
+    assert (
+        _native_solver_metadata(
+            legacy, PrecisionRunCfg(backend="newton"), {"solver": 0}
+        )["active_solver"]
+        == 0
+    )
+
+
+def test_matrix_keeps_families_failures_and_runtime_artifacts_separate(
+    tmp_path, monkeypatch
+):
+    pytest.importorskip("mujoco")
+    pytest.importorskip("pxr")
+    from scripts.benchmark.assembly import precision as matrix
+
+    asset = import_mjcf(SOURCE)
+    manifest = asset.save(tmp_path / "asset.json")
+    args = _matrix_args(tmp_path / "output", manifest)
+    args.backends = ["mujoco_cpu", "newton"]
+    args.newton_solvers = ["mujoco_warp", "dexuni"]
+    observed = []
+
+    def worker(command, **kwargs):
+        spec = json.loads(Path(command[command.index("--cell-config") + 1]).read_text())
+        spec.pop("constrained_probe")
+        spec.pop("num_directions")
+        observed.append(spec)
+        failed = spec["newton_solver"] == "dexuni"
+        Path(command[command.index("--cell-output") + 1]).write_text(
+            json.dumps(
+                {
+                    "backend": spec["backend"],
+                    "route": spec["route"],
+                    "config": spec,
+                    "asset_sha256": asset.content_hash,
+                    "status": "failed" if failed else "passed",
+                    "reason": "fixture failed before preparation" if failed else "",
+                }
+            )
+        )
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(matrix.subprocess, "run", worker)
+    monkeypatch.setattr(matrix, "compare_usd_geometry", lambda *args: {"passed": True})
+    report = matrix.run_all_benchmarks(args)
+    assert [c["newton_solver"] for c in observed] == [None, "mujoco_warp", "dexuni"]
+    assert len({c["work_dir"] for c in observed}) == 3
+    rows = json.loads(report.with_suffix(".json").read_text())["cells"]
+    assert [r["requested_newton_solver"] for r in rows] == [
+        None,
+        "mujoco_warp",
+        "dexuni",
+    ]
+    text = report.read_text()
+    assert "| newton[dexuni]/direct | 0 | 1 | 0.0000 |" in text
+    assert "| newton[mujoco_warp]/direct | 1 | 1 | 1.0000 |" in text
+    assert "actual dispatch" in text and "unavailable" in text
+    args.backends = ["mujoco_cpu"]
+    with pytest.raises(ValueError, match="requires newton in --backends"):
+        matrix.run_all_benchmarks(args)
