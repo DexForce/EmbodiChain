@@ -302,7 +302,7 @@ class SceneExporter:
 
     @staticmethod
     def _opaque_glb_materials(path: Path) -> bool:
-        """Check authored opacity before Trimesh quantizes material factors."""
+        """Accept only self-contained core-material GLBs before color quantization."""
         try:
             with path.open("rb") as stream:
                 magic, version, length, size, kind = struct.unpack(
@@ -317,6 +317,13 @@ class SceneExporter:
                 ):
                     return False
                 document = json.loads(stream.read(size))
+            # The proof hashes only this GLB. Relative/remote buffers can change
+            # rendered colors without changing that digest.
+            if any(
+                "uri" in buffer and not buffer["uri"].startswith("data:")
+                for buffer in document.get("buffers", [])
+            ):
+                return False
             materials = document.get("materials", [])
             for mesh in document.get("meshes", []):
                 for primitive in mesh["primitives"]:
@@ -325,6 +332,11 @@ class SceneExporter:
                         if "material" in primitive
                         else {}
                     )
+                    # Extensions may replace the core alpha/color source (e.g.
+                    # pbrSpecularGlossiness.diffuseFactor). Do not certify their
+                    # appearance until an extension-specific reader owns it.
+                    if material.get("extensions"):
+                        return False
                     mode = material.get("alphaMode", "OPAQUE")
                     if mode == "OPAQUE":
                         continue
@@ -383,11 +395,11 @@ class SceneExporter:
             "black": (0, 0, 0),
             "yellow": (255, 255, 0),
         }
+        if not SceneExporter._opaque_glb_materials(path):
+            return {}
         try:
             scene = trimesh.load_scene(path, process=False)
         except (OSError, ValueError, TypeError, NotImplementedError):
-            return {}
-        if not SceneExporter._opaque_glb_materials(path):
             return {}
         measured = []
         for mesh in scene.geometry.values():

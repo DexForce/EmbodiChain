@@ -421,6 +421,7 @@ def test_unresolved_native_binding_retains_failure_and_never_executes(
         ("red", None),
         ("red", "mesh"),
         ("red", "deployment_mesh"),
+        ("red", "external_buffer"),
         ("red", "source"),
         ("red", "sha256"),
     ],
@@ -518,6 +519,36 @@ def test_default_scene_route_enforces_frozen_role_properties(
             asset["shape"]["fpath"] = blue_path.relative_to(
                 config_path.parent
             ).as_posix()
+        elif stale_evidence == "external_buffer":
+            import struct
+
+            data = mesh_path.read_bytes()
+            size = struct.unpack_from("<I", data, 12)[0]
+            document = json.loads(data[20 : 20 + size])
+            binary = bytearray(data[28 + size :])
+            document["buffers"][0]["uri"] = "colors.bin"
+            header = json.dumps(document).encode()
+            header += b" " * (-len(header) % 4)
+            mesh_path.write_bytes(
+                struct.pack(
+                    "<4sIIII", b"glTF", 2, 20 + len(header), len(header), 0x4E4F534A
+                )
+                + header
+            )
+            # Simulate a pre-fix red proof for this external-buffer GLB.
+            proof["sha256"] = hashlib.sha256(mesh_path.read_bytes()).hexdigest()
+            buffer = mesh_path.with_name("colors.bin")
+            index = document["meshes"][0]["primitives"][0]["attributes"]["COLOR_0"]
+            accessor = document["accessors"][index]
+            view = document["bufferViews"][accessor["bufferView"]]
+            start = view.get("byteOffset", 0) + accessor.get("byteOffset", 0)
+            for row in range(accessor["count"]):
+                offset = start + row * view.get("byteStride", 4)
+                binary[offset : offset + 4] = bytes([0, 0, 255, 255])
+            buffer.write_bytes(binary)
+            assert trimesh.load_mesh(mesh_path, process=False).visual.vertex_colors[
+                0
+            ].tolist() == [0, 0, 255, 255]
         elif stale_evidence == "source":
             other = mesh_path.with_name("other-red.glb")
             other.write_bytes(mesh_path.read_bytes())

@@ -635,6 +635,20 @@ def _check_scene_roles(
                                 available = source == mesh and _file_hash(
                                     mesh
                                 ) == proof.get("sha256")
+                                if (
+                                    available
+                                    and proof.get("method")
+                                    == "uniform_opaque_srgb_palette/v1"
+                                ):
+                                    from .scene_engine.pipeline.utils.scene_exporter import (
+                                        SceneExporter,
+                                    )
+
+                                    # Older proofs may hash only the main GLB even
+                                    # when appearance lives in mutable sidecars.
+                                    available = SceneExporter._opaque_glb_materials(
+                                        mesh
+                                    )
                         except (OSError, ValueError, TypeError):
                             available = False
                 if available and measured == expected:
