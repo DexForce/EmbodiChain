@@ -83,7 +83,8 @@ relations/table regions; directional vocabularies require quarter turns.
   imported/exported graph node IDs must equal object IDs.
 - Rigid exports carry conservatively measured uniform GLB color properties and
   content-bound provenance. Opacity uses authored GLB floating-point alpha and
-  material mode before library color quantization; unsupported
+  material mode before library color quantization. Material extensions and
+  external buffers withhold GLB-only color proofs, including on replay. Unsupported
   geometry, textures and mixed appearance leave the measurement unverified.
   Role checks verify measured proofs against the mesh the deployment consumes,
   including the legacy `shape.fpath` selection. Proxy GLB proofs cannot certify

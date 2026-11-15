@@ -173,6 +173,9 @@ def test_object_physics_rejects_invalid_values(
         ("material_blend_float", None),
         ("material_blend_fully_opaque", "red"),
         ("material_opaque_float", "red"),
+        ("material_extension_mask", None),
+        ("material_extension_blend", None),
+        ("material_extension_opaque", None),
         ("material_with_vertex_color", None),
         ("textured", None),
     ],
@@ -261,6 +264,42 @@ def test_scene_export_carries_measured_appearance(tmp_path, appearance, expected
             + header
             + binary
         )
+    if appearance.startswith("material_extension"):
+        import struct
+
+        data = asset_path.read_bytes()
+        size = struct.unpack_from("<I", data, 12)[0]
+        document = json.loads(data[20 : 20 + size])
+        mode, alpha = {
+            "material_extension_mask": ("MASK", 0.0),
+            "material_extension_blend": ("BLEND", 0.999),
+            "material_extension_opaque": ("OPAQUE", 1.0),
+        }[appearance]
+        document["materials"][0] = {
+            "alphaMode": mode,
+            "alphaCutoff": 0.5,
+            "extensions": {
+                "KHR_materials_pbrSpecularGlossiness": {
+                    "diffuseFactor": [1.0, 1.0, 1.0, alpha]
+                }
+            },
+        }
+        document["extensionsUsed"] = ["KHR_materials_pbrSpecularGlossiness"]
+        header = json.dumps(document).encode()
+        header += b" " * (-len(header) % 4)
+        binary = data[20 + size :]
+        asset_path.write_bytes(
+            struct.pack(
+                "<4sIIII",
+                b"glTF",
+                2,
+                20 + len(header) + len(binary),
+                len(header),
+                0x4E4F534A,
+            )
+            + header
+            + binary
+        )
     table = _scene_object(
         object_id="table",
         kind="table",
@@ -289,6 +328,66 @@ def test_scene_export_carries_measured_appearance(tmp_path, appearance, expected
             == hashlib.sha256((path.parent / proof["source"]).read_bytes()).hexdigest()
         )
     assert "waterproof" not in entry.get("properties", {})
+
+
+def test_external_color_buffer_never_creates_glb_only_proof(tmp_path):
+    import hashlib
+    import struct
+    import trimesh
+
+    root = tmp_path / "export"
+    folder = root / "scene_export/mesh_assets/asset"
+    folder.mkdir(parents=True)
+    path = folder / "asset.glb"
+    mesh = trimesh.creation.box()
+    mesh.visual.vertex_colors = [255, 0, 0, 255]
+    data = mesh.export(file_type="glb")
+    size = struct.unpack_from("<I", data, 12)[0]
+    document = json.loads(data[20 : 20 + size])
+    binary = bytearray(data[28 + size :])
+    document["buffers"][0]["uri"] = "colors.bin"
+    header = json.dumps(document).encode()
+    header += b" " * (-len(header) % 4)
+    path.write_bytes(
+        struct.pack("<4sIIII", b"glTF", 2, 20 + len(header), len(header), 0x4E4F534A)
+        + header
+    )
+    buffer = folder / "colors.bin"
+    buffer.write_bytes(binary)
+    original_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+    asset = _scene_object(
+        object_id="asset", kind="asset", glb_path=path, physics=_physics("dynamic")
+    )
+    table_path = tmp_path / "table.glb"
+    table_path.write_bytes(b"glTF-table")
+    table = _scene_object(
+        object_id="table",
+        kind="table",
+        glb_path=table_path,
+        physics=_physics("kinematic"),
+    )
+    scene = Scene(objects=[table, asset])
+    exporter = SceneExporter(
+        scene=scene, scene_graph=_scene_graph(scene), output_root=root
+    )
+    for color in ([255, 0, 0, 255], [0, 0, 255, 255]):
+        index = document["meshes"][0]["primitives"][0]["attributes"]["COLOR_0"]
+        accessor = document["accessors"][index]
+        view = document["bufferViews"][accessor["bufferView"]]
+        start = view.get("byteOffset", 0) + accessor.get("byteOffset", 0)
+        for row in range(accessor["count"]):
+            offset = start + row * view.get("byteStride", 4)
+            binary[offset : offset + 4] = bytes(color)
+        buffer.write_bytes(binary)
+        loaded = trimesh.load_scene(path, process=False)
+        assert (
+            next(iter(loaded.geometry.values())).visual.vertex_colors[0].tolist()
+            == color
+        )
+        exported = json.loads(exporter.export().read_text())["rigid_object"][0]
+        assert "properties" not in exported
+        assert "property_evidence" not in exported
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == original_hash
 
 
 def test_scene_export_copies_meshes_and_converts_y_up_pose(tmp_path: Path) -> None:
