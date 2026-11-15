@@ -41,7 +41,7 @@ from embodichain_models.dynamics.nerd.codec import (
 from embodichain_models.dynamics.nerd import load_model
 from embodichain_models.dynamics.nerd.transition import NeRDState, NeRDTransition
 
-from embodichain.lab.sim.diff.kinematics import differentiable_fk
+from embodichain.lab.sim.diff._newton_fk import _newton_fk
 from ._binding import NeRDBinding
 
 __all__ = ["NeRDProvider", "NeuralRobotDynamicSolver"]
@@ -201,7 +201,7 @@ class NeuralRobotDynamicSolver(SolverBase):
         physical["joint_qd"] = state.physical["joint_qd"].scatter(
             0, self.binding.qd_indices.flatten(), result.qd.flatten()
         )
-        physical["body_q"], physical["body_qd"] = differentiable_fk(
+        physical["body_q"], physical["body_qd"] = _newton_fk(
             self.model, physical["joint_q"], physical["joint_qd"]
         )
         return FunctionalSolverState(physical, result.history, result.valid_lengths)

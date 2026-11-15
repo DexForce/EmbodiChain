@@ -462,13 +462,13 @@ class NeRDBinding:
         self, q: torch.Tensor, qd: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Map canonical coordinates into an independently owned Newton FK call."""
-        from embodichain.lab.sim.diff.kinematics import differentiable_fk
+        from embodichain.lab.sim.diff._newton_fk import _newton_fk
 
         native_q = self._q_template.scatter(0, self.q_indices.flatten(), q.flatten())
         native_qd = self._qd_template.scatter(
             0, self.qd_indices.flatten(), qd.flatten()
         )
-        return differentiable_fk(self.model, native_q, native_qd)
+        return _newton_fk(self.model, native_q, native_qd)
 
     def contacts(self, body_q: torch.Tensor) -> dict[str, torch.Tensor]:
         """Delegate fixed-slot feature mathematics to the independent model layer."""

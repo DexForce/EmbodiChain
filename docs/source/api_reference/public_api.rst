@@ -3300,21 +3300,6 @@ embodichain.lab.sim.diff.bridge
    NewtonStepFunc
    tape_context
 
-embodichain.lab.sim.diff.kinematics
-----------------------------------
-
-Newton FK with independently owned primal/adjoint storage and first-order
-PyTorch gradients to canonicalized joint positions and velocities. Native
-model parameters remain fixed while dependent graphs are alive.
-
-.. currentmodule:: embodichain.lab.sim.diff.kinematics
-
-.. autosummary::
-
-   differentiable_fk
-
-.. autofunction:: differentiable_fk
-
 embodichain.lab.sim.cfg.source
 -------------------------------
 

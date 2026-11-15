@@ -14,7 +14,12 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""First-order Torch autograd boundary for native Newton FK."""
+"""Private first-order Torch/Warp gradient adapter for finalized Newton models.
+
+This backend preserves Newton's body layout and velocity conventions. Generic
+FK/IK consumers use ``compute.kinematics`` and ``learning.layers``; model
+transitions receive the bound Newton adapter through their injected FK callable.
+"""
 
 from __future__ import annotations
 
@@ -25,7 +30,7 @@ import torch
 from torch.autograd.function import once_differentiable
 import warp as wp
 
-__all__ = ["differentiable_fk"]
+__all__: list[str] = []
 
 
 def _stream_scope(device: torch.device):
@@ -92,7 +97,7 @@ class _NewtonFK(torch.autograd.Function):
         return q_grad, qd_grad, None
 
 
-def differentiable_fk(
+def _newton_fk(
     model: Any, q: torch.Tensor, qd: torch.Tensor
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Return body poses and COM velocities with first-order input gradients.

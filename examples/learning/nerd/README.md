@@ -75,7 +75,9 @@ Newton or DexSim modules. Offline supervised batches still use measured contacts
 
 The Cartpole/Ant factories use the same `trainer.learning_env` route as RWM:
 they own canonical state/history and task rules, not a World, Scene or solver.
-Ant injects the generic Newton FK gradient bridge using an FK-only model.
+Ant injects a private Newton FK gradient adapter using an FK-only model.
+This preserves the finalized Newton model's body layout and COM conventions;
+reusable tensor FK/IK APIs remain in `compute.kinematics` and `learning.layers`.
 Reference construction shares native descriptor lowering and validates the
 complete recorded physics signature, joint order, COM, contacts, gravity and dt.
 The export selects its recorded physical profile unless explicitly confirmed.
