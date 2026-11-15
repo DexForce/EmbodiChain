@@ -60,6 +60,35 @@ class _Options:
     gain: float = 2.0
 
 
+class _DecoderMeta(type):
+    def from_dict(cls, values):
+        return cls(gain=values["gain"])
+
+
+@configclass
+class _MetaOptions(metaclass=_DecoderMeta):
+    gain: float = 2.0
+
+
+@configclass
+class _HookedMetaOptions(_MetaOptions):
+    @classmethod
+    def from_dict_with_defaults(cls, values, defaults):
+        pytest.fail("An unowned metaclass decoder must use ordinary decoding")
+
+
+@configclass
+class _MetaProbeCfg(SensorCfg):
+    sensor_type: str = "MetaProbe"
+    options: _MetaOptions = _MetaOptions()
+
+
+@configclass
+class _HookedMetaProbeCfg(_MetaProbeCfg):
+    sensor_type: str = "HookedMetaProbe"
+    options: _HookedMetaOptions = _HookedMetaOptions()
+
+
 @configclass
 class _AliasMount(CameraCfg.ExtrinsicsCfg):
     @classmethod
@@ -389,6 +418,15 @@ def test_custom_decoders_receive_only_authored_keys() -> None:
     )
     assert cfg.render.gaussian.enabled
     assert cfg.collision.sdf_resolution == 32
+
+
+@pytest.mark.parametrize("cfg_type", [_MetaProbeCfg, _HookedMetaProbeCfg])
+def test_metaclass_decoder_falls_back_to_ordinary_authored_input(cfg_type):
+    name = cfg_type().sensor_type
+    register_sensor(SensorRegistration(name, cfg_type, _Probe))
+    cfg = SensorCfg.from_dict({"sensor_type": name, "options": {"gain": 7.0}})
+    assert cfg.options.gain == 7.0
+    assert type(cfg.options) is type(cfg_type().options)
 
 
 @pytest.mark.parametrize("cfg_type", [_AliasCameraCfg, _OptedAliasCameraCfg])

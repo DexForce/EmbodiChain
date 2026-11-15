@@ -207,20 +207,23 @@ def _decode_config_value(
         decoder = getattr(config_type, "from_dict", None)
         if callable(decoder):
             with_defaults = getattr(config_type, "from_dict_with_defaults", None)
-            mro = config_type.__mro__
-            decoder_owner = next(base for base in mro if "from_dict" in vars(base))
-            defaults_owner = next(
-                (base for base in mro if "from_dict_with_defaults" in vars(base)), None
-            )
-            # Replacing a decoder does not opt its authored-key protocol into
-            # an inherited default-injection policy.
-            if (
-                is_configclass(default)
-                and callable(with_defaults)
-                and defaults_owner is not None
-                and mro.index(defaults_owner) <= mro.index(decoder_owner)
-            ):
-                return with_defaults(value, default)
+            if is_configclass(default) and callable(with_defaults):
+                mro = config_type.__mro__
+                decoder_owner = next(
+                    (base for base in mro if "from_dict" in vars(base)), None
+                )
+                defaults_owner = next(
+                    (base for base in mro if "from_dict_with_defaults" in vars(base)),
+                    None,
+                )
+                # Dynamic/metaclass decoders have no class-MRO owner. Keep
+                # their authored input semantics rather than inferring opt-in.
+                if (
+                    decoder_owner is not None
+                    and defaults_owner is not None
+                    and mro.index(defaults_owner) <= mro.index(decoder_owner)
+                ):
+                    return with_defaults(value, default)
             return decoder(value)
         cfg = default if is_configclass(default) else config_type()
         return _populate_sensor_config(cfg, value)
