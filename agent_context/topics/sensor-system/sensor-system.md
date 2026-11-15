@@ -254,6 +254,9 @@ gains follow increasing probe columns and rows. Planar, spherical-cap, and
 explicit row-major grids use the physical distance between neighboring
 probes for each directional slope. A no-contact pixel and a reset row return their calibrated
 background. RGB shares the depth sample and consumes no native render pass.
+Gym's `preview_sensor_data(name, data_type="rgb")` reads the latest valid
+scheduled sample for the chosen environment. Legacy camera preview still
+refreshes explicitly.
 
 Ray queries default to cooked collision shapes. Select `geometry_source: visual`
 for authored procedural or array-backed render geometry of rigid and visual
