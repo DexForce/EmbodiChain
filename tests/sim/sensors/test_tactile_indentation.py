@@ -152,6 +152,11 @@ def test_registered_indentation_observes_motion_in_only_selected_arena() -> None
                     "resolution": [4, 4],
                     "mount": {"pos": [0, 0, 0.15]},
                     "max_depth": 0.02,
+                    "rgb": {
+                        "x_response": [0.25, 0, 0],
+                        "y_response": [0, 0.25, 0],
+                        "background": [0.25, 0.5, 0.75],
+                    },
                 }
             )
         )
@@ -161,9 +166,17 @@ def test_registered_indentation_observes_motion_in_only_selected_arena() -> None
         )
         solid.set_local_pose(torch.tensor([[0.0, 0.0, 0.3, 0, 0, 0, 1.0]]), env_ids=[1])
         sim.update(step=1, render_final_step=False)
-        assert (
-            sensor.get_data()["hit"][0].all() and not sensor.get_data()["hit"][1].any()
-        )
+        data = sensor.get_data()
+        assert data["hit"][0].all() and not data["hit"][1].any()
+        background = torch.tensor([0.25, 0.5, 0.75]).expand(4, 4, 3)
+        torch.testing.assert_close(data["rgb"][1], background)
+        solid.set_local_pose(torch.tensor([[0.1, 0, 0.18, 0, 0, 0, 1]]), env_ids=[0])
+        sim.update(step=1, render_final_step=False)
+        data = sensor.get_data()
+        assert data["hit"][0].any() and (data["rgb"][0] != background).any()
+        sensor.reset([0])
+        torch.testing.assert_close(sensor.get_data()["rgb"][0], background)
+        assert sensor.get_sample_metadata()["valid"].tolist() == [False, True]
     finally:
         sim.destroy(exit_process=False)
         SimulationManager.flush_cleanup_queue()

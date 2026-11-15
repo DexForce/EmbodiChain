@@ -39,6 +39,8 @@ from embodichain.lab.sim.cfg import NewtonPhysicsCfg, RenderCfg, RigidObjectCfg
 from embodichain.lab.sim.sensors import ContactGridCfg, SensorCfg, TactileIndentationCfg
 from embodichain.lab.sim.shapes import CubeCfg
 
+_BASE_VARIANTS = ("off", "grid", "dense", "screened", "both-dense", "both-screened")
+
 
 def _benchmark_variant(
     envs: int,
@@ -90,7 +92,7 @@ def _benchmark_variant(
         alternate[:active, 0] += 0.001
         grid = None
         indent = None
-        if variant in ("grid", "both-dense", "both-screened"):
+        if variant == "grid" or variant.startswith("both-"):
             grid = sim.add_sensor(
                 ContactGridCfg(
                     uid="contact_grid",
@@ -101,7 +103,7 @@ def _benchmark_variant(
                     max_plane_distance=0.015,
                 )
             )
-        if variant in ("dense", "screened", "both-dense", "both-screened"):
+        if variant in ("dense", "screened") or variant.startswith("both-"):
             indent = sim.add_sensor(
                 TactileIndentationCfg(
                     uid="indentation",
@@ -112,6 +114,14 @@ def _benchmark_variant(
                     curvature_radius=0.10,
                     max_depth=0.03,
                     use_candidates=variant in ("screened", "both-screened"),
+                    rgb=(
+                        TactileIndentationCfg.RGBCfg(
+                            x_response=(0.2, -0.1, 0.0),
+                            y_response=(0.1, 0.0, -0.2),
+                        )
+                        if variant == "both-rgb"
+                        else None
+                    ),
                 )
             )
 
@@ -168,6 +178,14 @@ def _benchmark_variant(
                 raise RuntimeError("The indentation fixture found a wrong contact row.")
             results = [rows[name].cpu() for name in ("depth", "shape_id", "hit")]
             observed["active_depth_rows"] = active
+            if "rgb" in rows:
+                observed["optical_contact_rows"] = int(
+                    (rows["rgb"] != 0.5).flatten(1).any(dim=-1).sum()
+                )
+                if observed["optical_contact_rows"] > active or (
+                    active and resolution >= 4 and not observed["optical_contact_rows"]
+                ):
+                    raise RuntimeError("The optical fixture did not observe contact.")
         return (
             {
                 "environments": envs,
@@ -195,6 +213,12 @@ def main() -> None:
     parser.add_argument(
         "--fractions", type=float, nargs="+", default=[0.0, 0.05, 0.25, 1.0]
     )
+    parser.add_argument(
+        "--variants",
+        nargs="+",
+        choices=(*_BASE_VARIANTS, "both-rgb"),
+        default=_BASE_VARIANTS,
+    )
     parser.add_argument("--warmup", type=int, default=10)
     parser.add_argument("--repeats", type=int, default=30)
     parser.add_argument("--resolution", type=int, default=16)
@@ -213,15 +237,9 @@ def main() -> None:
         # Fractions that round to the same scene do not add independent evidence.
         active_counts = sorted({round(count * fraction) for fraction in args.fractions})
         for active in active_counts:
-            dense = None
-            for variant in (
-                "off",
-                "grid",
-                "dense",
-                "screened",
-                "both-dense",
-                "both-screened",
-            ):
+            depth_reference = None
+            reference_name = None
+            for variant in args.variants:
                 result, observed = _benchmark_variant(
                     count,
                     active / count,
@@ -231,12 +249,15 @@ def main() -> None:
                     args.warmup,
                     args.resolution,
                 )
-                if variant == "dense":
-                    dense = observed
-                if variant in ("screened", "both-dense", "both-screened"):
-                    for first, second in zip(observed, dense, strict=True):
-                        torch.testing.assert_close(first, second, atol=1e-6, rtol=0.0)
-                    result["matches_dense"] = True
+                if observed:
+                    if dense is None:
+                        dense = observed
+                    else:
+                        for first, second in zip(observed, dense, strict=True):
+                            torch.testing.assert_close(
+                                first, second, atol=1e-6, rtol=0.0
+                            )
+                        result["matches_depth_reference"] = True
                 rows.append(result)
                 print(json.dumps(result), flush=True)
 

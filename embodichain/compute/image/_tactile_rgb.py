@@ -15,11 +15,9 @@
 # ----------------------------------------------------------------------------
 
 
-"""Device-resident RGB response from a planar tactile depth image."""
+"""Device-resident calibrated RGB response from a tactile depth grid."""
 
 from __future__ import annotations
-
-import math
 
 import torch
 import warp as wp
@@ -47,8 +45,7 @@ def _shade(
     background: wp.array2d(dtype=wp.vec3),
     x_response: wp.vec3,
     y_response: wp.vec3,
-    inv_dx: float,
-    inv_dy: float,
+    inverse_span: wp.array2d(dtype=wp.vec2),
     rgb: wp.array3d(dtype=wp.vec3),
 ):
     env, row, col = wp.tid()
@@ -63,11 +60,11 @@ def _shade(
     dx = (
         _depth_at_hit(depth, hit, env, row, right)
         - _depth_at_hit(depth, hit, env, row, left)
-    ) * (inv_dx / float(wp.max(1, right - left)))
+    ) * inverse_span[row, col][0]
     dy = (
         _depth_at_hit(depth, hit, env, back, col)
         - _depth_at_hit(depth, hit, env, front, col)
-    ) * (inv_dy / float(wp.max(1, back - front)))
+    ) * inverse_span[row, col][1]
     color = base + dx * x_response + dy * y_response
     rgb[env, row, col] = wp.vec3(
         wp.clamp(color[0], 0.0, 1.0),
@@ -76,57 +73,53 @@ def _shade(
     )
 
 
-def _render_tactile_rgb(
-    depth: torch.Tensor,
-    hit: torch.Tensor,
-    background: torch.Tensor,
-    *,
-    spacing: tuple[float, float],
-    x_response: tuple[float, float, float],
-    y_response: tuple[float, float, float],
-    rgb: torch.Tensor,
-) -> None:
-    """Write RGB in-place using a first-order calibrated slope response.
+class _TactileRGB:
+    """Bind grid storage once and shade into its caller-owned RGB buffer."""
 
-    Depth and hit have shape [env, row, col]. Spacing is (dx, dy) in meters,
-    with positive x along columns and positive y along rows. The background
-    has shape [row, col, 3] and is shared by the batch. Response triples
-    give the change in normalized RGB per unit slope. Misses preserve the
-    background and contribute zero depth to adjacent slopes. All buffers
-    are contiguous, on one device, and images use float32 with RGB in [0, 1].
-    """
-    if depth.ndim != 3 or hit.shape != depth.shape or min(depth.shape[1:]) <= 0:
-        raise ValueError("Expected depth and hit with shape [env, row, col].")
-    if background.shape != (*depth.shape[1:], 3) or rgb.shape != (*depth.shape, 3):
-        raise ValueError("Background and output must match the depth layout.")
-    if any(
-        not tensor.is_contiguous() or tensor.device != depth.device
-        for tensor in (depth, hit, background, rgb)
-    ):
-        raise ValueError("Input and output must be contiguous on one device.")
-    if hit.dtype != torch.bool or any(
-        tensor.dtype != torch.float32 for tensor in (depth, background, rgb)
-    ):
-        raise ValueError("Expected a boolean hit mask and float32 image tensors.")
-    dx, dy = spacing
-    if not all(math.isfinite(step) and step > 0 for step in spacing):
-        raise ValueError("Pixel spacing must be finite and positive.")
-    if depth.shape[0] == 0:
-        return
-    wp.init()
-    wp.launch(
-        _shade,
-        dim=tuple(depth.shape),
-        inputs=[
+    def __init__(
+        self,
+        depth: torch.Tensor,
+        hit: torch.Tensor,
+        rgb: torch.Tensor,
+        background: torch.Tensor,
+        points: torch.Tensor,
+        x_response: tuple[float, float, float],
+        y_response: tuple[float, float, float],
+    ) -> None:
+        _, height, width = depth.shape
+        grid = points.reshape(height, width, 3)
+        inverse_span = torch.zeros((height, width, 2), device=depth.device)
+        for axis, size, channel in ((1, width, 0), (0, height, 1)):
+            if size > 1:
+                idx = torch.arange(size, device=depth.device)
+                left = grid.index_select(axis, (idx - 1).clamp_min(0))
+                right = grid.index_select(axis, (idx + 1).clamp_max(size - 1))
+                distance = (right - left).norm(dim=-1)
+                if not bool((distance > 0).all()):
+                    raise ValueError(
+                        "RGB calibration requires distinct slope neighbors."
+                    )
+                inverse_span[..., channel] = distance.reciprocal()
+
+        wp.init()
+        self._device = depth.device
+        self._shape = tuple(depth.shape)
+        self._inputs = [
             wp.from_torch(depth),
             wp.from_torch(hit),
             wp.from_torch(background, dtype=wp.vec3),
             wp.vec3(*x_response),
             wp.vec3(*y_response),
-            1.0 / dx,
-            1.0 / dy,
-        ],
-        outputs=[wp.from_torch(rgb, dtype=wp.vec3)],
-        device=str(depth.device),
-        stream=current_warp_stream(depth.device),
-    )
+            wp.from_torch(inverse_span, dtype=wp.vec2),
+        ]
+        self._output = wp.from_torch(rgb, dtype=wp.vec3)
+
+    def render(self) -> None:
+        wp.launch(
+            _shade,
+            dim=self._shape,
+            inputs=self._inputs,
+            outputs=[self._output],
+            device=str(self._device),
+            stream=current_warp_stream(self._device),
+        )
