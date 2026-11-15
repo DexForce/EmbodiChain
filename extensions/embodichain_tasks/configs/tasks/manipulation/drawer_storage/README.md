@@ -8,7 +8,7 @@ in 24 segments.
 | --- | --- | --- | --- | --- | --- |
 | `ur5` | `task.ur5.yaml` | UR5, DH PGI-140-80 | 50 mm cube | 4 | Seeds 0–9, 10/10 |
 | `franka` | `task.franka.yaml` | Franka FR3, Panda hand | 50 mm cube | 4 | Seeds 0–9, 10/10 |
-| `ur5_long_horizon` | `task.ur5.long_horizon.yaml` | UR5, DH PGI-140-80 (full closure) | Drink can, water bottle, coffee cup, paper cup | 24 | Seeds 0–9, 10/10 |
+| `ur5_long_horizon` | `task.ur5.long_horizon.yaml` | UR5, DH PGI-140-80 (full-closure override) | Drink can, water bottle, coffee cup, paper cup | 24 | Seeds 0–9, 10/10 |
 
 The long-horizon deployment keeps the open → pick → place → close structure.
 It repeats pick and place for four objects in assigned slots, lowers each
@@ -95,16 +95,15 @@ assets.
 
 ### Scene and embodiment
 
-The selected `ur5_dh_pgi_140_80_full_closure` embodiment uses a 0.040 m
-closure command and a 3000 N/m finger drive so the jaws hold the slender handle
-against rail damping. Larger everyday objects block the fingers before that
-commanded endpoint.
-The single-cube `ur5` deployment keeps the original `ur5_dh_pgi_140_80`
-calibration.
+The deployment selects the shared `ur5_dh_pgi_140_80` embodiment and overrides
+its calibration: a 0.040 m grasp command and a 3000 N/m finger drive with
+300 N·s/m damping, so the jaws hold the slender handle against rail damping.
+Larger everyday objects block the fingers before that commanded endpoint. The
+single-cube `ur5` deployment keeps the component's own calibration.
 
-The full cabinet in `assets/bedside_cabinet.urdf` is derived from the
-`Drawer/model_split_links_with_inertials.urdf` asset that the single-cube
-scene uses at native scale. A uniform 0.8 scale is baked into its geometry,
+The full cabinet is the downloaded `BedsideCabinet/bedside_cabinet.urdf`
+asset, derived from the `Drawer/model_split_links_with_inertials.urdf` asset
+that the single-cube scene uses at native scale. A uniform 0.8 scale is baked into its geometry,
 joint origins, prismatic limits, and inertias. The top, side panels, drawer
 walls, handle, and all corresponding collisions remain. The cabinet rests on
 a 91.4 mm plinth; the robot is raised 240 mm and the source mat 120 mm. The
@@ -231,17 +230,3 @@ also reaches over the side walls. Native Franka trials reproduced the panel
 and side-wall contacts: the can stopped 71 mm and 6.8 mm above the floor. The
 PGI-140-80 closes front to back with 85 mm fingers, so its body stays above the
 panel and its fingers stay clear of the row.
-
-### Preview
-
-![Loaded drawer before contact-driven closure](https://raw.githubusercontent.com/DexForce/EmbodiChain/main/extensions/embodichain_tasks/configs/tasks/manipulation/drawer_storage/media/long_horizon_preview.jpg)
-
-[Full task at 4× speed](https://github.com/DexForce/EmbodiChain/blob/main/extensions/embodichain_tasks/configs/tasks/manipulation/drawer_storage/media/long_horizon_preview.mp4) ·
-[Supported releases and contact closure at 1× speed](https://github.com/DexForce/EmbodiChain/blob/main/extensions/embodichain_tasks/configs/tasks/manipulation/drawer_storage/media/long_horizon_release_and_closure.mp4)
-
-Both videos render the measured states from an accepted Default physics
-episode with DexSim 0.6.0rc1, CPU, seed 0, recorded before the handle-grasp
-fix. The source episode lasts approximately 265 seconds. The preview uses
-state replay for rendering; it is not a live-render capture. All 24 segments
-passed, all four releases had floor contact, and 227.975 mm of closure occurred
-with finger-to-handle contact (0.027 mm without contact).

@@ -62,7 +62,7 @@ _DEPLOYMENTS = {
     Path("tasks/manipulation/drawer_storage/task.ur5.long_horizon.yaml"): (
         "drawer_storage_long_horizon",
         "task_program_drawer_storage_long_horizon",
-        "ur5_dh_pgi_140_80_full_closure",
+        "ur5_dh_pgi_140_80",
     ),
     Path("tasks/manipulation/repeated_pick_place/task.tianji_marvin.yaml"): (
         "repeated_tabletop_cube_pick_place",
@@ -291,14 +291,12 @@ _RESOURCE_PATHS = frozenset(
         ),
         Path("components/execution_policies/real2sim_verified.yaml"),
         *_DUAL_ARM_RESOURCES,
-        Path("components/embodiments/ur5_dh_pgi_140_80_full_closure.yaml"),
         *(
             Path("tasks/manipulation/drawer_storage") / name
             for name in (
                 "env.long_horizon.yaml",
                 "catalog.yaml",
                 "README.md",
-                "assets/bedside_cabinet.urdf",
                 "task_program/evaluation.long_horizon.yaml",
                 "task_program/integration.long_horizon.yaml",
                 "task_program/execution_policy.long_horizon.yaml",
@@ -473,7 +471,6 @@ def test_setup_stages_all_official_task_programs(
         "**/*.json",
         "**/*.yaml",
         "**/*.yml",
-        "**/*.urdf",
         "**/README.md",
     ]
     expected_outputs = {
@@ -582,7 +579,7 @@ print(json.dumps(decoded_deployments, sort_keys=True))
 
 
 def test_drawer_storage_readme_links_survive_wheel_installation() -> None:
-    """Relative README links target packaged files; previews use stable URLs."""
+    """Relative README links target files shipped in the installed package."""
     readme = _CONFIG_SOURCE / "tasks/manipulation/drawer_storage/README.md"
     patterns = get_package_data()[_CONFIG_PACKAGE]
     targets = re.findall(r"\]\(([^)\s#]+)", readme.read_text(encoding="utf-8"))
@@ -669,15 +666,18 @@ assert not (installed / "embodichain_tasks/manipulation/drawer_storage.py").exis
 assert (configs / "task_program/evaluation.yaml").is_file()
 assert "embodichain_tasks" not in sys.modules
 
-for name, open_positions, contained, clearance_fields in (
-    ("ur5", (0.0,), "cube_contained", 3),
-    ("franka", (0.04, 0.04), "cube_contained", 3),
-    ("ur5.long_horizon", (0.0,), "paper_cup_contained", 6),
+for name, open_positions, contained, clearance_fields, finger_stiffness in (
+    ("ur5", (0.0,), "cube_contained", 3, 1000.0),
+    ("franka", (0.04, 0.04), "cube_contained", 3, None),
+    ("ur5.long_horizon", (0.0,), "paper_cup_contained", 6, 3000.0),
 ):
     path = configs / f"task.{name}.yaml"
     raw = load_config(path)
     assert raw["id"] not in registry
-    config_to_cfg(raw, source_path=path)
+    cfg = config_to_cfg(raw, source_path=path)
+    if finger_stiffness is not None:
+        stiffness = cfg.robot.joint_drive_props.stiffness
+        assert stiffness["gripper_finger1_joint_1"] == finger_stiffness
     spec = get_env_spec(raw["id"])
     assert spec.cls is EmbodiedEnv
     registration = spec.task_program_registration

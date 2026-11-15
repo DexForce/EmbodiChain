@@ -10,7 +10,7 @@ graph:
   rules:
     # Points are each scaled convex hull's support vertices along the six
     # axes and eight diagonals, so they stay on the surface of round and
-    # tapered objects. The interior is assets/bedside_cabinet.urdf in the
+    # tapered objects. The interior is BedsideCabinet/bedside_cabinet.urdf in the
     # drawer_bottom frame, from the floor top to the side-wall top.
     drink_can_contained:
       kind: corner_containment
