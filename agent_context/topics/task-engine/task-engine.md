@@ -70,8 +70,8 @@ robot control-part names are preserved for runtime binding. Terminal holds are c
 the source step boundary; coordinated hold is rejected until a matching hold
 call is available in the catalog. E1/E2 release by default; with
 `terminal_behavior=hold` their producer is one held transport after a pick
-(`terminal_hold_requires_one_of`), which also realizes an upright goal, so a hold
-step rejects `simulation.axis_align`.
+(`terminal_hold_requires_one_of`), which also realizes and must declare the step's
+orientation goal, so a hold step rejects `simulation.axis_align`.
 
 Image entities distinguish `observed`, `instruction_declared` and
 `runtime_required`; only observed entities carry normalized boxes. Ambiguous references retain

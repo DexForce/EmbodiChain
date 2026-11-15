@@ -217,7 +217,8 @@ def calibrate_scene(
         The calibrated export and a ``reference_layout`` report.
 
     Raises:
-        ValueError: An object lacks a mask or the scene has no table.
+        ValueError: An object lacks a mask, the scene has no table or an
+            articulation, or the rotated table is not world-axis aligned.
     """
     import numpy as np
     from scipy.spatial.transform import Rotation
@@ -244,6 +245,14 @@ def calibrate_scene(
             Rotation.from_matrix(yaw @ rotation).as_euler(_EULER, degrees=True).tolist()
         )
 
+    if result.get("articulation"):
+        # Exported articulations are native USD roots with a separate proxy
+        # mesh transform; fitting them would need that distinction.
+        raise ValueError(
+            "Source calibration supports rigid objects only; the scene has "
+            "articulations "
+            + str(sorted(entry.get("uid") for entry in result["articulation"]))
+        )
     tables = [e for e in result.get("background", []) if e.get("uid") == "table"]
     if len(tables) != 1:
         raise ValueError("Source calibration requires exactly one generated table")
@@ -257,9 +266,20 @@ def calibrate_scene(
             _EULER, table.get("init_rot", [0, 0, 0]), degrees=True
         ).as_matrix()
     )
+    # The calibrated tabletop is a world-axis rectangle. A box-like table can
+    # match it only if its body axes map onto world axes; then the world size
+    # maps back to body axes through that axis permutation.
+    permutation = np.round(world_rotation)
+    if (
+        np.abs(world_rotation - permutation).max() > math.sin(math.radians(1.0))
+        or np.abs(permutation).sum() != 3
+    ):
+        raise ValueError(
+            "Source calibration requires the generated table, rotated by "
+            "scene_yaw_deg, to stay aligned with the world axes"
+        )
     want = np.array([*table_cal["size_xy"], table_cal["thickness"]], dtype=float)
-    # Generated tables are level and axis-aligned; map the world size to body axes.
-    factor = (np.abs(world_rotation.T) @ want) / np.maximum(np.ptp(body, axis=0), 1e-9)
+    factor = (np.abs(permutation.T) @ want) / np.maximum(np.ptp(body, axis=0), 1e-9)
     scale = np.asarray(table.get("body_scale", [1, 1, 1]), dtype=float)
     # body_scale is authored in the export's Y-up axes: (x, height, depth).
     table["body_scale"] = (scale * factor[[0, 2, 1]]).tolist()
@@ -271,21 +291,18 @@ def calibrate_scene(
         float(surface_z - high[2]),
     ]
     table["init_rot"] = oriented(table)
-    for category in ("rigid_object", "articulation"):
-        for entry in result.get(category, []):
-            mask = masks / f"{entry['uid']}_mask.png"
-            if not mask.is_file():
-                raise ValueError(
-                    f"No image mask for calibrated object {entry['uid']!r}"
-                )
-            bbox = _mask_bbox(mask, tuple(calibration["image_size"]))
-            fit = _fit_object(
-                _world_vertices(entry, export, yaw), bbox, camera, surface_z, clearance
-            )
-            entry["init_rot"] = oriented(entry)
-            entry["init_pos"] = fit["position"]
-            entry["body_scale"] = (
-                np.asarray(entry.get("body_scale", [1, 1, 1])) * fit["scale"]
-            ).tolist()
-            report["objects"].append({"uid": entry["uid"], **fit})
+    for entry in result.get("rigid_object", []):
+        mask = masks / f"{entry['uid']}_mask.png"
+        if not mask.is_file():
+            raise ValueError(f"No image mask for calibrated object {entry['uid']!r}")
+        bbox = _mask_bbox(mask, tuple(calibration["image_size"]))
+        fit = _fit_object(
+            _world_vertices(entry, export, yaw), bbox, camera, surface_z, clearance
+        )
+        entry["init_rot"] = oriented(entry)
+        entry["init_pos"] = fit["position"]
+        entry["body_scale"] = (
+            np.asarray(entry.get("body_scale", [1, 1, 1])) * fit["scale"]
+        ).tolist()
+        report["objects"].append({"uid": entry["uid"], **fit})
     return result, report

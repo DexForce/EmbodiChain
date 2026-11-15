@@ -299,6 +299,15 @@ def test_terminal_hold_acquires_with_pick_not_axis_alignment(source_image):
         _plan(source_image, "E2", align_first)
 
 
+def test_terminal_hold_transport_carries_the_orientation_goal(source_image):
+    def upright_on_pick_only(s, g, p):
+        _terminal_hold("E2")(s, g, p)
+        del p["nodes"][1]["semantic"]["intent"]["orientation_goal"]
+
+    with pytest.raises(SemanticPlanningError, match="declare it in semantic.intent"):
+        _plan(source_image, "E2", upright_on_pick_only)
+
+
 def test_hidden_objects_have_no_invented_image_boxes(source_image):
     def hidden(s, g, p):
         g["objects"][0].update(provenance="instruction_declared", bbox=None)

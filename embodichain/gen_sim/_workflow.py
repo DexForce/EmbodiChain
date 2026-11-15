@@ -91,6 +91,19 @@ def _run(cfg: _RunCfg, *, services: GenSimServices | None = None) -> dict[str, A
     runtime, policy, profile = _load_runtime(cfg)
     with Image.open(cfg.image) as image:
         image.verify()
+    if cfg.task is not None:
+        from .workflow import load_task_plan
+
+        # Binding reads the reused graph; it must plan this run's request.
+        plan = load_task_plan(cfg.task)
+        if (
+            plan.get("instruction") != cfg.instruction
+            or plan.get("image_sha256")
+            != hashlib.sha256(cfg.image.read_bytes()).hexdigest()
+        ):
+            raise ValueError(
+                "task was planned for a different instruction or image than this run"
+            )
     output = validate_run_output_directory(cfg.output)
     output.mkdir(parents=True, exist_ok=False)
     source = output / ("source_image" + cfg.image.suffix.lower())

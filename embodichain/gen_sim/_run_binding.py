@@ -904,6 +904,23 @@ def _bind_deployment(
     # released object to separate from the still-open gripper before retracting,
     # which an object already resting on its support cannot do.
     release_clearance = float(cfg.binding.get("release_clearance", 0.0))
+    configured_services = cfg.binding.get("runtime_services", {})
+    # Measured legacy geometry binds only the registered calls whose lowerer the
+    # run configuration does not supply. A configured lowerer owns its targets,
+    # so no geometry or validator is synthesized for its calls.
+    automatic = (
+        set()
+        if generated_scene is not None
+        else {
+            "simulation." + kind
+            for kind in ("place_relative", "axis_align", "move_held_object")
+        }
+        - {
+            "simulation." + str(item.get("kind"))
+            for item in configured_services.get("registered_semantic_lowerers", [])
+            if isinstance(item, dict)
+        }
+    )
 
     def subject_of(node: dict[str, Any]) -> str | None:
         call = node["call"]
@@ -918,12 +935,14 @@ def _bind_deployment(
         # every object that is aligned or carried upright.
         call = node["call"]
         intent = annotations.get(node["id"], {}).get("intent", {})
-        if call.get("call_id") == "simulation.axis_align" or (
-            call.get("call_id") == "simulation.move_held_object"
+        if call.get("call_id") not in automatic:
+            continue
+        if call["call_id"] == "simulation.axis_align" or (
+            call["call_id"] == "simulation.move_held_object"
             and intent.get("orientation_goal") == "upright"
         ):
             subject = subject_of(node)
-            if generated_scene is not None or subject not in rigid:
+            if subject not in rigid:
                 raise ValueError(
                     "Upright orientation requires a measured legacy rigid object"
                 )
@@ -962,7 +981,9 @@ def _bind_deployment(
             call["object"]
             if call["kind"] == "pick"
             else (
-                call["arguments"]["object"] if cid == "simulation.axis_align" else None
+                call["arguments"]["object"]
+                if cid == "simulation.axis_align" and cid in automatic
+                else None
             )
         )
         if grasped in rigid:
@@ -1033,7 +1054,7 @@ def _bind_deployment(
                     "displacement": displacement,
                 }
             ]
-        elif cid == "simulation.place_relative" and generated_scene is None:
+        elif cid == "simulation.place_relative" and cid in automatic:
             arguments = call["arguments"]
             subject, reference = arguments["object"], arguments["reference"]
             if subject not in rigid or reference not in rigid:
@@ -1073,7 +1094,7 @@ def _bind_deployment(
                     "displacement": displacement,
                 }
             ]
-        elif cid == "simulation.axis_align" and call["arguments"]["object"] in rigid:
+        elif cid == "simulation.axis_align" and cid in automatic:
             subject = call["arguments"]["object"]
             aligned_objects.append(subject)
             validators = [
@@ -1084,7 +1105,7 @@ def _bind_deployment(
                     "maximum_tilt_degrees": 15.0,
                 },
             ]
-        elif cid == "simulation.move_held_object" and generated_scene is None:
+        elif cid == "simulation.move_held_object" and cid in automatic:
             arguments = call["arguments"]
             annotation = annotations.get(node["id"], {})
             reference = annotation.get("reference") or arguments.get("reference")
@@ -1119,8 +1140,8 @@ def _bind_deployment(
             )
             # The runtime call selects only its configured target.
             call["arguments"] = {"target": arguments["target"]}
-            validators = (
-                [
+            if reference is not None:
+                validators = [
                     {
                         "kind": "object_near_relative_target",
                         "object": subject,
@@ -1128,11 +1149,19 @@ def _bind_deployment(
                         "displacement": displacement,
                     }
                 ]
-                if reference is not None
-                else [
-                    {"kind": "object_lifted", "object": subject, "minimum_lift": 0.05}
+            else:
+                # Validate the intended world pose. A lift validator would
+                # measure from this segment's start, after Pick has already
+                # lifted the object.
+                target = f"gensim_hold_{node['id']}"
+                graph["targets"][target] = {
+                    "kind": "pose",
+                    "position": pose["position"],
+                    "quaternion_xyzw": pose["quaternion_xyzw"],
+                }
+                validators = [
+                    {"kind": "object_near_target", "object": subject, "target": target}
                 ]
-            )
             if upright:
                 validators.append(
                     {
@@ -1171,7 +1200,7 @@ def _bind_deployment(
         "scene_binding": semantic_scene,
         "profile": additions,
         "runtime_services": _with_automatic_lowerers(
-            cfg.binding.get("runtime_services", {}),
+            configured_services,
             relative_routes,
             aligned_objects,
             held_routes,

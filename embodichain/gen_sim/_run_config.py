@@ -155,15 +155,19 @@ def _load_run_config(args: argparse.Namespace) -> _RunCfg:
             raise ValueError("GenSim output must not contain an input file")
     if cfg.task is not None and not (cfg.task / "task_plan_manifest.json").is_file():
         raise ValueError("task must name a published task plan directory")
-    if cfg.scene is not None:
-        if not (cfg.scene / "scene_export/scene_config.json").is_file():
-            raise ValueError(
-                "scene must name a workspace containing scene_export/scene_config.json"
-            )
-        if (
-            cfg.scene == cfg.output
-            or cfg.scene in cfg.output.parents
-            or cfg.output in cfg.scene.parents
+    if (
+        cfg.scene is not None
+        and not (cfg.scene / "scene_export/scene_config.json").is_file()
+    ):
+        raise ValueError(
+            "scene must name a workspace containing scene_export/scene_config.json"
+        )
+    # Reused inputs are copied or read while the output grows.
+    for name, path in (("task", cfg.task), ("scene", cfg.scene)):
+        if path is not None and (
+            path == cfg.output
+            or path in cfg.output.parents
+            or cfg.output in path.parents
         ):
-            raise ValueError("GenSim output and source scene must not overlap")
+            raise ValueError(f"GenSim output and source {name} must not overlap")
     return cfg

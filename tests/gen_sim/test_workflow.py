@@ -48,21 +48,22 @@ class _ScriptedChat:
         return ChatResponse(text=json.dumps(self.responses.popleft()))
 
 
-def _services(*, missing_object: bool = False) -> GenSimServices:
-    def selector(reference: str = "") -> dict:
-        return dict(
-            kind="scene_ref" if reference else "none",
-            step_id="",
-            reference=reference,
-            quantifier="one",
-            count=0,
-        )
+def _selector(reference: str = "") -> dict:
+    return dict(
+        kind="scene_ref" if reference else "none",
+        step_id="",
+        reference=reference,
+        quantifier="one",
+        count=0,
+    )
 
+
+def _step(**changes) -> dict:
     step = dict(
         id="step_01",
         task_type="E1",
-        object=selector("cube"),
-        target=selector("table"),
+        object=_selector("cube"),
+        target=_selector("table"),
         relation="on",
         required_arm="auto",
         transfer_arm="none",
@@ -76,7 +77,17 @@ def _services(*, missing_object: bool = False) -> GenSimServices:
         terminal_behavior="none",
         depends_on=[],
     )
-    grounding = {
+    return {**step, **changes}
+
+
+def _services(
+    *,
+    missing_object: bool = False,
+    step: dict | None = None,
+    grounding: dict | None = None,
+    plan: dict | None = None,
+) -> GenSimServices:
+    default_grounding = {
         "objects": [
             dict(
                 id="source",
@@ -93,7 +104,7 @@ def _services(*, missing_object: bool = False) -> GenSimServices:
         ],
         "bindings": {"step_01.object": ["source"], "step_01.target": ["table"]},
     }
-    plan = {
+    default_plan = {
         "nodes": [
             dict(
                 id="pick_cube",
@@ -130,21 +141,22 @@ def _services(*, missing_object: bool = False) -> GenSimServices:
             )
         ],
     }
+    grounding = grounding or default_grounding
+    native = {"source": None if missing_object else "cube_native", "table": "table"}
     return GenSimServices(
         GenSimServicesCfg(),
         injected={
-            "task_interpretation": _ScriptedChat({"steps": [step]}),
+            "task_interpretation": _ScriptedChat({"steps": [step or _step()]}),
             "task_image_grounding": _ScriptedChat(
                 grounding,
                 {
                     "objects": {
-                        "source": None if missing_object else "cube_native",
-                        "table": "table",
+                        item["id"]: native[item["id"]] for item in grounding["objects"]
                     },
                     "resources": {"default_primary": "primary_manipulator"},
                 },
             ),
-            "task_semantic_planning": _ScriptedChat(plan),
+            "task_semantic_planning": _ScriptedChat(plan or default_plan),
         },
     )
 
@@ -369,6 +381,230 @@ def test_existing_run_is_not_overwritten(run_cfg: _RunCfg) -> None:
     with _services() as services, pytest.raises(FileExistsError):
         _run(run_cfg, services=services)
     assert marker.read_text() == "existing run"
+
+
+def _bound_deployment(
+    run_cfg: _RunCfg, monkeypatch: pytest.MonkeyPatch, services: GenSimServices
+) -> tuple[dict, dict]:
+    """Run planning and binding with a stubbed execution receipt."""
+    from embodichain.gen_sim.scene_engine.pipeline import generate
+    from embodichain.gen_sim import _run_execution
+
+    monkeypatch.setattr(
+        generate,
+        "generate_scene_from_image",
+        lambda image, output, **kwargs: _write_scene(output),
+    )
+    monkeypatch.setattr(
+        _run_execution,
+        "_execute_deployment",
+        lambda path, **kwargs: {
+            "status": "succeeded",
+            "completed": True,
+            "all_success": True,
+            "effect_assurance": "verified",
+        },
+    )
+    with services:
+        _run(run_cfg, services=services)
+    root = run_cfg.output / "deployment"
+    return (
+        json.loads((root / "program.json").read_text()),
+        yaml.safe_load((root / "integration.yaml").read_text()),
+    )
+
+
+def _node(node_id: str, call: dict, depends_on: list[str], **semantic) -> dict:
+    return dict(
+        id=node_id,
+        step_id="step_01",
+        call=call,
+        depends_on=depends_on,
+        semantic=dict(object="source", **semantic),
+    )
+
+
+@pytest.mark.parametrize("configured", [False, True])
+def test_relative_placement_validators_follow_the_selected_lowerer(
+    run_cfg: _RunCfg, monkeypatch: pytest.MonkeyPatch, configured: bool
+) -> None:
+    instruction = "Put the cube right of the table"
+    semantic = dict(
+        reference="table", relation="right_of", intent={"relation": "right_of"}
+    )
+    place = dict(
+        kind="registered",
+        call_id="simulation.place_relative",
+        arguments={"object": "source", "reference": "table", "relation": "right_of"},
+        resources={},
+    )
+    plan = {
+        "nodes": [
+            _node(
+                "pick_cube",
+                dict(kind="pick", object="source", resources={}),
+                [],
+                **semantic,
+            ),
+            _node("place_cube", place, ["pick_cube"], **semantic),
+        ],
+        "requirements": [
+            dict(id="r1", quote=instruction, node_ids=["pick_cube", "place_cube"])
+        ],
+    }
+    route = {
+        "object_id": "source",
+        "reference_entity_id": "table",
+        "relation": "right_of",
+        "world_displacement": [0.0, 0.30, 0.005],
+    }
+    services = (
+        {
+            "registered_semantic_lowerers": [
+                {"kind": "place_relative", "routes": [route]}
+            ]
+        }
+        if configured
+        else {}
+    )
+    run_cfg = _RunCfg(
+        **{
+            **run_cfg.to_dict(),
+            "instruction": instruction,
+            "binding": {"runtime_services": services},
+        }
+    )
+
+    program, integration = _bound_deployment(
+        run_cfg,
+        monkeypatch,
+        _services(step=_step(relation="right_of"), plan=plan),
+    )
+
+    validators = program["program"]["items"][1]["validators"]
+    (lowerer,) = integration["runtime_services"]["registered_semantic_lowerers"]
+    if configured:
+        # The configured route owns its target; no measured validator contradicts it.
+        assert lowerer["routes"] == [route]
+        assert validators == []
+    else:
+        (validator,) = validators
+        assert lowerer["routes"][0]["world_displacement"] == validator["displacement"]
+
+
+def test_held_upright_without_reference_validates_its_terminal_pose(
+    run_cfg: _RunCfg, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    instruction = "Hold the cube upright"
+    semantic = dict(
+        reference=None,
+        relation="none",
+        intent={"orientation_goal": "upright", "terminal_behavior": "hold"},
+    )
+    hold = dict(
+        kind="registered",
+        call_id="simulation.move_held_object",
+        arguments={"target": "hold_pose"},
+        resources={},
+    )
+    plan = {
+        "nodes": [
+            _node(
+                "pick_cube",
+                dict(kind="pick", object="source", resources={}),
+                [],
+                **semantic,
+            ),
+            _node("hold_cube", hold, ["pick_cube"], **semantic),
+        ],
+        "requirements": [
+            dict(id="r1", quote=instruction, node_ids=["pick_cube", "hold_cube"])
+        ],
+    }
+    grounding = {
+        "objects": [
+            dict(
+                id="source",
+                description="red cube",
+                bbox=[100, 200, 300, 500],
+                provenance="observed",
+            )
+        ],
+        "bindings": {"step_01.object": ["source"]},
+    }
+    step = _step(
+        task_type="E2",
+        target=_selector(),
+        relation="none",
+        orientation_goal="upright",
+        terminal_behavior="hold",
+    )
+    run_cfg = _RunCfg(**{**run_cfg.to_dict(), "instruction": instruction})
+
+    program, integration = _bound_deployment(
+        run_cfg, monkeypatch, _services(step=step, grounding=grounding, plan=plan)
+    )
+
+    # A lift validator would measure from the transport start, after Pick has
+    # already lifted the object; the held pose itself is the terminal goal.
+    near, upright = program["program"]["items"][1]["validators"]
+    assert (near["kind"], upright["kind"]) == ("object_near_target", "object_upright")
+    (lowerer,) = integration["runtime_services"]["registered_semantic_lowerers"]
+    pose = lowerer["routes"][0]["pose"]
+    assert program["targets"][near["target"]] == {
+        "kind": "pose",
+        "position": pose["position"],
+        "quaternion_xyzw": pose["quaternion_xyzw"],
+    }
+
+
+def test_run_config_rejects_output_inside_the_reused_task(run_cfg: _RunCfg) -> None:
+    task = run_cfg.image.parent / "plan"
+    task.mkdir()
+    (task / "task_plan_manifest.json").write_text("{}")
+    source = run_cfg.image.parent / "job.yaml"
+    source.write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": "embodichain.gensim-run/v1",
+                "image": "input.png",
+                "runtime": "runtime.yaml",
+                "execution_policy": "policy.yaml",
+                "instruction": run_cfg.instruction,
+                "task": "plan",
+                "output": "plan/new-run",
+            }
+        )
+    )
+    with pytest.raises(ValueError, match="source task must not overlap"):
+        _load_run_config(argparse.Namespace(config=source))
+
+
+@pytest.mark.parametrize("changed", ["instruction", "image"])
+def test_reused_task_must_plan_the_run_instruction_and_image(
+    run_cfg: _RunCfg, changed: str
+) -> None:
+    from embodichain.gen_sim.workflow import plan_image_task
+
+    with _services() as services:
+        task = plan_image_task(
+            run_cfg.image,
+            run_cfg.instruction,
+            run_cfg.image.parent / "plan",
+            task_id=run_cfg.task_id,
+            services=services,
+        )
+    image = run_cfg.image.parent / "other.png"
+    Image.new("RGB", (100, 80), "black").save(image)
+    change = (
+        {"instruction": "Put the cube inside the box"}
+        if changed == "instruction"
+        else {"image": image}
+    )
+    cfg = _RunCfg(**{**run_cfg.to_dict(), "task": task, **change})
+    with pytest.raises(ValueError, match="different instruction or image"):
+        _run(cfg)
+    assert not cfg.output.exists()
 
 
 def test_runtime_mesh_handoff_bakes_axis_and_scale_without_changing_source(

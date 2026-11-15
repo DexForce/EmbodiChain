@@ -524,13 +524,34 @@ def validate_semantic_plan(
             )
         target = grounding["bindings"].get(f"{step_id}.target")
         if step.get("terminal_behavior") == "hold":
-            if "terminal_hold_requires_one_of" in semantic_plan_rules()[
-                step["task_type"]
-            ] and any(effects[n["id"]] == "simulation.axis_align" for n in calls):
+            held_transport = (
+                "terminal_hold_requires_one_of"
+                in semantic_plan_rules()[step["task_type"]]
+            )
+            if held_transport and any(
+                effects[n["id"]] == "simulation.axis_align" for n in calls
+            ):
                 raise ValueError(
                     f"{step_id} ends holding its object: acquire it with pick; "
                     "the held transport realizes any upright orientation, so "
                     "remove simulation.axis_align."
+                )
+            # Binding derives the held target and its validators from the
+            # producing transport alone.
+            goal = step.get("orientation_goal", "none")
+            if (
+                held_transport
+                and goal != "none"
+                and not any(
+                    effects[n["id"]] in producer_ids
+                    and annotations[n["id"]]["intent"].get("orientation_goal") == goal
+                    for n in calls
+                )
+            ):
+                raise ValueError(
+                    f"{step_id} ends holding its object with orientation_goal="
+                    f"{goal}: declare it in semantic.intent of the held "
+                    "transport that produces the step."
                 )
             if TASK_CONTRACTS[step["task_type"]].resource_mode == "coordinated":
                 raise ValueError(

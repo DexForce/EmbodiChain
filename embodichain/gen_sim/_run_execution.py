@@ -29,18 +29,26 @@ class _EpisodeRecording:
     """Record every camera and the native state at each executed control step.
 
     Frames come from the environment's own sensor observations, so the video
-    shows the actual executed motion rather than a re-rendered replay.
+    shows the actual executed motion rather than a re-rendered replay. Each
+    frame is encoded and each state written as it is observed, so memory does
+    not grow with the episode length.
     """
 
     def __init__(self, env: Any, root: Path) -> None:
         self.env = env
         self.root = root
         self.fps = 1.0 / float(env.step_dt)
-        self.frames: dict[str, list[Any]] = {}
-        self.states: list[dict[str, Any]] = []
+        self.root.mkdir(parents=True, exist_ok=True)
+        self.writers: dict[str, Any] = {}
+        self.cameras: dict[str, dict[str, int]] = {}
+        self.steps = 0
+        self.states = (root / "states.jsonl").open("w")
 
     def observe(self, observation: Any) -> None:
-        """Append the observation's camera frames and the native object state."""
+        """Encode the observation's camera frames and append the native state."""
+        import json
+
+        import imageio
         import numpy as np
 
         sensors = observation.get("sensor", {}) if observation is not None else {}
@@ -50,8 +58,17 @@ class _EpisodeRecording:
                 continue
             frame = data["color"][0, ..., :3]
             frame = frame.detach().cpu().numpy() if hasattr(frame, "detach") else frame
-            self.frames.setdefault(uid, []).append(np.asarray(frame, dtype=np.uint8))
-        step = len(self.states)
+            frame = np.asarray(frame, dtype=np.uint8)
+            if uid not in self.writers:
+                # The same H.264 settings as dexsim's images_to_video.
+                self.writers[uid] = imageio.get_writer(
+                    str(self.root / f"{uid}.mp4"), fps=self.fps, quality=5
+                )
+                height, width = frame.shape[:2]
+                self.cameras[uid] = {"frames": 0, "width": width, "height": height}
+            self.writers[uid].append_data(frame)
+            self.cameras[uid]["frames"] += 1
+        step = self.steps
         robot = observation.get("robot", {}) if observation is not None else {}
         state: dict[str, Any] = {
             "control_step": step,
@@ -66,27 +83,23 @@ class _EpisodeRecording:
         for uid in self.env.sim.get_rigid_object_uid_list():
             pose = self.env.sim.get_rigid_object(uid).get_local_pose(to_matrix=True)
             state["objects"][uid] = pose[0, :3, 3].detach().cpu().tolist()
-        self.states.append(state)
+        self.states.write(json.dumps(state) + "\n")
+        self.steps += 1
 
     def write(self, report: dict[str, Any] | None) -> dict[str, Any]:
-        """Encode one H.264 video per camera and the state timeline."""
+        """Finish every camera video and the state timeline, then the manifest."""
         import json
-        from dexsim.utility import images_to_video
 
-        self.root.mkdir(parents=True, exist_ok=True)
-        cameras = {}
-        for uid, frames in self.frames.items():
-            images_to_video(frames, str(self.root), uid, fps=self.fps)
-            height, width = frames[0].shape[:2]
-            cameras[uid] = {"frames": len(frames), "width": width, "height": height}
-        (self.root / "states.jsonl").write_text(
-            "".join(json.dumps(state) + "\n" for state in self.states)
-        )
+        try:
+            for writer in self.writers.values():
+                writer.close()
+        finally:
+            self.states.close()
         manifest = {
             "schema_version": "embodichain.gensim-native-recording/v1",
             "fps": self.fps,
-            "frames": len(self.states),
-            "cameras": cameras,
+            "frames": self.steps,
+            "cameras": self.cameras,
             "episode_completed": None if report is None else report.get("completed"),
         }
         (self.root / "recording.json").write_text(json.dumps(manifest, indent=2))
@@ -143,8 +156,8 @@ def _execute_deployment(
         try:
             result = execute_demo_episode(env, **kwargs)
         finally:
-            if recorder is not None and result is None and recorder.states:
-                # An interrupted episode still keeps its recorded frames.
+            if recorder is not None and result is None:
+                # An interrupted episode still finishes its recorded frames.
                 recorder.write(None)
         report = result.to_metadata()
         if recorder is not None:

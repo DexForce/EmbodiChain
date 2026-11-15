@@ -123,6 +123,24 @@ def test_calibration_requires_a_mask_for_every_object(tmp_path: Path) -> None:
         calibrate_scene(data, tmp_path, tmp_path, _CALIBRATION)
 
 
+def test_calibration_rejects_off_axis_tables_and_articulations(
+    tmp_path: Path,
+) -> None:
+    trimesh.creation.box(extents=[1, 0.1, 1]).export(tmp_path / "table.glb")
+    data = {"background": [{"uid": "table", "shape": {"fpath": "table.glb"}}]}
+    # A box table yawed by 45 degrees cannot match a world-axis tabletop size.
+    with pytest.raises(ValueError, match="aligned with the world axes"):
+        calibrate_scene(
+            data, tmp_path, tmp_path, {**_CALIBRATION, "scene_yaw_deg": 45.0}
+        )
+    # Exported articulations carry a native USD root and a proxy mesh.
+    drawer = {"uid": "drawer_001", "fpath": "drawer.usdc", "proxy_glb_fpath": "d.glb"}
+    with pytest.raises(ValueError, match="rigid objects only"):
+        calibrate_scene(
+            {**data, "articulation": [drawer]}, tmp_path, tmp_path, _CALIBRATION
+        )
+
+
 def test_incomplete_calibration_is_rejected(tmp_path: Path) -> None:
     path = tmp_path / "calibration.json"
     path.write_text(json.dumps({**_CALIBRATION, "table": {}}))
