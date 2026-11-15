@@ -945,17 +945,23 @@ class Articulation(BatchEntity):
         """
         spawn_result = getattr(self, "_spawn_result", None)
         self._prepare_spawn_runtime_config(spawn_result)
-
         root_props = getattr(self.cfg, "root_props", None)
-        self._newton_mimic_compliance_configured = getattr(
-            root_props, "newton_mimic_stabilizer", False
-        ) and _configure_newton_mimic_compliance(
-            result=spawn_result,
-            entities=self._entities,
-            state_joint_names=self._state_joint_names(),
-            mimic_ids=self.mimic_ids,
-            mimic_parents=self.mimic_parents,
-        )
+        stabilize = getattr(root_props, "newton_mimic_stabilizer", False)
+        solref = getattr(root_props, "newton_mimic_solref", None)
+        solimp = getattr(root_props, "newton_mimic_solimp", None)
+        self._newton_mimic_compliance_configured = False
+        if stabilize or solref is not None or solimp is not None:
+            configured = _configure_newton_mimic_compliance(
+                result=spawn_result,
+                entities=self._entities,
+                state_joint_names=self._state_joint_names(),
+                mimic_ids=self.mimic_ids,
+                mimic_parents=self.mimic_parents,
+                stabilize=stabilize,
+                solref=solref,
+                solimp=solimp,
+            )
+            self._newton_mimic_compliance_configured = stabilize and configured
 
         if not self.cfg.compute_uv:
             return
