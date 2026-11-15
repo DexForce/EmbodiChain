@@ -258,6 +258,17 @@ Gym's `preview_sensor_data(name, data_type="rgb")` reads the latest valid
 scheduled sample for the chosen environment. Legacy camera preview still
 refreshes explicitly.
 
+Set `TactileIndentationCfg.shear` to estimate per-cell compressive and shear
+forces in newtons and elastic displacement in meters. It drives the elastic
+state from completed-sample relative probe motion against the winning collider,
+caps shear at the Coulomb limit, and clears state on a miss, collider change,
+or reset. The first sample of a contact supplies normal force and starts with
+zero shear. The tangent axes are mount +X projected onto the probe plane
+(+Y when close to the normal) and the cross product of the normal and that
+tangent. Ordered `marker_indices` expose a sparse subset of the same relative
+gel displacement. These estimates share the clipped geometric depth and
+are independent from the native impulse reported by ContactGrid.
+
 Ray queries default to cooked collision shapes. Select `geometry_source: visual`
 for authored procedural or array-backed render geometry of rigid and visual
 objects. Visual queries use authored surfaces with no renderer or shading
