@@ -1,5 +1,10 @@
 # Native physics deployment adapters
 
+Start with the [NeRD solver quickstart](../../examples/learning/nerd/DEPLOYMENT.md)
+for a complete model-preparation, step/readback/reset/close example. The
+[execution record](../../examples/learning/nerd/VALIDATION.md) separates measured
+native execution from training and viewer claims.
+
 `embodichain_solvers` ships in the main `embodichain` distribution. It shares
 the existing version/dependencies and `dexsim.newton_solvers` discovery
 mechanism. Importing the package does not import Torch, models or the SDK.

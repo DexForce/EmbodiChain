@@ -34,7 +34,7 @@ Use the following canonical packages for the current model directions:
 | --- | --- | --- |
 | Ordinary state/visual BC | `embodichain_models.policy.bc` | Target for the BC follow-up; not created yet. |
 | Visual ACT | `embodichain_models.policy.act` | Official LeRobot ACT configuration, provenance and simulator inference. |
-| NeRD | `embodichain_models.dynamics.nerd` | Implemented in this change. |
+| NeRD | `embodichain_models.dynamics.nerd` | Network/codec, shared SL, independent transition/geometry and learning-env consumers. |
 | Robot world model (RWM) | `embodichain_models.dynamics.rwm` | Implemented. |
 | RigidFormer | `embodichain_models.dynamics.rigidformer` | Native author architecture, official weights and shared-SL recipe. |
 | WorldParticle | `embodichain_models.dynamics.worldparticle` | Frozen particle transition; optional native deployment and operator qualification are separate. |
@@ -50,6 +50,13 @@ recipe, learning-env or qualified functional-gradient/APG contract in this stage
 Visual ACT's configuration and inference adapters are documented in the
 [API reference](../../docs/source/api_reference/visual_act.rst); its runnable
 workflow lives in [examples/learning/act](../../examples/learning/act/README.md).
+
+NeRD's [showcase](../../examples/learning/nerd/README.md) separates offline SL,
+learning-env policy optimization and the optional
+[native solver quickstart](../../examples/learning/nerd/DEPLOYMENT.md).
+Its [execution record](../../examples/learning/nerd/VALIDATION.md) states the
+tested runtime/budgets. Native deployment adapters have their own
+[solver extension guide](../embodichain_solvers/README.md).
 
 RWM predicts action-conditioned robot state transitions, so it belongs to
 `dynamics`. World models also describe future-state/observation prediction;

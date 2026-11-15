@@ -68,6 +68,18 @@ path overrides resolve from the working directory.
 
 ## Differentiable policy training and native deployment
 
+Choose the execution owner explicitly:
+
+| Goal | Entry | State/reset owner |
+| --- | --- | --- |
+| Fit/evaluate the dynamics network | `train`, `eval`, `export` above | SL workflow / measured data |
+| Optimize an APG/PPO policy through the model | `train-policy` below | Lightweight learning-env; no World/Scene/solver |
+| Step a native reference scene with learned dynamics | [Native solver quickstart](DEPLOYMENT.md) | SDK Scene plus optional NeRD Provider |
+
+The native quickstart prepares model-only resources, runs both reference robots,
+reads state, resets history and closes the Scene. Its
+[execution record](VALIDATION.md) states the checked runtime and limits.
+
 `NeRDTransition` owns the complete current-state FK/contact, codec, history,
 prediction and decoding path. `NeRDGeometry` caches detached fixed parameters
 and receives its FK callable at construction. The model package imports no
