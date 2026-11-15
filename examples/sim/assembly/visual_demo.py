@@ -44,6 +44,7 @@ from embodichain_benchmarks.assembly.precision import (
     _run_embodichain,
     _run_mujoco,
     _json_measurement,
+    _native_solver_metadata,
 )
 
 
@@ -72,6 +73,11 @@ def main(default_config: str = "usb_c") -> None:
         "--peg-offset", type=float, default=0.0, help="Peg X offset, m."
     )
     parser.add_argument("--backend-contacts", action="store_true")
+    parser.add_argument(
+        "--newton-solver",
+        choices=["mujoco_warp", "dexuni"],
+        help="Newton solver family; omission preserves mujoco_warp.",
+    )
     parser.add_argument("--solver", choices=["pgs", "cg", "newton"])
     parser.add_argument("--use-mujoco-cpu", action="store_true")
     parser.add_argument("--solver-tolerance", type=float)
@@ -97,6 +103,8 @@ def main(default_config: str = "usb_c") -> None:
     parser.add_argument("--output", type=Path, default=Path("outputs/assembly_visual"))
     parser.add_argument("--record", choices=["gif", "mp4"])
     args = parser.parse_args()
+    if args.newton_solver is not None and args.backend != "newton":
+        parser.error("--newton-solver requires --backend newton.")
     if min(args.duration, args.timestep, args.playback_speed, args.fps) <= 0:
         parser.error("Duration, timestep, playback speed and FPS must be positive.")
     if min(args.startup_delay, args.hold_seconds) < 0:
@@ -183,6 +191,7 @@ def main(default_config: str = "usb_c") -> None:
         duration=args.duration,
         timestep=args.timestep,
         source_contact=not args.backend_contacts,
+        newton_solver=args.newton_solver,
         solver=args.solver,
         use_mujoco_cpu=args.use_mujoco_cpu,
         solver_tolerance=args.solver_tolerance,
@@ -206,7 +215,7 @@ def main(default_config: str = "usb_c") -> None:
         f"Newton / MuJoCo CPU {solver_label}"
         if args.backend == "newton" and cfg.use_mujoco_cpu
         else (
-            f"Newton / Warp {solver_label}"
+            f"Newton / {cfg.newton_solver or 'mujoco_warp'} {solver_label}"
             if args.backend == "newton"
             else (
                 f"MuJoCo CPU {solver_label}"
@@ -251,9 +260,13 @@ def main(default_config: str = "usb_c") -> None:
         native_frames.mkdir(parents=True, exist_ok=True)
 
     def observe(host: Any, state: Any, step: int) -> None:
-        nonlocal start, window, camera, native_capture_count
+        nonlocal start, window, camera, native_capture_count, executor
         if step not in {0, steps} and step % stride:
             return
+        if step == 0 and cfg.backend == "newton":
+            metadata = _native_solver_metadata(host, cfg, asset.source_options)
+            executor = f"{metadata['runtime']} {solver_label}"
+            trace["display_config"]["executor"] = executor
         if args.backend == "mujoco_cpu":
             import mujoco
 

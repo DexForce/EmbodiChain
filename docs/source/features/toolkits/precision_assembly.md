@@ -198,13 +198,33 @@ embodichain run-example sim/assembly/drop_peg --backend mujoco_cpu
 
 ### DexUni validation
 
-A separate validation host used the same manifests, camera views, source
-contacts and controls with `NewtonPhysicsCfg(solver_cfg={"solver_type": "dexuni",
-...})`. All five cases, including the blocked-rim control, passed their behavior
-checks and retained their source collision counts. The actual SDK diagnostic
-was `features.backend="pure_mujoco"` for every scene, with VBD disabled.
-This verifies DexUni's scene-dispatch route for these rigid assemblies; it does
-not qualify a VBD-only or rigid/soft coupling route.
+Select DexUni explicitly through the installed demo CLI. Omission of
+`--newton-solver` preserves the existing `mujoco_warp` profile:
+
+```bash
+embodichain run-example sim/assembly/visual_demo --backend newton --newton-solver dexuni --config circle --clearance .0001 --duration .2 --native-window --native-record --renderer fast-rt --output outputs/assembly/dexuni_circle
+embodichain run-example sim/assembly/gear_pair --backend newton --newton-solver dexuni --solver cg --duration .5
+```
+
+`--newton-solver` selects the Newton solver family (`mujoco_warp`, `dexuni`).
+`--solver` still selects the MuJoCo algorithm (`pgs`, `cg`, `newton`). The family
+selector is rejected on the Default and independent MuJoCo reference backends.
+`--use-mujoco-cpu` explicitly selects the single-world CPU integration inside
+either Newton family; it never requests an automatic fallback.
+
+Both families receive the same iteration limit, source algorithm/integrator,
+contact capacity, and explicit tolerance/MultiCCD overrides. DexUni forwards
+these under the SDK's `mujoco_options`. `source_contact=True` remains the default.
+The traces retain `newton_solver`, `active_solver` (the MuJoCo algorithm), and
+SDK `solver_diagnostics`, including its actual scene dispatch and step count.
+The window/trace executor label identifies DexUni and the measured dispatch.
+
+The following recordings use the formal CLI with the same manifests, camera
+views, source contacts and controls as the gallery. The actual SDK diagnostic
+is `features.backend="pure_mujoco"`, with VBD disabled. The assembly benchmark
+requires this dispatch to honor its configured MuJoCo contact/algorithm profile;
+missing diagnostics or a VBD/coupled dispatch produce an explicit unsupported
+result. These checks do not qualify VBD-only or rigid/soft coupling.
 
 <video controls playsinline preload="none" style="width: 100%;" poster="../../_static/assembly/dexuni.jpg" aria-label="DexUni native RGB comparison: peg, many pegs, thread and gears">
   <source src="../../_static/assembly/dexuni.mp4" type="video/mp4">
@@ -214,28 +234,53 @@ not qualify a VBD-only or rigid/soft coupling route.
 DexUni recordings, clockwise from top left: peg, many pegs, gears, thread.
 [Download the DexUni MP4](../../_static/assembly/dexuni.mp4).
 The circle insertion was approximately 10 mm and the many-pegs result was 9/9.
-M10 advanced 1.824 mm with 1.90% lead error, compared with 0.62% above; gear-ratio
+M10 advanced 1.794 mm with 0.19% lead error, compared with 0.62% above; gear-ratio
 error was 0.15%. These routes are not numerically identical.
-
-The packaged `visual_demo` CLI currently fixes the Newton solver to
-`mujoco_warp`; it does **not** provide a DexUni flag. Its `--solver` option
-selects the MuJoCo algorithm (`pgs`, `cg`, `newton`), not the Newton solver
-family. The DexUni video documents the isolated validation, rather than a
-command-line capability that has not been added.
 
 ## Measurement and current limits
 
 The separate `embodichain_benchmarks.assembly.precision` module exposes
 `PrecisionRunCfg`, `compare_usd_geometry` and `run_passive_probe`.
 `embodichain_benchmarks.assembly.probes` owns independent constrained clearance
-probes. The source matrix runner is:
+probes. Select the family programmatically through `PrecisionRunCfg.newton_solver`:
+
+```python
+from embodichain_benchmarks.assembly.precision import PrecisionRunCfg, run_passive_probe
+
+result = run_passive_probe(
+    restored,
+    PrecisionRunCfg(backend="newton", newton_solver="dexuni", duration=0.2),
+)
+```
+
+The source matrix runner can compare both families in one invocation:
 
 ```bash
-python scripts/benchmark/assembly/precision.py --help
+python scripts/benchmark/assembly/precision.py --configs circle --backends newton --routes direct --newton-solvers mujoco_warp dexuni --duration .2
+python scripts/benchmark/assembly/precision.py --configs circle --backends newton --routes direct --newton-solvers mujoco_warp dexuni --probe S2 --directions 4 --duration .3
 ```
+
+`--newton-solver` is also accepted as a singular alias by the matrix CLI.
+When independent reference/Default backends are included, their cells run once;
+the Newton solver sweep applies only to Newton cells. Reports group requested
+families separately, display actual SDK dispatch independently, and retain failed
+attempts in their requested profile. Each cell owns a separate preparation
+directory. An unresolved/failed dispatch is labeled `unavailable`.
+
+`run_native_probe(..., newton_solver="dexuni")` exposes the same family choice
+for constrained S2–S4 probes. Native S0 remains explicitly unavailable because
+there is no read-only collision-forward query. MuJoCo algorithm, CPU and
+calibration CLI overrides apply to passive probes; constrained matrix calls
+reject these overrides rather than ignore them.
 
 The [recording metadata](../../_static/assembly/recordings.json) contains asset
 hashes, profiles, camera parameters, measurements and collision counts.
+A 0.3 s, four-direction S2 check at 100 μm clearance returned identical rows
+for the published MuJoCo Warp baseline and both new family selections. Two
+directions exceeded the 10 μm wall-error budget (worst error approximately
+18.49 μm), so the report correctly retained `failed`. Solver selection does not
+relax the accuracy threshold or turn a completed run into precision acceptance.
+
 Behavioral success does not certify micro-clearance accuracy or solver capacity:
 live native contact-overflow accounting remains unavailable, and native
 precision qualification stays `unverified`.

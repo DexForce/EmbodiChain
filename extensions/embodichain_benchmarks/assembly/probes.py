@@ -681,6 +681,7 @@ def run_native_probe(
     cfg: ConstrainedProbeCfg,
     backend: str = "newton",
     *,
+    newton_solver: str | None = None,
     work_dir: str | Path = "outputs/assembly_precision/constrained",
 ) -> dict[str, Any]:
     """Integrate native S2-S4 with real constraints and constant joint effort.
@@ -688,14 +689,46 @@ def run_native_probe(
     S2 uses one isolated environment per force direction. S3/S4 use one
     environment. Contact-capacity health and raw profile support must be
     independently qualified before these behavior measurements certify a
-    backend; missing SDK functionality is reported explicitly.
+    backend; missing SDK functionality is reported explicitly. ``newton_solver``
+    selects ``mujoco_warp`` or ``dexuni`` for Newton. Omission preserves the
+    existing MuJoCo Warp profile.
+
+    Args:
+        asset: Source plate geometry and reference physical properties.
+        cfg: Analytic constraint, force, sampling and contact settings.
+        backend: Native ``newton`` or ``default`` physics backend.
+        newton_solver: Optional Newton family; invalid on ``default``.
+        work_dir: Root for generated probe files and exported native models.
+
+    Returns:
+        Measurements, actual solver diagnostics and qualification status.
+        Native results remain unverified when contact health is unavailable.
     """
     if backend not in {"newton", "default"}:
         raise ValueError("Native constrained probe backend must be newton or default.")
+    from .precision import (
+        PrecisionRunCfg,
+        _validate_solver_overrides,
+        _newton_solver_config,
+        _native_solver_metadata,
+    )
+
+    profile = PrecisionRunCfg(
+        backend=backend,
+        newton_solver=newton_solver,
+        source_contact=cfg.source_contact,
+        solver_iterations=cfg.solver_iterations,
+        contact_capacity=cfg.contact_capacity,
+    )
+    _validate_solver_overrides(profile)
+    source_options = {"integrator": "implicitfast"}
     definition = prepare_probe(asset, cfg)
     result: dict[str, Any] = {
         "probe": cfg.probe,
         "backend": backend,
+        "newton_solver": (
+            (newton_solver or "mujoco_warp") if backend == "newton" else None
+        ),
         "asset_sha256": asset.content_hash,
         "config": cfg.to_dict(),
         "analytic_geometry": definition.geometry.to_dict(),
@@ -722,7 +755,7 @@ def run_native_probe(
         return {
             **result,
             "status": "skipped",
-            "reason": "Native MuJoCo Warp probes require CUDA.",
+            "reason": "Native Newton probes require CUDA.",
         }
     directions = np.column_stack(
         (
@@ -742,14 +775,9 @@ def run_native_probe(
             gravity=[0.0, 0.0, 0.0],
             num_substeps=1,
             use_cuda_graph=False,
-            solver_cfg={
-                "solver_type": "mujoco_warp",
-                "iterations": cfg.solver_iterations,
-                "integrator": "implicitfast",
-                "nconmax": cfg.contact_capacity,
-                "njmax": 6 * cfg.contact_capacity,
-                "save_to_mjcf": str(native_model_path.resolve()),
-            },
+            solver_cfg=_newton_solver_config(
+                profile, source_options, save_to_mjcf=str(native_model_path.resolve())
+            ),
         )
         if backend == "newton"
         else DefaultPhysicsCfg(device=str(device), gravity=[0.0, 0.0, 0.0])
@@ -773,6 +801,7 @@ def run_native_probe(
         sim.add_rigid_object(plate_cfg)
         peg = sim.add_articulation(peg_cfg)
         sim.prepare()
+        result.update(_native_solver_metadata(sim, profile, source_options))
         names = list(peg.joint_names)
         indices = [
             names.index(f"probe_joint_{index}") for index in range(len(definition.axes))
@@ -832,6 +861,7 @@ def run_native_probe(
                 }
             )
         result.update(
+            **_native_solver_metadata(sim, profile, source_options),
             rows=rows,
             behavior_status=(
                 "passed" if all(row["passed"] for row in rows) else "failed"
