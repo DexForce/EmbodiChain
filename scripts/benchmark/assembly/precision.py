@@ -66,6 +66,8 @@ def _dispatch_label(row: dict) -> str:
 
 def run_all_benchmarks(args: argparse.Namespace) -> Path:
     """Run isolated cells and write exactly three comparison tables plus data."""
+    if args.integration_substeps is not None and args.probe == "passive":
+        raise ValueError("--integration-substeps applies to constrained probes only.")
     if args.newton_solvers and "newton" not in args.backends:
         raise ValueError("--newton-solvers requires newton in --backends.")
     if args.probe != "passive" and args.num_envs != [1]:
@@ -174,6 +176,13 @@ def run_all_benchmarks(args: argparse.Namespace) -> Path:
                                         **asdict(cfg),
                                         "constrained_probe": args.probe,
                                         "num_directions": args.directions,
+                                        **(
+                                            {
+                                                "integration_substeps": args.integration_substeps
+                                            }
+                                            if args.integration_substeps is not None
+                                            else {}
+                                        ),
                                     }
                                 ),
                                 encoding="utf-8",
@@ -214,6 +223,16 @@ def run_all_benchmarks(args: argparse.Namespace) -> Path:
                                             or result.get("asset_sha256")
                                             != asset.content_hash
                                             or result.get("config") != asdict(cfg)
+                                            or (
+                                                args.probe != "passive"
+                                                and result.get("integration_substeps")
+                                                != (
+                                                    args.integration_substeps
+                                                    if args.integration_substeps
+                                                    is not None
+                                                    else 4
+                                                )
+                                            )
                                         ):
                                             raise ValueError(
                                                 "Cell output does not match this asset and configuration."
@@ -240,6 +259,15 @@ def run_all_benchmarks(args: argparse.Namespace) -> Path:
                                 ),
                                 requested_mujoco_cpu=args.use_mujoco_cpu,
                                 config_name=name,
+                                requested_integration_substeps=(
+                                    (
+                                        args.integration_substeps
+                                        if args.integration_substeps is not None
+                                        else 4
+                                    )
+                                    if args.probe != "passive"
+                                    else None
+                                ),
                                 requested_num_envs=worlds,
                                 timestep=timestep,
                                 asset_sha256=asset.content_hash,
@@ -298,12 +326,12 @@ def run_all_benchmarks(args: argparse.Namespace) -> Path:
         "",
         "## Time & Memory",
         "",
-        "| asset | backend/solver/route | actual dispatch | worlds | dt | cost_time_ms/world-step | cpu_delta_mb | gpu_delta_mb | peak_gpu_mb |",
-        "|---|---|---|---:|---:|---:|---|---|---|",
+        "| asset | backend/solver/route | actual dispatch | worlds | requested dt | integration dt | cost_time_ms/world-step | cpu_delta_mb | gpu_delta_mb | peak_gpu_mb |",
+        "|---|---|---|---:|---:|---:|---:|---|---|---|",
     ]
     for row in rows:
         lines.append(
-            f"| {row['config_name']} | {_profile_label(row)} | {_dispatch_label(row)} | {row['num_envs']} | {row['timestep']} | {row.get('step_time_ms', 'unmeasured')} | unmeasured | unmeasured | unmeasured |"
+            f"| {row['config_name']} | {_profile_label(row)} | {_dispatch_label(row)} | {row['num_envs']} | {row['timestep']} | {row.get('integration_dt', row['timestep'] if row['probe'] == 'passive' else 'unavailable')} | {row.get('step_time_ms', 'unmeasured')} | unmeasured | unmeasured | unmeasured |"
         )
     lines += [
         "",
@@ -410,6 +438,11 @@ def main() -> None:
         "--probe", choices=["passive", "S0", "S2", "S3", "S4"], default="passive"
     )
     parser.add_argument("--directions", type=int, default=24)
+    parser.add_argument(
+        "--integration-substeps",
+        type=int,
+        help="Constrained integration refinements per requested interval (default: 4); all physical steps are scored.",
+    )
     parser.add_argument("--cell-timeout", type=int, default=300)
     parser.add_argument(
         "--backend-contacts",
@@ -425,6 +458,7 @@ def main() -> None:
         parameters = json.loads(Path(args.cell_config).read_text())
         probe = parameters.pop("constrained_probe", "passive")
         directions = parameters.pop("num_directions", 24)
+        integration_substeps = parameters.pop("integration_substeps", 4)
         asset = AssemblyAsset.load(args.cell)
         cfg = PrecisionRunCfg(**parameters)
         if probe == "passive":
@@ -440,6 +474,7 @@ def main() -> None:
             selected = ConstrainedProbeCfg(
                 probe=probe,
                 num_directions=directions,
+                integration_substeps=integration_substeps,
                 duration=cfg.duration,
                 timestep=cfg.timestep,
                 source_contact=cfg.source_contact,
@@ -475,6 +510,7 @@ def main() -> None:
                 result = {"status": "failed", "reason": str(error)}
             rows = result.get("rows", [])
             result.update(
+                integration_substeps=selected.integration_substeps,
                 backend=cfg.backend,
                 route=cfg.route,
                 asset_sha256=asset.content_hash,

@@ -254,3 +254,87 @@ Path(sys.argv[2]).write_text(json.dumps(result, allow_nan=False))
     }
     if family == "dexuni":
         assert result["solver_diagnostics"]["features"]["backend"] == "pure_mujoco"
+
+
+def test_constrained_integration_refines_time_without_changing_force_or_error_budget():
+    import mujoco
+
+    coarse = ConstrainedProbeCfg(
+        probe="S2", duration=0.3, timestep=0.001, integration_substeps=1
+    )
+    refined = coarse.replace(integration_substeps=4)
+    assert refined.integration_dt == 0.00025
+    assert refined.integration_steps == 1200
+    assert refined.integration_steps * refined.integration_dt == pytest.approx(0.3)
+    assert refined.force == coarse.force
+    definition = prepare_probe(_square_asset(), refined)
+    model = mujoco.MjModel.from_xml_string(definition.source_mjcf)
+    assert model.opt.timestep == 0.00025
+    result = run_reference_probe(_square_asset(), refined)
+    assert result["wall_error_tolerance_m"] == 1e-5
+    assert all(row["sample_count"] == 600 for row in result["rows"])
+    assert all(row["passed"] for row in result["rows"])
+    for invalid in [0, 1.5]:
+        with pytest.raises(ValueError, match="positive integer"):
+            ConstrainedProbeCfg(integration_substeps=invalid)
+
+
+@pytest.mark.gpu
+@pytest.mark.subprocess_sim
+@pytest.mark.parametrize("family", ["mujoco_warp", "dexuni"])
+def test_s2_circle_retains_ten_micrometre_budget_at_every_integration_step(
+    tmp_path, family
+):
+    import json
+    from pathlib import Path
+    import subprocess
+    import sys
+
+    fixture = Path(__file__).resolve().parents[2] / "fixtures/assembly/circle_100um.xml"
+    output = tmp_path / "result.json"
+    program = """
+import json,sys
+from pathlib import Path
+from embodichain.toolkits.assembly import import_mjcf
+from embodichain_benchmarks.assembly.probes import ConstrainedProbeCfg,run_native_probe
+asset = import_mjcf(Path(sys.argv[1]).read_text(), config={
+    'kind':'peg','hole':{'type':'circle','radius':.008,'n':32},
+    'clearance':.0001,'plate_thickness':.01,'peg_length':.03})
+result = run_native_probe(asset, ConstrainedProbeCfg(probe='S2',num_directions=4,duration=.3),
+    newton_solver=sys.argv[3], work_dir=sys.argv[4])
+Path(sys.argv[2]).write_text(json.dumps(result,allow_nan=False))
+"""
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            program,
+            str(fixture),
+            str(output),
+            family,
+            str(tmp_path / "runtime"),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    result = json.loads(output.read_text())
+    assert result["behavior_status"] == "passed", result
+    assert (
+        result["status"] == "unverified"
+    )  # Capacity accounting is a separate qualification.
+    assert result["newton_solver"] == family
+    assert result["wall_error_tolerance_m"] == 1e-5
+    assert result["integration_dt"] == 0.00025
+    assert (
+        result["integration_steps"]
+        == result["solver_diagnostics"]["step_index"]
+        == 1200
+    )
+    assert result["solver_diagnostics"]["sim_time"] == pytest.approx(0.3)
+    assert len(result["rows"]) == 4
+    for row in result["rows"]:
+        assert row["sample_count"] == 600
+        assert row["passed"]
+        assert row["wall_worst_error_m"] <= 1e-5
