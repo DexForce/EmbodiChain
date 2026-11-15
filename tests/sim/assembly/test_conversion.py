@@ -23,7 +23,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from embodichain.lab.sim.assembly import (
+from embodichain.toolkits.assembly.native import (
+    prepare_native_configs,
     to_articulation_configs,
     to_rigid_config,
     to_rigid_configs,
@@ -81,7 +82,7 @@ def test_hinge_export_rejects_names_and_symlinks_outside_output(tmp_path: Path) 
 def test_source_collision_only_body_remains_invisible(tmp_path: Path) -> None:
     from embodichain.toolkits.assembly import AssemblyBody, AssemblyGeometry
     from embodichain.lab.sim.spawn.descriptors import rigid_desc_from_cfg
-    from embodichain.lab.sim.assembly._visual import _write_rigid_visual_meshes
+    from embodichain.toolkits.assembly._visual import _write_rigid_visual_meshes
 
     body = AssemblyBody(
         name="hidden",
@@ -103,7 +104,7 @@ def test_rigid_preview_preflights_all_names_before_writing(
     tmp_path: Path, name_kind: str
 ) -> None:
     from embodichain.toolkits.assembly import AssemblyBody, AssemblyGeometry
-    from embodichain.lab.sim.assembly._visual import _write_rigid_visual_meshes
+    from embodichain.toolkits.assembly._visual import _write_rigid_visual_meshes
 
     names = {
         "traversal": "../../../outside",
@@ -128,7 +129,7 @@ def test_rigid_preview_preflights_all_names_before_writing(
 @pytest.mark.parametrize("destination", ["obj", "mtl", "directory"])
 def test_rigid_preview_rejects_cache_symlinks(tmp_path: Path, destination: str) -> None:
     from embodichain.toolkits.assembly import AssemblyBody, AssemblyGeometry
-    from embodichain.lab.sim.assembly._visual import _write_rigid_visual_meshes
+    from embodichain.toolkits.assembly._visual import _write_rigid_visual_meshes
 
     asset = AssemblyAsset(
         bodies=[
@@ -362,7 +363,7 @@ def test_native_visual_obj_preserves_source_triangles_and_body_ownership(
     from dataclasses import asdict
 
     from embodichain.toolkits.assembly import AssemblyBody, AssemblyGeometry
-    from embodichain.lab.sim.assembly._visual import _write_rigid_visual_meshes
+    from embodichain.toolkits.assembly._visual import _write_rigid_visual_meshes
 
     source_vertices = [[0, 0, 0], [0.01, 0, 0], [0, 0.01, 0]]
     body = AssemblyBody(
@@ -421,7 +422,7 @@ def test_native_visual_obj_preserves_source_triangles_and_body_ownership(
 def test_native_visual_obj_keeps_rotated_sharp_edge_normals(tmp_path) -> None:
     """Shared vertices must not smooth a ninety-degree edge or translate normals."""
     from embodichain.toolkits.assembly import AssemblyBody, AssemblyGeometry
-    from embodichain.lab.sim.assembly._visual import write_visual_mesh
+    from embodichain.toolkits.assembly._visual import write_visual_mesh
 
     body = AssemblyBody(
         name="hard_corner",
@@ -454,7 +455,7 @@ def test_native_visual_obj_uses_an_analytic_cylinder_only_for_appearance(
 ) -> None:
     """The file's tessellated appearance must leave its native collider intact."""
     from embodichain.toolkits.assembly import AssemblyBody, AssemblyGeometry
-    from embodichain.lab.sim.assembly._visual import write_visual_mesh
+    from embodichain.toolkits.assembly._visual import write_visual_mesh
     from embodichain.lab.sim.shapes import CylinderCfg
 
     body = AssemblyBody(
@@ -509,7 +510,7 @@ def test_default_source_contacts_require_an_explicit_backend_comparison() -> Non
 
 def test_failed_asset_write_preserves_existing_complete_cache_file(tmp_path):
     import pytest
-    from embodichain.lab.sim.assembly._visual import _atomic_text
+    from embodichain.toolkits.assembly._visual import _atomic_text
 
     path = tmp_path / "mesh.obj"
     path.write_text("previous complete mesh")
@@ -519,3 +520,59 @@ def test_failed_asset_write_preserves_existing_complete_cache_file(tmp_path):
             raise RuntimeError("interrupted")
     assert path.read_text() == "previous complete mesh"
     assert list(tmp_path.iterdir()) == [path]
+
+
+@pytest.mark.parametrize("file_visuals", [False, True])
+def test_prepare_native_mixed_bodies_preserves_physics_and_empty_appearance(
+    tmp_path: Path, file_visuals: bool
+) -> None:
+    from dataclasses import asdict
+    from embodichain.toolkits.assembly import (
+        AssemblyBody,
+        AssemblyGeometry,
+        AssemblyJoint,
+    )
+    from embodichain.lab.sim.cfg import ArticulationCfg, RigidObjectCfg
+    from embodichain.lab.sim.shapes import CylinderCfg, MeshCfg
+
+    rigid = AssemblyBody(
+        name="bolt",
+        joint=AssemblyJoint(kind="free"),
+        mass=2.0,
+        inertia=[[0.01, 0, 0], [0, 0.02, 0], [0, 0, 0.025]],
+        geometries=[AssemblyGeometry(kind="cylinder", size=[0.005, 0.01])],
+    )
+    hidden = rigid.copy()
+    hidden.name = "hidden"
+    hidden.geometries[0].visible = False
+    hinge = rigid.copy()
+    hinge.name = "gear"
+    hinge.joint = AssemblyJoint(name="axis", kind="hinge")
+    asset = AssemblyAsset(bodies=[rigid, hidden, hinge])
+    original = asdict(asset)
+    configs = prepare_native_configs(
+        asset,
+        tmp_path,
+        source_contact=False,
+        backend="default",
+        file_visuals=file_visuals,
+    )
+    assert set(configs) == {"bolt", "hidden", "gear"}
+    assert isinstance(configs["gear"], ArticulationCfg)
+    assert Path(configs["gear"].fpath).is_file()
+    assert isinstance(configs["bolt"], RigidObjectCfg)
+    assert configs["hidden"].visuals == []
+    assert isinstance(configs["bolt"].shape.parts[0].shape, CylinderCfg)
+    assert configs["bolt"].attrs.mass_props.mass == 2.0
+    representation = configs["bolt"].visuals[0].representation
+    if file_visuals:
+        assert isinstance(representation, MeshCfg)
+        assert Path(representation.fpath).is_file()
+    else:
+        assert isinstance(representation, CylinderCfg)
+    assert asdict(asset) == original
+
+    asset.bodies.append(rigid.copy())
+    with pytest.raises(ValueError, match="names must be unique"):
+        prepare_native_configs(asset, tmp_path / "duplicate", source_contact=False)
+    assert not (tmp_path / "duplicate").exists()
