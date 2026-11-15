@@ -335,11 +335,28 @@ class TactileIndentation(_ReadOnlySensor):
             self._data_buffer["rgb"][rows] = self._rgb_background
 
     def update(self, **kwargs: object) -> None:
-        """Publish the bounded outward depth and validity for each probe."""
+        """Refresh stateless depth and RGB, or retain the completed shear sample.
+
+        With shear enabled, the scheduler updates all fields and advances the
+        relative-pose history together at the configured sample boundary.
+        """
+        if self._shear is None:
+            self._acquire_frame()
+
+    def _acquire_sample(self, *, sample_dt: float, fetch_only: bool) -> None:
+        self._acquire_frame()
+
+    def _acquire_frame(self) -> None:
         if self._scene is None or self._query is None:
             raise RuntimeError("TactileIndentation must be bound before sampling.")
-        poses = [pose for _, pose in self._scene._posed_meshes()]
+        meshes = self._scene._posed_meshes()
         mount = self.get_mount_pose()
+        if self._shear is not None:
+            # Share the Warp-compatible layout between indentation and shear.
+            mount = mount.contiguous()
+            poses = [pose.contiguous() for _, pose in meshes]
+        else:
+            poses = [pose for _, pose in meshes]
         self._query.cast(mount, poses, use_candidates=self.cfg.use_candidates)
         torch.ge(self._data_buffer["shape_id"], 0, out=self._data_buffer["hit"])
         if self._rgb is not None:

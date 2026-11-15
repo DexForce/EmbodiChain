@@ -170,6 +170,30 @@ def test_registered_indentation_observes_motion_in_only_selected_arena() -> None
         torch.testing.assert_close(
             sensor.get_data()["depth"], torch.full((2, 4, 4), 0.02)
         )
+        completed_data = sensor.get_data().clone()
+        completed_metadata = sensor.get_sample_metadata().clone()
+        solid.set_local_pose(torch.tensor([[0.02, 0, 0.18, 0, 0, 0, 1]]), env_ids=[1])
+        sensor.update()
+        for key, expected in completed_data.items():
+            torch.testing.assert_close(sensor.get_data()[key], expected)
+        for key, expected in completed_metadata.items():
+            torch.testing.assert_close(sensor.get_sample_metadata()[key], expected)
+
+        solid.set_local_pose(torch.tensor([[0.0, 0, 0.18, 0, 0, 0, 1]]), env_ids=[1])
+        sim.update(step=1, render_final_step=False)
+        torch.testing.assert_close(
+            sensor.get_sample_metadata()["physics_step"],
+            completed_metadata["physics_step"] + 1,
+        )
+        torch.testing.assert_close(
+            sensor.get_sample_metadata()["sample_id"],
+            completed_metadata["sample_id"] + 1,
+        )
+        torch.testing.assert_close(
+            sensor.get_data()["shear_displacement"],
+            completed_data["shear_displacement"],
+        )
+
         solid.set_local_pose(torch.tensor([[0.0, 0.0, 0.3, 0, 0, 0, 1.0]]), env_ids=[1])
         sim.update(step=1, render_final_step=False)
         data = sensor.get_data()
@@ -278,3 +302,48 @@ def test_relative_shear_sticks_slips_and_clears_on_contact_change(
     first[:, 0, 3] += 0.03
     second[1, 2, 3] = 0.3
     check_reading(5, (2.0, 0.0), (0.003, 0.0))
+
+
+@pytest.mark.parametrize(
+    "device", ["cpu", pytest.param("cuda:0", marks=pytest.mark.gpu)]
+)
+def test_shear_reads_strided_mount_and_target_poses(device: str) -> None:
+    trimesh = pytest.importorskip("trimesh")
+    box = _mesh(trimesh.creation.box(extents=(0.2, 0.2, 0.04)), device)
+    identity = torch.eye(4, device=device).repeat(2, 1, 1)
+    mount = identity.clone().transpose(-1, -2)
+    target = identity.clone().transpose(-1, -2)
+    assert not mount.is_contiguous() and not target.is_contiguous()
+    scene = RayScene([(box, lambda: target)])
+    context = SensorContext(
+        torch.device(device), 2, None, None, ray_factory=lambda *_: scene
+    )
+    sensor = TactileIndentation(
+        TactileIndentationCfg(
+            uid="pad",
+            target_uids=("target",),
+            resolution=(1, 1),
+            max_depth=0.02,
+            shear=TactileIndentationCfg.ShearCfg(
+                normal_stiffness=100.0,
+                shear_stiffness=50.0,
+                friction=0.5,
+                marker_indices=(0,),
+            ),
+        ),
+        context=context,
+    )
+    sensor._bind(1, lambda: mount)
+    sensor._sample(1, 0.01, 1, 0.01)
+    mount[0, 0, 3] = 0.001
+    target[:, 0, 3] = torch.tensor([0.003, -0.004], device=device)
+    sensor._sample(2, 0.02, 2, 0.01)
+
+    data = sensor.get_data()
+    expected = torch.tensor([[0.002, 0.0], [-0.004, 0.0]], device=device)
+    assert data["shape_id"][:, 0, 0].tolist() == [0, 0]
+    torch.testing.assert_close(
+        data["normal_force"][:, 0, 0], torch.full((2,), 2.0, device=device)
+    )
+    torch.testing.assert_close(data["marker_displacement"][:, 0], expected)
+    torch.testing.assert_close(data["shear_force"][:, 0, 0], 50.0 * expected)

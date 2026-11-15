@@ -262,7 +262,9 @@ Set `TactileIndentationCfg.shear` to estimate per-cell compressive and shear
 forces in newtons and elastic displacement in meters. It drives the elastic
 state from completed-sample relative probe motion against the winning collider,
 caps shear at the Coulomb limit, and clears state on a miss, collider change,
-or reset. The first sample of a contact supplies normal force and starts with
+or reset. With shear enabled, the scheduler updates all fields and the shear
+history at the same sample boundary. Direct `update()` retains the completed
+sample. The first sample of a contact supplies normal force and starts with
 zero shear. The tangent axes are mount +X projected onto the probe plane
 (+Y when close to the normal) and the cross product of the normal and that
 tangent. Ordered `marker_indices` expose a sparse subset of the same relative
