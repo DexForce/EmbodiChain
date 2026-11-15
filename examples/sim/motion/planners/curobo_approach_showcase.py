@@ -62,6 +62,7 @@ def _scene(render: bool) -> tuple[Any, Any, list[Any]]:
     from embodichain.lab.sim.cfg import RenderCfg, RigidBodyPhysicsCfg, RigidObjectCfg
     from embodichain.lab.sim.material import VisualMaterialCfg
     from embodichain.lab.sim.shapes import CubeCfg
+    from embodichain.lab.visualization import VisualizationCfg
     from embodichain_benchmarks.motion_generation._atomic_fixtures import (
         _create_franka_native_hand_cfg,
     )
@@ -69,6 +70,7 @@ def _scene(render: bool) -> tuple[Any, Any, list[Any]]:
     sim = SimulationManager(
         SimulationManagerCfg(
             headless=True,
+            visualization=VisualizationCfg(backend="none"),
             sim_device="cuda",
             width=WIDTH,
             height=HEIGHT,
