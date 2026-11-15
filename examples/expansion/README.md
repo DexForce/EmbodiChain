@@ -67,3 +67,39 @@ The primitive Cube baseline remains a separate, direct-configuration example.
 Its primitive shapes do not require asset catalogs.
 
 - [DemoSkill](demo_skill/README.md): task-specific real-demonstration assets, mixed/whole Task Program calls and qualified offline expansion.
+
+## Selected-environment scene comparison
+
+The [four-environment example](scene_batch.py) runs the existing native UR5
+Pick/Place Task Program through `execute_scene_variants`. It records the real
+scene before preparation, after selected-row pose changes, after execution and
+after restoring the captured initial states:
+
+```bash
+embodichain run-example expansion/scene_batch --output /tmp/scene-batch
+```
+
+Use a new or empty output directory. This requires Default physics, the Hybrid
+offscreen renderer, Pillow and imageio/ffmpeg. The example selects SDL's dummy
+video driver automatically on a machine without a display server.
+
+- Environment 0 is an unselected reference. Preparation/restoration do not
+  rewrite its physical state.
+- Environments 1 and 3 start at distinct valid poses and execute measured grasp,
+  placement and release.
+- Environment 2 is outside the example's declared initial XY region. Its initial
+  check rejects it before task execution and blocks its recording eligibility.
+- All selected snapshots are restored and checked numerically without stepping.
+  The rejected initial scene remains invalid after its physical state is restored.
+
+Open `index.html` to play the native four-camera `preview.mp4` and inspect
+`comparison.png`. The four stage PNGs retain the complete scene view;
+`report.json` contains row-specific evidence, and `measured_states.npz` contains
+measured poses and joints. Video frames follow the control clock, with one-second
+inspection holds at key stages; `--stride 2` captures every second control step.
+These are diagnostic artifacts, and the example does not persist a training
+dataset. Recording eligibility is measured before restoration resets the buffers.
+
+Execution advances the whole World. Unselected/rejected rows retain their passive
+dynamics even though no Pick/Place task is executed for them. Renderer history and
+the shared physical clock are not rewound by physical-state restoration.
