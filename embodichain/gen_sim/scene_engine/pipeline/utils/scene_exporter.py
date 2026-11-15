@@ -337,6 +337,10 @@ class SceneExporter:
                     # appearance until an extension-specific reader owns it.
                     if material.get("extensions"):
                         return False
+                    # Missing images may disappear from Trimesh's loaded material.
+                    # Authored texture use is ineligible even if decoding failed.
+                    if "baseColorTexture" in material.get("pbrMetallicRoughness", {}):
+                        return False
                     mode = material.get("alphaMode", "OPAQUE")
                     if mode == "OPAQUE":
                         continue
