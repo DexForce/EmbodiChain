@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 import torch
 from tensordict import TensorDict
 
@@ -42,12 +44,16 @@ class RolloutBuffer:
         device: torch.device,
         critic_obs_dim: int | None = None,
         distribution_param_dim: int | None = None,
+        training_field_specs: (
+            Mapping[str, tuple[tuple[int, ...], torch.dtype]] | None
+        ) = None,
     ) -> None:
         self.num_envs = num_envs
         self.rollout_len = rollout_len
         self.obs_dim = obs_dim
         self.critic_obs_dim = critic_obs_dim
         self.distribution_param_dim = distribution_param_dim
+        self.training_field_specs = dict(training_field_specs or {})
         self.action_dim = action_dim
         self.device = device
         self._rollout = self._allocate_rollout()
@@ -176,6 +182,29 @@ class RolloutBuffer:
                     dtype=torch.float32,
                     device=self.device,
                 )
+        for name, (shape, dtype) in self.training_field_specs.items():
+            derived_fields = {
+                "next_value",
+                "advantage",
+                "return",
+                "entropy",
+                "seq_mask",
+                "seq_return",
+                "critic_obs",
+                "action_mean",
+                "action_std",
+            }
+            if name in fields or name in derived_fields:
+                raise ValueError(
+                    f"Training field '{name}' collides with a rollout field."
+                )
+            fields[name] = torch.empty(
+                self.num_envs,
+                self.rollout_len + 1,
+                *shape,
+                dtype=dtype,
+                device=self.device,
+            )
         return TensorDict(
             fields,
             batch_size=[self.num_envs, self.rollout_len + 1],
@@ -202,6 +231,8 @@ class RolloutBuffer:
         for name in ("action_mean", "action_std"):
             if name in self._rollout.keys():
                 self._rollout[name][:, last_idx].zero_()
+        for name in self.training_field_specs:
+            self._rollout[name][:, last_idx].zero_()
 
     def _validate_rollout_layout(self, rollout: TensorDict) -> None:
         """Validate the expected tensor shapes for the shared rollout."""
@@ -229,6 +260,8 @@ class RolloutBuffer:
                     self.rollout_len + 1,
                     self.distribution_param_dim,
                 )
+        for name, (shape, _) in self.training_field_specs.items():
+            expected_shapes[name] = (self.num_envs, self.rollout_len + 1, *shape)
         for key, expected_shape in expected_shapes.items():
             actual_shape = tuple(rollout[key].shape)
             if actual_shape != expected_shape:
