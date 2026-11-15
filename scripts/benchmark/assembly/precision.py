@@ -44,19 +44,43 @@ from embodichain_benchmarks.assembly.precision import (
 __all__: list[str] = []
 
 
+def _profile_label(row: dict) -> str:
+    """Keep requested Newton families distinct, including unsuccessful cells."""
+    backend = row["backend"]
+    if backend == "newton":
+        family = row.get("requested_newton_solver") or "mujoco_warp"
+        cpu = ",cpu" if row.get("requested_mujoco_cpu") else ""
+        backend = f"newton[{family}{cpu}]"
+    return f"{backend}/{row['route']}"
+
+
+def _dispatch_label(row: dict) -> str:
+    """Show measured dispatch without guessing from the request."""
+    diagnostics = row.get("solver_diagnostics") or {}
+    return (
+        diagnostics.get("features", {}).get("backend")
+        or diagnostics.get("solver_type")
+        or "unavailable"
+    )
+
+
 def run_all_benchmarks(args: argparse.Namespace) -> Path:
     """Run isolated cells and write exactly three comparison tables plus data."""
+    if args.newton_solvers and "newton" not in args.backends:
+        raise ValueError("--newton-solvers requires newton in --backends.")
     if args.probe != "passive" and args.num_envs != [1]:
         raise ValueError(
             "Constrained probes batch one world per direction; use --directions. Use --probe passive for an environment-capacity sweep."
         )
     if args.probe != "passive" and (
-        args.solver_tolerance is not None
+        args.solver is not None
+        or args.use_mujoco_cpu
+        or args.solver_tolerance is not None
         or args.multiccd is not None
         or args.warp_reference_initialization != "cpu_compiled"
     ):
         raise ValueError(
-            "Solver tolerance and MultiCCD overrides currently apply to passive probes only."
+            "MuJoCo algorithm, CPU and calibration overrides currently apply to passive probes only."
         )
     directory = Path(args.output).resolve()
     directory.mkdir(parents=True, exist_ok=True)
@@ -116,108 +140,120 @@ def run_all_benchmarks(args: argparse.Namespace) -> Path:
             for route in (
                 args.routes if backend in {"newton", "default"} else ["direct"]
             ):
-                for timestep in args.timesteps:
-                    for worlds in args.num_envs if backend != "mujoco_cpu" else [1]:
-                        cfg = PrecisionRunCfg(
-                            backend=backend,
-                            route=route,
-                            num_envs=worlds,
-                            duration=args.duration,
-                            timestep=timestep,
-                            contact_offset=args.contact_offset,
-                            rest_offset=args.rest_offset,
-                            solver_iterations=args.solver_iterations,
-                            contact_capacity=args.contact_capacity,
-                            source_contact=not args.backend_contacts,
-                            solver=args.solver,
-                            use_mujoco_cpu=args.use_mujoco_cpu,
-                            solver_tolerance=args.solver_tolerance,
-                            enable_multiccd=args.multiccd,
-                            warp_reference_initialization=args.warp_reference_initialization,
-                            work_dir=str(directory / "runtime"),
-                        )
-                        cell = directory / f"cell_{len(rows)}.json"
-                        spec = directory / f"spec_{len(rows)}.json"
-                        spec.write_text(
-                            json.dumps(
-                                {
-                                    **asdict(cfg),
-                                    "constrained_probe": args.probe,
-                                    "num_directions": args.directions,
-                                }
-                            ),
-                            encoding="utf-8",
-                        )
-                        command = [
-                            sys.executable,
-                            str(Path(__file__).resolve()),
-                            "--cell",
-                            str(manifest),
-                            "--cell-config",
-                            str(spec),
-                            "--cell-output",
-                            str(cell),
-                        ]
-                        try:
-                            completed = subprocess.run(
-                                command,
-                                capture_output=True,
-                                text=True,
-                                timeout=args.cell_timeout,
+                for family in (
+                    (args.newton_solvers or [None]) if backend == "newton" else [None]
+                ):
+                    for timestep in args.timesteps:
+                        for worlds in args.num_envs if backend != "mujoco_cpu" else [1]:
+                            cfg = PrecisionRunCfg(
+                                backend=backend,
+                                route=route,
+                                num_envs=worlds,
+                                duration=args.duration,
+                                timestep=timestep,
+                                contact_offset=args.contact_offset,
+                                rest_offset=args.rest_offset,
+                                solver_iterations=args.solver_iterations,
+                                contact_capacity=args.contact_capacity,
+                                source_contact=not args.backend_contacts,
+                                newton_solver=family,
+                                solver=args.solver,
+                                use_mujoco_cpu=args.use_mujoco_cpu,
+                                solver_tolerance=args.solver_tolerance,
+                                enable_multiccd=args.multiccd,
+                                warp_reference_initialization=args.warp_reference_initialization,
+                                work_dir=str(
+                                    directory / "runtime" / f"cell_{len(rows)}"
+                                ),
                             )
-                            (directory / f"cell_{len(rows)}.log").write_text(
-                                completed.stdout + "\n" + completed.stderr,
+                            cell = directory / f"cell_{len(rows)}.json"
+                            spec = directory / f"spec_{len(rows)}.json"
+                            spec.write_text(
+                                json.dumps(
+                                    {
+                                        **asdict(cfg),
+                                        "constrained_probe": args.probe,
+                                        "num_directions": args.directions,
+                                    }
+                                ),
                                 encoding="utf-8",
                             )
-                            if completed.returncode != 0:
-                                result = {
-                                    "backend": backend,
-                                    "route": route,
-                                    "status": "failed",
-                                    "reason": f"Process exit {completed.returncode}: {completed.stderr[-1800:]}",
-                                }
-                            else:
-                                try:
-                                    result = json.loads(cell.read_text())
-                                    if (
-                                        not isinstance(result, dict)
-                                        or result.get("asset_sha256")
-                                        != asset.content_hash
-                                        or result.get("config") != asdict(cfg)
-                                    ):
-                                        raise ValueError(
-                                            "Cell output does not match this asset and configuration."
-                                        )
-                                except (OSError, ValueError) as error:
+                            command = [
+                                sys.executable,
+                                str(Path(__file__).resolve()),
+                                "--cell",
+                                str(manifest),
+                                "--cell-config",
+                                str(spec),
+                                "--cell-output",
+                                str(cell),
+                            ]
+                            try:
+                                completed = subprocess.run(
+                                    command,
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=args.cell_timeout,
+                                )
+                                (directory / f"cell_{len(rows)}.log").write_text(
+                                    completed.stdout + "\n" + completed.stderr,
+                                    encoding="utf-8",
+                                )
+                                if completed.returncode != 0:
                                     result = {
                                         "backend": backend,
                                         "route": route,
                                         "status": "failed",
-                                        "reason": str(error),
+                                        "reason": f"Process exit {completed.returncode}: {completed.stderr[-1800:]}",
                                     }
-                        except subprocess.TimeoutExpired:
-                            result = {
-                                "backend": backend,
-                                "route": route,
-                                "status": "failed",
-                                "reason": "Probe process timed out.",
-                            }
-                        result.update(
-                            config_name=name,
-                            requested_num_envs=worlds,
-                            timestep=timestep,
-                            asset_sha256=asset.content_hash,
-                        )
-                        result.setdefault("num_envs", worlds)
-                        cell.write_text(
-                            json.dumps(result, indent=2, allow_nan=False) + "\n"
-                        )
-                        result["probe"] = args.probe
-                        rows.append(result)
-                        print(
-                            f"{name} {backend}/{route} B={worlds} dt={timestep}: {result['status']}",
-                            flush=True,
-                        )
+                                else:
+                                    try:
+                                        result = json.loads(cell.read_text())
+                                        if (
+                                            not isinstance(result, dict)
+                                            or result.get("asset_sha256")
+                                            != asset.content_hash
+                                            or result.get("config") != asdict(cfg)
+                                        ):
+                                            raise ValueError(
+                                                "Cell output does not match this asset and configuration."
+                                            )
+                                    except (OSError, ValueError) as error:
+                                        result = {
+                                            "backend": backend,
+                                            "route": route,
+                                            "status": "failed",
+                                            "reason": str(error),
+                                        }
+                            except subprocess.TimeoutExpired:
+                                result = {
+                                    "backend": backend,
+                                    "route": route,
+                                    "status": "failed",
+                                    "reason": "Probe process timed out.",
+                                }
+                            result.update(
+                                requested_newton_solver=(
+                                    (family or "mujoco_warp")
+                                    if backend == "newton"
+                                    else None
+                                ),
+                                requested_mujoco_cpu=args.use_mujoco_cpu,
+                                config_name=name,
+                                requested_num_envs=worlds,
+                                timestep=timestep,
+                                asset_sha256=asset.content_hash,
+                            )
+                            result.setdefault("num_envs", worlds)
+                            cell.write_text(
+                                json.dumps(result, indent=2, allow_nan=False) + "\n"
+                            )
+                            result["probe"] = args.probe
+                            rows.append(result)
+                            print(
+                                f"{name} {_profile_label(result)} B={worlds} dt={timestep}: {result['status']}",
+                                flush=True,
+                            )
     versions = {}
     for package in [
         "mujoco",
@@ -262,19 +298,19 @@ def run_all_benchmarks(args: argparse.Namespace) -> Path:
         "",
         "## Time & Memory",
         "",
-        "| asset | backend/route | worlds | dt | cost_time_ms/world-step | cpu_delta_mb | gpu_delta_mb | peak_gpu_mb |",
-        "|---|---|---:|---:|---:|---|---|---|",
+        "| asset | backend/solver/route | actual dispatch | worlds | dt | cost_time_ms/world-step | cpu_delta_mb | gpu_delta_mb | peak_gpu_mb |",
+        "|---|---|---|---:|---:|---:|---|---|---|",
     ]
     for row in rows:
         lines.append(
-            f"| {row['config_name']} | {row['backend']}/{row['route']} | {row['num_envs']} | {row['timestep']} | {row.get('step_time_ms', 'unmeasured')} | unmeasured | unmeasured | unmeasured |"
+            f"| {row['config_name']} | {_profile_label(row)} | {_dispatch_label(row)} | {row['num_envs']} | {row['timestep']} | {row.get('step_time_ms', 'unmeasured')} | unmeasured | unmeasured | unmeasured |"
         )
     lines += [
         "",
         "## Success & Other Metrics",
         "",
-        "| asset | backend/route | status | measured success | geometric error m | mass relative error | inertia relative error |",
-        "|---|---|---|---:|---:|---:|---:|",
+        "| asset | backend/solver/route | actual dispatch | status | measured success | geometric error m | mass relative error | inertia relative error |",
+        "|---|---|---|---|---:|---:|---:|---:|",
     ]
     for row in rows:
         measured = next(g for g in geometry if g["config"] == row["config_name"])
@@ -287,7 +323,7 @@ def run_all_benchmarks(args: argparse.Namespace) -> Path:
             )
         ]
         lines.append(
-            f"| {row['config_name']} | {row['backend']}/{row['route']} | {row['status']} | {row.get('metrics', {}).get('success_rate', 'unmeasured')} | {' | '.join(values)} |"
+            f"| {row['config_name']} | {_profile_label(row)} | {_dispatch_label(row)} | {row['status']} | {row.get('metrics', {}).get('success_rate', 'unmeasured')} | {' | '.join(values)} |"
         )
     for measured in geometry:
         if measured.get("reason"):
@@ -302,10 +338,10 @@ def run_all_benchmarks(args: argparse.Namespace) -> Path:
         "| rank | algorithm | qualified passive cells | attempted cells | overall_success_rate |",
         "|---:|---|---:|---:|---:|",
     ]
-    algorithms = sorted({f"{r['backend']}/{r['route']}" for r in rows})
+    algorithms = sorted({_profile_label(r) for r in rows})
     ranked = []
     for algorithm in algorithms:
-        attempts = [r for r in rows if f"{r['backend']}/{r['route']}" == algorithm]
+        attempts = [r for r in rows if _profile_label(r) == algorithm]
         passed = sum(r["status"] == "passed" for r in attempts)
         ranked.append((passed / len(attempts), algorithm, passed, len(attempts)))
     for rank, (rate, algorithm, passed, attempted) in enumerate(
@@ -316,7 +352,7 @@ def run_all_benchmarks(args: argparse.Namespace) -> Path:
         if row.get("reason"):
             lines += [
                 "",
-                f"- {row['config_name']} {row['backend']}/{row['route']}: {row['reason'].replace(chr(10), ' ')}",
+                f"- {row['config_name']} {_profile_label(row)}: {row['reason'].replace(chr(10), ' ')}",
             ]
     report.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"Markdown report saved: {report}")
@@ -350,6 +386,13 @@ def main() -> None:
     parser.add_argument("--contact-offset", type=float, default=0.0)
     parser.add_argument("--rest-offset", type=float, default=0.0)
     parser.add_argument("--solver-iterations", type=int, default=100)
+    parser.add_argument(
+        "--newton-solvers",
+        "--newton-solver",
+        nargs="+",
+        choices=["mujoco_warp", "dexuni"],
+        help="Newton solver families to compare; other backends run once.",
+    )
     parser.add_argument("--solver", choices=["pgs", "cg", "newton"])
     parser.add_argument("--use-mujoco-cpu", action="store_true")
     parser.add_argument("--solver-tolerance", type=float)
@@ -417,7 +460,11 @@ def main() -> None:
                     }
                 else:
                     result = run_native_probe(
-                        asset, selected, backend=cfg.backend, work_dir=cfg.work_dir
+                        asset,
+                        selected,
+                        backend=cfg.backend,
+                        newton_solver=cfg.newton_solver,
+                        work_dir=cfg.work_dir,
                     )
             except (
                 ValueError,

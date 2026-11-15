@@ -77,6 +77,24 @@ reference supports `--backend mujoco_cpu --solver pgs`. Historical Newton CPU
 PGS profiles are retained in the runtime archive linked below. Generated traces
 record the executor, selected solver and measured outcome.
 
+Newton solver selection is explicit: `--newton-solver mujoco_warp|dexuni`.
+Omission preserves MuJoCo Warp. `--solver pgs|cg|newton` continues to select the
+MuJoCo algorithm. The Newton selector requires `--backend newton`.
+
+```bash
+embodichain run-example sim/assembly/visual_demo --config circle --clearance .0001 --newton-solver dexuni --native-window --native-record --renderer fast-rt --output outputs/assembly_native_window/dexuni
+embodichain run-example sim/assembly/gear_pair --newton-solver dexuni --solver cg --duration .5
+python scripts/benchmark/assembly/precision.py --configs circle --backends newton --routes direct --newton-solvers mujoco_warp dexuni --duration .2
+```
+
+`PrecisionRunCfg.newton_solver` and `run_native_probe(..., newton_solver=...)`
+expose the same selection in the packaged benchmark API. DexUni routes MuJoCo
+options through `mujoco_options`. JSON results retain the requested configuration,
+actual Newton family and SDK dispatch diagnostics; reports keep the two families
+separate, including failures. These assembly profiles require DexUni's measured
+`pure_mujoco` dispatch; missing diagnostics or a VBD/coupled dispatch is explicitly
+unsupported. Native capacity/precision qualification remains `unverified`.
+
 For the native DexSim rendering window, use a desktop display and a supporting
 SDK runtime. The rc2 RGB recordings below use FastRT, 16 samples per pixel and
 OptiX denoising, with a camera framed around the centimetre-scale part. Hybrid
