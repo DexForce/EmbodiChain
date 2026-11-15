@@ -24,6 +24,14 @@ for measured 3D/RGB-D comparisons, per-capability checks, recovery diagnostics a
 portable dataset verification. `--mode quick` samples a smaller subset; unrun
 capabilities remain explicit. `--reuse` rebuilds the offline page without a World.
 
+## Native ghost preview
+
+See [the native ghost-preview notes](ghost-preview.md) for the existing SDK
+window comparison, the separately validated eight-result browser prototype,
+linked spatial/affordance/trajectory filters, and the native WebRTC follow-up.
+The prototype uses native offscreen rendering with HTTP JPEG transport; it is
+not a WebRTC entry point or a released general-purpose viewer.
+
 ## Run a configured job
 
 From the repository root, with the simulation dependencies installed:
