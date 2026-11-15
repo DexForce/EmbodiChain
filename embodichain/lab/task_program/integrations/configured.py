@@ -3380,6 +3380,8 @@ class _ConfiguredTaskProgramAdapterFactory:
     def create_adapter(
         self,
         environment: object,
+        *,
+        grasp_contact_frames: Mapping[str, object] | None = None,
     ) -> TaskProgramEnvironmentAdapter:
         """Create a live adapter for an initialized environment."""
         from .demo_skill import _ConfiguredDemoSkillSource
@@ -3390,7 +3392,9 @@ class _ConfiguredTaskProgramAdapterFactory:
         ):
             if getattr(environment, "num_envs", None) != 1:
                 raise ValueError("configured Demo Skills require num_envs == 1")
-        adapter = self.delegate.create_adapter(environment)
+        adapter = self.delegate.create_adapter(
+            environment, grasp_contact_frames=grasp_contact_frames
+        )
         adapter._set_configured_nominal_sources(self.nominal_motion_sources)
         return adapter
 

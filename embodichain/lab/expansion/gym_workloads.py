@@ -135,7 +135,7 @@ class _GymWorkloadSource:
         ids = tuple(a.env_id for a in assignments)
         view = SceneView(self.env.sim, env_ids=ids)
         # Every candidate starts from the same seeded nominal reset. Original
-        # reset events may run, but cannot resample an unowned scene axis.
+        # scene reset events were frozen before rolling admission began.
         apply_changes_batch(
             view,
             {row: SceneChangeSet(self.nominal, tuple(self.nominal)) for row in ids},
@@ -559,12 +559,21 @@ def run_gym_expansion_workloads(
     first = configs[0][1]
 
     def physical_key(cfg: Any) -> str:
+        robot = deepcopy(cfg.robot.to_dict())
+        for binding in robot.get("gripper_bindings", {}).values():
+            binding["declaration"].pop("root_from_contact_frame", None)
+            binding["defaults"].pop("root_from_contact_frame", None)
+            binding["defaults"].get("binding", {}).pop("root_from_contact_frame", None)
         return _hash(
             {
                 name: (
-                    getattr(cfg, name).to_dict()
-                    if hasattr(getattr(cfg, name), "to_dict")
-                    else getattr(cfg, name)
+                    robot
+                    if name == "robot"
+                    else (
+                        getattr(cfg, name).to_dict()
+                        if hasattr(getattr(cfg, name), "to_dict")
+                        else getattr(cfg, name)
+                    )
                 )
                 for name in (
                     "robot",
@@ -609,7 +618,30 @@ def run_gym_expansion_workloads(
         ] = env.task_program_adapter
         # Sampling only row zero retains the original B=1 seeded reference
         # regardless of the collection capacity. All rows use that same scene.
+        import inspect
+        from embodichain.lab.gym.envs.managers.event_manager import EventManager
+
+        events = getattr(env, "event_manager", None)
+        if events is not None:
+            for name in events.active_functors.get("reset", ()):
+                event = deepcopy(events.get_functor_cfg(name))
+                if "allow_partial_envs" in inspect.signature(event.func).parameters:
+                    # No trajectories are live during this one nominal reset.
+                    event.params["allow_partial_envs"] = True
+                    events.set_functor_cfg(name, event)
         env.reset(seed=execution.seed, options={"save_data": False, "reset_ids": [0]})
+        # The reference now owns all reset-time scene randomization/settling.
+        # Re-running those functors during row refill could advance live peers
+        # outside the executor and lose measured control boundaries.
+        if events is not None:
+            frozen_events = {
+                name: deepcopy(events.get_functor_cfg(name))
+                for mode, names in events.active_functors.items()
+                if mode != "reset"
+                for name in names
+            }
+            env.cfg.events = frozen_events
+            env.event_manager = EventManager(frozen_events, env)
         snapshot = _preview_snapshot(env)
         nominal = {
             uid: env.sim.get_rigid_object(uid)
@@ -668,7 +700,17 @@ def run_gym_expansion_workloads(
             factory = REGISTERED_ENVS[raw["id"]].task_program_adapter_factory
             adapter = adapters.get(id(factory))
             if adapter is None:
-                adapter = factory.create_adapter(env)
+                contact_frames = {}
+                for instance, binding in environment_cfg.robot.gripper_bindings.items():
+                    actual = first.robot.gripper_bindings[instance]
+                    frame = binding["defaults"].get("root_from_contact_frame")
+                    if frame != actual["defaults"].get("root_from_contact_frame"):
+                        contact_frames[binding["declaration"]["control_part"]] = frame
+                adapter = (
+                    factory.create_adapter(env, grasp_contact_frames=contact_frames)
+                    if contact_frames
+                    else factory.create_adapter(env)
+                )
                 adapters[id(factory)] = adapter
             ctx.program = adapter.compile(environment_cfg.task_program)
             if (

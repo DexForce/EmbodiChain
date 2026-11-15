@@ -353,6 +353,7 @@ class WorkloadProgramExecutor:
             return
         self.refills += bool(self.live)
         assignments = tuple(added)
+        before = self.env.sim.physics_step_index
         result = self.env.reset(
             seed=self.cfg.seed,
             options={
@@ -361,6 +362,10 @@ class WorkloadProgramExecutor:
                 "episode_prepare": lambda: self.source.prepare(assignments),
             },
         )
+        if self.env.sim.physics_step_index != before:
+            raise RuntimeError(
+                "rolling reset/preparation must not advance World physics"
+            )
         self.observation = result[0]
         rows = [a.env_id for a in added]
         self.hold[rows] = self.env.robot.get_qpos(target=True)[rows]

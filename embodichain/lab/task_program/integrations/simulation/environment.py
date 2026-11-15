@@ -1529,16 +1529,44 @@ class SimulationTaskProgramAdapterFactory:
     def create_adapter(
         self,
         environment: object,
+        *,
+        grasp_contact_frames: Mapping[str, object] | None = None,
     ) -> TaskProgramEnvironmentAdapter:
-        """Create fresh grasp services and bind the initialized environment."""
+        """Create fresh grasp services and bind the initialized environment.
+
+        Args:
+            environment: Sole owner of the actual robot and physical World.
+            grasp_contact_frames: Explicit per-control-part sampling conventions
+                matching this factory's declared grasp services. Only these
+                contact frames may differ from the installed binding; TCP,
+                physical meshes, joint commands and all other calibration stay
+                strictly checked. The live robot configuration is never mutated.
+
+        Returns:
+            Fresh adapter with independent grasp and execution services.
+        """
         from embodichain.toolkits.graspkit import GraspPoseGenerator
 
         self._registration.assert_unchanged()
+        frames = dict(grasp_contact_frames or {})
+        if set(frames) - self._grasp_pose_generator_factories.keys():
+            raise ValueError("Contact frame overrides require declared grasp services.")
         generators: dict[str, GraspPoseGenerator] = {}
         for target_id, factory in self._grasp_pose_generator_factories.items():
             validator = getattr(factory, "validate_binding", None)
             if validator is not None:
-                validator(environment.robot, target_id)
+                if target_id in frames:
+                    validator(
+                        environment.robot,
+                        target_id,
+                        contact_frame_override=frames[target_id],
+                    )
+                else:
+                    validator(environment.robot, target_id)
+            elif target_id in frames:
+                raise ValueError(
+                    "Grasp service cannot validate a contact frame override."
+                )
             generator = factory()
             if not isinstance(generator, GraspPoseGenerator):
                 raise TypeError(

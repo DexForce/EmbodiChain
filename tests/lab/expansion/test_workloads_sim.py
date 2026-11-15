@@ -348,6 +348,7 @@ def _probe(output: str) -> None:
 
 
 def _facade_probe(output: str) -> None:
+    from copy import deepcopy
     import hashlib
     import json
     import torch
@@ -363,6 +364,7 @@ def _facade_probe(output: str) -> None:
     )
     from embodichain.lab.expansion.collision import _MeasuredCollision
     from embodichain.lab.gym.utils.registration import (
+        REGISTERED_ENVS,
         discover_task_packages,
         execute_init_hooks,
     )
@@ -381,13 +383,44 @@ def _facade_probe(output: str) -> None:
     program["program"]["repeat"]["count"] = 1
     override = path / "program.yaml"
     override.write_text(yaml.safe_dump(program))
-    digest = hashlib.sha256(deployment.read_bytes()).hexdigest()
+
+    def absolute_paths(value, base):
+        if isinstance(value, dict):
+            return {key: absolute_paths(item, base) for key, item in value.items()}
+        if isinstance(value, list):
+            return [absolute_paths(item, base) for item in value]
+        if isinstance(value, str) and value.endswith((".yaml", ".yml", ".json")):
+            return str((base / value).resolve())
+        return value
+
+    raw = absolute_paths(yaml.safe_load(deployment.read_text()), deployment.parent)
+    component = Path(raw["embodiment"]["component"])
+    embodiment = absolute_paths(yaml.safe_load(component.read_text()), component.parent)
+    from embodichain.lab.gym.utils.gym_utils import config_to_cfg
+
+    base_cfg = config_to_cfg(
+        yaml.safe_load(deployment.read_text()), source_path=deployment
+    )
+    contact = deepcopy(
+        base_cfg.robot.gripper_bindings["eef"]["defaults"]["root_from_contact_frame"]
+    )
+    contact[0][3] += 0.001
+    embodiment["grippers"]["eef"]["root_from_contact_frame"] = contact
+    component_override = path / "embodiment.yaml"
+    component_override.write_text(yaml.safe_dump(embodiment))
+    raw["id"] = "TaskProgramRepeatedPickPlace-ContactFrame-v1"
+    raw["embodiment"]["component"] = str(component_override)
+    policy_deployment = path / "contact-frame.yaml"
+    policy_deployment.write_text(yaml.safe_dump(raw))
+    config_to_cfg(raw, source_path=policy_deployment)
     discover_task_packages()
     execute_init_hooks()
     workloads = []
     for name, target in (("pair", 2), ("queued", 1)):
+        selected_deployment = deployment if name == "pair" else policy_deployment
+        digest = hashlib.sha256(selected_deployment.read_bytes()).hexdigest()
         cfg = ExpansionRunCfg(
-            deployment=str(deployment),
+            deployment=str(selected_deployment),
             program=str(override),
             output_dir=str(path / name),
             target_episodes=target,
@@ -405,25 +438,34 @@ def _facade_probe(output: str) -> None:
             "runtime_versions": {},
         }
         workloads.append(GymExpansionWorkload(name, cfg, report, {}))
+
+    observed_bindings = []
+
+    def validator(env, output):
+        binding = deepcopy(env.robot.cfg.gripper_bindings)
+        observed_bindings.append((env.robot.cfg, binding))
+        factory = REGISTERED_ENVS[raw["id"]].task_program_adapter_factory
+        with pytest.raises(ValueError, match="actual hand installation"):
+            factory.create_adapter(env)
+        assert env.robot.cfg.gripper_bindings == binding
+        return _MeasuredCollision(
+            env,
+            str(root / "examples/expansion/scene_robot_feasibility/search.ur5.yaml"),
+            output,
+        )
+
     result = run_gym_expansion_workloads(
         workloads,
         WorkloadExecutionCfg(
             workload_count=1, batch_size=2, max_steps=2500, settling_steps=5
         ),
-        extensions=GymExpansionHostExtensions(
-            validator_factory=lambda env, output: _MeasuredCollision(
-                env,
-                str(
-                    root / "examples/expansion/scene_robot_feasibility/search.ur5.yaml"
-                ),
-                output,
-            )
-        ),
+        extensions=GymExpansionHostExtensions(validator_factory=validator),
         output_dir=path / "execution",
     )
     assert result["complete"], result
     assert result["num_envs"] == 2 and result["world"]["world_count"] == 1
     assert not SimulationManager._instances
+    assert all(cfg.gripper_bindings == binding for cfg, binding in observed_bindings)
     for name, expected in (("pair", 2), ("queued", 1)):
         group = result["workloads"][name]
         assert group["complete"] and group["committed_episodes"] == expected
@@ -439,6 +481,45 @@ def _facade_probe(output: str) -> None:
             ] + 1 == len(episode.actions)
             assert execution["world"] == result["world"]
     (path / "facade-result.json").write_text(json.dumps(result, indent=2))
+    # A real drive change remains incompatible even though contact conventions
+    # above are allowed. Reject before constructing another World.
+    embodiment["simulation"]["joint_drive_props"]["stiffness"][
+        "gripper_finger1_joint_1"
+    ] += 1
+    hardware_component = path / "different-hardware.yaml"
+    hardware_component.write_text(yaml.safe_dump(embodiment))
+    raw["id"] += "-Hardware"
+    raw["embodiment"]["component"] = str(hardware_component)
+    hardware_deployment = path / "different-hardware-task.yaml"
+    hardware_deployment.write_text(yaml.safe_dump(raw))
+    rejected = GymExpansionWorkload(
+        "different",
+        ExpansionRunCfg(
+            **{
+                **workloads[-1].cfg.to_dict(),
+                "deployment": str(hardware_deployment),
+                "output_dir": str(path / "different"),
+            }
+        ),
+        {
+            **workloads[-1].report,
+            "input_files": {
+                "deployment": hashlib.sha256(
+                    hardware_deployment.read_bytes()
+                ).hexdigest()
+            },
+        },
+        {},
+    )
+    with pytest.raises(ValueError, match="physical environment"):
+        run_gym_expansion_workloads(
+            [workloads[0], rejected],
+            WorkloadExecutionCfg(
+                workload_count=1, batch_size=2, max_steps=2500, settling_steps=5
+            ),
+            output_dir=path / "rejected",
+        )
+    assert not SimulationManager._instances
 
 
 @pytest.mark.requires_sim

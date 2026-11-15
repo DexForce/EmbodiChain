@@ -30,6 +30,13 @@ existing session, frame collector, episode assembler and confirmed artifact sink
 Different integration/grasp policies may share that World only when their
 physical configuration, program and cadence agree. Physical/visual/prototype
 operators remain on the cohort API; unsupported payloads fail explicitly.
+Explicit contact sampling conventions may differ per integration through
+`SimulationTaskProgramAdapterFactory.create_adapter(grasp_contact_frames=...)`;
+the declared frame must match its grasp service, while TCP, hardware geometry
+and drive/command bindings remain strict and the live robot is unchanged.
+Only the initial nominal reset may run scene-settling events. The facade then
+freezes reset events; rolling preparation is checked against the physical step
+counter so another row cannot advance outside the World-owner loop.
 Frozen groups export through one bounded writer thread without World access.
 Fresh output is required; this facade does not resume interrupted collection.
 
