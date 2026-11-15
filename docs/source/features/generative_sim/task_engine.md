@@ -1,14 +1,18 @@
 # Task Engine
 
-Task Engine turns an instruction and a scene photograph into task candidates,
-a normative TaskSpec, and a graph of canonical Semantic Calls. It preserves
-image evidence, source-clause traceability, and unresolved runtime bindings so
-you can inspect a proposed task before assembling an executable deployment.
+Task Engine publishes a specification of **what must hold** and a candidate graph of
+**how to achieve it**. Use `embodichain gensim task plan` to author a plan. It does
+not step a simulator. The default for this command is `hybrid`; it never retries
+a rejected plan using another route.
 
-Use `embodichain task-engine` for image-based semantic planning. Use the Python
-contracts to validate fixed declarations or render an existing graph without
-making model requests. The [API reference](../../api_reference/embodichain/embodichain.gen_sim.task_engine.rst)
-covers both routes.
+| Route | Input and planning strategy | When to use it |
+| --- | --- | --- |
+| Default (hybrid) | Original image and instruction. Compose source-quoted E1–E9 operations, audit them against the instruction, freeze objectives, and check the call graph against them. | Start here for an inspectable plan. Supported rigid manipulation graphs can proceed to automatic visual binding. |
+| `--route template` | Original image and instruction. Interpret a candidate, bind visual references, then propose and validate catalog calls. | Use the historical v2 plan format or revise a graph against an existing template publication. |
+| `--route goal` | Instruction, optional image or external proposal. Freeze quoted goals and milestones, then propose catalog calls without selecting E1–E9 templates. | Explore objectives outside the templates or inspect bounded graph repairs. Inspect its authoring `run_manifest.json`; this is not a qualified scene. |
+
+This default applies to **task plan**. The separate `gensim run` workflow and
+the choice of simulation renderer are independent.
 
 ## Place in the architecture
 
@@ -26,17 +30,17 @@ supply assets, physical entities, robot bindings, execution, and measured eviden
 
 ```mermaid
 flowchart TD
-    instruction["Instruction"] --> interpretation["TaskAgent: intent and candidate"]
-    interpretation --> spec["TaskSpec: normative requirements"]
-    interpretation --> grounding["Image references and evidence"]
-    image["PNG or JPEG photograph"] --> grounding
-    grounding --> planning["Catalog-constrained semantic planning"]
-    spec --> planning
-    catalog["Task Program language: data-only call catalog"] --> planning
-    planning --> checks["Graph, symbolic state, source-clause and binding checks"]
-    checks --> output["JSON artifacts and offline HTML viewer"]
-    output -.-> integration["Caller-owned scene and robot integration"]
-    integration --> execution["Task Program, Atomic Skills, motion, and Gym"]
+    inputs["Original instruction and photograph"] --> author["Task Engine: interpret, author and validate"]
+    author --> spec["TaskSpec: roles, goals and ordered milestones"]
+    author --> graph["SemanticTaskGraph: calls, resources and dependencies"]
+    spec --> req["Scene requirements"]
+    req --> scene["Scene provider: native inventory and geometry"]
+    spec --> qualify["Qualify scene and role bindings"]
+    graph --> qualify
+    scene --> qualify
+    qualify --> prepare["Accepted qualification + trusted robot and policies"]
+    prepare --> program["Prepare and compile Task Program"]
+    program --> execution["Execute and measure physical outcomes"]
 ```
 
 The image CLI ends at the semantic-graph output. Its logical image IDs become
@@ -81,7 +85,7 @@ geometry generation, segmentation, or an articulated-asset service.
 Choose an existing PNG/JPEG image and a fresh output directory:
 
 ```bash
-embodichain task-engine \
+embodichain gensim task plan \
   --image /path/to/tabletop.jpg \
   --instruction "Pick up the red cup and place it on the tray." \
   --task-id cup_on_tray \
@@ -91,7 +95,7 @@ embodichain task-engine \
 The package entry point accepts the same arguments:
 
 ```bash
-python -m embodichain task-engine \
+python -m embodichain gensim task plan \
   --image /path/to/tabletop.jpg \
   --instruction "Pick up the red cup and place it on the tray." \
   --output outputs/task_engine/cup_on_tray_02
@@ -99,17 +103,42 @@ python -m embodichain task-engine \
 
 | Argument | Required/default | Meaning |
 | --- | --- | --- |
-| `--image` | Required | Existing `.png`, `.jpg`, or `.jpeg` file; image bytes must also decode as PNG/JPEG |
+| `--image` | Hybrid/template | Existing `.png`, `.jpg`, or `.jpeg` file; image bytes must also decode as PNG/JPEG |
 | `--instruction` | Required | Complete task instruction to interpret and preserve |
 | `--output` | Required | Fresh output directory; existing directories are rejected |
 | `--task-id` | `image_task` | Shared identity for candidates, TaskSpec, graph, and run metadata |
 
-On success, the command prints the graph JSON and HTML paths. Open
-`semantic_task_graph.html` to inspect the result locally. The page embeds its
-viewer resources and image crops, so viewing a generated page requires neither
-Node nor another model request.
+Open `semantic_task_graph.html` in a published hybrid or template plan to inspect
+the specification and graph offline. The specification describes inputs,
+interpretation, configuration, objectives and generalization. Final goals must
+hold together; a milestone can describe a past event (such as handing over a
+fruit) and has its own dependencies. A generalization declaration describes
+variation across episodes; it is not evidence that those episodes were collected.
+The current hybrid and goal authors do not extract generalization declarations.
 
-## What the planning stages check
+## Read the default publication
+
+Start at `task_plan_manifest.json`. It identifies the specific frozen
+`task_spec_v1.json` and selected `semantic_task_graph.json`. Use
+`load_task_plan` to verify the publication before handing it downstream.
+`coverage.json` describes whether the calls witness the declarations;
+`source_audits.json` and `planning_history.json` explain interpretation and
+graph repair. Coverage is not a measurement of the world.
+
+| Hybrid manifest stage | What the consumer can do |
+| --- | --- |
+| `authoring_only` | Inspect the spec, graph and coverage. There is no qualified grounded witness. |
+| `pending_visual_binding` | Inspect the unresolved roles. An unobserved role has no measured box; this plan does not authorize deployment. |
+| `ready_for_qualification` | Submit the grounded plan and a matching scene to qualification. Native object IDs, robot resources and physical feasibility still need checking. |
+
+Automatic visual binding currently covers graphs made of pick, place, handover
+and coordinated transport calls. For example, an authored hinge-door closure
+can describe the correct goal while lacking a compatible articulation in the
+deployment. A static goal or a request for a deployment must not be presented
+as a successful preflight. To revise a hybrid plan today, author a new
+publication; `gensim task revise` uses the explicit template revision protocol.
+
+## How explicit template planning works
 
 1. **Interpretation:** `TaskAgent` validates structured intent, object/target
    selectors, dependencies, requested arms, and task-specific intent. The image
@@ -129,7 +158,7 @@ response. `OPENAI_MAX_ATTEMPTS` is the model transport retry setting, separate
 from these semantic repair rounds. Raw responses and diagnostics are retained
 in `model_attempts.json` or failure audit artifacts.
 
-The current intent vocabulary includes these task families:
+The template intent vocabulary includes these task families:
 
 | Family | Semantic intent |
 | --- | --- |
@@ -155,9 +184,9 @@ catalog = semantic_planning_catalog()
 print(sorted(catalog["calls"]))
 ```
 
-## Output artifacts
+## Explicit template artifacts
 
-A successful run contains:
+Alongside the v2 `task_plan_manifest.json` and frozen `task_spec_v1.json`, a successful template publication includes:
 
 ```text
 cup_on_tray/
@@ -196,9 +225,9 @@ On semantic planning failure, the CLI saves a sibling
 artifacts. The incomplete output directory is cleaned up. Use a fresh directory
 for another attempt; an existing successful run is never overwritten.
 
-## Read validation and pending bindings
+## Read template validation and pending bindings
 
-A successfully published image plan has these status fields:
+A successfully published template plan has these status fields:
 
 ```json
 {
@@ -232,7 +261,7 @@ object at that pose.
 
 ## Python planning and offline display
 
-The Python entry point returns the JSON-ready artifact mapping without writing
+The template Python entry point returns the JSON-ready artifact mapping without writing
 a run directory:
 
 ```python
@@ -281,19 +310,31 @@ or source-image crops, rather than observations after each proposed call.
 
 ## Continue to execution
 
-Resolve logical references against a real scene, provide robot profiles,
-affordances, runtime policies, and acceptance bindings, then use the configured
-Task Program preflight and execution path. Start with
-[Scene Registry](../../overview/task_program/scene_registry.md),
-[robot profiles](../../overview/task_program/robot_profiles.md), and the
-[Task Program tutorial](../../tutorial/task_program.rst).
+1. Give the scene provider `scene_requirements.json`: distinguish what must
+   hold initially from what the scene must support later. An instruction to
+   place fruit on a tray is not a request to start with fruit already on it.
+2. Call `qualify_task_scene` with the published plan, matching scene, trusted
+   runtime and policy. Inspect `scene_qualification.json` for its verdict,
+   logical-to-native bindings and issues.
+3. Pass the accepted qualification and matching inputs to
+   `prepare_task_deployment`. It binds the graph to the installation and
+   compiles the Task Program. Inspect `preflight_report.json`; only a later
+   execution can produce observations of the requested physical effects.
+
+For task1186 the two fruits must each pass from the right arm to the left and
+land on the same tray before both arms move it. The final test checks three
+relations **after** the move: apple on tray, orange on tray, and tray on service
+pad. Finishing the transport call alone does not establish any of them.
+See [Scene Registry](../../overview/task_program/scene_registry.md),
+[robot profiles](../../overview/task_program/robot_profiles.md) and the
+[Task Program tutorial](../../tutorial/task_program.rst) for runtime integration.
 
 For already-authored and bound declarations, the Task Engine API also provides
 pure program projection, configured bundle snapshots, and read-only reporting
 contracts. Those APIs require explicit caller-owned inputs; image planning does
 not produce a complete deployment automatically. Workflow configuration in
 `config.py` and `defaults.yaml` belongs to these broader integration contracts,
-separately from the four-argument image CLI.
+separately from the planning CLI.
 
 See the [Task Engine API reference](../../api_reference/embodichain/embodichain.gen_sim.task_engine.rst)
 for these contracts and the [CLI reference](../../guides/cli.md) for command usage.

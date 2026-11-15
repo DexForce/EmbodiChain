@@ -96,7 +96,13 @@ never creates capabilities, rewrites control-part names or chooses physics.
 
 ## Outputs and verdicts
 
-The v2 task-plan manifest publishes `task_spec_v1.json` and the selected
+For a route comparison and the path from specification to physical evidence, see the
+[Task Engine guide](../../docs/source/features/generative_sim/task_engine.md) and
+[paired 20-task evaluation](../../examples/gensim/goal_authoring/REPORT.md).
+Standalone `gensim task plan` defaults to hybrid. Its published stage distinguishes
+authoring only, pending visual binding and readiness for scene qualification.
+
+The explicit template route’s v2 task-plan manifest publishes `task_spec_v1.json` and the selected
 semantic graph. The v0.1 normative source remains available as `task_spec.json`.
 Use `load_task_plan` to verify the publication. Scene providers receive
 `scene_requirements.json`; an agent provider can consume the associated
@@ -110,7 +116,7 @@ publish a fresh offline view with
 `embodichain gensim task view --plan RUN/task --run RUN --output review.html`.
 Omit `--run` to review only the frozen task and graph.
 
-To revise graph calls against a published spec and its original grounding:
+To revise template graph calls against a published spec and its original grounding:
 
 ```bash
 embodichain gensim task revise --parent outputs/task --proposal proposed_nodes.json \
