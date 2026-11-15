@@ -358,6 +358,7 @@ def main() -> None:
     args = parser.parse_args()
     if args.episodes < 1:
         parser.error("--episodes must be positive")
+    args.data_root = args.data_root.expanduser().resolve()
     os.environ.setdefault("EMBODICHAIN_SIM_EXIT_PROCESS", "0")
     if not args.viewer:
         os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
