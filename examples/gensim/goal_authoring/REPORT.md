@@ -111,6 +111,17 @@ python -m examples.gensim.goal_authoring.auto_acceptance "$OUTPUT" "$INSTALLATIO
 默认切换仅指 task plan 图文入口；没有运行时自动回退。模板修订协议仍需显式 `--route template`。未支持部署的 hybrid 候选可读取规范、图和离线 HTML，但标为 authoring_only。视觉缺项以 pending_visual_binding 发布，不授权部署。模型接口失败或修订次数耗尽报错。视觉请求独立于图修订预算，因此不要把历史五请求试验当成本轮端到端请求成本。
 
 
+## task1186 本地交互预览
+
+截图、执行视频与离线 ZIP 保留在本工作树的 `outputs/task1186-pr-preview/`，不纳入 Git。该目录包含 `index.html`、相邻的 `execution.mp4`、`overview.png`、`call7.png` 和 `interactive.zip`。在保有这些本地产物的机器上，用浏览器打开 `index.html`，或解压 ZIP 后打开其中的页面。GitHub 上的干净检出不附带演示媒体。
+
+画布节点的事件、持有状态、步数区间和三项支撑测量来自原先验收通过的 4096 步运行；视频来自同一部署的另一次成功复跑，不作为原运行的节点证据。[生成脚本](fruit_view.py) 和 [验收记录](task1186_result.json) 保留在仓库。给定包含 `review.json`、`execution.json`、计划与部署文件的完整运行目录，可重新生成页面；`--replay` 需要相邻的 `execution.mp4`：
+
+```bash
+mkdir -p outputs/task1186-review
+python -m examples.gensim.goal_authoring.fruit_view "$RUN" outputs/task1186-review/index.html --replay
+```
+
 ## task1186：双臂、多阶段生成部署
 
 在已安装扩展、USD 和 DexSim Default 后端的仓库根目录运行：
