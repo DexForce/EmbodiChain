@@ -126,6 +126,21 @@ def assess(folder, installation):
         if "Visual grounding invalid" in result["error"]:
             result["visual"] = "failed"
             result.update(visual_diagnostic(folder))
+        elif failures := list(folder.glob("plan.failure-*.json")):
+            # Grounding may succeed before graph generation fails. Count the
+            # validated artifact rather than treating all unpublished plans alike.
+            artifacts = read(failures[0])["artifacts"]
+            if grounding := artifacts.get("image_grounding"):
+                required = {
+                    uid for uids in grounding["bindings"].values() for uid in uids
+                }
+                observed = {
+                    obj["id"]
+                    for obj in grounding["objects"]
+                    if obj["provenance"] == "observed"
+                }
+                result["pending_visual_entities"] = sorted(required - observed)
+                result["visual"] = "pending" if required - observed else "complete"
         return result
     manifest = read(plan / "task_plan_manifest.json")
     result["manifest_sha256"] = hashlib.sha256(
@@ -218,12 +233,18 @@ if __name__ == "__main__":
         help="Assess saved trials without reauthoring; use a freshly generated batch.",
     )
     p.add_argument("--fruit-installation", type=Path)
+    p.add_argument(
+        "--template-only",
+        action="store_true",
+        help="Rerun explicit template against a saved default baseline.",
+    )
     a = p.parse_args()
+    routes = ("template",) if a.template_only else ("default", "template")
     if a.assess:
         rows = [
             assess(a.output / f"task{i}" / r, a.fruit_installation)
             for i in range(1171, 1191)
-            for r in ("default", "template")
+            for r in routes
         ]
         (a.output / "results.json").write_text(
             json.dumps(rows, indent=2, ensure_ascii=False) + "\n"
@@ -238,7 +259,7 @@ if __name__ == "__main__":
                 (
                     (a.output, a.dataset, k, r, src[k]["zh"])
                     for k in [f"task{i}" for i in range(1171, 1191)]
-                    for r in ("default", "template")
+                    for r in routes
                 ),
             )
         )

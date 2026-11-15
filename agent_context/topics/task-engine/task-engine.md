@@ -10,6 +10,7 @@ against the frozen objective; inspect `planning_history.json` for each candidate
 pre-call holdings, checked coverage and the selected round. Source matching
 establishes traceability, not semantic entailment.
 The explicit `--route template` route retains the existing image plan and revision format.
+Its visual response nests constraints in source clauses and crossed dimensions in generalization entries. Empty auxiliary tables are harmless; misplaced nonempty declarations, malformed entities and invalid ambiguity evidence trigger a diagnostic repair, not silent removal.
 The default hybrid route composes quoted E1–E9 operations into goal contracts
 and ordered calls. Orientation, pour receiver, original support, slider endpoint
 and twist mode can require occurrence-bound deployment parameters. The hybrid

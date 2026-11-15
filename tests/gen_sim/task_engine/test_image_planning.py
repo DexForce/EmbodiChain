@@ -669,6 +669,41 @@ def test_invalid_grounding_rejects_before_graph_planning(source_image, box):
     )
 
 
+def test_empty_visual_side_tables_preserve_frozen_contract(source_image):
+    baseline = _plan(source_image)
+
+    def empty(step, grounding, plan):
+        grounding.update(milestones=[], constraints=[], cross_with=[])
+
+    actual = _plan(source_image, mutate=empty)
+    assert actual["task_spec_v1"] == baseline["task_spec_v1"]
+    assert actual["image_grounding"] == baseline["image_grounding"]
+
+
+@pytest.mark.parametrize(
+    ("damage", "diagnostic"),
+    [
+        ("unattached_constraint", "Unexpected grounding keys"),
+        ("observed_with_candidates", "Ambiguous references"),
+        ("unknown_entity_field", "Malformed entity evidence"),
+    ],
+)
+def test_visual_compatibility_never_drops_obligations_or_invalid_evidence(
+    source_image, damage, diagnostic
+):
+    def mutate(step, grounding, plan):
+        grounding.update(constraints=[], cross_with=[])
+        if damage == "unattached_constraint":
+            grounding["constraints"] = [{"kind": "restore_upright"}]
+        elif damage == "observed_with_candidates":
+            grounding["objects"][0]["candidates"] = ["tray"]
+        else:
+            grounding["objects"][0]["invented"] = "tray"
+
+    with pytest.raises(SemanticPlanningError, match=diagnostic):
+        _plan(source_image, mutate=mutate)
+
+
 def test_handover_direction_is_checked_against_task_contract(source_image):
     def mutate(s, g, p):
         p["nodes"][1]["call"]["resources"] = {"source": "left", "destination": "right"}
