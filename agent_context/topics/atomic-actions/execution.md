@@ -259,7 +259,10 @@ Pickup plans a separate straight world-Z lift only after a feasible approach;
 failed rows remain ineligible. Placement times each required approach leg
 separately and retains both adjacent endpoints as a one-control-interval stop,
 preserving exact arrivals and the independently checked acceleration bounds at
-corners. It retains its closing pressure until release. The default paths remain
+corners. Ineligible or previously failed rows receive hold targets before each
+approach leg and retract, so rejected paths cannot set the active batch duration.
+Adaptive sampling grows to fit the required arrivals; fixed-grid budgets remain
+explicit. It retains its closing pressure until release. The default paths remain
 unchanged. HandOver can explicitly retract
 sampled grasp TCPs through `grasp_retract_distance` before deriving transport
 and handover targets. The offset is a planning declaration; acquisition,

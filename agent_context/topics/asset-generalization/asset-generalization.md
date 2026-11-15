@@ -50,7 +50,9 @@ not establish reachable grasps, settled state or measured task success.
 `integrations/asset_materialization.py` reads integration-owned
 `asset_requirements`, verifies prepared content and emits standalone deployment
 artifacts. It preserves logical entity IDs and derives new Gym/integration
-identities. Explicit `./` or `../` resource paths resolve from the component
+identities. Integration component selections and their bounded overrides use the
+same resolver as normal configured loading, including component-owned service
+paths. Explicit `./` or `../` resource paths resolve from the component
 that declares them; bare paths retain dataset registry semantics.
 Execution-policy selections use the same configured resolver as normal task
 loading. Materialization writes the resolved policy to `policy.yaml`, retaining

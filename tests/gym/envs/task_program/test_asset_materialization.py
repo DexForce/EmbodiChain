@@ -208,6 +208,12 @@ def test_materialized_deployment_uses_production_loader_and_fresh_geometry(
     _write(env_path, env)
     if with_policy_overrides:
         task = yaml.safe_load(source.read_text())
+        task["task_program"]["integration"] = {
+            "component": "integration.yaml",
+            "overrides": {
+                "profile": {"skill_options": {"pick": {"lift_height": 0.08}}}
+            },
+        }
         task["task_program"]["execution_policy"] = {
             "component": task["task_program"]["execution_policy"],
             "overrides": {
@@ -216,6 +222,10 @@ def test_materialized_deployment_uses_production_loader_and_fresh_geometry(
             },
         }
         _write(source, task)
+    assert (
+        load_asset_requirements_from_deployment(source).to_dict()
+        == requirements.to_dict()
+    )
     original = source.read_bytes()
     result = materialize_asset_deployment(
         source, requirements, resolved, output_dir=tmp_path / "out"
@@ -240,6 +250,8 @@ def test_materialized_deployment_uses_production_loader_and_fresh_geometry(
         (result.deployment_path.parent / "integration.yaml").read_text()
     )
     assert integration["scene_binding"]["rigid_objects"][0]["entity_id"] == "cube"
+    if with_policy_overrides:
+        assert integration["profile"]["skill_options"]["pick"]["lift_height"] == 0.08
     target = integration["scene_binding"]["rigid_objects"][1]["affordances"][0]
     assert target["object_target_pose"][11] == pytest.approx(0.10)
     assert target["object_target_frame"] == "parent"

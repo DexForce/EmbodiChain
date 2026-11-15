@@ -320,15 +320,22 @@ class Place(AtomicSkill[PlaceGoal | AssembleGoal, PlaceOptions]):
             from embodichain.lab.sim.motion.ik import sample_cartesian_targets
 
             required = build_pose_plan_states(down_xpos)
+            if request.motion_policy.interpolation_mode == "adaptive":
+                n_down = max(n_down, len(required) + 1)
             if n_down - 1 < len(required):
                 raise ValueError(
                     "Cartesian approach sampling needs one sample per target."
                 )
             remaining = n_down - 1
             current_qpos, current_xpos = start_arm_qpos, start_xpos
-            down_success = torch.ones_like(eligible)
+            down_success = eligible.clone()
             legs = []
             for index, target_pose in enumerate(required):
+                target_pose = build_pose_plan_states(
+                    torch.where(
+                        down_success[:, None, None], target_pose.xpos, current_xpos
+                    )
+                )[0]
                 intervals = remaining // (len(required) - index)
                 sampled = sample_cartesian_targets(
                     current_xpos, [target_pose], intervals + 1
@@ -364,6 +371,19 @@ class Place(AtomicSkill[PlaceGoal | AssembleGoal, PlaceOptions]):
                 remaining -= intervals
             down_arm = torch.cat(legs, dim=1)
             if bool(down_success.any()):
+                hold_xpos = self.robot.compute_fk(
+                    qpos=down_arm[:, -1],
+                    name=control_part,
+                    to_matrix=True,
+                    **(
+                        {"env_ids": self.planning_services.env_ids}
+                        if self.planning_services.env_ids is not None
+                        else {}
+                    ),
+                )
+                back_xpos = torch.where(
+                    down_success[:, None, None, None], back_xpos, hold_xpos[:, None]
+                )
                 back_success, back_arm = plan_named_arm_trajectory(
                     self.motion_generator,
                     control_part,

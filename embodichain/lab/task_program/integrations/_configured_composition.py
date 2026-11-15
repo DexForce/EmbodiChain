@@ -484,34 +484,9 @@ def _apply_integration_overrides(
     return result
 
 
-def _resolve_task_program_components(
-    value: object,
-    *,
-    base_dir: Path,
-) -> tuple[Path | Mapping[str, object], Mapping[str, object], Mapping[str, object]]:
-    """Resolve program, task integration, and execution policy selections."""
-    declaration = _mapping(
-        value,
-        path="task_program",
-        required=frozenset({"program", "integration", "execution_policy"}),
-        optional=frozenset({"execution", "action_owners"}),
-    )
-    execution = declaration.get("execution", "expert")
-    if execution not in ("expert", "policy"):
-        raise ValueError("task_program.execution must be expert or policy.")
-    if "action_owners" in declaration and execution != "policy":
-        raise ValueError("task_program.action_owners requires policy execution.")
-    program_path = (
-        _inline_component(declaration["program"], path="task_program.program")
-        if isinstance(declaration["program"], Mapping)
-        else _component_path(
-            declaration["program"],
-            base_dir=base_dir,
-            path="task_program.program",
-            suffixes=frozenset({".json", ".yaml", ".yml"}),
-        )
-    )
-    integration_selector = declaration["integration"]
+def _resolve_integration(value: object, *, base_dir: Path) -> dict[str, object]:
+    """Resolve an owned integration and its component-relative service paths."""
+    integration_selector = value
     overrides = None
     if (
         isinstance(integration_selector, Mapping)
@@ -635,6 +610,37 @@ def _resolve_task_program_components(
         )
 
         AssetRequirements.from_dict(integration["asset_requirements"])
+    return integration
+
+
+def _resolve_task_program_components(
+    value: object,
+    *,
+    base_dir: Path,
+) -> tuple[Path | Mapping[str, object], Mapping[str, object], Mapping[str, object]]:
+    """Resolve program, task integration, and execution policy selections."""
+    declaration = _mapping(
+        value,
+        path="task_program",
+        required=frozenset({"program", "integration", "execution_policy"}),
+        optional=frozenset({"execution", "action_owners"}),
+    )
+    execution = declaration.get("execution", "expert")
+    if execution not in ("expert", "policy"):
+        raise ValueError("task_program.execution must be expert or policy.")
+    if "action_owners" in declaration and execution != "policy":
+        raise ValueError("task_program.action_owners requires policy execution.")
+    program_path = (
+        _inline_component(declaration["program"], path="task_program.program")
+        if isinstance(declaration["program"], Mapping)
+        else _component_path(
+            declaration["program"],
+            base_dir=base_dir,
+            path="task_program.program",
+            suffixes=frozenset({".json", ".yaml", ".yml"}),
+        )
+    )
+    integration = _resolve_integration(declaration["integration"], base_dir=base_dir)
     _, policy = _resolve_execution_policy(
         declaration["execution_policy"], base_dir=base_dir
     )

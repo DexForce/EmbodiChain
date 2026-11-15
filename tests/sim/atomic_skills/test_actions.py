@@ -9779,8 +9779,9 @@ def test_new_skill_options_preserve_existing_positional_arguments() -> None:
 
 @pytest.mark.parametrize("control_dt", [0.04, 0.02])
 @pytest.mark.parametrize("partial_failure", [False, True])
+@pytest.mark.parametrize("sample_count", [9, 20])
 def test_place_required_waypoints_survive_real_cartesian_retiming(
-    monkeypatch, control_dt: float, partial_failure: bool
+    monkeypatch, control_dt: float, partial_failure: bool, sample_count: int
 ) -> None:
     """Exercise final commands with exact IK/FK and the real adaptive retimer."""
     monkeypatch.setattr(
@@ -9811,6 +9812,8 @@ def test_place_required_waypoints_survive_real_cartesian_retiming(
     points = torch.tensor([[0.1, 0, 0], [0.1, 0.02, 0], [0.2, 0.02, 0]])
     goals = torch.eye(4).repeat(NUM_ENVS, len(points), 1, 1)
     goals[..., :3, 3] = points
+    if partial_failure:
+        goals[1, -1, 0, 3] = 1000.0
     task = TaskState(batch_size=NUM_ENVS, device="cpu", held_objects={"arm": _held()})
     plan = _plan_action(
         action,
@@ -9820,7 +9823,7 @@ def test_place_required_waypoints_survive_real_cartesian_retiming(
             binding=_binding(action),
             motion_policy=MotionPolicy(
                 strategy="ik_interp",
-                sample_count=20,
+                sample_count=sample_count,
                 velocity_limit=0.2,
                 acceleration_limit=0.5,
             ),

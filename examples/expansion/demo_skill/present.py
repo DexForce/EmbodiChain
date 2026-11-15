@@ -47,11 +47,14 @@ def prepare(output: Path, *, duration_s: float = 2.0) -> Path:
         (base / task["task_program"]["execution_policy"]).read_text()
     )
     physical = _resolve_gym_components(task, base_dir=base)
-    template = load_configured_task_program_deployment(
-        task_program=physical.config["task_program"],
-        skill_profile=physical.embodiment_skill_profile,
-        base_dir=base,
-    ).load_program()
+    from embodichain.lab.task_program.language.decoder import _decode_target
+
+    template = yaml.safe_load((base / task["task_program"]["program"]).read_text())
+    target = _decode_target(
+        template["targets"]["above_worktop"], path=("targets", "above_worktop")
+    )
+    if target.kind == "cyclic_pose":
+        target = target.values[0]
     integration["program_id"] = "carton_present"
     integration["integration_id"] = "carton_present"
     services = integration["runtime_services"]
@@ -65,7 +68,6 @@ def prepare(output: Path, *, duration_s: float = 2.0) -> Path:
         "revision": "1",
         "params": {},
     }
-    target = template.targets["above_worktop"]
     destination = {
         "position": list(target.position),
         "quaternion_xyzw": list(target.quaternion_xyzw),

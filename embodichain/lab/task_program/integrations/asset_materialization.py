@@ -42,7 +42,7 @@ from ._asset_pouring import (
     prepare_pour_adaptation,
     finish_pour_adaptation,
 )
-from ._configured_composition import _resolve_execution_policy
+from ._configured_composition import _resolve_execution_policy, _resolve_integration
 from .configured import _resolve_simulation_uid
 
 from embodichain.utils import configclass
@@ -110,7 +110,9 @@ def load_asset_requirements_from_deployment(
 
     source = Path(task_config_path).resolve()
     task = _read(source)
-    integration = _read(_path(task["task_program"]["integration"], source))
+    integration = _resolve_integration(
+        task["task_program"]["integration"], base_dir=source.parent
+    )
     if "asset_requirements" not in integration:
         raise ValueError("Task integration does not declare asset_requirements")
     return AssetRequirements.from_dict(integration["asset_requirements"])
@@ -386,13 +388,14 @@ def materialize_asset_deployment(
     if unknown:
         raise ValueError(f"Unknown initial-bottom roles: {sorted(unknown)}")
     task_program = raw["task_program"]
-    integration_path = _path(task_program["integration"], source)
     program_path = _path(task_program["program"], source)
     policy_path, policy = _resolve_execution_policy(
         task_program["execution_policy"], base_dir=source.parent
     )
     embodiment_path = _path(raw["embodiment"]["component"], source)
-    integration = _read(integration_path)
+    integration = _resolve_integration(
+        task_program["integration"], base_dir=source.parent
+    )
     if (
         "asset_requirements" in integration
         and type(requirements).from_dict(integration["asset_requirements"]).to_dict()
