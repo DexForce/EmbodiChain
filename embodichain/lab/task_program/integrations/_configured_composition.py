@@ -484,8 +484,10 @@ def _apply_integration_overrides(
     return result
 
 
-def _resolve_integration(value: object, *, base_dir: Path) -> dict[str, object]:
-    """Resolve an owned integration and its component-relative service paths."""
+def _select_integration(
+    value: object, *, base_dir: Path
+) -> tuple[dict[str, object], Path]:
+    """Select and validate integration declarations without loading runtime assets."""
     integration_selector = value
     overrides = None
     if (
@@ -535,6 +537,18 @@ def _resolve_integration(value: object, *, base_dir: Path) -> dict[str, object]:
         optional=frozenset({"runtime_services", "asset_requirements"}),
     )
     integration = deepcopy(dict(integration))
+    if "asset_requirements" in integration:
+        from embodichain.lab.task_program.semantics.asset_requirements import (
+            AssetRequirements,
+        )
+
+        AssetRequirements.from_dict(integration["asset_requirements"])
+    return integration, integration_base
+
+
+def _resolve_integration(value: object, *, base_dir: Path) -> dict[str, object]:
+    """Resolve a selected integration's runtime assets for actual deployment."""
+    integration, integration_base = _select_integration(value, base_dir=base_dir)
     if "runtime_services" in integration:
         runtime_services = _owned_mapping(
             integration["runtime_services"], path="integration.runtime_services"
@@ -604,12 +618,6 @@ def _resolve_integration(value: object, *, base_dir: Path) -> dict[str, object]:
                 resolved_sources.append(value)
             runtime_services["nominal_motion_sources"] = resolved_sources
         integration["runtime_services"] = runtime_services
-    if "asset_requirements" in integration:
-        from embodichain.lab.task_program.semantics.asset_requirements import (
-            AssetRequirements,
-        )
-
-        AssetRequirements.from_dict(integration["asset_requirements"])
     return integration
 
 

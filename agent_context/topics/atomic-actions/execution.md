@@ -259,9 +259,11 @@ Pickup plans a separate straight world-Z lift only after a feasible approach;
 failed rows remain ineligible. Placement times each required approach leg
 separately and retains both adjacent endpoints as a one-control-interval stop,
 preserving exact arrivals and the independently checked acceleration bounds at
-corners. Ineligible or previously failed rows receive hold targets before each
-approach leg and retract, so rejected paths cannot set the active batch duration.
-Adaptive sampling grows to fit the required arrivals; fixed-grid budgets remain
+corners. Ineligible or previously failed rows bypass IK and timing for each
+approach leg and retract; active rows retain their physical environment mapping,
+and joint-space holds are scattered back for rejected rows. An FK hold pose is
+insufficient because redundant IK can select another posture. Adaptive PickUp
+and Place sampling grows to fit the required arrivals; fixed-grid budgets remain
 explicit. It retains its closing pressure until release. The default paths remain
 unchanged. HandOver can explicitly retract
 sampled grasp TCPs through `grasp_retract_distance` before deriving transport

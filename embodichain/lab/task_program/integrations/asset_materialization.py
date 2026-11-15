@@ -42,7 +42,7 @@ from ._asset_pouring import (
     prepare_pour_adaptation,
     finish_pour_adaptation,
 )
-from ._configured_composition import _resolve_execution_policy, _resolve_integration
+from ._configured_composition import _resolve_execution_policy, _select_integration
 from .configured import _resolve_simulation_uid
 
 from embodichain.utils import configclass
@@ -110,7 +110,7 @@ def load_asset_requirements_from_deployment(
 
     source = Path(task_config_path).resolve()
     task = _read(source)
-    integration = _resolve_integration(
+    integration, _ = _select_integration(
         task["task_program"]["integration"], base_dir=source.parent
     )
     if "asset_requirements" not in integration:
@@ -393,9 +393,19 @@ def materialize_asset_deployment(
         task_program["execution_policy"], base_dir=source.parent
     )
     embodiment_path = _path(raw["embodiment"]["component"], source)
-    integration = _resolve_integration(
+    integration, integration_base = _select_integration(
         task_program["integration"], base_dir=source.parent
     )
+    # Keep registry references declarative so each destination uses its own cache.
+    # Only local filenames need rebasing from their component's directory.
+    from embodichain.data._references import _resolve_data_reference
+
+    for node in _walk(integration.get("runtime_services", {})):
+        for field in ("asset_manifest", "prototype_manifest"):
+            if field in node and isinstance(node[field], (str, Path)):
+                node[field] = str(
+                    _resolve_data_reference(node[field], base_dir=integration_base)
+                )
     if (
         "asset_requirements" in integration
         and type(requirements).from_dict(integration["asset_requirements"]).to_dict()

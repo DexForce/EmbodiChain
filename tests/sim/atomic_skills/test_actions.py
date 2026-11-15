@@ -2286,8 +2286,10 @@ def test_place_restores_grasp_pressure_only_for_held_rows() -> None:
 
 
 @pytest.mark.parametrize("failed_lift", [False, True])
+@pytest.mark.parametrize("sample_count", [9, 20])
 def test_pick_cartesian_lift_keeps_pose_path_and_failure_mask(
     failed_lift: bool,
+    sample_count: int,
 ) -> None:
     generator = _motion_generator()
     original_generate = generator.generate
@@ -2310,7 +2312,7 @@ def test_pick_cartesian_lift_keeps_pose_path_and_failure_mask(
             skill_id="pick_up",
             goal=GraspGoal(semantics=_semantics(entity_id="target"), grasp_xpos=pose),
             binding=_binding(action),
-            motion_policy=MotionPolicy(strategy="ik_interp", sample_count=20),
+            motion_policy=MotionPolicy(strategy="ik_interp", sample_count=sample_count),
             skill_options=PickUpOptions(cartesian_lift=True, lift_height=0.1),
         ),
         context,
@@ -9788,16 +9790,19 @@ def test_place_required_waypoints_survive_real_cartesian_retiming(
         MotionGenerator, "_interpolate_cartesian_with_limits", _REAL_CARTESIAN_RETIMING
     )
     generator = _motion_generator()
+    del generator._solve_cartesian_waypoints  # Use real row-scoped dispatch.
 
     def ik(pose, **kwargs):
         joints = pose.new_zeros((*pose.shape[:-2], ARM_DOF))
         joints[..., :3] = pose[..., :3, 3]
         valid = torch.ones(pose.shape[:-2], dtype=torch.bool)
         if partial_failure:
-            valid[1] &= ~(
-                torch.isclose(joints[1, ..., 0], torch.tensor(0.1))
-                & (joints[1, ..., 1] > 0)
-            )
+            for row, env_id in enumerate(kwargs.get("env_ids", range(pose.shape[0]))):
+                if env_id == 1:
+                    valid[row] &= ~(
+                        torch.isclose(joints[row, ..., 0], torch.tensor(0.1))
+                        & (joints[row, ..., 1] > 0)
+                    )
         return valid, joints
 
     def fk(qpos, **kwargs):
@@ -9848,3 +9853,141 @@ def test_place_required_waypoints_survive_real_cartesian_retiming(
     )
     assert velocity.abs().max() <= 0.2 + 1e-6
     assert acceleration.abs().max() <= 0.5 + 1e-5
+
+
+def test_inactive_named_arm_rows_never_enter_ik_or_timing(monkeypatch):
+    from embodichain.lab.sim.atomic_skills.primitives._helpers import (
+        plan_named_arm_trajectory,
+    )
+
+    monkeypatch.setattr(
+        MotionGenerator, "_interpolate_cartesian_with_limits", _REAL_CARTESIAN_RETIMING
+    )
+    generator = _motion_generator()
+    del generator._solve_cartesian_waypoints
+
+    def ik(pose, *, env_ids, **kwargs):
+        # A redundant solver could choose a different posture even for an FK hold.
+        # Reject any attempt to send the inactive physical row through IK.
+        assert tuple(env_ids) == (0,)
+        joints = pose.new_zeros((*pose.shape[:-2], ARM_DOF))
+        joints[..., :3] = pose[..., :3, 3]
+        return torch.ones(pose.shape[:-2], dtype=torch.bool), joints
+
+    def fk(qpos, **kwargs):
+        poses = torch.eye(4).expand(*qpos.shape[:-1], 4, 4).clone()
+        poses[..., :3, 3] = qpos[..., :3]
+        return poses
+
+    generator.robot.compute_ik.side_effect = ik
+    generator.robot.compute_batch_ik.side_effect = ik
+    generator.robot.compute_fk.side_effect = fk
+    start = torch.zeros(NUM_ENVS, ARM_DOF)
+    start[1, 3] = 1.254
+    goals = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    goals[:, 0, 3] = 0.01
+    success, commands = plan_named_arm_trajectory(
+        generator,
+        "arm",
+        start,
+        goals,
+        2,
+        MotionPolicy(strategy="ik_interp", sample_count=2, velocity_limit=0.005),
+        0.02,
+        active_mask=torch.tensor([True, False]),
+        cartesian_linear=True,
+    )
+    assert success.tolist() == [True, False]
+    torch.testing.assert_close(commands[1], start[1].expand_as(commands[1]))
+    torch.testing.assert_close(commands[0, -1, :3], goals[0, :3, 3])
+
+
+@pytest.mark.parametrize("scope", [None, (4, 1)])
+@pytest.mark.parametrize("sample_count", [9, 20])
+def test_pick_failed_approach_never_enters_lift_ik(monkeypatch, scope, sample_count):
+    from embodichain.compute.trajectory import interpolate_minimum_jerk
+
+    monkeypatch.setattr(
+        MotionGenerator, "_interpolate_cartesian_with_limits", _REAL_CARTESIAN_RETIMING
+    )
+    monkeypatch.setattr(
+        "embodichain.lab.sim.motion.motion_generator.interpolate_minimum_jerk",
+        interpolate_minimum_jerk,
+    )
+
+    def run(failed):
+        generator = _motion_generator()
+        del generator._solve_cartesian_waypoints
+        if scope is not None:
+            generator._env_ids = scope
+            generator.planner._planning_env_ids = scope
+            generator.robot.get_qpos.side_effect = lambda name=None: torch.zeros(
+                6, len(generator.robot.get_joint_ids(name=name))
+            )
+            generator.robot.get_qvel_limits.side_effect = (
+                lambda name=None, joint_ids=None: torch.ones(
+                    6,
+                    len(
+                        generator.robot.get_joint_ids(name=name)
+                        if joint_ids is None
+                        else joint_ids
+                    ),
+                )
+            )
+        rejected_id = 1
+
+        def ik(pose, **kwargs):
+            joints = pose.new_zeros((*pose.shape[:-2], ARM_DOF))
+            joints[..., :3] = pose[..., :3, 3]
+            valid = torch.ones(pose.shape[:-2], dtype=torch.bool)
+            if failed:
+                for row, env_id in enumerate(
+                    kwargs.get("env_ids", range(pose.shape[0]))
+                ):
+                    if env_id == rejected_id:
+                        hold = joints[row, ..., :3].abs().amax(dim=-1) < 1e-8
+                        assert not hold.any(), "Rejected FK hold must never reenter IK"
+                        valid[row] = False
+            return valid, joints
+
+        def fk(qpos, **kwargs):
+            poses = torch.eye(4).expand(*qpos.shape[:-1], 4, 4).clone()
+            poses[..., :3, 3] = qpos[..., :3]
+            return poses
+
+        generator.robot.compute_ik.side_effect = ik
+        generator.robot.compute_batch_ik.side_effect = ik
+        generator.robot.compute_fk.side_effect = fk
+        action = _bind_action(generator, PickUp(), env_ids=scope)
+        pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+        pose[:, 0, 3] = 0.1
+        context = _context(scene=_target_scene(pose, timestamp=0.0, version=0))
+        if scope is not None:
+            context = replace(context, env_ids=torch.tensor(scope))
+        plan = _plan_action(
+            action,
+            SkillInvocation(
+                skill_id="pick_up",
+                goal=GraspGoal(
+                    semantics=_semantics(entity_id="target"), grasp_xpos=pose
+                ),
+                binding=_binding(action),
+                motion_policy=MotionPolicy(
+                    sample_count=sample_count,
+                    strategy="ik_interp",
+                    velocity_limit=0.2,
+                    acceleration_limit=0.5,
+                ),
+                skill_options=PickUpOptions(cartesian_lift=True, lift_height=0.1),
+            ),
+            context,
+        )
+        assert plan.plan_success.tolist() == [True, not failed]
+        commands = _joint_command_positions(plan, "arm")
+        if failed:
+            assert not commands[1].any()
+        if scope is not None:
+            assert generator._env_ids == generator.planner._planning_env_ids == scope
+        return commands[0]
+
+    torch.testing.assert_close(run(True), run(False), rtol=0, atol=0)

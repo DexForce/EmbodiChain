@@ -1121,3 +1121,120 @@ def test_materialized_deployment_keeps_named_evaluation_component(deployment, tm
         source, requirements, resolved, output_dir=tmp_path / "second"
     )
     assert yaml.safe_load(second.deployment_path.read_text())["id"] != selected["id"]
+
+
+def test_requirements_lookup_does_not_resolve_runtime_assets(deployment, monkeypatch):
+    source, requirements, _ = deployment
+    path = source.parent / "integration.yaml"
+    integration = yaml.safe_load(path.read_text())
+    integration["runtime_services"] = {
+        "nominal_motion_sources": [
+            {
+                "provider_id": "real2sim",
+                "prototype_manifest": {
+                    "asset": "Real2SimCarton",
+                    "path": "inputs/measured/0/prototype.json",
+                },
+            }
+        ]
+    }
+    _write(path, integration)
+    task = yaml.safe_load(source.read_text())
+    task["task_program"]["integration"] = {
+        "component": "integration.yaml",
+        "overrides": {"profile": {"skill_options": {"pick": {"lift_height": 0.08}}}},
+    }
+    _write(source, task)
+
+    def offline(*args, **kwargs):
+        raise AssertionError("Role-contract lookup must not load runtime assets")
+
+    monkeypatch.setattr("embodichain.data._references._resolve_data_reference", offline)
+    assert (
+        load_asset_requirements_from_deployment(source).to_dict()
+        == requirements.to_dict()
+    )
+
+
+def test_materialized_registry_references_follow_destination_cache(
+    deployment, tmp_path, monkeypatch
+):
+    import numpy as np
+    from types import SimpleNamespace
+    import embodichain.data as data
+    from embodichain.data_pipeline.real2sim import (
+        RobotDemonstration,
+        DemoSkillSpec,
+        DemoSkillPhase,
+        DemoSkillConstraint,
+        JointSpec,
+        build_demo_skill,
+        save_demo_skill,
+    )
+
+    source, requirements, resolved = deployment
+    cache = tmp_path / "cache_a"
+    artifact = build_demo_skill(
+        RobotDemonstration(
+            "teleop",
+            "1",
+            "specialized",
+            ("a",),
+            ("rad",),
+            np.zeros((6, 1)),
+            np.arange(6) * 0.02,
+            "s",
+            "a" * 64,
+            "b" * 64,
+        ),
+        DemoSkillSpec(
+            asset_id="task.trace",
+            instruction="Trace",
+            phases=(DemoSkillPhase("continuous", 0, 6),),
+            constraints=(DemoSkillConstraint("done", "metric", "terminal"),),
+        ),
+        joints=(JointSpec("a", "revolute"),),
+        control_dt=0.02,
+    )
+    manifest = save_demo_skill(artifact, cache / "skill")
+    reference = {"asset": "ReviewDemo", "path": "skill/demo_skill.json"}
+    original = data.get_data_class
+
+    def asset_class(name):
+        return (
+            (lambda: SimpleNamespace(extract_dir=str(cache)))
+            if name == "ReviewDemo"
+            else original(name)
+        )
+
+    monkeypatch.setattr(data, "get_data_class", asset_class)
+    path = source.parent / "integration.yaml"
+    integration = yaml.safe_load(path.read_text())
+    integration["runtime_services"] = {
+        "demo_skills": {
+            "trace": {
+                "call_id": "task.trace",
+                "asset_manifest": reference,
+                "asset_sha256": artifact.content_sha256,
+            }
+        }
+    }
+    _write(path, integration)
+    result = materialize_asset_deployment(
+        source, requirements, resolved, output_dir=tmp_path / "out"
+    )
+    exported = yaml.safe_load(
+        (result.deployment_path.parent / "integration.yaml").read_text()
+    )
+    assert (
+        exported["runtime_services"]["demo_skills"]["trace"]["asset_manifest"]
+        == reference
+    )
+    destination = tmp_path / "cache_b"
+    cache.rename(destination)
+    cache = destination
+    assert (cache / manifest.relative_to(tmp_path / "cache_a")).is_file()
+    config_to_cfg(
+        yaml.safe_load(result.deployment_path.read_text()),
+        source_path=result.deployment_path,
+    )

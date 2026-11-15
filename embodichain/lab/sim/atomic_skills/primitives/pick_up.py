@@ -431,6 +431,8 @@ class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
         if options.cartesian_lift:
             if motion_policy.strategy != "ik_interp":
                 raise ValueError("cartesian_lift requires strategy='ik_interp'.")
+            if motion_policy.interpolation_mode == "adaptive":
+                n_approach = max(n_approach, len(waypoints))
             approach_success, approach_arm = plan_named_arm_trajectory(
                 self.motion_generator,
                 manipulator.control_part,
@@ -449,18 +451,6 @@ class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
                 n_waypoints=n_lift - 1,
             )
             if bool(approach_success.any()):
-                if not bool(approach_success.all()):
-                    held_pose = self.robot.compute_fk(
-                        qpos=approach_arm[:, -1],
-                        name=manipulator.control_part,
-                        to_matrix=True,
-                        **(
-                            {"env_ids": self.planning_services.env_ids}
-                            if self.planning_services.env_ids is not None
-                            else {}
-                        ),
-                    )
-                    lift_targets[~approach_success] = held_pose[~approach_success, None]
                 lift_success, lift_arm = plan_named_arm_trajectory(
                     self.motion_generator,
                     manipulator.control_part,
@@ -469,6 +459,7 @@ class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
                     n_lift,
                     motion_policy,
                     interpolation_dt,
+                    active_mask=approach_success,
                     cartesian_linear=True,
                 )
             else:

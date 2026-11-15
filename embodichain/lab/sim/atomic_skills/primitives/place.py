@@ -348,6 +348,7 @@ class Place(AtomicSkill[PlaceGoal | AssembleGoal, PlaceOptions]):
                     intervals + 1,
                     request.motion_policy,
                     context.control_dt,
+                    active_mask=down_success,
                     cartesian_linear=True,
                 )
                 down_success &= leg_success
@@ -392,6 +393,7 @@ class Place(AtomicSkill[PlaceGoal | AssembleGoal, PlaceOptions]):
                     n_back,
                     request.motion_policy,
                     context.control_dt,
+                    active_mask=down_success,
                 )
             else:
                 back_success = down_success.clone()

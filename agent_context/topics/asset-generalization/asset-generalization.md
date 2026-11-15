@@ -51,8 +51,11 @@ not establish reachable grasps, settled state or measured task success.
 `asset_requirements`, verifies prepared content and emits standalone deployment
 artifacts. It preserves logical entity IDs and derives new Gym/integration
 identities. Integration component selections and their bounded overrides use the
-same resolver as normal configured loading, including component-owned service
-paths. Explicit `./` or `../` resource paths resolve from the component
+same declaration selector as normal configured loading. Reading role requirements
+does not resolve runtime manifests. Exported registry references retain their
+`{asset, path}` declarations for resolution against the destination cache;
+local service filenames retain their component owner. Explicit `./` or `../`
+resource paths resolve from the component
 that declares them; bare paths retain dataset registry semantics.
 Execution-policy selections use the same configured resolver as normal task
 loading. Materialization writes the resolved policy to `policy.yaml`, retaining
