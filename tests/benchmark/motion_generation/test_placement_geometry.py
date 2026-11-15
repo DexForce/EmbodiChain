@@ -171,7 +171,7 @@ def test_settled_placement_requires_full_footprint_and_bounded_surface_gaps(cond
 @pytest.mark.parametrize(
     "suite_name",
     [
-        "atomic_dual_franka_pgi_coordinated_placement",
+        "atomic_dual_franka_robotiq_coordinated_placement",
         "atomic_dual_ur5_pgi_coordinated_placement",
         "atomic_dual_ur5_pgi_coordinated_placement_spatial_generalization",
     ],

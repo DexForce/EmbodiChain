@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
+    from embodichain.lab.evaluation import PredicateRegistry
     from embodichain.lab.task_program.language.schema import TaskProgramCfg
     from .catalog import TaskProgramIntegrationCatalog
 
@@ -41,6 +42,7 @@ from .configured import (
     _decode_motion_policy,
     _decode_recovery_policy,
     _identifier,
+    _identifier_mapping,
     _normalize_skill_options_key,
     _normalize_recovery_policy_keys,
     _mapping,
@@ -397,7 +399,13 @@ def _resolve_task_program_components(
         value,
         path="task_program",
         required=frozenset({"program", "integration", "execution_policy"}),
+        optional=frozenset({"execution", "action_owners"}),
     )
+    execution = declaration.get("execution", "expert")
+    if execution not in ("expert", "policy"):
+        raise ValueError("task_program.execution must be expert or policy.")
+    if "action_owners" in declaration and execution != "policy":
+        raise ValueError("task_program.action_owners requires policy execution.")
     program_path = (
         _inline_component(declaration["program"], path="task_program.program")
         if isinstance(declaration["program"], Mapping)
@@ -459,12 +467,17 @@ def _resolve_task_program_components(
                 )
         if "registered_semantic_lowerers" in runtime_services:
             for lowerer in runtime_services["registered_semantic_lowerers"]:
-                if isinstance(lowerer, dict) and lowerer.get("kind") == "demo_skill":
+                if not isinstance(lowerer, dict):
+                    continue
+                field = {
+                    "demo_skill": "asset_manifest",
+                }.get(lowerer.get("kind"))
+                if field is not None and field in lowerer:
                     from embodichain.data._references import _resolve_data_reference
 
-                    lowerer["asset_manifest"] = str(
+                    lowerer[field] = str(
                         _resolve_data_reference(
-                            lowerer["asset_manifest"], base_dir=integration_base
+                            lowerer[field], base_dir=integration_base
                         )
                     )
         if "nominal_motion_sources" in runtime_services:
@@ -622,6 +635,8 @@ def _load_configured_task_program_deployment(
     task_program: object,
     skill_profile: object,
     base_dir: str | Path,
+    evaluation: Mapping[str, object] | None = None,
+    evaluation_registry: PredicateRegistry | None = None,
 ) -> _ConfiguredTaskProgramDeployment:
     """Compose Task Program metadata after Gym resolves physical components."""
     selected_base_dir = Path(base_dir).expanduser()
@@ -638,7 +653,7 @@ def _load_configured_task_program_deployment(
         required=frozenset(
             {"contract_id", "profile_id", "resources", "command_presets"}
         ),
-        optional=frozenset({"runtime_services"}),
+        optional=frozenset({"runtime_services", "evaluation_links"}),
     )
     scene_binding = _mapping(
         task["scene_binding"],
@@ -664,6 +679,12 @@ def _load_configured_task_program_deployment(
     integration = _decode_configured_task_program_integration(
         payload,
         planner_config=planner_config,
+        evaluation=evaluation,
+        evaluation_registry=evaluation_registry,
+        evaluation_robot_links=_identifier_mapping(
+            selected_skill_profile.get("evaluation_links", {}),
+            path="embodiment component.skill_profile.evaluation_links",
+        ),
     )
     integration_id = _identifier(
         task["integration_id"],

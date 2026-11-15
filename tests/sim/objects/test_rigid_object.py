@@ -56,6 +56,79 @@ Z_TRANSLATION = 2.0
 NEWTON_INERTIA_ROUND_TRIP_ATOL = 2e-4
 
 
+@pytest.mark.requires_sim
+@pytest.mark.gpu
+@pytest.mark.parametrize("backend", ["default", "newton"])
+def test_static_friction_preserves_selected_rows_across_rebuild(backend: str) -> None:
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            device="cuda:0",
+            num_envs=3,
+            physics_cfg=physics_cfg_for_backend(backend),
+        )
+    )
+    surface = extra = None
+    try:
+        surface = sim.add_rigid_object(
+            RigidObjectCfg(uid="surface", body_type="static", shape=CubeCfg())
+        )
+        sim.prepare()
+        expected = surface.get_friction().clone()
+        selected = torch.tensor([0.7, 0.2], device=sim.device)
+        surface.set_friction(selected, env_ids=[2, 0])
+        expected[[2, 0]] = selected
+        torch.testing.assert_close(surface.get_friction(), expected)
+        torch.testing.assert_close(surface.get_friction([2, 0]), selected)
+        extra = sim.add_rigid_object(
+            RigidObjectCfg(uid="extra", shape=CubeCfg(), init_pos=(0, 0, 2))
+        )
+        sim.prepare()
+        torch.testing.assert_close(surface.get_friction(), expected)
+    finally:
+        surface = extra = None
+        sim.destroy(exit_process=False)
+        SimulationManager.flush_cleanup_queue()
+
+
+@pytest.mark.requires_sim
+@pytest.mark.gpu
+@pytest.mark.parametrize("backend", ["default", "newton"])
+@pytest.mark.parametrize("change", ["disabled", "geometry"])
+def test_ground_configuration_changes_live_collision(backend: str, change: str) -> None:
+    from dexsim.spawn import GeometryDesc
+
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            device="cuda:0",
+            physics_cfg=physics_cfg_for_backend(backend),
+        )
+    )
+    falling = None
+    try:
+        if change == "disabled":
+            sim.configure_ground_plane_collision(enabled=False)
+        else:
+            sim.configure_ground_plane_collision(geometry=GeometryDesc.cube((2, 2, 1)))
+        falling = sim.add_rigid_object(
+            RigidObjectCfg(
+                uid="falling", shape=CubeCfg(size=(0.1, 0.1, 0.1)), init_pos=(0, 0, 1)
+            )
+        )
+        sim.prepare()
+        sim.update(step=240)
+        height = float(falling.get_local_pose()[0, 2])
+        if change == "disabled":
+            assert height < -1.0
+        else:
+            assert height == pytest.approx(0.55, abs=0.02)
+    finally:
+        falling = None
+        sim.destroy(exit_process=False)
+        SimulationManager.flush_cleanup_queue()
+
+
 @pytest.mark.parametrize("device", ["cpu", "cuda:0"])
 @pytest.mark.parametrize("operation", ["initialization", "reset", "pose"])
 def test_rigid_state_writes_do_not_advance_other_bodies(

@@ -56,7 +56,7 @@ from embodichain.lab.sim.atomic_skills.primitives._binding_contracts import (
 from embodichain.lab.sim.atomic_skills.primitives._helpers import (
     arm_qpos_from_state,
     pad_trajectory_to_length,
-    resample_planned_trajectory,
+    plan_named_arm_trajectory,
 )
 from embodichain.lab.sim.atomic_skills.requirements import (
     CARTESIAN_POSE_CAPABILITY,
@@ -65,7 +65,6 @@ from embodichain.lab.sim.atomic_skills.requirements import (
 from embodichain.lab.sim.atomic_skills.state import PlanningContext
 from embodichain.lab.sim.atomic_skills.trajectory_ops import (
     axis_translation_keyframes,
-    build_pose_plan_states,
     interpolate_hand_qpos,
     resolve_pose_target,
     translate_pose_world,
@@ -164,7 +163,23 @@ class SlideOptions(SkillOptions):
     release_retreat_distance: float = 0.0
     """Distance opposite grasp Z while opening; zero holds the arm still."""
 
+    push_approach_offset: tuple[float, float, float] | None = None
+    """World XYZ offset (m) from the pre-grasp pose for an extra push waypoint."""
+
     def __post_init__(self) -> None:
+        if self.push_approach_offset is not None:
+            if len(self.push_approach_offset) != 3 or any(
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                for value in self.push_approach_offset
+            ):
+                raise ValueError(
+                    "push_approach_offset must contain three finite numbers."
+                )
+            object.__setattr__(
+                self, "push_approach_offset", tuple(self.push_approach_offset)
+            )
         if self.direction not in ("pull", "push"):
             raise ValueError("direction must be either 'pull' or 'push'.")
         if self.hand_interp_steps < 1:
@@ -384,8 +399,14 @@ class Slide(AtomicSkill[SlideGoal, SlideOptions]):
             options.hand_interp_steps,
             direction=direction,
         )
+        approach_target = approach_xpos
+        if direction == "push" and options.push_approach_offset is not None:
+            clearance_pose = translate_pose_world(
+                approach_xpos, approach_xpos.new_tensor(options.push_approach_offset)
+            )
+            approach_target = torch.stack((clearance_pose, approach_xpos), dim=1)
         approach_success, approach_arm = self._plan_pose_segment(
-            approach_xpos,
+            approach_target,
             start_arm_qpos,
             control_part,
             request,
@@ -670,25 +691,15 @@ class Slide(AtomicSkill[SlideGoal, SlideOptions]):
         interpolation_dt: float,
         cartesian_linear: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        result = self.motion_generator.generate(
-            build_pose_plan_states(target_pose),
-            options=request.motion_policy.to_motion_gen_options(
-                start_qpos=start_qpos,
-                control_part=control_part,
-                sample_count=sample_count,
-                interpolation_dt=interpolation_dt,
-                cartesian_linear=cartesian_linear,
-            ),
-        )
-        assert isinstance(result.success, torch.Tensor)
-        assert result.positions is not None
-        assert result.dt is not None
-        return result.success, resample_planned_trajectory(
-            result.positions,
+        return plan_named_arm_trajectory(
+            self.motion_generator,
+            control_part,
+            start_qpos,
+            target_pose,
             sample_count,
-            dt=result.dt,
-            control_dt=interpolation_dt,
-            arrival_indices=result.waypoint_indices,
+            request.motion_policy,
+            interpolation_dt,
+            cartesian_linear=cartesian_linear,
         )
 
 

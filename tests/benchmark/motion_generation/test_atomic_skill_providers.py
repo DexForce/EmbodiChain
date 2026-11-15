@@ -1156,7 +1156,7 @@ def test_replay_measures_hinge_at_segment_end_and_peak_object_rotation() -> None
 
 
 def test_door_pour_align_push_suite_declares_the_four_skills() -> None:
-    suite = load_suite("atomic_franka_pgi_door_pour_align_push")
+    suite = load_suite("atomic_franka_robotiq_door_pour_align_push")
     track = suite.enabled_tracks()[0]
 
     assert [spec.id for spec in suite.planners if spec.enabled] == ["curobo", "toppra"]

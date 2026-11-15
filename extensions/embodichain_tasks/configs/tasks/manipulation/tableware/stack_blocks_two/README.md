@@ -12,6 +12,12 @@ The two recorded segments keep separate physical acceptance gates:
   25 mm in X/Y and 12 mm in Z of a point 50 mm above block 1, and each block
   must tilt less than 45 degrees from upright.
 
+The CobotMagic deployment also selects `task_program/evaluation.yaml`. At
+episode completion it checks the horizontal distance between the two block
+centers against a 35.36 mm radius derived from the placement segment's X/Y
+tolerance. Trajectory recordings include the raw poses used for this check so
+`run-task --replay` can report the recomputed and recorded acceptance.
+
 The pick declares a calibrated object-to-TCP transform: translation
 `[0.02, 0, -0.025]` m and the right arm's initial tool rotation. This retains
 the lower-edge side grasp and bypasses antipodal sampling, whose vertical

@@ -17,8 +17,11 @@
 from __future__ import annotations
 
 import importlib
+import json
+from types import SimpleNamespace
 
 import pytest
+import torch
 
 from embodichain.learning.rl.policy_evaluation.cli import (
     _resolve_input,
@@ -51,6 +54,114 @@ def test_run_defaults_to_latest_checkpoint(tmp_path):
     assert resolved.checkpoint == checkpoint
     assert resolved.requested_checkpoint == "latest"
     assert resolved.selected_checkpoint == "latest"
+
+
+def test_named_run_reports_the_host_owned_policy_outcomes(tmp_path, monkeypatch):
+    from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+    from embodichain.lab.gym.envs.episode_context import EpisodeContext
+    from embodichain.lab.gym.envs.managers import (
+        ConditionCfg,
+        RLTaskCfg,
+        TerminationManager,
+    )
+    from embodichain.lab.gym.envs.managers.conditions import evaluation_condition
+    from embodichain.learning.rl.policy_evaluation import cli
+
+    host = object.__new__(EmbodiedEnv)
+    host._num_envs = 3
+    host.sim = SimpleNamespace(device=torch.device("cpu"))
+    host.cfg = SimpleNamespace(seed=79, task_program=None)
+    host.episode_context = EpisodeContext(3)
+    host._task_initial_states = [{}, {}, {}]
+    host._recording_provenance = {}
+    host._elapsed_steps = torch.ones(3, dtype=torch.long)
+    host.positions = torch.tensor([[0.0, 0, 0], [0, 0, 2], [0, 0, 0]])
+    manager = TerminationManager(
+        RLTaskCfg(
+            success={
+                "low": ConditionCfg(
+                    func=evaluation_condition,
+                    params={
+                        "sources": {
+                            "pose": {"attribute": "positions", "kind": "position"}
+                        },
+                        "rules": {
+                            "low": {
+                                "kind": "below_height",
+                                "bindings": {"position": "pose"},
+                                "params": {"height": 1.0},
+                            }
+                        },
+                        "root": "low",
+                    },
+                )
+            }
+        ),
+        host,
+    )
+    host.termination_manager = manager
+    observation = torch.zeros(3, 1)
+
+    def reset(*, seed):
+        assert seed == host.cfg.seed
+        manager.reset()
+        host.episode_context._begin_episode([0, 1, 2])
+        host.episode_context._finish_initialization([0, 1, 2])
+        host._demo_episode_metadata = [
+            host._new_demo_episode_metadata(i) for i in range(3)
+        ]
+        return observation, {}
+
+    def step(action):
+        manager.compute()
+        info = {"success": manager.task_state()[0], "task_outcome": manager.snapshot()}
+        terminated, truncated = manager.terminated, manager.truncated
+        rows = terminated.nonzero().flatten()
+        assert rows.tolist() == [0, 2]
+        host._seal_step_outcomes(rows, terminated, truncated, info)
+        manager.reset(rows)
+        assert manager.snapshot()["steps"].tolist() == [0, 1, 0]
+        return observation, torch.ones(3), terminated, truncated, info
+
+    class Policy(torch.nn.Module):
+        def get_action(self, inputs, deterministic=False):
+            assert deterministic
+            return {"action": torch.zeros(3, 1)}
+
+    run, checkpoint = _run(tmp_path / "shared-rules-experiment")
+    args = parse_args((str(run), "--episodes", "1"))
+    resolved = _resolve_input(args)
+    runtime = SimpleNamespace(
+        env=SimpleNamespace(num_envs=3, reset=reset, step=step),
+        policy=Policy(),
+        env_id="SharedRules-v1",
+        close=lambda: None,
+    )
+    native = cli.NativeRuntime(
+        runtime, host.device, host.device, 79, "hybrid", False, {}
+    )
+    monkeypatch.setattr(cli, "_build_native_runtime", lambda *args, **kwargs: native)
+    report_path = cli._run_native_headless(args, resolved)
+    report = json.loads(report_path.read_text())
+    assert report["inputs"]["run"] == str(run)
+    assert report["inputs"]["checkpoint"]["path"] == str(checkpoint)
+    (outcome,) = report["result"]["episode_outcomes"]
+    assert outcome == host.get_demo_episode_metadata(0)["episode_outcome"]
+    assert outcome["identity"]["seed"] == 79
+    assert outcome["acceptance"]["accepted"] is True
+    assert outcome["physical"]["conditions"]["conditions"]["success.low"][
+        "evaluation_identity"
+    ]
+    assert (
+        host.get_demo_episode_metadata(2)["episode_outcome"]["identity"]["env_id"] == 2
+    )
+    repeated = json.loads(cli._run_native_headless(args, resolved).read_text())
+    (second_outcome,) = repeated["result"]["episode_outcomes"]
+    assert second_outcome["physical"] == outcome["physical"]
+    assert (
+        second_outcome["identity"]["episode_uuid"]
+        != outcome["identity"]["episode_uuid"]
+    )
 
 
 @pytest.mark.parametrize(

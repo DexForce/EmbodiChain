@@ -27,6 +27,7 @@ import pytest
 import torch
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
+    CableObjectCfg,
     FluidObjectCfg,
     FluidSpawnCfg,
     FluidRenderCfg,
@@ -49,18 +50,13 @@ class TestFluidRuntime:
         from dexsim.engine.newton_physics import DexUniSolverCfg
 
         if "sph_cfg" not in getattr(DexUniSolverCfg, "__dataclass_fields__", {}):
-            pytest.skip("This DexSim build does not compose SPH through DexUni.")
+            pytest.skip("This DexSim build lacks DexUni fluid composition.")
         if num_envs > 1:
             from dexsim.engine.newton_physics.solver_runtime import (
                 ensure_solver_available,
             )
 
-            solver = ensure_solver_available("sph")
-            if not (
-                getattr(solver, "supports_world_isolation", False)
-                and getattr(solver, "supports_world_reset", False)
-            ):
-                pytest.skip("This DexSim SPH build supports only a single world.")
+            ensure_solver_available("dexuni")
 
         def run_worlds(count: int, use_default: bool) -> dict:
             result_path = tmp_path / f"lifecycle-{count}-{use_default}.json"
@@ -96,7 +92,7 @@ class TestFluidRuntime:
 
 def _run_fluid_lifecycle(num_envs: int, automatic: bool) -> dict[str, object]:
     """Run the complete NoRender lifecycle in a fresh native process."""
-    from dexsim.engine.newton_physics import DexUniSolverCfg, SPHSolverCfg
+    from dexsim.engine.newton_physics import DexUniSolverCfg
     from dexsim.engine.newton_physics.backend_registry import get_newton_backend
     from embodichain.lab.sim.cfg import RigidObjectCfg
     from embodichain.lab.sim.shapes import CubeCfg
@@ -106,7 +102,7 @@ def _run_fluid_lifecycle(num_envs: int, automatic: bool) -> dict[str, object]:
             headless=True,
             device="cuda",
             num_envs=num_envs,
-            # The two fluid volumes overlap in world space. SPH worlds must
+            # The two fluid volumes overlap in world space. DexUni fluid worlds must
             # remain isolated even when their particles are nearby.
             arena_space=0.02,
             physics_dt=0.001,
@@ -118,11 +114,11 @@ def _run_fluid_lifecycle(num_envs: int, automatic: bool) -> dict[str, object]:
                     None
                     if automatic
                     else DexUniSolverCfg(
-                        sph_cfg=SPHSolverCfg(
-                            sph_method="dfsph",
-                            particle_support_radius=0.0225,
-                            volume_map_boundary_enabled=False,
-                        )
+                        sph_cfg={
+                            "sph_method": "dfsph",
+                            "particle_support_radius": 0.0225,
+                            "volume_map_boundary_enabled": False,
+                        }
                     )
                 ),
             ),
@@ -152,6 +148,15 @@ def _run_fluid_lifecycle(num_envs: int, automatic: bool) -> dict[str, object]:
                 render=FluidRenderCfg(mode="none"),
             )
         )
+        with pytest.raises(NotImplementedError, match="same arena"):
+            sim.add_cable_object(
+                CableObjectCfg(
+                    uid="wire",
+                    points=[[0, 0, 0], [0, 0, 0.1], [0, 0, 0.2]],
+                    radius=0.01,
+                )
+            )
+        assert "wire" not in sim.asset_uids
         with pytest.raises(RuntimeError, match="prepare"):
             _ = fluid.data
         sim.prepare()
@@ -187,6 +192,10 @@ def _run_fluid_lifecycle(num_envs: int, automatic: bool) -> dict[str, object]:
             continued = fluid.data.particle_state_w
             torch.testing.assert_close(continued[0], first[0], rtol=1e-5, atol=1e-6)
             assert continued[1, :, 2].mean() < first[1, :, 2].mean()
+            sim.reset_objects_state(env_ids=[1])
+            selected = fluid.data.particle_state_w
+            torch.testing.assert_close(selected[0], continued[0], rtol=0, atol=0)
+            torch.testing.assert_close(selected[1], original[1], rtol=0, atol=0)
         sim.reset_objects_state()
         torch.testing.assert_close(fluid.data.particle_state_w, original)
         sim.update(step=3, render_final_step=False)

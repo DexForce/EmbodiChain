@@ -1,0 +1,96 @@
+program_id: pick_aim_pour_return_cup
+targets:
+  cup_return_pose:
+    kind: cyclic_pose
+    values:
+    - position:
+      - -0.75
+      - 0.0
+      - 0.552
+      quaternion_xyzw:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+  cup_lift_pose:
+    kind: cyclic_pose
+    values:
+    - position:
+      - -0.75
+      - 0.0
+      - 0.672
+      quaternion_xyzw:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+  cup_pour_pose:
+    kind: cyclic_pose
+    values:
+    - position:
+      - -0.75
+      - -0.06
+      - 0.67
+      quaternion_xyzw:
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+program:
+  kind: sequence
+  items:
+  - kind: segment
+    name: pick_cup
+    steps:
+      kind: invoke
+      call:
+        kind: pick
+        object: cup
+        grasp: cup_grasp
+    validators:
+    - kind: object_near_target
+      object: cup
+      target: cup_lift_pose
+      position_tolerance: 0.03
+  - kind: segment
+    name: aim_cup_above_bowl
+    steps:
+      kind: invoke
+      call:
+        kind: registered
+        call_id: simulation.move_held_object
+        arguments:
+          target: receiver_pour_pose
+    validators:
+    - kind: object_near_target
+      object: cup
+      target: cup_pour_pose
+      position_tolerance: 0.03
+  - kind: segment
+    name: pour_water
+    steps:
+      kind: invoke
+      call:
+        kind: registered
+        call_id: simulation.pour
+        arguments:
+          object: cup
+  - kind: segment
+    name: return_cup
+    steps:
+      kind: invoke
+      call:
+        kind: place
+        object: cup
+        at:
+          kind: target_ref
+          target: cup_return_pose
+    post:
+    - kind: wait_stable
+      entity: cup
+    validators:
+    - kind: object_near_target
+      object: cup
+      target: cup_return_pose
+      position_tolerance: 0.03
+instruction: Pour water from the cup into the bowl and return the cup to the table.

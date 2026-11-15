@@ -14,9 +14,14 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
+import hashlib
 import os
+import shlex
 import shutil
 import xml.etree.ElementTree as ET
+from pathlib import Path
 
 from embodichain.toolkits.urdf_assembly.logging_utils import (
     URDFAssemblyLogger,
@@ -141,25 +146,8 @@ class URDFMeshManager:
             self.logger.error(f"Failed to copy mesh file: {e}", exc_info=True)
             return mesh_file_name
 
-        # Handle OBJ's mtl dependency
         if mesh_file_name.lower().endswith(".obj"):
-            mtl_filename = (
-                os.path.splitext(os.path.basename(mesh_file_name))[0] + ".mtl"
-            )
-            original_mtl_path = os.path.join(
-                os.path.dirname(original_mesh_path), mtl_filename
-            )
-            if os.path.exists(original_mtl_path):
-                new_mtl_path = os.path.join(target_dir, os.path.basename(mtl_filename))
-                shutil.copyfile(original_mtl_path, new_mtl_path)
-                # Fix mtllib path in obj file to reference local filename
-                with open(new_mesh_path, "r") as f:
-                    obj_content = f.read()
-                obj_content = obj_content.replace(
-                    f"mtllib {mtl_filename}", f"mtllib {os.path.basename(mtl_filename)}"
-                )
-                with open(new_mesh_path, "w") as f:
-                    f.write(obj_content)
+            self._copy_obj_materials(Path(original_mesh_path), Path(new_mesh_path))
 
         # Handle DAE's texture dependency
         if mesh_file_name.lower().endswith(".dae"):
@@ -190,3 +178,62 @@ class URDFMeshManager:
                 )
 
         return os.path.join(sub_folder, comp_name, os.path.basename(mesh_file_name))
+
+    def _copy_obj_materials(self, source: Path, destination: Path) -> None:
+        """Copy the material libraries declared by the source OBJ."""
+        with source.open(encoding="utf-8", errors="surrogateescape", newline="") as obj:
+            lines = obj.readlines()
+
+        changed = False
+        for index, line in enumerate(lines):
+            fields = line.split(maxsplit=1)
+            if len(fields) != 2 or fields[0] != "mtllib":
+                continue
+            argument = fields[1].strip()
+            if (source.parent / argument).is_file():
+                references = [argument]
+            else:
+                try:
+                    references = shlex.split(argument, comments=True)
+                except ValueError:
+                    self.logger.warning(
+                        f"Invalid mtllib declaration in {source}: {line.strip()}"
+                    )
+                    continue
+
+            relocated = []
+            for reference in references:
+                material = source.parent / reference
+                if not material.is_file():
+                    self.logger.warning(f"OBJ material library not found: {material}")
+                    relocated.append(reference)
+                    continue
+
+                relative = Path(os.path.normpath(reference))
+                if relative.is_absolute() or relative.parts[0] == "..":
+                    # Keep libraries outside the source OBJ's directory inside
+                    # this component's output. Distinct paths can share a basename.
+                    key = hashlib.sha256(os.fsencode(material.resolve())).hexdigest()[
+                        :16
+                    ]
+                    relative = Path("materials") / f"{key}.mtl"
+                    relocated.append(relative.as_posix())
+                else:
+                    relocated.append(reference)
+
+                target = destination.parent / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(material, target)
+
+            if relocated != references:
+                names = " ".join(
+                    f'"{name}"' if " " in name else name for name in relocated
+                )
+                lines[index] = f"mtllib {names}\n"
+                changed = True
+
+        if changed:
+            with destination.open(
+                "w", encoding="utf-8", errors="surrogateescape", newline=""
+            ) as obj:
+                obj.writelines(lines)

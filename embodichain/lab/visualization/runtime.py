@@ -443,8 +443,14 @@ class VisualizationRuntime:
                 "Visualization update thread failed."
             ) from self._worker_error
 
-    def start(self, timeout: float = 10.0) -> None:
-        """Build the initial manifest and start the backend update thread."""
+    def start(self, timeout: float = 120.0) -> None:
+        """Build the initial manifest and start the backend update thread.
+
+        Args:
+            timeout: Maximum seconds to wait for backend readiness, including
+                any frontend dependency installation/build and initial manifest
+                publication. Returns as soon as the backend is ready.
+        """
         if self.is_running:
             return
         manifest = self.exporter.build_manifest()
@@ -461,7 +467,11 @@ class VisualizationRuntime:
         self._thread.start()
         if not self._ready_event.wait(timeout=timeout):
             self.stop(timeout=timeout)
-            raise TimeoutError("Timed out while starting the visualization backend.")
+            raise TimeoutError(
+                f"Timed out after {timeout:g}s while starting the visualization backend. "
+                "Check backend startup logs; frontend installation/build may "
+                "require a longer start(timeout=...) budget."
+            )
         self._raise_worker_error()
         self._next_capture_time = perf_counter()
         self._next_image_capture_time = perf_counter()

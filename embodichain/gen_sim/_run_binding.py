@@ -22,6 +22,7 @@ from copy import deepcopy
 import hashlib
 import json
 from pathlib import Path
+import shutil
 from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -291,6 +292,62 @@ def _physical_scene(export: Path, data: dict[str, Any], assets: Path) -> dict[st
     return result
 
 
+def _generated_scene_data(
+    root: Path, manifest: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+    data: dict[str, Any] = {"background": [], "rigid_object": [], "articulation": []}
+    entries = {}
+    for value in manifest["objects"]:
+        physics = value.get("physics", {})
+        entry = {
+            "uid": value["uid"],
+            "name": value["name"],
+            "description": value["description"],
+            "category": value["category"],
+            "shape": {"shape_type": "Mesh", "fpath": value["mesh_path"]},
+            "init_pos": value["pose"]["position"],
+            "init_rot": value["pose"]["rotation_euler_xyz_degrees"],
+            "body_scale": value["pose"]["scale"],
+            "body_type": physics.get("body_type", value.get("body_type", "dynamic")),
+            "attrs": physics.get("attrs", {}),
+            "max_convex_hull_num": physics.get("max_convex_hull_num", 16),
+            "source_prim_path": value["source_prim_path"],
+        }
+        entries[entry["uid"]] = entry
+        category = "background" if entry["uid"] == "table" else "rigid_object"
+        data[category].append(entry)
+    return data, entries
+
+
+def _physical_generated_scene(
+    scene_root: Path,
+    manifest: dict[str, Any],
+    assets: Path,
+) -> dict[str, Any]:
+    source = (scene_root / manifest["runtime_asset"]["path"]).resolve()
+    assets.mkdir(parents=True, exist_ok=True)
+    runtime = assets / "asset.usdz"
+    shutil.copyfile(source, runtime)
+    result: dict[str, Any] = {
+        "background": [],
+        "rigid_object": [],
+        "articulation": [],
+    }
+    for value in manifest["objects"]:
+        item = {
+            "uid": value["uid"],
+            "source": {
+                "file_path": str(runtime),
+                "source_prim_path": value["source_prim_path"],
+            },
+            "asset_physics_mode": "preserve",
+            "source_pose_mode": "preserve",
+        }
+        category = "background" if value["uid"] == "table" else "rigid_object"
+        result[category].append(item)
+    return result
+
+
 def _placement(
     object_entry: dict[str, Any],
     reference_entry: dict[str, Any],
@@ -346,7 +403,10 @@ def _bind_deployment(
     policy: dict[str, Any],
     profile: dict[str, Any],
     *,
-    services: GenSimServices,
+    services: GenSimServices | None,
+    generated_scene: dict[str, Any] | None = None,
+    resolved_bindings: dict[str, dict[str, str]] | None = None,
+    resolved_placements: dict[str, dict[str, Any]] | None = None,
 ) -> Path:
     import yaml
     from embodichain.lab.gym.utils.composition import resolve_gym_components
@@ -362,13 +422,17 @@ def _bind_deployment(
     )
     from .task_engine.orchestration.workflow_artifacts import write_run_json
 
-    export = scene / "scene_export"
-    scene_data = json.loads((export / "scene_config.json").read_text())
-    entries = {
-        item["uid"]: item
-        for name in ("background", "rigid_object", "articulation")
-        for item in scene_data.get(name, [])
-    }
+    if generated_scene is None:
+        export = scene / "scene_export"
+        scene_data = json.loads((export / "scene_config.json").read_text())
+        entries = {
+            item["uid"]: item
+            for name in ("background", "rigid_object", "articulation")
+            for item in scene_data.get(name, [])
+        }
+    else:
+        export = scene
+        scene_data, entries = _generated_scene_data(scene, generated_scene)
     if len(entries) != sum(
         len(scene_data.get(name, []))
         for name in ("background", "rigid_object", "articulation")
@@ -380,9 +444,13 @@ def _bind_deployment(
     original_digest = hashlib.sha256(graph_path.read_bytes()).hexdigest()
     annotations = validation["source"]["annotations"]
     grounding = json.loads((task / "image_grounding.json").read_text())
-    bindings = _ground_ids(
-        grounding, annotations, graph, entries, profile, services=services
-    )
+    bindings = resolved_bindings
+    if bindings is None:
+        if services is None:
+            raise ValueError("Runtime grounding requires GenSimServices")
+        bindings = _ground_ids(
+            grounding, annotations, graph, entries, profile, services=services
+        )
     root = cfg.output / "deployment"
     root.mkdir()
     write_run_json(
@@ -469,12 +537,21 @@ def _bind_deployment(
                 raise ValueError(
                     "Automatic placement must preserve the declared on/inside relation"
                 )
-            pose, displacement = _placement(
-                entries[bindings["objects"][subject]],
-                entries[bindings["objects"][reference]],
-                export,
-                occupied.setdefault(reference, []),
+            placement = (
+                None
+                if resolved_placements is None
+                else resolved_placements.get(node["id"])
             )
+            if placement is None:
+                pose, displacement = _placement(
+                    entries[bindings["objects"][subject]],
+                    entries[bindings["objects"][reference]],
+                    export,
+                    occupied.setdefault(reference, []),
+                )
+            else:
+                pose = placement["object_target_pose"]
+                displacement = placement["displacement"]
             affordance = f"gensim_destination_{node['id']}"
             rigid[reference]["affordances"].append(
                 {
@@ -524,7 +601,11 @@ def _bind_deployment(
     deployment = {
         key: deepcopy(value) for key, value in runtime.items() if key != "embodiment"
     }
-    deployment.update(_physical_scene(export, scene_data, root / "assets"))
+    deployment.update(
+        _physical_scene(export, scene_data, root / "assets")
+        if generated_scene is None
+        else _physical_generated_scene(scene, generated_scene, root / "assets")
+    )
     write_run_json(root / "program.json", program)
     (root / "integration.yaml").write_text(yaml.safe_dump(integration, sort_keys=False))
     (root / "execution_policy.yaml").write_text(yaml.safe_dump(policy, sort_keys=False))

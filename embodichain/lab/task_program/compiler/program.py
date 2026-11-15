@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TypeAlias
 
+from embodichain.lab.evaluation import CompiledEvaluation
 from embodichain.lab.task_program.semantics.calls import (
     DeclarativeValue,
     HandOver,
@@ -49,6 +50,7 @@ from ..language.schema import (
     MAX_REPEAT_COUNT,
     ArticulationJointPositionValidatorCfg,
     BarrierCfg,
+    ConditionValidatorCfg,
     CyclicPoseTargetCfg,
     PoseTargetCfg,
     SceneRelativePoseTargetCfg,
@@ -71,6 +73,7 @@ from ..language.schema import (
     RegisteredSemanticCallCfg,
     RepeatCfg,
     SegmentCfg,
+    SegmentContractCfg,
     SequenceCfg,
     TargetRefCfg,
     WaitStablePostCfg,
@@ -540,13 +543,41 @@ class CompiledObjectStateValidator:
         object.__setattr__(self, "object", _copy_scene_ref(self.object))
 
 
+@dataclass(frozen=True, slots=True)
+class _ConditionValues:
+    ref: str
+    kind: str = "condition"
+
+
+@dataclass(frozen=True, slots=True)
+class CompiledConditionValidator:
+    """An immutable reference resolved against the deployment rule library."""
+
+    cfg: ConditionValidatorCfg | _ConditionValues
+    spec: CompiledEvaluation
+    source_path: ConfigPath
+
+    def __post_init__(self) -> None:
+        if type(self.cfg) not in (ConditionValidatorCfg, _ConditionValues):
+            raise TypeError("cfg must be a condition validator.")
+        if (
+            type(self.spec) is not CompiledEvaluation
+            or type(self.source_path) is not tuple
+        ):
+            raise TypeError("Expected a bound rule and a ConfigPath tuple.")
+        cfg = ConditionValidatorCfg(ref=self.cfg.ref, kind=self.cfg.kind)
+        object.__setattr__(self, "cfg", _ConditionValues(cfg.ref))
+
+
 CompiledTaskProgramValidator: TypeAlias = (
     CompiledObjectNearTargetValidator
     | CompiledObjectNearRelativeTargetValidator
     | CompiledArticulationJointPositionValidator
     | CompiledObjectStateValidator
+    | CompiledConditionValidator
 )
 _COMPILED_VALIDATOR_TYPES = (
+    CompiledConditionValidator,
     CompiledObjectStateValidator,
     CompiledObjectNearTargetValidator,
     CompiledObjectNearRelativeTargetValidator,
@@ -621,6 +652,21 @@ class CompiledParallelBlock:
 
 
 @dataclass(frozen=True, slots=True)
+class _CompiledSegmentEvidence:
+    kind: str
+    ref: str | int
+    assurance: str | None
+    required: bool
+    spec: CompiledEvaluation | None
+
+
+@dataclass(frozen=True, slots=True)
+class _CompiledSegmentContract:
+    prerequisites: tuple[_CompiledSegmentEvidence, ...]
+    outcomes: tuple[_CompiledSegmentEvidence, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class CompiledTaskProgramSegment:
     """One independent explicit or implicit logical program segment."""
 
@@ -635,6 +681,9 @@ class CompiledTaskProgramSegment:
     parallel_block: CompiledParallelBlock | None = None
     implicit: bool = False
     instruction: str | None = None
+    contract: _CompiledSegmentContract | None = field(
+        default=None, metadata={"omit_none_from_provenance": True}
+    )
 
     def __post_init__(self) -> None:
         if type(self.segment_index) is not int or self.segment_index < 0:
@@ -841,6 +890,7 @@ _ValidatorTemplate: TypeAlias = (
     | _ObjectNearRelativeTargetValidatorTemplate
     | _ArticulationJointPositionValidatorTemplate
     | _ObjectStateValidatorTemplate
+    | CompiledConditionValidator
 )
 
 
@@ -852,6 +902,7 @@ class _SegmentTemplate:
     post: tuple[_PostTemplate, ...]
     validators: tuple[_ValidatorTemplate, ...]
     source_path: ConfigPath
+    contract: _CompiledSegmentContract | None
 
 
 _NodeTemplate = (
@@ -1255,6 +1306,12 @@ def _iter_segments(
                     source_path=validator.source_path,
                 )
             )
+        elif type(validator) is CompiledConditionValidator:
+            validators.append(
+                CompiledConditionValidator(
+                    validator.cfg, validator.spec, validator.source_path
+                )
+            )
         else:
             raise TypeError(
                 f"Unsupported internal validator template {type(validator).__name__}."
@@ -1276,6 +1333,7 @@ def _iter_segments(
         validators=tuple(validators),
         parallel_block=parallel_block,
         implicit=False,
+        contract=template.contract,
     )
     state.segment_index += 1
     yield segment
@@ -1496,6 +1554,7 @@ def _materialize_program(
     integration: TaskProgramIntegrationCfg,
     targets: Mapping[str, tuple[SemanticPose | SemanticRelativePose, ...]],
     root: _NodeTemplate,
+    strict_contracts: bool,
 ) -> CompiledTaskProgram:
     """Expand one internal template directly into the public bounded snapshot."""
     segments: list[CompiledTaskProgramSegment] = []
@@ -1507,6 +1566,33 @@ def _materialize_program(
         repeat_frames=(),
         state=_ExpansionState(),
     ):
+        if strict_contracts and segment.instruction is None:
+            raise TaskProgramCompileError(
+                "missing_segment_instruction",
+                (*segment.source_path, "instruction"),
+                "Describe the segment subgoal explicitly.",
+            )
+        if strict_contracts and segment.contract is None:
+            raise TaskProgramCompileError(
+                "missing_segment_contract",
+                (*segment.source_path, "contract"),
+                "Declare the segment prerequisites and outcome evidence.",
+            )
+        if segment.contract is not None:
+            limits = {
+                "call_effect": (
+                    len(segment.calls) if segment.parallel_block is None else 0
+                ),
+                "validator": len(segment.validators),
+                "post_policy": len(segment.post_policies),
+            }
+            for index, evidence in enumerate(segment.contract.outcomes):
+                if evidence.kind in limits and evidence.ref >= limits[evidence.kind]:
+                    raise TaskProgramCompileError(
+                        "unresolved_segment_evidence",
+                        (*segment.source_path, "contract", "outcomes", index, "ref"),
+                        f"{evidence.kind} index does not name a supported segment boundary.",
+                    )
         expanded_calls += len(segment.calls)
         if expanded_calls > MAX_EXPANDED_CALLS:
             raise TaskProgramCompileError(
@@ -1527,15 +1613,22 @@ def _materialize_program(
 class TaskProgramCompiler:
     """Compile validated Task Program ASTs through one static scene manifest."""
 
-    def __init__(self, scene_manifest: SceneManifest) -> None:
+    def __init__(
+        self,
+        scene_manifest: SceneManifest,
+        *,
+        evaluation_conditions: Mapping[str, CompiledEvaluation] | None = None,
+    ) -> None:
         """Create one provider-free compiler.
 
         Args:
             scene_manifest: Canonical provider-free scene identity catalog.
+            evaluation_conditions: Bound rules from the selected deployment.
         """
         if type(scene_manifest) is not SceneManifest:
             raise TypeError("scene_manifest must be exactly SceneManifest.")
         self._scene_manifest = scene_manifest
+        self._evaluation_conditions = dict(evaluation_conditions or {})
 
     @classmethod
     def from_scene_registry(cls, registry: SceneRegistry) -> TaskProgramCompiler:
@@ -1572,6 +1665,50 @@ class TaskProgramCompiler:
                 f"{tuple(value.__name__ for value in expected_types)}.",
             )
         return _copy_scene_ref(resolved)
+
+    def _compile_segment_contract(
+        self, contract: SegmentContractCfg | None, *, path: ConfigPath
+    ) -> _CompiledSegmentContract | None:
+        if contract is None:
+            return None
+
+        def compile_group(group):
+            entries = []
+            for index, evidence in enumerate(getattr(contract, group)):
+                ref_path = (*path, group, index, "ref")
+                ref = evidence.ref
+                spec = None
+                if evidence.kind in ("held", "released"):
+                    ref = self._resolve_scene(
+                        ref, expected_types=(SceneObjectRef,), path=ref_path
+                    ).entity_id
+                elif evidence.kind == "condition":
+                    spec = self._evaluation_conditions.get(ref)
+                    if spec is None or spec.stateful:
+                        raise TaskProgramCompileError(
+                            "invalid_prerequisite_condition",
+                            ref_path,
+                            "Prerequisites require a bound instantaneous condition.",
+                        )
+                    if any(
+                        field.endswith("/segment_start_frame")
+                        for field in spec.required_fields
+                    ):
+                        raise TaskProgramCompileError(
+                            "invalid_prerequisite_condition",
+                            ref_path,
+                            "Incoming evidence cannot use a segment-start baseline.",
+                        )
+                entries.append(
+                    _CompiledSegmentEvidence(
+                        evidence.kind, ref, evidence.assurance, evidence.required, spec
+                    )
+                )
+            return tuple(entries)
+
+        return _CompiledSegmentContract(
+            compile_group("prerequisites"), compile_group("outcomes")
+        )
 
     @staticmethod
     def _target_id(
@@ -1877,6 +2014,18 @@ class TaskProgramCompiler:
             validators: list[_ValidatorTemplate] = []
             for index, cfg in enumerate(node.validators):
                 validator_path = (*path, "validators", index)
+                if type(cfg) is ConditionValidatorCfg:
+                    spec = self._evaluation_conditions.get(cfg.ref)
+                    if spec is None:
+                        raise TaskProgramCompileError(
+                            "unknown_evaluation_condition",
+                            (*validator_path, "ref"),
+                            f"Unknown deployment evaluation condition {cfg.ref!r}.",
+                        )
+                    validators.append(
+                        CompiledConditionValidator(cfg, spec, validator_path)
+                    )
+                    continue
                 if type(cfg) is ObjectNearTargetValidatorCfg:
                     if cfg.kind != "object_near_target":
                         raise TaskProgramCompileError(
@@ -2022,6 +2171,9 @@ class TaskProgramCompiler:
                 post=tuple(post),
                 validators=tuple(validators),
                 source_path=path,
+                contract=self._compile_segment_contract(
+                    node.contract, path=(*path, "contract")
+                ),
             )
         if type(node) is ParallelCfg:
             if inside_parallel:
@@ -2154,18 +2306,21 @@ class TaskProgramCompiler:
             compiled[target_id] = tuple(poses)
         return MappingProxyType(compiled)
 
-    def compile(self, config: TaskProgramCfg) -> CompiledTaskProgram:
+    def compile(
+        self, config: TaskProgramCfg, *, strict_contracts: bool = False
+    ) -> CompiledTaskProgram:
         """Compile a bounded program and retain its authored diagnostic locations.
 
         Args:
             config: Strictly validated declarative program.
+            strict_contracts: Require complete segment instructions and contracts.
 
         Returns:
             Immutable calls, targets and segment acceptance declarations.
         """
         normalized = getattr(config, "__authoring_source_map__", None)
         try:
-            program = self._compile(config)
+            program = self._compile(config, strict_contracts=strict_contracts)
         except TaskProgramConfigError as error:
             if normalized is None:
                 raise
@@ -2180,11 +2335,14 @@ class TaskProgramCompiler:
             )
         return program
 
-    def _compile(self, config: TaskProgramCfg) -> CompiledTaskProgram:
+    def _compile(
+        self, config: TaskProgramCfg, *, strict_contracts: bool = False
+    ) -> CompiledTaskProgram:
         """Compile one validated AST into a bounded provider-free program.
 
         Args:
             config: Strict, supported-version Task Program configuration.
+            strict_contracts: Require explicit instructions and contracts on all segments.
 
         Returns:
             Immutable segments with repeat-local targets already resolved.
@@ -2224,6 +2382,7 @@ class TaskProgramCompiler:
             integration=integration,
             targets=targets,
             root=root,
+            strict_contracts=strict_contracts,
         )
 
 

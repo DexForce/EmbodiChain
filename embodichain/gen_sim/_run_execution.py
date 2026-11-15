@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +26,12 @@ __all__: list[str] = []
 
 
 def _execute_deployment(
-    path: Path, *, device: str | None, headless: bool
+    path: Path,
+    *,
+    device: str | None,
+    headless: bool,
+    reset_observer: Callable[[Any], None] | None = None,
+    step_observer: Callable[[Any, Any, Any], None] | None = None,
 ) -> dict[str, Any]:
     from embodichain.lab.gym.envs.demo import execute_demo_episode
     from embodichain.lab.gym.utils.gym_utils import config_to_cfg
@@ -47,8 +53,13 @@ def _execute_deployment(
     env = None
     try:
         env = get_env_spec(data["id"]).make(cfg=cfg)
-        env.reset(options={"save_data": False})
-        result = execute_demo_episode(env, episode_index=0)
+        reset_result = env.reset(options={"save_data": False})
+        if reset_observer is not None:
+            reset_observer(reset_result[0])
+        kwargs = {"episode_index": 0}
+        if step_observer is not None:
+            kwargs["step_observer"] = step_observer
+        result = execute_demo_episode(env, **kwargs)
         report = result.to_metadata()
         report.update(
             status="succeeded" if result.completed and result.all_success else "failed",

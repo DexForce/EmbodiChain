@@ -17,9 +17,10 @@
 """Run-scoped service assembly, ownership and safe call records."""
 
 from __future__ import annotations
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from contextlib import contextmanager
 from copy import deepcopy
+from importlib.metadata import entry_points
 from pathlib import Path
 from threading import RLock
 from time import perf_counter
@@ -54,14 +55,15 @@ ROLE_METHODS = {
     "articulated_generation": "generate",
     "articulation_jobs": "submit",
 }
+_ADAPTER_ENTRY_POINT_GROUP = "embodichain.gensim_service_adapters"
 
 
 class ServiceRegistry:
     """Explicit adapter factories, keyed by stable IDs and supported roles.
 
     Factories receive a resolved profile mapping and own cleanup if their
-    construction fails before returning an instance. No entry-point discovery
-    or process-global mutable registry is used.
+    construction fails before returning an instance. Selected installed adapter
+    entry points are loaded into each run's registry without process-global state.
     """
 
     def __init__(self) -> None:
@@ -104,9 +106,31 @@ class ServiceRegistry:
             raise CapabilityError(f"No registered adapter for role {role}")
         return entry[0](profile)
 
+    def supports(self, adapter_id: str, role: str) -> bool:
+        """Return whether an adapter is registered for a role.
+
+        Args:
+            adapter_id: Stable built-in or installed entry-point ID.
+            role: GenSim capability role.
+
+        Returns:
+            Whether the adapter can construct the selected role.
+        """
+        entry = self._factories.get(adapter_id)
+        return entry is not None and role in entry[1]
+
     @classmethod
-    def defaults(cls) -> ServiceRegistry:
-        """Construct a fresh registry containing the shipped adapters."""
+    def defaults(cls, *, adapter_ids: Collection[str] = ()) -> ServiceRegistry:
+        """Construct a fresh registry with built-ins and selected plugins.
+
+        Args:
+            adapter_ids: Configured adapter IDs. An unknown ID selects an installed
+                entry point with the same name from
+                ``embodichain.gensim_service_adapters``.
+
+        Returns:
+            A run-local registry. Unselected plugins are never imported.
+        """
         registry = cls()
 
         def chat(profile: Mapping[str, Any]) -> Any:
@@ -118,7 +142,7 @@ class ServiceRegistry:
                 )
             except TypeError:
                 raise ServiceConfigurationError(
-                    "Chat profile requires model and api_key"
+                    "Chat profile requires a model"
                 ) from None
 
         registry.register("openai_compatible", chat, roles=CHAT_ROLES)
@@ -144,7 +168,40 @@ class ServiceRegistry:
             )
 
         registry.register("articulation_jobs_http", jobs, roles=("articulation_jobs",))
+        registry._load_selected_plugins(adapter_ids)
         return registry
+
+    def _load_selected_plugins(self, adapter_ids: Collection[str]) -> None:
+        selected = set(adapter_ids) - self._factories.keys()
+        if not selected:
+            return
+        available: dict[str, list[Any]] = {}
+        for entry_point in entry_points(group=_ADAPTER_ENTRY_POINT_GROUP):
+            if entry_point.name in selected:
+                available.setdefault(entry_point.name, []).append(entry_point)
+        for adapter_id in sorted(selected):
+            matches = available.get(adapter_id, [])
+            if not matches:
+                continue
+            if len(matches) != 1:
+                raise ServiceConfigurationError(
+                    f"Multiple service adapter entry points named {adapter_id}"
+                )
+            try:
+                register = matches[0].load()
+                if not callable(register):
+                    raise TypeError
+                register(self)
+            except ServiceConfigurationError:
+                raise
+            except Exception:
+                raise ServiceConfigurationError(
+                    f"Could not load service adapter entry point {adapter_id}"
+                ) from None
+            if adapter_id not in self._factories:
+                raise ServiceConfigurationError(
+                    f"Service adapter entry point did not register {adapter_id}"
+                )
 
 
 def _http_adapter(role: str, profile: Mapping[str, Any]) -> Any:
@@ -377,8 +434,19 @@ class GenSimServices:
             from .config import _load_services_config
 
             self.cfg, self._source = _load_services_config()
-        self.registry = registry or ServiceRegistry.defaults()
         self._injected = dict(injected or {})
+        selected_adapters = (
+            {
+                self.cfg.profiles[profile]["adapter"]
+                for role, profile in self.cfg.roles.items()
+                if role not in self._injected
+            }
+            if self.cfg is not None
+            else set()
+        )
+        self.registry = registry or ServiceRegistry.defaults(
+            adapter_ids=selected_adapters
+        )
         self._models = dict(model_overrides or {})
         self._instances: dict[str, Any] = {}
         self._owned: list[Any] = []

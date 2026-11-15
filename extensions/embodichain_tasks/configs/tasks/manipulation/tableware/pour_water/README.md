@@ -77,9 +77,18 @@ The default mirror-based registry path passed the same empty-cache download,
 extraction and checksum checks.
 The preparation script itself does not publish anything.
 
-The Task Program uses projected effects, with measured bottle-position and
-cup-position validators. Water transfer is not measured; this scene does not
-include fluid simulation.
+The CobotMagic program declares four segment contracts. A measured lift
+supports the pick; the held relation remains symbolic. Transport acceptance
+and the incoming pour condition use the same cup-relative target as the
+planner. The pour contract reports command completion separately from
+`liquid_transfer: unavailable`. The return contract retains the bottle and
+cup position validators and both settling policies. Physical attachment and
+release evidence are also reported as unavailable by this deployment.
+
+Check structure with `inspect_deployment.py --strict-contracts` for
+`task.cobotmagic.yaml`. The episode instruction, each stage instruction,
+resolved evidence and acceptance are retained in segment reports and
+dataset fragments.
 
 ## Tianji Marvin deployment
 
@@ -157,6 +166,14 @@ These checkpoints supplement projected effects; they are not continuous grasp
 verification during every call.
 
 ## Validation
+
+The CobotMagic segment contracts ran on DexSim 0.6.0rc1 Default physics
+with CPU Hybrid and sensors disabled. Seed 0 accepted all four stages in
+2937 control steps. The bottle reached 59.89 degrees of tilt and the saved
+trajectory retained the four contract reports. The liquid-transfer outcome
+was unavailable. In a separate controlled run, shifting the bottle 150 mm
+after the transport segment triggered the measured pour prerequisite and
+rejected the episode before any pour command.
 
 The corrected deployment was qualified locally on an RTX 5090 using the Default
 physics backend, seeds 0, 1 and 2, and bottle masses 10 g, 100 g and 250 g.

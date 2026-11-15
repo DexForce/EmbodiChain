@@ -64,11 +64,34 @@ def _run_episode(variant: str, seed: int) -> dict[str, Any]:
     cfg.init_rollout_buffer = False
     cfg.record_trajectory = False
     program = load_config(source.parent / payload["task_program"]["program"])
-    target = np.array(program["targets"]["bottle_pour_pose"]["values"][0]["position"])
+    target = None
+    if variant != "cobotmagic":
+        target = np.array(
+            program["targets"]["bottle_pour_pose"]["values"][0]["position"]
+        )
     env = None
     try:
         env = make(payload["id"], cfg=cfg)
         env.reset(seed=seed, options={"save_data": False})
+        if target is None:
+            integration = load_config(
+                source.parent / payload["task_program"]["integration"]
+            )
+            transport = next(
+                lowerer
+                for lowerer in integration["runtime_services"][
+                    "registered_semantic_lowerers"
+                ]
+                if lowerer.get("target_id") == "cup_pour_pose"
+            )
+            relative = np.array(transport["relative_pose"]).reshape(4, 4)
+            cup = (
+                env.sim.get_rigid_object("cup")
+                .get_local_pose(to_matrix=True)[0]
+                .cpu()
+                .numpy()
+            )
+            target = (cup @ relative)[:3, 3]
         poses = []
         original_step = env.step
 
@@ -86,10 +109,21 @@ def _run_episode(variant: str, seed: int) -> dict[str, Any]:
         env.step = tracked_step
         result = execute_demo_episode(env)
         episode = result.to_metadata()
+        assert result.all_success, episode["terminal_reason"]
         segment = next(
             item for item in episode["segments"] if item["name"] == "pour_water"
         )
         pouring = np.stack(poses[segment["start_step"] : segment["end_step"]])
+        if variant == "cobotmagic":
+            contract = segment["metadata"]["segment_contract"]
+            liquid_transfer = next(
+                item
+                for item in contract["outcomes"]
+                if item["ref"] == "liquid_transfer"
+            )
+            assert liquid_transfer["status"] == ["unavailable"]
+            assert liquid_transfer["required"] is False
+            assert contract["accepted_mask"] == [True]
         errors = np.linalg.norm(pouring[:, :3, 3] - target, axis=-1)
         tilts = np.degrees(np.arccos(np.clip(pouring[:, 2, 2], -1.0, 1.0)))
         return {

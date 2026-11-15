@@ -1,0 +1,46 @@
+program_id: cloth_single_fold
+instruction: Fold the cloth in half, lay it flat on the table, and release it.
+targets: {}
+program:
+  kind: sequence
+  items:
+    - kind: segment
+      name: grasp
+      instruction: Grasp the cloth along the fold line with both hands.
+      steps:
+        kind: invoke
+        call:
+          kind: registered
+          call_id: simulation.kinematic_joint_replay
+          arguments: {phase: grasp}
+          resources: {primary: folder}
+    - kind: segment
+      name: lift_and_fold
+      instruction: Lift the cloth into a fold and hold until its motion settles.
+      steps:
+        kind: invoke
+        call:
+          kind: registered
+          call_id: simulation.kinematic_joint_replay
+          arguments: {phase: lift_and_fold}
+          resources: {primary: folder}
+    - kind: segment
+      name: lay
+      instruction: Lay the folded cloth on the table and align its free edges.
+      steps:
+        kind: invoke
+        call:
+          kind: registered
+          call_id: simulation.kinematic_joint_replay
+          arguments: {phase: lay}
+          resources: {primary: folder}
+    - kind: segment
+      name: release
+      instruction: Open both hands, withdraw, and let the cloth settle.
+      steps:
+        kind: invoke
+        call:
+          kind: registered
+          call_id: simulation.kinematic_joint_replay
+          arguments: {phase: release}
+          resources: {primary: folder}

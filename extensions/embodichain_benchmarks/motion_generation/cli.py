@@ -20,8 +20,8 @@ cuRobo is the default primary baseline. IK interpolation and TOPPRA are
 optional diagnostic baselines. NMG is loaded from a standalone ONNX policy.
 
 Run: ``embodichain benchmark motion-generation --suite
-motion_panda_free_space_smoke`` or select the Franka + PGI Atomic Skills suite
-with ``--suite atomic_franka_pgi_smoke``.
+motion_panda_free_space_smoke`` or select the Franka + Robotiq Atomic Skills suite
+with ``--suite atomic_franka_robotiq_smoke``.
 """
 
 from __future__ import annotations
@@ -53,8 +53,8 @@ def add_parser_arguments(parser: argparse.ArgumentParser) -> None:
             "Suite file stem or explicit YAML path. Motion Planning examples: "
             "motion_panda_free_space_smoke, motion_panda_free_space_coverage, "
             "motion_ur5_free_space_coverage. Atomic Skills examples: "
-            "atomic_franka_pgi_smoke, atomic_franka_pgi_randomized, "
-            "atomic_franka_pgi_pose_batch, atomic_ur5_pgi_randomized. "
+            "atomic_franka_robotiq_smoke, atomic_franka_robotiq_randomized, "
+            "atomic_franka_robotiq_pose_batch, atomic_ur5_pgi_randomized. "
             "Default: motion_panda_free_space_smoke."
         ),
     )

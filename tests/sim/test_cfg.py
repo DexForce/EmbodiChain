@@ -599,7 +599,6 @@ def test_backend_property_groups_track_dexsim_spawn_descriptors() -> None:
         "use_native_mesh_loader",
         "convert_to_heightfield",
         "heightfield_resolution",
-        "preserve_mesh_transform",
         "max_hull_vertices",  # Mesh cooking is outside rigid-body physics.
     }
     assert (
@@ -1233,6 +1232,81 @@ def test_default_physics_cfg_applies_fixed_solver_defaults() -> None:
     assert physics_args["enable_friction_every_iteration"] is True
 
 
+@pytest.mark.parametrize("serialized", [False, True])
+def test_gaussian_render_preset_applies_native_configuration(serialized: bool) -> None:
+    cfg = (
+        RenderCfg.from_dict({"preset": "gaussian", "spp": 4})
+        if serialized
+        else RenderCfg.for_gaussian(spp=4)
+    )
+    assert cfg.renderer == "hybrid"
+    assert cfg.gaussian.enabled is True
+    assert cfg.denoising.window == "off"
+    assert cfg.denoising.offscreen == "optix"
+    world_config = dexsim.WorldConfig()
+    cfg.apply_to_dexsim_config(world_config)
+    assert world_config.renderer == Renderer.HYBRID
+    assert world_config.gaussian_config.enabled is True
+    assert world_config.rt_pipeline_config.window.mode == RTRenderMode.RAW
+    assert world_config.rt_pipeline_config.offscreen.mode == RTRenderMode.OPTIX_DENOISE
+    assert world_config.raytrace_config.render_iterations_per_frame == 4
+
+
+def test_gaussian_preset_overrides_roundtrip_without_changing_legacy_defaults() -> None:
+    data = {
+        "preset": "gaussian",
+        "renderer": "fast-rt",
+        "gaussian": {"workspace_memory_budget_mb": 64},
+        "denoising": {"offscreen": "off"},
+        "dlss": {"tiled_enabled": False},
+        "nrd": {"max_indirect_bounces": 2},
+    }
+    cfg = RenderCfg.from_dict(data)
+    restored = RenderCfg.from_dict(cfg.to_dict())
+    assert restored.renderer == "fast-rt"
+    assert restored.gaussian.enabled is True
+    assert restored.gaussian.workspace_memory_budget_mb == 64
+    assert restored.denoising.window == restored.denoising.offscreen == "off"
+    assert restored.dlss.tiled_enabled is False
+    assert restored.nrd.max_indirect_bounces == 2
+    cfg.gaussian.workspace_memory_budget_mb = 128
+    assert restored.gaussian.workspace_memory_budget_mb == 64
+    assert data["gaussian"] == {"workspace_memory_budget_mb": 64}
+    assert data["denoising"] == {"offscreen": "off"}
+    legacy = RenderCfg.from_dict(RenderCfg().to_dict())
+    assert legacy.gaussian.enabled is False
+    assert legacy.denoising.window == legacy.denoising.offscreen == "dlss"
+
+
+def test_gaussian_preset_preserves_explicit_nested_objects() -> None:
+    resource = sim_cfg.GaussianRenderCfg(enabled=True, workspace_memory_budget_mb=64)
+    denoising = sim_cfg.DenoisingCfg(window="off", offscreen="nrd")
+    cfg = RenderCfg.for_gaussian(
+        renderer="fast-rt", gaussian=resource, denoising=denoising
+    )
+    assert cfg.gaussian.workspace_memory_budget_mb == 64
+    assert cfg.denoising.offscreen == "nrd"
+    cfg.gaussian.workspace_memory_budget_mb = 128
+    cfg.denoising.offscreen = "off"
+    assert resource.workspace_memory_budget_mb == 64
+    assert denoising.offscreen == "nrd"
+    assert RenderCfg.for_gaussian().denoising.offscreen == "optix"
+
+
+@pytest.mark.parametrize(
+    "data,message",
+    [
+        ({"preset": "unknown"}, "preset"),
+        ({"preset": "gaussian", "gaussian": {"enabled": False}}, "enabled"),
+        ({"preset": "gaussian", "renderer": "no-render"}, "renderer"),
+        ({"preset": "gaussian", "denoising": {"window": "nrd"}}, "NRD"),
+    ],
+)
+def test_gaussian_preset_rejects_explicit_conflicts(data, message) -> None:
+    with pytest.raises(ValueError, match=message):
+        RenderCfg.from_dict(data)
+
+
 def test_render_cfg_defaults_to_dlss_rr_without_tone_mapping() -> None:
     """Default rendering enables DLSS RR and bypasses tone mapping."""
     world_config = dexsim.WorldConfig()
@@ -1606,6 +1680,13 @@ def test_nrd_rejects_invalid_settings(field_name: str, invalid_value: object) ->
     """Malformed NRD values fail before entering the native renderer."""
     with pytest.raises(ValueError, match=field_name):
         sim_cfg.NRDCfg(**{field_name: invalid_value})
+
+
+@pytest.mark.parametrize("constructor", [None, "sah", "cubql"])
+def test_newton_mesh_bvh_constructor_round_trip(constructor: str | None) -> None:
+    cfg = NewtonPhysicsCfg(mesh_bvh_constructor=constructor)
+    assert cfg.to_dict()["mesh_bvh_constructor"] == constructor
+    assert cfg.to_dexsim_cfg(gpu_id=0).mesh_bvh_constructor == constructor
 
 
 def test_urdf_cfg_preserves_positional_constructor_with_keyword_mounting_flag():

@@ -22,6 +22,8 @@ from importlib import import_module
 from typing import Any
 
 __all__ = [
+    "KinematicWorldModelCfg",
+    "KinematicWorldModel",
     "RobotWorldModelCfg",
     "RobotWorldModel",
     "frozen_world_model",
@@ -33,6 +35,8 @@ __all__ = [
 ]
 
 _EXPORT_MODULES = {
+    "KinematicWorldModelCfg": "kinematic",
+    "KinematicWorldModel": "kinematic",
     "RobotWorldModelCfg": "model",
     "RobotWorldModel": "model",
     "frozen_world_model": "model",

@@ -31,10 +31,15 @@ flat layout, `extensions/embodichain_<name>/__init__.py`, is also supported;
 each extension must use exactly one layout. Package names must be valid Python
 identifiers. The build rejects ambiguous and missing package roots.
 
-Non-Python resources still need explicit `package_data` rules in `setup.py`;
-runtime discovery entry points, when needed, are declared in `pyproject.toml`.
-Including a package does not register it as a plugin. Extensions currently have
-no separate build metadata.
+The root build applies shared resource rules to every discovered extension:
+JSON, YAML and URDF files, `README.md`, `LICENSE` / `LICENSE.*`,
+`THIRD_PARTY_LICENSES` and `preview.png`, including resources in subdirectories.
+New models using these resource types need no per-model declaration in
+`setup.py`. Other resource types require an explicit build-rule update.
+The task configuration tree retains its separate installed-package mapping.
+Runtime discovery entry points, when needed, are declared in `pyproject.toml`.
+Including a package does not register it as a plugin. Extensions have no
+separate build metadata.
 
 Official task references beginning with
 `extensions/embodichain_tasks/configs/` work from a source checkout and an

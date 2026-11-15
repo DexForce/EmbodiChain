@@ -48,12 +48,14 @@ For a configured Gym deployment, the manager plans Scene-owned groups before
 creating robot-mounted and independent cameras. Cameras with matching
 resolution, enabled outputs and visual-overlay policy share a target; individual
 intrinsics, poses and ground visibility remain view-owned. FastRT and offline RT
-use one group per compatible set on the current DexSim dev build, while Hybrid
+use one group per compatible set with DexSim 0.6.0rc2, while Hybrid
 packs at most 32 views per group. Sensors added after startup keep independent
 targets. The manager owns group lifetime, and each sensor reads only its leased
 slots in Arena/eye order. Gym and recording consumers render each unique group
 once; direct sensor captures include all groups in its shared set. A partial
 group render cannot publish a complete capture-metadata snapshot.
+Gaussian-enabled render configurations keep independent groups so each camera
+retains its own capture identity.
 
 Componentized Gym deployments select the robot and independent sensors through
 an embodiment component. The component/inline exclusion rules, Gym acquisition
@@ -73,6 +75,14 @@ to the native OpenGL view unchanged (-Z forward, +Y up). Unparented explicit
 poses are converted from optical axes (+Z forward, +Y down) by flipping Y/Z.
 Convert optical-frame mount calibration before storing a parented `pos/quat`;
 do not infer image direction from `get_arena_pose()` without this conversion.
+
+For Gaussian scenes, `Camera.capture_metadata` retains completed-frame identity,
+calibration and output semantics separately from image tensors. Gym exposes the
+snapshot through `sensor_capture_metadata`. Capability checks and publication
+ordering follow [Gaussian composition](../simulation-system/rendering.md#gaussian-composition).
+USD-native Gaussian PLY references use the same capture-status path; source prim
+and local visual transform appear in `gaussian_instances`. The separate
+`get_capture_metadata()` method also includes the ground visibility policy.
 
 ## Camera ground visibility
 

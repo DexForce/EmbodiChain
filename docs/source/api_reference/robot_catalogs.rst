@@ -109,6 +109,13 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
    the robot-specific differentiable kinematic chains. Generic runtime
    fields and backend selection follow ``RobotCfg``.
 
+.. py:class:: embodichain_robots.AgilexPiperXCfg
+
+   Fixed-base PiPER-X bare arm with six joints in the ``arm`` control group.
+   Construct with ``from_dict()`` to apply the catalog defaults.
+   ``build_pk_serial_chain()`` builds the arm chain through the tool flange.
+   The AGX gripper embodiment supplies the mount, gripper control and TCP.
+
 .. py:class:: embodichain_robots.FrankaPandaCfg
 
    Legacy selector for the historical bare seven-DOF FR3 arm.
@@ -448,6 +455,36 @@ and cache prefixes while using the shared core download and locking services.
    :no-index:
 
    Dataset class for the Cobot Magic Arm robot.
+
+
+embodichain_robots.agilex.piper_x
+---------------------------------
+
+.. py:class:: embodichain_robots.agilex.piper_x.AgilexPiperXCfg
+   :no-index:
+
+   Lazy model-level export of :class:`embodichain_robots.AgilexPiperXCfg`.
+
+
+embodichain_robots.agilex.piper_x.cfg
+-------------------------------------
+
+.. py:class:: embodichain_robots.agilex.piper_x.cfg.AgilexPiperXCfg
+   :no-index:
+
+   Implementation of :class:`embodichain_robots.AgilexPiperXCfg`. The arm
+   solver uses the same portable URDF as simulation.
+
+
+embodichain_robots.agilex.piper_x.assets
+----------------------------------------
+
+.. py:class:: embodichain_robots.agilex.piper_x.assets.AgilexPiperX(data_root=None)
+   :no-index:
+
+   Resolve the official bare-arm meshes and portable URDF, including the
+   fixed mounting flange from the AgileX tool Xacro. The dataset verifies
+   the source files by SHA-256 and exposes ``piper_x.urdf`` under ``extract_dir``.
 
 
 embodichain_robots.alohamini.aloha_mini

@@ -817,6 +817,7 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
                 "joint_command_mode must be 'position' or 'position_velocity'."
             )
 
+        self._environment_ref = None
         robot_uid = _robot_uid(robot)
         get_robot = getattr(simulation, "get_robot", None)
         if not callable(get_robot):
@@ -986,6 +987,7 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             rotation_threshold=self._rotation_threshold,
             sensor_suite=self._sensor_suite,
         )
+        factory._environment_ref = self._environment_ref
         factory._env_ids = torch.tensor(
             env_ids, dtype=torch.long, device=self._env_ids.device
         )
@@ -1049,7 +1051,7 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             "joint_command_mode",
             "position",
         )
-        return cls(
+        factory = cls(
             simulation,
             robot,
             registration,
@@ -1065,6 +1067,15 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             capture_root_pose=capture_root_pose,
             hold_qpos_source=hold_qpos_source,
         )
+        factory._environment_ref = (
+            ref(environment)
+            if any(
+                callable(getattr(item, "create_for_environment", None))
+                for item in registration.registered_semantic_lowerer_factories
+            )
+            else None
+        )
+        return factory
 
     @property
     def scene_registry_id(self) -> str:
@@ -1105,6 +1116,9 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
     ) -> tuple[RegisteredSemanticLowerer, ...]:
         """Create fresh registration-owned lowerers for this runtime assembly."""
         return self._registration.create_registered_semantic_lowerers(
+            environment=(
+                self._environment_ref() if self._environment_ref is not None else None
+            ),
             simulation=self._simulation,
             robot=self._robot,
             scene_registry=scene_registry,

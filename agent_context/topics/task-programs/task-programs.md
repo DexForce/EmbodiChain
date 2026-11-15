@@ -55,9 +55,6 @@ Semantic Calls and their scene/profile/effect contracts live inside
 | Physical grip interpretation | `embodichain/lab/sim/atomic_skills/grip_evidence.py` |
 | Offline receipt/query/actor normalization and observation requests | `embodichain/lab/task_program/integrations/evidence/` |
 | SDK-independent shared physical value contracts | `embodichain/lab/evidence.py`; `lab/sim/evidence.py` re-exports the same classes |
-
-| Offline held-object protocol normalization and observation requests | `embodichain/lab/task_program/integrations/evidence/` |
-| Shared SDK-independent physical value contracts | `embodichain/lab/evidence.py`; `lab/sim/evidence.py` re-exports the same classes |
 | Evidence declarations and semantic adaptation | `embodichain/lab/task_program/integrations/simulation/grip_evidence.py` |
 | Gym `DemoSegment` / `env.step()` bridge | `embodichain/lab/gym/envs/task_program/bridge.py` |
 | Dynamic Gym ID registration | `embodichain/lab/gym/envs/task_program/registration.py` |
@@ -76,15 +73,9 @@ decides no task predicate. Held observation requests select exact parts and fres
 query revisions here. Normative criteria are supplied separately by the consumer;
 mutable runtime receipts never define task acceptance thresholds.
 
-import Gym. Provider-specific dependencies are confined to `integrations`. Public package
-exports resolve lazily while retaining their existing names and objects, so an
-offline evidence adapter can import without initializing a simulator.
-
-The held-object adapter validates receipt, actor, query and time identities and
-cross-checks world-position/orientation measurements against the original policy.
-It imports neither TaskSpec nor Task Engine and makes no normative task judgment.
-Declared task bounds belong to the separately supplied normative criteria. Invalid
-capture boundaries return unavailable evidence instead of failing report assembly.
+Invalid capture boundaries remain unavailable evidence. Runtime receipts never
+supply normative acceptance thresholds; observations keep their original time
+and source identity.
 Gym retains only lifecycle coupling; it does not own schemas, compilers,
 catalogs, lowerers, or simulation assembly.
 
@@ -166,7 +157,7 @@ not by Task Program or Gym.
 ## Read on demand
 
 - [Language and semantic integration](configuration.md): strict decoding, scene/profile contracts, component ownership and service allowlists.
-- [Assurance and execution](execution.md): measured/projected effects, acceptance, parallel calls and MLLM boundaries.
+- [Assurance and execution](execution.md), including [policy stage progress](execution.md#policy-stage-progress): measured/projected effects, acceptance, parallel calls and MLLM boundaries.
 - [Dataset persistence](../data-pipeline/data-pipeline.md): recorder commits, fragments, failures and finalization.
 - [Scene services](../scene-services/scene-services.md): shared layout, physical state, deterministic changes and measured checks; Task Program retains semantics and execution lifecycle.
 - [Scene expansion](../scene-expansion/scene-expansion.md): fixed scene proposals, injected preparation, independent measured acceptance and reset-time persistence gates.
@@ -200,23 +191,10 @@ receipt-confirmed coverage.
 
 ## Recommended change sites
 
-| Requested change | Start here |
-|---|---|
-| Language shape or limits | `language/schema.py`, then decoder/loader tests |
-| Untrusted input behavior | `language/decoder.py`, `language/loader.py` |
-| AST expansion or compiled structure | `compiler/program.py` |
-| Call-to-Atomic-Skill lowering | `compiler/lowering.py` |
-| Semantic Call, scene, robot, effect contracts | `semantics/` |
-| Runtime sequencing or parallel behavior | `runtime/` |
-| Grounded call transform protocol | `runtime/expansion.py`, then `runtime/executor.py` |
-| Registration fingerprint/extensions | `integrations/catalog.py`, `extensions.py` |
-| Configured integration format | `integrations/configured.py` |
-| Live simulation binding | `integrations/simulation/` |
-| Task Program candidate adaptation and provenance | `integrations/expansion.py` |
-| Gym action/segment lifecycle | `gym/envs/task_program/bridge.py` |
-| Episode program/expansion selection and final success | `gym/envs/embodied_env.py` |
-| Outcome annotations and persistence mode | `gym/envs/demo.py`, `gym/envs/embodied_env.py` |
-| LeRobot fragment slicing/idempotency | `gym/envs/managers/datasets.py`, `async_datasets.py` |
+Use the package map's owning layer. Language/decoder edits use offline tests;
+lowering/runtime edits follow a full call through grounding and execution;
+integration edits preserve registration identity and the Gym lifecycle boundary.
+Dataset slicing/idempotency remains with the data-pipeline owner.
 
 ## Focused validation
 

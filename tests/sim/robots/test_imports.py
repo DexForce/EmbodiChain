@@ -52,7 +52,9 @@ _CONFIG_CLASSES = (
     "ARX5Cfg",
     "AlohaMiniCfg",
     "TianjiMarvinCfg",
+    "AgibotG2Cfg",
     "CobotMagicCfg",
+    "AgilexPiperXCfg",
     "FrankaPandaCfg",
     "FlexivRizon4SCfg",
     "URRobotCfg",
@@ -106,6 +108,7 @@ def test_concrete_robot_class_uses_canonical_package(class_name: str) -> None:
         "embodichain_robots.wuji.hand",
         "embodichain_robots.dh_robotics.pgc_140_50",
         "embodichain_robots.agilex.pika",
+        "embodichain_robots.agibot.g2",
         "embodichain.robot_registry",
         "embodichain_robots.dexforce.w1.types",
         "embodichain.lab.sim.robots",
@@ -121,6 +124,7 @@ module = sys.argv[1]
 importlib.import_module(module)
 for name in (
     "alohamini.aloha_mini.cfg", "tianji.marvin.cfg", "agilex.cobotmagic.cfg",
+    "agilex.piper_x.cfg",
     "franka.panda", "universal_robots.ur_robot", "dexforce.w1.cfg",
     "unitree.go1.cfg",
     "unitree.go2.cfg",
@@ -130,6 +134,7 @@ for name in (
     "pollen_robotics.microduck.cfg",
     "arx.arx5.cfg", "the_robot_studio.so101.cfg", "flexiv.rizon4s.cfg",
     "brainco.revo1.cfg",
+    "agibot.g2.cfg",
     "sharpa.wave.cfg",
     "wuji.hand.cfg",
 ):

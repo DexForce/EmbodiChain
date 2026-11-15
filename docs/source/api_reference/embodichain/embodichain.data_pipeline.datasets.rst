@@ -117,3 +117,27 @@ diagnostic reports, quality evidence and split-manifest consumption.
 
 .. automodule:: embodichain.data_pipeline.datasets.inspection
    :members:
+
+Reference motion clips
+----------------------
+
+``MotionLibrary`` stores floating-root reference clips on one device. It loads
+explicit joint and quaternion conventions, resamples headerless CSV inputs and
+writes portable NPZ archives. Current and future queries return owned tensors;
+future offsets hold the endpoints of each clip instead of crossing boundaries.
+
+.. automodule:: embodichain.data_pipeline.datasets.motion
+   :members:
+   :no-index:
+
+Adaptive motion starts
+----------------------
+
+``MotionStartSampler`` samples clip-local time bins from uniform, current
+low-return and historical low-return distributions. Simultaneous returns in one
+bin are averaged before updating its score. Checkpoints retain motion identity,
+visits, return estimates and historical weights; callers own the sampling RNG.
+
+.. automodule:: embodichain.data_pipeline.datasets.motion_sampling
+   :members:
+   :no-index:

@@ -51,6 +51,17 @@ Keep the lock outside the directory repair may delete. POSIX uses `flock`;
 Windows uses a polled byte lock. Direct Open3D subclasses do not automatically
 receive the project's locking/repair behavior.
 
+For `hf-mirror.com/datasets/DexForceAI/embodichain_data/` descriptors, the shared
+dataset base appends the matching official `huggingface.co` URL after the
+declared sources. Open3D tries it when an earlier download or checksum check
+fails, retaining the descriptor's revision, digest and extraction subdirectory.
+Custom hosts and other repositories are unchanged; failure of every source
+still raises a download error.
+
+The `task` category registers `PourCupAssets` runtime meshes and
+`PourCupDemoData` historical recordings through `assets/task_assets.py`.
+Both use the shared download cache and class-prefixed paths.
+
 The CLI honors an asset class's optional `cache_prefix` when checking readiness
 and ensuring extraction; otherwise the class name is the cache entry.
 The shared registry merges core category modules and `embodichain.assets`

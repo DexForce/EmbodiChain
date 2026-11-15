@@ -84,7 +84,7 @@ interpret missing contacts as a physical miss must first check the device-local
 query overflow conservatively invalidates every row. Standalone updates report
 the latest query; history-enabled sensors retain the current interval's losses.
 
-PhysX Direct GPU cannot identify static counterparts from its raw contact
+Default Direct GPU cannot identify static counterparts from its raw contact
 buffer and uses actor ID `-1` for those rows. To observe arbitrary static
 geometry there, monitor the dynamic/link side with `filter_need_both_actor=False`.
 Default CPU and Newton can identify registered static shapes. Keep this

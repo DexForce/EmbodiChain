@@ -21,6 +21,8 @@ from __future__ import annotations
 from itertools import product
 
 _CONFIG_CLASSES = {
+    "AgibotG2": "embodichain_robots.agibot.g2:AgibotG2Cfg",
+    "AgibotG1": "embodichain_robots.agibot.g1:AgibotG1Cfg",
     "YamI2rt": "embodichain_robots.i2rt.yam:YamI2rtCfg",
     "UnitreeGo1": "embodichain_robots.unitree.go1:UnitreeGo1Cfg",
     "UnitreeGo2": "embodichain_robots.unitree.go2:UnitreeGo2Cfg",
@@ -33,6 +35,7 @@ _CONFIG_CLASSES = {
     "TianjiMarvin": "embodichain_robots.tianji.marvin:TianjiMarvinCfg",
     "DexforceW1": "embodichain_robots.dexforce.w1:DexforceW1Cfg",
     "CobotMagic": "embodichain_robots.agilex.cobotmagic:CobotMagicCfg",
+    "AgilexPiperX": "embodichain_robots.agilex.piper_x:AgilexPiperXCfg",
     "Franka": "embodichain_robots.franka.cfg:FrankaCfg",
     "FrankaPanda": "embodichain_robots.franka.panda:FrankaPandaCfg",
     "FlexivRizon4S": "embodichain_robots.flexiv.rizon4s:FlexivRizon4SCfg",
@@ -44,6 +47,30 @@ _CONFIG_CLASSES = {
 }
 
 _DEFAULT_CONTROL_INFO = {
+    "AgibotG2": {
+        "dof": 32,
+        "control_parts": {
+            "torso": 5,
+            "head": 3,
+            "chassis_steering": 4,
+            "chassis_wheels": 4,
+            "left_arm": 7,
+            "right_arm": 7,
+            "left_eef": 8,
+            "right_eef": 8,
+        },
+    },
+    "AgibotG1": {
+        "dof": 20,
+        "control_parts": {
+            "torso": 2,
+            "head": 2,
+            "left_arm": 7,
+            "right_arm": 7,
+            "left_eef": 1,
+            "right_eef": 1,
+        },
+    },
     "YamI2rt": {
         "dof": 16,
         "control_parts": {"right_arm": 6, "left_arm": 6, "right_eef": 2, "left_eef": 2},
@@ -96,6 +123,7 @@ _DEFAULT_CONTROL_INFO = {
             "right_eef": 2,
         },
     },
+    "AgilexPiperX": {"dof": 6, "control_parts": {"arm": 6}},
     "Franka": {"dof": 7, "control_parts": {"arm": 7}},
     "FrankaPanda": {"dof": 7, "control_parts": {"arm": 7}},
     "URRobot": {"dof": 6, "control_parts": {"arm": 6}},
@@ -107,6 +135,27 @@ _DEFAULT_CONTROL_INFO = {
 }
 
 _MIMIC_JOINTS = {
+    "AgibotG2": {
+        f"idx{offset+index}_gripper_{side}_{name}": f"idx{offset+1}_gripper_{side}_inner_joint1"
+        for side, offset in (("l", 30), ("r", 70))
+        for index, name in (
+            (2, "inner_joint3"),
+            (3, "inner_joint4"),
+            (9, "inner_joint0"),
+            (11, "outer_joint1"),
+            (12, "outer_joint3"),
+            (13, "outer_joint4"),
+            (19, "outer_joint0"),
+        )
+    },
+    "AgibotG1": {
+        "idx31_gripper_l_inner_joint1": "idx41_gripper_l_outer_joint1",
+        "idx33_gripper_l_inner_joint4": "idx31_gripper_l_inner_joint1",
+        "idx43_gripper_l_outer_joint4": "idx41_gripper_l_outer_joint1",
+        "idx71_gripper_r_inner_joint1": "idx81_gripper_r_outer_joint1",
+        "idx73_gripper_r_inner_joint4": "idx71_gripper_r_inner_joint1",
+        "idx83_gripper_r_outer_joint4": "idx81_gripper_r_outer_joint1",
+    },
     "AlohaMini": {},
     "TianjiMarvin": {
         "LEFT_HAND_FINGER_2": "LEFT_HAND_FINGER_1",
@@ -126,6 +175,12 @@ _MIMIC_JOINTS = {
     "URRobot": {},
 }
 _CONTROL_PART_MIMICS = {
+    "AgibotG2": {
+        f"{side}_eef": tuple(
+            joint for joint in _MIMIC_JOINTS["AgibotG2"] if f"gripper_{label}_" in joint
+        )
+        for side, label in (("left", "l"), ("right", "r"))
+    },
     "TianjiMarvin": {
         "left_eef": ("LEFT_HAND_FINGER_2",),
         "right_eef": ("RIGHT_HAND_FINGER_2",),
@@ -136,6 +191,8 @@ _CONTROL_PART_MIMICS = {
 }
 
 _CLASSIFICATION = {
+    "AgibotG2": ("agibot", "wheeled_humanoid", 2),
+    "AgibotG1": ("agibot", "wheeled_humanoid", 2),
     "YamI2rt": ("i2rt", "fixed_manipulator", 2),
     "UnitreeGo1": ("unitree", "quadruped", 0),
     "UnitreeGo2": ("unitree", "quadruped", 0),
@@ -148,6 +205,7 @@ _CLASSIFICATION = {
     "TianjiMarvin": ("tianji", "fixed_manipulator", 2),
     "DexforceW1": ("dexforce", "wheeled_humanoid", 2),
     "CobotMagic": ("agilex", "fixed_manipulator", 2),
+    "AgilexPiperX": ("agilex", "fixed_manipulator", 1),
     "Franka": ("franka", "fixed_manipulator", 1),
     "FrankaPanda": ("franka", "fixed_manipulator", 1),
     "FlexivRizon4S": ("flexiv", "fixed_manipulator", 1),

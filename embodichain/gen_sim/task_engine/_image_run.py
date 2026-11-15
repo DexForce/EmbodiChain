@@ -38,7 +38,7 @@ from .image_planning import (
 from .orchestration.workflow_artifacts import WorkflowRunArtifacts, write_run_json
 from .semantic_graph_html import render_semantic_task_graph_html
 
-__all__: list[str] = []
+__all__ = ["plan_image_task"]
 
 
 @service_entry
@@ -73,6 +73,30 @@ def _plan_image_task(
                 overwrite=False,
             )
             raise
+        candidate_id = result["task_spec"]["metadata"]["candidate_id"]
+        candidate = next(
+            value
+            for value in result["task_candidates"]["candidates"]
+            if value["candidate_id"] == candidate_id
+        )
+        result["scene_requirements"] = {
+            "schema_version": "embodichain.scene-requirements/v1",
+            "task_id": task_id,
+            "candidate_id": candidate_id,
+            "image_sha256": result["image_grounding"]["image_sha256"],
+            "task_plan_sha256": result["semantic_graph_validation"]["graph_digest"],
+            "entities": candidate["scene_request"]["references"],
+            "relations": [
+                {
+                    "step_id": step["id"],
+                    "task_type": step["task_type"],
+                    "relation": step["relation"],
+                    "object": step["object"],
+                    "target": step["target"],
+                }
+                for step in candidate["draft"]["steps"]
+            ],
+        }
         for name, value in result.items():
             write_run_json(artifacts.output_dir / f"{name}.json", value)
         source_copy = artifacts.output_dir / f"source_image{image_path.suffix.lower()}"
@@ -108,12 +132,42 @@ def _plan_image_task(
         )
         services.write_records(artifacts.output_dir / "service_calls.json")
         write_run_json(artifacts.output_dir / "run_manifest.json", summary)
+        inventory = {
+            path.relative_to(artifacts.output_dir)
+            .as_posix(): hashlib.sha256(path.read_bytes())
+            .hexdigest()
+            for path in sorted(artifacts.output_dir.rglob("*"))
+            if path.is_file() and path.name != "task_plan_manifest.json"
+        }
+        write_run_json(
+            artifacts.output_dir / "task_plan_manifest.json",
+            {
+                "schema_version": "embodichain.task-plan-artifact/v1",
+                "task_id": task_id,
+                "candidate_id": candidate_id,
+                "instruction": instruction,
+                "image_sha256": summary["image_sha256"],
+                "semantic_graph_sha256": result["semantic_graph_validation"][
+                    "graph_digest"
+                ],
+                "task_spec_sha256": result["semantic_graph_validation"][
+                    "task_spec_digest"
+                ],
+                "semantic_status": summary["semantic_status"],
+                "visual_status": summary["visual_status"],
+                "execution_ready": False,
+                "artifacts": inventory,
+            },
+        )
         artifacts.commit()
     print(f"Semantic graph: {artifacts.output_dir / 'semantic_task_graph.json'}")
     print(f"Offline viewer: {artifacts.output_dir / 'semantic_task_graph.html'}")
     print("Stage: semantic_graph; runtime integration unbound; simulation not run.")
 
     return artifacts.output_dir
+
+
+plan_image_task = _plan_image_task
 
 
 def _image_preview(

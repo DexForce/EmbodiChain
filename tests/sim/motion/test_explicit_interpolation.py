@@ -82,6 +82,102 @@ def _generator(tmp_path, *, batch=1, speed=1.0, failure=None):
     return generator, seeds
 
 
+def _selected_generator(tmp_path, env_ids):
+    generator, _ = _generator(tmp_path, batch=4, speed=10.0)
+    generator._env_ids = env_ids
+    origins = torch.arange(4, dtype=torch.float32)[:, None] * 2
+
+    def fk(*, qpos, name, to_matrix, env_ids=None):
+        selected = origins if env_ids is None else origins[list(env_ids)]
+        poses = torch.eye(4).repeat(len(selected), 1, 1)
+        poses[:, :1, 3] = qpos + selected
+        return poses
+
+    def ik(*, pose, joint_seed, name, env_ids=None):
+        selected = origins if env_ids is None else origins[list(env_ids)]
+        qpos = pose[:, :1, 3] - selected
+        return torch.ones(len(selected), dtype=torch.bool), qpos
+
+    generator.robot.compute_fk = fk
+    generator.robot.compute_ik = ik
+    return generator, origins[list(env_ids)]
+
+
+@pytest.mark.parametrize("env_ids", [(1,), (3, 1, 0, 2)])
+def test_fixed_grid_uses_selected_velocity_limits_in_requested_order(tmp_path, env_ids):
+    generator, _ = _selected_generator(tmp_path, env_ids)
+    generator.robot.get_qvel_limits = lambda **kwargs: torch.tensor(
+        [[0.5], [2.0], [0.75], [3.0]]
+    )
+    options = MotionGenOptions(
+        strategy="ik_interp",
+        sample_count=3,
+        interpolation_dt=0.1,
+        control_part="arm",
+        start_qpos=torch.zeros(len(env_ids), 1),
+        interpolation_mode="fixed_grid",
+    )
+    # Moving 0.2 in two 0.1-second intervals requires a speed of 1.0.
+    result = generator.generate(
+        [PlanState.from_qpos(torch.full((len(env_ids), 1), 0.2))], options
+    )
+    expected = torch.tensor([False, True, False, True])[list(env_ids)]
+    assert torch.equal(result.success, expected)
+    torch.testing.assert_close(result.positions[:, -1, 0], expected.float() * 0.2)
+
+
+@pytest.mark.parametrize("env_ids", [(1,), (3, 1, 0, 2)])
+@pytest.mark.parametrize("linear_keyframes", [False, True])
+def test_sequential_cartesian_planning_uses_selected_environment_frames(
+    tmp_path, env_ids, linear_keyframes
+):
+    generator, origins = _selected_generator(tmp_path, env_ids)
+    pose = torch.eye(4).repeat(len(env_ids), 1, 1)
+    pose[:, :1, 3] = origins + 0.2
+    options = MotionGenOptions(
+        strategy="ik_interp",
+        sample_count=3 if linear_keyframes else 2,
+        interpolation_dt=0.1,
+        control_part="arm",
+        start_qpos=torch.zeros(len(env_ids), 1),
+        interpolation_mode="fixed_grid",
+        ik_seed_mode="sequential",
+        is_linear=linear_keyframes,
+        preserve_cartesian_samples=not linear_keyframes,
+    )
+    result = generator.generate([PlanState.from_xpos(pose)], options)
+    assert result.is_all_success()
+    expected = torch.tensor([0.0, 0.1, 0.2] if linear_keyframes else [0.0, 0.2])
+    torch.testing.assert_close(
+        result.positions, expected[None, :, None].expand(len(env_ids), -1, -1)
+    )
+
+
+def test_continuous_recovery_uses_selected_joint_bounds_and_velocity_limits(tmp_path):
+    generator, origins = _selected_generator(tmp_path, (1,))
+    generator.robot.get_qpos_limits = lambda **kwargs: torch.tensor(
+        [[[-3.0, -2.0]], [[-1.0, 1.0]], [[2.0, 3.0]], [[4.0, 5.0]]]
+    )
+    generator.robot.get_qvel_limits = lambda **kwargs: torch.tensor(
+        [[0.01], [2.0], [0.01], [0.01]]
+    )
+    pose = torch.eye(4)[None]
+    pose[:, :1, 3] = origins + 0.1
+    options = MotionGenOptions(
+        strategy="ik_interp",
+        sample_count=2,
+        interpolation_dt=0.1,
+        control_part="arm",
+        start_qpos=torch.zeros(1, 1),
+        interpolation_mode="fixed_grid",
+        ik_seed_mode="sequential",
+    )
+    result = resolve_continuous_ik_path(generator, [PlanState.from_xpos(pose)], options)
+    assert result is not None and result.is_all_success()
+    torch.testing.assert_close(result.positions, torch.tensor([[[0.0], [0.1]]]))
+    torch.testing.assert_close(result.dt, torch.tensor([[0.0, 0.1]]))
+
+
 @pytest.mark.parametrize("cap_owner", ["runtime", "urdf"])
 def test_fixed_grid_holds_failed_commands_and_preserves_candidate_for_retry(
     tmp_path, cap_owner

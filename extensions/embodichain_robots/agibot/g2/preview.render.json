@@ -1,0 +1,159 @@
+{
+  "description": "G2 catalog capture matching the W1 documentation's RT presentation.",
+  "catalog_id": "AgibotG2",
+  "render_cfg": {
+    "renderer": "rt",
+    "spp": 1,
+    "denoising": {
+      "window": "dlss",
+      "offscreen": "dlss"
+    },
+    "dlss": {
+      "dlss_quality": 2,
+      "upsample_ratio": null,
+      "render_width": 0,
+      "render_height": 0,
+      "target_width": 0,
+      "target_height": 0,
+      "tiled_enabled": true,
+      "exposure_compensation": 1.0
+    },
+    "nrd": {
+      "max_indirect_bounces": 1,
+      "denoising_range": 500000.0,
+      "disocclusion_threshold": 0.01,
+      "disocclusion_threshold_alternate": 0.05,
+      "disocclusion_threshold_mix_enabled": true,
+      "history_confidence_enabled": true,
+      "history_confidence_probe_stride": 5,
+      "history_confidence_sigma_scale": 2.0,
+      "history_confidence_sensitivity": 1.0,
+      "max_accumulated_frame_num": 30,
+      "max_fast_accumulated_frame_num": 6,
+      "history_fix_frame_num": 3,
+      "diffuse_prepass_blur_radius": 30.0,
+      "specular_prepass_blur_radius": 50.0,
+      "anti_firefly_enabled": false,
+      "sh_mode_enabled": false,
+      "validation_enabled": false,
+      "max_stabilized_frame_num": 63,
+      "min_blur_radius": 1.0,
+      "max_blur_radius": 30.0,
+      "antilag_luminance_sigma_scale": 2.0,
+      "antilag_luminance_sensitivity": 3.0,
+      "taa_min_current_weight": 0.0625,
+      "taa_sigma_scale": 2.0,
+      "taa_depth_rejection_enabled": true,
+      "taa_tone_mapping_enabled": false
+    },
+    "tone_mapping_enabled": false,
+    "tone_mapping_exposure": 1.0,
+    "min_bounces": 4,
+    "max_bounces": 8
+  },
+  "camera": {
+    "width": 960,
+    "height": 1200,
+    "intrinsics": [
+      2350.0,
+      2350.0,
+      480.0,
+      600.0
+    ],
+    "eye": [
+      2.4,
+      -3.2,
+      2.2
+    ],
+    "target": [
+      0.06,
+      0.0,
+      0.94
+    ],
+    "up": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "near": 0.03,
+    "far": 60.0
+  },
+  "scene": {
+    "presentation": "SimulationManager defaults",
+    "direct_lights": [],
+    "emission_color": [
+      0.92,
+      0.95,
+      1.0
+    ],
+    "emission_intensity": 80.0
+  },
+  "physics_stepped": false,
+  "warmup_frames": 48,
+  "joint_positions": {
+    "idx01_body_joint1": 0.0,
+    "idx02_body_joint2": 0.0,
+    "idx111_chassis_lwheel_front_joint1": 0.0,
+    "idx121_chassis_lwheel_rear_joint1": 0.0,
+    "idx131_chassis_rwheel_front_joint1": 0.0,
+    "idx141_chassis_rwheel_rear_joint1": 0.0,
+    "idx03_body_joint3": 0.0,
+    "idx112_chassis_lwheel_front_joint2": 0.0,
+    "idx122_chassis_lwheel_rear_joint2": 0.0,
+    "idx132_chassis_rwheel_front_joint2": 0.0,
+    "idx142_chassis_rwheel_rear_joint2": 0.0,
+    "idx04_body_joint4": 0.0,
+    "idx05_body_joint5": 0.0,
+    "idx11_head_joint1": 0.0,
+    "idx12_head_joint2": 0.0,
+    "idx21_arm_l_joint1": 1.5707963705062866,
+    "idx61_arm_r_joint1": -1.5707963705062866,
+    "idx13_head_joint3": 0.0,
+    "idx22_arm_l_joint2": -1.2000000476837158,
+    "idx62_arm_r_joint2": -1.2000000476837158,
+    "idx23_arm_l_joint3": -1.5707963705062866,
+    "idx63_arm_r_joint3": 1.5707963705062866,
+    "idx24_arm_l_joint4": -1.399999976158142,
+    "idx64_arm_r_joint4": -1.399999976158142,
+    "idx25_arm_l_joint5": 0.0,
+    "idx65_arm_r_joint5": 0.0,
+    "idx26_arm_l_joint6": 0.0,
+    "idx66_arm_r_joint6": 0.0,
+    "idx27_arm_l_joint7": 0.0,
+    "idx67_arm_r_joint7": 0.0,
+    "idx31_gripper_l_inner_joint1": 0.0,
+    "idx41_gripper_l_outer_joint1": 0.0,
+    "idx71_gripper_r_inner_joint1": 0.0,
+    "idx81_gripper_r_outer_joint1": 0.0,
+    "idx32_gripper_l_inner_joint3": 0.0,
+    "idx42_gripper_l_outer_joint3": 0.0,
+    "idx72_gripper_r_inner_joint3": 0.0,
+    "idx82_gripper_r_outer_joint3": 0.0,
+    "idx33_gripper_l_inner_joint4": 0.0,
+    "idx43_gripper_l_outer_joint4": 0.0,
+    "idx73_gripper_r_inner_joint4": 0.0,
+    "idx83_gripper_r_outer_joint4": 0.0,
+    "idx39_gripper_l_inner_joint0": 0.0,
+    "idx49_gripper_l_outer_joint0": 0.0,
+    "idx79_gripper_r_inner_joint0": 0.0,
+    "idx89_gripper_r_outer_joint0": 0.0
+  },
+  "root_position": [
+    0.0,
+    0.0,
+    0.041
+  ],
+  "source_materials_preserved": true,
+  "asset": {
+    "repository": "https://github.com/AgibotTech/genie_sim_robot_model",
+    "revision": "6d5b2159806ae0e64b432b638e9ee288d8bddc8f",
+    "archive_sha256": "02193a0aa6ff944c04fa3def507b3812cc37de097ce32182c6aaba25487185b8",
+    "urdf_sha256": "030cd24e00c25ea856fe2040307905ef58526228da48753a9ba49004c5bc1b6f"
+  },
+  "runtime": {
+    "dexsim": "0.6.0rc1",
+    "torch": "2.11.0+cu130"
+  },
+  "preview_source_sha256": "9c9e4f1dd7a2ae7af320483c1d29ff1d531d6aca8441c5ad6c946378ecaa0614",
+  "image_sha256": "7ff6d6fa0f4feab88dcfb880691f4038193613c702e79ba9b6a06a61e707c7b0"
+}

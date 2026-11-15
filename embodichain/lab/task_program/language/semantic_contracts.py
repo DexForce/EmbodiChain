@@ -24,6 +24,7 @@ from __future__ import annotations
 from copy import deepcopy
 from collections.abc import Mapping
 from dataclasses import dataclass
+from math import isfinite
 from types import MappingProxyType
 from typing import Any
 
@@ -164,7 +165,7 @@ def semantic_planning_catalog(
             "simulation.articulation_link_slide",
             "slide",
             {"handle": "part"},
-            {},
+            {"position": "finite_number"},
             ["primary"],
             "control",
             ["articulation_joint", "operation_policy"],
@@ -302,6 +303,9 @@ def semantic_planning_catalog(
     calls["simulation.axis_align"][
         "description"
     ] = "Acquire an UNHELD object and align its axis. Not usable as in-hand rotation after pouring."
+    calls["simulation.articulation_link_slide"][
+        "description"
+    ] = "Supply an absolute joint position only when the deployed lowerer binds a joint target."
     calls["simulation.coordinated_transport"][
         "description"
     ] = "Both arms acquire, transport and RELEASE the object. No separate placement afterward."
@@ -375,6 +379,8 @@ def validate_semantic_call_payload(
             )
         elif isinstance(rule, list):
             valid = value in rule
+        elif rule == "finite_number":
+            valid = type(value) is int or (type(value) is float and isfinite(value))
         else:
             valid = type(value) is str and bool(value) and value == value.strip()
         if not valid:

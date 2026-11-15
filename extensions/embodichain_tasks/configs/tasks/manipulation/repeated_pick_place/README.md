@@ -29,6 +29,8 @@ backend.
 | dexforce_w1_030_pika | dexforce_w1_030_pika | default | `task.dexforce_w1_030_pika.yaml` |
 | dual_franka_robotiq_arg2f_140 | dual_franka_robotiq_arg2f_140 | default | `task.dual_franka_robotiq_arg2f_140.yaml` |
 | dual_ur10_robotiq_arg2f_140 | dual_ur10_robotiq_arg2f_140 | default | `task.dual_ur10_robotiq_arg2f_140.yaml` |
+| dual_ur10_robotiq_arg2f_140_gensim | dual_ur10_robotiq_arg2f_140_gensim | default | `task.dual_ur10_robotiq_arg2f_140_gensim.yaml` |
+| dual_franka_robotiq_arg2f_140_gensim | dual_franka_robotiq_arg2f_140_gensim | default | `task.dual_franka_robotiq_arg2f_140_gensim.yaml` |
 
 Inspect the available deployments:
 
@@ -158,13 +160,24 @@ a different robot's base position, grasp offset or workspace.
   starts with the elbow-up branch. This avoids the table intersections of the
   floor-level, elbow-down validation layout. No joint limit, drive gain or
   hand TCP is changed.
+- `task.dual_ur10_robotiq_arg2f_140_gensim.yaml` uses the same workcell and
+  expert path. `DualArmRobot` composes the registered `URRobot` UR10 arms and
+  Robotiq 2F-140 grippers; the component retains GenSim zero friction/armature
+  and the model's 150 mm grasp-search opening.
+- `task.dual_franka_robotiq_arg2f_140_gensim.yaml` installs the GenSim Panda
+  assembly over the workbench supports. `DualArmRobot` composes the registered
+  `Franka` FR3 arms and Robotiq 2F-140 grippers. The component preserves the
+  source's 0.741 rad seventh-joint pose; the arm preset supplies FEP IK and arm
+  drive, and the gripper preset supplies the 200 mm TCP. Explicit hand geometry
+  remains in the skill profile.
 
-The two ARG2F-140 deployments share a known-cube grasp selection and program,
+The ARG2F-140 deployments share a known-cube grasp selection and program,
 with independent physical environments and robot placement. The object-frame
 pose selects a center top grasp with surface clearance; it is not an extra
 hand-frame conversion. They use 400 Hz Default physics, a 25 Hz control clock,
 and position/velocity controller targets. The smaller physics interval improves
-coupled-linkage contact stability without changing masses, friction or gains.
+coupled-linkage contact stability; GenSim drive/friction changes are confined
+to the new embodiment variants.
 
 `sequential_ik_verified.yaml` seeds each keyframe from its preceding solution and
 retimes to the existing velocity/acceleration limits. This avoids the large

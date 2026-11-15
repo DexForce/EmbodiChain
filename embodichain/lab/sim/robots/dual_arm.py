@@ -419,6 +419,15 @@ def _populate_dual_cfg(
     cfg.joint_drive_props = _mirror_joint_drive_props(
         base_cfg.joint_drive_props, name_case
     )
+    cfg.mimic_compliance = None
+    if base_cfg.mimic_compliance is not None:
+        cfg.mimic_compliance = {
+            hand_joint_maps[side].get(
+                name, _prefixed_name(name, prefix, "joint", name_case)
+            ): compliance.copy()
+            for side, _comp, prefix in _SIDES
+            for name, compliance in base_cfg.mimic_compliance.items()
+        }
     cfg.attrs = base_cfg.attrs.copy()
     cfg.root_props = base_cfg.root_props.copy()
 
@@ -565,6 +574,8 @@ class DualArmRobotCfg(RobotCfg):
     ``base_link``. The left/right ``control_parts``, per-arm ``solver_cfg`` and
     mirrored ``joint_drive_props`` are derived automatically by
     :func:`build_dual_arm_cfg`.
+    The base robot's ``mimic_compliance`` entries are copied to the
+    corresponding master joints on both assembled arms.
 
     Example:
 

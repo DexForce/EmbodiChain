@@ -197,6 +197,7 @@ class PointMassEnv:
         }
 
         self.last_action = action.detach()
+        info["terminal_observation"] = self._observation()
         if bool(done.any()):
             self._reset_ids(torch.nonzero(done, as_tuple=False).squeeze(-1))
         return self._observation(), reward, terminated, truncated, info

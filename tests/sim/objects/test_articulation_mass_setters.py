@@ -24,9 +24,21 @@ import pytest
 import torch
 
 from embodichain.lab.sim.objects import Articulation
+from embodichain.lab.sim.objects.backends.scene import SceneArticulationView
 from embodichain.utils.math import matrix_from_quat
 
 pytestmark = pytest.mark.no_sim
+
+
+def property_view(count: int, status: int = 1) -> SceneArticulationView:
+    view = object.__new__(SceneArticulationView)
+    view.device = torch.device("cpu")
+    view._row_indices = torch.arange(count)
+    view.batch = Mock()
+    view.batch.select.return_value = view.batch
+    view.batch.apply_link_inertia_diagonal.return_value = status
+    view.batch.apply_link_com_local_pose.return_value = status
+    return view
 
 
 @pytest.mark.parametrize("newton", [False, True])
@@ -41,6 +53,7 @@ def test_spawn_mass_setters_preserve_selection_and_quaternion_order(
     articulation._data = SimpleNamespace(
         is_newton_backend=newton,
         link_names=["base", "tip"],
+        articulation_view=property_view(3),
         inertia=torch.tensor([1.0, 2.0, 3.0]).expand(3, 2, 3).clone(),
         com_pose=torch.tensor([0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 4.0])
         .expand(3, 2, 7)
@@ -72,6 +85,33 @@ def test_spawn_mass_setters_preserve_selection_and_quaternion_order(
     getattr(articulation, "set_" + property_name)(
         values, link_names=link_names, env_ids=env_ids
     )
+
+    if newton:
+        batch = articulation._data.articulation_view.batch
+        method = (
+            "apply_link_inertia_diagonal"
+            if property_name == "inertia"
+            else "apply_link_com_local_pose"
+        )
+        call = getattr(batch, method).call_args
+        expected = (
+            original
+            if property_name == "inertia"
+            else torch.cat((original[..., 3:7], original[..., :3]), dim=-1)
+        )
+        torch.testing.assert_close(call.args[0], expected)
+        assert torch.as_tensor(call.kwargs["link_ids"]).tolist() == (
+            [1, 0] if selected else [0, 1]
+        )
+        native_rows = (
+            batch.select.call_args.args[0]
+            if property_name == "inertia"
+            else call.kwargs["rows"]
+        )
+        assert torch.as_tensor(native_rows).tolist() == rows
+        assert all(not entity.mock_calls for entity in articulation._entities)
+        torch.testing.assert_close(values, original)
+        return
 
     for i, env_id in enumerate(rows):
         entity = articulation._entities[env_id]
@@ -132,6 +172,7 @@ def test_spawn_mass_setters_raise_for_negative_native_status(
     articulation._data = SimpleNamespace(
         is_newton_backend=newton,
         link_names=["base"],
+        articulation_view=property_view(2, status),
         inertia=torch.ones(2, 1, 3),
         com_pose=torch.tensor([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0])
         .expand(2, 1, 7)
@@ -146,9 +187,12 @@ def test_spawn_mass_setters_raise_for_negative_native_status(
     ).return_value = status
     articulation._entities = [Mock(), entity]
 
-    with pytest.raises(
-        RuntimeError, match=f"set_link_{property_name}.*env 1.*base.*{status}"
-    ):
+    message = (
+        f"apply_link_.*{status}"
+        if newton
+        else f"set_link_{property_name}.*env 1.*base.*{status}"
+    )
+    with pytest.raises(RuntimeError, match=message):
         getattr(articulation, "set_" + property_name)(
             torch.ones(1, 1, width), link_names="base", env_ids=[1]
         )

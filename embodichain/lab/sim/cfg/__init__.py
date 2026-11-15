@@ -33,6 +33,7 @@ from .articulation import (
     ArticulationRootPropertiesCfg,
     JointDrivePropertiesCfg,
     LinkPhysicsOverrideCfg,
+    MimicComplianceCfg,
     NewtonJointDrivePropertiesCfg,
     _normalize_joint_target_mode,
     _raise_removed_articulation_cfg_fields,
@@ -41,6 +42,7 @@ from .articulation import (
 from .asset import AssetPhysicsMode, ObjectBaseCfg, _resolve_asset_physics_mode
 from .fluid import FluidObjectCfg, FluidSpawnCfg, FluidRenderCfg
 from .source import UsdSourceCfg
+from .cable import CableAttachmentCfg, CableObjectCfg, CablePhysicsCfg
 from .usd import UsdImportCfg
 from .deformable import (
     SurfaceElementPropertiesCfg,
@@ -67,6 +69,7 @@ from .rigid import (
 )
 from .rigid_object import RigidObjectCfg, RigidObjectGroupCfg
 from .visual_object import VisualObjectCfg
+from .visuals import GaussianSplatCfg, VisualElementCfg, GaussianRenderCfg
 from .scene import LightCfg, RigidConstraintCfg
 from .physics import (
     DefaultPhysicsCfg,
@@ -130,6 +133,12 @@ __all__ = [
     "LightCfg",
     "RigidObjectCfg",
     "VisualObjectCfg",
+    "GaussianSplatCfg",
+    "VisualElementCfg",
+    "GaussianRenderCfg",
+    "CableObjectCfg",
+    "CablePhysicsCfg",
+    "CableAttachmentCfg",
     "DeformableObjectCfg",
     "VolumeDeformableObjectCfg",
     "SurfaceDeformableObjectCfg",
@@ -142,6 +151,7 @@ __all__ = [
     "VolumeDeformablePhysicsCfg",
     "SurfaceDeformablePhysicsCfg",
     "ArticulationRootPropertiesCfg",
+    "MimicComplianceCfg",
     "LinkPhysicsOverrideCfg",
     "link_attrs_from_dict",
     "JointDrivePropertiesCfg",

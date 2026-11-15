@@ -861,6 +861,7 @@ def test_actual_mimic_topology_must_match_source(tmp_path, mutation):
 def test_dual_hand_names_controls_limits_and_drives_follow_assembler(tmp_path, prefix):
     import numpy as np
     import xml.etree.ElementTree as ET
+    from embodichain.lab.sim.cfg import MimicComplianceCfg
     from embodichain.robot_registry import resolve_robot_cfg
     from embodichain.lab.sim.robots.dual_arm import build_dual_arm_cfg
     from embodichain.lab.sim.utility.gripper_binding import prepare_robot_grippers
@@ -877,9 +878,24 @@ def test_dual_hand_names_controls_limits_and_drives_follow_assembler(tmp_path, p
         ).config["robot"]
     )
     base = resolve_robot_cfg(values.pop("class_type"), values)
+    master = base.gripper_bindings["tool"]["joint_names"]["gripper_finger1_joint_1"]
+    base.mimic_compliance = {master: MimicComplianceCfg(0.0, 0.0)}
+
     dual = build_dual_arm_cfg(base, {"left": np.eye(4), "right": np.eye(4)})
     prepare_robot_grippers(dual)
-    names = {j.get("name") for j in ET.parse(dual.fpath).findall("joint")}
+    joints = ET.parse(dual.fpath).findall("joint")
+    names = {joint.get("name") for joint in joints}
+    mimic_masters = {
+        mimic.get("joint") for joint in joints for mimic in joint.findall("mimic")
+    }
+    assert dual.mimic_compliance == {
+        "left_gripper_finger1_joint_1": MimicComplianceCfg(0.0, 0.0),
+        "right_gripper_finger1_joint_1": MimicComplianceCfg(0.0, 0.0),
+    }
+    assert dual.mimic_compliance.keys() <= mimic_masters
+    dual.mimic_compliance["left_gripper_finger1_joint_1"].damping_ratio = 1.0
+    assert dual.mimic_compliance["right_gripper_finger1_joint_1"].damping_ratio == 0.0
+    assert base.mimic_compliance[master].damping_ratio == 0.0
     for side in ("left", "right"):
         expected = [
             f"{side}_gripper_finger1_joint_1",

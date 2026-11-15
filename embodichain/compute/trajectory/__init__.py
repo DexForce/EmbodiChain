@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from .toppra import retime_joint_paths
 from .stability import PositionRangeMonitor
+from .floating import resample_floating_trajectory
 from .interpolation import (
     interpolate_minimum_jerk,
     interpolate_with_distance,
@@ -40,6 +41,7 @@ from .warping import sort_and_padding_key_frame, warp_trajectory_qpos
 __all__ = [
     "retime_joint_paths",
     "PositionRangeMonitor",
+    "resample_floating_trajectory",
     "differentiate_positions",
     "resample_in_time",
     "retime_to_control_grid",

@@ -1,0 +1,8 @@
+task_key: cloth_fold
+title: Fold Cloth
+summary: Fold a cloth once on a table with a synchronized two-arm expert.
+tags: [manipulation, bimanual, task_program]
+default_deployment: w1
+deployments:
+  w1:
+    config: task.w1.yaml

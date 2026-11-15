@@ -225,8 +225,8 @@ def test_motion_suites_cover_both_targets_with_shared_baselines(suite_name):
 @pytest.mark.parametrize(
     "suite_name",
     [
-        "atomic_franka_pgi_pose_batch",
-        "atomic_franka_pgi_randomized",
+        "atomic_franka_robotiq_pose_batch",
+        "atomic_franka_robotiq_randomized",
         "atomic_ur5_pgi_randomized",
     ],
 )
@@ -247,7 +247,7 @@ def test_atomic_sweeps_focus_on_interaction_skills(suite_name):
 
 
 def test_atomic_smoke_keeps_one_representative_case_per_motion_skill():
-    suite = load_suite("atomic_franka_pgi_smoke")
+    suite = load_suite("atomic_franka_robotiq_smoke")
     primitives = [
         skill
         for track in suite.enabled_tracks()
@@ -284,13 +284,62 @@ def test_old_report_schema_requires_explicit_migration(tmp_path):
 
 
 def test_franka_pose_batch_uses_the_same_policy_frames_as_its_robot_assembly():
-    smoke = load_suite("atomic_franka_pgi_smoke")
-    pose_batch = load_suite("atomic_franka_pgi_pose_batch")
+    smoke = load_suite("atomic_franka_robotiq_smoke")
+    pose_batch = load_suite("atomic_franka_robotiq_pose_batch")
     assert smoke.robot.to_dict() == pose_batch.robot.to_dict()
     reference = next(spec for spec in smoke.planners if spec.id == "nmg")
     candidate = next(spec for spec in pose_batch.planners if spec.id == "nmg")
     for key in ("policy_frame_from_world", "runtime_tcp_from_policy_tcp"):
         assert candidate.config[key] == reference.config[key]
+
+
+@pytest.mark.parametrize(
+    "suite_path",
+    sorted((BENCHMARK_ROOT / "suites").glob("atomic*franka*.yaml")),
+    ids=lambda path: path.stem,
+)
+def test_packaged_franka_atomic_suites_bind_robotiq_geometry_and_policy_tcp(suite_path):
+    """Every shipped Franka Atomic track must describe its mounted Robotiq."""
+    from embodichain_benchmarks.motion_generation.registry import create_robot_provider
+    from embodichain_benchmarks.motion_generation import robots as _robots
+
+    suite = load_suite(suite_path)
+    dual = suite.robot.provider == "dual_arm"
+    if dual:
+        assert suite.robot.config["gripper_type"] == "robotiq_2f_140"
+    else:
+        assert suite.robot.provider == "franka_robotiq"
+    cfg = create_robot_provider(suite.robot).build_cfg()
+    for component, value in cfg.urdf_cfg.components.items():
+        if "hand" in component:
+            assert Path(value["urdf_path"]).name == "robotiq_arg2f_140.urdf"
+    for track in suite.evaluation_tracks():
+        assert track.config["grasp_model"] == "RobotiqArg2F140"
+        grippers = track.config["grippers"] if dual else [track.config["gripper"]]
+        for gripper in grippers:
+            assert len(cfg.control_parts[gripper["control_part"]]) == 6
+            assert gripper["open_qpos"] == [0.0] * 6
+            assert len(gripper["grasp_qpos"]) == 6
+            assert len(gripper["finger_links"]) == 2
+            assert all("finger_pad" in link for link in gripper["finger_links"])
+    # The exported Franka policy observes its original flange-relative TCP:
+    # a -45 degree rotation about Z and a 0.1034 m translation along Z.
+    s = 2**-0.5
+    flange_from_policy = torch.tensor(
+        [
+            [s, s, 0.0, 0.0],
+            [-s, s, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.1034],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    )
+    for planner in suite.planners:
+        mapping = planner.config.get("runtime_tcp_from_policy_tcp")
+        if mapping is not None:
+            for solver in cfg.solver_cfg.values():
+                torch.testing.assert_close(
+                    torch.tensor(solver.tcp) @ torch.tensor(mapping), flange_from_policy
+                )
 
 
 def test_component_ur5_policy_tcp_is_inverse_of_the_component_solver_tcp():

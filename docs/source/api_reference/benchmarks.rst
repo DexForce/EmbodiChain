@@ -369,6 +369,7 @@ embodichain_benchmarks.motion_generation.robots
    DualArmProvider
    FrankaPandaProvider
    FrankaPgiProvider
+   FrankaRobotiqProvider
    RobotProvider
    UR5PgiProvider
    UR5Provider

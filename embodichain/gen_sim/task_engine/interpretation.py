@@ -1233,36 +1233,6 @@ def _nonempty(value: Any, context: str) -> str:
     return value.strip()
 
 
-def _topological_steps(steps: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """Return a stable topological ordering for validated intent steps."""
-    by_id = {str(step["id"]): dict(step) for step in steps}
-    effective_dependencies: dict[str, tuple[str, ...]] = {}
-    for step_id, step in by_id.items():
-        deps = list(str(dep) for dep in step["depends_on"])
-        for selector in (step["object"], step["target"]):
-            if selector["kind"] == "step_result":
-                reference = str(selector["step_id"])
-                if reference not in deps:
-                    deps.append(reference)
-        effective_dependencies[step_id] = tuple(deps)
-    pending = set(by_id)
-    ordered: list[dict[str, Any]] = []
-    original = [str(step["id"]) for step in steps]
-    while pending:
-        ready = [
-            step_id
-            for step_id in original
-            if step_id in pending
-            and all(str(dep) not in pending for dep in effective_dependencies[step_id])
-        ]
-        if not ready:
-            raise ValueError("Instruction intent dependencies contain a cycle.")
-        for step_id in ready:
-            ordered.append(by_id[step_id])
-            pending.remove(step_id)
-    return ordered
-
-
 def _coerce_instruction_response(response: Any) -> Mapping[str, Any]:
     """Coerce common structured-client response wrappers without accepting prose."""
     if isinstance(response, Mapping):

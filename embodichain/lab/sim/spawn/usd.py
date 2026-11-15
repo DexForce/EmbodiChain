@@ -25,6 +25,8 @@ import numpy as np
 from dexsim.spawn import (
     ArticulationDesc,
     CollisionDesc,
+    GeometryType,
+    ConstraintDesc,
     MaterialDesc,
     ObjectDesc,
     RenderDesc,
@@ -60,6 +62,41 @@ from embodichain.lab.sim.spawn.descriptors import (
 __all__ = ["articulation_desc_from_usd", "rigid_desc_from_usd", "visual_desc_from_usd"]
 
 _PropertyCfgT = TypeVar("_PropertyCfgT")
+
+
+def _has_native_gaussian_renders(descriptor: object) -> bool:
+    """Detect Gaussian visuals already classified by DexSim's USD parser."""
+    return any(
+        render.geometry_type == GeometryType.GAUSSIAN_SPLAT
+        for render in getattr(descriptor, "renders", ())
+    )
+
+
+def _source_visual_elements(descriptor: object) -> tuple[dict[str, object], ...]:
+    """Snapshot typed USD render references without copying Gaussian points."""
+    return tuple(
+        {
+            "id": (
+                render.usd.prim_path
+                if render.usd is not None and render.usd.prim_path
+                else render.segment_name or f"render_{index}"
+            ),
+            "link_name": None,
+            "representation": (
+                "gaussian_splat"
+                if render.geometry_type == GeometryType.GAUSSIAN_SPLAT
+                else "mesh"
+            ),
+            "file_path": render.file_path,
+            "source_prim_path": (
+                render.usd.prim_path if render.usd is not None else None
+            ),
+            "local_pose": render.local_transform.copy(),
+            "scale": 1.0,
+            "resource_ids": (),
+        }
+        for index, render in enumerate(getattr(descriptor, "renders", ()))
+    )
 
 
 def _require_usd_import_contract() -> None:
@@ -366,19 +403,56 @@ def articulation_desc_from_usd(
     source_path: str | None = None,
     newton_solver_type: str | None = None,
 ) -> tuple[ArticulationDesc, dict[str, MaterialDesc]]:
-    """Select an articulation by exact prim path, or require a singleton stage."""
+    """Select a standalone articulation descriptor by exact USD prim path.
+
+    Use a SimulationManager to import articulations with scene constraints.
+    """
+    desc, materials, _ = _load_usd_articulation(
+        cfg,
+        per_env=per_env,
+        source_path=source_path,
+        newton_solver_type=newton_solver_type,
+        allow_constraints=False,
+    )
+    return desc, materials
+
+
+def _load_usd_articulation(
+    cfg: ArticulationCfg,
+    *,
+    per_env: bool = True,
+    source_path: str | None = None,
+    newton_solver_type: str | None = None,
+    allow_constraints: bool = True,
+) -> tuple[ArticulationDesc, dict[str, MaterialDesc], list[ConstraintDesc]]:
     preserve_asset_physics = cfg.resolve_asset_physics_mode() == "preserve"
     if not preserve_asset_physics:
         _validate_articulation_rigid_physics(
             cfg,
             newton_solver_type=newton_solver_type,
         )
-    configured_path = _asset_file_path(cfg)
-    path = source_path or configured_path
+    path = source_path or _asset_file_path(cfg)
     scene, desc = _parse_singleton(
         path, "articulations", "articulation", source=cfg.source
     )
-    return _configure_articulation_usd(
+    source_prefix = f"{desc.name}/"
+    constraints = _articulation_constraints(desc, scene.constraints)
+    if constraints:
+        if (
+            not preserve_asset_physics
+            and cfg.body_scale is not None
+            and not np.array_equal(
+                _vector3(cfg.body_scale, field_name="body_scale"), desc.body_scale
+            )
+        ):
+            raise ValueError(
+                "USD articulation with scene constraints requires the authored body scale."
+            )
+        if not allow_constraints:
+            raise ValueError(
+                "USD articulation has scene constraints. Use SimulationManager."
+            )
+    desc, materials = _configure_articulation_usd(
         cfg,
         scene,
         desc,
@@ -386,6 +460,40 @@ def articulation_desc_from_usd(
         source_path=path,
         newton_solver_type=newton_solver_type,
     )
+    constraints = [
+        replace(
+            constraint,
+            name=f"{desc.name}/{constraint.name}",
+            body0=f"{desc.name}/{constraint.body0.removeprefix(source_prefix)}",
+            body1=f"{desc.name}/{constraint.body1.removeprefix(source_prefix)}",
+            per_env=per_env,
+        )
+        for constraint in constraints
+    ]
+    return desc, materials, constraints
+
+
+def _articulation_constraints(
+    desc: ArticulationDesc, constraints: list[ConstraintDesc]
+) -> list[ConstraintDesc]:
+    """Select internal constraints and reject links to other scene resources."""
+    prefix = f"{desc.name}/"
+    endpoints = {f"{prefix}{link.name}" for link in desc.links}
+    selected = []
+    for constraint in constraints:
+        body0, body1 = constraint.body0, constraint.body1
+        if not any(
+            body == desc.name or (body is not None and body.startswith(prefix))
+            for body in (body0, body1)
+        ):
+            continue
+        if body0 not in endpoints or body1 not in endpoints:
+            raise ValueError(
+                f"USD constraint {constraint.name!r} connects the selected "
+                "articulation to an external endpoint. Use add_usd()."
+            )
+        selected.append(constraint)
+    return selected
 
 
 def _configure_articulation_usd(
@@ -454,7 +562,7 @@ def _parse_singleton(path: object, collection: str, label: str, *, source=None):
             f"{len(candidates)}: {found}."
         )
     selected = candidates[0]
-    if label != "visual object":
+    if collection != "articulations" and label != "visual object":
         for constraint in scene.constraints:
             if any(
                 endpoint is not None and endpoint.partition("/")[0] == selected.name

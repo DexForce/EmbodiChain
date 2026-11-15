@@ -1612,7 +1612,7 @@ def test_nmg_rejects_unknown_motion_validity():
 
 
 def test_seed_override_applies_to_atomic_tracks():
-    suite = load_suite("atomic_franka_pgi_randomized")
+    suite = load_suite("atomic_franka_robotiq_randomized")
 
     _apply_overrides(suite, seeds=[104])
 
@@ -1621,7 +1621,7 @@ def test_seed_override_applies_to_atomic_tracks():
 
 
 def test_seed_override_adds_missing_atomic_track_seeds():
-    suite = load_suite("atomic_franka_pgi_randomized")
+    suite = load_suite("atomic_franka_robotiq_randomized")
     atomic_track = suite.enabled_tracks()[0]
     atomic_track.config.pop("seeds", None)
 

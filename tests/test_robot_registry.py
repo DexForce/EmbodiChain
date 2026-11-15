@@ -306,9 +306,11 @@ def local_robot_assets(monkeypatch, tmp_path):
     for module_name in (
         "embodichain.data",
         "embodichain.lab.sim.cfg",
+        "embodichain_robots.agibot.g1.cfg",
         "embodichain_robots.arx.arx5.cfg",
         "embodichain_robots.alohamini.aloha_mini.cfg",
         "embodichain_robots.tianji.marvin.cfg",
+        "embodichain_robots.agibot.g2.cfg",
         "embodichain_robots.agilex.cobotmagic.cfg",
         "embodichain_robots.franka.cfg",
         "embodichain_robots.flexiv.rizon4s.cfg",
@@ -324,6 +326,7 @@ def local_robot_assets(monkeypatch, tmp_path):
 @pytest.mark.parametrize(
     "name",
     [
+        "AgibotG1",
         "UnitreeGo1",
         "UnitreeGo2",
         "UnitreeG1",
@@ -334,6 +337,7 @@ def local_robot_assets(monkeypatch, tmp_path):
         "ARX5",
         "TianjiMarvin",
         "CobotMagic",
+        "AgibotG2",
         "DexforceW1",
         "FrankaPanda",
         "FlexivRizon4S",

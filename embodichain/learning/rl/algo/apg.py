@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from typing import Dict
+from contextlib import AbstractContextManager, nullcontext
 
 import torch
 
@@ -111,7 +112,7 @@ class APG(BaseAlgorithm[DifferentiableRollout]):
         self.cfg = cfg
         self.policy = policy
         self.device = torch.device(cfg.device)
-        self._setup_optimization(cfg, policy.parameters())
+        self._setup_optimization(cfg, self._optimization_parameters())
         self._update_active = False
         self._update_valid = True
         self._discount: torch.Tensor | None = None
@@ -120,6 +121,13 @@ class APG(BaseAlgorithm[DifferentiableRollout]):
         self._entropy_total = 0.0
         self._num_accumulated_steps = 0
         self._action_gradient_stats: list[BatchedGradientNormStats] = []
+
+    def rollout_context(self) -> AbstractContextManager[None]:
+        """Return the model-state context used during graph-preserving collection."""
+        return nullcontext()
+
+    def _optimization_parameters(self) -> tuple[torch.nn.Parameter, ...]:
+        return tuple(self.policy.parameters())
 
     def update(self, rollout: DifferentiableRollout) -> Dict[str, float]:
         """Apply one pathwise-gradient update from a rollout segment."""
@@ -251,7 +259,7 @@ class APG(BaseAlgorithm[DifferentiableRollout]):
         # simulator steps. Invoke it even when this accumulation window is
         # already invalid so every rollout can release its retained graph/tape.
         loss.backward()
-        parameters = tuple(self.policy.parameters())
+        parameters = self._optimization_parameters()
         gradients_are_finite = all(
             parameter.grad is None or bool(torch.isfinite(parameter.grad).all())
             for parameter in parameters
@@ -270,7 +278,7 @@ class APG(BaseAlgorithm[DifferentiableRollout]):
         if self._num_accumulated_steps == 0:
             raise RuntimeError("Cannot finish an APG update without any segments.")
 
-        parameters = tuple(self.policy.parameters())
+        parameters = self._optimization_parameters()
         if not self._update_valid:
             metrics = self._accumulated_metrics(
                 grad_norm=float("nan"),
@@ -296,6 +304,7 @@ class APG(BaseAlgorithm[DifferentiableRollout]):
             )
             self._update_active = False
             return metrics
+        self._after_gradient_clip()
         self.optimizer.step()
         self._step_scheduler()
         metrics = self._accumulated_metrics(
@@ -305,6 +314,9 @@ class APG(BaseAlgorithm[DifferentiableRollout]):
         )
         self._update_active = False
         return metrics
+
+    def _after_gradient_clip(self) -> None:
+        """Apply algorithm-specific gradient transforms after norm validation."""
 
     def cancel_update(self) -> None:
         self.optimizer.zero_grad(set_to_none=True)

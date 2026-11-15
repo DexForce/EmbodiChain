@@ -298,6 +298,8 @@ def _assert_physical_goal(
         ("repeated_pick_place", "dexforce_w1_030_pika"),
         ("repeated_pick_place", "dual_franka_robotiq_arg2f_140"),
         ("repeated_pick_place", "dual_ur10_robotiq_arg2f_140"),
+        ("repeated_pick_place", "dual_franka_robotiq_arg2f_140_gensim"),
+        ("repeated_pick_place", "dual_ur10_robotiq_arg2f_140_gensim"),
         ("carton_stocking", "panda.rgbd"),
     ],
 )

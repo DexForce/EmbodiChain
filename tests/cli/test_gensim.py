@@ -35,6 +35,7 @@ pytestmark = pytest.mark.no_sim
     "command",
     [
         ["gensim"],
+        ["gensim", "services"],
         ["gensim", "asset"],
         ["gensim", "scene"],
         ["gensim", "task"],
@@ -44,6 +45,8 @@ pytestmark = pytest.mark.no_sim
         ["gensim", "scene", "expand"],
         ["gensim", "scene", "preview"],
         ["gensim", "task", "plan"],
+        ["gensim", "services", "validate"],
+        ["gensim", "services", "doctor"],
         ["gensim", "run"],
         ["gensim", "ui"],
         ["asset-engine"],

@@ -26,6 +26,20 @@ import torch
 from unittest.mock import MagicMock, Mock, patch
 
 
+def test_public_exports_include_entity_and_fluid_queries() -> None:
+    from embodichain.lab.gym.envs.managers import observations
+
+    namespace = {}
+    exec("from embodichain.lab.gym.envs.managers.observations import *", namespace)
+    for name in (
+        "get_entity_state",
+        "get_fluid_particle_state",
+        "get_fluid_summary",
+        "get_fluid_volume_in_region",
+    ):
+        assert namespace[name] is getattr(observations, name)
+
+
 class MockRobot:
     """Mock robot for observation functor tests."""
 

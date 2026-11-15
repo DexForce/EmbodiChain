@@ -133,6 +133,23 @@ embodichain_robots.wheeltec.fa2f.assets
 .. autoclass:: WheelTecFA2F
    :members:
 
+embodichain_robots.agilex.agx_gripper.assets
+--------------------------------------------
+
+Pinned AGX two-finger gripper with a single opening command in meters and
+two source mimic joints. The asset provides a portable URDF and source
+meshes for explicit mounting in a robot embodiment.
+
+.. currentmodule:: embodichain_robots.agilex.agx_gripper.assets
+
+.. autosummary::
+   :nosignatures:
+
+   AgxGripper
+
+.. autoclass:: AgxGripper
+   :members:
+
 embodichain_robots.agilex.pika.assets
 -------------------------------------
 

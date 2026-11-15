@@ -22,8 +22,9 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from dexsim.spawn import ArticulationDesc, JointDesc, LinkDesc
+from dexsim.spawn import ArticulationDesc, DexsimJointDesc, JointDesc, LinkDesc
 from dexsim.engine import JointType
+from dexsim.types import DriveType
 
 from embodichain.lab.sim.spawn.source import (
     _apply_dexsim_source_overlay,
@@ -226,6 +227,61 @@ def test_default_overlay_writes_only_explicitly_marked_link_physics() -> None:
     np.testing.assert_array_equal(raw.inertia, (1.0, 2.0, 3.0))
     np.testing.assert_allclose(raw.com_position, (0.1, 0.2, 0.3))
     assert handle.articulation_desc.get_link_desc("skipped").rigid_body is not None
+
+
+def test_default_sparse_drive_overlay_retains_each_native_joint_order() -> None:
+    selected = JointDesc(
+        "selected",
+        "base",
+        "arm",
+        JointType.REVOLUTE,
+        dexsim=DexsimJointDesc(damping=0.0),
+    )
+    untouched = JointDesc(
+        "untouched",
+        "arm",
+        "tool",
+        JointType.REVOLUTE,
+        dexsim=DexsimJointDesc(),
+    )
+    desc = ArticulationDesc(name="robot", joints=[selected, untouched])
+    for offset in (0.0, 100.0):
+        writes = []
+        binding = SimpleNamespace(
+            get_physical_body=lambda _name: None,
+            set_physical_attr=lambda *_: None,
+            get_actived_joint_names=lambda *_: ["untouched", "selected"],
+            get_drive=lambda: (
+                np.asarray([11.0, 12.0]) + offset,
+                np.asarray([21.0, 22.0]) + offset,
+                np.asarray([31.0, 32.0]) + offset,
+                np.asarray([41.0, 42.0]) + offset,
+                np.asarray([0.1, 0.2]),
+                np.asarray([0.3, 0.4]),
+                [DriveType.FORCE, DriveType.ACCELERATION],
+            ),
+            set_drive=lambda **kwargs: writes.append(kwargs),
+            set_joint_velocity_limit=lambda **_: 1,
+        )
+        handle = SimpleNamespace(
+            _physics_binding=binding,
+            articulation_desc=ArticulationDesc(name="robot"),
+        )
+
+        _apply_dexsim_source_overlay(handle, desc)
+
+        assert writes == [
+            {
+                "joint_name": "selected",
+                "stiffness": 12.0 + offset,
+                "damping": 0.0,
+                "max_force": 32.0 + offset,
+                "max_velocity": 42.0 + offset,
+                "joint_friction": 0.2,
+                "armature": 0.4,
+                "drive_type": DriveType.ACCELERATION,
+            }
+        ]
 
 
 class _RawBody:

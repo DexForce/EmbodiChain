@@ -230,10 +230,13 @@ def scene_layout_input_from_sim(
         poses[uid] = (
             entity.get_local_pose(to_matrix=True)[env_id].detach().cpu().numpy()
         )
-        vertices[uid] = (
-            entity.get_vertices(env_ids=[env_id], scale=True)[0].detach().cpu().numpy()
-        )
-        faces[uid] = entity.get_triangles(env_ids=[env_id])[0].detach().cpu().numpy()
+        if hasattr(entity, "get_semantic_mesh"):
+            semantic_vertices, semantic_faces = entity.get_semantic_mesh([env_id])
+        else:
+            semantic_vertices = entity.get_vertices(env_ids=[env_id], scale=True)
+            semantic_faces = entity.get_triangles(env_ids=[env_id])
+        vertices[uid] = semantic_vertices[0].detach().cpu().numpy()
+        faces[uid] = semantic_faces[0].detach().cpu().numpy()
         if hasattr(entity, "get_body_scale"):
             scales = entity.get_body_scale().detach().cpu().numpy()
             if not np.allclose(scales, scales[env_id], rtol=0, atol=1e-8):
