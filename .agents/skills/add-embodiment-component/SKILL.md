@@ -119,7 +119,10 @@ embodiment:
 ```
 
 Optional deployment overrides are limited to `uid`, `init_pos`, `init_rot`,
-and `init_qpos`. Do not repeat inline `robot` or `sensor` fields.
+`init_qpos`, and bounded calibration: replacing existing named
+`joint_drive_props.stiffness`/`damping` values and a declared hand's complete
+`open`/`grasp` commands. Prefer these over copying a component for task-local
+gains or commands. Do not repeat inline `robot` or `sensor` fields.
 
 One task can provide multiple thin deployments selecting compatible
 embodiments. Keep the program embodiment-independent and validate the

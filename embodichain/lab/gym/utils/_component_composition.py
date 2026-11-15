@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
+import math
 import os
 from pathlib import Path
 
@@ -31,6 +32,10 @@ from .composition import ResolvedGymComponents as _ResolvedGymComponents
 __all__: list[str] = []
 
 _EMBODIMENT_OVERRIDE_FIELDS = frozenset({"uid", "init_pos", "init_rot", "init_qpos"})
+# Bounded task calibration: replace existing named drive gains and hand commands.
+_EMBODIMENT_CALIBRATION_FIELDS = frozenset({"joint_drive_props", "grippers"})
+_DRIVE_GAIN_OVERRIDE_FIELDS = frozenset({"stiffness", "damping"})
+_GRIPPER_COMMAND_OVERRIDE_NAMES = frozenset({"open", "grasp"})
 _ENVIRONMENT_COMPONENT_FIELDS = frozenset(
     {
         "max_episodes",
@@ -296,6 +301,63 @@ def _resolve_environment_component(
     return resolved
 
 
+def _override_drive_gains(simulation: dict[str, object], value: object) -> None:
+    """Replace existing named drive gains with finite nonnegative values."""
+    gains = _mapping(
+        value,
+        path="embodiment.overrides.joint_drive_props",
+        required=frozenset(),
+        optional=_DRIVE_GAIN_OVERRIDE_FIELDS,
+    )
+    drives = simulation.get("joint_drive_props")
+    for field_name, entries in gains.items():
+        path = f"embodiment.overrides.joint_drive_props.{field_name}"
+        replacements = _owned_mapping(entries, path=path)
+        existing = drives.get(field_name) if isinstance(drives, Mapping) else None
+        if not isinstance(existing, dict) or not replacements:
+            raise ValueError(f"{path} must replace named entries of the component.")
+        for name, gain in replacements.items():
+            if name not in existing:
+                raise ValueError(f"{path} names no existing entry {name!r}.")
+            if (
+                isinstance(gain, bool)
+                or not isinstance(gain, (int, float))
+                or not math.isfinite(gain)
+                or gain < 0
+            ):
+                raise ValueError(f"{path}.{name} must be finite and nonnegative.")
+            existing[name] = float(gain)
+
+
+def _override_gripper_commands(grippers: object, value: object) -> dict[str, object]:
+    """Return gripper declarations with replaced open or grasp commands."""
+    overrides = _owned_mapping(value, path="embodiment.overrides.grippers")
+    if not isinstance(grippers, Mapping):
+        raise ValueError("embodiment.overrides.grippers requires component grippers.")
+    declarations = _owned_mapping(grippers, path="embodiment component.grippers")
+    for instance, entry in overrides.items():
+        path = f"embodiment.overrides.grippers.{instance}"
+        if instance not in declarations:
+            raise ValueError(f"{path} names no existing gripper instance.")
+        commands = _mapping(
+            _mapping(entry, path=path, required=frozenset({"commands"}))["commands"],
+            path=f"{path}.commands",
+            required=frozenset(),
+            optional=_GRIPPER_COMMAND_OVERRIDE_NAMES,
+        )
+        if not commands:
+            raise ValueError(f"{path}.commands must replace open or grasp.")
+        declaration = declarations[instance]
+        if not isinstance(declaration, dict):
+            raise TypeError(
+                f"embodiment component.grippers.{instance} must be a mapping."
+            )
+        merged = dict(declaration.get("commands", {}))
+        merged.update(deepcopy(dict(commands)))
+        declaration["commands"] = merged
+    return declarations
+
+
 def _resolve_embodiment_component(
     value: object,
     *,
@@ -336,9 +398,20 @@ def _resolve_embodiment_component(
         declaration.get("overrides", {}),
         path="embodiment.overrides",
         required=frozenset(),
-        optional=_EMBODIMENT_OVERRIDE_FIELDS,
+        optional=_EMBODIMENT_OVERRIDE_FIELDS | _EMBODIMENT_CALIBRATION_FIELDS,
     )
-    simulation.update(deepcopy(dict(overrides)))
+    simulation.update(
+        {
+            key: deepcopy(value)
+            for key, value in overrides.items()
+            if key in _EMBODIMENT_OVERRIDE_FIELDS
+        }
+    )
+    if "joint_drive_props" in overrides:
+        _override_drive_gains(simulation, overrides["joint_drive_props"])
+    grippers = component.get("grippers")
+    if "grippers" in overrides:
+        grippers = _override_gripper_commands(grippers, overrides["grippers"])
     _resolve_local_resource_paths(simulation, base_dir=component_path.parent)
     _resolve_local_resource_paths(sensors, base_dir=component_path.parent)
     skill_profile = None
@@ -347,10 +420,11 @@ def _resolve_embodiment_component(
             component["skill_profile"],
             path="embodiment component.skill_profile",
         )
-    if "grippers" in component:
+    if grippers is not None:
         from embodichain.lab.gym.utils._gripper_composition import _expand_grippers
 
-        _expand_grippers(simulation, skill_profile, component["grippers"])
+        # Expansion validates complete native-joint commands within hand limits.
+        _expand_grippers(simulation, skill_profile, grippers)
     return simulation, sensors, skill_profile
 
 

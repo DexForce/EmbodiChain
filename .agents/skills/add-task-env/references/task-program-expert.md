@@ -49,7 +49,8 @@ embodiment:
 ```
 
 Paths resolve relative to the runnable deployment. Deployment embodiment
-overrides are limited to `uid`, `init_pos`, `init_rot`, and `init_qpos`.
+overrides are limited to `uid`, `init_pos`, `init_rot`, `init_qpos`, and
+bounded calibration of existing drive gains and hand `open`/`grasp` commands.
 
 ## Python boundary
 

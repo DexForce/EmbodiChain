@@ -317,8 +317,13 @@ selected scene's graspable rigid objects, so reusable embodiments do not name
 task-local objects.
 
 Deployment embodiment overrides affect only the robot simulation fields and
-are restricted to `uid`, `init_pos`, `init_rot`, and `init_qpos`. Sensor lists
-are selected atomically with the embodiment. Task grasp-generator overrides
+are restricted to `uid`, `init_pos`, `init_rot`, and `init_qpos`, plus bounded
+task calibration. `joint_drive_props.stiffness` and `damping` may replace
+finite, nonnegative values of entries the component already names, and
+`grippers.<instance>.commands.open` or `grasp` may replace a declared hand's
+command with positions for every native hand joint within the hand limits.
+New drive entries, other drive fields and structural hand changes are
+rejected. Sensor lists are selected atomically with the embodiment. Task grasp-generator overrides
 are similarly allowlisted. This gives one embodiment to many tasks and one
 task to many compatible embodiments without copying either declaration or
 admitting arbitrary merge semantics. `repeated_pick_place` and `open_drawer`
