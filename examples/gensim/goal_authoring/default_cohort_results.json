@@ -1,0 +1,939 @@
+[
+  {
+    "case": "task1171",
+    "route": "default",
+    "image_sha256": "58d1bb5403c3306a26cd771ee2576ef6c168a7931fc44d4d52b2699759c49946",
+    "instruction": "扶正侧倒的罐头并放入托盘，再把塑料瓶放入同一托盘，最后把纸杯放到托盘旁的杯垫上。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": true,
+    "visual": "not_verified",
+    "qualification": "not_verified",
+    "preflight": "not_verified",
+    "qualification_calls": [],
+    "manifest_sha256": "57f8b7c77ac1c6b304b0d08cdffd7d9738c8a194ee618a53f4677f366837e676",
+    "stage": "authoring_only"
+  },
+  {
+    "case": "task1171",
+    "route": "template",
+    "image_sha256": "58d1bb5403c3306a26cd771ee2576ef6c168a7931fc44d4d52b2699759c49946",
+    "instruction": "扶正侧倒的罐头并放入托盘，再把塑料瓶放入同一托盘，最后把纸杯放到托盘旁的杯垫上。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": false,
+    "error": "SemanticPlanningError: Visual grounding invalid after one repair: ['Grounding requires objects and bindings']",
+    "visual": "failed",
+    "qualification": "not_verified",
+    "preflight": "not_verified",
+    "qualification_calls": [],
+    "last_visual_response_keys": [
+      "bindings",
+      "clauses",
+      "constraints",
+      "generalization",
+      "objects",
+      "role_properties"
+    ],
+    "last_visual_errors": [
+      "Grounding requires objects and bindings"
+    ]
+  },
+  {
+    "case": "task1172",
+    "route": "default",
+    "image_sha256": "ae70608e355a9080ebf435a5a416ec312c99366e325f2105cf21df688d50930d",
+    "instruction": "打开抽屉，取出里面的苹果放入抽屉左侧的果盘，再把桌上的橙子放入同一果盘，最后关闭抽屉。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": true,
+    "visual": "not_verified",
+    "qualification": "not_verified",
+    "preflight": "not_verified",
+    "qualification_calls": [],
+    "manifest_sha256": "23ea2a092547a6d1d301d9516e788e73b9fac7492eea3c4c23a240b950f12734",
+    "stage": "authoring_only"
+  },
+  {
+    "case": "task1172",
+    "route": "template",
+    "image_sha256": "ae70608e355a9080ebf435a5a416ec312c99366e325f2105cf21df688d50930d",
+    "instruction": "打开抽屉，取出里面的苹果放入抽屉左侧的果盘，再把桌上的橙子放入同一果盘，最后关闭抽屉。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": false,
+    "error": "SemanticPlanningError: Visual grounding invalid after one repair: ['Grounding requires objects and bindings']",
+    "visual": "failed",
+    "qualification": "not_verified",
+    "preflight": "not_verified",
+    "qualification_calls": [],
+    "last_visual_response_keys": [
+      "bindings",
+      "clauses",
+      "constraints",
+      "cross_with",
+      "generalization",
+      "objects",
+      "role_properties"
+    ],
+    "last_visual_errors": [
+      "Grounding requires objects and bindings"
+    ]
+  },
+  {
+    "case": "task1173",
+    "route": "default",
+    "image_sha256": "edcc9f889ccf085022ee2d8dd5e4f98b5246586245e97258f2d4a7362763f661",
+    "instruction": "把蓝色塑料杯放到浅蓝色鼠标垫上，拿起玻璃咖啡壶朝该杯完成一次倾倒动作，回正并放回原位，最后按一次服务铃。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": true,
+    "visual": "not_verified",
+    "qualification": "not_verified",
+    "preflight": "not_verified",
+    "qualification_calls": [],
+    "manifest_sha256": "914c25c5c346c14df4c069dedbd71539b0e0b8aff31a80a8376a15448c68461a",
+    "stage": "authoring_only"
+  },
+  {
+    "case": "task1173",
+    "route": "template",
+    "image_sha256": "edcc9f889ccf085022ee2d8dd5e4f98b5246586245e97258f2d4a7362763f661",
+    "instruction": "把蓝色塑料杯放到浅蓝色鼠标垫上，拿起玻璃咖啡壶朝该杯完成一次倾倒动作，回正并放回原位，最后按一次服务铃。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": false,
+    "error": "SemanticPlanningError: Visual grounding invalid after one repair: ['Grounding requires objects and bindings']",
+    "visual": "failed",
+    "qualification": "not_verified",
+    "preflight": "not_verified",
+    "qualification_calls": [],
+    "last_visual_response_keys": [
+      "bindings",
+      "clauses",
+      "constraints",
+      "generalization",
+      "objects",
+      "role_properties"
+    ],
+    "last_visual_errors": [
+      "Grounding requires objects and bindings"
+    ]
+  },
+  {
+    "case": "task1174",
+    "route": "default",
+    "image_sha256": "f996a3e1e66febad6d6fc380968e3e9aa65da69517d97003adf3910eb8574663",
+    "instruction": "把杯子放到咖啡机的接杯垫上，按一次黑色咖啡机上的蓝色按钮，再把同一杯子移到旁边的服务托盘内。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": true,
+    "visual": "not_verified",
+    "qualification": "not_verified",
+    "preflight": "not_verified",
+    "qualification_calls": [],
+    "manifest_sha256": "04efc8ea1e99504fdc6aa3ea766f74208f8d2cea6a9f9b22a5225fca80a8c5f9",
+    "stage": "authoring_only"
+  },
+  {
+    "case": "task1174",
+    "route": "template",
+    "image_sha256": "f996a3e1e66febad6d6fc380968e3e9aa65da69517d97003adf3910eb8574663",
+    "instruction": "把杯子放到咖啡机的接杯垫上，按一次黑色咖啡机上的蓝色按钮，再把同一杯子移到旁边的服务托盘内。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": false,
+    "error": "SemanticPlanningError: Visual grounding invalid after one repair: ['Grounding requires objects and bindings']",
+    "visual": "failed",
+    "qualification": "not_verified",
+    "preflight": "not_verified",
+    "qualification_calls": [],
+    "last_visual_response_keys": [
+      "bindings",
+      "constraints",
+      "objects",
+      "role_properties"
+    ],
+    "last_visual_errors": [
+      "Grounding requires objects and bindings"
+    ]
+  },
+  {
+    "case": "task1175",
+    "route": "default",
+    "image_sha256": "bbca400c42b4cf781cc3760962cd7d50560a20438c2207ad03765a9f8cafc769",
+    "instruction": "打开上层抽屉，把台面上的罐头和白盖透明塑料瓶依次放进去，最后关闭同一抽屉。罐头只需保持长轴竖直，正倒均可，不要求翻正；塑料瓶需瓶口朝上竖直正放。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": false,
+    "error": "ValueError: source_omission: 正倒均可 requires E2/vertical",
+    "visual": "not_verified",
+    "qualification": "not_verified",
+    "preflight": "not_verified",
+    "qualification_calls": []
+  },
+  {
+    "case": "task1175",
+    "route": "template",
+    "image_sha256": "bbca400c42b4cf781cc3760962cd7d50560a20438c2207ad03765a9f8cafc769",
+    "instruction": "打开上层抽屉，把台面上的罐头和白盖透明塑料瓶依次放进去，最后关闭同一抽屉。罐头只需保持长轴竖直，正倒均可，不要求翻正；塑料瓶需瓶口朝上竖直正放。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": false,
+    "error": "SemanticPlanningError: Visual grounding invalid after one repair: ['Grounding requires objects and bindings']",
+    "visual": "failed",
+    "qualification": "not_verified",
+    "preflight": "not_verified",
+    "qualification_calls": [],
+    "last_visual_response_keys": [
+      "bindings",
+      "clauses",
+      "constraints",
+      "generalization",
+      "objects",
+      "role_properties"
+    ],
+    "last_visual_errors": [
+      "Grounding requires objects and bindings"
+    ]
+  },
+  {
+    "case": "task1176",
+    "route": "default",
+    "image_sha256": "762c5dd172b58bce7d0c9f27e0e072653023abba1d0ecbab50181d7c983502bf",
+    "instruction": "打开收纳抽屉，把木块和魔方依次放进去，关闭抽屉，最后按一次完成确认按钮。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": true,
+    "visual": "not_verified",
+    "qualification": "not_verified",
+    "preflight": "not_verified",
+    "qualification_calls": [],
+    "manifest_sha256": "6b4ffd13621d6278b7ad7bcdedd2426004c71007059f30cafe904ad8acd2deb5",
+    "stage": "authoring_only"
+  },
+  {
+    "case": "task1176",
+    "route": "template",
+    "image_sha256": "762c5dd172b58bce7d0c9f27e0e072653023abba1d0ecbab50181d7c983502bf",
+    "instruction": "打开收纳抽屉，把木块和魔方依次放进去，关闭抽屉，最后按一次完成确认按钮。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": false,
+    "error": "SemanticPlanningError: Visual grounding invalid after one repair: ['Grounding requires objects and bindings']",
+    "visual": "failed",
+    "qualification": "not_verified",
+    "preflight": "not_verified",
+    "qualification_calls": [],
+    "last_visual_response_keys": [
+      "bindings",
+      "milestones",
+      "objects"
+    ],
+    "last_visual_errors": [
+      "Grounding requires objects and bindings"
+    ]
+  },
+  {
+    "case": "task1177",
+    "route": "default",
+    "image_sha256": "bc31cff944e80bca5e6ecebf92cd05ff069dc1814b23d46f358f82a14c3c8074",
+    "instruction": "粗转烤箱旋钮一次，拉出滑轨托盘，把其中的餐碗取出放到耐热垫上，最后推回空托盘。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": true,
+    "visual": "not_verified",
+    "qualification": "not_verified",
+    "preflight": "not_verified",
+    "qualification_calls": [],
+    "manifest_sha256": "ada5012ac44d2951e0815554f4eff37ae7df6a0bcf921b92125b29940b6bce29",
+    "stage": "authoring_only"
+  },
+  {
+    "case": "task1177",
+    "route": "template",
+    "image_sha256": "bc31cff944e80bca5e6ecebf92cd05ff069dc1814b23d46f358f82a14c3c8074",
+    "instruction": "粗转烤箱旋钮一次，拉出滑轨托盘，把其中的餐碗取出放到耐热垫上，最后推回空托盘。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": false,
+    "error": "SemanticPlanningError: Visual grounding invalid after one repair: ['Grounding requires objects and bindings']",
+    "visual": "failed",
+    "qualification": "not_verified",
+    "preflight": "not_verified",
+    "qualification_calls": [],
+    "last_visual_response_keys": [
+      "bindings",
+      "clauses",
+      "constraints",
+      "generalization",
+      "milestones",
+      "objects",
+      "role_properties"
+    ],
+    "last_visual_errors": [
+      "Grounding requires objects and bindings"
+    ]
+  },
+  {
+    "case": "task1178",
+    "route": "default",
+    "image_sha256": "2c00c9669f57413e9a8e1df464e831000d14fb096d2ddb1c86b29de5e8653338",
+    "instruction": "把绿色双环柄托盘内的蓝色塑料杯放到杯垫，把白盖透明塑料瓶放到瓶垫，最后用双臂把空托盘搬到侧面的托盘收纳垫上并放下。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": true,
+    "visual": "pending",
+    "qualification": "not_verified",
+    "preflight": "not_verified",
+    "qualification_calls": [],
+    "manifest_sha256": "aee5e58a863d295d0f50953d39726248aa401a18f573f0a7dbad1dd6233275f8",
+    "stage": "pending_visual_binding",
+    "pending_roles": [
+      "bottle_coaster",
+      "cup_coaster"
+    ],
+    "reason": "no matching installation"
+  },
+  {
+    "case": "task1178",
+    "route": "template",
+    "image_sha256": "2c00c9669f57413e9a8e1df464e831000d14fb096d2ddb1c86b29de5e8653338",
+    "instruction": "把绿色双环柄托盘内的蓝色塑料杯放到杯垫，把白盖透明塑料瓶放到瓶垫，最后用双臂把空托盘搬到侧面的托盘收纳垫上并放下。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": false,
+    "error": "SemanticPlanningError: Visual grounding invalid after one repair: ['Grounding requires objects and bindings']",
+    "visual": "failed",
+    "qualification": "not_verified",
+    "preflight": "not_verified",
+    "qualification_calls": [],
+    "last_visual_response_keys": [
+      "bindings",
+      "clauses",
+      "constraints",
+      "generalization",
+      "objects",
+      "role_properties"
+    ],
+    "last_visual_errors": [
+      "Grounding requires objects and bindings"
+    ]
+  },
+  {
+    "case": "task1179",
+    "route": "default",
+    "image_sha256": "9eaa888434a96b54e039088cbaac3c59658f9a7172bc6d5761e12946786d5cae",
+    "instruction": "把碗和纸杯分别放入备餐托盘，拿起水壶朝托盘中的碗完成一次倾倒动作，随后回正并放回原位。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": true,
+    "visual": "not_verified",
+    "qualification": "not_verified",
+    "preflight": "not_verified",
+    "qualification_calls": [],
+    "manifest_sha256": "1e49e07d1980f7a8d7d43fcb9d6c91c9df41abbcba1581fa1729cf0cdba41681",
+    "stage": "authoring_only"
+  },
+  {
+    "case": "task1179",
+    "route": "template",
+    "image_sha256": "9eaa888434a96b54e039088cbaac3c59658f9a7172bc6d5761e12946786d5cae",
+    "instruction": "把碗和纸杯分别放入备餐托盘，拿起水壶朝托盘中的碗完成一次倾倒动作，随后回正并放回原位。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": false,
+    "error": "SemanticPlanningError: Visual grounding invalid after one repair: ['Grounding requires objects and bindings']",
+    "visual": "failed",
+    "qualification": "not_verified",
+    "preflight": "not_verified",
+    "qualification_calls": [],
+    "last_visual_response_keys": [
+      "bindings",
+      "clauses",
+      "constraints",
+      "generalization",
+      "objects",
+      "role_properties"
+    ],
+    "last_visual_errors": [
+      "Grounding requires objects and bindings"
+    ]
+  },
+  {
+    "case": "task1180",
+    "route": "default",
+    "image_sha256": "dba2e98946c0df7f3382c1fb6ed7596cce30609318d8f0d44c79decc853565a2",
+    "instruction": "先把柜前的杯子移到杯垫上，腾出抽屉操作空间；再打开餐具抽屉，把台面上的木勺放进去，最后关闭抽屉。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": true,
+    "visual": "not_verified",
+    "qualification": "not_verified",
+    "preflight": "not_verified",
+    "qualification_calls": [],
+    "manifest_sha256": "132c9dca786fb65623442923af3a76557342bd315533b7acd51cdaa47a296290",
+    "stage": "authoring_only"
+  },
+  {
+    "case": "task1180",
+    "route": "template",
+    "image_sha256": "dba2e98946c0df7f3382c1fb6ed7596cce30609318d8f0d44c79decc853565a2",
+    "instruction": "先把柜前的杯子移到杯垫上，腾出抽屉操作空间；再打开餐具抽屉，把台面上的木勺放进去，最后关闭抽屉。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": false,
+    "error": "SemanticPlanningError: Visual grounding invalid after one repair: ['Grounding requires objects and bindings']",
+    "visual": "failed",
+    "qualification": "not_verified",
+    "preflight": "not_verified",
+    "qualification_calls": [],
+    "last_visual_response_keys": [
+      "bindings",
+      "clauses",
+      "constraints",
+      "generalization",
+      "objects",
+      "role_properties"
+    ],
+    "last_visual_errors": [
+      "Grounding requires objects and bindings"
+    ]
+  },
+  {
+    "case": "task1181",
+    "route": "default",
+    "image_sha256": "9206269ddc0ab03c3423750286a943f7a0f0089996d3f48cd7e4d22dd40be2e5",
+    "instruction": "把棕色空纸杯放到左侧较大的浅蓝色矩形服务垫上；这里的服务垫区别于瓶垫和餐具垫。再由右臂把蓝色瓶子递给左臂，由左臂放到杯旁的瓶垫上并释放；随后由右臂把木勺递给左臂，由左臂放到餐具垫上并释放。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": true,
+    "visual": "pending",
+    "qualification": "not_verified",
+    "preflight": "not_verified",
+    "qualification_calls": [],
+    "manifest_sha256": "0871591f909afdce1d19bdec6756dff5412b232cb801655676ec7b21c0d0af6f",
+    "stage": "pending_visual_binding",
+    "pending_roles": [
+      "bottle_mat",
+      "cutlery_mat",
+      "wooden_spoon"
+    ],
+    "reason": "no matching installation"
+  },
+  {
+    "case": "task1181",
+    "route": "template",
+    "image_sha256": "9206269ddc0ab03c3423750286a943f7a0f0089996d3f48cd7e4d22dd40be2e5",
+    "instruction": "把棕色空纸杯放到左侧较大的浅蓝色矩形服务垫上；这里的服务垫区别于瓶垫和餐具垫。再由右臂把蓝色瓶子递给左臂，由左臂放到杯旁的瓶垫上并释放；随后由右臂把木勺递给左臂，由左臂放到餐具垫上并释放。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": false,
+    "error": "SemanticPlanningError: Visual grounding invalid after one repair: ['Grounding requires objects and bindings']",
+    "visual": "failed",
+    "qualification": "not_verified",
+    "preflight": "not_verified",
+    "qualification_calls": [],
+    "last_visual_response_keys": [
+      "bindings",
+      "clauses",
+      "constraints",
+      "cross_with",
+      "generalization",
+      "objects",
+      "role_properties"
+    ],
+    "last_visual_errors": [
+      "Grounding requires objects and bindings"
+    ]
+  },
+  {
+    "case": "task1182",
+    "route": "default",
+    "image_sha256": "9af07f847ed7c477da86cc2c1bc3dbbce9d6070891e81a84c18d91f03ee06214",
+    "instruction": "按顺序完成以下三项操作。这里的杯垫指托盘旁的灰色矩形布垫，场景中称为鼠标垫。1. 拿起量杯，朝白色碗完成一次倾倒动作；量杯回正，并将量杯放回原位后松开。2. 拿起白色碗，将白色碗放入备餐托盘后松开。这一步搬动的是白色碗，不是量杯。3. 再次拿起量杯，将量杯放到托盘旁的杯垫上后松开。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": true,
+    "visual": "not_verified",
+    "qualification": "not_verified",
+    "preflight": "not_verified",
+    "qualification_calls": [],
+    "manifest_sha256": "d508f7baadc1862236d60119527db6dfbec48e4e13923400bddbbf3a1cdff777",
+    "stage": "authoring_only"
+  },
+  {
+    "case": "task1182",
+    "route": "template",
+    "image_sha256": "9af07f847ed7c477da86cc2c1bc3dbbce9d6070891e81a84c18d91f03ee06214",
+    "instruction": "按顺序完成以下三项操作。这里的杯垫指托盘旁的灰色矩形布垫，场景中称为鼠标垫。1. 拿起量杯，朝白色碗完成一次倾倒动作；量杯回正，并将量杯放回原位后松开。2. 拿起白色碗，将白色碗放入备餐托盘后松开。这一步搬动的是白色碗，不是量杯。3. 再次拿起量杯，将量杯放到托盘旁的杯垫上后松开。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": false,
+    "error": "SemanticPlanningError: Visual grounding invalid after one repair: ['Grounding requires objects and bindings']",
+    "visual": "failed",
+    "qualification": "not_verified",
+    "preflight": "not_verified",
+    "qualification_calls": [],
+    "last_visual_response_keys": [
+      "bindings",
+      "clauses",
+      "constraints",
+      "cross_with",
+      "generalization",
+      "objects",
+      "role_properties"
+    ],
+    "last_visual_errors": [
+      "Grounding requires objects and bindings"
+    ]
+  },
+  {
+    "case": "task1183",
+    "route": "default",
+    "image_sha256": "5ad61314a5760429ef9ec93f313b3ac89c3562af8ec78e7561d8c953e5e2a1b4",
+    "instruction": "把白色碗和木勺分别放到操作面板前的备料垫上，粗转定时旋钮一次，最后按一次启动按钮。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": true,
+    "visual": "not_verified",
+    "qualification": "not_verified",
+    "preflight": "not_verified",
+    "qualification_calls": [],
+    "manifest_sha256": "cb7aaaa56b69742b3c5b3992ed45bc44ca88f19d6297494864e9ee456d375842",
+    "stage": "authoring_only"
+  },
+  {
+    "case": "task1183",
+    "route": "template",
+    "image_sha256": "5ad61314a5760429ef9ec93f313b3ac89c3562af8ec78e7561d8c953e5e2a1b4",
+    "instruction": "把白色碗和木勺分别放到操作面板前的备料垫上，粗转定时旋钮一次，最后按一次启动按钮。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": false,
+    "error": "SemanticPlanningError: Visual grounding invalid after one repair: ['Grounding requires objects and bindings']",
+    "visual": "failed",
+    "qualification": "not_verified",
+    "preflight": "not_verified",
+    "qualification_calls": [],
+    "last_visual_response_keys": [
+      "bindings",
+      "clauses",
+      "constraints",
+      "cross_with",
+      "generalization",
+      "objects",
+      "role_properties"
+    ],
+    "last_visual_errors": [
+      "Grounding requires objects and bindings"
+    ]
+  },
+  {
+    "case": "task1184",
+    "route": "default",
+    "image_sha256": "5573c6017570d7ab62d7ef900f9b9a32da998091d2f7b4cd475dc6430619f3b2",
+    "instruction": "按一次停止按钮，粗转速度旋钮一次，再把工作区的蓝色瓶子和杯子依次收进器具托盘。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": true,
+    "visual": "not_verified",
+    "qualification": "not_verified",
+    "preflight": "not_verified",
+    "qualification_calls": [],
+    "manifest_sha256": "3d3e26f470189b30e7226fbb65242d1f015638a7004890712030d975bf63eb4f",
+    "stage": "authoring_only"
+  },
+  {
+    "case": "task1184",
+    "route": "template",
+    "image_sha256": "5573c6017570d7ab62d7ef900f9b9a32da998091d2f7b4cd475dc6430619f3b2",
+    "instruction": "按一次停止按钮，粗转速度旋钮一次，再把工作区的蓝色瓶子和杯子依次收进器具托盘。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": false,
+    "error": "SemanticPlanningError: Visual grounding invalid after one repair: ['Ambiguous references require unique observed candidate IDs and runtime_required provenance']",
+    "visual": "failed",
+    "qualification": "not_verified",
+    "preflight": "not_verified",
+    "qualification_calls": [],
+    "last_visual_response_keys": [
+      "bindings",
+      "clauses",
+      "generalization",
+      "objects",
+      "role_properties"
+    ],
+    "last_visual_errors": [
+      "Ambiguous references require unique observed candidate IDs and runtime_required provenance"
+    ]
+  },
+  {
+    "case": "task1185",
+    "route": "default",
+    "image_sha256": "eb1631bc824706f8bffc0385417c0196b0b5d39700ddf0f320fcf9063a651d5f",
+    "instruction": "拉出烤箱托盘，把里面的餐碗移到桌上的服务托盘内，再把纸杯放到餐碗右侧（碗旁），最后推回空烤箱托盘。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": true,
+    "visual": "not_verified",
+    "qualification": "not_verified",
+    "preflight": "not_verified",
+    "qualification_calls": [],
+    "manifest_sha256": "c774f1e16f297475318b271b849819090b3fb62f3a09629dabdbe16433f9092e",
+    "stage": "authoring_only"
+  },
+  {
+    "case": "task1185",
+    "route": "template",
+    "image_sha256": "eb1631bc824706f8bffc0385417c0196b0b5d39700ddf0f320fcf9063a651d5f",
+    "instruction": "拉出烤箱托盘，把里面的餐碗移到桌上的服务托盘内，再把纸杯放到餐碗右侧（碗旁），最后推回空烤箱托盘。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": false,
+    "error": "SemanticPlanningError: Visual grounding invalid after one repair: ['Malformed entity evidence']",
+    "visual": "failed",
+    "qualification": "not_verified",
+    "preflight": "not_verified",
+    "qualification_calls": [],
+    "last_visual_response_keys": [
+      "bindings",
+      "objects",
+      "role_properties"
+    ],
+    "last_visual_errors": [
+      "Malformed entity evidence"
+    ]
+  },
+  {
+    "case": "task1186",
+    "route": "default",
+    "image_sha256": "25416a5fdc9cd7de1e3d2bd824c66c7905752e9a99085783ee7f9cf55c6da9ff",
+    "instruction": "右臂将苹果递给左臂，由左臂放入盘子；再以同样方式放入橙子。两手释放后，用双臂把装有水果的盘子搬到桌面中央的服务垫上。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": true,
+    "visual": "complete",
+    "qualification": "accepted",
+    "preflight": "passed",
+    "qualification_calls": [
+      "mimo-v2.6-pro"
+    ],
+    "manifest_sha256": "f909a7c0c5ab0e875a70f5af54327f08eead43312534e270ecf04d6cdc31fde5",
+    "stage": "ready_for_qualification",
+    "pending_roles": [],
+    "issues": [],
+    "bindings": {
+      "objects": {
+        "apple": "apple",
+        "orange": "orange",
+        "plate": "tray",
+        "service_mat": "service_pad"
+      },
+      "resources": {
+        "left": "left",
+        "right": "right"
+      }
+    },
+    "compiled": {
+      "program_id": "gensim_9ba1552704497aa4",
+      "segment_count": 7,
+      "integration_fingerprint": "3d88659ca8afa6c0dfb12bb436d13538883e1144d910964b1437a679d9892dda",
+      "effect_assurance": "verified"
+    }
+  },
+  {
+    "case": "task1186",
+    "route": "template",
+    "image_sha256": "25416a5fdc9cd7de1e3d2bd824c66c7905752e9a99085783ee7f9cf55c6da9ff",
+    "instruction": "右臂将苹果递给左臂，由左臂放入盘子；再以同样方式放入橙子。两手释放后，用双臂把装有水果的盘子搬到桌面中央的服务垫上。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": false,
+    "error": "SemanticPlanningError: Visual grounding invalid after one repair: ['Grounding requires objects and bindings']",
+    "visual": "failed",
+    "qualification": "not_verified",
+    "preflight": "not_verified",
+    "qualification_calls": [],
+    "last_visual_response_keys": [
+      "bindings",
+      "clauses",
+      "constraints",
+      "cross_with",
+      "generalization",
+      "objects",
+      "role_properties"
+    ],
+    "last_visual_errors": [
+      "Grounding requires objects and bindings"
+    ]
+  },
+  {
+    "case": "task1187",
+    "route": "default",
+    "image_sha256": "f5d33e66d04a464c7f8f3f27a47a646166a8915a693264e2662eb634410ec0b0",
+    "instruction": "把杯子放到蓝色圆形杯垫上，拿起水壶朝同一杯子完成一次倾倒动作，回正并放回原位，最后把杯子移入服务托盘。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": true,
+    "visual": "not_verified",
+    "qualification": "not_verified",
+    "preflight": "not_verified",
+    "qualification_calls": [],
+    "manifest_sha256": "91f83cdec7a67aba5da4ef6c55b2ee7c5bd6f987248e122e4c21e57a367f3802",
+    "stage": "authoring_only"
+  },
+  {
+    "case": "task1187",
+    "route": "template",
+    "image_sha256": "f5d33e66d04a464c7f8f3f27a47a646166a8915a693264e2662eb634410ec0b0",
+    "instruction": "把杯子放到蓝色圆形杯垫上，拿起水壶朝同一杯子完成一次倾倒动作，回正并放回原位，最后把杯子移入服务托盘。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": false,
+    "error": "SemanticPlanningError: Visual grounding invalid after one repair: ['Grounding requires objects and bindings']",
+    "visual": "failed",
+    "qualification": "not_verified",
+    "preflight": "not_verified",
+    "qualification_calls": [],
+    "last_visual_response_keys": [
+      "bindings",
+      "clauses",
+      "constraints",
+      "generalization",
+      "milestones",
+      "objects",
+      "role_properties"
+    ],
+    "last_visual_errors": [
+      "Grounding requires objects and bindings"
+    ]
+  },
+  {
+    "case": "task1188",
+    "route": "default",
+    "image_sha256": "5bfc25a186cbc16c8e03d3e337f23ab496d493b0e17aab3688a0c7893933f182",
+    "instruction": "把蓝色杯子放到备料垫上，用瓶子朝该杯完成一次倾倒动作并回正放回原位；把瓶子收到木质服务托盘上，再由左臂把同一杯子递给右臂，放到右侧服务垫上。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": true,
+    "visual": "not_verified",
+    "qualification": "not_verified",
+    "preflight": "not_verified",
+    "qualification_calls": [],
+    "manifest_sha256": "9ab1cf07b6d0d0cb6a7950f62cd5034eb9d919e767c7537d375124d21c5c242e",
+    "stage": "authoring_only"
+  },
+  {
+    "case": "task1188",
+    "route": "template",
+    "image_sha256": "5bfc25a186cbc16c8e03d3e337f23ab496d493b0e17aab3688a0c7893933f182",
+    "instruction": "把蓝色杯子放到备料垫上，用瓶子朝该杯完成一次倾倒动作并回正放回原位；把瓶子收到木质服务托盘上，再由左臂把同一杯子递给右臂，放到右侧服务垫上。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": false,
+    "error": "SemanticPlanningError: Visual grounding invalid after one repair: ['Grounding requires objects and bindings']",
+    "visual": "failed",
+    "qualification": "not_verified",
+    "preflight": "not_verified",
+    "qualification_calls": [],
+    "last_visual_response_keys": [
+      "bindings",
+      "clauses",
+      "constraints",
+      "generalization",
+      "objects",
+      "role_properties"
+    ],
+    "last_visual_errors": [
+      "Grounding requires objects and bindings"
+    ]
+  },
+  {
+    "case": "task1189",
+    "route": "default",
+    "image_sha256": "faed342d2cb690b80f52b5b88bd62b113559e7df1d264953686c042a0077037f",
+    "instruction": "扶正倒下的杯子，把它放到咖啡机旁独立的接杯垫上（不是咖啡机机身或内部滴水盘），按一次咖啡机的启动按钮，最后把同一杯子移入服务托盘。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": true,
+    "visual": "not_verified",
+    "qualification": "not_verified",
+    "preflight": "not_verified",
+    "qualification_calls": [],
+    "manifest_sha256": "f727a55431b1fef63f2b5dcc85cec052e61f1db258510a80f20eba3eb42774ea",
+    "stage": "authoring_only"
+  },
+  {
+    "case": "task1189",
+    "route": "template",
+    "image_sha256": "faed342d2cb690b80f52b5b88bd62b113559e7df1d264953686c042a0077037f",
+    "instruction": "扶正倒下的杯子，把它放到咖啡机旁独立的接杯垫上（不是咖啡机机身或内部滴水盘），按一次咖啡机的启动按钮，最后把同一杯子移入服务托盘。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": false,
+    "error": "SemanticPlanningError: Visual grounding invalid after one repair: ['Grounding requires objects and bindings']",
+    "visual": "failed",
+    "qualification": "not_verified",
+    "preflight": "not_verified",
+    "qualification_calls": [],
+    "last_visual_response_keys": [
+      "bindings",
+      "clauses",
+      "constraints",
+      "generalization",
+      "objects",
+      "role_properties"
+    ],
+    "last_visual_errors": [
+      "Grounding requires objects and bindings"
+    ]
+  },
+  {
+    "case": "task1190",
+    "route": "default",
+    "image_sha256": "18c04017cd68cbbd75e5eeb1f9fb517b539410708005058e1c1c09849df7319b",
+    "instruction": "把台面上的木块收进散件托盘，打开右侧抽屉；左臂把瓶子递给右臂，由右臂放入该抽屉，最后关闭同一抽屉。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": true,
+    "visual": "not_verified",
+    "qualification": "not_verified",
+    "preflight": "not_verified",
+    "qualification_calls": [],
+    "manifest_sha256": "38f0f19e1ae28da083adc65a5a5a7d5ea5fe831b843be4a52dbe45e7c779cf3d",
+    "stage": "authoring_only"
+  },
+  {
+    "case": "task1190",
+    "route": "template",
+    "image_sha256": "18c04017cd68cbbd75e5eeb1f9fb517b539410708005058e1c1c09849df7319b",
+    "instruction": "把台面上的木块收进散件托盘，打开右侧抽屉；左臂把瓶子递给右臂，由右臂放入该抽屉，最后关闭同一抽屉。",
+    "calls": [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro",
+      "mimo-v2.6-pro"
+    ],
+    "published": false,
+    "error": "SemanticPlanningError: Visual grounding invalid after one repair: ['Grounding requires objects and bindings']",
+    "visual": "failed",
+    "qualification": "not_verified",
+    "preflight": "not_verified",
+    "qualification_calls": [],
+    "last_visual_response_keys": [
+      "bindings",
+      "clauses",
+      "constraints",
+      "generalization",
+      "objects",
+      "role_properties"
+    ],
+    "last_visual_errors": [
+      "Grounding requires objects and bindings"
+    ]
+  }
+]
