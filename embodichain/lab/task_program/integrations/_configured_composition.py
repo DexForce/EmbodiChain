@@ -399,7 +399,13 @@ def _resolve_task_program_components(
         value,
         path="task_program",
         required=frozenset({"program", "integration", "execution_policy"}),
+        optional=frozenset({"execution", "action_owners"}),
     )
+    execution = declaration.get("execution", "expert")
+    if execution not in ("expert", "policy"):
+        raise ValueError("task_program.execution must be expert or policy.")
+    if "action_owners" in declaration and execution != "policy":
+        raise ValueError("task_program.action_owners requires policy execution.")
     program_path = (
         _inline_component(declaration["program"], path="task_program.program")
         if isinstance(declaration["program"], Mapping)

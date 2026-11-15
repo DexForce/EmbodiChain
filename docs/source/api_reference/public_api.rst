@@ -4637,9 +4637,12 @@ Resolve source geometry and project numerical generator inputs at the Sim bounda
    :nosignatures:
 
    build_gripper_collision_geometry
+   build_gripper_closing_geometry
    grasp_generator_parameters
 
 .. autofunction:: build_gripper_collision_geometry
+
+.. autofunction:: build_gripper_closing_geometry
 
 .. autofunction:: grasp_generator_parameters
 
@@ -4986,6 +4989,9 @@ Measured manipulation functors bind rigid objects and validate geometric paramet
    object_near_target
    object_below_height
    evaluation_condition
+   program_stage_condition
+
+.. autofunction:: program_stage_condition
 
 .. autoclass:: object_near_target
    :members:

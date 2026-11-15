@@ -22,8 +22,15 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from dexsim.spawn import ArticulationDesc, JointDesc, LinkDesc
+from dexsim.spawn import (
+    ArticulationDesc,
+    DexsimJointDesc,
+    JointDesc,
+    LinkDesc,
+    NewtonJointDesc,
+)
 from dexsim.engine import JointType
+from dexsim.types import DriveType
 
 from embodichain.lab.sim.spawn.source import (
     _apply_dexsim_source_overlay,
@@ -103,6 +110,75 @@ def _physical_attr(
         com_position=np.asarray(com_position, dtype=np.float32),
         com_quaternion=np.asarray((1.0, 0.0, 0.0, 0.0), dtype=np.float32),
     )
+
+
+@pytest.mark.parametrize("override", [None, 0.0])
+def test_urdf_passive_dynamics_survive_effort_mode_and_keep_overrides(
+    tmp_path, monkeypatch, override: float | None
+) -> None:
+    """Effort mode clears PD gains while preserving source joint dissipation."""
+    from embodichain.lab.sim.cfg import ArticulationCfg, JointDrivePropertiesCfg
+    from embodichain.lab.sim.spawn.descriptors import configure_articulation_desc
+
+    urdf = tmp_path / "passive.urdf"
+    urdf.write_text(
+        '<robot name="passive"><link name="base"/><link name="part"/>'
+        '<joint name="axis" type="continuous"><parent link="base"/>'
+        '<child link="part"/><dynamics damping="0.001" friction="0.002"/>'
+        "</joint></robot>"
+    )
+    desc = ArticulationDesc(name="passive", urdf_path=str(urdf))
+    skeleton = SimpleNamespace(
+        set_name=lambda _name: None,
+        detach_parent=lambda: None,
+        load_urdf=lambda _path, _scale: 0,
+        get_link_names=lambda _cache: ["base", "part"],
+        get_collision_shapes=lambda _name: [],
+    )
+    arena = SimpleNamespace(
+        create_skeleton=lambda _kind: skeleton,
+        remove_skeleton=lambda _name: None,
+    )
+    builder = SimpleNamespace(
+        replicate_plan=None, world=SimpleNamespace(get_env=lambda: arena)
+    )
+
+    def translate(_skeleton, descriptor) -> None:
+        # Reproduce the SDK metadata gap without constructing a native world.
+        descriptor.links = [_link("base"), _link("part")]
+        descriptor.joints = [
+            JointDesc(
+                name="axis",
+                parent_link_name="base",
+                child_link_name="part",
+                joint_type=JointType.CONTINUOUS,
+                newton=NewtonJointDesc(damping=override, friction=override),
+            )
+        ]
+
+    monkeypatch.setattr(
+        "dexsim.spawn.adapters.newton_articulation_adapter._translate_urdf_articulation",
+        translate,
+    )
+    resolve_articulation_source(builder, desc)
+    configure_articulation_desc(
+        desc,
+        ArticulationCfg(
+            uid="passive",
+            fpath=str(urdf),
+            asset_physics_mode="overlay",
+            joint_drive_props=JointDrivePropertiesCfg(
+                target_mode="effort", stiffness=0.0, damping=0.0
+            ),
+        ),
+        newton_solver_type="mujoco_warp",
+    )
+    joint = desc.get_joint_desc("axis").newton
+    assert joint.damping == pytest.approx(0.001 if override is None else override)
+    assert joint.friction == pytest.approx(0.002 if override is None else override)
+    assert joint.target_ke == 0.0
+    assert joint.target_kd == 0.0
+    assert joint.target_mode == 4
 
 
 def test_default_source_capture_keeps_valid_inertia_and_discards_invalid_com(
@@ -226,6 +302,61 @@ def test_default_overlay_writes_only_explicitly_marked_link_physics() -> None:
     np.testing.assert_array_equal(raw.inertia, (1.0, 2.0, 3.0))
     np.testing.assert_allclose(raw.com_position, (0.1, 0.2, 0.3))
     assert handle.articulation_desc.get_link_desc("skipped").rigid_body is not None
+
+
+def test_default_sparse_drive_overlay_retains_each_native_joint_order() -> None:
+    selected = JointDesc(
+        "selected",
+        "base",
+        "arm",
+        JointType.REVOLUTE,
+        dexsim=DexsimJointDesc(damping=0.0),
+    )
+    untouched = JointDesc(
+        "untouched",
+        "arm",
+        "tool",
+        JointType.REVOLUTE,
+        dexsim=DexsimJointDesc(),
+    )
+    desc = ArticulationDesc(name="robot", joints=[selected, untouched])
+    for offset in (0.0, 100.0):
+        writes = []
+        binding = SimpleNamespace(
+            get_physical_body=lambda _name: None,
+            set_physical_attr=lambda *_: None,
+            get_actived_joint_names=lambda *_: ["untouched", "selected"],
+            get_drive=lambda: (
+                np.asarray([11.0, 12.0]) + offset,
+                np.asarray([21.0, 22.0]) + offset,
+                np.asarray([31.0, 32.0]) + offset,
+                np.asarray([41.0, 42.0]) + offset,
+                np.asarray([0.1, 0.2]),
+                np.asarray([0.3, 0.4]),
+                [DriveType.FORCE, DriveType.ACCELERATION],
+            ),
+            set_drive=lambda **kwargs: writes.append(kwargs),
+            set_joint_velocity_limit=lambda **_: 1,
+        )
+        handle = SimpleNamespace(
+            _physics_binding=binding,
+            articulation_desc=ArticulationDesc(name="robot"),
+        )
+
+        _apply_dexsim_source_overlay(handle, desc)
+
+        assert writes == [
+            {
+                "joint_name": "selected",
+                "stiffness": 12.0 + offset,
+                "damping": 0.0,
+                "max_force": 32.0 + offset,
+                "max_velocity": 42.0 + offset,
+                "joint_friction": 0.2,
+                "armature": 0.4,
+                "drive_type": DriveType.ACCELERATION,
+            }
+        ]
 
 
 class _RawBody:

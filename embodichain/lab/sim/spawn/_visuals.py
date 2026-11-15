@@ -21,10 +21,17 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
+from pathlib import Path
 import numpy as np
 import torch
 
-from ..cfg.visuals import GaussianSplatCfg, VisualElementCfg, _visual_elements
+from ..cfg.visuals import (
+    GaussianSplatCfg,
+    VisualElementCfg,
+    _visual_elements,
+    _file_visual_binding_elements,
+    _resolve_visual_path,
+)
 
 
 def _semantic_mesh_arrays(shape: Any) -> tuple[np.ndarray, np.ndarray]:
@@ -32,21 +39,33 @@ def _semantic_mesh_arrays(shape: Any) -> tuple[np.ndarray, np.ndarray]:
     from ..cfg import VisualObjectCfg
     from .descriptors import visual_desc_from_cfg
     from dexsim.spawn.adapters.common import generated_mesh
-    from embodichain.data import get_data_path
 
     descriptor, _ = visual_desc_from_cfg(VisualObjectCfg(uid="semantic", shape=shape))
-    geometry = descriptor.renders[0]
-    if geometry.file_path:
-        import trimesh
+    if not descriptor.renders:
+        raise ValueError("Semantic shape must contain at least one mesh surface.")
+    vertices_by_part = []
+    faces_by_part = []
+    vertex_offset = 0
+    for geometry in descriptor.renders:
+        if geometry.file_path:
+            import trimesh
 
-        mesh = trimesh.load(
-            get_data_path(geometry.file_path), force="mesh", process=False
-        )
-        return np.asarray(mesh.vertices, dtype=np.float32), np.asarray(
-            mesh.faces, dtype=np.int32
-        )
-    vertices, faces, _, _ = generated_mesh(geometry)
-    return vertices, faces
+            mesh = trimesh.load(
+                _resolve_visual_path(geometry.file_path), force="mesh", process=False
+            )
+            transform = np.asarray(geometry.local_transform, dtype=np.float32)
+            vertices = (
+                np.asarray(mesh.vertices, dtype=np.float32) @ transform[:3, :3].T
+                + transform[:3, 3]
+            )
+            faces = np.asarray(mesh.faces, dtype=np.int32)
+        else:
+            # The native generator already bakes this part's local transform.
+            vertices, faces, _, _ = generated_mesh(geometry)
+        vertices_by_part.append(vertices)
+        faces_by_part.append(faces + vertex_offset)
+        vertex_offset += len(vertices)
+    return np.concatenate(vertices_by_part), np.concatenate(faces_by_part)
 
 
 @dataclass(frozen=True)
@@ -95,6 +114,9 @@ class _VisualBinding:
         groups = getattr(cfg, "link_visuals", {})
         if hasattr(cfg, "visuals"):
             groups = {None: cfg.visuals} if cfg.visuals is not None else {}
+        file_elements = _file_visual_binding_elements(cfg)
+        if file_elements is not None:
+            groups = {None: file_elements}
         self.groups = {
             link: _visual_elements(elements) for link, elements in groups.items()
         }
@@ -133,8 +155,13 @@ class _VisualBinding:
                         sh_coefficients=representation.sh_coefficients,
                     )
                 else:
-                    if hasattr(representation, "fpath"):
-                        representation.fpath = get_data_path(representation.fpath)
+                    if (
+                        isinstance(getattr(representation, "fpath", None), (str, Path))
+                        and representation.fpath
+                    ):
+                        representation.fpath = _resolve_visual_path(
+                            representation.fpath
+                        )
                     descriptor, materials = visual_desc_from_cfg(
                         VisualObjectCfg(
                             uid=name,
@@ -242,6 +269,8 @@ class _VisualBinding:
             and hasattr(owner.cfg, "semantic_shape")
         ):
             shape = owner.cfg.semantic_shape
+            if shape is None and _file_visual_binding_elements(owner.cfg) is not None:
+                shape = owner.cfg.shape
             if shape is None:
                 vertices, faces = [], []
                 for handle in owner._entities:
@@ -468,22 +497,9 @@ class _VisualBinding:
         self.visibility[ids] = visible
 
     def indices(self, env_ids: Any) -> list[int]:
-        if isinstance(env_ids, torch.Tensor):
-            env_ids = env_ids.detach().cpu().tolist()
-        ids = (
-            list(range(self.owner.num_instances)) if env_ids is None else list(env_ids)
-        )
-        if any(
-            isinstance(i, bool)
-            or not isinstance(i, (int, np.integer))
-            or i < 0
-            or i >= self.owner.num_instances
-            for i in ids
-        ):
-            raise IndexError("Visual environment indices are out of range.")
-        if len(set(ids)) != len(ids):
-            raise ValueError("Visual environment indices must be unique.")
-        return ids
+        from ..common import _validated_env_ids
+
+        return _validated_env_ids(env_ids, self.owner.num_instances)
 
     def reset(self, env_ids: Any = None) -> None:
         ids = self.indices(env_ids)

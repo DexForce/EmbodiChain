@@ -305,11 +305,17 @@ def rigid_desc_from_usd(
     newton_solver_type: str | None = None,
 ) -> tuple[ObjectDesc, dict[str, MaterialDesc]]:
     """Select a rigid object by exact prim path, or require a singleton stage."""
+    if cfg.env_variants:
+        raise NotImplementedError(
+            "env_variants currently requires directly configured shapes; "
+            "load assembly manifests and construct the per-environment rigid configs."
+        )
     uid = _required_uid(cfg.uid, "Rigid object")
     path = _asset_file_path(cfg)
     scene, desc = _parse_singleton(
         path, "mesh_objects", "rigid object", source=cfg.source
     )
+    _check_disabled_body_colliders(path, desc, source=cfg.source)
 
     return _configure_rigid_usd(
         cfg, scene, desc, per_env=per_env, newton_solver_type=newton_solver_type
@@ -534,6 +540,50 @@ def _configure_articulation_usd(
     if compensation is not None:
         desc.newton_gravity_compensation = compensation
     return desc, materials
+
+
+def _check_disabled_body_colliders(
+    path: object, desc: ObjectDesc, *, source: UsdSourceCfg | None = None
+) -> None:
+    """Reject SDK parser loss instead of materializing a collision-free fixture."""
+    if desc.collisions or desc.usd is None:
+        return
+    from pxr import Sdf, Usd, UsdPhysics
+
+    layer = Sdf.Layer.FindOrOpen(str(path))
+    if layer is None:
+        raise ValueError(f"Cannot inspect USD rigid object {path!r}.")
+    stage = Usd.Stage.Open(layer, Sdf.Layer.CreateAnonymous())
+    if stage is None:
+        raise ValueError(f"Cannot inspect USD rigid object {path!r}.")
+    stage.SetEditTarget(stage.GetSessionLayer())
+    variants = {} if source is None else source.variants or {}
+    for prim_path, selections in sorted(
+        variants.items(), key=lambda item: item[0].count("/")
+    ):
+        selected_prim = stage.GetPrimAtPath(prim_path)
+        for name, value in selections.items():
+            selected_prim.GetVariantSet(name).SetVariantSelection(value)
+    prim = stage.GetPrimAtPath(desc.usd.prim_path)
+    if not prim or not prim.HasAPI(UsdPhysics.RigidBodyAPI):
+        return
+    if UsdPhysics.RigidBodyAPI(prim).GetRigidBodyEnabledAttr().Get() is not False:
+        return
+    children = iter(Usd.PrimRange(prim, Usd.TraverseInstanceProxies()))
+    for child in children:
+        if child != prim and child.HasAPI(UsdPhysics.RigidBodyAPI):
+            children.PruneChildren()
+            continue
+        if (
+            child.HasAPI(UsdPhysics.CollisionAPI)
+            and UsdPhysics.CollisionAPI(child).GetCollisionEnabledAttr().Get()
+            is not False
+        ):
+            raise NotImplementedError(
+                f"The USD parser dropped collision pieces below disabled rigid "
+                f"body {desc.usd.prim_path!r}. Use direct compound construction "
+                "or a DexSim build that preserves static USD collider ownership."
+            )
 
 
 def _parse_singleton(path: object, collection: str, label: str, *, source=None):

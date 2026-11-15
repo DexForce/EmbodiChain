@@ -22,7 +22,7 @@ import os
 import hashlib
 import tempfile
 from collections.abc import Iterator, Mapping
-from contextlib import closing
+from contextlib import closing, ExitStack
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -31,11 +31,13 @@ from typing import TYPE_CHECKING, TypeVar
 import torch
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.sim.cfg import DefaultPhysicsCfg
 
 from . import planners as _builtin_planners  # noqa: F401 - registry side effects
 from . import robots as _builtin_robots  # noqa: F401 - registry side effects
 from . import scenarios as _builtin_scenarios  # noqa: F401 - registry side effects
 from .aggregation import aggregate_results
+from ._case_preparation import _CasePreparation
 from .artifacts import (
     TrialJsonlWriter,
     _read_case_manifest,
@@ -277,6 +279,9 @@ class BenchmarkRunner:
                 sim_device=str(self.device),
                 num_envs=batch_size,
                 arena_space=2.0,
+                physics_cfg=DefaultPhysicsCfg(
+                    num_substeps=self.suite.protocol.physics_substeps
+                ),
             )
         )
         try:
@@ -1074,6 +1079,7 @@ class BenchmarkRunner:
 
     def _case_batches(
         self,
+        progress: _CasePreparation | None = None,
     ) -> Iterator[
         tuple[SimulationManager, "Robot", ScenarioProvider, list[BenchmarkCase]]
     ]:
@@ -1113,8 +1119,19 @@ class BenchmarkRunner:
                         self.control_part,
                     )
                     cases = (
-                        provider.generate_cases(
-                            self.suite, track, robot, self.control_part, batch_size
+                        (
+                            provider.generate_cases(
+                                self.suite, track, robot, self.control_part, batch_size
+                            )
+                            if progress is None
+                            else provider.prepare_cases(
+                                self.suite,
+                                track,
+                                robot,
+                                self.control_part,
+                                batch_size,
+                                progress,
+                            )
                         )
                         if self.replay_cases is None
                         else [
@@ -1171,11 +1188,19 @@ class BenchmarkRunner:
                             finally:
                                 SimulationManager.flush_cleanup_queue()
 
-    def prepare_case_manifest(self, output: str | Path) -> Path:
+    def prepare_case_manifest(
+        self,
+        output: str | Path,
+        *,
+        progress: str | Path | None = None,
+        generation_revision: str | None = None,
+    ) -> Path:
         """Generate inputs without constructing or running a planner.
 
         Args:
             output: New case manifest path. Existing files are never replaced.
+            progress: Optional directory retaining incomplete preparation units.
+            generation_revision: Frozen source identity required with progress.
 
         Returns:
             The complete hashed manifest with resolved embodiment provenance.
@@ -1183,24 +1208,46 @@ class BenchmarkRunner:
         output = Path(output)
         if output.exists():
             raise FileExistsError(output)
-        for _sim, _robot, _provider, _cases in self._case_batches():
-            pass
-        output.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(dir=output.parent, delete=False) as temporary:
-            temporary_path = Path(temporary.name)
-        try:
-            write_case_manifest(
-                temporary_path,
-                self.cases,
-                suite=self.suite,
-                embodiment_resolution=self.embodiment_resolution,
+        if (progress is None) != (generation_revision is None):
+            raise ValueError(
+                "progress and generation_revision must be supplied together."
             )
-            # Publish complete inputs atomically without replacing a concurrent
-            # caller's corpus after the initial existence check.
-            output.hardlink_to(temporary_path)
-        finally:
-            temporary_path.unlink(missing_ok=True)
-        return output
+        with ExitStack() as stack:
+            saved = (
+                None
+                if progress is None
+                else stack.enter_context(
+                    _CasePreparation(
+                        Path(progress),
+                        self.suite,
+                        self.embodiment_resolution,
+                        self.device,
+                        generation_revision,
+                    )
+                )
+            )
+            for _sim, _robot, _provider, _cases in self._case_batches(saved):
+                pass
+            if saved is not None:
+                saved.validate_complete()
+            output.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(
+                dir=output.parent, delete=False
+            ) as temporary:
+                temporary_path = Path(temporary.name)
+            try:
+                write_case_manifest(
+                    temporary_path,
+                    self.cases,
+                    suite=self.suite,
+                    embodiment_resolution=self.embodiment_resolution,
+                )
+                # Publish complete inputs atomically without replacing a concurrent
+                # caller's corpus after the initial existence check.
+                output.hardlink_to(temporary_path)
+            finally:
+                temporary_path.unlink(missing_ok=True)
+            return output
 
     def run(self) -> BenchmarkRunResult:
         """Run the suite and write all required artifacts."""

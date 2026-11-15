@@ -1,0 +1,45 @@
+graph:
+  roots:
+  - lifted
+  - stacked
+  - above_floor
+  rules:
+    below_clearance:
+      kind: below_height
+      bindings:
+        position: rigid_objects/block_2/pose
+      params:
+        height: 0.95
+    lifted:
+      kind: not
+      refs:
+      - below_clearance
+    stacked:
+      kind: relative_position
+      bindings:
+        pose: rigid_objects/block_2/frame
+        reference: rigid_objects/block_1/frame
+      params:
+        offset:
+        - 0.0
+        - 0.0
+        - 0.05
+        tolerances:
+        - 0.025
+        - 0.025
+        - 0.012
+        parent_axes: false
+    below_floor:
+      kind: below_height
+      bindings:
+        position: rigid_objects/block_2/pose
+      params:
+        height: 0.1
+    above_floor:
+      kind: not
+      refs:
+      - below_floor
+final_acceptance:
+- stacked
+process_constraints:
+- above_floor

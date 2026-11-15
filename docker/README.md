@@ -11,7 +11,7 @@ profiles introduced by [PR #911](https://github.com/DexForce/EmbodiChain/pull/91
 RigidFormer extra dependencies and model weights are not preinstalled. Models,
 task assets and remote service credentials remain runtime inputs.
 
-This checkout's profiles select DexSim 0.6.0rc1 and Newton 1.7.0. The published
+This checkout's profiles select DexSim 0.6.0rc2 and Newton 1.7.0. The published
 tags and image digests recorded in [VALIDATION.md](VALIDATION.md) describe the
 earlier DexSim 0.5.1rc1 runtime. Build and qualify a source-commit candidate for
 the current profiles before promoting a replacement; the historical image
@@ -194,7 +194,7 @@ complete Python dependency sets and explicit conda package URLs/checksums.
 The CUDA base, Node base, Miniforge installer and cuRobo commit are pinned.
 Both DexSim wheel URLs carry SHA256 pins, which the installer verifies even
 though the wheel server uses HTTP. These match the published index checksums
-for DexSim 0.6.0rc1. Build and qualify both updated profiles before promoting
+for DexSim 0.6.0rc2. Build and qualify both updated profiles before promoting
 new image digests.
 DexSim and LeRobot currently require different OpenCV distributions sharing
 `cv2`. Python-selected dependencies pin both to the same release; qualification

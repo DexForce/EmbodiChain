@@ -53,8 +53,11 @@ Edit: import export → validate graph/typed edit plan → generate additions
 → change layout → overwrite export. Combined image/edit mode generates first.
 
 `gensim run` binds a generated scene to a trusted embodiment/execution policy,
-preflights Task Program and uses ordinary Gym demo execution. Its source graph
-stays unbound; bound graph/deployment have separate run-owned paths. Ambiguous
+preflights Task Program and uses ordinary Gym demo execution. Placement,
+relative placement, axis alignment and held-transport targets bind from measured
+rigid geometry; optional calibration, room, recording and arm-anchor fields are in
+the command guide. Its source graph stays unbound; bound graph/deployment have
+separate run-owned paths. Ambiguous
 references reject and failures retain stage artifacts. Native success and
 normative TaskSpec certification remain distinct. See the
 [command guide](../../../embodichain/gen_sim/README.md) and provider-free

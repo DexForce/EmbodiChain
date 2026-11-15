@@ -15,7 +15,8 @@ topics:
     ArticulationJointKinematics, get_parent_joint_chain, asset_physics_mode, joint_drive_props, enable_gravity,
     fixed-cadence playback, FluidObjectCfg, FluidSpawnCfg, FluidObject, sph_cfg, DFSPH, revolved_volume, fill_level,
     粒子采样, fluid, 流体, quaternion, xyzw, cable, CableObject, CableObjectCfg,
-    CableObjectData, 线缆对象]
+    CableObjectData, 线缆对象,
+    CompoundShapeCfg, ShapePartCfg, CylinderCfg, env_variants, enable_ground_plane, ground_plane_attrs]
   paths: [topics/simulation-system/simulation-system.md]
   source_of_truth:
   - embodichain/lab/sim/motion/__init__.py
@@ -55,7 +56,7 @@ topics:
     physics_config, ControllerAction, EnvProfiler, startup_summary, dexsim_startup_info,
     fluid Gym, 流体 Gym, fluid replay, 粒子回放, DemoQualification, ObjectMotionMetrics, ExpertTrajectoryCfg, joint_command_mode, position_velocity, qpos qvel, expert action schema, ObservationHistorySnapshot, ObservationFrame,
     EvaluationSpec, RuleSession, evaluate_recorded_rules,
-    task_instruction, resolve_demo_instruction,
+    task_instruction, resolve_demo_instruction, program_stage_reward, program_stage_condition,
     show-task, task catalog, task gallery, 任务画廊, physical_objective, 物理目标, RLTaskCfg, rl_task]
   paths: [topics/env-framework/env-framework.md]
   source_of_truth:
@@ -359,7 +360,8 @@ topics:
   status: active
 - id: rl-learning
   title: RL Learning Pipeline
-  aliases: [rl learning, rl config, reinforcement learning, 强化学习, 训练配置]
+  aliases: [rl learning, rl config, reinforcement learning, 强化学习, 训练配置, Sharpa APG, 灵巧手 APG,
+    Wuji APG, Wuji 掌内转动]
   keywords: [train-rl, Trainer, trainer.gym_config, learning_env, RolloutKind, DifferentiableTrainer,
     PPO, GRPO, APG, APGActorCritic, apg_actor_critic, SyncCollector, ScheduledDifferentiableEnvProtocol, DifferentiableRolloutSpec,
     complete rollout, full horizon, gradient accumulation, action adjoint, observation normalization]
@@ -376,9 +378,13 @@ topics:
   - embodichain/learning/rl/utils/config.py
   - embodichain/learning/rl/algo/
   - embodichain/learning/rl/policies/
+  - embodichain/learning/rl/experimental/
   - embodichain/learning/models/
   - extensions/embodichain_tasks/configs/tasks/
-  watch_paths: [embodichain/learning/rl/, tests/learning/]
+  - examples/learning/sharpa_inhand/
+  - examples/learning/wuji_inhand/
+  watch_paths: [embodichain/learning/rl/, tests/learning/, examples/learning/sharpa_inhand/,
+    examples/learning/wuji_inhand/]
   related_topics: [simulation-system, env-framework, manager-functor, configclass-pattern]
   status: active
 - id: differentiable-env
@@ -448,7 +454,7 @@ topics:
 - id: task-programs
   title: Embodied Task Program
   aliases: [task program, semantic call, 任务程序, 语义调用]
-  keywords: [TaskProgramCfg, kinematic_joint_replay, MoveHeldObjectCfg, HoldPostCfg, PoseTargetCfg,
+  keywords: [TaskProgramCfg, TaskProgramProgress, kinematic_joint_replay, MoveHeldObjectCfg, HoldPostCfg, PoseTargetCfg,
     SceneRelativePoseTargetCfg, normalize_task_program, demo_skills,
     SimulationSettleMonitorCfg, program.yaml, integration.yaml, scene_binding, SceneManifest, SkillPolicyPreset,
     hand_geometries,

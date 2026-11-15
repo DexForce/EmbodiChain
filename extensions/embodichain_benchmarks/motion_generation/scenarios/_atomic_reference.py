@@ -34,6 +34,61 @@ if TYPE_CHECKING:
 __all__: list[str] = []
 
 
+def _qualified_reference_ik(
+    robot: Robot,
+    target: torch.Tensor,
+    seed: torch.Tensor,
+    *,
+    control_part: str,
+    protocol: ProtocolCfg,
+    env_ids: Sequence[int] | None = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """FK-check every canonical joint witness against its unchanged request."""
+    flags, solved = robot.compute_ik(
+        pose=target, joint_seed=seed, name=control_part, env_ids=env_ids
+    )
+    solved = canonical_case_qpos(solved).reshape_as(seed)
+    lower, upper = (
+        robot.get_qpos_limits(name=control_part, env_ids=env_ids).to(solved).unbind(-1)
+    )
+    valid = (
+        torch.as_tensor(flags, device=seed.device, dtype=torch.bool)
+        .reshape(-1)
+        .expand(seed.shape[0])
+        .clone()
+    )
+    valid &= torch.isfinite(solved).all(-1)
+    valid &= (
+        torch.maximum(lower - solved, solved - upper).clamp_min(0).amax(-1)
+        <= protocol.joint_limit_tolerance_rad
+    )
+    check = valid.nonzero(as_tuple=False).flatten()
+    if check.numel():
+        rows = check.cpu().tolist()
+        actual = robot.compute_fk(
+            qpos=solved[check],
+            name=control_part,
+            env_ids=rows if env_ids is None else [env_ids[row] for row in rows],
+            to_matrix=True,
+        )
+        dp, dr = pose_error(actual, target[check])
+        valid[check] &= (dp.norm(dim=-1) <= protocol.position_threshold_m) & (
+            dr.norm(dim=-1) <= protocol.rotation_threshold_rad
+        )
+    if not bool(valid.all().item()):
+        return _recover_reference_ik(
+            robot,
+            target,
+            seed,
+            valid,
+            solved,
+            control_part=control_part,
+            protocol=protocol,
+            env_ids=env_ids,
+        )
+    return valid, solved
+
+
 def _recover_reference_ik(
     robot: Robot,
     target: torch.Tensor,

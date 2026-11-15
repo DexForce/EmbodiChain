@@ -92,6 +92,19 @@ def _run(cfg: _RunCfg, *, services: GenSimServices | None = None) -> dict[str, A
     runtime, policy, profile = _load_runtime(cfg)
     with Image.open(cfg.image) as image:
         image.verify()
+    if cfg.task is not None:
+        from .workflow import load_task_plan
+
+        # Binding reads the reused graph; it must plan this run's request.
+        plan = load_task_plan(cfg.task)
+        if (
+            plan.get("instruction") != cfg.instruction
+            or plan.get("image_sha256")
+            != hashlib.sha256(cfg.image.read_bytes()).hexdigest()
+        ):
+            raise ValueError(
+                "task was planned for a different instruction or image than this run"
+            )
     output = validate_run_output_directory(cfg.output)
     output.mkdir(parents=True, exist_ok=False)
     source = output / ("source_image" + cfg.image.suffix.lower())
@@ -134,21 +147,30 @@ def _run(cfg: _RunCfg, *, services: GenSimServices | None = None) -> dict[str, A
                 load_scene_generation_provider,
             )
 
-            update("running")
-            task = plan_image_task(
-                source,
-                cfg.instruction,
-                output / "task",
-                task_id=cfg.task_id,
-                services=run,
-            )
+            if cfg.task is not None:
+                # Reuse a published plan read-only, as --scene reuses a scene.
+                task = output / "task"
+                shutil.copytree(cfg.task, task)
+                manifest["task_reused_from"] = str(cfg.task)
+                update("reused")
+            else:
+                update("running")
+                task = plan_image_task(
+                    source,
+                    cfg.instruction,
+                    output / "task",
+                    task_id=cfg.task_id,
+                    services=run,
+                    max_repairs=cfg.planning_repairs,
+                )
+                update("succeeded")
             plan = load_task_plan(task)
             manifest["task_id"] = plan["task_id"]
             manifest["instruction"] = plan["instruction"]
             manifest["spec_digest"] = plan.get("spec_digest")
             manifest["graph_digest"] = plan["semantic_graph_sha256"]
             manifest["plan_digest"] = plan["plan_digest"]
-            update("succeeded")
+
             stage = "scene"
             update("running")
             scene = cfg.scene
@@ -267,7 +289,10 @@ def _run(cfg: _RunCfg, *, services: GenSimServices | None = None) -> dict[str, A
             ).hexdigest()
             update("running")
             report = _execute_deployment(
-                deployment, device=cfg.device, headless=cfg.headless
+                deployment,
+                device=cfg.device,
+                headless=cfg.headless,
+                recording=output / "recording" if cfg.recording else None,
             )
             write_run_json(output / "execution_report.json", report)
             write_run_json(

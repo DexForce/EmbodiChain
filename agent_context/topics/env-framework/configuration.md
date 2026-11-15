@@ -235,7 +235,12 @@ Python task registration module. `config_to_cfg` decodes `RLTaskCfg`, reuses the
 ordinary manager and physical-component configuration, and registers the common
 host with explicit RL capability. Conditions are grouped as success, failure
 and truncation; their `func`/`params` use the manager registry and entity binding.
-The same deployment cannot select both `rl_task` and `task_program`.
+A deployment may combine `rl_task` and `task_program` only with explicit
+`task_program.execution: policy` and `action_owners` assigning every declared
+robot resource to `policy`. The default `expert` execution remains exclusive
+with RL. Policy mode loads declarations and integration metadata without
+creating an expert adapter. Its supported subset and consumer bindings are
+owned by [policy stage progress](../task-programs/execution.md#policy-stage-progress).
 
 The registration signature preserves manager ordering, measured conditions,
 physical declarations and episode limits while excluding runtime device, batch
