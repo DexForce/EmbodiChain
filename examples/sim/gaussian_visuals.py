@@ -20,6 +20,9 @@ Run from the repository root with a qualified DexSim integration build::
 
     python examples/sim/gaussian_visuals.py --background /assets/room.ply
 
+For a display-referred SuperSplat/Inria background, pass
+--no-apply-display-srgb. The synthetic cube keeps the existing sRGB-transfer
+default; the switch is World-wide, including Gaussian body/link appearances.
 Without --background a synthetic Gaussian cube is used. Physics and semantic
 geometry are independent of the captured appearance. Outputs include a camera
 mosaic and per-frame capture metadata. No Gaussian USD import is performed.
@@ -112,6 +115,16 @@ def main() -> None:
     parser.add_argument(
         "--renderer", choices=["hybrid", "fast-rt", "rt"], default="fast-rt"
     )
+    parser.add_argument(
+        "--apply-display-srgb",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Apply the shared sRGB display transfer (default: on for synthetic colors). "
+            "Use --no-apply-display-srgb for SuperSplat/Inria captures; "
+            "this setting applies to every Gaussian asset in the World."
+        ),
+    )
     parser.add_argument("--output", type=Path, default=Path("outputs/gaussian_visuals"))
     args = parser.parse_args()
     if args.frames < 3 or args.num_envs < 1:
@@ -134,6 +147,7 @@ def main() -> None:
                 render_cfg=RenderCfg.for_gaussian(
                     renderer=args.renderer,
                     spp=16,
+                    gaussian={"apply_display_srgb": args.apply_display_srgb},
                 ),
             )
         )
@@ -233,6 +247,7 @@ def main() -> None:
                     sim.render_camera_group([camera.group_id])
                     camera.update(fetch_only=True)
                 record = serializable(camera.capture_metadata)
+                record["apply_display_srgb"] = args.apply_display_srgb
                 record["body_pose"] = serializable(body.get_local_pose())
                 record["arm_qpos"] = serializable(arm.get_qpos())
                 records.append(record)

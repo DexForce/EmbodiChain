@@ -1153,6 +1153,8 @@ def test_gaussian_render_budget_and_missing_sidecar_validate_without_engine():
         GaussianRenderCfg(workspace_memory_budget_mb=-1)
     with pytest.raises(TypeError, match="booleans"):
         GaussianRenderCfg(enabled="yes")
+    with pytest.raises(TypeError, match="booleans"):
+        GaussianRenderCfg(apply_display_srgb="false")
     with pytest.raises(ValueError, match="physical shape"):
         rigid_desc_from_cfg(
             RigidObjectCfg(
