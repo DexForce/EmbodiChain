@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Numerical checks of the native FK autograd boundary."""
+"""Numerical and storage checks of the private Newton FK gradient adapter."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ import warp as wp
 
 newton = pytest.importorskip("newton")
 
-from embodichain.lab.sim.diff.kinematics import differentiable_fk
+from embodichain.lab.sim.diff._newton_fk import _newton_fk
 
 
 def _model():
@@ -45,7 +45,7 @@ def test_fk_pose_and_velocity_gradients_match_finite_difference():
     model = _model()
     q = torch.tensor([0.4], requires_grad=True)
     qd = torch.tensor([0.7], requires_grad=True)
-    pose, velocity = differentiable_fk(model, q, qd)
+    pose, velocity = _newton_fk(model, q, qd)
     pose_weights = torch.arange(1.0, 8.0).view(1, 7)
     velocity_weights = torch.arange(1.0, 7.0).view(1, 6)
     loss = (pose * pose_weights).sum() + (velocity * velocity_weights).sum()
@@ -54,7 +54,7 @@ def test_fk_pose_and_velocity_gradients_match_finite_difference():
     assert all(torch.allclose(a, b) for a, b in zip(gradients, repeated))
 
     def evaluate(position, speed):
-        a, b = differentiable_fk(model, position, speed)
+        a, b = _newton_fk(model, position, speed)
         return (a * pose_weights).sum() + (b * velocity_weights).sum()
 
     epsilon = 1.0e-3
@@ -76,9 +76,9 @@ def test_later_fk_does_not_overwrite_retained_outputs_or_graph():
     model = _model()
     q = torch.tensor([0.2], requires_grad=True)
     qd = torch.tensor([0.3], requires_grad=True)
-    first, _ = differentiable_fk(model, q, qd)
+    first, _ = _newton_fk(model, q, qd)
     saved = first.detach().clone()
-    differentiable_fk(model, q + 1.0, qd + 2.0)
+    _newton_fk(model, q + 1.0, qd + 2.0)
     assert torch.equal(first, saved)
     first.sum().backward()
     assert q.grad is not None and torch.isfinite(q.grad).all()
@@ -87,6 +87,6 @@ def test_later_fk_does_not_overwrite_retained_outputs_or_graph():
 def test_fk_rejects_unmatched_coordinate_layout():
     model = _model()
     with pytest.raises(ValueError, match="flattened"):
-        differentiable_fk(model, torch.zeros(1, 1), torch.zeros(1))
+        _newton_fk(model, torch.zeros(1, 1), torch.zeros(1))
     with pytest.raises(TypeError, match="float32"):
-        differentiable_fk(model, torch.zeros(1, dtype=torch.float64), torch.zeros(1))
+        _newton_fk(model, torch.zeros(1, dtype=torch.float64), torch.zeros(1))

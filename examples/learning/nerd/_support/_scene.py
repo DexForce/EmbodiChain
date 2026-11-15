@@ -41,14 +41,14 @@ def _runtime_identity(device: torch.device) -> dict[str, Any]:
     """Record actual execution identity separately from historical teacher metadata."""
     from embodichain_models.dynamics.nerd import geometry, transition
     from embodichain_solvers.physics.nerd import provider
-    from embodichain.lab.sim.diff import kinematics
+    from embodichain.lab.sim.diff import _newton_fk
 
     sources = {
         "geometry.py": Path(geometry.__file__),
         "transition.py": Path(transition.__file__),
         "provider.py": Path(provider.__file__),
         "_binding.py": Path(provider.__file__).with_name("_binding.py"),
-        "kinematics.py": Path(kinematics.__file__),
+        "_newton_fk.py": Path(_newton_fk.__file__),
     }
     for name in (
         "_scene.py",

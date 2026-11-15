@@ -52,6 +52,9 @@ Full reset creates independent episode graphs; partial reset preserves peers.
 The optional native adapter retains indexing, physical admission and publication.
 The FK-only reference factory isolates SDK descriptor lowering without creating
 a World, Scene or solver; signatures guard that SDK compatibility surface.
+Its injected Newton backend uses the private `lab.sim.diff._newton_fk` gradient
+adapter. Reusable tensor FK/IK remains owned by `compute.kinematics` and
+`learning.layers`; the native adapter does not introduce another public FK API.
 
 ## RigidFormer author model
 

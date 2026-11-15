@@ -266,7 +266,7 @@ class ConcreteImportsForbidden(importlib.abc.MetaPathFinder):
 blocker = ConcreteImportsForbidden()
 sys.meta_path.insert(0, blocker)
 from embodichain.lab.gym.envs.differentiable_env import DifferentiableEnv
-from embodichain.lab.sim.diff.kinematics import differentiable_fk
+from embodichain.lab.sim.diff._newton_fk import _newton_fk
 sys.meta_path.remove(blocker)
 assert 'embodichain_models' not in sys.modules
 entries = [entry for entry in metadata.entry_points(group='dexsim.newton_solvers') if entry.name == 'nerd']

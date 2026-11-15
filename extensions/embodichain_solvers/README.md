@@ -13,8 +13,10 @@ that same transition; only explicit native publication detaches history.
 
 The independent learning environment calls the transition directly. Its
 reference factory may reuse the Newton geometry binding with an FK-only model;
-it does not construct a native World, Scene or solver. The generic FK gradient
-bridge remains in `embodichain.lab.sim.diff.kinematics`.
+it does not construct a native World, Scene or solver. The private Newton FK
+gradient adapter lives in `embodichain.lab.sim.diff._newton_fk`, preserving
+native layout/velocity conventions and independently owned call storage.
+Reusable tensor FK/IK APIs remain in `compute.kinematics` and `learning.layers`.
 
 Deployment accepts the existing direct `ProviderNewtonSolverCfg` or the `nerd`
 registered name with `options: {checkpoint: ...}`. It validates the recorded

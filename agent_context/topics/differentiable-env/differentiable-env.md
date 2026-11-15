@@ -97,8 +97,10 @@ Model-based training is a separate consumer of the existing
 `DifferentiableEnvProtocol` and shared collector/trainer, including RWM and the
 NeRD lightweight reference factories. It does not add a dynamics mode to this
 Warp environment or route model prediction through SimulationManager. The
-generic `sim.diff.kinematics.differentiable_fk` helper supplies first-order
-q/qd gradients using independently owned Warp storage; it does not step physics.
+private `sim.diff._newton_fk` adapter supplies first-order q/qd gradients for
+finalized Newton models using independently owned Warp storage. It preserves
+native layout/COM conventions and does not step physics; reusable tensor FK/IK
+APIs remain in `compute.kinematics` and `learning.layers`.
 
 ## Source of truth
 
