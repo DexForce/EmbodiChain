@@ -1071,8 +1071,8 @@ def test_failed_frame_cannot_republish_previous_camera_capture(tmp_path, failure
         _flush_render_updates=MagicMock(return_value=0),
     )
     camera = object.__new__(Camera)
-    camera.group_id = 8
-    camera._owner = lambda: sim
+    camera._camera_groups = (SimpleNamespace(get_group_id=lambda: 8),)
+    camera._owner_ref = lambda: sim
     camera.cfg = SimpleNamespace()
     camera._capture_metadata = {"valid": True, "frame_id": 41}
     sim._sensors = {"camera": camera}

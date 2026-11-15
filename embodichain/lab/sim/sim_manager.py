@@ -101,6 +101,7 @@ from embodichain.lab.sim.sensors import (
     ContactSensor,
 )
 from embodichain.lab.sim.sensors.attachment import resolve_parent_nodes
+from embodichain.lab.sim.sensors._camera_group_pool import _CameraGroupPool
 from embodichain.lab.sim.cfg import (
     CableObjectCfg,
     RenderCfg,
@@ -794,6 +795,7 @@ class SimulationManager:
         self._robots: Dict[str, Robot] = dict()
 
         self._sensors: Dict[str, BaseSensor] = dict()
+        self._camera_group_pool = _CameraGroupPool(sim_config.num_envs)
         self._lights: Dict[str, Light] = dict()
 
         self._spawn_scene = SpawnScene(
@@ -2187,16 +2189,26 @@ class SimulationManager:
         Note: This interface is only valid when Ray Tracing rendering backend is enabled.
         """
 
+        group_ids = list(dict.fromkeys(group_ids))
         if group_ids:
             self._ensure_render_state()
         elif self.is_window_opened:
             self._ensure_render_state(wait=False)
         if group_ids:
-            cameras = [
-                sensor
-                for sensor in self._sensors.values()
-                if isinstance(sensor, Camera) and sensor.group_id in group_ids
-            ]
+            requested = set(group_ids)
+            cameras = []
+            for sensor in self._sensors.values():
+                if not isinstance(sensor, Camera):
+                    continue
+                owned = set(sensor.group_ids)
+                if not requested.intersection(owned):
+                    continue
+                if not owned.issubset(requested):
+                    raise ValueError(
+                        f"Camera {sensor.uid!r} requires all of its group IDs "
+                        "for a complete render."
+                    )
+                cameras.append(sensor)
             for sensor in cameras:
                 sensor._capture_metadata = None
                 sensor._pending_capture_metadata = None
@@ -2216,6 +2228,13 @@ class SimulationManager:
                 for sensor in cameras:
                     sensor._snapshot_render_metadata()
         self._log_scene_summary()
+
+    def _plan_camera_groups(self, configs: Sequence[SensorCfg]) -> None:
+        """Reserve startup camera slots before the first sensor is created."""
+        if self.sim_config.render_cfg.gaussian.enabled:
+            # Gaussian capture status is owned by one camera group and camera.
+            return
+        self._camera_group_pool.plan(configs)
 
     def _invalidate_gaussian_captures(self, group_id: int | None = None) -> None:
         """Discard capture identities before replacement or after failed writes."""
