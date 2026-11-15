@@ -31,6 +31,17 @@ perform native access. Spawn owns replication/isolation and source overlays.
 Contact sensors use the finalized Scene query boundary. Cameras/lights use the
 same Scene, including its pre-finalization prepared-Arena phase.
 
+The private `_GeometryNetForceSensor` qualifies native MuJoCo-Warp geometry-pair
+net forces for the Sharpa reference experiment. It resolves named source
+colliders after preparation, rejects ambiguous decompositions and topology
+changes, and closes borrowed buffers before manager teardown. Native material
+scaling and batched joint-gain writes are physics-owned private views: tasks
+submit row values, source reset defaults are preserved, and solver graphs are
+invalidated after parameter changes. The private `_shrink_cylinder_variants`
+helper scales only analytic cylinders by ratios in `(0, 1]`, scaling inertia at
+constant mass while keeping the enclosing template broad-phase bounds. It does
+not update render geometry or descriptors and must run once before collection.
+
 `VisualObject` owns appearance, visibility and pure-visual poses without physics
 buffers or collision API. Source selectors are exclusive with ordinary file/
 shape inputs. Explicit `visuals` and articulation `link_visuals` replace appearance
@@ -92,8 +103,10 @@ mass/COM/inertia applies once to the parent. `CylinderCfg` retains a native
 cylinder descriptor, but cooking fidelity remains backend-specific.
 Rigid appearance has one canonical `visuals` list. Legacy `visual_shape` and
 compound `visual_parts` migrate into that list with a warning and are cleared;
-competing inputs fail. Procedural rigid mesh elements lower directly on the
-body for both physics backends. Gaussian and other companion visuals keep
+competing inputs fail. Procedural arrays and singleton mesh files lower on the
+body for both physics backends. File-containing render batches use separate
+singleton imports with owner pose tracking; see [rendering](rendering.md).
+Gaussian and other companion visuals keep
 their separate binding capabilities. Semantic queries retain the physical
 surface unless the parent config explicitly selects a shared proxy.
 

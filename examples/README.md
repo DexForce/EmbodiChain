@@ -61,6 +61,16 @@ state-transition fitting and state/action gradients. Its generated recipes use
 the installable `embodichain_models.dynamics.rwm` model family and shared SL
 trainer; its corpus generation and acceptance helpers remain private to the example.
 
+The [Sharpa in-hand example](learning/sharpa_inhand/README.md) trains cylinder
+rotation with native eight-scale, domain-randomized physics, EmbodiChain APG
+actor updates and the pinned upstream teacher/world model, then evaluates saved
+policies against frozen source receipts.
+
+The [Wuji in-hand example](learning/wuji_inhand/README.md) adapts that learner
+to the 20-joint Wuji hand with authored actuator limits and screened holding
+states. It is evaluated separately from Sharpa and does not imply identical
+randomization or an algorithm comparison.
+
 The [visual ACT example](learning/act/README.md) collects Franka PushCube
 demonstrations, trains an RGB and proprioception action-chunking policy, and
 evaluates checkpoints on independently seeded simulator scenes.

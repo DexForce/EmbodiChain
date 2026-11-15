@@ -19,6 +19,8 @@
 from __future__ import annotations
 
 import json
+
+import numpy as np
 from pathlib import Path
 from unittest.mock import Mock
 import xml.etree.ElementTree as ET
@@ -203,3 +205,89 @@ def test_preloaded_sensor_templates_survive_repeated_and_failed_merges(
     assert sensors.attached_sensors is sources
     assert sensors.attached_sensors["cam"]["links"][0] is source_link
     assert ET.tostring(source_link) == source_xml
+
+
+@pytest.mark.parametrize("mode", ["root", "internal", "external"])
+def test_sensor_mount_connects_root_without_changing_internal_fk(
+    tmp_path: Path, mode: str
+) -> None:
+    arm = tmp_path / "arm.urdf"
+    arm.write_text('<robot name="arm"><link name="flange"/></robot>')
+    sensor = tmp_path / "sensor.urdf"
+    subtree = (
+        '<link name="lens"/><joint name="optical" type="fixed">'
+        '<parent link="sensor_root"/><child link="lens"/>'
+        '<origin xyz="0 0 0.03" rpy="0 0 0"/></joint>'
+        if mode == "internal"
+        else ""
+    )
+    if mode == "external":
+        subtree = (
+            '<joint name="mount" type="fixed"><parent link="flange"/>'
+            '<child link="sensor_root"/></joint>'
+        )
+    sensor.write_text(
+        '<robot name="sensor"><link name="sensor_root"/>' + subtree + "</robot>"
+    )
+    manager = URDFAssemblyManager()
+    manager.add_component("arm", arm)
+    mount = np.eye(4)
+    mount[:3, :3] = [[0, -1, 0], [1, 0, 0], [0, 0, 1]]
+    mount[2, 3] = 0.2  # Authored flange-to-sensor translation.
+    manager.attach_sensor("sensor", str(sensor), "arm", "flange", transform=mount)
+    result = manager.merge_urdfs(str(tmp_path / "assembled.urdf"))
+    root_joint = next(
+        j
+        for j in result.findall("joint")
+        if j.find("child").get("link") == "sensor_root"
+    )
+    assert root_joint.get("type") == "fixed"
+    assert root_joint.find("parent").get("link") == "flange"
+    assert np.fromstring(
+        root_joint.find("origin").get("xyz"), sep=" "
+    ) == pytest.approx([0, 0, 0.2])
+    assert np.fromstring(
+        root_joint.find("origin").get("rpy"), sep=" "
+    ) == pytest.approx([0, 0, np.pi / 2])
+    if mode == "internal":
+        optical = next(
+            j
+            for j in result.findall("joint")
+            if j.find("child").get("link") == "sensor_lens"
+        )
+        assert optical.find("origin").get("xyz") == "0 0 0.03"
+        assert optical.find("origin").get("rpy") == "0 0 0"
+    assert result.find("link[@name='sensor_root']") is not None
+
+
+@pytest.mark.parametrize("change", ["mount", "source"])
+def test_cached_sensor_assembly_rebuilds_after_attachment_change(
+    tmp_path: Path, change: str
+) -> None:
+    arm = tmp_path / "arm.urdf"
+    arm.write_text('<robot name="arm"><link name="flange"/></robot>')
+    sensor = tmp_path / "sensor.urdf"
+    sensor.write_text('<robot name="sensor"><link name="sensor_root"/></robot>')
+    manager = URDFAssemblyManager()
+    manager.add_component("arm", arm)
+    mount = np.eye(4)
+    manager.attach_sensor("sensor", str(sensor), "arm", "flange", transform=mount)
+    output = str(tmp_path / "assembled.urdf")
+    manager.merge_urdfs(output)
+    if change == "mount":
+        mount[2, 3] = 0.2
+    else:
+        sensor.write_text('<robot name="sensor"><link name="sensor_revised"/></robot>')
+    result = manager.merge_urdfs(output)
+    if change == "mount":
+        connector = next(
+            j
+            for j in result.findall("joint")
+            if j.find("child").get("link") == "sensor_root"
+        )
+        assert np.fromstring(
+            connector.find("origin").get("xyz"), sep=" "
+        ) == pytest.approx([0, 0, 0.2])
+    else:
+        assert result.find("link[@name='sensor_revised']") is not None
+        assert result.find("link[@name='sensor_root']") is None

@@ -2371,6 +2371,48 @@ def test_pick_combined_motion_gen_preserves_backend_samples_before_split() -> No
     assert plan.commands.frame_count == sample_count
 
 
+def test_pick_failed_candidate_does_not_delay_successful_grasp() -> None:
+    positions = (
+        torch.arange(4, dtype=torch.float32)[None, :, None].expand(
+            NUM_ENVS, -1, ARM_DOF
+        )
+        * 0.01
+    )
+    result = PlanResult(
+        success=torch.tensor([True, False]),
+        positions=positions.clone(),
+        dt=torch.tensor(
+            [[0.0, CONTROL_DT, CONTROL_DT, CONTROL_DT], [0.0, 2.0, 2.0, 2.0]]
+        ),
+        waypoint_indices=torch.tensor([[1, 2, 3], [1, -1, -1]]),
+    )
+    generator = _motion_generator()
+    generator.generate = Mock(return_value=result)
+    action = _bind_action(generator, PickUp())
+    context = _context(
+        scene=_target_scene(
+            torch.eye(4).repeat(NUM_ENVS, 1, 1), timestamp=0.0, version=0
+        )
+    )
+    invocation = SkillInvocation(
+        skill_id="pick_up",
+        goal=GraspGoal(
+            semantics=_semantics(entity_id="target"), grasp_xpos=torch.eye(4)
+        ),
+        binding=_binding(action),
+        motion_policy=MotionPolicy(strategy="motion_gen", sample_count=20),
+    )
+    plan = _plan_action(action, invocation, context)
+    assert plan.plan_success.tolist() == [True, False]
+    assert plan.commands.frame_count == 20
+    trajectory = _joint_trajectory(plan)
+    torch.testing.assert_close(
+        trajectory.positions[1], context.robot.qpos[1:].expand(20, -1)
+    )
+    torch.testing.assert_close(result.positions, positions)
+    assert result.dt[1].sum().item() == 6.0
+
+
 def test_place_releases_only_exclusively_held_rows() -> None:
     generator = _motion_generator()
 

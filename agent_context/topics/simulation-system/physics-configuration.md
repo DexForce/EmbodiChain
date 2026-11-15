@@ -17,6 +17,11 @@ use `sim.device`; `gpu_id` selects the render GPU and fills an unindexed CUDA
 device, not a separate environment tensor device.
 
 `DefaultPhysicsCfg.cache_material` controls native material reuse.
+`DefaultPhysicsCfg.num_substeps` divides each manager physics interval into
+native integration steps (default one). Manager time, control/observer intervals
+and render publication keep the outer interval. This permits integration
+refinement without changing task durations; it does not add controller updates
+or contact observations between native steps.
 `SimulationManagerCfg.scene_node_capacity` sets World capacity before creation;
 `None` retains the native default. Gym accepts the former in `physics_config`
 and the latter at the top level through `config_to_cfg()`.
@@ -157,6 +162,10 @@ positive or direct-mode meaning. New typed declarations use only
 collision-owned raw contact keys migrates once in `RigidBodyPhysicsCfg.from_dict`
 with a deprecation warning. Explicit non-None material values win in that block;
 after migration, link-local values override global material values normally.
+Sparse global and named-link robot overlays preserve portable preset fields
+when promoting collision/material groups to a backend subtype. Nested compound
+and variant collision mesh paths, including each decoded particle-only boundary,
+resolve through the Gym data-root loader.
 Use per-link overlays for contact intent, not
 finalized solver-array mutations. `has_particle_collision` is
 per-shape participation; Arena isolation remains scene-owned.
@@ -165,6 +174,13 @@ Rigid USD import rejects a parsed disabled body with authored child colliders
 but no retained collision pieces. DexSim 0.6.0rc1 has this parser limitation;
 use direct compound construction until the dependency retains static-body
 collider ownership. Do not change a static fixture into a moving body to mask it.
+
+File-backed Newton collision queries read each prepared shape independently,
+including cooked hulls, local poses and scales. Explicit particle-only boundaries
+are excluded from rigid planner geometry; disabling ordinary rigid contacts keeps
+their geometry queryable. Static model transforms are returned in the owning body
+frame. A disabled default ground accepts an idempotent collision-disable request;
+enabling or editing a nonexistent ground fails before descriptor access.
 
 `DefaultRigidBodyPropertiesCfg.has_gravity` is Default-native configuration,
 not a portable cross-solver gravity feature; source assets need overlay mode
