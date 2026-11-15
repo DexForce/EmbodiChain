@@ -2,12 +2,13 @@
 
 Precision assembly is a reusable capability outside GenSim. GenSim pipelines,
 Gym tasks and examples consume the same neutral asset API; the toolkit does not
-import GenSim, simulation runtime, task packages or benchmark helpers.
+import GenSim, simulation runtime, task packages or benchmark helpers at its root.
+Native preparation is an explicit opt-in through `embodichain.toolkits.assembly.native`.
 
 | Responsibility | Owner |
 |---|---|
 | Pinned mjfit provider, manifests, sampling and USD format export | `embodichain/toolkits/assembly/` |
-| Native compound configs and actual hinge articulations | `embodichain/lab/sim/assembly/` |
+| Native compound configs and actual hinge articulations | `embodichain/toolkits/assembly/native.py` |
 | Reference execution, analytic probes and measurement | `extensions/embodichain_benchmarks/assembly/` |
 
 `build_assembly` produces source body-local geometry, independent visual parts,
@@ -24,7 +25,10 @@ cell's configuration and source-prefixed names; cells are not replicated
 arenas. Explicit outline-accuracy overrides retain both sampled and actual
 configurations rather than silently changing the official geometry profile.
 
-`embodichain.lab.sim.assembly.to_rigid_config(body)` builds a native compound for free/fixed bodies.
+`prepare_native_configs(asset, directory)` prepares mixed rigid/hinge assets and
+optionally file-backed rigid appearance through one public entry point. Benchmark
+execution consumes those configurations without importing private visual writers.
+`embodichain.toolkits.assembly.native.to_rigid_config(body)` builds a native compound for free/fixed bodies.
 Hinges are rejected there and exported as actual native articulations through
 `to_articulation_configs`; USD export includes the same collider ownership and
 fixed-anchor hinge trees. Never combine all source convex pieces into one hull
@@ -37,7 +41,7 @@ parameters belong to `attrs.material_props`, while contact envelopes, dimension
 and priority belong to `attrs.collision_props`. Hinge export validates generated
 names and destinations before writing into the output directory.
 
-`lab/sim/assembly/_visual.py` owns body-local OBJ visuals for native rigid objects and URDF
+`embodichain/toolkits/assembly/_visual.py` owns body-local OBJ visuals for native rigid objects and URDF
 moving links. The URDF visual origin stays identity because geom transforms
 are already baked into that file; collision entries retain their own source
 transforms. `usd.py` keeps mesh normals geometry-local under the authored geom

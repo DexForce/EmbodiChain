@@ -5086,48 +5086,6 @@ qualified DriverOpeningBinding type must be rebuilt with its Atomic owner.
 .. autoclass:: DriverOpeningBinding
    :members:
 
-embodichain.lab.sim.assembly
-----------------------------
-
-Adapt portable assembly data to native simulation without changing authored collision partitions or integrating overlapping-piece inertia. Free and fixed parts become compound rigid objects; hinge parts use actual articulations.
-
-.. currentmodule:: embodichain.lab.sim.assembly
-
-.. autosummary::
-
-   to_rigid_config
-   to_rigid_configs
-   to_articulation_configs
-
-
-
-embodichain.lab.sim.assembly.conversion
----------------------------------------
-
-Explicit simulation-boundary conversion of neutral bodies into one rigid object per authored body, preserving supported source contact and mass properties.
-
-.. currentmodule:: embodichain.lab.sim.assembly.conversion
-
-.. autosummary::
-
-   to_rigid_config
-   to_rigid_configs
-
-
-
-embodichain.lab.sim.assembly.urdf
----------------------------------
-
-Preparation-only URDF export keeps a moving compound link on its real fixed-anchor hinge. File-backed visual geometry remains separate from collision geometry.
-
-.. currentmodule:: embodichain.lab.sim.assembly.urdf
-
-.. autosummary::
-
-   to_articulation_configs
-
-
-
 embodichain.toolkits.assembly
 -----------------------------
 
@@ -5150,6 +5108,26 @@ Public assembly generation and portable manifests preserve one physical body wit
 
 
 
+
+embodichain.toolkits.assembly.native
+------------------------------------
+
+Prepare native rigid and hinge configurations from portable assembly assets.
+File-backed appearance is optional and preserves source collision ownership.
+
+.. currentmodule:: embodichain.toolkits.assembly.native
+
+.. autosummary::
+
+   to_rigid_config
+   to_rigid_configs
+   to_articulation_configs
+   prepare_native_configs
+
+.. autofunction:: to_rigid_config
+.. autofunction:: to_rigid_configs
+.. autofunction:: to_articulation_configs
+.. autofunction:: prepare_native_configs
 
 embodichain.toolkits.assembly.adapter
 -------------------------------------

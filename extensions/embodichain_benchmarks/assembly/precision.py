@@ -650,7 +650,10 @@ def _run_embodichain(
 ) -> dict[str, Any]:
     _validate_solver_overrides(cfg)
     import torch
-    from embodichain.lab.sim.assembly import to_articulation_configs, to_rigid_config
+    from embodichain.toolkits.assembly.native import (
+        prepare_native_configs,
+        to_rigid_config,
+    )
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
     from embodichain.lab.sim.cfg import (
         DefaultPhysicsCfg,
@@ -661,11 +664,17 @@ def _run_embodichain(
     )
 
     ground_enabled, ground_attrs = _source_floor_attributes(asset, cfg)
-    visual_paths: dict[str, Path] = {}
-    if native_window and cfg.route == "direct":
-        from embodichain.lab.sim.assembly._visual import _write_rigid_visual_meshes
-
-        visual_paths = _write_rigid_visual_meshes(asset, cfg.work_dir)
+    native_configs = (
+        prepare_native_configs(
+            asset,
+            cfg.work_dir,
+            source_contact=cfg.source_contact,
+            backend=cfg.backend,
+            file_visuals=native_window,
+        )
+        if cfg.route == "direct"
+        else {}
+    )
     physics = (
         NewtonPhysicsCfg(
             gravity=asset.source_options.get("gravity", [0, 0, -9.81]),
@@ -747,36 +756,16 @@ def _run_embodichain(
                     objects[body.name] = sim.add_rigid_object(body_cfg)
         else:
             for body in asset.bodies:
-                if body.joint.kind != "hinge":
-                    body_cfg = to_rigid_config(
-                        body,
-                        source_contact=cfg.source_contact,
-                        backend=cfg.backend,
-                    )
-                    if body.name in visual_paths:
-                        from embodichain.lab.sim.cfg import VisualElementCfg
-                        from embodichain.lab.sim.shapes import MeshCfg
-
-                        body_cfg.visuals = [
-                            VisualElementCfg(
-                                representation=MeshCfg(
-                                    fpath=str(visual_paths[body.name])
-                                )
-                            )
-                        ]
+                body_cfg = native_configs[body.name]
+                if body.joint.kind == "hinge":
+                    for group in body_cfg.link_attrs.values():
+                        group.attrs.collision_props.contact_offset = cfg.contact_offset
+                        group.attrs.collision_props.rest_offset = cfg.rest_offset
+                    objects[body.name] = sim.add_articulation(body_cfg)
+                else:
                     body_cfg.attrs.collision_props.contact_offset = cfg.contact_offset
                     body_cfg.attrs.collision_props.rest_offset = cfg.rest_offset
                     objects[body.name] = sim.add_rigid_object(body_cfg)
-            for name, art_cfg in to_articulation_configs(
-                asset,
-                Path(cfg.work_dir) / asset.content_hash,
-                source_contact=cfg.source_contact,
-                backend=cfg.backend,
-            ).items():
-                for group in art_cfg.link_attrs.values():
-                    group.attrs.collision_props.contact_offset = cfg.contact_offset
-                    group.attrs.collision_props.rest_offset = cfg.rest_offset
-                objects[name] = sim.add_articulation(art_cfg)
         sim.prepare()
         collision_counts = {}
         for body in asset.bodies:
@@ -851,7 +840,7 @@ def _run_embodichain(
                 else "failed"
             ),
             "reason": (
-                "Native contact-overflow accounting is not exposed by the Scene facade; source contact parameters require the documented SDK patch."
+                "Native contact-overflow accounting is not exposed by the Scene facade."
                 if metrics["finite"] and metrics["success_rate"] == 1
                 else "Physical probe failed; native contact-overflow accounting is unavailable."
             ),

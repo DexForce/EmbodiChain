@@ -373,7 +373,7 @@ class ConstrainedProbeDefinition:
         source_contact: bool | None = None,
     ) -> tuple[RigidObjectCfg, ArticulationCfg]:
         """Build the fixed imported plate and the physically constrained peg."""
-        from embodichain.lab.sim.assembly import to_rigid_config
+        from embodichain.toolkits.assembly.native import to_rigid_config
         from embodichain.lab.sim.cfg import (
             ArticulationCfg,
             ArticulationRootPropertiesCfg,

@@ -1,9 +1,9 @@
 # Precision assembly examples
 
-The project selects DexSim 0.6.0rc2. Earlier Python 3.12 direct-compound
-construction and raw-contact checks used DexSim 0.6.0rc1 without the
-historical source overlay. The static compound USD import route is unavailable
-on 0.6.0rc1: its parser drops child colliders under disabled rigid bodies.
+The project selects DexSim 0.6.0rc2. Python 3.12 direct-compound construction,
+raw-contact checks and native RGB previews were verified with rc2 using the
+installed SDK. The static compound USD import route is unavailable
+on 0.6.0rc1 and 0.6.0rc2: its parser drops child colliders under disabled rigid bodies.
 EmbodiChain rejects that loss explicitly. Exported USD retains the authored
 static ownership; use direct manifests for runtime construction until the SDK
 parser is corrected. This dependency gap is retained as one strict expected
@@ -32,7 +32,9 @@ embodichain run-example sim/assembly/gear_pair --backend mujoco_cpu
 The reusable API lives in `embodichain.toolkits.assembly`, independently of
 GenSim. Use `build_assembly` or `build_many_pegs` during asset preparation, then
 load an `AssemblyAsset` at runtime. Native conversion belongs to
-`embodichain.lab.sim.assembly`; precision measurements belong to
+`embodichain.toolkits.assembly.native`. Its `prepare_native_configs` prepares
+rigid and hinged bodies together, including optional file-backed appearance,
+while preserving authored collision pieces and mass properties. Precision measurements belong to
 `embodichain_benchmarks.assembly`. GenSim pipelines can consume the same toolkit.
 
 The gallery writes self-contained manifests and USD files. A manifest can be
@@ -72,12 +74,13 @@ PGS profiles are retained in the runtime archive linked below. Generated traces
 record the executor, selected solver and measured outcome.
 
 For the native DexSim rendering window, use a desktop display and a supporting
-SDK runtime. The preview uses Hybrid rendering, 16 samples per
-pixel and OptiX denoising, with a camera framed around the centimetre-scale part:
+SDK runtime. The rc2 RGB recordings below use FastRT, 16 samples per pixel and
+OptiX denoising, with a camera framed around the centimetre-scale part. Hybrid
+is also selectable; its native recording crashed under this remote Xvfb profile.
 
 ```bash
-embodichain run-example sim/assembly/visual_demo --config circle --clearance .0001 --collision-colors --native-window --native-record --startup-delay 2 --hold-seconds 10 --output outputs/assembly_native_window/circle
-embodichain run-example sim/assembly/visual_demo --config m10 --duration 1.5 --playback-speed .4 --native-window --native-record --startup-delay 2 --hold-seconds 10 --output outputs/assembly_native_window/m10
+embodichain run-example sim/assembly/visual_demo --config circle --clearance .0001 --collision-colors --native-window --native-record --renderer fast-rt --startup-delay 2 --hold-seconds 10 --output outputs/assembly_native_window/circle
+embodichain run-example sim/assembly/visual_demo --config m10 --duration 1.5 --playback-speed .4 --native-window --native-record --renderer fast-rt --startup-delay 2 --hold-seconds 10 --output outputs/assembly_native_window/m10
 ```
 
 `--native-record` writes native RGB PNG frames and `native_window.mp4`. The
@@ -92,7 +95,7 @@ physical sample steps and captured frame count. Movie export is bounded by
 this run's frame count to avoid including stale frames after a shorter rerun.
 
 Native direct previews prepare a file-backed OBJ/MTL visual per body through
-the private assembly visual adapter. This avoids the installed SDK's failure
+`prepare_native_configs(..., file_visuals=True)` in the native toolkit adapter. This avoids the installed SDK's failure
 to publish large procedurally appended render bodies. The OBJ groups source
 triangle surfaces by material; it does not supply collision geometry. M10
 therefore renders the bolt as two material meshes while Newton retains all
