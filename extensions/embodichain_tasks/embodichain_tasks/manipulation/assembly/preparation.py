@@ -23,7 +23,10 @@ import numpy as np
 from scipy.spatial import ConvexHull
 from scipy.spatial.transform import Rotation
 from embodichain.toolkits.assembly import AssemblyAsset
-from embodichain.lab.sim.assembly import to_rigid_config, to_articulation_configs
+from embodichain.toolkits.assembly.native import (
+    to_rigid_config,
+    to_articulation_configs,
+)
 from embodichain.lab.sim.cfg import NewtonPhysicsCfg
 from embodichain.lab.sim.sensors import ContactSensorCfg, ArticulationContactFilterCfg
 from embodichain.lab.gym.envs import EmbodiedEnvCfg

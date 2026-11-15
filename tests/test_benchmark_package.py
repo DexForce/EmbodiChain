@@ -90,6 +90,10 @@ def installed_benchmark(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path,
         assert "embodichain/cli/benchmark.py" in entries
         assert "embodichain_benchmarks/assembly/robot_reference.py" in entries
         assert "embodichain_robots/flexiv/rizon4s/rizon4s_sources.json" in entries
+        assert "embodichain/toolkits/assembly/native.py" in entries
+        assert not any(
+            name.startswith("embodichain/lab/sim/assembly/") for name in entries
+        )
         assert not any(
             "share/embodichain/assembly_patches/" in name for name in entries
         )
@@ -196,6 +200,10 @@ assert not any(name == "embodichain_benchmarks" or name.startswith("embodichain_
 import embodichain_benchmarks.motion_generation as benchmark
 from embodichain_benchmarks.motion_generation import load_suite, run_benchmark
 assert Path(benchmark.__file__).is_relative_to(target)
+assert "embodichain.lab.sim" not in sys.modules
+from embodichain.toolkits.assembly import native
+assert Path(native.__file__).is_relative_to(target)
+assert callable(native.prepare_native_configs)
 assert "embodichain.lab.sim" not in sys.modules
 for source in Path(benchmark.__file__).parent.rglob("*.py"):
     for node in ast.walk(ast.parse(source.read_text())):

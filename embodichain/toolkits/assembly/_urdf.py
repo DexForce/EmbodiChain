@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from embodichain.lab.sim.cfg import ArticulationCfg
     from embodichain.toolkits.assembly.model import AssemblyAsset
 
-__all__ = ["to_articulation_configs"]
+__all__: list[str] = []
 
 
 def to_articulation_configs(
@@ -57,7 +57,7 @@ def to_articulation_configs(
         ValueError: If a hinge anchor or contact overlay cannot be represented.
         NotImplementedError: If the backend cannot retain source contacts.
     """
-    from .conversion import to_rigid_config
+    from .native import to_rigid_config
     from embodichain.lab.sim.cfg import (
         ArticulationCfg,
         ArticulationRootPropertiesCfg,

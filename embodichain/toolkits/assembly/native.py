@@ -17,16 +17,23 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 import numpy as np
 
-from embodichain.toolkits.assembly import AssemblyAsset, AssemblyBody, AssemblyGeometry
+from .model import AssemblyAsset, AssemblyBody, AssemblyGeometry
+from ._urdf import to_articulation_configs
 
 if TYPE_CHECKING:
-    from embodichain.lab.sim.cfg import RigidObjectCfg
+    from embodichain.lab.sim.cfg import ArticulationCfg, RigidObjectCfg
     from embodichain.lab.sim.shapes import ShapePartCfg
 
-__all__ = ["to_rigid_config", "to_rigid_configs"]
+__all__ = [
+    "to_rigid_config",
+    "to_rigid_configs",
+    "to_articulation_configs",
+    "prepare_native_configs",
+]
 
 
 def _shape_part(geometry: AssemblyGeometry) -> ShapePartCfg:
@@ -216,3 +223,62 @@ def to_rigid_configs(
         )
         for body in asset.bodies
     }
+
+
+def prepare_native_configs(
+    asset: AssemblyAsset,
+    directory: str | Path,
+    *,
+    source_contact: bool = True,
+    backend: str = "newton",
+    file_visuals: bool = False,
+) -> dict[str, RigidObjectCfg | ArticulationCfg]:
+    """Prepare native rigid bodies and hinges with optional file-backed visuals.
+
+    File-backed appearance combines only visible source surfaces. Collision
+    pieces, body-local frames and authored mass properties remain unchanged.
+    The toolkit root stays independent of the simulation runtime; import this
+    adapter explicitly when preparing a native scene.
+
+    Args:
+        asset: Portable assembly containing free, fixed or hinged bodies.
+        directory: Root for generated visual files and hinge URDFs.
+        source_contact: Preserve supported source contact parameters.
+        backend: Explicit ``newton`` or ``default`` physics configuration.
+        file_visuals: Prepare OBJ/MTL appearance for rigid mesh-file loading.
+            Hinge visuals always use the generated URDF's mesh files.
+
+    Returns:
+        Source body names mapped to configurations ready for the simulator.
+
+    Raises:
+        ValueError: If names, geometry, attachments or contacts are unsupported.
+        NotImplementedError: If the backend cannot preserve source contacts.
+    """
+    from embodichain.lab.sim.cfg import VisualElementCfg
+    from embodichain.lab.sim.shapes import MeshCfg
+    from ._visual import _write_rigid_visual_meshes
+
+    names = [body.name for body in asset.bodies]
+    if len(set(names)) != len(names):
+        raise ValueError("Assembly body names must be unique.")
+    configs: dict[str, RigidObjectCfg | ArticulationCfg] = {
+        body.name: to_rigid_config(body, source_contact=source_contact, backend=backend)
+        for body in asset.bodies
+        if body.joint.kind != "hinge"
+    }
+    visual_paths = _write_rigid_visual_meshes(asset, directory) if file_visuals else {}
+    for name, path in visual_paths.items():
+        configs[name].visuals = [
+            VisualElementCfg(representation=MeshCfg(fpath=str(path)))
+        ]
+    if any(body.joint.kind == "hinge" for body in asset.bodies):
+        configs.update(
+            to_articulation_configs(
+                asset,
+                Path(directory) / asset.content_hash,
+                source_contact=source_contact,
+                backend=backend,
+            )
+        )
+    return configs
