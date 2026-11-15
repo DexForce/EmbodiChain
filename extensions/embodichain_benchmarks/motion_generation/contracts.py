@@ -409,6 +409,8 @@ class ExecutionObservation:
     gripper_contact_thresholds_m: Mapping[str, float] = field(default_factory=dict)
     grasp_contact_metadata: Mapping[str, object] = field(default_factory=dict)
     """Contact bindings, thresholds and unavailable-evidence reasons for replay."""
+    joint_tracking_metadata: Mapping[str, object] = field(default_factory=dict)
+    """Motion control parts and selected joints used for tracking RMSE."""
 
 
 class PhysicalStageEvaluator(Protocol):

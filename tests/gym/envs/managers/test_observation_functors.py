@@ -947,6 +947,43 @@ class TestComputeSemanticMask:
         # Background: 7 pixels with uid 0
         assert bg.sum().item() == 7
 
+    def test_companion_ids_belong_to_their_foreground_owner_per_environment(self):
+        from types import SimpleNamespace
+
+        from embodichain.lab.sim.objects import RigidObject
+
+        env, obs = self._make_env_and_obs(num_envs=2)
+        owner = object.__new__(RigidObject)
+        owner.uid = "fg_object"
+        owner.device = torch.device("cpu")
+        owner._entities = [object(), object()]
+        owner._all_indices = [0, 1]
+        owner.user_ids = torch.tensor([10, 20], dtype=torch.int32)
+        companion_ids = [[11, 21], [12, 22]]
+        owner._visual_binding = SimpleNamespace(
+            elements=[SimpleNamespace(gaussian=False)] * 2,
+            handles=[
+                tuple(SimpleNamespace(get_user_id=lambda uid=uid: uid) for uid in ids)
+                for ids in companion_ids
+            ],
+        )
+        env.sim.add_rigid_object(owner)
+        # Each row includes its physical owner, both companions, and another
+        # environment's companion, which must remain background.
+        obs["sensor"]["camera"]["mask"] = torch.tensor(
+            [[[10, 11, 12, 21]], [[20, 21, 22, 11]]], dtype=torch.int32
+        )
+        result = compute_semantic_mask(
+            env, obs, entity_cfg=MagicMock(uid="camera"), foreground_uids=[owner.uid]
+        )
+        expected = torch.tensor([[[True, True, True, False]]] * 2)
+        torch.testing.assert_close(result[..., 1], expected)
+        torch.testing.assert_close(result[..., 0], ~expected)
+        # Physics consumers still see one physical ID per environment.
+        torch.testing.assert_close(
+            owner.get_user_ids(), torch.tensor([10, 20], dtype=torch.int32)
+        )
+
     def test_background_is_negation_of_foreground_and_robot(self):
         """Test that background == ~(left | right | foreground)."""
         env, obs = self._make_env_and_obs(num_envs=2)

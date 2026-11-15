@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import os
+from email.parser import Parser
 from pathlib import Path
 import shutil
 import subprocess
@@ -26,6 +27,7 @@ import sys
 import zipfile
 
 import pytest
+from packaging.requirements import Requirement
 
 pytestmark = pytest.mark.no_sim
 
@@ -74,6 +76,15 @@ def installed_benchmark(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path,
     wheel = next((workspace / "dist").glob("*.whl"))
     with zipfile.ZipFile(wheel) as archive:
         entries = archive.namelist()
+        metadata_path = next(
+            name for name in entries if name.endswith(".dist-info/METADATA")
+        )
+        metadata = Parser().parsestr(archive.read(metadata_path).decode())
+        assert "assembly" not in metadata.get_all("Provides-Extra", [])
+        assert not any(
+            Requirement(value).name.lower() == "mujoco"
+            for value in metadata.get_all("Requires-Dist", [])
+        )
         assert "embodichain_benchmarks/__init__.py" in entries
         assert "embodichain_benchmarks/motion_generation/api.py" in entries
         assert "embodichain/cli/benchmark.py" in entries

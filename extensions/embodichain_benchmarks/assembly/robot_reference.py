@@ -261,7 +261,8 @@ def _prepare_rizon4s_urdf(root: Path, *, gripper_model: str) -> str:
         import mujoco
     except ImportError as exc:
         raise ImportError(
-            "Preparing the public Rizon assets requires the optional assembly extra; already prepared URDFs do not."
+            "Preparing the public Rizon assets requires MuJoCo from the SDK/Newton "
+            "or generator dependencies; already prepared URDFs do not."
         ) from exc
     output.mkdir(parents=True, exist_ok=True)
     robot = ET.Element("robot", name="rizon4s_robotiq2f85")

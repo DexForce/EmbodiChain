@@ -50,6 +50,28 @@ scheduled APG supplies the next complete horizon/objective scale. Legacy vector
 environment names remain aliases. This path currently rejects distributed mode
 and environment profiling; see [differentiable environments](../differentiable-env/differentiable-env.md).
 
+The [Sharpa in-hand example](../../../examples/learning/sharpa_inhand/README.md)
+trains cylinder rotation in native EmbodiChain physics. `reference.py` first
+trains the pinned upstream teacher, whose saved training config parameterizes
+the native run. `native_full.py` / `_full_native_task.py` collect eight-scale,
+domain-randomized transitions through `SimulationManager`, physics-owned
+parameter writes and exact raw-cache replay. `_apg_learner.py` keeps the
+upstream HORA teacher, world model and replay while routing actor updates
+through EmbodiChain APG. Native hand self-contact dimensionality and metal
+contact parameters still differ from upstream, so results are not strict
+upstream physics parity or an algorithm comparison.
+`native_full_evaluate.py` checks frozen source receipts before qualifying a
+newly trained checkpoint; reference/implementation transfer modes are
+diagnostics only. Qualify a freshly trained checkpoint with physical traces.
+The sibling [Wuji example](../../../examples/learning/wuji_inhand/README.md)
+adapts the same learner to the 20-DOF Wuji hand in run-owned source snapshots.
+Its native task requires a palm-up root pose (local palmar +X faces world +Z),
+verified initial opposing-pad contacts, authored actuator effort limits and
+fixed physical parameters across eight sizes. Differentiable FK gates rewards
+by pad geometry and forces, while native termination/evaluation checks actual
+opposing-pad participation. Neither route uses the simulator's FK-only
+`DifferentiableEnv` or differentiates contact physics.
+
 ## Rollout and Trainer Routing
 
 | Kind | Trainer / payload | Algorithms |

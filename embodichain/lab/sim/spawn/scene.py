@@ -303,7 +303,12 @@ class SpawnScene:
         self._bind_resource_materials(descriptor)
         self._initialize_facade_declaration(facade)
         binding = None
-        from ..cfg.visuals import _uses_descriptor_visuals
+        from ..cfg.visuals import (
+            _file_visual_binding_elements,
+            _uses_descriptor_visuals,
+        )
+
+        file_elements = _file_visual_binding_elements(getattr(facade, "cfg", None))
 
         if (
             facade is not None
@@ -311,13 +316,14 @@ class SpawnScene:
             and (
                 getattr(getattr(facade, "cfg", None), "visuals", None) is not None
                 or getattr(getattr(facade, "cfg", None), "link_visuals", {})
+                or file_elements is not None
             )
         ):
             from ._visuals import _VisualBinding
             from dexsim.scene import Scene
 
             if self._material_resources.renderer != "no-render":
-                if self.builder.backend != "dexsim":
+                if self.builder.backend != "dexsim" and file_elements is None:
                     raise NotImplementedError(
                         "Explicit visual composition currently requires the Default backend."
                     )

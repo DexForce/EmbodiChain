@@ -126,6 +126,25 @@ class CollisionShapeDesc:
     triangles: torch.Tensor | None = None
 
 
+def _apply_entity_visual_uv(cfg: RigidObjectCfg, entity: object) -> None:
+    """Apply UV projection only when this row's effective appearance requests it."""
+    shape = getattr(cfg, "visual_shape", None) or cfg.shape
+    visuals = cfg.visuals
+    if visuals is not None:
+        shape = visuals[0].representation if len(visuals) == 1 else None
+    if not isinstance(shape, MeshCfg) or not shape.compute_uv:
+        return
+    render_body = entity.get_render_body()
+    if render_body is None:
+        return
+    project_uv = getattr(render_body, "set_projective_uv", None)
+    if project_uv is None:
+        raise NotImplementedError(
+            "compute_uv requires a render body with set_projective_uv()."
+        )
+    project_uv(np.asarray(shape.project_direction, dtype=np.float32))
+
+
 def _build_cfg_init_pose(
     cfg: RigidObjectCfg, env_ids: Sequence[int] | torch.Tensor, device: torch.device
 ) -> torch.Tensor:
@@ -555,27 +574,10 @@ class RigidObject(BatchEntity):
         self._has_collision_visible_node = False
 
     def _apply_spawn_visual_uv(self) -> None:
-        """Apply configured projective UV mapping to spawned render bodies."""
-        shape = getattr(self.cfg, "visual_shape", None) or getattr(
-            self.cfg, "shape", None
-        )
-        visuals = getattr(self.cfg, "visuals", None)
-        if visuals is not None:
-            shape = visuals[0].representation if len(visuals) == 1 else None
-        if not isinstance(shape, MeshCfg) or not shape.compute_uv:
-            return
-
-        project_direction = np.asarray(shape.project_direction, dtype=np.float32)
-        for entity in self._entities:
-            render_body = entity.get_render_body()
-            if render_body is None:
-                continue
-            project_uv = getattr(render_body, "set_projective_uv", None)
-            if project_uv is None:
-                raise NotImplementedError(
-                    "compute_uv requires a render body with set_projective_uv()."
-                )
-            project_uv(project_direction)
+        """Apply projection using each row's complete replacement configuration."""
+        variants = self.cfg.env_variants or {}
+        for env_id, entity in enumerate(self._entities):
+            _apply_entity_visual_uv(variants.get(env_id, self.cfg), entity)
 
     def bind_spawn(
         self,
@@ -1988,10 +1990,14 @@ class RigidObject(BatchEntity):
             )
         binding = getattr(self, "_visual_binding", None)
         if binding is None:
-            from ..cfg.visuals import _uses_descriptor_visuals
+            from ..cfg.visuals import (
+                _file_visual_binding_elements,
+                _uses_descriptor_visuals,
+            )
 
             if self.cfg.semantic_shape is None and (
                 _uses_descriptor_visuals(self.cfg)
+                or _file_visual_binding_elements(self.cfg) is not None
                 or getattr(self.cfg, "env_variants", None)
             ):
                 from ..spawn._visuals import _semantic_mesh_arrays
@@ -2134,6 +2140,47 @@ class RigidObject(BatchEntity):
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
         return self.user_ids[local_env_ids]
+
+    def get_render_ids(
+        self, env_ids: Sequence[int] | torch.Tensor | None = None
+    ) -> torch.Tensor:
+        """Return mesh instance IDs belonging to this logical rigid object.
+
+        Camera segmentation can contain IDs from separate appearance actors.
+        These IDs supplement the owner ID here; :meth:`get_user_ids` continues
+        to return only physical body IDs. Gaussian splats do not expose mesh
+        instance-mask IDs and are excluded.
+
+        Args:
+            env_ids: Environment indices, or None for all environments.
+
+        Returns:
+            Int32 IDs of shape (B, K), with the physical owner in column zero.
+
+        Raises:
+            IndexError: If an environment index is invalid.
+            ValueError: If environment indices repeat.
+        """
+        from ..common import _validated_env_ids
+
+        ids = _validated_env_ids(env_ids, self.num_instances)
+        owner_ids = self.get_user_ids(ids).unsqueeze(1)
+        binding = getattr(self, "_visual_binding", None)
+        if binding is None:
+            return owner_ids
+        mesh_handles = [
+            handles
+            for element, handles in zip(binding.elements, binding.handles)
+            if not element.gaussian
+        ]
+        if not mesh_handles:
+            return owner_ids
+        companion_ids = torch.tensor(
+            [[handles[i].get_user_id() for handles in mesh_handles] for i in ids],
+            dtype=owner_ids.dtype,
+            device=self.device,
+        ).reshape(len(ids), len(mesh_handles))
+        return torch.cat((owner_ids, companion_ids), dim=1)
 
     def enable_collision(
         self, enable: torch.Tensor, env_ids: Sequence[int] | None = None
