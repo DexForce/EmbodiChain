@@ -73,3 +73,38 @@ Public API documentation coverage passed at **4913/4913** exports. Existing
 simulation/environment/media context guidance remains accurate: this example
 composes the established contracts, and its runnable/recording details are
 owned by the example README.
+
+## OptiX sensor denoising comparison
+
+The same native build and GPU were used at 960x540, Hybrid, `spp=1`, with
+only offscreen denoising changed. Both fresh seed-42 task recordings completed
+478 actions and 479 same-frame RGB/depth observations. Native logs confirmed
+the OptiX offscreen denoiser was active.
+
+| Measurement | Off | OptiX | Change |
+| --- | ---: | ---: | ---: |
+| Completed camera call median | 8.224 ms | 10.290 ms | +25.1% |
+| Completed camera call P95 | 9.733 ms | 11.137 ms | +14.4% |
+| Warm native device-memory delta | 2642 MiB | 2792 MiB | +150 MiB |
+| One full recording, excluding setup/audit | 19.59 s | 21.31 s | +8.8% |
+
+Camera timing used four fresh processes in off/optix/optix/off order, restoring
+the exact initial/lifted/terminal states from one trajectory. Each mode has
+360 timed captures after ten warmups per pose. The timed call includes state
+publication, native rendering and CPU RGB/depth readback; physics, writes and
+image inspection are excluded. Device memory includes native graphics/CUDA
+allocations and is sampled separately. End-to-end recording time is one sample
+per mode, so it includes ordinary host/filesystem variability.
+
+Matching-pose images show much less grain on the mesh robot and tabletop.
+The Library background ROI (x=650:850, y=140:230) was pixel-identical between
+modes at all three inspected poses. Fixed-clock rendering repeats the same
+sampling pattern, so temporal variance is not used as a noise-quality metric.
+The native denoiser's output and the raw output are both retained; MP4 previews
+are encoded from those actual sensor frames at the original 25 fps.
+
+The reproducible harness is
+`scripts/benchmark/rendering/library_denoising.py`; it records raw latency
+samples, native versions, source hashes, memory scope and matching-pose PNGs.
+The renderer/configuration and example-CLI regression suites passed 263 tests
+after exposing the `--denoising off|optix` example option.

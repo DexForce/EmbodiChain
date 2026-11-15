@@ -90,6 +90,7 @@ def _prepare(args: argparse.Namespace, directory: Path) -> tuple[object, dict]:
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, target)
     environment = load_config(resolved / "env.yaml")
+    environment["render_cfg"]["denoising"]["offscreen"] = args.denoising
     environment["simulation"]["usd_scene"]["source"]["file_path"] = str(
         asset_root / preset["entry"]
     )
@@ -355,6 +356,12 @@ def main() -> None:
     )
     parser.add_argument("--prepare-only", action="store_true")
     parser.add_argument("--viewer", action="store_true")
+    parser.add_argument(
+        "--denoising",
+        choices=("off", "optix"),
+        default="off",
+        help="Native denoising for the managed sensor; spp remains 1.",
+    )
     args = parser.parse_args()
     if args.episodes < 1:
         parser.error("--episodes must be positive")

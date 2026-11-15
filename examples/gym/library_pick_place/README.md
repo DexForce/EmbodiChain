@@ -22,10 +22,13 @@ From the repository root:
 PYTHONPATH=. python examples/gym/library_pick_place/run.py --prepare-only
 PYTHONPATH=. python examples/gym/library_pick_place/run.py --episodes 1 --seed 42
 PYTHONPATH=. python examples/gym/library_pick_place/run.py --episodes 10 --seed 42
+PYTHONPATH=. python examples/gym/library_pick_place/run.py --denoising optix
 ```
 
 Or use `embodichain run-example gym/library_pick_place/run`. The default is
 headless; `--viewer` opens a native window while the Camera continues recording.
+`--denoising optix` enables native sensor denoising with the same single sample
+per pixel; the default `off` retains the original qualification settings.
 Headless mode defaults SDL to its dummy driver. If the host requires an XDG
 runtime directory, create a private directory and set `XDG_RUNTIME_DIR`, as in
 the project's native CI configuration. `--output` selects the output **parent**;
@@ -139,3 +142,21 @@ remove `episode.json`; verification must return nonzero. Production regressions
 cover Gaussian subtree selection, normal/safe-stop observers and exact
 float32/invalid-depth media ownership. The example exports raw recordings and
 trajectories; LeRobot conversion is outside this example.
+
+## Compare sensor denoising
+
+Use one saved trajectory to compare completed camera calls at exactly the same
+initial, lifted and terminal states, with disk writing outside the timed scope:
+
+```bash
+PYTHONPATH=. python scripts/benchmark/rendering/library_denoising.py \
+  --gym-config /path/to/run_uuid/resolved/task.dual_ur5.yaml \
+  --trajectory /path/to/run_uuid/episodes/episode_uuid/trajectory.pt \
+  --output outputs/library_pick_place/denoising_benchmark
+```
+
+The harness runs four fresh processes in off/optix/optix/off order, saves
+matching-pose PNGs and reports raw timings plus native memory. When selecting a
+GPU through `CUDA_VISIBLE_DEVICES`, set `--nvml-device` to its physical index.
+The [qualification](QUALIFICATION.md#optix-sensor-denoising-comparison) records
+the measured 960x540, `spp=1` tradeoff and the separate full-recording comparison.
