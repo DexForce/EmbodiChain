@@ -1537,6 +1537,100 @@ def test_cartesian_transit_rejects_object_held_through_manipulator_alias() -> No
     assert "manipulator" in error.value.diagnostic.message
 
 
+def test_cartesian_transit_ignores_auxiliary_endpoints_of_the_holding_resource() -> (
+    None
+):
+    """A hold through one arm leaves transit with the other, disjoint arm free."""
+    from embodichain.lab.task_program.integrations._configured_services import (
+        _MoveEndEffectorLowerer,
+    )
+
+    call_id = "simulation.move_end_effector"
+    registry, _ = _scene_registry()
+    templates = _skill_option_templates()
+    templates[call_id] = MoveEndEffectorOptions()
+
+    def arm(side: str) -> dict[str, ControlPartEndpoint]:
+        return {
+            "motion": ControlPartEndpoint(
+                control_part=f"{side}_arm", capabilities=_MOTION_CAPABILITIES
+            ),
+            "grasp": ControlPartEndpoint(
+                control_part=f"{side}_hand",
+                capabilities=frozenset({GRASP_CAPABILITY}),
+            ),
+        }
+
+    profile = RobotSkillProfile(
+        profile_id="bimanual_robot",
+        resources={
+            "left": RobotResource("left", endpoints=arm("left")),
+            "right": RobotResource("right", endpoints=arm("right")),
+            "bimanual": RobotResource(
+                "bimanual",
+                endpoints={
+                    **arm("right"),
+                    "support": ControlPartEndpoint(
+                        control_part="left_arm", capabilities=_MOTION_CAPABILITIES
+                    ),
+                },
+                members=("right", "left"),
+            ),
+        },
+        command_profiles={
+            f"{side}_hand": ControlPartCommandProfile.joint_positions(
+                open=torch.tensor([0.0]), grasp=torch.tensor([1.0])
+            )
+            for side in ("left", "right")
+        },
+        defaults={
+            "pick_up": ResourceBinding({"primary": "bimanual"}),
+            "place": ResourceBinding({"primary": "bimanual"}),
+            "move_end_effector": ResourceBinding({"primary": "left"}),
+        },
+        presets={"safe": _preset("safe", skill_option_templates=templates)},
+        default_preset="safe",
+    )
+    manifest = SemanticIntegrationManifest(
+        scene=SceneManifest.from_registry(registry),
+        robot_profile=profile,
+        call_catalog=builtin_semantic_call_catalog().with_descriptor(
+            SemanticCallDescriptor(
+                call_id=call_id,
+                spec_type=RegisteredSemanticCall,
+                target_descriptor=MoveEndEffector.descriptor(),
+            )
+        ),
+    )
+    bound = manifest.bind(registry, _engine(profile))
+    route = (("outside", (tuple(torch.eye(4).flatten().tolist()),)),)
+    compiler = SemanticCallCompiler(
+        bound, registered_lowerers=(_MoveEndEffectorLowerer(route),)
+    )
+    workflow = compiler.analyze(
+        (
+            Pick(object=SceneObjectRef("cube")),
+            RegisteredSemanticCall(call_id=call_id, arguments={"target": "outside"}),
+        )
+    )
+    hold_key = (
+        bound.robot_profile.resources["bimanual"].endpoints["motion"].task_state_key
+    )
+    held = _held_context(
+        registry,
+        ObjectSemantics(
+            affordance=AntipodalAffordance(), geometry={}, entity_id="cube"
+        ),
+        torch.eye(4).repeat(2, 1, 1),
+        env_mask=torch.tensor([True, True]),
+        task_state_key=hold_key,
+        robot_dof=4,
+    )
+
+    lowered = compiler.ground(workflow, 1, held)
+    assert lowered.invocation.goal.xpos.shape == (2, 1, 4, 4)
+
+
 def test_registered_monitor_without_effect_grounder_fails_during_analysis() -> None:
     registry, _ = _scene_registry()
     profile = _profile(

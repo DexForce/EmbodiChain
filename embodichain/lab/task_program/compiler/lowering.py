@@ -1039,6 +1039,10 @@ class _TypedMoveHeldObjectLowerer(RegisteredSemanticLowerer):
         return (SemanticObjectTarget(pose=call.at),)
 
 
+_HOLD_ENDPOINT_IDS = ("motion", "grasp")
+"""Resource endpoints that carry or address a held-object relation."""
+
+
 class SemanticCallCompiler:
     """Analyze semantic workflows and JIT-lower exactly one call at a time."""
 
@@ -2363,12 +2367,25 @@ class SemanticCallCompiler:
             task_state_key = endpoint.task_state_key
             assert isinstance(task_state_key, str)
             # Aliases of the same physical manipulator keep separate state keys.
-            state_keys = {task_state_key} | {
-                other.task_state_key
-                for candidate in self._integration.robot_profile.resources.values()
-                for other in candidate.endpoints.values()
-                if any(own.conflicts_with(other) for own in resource.endpoints.values())
-            }
+            # Compare only the endpoints that move or hold; holds are keyed by
+            # motion endpoints, and auxiliary endpoints must not join them.
+            own = [
+                resource.endpoints[endpoint_id]
+                for endpoint_id in _HOLD_ENDPOINT_IDS
+                if endpoint_id in resource.endpoints
+            ]
+            state_keys = {task_state_key}
+            for candidate in self._integration.robot_profile.resources.values():
+                holder = candidate.endpoints.get("motion")
+                if holder is None:
+                    continue
+                if any(
+                    mine.conflicts_with(candidate.endpoints[endpoint_id])
+                    for endpoint_id in _HOLD_ENDPOINT_IDS
+                    if endpoint_id in candidate.endpoints
+                    for mine in own
+                ):
+                    state_keys.add(holder.task_state_key)
             occupied = torch.zeros_like(eligible)
             holders = []
             for key in sorted(state_keys):
