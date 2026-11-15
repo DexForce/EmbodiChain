@@ -45,7 +45,77 @@ def main(argv: Sequence[str] | None = None) -> int:
     command.add_argument("--stage", choices=("all", "export"), default="all")
     command = commands.add_parser("inspect")
     command.add_argument("--output", required=True)
+    command = commands.add_parser(
+        "preview", help="Replay confirmed results with native ghost rendering"
+    )
+    command.add_argument(
+        "--output",
+        action="append",
+        required=True,
+        help="Result directory with job.json; repeat for spatial groups",
+    )
+    command.add_argument(
+        "--reference",
+        help="Optional result directory containing exactly one reference episode",
+    )
+    command.add_argument(
+        "--robot-asset", help="Matching URDF override if recorded asset paths moved"
+    )
+    command.add_argument(
+        "--eef-link",
+        help="URDF link used for measured FK paths; inferred from the solver when unique",
+    )
+    command.add_argument("--gpu", type=int, default=0)
+    command.add_argument(
+        "--port", type=int, default=8769, help="Loopback port; 0 selects a free port"
+    )
+    command.add_argument("--max-episodes", type=int, default=32)
+    command.add_argument(
+        "--duration",
+        type=float,
+        default=0,
+        help="Exit after these seconds; 0 waits for Ctrl+C",
+    )
+    command.add_argument(
+        "--open",
+        action="store_true",
+        help="Open a browser after the first complete render",
+    )
     args = parser.parse_args(argv)
+    if args.operation == "preview":
+        import math
+        from pathlib import Path
+
+        if (
+            not 0 <= args.port <= 65535
+            or args.gpu < 0
+            or not math.isfinite(args.duration)
+            or args.duration < 0
+        ):
+            parser.error("invalid preview port, GPU or duration")
+        from embodichain.lab.expansion._preview_data import load_preview
+        from embodichain.lab.expansion._preview_server import serve_preview
+
+        try:
+            data = load_preview(
+                [Path(p) for p in args.output],
+                Path(args.reference) if args.reference else None,
+                robot_asset=Path(args.robot_asset) if args.robot_asset else None,
+                eef_link=args.eef_link,
+                max_episodes=args.max_episodes,
+            )
+            serve_preview(
+                data,
+                port=args.port,
+                gpu=args.gpu,
+                open_browser=args.open,
+                duration=args.duration,
+            )
+        except KeyboardInterrupt:
+            return 0
+        except (ValueError, OSError) as exc:
+            parser.error(str(exc))
+        return 0
     from embodichain.lab.expansion.configured import (
         load_expansion_job,
     )

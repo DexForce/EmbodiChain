@@ -93,6 +93,16 @@ time; physics stays disabled and render updates do not mutate saved evidence.
 cross-group frame through the public marker layer. Task assets and any collection
 process orchestration remain outside the replay core.
 
+`embodichain expansion preview` reads confirmed job outputs through `_preview_data.py`,
+then replays full measured states using `_preview_render.py` and a loopback-only
+`_preview_server.py`. Inputs retain their original evidence; no collection or
+physics stepping occurs. The first version accepts one URDF robot and Cube rigid
+objects with fixed layouts, and rejects unsupported geometry. Space filters group
+input directories; missing motion annotations remain explicit. HTTP publishes a
+single immutable image/state snapshot; WebRTC is follow-up work. FK and episode
+budgets bound preload, controls are queued for the render owner, and native
+resources/ports close on exit. See the example's `ghost-preview.md` for usage.
+
 `TaskProgramDemoBridge.program_id` and `env_ids` expose binding identity without
 runtime traversal. `EmbodiedEnv.task_program_bridge_scope()` restores the borrowed
 bridge even after failure. `Real2SimTabletopSource` and explicit

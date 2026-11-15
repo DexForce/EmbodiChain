@@ -26,11 +26,17 @@ capabilities remain explicit. `--reuse` rebuilds the offline page without a Worl
 
 ## Native ghost preview
 
-See [the native ghost-preview notes](ghost-preview.md) for the existing SDK
-window comparison, the separately validated eight-result browser prototype,
-linked spatial/affordance/trajectory filters, and the native WebRTC follow-up.
-The prototype uses native offscreen rendering with HTTP JPEG transport; it is
-not a WebRTC entry point or a released general-purpose viewer.
+Replay confirmed results directly, without recollection or physics stepping:
+
+```bash
+embodichain expansion preview --output /path/to/job-output --gpu 0 --open
+```
+
+Repeat `--output` for spatial groups and optionally add `--reference` with one
+confirmed reference episode. The [native preview guide](ghost-preview.md) covers
+linked spatial/affordance/trajectory filters, asset recovery, supported scene
+geometry, replay semantics and the WebRTC TODO. Rendering is native; browser
+transport currently uses HTTP JPEG, not WebRTC.
 
 ## Run a configured job
 
