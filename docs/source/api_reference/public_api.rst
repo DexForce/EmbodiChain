@@ -3507,6 +3507,7 @@ embodichain.lab.sim.motion.planners.curobo.curobo_planner
 .. autosummary::
 
    CuroboAutoGenCfg
+   CuroboLinearConstraintCfg
    CuroboPlanOptions
    CuroboPlanner
    CuroboPlannerCfg

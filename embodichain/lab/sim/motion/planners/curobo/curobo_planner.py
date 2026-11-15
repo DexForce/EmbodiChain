@@ -31,6 +31,7 @@ from __future__ import annotations
 import hashlib
 import importlib
 import logging
+import math
 import os
 import threading
 import time
@@ -39,7 +40,7 @@ from contextlib import contextmanager, nullcontext
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import torch
 
@@ -76,6 +77,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "CuroboAutoGenCfg",
+    "CuroboLinearConstraintCfg",
     "CuroboPlanOptions",
     "CuroboPlanner",
     "CuroboPlannerCfg",
@@ -518,6 +520,61 @@ class CuroboPlannerCfg(BasePlannerCfg):
 
 
 @configclass
+class CuroboLinearConstraintCfg:
+    """Constrain one Cartesian segment to a line through its target TCP.
+
+    The complete segment, including its start, must remain within the position
+    tolerance of the line and the orientation tolerance of the target. These
+    are sampled checks, not continuous collision or monotonic-motion guarantees.
+
+    Args:
+        direction: Nonzero line direction; its magnitude and sign are irrelevant.
+        frame: ``goal`` expresses direction in the target TCP frame; ``base``
+            uses the cuRobo planning base frame, independently in each environment.
+        weight: Positive nonterminal pose-cost scale used by the optimizer.
+        position_tolerance: Maximum perpendicular TCP distance in meters.
+        orientation_tolerance: Maximum target-relative rotation angle in radians.
+    """
+
+    direction: tuple[float, float, float] = (0.0, 0.0, 1.0)
+    frame: Literal["goal", "base"] = "goal"
+    weight: float = 1.0
+    position_tolerance: float = 0.005
+    orientation_tolerance: float = 0.05
+
+    def __post_init__(self) -> None:
+        """Reject undefined directions and invalid weights or tolerances."""
+        if (
+            not isinstance(self.direction, (tuple, list))
+            or len(self.direction) != 3
+            or any(
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                for value in self.direction
+            )
+            or math.hypot(*self.direction) == 0.0
+            or not math.isfinite(math.hypot(*self.direction))
+        ):
+            raise ValueError(
+                "direction must contain three finite values with nonzero norm."
+            )
+        if self.frame not in ("goal", "base"):
+            raise ValueError("frame must be 'goal' or 'base'.")
+        for name in ("weight", "position_tolerance", "orientation_tolerance"):
+            value = getattr(self, name)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or value <= 0.0
+            ):
+                raise ValueError(f"{name} must be finite and positive.")
+        if self.orientation_tolerance > math.pi:
+            raise ValueError("orientation_tolerance must not exceed pi.")
+
+
+@configclass
 class CuroboPlanOptions(PlanOptions):
     """Per-plan options for :class:`CuroboPlanner`.
 
@@ -551,6 +608,16 @@ class CuroboPlanOptions(PlanOptions):
     change terminal costs and convergence tests only; they impose no additional
     path constraint. Position-only targets require the cuRobo tool and TCP
     origins to coincide.
+    """
+
+    path_constraints: list[CuroboLinearConstraintCfg | None] | None = None
+    """Optional constraint for each segment arriving at the corresponding target.
+
+    The list must match the target count. ``None`` entries retain unconstrained
+    paths; constrained entries require full-pose ``EEF_MOVE`` targets and
+    ``CuroboPlannerCfg.preserve_plan_samples=True``. The optimizer's line costs
+    are followed by independent TCP checks on every returned sample. Failure
+    in one environment retains the ordinary failed-row start hold.
     """
 
 
@@ -1294,6 +1361,7 @@ class CuroboPlanner(BasePlanner):
                 success=torch.zeros(0, dtype=torch.bool, device=self.device),
                 positions=None,
             )
+        self._validate_path_constraints(target_states, options)
         # MotionGenOptions carries backend-neutral per-invocation limits. Keep
         # the planner-owned baseline so a later call without overrides does not
         # inherit a previous invocation's stricter budget. The backend cache key
@@ -2437,6 +2505,165 @@ class CuroboPlanner(BasePlanner):
     # Segment planning
     # ------------------------------------------------------------------
 
+    def _validate_path_constraints(
+        self, target_states: list[PlanState], options: CuroboPlanOptions
+    ) -> None:
+        """Reject unsupported constraints before constructing native backends."""
+        constraints = options.path_constraints
+        if constraints is None:
+            return
+        if len(constraints) != len(target_states):
+            raise ValueError("path_constraints must match the target count.")
+        if options.waypoint_modalities is not None and len(
+            options.waypoint_modalities
+        ) != len(target_states):
+            raise ValueError("waypoint_modalities must match the target count.")
+        for index, (target, constraint) in enumerate(zip(target_states, constraints)):
+            if constraint is None:
+                continue
+            if not isinstance(constraint, CuroboLinearConstraintCfg):
+                raise TypeError(
+                    "path_constraints entries must be linear configs or None."
+                )
+            constraint.__post_init__()
+            if target.move_type != MoveType.EEF_MOVE or (
+                options.waypoint_modalities is not None
+                and options.waypoint_modalities[index] != "pose"
+            ):
+                raise ValueError(
+                    "Linear path constraints require full-pose EEF_MOVE targets."
+                )
+            if not self.cfg.preserve_plan_samples:
+                raise ValueError(
+                    "Linear path constraints require preserve_plan_samples=True."
+                )
+
+    @contextmanager
+    def _linear_constraint_scope(
+        self, backend: "_CuroboBackend", constraint: CuroboLinearConstraintCfg | None
+    ) -> Iterator[None]:
+        """Apply a segment-local native cost and restore it even on failure."""
+        if constraint is None:
+            yield
+            return
+        key = (
+            tuple(constraint.direction),
+            constraint.frame,
+            constraint.weight,
+            constraint.position_tolerance,
+            constraint.orientation_tolerance,
+        )
+        cached = getattr(backend, "linear_criteria_cache", None)
+        if cached is None or cached[0] != key:
+            cached = (key, *self._make_linear_criteria(backend, constraint))
+            # Retain only the most recent pair, bounding storage independently
+            # of the number of distinct requests. Native updates copy values.
+            backend.linear_criteria_cache = cached
+        _, criteria, baseline = cached
+        try:
+            backend.planner.update_tool_pose_criteria({backend.tool_frame: criteria})
+            yield
+        finally:
+            backend.planner.update_tool_pose_criteria({backend.tool_frame: baseline})
+
+    def _make_linear_criteria(
+        self, backend: "_CuroboBackend", constraint: CuroboLinearConstraintCfg
+    ) -> tuple[Any, Any]:
+        """Build native path and reset values once per distinct constraint."""
+        device_cfg = self._bindings.DeviceCfg(device=str(self._curobo_device))
+        direction = torch.tensor(
+            [
+                value / math.hypot(*constraint.direction)
+                for value in constraint.direction
+            ],
+            device=self._curobo_device,
+            dtype=torch.float32,
+        )
+        tool_to_tcp = backend.profile.tool_frame_to_tcp
+        if constraint.frame == "goal" and tool_to_tcp is not None:
+            direction = (
+                torch.as_tensor(
+                    tool_to_tcp, device=self._curobo_device, dtype=direction.dtype
+                )[:3, :3]
+                @ direction
+            )
+        criteria = self._bindings.ToolPoseCriteria.linear_motion(
+            direction=direction,
+            non_terminal_scale=constraint.weight,
+            project_distance_to_goal=constraint.frame == "goal",
+            device_cfg=device_cfg,
+        )
+        criteria.path_tolerance.copy_(
+            criteria.path_tolerance.new_tensor(
+                [constraint.position_tolerance, constraint.orientation_tolerance]
+            )
+        )
+        criteria.enforce_path_tolerance.fill_(True)
+        baseline = self._bindings.ToolPoseCriteria(
+            terminal_pose_axes_weight_factor=[1.0] * 6,
+            non_terminal_pose_axes_weight_factor=[0.0] * 6,
+            device_cfg=device_cfg,
+        )
+        return criteria, baseline
+
+    def _linear_path_validity(
+        self,
+        positions: torch.Tensor,
+        target_xpos: torch.Tensor,
+        backend: "_CuroboBackend",
+        constraint: CuroboLinearConstraintCfg,
+        sim_base_pose_inv: torch.Tensor | None,
+    ) -> torch.Tensor:
+        """Check actual TCP geometry in bounded device-resident FK batches."""
+        batch, horizon, dof = positions.shape
+        target_xpos = target_xpos.to(device=self._curobo_device, dtype=torch.float32)
+        goal = self._sim_world_to_curobo_base_pose(
+            target_xpos, backend, sim_base_pose_inv
+        )
+        direction = goal.new_tensor(
+            [
+                value / math.hypot(*constraint.direction)
+                for value in constraint.direction
+            ]
+        )
+        direction = direction.expand(batch, -1)
+        if constraint.frame == "goal":
+            direction = (goal[:, :3, :3] @ direction[..., None]).squeeze(-1)
+        tool_to_tcp = backend.profile.tool_frame_to_tcp
+        offset = None if tool_to_tcp is None else goal.new_tensor(tool_to_tcp)
+        validity = []
+        # Bound native FK storage independently of the trajectory batch/horizon.
+        chunk_size = 1024
+        for start in range(0, batch * horizon, chunk_size):
+            joints = positions.reshape(-1, dof)[start : start + chunk_size]
+            state = self._to_curobo_joint_state(joints, backend)
+            tools = backend.planner.compute_kinematics(state).tool_poses
+            tcp = tools.get_link_pose(backend.tool_frame).get_matrix()
+            if offset is not None:
+                tcp = tcp @ offset
+            rows = (
+                torch.arange(start, start + joints.shape[0], device=goal.device)
+                // horizon
+            )
+            delta = tcp[:, :3, 3] - goal[rows, :3, 3]
+            axis = direction[rows]
+            lateral = delta - (delta * axis).sum(dim=-1, keepdim=True) * axis
+            relative = goal[rows, :3, :3].transpose(-1, -2) @ tcp[:, :3, :3]
+            cosine = (relative.diagonal(dim1=-2, dim2=-1).sum(-1) - 1) / 2
+            sine = torch.linalg.matrix_norm(
+                relative - relative.transpose(-1, -2)
+            ) / math.sqrt(8)
+            angle = torch.atan2(sine, cosine)
+            validity.append(
+                torch.isfinite(tcp).all(dim=(-2, -1))
+                & (
+                    torch.linalg.vector_norm(lateral, dim=-1)
+                    <= constraint.position_tolerance
+                )
+                & (angle <= constraint.orientation_tolerance)
+            )
+        return torch.cat(validity).reshape(batch, horizon).all(dim=-1)
+
     def _plan_segments(
         self,
         target_states: list[PlanState],
@@ -2485,6 +2712,11 @@ class CuroboPlanner(BasePlanner):
         for seg_idx, target in enumerate(target_states):
             self._validate_segment_batch(target, B, seg_idx)
             backend = backends[target.move_type]
+            constraint = (
+                None
+                if options.path_constraints is None
+                else options.path_constraints[seg_idx]
+            )
             current_state = self._to_curobo_joint_state(current, backend)
             if target.move_type == MoveType.EEF_MOVE:
                 if target.xpos is None:
@@ -2510,7 +2742,11 @@ class CuroboPlanner(BasePlanner):
                 goal = self._to_curobo_pose_goal(xpos, backend, sim_base_pose_inv)
                 start_time = time.time()
                 capture_mode = self._planning_capture_scope(backend)
-                with capture_mode, torch.cuda.device(self._curobo_device):
+                with (
+                    capture_mode,
+                    torch.cuda.device(self._curobo_device),
+                    self._linear_constraint_scope(backend, constraint),
+                ):
                     v2_result = backend.planner.plan_pose(
                         goal,
                         current_state,
@@ -2571,6 +2807,16 @@ class CuroboPlanner(BasePlanner):
                     seg_velocities,
                     seg_accelerations,
                 ) = self._extract_segment(v2_result, backend)
+                if constraint is not None:
+                    assert target.xpos is not None
+                    with torch.cuda.device(self._curobo_device):
+                        seg_success &= self._linear_path_validity(
+                            seg_positions,
+                            target.xpos,
+                            backend,
+                            constraint,
+                            sim_base_pose_inv,
+                        )
             seg_success = seg_success.to(self._curobo_device) & alive
             if v2_result is not None and self.cfg.max_planning_time is not None:
                 total_time = self._extract_total_time(v2_result, B)
@@ -3364,6 +3610,7 @@ class _CuroboBackend:
     gravity: tuple[float, float, float] | None = None
     motion_limits_key: str | None = None
     collision_checker: "Any | None" = None
+    linear_criteria_cache: tuple[tuple[object, ...], Any, Any] | None = None
     # Lazily-built device-tensor caches for the shared post-processing. The
     # cuRobo joint order and the profile's fixed transforms are stable for a
     # planner's life, so these are built once on first use and reused across

@@ -24,12 +24,12 @@ extra from the maximum CUDA version displayed by `nvidia-smi`.
 
 ~~~bash
 # Recommended for the normal EmbodiChain environment, where PyTorch is present.
-uv pip install "nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@v0.8.0"
-uv pip install "nvidia-curobo[cu13] @ git+https://github.com/NVlabs/curobo.git@v0.8.0"
+uv pip install "nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@v0.9.0"
+uv pip install "nvidia-curobo[cu13] @ git+https://github.com/NVlabs/curobo.git@v0.9.0"
 
 # For a fresh environment that also needs PyTorch.
-uv pip install "nvidia-curobo[cu12-torch] @ git+https://github.com/NVlabs/curobo.git@v0.8.0"
-uv pip install "nvidia-curobo[cu13-torch] @ git+https://github.com/NVlabs/curobo.git@v0.8.0"
+uv pip install "nvidia-curobo[cu12-torch] @ git+https://github.com/NVlabs/curobo.git@v0.9.0"
+uv pip install "nvidia-curobo[cu13-torch] @ git+https://github.com/NVlabs/curobo.git@v0.9.0"
 
 python -c "import curobo; print(curobo.__version__)"
 pytest --pyargs curobo.tests
@@ -37,9 +37,9 @@ pytest --pyargs curobo.tests
 
 These commands follow [NVIDIA's official cuRobo installation
 guide](https://nvlabs.github.io/curobo/latest/getting-started/installation.html)
-and pin the source dependency to the cuRobo V2 `v0.8.0` release. Although
-cuRobo supports Python 3.10--3.13, use EmbodiChain's supported Python 3.10,
-3.11, or 3.12 environment on Linux with a supported NVIDIA GPU and driver. The
+and pin the source dependency to cuRobo V2-Fast `v0.9.0`. The adapter requires
+V2-Fast 0.9 or later. Use a Python environment supported by both EmbodiChain
+and DexSim on Linux with a supported NVIDIA GPU and driver. The
 non-`torch` variants are preferred for EmbodiChain because the simulation
 environment normally already provides PyTorch; the `-torch` variants delegate
 the PyTorch version requirement to cuRobo. Keep cuRobo in the same Python
@@ -126,6 +126,299 @@ result = motion_generator.generate(
 )
 assert result.success.all()
 ~~~
+
+(curobo-linear-grasp-approaches)=
+## Line-constrained grasp approaches
+
+`CuroboPlanOptions.path_constraints` adds optional straight-line and
+target-orientation requirements to individual Cartesian segments. The adapter
+installs native cuRobo path costs, enables native path-tolerance checks, and
+then verifies the returned samples using the actual TCP geometry. Defaults
+remain unchanged when no path constraints are supplied.
+
+```mermaid
+flowchart LR
+    A["Targets and segment constraints"] --> B["Frame conversion"]
+    B --> C["Constrained cuRobo solve"]
+    C --> D["Restore native criteria"]
+    D --> E["Validate actual TCP samples"]
+    E --> F["Per-environment result"]
+```
+
+### Configure the approach segment
+
+Each constraint belongs to the segment arriving at the target at the same
+list index. For targets `[pre_grasp, grasp, lift]`, the selection
+`[None, approach, None]` constrains only `pre_grasp -> grasp`. The whole selected
+segment, including its start, must satisfy the tolerances. Route to a suitable
+pre-grasp pose first when the initial robot pose lies outside the approach
+line or has a different orientation.
+
+The following example assumes a registered `robot`, a scene collision-world
+configuration `world_cfg`, and a target TCP transform `grasp_pose` with shape
+`(B, 4, 4)` in the simulator world/arena frame:
+
+~~~python
+import math
+
+from embodichain.lab.sim.motion.motion_generator import (
+    MotionGenCfg,
+    MotionGenOptions,
+    MotionGenerator,
+)
+from embodichain.lab.sim.motion.planners import (
+    CuroboLinearConstraintCfg,
+    CuroboPlanOptions,
+    CuroboPlannerCfg,
+    PlanState,
+)
+
+generator = MotionGenerator(
+    MotionGenCfg(
+        planner_cfg=CuroboPlannerCfg(
+            robot_uid=robot.uid,
+            world=world_cfg,
+            preserve_plan_samples=True,
+        )
+    )
+)
+
+pre_grasp = grasp_pose.clone()
+pre_grasp[:, :3, 3] -= grasp_pose[:, :3, 2] * 0.15
+lift = grasp_pose.clone()
+lift[:, 2, 3] += 0.16
+
+approach = CuroboLinearConstraintCfg(
+    direction=(0.0, 0.0, 1.0),
+    frame="goal",
+    weight=1.0,
+    position_tolerance=0.005,
+    orientation_tolerance=math.radians(3.0),
+)
+result = generator.generate(
+    [PlanState.from_xpos(pose) for pose in (pre_grasp, grasp_pose, lift)],
+    MotionGenOptions(
+        start_qpos=robot.get_qpos(name="arm"),
+        control_part="arm",
+        plan_opts=CuroboPlanOptions(path_constraints=[None, approach, None]),
+    ),
+)
+~~~
+
+This is an arm-motion planning example. Atomic Skills own the hand-closing,
+settling, effect verification, and execution boundaries between grasp arrival
+and lift; direct consumers must schedule those actions separately.
+
+| Setting | Meaning | Default |
+| --- | --- | --- |
+| `direction` | Nonzero line direction; normalized before use. | `(0.0, 0.0, 1.0)` |
+| `frame` | `goal`: target TCP axes; `base`: native planning-base axes. | `"goal"` |
+| `weight` | Positive native nonterminal residual scale. | `1.0` |
+| `position_tolerance` | Maximum perpendicular TCP distance, in meters. | `0.005` |
+| `orientation_tolerance` | Maximum target-relative TCP rotation, in radians. | `0.05`, approximately 2.86 degrees |
+
+The constraint list must match the target count. Constrained entries require
+full-pose `EEF_MOVE` targets; joint targets and position-only or
+orientation-only modalities are rejected. Directions must be finite and
+nonzero, weights and tolerances must be finite and positive, and orientation
+tolerance cannot exceed pi. Approach distance belongs to pre-grasp waypoint
+construction, independently of this line configuration.
+
+### Line geometry and orientation
+
+Let the target TCP pose in the planning base be `(p_g, R_g)`, and let forward
+kinematics map joint positions `q` to TCP position `p(q)` and rotation `R(q)`.
+Normalize the configured direction to a unit vector `d` in the same frame.
+The target line and perpendicular-position residual are
+
+:::{math}
+\mathcal{L}=\{p_g+s d\mid s\in\mathbb{R}\},\qquad
+P=I-dd^{\mathsf T},\qquad
+e_\perp(q)=P\bigl(p(q)-p_g\bigr).
+:::
+
+`P` removes displacement along the line and retains transverse displacement.
+For a planning-base Z direction, the perpendicular distance is simply
+`sqrt((x - x_g)**2 + (y - y_g)**2)`; axial displacement remains available for
+approach progress. The endpoint pose goal still determines where the motion
+must finish.
+
+The acceptance condition is `norm(e_perp) <= position_tolerance`: a 5 mm
+tolerance describes a tube of radius 5 mm around the line. This is an infinite
+line, so reversing `direction` leaves the geometry unchanged. It does not
+enforce monotonic progress, a signed approach, or confinement between the two
+endpoints.
+
+Orientation is constrained relative to the complete target rotation, including
+rotation around the approach axis. With `R_e = R_g.T @ R(q)`, the adapter uses
+the rotation angle
+
+:::{math}
+\theta=\operatorname{atan2}\left(
+    \frac{\|R_e-R_e^{\mathsf T}\|_F}{\sqrt{8}},
+    \frac{\operatorname{tr}(R_e)-1}{2}
+\right)
+\leq\varepsilon_R.
+:::
+
+For valid rotation matrices, this gives the relative rotation angle. The
+`atan2` expression avoids the loss of small-angle resolution that can occur
+when using only `acos` of the trace in float32.
+
+### Native optimization costs and tolerance checks
+
+The adapter calls cuRobo V2-Fast's `ToolPoseCriteria.linear_motion()` with the
+configured direction and `non_terminal_scale=weight`. Intermediate position
+residuals use the line projector `P`; intermediate orientation residuals retain
+all rotation axes. Terminal position and orientation projectors remain full
+identity matrices. Existing goal, collision, dynamic-limit, and smoothness
+terms continue to participate in the solve.
+
+For cuRobo 0.9, ignoring tolerance deadbands, these path contributions can be
+written as
+
+:::{math}
+C_{\mathrm{path}}=\sum_k\left[
+    \frac{c_p}{2}\|w e_{\perp,k}\|^2
+    +c_R\|w r_{R,k}\|^2
+\right].
+:::
+
+Here `c_p` and `c_R` are native cost weights, and `w` is this adapter's
+`weight`. The native rotation residual is twice the vector part of a
+normalized, shortest-arc error quaternion: `r_R = 2 * vec(q_error)`. Its norm
+is `2 * sin(theta / 2)`, which approximates the rotation angle near zero.
+EmbodiChain's final check uses the rotation angle itself.
+
+The position cost propagates through the robot's position Jacobian:
+
+:::{math}
+\nabla_q C_p=c_p w^2 J_{\mathrm{xyz}}(q)^{\mathsf T}
+P\bigl(p(q)-p_g\bigr).
+:::
+
+The optimizer can therefore adjust joint trajectories and redundant joint
+postures while discouraging TCP displacement away from the line. This does
+not turn the optimization into an exact Cartesian interpolation algorithm.
+
+The adapter also sets `path_tolerance` and `enforce_path_tolerance=True` in the
+native criteria. In cuRobo 0.9, residual scaling participates in both quadratic
+costs and native reported error distances, so changing `weight` can also change
+native feasibility decisions. At `weight=2`, the quadratic contribution is
+approximately four times larger outside deadbands. Start with `weight=1` when
+matching native checks to physical tolerances; increasing it does not guarantee
+that a feasible path will be found. The final TCP checks always use unscaled
+meters and radians.
+
+See the upstream [criteria factory](https://github.com/NVlabs/curobo/blob/v0.9.0/curobo/_src/cost/tool_pose_criteria.py)
+and [projected pose metrics](https://github.com/NVlabs/curobo/blob/v0.9.0/curobo/_src/cost/wp_pose_metric.py)
+for the native residual definitions.
+
+### Goal frames, planning bases, and TCP offsets
+
+With `frame="goal"`, a direction is expressed in the **target TCP frame**.
+For example, `(0, 0, 1)` follows the target TCP Z axis, which may point downward
+in the simulator frame. Its planning-base expression is `d_B = R_g @ d_goal`.
+With `frame="base"`, the supplied direction is already in the native planning
+base. The adapter's normal simulator-world-to-base conversion still applies
+to target poses; `base` does not mean the simulator world frame.
+
+The native model's tool frame `F` may differ from the configured TCP `T` by a
+fixed transform. Using `B` for the planning base, the adapter converts the
+target and reconstructs the actual TCP with
+
+:::{math}
+{}^B T_{F,g}={}^B T_{T,g}\left({}^F T_T\right)^{-1},
+\qquad
+{}^B T_T(q)={}^B T_F(q)\,{}^F T_T.
+:::
+
+For goal-frame constraints, it also rotates the direction into the native
+tool's goal axes: `d_F = R_FT @ d_T`. A translated TCP offset makes the final
+reconstruction important: even a small tool-orientation change can move the
+TCP sideways while the tool origin stays close to its line. The returned
+trajectory is checked at the TCP, including this fixed offset.
+
+### Returned samples, batches, and scoped state
+
+After native planning, the adapter maps every returned joint sample back
+through native FK, reconstructs the TCP, and checks finite transforms,
+perpendicular position error, and rotation angle. Acceptance requires **every
+sample**, including the start and endpoint, to pass the unscaled tolerances.
+An optimizer success flag alone does not bypass this check.
+
+Trajectories have shape `(B, N, D)`. FK is evaluated in device-resident chunks
+of at most 1024 joint states, bounding intermediate FK storage. Validity is
+reduced per environment. If a segment fails in one environment, that
+environment's complete request returns `success=False` and an initial-qpos
+hold, while other environments can retain their successful trajectories. A
+TCP rejection adds no separate automatic repair loop.
+
+Constrained requests require `preserve_plan_samples=True`. FK is nonlinear:
+interpolating two valid joint samples can create a new TCP sample outside the
+line or orientation tolerance. A consumer that resamples or deforms the path
+must revalidate the resulting samples before making the same claim.
+
+Native criteria are installed only for the selected segment and restored to
+ordinary full-pose terminal costs with zero path costs in a `finally` block.
+This prevents a constrained approach from affecting later lifts or subsequent
+requests, including after exceptions. Each backend retains only its most
+recent pair of constrained/reset criteria, keyed by direction, frame, weight,
+and tolerances. Goals remain per-call inputs. Native updates copy values into
+fixed-address buffers, retaining CUDA Graph compatibility.
+
+### Compare the example and interpret the result
+
+The comparison reuses the Franka obstacle scene from
+`examples/sim/motion/planners/curobo_planner.py`. It first plans one shared
+pre-grasp route, then starts both final approaches from the same reached joint
+state. Targets, collision geometry, dynamic limits, and sampling resets are
+held constant; only the final segment's path constraint changes.
+
+~~~bash
+python -m scripts.benchmark.motion_generation.curobo_grasp_approach --warmup 2 --repeats 5
+python -m scripts.benchmark.motion_generation.curobo_grasp_approach --num-envs 2 --warmup 2 --repeats 5 --output-dir outputs/benchmarks/curobo_grasp_approach_b2
+~~~
+
+The script writes `report.md`, `measurements.json`, `comparison.png`, and
+`before.npz` / `after.npz` under `outputs/benchmarks/curobo_grasp_approach` by
+default. Latency is warmed, CUDA-synchronized wall time for
+`MotionGenerator.generate()`, including adapter validation but excluding
+independent Robot FK scoring and plotting. Memory is measured in separate
+warmed calls, with Torch allocator coverage stated in the report.
+
+One fixed single-environment case measured on an RTX 5090 with cuRobo 0.9.0,
+PyTorch 2.11.0+cu130, float32, CUDA Graphs, seed 0, and five repeated solves
+produced the following snapshot:
+
+| Metric | Unconstrained approach | Constrained approach |
+| --- | --- | --- |
+| Maximum perpendicular TCP error | 5.82 mm | 4.59 mm |
+| Maximum target-orientation error | 0.21 degrees | 0.35 degrees |
+| Median planning latency | 12.46 ms | 19.26 ms |
+| Attempts meeting 5 mm / 3 degree tolerances | 0 / 5 | 5 / 5 |
+
+The transverse error fell by about 21%, while planning latency and orientation
+error increased. Both orientation errors remain within the configured bound.
+Optimization balances several objectives and need only satisfy the accepted
+tube; it does not promise zero deviation or improvement in every metric.
+These are repetitions of one fixed planning case, not a scene-population
+success rate or a physical grasp-success measurement.
+
+### Scope relative to blended grasp approaches
+
+This implementation retains the pre-grasp waypoint and existing stage
+boundaries. It does not implement the cuRobo V1
+[`create_grasp_approach_metric()` time-activated cost](https://nvlabs.github.io/curobo/v0.7.6/advanced_examples/3_constrained_planning.html#grasp-approach-vector),
+which can enable approach costs for a later portion of a single trajectory
+optimization and blend through the pre-grasp region. There is no
+`tstep_fraction` option in this adapter.
+
+The guarantees here concern accepted returned samples. Monotonic approach,
+continuous validity between samples, a transition without an intermediate
+stop, and physical grasp success require additional planning or host-side
+verification. Existing collision-model coverage and the self-collision
+limitation below still apply.
 
 ## Devices and CUDA graphs
 
@@ -415,3 +708,25 @@ automatically record this fixed offscreen camera view to an MP4. Set an explicit
 destination with `--record-save-path outputs/videos/curobo_demo.mp4`, adjust
 the rate with `--record-fps`, or pass `--disable-record` to skip recording. See
 [MotionGenerator](../motion_generator.md) for the common planner interface.
+
+For a more visible approach-constraint comparison, run the 45 cm side-approach
+showcase:
+
+~~~bash
+python examples/sim/motion/planners/curobo_approach_showcase.py
+~~~
+
+It plans both approaches against the same physical alignment frame, checks
+native sampled collisions and independent TCP errors, and writes an overview /
+overhead comparison video plus `summary.json` and joint trajectories under
+`outputs/curobo_approach_showcase`. Blue shows the unconstrained path and orange
+the line-constrained path; the green guide has a 5 mm radius. The fixture opening
+permits both plans, so the difference demonstrates approach geometry rather
+than a collision-checking failure. Playback is kinematic, at six times slow
+motion. Use `--plan-only` for planning checks or `--probe` for still frames.
+
+In this fixed case, the sampled maximum perpendicular TCP error is 71.5 mm
+without the path constraint and 4.3 mm with it; both paths pass the native
+sampled world-collision check. This is a geometric planning comparison, not a
+physical insertion-success measurement. Rendered media are generated locally
+by the example and are not included in the repository.

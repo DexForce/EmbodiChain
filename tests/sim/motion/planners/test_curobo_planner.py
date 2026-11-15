@@ -42,6 +42,7 @@ from embodichain.lab.sim.motion.planners import CuroboPlannerCfg, PlanState
 from embodichain.lab.sim.motion.planners.curobo import curobo_yaml
 from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
     CuroboPlanOptions,
+    CuroboLinearConstraintCfg,
     CuroboPlanner,
     CuroboPlannerCfg as CuroboPlannerCfgDirect,
     CuroboWorldCfg,
@@ -429,6 +430,155 @@ def test_position_only_rejects_translated_tool_origin():
     backend = SimpleNamespace(tool_to_frame_matrix=transform)
     with pytest.raises(ValueError, match="coincident tool/TCP"):
         planner._set_pose_modality(backend, "position")
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"direction": (0, 0, 0)},
+        {"direction": (0, math.nan, 1)},
+        {"frame": "world"},
+        {"weight": 0},
+        {"position_tolerance": -0.1},
+        {"orientation_tolerance": math.pi + 0.1},
+    ],
+)
+def test_linear_path_constraint_rejects_undefined_geometry(values):
+    with pytest.raises(ValueError):
+        CuroboLinearConstraintCfg(**values)
+
+
+def test_linear_path_constraints_require_matching_full_pose_native_segments():
+    planner = object.__new__(CuroboPlanner)
+    planner.cfg = SimpleNamespace(preserve_plan_samples=True)
+    pose = PlanState.from_xpos(torch.eye(4)[None])
+    constraint = CuroboLinearConstraintCfg()
+    options = CuroboPlanOptions(path_constraints=[None, constraint])
+    with pytest.raises(ValueError, match="target count"):
+        planner._validate_path_constraints([pose], options)
+    options.path_constraints = [constraint]
+    with pytest.raises(ValueError, match="full-pose"):
+        planner._validate_path_constraints(
+            [PlanState.from_qpos(torch.zeros(1, 7))], options
+        )
+    options.waypoint_modalities = ["position"]
+    with pytest.raises(ValueError, match="full-pose"):
+        planner._validate_path_constraints([pose], options)
+    options.waypoint_modalities = None
+    planner.cfg.preserve_plan_samples = False
+    with pytest.raises(ValueError, match="preserve_plan_samples"):
+        planner._validate_path_constraints([pose], options)
+
+
+@pytest.mark.parametrize("raise_inside", [False, True])
+def test_linear_path_cost_is_scoped_and_uses_tcp_axes(raise_inside):
+    """Restore cached native costs after both normal completion and exceptions."""
+    active = {}
+
+    class Criteria:
+        def __init__(self, **values):
+            self.values = values
+
+        @staticmethod
+        def linear_motion(**values):
+            return SimpleNamespace(
+                values=values,
+                path_tolerance=torch.zeros(2),
+                enforce_path_tolerance=torch.tensor(False),
+            )
+
+    planner = object.__new__(CuroboPlanner)
+    planner._curobo_device = torch.device("cpu")
+    planner._bindings = SimpleNamespace(
+        ToolPoseCriteria=Criteria, DeviceCfg=lambda **values: values
+    )
+    tool_to_tcp = torch.eye(4)
+    # TCP X is tool Y, including a translated origin.
+    tool_to_tcp[:3, :3] = torch.tensor(
+        [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+    )
+    tool_to_tcp[2, 3] = 0.1
+    backend = SimpleNamespace(
+        tool_frame="tool",
+        profile=SimpleNamespace(tool_frame_to_tcp=tool_to_tcp.tolist()),
+        planner=SimpleNamespace(update_tool_pose_criteria=active.update),
+    )
+    constraint = CuroboLinearConstraintCfg(direction=(2.0, 0.0, 0.0))
+    try:
+        with planner._linear_constraint_scope(backend, constraint):
+            torch.testing.assert_close(
+                active["tool"].values["direction"], torch.tensor([0.0, 1.0, 0.0])
+            )
+            assert bool(active["tool"].enforce_path_tolerance)
+            if raise_inside:
+                raise RuntimeError("native planning failed")
+    except RuntimeError:
+        assert raise_inside
+    assert active["tool"].values["non_terminal_pose_axes_weight_factor"] == [0.0] * 6
+    # A changed request must replace cached values rather than inheriting the
+    # previous segment's scale or acceptance bound.
+    constraint.weight = 2.0
+    constraint.position_tolerance = 0.01
+    with planner._linear_constraint_scope(backend, constraint):
+        assert active["tool"].values["non_terminal_scale"] == 2.0
+        assert float(active["tool"].path_tolerance[0]) == pytest.approx(0.01)
+
+
+@pytest.mark.parametrize(
+    ("excursion", "angle", "tolerance"),
+    [("position", 0.2, 0.05), ("orientation", 0.2, 0.05), ("orientation", 1e-4, 1e-5)],
+)
+def test_linear_path_validation_checks_each_tcp_sample_and_row(
+    monkeypatch, excursion, angle, tolerance
+):
+    """An intermediate TCP excursion fails only its own environment."""
+    planner = object.__new__(CuroboPlanner)
+    planner._curobo_device = torch.device("cpu")
+    planner._bindings = SimpleNamespace()
+    # The native tool is 10 cm behind the TCP; a tool-frame check would fail
+    # even the valid row. The goal TCP follows a world-X line.
+    tool_to_tcp = torch.eye(4)
+    tool_to_tcp[2, 3] = 0.1
+    tcp = torch.eye(4).expand(2, 3, -1, -1).clone()
+    tcp[:, :, 0, 3] = torch.tensor([0.0, 0.05, 0.1])
+    if excursion == "position":
+        tcp[1, 1, 1, 3] = 0.02
+    else:
+        tcp[1, 1, :3, :3] = torch.tensor(
+            [
+                [math.cos(angle), -math.sin(angle), 0.0],
+                [math.sin(angle), math.cos(angle), 0.0],
+                [0.0, 0.0, 1.0],
+            ]
+        )
+    tools = tcp @ torch.linalg.inv(tool_to_tcp)
+    goal = torch.eye(4).expand(2, -1, -1).clone()
+    goal[:, 0, 3] = 0.1
+    backend = SimpleNamespace(
+        tool_frame="tool",
+        profile=SimpleNamespace(tool_frame_to_tcp=tool_to_tcp.tolist()),
+        planner=SimpleNamespace(
+            compute_kinematics=lambda _: SimpleNamespace(
+                tool_poses=SimpleNamespace(
+                    get_link_pose=lambda _: SimpleNamespace(
+                        get_matrix=lambda: tools.reshape(-1, 4, 4)
+                    )
+                )
+            )
+        ),
+    )
+    monkeypatch.setattr(planner, "_to_curobo_joint_state", lambda *args: object())
+    monkeypatch.setattr(
+        planner, "_sim_world_to_curobo_base_pose", lambda pose, *_: pose
+    )
+    valid = planner._linear_path_validity(
+        torch.zeros(2, 3, 7),
+        goal,
+        backend,
+        CuroboLinearConstraintCfg(direction=(1, 0, 0), orientation_tolerance=tolerance),
+        None,
+    )
+    assert valid.tolist() == [True, False]
 
 
 def test_extract_segment_uses_curobo_exclusive_last_tstep(monkeypatch):

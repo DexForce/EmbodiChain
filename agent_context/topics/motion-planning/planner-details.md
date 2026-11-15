@@ -92,6 +92,19 @@ facade independently of the selected planner backend.
 
 ## Backend-specific boundaries
 
+### cuRobo linear approach segments
+
+`CuroboPlanOptions.path_constraints` assigns optional
+`CuroboLinearConstraintCfg` values to individual target-arrival segments.
+Directions use the target TCP (`goal`) or the native planning `base` frame.
+The entire constrained segment, including its start, must satisfy the line and
+target-orientation tolerances; this is not a late-activated approach cost.
+The adapter scopes native costs to that segment and restores cached planner
+criteria even on exceptions. Bounded native FK then validates the actual TCP,
+including its fixed tool offset, and rejects violating rows through the normal
+start-hold failure contract. Constraints require preserved native samples;
+resampling, monotonic progress and continuous validity are not certified.
+
 ### TOPPRA
 
 `toppra_planner.py` uses Warp on CPU and CUDA. Numerical ownership is in

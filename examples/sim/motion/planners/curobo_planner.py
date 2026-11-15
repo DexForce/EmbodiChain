@@ -33,6 +33,14 @@ Run from the repository root::
     python examples/sim/motion/planners/curobo_planner.py --headless --device cuda:1
     python examples/sim/motion/planners/curobo_planner.py --headless --physics newton
 
+Compare unconstrained and line-constrained final grasp approaches in this same
+Franka obstacle scene (planned geometry, without physical grasp execution)::
+
+    python -m scripts.benchmark.motion_generation.curobo_grasp_approach
+
+The comparison writes a TCP trajectory overlay, raw arrays and a Markdown report
+under ``outputs/benchmarks/curobo_grasp_approach``. It retains the pre-grasp stop.
+
 Requirements: an NVIDIA CUDA device and the CUDA-matched cuRobo V2 source
 package installed in the active environment. Installation instructions:
 https://nvlabs.github.io/curobo/latest/getting-started/installation.html
