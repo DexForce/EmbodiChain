@@ -866,6 +866,7 @@ def test_failed_image_read_invalidates_capture_metadata() -> None:
     camera.cfg = CameraCfg()
     camera._capture_metadata = {"capture_sequence": 1}
     camera._pending_capture_metadata = {"capture_sequence": 2}
+    camera._owner_ref = lambda: None
     camera._frame_buffer = MagicMock()
     camera._frame_buffer.get_rgb_gpu_buffer.side_effect = RuntimeError("read failed")
     camera._camera_lease = _CameraGroupLease(

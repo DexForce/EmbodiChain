@@ -84,7 +84,7 @@ def camera_env():
     context._finish_initialization([0, 1, 2, 3])
     rgb = torch.stack([torch.full((4, 6, 4), i, dtype=torch.uint8) for i in range(4)])
     camera = SimpleNamespace(
-        group_ids=(1,), update=lambda **kwargs: None, get_data=lambda: {"color": rgb}
+        group_ids=(1, 2), update=lambda **kwargs: None, get_data=lambda: {"color": rgb}
     )
     env = SimpleNamespace(
         num_envs=4,
@@ -123,7 +123,7 @@ def test_camera_recording_uses_control_rate_and_renders_current_state(
     )
     recorder(env, [0], name="camera", fps=None)
     recorder.save_and_clear([0])
-    assert rendered == [[1]]
+    assert rendered == [[1, 2]]
     assert rates == [40.0]
 
 

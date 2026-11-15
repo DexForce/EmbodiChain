@@ -287,7 +287,7 @@ class record_camera_data(Functor):
             fps: Video frame rate, or None for the environment control rate.
         """
         self._ensure_open()
-        env.sim.render_camera_group([self.camera.group_id])
+        env.sim.render_camera_group(list(self.camera.group_ids))
         self.camera.update(fetch_only=True)
         rgb = self.camera.get_data()["color"]
         for row in self._normalize_env_ids(env_ids):
