@@ -140,6 +140,12 @@ def numeric(frame):
 
 
 def validate_frame(frame):
+    if (
+        type(frame) is not RuntimeCommandFrame
+        or type(frame.env_ids) is not torch.Tensor
+        or frame.env_ids.device.type != "cuda"
+    ):
+        return False
     values = leaves(frame)
     if values is None:
         return False

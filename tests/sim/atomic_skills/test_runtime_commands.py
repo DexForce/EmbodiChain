@@ -411,3 +411,32 @@ def test_timed_command_sequence_requires_nonempty_int64_batch() -> None:
         TimedCommandSequence(frames=(), env_ids=torch.tensor([0.0]))
     with pytest.raises(ValueError, match="unique"):
         TimedCommandSequence(frames=(), env_ids=torch.tensor([2, 2]))
+
+
+def test_joint_target_snapshot_revalidates_and_preserves_custom_ownership() -> None:
+    original = JointPositionTarget("arm", (0, 1))
+    copied = original.snapshot()
+    assert copied == original and copied is not original
+    object.__setattr__(original, "joint_ids", (0, 0))
+    with pytest.raises(ValueError, match="unique"):
+        original.snapshot()
+
+    @dataclass(frozen=True, slots=True)
+    class ExtendedTarget(JointPositionTarget):
+        metadata: list[int]
+
+    custom = ExtendedTarget("arm", (0, 1), [3])
+    snapshot = custom.snapshot()
+    assert type(snapshot) is ExtendedTarget
+    snapshot.metadata[0] = 7
+    assert custom.metadata == [3]
+
+    class AnnotatedName(str):
+        pass
+
+    name = AnnotatedName("arm")
+    name.annotations = [1]
+    named = JointPositionTarget(name, (0, 1))
+    named_copy = named.snapshot()
+    named_copy.control_part.annotations.append(2)
+    assert named.control_part.annotations == [1]

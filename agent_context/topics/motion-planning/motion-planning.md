@@ -93,6 +93,12 @@ unchanged physics substeps; Gym experts use their environment's command period. 
 prepared actions without retiming again. See
 [retiming and playback](planner-details.md#retiming-and-playback).
 
+Gripper surface queries with CPU inputs still classify convex distances on CUDA.
+Native multi-chunk calls own one query-local geometry snapshot and bounded scratch,
+retain CPU point/ground transforms and all samples, and return owned reduced CPU
+results. This is distinct from the simulation physics device. Visualization,
+custom point-query overrides and already-device-resident callers keep their paths.
+
 GraspKit owns sampled/native geometric qualification from explicit hand inputs;
 Scene captures geometry and Robot adapters provide FK/calibration. GraspKit
 performs no hardware lookup. Sampling uses the contact frame and maps to runtime

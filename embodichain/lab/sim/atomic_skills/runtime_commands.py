@@ -70,6 +70,18 @@ def _snapshot_target(target: RuntimeEndpointTarget) -> RuntimeEndpointTarget:
     return snapshot
 
 
+def _unique_env_ids(env_ids: torch.Tensor) -> bool:
+    """Avoid a data-dependent kernel for a provably unique dense CPU singleton."""
+    if (
+        type(env_ids) is torch.Tensor
+        and env_ids.device.type == "cpu"
+        and env_ids.layout == torch.strided
+        and env_ids.numel() == 1
+    ):
+        return True
+    return torch.unique(env_ids).numel() == env_ids.numel()
+
+
 class RuntimeCommandPayload(ABC):
     """Immutable-by-ownership payload submitted to one runtime transport."""
 
@@ -264,6 +276,10 @@ class RuntimeCommandFrame:
 
         if validate_frame(self):
             return
+        RuntimeCommandFrame._initialize(self, owned_commands=False)
+
+    def _initialize(self, *, owned_commands: bool) -> None:
+        """Validate every frame field, optionally transferring private commands."""
         if isinstance(self.commands, (str, bytes)):
             raise TypeError("commands must be an iterable of EndpointCommand values.")
         try:
@@ -284,7 +300,7 @@ class RuntimeCommandFrame:
         ):
             raise ValueError("env_ids must be int64 with shape (batch_size,).")
         batch_size = int(self.env_ids.shape[0])
-        if torch.unique(self.env_ids).numel() != batch_size:
+        if not _unique_env_ids(self.env_ids):
             raise ValueError("env_ids must be unique.")
         if not isinstance(self.active_mask, torch.Tensor):
             raise TypeError("active_mask must be a torch.Tensor.")
@@ -306,7 +322,11 @@ class RuntimeCommandFrame:
         if self.hold_duration.device != self.env_ids.device:
             raise ValueError("hold_duration and env_ids must share a device.")
 
-        snapshots = tuple(command.snapshot() for command in commands)
+        snapshots = (
+            commands
+            if owned_commands
+            else tuple(command.snapshot() for command in commands)
+        )
         destinations: set[tuple[str, str]] = set()
         joint_owners: dict[int, tuple[str, str]] = {}
         for command in snapshots:
@@ -426,7 +446,7 @@ class TimedCommandSequence:
             or self.env_ids.shape[0] < 1
         ):
             raise ValueError("env_ids must be int64 with shape (batch_size,).")
-        if torch.unique(self.env_ids).numel() != self.env_ids.numel():
+        if not _unique_env_ids(self.env_ids):
             raise ValueError("env_ids must be unique.")
         if isinstance(self.frames, (str, bytes)):
             raise TypeError("frames must be an iterable of RuntimeCommandFrame values.")
@@ -479,6 +499,93 @@ class TimedCommandSequence:
     def snapshot(self) -> TimedCommandSequence:
         """Return an independently owned timed sequence."""
         return TimedCommandSequence(frames=self.frames, env_ids=self.env_ids)
+
+
+def _canonical_cpu_command(command: EndpointCommand) -> bool:
+    """Identify standard commands without user-defined snapshot callbacks."""
+    return (
+        type(command) is EndpointCommand
+        and type(command.target) is JointPositionTarget
+        and type(command.target.control_part) is str
+        and type(command.target.joint_ids) is tuple
+        and all(type(joint) is int for joint in command.target.joint_ids)
+        and not getattr(command.target, "__dict__", {})
+        and type(command.payload) is JointPositionPayload
+        and type(command.payload.positions) is torch.Tensor
+        and command.payload.positions.device.type == "cpu"
+        and (
+            command.payload.velocities is None
+            or type(command.payload.velocities) is torch.Tensor
+        )
+    )
+
+
+def _frame_from_fresh_commands(
+    commands: list[EndpointCommand],
+    *,
+    active_mask: torch.Tensor,
+    env_ids: torch.Tensor,
+    hold_duration: torch.Tensor,
+) -> RuntimeCommandFrame:
+    """Transfer unexposed engine-built commands while retaining frame checks.
+
+    Only fresh commands from the two canonical engine builders may enter this
+    path. Extended targets, payloads and tensor types use public construction.
+    Public frame constructors and snapshots never transfer caller ownership.
+    """
+    fields = dict(
+        commands=tuple(commands),
+        active_mask=active_mask,
+        env_ids=env_ids,
+        hold_duration=hold_duration,
+    )
+    if any(
+        type(v) is not torch.Tensor or v.device.type != "cpu"
+        for v in (active_mask, env_ids, hold_duration)
+    ) or not all(_canonical_cpu_command(c) for c in commands):
+        return RuntimeCommandFrame(**fields)
+    frame = object.__new__(RuntimeCommandFrame)
+    for name, value in fields.items():
+        object.__setattr__(frame, name, value)
+    RuntimeCommandFrame._initialize(frame, owned_commands=True)
+    commands.clear()
+    return frame
+
+
+def _sequence_from_fresh_frames(
+    frames: list[RuntimeCommandFrame], env_ids: torch.Tensor
+) -> TimedCommandSequence:
+    """Transfer private, freshly validated canonical frames into a sequence.
+
+    Only engine builders may pass their newly constructed, unexposed CPU frames.
+    CUDA retains packed sequence validation rather than synchronizing each ID check.
+    Public constructors and snapshots always retain defensive revalidation and
+    copying. Custom targets/payloads retain that path as their callbacks may
+    carry aliases or side effects. The input list is consumed on transfer.
+    """
+    if (
+        type(env_ids) is not torch.Tensor
+        or env_ids.device.type != "cpu"
+        or any(
+            type(frame) is not RuntimeCommandFrame
+            or any(
+                type(value) is not torch.Tensor
+                for value in (frame.active_mask, frame.env_ids, frame.hold_duration)
+            )
+            or not all(_canonical_cpu_command(command) for command in frame.commands)
+            for frame in frames
+        )
+    ):
+        return TimedCommandSequence(frames=tuple(frames), env_ids=env_ids)
+    sequence = TimedCommandSequence(frames=(), env_ids=env_ids)
+    for index, frame in enumerate(frames):
+        if frame.device != sequence.device:
+            raise ValueError(f"Frame {index} must share the sequence device.")
+        if not torch.equal(frame.env_ids, sequence.env_ids):
+            raise ValueError(f"Frame {index} env_ids do not match the sequence.")
+    object.__setattr__(sequence, "frames", tuple(frames))
+    frames.clear()
+    return sequence
 
 
 __all__ = [

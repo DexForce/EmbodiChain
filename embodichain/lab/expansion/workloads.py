@@ -463,6 +463,9 @@ class WorkloadProgramExecutor:
         from tensordict import TensorDict
         from embodichain.lab.gym.envs.types import ControllerAction
         from ._planning_batches import batched_planning
+        from embodichain.lab.sim.objects.backends._numeric_observations import (
+            numeric_observation_scope,
+        )
 
         env, torch = self.env, self.torch
         previous_auto = getattr(env, "_demo_no_auto_reset", False)
@@ -483,15 +486,16 @@ class WorkloadProgramExecutor:
                     self._fill()
                     self._activate()
                     cursors = {row: state["cursor"] for row, state in self.live.items()}
-                    commands = (
-                        planner.gather(cursors)
-                        if planner is not None
-                        else {
-                            row: command
-                            for row, cursor in cursors.items()
-                            if (command := cursor.next()) is not None
-                        }
-                    )
+                    with numeric_observation_scope(env.sim, env.robot):
+                        commands = (
+                            planner.gather(cursors)
+                            if planner is not None
+                            else {
+                                row: command
+                                for row, cursor in cursors.items()
+                                if (command := cursor.next()) is not None
+                            }
+                        )
                     for row in tuple(self.live):
                         if row not in commands:
                             self._finish(row)

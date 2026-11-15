@@ -56,6 +56,16 @@ The optional cooperative planner merges compatible fixed-grid motion requests
 and pure FK/IK/Jacobian calls. Budget-bearing whole-motion requests keep their
 original execution so charge semantics are preserved. Context variables and
 candidate random streams remain row-local; results are independently owned.
+Default CPU command gathering shares native numeric reads through a bounded
+World-owner scope in `sim/objects/backends/_numeric_observations.py`. It ends
+before completion callbacks and physical stepping, and starts after reset and
+activation. Checked native writes, physics steps and binding topology changes
+invalidate samples. Derived dynamic rigid poses share the same boundary and invalidation, with
+separate CPU autocast representations. Consumers receive independent output
+buffers; semantic
+state, episode clocks and validation remain row-owned. CUDA and other backends
+retain native reads. Raw SDK mutation or concurrent World writes inside the
+read boundary are outside this internal side-effect-free planning contract.
 Semantic programs and some trajectory processing still run per row. Per-control
 planning readiness is a barrier; this API does not claim complete vectorization
 or universal throughput improvement.

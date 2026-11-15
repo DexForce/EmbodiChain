@@ -34,6 +34,7 @@ import numpy as np
 import torch
 
 from .base import ArticulationViewBase, RigidBodyViewBase
+from ._numeric_observations import _ACTIVE
 
 if TYPE_CHECKING:
     from dexsim.scene import (
@@ -57,12 +58,20 @@ def _checked_batch_call(
     **kwargs: Any,
 ) -> Any:
     """Call one Scene batch operation and reject native failure statuses."""
+    reads = _ACTIVE.get()
+    key = None if reads is None else reads.key(batch, method_name, args, kwargs)
+    if key is not None and key in reads.values:
+        saved, status = reads.values[key]
+        args[0].copy_(saved)
+        return status
     status = getattr(batch, method_name)(*args, **kwargs)
     if isinstance(status, Integral) and status < 0:
         raise RuntimeError(
             f"DexSim Scene batch operation {method_name!r} failed with "
             f"status {status}."
         )
+    if key is not None:
+        reads.values[key] = (args[0].detach().clone(), status)
     return status
 
 
