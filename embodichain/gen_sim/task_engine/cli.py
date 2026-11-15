@@ -53,7 +53,10 @@ def main(
         help="Reviewed source-image grounding for hybrid rigid placement qualification",
     )
     parser.add_argument(
-        "--route", choices=("template", "goal", "hybrid"), default="template"
+        "--route",
+        choices=("template", "goal", "hybrid"),
+        default="hybrid",
+        help="Authoring route (default: hybrid). Use template for the legacy template/revision format. No automatic fallback.",
     )
     parser.add_argument(
         "--proposal",

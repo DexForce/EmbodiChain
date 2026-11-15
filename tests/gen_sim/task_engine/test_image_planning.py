@@ -1286,8 +1286,6 @@ def test_hybrid_cli_compiles_pick_place_and_rejects_hinge(
     out = tmp_path / "hybrid"
     main(
         [
-            "--route",
-            "hybrid",
             "--image",
             str(source_image),
             "--instruction",

@@ -9,8 +9,8 @@ and milestone ID. Graph repair is bounded to two additional model proposals
 against the frozen objective; inspect `planning_history.json` for each candidate,
 pre-call holdings, checked coverage and the selected round. Source matching
 establishes traceability, not semantic entailment.
-The default template route retains the existing image plan and revision format.
-The opt-in hybrid route composes quoted E1–E9 operations into goal contracts
+The explicit `--route template` route retains the existing image plan and revision format.
+The default hybrid route composes quoted E1–E9 operations into goal contracts
 and ordered calls. Orientation, pour receiver, original support, slider endpoint
 and twist mode can require occurrence-bound deployment parameters. The hybrid
 validator checks symbolic declaration coverage, including acquisition versus
@@ -75,7 +75,7 @@ handoff. Public API descriptions are in the
 
 ## Image semantic planning entry
 
-`embodichain gensim task plan --image IMAGE --instruction TEXT --output DIRECTORY`
+`embodichain gensim task plan --route template --image IMAGE --instruction TEXT --output DIRECTORY`
 uses the configured GenSim model to interpret the complete instruction, ground
 logical image references and plan canonical calls from the data-only Task Program
 catalog. It always ends at the unbound semantic graph; there are no model or
