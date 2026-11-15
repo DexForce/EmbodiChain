@@ -15,7 +15,8 @@ topics:
     ArticulationJointKinematics, get_parent_joint_chain, asset_physics_mode, joint_drive_props, enable_gravity,
     fixed-cadence playback, FluidObjectCfg, FluidSpawnCfg, FluidObject, sph_cfg, DFSPH, revolved_volume, fill_level,
     粒子采样, fluid, 流体, quaternion, xyzw, cable, CableObject, CableObjectCfg,
-    CableObjectData, 线缆对象]
+    CableObjectData, 线缆对象,
+    CompoundShapeCfg, ShapePartCfg, CylinderCfg, env_variants, enable_ground_plane, ground_plane_attrs]
   paths: [topics/simulation-system/simulation-system.md]
   source_of_truth:
   - embodichain/lab/sim/motion/__init__.py
