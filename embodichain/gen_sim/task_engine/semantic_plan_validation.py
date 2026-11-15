@@ -499,6 +499,12 @@ def validate_semantic_plan(
         ):
             raise ValueError("Requested printed knob setting was lost")
         producer_ids = _producer_ids(step)
+        held_transport = step.get("terminal_behavior") == "hold" and (
+            "terminal_hold_requires_one_of" in semantic_plan_rules()[step["task_type"]]
+        )
+        # Binding derives each held target and its validators from that
+        # subject's producing transport alone.
+        held_goal = step.get("orientation_goal", "none") if held_transport else "none"
         for subject in grounding["bindings"].get(f"{step_id}.object", []):
             producers = [
                 n
@@ -509,6 +515,17 @@ def validate_semantic_plan(
             if len(producers) != 1:
                 raise ValueError(
                     f"{step_id} requires exactly one semantic producer per declared subject, got {len(producers)} for {subject}"
+                )
+            producer = producers[0]
+            if (
+                held_goal != "none"
+                and annotations[producer["id"]]["intent"].get("orientation_goal")
+                != held_goal
+            ):
+                raise ValueError(
+                    f"{step_id} ends holding {subject} with orientation_goal="
+                    f"{held_goal}: declare it in semantic.intent of its held "
+                    f"transport {producer['id']}."
                 )
         expected = grounding["bindings"].get(f"{step_id}.object")
         if expected and not all(
@@ -524,10 +541,6 @@ def validate_semantic_plan(
             )
         target = grounding["bindings"].get(f"{step_id}.target")
         if step.get("terminal_behavior") == "hold":
-            held_transport = (
-                "terminal_hold_requires_one_of"
-                in semantic_plan_rules()[step["task_type"]]
-            )
             if held_transport and any(
                 effects[n["id"]] == "simulation.axis_align" for n in calls
             ):
@@ -535,23 +548,6 @@ def validate_semantic_plan(
                     f"{step_id} ends holding its object: acquire it with pick; "
                     "the held transport realizes any upright orientation, so "
                     "remove simulation.axis_align."
-                )
-            # Binding derives the held target and its validators from the
-            # producing transport alone.
-            goal = step.get("orientation_goal", "none")
-            if (
-                held_transport
-                and goal != "none"
-                and not any(
-                    effects[n["id"]] in producer_ids
-                    and annotations[n["id"]]["intent"].get("orientation_goal") == goal
-                    for n in calls
-                )
-            ):
-                raise ValueError(
-                    f"{step_id} ends holding its object with orientation_goal="
-                    f"{goal}: declare it in semantic.intent of the held "
-                    "transport that produces the step."
                 )
             if TASK_CONTRACTS[step["task_type"]].resource_mode == "coordinated":
                 raise ValueError(

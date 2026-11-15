@@ -308,6 +308,46 @@ def test_terminal_hold_transport_carries_the_orientation_goal(source_image):
         _plan(source_image, "E2", upright_on_pick_only)
 
 
+@pytest.mark.parametrize("second_upright", [True, False])
+def test_terminal_hold_orientation_is_checked_for_every_subject(
+    source_image, second_upright
+):
+    def two_held(s, g, p):
+        _terminal_hold("E2")(s, g, p)
+        s["object"].update(quantifier="count", count=2)
+        g["objects"].append(
+            dict(
+                id="second",
+                description="second source",
+                bbox=[300, 200, 400, 400],
+                provenance="observed",
+            )
+        )
+        g["bindings"]["step_01.object"].append("second")
+        # Each arm picks and holds one object.
+        more = deepcopy(p["nodes"])
+        for node in p["nodes"]:
+            node["call"]["resources"] = {"primary": "left"}
+        for i, node in enumerate(more):
+            node.update(id=f"n{i+2}", depends_on=[f"n{i+1}"])
+            node["call"]["resources"] = {"primary": "right"}
+            node["semantic"]["object"] = "second"
+        more[0]["call"]["object"] = "second"
+        if not second_upright:
+            # The first object's transport must not satisfy the second's goal.
+            del more[1]["semantic"]["intent"]["orientation_goal"]
+        p["nodes"].extend(more)
+        p["requirements"][0]["node_ids"].extend(["n2", "n3"])
+
+    if second_upright:
+        result = _plan(source_image, "E2", two_held)
+        coverage = result["semantic_graph_validation"]["coverage"]
+        assert coverage["semantic_status"] == "valid"
+    else:
+        with pytest.raises(SemanticPlanningError, match="ends holding second"):
+            _plan(source_image, "E2", two_held)
+
+
 def test_hidden_objects_have_no_invented_image_boxes(source_image):
     def hidden(s, g, p):
         g["objects"][0].update(provenance="instruction_declared", bbox=None)
