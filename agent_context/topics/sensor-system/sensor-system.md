@@ -55,6 +55,8 @@ invalid scalars and sequences fail at the decode boundary.
 Custom `from_dict()` methods receive only authored keys, preserving preset and
 alias semantics. A decoder may explicitly implement `from_dict_with_defaults`
 to receive its owning default separately; sensor mount offsets use this hook.
+Overriding `from_dict()` disables a less-specific inherited defaults hook unless
+the subclass explicitly opts in again.
 
 New factories accept `factory(cfg, *, context)`. `SensorContext` supplies the
 device, instance count, manager clock and public joint-state snapshots; external
@@ -75,6 +77,8 @@ USD-mounted cameras using context or callable factories remain queued until
 explicit `prepare()`, allowing multiple USD declarations before finalization.
 Pending names are reserved; factory failures retain declarations for retry and
 removal cancels them. Query constructed sensor handles after preparation.
+Robot removal cancels only pending cameras whose qualified parent belongs to
+that robot; a canceled sensor UID may be reused by a different owner.
 Generalized non-camera mounting, sampling periods and output
 descriptors are separate runtime-contract work, not guarantees of this initial
 extension path. The independently installable example and usage instructions

@@ -103,8 +103,9 @@ def _source():
 
 
 @pytest.mark.parametrize("legacy", [False, True])
+@pytest.mark.parametrize("reuse_camera_uid", [False, True])
 def test_callable_mounted_camera_keeps_multiple_usd_declarations_open(
-    monkeypatch, legacy
+    monkeypatch, legacy, reuse_camera_uid
 ):
     import dexsim.kit.usd
     from embodichain.lab.sim.cfg import RobotCfg
@@ -180,6 +181,57 @@ def test_callable_mounted_camera_keeps_multiple_usd_declarations_open(
     )
     assert not created
     assert not manager._spawn_scene.builder.is_finalized
+    if reuse_camera_uid:
+        assert manager.remove_asset("camera")
+        second_robot = ArticulationDesc(
+            name="RobotB",
+            links=[
+                LinkDesc(
+                    name="base", parent_name=None, pose=np.eye(4, dtype=np.float32)
+                )
+            ],
+            usd=UsdSourceDesc(prim_path="/RobotB"),
+        )
+        monkeypatch.setattr(
+            dexsim.kit.usd,
+            "parse_usd",
+            lambda *a, **k: SceneDesc(articulations=[second_robot]),
+        )
+        manager.add_usd(
+            UsdImportCfg(
+                name="other_robot",
+                source=UsdSourceCfg(file_path="other.usda"),
+                robot_cfgs={
+                    "/RobotB": RobotCfg(
+                        build_pk_chain=False,
+                        enable_sensor=True,
+                        sensors=[
+                            MountedCfg(
+                                uid="camera",
+                                extrinsics=CameraCfg.ExtrinsicsCfg(parent="base"),
+                            )
+                        ],
+                        joint_drive_props=None,
+                    )
+                },
+            )
+        )
+        manager._gizmos = {}
+        manager._disabled_robot_gizmos = set()
+        # Native tracking is stubbed in this fixture; keep manager removal real.
+        monkeypatch.setattr(
+            type(manager._spawn_scene),
+            "__contains__",
+            lambda scene, uid: uid in manager._robots,
+        )
+        manager._spawn_scene._require_removable = lambda uid: None
+        manager._spawn_scene.remove = lambda uid: None
+        assert manager.remove_asset("Robot")
+        assert "RobotB" in manager._robots
+        assert (
+            manager._pending_mounted_sensors["camera"].extrinsics.parent
+            == "RobotB/base"
+        )
     monkeypatch.setattr(dexsim.kit.usd, "parse_usd", lambda *args, **kwargs: _source())
     manager.add_usd(
         UsdImportCfg(name="second", source=UsdSourceCfg(file_path="second.usda"))

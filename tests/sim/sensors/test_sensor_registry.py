@@ -61,6 +61,41 @@ class _Options:
 
 
 @configclass
+class _AliasMount(CameraCfg.ExtrinsicsCfg):
+    @classmethod
+    def from_dict(cls, values):
+        values = dict(values)
+        if "pos_mm" in values:
+            if "pos" in values:
+                raise ValueError("pos and pos_mm are mutually exclusive")
+            values["pos"] = tuple(
+                component / 1000 for component in values.pop("pos_mm")
+            )
+        return super().from_dict(values)
+
+
+@configclass
+class _OptedAliasMount(_AliasMount):
+    @classmethod
+    def from_dict_with_defaults(cls, values, defaults):
+        cfg = cls.from_dict(values)
+        cfg.quat = defaults.quat
+        return cfg
+
+
+@configclass
+class _AliasCameraCfg(CameraCfg):
+    sensor_type: str = "AliasMountCamera"
+    extrinsics: _AliasMount = _AliasMount(quat=(0.0, 0.0, 1.0, 0.0))
+
+
+@configclass
+class _OptedAliasCameraCfg(_AliasCameraCfg):
+    sensor_type: str = "OptedAliasMountCamera"
+    extrinsics: _OptedAliasMount = _OptedAliasMount(quat=(0.0, 0.0, 1.0, 0.0))
+
+
+@configclass
 class _DecoderProbeCfg(SensorCfg):
     sensor_type: str = "DecoderProbe"
     render: RenderCfg = RenderCfg()
@@ -354,6 +389,21 @@ def test_custom_decoders_receive_only_authored_keys() -> None:
     )
     assert cfg.render.gaussian.enabled
     assert cfg.collision.sdf_resolution == 32
+
+
+@pytest.mark.parametrize("cfg_type", [_AliasCameraCfg, _OptedAliasCameraCfg])
+def test_overridden_mount_decoder_requires_explicit_defaults_opt_in(cfg_type):
+    name = cfg_type().sensor_type
+    register_sensor(SensorRegistration(name, cfg_type, _Probe))
+    cfg = SensorCfg.from_dict(
+        {"sensor_type": name, "extrinsics": {"pos_mm": [1000, 2000, 3000]}}
+    )
+    assert cfg.extrinsics.pos == (1.0, 2.0, 3.0)
+    assert cfg.extrinsics.quat == (
+        (0.0, 0.0, 1.0, 0.0)
+        if cfg_type is _OptedAliasCameraCfg
+        else (0.0, 0.0, 0.0, 1.0)
+    )
 
 
 @pytest.mark.parametrize("gain", [None, 5.0])

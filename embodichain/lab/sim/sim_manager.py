@@ -5093,7 +5093,13 @@ class SimulationManager:
         robot = self._robots.get(uid)
         if robot is not None and robot.cfg.enable_sensor:
             for sensor_cfg in robot.cfg.sensors:
-                pending.pop(sensor_cfg.uid, None)
+                queued = pending.get(sensor_cfg.uid)
+                if (
+                    queued is not None
+                    and queued.extrinsics.parent is not None
+                    and queued.extrinsics.parent.startswith(f"{uid}/")
+                ):
+                    pending.pop(sensor_cfg.uid)
                 sensor = self._sensors.get(sensor_cfg.uid)
                 if (
                     isinstance(sensor, Camera)
