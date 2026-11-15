@@ -715,6 +715,8 @@ def test_preview_and_existing_output_remain_read_only(
     output = tmp_path / "preview"
     argv = [
         "task-engine",
+        "--route",
+        "template",
         "--image",
         "~/scene.png" if home_path else str(source_image),
         "--instruction",
@@ -1232,6 +1234,8 @@ def test_hybrid_cli_compiles_pick_place_and_rejects_hinge(
     default = tmp_path / "default"
     main(
         [
+            "--route",
+            "template",
             "--image",
             str(source_image),
             "--instruction",
@@ -1262,7 +1266,23 @@ def test_hybrid_cli_compiles_pick_place_and_rejects_hinge(
     monkeypatch.setattr(
         compat.VisionFacade, "complete", lambda *a, **kw: json.dumps([op])
     )
-    monkeypatch.setattr(compat, "structured_call", lambda **kw: {"issues": []})
+    monkeypatch.setattr(
+        compat,
+        "structured_call",
+        lambda **kw: (
+            {
+                r: {
+                    "description": r,
+                    "bbox": (
+                        [100, 200, 300, 400] if r == "block_2" else [50, 600, 550, 900]
+                    ),
+                }
+                for r in ("block_2", "block_1_top")
+            }
+            if kw["role"] == "task_image_grounding"
+            else {"issues": []}
+        ),
+    )
     out = tmp_path / "hybrid"
     main(
         [

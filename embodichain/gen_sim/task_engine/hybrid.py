@@ -618,6 +618,92 @@ def _scene_projection(doc, graph, packet):
     }
 
 
+def _ground_frozen_roles(doc, graph, image, services):
+    """Request image observations without changing a frozen role or objective."""
+    from ..services.compat import structured_call
+    from ..services.runtime import service_scope
+
+    instruction = doc["inputs"]["instruction"]
+    roles = [r["id"] for r in doc["configuration"]["roles"]]
+    errors = []
+    with service_scope(services) as run:
+        for attempt in range(2):
+            try:
+                raw = structured_call(
+                    services=run,
+                    role="task_image_grounding",
+                    image_path=image,
+                    schema={
+                        "type": "object",
+                        "required": roles,
+                        "additionalProperties": False,
+                        "properties": {
+                            r: {
+                                "type": "object",
+                                "required": ["description", "bbox"],
+                                "additionalProperties": False,
+                                "properties": {
+                                    "description": {"type": "string"},
+                                    "bbox": {
+                                        "anyOf": [
+                                            {"type": "null"},
+                                            {
+                                                "type": "array",
+                                                "minItems": 4,
+                                                "maxItems": 4,
+                                                "items": {
+                                                    "type": "integer",
+                                                    "minimum": 0,
+                                                    "maximum": 1000,
+                                                },
+                                            },
+                                        ]
+                                    },
+                                },
+                            }
+                            for r in roles
+                        },
+                    },
+                    system_prompt="Locate each role by inspecting the provided image. For each role return description (including visible shape, size, location) and bbox as ordered integer [xmin,ymin,xmax,ymax] on a 0..1000 grid. For ambiguous or hidden roles return null for bbox. Do not guess coordinates.",
+                    prompt=json.dumps(
+                        dict(
+                            instruction=instruction,
+                            roles=roles,
+                            validation_errors=errors,
+                        ),
+                        ensure_ascii=False,
+                    ),
+                )
+                if set(raw) != set(roles):
+                    raise ValueError("Expected one entry per frozen role")
+                packet = dict(
+                    image_sha256=doc["inputs"]["image"]["sha256"],
+                    grounding={
+                        "objects": [
+                            dict(
+                                id=r,
+                                description=raw[r]["description"],
+                                bbox=raw[r]["bbox"],
+                                provenance=(
+                                    "runtime_required"
+                                    if raw[r]["bbox"] is None
+                                    else "observed"
+                                ),
+                            )
+                            for r in roles
+                        ],
+                        "bindings": {r: [r] for r in roles},
+                    },
+                )
+                projection = _scene_projection(doc, graph, packet)
+                break
+            except (TypeError, ValueError, KeyError) as exc:
+                errors.append(str(exc))
+                if attempt:
+                    raise
+    return projection, packet
+
+
 def publish_hybrid(
     instruction: str,
     task_id: str,
@@ -635,7 +721,7 @@ def publish_hybrid(
     image_bytes = image.read_bytes()
     prompt = {
         "instruction": instruction,
-        "request": "Return JSON {operations:[...]}. Choose only requested operations from the nine types. Copy task actions exactly in order. Do NOT invent handovers, named arms or extra pick steps. E1 handles both acquisition and placement. E4 ONLY for an explicit handover between two named arms: {template:E4,object,source:left|right,destination:left|right,quote}. E1 single arm placing: {template:E1,object,primary:auto|left|right,reference,relation:on|inside|right_of,quote}. E5 coordinated transport and release: {template:E5,object,reference,relation:on,quote}. Use consistent short English role IDs, retaining the same role when its contents change. E4 must be followed by E1 on the same object using the receiver. Use auto for unspecified arms. Distinguish surface support from volume containment. Every quote must be a verbatim instruction substring.",
+        "request": "Return JSON {operations:[...]}. Choose only requested operations from the nine types. Copy task actions exactly in order. Do NOT invent handovers, named arms or extra pick steps. E1 handles both acquisition and placement. E4 ONLY for an explicit handover between two named arms: {template:E4,object,source:left|right,destination:left|right,quote}. E1 single arm placing: {template:E1,object,primary:auto|left|right,reference,relation:on|inside|right_of,quote}. E5 coordinated transport and release: {template:E5,object,reference,relation:on,quote}. Use consistent snake_case ASCII identifiers matching [A-Za-z][A-Za-z0-9_]* for every object and reference, never spaces or punctuation. Use short English role IDs, retaining the same role when its contents change. E4 must be followed by E1 on the same object using the receiver. Use auto for unspecified arms. Distinguish surface support from volume containment. Every quote must be a verbatim instruction substring.",
     }
     prompt["request"] += (
         " Additionally support E2 align {object,orientation:upright|vertical,continue_held:true only when next E1 places same object}; "
@@ -801,6 +887,25 @@ def publish_hybrid(
             raise ValueError("Only a covered witness can enter scene qualification")
         packet = json.loads(scene_grounding.read_text())
         result.update(_scene_projection(doc, graph, packet), scene_grounding=packet)
+    elif coverage["status"] == "covered" and all(
+        n["call"]["kind"] in {"pick", "place", "hand_over"}
+        or n["call"].get("call_id") == "simulation.coordinated_transport"
+        for n in graph["nodes"]
+    ):
+        projection, packet = _ground_frozen_roles(doc, graph, image, services)
+        if image.read_bytes() != image_bytes:
+            raise ValueError("Source image changed during grounding")
+        result.update(projection, scene_grounding=packet)
+    pending_roles = [
+        obj["id"]
+        for obj in result.get("image_grounding", {}).get("objects", [])
+        if obj["provenance"] != "observed"
+    ]
+    stage = (
+        ("pending_visual_binding" if pending_roles else "ready_for_qualification")
+        if "scene_grounding" in result
+        else "authoring_only"
+    )
     with WorkflowRunArtifacts(output) as artifacts:
         (output / doc["inputs"]["image"]["ref"]).write_bytes(image_bytes)
         for k, v in result.items():
@@ -810,27 +915,66 @@ def publish_hybrid(
             dict(
                 schema_version="goal_authoring/v1",
                 route="hybrid",
+                stage=stage,
+                pending_roles=pending_roles,
                 spec_digest=doc["spec_digest"],
                 graph_digest=canonical_hash(graph),
                 execution_ready=False,
             ),
         )
-        if scene_grounding is not None:
+        from .semantic_graph_html import _graph_data, _viewer_document
+
+        data = _graph_data(graph)
+        data["review"] = dict(
+            spec=doc,
+            pending=len(pending_roles),
+            attempt=None,
+            pairing=dict(
+                role_entities=result.get("plan_coverage", {}).get("role_entities", {}),
+                milestone_groups={
+                    m.id: graph["task_groups"][0]["id"]
+                    for m in spec.milestones
+                    if m.id in coverage["producers"]
+                },
+                goal_groups={
+                    p.id: [graph["task_groups"][0]["id"]]
+                    for p in spec.goal
+                    if p.id in coverage["producers"]
+                },
+            ),
+        )
+        (output / "semantic_task_graph.html").write_text(
+            _viewer_document(data), encoding="utf-8"
+        )
+        if "scene_grounding" not in result:
+            from ..task_spec.publication import project_scene_requirements
+
             write_run_json(
-                output / "task_plan_manifest.json",
-                dict(
-                    schema_version="embodichain.hybrid-task-plan/v1",
-                    task_id=task_id,
-                    instruction=instruction,
-                    image_sha256=doc["inputs"]["image"]["sha256"],
-                    spec_digest=doc["spec_digest"],
-                    semantic_graph_sha256=canonical_hash(graph),
-                    artifacts={
-                        p.name: hashlib.sha256(p.read_bytes()).hexdigest()
-                        for p in output.iterdir()
-                        if p.is_file()
-                    },
-                ),
+                output / "scene_requirements.json", project_scene_requirements(doc)
             )
+        write_run_json(
+            output / "task_plan_manifest.json",
+            dict(
+                schema_version=(
+                    "embodichain.hybrid-task-plan/v1"
+                    if "scene_grounding" in result
+                    else "embodichain.hybrid-authoring/v1"
+                ),
+                task_id=task_id,
+                route="hybrid",
+                stage=stage,
+                pending_roles=pending_roles,
+                execution_ready=False,
+                instruction=instruction,
+                image_sha256=doc["inputs"]["image"]["sha256"],
+                spec_digest=doc["spec_digest"],
+                semantic_graph_sha256=canonical_hash(graph),
+                artifacts={
+                    p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+                    for p in output.iterdir()
+                    if p.is_file()
+                },
+            ),
+        )
         artifacts.commit()
     return result

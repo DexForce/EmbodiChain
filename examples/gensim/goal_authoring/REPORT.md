@@ -1,5 +1,26 @@
 # Task Engine 目标驱动链路验证（2026-11-14）
 
+## 默认图文入口验收（2026-11-15）
+
+不传 `--route`、`--proposal` 或 `--scene-grounding`，使用配置的 MiMo 视觉服务实时解读原图和指令。没有向模型提供旧操作、框、评分清单或图。物理侧复用已知安装的 USDZ、机器人和已标定的技能参数；不复用旧程序或资格报告。场景代理的尺寸由 mesh 计算，供逻辑角色绑定。每个新计划重新做资格检查、部署编译、单环境 Default 物理执行和独立末帧几何测量。[输入摘要、实际视觉框、绑定和终态](automatic_results.json)。
+
+| 任务 | 原生执行 | 末帧测量 |
+|---|---:|---|
+| 小积木放上大积木（原始双色俯视示意图） | 1027 步 | 小块投影在大块顶面内，底面间隙 2.00 mm |
+| task1186（原始数据集图片） | 4096 步 | 两次右递左和释放顺序正确；苹果/橙子距盘面 1.84/1.74 mm，盘底距垫面 1.75 mm |
+
+最终版每题一次实时 authoring 和 native execution 均通过，不能估算跨任务总体通过率。开发过程中，文本模式视觉响应曾出现非法 ID、错误字段和尾随文本；采用带图片的结构化请求并由宿主构造稳定绑定后通过。另一次运行生成了正确的 plate 视觉角色，但安装绑定没有确认对应的 tray，资格检查拒绝；没有将该次计作成功。解析器现在会使用场景代理的语义和尺寸，禁止改写已知身份。错臂、错盘在实际生成图上仍为 uncovered；关铰链门在已有不兼容部署仍拒绝编译。历史 Pick/Place、task1186 的 template v2 和已发布的 hybrid/v1 都经当前加载器验摘要重读；显式 template 的离线 CLI 发布和旧目录保护回归通过。
+
+**复现**：配置本文所列模型服务，准备前述 stack_pilot / fruit_pilot 安装，分别执行（OUTPUT 必须是新目录）：
+
+```bash
+embodichain gensim task plan --image "$IMAGE" --instruction "$INSTRUCTION" --task-id "$TASK" --output "$OUTPUT/plan"
+python -m examples.gensim.goal_authoring.auto_acceptance "$OUTPUT" "$INSTALLATION"
+```
+
+默认切换仅指 task plan 图文入口；没有运行时自动回退。模板修订协议仍需显式 `--route template`。未支持部署的 hybrid 候选可读取规范、图和离线 HTML，但标为 authoring_only。视觉缺项以 pending_visual_binding 发布，不授权部署。模型接口失败或修订次数耗尽报错。视觉请求独立于图修订预算，因此不要把历史五请求试验当成本轮端到端请求成本。
+
+
 ## task1186：双臂、多阶段生成部署
 
 在已安装扩展、USD 和 DexSim Default 后端的仓库根目录运行：

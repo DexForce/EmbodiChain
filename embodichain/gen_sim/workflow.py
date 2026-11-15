@@ -94,7 +94,10 @@ def load_task_plan(path: str | Path) -> dict[str, Any]:
     root = Path(path).expanduser().resolve(strict=True)
     manifest = _load_json(root / "task_plan_manifest.json", "task plan manifest")
     version = manifest.get("schema_version")
-    if version == "embodichain.hybrid-task-plan/v1":
+    if version in {
+        "embodichain.hybrid-task-plan/v1",
+        "embodichain.hybrid-authoring/v1",
+    }:
         from .task_engine.hybrid import _scene_projection, verify_witness
         from .task_spec import TaskSpec, canonical_hash
         from .task_spec.publication import decode_task_document
@@ -121,6 +124,22 @@ def load_task_plan(path: str | Path) -> dict[str, Any]:
             or image["sha256"] != manifest["image_sha256"]
         ):
             raise ValueError("Hybrid publication identity mismatch")
+        if version == "embodichain.hybrid-authoring/v1":
+            from .task_spec.publication import project_scene_requirements
+
+            requirements = read("scene_requirements")
+            if (
+                requirements != project_scene_requirements(doc)
+                or manifest.get("stage") != "authoring_only"
+            ):
+                raise ValueError("Invalid authoring-only publication")
+            return {
+                **manifest,
+                "root": str(root),
+                "plan_digest": _file_hash(root / "task_plan_manifest.json"),
+                "task_document": doc,
+                "scene_requirements": requirements,
+            }
         if (
             verify_witness(
                 spec,
@@ -137,6 +156,18 @@ def load_task_plan(path: str | Path) -> dict[str, Any]:
         projection = _scene_projection(doc, graph, read("scene_grounding"))
         if any(read(k) != v for k, v in projection.items()):
             raise ValueError("Hybrid scene projection mismatch")
+        pending = [
+            o["id"]
+            for o in projection["image_grounding"]["objects"]
+            if o["provenance"] != "observed"
+        ]
+        if "stage" in manifest and (
+            manifest["stage"]
+            != ("pending_visual_binding" if pending else "ready_for_qualification")
+            or pending != manifest["pending_roles"]
+            or manifest["execution_ready"] is not False
+        ):
+            raise ValueError("Hybrid publication stage differs from verified grounding")
         return {
             **manifest,
             "root": str(root),
@@ -329,7 +360,10 @@ def revise_task_plan(
         or plan["plan_digest"] != expected_plan_digest
     ):
         raise ValueError("Stale task plan revision")
-    if plan["schema_version"] == "embodichain.hybrid-task-plan/v1":
+    if plan["schema_version"] in {
+        "embodichain.hybrid-task-plan/v1",
+        "embodichain.hybrid-authoring/v1",
+    }:
         raise ValueError(
             "Hybrid graph revisions require a fresh grounded hybrid publication"
         )
@@ -789,6 +823,20 @@ def qualify_task_scene(
         "requirements_sha256": scene.get("requirements_sha256"),
         "feedback_sha256": scene.get("feedback_sha256"),
     }
+    if plan["schema_version"] == "embodichain.hybrid-authoring/v1":
+        return _publish_qualification(
+            output,
+            status="rejected",
+            inputs=inputs,
+            issues=[
+                dict(
+                    code="authoring_only",
+                    owner="task_plan",
+                    retry_scope="none",
+                    message="No qualified grounded witness",
+                )
+            ],
+        )
     requirements_hash = _file_hash(plan_root / "scene_requirements.json")
     if scene.get("requirements_sha256") != requirements_hash:
         return _publish_qualification(
@@ -1016,6 +1064,10 @@ def prepare_task_deployment(
     from .task_spec import canonical_hash
 
     plan = load_task_plan(task_plan_dir)
+    if plan.get("stage") in {"authoring_only", "pending_visual_binding"}:
+        raise ValueError(
+            "Deployment preparation requires its matching accepted qualification"
+        )
     scene = load_generated_scene(generated_scene_dir)
     plan_root, scene_root = Path(plan["root"]), Path(scene["root"])
     qualification_root = Path(qualification_dir).expanduser().resolve(strict=True)

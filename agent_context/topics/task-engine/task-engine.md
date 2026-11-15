@@ -20,9 +20,7 @@ Before freezing the hybrid objective, source checks distinguish explicit pour
 motion, requested liquid transfer and ambiguous outcomes. A separately prompted
 source audit checks omissions and invented actions against both the declarations and their expanded calls and occurrence bindings. During expansion, a following placement or pour can reuse the same held object; explicit incompatible arms remain errors. Diagnostics feed a bounded
 reinterpretation; a failed audit prevents plan publication.
-For rigid pick/place, named handovers and coordinated tray release, hybrid can additionally publish a verified scene-workflow
-manifest with `--scene-grounding FILE` (source-image digest plus reviewed visual
-entities/bindings). Qualification and deployment preparation then use the same
+For rigid pick/place, named handovers and coordinated tray release, hybrid automatically grounds frozen roles in the original image, or verifies a supplied `--scene-grounding FILE`. A null box retains a pending role. Plans outside this deployment scope publish an authoring-only manifest. Qualification and deployment preparation then use the same
 role, geometry, resource and configuration checks as template plans. The same tray identity is retained across fruit landings and the final transport;
 qualification selects non-overlapping landing poses and the terminal segment
 rechecks retained payloads. A handover requires a trusted exchange pose. Ungrounded

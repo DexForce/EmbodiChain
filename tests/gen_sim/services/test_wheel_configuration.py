@@ -218,6 +218,8 @@ def test_installed_wheel_cli_reads_external_profiles_without_package_edits(tmp_p
                 "-m",
                 "embodichain",
                 "task-engine",
+                "--route",
+                "template",
                 "--image",
                 str(image),
                 "--instruction",

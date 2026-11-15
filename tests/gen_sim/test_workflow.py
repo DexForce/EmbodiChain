@@ -1122,7 +1122,13 @@ def test_grounded_hybrid_placement_uses_scene_qualification(run_cfg, seen):
     with GenSimServices(
         GenSimServicesCfg(),
         injected={
-            "task_image_grounding": _ScriptedChat({"operations": [op]}),
+            "task_image_grounding": _ScriptedChat(
+                {"operations": [op]},
+                {
+                    o["id"]: {"description": o["description"], "bbox": o["bbox"]}
+                    for o in packet["grounding"]["objects"]
+                },
+            ),
             "task_interpretation": _ScriptedChat({"issues": []}),
         },
     ) as services:
@@ -1132,7 +1138,7 @@ def test_grounded_hybrid_placement_uses_scene_qualification(run_cfg, seen):
             run_cfg.image,
             base / "plan",
             services,
-            scene_grounding=ground,
+            scene_grounding=ground if seen else None,
         )
     plan = load_task_plan(base / "plan")
     scene = _provider_scene(

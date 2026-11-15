@@ -1,0 +1,181 @@
+{
+  "stack": {
+    "spec_digest": "0dc0c7aa769cfd70026b69864b389cfbee7fe4f9b37905dfac71d037677f4b6a",
+    "graph_digest": "04624cea98c4e82104a28f1bfa0bcc36c267584a9d4f602a8f43a5958addb438",
+    "bindings": {
+      "larger_block": "block_1",
+      "small_block": "block_2"
+    },
+    "steps": 1027,
+    "terminal": [
+      {
+        "subject": "block_2",
+        "reference": "block_1",
+        "gap": 0.0019958982217940444,
+        "margin": 0.018104509740369396,
+        "satisfied": true
+      }
+    ],
+    "holders": [
+      {
+        "primary_manipulator": "block_2"
+      },
+      {}
+    ],
+    "passed": true,
+    "grounding": {
+      "objects": [
+        {
+          "id": "larger_block",
+          "description": "A blue square block located in the upper portion of the image.",
+          "bbox": [
+            0.414,
+            0.04,
+            0.585,
+            0.211
+          ],
+          "provenance": "observed"
+        },
+        {
+          "id": "small_block",
+          "description": "An orange square block located in the lower portion of the image.",
+          "bbox": [
+            0.45,
+            0.85,
+            0.549,
+            0.949
+          ],
+          "provenance": "observed"
+        }
+      ],
+      "bindings": {
+        "larger_block": [
+          "larger_block"
+        ],
+        "small_block": [
+          "small_block"
+        ]
+      }
+    },
+    "image_sha256": "bf13a3165d03028bab428f0c56dd4ca048e1012ee308c6d9d64ee6635a9a7030"
+  },
+  "fruit": {
+    "spec_digest": "a2f012e793c715c474fed8f79cacda78e13c4e2cc56f233b1307ff394f3dfee0",
+    "graph_digest": "0f241c128178c5213224a37ae73209ba370697754a22153592313c862c5d9b0e",
+    "bindings": {
+      "apple": "apple",
+      "orange": "orange",
+      "plate": "tray",
+      "service_mat": "service_pad"
+    },
+    "steps": 4096,
+    "terminal": [
+      {
+        "subject": "apple",
+        "reference": "tray",
+        "gap": 0.001842428849922726,
+        "margin": 0.03970526118588168,
+        "satisfied": true
+      },
+      {
+        "subject": "orange",
+        "reference": "tray",
+        "gap": 0.0017365882091689884,
+        "margin": 0.019698899488139437,
+        "satisfied": true
+      },
+      {
+        "subject": "tray",
+        "reference": "service_pad",
+        "gap": 0.0017473389322694866,
+        "margin": 0.02876409931515808,
+        "satisfied": true
+      }
+    ],
+    "holders": [
+      {
+        "right": "apple"
+      },
+      {
+        "left": "apple"
+      },
+      {},
+      {
+        "right": "orange"
+      },
+      {
+        "left": "orange"
+      },
+      {},
+      {}
+    ],
+    "passed": true,
+    "grounding": {
+      "objects": [
+        {
+          "id": "apple",
+          "description": "A red apple with a small stem, located on the right side of the table near the orange.",
+          "bbox": [
+            0.724,
+            0.398,
+            0.81,
+            0.517
+          ],
+          "provenance": "observed"
+        },
+        {
+          "id": "orange",
+          "description": "A round orange fruit, located on the right side of the table next to the apple.",
+          "bbox": [
+            0.833,
+            0.413,
+            0.918,
+            0.528
+          ],
+          "provenance": "observed"
+        },
+        {
+          "id": "plate",
+          "description": "A large, round, white plate with two metal handles, located on the left side of the table.",
+          "bbox": [
+            0.072,
+            0.286,
+            0.351,
+            0.51
+          ],
+          "provenance": "observed"
+        },
+        {
+          "id": "service_mat",
+          "description": "A circular outline on the table surface, indicating the service mat area in the center.",
+          "bbox": [
+            0.388,
+            0.301,
+            0.676,
+            0.557
+          ],
+          "provenance": "observed"
+        }
+      ],
+      "bindings": {
+        "apple": [
+          "apple"
+        ],
+        "orange": [
+          "orange"
+        ],
+        "plate": [
+          "plate"
+        ],
+        "service_mat": [
+          "service_mat"
+        ]
+      }
+    },
+    "image_sha256": "25416a5fdc9cd7de1e3d2bd824c66c7905752e9a99085783ee7f9cf55c6da9ff",
+    "negative_controls": {
+      "wrong_arm": "uncovered",
+      "wrong_plate": "uncovered"
+    }
+  }
+}
