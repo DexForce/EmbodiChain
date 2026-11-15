@@ -108,3 +108,33 @@ The reproducible harness is
 samples, native versions, source hashes, memory scope and matching-pose PNGs.
 The renderer/configuration and example-CLI regression suites passed 263 tests
 after exposing the `--denoising off|optix` example option.
+
+## DLSS compatibility and default Balanced comparison
+
+DLSS is not excluded by the Gaussian admission contract. The general rendering
+configuration defaults to DLSS RR, while the Gaussian preset chooses OptiX for
+offscreen cameras. The initial comparison followed that preset; it did not
+establish any DLSS incompatibility.
+
+The same Library task subsequently completed with `--denoising dlss`: 478
+actions / 479 valid RGB-D frames. Native NGX initialization succeeded, and
+`get_rt_pipeline_state()` reported effective `DLSS_RR`, matching the requested
+mode. Native logs reported **557x313 internal / 960x540 output** at default
+Balanced quality 2. Off and OptiX use native 960x540 input. Therefore this is a
+resolution/reconstruction tradeoff, not equal internal shading workloads.
+
+A new six-process pass in off/optix/dlss/dlss/optix/off order measured 360
+captures per mode at the same three recorded poses:
+
+| Mode | Internal mesh resolution | Camera median | P95 | Warm device-memory delta |
+| --- | --- | ---: | ---: | ---: |
+| Off | 960x540 | 8.262 ms | 8.841 ms | 2642 MiB |
+| OptiX | 960x540 | 10.355 ms | 10.988 ms | 2792 MiB |
+| DLSS RR Balanced | 557x313, reconstructed to 960x540 | 9.118 ms | 10.057 ms | 2875.3 MiB |
+
+Matching-pose screenshots and complete sensor videos are retained for all three
+modes. The default DLSS task recording took 19.11 s in one sample, with the same
+setup/audit exclusion as the previous recording timings. Native pipeline state
+is saved in the benchmark JSON so configured mode can be distinguished from
+capability fallback. DLAA quality 5 would retain native internal resolution;
+that alternative was not qualified in this comparison.

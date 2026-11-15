@@ -358,7 +358,7 @@ def main() -> None:
     parser.add_argument("--viewer", action="store_true")
     parser.add_argument(
         "--denoising",
-        choices=("off", "optix"),
+        choices=("off", "optix", "dlss"),
         default="off",
         help="Native denoising for the managed sensor; spp remains 1.",
     )

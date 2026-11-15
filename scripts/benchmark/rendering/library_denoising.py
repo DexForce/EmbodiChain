@@ -193,6 +193,7 @@ def _worker(args: argparse.Namespace) -> dict[str, Any]:
             "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
             "python": sys.version,
             "render_settings": cfg.sim_cfg.render_cfg.to_dict(),
+            "rt_pipeline_state": str(env.sim.get_world().get_rt_pipeline_state()),
             "scene_dependencies": cfg._usd_scene_inventory["dependencies"],
             "trajectory_sha256": _sha(args.trajectory),
             "steps_in_source": steps,
@@ -213,7 +214,7 @@ def _report(args: argparse.Namespace, rows: list[dict]) -> None:
         ):
             raise ValueError("Scene or trajectory changed during the comparison")
     groups = {}
-    for mode in ("off", "optix"):
+    for mode in args.modes:
         selected = [row for row in rows if row["mode"] == mode]
         samples = [
             v for row in selected for pose in row["poses"] for v in pose["samples_ms"]
@@ -246,7 +247,9 @@ def _report(args: argparse.Namespace, rows: list[dict]) -> None:
         "# Library sensor denoising comparison",
         "",
         "Same 2M-point scene, trajectory poses, 960x540 RGB/depth, Hybrid and spp=1.",
-        "Four fresh processes run off/optix/optix/off. Completed camera calls include",
+        "DLSS, when selected, uses its default Balanced internal mesh resolution;",
+        "OptiX and off retain native resolution. This is a quality/resolution tradeoff.",
+        f"Fresh processes run {'/'.join([*args.modes, *reversed(args.modes)])}. Completed camera calls include",
         "publication, native rendering and CPU RGB/depth readback; physics, quality",
         "statistics, disk writes and memory profiling are outside the timed scope.",
         f"Each of three poses has {args.warmup} warmups and {args.samples} timed calls per process.",
@@ -310,7 +313,10 @@ def main() -> None:
     parser.add_argument("--nvml-device", type=int, default=0)
     parser.add_argument("--samples", type=int, default=60)
     parser.add_argument("--warmup", type=int, default=10)
-    parser.add_argument("--mode", choices=("off", "optix"))
+    parser.add_argument("--mode", choices=("off", "optix", "dlss"))
+    parser.add_argument(
+        "--modes", nargs="+", choices=("off", "optix", "dlss"), default=["off", "optix"]
+    )
     parser.add_argument("--repeat", type=int, default=0)
     parser.add_argument("--worker", action="store_true")
     args = parser.parse_args()
@@ -331,7 +337,8 @@ def main() -> None:
         print("RESULT_JSON=" + json.dumps(row), flush=True)
         return
     rows = []
-    for repeat, mode in enumerate(("off", "optix", "optix", "off")):
+    order = [*args.modes, *reversed(args.modes)]
+    for repeat, mode in enumerate(order):
         command = [
             sys.executable,
             __file__,
@@ -362,7 +369,7 @@ def main() -> None:
             if line.startswith("RESULT_JSON=")
         )
         rows.append(json.loads(marker.removeprefix("RESULT_JSON=")))
-        print(f"Completed {mode} process {repeat + 1}/4", flush=True)
+        print(f"Completed {mode} process {repeat + 1}/{len(order)}", flush=True)
     _report(args, rows)
 
 

@@ -23,12 +23,16 @@ PYTHONPATH=. python examples/gym/library_pick_place/run.py --prepare-only
 PYTHONPATH=. python examples/gym/library_pick_place/run.py --episodes 1 --seed 42
 PYTHONPATH=. python examples/gym/library_pick_place/run.py --episodes 10 --seed 42
 PYTHONPATH=. python examples/gym/library_pick_place/run.py --denoising optix
+PYTHONPATH=. python examples/gym/library_pick_place/run.py --denoising dlss
 ```
 
 Or use `embodichain run-example gym/library_pick_place/run`. The default is
 headless; `--viewer` opens a native window while the Camera continues recording.
 `--denoising optix` enables native sensor denoising with the same single sample
 per pixel; the default `off` retains the original qualification settings.
+`--denoising dlss` selects native DLSS Ray Reconstruction with its default
+Balanced setting. It reconstructs a lower internal mesh resolution to the
+sensor output size, so it is a different resolution/quality tradeoff from OptiX.
 Headless mode defaults SDL to its dummy driver. If the host requires an XDG
 runtime directory, create a private directory and set `XDG_RUNTIME_DIR`, as in
 the project's native CI configuration. `--output` selects the output **parent**;
@@ -152,6 +156,7 @@ initial, lifted and terminal states, with disk writing outside the timed scope:
 PYTHONPATH=. python scripts/benchmark/rendering/library_denoising.py \
   --gym-config /path/to/run_uuid/resolved/task.dual_ur5.yaml \
   --trajectory /path/to/run_uuid/episodes/episode_uuid/trajectory.pt \
+  --modes off optix dlss \
   --output outputs/library_pick_place/denoising_benchmark
 ```
 
