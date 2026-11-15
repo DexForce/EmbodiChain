@@ -54,6 +54,12 @@ class PrecisionRunCfg:
     """Explicit MuJoCo MultiCCD selection; None preserves each route's default."""
     contact_capacity: int = 4096
     source_contact: bool = True
+    newton_solver: str | None = None
+    """Newton solver family: ``mujoco_warp`` or ``dexuni``.
+
+    Omission preserves the existing MuJoCo Warp profile. Explicit selection
+    requires ``backend="newton"``; ``solver`` still selects the MuJoCo algorithm.
+    """
     solver: str | None = None
     """Explicit solver comparison; None preserves the source solver."""
     use_mujoco_cpu: bool = False
@@ -272,6 +278,10 @@ def run_passive_probe(asset: AssemblyAsset, cfg: PrecisionRunCfg) -> dict[str, A
 
 def _validate_solver_overrides(cfg: PrecisionRunCfg) -> None:
     """Reject calibration settings that would otherwise be ignored."""
+    if cfg.newton_solver not in {None, "mujoco_warp", "dexuni"}:
+        raise ValueError("Newton solver must be mujoco_warp or dexuni.")
+    if cfg.newton_solver is not None and cfg.backend != "newton":
+        raise ValueError("An explicit Newton solver requires backend='newton'.")
     if cfg.warp_reference_initialization not in {"cpu_compiled", "warp_recomputed"}:
         raise ValueError(
             "Warp reference initialization must be cpu_compiled or warp_recomputed."
@@ -296,6 +306,85 @@ def _validate_solver_overrides(cfg: PrecisionRunCfg) -> None:
         raise ValueError(
             "Default does not accept MuJoCo solver or calibration overrides."
         )
+
+
+def _newton_solver_config(
+    cfg: PrecisionRunCfg,
+    source_options: dict[str, Any],
+    *,
+    save_to_mjcf: str | None = None,
+) -> dict[str, Any]:
+    """Route the same MuJoCo profile into the selected native solver family."""
+    _validate_solver_overrides(cfg)
+    options = {
+        "iterations": cfg.solver_iterations,
+        "nconmax": cfg.contact_capacity,
+        "njmax": 6 * cfg.contact_capacity,
+        "solver": (
+            cfg.solver
+            if cfg.solver is not None
+            else source_options.get("solver", "newton")
+        ),
+        "integrator": source_options.get("integrator"),
+        "use_mujoco_cpu": cfg.use_mujoco_cpu,
+        "separate_worlds": False if cfg.use_mujoco_cpu else None,
+    }
+    if cfg.solver_tolerance is not None:
+        options["tolerance"] = cfg.solver_tolerance
+    if cfg.enable_multiccd is not None:
+        options["enable_multiccd"] = cfg.enable_multiccd
+    if save_to_mjcf is not None:
+        options["save_to_mjcf"] = save_to_mjcf
+    if cfg.newton_solver == "dexuni":
+        return {"solver_type": "dexuni", "mujoco_options": options}
+    return {"solver_type": "mujoco_warp", **options}
+
+
+def _native_solver_metadata(
+    sim: Any, cfg: PrecisionRunCfg, source_options: dict[str, Any]
+) -> dict[str, Any]:
+    """Read the prepared solver identity; never infer a DexUni dispatch."""
+    if cfg.backend != "newton":
+        return {
+            "runtime": "Default",
+            "newton_solver": None,
+            "active_solver": None,
+            "solver_diagnostics": None,
+        }
+    requested = cfg.newton_solver or "mujoco_warp"
+    active = sim.physics.solver_type
+    if active != requested:
+        raise RuntimeError(
+            f"Requested Newton solver {requested!r}, prepared {active!r}."
+        )
+    read = getattr(sim.spawn_result, "get_solver_diagnostics", None)
+    diagnostics = read() if callable(read) else None
+    algorithm = (
+        cfg.solver if cfg.solver is not None else source_options.get("solver", "newton")
+    )
+    if requested == "dexuni":
+        features = (diagnostics or {}).get("features", {})
+        dispatch = features.get("backend")
+        if not dispatch:
+            raise NotImplementedError(
+                "DexUni assembly probes require SDK solver dispatch diagnostics."
+            )
+        # These probes configure MuJoCo contacts/algorithms. A VBD or coupled
+        # scene cannot silently substitute different parameter semantics.
+        if dispatch != "pure_mujoco":
+            raise NotImplementedError(
+                f"DexUni assembly probes require pure_mujoco dispatch for the selected "
+                f"contact/solver profile; SDK selected {dispatch!r}."
+            )
+        runtime = f"Newton/DexUni ({dispatch}{', CPU' if cfg.use_mujoco_cpu else ''})"
+    else:
+        runtime = "Newton/MuJoCo CPU" if cfg.use_mujoco_cpu else "Newton/MuJoCo Warp"
+    return {
+        "runtime": runtime,
+        "newton_solver": active,
+        "active_solver": algorithm,
+        "solver_diagnostics": diagnostics,
+    }
 
 
 def _json_measurement(result: dict[str, Any]) -> dict[str, Any]:
@@ -680,29 +769,13 @@ def _run_embodichain(
             gravity=asset.source_options.get("gravity", [0, 0, -9.81]),
             num_substeps=1,
             use_cuda_graph=False,
-            solver_cfg={
-                "solver_type": "mujoco_warp",
-                "iterations": cfg.solver_iterations,
-                "nconmax": cfg.contact_capacity,
-                "njmax": 6 * cfg.contact_capacity,
-                "solver": asset.source_options.get("solver", "newton"),
-                "integrator": asset.source_options.get("integrator"),
-                "use_mujoco_cpu": cfg.use_mujoco_cpu,
-                "separate_worlds": False if cfg.use_mujoco_cpu else None,
-            },
+            solver_cfg=_newton_solver_config(cfg, asset.source_options),
         )
         if cfg.backend == "newton"
         else DefaultPhysicsCfg(
             gravity=asset.source_options.get("gravity", [0, 0, -9.81])
         )
     )
-    if cfg.backend == "newton":
-        if cfg.solver is not None:
-            physics.solver_cfg["solver"] = cfg.solver
-        if cfg.solver_tolerance is not None:
-            physics.solver_cfg["tolerance"] = cfg.solver_tolerance
-        if cfg.enable_multiccd is not None:
-            physics.solver_cfg["enable_multiccd"] = cfg.enable_multiccd
     sim = SimulationManager(
         SimulationManagerCfg(
             headless=not native_window,
@@ -767,6 +840,7 @@ def _run_embodichain(
                     body_cfg.attrs.collision_props.rest_offset = cfg.rest_offset
                     objects[body.name] = sim.add_rigid_object(body_cfg)
         sim.prepare()
+        _native_solver_metadata(sim, cfg, asset.source_options)
         collision_counts = {}
         for body in asset.bodies:
             entity = objects[body.name]._entities[0]
@@ -845,17 +919,8 @@ def _run_embodichain(
                 else "Physical probe failed; native contact-overflow accounting is unavailable."
             ),
             "metrics": metrics,
-            "runtime": (
-                "Newton/MuJoCo CPU"
-                if cfg.backend == "newton" and cfg.use_mujoco_cpu
-                else "Newton/MuJoCo Warp" if cfg.backend == "newton" else "Default"
-            ),
+            **_native_solver_metadata(sim, cfg, asset.source_options),
             "source_solver": asset.source_options.get("solver"),
-            "active_solver": (
-                cfg.solver or asset.source_options.get("solver")
-                if cfg.backend == "newton"
-                else None
-            ),
             "collision_counts": collision_counts,
             "initial_state": {name: value.tolist() for name, value in initial.items()},
             "final_state": {name: value.tolist() for name, value in final.items()},

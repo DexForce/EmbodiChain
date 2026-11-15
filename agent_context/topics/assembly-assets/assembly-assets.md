@@ -62,11 +62,25 @@ with rotational weights, changing contact regularization without changing asset
 geometry or mass. Newton's Warp model-property updates already recompute these
 constants. Compare declared initialization protocols and effective solver options;
 equal requested tolerance or MultiCCD settings alone do not establish physics
-alignment. `PrecisionRunCfg.solver` explicitly selects a solver comparison;
+alignment. `PrecisionRunCfg.newton_solver` selects the Newton family
+(`mujoco_warp` or `dexuni`); omission preserves MuJoCo Warp. The demo CLI uses
+`--newton-solver`, and the matrix accepts `--newton-solvers` to compare families
+without duplicating independent reference cells. A non-Newton backend rejects
+an explicit family. `PrecisionRunCfg.solver` explicitly selects a MuJoCo algorithm comparison;
 omission preserves the source setting. Source PGS gears require a distinct CG
 comparison on current MuJoCo Warp. `use_mujoco_cpu` selects a separate,
 single-world Newton/MuJoCo CPU profile, never an implicit Warp fallback.
-Source and active solver identities remain separate in results.
+Source and active MuJoCo algorithms remain separate from the Newton family.
+Shared profile routing forwards the same contact capacity, algorithm/integrator,
+iteration limit and explicit calibration knobs to direct MuJoCo Warp or DexUni's
+nested `mujoco_options`. Native constrained probes accept `newton_solver` too;
+their matrix rejects passive-only algorithm/CPU/calibration overrides.
+Results record prepared `newton_solver` and SDK `solver_diagnostics`; DexUni
+assembly profiles require measured `pure_mujoco` dispatch. Missing diagnostics,
+a mismatched family, or VBD/coupled dispatch cannot silently stand in for this
+contact/algorithm profile. Report grouping uses requested family/CPU identity,
+including unsuccessful cells; actual dispatch is shown independently. Every
+matrix cell owns its preparation directory.
 
 `embodichain_benchmarks.assembly.probes` owns independent constrained circle/square clearance oracles.
 Many-pegs endpoint seating and gear ratios do not replace those independent

@@ -5188,7 +5188,7 @@ Self-contained body-local geometry, joint attachment and mass-property records w
 embodichain_benchmarks.assembly.precision
 -----------------------------------------
 
-Independent USD geometry/mass acceptance and passive source/native simulation measurements. Missing overflow accounting remains unverified rather than a precision certification.
+Independent USD geometry/mass acceptance and passive source/native simulation measurements. Missing overflow accounting remains unverified rather than a precision certification. ``PrecisionRunCfg.newton_solver`` explicitly selects MuJoCo Warp or DexUni; ``solver`` retains the MuJoCo algorithm. Native results retain the prepared family and actual SDK dispatch.
 
 .. currentmodule:: embodichain_benchmarks.assembly.precision
 
