@@ -211,11 +211,12 @@ def custom_post_init(obj):
                 embed()
 
 
-def class_to_dict(obj: object) -> dict[str, Any]:
+def class_to_dict(obj: object) -> dict[Any, Any]:
     """Convert an object into dictionary recursively.
 
     Note:
-        Ignores all names starting with "__" (i.e. built-in methods).
+        Ignores string names starting with "__" (i.e. built-in methods).
+        Non-string mapping keys retain their original type.
 
     Args:
         obj: An instance of a class to convert.
@@ -246,7 +247,7 @@ def class_to_dict(obj: object) -> dict[str, Any]:
     data = dict()
     for key, value in obj_dict.items():
         # disregard builtin attributes
-        if key.startswith("__"):
+        if isinstance(key, str) and key.startswith("__"):
             continue
         # check if attribute is callable -- function
         if callable(value):

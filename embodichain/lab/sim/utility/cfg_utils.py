@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import MISSING
+from copy import deepcopy
 from typing import TypeVar
 
 from embodichain.lab.sim.cfg import (
@@ -51,6 +52,21 @@ def _merge_non_none_config(base: _ConfigT | None, override: _ConfigT) -> _Config
                 and is_configclass(base_value)
             ):
                 _merge_non_none_config(base_value, value)
+            elif (
+                base_value is not None
+                and is_configclass(base_value)
+                and is_configclass(value)
+                and isinstance(value, type(base_value))
+            ):
+                # A sparse backend extension must retain the portable preset
+                # fields when promoting its material or collision group.
+                promoted = type(value)(
+                    **{
+                        name: deepcopy(getattr(base_value, name))
+                        for name in base_value.__dataclass_fields__
+                    }
+                )
+                setattr(base, field_name, _merge_non_none_config(promoted, value))
             else:
                 setattr(base, field_name, value)
     return base
@@ -298,17 +314,8 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
             # merge physics attributes
             user_attrs_dict = override_cfg_dict.get("attrs")
             if isinstance(user_attrs_dict, dict):
-                grouped_fields = set(RigidBodyPhysicsCfg.__dataclass_fields__)
                 parsed = _sparse_rigid_body_physics_from_dict(user_attrs_dict)
-                for field_name in grouped_fields:
-                    override = getattr(parsed, field_name)
-                    if override is None:
-                        continue
-                    base = getattr(base_cfg.attrs, field_name)
-                    if base is not None and isinstance(base, type(override)):
-                        _merge_non_none_config(base, override)
-                    else:
-                        setattr(base_cfg.attrs, field_name, override)
+                base_cfg.attrs = _merge_non_none_config(base_cfg.attrs, parsed)
             else:
                 logger.log_warning(
                     "attrs should be a dictionary. Skipping attrs merge."
@@ -338,13 +345,21 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
             # merge urdf components
             user_urdf_cfg = override_cfg_dict.get("urdf_cfg")
             if isinstance(user_urdf_cfg, dict):
-                for output_field in ("fname", "fpath_prefix", "force_assembly"):
-                    if output_field in user_urdf_cfg:
-                        setattr(
-                            base_cfg.urdf_cfg,
-                            output_field,
-                            user_urdf_cfg[output_field],
-                        )
+                for field in (
+                    "base_link_name",
+                    "fpath",
+                    "fname",
+                    "fpath_prefix",
+                    "use_signature_check",
+                    "force_assembly",
+                ):
+                    if field in user_urdf_cfg:
+                        setattr(base_cfg.urdf_cfg, field, user_urdf_cfg[field])
+                if "sensors" in user_urdf_cfg:
+                    decoded = type(base_cfg.urdf_cfg).from_dict(
+                        {"sensors": user_urdf_cfg["sensors"]}
+                    )
+                    base_cfg.urdf_cfg.sensors = decoded.sensors
                 # Merge name_case policy if the override specifies one.
                 user_name_case = user_urdf_cfg.get("name_case")
                 if isinstance(user_name_case, dict):
@@ -373,15 +388,25 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
                         {"component_type": k, **v} for k, v in components.items()
                     ]
                 for component in components:
+                    params = dict(component.get("params", {}))
+                    params.update(
+                        {
+                            k: v
+                            for k, v in component.items()
+                            if k
+                            not in {
+                                "component_type",
+                                "urdf_path",
+                                "transform",
+                                "params",
+                            }
+                        }
+                    )
                     base_cfg.urdf_cfg.add_component(
                         component_type=component.get("component_type"),
                         urdf_path=component.get("urdf_path"),
                         transform=component.get("transform"),
-                        **{
-                            k: v
-                            for k, v in component.items()
-                            if k not in {"component_type", "urdf_path", "transform"}
-                        },
+                        **params,
                     )
             else:
                 logger.log_warning(
