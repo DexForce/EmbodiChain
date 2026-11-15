@@ -594,6 +594,121 @@ def test_unsupported_frozen_qualifier_remains_unverified(
         )
 
 
+def _terminal_hold(task_type, *, release=False):
+    def mutate(s, g, p):
+        s["terminal_behavior"] = "hold"
+        if task_type == "E1":
+            # A held tool ends above its target instead of being placed there.
+            s["relation"] = "above"
+        transport = dict(
+            kind="registered",
+            call_id="simulation.move_held_object",
+            arguments={"target": "hold_pose"},
+            resources={},
+        )
+        # A pick and one held transport replace the releasing placement; E2
+        # holds its object upright where it was picked.
+        nodes = p["nodes"]
+        nodes[0]["call"] = dict(kind="pick", object="source", resources={})
+        nodes[1]["call"] = transport
+        if release:
+            place = dict(
+                kind="place",
+                object="source",
+                inside="inside__tray__source",
+                resources={},
+            )
+            nodes.append({**deepcopy(nodes[1]), "id": "n2", "call": place})
+            nodes[2]["depends_on"] = ["n1"]
+            nodes[2]["semantic"]["relation"] = "inside"
+            p["requirements"][0]["node_ids"].append("n2")
+        if task_type == "E2":
+            nodes[1]["semantic"]["reference"] = None
+        for node in p["nodes"]:
+            if node["call"]["kind"] != "place":
+                node["semantic"]["relation"] = s["relation"]
+            node["semantic"]["intent"]["terminal_behavior"] = "hold"
+            if task_type == "E1":
+                node["semantic"]["intent"]["relation"] = "above"
+
+    return mutate
+
+
+@pytest.mark.parametrize("task_type", ["E1", "E2"])
+def test_terminal_hold_plans_keep_the_object_in_the_gripper(source_image, task_type):
+    result = _plan(source_image, task_type, _terminal_hold(task_type))
+    coverage = result["semantic_graph_validation"]["coverage"]
+    assert coverage["semantic_status"] == "valid"
+
+
+def test_terminal_hold_rejects_a_releasing_plan(source_image):
+    with pytest.raises(SemanticPlanningError, match="hold is not retained"):
+        _plan(source_image, "E2", _terminal_hold("E2", release=True))
+
+
+def test_terminal_hold_acquires_with_pick_not_axis_alignment(source_image):
+    def align_first(s, g, p):
+        _terminal_hold("E2")(s, g, p)
+        p["nodes"][0]["call"] = dict(
+            kind="registered",
+            call_id="simulation.axis_align",
+            arguments={"object": "source"},
+            resources={},
+        )
+
+    with pytest.raises(SemanticPlanningError, match="acquire it with pick"):
+        _plan(source_image, "E2", align_first)
+
+
+def test_terminal_hold_transport_carries_the_orientation_goal(source_image):
+    def upright_on_pick_only(s, g, p):
+        _terminal_hold("E2")(s, g, p)
+        del p["nodes"][1]["semantic"]["intent"]["orientation_goal"]
+
+    with pytest.raises(SemanticPlanningError, match="declare it in semantic.intent"):
+        _plan(source_image, "E2", upright_on_pick_only)
+
+
+@pytest.mark.parametrize("second_upright", [True, False])
+def test_terminal_hold_orientation_is_checked_for_every_subject(
+    source_image, second_upright
+):
+    def two_held(s, g, p):
+        _terminal_hold("E2")(s, g, p)
+        s["object"].update(quantifier="count", count=2)
+        g["objects"].append(
+            dict(
+                id="second",
+                description="second source",
+                bbox=[300, 200, 400, 400],
+                provenance="observed",
+            )
+        )
+        g["bindings"]["step_01.object"].append("second")
+        # Each arm picks and holds one object.
+        more = deepcopy(p["nodes"])
+        for node in p["nodes"]:
+            node["call"]["resources"] = {"primary": "left"}
+        for i, node in enumerate(more):
+            node.update(id=f"n{i+2}", depends_on=[f"n{i+1}"])
+            node["call"]["resources"] = {"primary": "right"}
+            node["semantic"]["object"] = "second"
+        more[0]["call"]["object"] = "second"
+        if not second_upright:
+            # The first object's transport must not satisfy the second's goal.
+            del more[1]["semantic"]["intent"]["orientation_goal"]
+        p["nodes"].extend(more)
+        p["requirements"][0]["node_ids"].extend(["n2", "n3"])
+
+    if second_upright:
+        result = _plan(source_image, "E2", two_held)
+        coverage = result["semantic_graph_validation"]["coverage"]
+        assert coverage["semantic_status"] == "valid"
+    else:
+        with pytest.raises(SemanticPlanningError, match="ends holding second"):
+            _plan(source_image, "E2", two_held)
+
+
 def test_hidden_objects_have_no_invented_image_boxes(source_image):
     def hidden(s, g, p):
         g["objects"][0].update(provenance="instruction_declared", bbox=None)
@@ -914,6 +1029,74 @@ def test_single_repair_receives_original_response_and_error(source_image):
         and json.loads(calls[1]["previous_response"]) == invalid
     )
     assert result["semantic_graph_validation"]["coverage"]["semantic_status"] == "valid"
+
+
+@pytest.mark.parametrize("max_repairs", [1, 2])
+def test_repair_budget_is_explicit_and_revalidates_every_attempt(
+    source_image, max_repairs
+):
+    step, grounding, plan = _fixture()
+    invalid = deepcopy(plan)
+    invalid["nodes"] = []
+    calls = []
+
+    def provider(**kwargs):
+        calls.append(json.loads(kwargs["user_prompt"]))
+        return json.dumps(invalid if len(calls) <= 2 else plan)
+
+    def run():
+        return generate_semantic_task_graph_from_image(
+            source_image,
+            "执行测试任务",
+            task_id="case",
+            instruction_caller=lambda **_: dict(steps=[step]),
+            image_caller=lambda **_: json.dumps(grounding),
+            planning_caller=provider,
+            max_repairs=max_repairs,
+        )
+
+    if max_repairs == 1:
+        with pytest.raises(SemanticPlanningError, match="after one repair"):
+            run()
+        assert len(calls) == 2
+    else:
+        result = run()
+        assert len(calls) == 3
+        assert json.loads(calls[2]["previous_response"]) == invalid
+        assert (
+            result["semantic_graph_validation"]["coverage"]["semantic_status"]
+            == "valid"
+        )
+
+
+def test_one_diagnostic_names_every_placement_relation_mismatch(source_image):
+    def mutate(step, grounding, plan):
+        pick, place = deepcopy(plan["nodes"][0]), deepcopy(plan["nodes"][1])
+        pick.update(id="n2", depends_on=["n1"])
+        place.update(id="n3", depends_on=["n2"])
+        plan["nodes"] += [pick, place]
+        plan["requirements"][0]["node_ids"] += ["n2", "n3"]
+        for node in (plan["nodes"][1], place):
+            node["semantic"]["relation"] = "right_of"
+
+    with pytest.raises(SemanticPlanningError) as failure:
+        _plan(source_image, mutate=mutate)
+    message = failure.value.artifacts["model_attempts"][-1]["errors"][0]["message"]
+    assert "n1 uses place.inside" in message
+    assert "n3 uses place.inside" in message
+    assert "simulation.place_relative" in message
+
+
+def test_role_id_subject_names_the_grounded_entities(source_image):
+    def mutate(step, grounding, plan):
+        for node in plan["nodes"]:
+            node["semantic"]["object"] = "role_001"
+
+    with pytest.raises(SemanticPlanningError) as failure:
+        _plan(source_image, mutate=mutate)
+    message = failure.value.artifacts["model_attempts"][-1]["errors"][0]["message"]
+    assert "'role_001' is not a grounded entity ID" in message
+    assert "'source'" in message and "'tray'" in message
 
 
 def test_saved_report_rejects_tampered_runtime_binding(source_image):

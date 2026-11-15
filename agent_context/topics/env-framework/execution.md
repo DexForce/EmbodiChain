@@ -133,16 +133,20 @@ stable online language IDs. Language intent does not establish physical success.
 ### Configured manipulation RL outcomes
 
 `EmbodiedEnvCfg.rl_task` optionally enables RL outcomes on `EmbodiedEnv`.
-Its ordinary loop calls `TerminationManager.compute()` once after physics and
+Its RL-only loop calls `TerminationManager.compute()` once after physics and
 interval events, supplying this transition's time-limit mask before observations
-and rewards. `BaseEnv._get_termination_flags()` lets the configured host return
+and rewards. Explicit Task Program policy mode first acquires the canonical
+observation, then `_after_observation` advances shared progress and computes
+termination before info/rewards read the caches. Reset captures never advance
+progress; the [policy stage contract](../task-programs/execution.md#policy-stage-progress)
+owns declaration and evidence restrictions. `BaseEnv._get_termination_flags()` lets the configured host return
 those cached Gym flags; recording does not finalize or recompute acceptance.
 Queries return owned tensors and never sample stateful conditions. No declared
 success terms means no default success; invalid evidence fails only its own rows.
 Failure or truncation excludes accepted success while retaining raw physical
 truth. `ignore_terminations` suppresses Gym termination flags without changing
-measured acceptance or disabling time limits. Legacy environments and Task
-Program keep their existing info-based termination and success rules.
+measured acceptance or disabling time limits. Legacy environments and expert Task
+Program execution keep their existing info-based termination and success rules.
 
 Reset consumes old buffers first, then clears selected condition rows and
 captures virtual targets after reset events and trusted preparation. Explicit
@@ -230,6 +234,7 @@ step(action)
   │     ├── robot.get_proprioception()[:, active_joint_ids]
   │     ├── _get_sensor_obs()
   │     └── _extend_obs()            # ObservationManager.compute()
+  ├── _after_observation()            # policy Task Program progress + termination
   ├── get_info() → evaluate()
   ├── get_reward() + _extend_reward()  # RewardManager.compute()
   ├── _postprocess_action(action)     # BaseEnv no-op; no action post mode

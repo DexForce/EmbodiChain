@@ -42,6 +42,7 @@ __all__ = [
     "CuroboParallelSafetyValidatorFactory",
     "EndpointAdapterDeclaration",
     "TaskProgramAdapterFactory",
+    "TaskProgramProgress",
     "TaskProgramEnvironmentAdapter",
     "TaskProgramEnvironmentFactory",
     "TaskProgramIntegrationCatalog",
@@ -81,6 +82,7 @@ __all__ = [
 ]
 
 _EXPORTS = {
+    "TaskProgramProgress": (".progress", "TaskProgramProgress"),
     "AntipodalGraspAffordanceBinding": (
         ".simulation",
         "AntipodalGraspAffordanceBinding",

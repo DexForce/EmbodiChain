@@ -21,6 +21,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import fields
 from typing import Any, Sequence
+import warnings
 
 import numpy as np
 from dexsim.types import PhysicalAttr
@@ -373,6 +374,38 @@ class NewtonRigidBodyMaterialCfg(RigidBodyMaterialCfg):
     resistance.
     """
 
+    def __post_init__(self) -> None:
+        """Validate authored MuJoCo parameters before lowering to the SDK."""
+        if self.solref is not None:
+            reference = np.asarray(self.solref, dtype=float)
+            if (
+                reference.shape != (2,)
+                or not np.isfinite(reference).all()
+                or not (np.all(reference > 0) or np.all(reference <= 0))
+            ):
+                raise ValueError(
+                    "solref must contain two finite positive or two non-positive values."
+                )
+        if self.solimp is not None:
+            impedance = np.asarray(self.solimp, dtype=float)
+            if impedance.shape != (5,) or not np.isfinite(impedance).all():
+                raise ValueError("solimp must contain five finite values.")
+            d0, dwidth, width, midpoint, power = impedance
+            if not (
+                0 <= d0 <= 1
+                and 0 <= dwidth <= 1
+                and width > 0
+                and 0 <= midpoint <= 1
+                and power >= 1
+            ):
+                raise ValueError(
+                    "solimp requires impedance/midpoint in [0, 1], positive width, and power >= 1."
+                )
+        if self.solmix is not None and (
+            not np.isfinite(self.solmix) or self.solmix < 0
+        ):
+            raise ValueError("solmix must be finite and non-negative.")
+
 
 _RIGID_PHYSICS_GROUP_FIELDS = frozenset(
     {
@@ -550,6 +583,57 @@ class RigidBodyPhysicsCfg:
         unknown = set(init_dict) - _RIGID_PHYSICS_GROUP_FIELDS
         if unknown:
             raise KeyError(f"Unknown RigidBodyPhysicsCfg fields: {sorted(unknown)}")
+        data = dict(init_dict)
+        collision = data.get("collision_props")
+        if isinstance(collision, Mapping):
+            collision = dict(collision)
+            aliases = {
+                name: collision.pop(name)
+                for name in ("solref", "solimp", "solmix")
+                if name in collision
+            }
+            if aliases:
+                collision_backend = collision.get("backend")
+                if (
+                    collision_backend is not None
+                    and str(collision_backend).lower().replace("-", "_") != "newton"
+                ):
+                    raise ValueError(
+                        "Raw MuJoCo contact parameters require Newton material_props."
+                    )
+                material = data.get("material_props")
+                if material is None:
+                    material = {}
+                elif isinstance(material, RigidBodyMaterialCfg):
+                    material = _physics_property_cfg_to_dict(
+                        material,
+                        common_type=RigidBodyMaterialCfg,
+                        backend_types={"newton": NewtonRigidBodyMaterialCfg},
+                        field_name="material_props",
+                    )
+                elif not isinstance(material, Mapping):
+                    raise TypeError(
+                        "Legacy contact parameters require Newton material_props."
+                    )
+                material = dict(material)
+                material_backend = material.get("backend")
+                if material_backend is not None and str(
+                    material_backend
+                ).lower().replace("-", "_") not in ("common", "newton"):
+                    raise ValueError(
+                        "Raw MuJoCo contact parameters require Newton material_props."
+                    )
+                for name, value in aliases.items():
+                    if material.get(name) is None:
+                        material[name] = value
+                data["material_props"] = {**material, "backend": "newton"}
+                data["collision_props"] = {**collision, "backend": "newton"}
+                warnings.warn(
+                    "collision_props.solref/solimp/solmix are deprecated; use material_props.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+        init_dict = data
         cfg = cls()
         if "mass_props" in init_dict:
             value = init_dict["mass_props"]

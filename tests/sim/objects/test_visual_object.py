@@ -274,6 +274,7 @@ def test_add_usd_classifies_visuals_without_promoting_collision_only_objects(tmp
     collision_only.physics = None
     assert collision_only.collisions
     manager = object.__new__(SimulationManager)
+    manager.sim_config = SimpleNamespace(enable_ground_plane=True)
     manager.device = torch.device("cpu")
     manager.physics = SimpleNamespace(name="default")
     for key in (

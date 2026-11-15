@@ -234,6 +234,7 @@ def validate_graph_coverage(
                 issue("wrong_articulation_part_or_state", group_id)
             if (
                 step["task_type"] in {"E1", "E2"}
+                and step["terminal_behavior"] != "hold"
                 or step["task_type"] in {"E4", "E5"}
                 and step["terminal_behavior"] == "place"
             ):

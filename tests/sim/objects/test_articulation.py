@@ -59,10 +59,162 @@ DRIVE_TEST_STIFFNESS = 12.0
 DRIVE_TEST_DAMPING = 4.0
 
 
+@pytest.mark.gpu
+@pytest.mark.requires_sim
+def test_native_continuous_urdf_joint_preserves_unlimited_rotation(
+    tmp_path: Path,
+) -> None:
+    from dexsim.spawn.adapters import newton_articulation_adapter
+
+    if not getattr(
+        newton_articulation_adapter, "PRESERVES_CONTINUOUS_URDF_LIMITS", False
+    ):
+        pytest.skip("Requires DexSim continuous joint patch.")
+    from dexsim.engine.newton_physics.backend_registry import get_newton_backend
+    from embodichain.lab.sim.cfg import NewtonPhysicsCfg, RenderCfg
+
+    path = tmp_path / "continuous.urdf"
+    path.write_text(
+        """<robot name="continuous">
+    <link name="base"/><link name="wheel">
+      <inertial><mass value="1"/><inertia ixx=".01" iyy=".01" izz=".01" ixy="0" ixz="0" iyz="0"/></inertial>
+      <collision><geometry><cylinder radius=".03" length=".01"/></geometry></collision>
+      <visual><geometry><cylinder radius=".03" length=".01"/></geometry></visual>
+    </link><joint name="spin" type="continuous"><parent link="base"/><child link="wheel"/><axis xyz="0 0 1"/></joint>
+    </robot>""",
+        encoding="utf-8",
+    )
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            startup_summary="off",
+            enable_entity_gizmo=False,
+            physics_cfg=NewtonPhysicsCfg(
+                use_cuda_graph=False,
+                num_substeps=1,
+                solver_cfg={"solver_type": "mujoco_warp"},
+            ),
+            render_cfg=RenderCfg(renderer="hybrid"),
+        )
+    )
+    try:
+        art = sim.add_articulation(
+            ArticulationCfg(
+                uid="wheel",
+                fpath=str(path),
+                init_pos=(0, 0, 1),
+                joint_drive_props=JointDrivePropertiesCfg(drive_type="none"),
+            )
+        )
+        sim.prepare()
+        backend = get_newton_backend(sim.get_world())
+        assert not backend.solver.mj_model.jnt_limited[-1]
+        # Newton canonicalizes infinity to its internal unlimited MAXVAL
+        # sentinel. Assert source semantics and the actual solver's limit flag.
+        joint = sim.spawn_result.handles["arena_0/wheel"].articulation_desc.joints[0]
+        assert np.isneginf(joint.lower_limit)
+        assert np.isposinf(joint.upper_limit)
+        angle = 4 * torch.pi
+        art.set_qpos(torch.tensor([[angle]], device=sim.device), target=False)
+        sim.update(step=1)
+        torch.testing.assert_close(
+            art.get_qpos(), torch.tensor([[angle]], device=sim.device)
+        )
+    finally:
+        sim.destroy(exit_process=False)
+        SimulationManager.flush_cleanup_queue()
+
+
 def _inertia_tensor(inertia: torch.Tensor, com_pose: torch.Tensor) -> torch.Tensor:
     """Compare physical inertia independently of the chosen principal axes."""
     rotation = matrix_from_quat(com_pose[..., 3:])
     return rotation @ torch.diag_embed(inertia) @ rotation.transpose(-1, -2)
+
+
+@pytest.mark.requires_sim
+def test_default_sparse_drive_config_preserves_loaded_properties(
+    tmp_path: Path,
+) -> None:
+    """Each configured drive field preserves other loaded fields and joints."""
+    from embodichain.lab.sim.cfg import DefaultPhysicsCfg
+
+    asset = tmp_path / "sparse_drive.urdf"
+    asset.write_text(
+        """<robot name="sparse_drive">
+      <link name="base"><inertial><mass value="1"/><inertia ixx=".1" ixy="0" ixz="0" iyy=".1" iyz="0" izz=".1"/></inertial></link>
+      <link name="slider"><inertial><mass value="1"/><inertia ixx=".1" ixy="0" ixz="0" iyy=".1" iyz="0" izz=".1"/></inertial></link>
+      <link name="hinge"><inertial><mass value="1"/><inertia ixx=".1" ixy="0" ixz="0" iyy=".1" iyz="0" izz=".1"/></inertial></link>
+      <joint name="slide" type="prismatic"><parent link="base"/><child link="slider"/><axis xyz="1 0 0"/><limit lower="-1" upper="1" effort="101" velocity="5"/><dynamics damping=".2" friction=".1"/></joint>
+      <joint name="hinge" type="revolute"><parent link="slider"/><child link="hinge"/><axis xyz="0 0 1"/><limit lower="-1" upper="1" effort="202" velocity="6"/><dynamics damping=".3" friction=".2"/></joint>
+    </robot>""",
+        encoding="utf-8",
+    )
+    overrides = {
+        "stiffness": 87.0,
+        "damping": 4.0,
+        "max_effort": 31.0,
+        "max_velocity": 2.5,
+        "friction": 0.0,
+        "armature": 0.02,
+    }
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            num_envs=2,
+            headless=True,
+            enable_entity_gizmo=False,
+            robot_ik_gizmo=None,
+            physics_cfg=DefaultPhysicsCfg(device="cpu", gravity=(0, 0, 0)),
+            startup_summary="off",
+            scene_node_capacity=128,
+        ),
+        requires_native_renderer=False,
+    )
+    articulations = {}
+    art = source = None
+    try:
+        config = {"fpath": str(asset), "build_pk_chain": False, "init_qpos": [0, 0]}
+        source = sim.add_articulation(
+            ArticulationCfg.from_dict({**config, "uid": "source"})
+        )
+        for field, value in overrides.items():
+            articulations[field] = sim.add_articulation(
+                ArticulationCfg.from_dict(
+                    {
+                        **config,
+                        "uid": field,
+                        "asset_physics_mode": "overlay",
+                        "joint_drive_props": {field: {"slide": value}},
+                    }
+                )
+            )
+        sim.prepare()
+        source_values = source.get_joint_drive()
+        source_modes = source.get_joint_drive_type()
+        for configured_field, art in articulations.items():
+            source_columns = [
+                source.joint_names.index(name) for name in art.joint_names
+            ]
+            selected_column = art.joint_names.index("slide")
+            for field, original, actual in zip(
+                overrides, source_values, art.get_joint_drive(), strict=True
+            ):
+                expected = original[:, source_columns].clone()
+                if field == configured_field:
+                    expected[:, selected_column] = overrides[field]
+                torch.testing.assert_close(
+                    actual, expected, msg=f"{configured_field}: {field}"
+                )
+                torch.testing.assert_close(
+                    getattr(art, f"default_joint_{field}"), expected
+                )
+            assert art.get_joint_drive_type() == [
+                [row[column] for column in source_columns] for row in source_modes
+            ]
+    finally:
+        art = source = None
+        articulations.clear()
+        sim.destroy(exit_process=False)
+        SimulationManager.flush_cleanup_queue()
 
 
 @pytest.mark.requires_sim
@@ -957,6 +1109,13 @@ class BaseArticulationTest:
 
         self.art.set_qpos(qpos=qpos_zero, env_ids=None, target=False)
 
+        # Position tracking requires explicit gains; a sparse drive_type overlay
+        # preserves the drawer's passive source drive.
+        self.art.set_joint_drive(
+            stiffness=torch.full_like(qpos, 1e4),
+            damping=torch.full_like(qpos, 1e3),
+            drive_type="force",
+        )
         # Test setting joint positions with target=True
         self.art.set_qpos(qpos, env_ids=None, target=True)
         self.sim.update(step=100)

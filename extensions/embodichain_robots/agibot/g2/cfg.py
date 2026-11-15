@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+import re
 import torch
 
 from embodichain.data import get_data_path
@@ -75,7 +76,49 @@ class AgibotG2Cfg(RobotCfg):
         """
         cfg = cls()
         cfg._build_defaults(init_dict)
+        cfg._prepare_effort_overrides(init_dict)
         return merge_robot_cfg(cfg, init_dict)
+
+    def _prepare_effort_overrides(self, init_dict: dict[str, Any]) -> None:
+        """Let explicit caller rules replace the selected model effort caps."""
+        overrides = init_dict.get("joint_drive_props")
+        if not isinstance(overrides, dict):
+            return
+        provided = overrides.get("max_effort")
+        if not isinstance(provided, dict):
+            return
+        parts = dict(self.control_parts)
+        if isinstance(init_dict.get("control_parts"), dict):
+            parts.update(init_dict["control_parts"])
+        joint_names = [name for names in self.control_parts.values() for name in names]
+        shadowed = {
+            name
+            for name in joint_names
+            if any(
+                re.fullmatch(expression, name)
+                for pattern in provided
+                for expression in parts.get(pattern, [pattern])
+            )
+        }
+        remaining = {}
+        for pattern, value in self.joint_drive_props.max_effort.items():
+            if pattern in provided:
+                continue
+            matched = {
+                name
+                for name in joint_names
+                if any(
+                    re.fullmatch(expression, name)
+                    for expression in parts.get(pattern, [pattern])
+                )
+            }
+            if shadowed.isdisjoint(matched):
+                remaining[pattern] = value
+            else:
+                remaining.update(
+                    {name: value for name in matched if name not in shadowed}
+                )
+        self.joint_drive_props.max_effort = remaining
 
     @property
     def _pk_urdf_path(self) -> str:
@@ -154,13 +197,26 @@ class AgibotG2Cfg(RobotCfg):
         }
         modes = {part: "position" for part in self.control_parts}
         modes.update(chassis_wheels="velocity", left_eef="none", right_eef="none")
+        # Default imports these joints without drives and reports zero effort.
+        # Activating a drive therefore needs the pinned source effort budget;
+        # an omitted cap preserves that zero rather than creating an actuator.
+        max_effort = {
+            "torso": 50.0,
+            "head": 50.0,
+            "chassis_steering": 15.0,
+            "chassis_wheels": 8.0,
+            "left_eef": 10.0,
+            "right_eef": 10.0,
+        }
         for side in ("left", "right"):
-            for joint, kp, kd in zip(
+            for joint, kp, kd, effort in zip(
                 self.control_parts[f"{side}_arm"],
                 (40000.0, 40000.0, 15000.0, 15000.0, 15000.0, 8000.0, 8000.0),
                 (600.0, 600.0, 220.0, 220.0, 220.0, 100.0, 100.0),
+                (108.0, 108.0, 35.0, 35.0, 35.0, 18.0, 18.0),
             ):
                 stiffness[joint], damping[joint] = kp, kd
+                max_effort[joint] = effort
             leader = self.control_parts[f"{side}_eef"][0]
             stiffness[leader], damping[leader], modes[leader] = 1000.0, 10.0, "position"
         self.joint_drive_props = JointDrivePropertiesCfg(
@@ -168,6 +224,7 @@ class AgibotG2Cfg(RobotCfg):
             target_mode=modes,
             stiffness=stiffness,
             damping=damping,
+            max_effort=max_effort,
         )
         self.root_props = ArticulationRootPropertiesCfg(
             fixed_base=True,
