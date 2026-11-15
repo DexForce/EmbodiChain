@@ -26,7 +26,7 @@ role, geometry, resource and configuration checks as template plans. The same tr
 qualification selects non-overlapping landing poses and the terminal segment
 rechecks retained payloads. A handover requires a trusted exchange pose. Ungrounded
 authoring outputs do not authorize deployment.
-See the [20-case comparison](../../../examples/gensim/goal_authoring/REPORT.md)
+See the [20-case comparison](../../../scripts/benchmark/task_engine/README.md)
 for the current qualification boundary.
 
 `gensim task revise` validates a planner proposal against the frozen v1

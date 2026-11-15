@@ -23,7 +23,7 @@ import yaml
 from pxr import Usd, UsdGeom, UsdPhysics, UsdUtils, Sdf, Gf, UsdShade
 import trimesh
 from examples.gensim.goal_authoring.stack_pilot import digest, write
-from examples.gensim.goal_authoring.hybrid_pilot import inspect_1186
+from ._checks import inspect_1186
 from embodichain.gen_sim.task_engine.hybrid import publish_hybrid, verify_witness
 from embodichain.gen_sim.task_spec import TaskSpec
 from embodichain.gen_sim.services import GenSimServices, GenSimServicesCfg, ChatResponse

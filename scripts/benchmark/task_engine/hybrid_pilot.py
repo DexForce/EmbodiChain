@@ -32,55 +32,7 @@ from embodichain.gen_sim.task_spec import TaskSpec
 from embodichain.gen_sim.task_engine.image_planning import (
     generate_semantic_task_graph_from_image,
 )
-
-
-def inspect_1186(graph):
-    """Check the declared fruit roles, transfer sequence and named destination."""
-    calls = [n["call"] for n in graph["nodes"]]
-    kinds = [c.get("call_id", c["kind"]) for c in calls]
-    sequence = ["pick", "hand_over", "place"] * 2 + ["simulation.coordinated_transport"]
-    fruit_ok = len(calls) == 7 and all(
-        fruit in str(c.get("object", "")).lower()
-        for fruit, block in (("apple", calls[:3]), ("orange", calls[3:6]))
-        for c in block
-    )
-    assignments = [
-        {"primary": "right"},
-        {"source": "right", "destination": "left"},
-        {"primary": "left"},
-    ] * 2 + [{"left": "left", "right": "right"}]
-    arm_ok = [c["resources"] for c in calls] == assignments
-    order_ok = (
-        kinds == sequence
-        and fruit_ok
-        and all(
-            n["depends_on"] == ([graph["nodes"][i - 1]["id"]] if i else [])
-            for i, n in enumerate(graph["nodes"])
-        )
-    )
-    landing = calls[-1].get("arguments", {})
-    plate = calls[2].get("on", calls[2].get("inside")) if len(calls) == 7 else None
-    support_ok = bool(
-        plate
-        and plate == calls[5].get("on", calls[5].get("inside"))
-        and landing.get("object") == plate
-        and ("plate" in plate or "tray" in plate)
-        and landing.get("target", "").lower().replace(" ", "_")
-        in {
-            "mat",
-            "service_pad",
-            "service_mat",
-            "service_mat_01",
-            "serv_mat",
-            "serving_mat",
-        }
-        and kinds[-1] == sequence[-1]
-    )
-    return dict(
-        arms=arm_ok,
-        ordered_transfers=order_ok,
-        shared_plate_and_final_support=support_ok,
-    )
+from examples.gensim.goal_authoring._checks import inspect_1186
 
 
 def rescore(root: Path) -> None:

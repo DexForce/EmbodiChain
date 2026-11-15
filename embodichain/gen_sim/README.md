@@ -98,7 +98,7 @@ never creates capabilities, rewrites control-part names or chooses physics.
 
 For a route comparison and the path from specification to physical evidence, see the
 [Task Engine guide](../../docs/source/features/generative_sim/task_engine.md) and
-[paired 20-task evaluation](../../examples/gensim/goal_authoring/REPORT.md).
+[paired 20-task evaluation](../../scripts/benchmark/task_engine/README.md).
 Standalone `gensim task plan` defaults to hybrid. Its published stage distinguishes
 authoring only, pending visual binding and readiness for scene qualification.
 
