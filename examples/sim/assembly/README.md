@@ -1,5 +1,9 @@
 # Precision assembly examples
 
+See the [Precision Assembly guide](../../../docs/source/features/toolkits/precision_assembly.md)
+for functional entry points, embedded native recordings, reproducible commands
+and the original mjfit paper citation.
+
 The project selects DexSim 0.6.0rc2. Python 3.12 direct-compound construction,
 raw-contact checks and native RGB previews were verified with rc2 using the
 installed SDK. The static compound USD import route is unavailable

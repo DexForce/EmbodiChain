@@ -107,6 +107,9 @@ identity and configuration must match before its result is accepted.
 Nominal robot preparation is shipped by the robot deployment
 layer together with its source asset registration, frame regression and API.
 
+User-facing installation, functional entry points, native RGB examples and the
+upstream research citation live in the [Precision Assembly guide](../../../docs/source/features/toolkits/precision_assembly.md).
+
 Focused coverage lives under `tests/toolkits/assembly/`, `tests/sim/assembly/`,
 `tests/benchmark/assembly/` and `tests/gym/envs/tasks/test_blind_assembly.py`.
 Portable-format tests explicitly block simulator, task, benchmark and generator
