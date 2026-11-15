@@ -468,6 +468,7 @@ def _score(
             * float(asset.config["pitch"])
             * int(asset.config.get("n_starts", 1))
         )
+        ideal *= float(asset.config.get("scale", 1.0))
         relative = np.abs(advance - ideal) / max(abs(ideal), 1e-12)
         metrics = {
             "advance_m": float(np.mean(advance)),

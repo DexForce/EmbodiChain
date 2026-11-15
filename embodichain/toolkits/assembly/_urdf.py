@@ -20,6 +20,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 import xml.etree.ElementTree as ET
+import re
 
 import numpy as np
 from ._visual import _atomic_text
@@ -213,7 +214,7 @@ def to_articulation_configs(
             asset_physics_mode="overlay",
             link_attrs={
                 "moving_part": LinkPhysicsOverrideCfg(
-                    link_names_expr=[body.name], attrs=properties
+                    link_names_expr=[re.escape(body.name)], attrs=properties
                 )
             },
             joint_drive_props=JointDrivePropertiesCfg(

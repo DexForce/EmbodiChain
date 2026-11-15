@@ -100,6 +100,11 @@ grid = build_many_pegs(9, seed=0, family="primitive")
 grid.save("outputs/assembly/many_pegs.json")
 ```
 
+Programmatic generator configurations may contain NumPy arrays and scalars;
+these are detached into JSON primitives before storage and hashing. Generation
+uses inline meshes. The upstream `mesh_dir` option is rejected before files
+are written, so a saved source cannot depend on a temporary mesh directory.
+
 A many-pegs grid is **one physical scene**, not nine independent simulation
 environments. Its manifest records each cell's sampled configuration and pose.
 

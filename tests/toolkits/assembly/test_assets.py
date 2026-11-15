@@ -148,6 +148,8 @@ def test_manifest_roundtrip_does_not_import_generator_and_detects_tampering(
 def test_usd_preserves_body_ownership_vertices_and_mass(tmp_path) -> None:
     pytest.importorskip("mujoco")
     pytest.importorskip("pxr")
+    # The native comparison must register schemas before the first stage.
+    pytest.importorskip("dexsim.kit.usd")
     from embodichain_benchmarks.assembly.precision import compare_usd_geometry
 
     asset = import_mjcf(SOURCE)
@@ -291,3 +293,44 @@ def test_many_pegs_preserves_official_sampling_prefixes_and_grid_placements(
         "max_error": 1e-5,
     }
     assert sum(len(body.geometries) for body in precise.bodies) > model.ngeom - 1
+
+
+def test_programmatic_configuration_arrays_are_portable_and_detached(tmp_path):
+    config = {
+        "hole": np.array([[0.0, 0.0], [0.01, 0.0], [0.0, 0.01]]),
+        "scale": np.float32(1.5),
+        "index": np.int64(7),
+        "nested": (np.bool_(True), np.array([np.int32(3)])),
+    }
+    asset = import_mjcf(SOURCE, config=config)
+    assert asset.config == {
+        "hole": [[0.0, 0.0], [0.01, 0.0], [0.0, 0.01]],
+        "scale": 1.5,
+        "index": 7,
+        "nested": [True, [3]],
+    }
+    digest = asset.content_hash
+    config["hole"][0, 0] = 10.0
+    assert asset.content_hash == digest
+    saved = asset.save(tmp_path / "asset.json")
+    assert AssemblyAsset.load(saved).content_hash == digest
+    json.dumps(asset.config, allow_nan=False)
+
+
+def test_external_mesh_generation_is_rejected_before_any_files_are_written(
+    tmp_path, monkeypatch
+):
+    from types import SimpleNamespace
+    from embodichain.toolkits.assembly import adapter
+
+    def generate(*args, **kwargs):
+        pytest.fail("mesh generation must not start for a nonportable mesh_dir request")
+
+    provider = SimpleNamespace(load=lambda config: {}, build=generate)
+    monkeypatch.setattr(
+        adapter, "load_mjfit", lambda: (provider, adapter.MJFIT_REVISION)
+    )
+    mesh_dir = tmp_path / "meshes"
+    with pytest.raises(ValueError, match="requires inline meshes"):
+        adapter.build_assembly("circle", mesh_dir=mesh_dir)
+    assert not mesh_dir.exists()

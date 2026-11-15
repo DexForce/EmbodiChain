@@ -259,6 +259,13 @@ def prepare_native_configs(
     from embodichain.lab.sim.shapes import MeshCfg
     from ._visual import _write_rigid_visual_meshes
 
+    root = Path(directory).resolve()
+    hinge_directory = root / asset.content_hash
+    if any(body.joint.kind == "hinge" for body in asset.bodies):
+        if not hinge_directory.resolve().is_relative_to(root):
+            raise ValueError(
+                f"Assembly output escapes its preparation directory: {hinge_directory}"
+            )
     names = [body.name for body in asset.bodies]
     if len(set(names)) != len(names):
         raise ValueError("Assembly body names must be unique.")
@@ -276,7 +283,7 @@ def prepare_native_configs(
         configs.update(
             to_articulation_configs(
                 asset,
-                Path(directory) / asset.content_hash,
+                hinge_directory,
                 source_contact=source_contact,
                 backend=backend,
             )

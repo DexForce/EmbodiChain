@@ -671,3 +671,23 @@ def test_matrix_keeps_families_failures_and_runtime_artifacts_separate(
     args.use_mujoco_cpu = True
     with pytest.raises(ValueError, match="passive probes only"):
         matrix.run_all_benchmarks(args)
+
+
+@pytest.mark.parametrize(
+    "scale,starts,advance", [(0.5, 1, 0.00075), (2.0, 1, 0.003), (2.0, 3, 0.009)]
+)
+def test_thread_lead_oracle_uses_physical_scaled_pitch(scale, starts, advance):
+    from embodichain_benchmarks.assembly.precision import PrecisionRunCfg, _score
+
+    asset = AssemblyAsset(
+        config={"kind": "thread", "pitch": 0.0015, "scale": scale, "n_starts": starts}
+    )
+    measured = _score(
+        asset,
+        {"bolt": np.array([[0.0, 0.0, 0.02]])},
+        {"bolt": np.array([[0.0, 0.0, 0.02 - advance]])},
+        PrecisionRunCfg(duration=1.0, timestep=0.001, spin_rate=2 * np.pi),
+    )
+    assert measured["ideal_advance_m"] == pytest.approx(advance)
+    assert measured["lead_relative_error"] < 1e-12
+    assert measured["success_rate"] == 1.0
