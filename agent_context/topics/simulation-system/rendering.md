@@ -4,6 +4,27 @@ Read this for physics/render synchronization, native-window/offscreen image
 processing and readiness reporting. Return to the
 [simulation overview](simulation-system.md).
 
+## Rigid file appearance
+
+`RigidObjectCfg.visuals` remains the appearance owner. SDK 0.6 cannot combine
+multiple file-backed render segments on one actor, so Spawn imports each segment
+through a separate visual object and tracks the physical owner's pose on Default
+and Newton. This also covers a compound physical shape whose default appearance
+mixes files and primitives. Physical collision pieces and semantic geometry stay
+independent; imported file materials and UVs use the native file importer.
+Camera foreground segmentation matches `RigidObject.get_render_ids()`, including
+mesh companion IDs in each selected environment. `get_user_ids()` retains only
+physical body IDs for physics consumers; Gaussian splats have no mesh mask IDs.
+Without a companion, file-batch semantic queries still decode the physical shape
+or explicit proxy, including on NoRender; empty native render buffers are not a
+semantic source. Existing local files resolve before data-root or registry paths.
+Unresolved file-like references remain deferred until materialization, while
+failures from registered catalog assets propagate. Multi-segment file appearance with `env_variants` rejects
+before declaration; use array geometry or separate logical objects for that case.
+Group members requiring this companion composition also reject before declaration;
+declare separate rigid objects. Single-mesh projective UV mapping uses each row's effective configuration, preserving
+a replacement row that does not request projection.
+
 ## NoRender initialization
 
 `RenderCfg(renderer="no-render")` selects `Renderer.NORENDER` and requires
@@ -124,6 +145,19 @@ Spawn. Closed windows do not imply disabled offscreen cameras. Browser export
 and native controls have their own owners:
 [visualization](../sim-visualization/sim-visualization.md) and
 [native gizmos](../sim-visualization/native-gizmos.md).
+
+Native single-frame captures are configured by ``SimulationManagerCfg.window_capture``
+and use the **C** hotkey by default. Input callbacks enqueue requests; the next
+`render_frame()` consumes them on its caller's thread after state publication,
+including frames entered by `update()`. DexSim's synchronous window readback
+cannot run on its render owner. Closing a window discards pending requests;
+late callbacks from its old control cannot capture a reopened window.
+The manager copies a non-empty
+``Windows.get_picture()`` frame when DexSim provides one; renderers without
+native CPU readback may use the legacy missing/empty-frame offscreen fallback
+at the current window pose. A native readback exception returns no image and
+must not enter that fallback: an OS-closed window shell can outlive its camera.
+Unavailable captures never create an empty output file.
 
 ## Parented cameras
 

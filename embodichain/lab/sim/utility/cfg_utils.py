@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import MISSING
+from copy import deepcopy
 from typing import TypeVar
 
 from embodichain.lab.sim.cfg import (
@@ -51,6 +52,21 @@ def _merge_non_none_config(base: _ConfigT | None, override: _ConfigT) -> _Config
                 and is_configclass(base_value)
             ):
                 _merge_non_none_config(base_value, value)
+            elif (
+                base_value is not None
+                and is_configclass(base_value)
+                and is_configclass(value)
+                and isinstance(value, type(base_value))
+            ):
+                # A sparse backend extension must retain the portable preset
+                # fields when promoting its material or collision group.
+                promoted = type(value)(
+                    **{
+                        name: deepcopy(getattr(base_value, name))
+                        for name in base_value.__dataclass_fields__
+                    }
+                )
+                setattr(base, field_name, _merge_non_none_config(promoted, value))
             else:
                 setattr(base, field_name, value)
     return base
@@ -298,17 +314,8 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
             # merge physics attributes
             user_attrs_dict = override_cfg_dict.get("attrs")
             if isinstance(user_attrs_dict, dict):
-                grouped_fields = set(RigidBodyPhysicsCfg.__dataclass_fields__)
                 parsed = _sparse_rigid_body_physics_from_dict(user_attrs_dict)
-                for field_name in grouped_fields:
-                    override = getattr(parsed, field_name)
-                    if override is None:
-                        continue
-                    base = getattr(base_cfg.attrs, field_name)
-                    if base is not None and isinstance(base, type(override)):
-                        _merge_non_none_config(base, override)
-                    else:
-                        setattr(base_cfg.attrs, field_name, override)
+                base_cfg.attrs = _merge_non_none_config(base_cfg.attrs, parsed)
             else:
                 logger.log_warning(
                     "attrs should be a dictionary. Skipping attrs merge."

@@ -12,12 +12,15 @@ failure in the USD round-trip tests.
 The native path attaches multiple convex collision pieces to one rigid body.
 An independent visual mesh never closes its collision aperture. The generator
 uses the separately installed optional mjfit provider pinned to revision
-`5833f465896e1e06bc4be4f003be847f5183a4db`. The assembly extra installs
-MuJoCo for MJCF conversion, while the Git installation keeps the required
-revision provenance outside the published wheel's dependency metadata:
+`5833f465896e1e06bc4be4f003be847f5183a4db`. On non-Windows SDK profiles,
+DexSim installs `newton[sim]`, which owns the compatible MuJoCo version.
+The separately installed generator also declares its MuJoCo dependency.
+Profiles without Newton need MuJoCo installed explicitly for standalone MJCF
+import; loading prepared manifests does not. The Git installation retains
+the required generator revision provenance:
 
 ```bash
-pip install '.[assembly]'
+pip install .
 pip install 'mjfit @ git+https://github.com/younghyopark/mjfit.git@5833f465896e1e06bc4be4f003be847f5183a4db'
 embodichain run-example sim/assembly/asset_gallery --output outputs/assembly_gallery
 embodichain run-example sim/assembly/asset_gallery --configs circle usb_c --collision-colors

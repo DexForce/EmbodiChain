@@ -208,6 +208,8 @@ def prepare_case_manifest(
     *,
     device: str = "auto",
     headless: bool = True,
+    progress: str | Path | None = None,
+    generation_revision: str | None = None,
 ) -> Path:
     """Freeze suite inputs independently of every candidate planner.
 
@@ -216,6 +218,11 @@ def prepare_case_manifest(
         output: New case manifest path; existing files are never replaced.
         device: Simulation device used for case generation and reachability.
         headless: Whether to construct simulation without a viewer.
+        progress: Optional preparation directory, reusable after interruption.
+            Saved units are separate from the final corpus and never replaced.
+        generation_revision: Nonempty identity of the caller's frozen generator
+            sources and dependencies. Required with progress; changed identities,
+            input configurations or embodiments cannot reuse saved units.
 
     Returns:
         The complete hashed corpus, ready for serial or parallel replay.
@@ -231,4 +238,6 @@ def prepare_case_manifest(
 
     return BenchmarkRunner(
         resolved, [], device=device, headless=headless
-    ).prepare_case_manifest(output)
+    ).prepare_case_manifest(
+        output, progress=progress, generation_revision=generation_revision
+    )

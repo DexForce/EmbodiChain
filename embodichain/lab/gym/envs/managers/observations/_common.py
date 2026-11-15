@@ -764,18 +764,14 @@ def compute_semantic_mask(
         env.sim.get_asset(uid) for uid in foreground_uids if uid in asset_uids
     ]
 
-    # cat assets uid (num_envs, n) into dim 1
-    foreground_uids = torch.cat(
-        [
-            (
-                asset.get_user_ids().unsqueeze(1)
-                if asset.get_user_ids().dim() == 1
-                else asset.get_user_ids()
-            )
-            for asset in foreground_assets
-        ],
-        dim=1,
-    )
+    # Appearance companions can have different mask IDs from their physical
+    # owner. Assets without a separate render-ID query retain their usual IDs.
+    foreground_ids = []
+    for asset in foreground_assets:
+        get_ids = getattr(asset, "get_render_ids", asset.get_user_ids)
+        ids = get_ids()
+        foreground_ids.append(ids.unsqueeze(1) if ids.dim() == 1 else ids)
+    foreground_uids = torch.cat(foreground_ids, dim=1)
 
     foreground_uids_exp = foreground_uids.unsqueeze_(1).unsqueeze_(1)
 

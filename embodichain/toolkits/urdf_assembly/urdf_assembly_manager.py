@@ -658,6 +658,7 @@ class URDFAssemblyManager:
             # signature. This ensures that changing naming strategy forces
             # a rebuild.
             component_info["__name_case__"] = dict(self._name_case)
+            component_info["__sensors__"] = self.sensor_registry.all()
 
             assembly_signature = self.signature_manager.calculate_assembly_signature(
                 component_info, output_path
