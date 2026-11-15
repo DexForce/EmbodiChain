@@ -250,14 +250,20 @@ def main() -> None:
                     args.resolution,
                 )
                 if observed:
-                    if dense is None:
-                        dense = observed
+                    if depth_reference is None:
+                        depth_reference = observed
+                        reference_name = variant
                     else:
-                        for first, second in zip(observed, dense, strict=True):
+                        for first, second in zip(
+                            observed, depth_reference, strict=True
+                        ):
                             torch.testing.assert_close(
                                 first, second, atol=1e-6, rtol=0.0
                             )
-                        result["matches_depth_reference"] = True
+                        if reference_name == "dense":
+                            result["matches_dense"] = True
+                        else:
+                            result["matches_depth_reference"] = reference_name
                 rows.append(result)
                 print(json.dumps(result), flush=True)
 
