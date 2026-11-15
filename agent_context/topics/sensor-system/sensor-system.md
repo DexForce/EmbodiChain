@@ -14,6 +14,7 @@
 | Joint and contact acquisition windows | `embodichain/lab/sim/sensors/contact/observation.py` |
 | Native support observations and pair ownership | `embodichain/lab/sim/sensors/support_observation.py` |
 | Fixed contact-buffer scatter | `embodichain/lab/sim/sensors/contact/_warp/scatter.py` |
+| Private native geometry-pair net forces | `embodichain/lab/sim/sensors/contact/_geometry_contact_sensor.py` |
 
 Sensors inherit `BaseSensor`/`BatchEntity` and expose per-environment data through
 a TensorDict buffer. `SensorCfg.from_dict()` resolves `sensor_type + "Cfg"`
@@ -62,6 +63,14 @@ to the native OpenGL view unchanged (-Z forward, +Y up). Unparented explicit
 poses are converted from optical axes (+Z forward, +Y down) by flipping Y/Z.
 Convert optical-frame mount calibration before storing a parented `pos/quat`;
 do not infer image direction from `get_arena_pose()` without this conversion.
+
+For Gaussian scenes, `Camera.capture_metadata` retains completed-frame identity,
+calibration and output semantics separately from image tensors. Gym exposes the
+snapshot through `sensor_capture_metadata`. Capability checks and publication
+ordering follow [Gaussian composition](../simulation-system/rendering.md#gaussian-composition).
+USD-native Gaussian PLY references use the same capture-status path; source prim
+and local visual transform appear in `gaussian_instances`. The separate
+`get_capture_metadata()` method also includes the ground visibility policy.
 
 ## Camera ground visibility
 

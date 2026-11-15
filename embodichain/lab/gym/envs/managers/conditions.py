@@ -43,7 +43,34 @@ if TYPE_CHECKING:
     from ..embodied_env import EmbodiedEnv
     from embodichain.lab.sim.objects import RigidObject
 
-__all__ = ["object_near_target", "object_below_height", "evaluation_condition"]
+__all__ = [
+    "object_near_target",
+    "object_below_height",
+    "evaluation_condition",
+    "program_stage_condition",
+]
+
+
+def program_stage_condition(
+    env: EmbodiedEnv, state: str, stage: str | None = None
+) -> ConditionResult:
+    """Read shared measured progress without activating the expert executor.
+
+    Args:
+        env: Policy-owned deployment containing Task Program declarations.
+        state: ``achieved`` for ordered history, or ``current`` for current truth.
+        stage: Authored name/exact occurrence ID, or all stages when omitted.
+
+    Returns:
+        Cached satisfaction, validity and scalar progress metrics.
+    """
+    progress = getattr(env, "task_program_progress", None)
+    if progress is None:
+        raise ValueError(
+            "program_stage_condition requires policy Task Program execution."
+        )
+    satisfied, valid = progress.condition(stage, state=state)
+    return ConditionResult(satisfied, valid, {})
 
 
 def _rigid_object(env: EmbodiedEnv, entity_cfg: SceneEntityCfg) -> RigidObject:

@@ -434,7 +434,7 @@ class EmbodiedEnvCfg(EnvCfg):
     """Optional measured RL success, failure and truncation conditions.
 
     Configured conditions use cached per-step outcomes and recorded reset-target
-    context. Keep this declaration and ``task_program`` in separate deployments.
+    context. Task Program declarations may coexist only in explicit policy mode.
     """
 
     task_program: TaskProgramCfg | None = None
@@ -444,6 +444,11 @@ class EmbodiedEnvCfg(EnvCfg):
     requests an explicit environment compiler and bridge through the dedicated
     hooks. No live provider, planner, or callable is stored in this config.
     """
+
+    task_program_execution: Literal["expert", "policy"] = "expert"
+    """Action producer; policy mode loads declarations without an expert adapter."""
+    task_program_action_owners: dict[str, str] = {}
+    """Explicit policy ownership of the declared robot resource IDs."""
 
     replay: _AuthoredJointStream | None = None
     """Explicit physical command-stream replay, independent of semantic lowerers."""
@@ -554,13 +559,25 @@ class EmbodiedEnv(BaseEnv):
         if rl_task is not None:
             if not isinstance(rl_task, RLTaskCfg):
                 raise TypeError("rl_task must be an RLTaskCfg or None.")
-            if (
+            if getattr(cfg, "task_program_execution", "expert") != "policy" and (
                 getattr(cfg, "task_program", None) is not None
                 or task_program_adapter_factory is not None
             ):
                 raise ValueError(
                     "rl_task and task_program cannot share one deployment."
                 )
+        if getattr(cfg, "task_program_execution", "expert") not in ("expert", "policy"):
+            raise ValueError("task_program_execution must be expert or policy.")
+        if getattr(cfg, "task_program_execution", "expert") == "policy" and (
+            rl_task is None
+            or cfg.task_program is None
+            or task_program_adapter_factory is None
+        ):
+            raise ValueError(
+                "Policy Task Program declarations require rl_task and a registered deployment."
+            )
+        self.task_program_progress = None
+        self._program_transition = 0
         self.termination_manager: (
             embodichain.lab.gym.envs.managers.TerminationManager | None
         ) = None
@@ -593,6 +610,16 @@ class EmbodiedEnv(BaseEnv):
                 "Extensions cannot override configured acceptance or environment fields."
             )
 
+        if cfg.task_program_execution == "policy":
+            from embodichain.lab.task_program.integrations.progress import (
+                _validate_policy_extensions,
+            )
+
+            _validate_policy_extensions(cfg)
+            if any(hasattr(self, name) for name in extensions):
+                raise ValueError(
+                    "Policy extensions cannot override environment-owned state or methods."
+                )
         for name, value in extensions.items():
             setattr(cfg, name, value)
             setattr(self, name, value)
@@ -615,6 +642,12 @@ class EmbodiedEnv(BaseEnv):
         self._expert_controller_qpos_history: list[list[torch.Tensor]] | None = None
 
         registration = getattr(task_program_adapter_factory, "registration", None)
+        if cfg.task_program_execution == "policy":
+            from embodichain.lab.task_program.integrations.progress import (
+                _validate_policy_deployment,
+            )
+
+            _validate_policy_deployment(cfg, registration)
         from embodichain.lab.gym.envs.objectives.ordered_placement import (
             _objective_rule,
         )
@@ -665,6 +698,32 @@ class EmbodiedEnv(BaseEnv):
                     (ref, bound[ref]) for ref, _ in self._process_evaluation_rules
                 )
                 self._physical_objective_rule = _objective_rule(cfg.objective, bound)
+                if cfg.task_program_execution == "policy":
+                    from embodichain.lab.task_program.integrations.progress import (
+                        TaskProgramProgress,
+                        _validate_policy_action_coverage,
+                    )
+
+                    _validate_policy_action_coverage(
+                        registration, self.robot, self.action_manager
+                    )
+
+                    self.task_program_progress = TaskProgramProgress(
+                        registration.catalog.preflight(
+                            cfg.task_program, strict_contracts=True
+                        ),
+                        bound,
+                        env_ids=tuple(range(self.num_envs)),
+                        # Unstarted rows expect their first reset (episode 0).
+                        # Frames remain unqualified while the owner is at -1.
+                        episode_ids=tuple(
+                            max(0, episode)
+                            for episode in self.episode_context.episode_ids
+                        ),
+                        device=self.device,
+                        final_rules=dict(self._final_acceptance_rules),
+                        process_rules=dict(self._process_evaluation_rules),
+                    )
             if self._explicit_policy_rollout and self.action_manager is None:
                 raise ValueError(
                     "policy_request rollout recording requires an ActionManager."
@@ -684,7 +743,10 @@ class EmbodiedEnv(BaseEnv):
                 dtype=np.float32,
             )
 
-            if task_program_adapter_factory is not None:
+            if (
+                task_program_adapter_factory is not None
+                and cfg.task_program_execution == "expert"
+            ):
                 from embodichain.lab.task_program.integrations import (
                     TaskProgramEnvironmentAdapter,
                 )
@@ -1092,13 +1154,17 @@ class EmbodiedEnv(BaseEnv):
             if "startup" in self.event_manager.available_modes:
                 self.event_manager.apply(mode="startup")
 
-        if self.cfg.observations or self.cfg.record_trajectory:
+        policy_program = (
+            getattr(getattr(self, "cfg", None), "task_program_execution", "expert")
+            == "policy"
+        )
+        if self.cfg.observations or self.cfg.record_trajectory or policy_program:
             recording = (
                 trajectory_observation_cfgs(self, self.cfg.trajectory_uids)
                 if self.cfg.record_trajectory
                 else {}
             )
-            if self.cfg.record_trajectory:
+            if self.cfg.record_trajectory or policy_program:
                 recording.update(getattr(self, "_evaluation_recording", {}))
             self.observation_manager = ObservationManager(
                 self.cfg.observations, self, recording=recording
@@ -1475,13 +1541,31 @@ class EmbodiedEnv(BaseEnv):
                     self.event_manager.apply(mode="interval")
 
         termination = getattr(self, "termination_manager", None)
-        if termination is not None:
+        if (
+            termination is not None
+            and getattr(getattr(self, "cfg", None), "task_program_execution", "expert")
+            != "policy"
+        ):
             # BaseEnv advances elapsed steps after rewards. Supply this
             # transition's deadline once; Gym flags later consume this cache.
             termination.compute(
                 self._elapsed_steps + 1 >= self.max_episode_steps,
                 ignore_terminations=self.cfg.ignore_terminations,
             )
+
+    def _after_observation(self, frame: ObservationFrame) -> None:
+        """Advance policy progress once before reward and termination read caches."""
+        progress = getattr(self, "task_program_progress", None)
+        if progress is None:
+            return
+        progress.advance(
+            frame, step=self._program_transition, episode_owner=self.episode_context
+        )
+        self._program_transition += 1
+        self.termination_manager.compute(
+            self._elapsed_steps + 1 >= self.max_episode_steps,
+            ignore_terminations=self.cfg.ignore_terminations,
+        )
 
     def _initialize_physical_objective(self) -> None:
         """Bind an optional objective to an existing measured rigid object."""
@@ -1532,6 +1616,12 @@ class EmbodiedEnv(BaseEnv):
             objective.reset(env_ids)
         if getattr(self, "termination_manager", None) is not None:
             self.initialize_task_outcome(env_ids)
+        progress = getattr(self, "task_program_progress", None)
+        if progress is not None:
+            ids = (
+                env_ids.tolist() if isinstance(env_ids, torch.Tensor) else list(env_ids)
+            )
+            progress.reset(ids, [self.episode_context.episode_ids[row] for row in ids])
 
     def _rl_target_keys(self) -> tuple[str, ...]:
         return tuple(
@@ -1637,7 +1727,11 @@ class EmbodiedEnv(BaseEnv):
         self.initialize_task_outcome()
 
     def _task_success_before_reset(self, env_ids: torch.Tensor) -> torch.Tensor:
-        rules = getattr(self, "_final_acceptance_rules", ())
+        rules = (
+            ()
+            if getattr(self, "task_program_progress", None) is not None
+            else getattr(self, "_final_acceptance_rules", ())
+        )
         rows = getattr(self, "_demo_episode_metadata", ())
         if not rows and not rules:
             return super()._task_success_before_reset(env_ids)
@@ -1778,6 +1872,15 @@ class EmbodiedEnv(BaseEnv):
                 "objective": metadata.get("physical_objective"),
                 "conditions": metadata.get("task_outcome"),
                 "final_acceptance": final,
+                **(
+                    {
+                        "stage_progress": _outcome_row(
+                            self.task_program_progress.snapshot(), env_id
+                        )
+                    }
+                    if getattr(self, "task_program_progress", None) is not None
+                    else {}
+                ),
             },
             "acceptance": {
                 "eligible": eligible,
@@ -1804,7 +1907,10 @@ class EmbodiedEnv(BaseEnv):
         if (
             "success" not in info
             or not getattr(self, "_demo_episode_metadata", None)
-            or getattr(self, "_final_acceptance_rules", ())
+            or (
+                getattr(self, "_final_acceptance_rules", ())
+                and getattr(self, "task_program_progress", None) is None
+            )
         ):
             return
         rows = env_ids.tolist()
@@ -2047,6 +2153,7 @@ class EmbodiedEnv(BaseEnv):
             self.dataset_manager is not None
             or getattr(self, "rollout_buffer", None) is not None
             or getattr(self, "_traj_buffer", None) is not None
+            or getattr(self, "task_program_progress", None) is not None
         ):
             episode_metadata = self._demo_episode_metadata = _EpisodeMetadataRows(
                 self.num_envs, self._new_demo_episode_metadata(0)
@@ -2214,6 +2321,13 @@ class EmbodiedEnv(BaseEnv):
         replan: bool = False,
     ) -> None:
         """Start annotation metadata for a new demonstration episode."""
+        if (
+            getattr(getattr(self, "cfg", None), "task_program_execution", "expert")
+            == "policy"
+        ):
+            raise RuntimeError(
+                "Policy-owned resources cannot start expert demonstration execution."
+            )
         selected = range(self.num_envs) if active_env_ids is None else active_env_ids
         bridge = getattr(self, "_active_task_program_bridge", None)
         if (not replan and getattr(bridge, "program_completed", False)) or (
@@ -3359,6 +3473,9 @@ class EmbodiedEnv(BaseEnv):
         outcome = getattr(self, "termination_manager", None)
         if outcome is not None:
             info["task_outcome"] = outcome.snapshot()
+        progress = getattr(self, "task_program_progress", None)
+        if progress is not None:
+            info["task_program_progress"] = progress.snapshot()
         if getattr(self.cfg, "episode_context_in_info", True):
             info["episode_context"] = self.episode_context.snapshot()
         return info
@@ -3409,6 +3526,14 @@ class EmbodiedEnv(BaseEnv):
         self._last_action_manager_qpos = None
         self._last_action_trace = None
         is_controller_action = isinstance(action, ControllerAction)
+        if (
+            is_controller_action
+            and getattr(getattr(self, "cfg", None), "task_program_execution", "expert")
+            == "policy"
+        ):
+            raise ValueError(
+                "Policy-owned resources require ActionManager policy actions."
+            )
         expert_cfg = getattr(getattr(self, "cfg", None), "expert_trajectory", None)
         managed_expert = is_controller_action and bool(
             getattr(expert_cfg, "use_action_manager", False)
@@ -4022,6 +4147,13 @@ class EmbodiedEnv(BaseEnv):
             Atomic demo bridge whose segments are consumed lazily.
 
         """
+        if (
+            getattr(getattr(self, "cfg", None), "task_program_execution", "expert")
+            == "policy"
+        ):
+            raise RuntimeError(
+                "Policy-only Task Program declarations cannot activate an expert bridge."
+            )
         kwargs = {}
         if nominal_source_factory is not None:
             kwargs["nominal_source_factory"] = nominal_source_factory

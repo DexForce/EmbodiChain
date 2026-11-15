@@ -646,6 +646,8 @@ def test_replay_collects_named_scene_object_poses_in_sync() -> None:
     )
     scenario.robot = Mock()
     scenario.robot.get_qpos.side_effect = lambda: torch.zeros(1, 6)
+    scenario.robot.get_joint_ids.return_value = [0, 1, 2]
+    scenario.robot.joint_names = [f"joint{i}" for i in range(6)]
     scenario.track = Mock(
         config={
             "physics": {
@@ -668,7 +670,7 @@ def test_replay_collects_named_scene_object_poses_in_sync() -> None:
     support.entity.get_local_pose.return_value = _pose(0.2).unsqueeze(0)
     scenario._objects = {"placing": placing, "support": support}
     compiled = SimpleNamespace(
-        trajectory=SimpleNamespace(positions=torch.zeros(1, 3, 6)),
+        trajectory=SimpleNamespace(positions=torch.zeros(1, 3, 6), velocities=None),
         plan_success=torch.tensor([True]),
     )
     provider = Mock()
@@ -854,12 +856,17 @@ class _EndpointRobot:
     def compute_fk(self, *, qpos, name, to_matrix, env_ids=None):
         assert to_matrix
         result = self.forward(qpos, name, env_ids)
-        if name == "right_arm" and self.failure == "position":
-            result[1, 0, 3] += 0.02  # Outside the unchanged 1cm arrival ball.
-        elif name == "right_arm" and self.failure == "rotation":
-            result[1, :3, :3] = result[1, :3, :3] @ axis_angle_to_rotation_matrix(
-                torch.tensor([0.2, 0.0, 0.0])  # Outside the 0.1rad threshold.
-            )
+        ids = list(range(self.batch)) if env_ids is None else env_ids
+        if name == "right_arm" and 1 in ids:
+            row = ids.index(1)
+            if self.failure == "position":
+                result[row, 0, 3] += 0.2  # Beyond the bounded arrival-region recovery.
+            elif self.failure == "rotation":
+                result[row, :3, :3] = result[
+                    row, :3, :3
+                ] @ axis_angle_to_rotation_matrix(
+                    torch.tensor([0.2, 0.0, 0.0])  # Outside the 0.1rad threshold.
+                )
         return result
 
 

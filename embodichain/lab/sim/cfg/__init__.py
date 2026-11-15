@@ -69,6 +69,7 @@ from .rigid import (
 )
 from .rigid_object import RigidObjectCfg, RigidObjectGroupCfg
 from .visual_object import VisualObjectCfg
+from .visuals import GaussianSplatCfg, VisualElementCfg, GaussianRenderCfg
 from .scene import LightCfg, RigidConstraintCfg
 from .physics import (
     DefaultPhysicsCfg,
@@ -132,6 +133,9 @@ __all__ = [
     "LightCfg",
     "RigidObjectCfg",
     "VisualObjectCfg",
+    "GaussianSplatCfg",
+    "VisualElementCfg",
+    "GaussianRenderCfg",
     "CableObjectCfg",
     "CablePhysicsCfg",
     "CableAttachmentCfg",

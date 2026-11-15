@@ -249,7 +249,7 @@ def test_newton_warp_log_suppression_covers_world_update() -> None:
             return nullcontext()
 
     class World:
-        def update(self, _physics_dt: float) -> None:
+        def update(self, _physics_dt: float, *, sync_to_dexsim: bool) -> None:
             observed_log_levels.append(sim_manager.wp.config.log_level)
 
     manager = SimpleNamespace(
@@ -271,7 +271,7 @@ def test_newton_warp_log_suppression_covers_world_update() -> None:
         render_frame=lambda **_kwargs: nullcontext(),
         _log_scene_summary=lambda: None,
     )
-    manager.physics = DefaultPhysicsBackend(manager)
+    manager.physics = NewtonPhysicsBackend(manager)
     try:
         SimulationManager.update(manager, physics_dt=0.01, step=1)
         assert observed_log_levels == [sim_manager.wp.LOG_WARNING]

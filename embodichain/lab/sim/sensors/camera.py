@@ -170,12 +170,15 @@ class Camera(BaseSensor):
         *,
         owner: SimulationManager,
     ) -> None:
+        import weakref
+
+        self._owner = weakref.ref(owner)
         owner._require_native_renderer("Native cameras")
         if not isinstance(config.ground_plane_visible, bool):
             raise ValueError("ground_plane_visible must be a bool")
         if not config.ground_plane_visible:
             owner._require_ground_plane_filtering()
-        self._owner_ref = weakref.ref(owner)
+        self._owner_ref = self._owner
         self._ground_plane_visibility = [True] * owner.num_envs
         self._capture_metadata: dict[str, object] | None = None
         self._capture_sequence = 0
@@ -368,7 +371,14 @@ class Camera(BaseSensor):
         including the global switch; it does not assert floor pixel coverage.
         Metadata is unavailable before acquisition or after a policy change.
         """
-        return None if self._capture_metadata is None else dict(self._capture_metadata)
+        from copy import deepcopy
+
+        if (
+            self._capture_metadata is None
+            or self._capture_metadata.get("valid") is False
+        ):
+            return None
+        return deepcopy(self._capture_metadata)
 
     def _snapshot_render_metadata(self) -> None:
         owner = self._owner_ref()
@@ -415,10 +425,31 @@ class Camera(BaseSensor):
         """
         self._capture_metadata = None
         fetch_only = kwargs.get("fetch_only", False)
+        owner_ref = getattr(self, "_owner", None)
+        owner = owner_ref() if owner_ref is not None else None
+        gaussian = (
+            getattr(getattr(owner, "_spawn_scene", None), "has_gaussians", False)
+            is True
+        )
+        if gaussian:
+            owner._validate_gaussian_camera(self.cfg)
         if not fetch_only:
             self._pending_capture_metadata = None
+            if gaussian:
+                owner._invalidate_gaussian_captures(self.group_id)
+                owner._ensure_render_state()
             self._frame_buffer.apply_ordered()
+            if gaussian:
+                owner._capture_gaussian_status(self.group_id, camera=self)
             self._snapshot_render_metadata()
+        if gaussian:
+            from copy import deepcopy
+
+            capture = getattr(owner, "_gaussian_captures", {}).get(self.group_id)
+            if capture is None:
+                raise RuntimeError(
+                    "No completed Gaussian capture for this camera group."
+                )
         self.cfg: CameraCfg
 
         if self.cfg.enable_color:
@@ -447,8 +478,38 @@ class Camera(BaseSensor):
             self._data_buffer["position"] = (
                 self._frame_buffer.get_position_gpu_buffer().to(self.device)[..., :3]
             )
+        if gaussian:
+            self._capture_metadata = deepcopy(capture)
+            self._capture_metadata.update(self._pending_capture_metadata or {})
+            self._capture_metadata["valid"] = True
+        else:
+            self._capture_metadata = self._pending_capture_metadata
 
-        self._capture_metadata = self._pending_capture_metadata
+    @property
+    def capture_metadata(self) -> dict[str, object]:
+        """Return owned Gaussian capture status, calibration and output semantics.
+
+        Empty for ordinary captures. A failed Gaussian update marks the capture
+        invalid and raises without publishing valid capture metadata.
+        Poses are arena-local OpenGL transforms in metres. Renderer identity is
+        effective; offscreen denoising records the configured mode because the
+        SDK has no per-group mode query. Image-buffer ownership is unchanged.
+
+        Returns:
+            An independent metadata snapshot, or an empty mapping for Mesh captures.
+        """
+        from copy import deepcopy
+
+        capture = getattr(self, "_capture_metadata", None)
+        if capture is None:
+            owner_ref = getattr(self, "_owner_ref", getattr(self, "_owner", None))
+            owner = owner_ref() if owner_ref is not None else None
+            if getattr(getattr(owner, "_spawn_scene", None), "has_gaussians", False):
+                return {"valid": False}
+            return {}
+        if "status" not in capture and capture.get("valid") is not False:
+            return {}
+        return deepcopy(capture)
 
     def _detach_from_parent_nodes(self) -> None:
         """Retain camera views while their Spawn-owned parents are rebuilt."""

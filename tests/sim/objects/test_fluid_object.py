@@ -140,10 +140,21 @@ def test_fluid_write_respects_render_frame_cache_scope(inside_frame):
 
     calls = []
     sim = SimpleNamespace(
-        physics=SimpleNamespace(invalidate_fluid_state=lambda **kwargs: None),
+        physics=SimpleNamespace(
+            invalidate_fluid_state=lambda **kwargs: None,
+            sync_render_state=lambda _result: calls.append("publish"),
+        ),
+        spawn_result=object(),
+        _spawn_scene=SimpleNamespace(has_visual_composition=False),
+        has_native_renderer=False,
+        _refresh_marker_attachments=lambda: None,
         _render_state_published=True if inside_frame else None,
-        sync_render_state=lambda: calls.append("publish"),
     )
+    sim._publish_render_state = lambda: SimulationManager._publish_render_state(sim)
+    sim._flush_native_render_updates = (
+        lambda: SimulationManager._flush_native_render_updates(sim)
+    )
+    sim.sync_render_state = lambda: SimulationManager.sync_render_state(sim)
     SimulationManager._invalidate_fluid_state(sim)
     SimulationManager._ensure_render_state(sim)
     SimulationManager._ensure_render_state(sim)

@@ -91,7 +91,7 @@ def pytest_addoption(parser):
         "--renderer",
         action="store",
         default="hybrid",
-        help="Specify the renderer backend: hybrid, or fast-rt",
+        help="Specify the renderer backend: hybrid, fast-rt, or rt (OfflineRT)",
     )
     parser.addoption(
         "--run-gpu",
@@ -119,9 +119,9 @@ def pytest_configure(config):
         raise pytest.UsageError("--ci-collect-manifest requires collect-only discovery")
     renderer = config.getoption("--renderer")
     if renderer:
-        if renderer not in ["hybrid", "fast-rt"]:
+        if renderer not in ["hybrid", "fast-rt", "rt"]:
             pytest.exit(
-                f"Invalid renderer: {renderer}. Must be one of 'hybrid', 'fast-rt'"
+                f"Invalid renderer: {renderer}. Must be one of 'hybrid', 'fast-rt', 'rt'"
             )
 
         # DexSim initialization is intentionally deferred to the first real-simulation
@@ -247,6 +247,7 @@ def _initialize_sim_engine(renderer):
     renderer_map = {
         "hybrid": dexsim.types.Renderer.HYBRID,
         "fast-rt": dexsim.types.Renderer.FASTRT,
+        "rt": dexsim.types.Renderer.OFFLINERT,
     }
     sim_config = dexsim.WorldConfig()
     # Keep the process-wide engine initialization aligned with the manager's

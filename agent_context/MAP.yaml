@@ -7,7 +7,7 @@ topics:
 - id: simulation-system
   title: Simulation System
   aliases: [simulation system, simulation manager, Newton physics backend, motion module, sim motion, camera attachment, 运动能力模块, 仿真系统, 仿真管理器]
-  keywords: [SimulationManager, SimulationManagerCfg, RenderCfg, DenoisingCfg, DenoisingMode, DLSSCfg,
+  keywords: [GaussianSplatCfg, VisualElementCfg, GaussianRenderCfg, 3DGS, Gaussian visual, SimulationManager, SimulationManagerCfg, RenderCfg, DenoisingCfg, DenoisingMode, DLSSCfg,
     NRDCfg, DLSS, NRD, frame_time_delta_ms, explicit physics stepping, simulation_time, arena, DexSim, UsdImportCfg, UsdImportResult, root_prim_path, LightCfg, LightBatch, 灯光批次, PhysicsBackendCfg,
     DefaultPhysicsCfg, NewtonPhysicsCfg, VisualObject, VisualObjectCfg, VisualMaterial, VisualMaterialCfg, VisualMaterialInst, preview-material, 材质预览, UsdSourceCfg, source_prim_path, add_visual_object, 纯渲染对象, DexUniSolverCfg, DexUni, runtime control, deformable, particle set,
     UsdSourceSnapshot, read_usd_source, LinkMesh,
@@ -55,7 +55,7 @@ topics:
     physics_config, ControllerAction, EnvProfiler, startup_summary, dexsim_startup_info,
     fluid Gym, 流体 Gym, fluid replay, 粒子回放, DemoQualification, ObjectMotionMetrics, ExpertTrajectoryCfg, joint_command_mode, position_velocity, qpos qvel, expert action schema, ObservationHistorySnapshot, ObservationFrame,
     EvaluationSpec, RuleSession, evaluate_recorded_rules,
-    task_instruction, resolve_demo_instruction,
+    task_instruction, resolve_demo_instruction, program_stage_reward, program_stage_condition,
     show-task, task catalog, task gallery, 任务画廊, physical_objective, 物理目标, RLTaskCfg, rl_task]
   paths: [topics/env-framework/env-framework.md]
   source_of_truth:
@@ -271,6 +271,7 @@ topics:
     NativePlanarPlacement, planar_floor_region, planar_placement_metrics, select_container_landing,
     SceneMeshSnapshot, SceneMeshComponent, capture_scene_meshes, CollisionObjectSnapshot, snapshot_collision_sources,
     LayoutSolution, PlanarRelation, SceneView, SceneState, SceneChangeSet, SceneCheckReport,
+    apply_group_transform, scene group, 组变换,
     SettlingCfg, declare_fragment, detect_support_region, clamp_group,
     solve_layout, capture_state, restore_state, settle_scene, check_layout,
     aabb_overlap_depth, aabb_containment_violation, transform_aabbs, triangle_geometry,
@@ -358,7 +359,8 @@ topics:
   status: active
 - id: rl-learning
   title: RL Learning Pipeline
-  aliases: [rl learning, rl config, reinforcement learning, 强化学习, 训练配置]
+  aliases: [rl learning, rl config, reinforcement learning, 强化学习, 训练配置, Sharpa APG, 灵巧手 APG,
+    Wuji APG, Wuji 掌内转动]
   keywords: [train-rl, Trainer, trainer.gym_config, learning_env, RolloutKind, DifferentiableTrainer,
     PPO, GRPO, APG, APGActorCritic, apg_actor_critic, SyncCollector, ScheduledDifferentiableEnvProtocol, DifferentiableRolloutSpec,
     complete rollout, full horizon, gradient accumulation, action adjoint, observation normalization]
@@ -375,9 +377,13 @@ topics:
   - embodichain/learning/rl/utils/config.py
   - embodichain/learning/rl/algo/
   - embodichain/learning/rl/policies/
+  - embodichain/learning/rl/experimental/
   - embodichain/learning/models/
   - extensions/embodichain_tasks/configs/tasks/
-  watch_paths: [embodichain/learning/rl/, tests/learning/]
+  - examples/learning/sharpa_inhand/
+  - examples/learning/wuji_inhand/
+  watch_paths: [embodichain/learning/rl/, tests/learning/, examples/learning/sharpa_inhand/,
+    examples/learning/wuji_inhand/]
   related_topics: [simulation-system, env-framework, manager-functor, configclass-pattern]
   status: active
 - id: differentiable-env
@@ -447,7 +453,7 @@ topics:
 - id: task-programs
   title: Embodied Task Program
   aliases: [task program, semantic call, 任务程序, 语义调用]
-  keywords: [TaskProgramCfg, kinematic_joint_replay, MoveHeldObjectCfg, HoldPostCfg, PoseTargetCfg,
+  keywords: [TaskProgramCfg, TaskProgramProgress, kinematic_joint_replay, MoveHeldObjectCfg, HoldPostCfg, PoseTargetCfg,
     SceneRelativePoseTargetCfg, normalize_task_program, demo_skills,
     SimulationSettleMonitorCfg, program.yaml, integration.yaml, scene_binding, SceneManifest, SkillPolicyPreset,
     hand_geometries,

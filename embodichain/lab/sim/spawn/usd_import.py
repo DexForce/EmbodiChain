@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from collections import Counter
 from copy import deepcopy
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -60,6 +60,8 @@ from .usd import (
     _parse_usd_source,
     _source_pose,
     _set_resolved_usd_pose,
+    _has_native_gaussian_renders,
+    _source_visual_elements,
 )
 
 if TYPE_CHECKING:
@@ -77,6 +79,10 @@ class _UsdImportPlan:
     resource_types: dict[str, str]
     constraint_uids: dict[str, str]
     resource_source_paths: dict[str, str]
+    native_gaussians: bool = False
+    source_visual_elements: dict[str, tuple[dict[str, object], ...]] = field(
+        default_factory=dict
+    )
 
 
 def _source_path(descriptor: Any) -> str:
@@ -85,9 +91,23 @@ def _source_path(descriptor: Any) -> str:
 
 
 def _compile_usd_import(
-    manager: SimulationManager, recipe: UsdImportCfg
+    manager: SimulationManager | None,
+    recipe: UsdImportCfg,
+    *,
+    reserved_uids: tuple[str, ...] = (),
+    physics_backend: str = "default",
+    device_type: str = "cpu",
 ) -> _UsdImportPlan:
+    """Plan source identities and descriptors, optionally declaring facades.
+
+    Without a manager, no World or facade is created and Gaussian appearance
+    remains descriptive metadata. Native admission belongs to the manager path.
+    """
     recipe.validate_import()
+    solver_type = None if manager is None else manager._active_newton_solver_type
+    if manager is not None:
+        physics_backend = manager.physics.name
+        device_type = manager.device.type
     file_path = recipe.source.file_path
     source = _parse_usd_source(
         recipe.source, name=recipe.name, namespace=recipe.namespace
@@ -96,6 +116,18 @@ def _compile_usd_import(
         raise NotImplementedError(
             "USD Gaussian-splat imports are not supported by the EmbodiChain USD entry point."
         )
+    source_visuals = {
+        id(item): _source_visual_elements(item) for item in source.mesh_objects
+    }
+    native_gaussians = any(
+        _has_native_gaussian_renders(item) for item in source.mesh_objects
+    )
+    if native_gaussians and manager is not None:
+        native_gaussians = manager._prepare_native_usd_gaussians(source.mesh_objects)
+        if native_gaussians:
+            for item in source.mesh_objects:
+                if _has_native_gaussian_renders(item):
+                    item.per_env = False
     unsupported_particles = [
         type(item).__name__
         for item in source.particle_sets
@@ -105,9 +137,10 @@ def _compile_usd_import(
         raise NotImplementedError(
             f"Unsupported USD particle-set types: {unsupported_particles}."
         )
-    manager._spawn_scene._require_compatible_particles(
-        cables=bool(source.cables), particles=bool(source.particle_sets)
-    )
+    if manager is not None:
+        manager._spawn_scene._require_compatible_particles(
+            cables=bool(source.cables), particles=bool(source.particle_sets)
+        )
     resources = list(source.iter_entities())
     source_paths_by_id = {id(item): _source_path(item) for item in resources}
     counts = Counter(source_paths_by_id.values())
@@ -144,7 +177,7 @@ def _compile_usd_import(
     ):
         raise ValueError("USD scene pose must be a finite (4, 4) transform.")
 
-    occupied = set(manager.asset_uids)
+    occupied = set(reserved_uids if manager is None else manager.asset_uids)
     for collection in (
         "mesh_objects",
         "articulations",
@@ -156,11 +189,13 @@ def _compile_usd_import(
         "cables",
         "scene_entities",
     ):
-        for item in getattr(manager._spawn_scene.builder, collection, ()):
+        builder = None if manager is None else manager._spawn_scene.builder
+        for item in getattr(builder, collection, ()):
             occupied.add(item.name)
     declarations = []
     mounted_sensors = []
-    sensor_uids = set(manager._sensors)
+    sensor_uids = set() if manager is None else set(manager._sensors)
+    robot_paths: set[str] = set()
     renamed = {}
     rigid_renames = {}
     for descriptor in descriptors:
@@ -176,13 +211,11 @@ def _compile_usd_import(
         is_soft = isinstance(descriptor, SoftBodyDesc)
         is_cloth = isinstance(descriptor, ClothDesc)
         is_deformable = is_soft or is_cloth
-        if is_deformable and (
-            manager.physics.name != "newton" or manager.device.type != "cuda"
-        ):
+        if is_deformable and (physics_backend != "newton" or device_type != "cuda"):
             raise NotImplementedError(
                 "USD soft bodies and cloth require the Newton backend on CUDA."
             )
-        if is_deformable and manager._active_newton_solver_type not in (
+        if is_deformable and solver_type not in (
             None,
             "dexuni",
             "xpbd",
@@ -192,7 +225,11 @@ def _compile_usd_import(
             raise NotImplementedError(
                 "The active Newton solver does not support USD soft bodies or cloth."
             )
-        if is_deformable and manager.sim_config.physics_cfg.requires_grad:
+        if (
+            is_deformable
+            and manager is not None
+            and manager.sim_config.physics_cfg.requires_grad
+        ):
             raise NotImplementedError(
                 "USD deformable facades do not support Newton gradient mode."
             )
@@ -351,6 +388,13 @@ def _compile_usd_import(
             continue
 
         uid = cfg.uid or descriptor.name
+        if getattr(cfg, "visuals", None) is not None or getattr(
+            cfg, "link_visuals", {}
+        ):
+            raise NotImplementedError(
+                "Whole-scene visual overrides are not supported; use a selected "
+                "UsdSourceCfg object with visuals or link_visuals."
+            )
         if is_visual and uid in occupied:
             uid = f"{recipe.name}_{uid}"
         if uid in occupied:
@@ -378,11 +422,9 @@ def _compile_usd_import(
                 source,
                 descriptor,
                 source_path=file_path,
-                newton_solver_type=manager._active_newton_solver_type,
+                newton_solver_type=solver_type,
             )
-            configure_articulation_desc(
-                descriptor, cfg, newton_solver_type=manager._active_newton_solver_type
-            )
+            configure_articulation_desc(descriptor, cfg, newton_solver_type=solver_type)
             kind = "articulation"
             facade_type = Robot if isinstance(cfg, RobotCfg) else Articulation
             cfg.root_props.fixed_base = bool(descriptor.fixed_base)
@@ -417,21 +459,30 @@ def _compile_usd_import(
                     cfg,
                     source,
                     descriptor,
-                    newton_solver_type=manager._active_newton_solver_type,
+                    newton_solver_type=solver_type,
                 )
             kind = "rigid_object"
             facade_type = RigidObject
         if root_pose is not None:
             descriptor.pose = root_pose @ descriptor.pose
         _set_resolved_usd_pose(cfg, descriptor.pose)
+        if native_gaussians and _has_native_gaussian_renders(descriptor):
+            # Per-asset configuration resolves physics but must not re-enable
+            # unsupported native USD Gaussian Arena replication.
+            descriptor.per_env = False
         source.materials.update(materials)
         if isinstance(cfg, RobotCfg) and cfg.enable_sensor:
             for sensor_cfg in cfg.sensors:
                 if not isinstance(sensor_cfg, CameraCfg):
                     raise TypeError("RobotCfg.sensors supports mounted cameras only.")
-                sensor_factory = manager.SUPPORTED_SENSOR_TYPES.get(
-                    sensor_cfg.sensor_type
+                from embodichain.lab.sim.sim_manager import SimulationManager
+
+                factories = (
+                    SimulationManager.SUPPORTED_SENSOR_TYPES
+                    if manager is None
+                    else manager.SUPPORTED_SENSOR_TYPES
                 )
+                sensor_factory = factories.get(sensor_cfg.sensor_type)
                 if not isinstance(sensor_factory, type) or not issubclass(
                     sensor_factory, Camera
                 ):
@@ -444,7 +495,8 @@ def _compile_usd_import(
                     raise TypeError(
                         "StereoCamera requires a StereoCameraCfg configuration."
                     )
-                manager._require_native_renderer("Mounted cameras")
+                if manager is not None:
+                    manager._require_native_renderer("Mounted cameras")
                 if not isinstance(sensor_cfg.uid, str) or not sensor_cfg.uid.strip():
                     raise ValueError("Mounted sensors require a non-empty uid.")
                 if sensor_cfg.uid in sensor_uids:
@@ -465,7 +517,11 @@ def _compile_usd_import(
                 bound_cfg = deepcopy(sensor_cfg)
                 bound_cfg.extrinsics.parent = f"{uid}/{link_name}"
                 mounted_sensors.append(bound_cfg)
-        facade = facade_type(cfg=cfg, device=manager.device)
+        facade = (
+            None if manager is None else facade_type(cfg=cfg, device=manager.device)
+        )
+        if isinstance(cfg, RobotCfg):
+            robot_paths.add(resource_keys[id(descriptor)])
         declarations.append((resource_keys[id(descriptor)], kind, descriptor, facade))
         renamed[original_name] = descriptor.name
         if isinstance(descriptor, MeshObjectDesc) and descriptor.physics is not None:
@@ -513,7 +569,7 @@ def _compile_usd_import(
         "cloth_object": "surface_deformable",
     }
     resource_types = {
-        path: "robot" if isinstance(facade, Robot) else public_kinds.get(kind, kind)
+        path: "robot" if path in robot_paths else public_kinds.get(kind, kind)
         for path, kind, _, facade in declarations
     }
     for collection, kind in (
@@ -537,4 +593,9 @@ def _compile_usd_import(
         resource_types,
         constraint_uids,
         resource_source_paths,
+        native_gaussians=native_gaussians,
+        source_visual_elements={
+            resource_keys[id(item)]: source_visuals[id(item)]
+            for item in source.mesh_objects
+        },
     )

@@ -31,6 +31,7 @@ from embodichain.utils import configclass, is_configclass, logger
 from ..shapes import ShapeCfg
 from .asset import AssetPhysicsMode, ObjectBaseCfg, _resolve_asset_physics_mode
 from .rigid import RigidBodyPhysicsCfg
+from .visuals import GaussianSplatCfg, VisualElementCfg
 from .source import UsdSourceCfg
 
 
@@ -41,6 +42,21 @@ class RigidObjectCfg(ObjectBaseCfg):
     This class extends the base asset configuration to include specific properties for rigid bodies,
     such as physical attributes and collision group.
     """
+
+    visuals: list[VisualElementCfg | GaussianSplatCfg] | GaussianSplatCfg | None = (
+        field(default=None, kw_only=True)
+    )
+    __annotations__["visuals"] = (
+        list[VisualElementCfg | GaussianSplatCfg] | GaussianSplatCfg | None
+    )
+    """Render replacement; one Gaussian may omit its element wrapper.
+
+    None preserves source appearance; [] removes it. Multiple elements require
+    explicit VisualElementCfg IDs.
+    """
+
+    semantic_shape: ShapeCfg | None = field(default=None, kw_only=True)
+    """Optional independent mesh/primitive for semantic geometry queries."""
 
     shape: ShapeCfg | None = None
     """Shape configuration for the rigid body. """

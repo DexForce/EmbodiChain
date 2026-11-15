@@ -85,6 +85,12 @@ physics, interval events or reset writes. An open native window, nonempty camera
 groups, due simulation-time recording and due Viser captures share one state
 publication in that phase. Empty camera groups alone are not consumers; an open
 window remains a consumer even with `NewtonPhysicsCfg.sync_to_renderer=False`.
+Window publication stages transforms and marker updates without waiting for
+native render completion. Scenes containing fluids retain completion waits to
+prevent bounded native staging from discarding newer particle updates.
+Camera reads and due captures complete those uploads
+before consumption, sharing one completion wait within the frame. Explicit
+`sync_render_state()` always publishes and waits for native completion.
 Viser decides whether a frame is due before invoking its publication callback.
 
 `update()` renders after each substep by default. Gym uses
@@ -162,6 +168,44 @@ source.
 Optical settings use `VisualMaterialCfg.parameters` for direct and shape-owned
 materials. Resource definitions and their reset baselines are owned by the
 [material system](materials.md).
+
+## Gaussian composition
+
+`RenderCfg.gaussian` configures native CUDA raster before World construction.
+`RenderCfg.for_gaussian()` composes a native renderer and compatible denoising;
+`RenderCfg.from_dict()` also resolves `preset: gaussian` for Gym YAML/JSON.
+Explicit overrides remain authoritative; conflicting preset choices fail
+instead of silently disabling rendering or changing denoising. The preset is
+resolved to ordinary typed settings, and configuration writes need not retain
+the preset name. Existing configs without a preset keep their defaults.
+Gaussian resources enter through Spawn, and `SpawnScene.sync_visuals()` runs
+after physics publication and before CameraGroups consume the state. Each
+binding retains only instance transforms/visibility and immutable references;
+resource residency and cloning remain native-owned. Rebind on topology changes,
+retain reset baselines, and do not assume native batch failures roll back.
+Window-only publication stages Gaussian companions without a completion wait.
+Failed staging or completion invalidates Gaussian capture identities; a failed
+completion can retry the staged publication before another camera read.
+
+USD visual Xforms may reference an external Gaussian PLY through DexSim's
+native parser. This produces a Gaussian render on its original USD rigid or
+visual owner, with USD collision and mass left independent. EmbodiChain binds
+that source through `add_usd()` or `UsdSourceCfg` in one Arena with Default
+physics and Hybrid rendering. Native USD Gaussian renders cannot currently be
+replicated across Arenas or replaced by the explicit `visuals` list; reject
+those requests before Spawn mutation. The standalone `GaussianSplatCfg` path
+continues to support multi-Arena companions and per-instance randomization.
+NoRender omits the USD Gaussian render resource but keeps its authored physics
+and collision descriptions, including replicated bodies. Type queries retain
+the authored visual reference without allocating Gaussian points.
+
+Gaussian cameras currently support pinhole color and native view-Z depth.
+Hybrid standalone NRD, full Gaussian mask/normal/position/motion and StereoCamera
+metadata are rejected. Captured SH is not scene-light relighting. Completed
+CameraGroups retain their own status/calibration snapshot before another group
+can overwrite native last-frame status; failures prevent successful observations.
+Depth/alpha meanings come from the native output contract, not mesh assumptions.
+
 
 ## Startup summaries
 

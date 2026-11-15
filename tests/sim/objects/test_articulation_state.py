@@ -28,8 +28,9 @@ from embodichain.lab.sim.objects.robot import Robot
 pytestmark = pytest.mark.no_sim
 
 
+@pytest.mark.parametrize("clamp_qpos", [True, False])
 @pytest.mark.parametrize("clamp_targets", [True, False])
-def test_combined_state_position_limits(clamp_targets: bool) -> None:
+def test_combined_state_position_limits(clamp_targets: bool, clamp_qpos: bool) -> None:
     art = object.__new__(Articulation)
     art.device = torch.device("cpu")
     art._entities = [object()] * 3
@@ -48,6 +49,7 @@ def test_combined_state_position_limits(clamp_targets: bool) -> None:
         target_qpos=torch.tensor([[-4.0, 4.0], [4.0, -4.0]]),
         clear_dynamics=True,
         clamp_target_qpos=clamp_targets,
+        clamp_qpos=clamp_qpos,
     )
     call = art._data.articulation_view.apply_state
     call.assert_called_once()
@@ -56,7 +58,12 @@ def test_combined_state_position_limits(clamp_targets: bool) -> None:
     assert torch.as_tensor(rows).tolist() == [2, 0]
     assert torch.as_tensor(columns).tolist() == [1, 0]
     torch.testing.assert_close(
-        call.call_args.kwargs["qpos"], torch.tensor([[2.0, -1.0], [-2.0, 1.0]])
+        call.call_args.kwargs["qpos"],
+        (
+            torch.tensor([[2.0, -1.0], [-2.0, 1.0]])
+            if clamp_qpos
+            else torch.tensor([[5.0, -3.0], [-5.0, 3.0]])
+        ),
     )
     torch.testing.assert_close(
         call.call_args.kwargs["target_qpos"],

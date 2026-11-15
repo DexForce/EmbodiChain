@@ -27,11 +27,66 @@ from embodichain.utils.math import pose_inv
 
 __all__ = [
     "interpolate_hand_samples",
+    "closing_ground_clearance",
     "full_object_opening_mask",
     "GraspApproach",
     "adaptive_grasp_approaches",
     "opposite_grasp_end",
 ]
+
+
+def closing_ground_clearance(
+    body: torch.Tensor,
+    pads: torch.Tensor,
+    gaps: torch.Tensor,
+    widths: torch.Tensor,
+    poses: torch.Tensor,
+    *,
+    ground_height: float,
+) -> torch.Tensor:
+    """Reduce floor clearance over the discrete open-to-contact hand stroke.
+
+    Args:
+        body: Hand body surface samples ``(G, V, 3)`` in the contact frame.
+        pads: Pad surface samples ``(G, 2, P, 3)`` in the same frame.
+        gaps: Strictly descending sample gaps ``(G,)``.
+        widths: Proposed contact gaps ``(K,)``; narrower stroke samples are
+            excluded because physical object contact arrests further closure.
+        poses: World contact-frame poses ``(K, 4, 4)``.
+        ground_height: Explicit horizontal world plane in metres.
+
+    Returns:
+        Minimum signed heights ``(K,)``, including an interpolated contact
+        endpoint. Invalid poses or widths receive negative infinity. This is
+        discrete geometry qualification, not continuous collision detection or
+        evidence of physical contact. Intermediates contain at most 32 poses.
+    """
+    if not math.isfinite(ground_height):
+        raise ValueError("ground_height must be finite.")
+    if poses.shape != (len(widths), 4, 4) or widths.ndim != 1:
+        raise ValueError("Closing ground queries need aligned poses and widths.")
+    body, pads, gaps = body.to(poses), pads.to(poses), gaps.to(poses)
+    widths = widths.to(poses)
+    result = widths.new_full(widths.shape, float("inf"))
+    valid = torch.isfinite(poses).all(-1).all(-1) & torch.isfinite(widths)
+    valid &= (widths >= gaps[-1]) & (widths <= gaps[0])
+    for start in range(0, len(widths), 32):
+        stop = min(start + 32, len(widths))
+        selected = widths[start:stop]
+        normal = poses[start:stop, 2, :3]
+        height = poses[start:stop, 2, 3] - ground_height
+        end_body, end_pads = interpolate_hand_samples(body, pads, gaps, selected)
+        end_points = torch.cat((end_body, end_pads.flatten(1, 2)), dim=1)
+        clearance = (end_points * normal[:, None]).sum(-1).amin(-1) + height
+        for state in range(len(gaps)):
+            points = torch.cat((body[state], pads[state].flatten(0, 1)), dim=0)
+            minimum = (points @ normal.T).amin(0) + height
+            clearance = torch.minimum(
+                clearance,
+                torch.where(gaps[state] >= selected, minimum, torch.inf),
+            )
+        result[start:stop] = clearance
+    return torch.where(valid, result, -torch.inf)
 
 
 def interpolate_hand_samples(

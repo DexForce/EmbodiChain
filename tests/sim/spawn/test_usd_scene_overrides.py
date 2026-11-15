@@ -102,6 +102,54 @@ def _source():
     return scene
 
 
+@pytest.mark.parametrize("representation", ["mesh", "gaussian_splat"])
+def test_source_inventory_compiles_without_world_or_facades(
+    monkeypatch, representation
+):
+    """Source inspection preserves appearance without runtime admission/binding."""
+    from dexsim.spawn import GeometryType, RenderDesc
+    from embodichain.lab.sim.spawn.usd_import import _compile_usd_import
+    import dexsim.kit.usd
+
+    path = "/World/asset"
+    render = RenderDesc(
+        geometry_type=(
+            GeometryType.GAUSSIAN_SPLAT
+            if representation == "gaussian_splat"
+            else GeometryType.MESH
+        ),
+        file_path=(
+            "appearance.ply" if representation == "gaussian_splat" else "appearance.obj"
+        ),
+        usd=UsdSourceDesc(prim_path=path + "/appearance"),
+    )
+    descriptor = MeshObjectDesc(
+        name="asset",
+        usd=UsdSourceDesc(prim_path=path),
+        renders=[render],
+        physics=RigidBodyPhysicsDesc(actor_type=ActorType.DYNAMIC, mass=0.25),
+    )
+    source = SceneDesc(mesh_objects=[descriptor])
+    monkeypatch.setattr(dexsim.kit.usd, "parse_usd", lambda *args, **kwargs: source)
+    plan = _compile_usd_import(
+        None,
+        UsdImportCfg(
+            name="scene",
+            source=UsdSourceCfg(file_path="source.usda"),
+            asset_cfgs={path: {"uid": "object"}},
+        ),
+    )
+    assert plan.resource_uids == {path: "object"}
+    assert plan.resource_types == {path: "rigid_object"}
+    assert plan.declarations[0][3] is None
+    assert plan.source.mesh_objects[0].physics.mass == pytest.approx(0.25)
+    assert plan.source_visual_elements[path][0]["representation"] == representation
+    assert (
+        plan.source_visual_elements[path][0]["source_prim_path"] == path + "/appearance"
+    )
+    assert plan.source.mesh_objects[0].renders == [render]
+
+
 def test_sparse_override_keeps_actor_and_pose_and_remaps_constraint(monkeypatch):
     import dexsim.kit.usd
 

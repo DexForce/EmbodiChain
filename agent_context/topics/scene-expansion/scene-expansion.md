@@ -151,3 +151,8 @@ The focused tests exercise immutable geometry and identities, bounded source
 consumption, real demo dispatch, reset ordering, full state restoration, workspace
 frames/masks/IK, fresh bridge observations and recording gates using CPU ports.
 They do not establish physical success across robot models or scene layouts.
+
+Layout snapshots read `RigidObject.get_semantic_mesh()` so Mesh/Gaussian
+appearance replacement preserves placement geometry. Source surfaces are retained
+by the simulation visual binding; an explicit `semantic_shape` can provide the
+proxy. Gaussian radiance data is not a replacement for this geometry contract.

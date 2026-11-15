@@ -24,7 +24,12 @@ import numpy as np
 import pytest
 from scipy.spatial.transform import Rotation
 
-from embodichain.lab.sim.cfg import RigidObjectCfg
+from embodichain.lab.sim.cfg import (
+    RigidObjectCfg,
+    VisualObjectCfg,
+    GaussianSplatCfg,
+    UsdSourceCfg,
+)
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.lab.sim.scene.composition import (
     SceneFragment,
@@ -42,8 +47,13 @@ def _cfg(uid, pos=(0.0, 0.0, 0.0)):
     return RigidObjectCfg(uid=uid, shape=CubeCfg(size=[0.1, 0.1, 0.1]), init_pos=pos)
 
 
-def test_fragment_owns_configs_and_preserves_scale_under_anchor_composition():
-    cfg = _cfg("item")
+@pytest.mark.parametrize("visual", [False, True])
+def test_fragment_owns_configs_and_preserves_scale_under_anchor_composition(visual):
+    cfg = (
+        VisualObjectCfg(uid="item", shape=CubeCfg(size=[0.1] * 3))
+        if visual
+        else _cfg("item")
+    )
     cfg.body_scale = (2.0, 3.0, 4.0)
     cfg.init_local_pose = np.eye(4)
     cfg.init_local_pose[:3, 3] = [1.0, 0.0, 0.0]
@@ -68,6 +78,53 @@ def test_fragment_owns_configs_and_preserves_scale_under_anchor_composition():
     np.testing.assert_allclose(composed.anchors["cell__mount"], pose)
     result.uid = "corrupt"
     assert composed.entities[0].uid == "cell__item"
+
+
+def test_mixed_fragment_routes_original_types_and_preflights_visual_collisions():
+    visual = VisualObjectCfg(uid="scan", visuals=GaussianSplatCfg(file_path="scan.ply"))
+    collider = RigidObjectCfg(
+        uid="collider",
+        source=UsdSourceCfg(
+            file_path="library.usda", source_prim_path="/Asset/Collision"
+        ),
+        body_type="static",
+    )
+    fragment = SceneFragment([visual, collider])
+    calls = []
+    sim = SimpleNamespace(
+        **{
+            f"get_{kind}_uid_list": lambda: []
+            for kind in (
+                "rigid_object",
+                "articulation",
+                "robot",
+                "rigid_object_group",
+                "deformable_object",
+            )
+        },
+        get_visual_object_uid_list=lambda: ["scan"],
+        add_visual_object=lambda cfg: calls.append(("visual", cfg)),
+        add_rigid_object=lambda cfg: calls.append(("rigid", cfg)),
+    )
+    with pytest.raises(ValueError, match="already exist"):
+        declare_fragment(sim, fragment)
+    assert calls == []
+    sim.get_visual_object_uid_list = lambda: []
+    sim.asset_uids = ["collider"]  # A sensor/light UID shares the manager namespace.
+    with pytest.raises(ValueError, match="already exist"):
+        declare_fragment(sim, fragment)
+    assert calls == []
+    sim.asset_uids = []
+    sim.add_visual_object = None
+    with pytest.raises(ValueError, match="add_visual_object"):
+        declare_fragment(sim, fragment)
+    assert calls == []
+    sim.add_visual_object = lambda cfg: calls.append(("visual", cfg))
+    assert declare_fragment(sim, fragment) == ("scan", "collider")
+    assert isinstance(calls[0][1], VisualObjectCfg) and isinstance(
+        calls[1][1], RigidObjectCfg
+    )
+    assert calls[1][1].source.source_prim_path == "/Asset/Collision"
 
 
 def test_fragment_duplicate_uid_fails_before_declaration():
