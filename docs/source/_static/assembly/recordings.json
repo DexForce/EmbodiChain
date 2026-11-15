@@ -1,0 +1,915 @@
+{
+  "recorded_date": "2026-11-15",
+  "source_commit": "30a89ed9dfe77e23df8112d2f313ad515fa40c60",
+  "sdk": "0.6.0rc2",
+  "renderer": "fast-rt",
+  "capture": "native Camera matched to the native window",
+  "precision_qualification": "unverified: no live contact-overflow accounting or independent micro-clearance qualification",
+  "recordings": {
+    "drop-peg": {
+      "asset_sha256": "f9ce94f2a47b2d2c95125e7214172bb65b4e8f1776d8e23961d9a3e609ba0eaa",
+      "runtime": "Newton/MuJoCo Warp",
+      "source_solver": 2,
+      "active_solver": 2,
+      "run_config": {
+        "backend": "newton",
+        "route": "direct",
+        "num_envs": 1,
+        "duration": 0.2,
+        "timestep": 0.001,
+        "spin_rate": 15.0,
+        "contact_offset": 0.0,
+        "rest_offset": 0.0,
+        "solver_iterations": 100,
+        "solver_tolerance": null,
+        "enable_multiccd": null,
+        "contact_capacity": 4096,
+        "source_contact": true,
+        "solver": null,
+        "use_mujoco_cpu": false,
+        "warp_reference_initialization": "cpu_compiled"
+      },
+      "metrics": {
+        "fall_m": 0.01500006765127182,
+        "insertion_depth_m": 0.010000067763030529,
+        "required_insertion_depth_m": 0.01,
+        "lateral_error_m": 1.1439856223774414e-12,
+        "seating_tolerance_m": 5e-06,
+        "success_rate": 1.0,
+        "finite": true,
+        "overflow_count": null
+      },
+      "collision_counts": {
+        "plate": {
+          "expected": 32,
+          "actual": 32
+        },
+        "peg": {
+          "expected": 1,
+          "actual": 1
+        }
+      },
+      "native_captured_frames": 41,
+      "camera": {
+        "eye": [
+          0.065,
+          -0.09,
+          0.07
+        ],
+        "target": [
+          0.0,
+          0.0,
+          0.02
+        ],
+        "intrinsics": [
+          933.3333333333334,
+          933.3333333333334,
+          640.0,
+          400.0
+        ],
+        "near": 0.01,
+        "far": 100.0
+      }
+    },
+    "many-pegs": {
+      "asset_sha256": "a831e30d73987930a228c1f9d4df011a00b5c2b908d049a3ed3871fb7198d8a6",
+      "runtime": "Newton/MuJoCo Warp",
+      "source_solver": 2,
+      "active_solver": 2,
+      "run_config": {
+        "backend": "newton",
+        "route": "direct",
+        "num_envs": 1,
+        "duration": 0.25,
+        "timestep": 0.001,
+        "spin_rate": 15.0,
+        "contact_offset": 0.0,
+        "rest_offset": 0.0,
+        "solver_iterations": 100,
+        "solver_tolerance": null,
+        "enable_multiccd": null,
+        "contact_capacity": 4096,
+        "source_contact": true,
+        "solver": null,
+        "use_mujoco_cpu": false,
+        "warp_reference_initialization": "cpu_compiled"
+      },
+      "metrics": {
+        "assembly_count": 9,
+        "fall_m": 0.023264814168214798,
+        "insertion_depth_m": 0.018264804035425186,
+        "max_seating_error_m": 1.1920928955078125e-07,
+        "max_lateral_error_m": 5.364418029785156e-07,
+        "success_rate": 1.0,
+        "finite": true,
+        "per_assembly": [
+          {
+            "index": 0,
+            "peg_body": "p0_peg",
+            "plate_body": "p0_plate",
+            "clearance_m": 0.0005,
+            "required_insertion_depth_m": 0.024471670745595326,
+            "seating_tolerance_m": 5e-06,
+            "fall_m": 0.02947176806628704,
+            "insertion_depth_m": 0.024471715092658997,
+            "seating_error_m": 4.470348358154297e-08,
+            "lateral_error_m": 5.364418029785156e-07,
+            "success_rate": 1.0
+          },
+          {
+            "index": 1,
+            "peg_body": "p1_peg",
+            "plate_body": "p1_plate",
+            "clearance_m": 0.0005,
+            "required_insertion_depth_m": 0.026368533421310666,
+            "seating_tolerance_m": 5e-06,
+            "fall_m": 0.03136850893497467,
+            "insertion_depth_m": 0.026368560269474983,
+            "seating_error_m": 2.60770320892334e-08,
+            "lateral_error_m": 2.384185791015625e-07,
+            "success_rate": 1.0
+          },
+          {
+            "index": 2,
+            "peg_body": "p2_peg",
+            "plate_body": "p2_plate",
+            "clearance_m": 0.0005,
+            "required_insertion_depth_m": 0.013566207628524521,
+            "seating_tolerance_m": 5e-06,
+            "fall_m": 0.018566308543086052,
+            "insertion_depth_m": 0.013566255569458008,
+            "seating_error_m": 4.7497451305389404e-08,
+            "lateral_error_m": 4.470348358154297e-07,
+            "success_rate": 1.0
+          },
+          {
+            "index": 3,
+            "peg_body": "p3_peg",
+            "plate_body": "p3_plate",
+            "clearance_m": 0.0005,
+            "required_insertion_depth_m": 0.02037516127037388,
+            "seating_tolerance_m": 5e-06,
+            "fall_m": 0.02537517249584198,
+            "insertion_depth_m": 0.02037520706653595,
+            "seating_error_m": 4.6566128730773926e-08,
+            "lateral_error_m": 8.940696716308594e-08,
+            "success_rate": 1.0
+          },
+          {
+            "index": 4,
+            "peg_body": "p4_peg",
+            "plate_body": "p4_plate",
+            "clearance_m": 0.0005,
+            "required_insertion_depth_m": 0.014745274988602066,
+            "seating_tolerance_m": 5e-06,
+            "fall_m": 0.01974530704319477,
+            "insertion_depth_m": 0.01474527083337307,
+            "seating_error_m": 3.725290298461914e-09,
+            "lateral_error_m": 5.6305489160024536e-09,
+            "success_rate": 1.0
+          },
+          {
+            "index": 5,
+            "peg_body": "p5_peg",
+            "plate_body": "p5_plate",
+            "clearance_m": 0.0005,
+            "required_insertion_depth_m": 0.027324722675295038,
+            "seating_tolerance_m": 5e-06,
+            "fall_m": 0.03232478350400925,
+            "insertion_depth_m": 0.027324842289090157,
+            "seating_error_m": 1.1920928955078125e-07,
+            "lateral_error_m": 6.71103350669e-08,
+            "success_rate": 1.0
+          },
+          {
+            "index": 6,
+            "peg_body": "p6_peg",
+            "plate_body": "p6_plate",
+            "clearance_m": 0.0005,
+            "required_insertion_depth_m": 0.011746613195752629,
+            "seating_tolerance_m": 5e-06,
+            "fall_m": 0.016746604815125465,
+            "insertion_depth_m": 0.011746587231755257,
+            "seating_error_m": 2.60770320892334e-08,
+            "lateral_error_m": 5.960464477539063e-08,
+            "success_rate": 1.0
+          },
+          {
+            "index": 7,
+            "peg_body": "p7_peg",
+            "plate_body": "p7_plate",
+            "clearance_m": 0.0005,
+            "required_insertion_depth_m": 0.01057187301338338,
+            "seating_tolerance_m": 5e-06,
+            "fall_m": 0.015571968629956245,
+            "insertion_depth_m": 0.010571938008069992,
+            "seating_error_m": 6.51925802230835e-08,
+            "lateral_error_m": 1.7485188644195127e-13,
+            "success_rate": 1.0
+          },
+          {
+            "index": 8,
+            "peg_body": "p8_peg",
+            "plate_body": "p8_plate",
+            "clearance_m": 0.0005,
+            "required_insertion_depth_m": 0.015212826734861584,
+            "seating_tolerance_m": 5e-06,
+            "fall_m": 0.02021290734410286,
+            "insertion_depth_m": 0.015212863683700562,
+            "seating_error_m": 3.725290298461914e-08,
+            "lateral_error_m": 0.0,
+            "success_rate": 1.0
+          }
+        ],
+        "measurement_scope": "Endpoint seating; independent clearance probes still required",
+        "overflow_count": null
+      },
+      "collision_counts": {
+        "p0_plate": {
+          "expected": 34,
+          "actual": 34
+        },
+        "p0_peg": {
+          "expected": 2,
+          "actual": 2
+        },
+        "p1_plate": {
+          "expected": 24,
+          "actual": 24
+        },
+        "p1_peg": {
+          "expected": 46,
+          "actual": 46
+        },
+        "p2_plate": {
+          "expected": 5,
+          "actual": 5
+        },
+        "p2_peg": {
+          "expected": 21,
+          "actual": 21
+        },
+        "p3_plate": {
+          "expected": 7,
+          "actual": 7
+        },
+        "p3_peg": {
+          "expected": 2,
+          "actual": 2
+        },
+        "p4_plate": {
+          "expected": 17,
+          "actual": 17
+        },
+        "p4_peg": {
+          "expected": 27,
+          "actual": 27
+        },
+        "p5_plate": {
+          "expected": 16,
+          "actual": 16
+        },
+        "p5_peg": {
+          "expected": 1,
+          "actual": 1
+        },
+        "p6_plate": {
+          "expected": 22,
+          "actual": 22
+        },
+        "p6_peg": {
+          "expected": 45,
+          "actual": 45
+        },
+        "p7_plate": {
+          "expected": 4,
+          "actual": 4
+        },
+        "p7_peg": {
+          "expected": 2,
+          "actual": 2
+        },
+        "p8_plate": {
+          "expected": 14,
+          "actual": 14
+        },
+        "p8_peg": {
+          "expected": 15,
+          "actual": 15
+        }
+      },
+      "native_captured_frames": 51,
+      "camera": {
+        "eye": [
+          0.46799999999999997,
+          -0.63,
+          0.945
+        ],
+        "target": [
+          0.0,
+          0.0,
+          0.015
+        ],
+        "intrinsics": [
+          933.3333333333334,
+          933.3333333333334,
+          640.0,
+          400.0
+        ],
+        "near": 0.01,
+        "far": 100.0
+      }
+    },
+    "thread-pair": {
+      "asset_sha256": "51a0cd43e521dc4429a3e4e8f61cdf01037837d388d44603bc3abcdf7262c552",
+      "runtime": "Newton/MuJoCo Warp",
+      "source_solver": 2,
+      "active_solver": 2,
+      "run_config": {
+        "backend": "newton",
+        "route": "direct",
+        "num_envs": 1,
+        "duration": 0.5,
+        "timestep": 0.001,
+        "spin_rate": 15.0,
+        "contact_offset": 0.0,
+        "rest_offset": 0.0,
+        "solver_iterations": 100,
+        "solver_tolerance": null,
+        "enable_multiccd": null,
+        "contact_capacity": 4096,
+        "source_contact": true,
+        "solver": null,
+        "use_mujoco_cpu": false,
+        "warp_reference_initialization": "cpu_compiled"
+      },
+      "metrics": {
+        "advance_m": 0.001801599282771349,
+        "ideal_advance_m": 0.0017904931097838226,
+        "lead_relative_error": 0.006202837452292442,
+        "success_rate": 1.0,
+        "finite": true,
+        "overflow_count": null
+      },
+      "collision_counts": {
+        "nut": {
+          "expected": 186,
+          "actual": 186
+        },
+        "bolt": {
+          "expected": 339,
+          "actual": 339
+        }
+      },
+      "native_captured_frames": 51,
+      "camera": {
+        "eye": [
+          0.038,
+          -0.055,
+          0.045
+        ],
+        "target": [
+          0.0,
+          0.0,
+          0.02
+        ],
+        "intrinsics": [
+          933.3333333333334,
+          933.3333333333334,
+          640.0,
+          400.0
+        ],
+        "near": 0.01,
+        "far": 100.0
+      }
+    },
+    "gear-pair": {
+      "asset_sha256": "3a3df76f70fd0e98bca4c197ef8ff8294d35e3fae206bfa1f3280fe4aeaa33bd",
+      "runtime": "Newton/MuJoCo Warp",
+      "source_solver": 0,
+      "active_solver": "cg",
+      "run_config": {
+        "backend": "newton",
+        "route": "direct",
+        "num_envs": 1,
+        "duration": 0.5,
+        "timestep": 0.001,
+        "spin_rate": 15.0,
+        "contact_offset": 0.0,
+        "rest_offset": 0.0,
+        "solver_iterations": 100,
+        "solver_tolerance": null,
+        "enable_multiccd": null,
+        "contact_capacity": 4096,
+        "source_contact": true,
+        "solver": "cg",
+        "use_mujoco_cpu": false,
+        "warp_reference_initialization": "cpu_compiled"
+      },
+      "metrics": {
+        "ratio_relative_error": 0.0018006960162892938,
+        "driver_angle_rad": 4.662905693054199,
+        "success_rate": 1.0,
+        "finite": true,
+        "overflow_count": null
+      },
+      "collision_counts": {
+        "gear_a": {
+          "expected": 19,
+          "actual": 19
+        },
+        "gear_b": {
+          "expected": 25,
+          "actual": 25
+        }
+      },
+      "native_captured_frames": 51,
+      "camera": {
+        "eye": [
+          0.025,
+          -0.09,
+          0.126
+        ],
+        "target": [
+          0.0,
+          0.0,
+          0.006
+        ],
+        "intrinsics": [
+          933.3333333333334,
+          933.3333333333334,
+          640.0,
+          400.0
+        ],
+        "near": 0.01,
+        "far": 100.0
+      }
+    },
+    "dexuni": {
+      "sdk": "0.6.0rc2",
+      "newton": "1.7.0",
+      "mujoco": "3.15.0",
+      "mujoco_warp": "3.15.0",
+      "source_commit": "30a89ed9dfe77e23df8112d2f313ad515fa40c60",
+      "selection": {
+        "solver_cfg": {
+          "solver_type": "dexuni",
+          "vbd_options": {
+            "iterations": 100
+          },
+          "mujoco_options": {
+            "iterations": 100,
+            "nconmax": 4096,
+            "njmax": 24576,
+            "integrator": 3,
+            "solver": "cg for gears; source Newton otherwise"
+          }
+        },
+        "num_substeps": 1,
+        "source_contact": true,
+        "renderer": "fast-rt"
+      },
+      "notes": [
+        "All finalized scenes dispatch to pure_mujoco, with VBD disabled; this does not qualify VBD-only or rigid/soft coupling.",
+        "Existing repository demo CLI remains hardcoded to mujoco_warp; the isolated harness explicitly selects DexUni through the public scene configuration.",
+        "PGS is replaced by an explicitly recorded CG comparison for gears, matching the earlier Warp demo profile."
+      ],
+      "results": [
+        {
+          "case": "circle",
+          "asset_sha256": "f9ce94f2a47b2d2c95125e7214172bb65b4e8f1776d8e23961d9a3e609ba0eaa",
+          "behavior_matches": true,
+          "solver_type": "dexuni",
+          "dispatch": {
+            "backend": "pure_mujoco",
+            "mujoco_joint_count": 1,
+            "vbd_body_count": 0,
+            "vbd_dynamic_body_count": 0,
+            "particle_count": 0,
+            "triangle_count": 0,
+            "edge_count": 0,
+            "tetrahedron_count": 0,
+            "spring_count": 0,
+            "pneumatic_cavity_count": 0,
+            "pneumatic_face_count": 0,
+            "mujoco_solve_enabled": true,
+            "vbd_solve_enabled": false,
+            "rigid_solve_enabled": false,
+            "particle_solve_enabled": false,
+            "triangle_solve_enabled": false,
+            "bending_solve_enabled": false,
+            "tetrahedron_solve_enabled": false,
+            "spring_solve_enabled": false,
+            "pneumatic_solve_enabled": false,
+            "two_way_coupling_enabled": false
+          },
+          "metrics": {
+            "fall_m": 0.01500006765127182,
+            "insertion_depth_m": 0.010000067763030529,
+            "required_insertion_depth_m": 0.01,
+            "lateral_error_m": 1.1439856223774414e-12,
+            "seating_tolerance_m": 5e-06,
+            "success_rate": 1.0,
+            "finite": true
+          },
+          "collision_counts": {
+            "plate": {
+              "expected": 32,
+              "actual": 32
+            },
+            "peg": {
+              "expected": 1,
+              "actual": 1
+            }
+          },
+          "frames": 41,
+          "max_translation_difference_m": 0.0,
+          "max_orientation_difference_rad": 0.0
+        },
+        {
+          "case": "blocked",
+          "asset_sha256": "fd090097c97adf12eff052b61f6da46799a536759fe3bbb3fba0da16cd4f54f5",
+          "behavior_matches": true,
+          "solver_type": "dexuni",
+          "dispatch": {
+            "backend": "pure_mujoco",
+            "mujoco_joint_count": 1,
+            "vbd_body_count": 0,
+            "vbd_dynamic_body_count": 0,
+            "particle_count": 0,
+            "triangle_count": 0,
+            "edge_count": 0,
+            "tetrahedron_count": 0,
+            "spring_count": 0,
+            "pneumatic_cavity_count": 0,
+            "pneumatic_face_count": 0,
+            "mujoco_solve_enabled": true,
+            "vbd_solve_enabled": false,
+            "rigid_solve_enabled": false,
+            "particle_solve_enabled": false,
+            "triangle_solve_enabled": false,
+            "bending_solve_enabled": false,
+            "tetrahedron_solve_enabled": false,
+            "spring_solve_enabled": false,
+            "pneumatic_solve_enabled": false,
+            "two_way_coupling_enabled": false
+          },
+          "metrics": {
+            "fall_m": 0.00500003807246685,
+            "insertion_depth_m": 3.725290298461914e-08,
+            "required_insertion_depth_m": 0.01,
+            "lateral_error_m": 0.011999943293631077,
+            "seating_tolerance_m": 5e-06,
+            "success_rate": 0.0,
+            "finite": true
+          },
+          "collision_counts": {
+            "plate": {
+              "expected": 32,
+              "actual": 32
+            },
+            "peg": {
+              "expected": 1,
+              "actual": 1
+            }
+          },
+          "frames": 41,
+          "max_translation_difference_m": 1.3176691920270004e-08,
+          "max_orientation_difference_rad": 8.606630014296629e-07
+        },
+        {
+          "case": "many",
+          "asset_sha256": "a831e30d73987930a228c1f9d4df011a00b5c2b908d049a3ed3871fb7198d8a6",
+          "behavior_matches": true,
+          "solver_type": "dexuni",
+          "dispatch": {
+            "backend": "pure_mujoco",
+            "mujoco_joint_count": 9,
+            "vbd_body_count": 0,
+            "vbd_dynamic_body_count": 0,
+            "particle_count": 0,
+            "triangle_count": 0,
+            "edge_count": 0,
+            "tetrahedron_count": 0,
+            "spring_count": 0,
+            "pneumatic_cavity_count": 0,
+            "pneumatic_face_count": 0,
+            "mujoco_solve_enabled": true,
+            "vbd_solve_enabled": false,
+            "rigid_solve_enabled": false,
+            "particle_solve_enabled": false,
+            "triangle_solve_enabled": false,
+            "bending_solve_enabled": false,
+            "tetrahedron_solve_enabled": false,
+            "spring_solve_enabled": false,
+            "pneumatic_solve_enabled": false,
+            "two_way_coupling_enabled": false
+          },
+          "metrics": {
+            "assembly_count": 9,
+            "fall_m": 0.023264814168214798,
+            "insertion_depth_m": 0.018264804035425186,
+            "max_seating_error_m": 1.1920928955078125e-07,
+            "max_lateral_error_m": 5.364418029785156e-07,
+            "success_rate": 1.0,
+            "finite": true,
+            "per_assembly": [
+              {
+                "index": 0,
+                "peg_body": "p0_peg",
+                "plate_body": "p0_plate",
+                "clearance_m": 0.0005,
+                "required_insertion_depth_m": 0.024471670745595326,
+                "seating_tolerance_m": 5e-06,
+                "fall_m": 0.02947176806628704,
+                "insertion_depth_m": 0.024471715092658997,
+                "seating_error_m": 4.470348358154297e-08,
+                "lateral_error_m": 5.364418029785156e-07,
+                "success_rate": 1.0
+              },
+              {
+                "index": 1,
+                "peg_body": "p1_peg",
+                "plate_body": "p1_plate",
+                "clearance_m": 0.0005,
+                "required_insertion_depth_m": 0.026368533421310666,
+                "seating_tolerance_m": 5e-06,
+                "fall_m": 0.03136850893497467,
+                "insertion_depth_m": 0.026368560269474983,
+                "seating_error_m": 2.60770320892334e-08,
+                "lateral_error_m": 2.384185791015625e-07,
+                "success_rate": 1.0
+              },
+              {
+                "index": 2,
+                "peg_body": "p2_peg",
+                "plate_body": "p2_plate",
+                "clearance_m": 0.0005,
+                "required_insertion_depth_m": 0.013566207628524521,
+                "seating_tolerance_m": 5e-06,
+                "fall_m": 0.018566308543086052,
+                "insertion_depth_m": 0.013566255569458008,
+                "seating_error_m": 4.7497451305389404e-08,
+                "lateral_error_m": 4.470348358154297e-07,
+                "success_rate": 1.0
+              },
+              {
+                "index": 3,
+                "peg_body": "p3_peg",
+                "plate_body": "p3_plate",
+                "clearance_m": 0.0005,
+                "required_insertion_depth_m": 0.02037516127037388,
+                "seating_tolerance_m": 5e-06,
+                "fall_m": 0.02537517249584198,
+                "insertion_depth_m": 0.02037520706653595,
+                "seating_error_m": 4.6566128730773926e-08,
+                "lateral_error_m": 8.940696716308594e-08,
+                "success_rate": 1.0
+              },
+              {
+                "index": 4,
+                "peg_body": "p4_peg",
+                "plate_body": "p4_plate",
+                "clearance_m": 0.0005,
+                "required_insertion_depth_m": 0.014745274988602066,
+                "seating_tolerance_m": 5e-06,
+                "fall_m": 0.01974530704319477,
+                "insertion_depth_m": 0.01474527083337307,
+                "seating_error_m": 3.725290298461914e-09,
+                "lateral_error_m": 5.626566768057728e-09,
+                "success_rate": 1.0
+              },
+              {
+                "index": 5,
+                "peg_body": "p5_peg",
+                "plate_body": "p5_plate",
+                "clearance_m": 0.0005,
+                "required_insertion_depth_m": 0.027324722675295038,
+                "seating_tolerance_m": 5e-06,
+                "fall_m": 0.03232478350400925,
+                "insertion_depth_m": 0.027324842289090157,
+                "seating_error_m": 1.1920928955078125e-07,
+                "lateral_error_m": 6.72061943873814e-08,
+                "success_rate": 1.0
+              },
+              {
+                "index": 6,
+                "peg_body": "p6_peg",
+                "plate_body": "p6_plate",
+                "clearance_m": 0.0005,
+                "required_insertion_depth_m": 0.011746613195752629,
+                "seating_tolerance_m": 5e-06,
+                "fall_m": 0.016746604815125465,
+                "insertion_depth_m": 0.011746587231755257,
+                "seating_error_m": 2.60770320892334e-08,
+                "lateral_error_m": 5.960464477539063e-08,
+                "success_rate": 1.0
+              },
+              {
+                "index": 7,
+                "peg_body": "p7_peg",
+                "plate_body": "p7_plate",
+                "clearance_m": 0.0005,
+                "required_insertion_depth_m": 0.01057187301338338,
+                "seating_tolerance_m": 5e-06,
+                "fall_m": 0.015571968629956245,
+                "insertion_depth_m": 0.010571938008069992,
+                "seating_error_m": 6.51925802230835e-08,
+                "lateral_error_m": 2.824824792482805e-13,
+                "success_rate": 1.0
+              },
+              {
+                "index": 8,
+                "peg_body": "p8_peg",
+                "plate_body": "p8_plate",
+                "clearance_m": 0.0005,
+                "required_insertion_depth_m": 0.015212826734861584,
+                "seating_tolerance_m": 5e-06,
+                "fall_m": 0.02021290734410286,
+                "insertion_depth_m": 0.015212863683700562,
+                "seating_error_m": 3.725290298461914e-08,
+                "lateral_error_m": 0.0,
+                "success_rate": 1.0
+              }
+            ],
+            "measurement_scope": "Endpoint seating; independent clearance probes still required"
+          },
+          "collision_counts": {
+            "p0_plate": {
+              "expected": 34,
+              "actual": 34
+            },
+            "p0_peg": {
+              "expected": 2,
+              "actual": 2
+            },
+            "p1_plate": {
+              "expected": 24,
+              "actual": 24
+            },
+            "p1_peg": {
+              "expected": 46,
+              "actual": 46
+            },
+            "p2_plate": {
+              "expected": 5,
+              "actual": 5
+            },
+            "p2_peg": {
+              "expected": 21,
+              "actual": 21
+            },
+            "p3_plate": {
+              "expected": 7,
+              "actual": 7
+            },
+            "p3_peg": {
+              "expected": 2,
+              "actual": 2
+            },
+            "p4_plate": {
+              "expected": 17,
+              "actual": 17
+            },
+            "p4_peg": {
+              "expected": 27,
+              "actual": 27
+            },
+            "p5_plate": {
+              "expected": 16,
+              "actual": 16
+            },
+            "p5_peg": {
+              "expected": 1,
+              "actual": 1
+            },
+            "p6_plate": {
+              "expected": 22,
+              "actual": 22
+            },
+            "p6_peg": {
+              "expected": 45,
+              "actual": 45
+            },
+            "p7_plate": {
+              "expected": 4,
+              "actual": 4
+            },
+            "p7_peg": {
+              "expected": 2,
+              "actual": 2
+            },
+            "p8_plate": {
+              "expected": 14,
+              "actual": 14
+            },
+            "p8_peg": {
+              "expected": 15,
+              "actual": 15
+            }
+          },
+          "frames": 51,
+          "max_translation_difference_m": 3.7452431110665785e-09,
+          "max_orientation_difference_rad": 5.960464477539063e-08
+        },
+        {
+          "case": "thread",
+          "asset_sha256": "51a0cd43e521dc4429a3e4e8f61cdf01037837d388d44603bc3abcdf7262c552",
+          "behavior_matches": true,
+          "solver_type": "dexuni",
+          "dispatch": {
+            "backend": "pure_mujoco",
+            "mujoco_joint_count": 1,
+            "vbd_body_count": 0,
+            "vbd_dynamic_body_count": 0,
+            "particle_count": 0,
+            "triangle_count": 0,
+            "edge_count": 0,
+            "tetrahedron_count": 0,
+            "spring_count": 0,
+            "pneumatic_cavity_count": 0,
+            "pneumatic_face_count": 0,
+            "mujoco_solve_enabled": true,
+            "vbd_solve_enabled": false,
+            "rigid_solve_enabled": false,
+            "particle_solve_enabled": false,
+            "triangle_solve_enabled": false,
+            "bending_solve_enabled": false,
+            "tetrahedron_solve_enabled": false,
+            "spring_solve_enabled": false,
+            "pneumatic_solve_enabled": false,
+            "two_way_coupling_enabled": false
+          },
+          "metrics": {
+            "advance_m": 0.0018244888633489609,
+            "ideal_advance_m": 0.0017904931097838226,
+            "lead_relative_error": 0.018986791372299194,
+            "success_rate": 1.0,
+            "finite": true
+          },
+          "collision_counts": {
+            "nut": {
+              "expected": 186,
+              "actual": 186
+            },
+            "bolt": {
+              "expected": 339,
+              "actual": 339
+            }
+          },
+          "frames": 51,
+          "max_translation_difference_m": 6.636117087761314e-05,
+          "max_orientation_difference_rad": 0.025386937274353125
+        },
+        {
+          "case": "gears",
+          "asset_sha256": "3a3df76f70fd0e98bca4c197ef8ff8294d35e3fae206bfa1f3280fe4aeaa33bd",
+          "behavior_matches": true,
+          "solver_type": "dexuni",
+          "dispatch": {
+            "backend": "pure_mujoco",
+            "mujoco_joint_count": 4,
+            "vbd_body_count": 0,
+            "vbd_dynamic_body_count": 0,
+            "particle_count": 0,
+            "triangle_count": 0,
+            "edge_count": 0,
+            "tetrahedron_count": 0,
+            "spring_count": 0,
+            "pneumatic_cavity_count": 0,
+            "pneumatic_face_count": 0,
+            "mujoco_solve_enabled": true,
+            "vbd_solve_enabled": false,
+            "rigid_solve_enabled": false,
+            "particle_solve_enabled": false,
+            "triangle_solve_enabled": false,
+            "bending_solve_enabled": false,
+            "tetrahedron_solve_enabled": false,
+            "spring_solve_enabled": false,
+            "pneumatic_solve_enabled": false,
+            "two_way_coupling_enabled": false
+          },
+          "metrics": {
+            "ratio_relative_error": 0.0015202363720163703,
+            "driver_angle_rad": 4.652043342590332,
+            "success_rate": 1.0,
+            "finite": true
+          },
+          "collision_counts": {
+            "gear_a": {
+              "expected": 19,
+              "actual": 19
+            },
+            "gear_b": {
+              "expected": 25,
+              "actual": 25
+            }
+          },
+          "frames": 51,
+          "max_translation_difference_m": 0.0,
+          "max_orientation_difference_rad": 0.010862315922644611
+        }
+      ]
+    }
+  }
+}
