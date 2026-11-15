@@ -620,8 +620,11 @@ def test_matrix_keeps_families_failures_and_runtime_artifacts_separate(
     args.backends = ["mujoco_cpu", "newton"]
     args.newton_solvers = ["mujoco_warp", "dexuni"]
     observed = []
+    original_run = subprocess.run
 
     def worker(command, **kwargs):
+        if "--cell-config" not in command:
+            return original_run(command, **kwargs)
         spec = json.loads(Path(command[command.index("--cell-config") + 1]).read_text())
         spec.pop("constrained_probe")
         spec.pop("num_directions")
@@ -658,4 +661,13 @@ def test_matrix_keeps_families_failures_and_runtime_artifacts_separate(
     assert "actual dispatch" in text and "unavailable" in text
     args.backends = ["mujoco_cpu"]
     with pytest.raises(ValueError, match="requires newton in --backends"):
+        matrix.run_all_benchmarks(args)
+    args.backends = ["newton"]
+    args.probe = "S2"
+    args.solver = "cg"
+    with pytest.raises(ValueError, match="passive probes only"):
+        matrix.run_all_benchmarks(args)
+    args.solver = None
+    args.use_mujoco_cpu = True
+    with pytest.raises(ValueError, match="passive probes only"):
         matrix.run_all_benchmarks(args)
