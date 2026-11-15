@@ -109,6 +109,11 @@ It saves RGB mosaics, depth arrays and capture-policy metadata. This requires th
 DexSim camera render-category API; the default camera configuration continues to
 work with older SDKs. Ground hidden in a camera still supports the falling box.
 
+The [Library Pick/Place example](gym/library_pick_place/README.md) combines the
+existing Library Gaussian scan with a verified Dual UR5 task. It records every
+initial, control and terminal RGB-D boundary, saves the native trajectory, and
+provides a CPU-only offline integrity and physical-result verifier.
+
 The [Expansion Engine showcase](expansion/engine/showcase/README.md) demonstrates
 native and real-demonstration-driven experts through the shared engine. Its offline
 viewer pairs measured 3D playback with RGB-D, recipes, source clocks and explicit
