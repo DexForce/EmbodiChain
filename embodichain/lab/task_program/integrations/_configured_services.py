@@ -1510,9 +1510,11 @@ class _MoveEndEffectorLowererFactory(RegisteredSemanticLowererFactory):
 
     @property
     def argument_contract(self) -> SemanticCallContract:
-        """Expose only this deployment's immutable route selectors."""
+        """Expose route selectors; grounding requires an unoccupied hand."""
         return SemanticCallContract(
-            {"target": tuple(key for key, _ in self.pose_routes)}, {}
+            {"target": tuple(key for key, _ in self.pose_routes)},
+            {},
+            preconditions=("primary_free",),
         )
 
     def __post_init__(self) -> None:

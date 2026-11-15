@@ -1460,6 +1460,83 @@ def test_cartesian_transit_requires_unoccupied_hand_in_eligible_rows() -> None:
         SemanticCallCompiler(bound, registered_lowerers=(_UnknownSlotLowerer(route),))
 
 
+def test_cartesian_transit_rejects_object_held_through_manipulator_alias() -> None:
+    """A composite alias of the holding manipulator cannot bypass occupancy."""
+    from embodichain.lab.task_program.integrations._configured_services import (
+        _MoveEndEffectorLowerer,
+    )
+
+    call_id = "simulation.move_end_effector"
+    registry, _ = _scene_registry()
+    templates = _skill_option_templates()
+    templates[call_id] = MoveEndEffectorOptions()
+    endpoints = {
+        "motion": ControlPartEndpoint(
+            control_part="arm", capabilities=_MOTION_CAPABILITIES
+        ),
+        "grasp": ControlPartEndpoint(
+            control_part="hand", capabilities=frozenset({GRASP_CAPABILITY})
+        ),
+    }
+    profile = RobotSkillProfile(
+        profile_id="aliased_robot",
+        resources={
+            "manipulator": RobotResource("manipulator", endpoints=endpoints),
+            "transit_arm": RobotResource(
+                "transit_arm", endpoints=endpoints, members=("manipulator",)
+            ),
+        },
+        command_profiles={
+            "hand": ControlPartCommandProfile.joint_positions(
+                open=torch.tensor([0.0]), grasp=torch.tensor([1.0])
+            )
+        },
+        defaults={
+            "pick_up": ResourceBinding({"primary": "manipulator"}),
+            "place": ResourceBinding({"primary": "manipulator"}),
+            "move_end_effector": ResourceBinding({"primary": "transit_arm"}),
+        },
+        presets={"safe": _preset("safe", skill_option_templates=templates)},
+        default_preset="safe",
+    )
+    manifest = SemanticIntegrationManifest(
+        scene=SceneManifest.from_registry(registry),
+        robot_profile=profile,
+        call_catalog=builtin_semantic_call_catalog().with_descriptor(
+            SemanticCallDescriptor(
+                call_id=call_id,
+                spec_type=RegisteredSemanticCall,
+                target_descriptor=MoveEndEffector.descriptor(),
+            )
+        ),
+    )
+    bound = manifest.bind(registry, _engine(profile))
+    route = (("outside", (tuple(torch.eye(4).flatten().tolist()),)),)
+    compiler = SemanticCallCompiler(
+        bound, registered_lowerers=(_MoveEndEffectorLowerer(route),)
+    )
+    workflow = compiler.analyze(
+        (
+            Pick(object=SceneObjectRef("cube")),
+            RegisteredSemanticCall(call_id=call_id, arguments={"target": "outside"}),
+        )
+    )
+    held = _held_context(
+        registry,
+        ObjectSemantics(
+            affordance=AntipodalAffordance(), geometry={}, entity_id="cube"
+        ),
+        torch.eye(4).repeat(2, 1, 1),
+        env_mask=torch.tensor([False, True]),
+    )
+
+    with pytest.raises(SemanticValidationError) as error:
+        compiler.ground(workflow, 1, held)
+
+    assert error.value.diagnostic.code == "unoccupied_resource_required"
+    assert "manipulator" in error.value.diagnostic.message
+
+
 def test_registered_monitor_without_effect_grounder_fails_during_analysis() -> None:
     registry, _ = _scene_registry()
     profile = _profile(

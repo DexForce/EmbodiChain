@@ -2362,10 +2362,25 @@ class SemanticCallCompiler:
                 )
             task_state_key = endpoint.task_state_key
             assert isinstance(task_state_key, str)
-            occupied = context.task.held_object_mask(task_state_key)
+            # Aliases of the same physical manipulator keep separate state keys.
+            state_keys = {task_state_key} | {
+                other.task_state_key
+                for candidate in self._integration.robot_profile.resources.values()
+                for other in candidate.endpoints.values()
+                if any(own.conflicts_with(other) for own in resource.endpoints.values())
+            }
+            occupied = torch.zeros_like(eligible)
+            holders = []
+            for key in sorted(state_keys):
+                held = context.task.held_object_mask(key)
+                if (held & eligible).any():
+                    holders.append(key)
+                occupied |= held
             for keys, coordinated in context.task.coordinated_held_objects.items():
-                if task_state_key in keys:
+                if state_keys.intersection(keys):
                     assert coordinated.env_mask is not None
+                    if (coordinated.env_mask & eligible).any():
+                        holders.extend(key for key in keys if key in state_keys)
                     occupied |= coordinated.env_mask
             occupied &= eligible
             if occupied.any():
@@ -2373,9 +2388,10 @@ class SemanticCallCompiler:
                     "unoccupied_resource_required",
                     (*path, "resources", slot_id),
                     f"Call {analyzed.call.semantic_id!r} carries no payload, but "
-                    f"logical state key {task_state_key!r} holds a verified object "
-                    "in an eligible environment. Move held objects with the "
-                    "verified held-object transport call.",
+                    f"logical state keys {sorted(set(holders))!r} of the bound "
+                    "manipulator hold a verified object in an eligible "
+                    "environment. Move held objects with the verified "
+                    "held-object transport call.",
                     tuple(
                         str(value)
                         for value in context.env_ids[occupied]

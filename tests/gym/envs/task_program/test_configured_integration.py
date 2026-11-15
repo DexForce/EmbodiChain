@@ -4801,7 +4801,9 @@ def test_cartesian_routes_lower_owned_batch_poses_and_reject_unknown_selectors()
         path="lowerer",
     )
     assert type(factory) is _MoveEndEffectorLowererFactory
-    assert factory.argument_contract.to_metadata()["required"]["target"] == ["outside"]
+    contract = factory.argument_contract.to_metadata()
+    assert contract["required"]["target"] == ["outside"]
+    assert contract["preconditions"] == ["primary_free"]
     robot = object()
     lowerer = factory.create(
         simulation=None,
