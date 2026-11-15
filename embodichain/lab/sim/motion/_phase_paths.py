@@ -99,7 +99,7 @@ def generate_phase_paths(
                 points = p.rejected_candidate.positions
             candidates.append(points if i == 0 else points[:, 1:])
         rejected = RejectedMotionCandidate(torch.cat(candidates, dim=1), dt, mask)
-    return PlanResult(
+    combined = PlanResult(
         success=success,
         positions=torch.where(
             success[:, None, None], positions, options.start_qpos[:, None]
@@ -108,3 +108,4 @@ def generate_phase_paths(
         rejected_candidate=rejected,
         recovery=pieces[-1].recovery,
     )
+    return generator._normalize_plan_result(combined, targets, options)

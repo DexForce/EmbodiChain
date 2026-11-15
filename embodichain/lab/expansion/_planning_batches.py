@@ -89,7 +89,10 @@ class PlanningBatches:
             "max_motion_group": 0,
         }
         previous = self._rng()
-        torch.manual_seed(seed)
+        torch.random.default_generator.manual_seed(seed)
+        for device in self.devices:
+            with torch.cuda.device(device):
+                torch.cuda.manual_seed(seed)
         np.random.seed(seed % 2**32)
         random.seed(seed)
         self.solve_rng = self._rng()
@@ -109,6 +112,7 @@ class PlanningBatches:
             self.random.getstate(),
             self.torch.is_grad_enabled(),
             self.torch.is_inference_mode_enabled(),
+            self._autocast_state(),
         )
 
     def _restore_rng(self, state):
@@ -117,6 +121,51 @@ class PlanningBatches:
             self.torch.cuda.set_rng_state(value, device)
         self.np.random.set_state(state[2])
         self.random.setstate(state[3])
+        self._restore_autocast(state[6])
+
+    def _autocast_state(self):
+        return (
+            tuple(
+                (
+                    device,
+                    self.torch.is_autocast_enabled(device),
+                    self.torch.get_autocast_dtype(device),
+                )
+                for device in ("cpu", "cuda")
+            ),
+            self.torch.is_autocast_cache_enabled(),
+        )
+
+    def _restore_autocast(self, state):
+        if state == self._autocast_state():
+            return
+        # Greenlets share thread-local autocast state and its weight cache.
+        # A cache populated in another dtype must not cross a row boundary.
+        self.torch.clear_autocast_cache()
+        for device, enabled, dtype in state[0]:
+            self.torch.set_autocast_enabled(device, enabled)
+            self.torch.set_autocast_dtype(device, dtype)
+        self.torch.set_autocast_cache_enabled(state[1])
+
+    def _mode(self):
+        return (
+            self.torch.is_grad_enabled(),
+            self.torch.is_inference_mode_enabled(),
+            self._autocast_state(),
+        )
+
+    @contextmanager
+    def _execution_mode(self, mode):
+        previous = self._autocast_state()
+        self._restore_autocast(mode[2])
+        try:
+            with (
+                self.torch.inference_mode(mode[1]),
+                self.torch.set_grad_enabled(mode[0]),
+            ):
+                yield
+        finally:
+            self._restore_autocast(previous)
 
     def _bind(self, solver, name):
         from greenlet import getcurrent
@@ -161,10 +210,7 @@ class PlanningBatches:
                     return original(*args, **kwargs)
             if count is None:
                 return original(*args, **kwargs)
-            mode = (
-                self.torch.is_grad_enabled(),
-                self.torch.is_inference_mode_enabled(),
-            )
+            mode = self._mode()
             key = (
                 id(solver),
                 name,
@@ -186,17 +232,14 @@ class PlanningBatches:
     def _invoke(self, request, tensors):
         _, original, spec, values, _, _, mode = request
         if request[0][0] == "motion":
-            with (
-                self.torch.inference_mode(mode[1]),
-                self.torch.set_grad_enabled(mode[0]),
-            ):
+            with self._execution_mode(mode):
                 return original(tensors)
         arguments = dict(values.arguments)
         arguments.update(tensors)
         # BoundArguments retains variadic **kwargs and keyword-only arguments.
         bound = spec.bind_partial()
         bound.arguments.update(arguments)
-        with self.torch.inference_mode(mode[1]), self.torch.set_grad_enabled(mode[0]):
+        with self._execution_mode(mode):
             return original(*bound.args, **bound.kwargs)
 
     def _part(self, result, start, stop, total=None):

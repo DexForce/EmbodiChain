@@ -75,10 +75,7 @@ class MotionBatches:
             tensors["rows"] = broker.torch.tensor(
                 generator._env_ids, dtype=broker.torch.long
             )
-            mode = (
-                broker.torch.is_grad_enabled(),
-                broker.torch.is_inference_mode_enabled(),
-            )
+            mode = broker._mode()
             key = (
                 "motion",
                 id(generator.robot),
