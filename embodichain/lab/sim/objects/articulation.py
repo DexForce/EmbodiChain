@@ -1942,6 +1942,7 @@ class Articulation(BatchEntity):
         root_velocity: torch.Tensor | None = None,
         clear_dynamics: bool = False,
         clamp_target_qpos: bool = True,
+        clamp_qpos: bool = True,
     ) -> None:
         """Write selected physical state in one backend operation.
 
@@ -1949,7 +1950,7 @@ class Articulation(BatchEntity):
             env_ids: Environment rows; None selects all environments.
             joint_ids: Joint columns for all supplied joint tensors.
             root_pose: Environment-local xyz + xyzw, shape (N, 7).
-            qpos: Current joint positions, shape (N, J), clipped to limits.
+            qpos: Current joint positions, shape (N, J).
             target_qpos: Position targets, shape (N, J).
             qvel: Current joint velocities, shape (N, J).
             target_qvel: Velocity targets, shape (N, J).
@@ -1959,8 +1960,11 @@ class Articulation(BatchEntity):
                 selected environments and hold their final joint positions.
                 Explicit fields override these defaults.
             clamp_target_qpos: Clip position targets to joint limits. Set False
-                to preserve PD targets outside the joint range. Current joint
-                position writes remain clipped; physical limits stay enabled.
+                to preserve PD targets outside the joint range. Physical limits
+                stay enabled.
+            clamp_qpos: Clip current joint positions to joint limits. Set False
+                to restore exact cached states, including compliant limit
+                excursions. Physical limits stay enabled.
 
         Unspecified positions and unselected environments retain their values.
         Scene backends validate all field shapes before changing physics state.
@@ -1991,7 +1995,9 @@ class Articulation(BatchEntity):
                 raise ValueError(
                     f"Expected {name} shape {expected}, got {tuple(value.shape)}."
                 )
-            if name == "qpos" or (name == "target_qpos" and clamp_target_qpos):
+            if (name == "qpos" and clamp_qpos) or (
+                name == "target_qpos" and clamp_target_qpos
+            ):
                 if limits is None:
                     limits = self.body_data.qpos_limits[local_env_ids][
                         :, local_joint_ids

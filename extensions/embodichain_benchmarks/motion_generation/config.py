@@ -125,6 +125,13 @@ class PlannerSpecCfg:
 class ProtocolCfg:
     """Common timing and external-validation protocol."""
 
+    physics_substeps: int = 1
+    """Default-native integration steps per fixed manager physics interval.
+
+    This refines physical integration without changing controller intervals,
+    settling durations, observation windows or trajectory timing.
+    """
+
     warmup_trials: int = 1
     measured_trials: int = 3
     sample_interval: int = 40
@@ -221,6 +228,8 @@ class FreeSpaceTrackCfg:
     """Characteristic length used to make Jacobian conditioning dimensionless."""
     near_singular_threshold: float = 0.02
     near_limit_threshold: float = 0.04
+    near_limit_sampling: str = "all_joints"
+    """Legacy joint-limit corners, or one near-limit joint with interior peers."""
     distance_unit: str = "m"
     """Translation ranges in metres or fractions of the declared robot reach."""
     robot_reach_m: float | None = None
@@ -231,6 +240,8 @@ class FreeSpaceTrackCfg:
     """FK-only numerical screening, or explicit legacy ``robot_ik`` screening."""
     screening_iterations: int = 80
     screening_restarts: int = 8
+    screening_proposal_batch_size: int = 1
+    """Opt-in FK-only proposal chunks; one preserves the legacy RNG stream."""
 
 
 @configclass
@@ -466,6 +477,11 @@ class SuiteCfg:
                 raise ValueError(f"Track {track.id!r} must not repeat domain ids.")
             if not track.id or not track.scenario:
                 raise ValueError("Every track must define a non-empty id and scenario.")
+        if (
+            type(self.protocol.physics_substeps) is not int
+            or self.protocol.physics_substeps < 1
+        ):
+            raise ValueError("physics_substeps must be a positive integer.")
         if self.protocol.warmup_trials < 0:
             raise ValueError("warmup_trials must be >= 0.")
         if self.protocol.measured_trials < 1:
@@ -657,9 +673,19 @@ def _validate_free_space(free_space: FreeSpaceTrackCfg) -> None:
         "singularity_candidates",
         "screening_iterations",
         "screening_restarts",
+        "screening_proposal_batch_size",
     ):
         if type(getattr(free_space, name)) is not int or getattr(free_space, name) < 1:
             raise ValueError(f"{name} must be a positive integer.")
+    if free_space.near_limit_sampling not in {"all_joints", "single_joint"}:
+        raise ValueError("near_limit_sampling must be all_joints or single_joint.")
+    if free_space.screening_proposal_batch_size > 128:
+        raise ValueError("screening_proposal_batch_size must be at most 128.")
+    if (
+        free_space.screening_proposal_batch_size > 1
+        and free_space.reachability_solver != "finite_difference_dls"
+    ):
+        raise ValueError("Proposal batching requires finite_difference_dls screening.")
     scale = free_space.jacobian_position_scale_m
     if (
         isinstance(scale, bool)

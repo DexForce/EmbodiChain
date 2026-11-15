@@ -31,6 +31,7 @@ from embodichain.utils.math import axis_angle_to_rotation_matrix
 from ..config import stable_hash
 from ..models import BenchmarkCase
 from .free_space import _start_qpos_for_bin
+from ._free_space_proposals import _sample_request_batched
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
@@ -136,7 +137,22 @@ def _sample_starts(
         generator = _generator("start-v1", seed, start_bin, row)
         base = _start_qpos_for_bin(start_bin, limits, generator, robot_id)
         noise = torch.rand(count, len(base), generator=generator) - 0.5
-        if start_bin == "near_limit":
+        if start_bin == "near_limit" and settings.near_limit_sampling == "single_joint":
+            # A joint-limit stratum is distinct from an all-joints corner.
+            # Keep starts paired across K, shape, distance and goal modality.
+            generator = _generator("near-limit-joints-v1", seed, row)
+            candidate = (
+                lower + (0.1 + 0.8 * torch.rand(len(base), generator=generator)) * span
+            )
+            joint = int(torch.randint(len(base), (), generator=generator))
+            margin = (0.01 + 0.03 * torch.rand((), generator=generator)) * span[joint]
+            candidate[joint] = (
+                upper[joint] - margin
+                if torch.rand((), generator=generator) > 0.5
+                else lower[joint] + margin
+            )
+            candidates = candidate[None]
+        elif start_bin == "near_limit":
             # Vary which limits are approached and the actual distance to them.
             sides = torch.rand(count, len(base), generator=generator) > 0.5
             margins = 0.01 + 0.03 * torch.rand(count, len(base), generator=generator)
@@ -180,6 +196,12 @@ def _sample_starts(
         "near_singular_threshold": settings.near_singular_threshold,
         "near_limit_threshold": settings.near_limit_threshold,
         "conditioning_source": "finite_difference_geometric_jacobian_v1",
+        **(
+            {"near_limit_sampling": settings.near_limit_sampling}
+            if start_bin == "near_limit"
+            and settings.near_limit_sampling != "all_joints"
+            else {}
+        ),
     }
 
 
@@ -248,6 +270,7 @@ def _reference_ik(
     position_tolerance: float,
     rotation_tolerance: float,
     restarts: int,
+    random_restarts: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Solve references using FK alone, with bounded numerical restarts.
 
@@ -259,17 +282,22 @@ def _reference_ik(
     middle = ((lower + upper) * 0.5).expand_as(seed)
     random = (
         lower[:, None]
-        + torch.rand(
-            seed.shape[0],
-            max(0, restarts - 2),
-            seed.shape[1],
-            device=seed.device,
-            dtype=seed.dtype,
+        + (
+            torch.rand(
+                seed.shape[0],
+                max(0, restarts - 2),
+                seed.shape[1],
+                device=seed.device,
+                dtype=seed.dtype,
+            )
+            if random_restarts is None
+            else random_restarts
         )
         * (upper - lower)[:, None]
     )
     qpos = torch.cat((seed[:, None], middle[:, None], random), dim=1)[:, :restarts]
     solved = torch.zeros(qpos.shape[:2], dtype=torch.bool, device=seed.device)
+    finished = torch.zeros(seed.shape[0], dtype=torch.bool, device=seed.device)
     for iteration in range(iterations + 1):
         current, jacobian = _fk_jacobian(robot, qpos, part, 0.3)
         position, rotation = pose_error(current, target[:, None])
@@ -278,6 +306,9 @@ def _reference_ik(
             & (rotation.norm(dim=-1) <= rotation_tolerance)
             & torch.isfinite(qpos).all(-1)
         )
+        if random_restarts is not None and iteration % 4 == 0:
+            # Each proposal has the same stopping rule regardless of chunk peers.
+            finished |= solved.any(-1)
         if iteration == iterations or (
             iteration % 4 == 0 and bool(solved.any(-1).all())
         ):
@@ -285,7 +316,9 @@ def _reference_ik(
         error = torch.cat((position / 0.3, rotation), dim=-1)
         step = damped_least_squares_step(error, jacobian, 0.02).clamp(-0.25, 0.25)
         qpos = torch.where(
-            solved[..., None], qpos, (qpos + step).clamp(lower[:, None], upper[:, None])
+            (solved | finished[:, None])[..., None],
+            qpos,
+            (qpos + step).clamp(lower[:, None], upper[:, None]),
         )
     score = (
         position.norm(dim=-1) / position_tolerance
@@ -310,6 +343,8 @@ def _screen_path(
     solver: str = "finite_difference_dls",
     iterations: int = 80,
     restarts: int = 8,
+    random_restarts: torch.Tensor | None = None,
+    homogeneous_group_size: int | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     seed = starts.clone()
     alive = torch.ones(starts.shape[0], dtype=torch.bool, device=starts.device)
@@ -330,6 +365,7 @@ def _screen_path(
                 position_tolerance,
                 rotation_tolerance,
                 restarts,
+                None if random_restarts is None else random_restarts[:, index],
             )
         success = (
             torch.as_tensor(success, device=starts.device, dtype=torch.bool)
@@ -340,8 +376,18 @@ def _screen_path(
             solved, device=starts.device, dtype=starts.dtype
         ).reshape_as(starts)
         if batch_mode == "homogeneous":
-            success = success[:1].expand_as(success)
-            solved = solved[:1].expand_as(solved).clone()
+            group_size = homogeneous_group_size or starts.shape[0]
+            success = (
+                success.reshape(-1, group_size)[:, :1]
+                .expand(-1, group_size)
+                .reshape(-1)
+            )
+            solved = (
+                solved.reshape(-1, group_size, starts.shape[-1])[:, :1]
+                .expand(-1, group_size, -1)
+                .reshape_as(starts)
+                .clone()
+            )
         measured = robot.compute_fk(qpos=solved, name=part, to_matrix=True)
         translation, rotation = pose_error(
             measured.to(torch.float64), targets[:, index].to(torch.float64)
@@ -360,6 +406,9 @@ def _screen_path(
         alive &= valid
         seed = torch.where(valid[:, None], solved, seed)
         references.append(seed.clone())
+        if random_restarts is not None and not bool(alive.any()):
+            references.extend(seed.clone() for _ in range(index + 1, targets.shape[1]))
+            break
     return alive, torch.stack(references, dim=1)
 
 
@@ -376,6 +425,20 @@ def _sample_request(
     batch_mode: str,
     suite: SuiteCfg,
 ) -> tuple[torch.Tensor, torch.Tensor, list[int]]:
+    if settings.screening_proposal_batch_size > 1:
+        return _sample_request_batched(
+            robot,
+            part,
+            starts,
+            settings,
+            seed,
+            count,
+            shape,
+            component,
+            distance_bin,
+            batch_mode,
+            suite,
+        )
     start_pose = robot.compute_fk(qpos=starts, name=part, to_matrix=True)
     targets = start_pose[:, None].expand(-1, count, -1, -1).clone()
     references = starts[:, None].expand(-1, count, -1).clone()
@@ -616,6 +679,15 @@ def generate_cartesian_cases(
                                         "reachability_solver": settings.reachability_solver,
                                         "screening_iterations": settings.screening_iterations,
                                         "screening_restarts": settings.screening_restarts,
+                                        **(
+                                            {
+                                                "screening_proposal_batch_size": settings.screening_proposal_batch_size,
+                                                "screening_restart_rule": "proposal_waypoint_cpu_v1",
+                                            }
+                                            if settings.screening_proposal_batch_size
+                                            > 1
+                                            else {}
+                                        ),
                                         "selection_condition": "reachable_by_declared_screening_solver",
                                         **start_measurements,
                                     }

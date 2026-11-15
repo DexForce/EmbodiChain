@@ -23,11 +23,10 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from embodichain.compute.kinematics import pose_error
-from ._atomic_reference import _recover_reference_ik
+from ._atomic_reference import _qualified_reference_ik
+from ._case_qualification import _CaseQualificationError
 from .atomic_case_utils import (
     apply_target_rotation_randomization,
-    canonical_case_qpos,
     float_vector,
     randomized_vector_batch,
 )
@@ -62,47 +61,14 @@ def _reference_chain_rows(
         selected = [env_ids[i] for i in local.cpu().tolist()]
         goal = targets[local, index]
         seed = previous[local]
-        flags, solved = robot.compute_ik(
-            pose=goal, joint_seed=seed, name=scenario.control_part, env_ids=selected
+        valid, solved = _qualified_reference_ik(
+            robot,
+            goal,
+            seed,
+            control_part=scenario.control_part,
+            protocol=protocol,
+            env_ids=selected,
         )
-        solved = canonical_case_qpos(solved)
-        lower, upper = (
-            robot.get_qpos_limits(name=scenario.control_part, env_ids=selected)
-            .to(solved)
-            .unbind(-1)
-        )
-        violation = torch.maximum(lower - solved, solved - upper).clamp_min(0).amax(-1)
-        valid = torch.as_tensor(flags, device=start.device, dtype=torch.bool).reshape(
-            -1
-        )
-        valid = (
-            valid
-            & torch.isfinite(solved).all(-1)
-            & (violation <= protocol.joint_limit_tolerance_rad)
-        )
-        check = valid.nonzero(as_tuple=False).flatten()
-        if check.numel():
-            actual = robot.compute_fk(
-                qpos=solved[check],
-                name=scenario.control_part,
-                env_ids=[selected[i] for i in check.cpu().tolist()],
-                to_matrix=True,
-            )
-            dp, dr = pose_error(actual, goal[check])
-            valid[check] &= (dp.norm(dim=-1) <= protocol.position_threshold_m) & (
-                dr.norm(dim=-1) <= protocol.rotation_threshold_rad
-            )
-        if not bool(valid.all().item()):
-            valid, solved = _recover_reference_ik(
-                robot,
-                goal,
-                seed,
-                valid,
-                solved,
-                control_part=scenario.control_part,
-                protocol=protocol,
-                env_ids=selected,
-            )
         feasible[local] &= valid
         accepted = local[valid]
         previous[accepted] = solved[valid]
@@ -205,6 +171,11 @@ def _held_target_reference(
                 },
             )
     missing = (~found).nonzero(as_tuple=False).flatten().cpu().tolist()
-    raise RuntimeError(
-        f"Independent reference search exhausted {count} target candidates for rows {missing}."
+    raise _CaseQualificationError(
+        f"Independent reference search exhausted {count} target candidates for rows {missing}.",
+        evidence={
+            "kind": "held_target_reference",
+            "rows": missing,
+            "attempts": attempts,
+        },
     )

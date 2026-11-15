@@ -25,6 +25,7 @@ import torch
 
 from embodichain.lab.sim.atomic_skills.plans import normalize_success_mask
 from embodichain.lab.sim.atomic_skills.primitives._helpers import (
+    plan_named_arm_trajectory,
     resolve_object_target,
     resample_planned_trajectory,
     split_joint_trajectory_at_pose,
@@ -44,6 +45,87 @@ from embodichain.lab.sim.atomic_skills.trajectory_ops import (
 from embodichain.lab.sim.motion.planners import MoveType, PlanResult
 
 CPU = torch.device("cpu")
+
+
+@pytest.mark.parametrize("arrival_stops", [False, True])
+def test_failed_plan_does_not_extend_full_robot_execution(arrival_stops):
+    positions = torch.tensor([[[0.0], [0.25], [0.5]], [[9.0], [8.0], [7.0]]])
+    dt = torch.tensor([[0.0, 0.25, 0.25], [0.0, 20.0, 20.0]])
+    arrivals = torch.tensor([[1, 2], [1, -1]]) if arrival_stops else None
+    result = PlanResult(
+        success=torch.tensor([True, False]),
+        positions=positions.clone(),
+        dt=dt.clone(),
+        waypoint_indices=arrivals,
+    )
+    success, timed = to_full_robot_trajectory(
+        result,
+        base_qpos=torch.tensor([[0.0, 4.0], [9.0, 5.0]]),
+        joint_ids=[0],
+        env_ids=torch.tensor([0, 1]),
+        control_dt=0.25,
+    )
+    assert success.tolist() == [True, False]
+    assert timed.waypoint_count == 3
+    torch.testing.assert_close(timed.positions[0, :, 0], positions[0, :, 0])
+    torch.testing.assert_close(
+        timed.positions[1], torch.tensor([[9.0, 5.0]]).expand(3, -1)
+    )
+    torch.testing.assert_close(
+        timed.dt, torch.tensor([[0.0, 0.25, 0.25], [0.0, 0.0, 0.0]])
+    )
+    torch.testing.assert_close(result.positions, positions)
+    torch.testing.assert_close(result.dt, dt)
+
+
+@pytest.mark.parametrize("success", [[True, False], [False, False]])
+def test_named_arm_execution_ignores_failed_candidate_duration(success):
+    positions = torch.tensor([[[0.0], [0.25], [0.5]], [[9.0], [8.0], [7.0]]])
+    dt = torch.tensor([[0.0, 0.25, 0.25], [0.0, 20.0, 20.0]])
+    result = PlanResult(
+        success=torch.tensor(success), positions=positions.clone(), dt=dt.clone()
+    )
+    generator = Mock()
+    generator.generate.return_value = result
+    mask, commands = plan_named_arm_trajectory(
+        generator,
+        "arm",
+        positions[:, 0],
+        torch.eye(4).repeat(2, 1, 1, 1),
+        3,
+        Mock(),
+        0.25,
+    )
+    assert mask.tolist() == success
+    assert commands.shape == (2, 3, 1)
+    torch.testing.assert_close(
+        commands[0], positions[0] if success[0] else positions[0, :1].expand(3, -1)
+    )
+    torch.testing.assert_close(commands[1], positions[1, :1].expand(3, -1))
+    torch.testing.assert_close(result.positions, positions)
+    torch.testing.assert_close(result.dt, dt)
+
+
+@pytest.mark.parametrize("malformed", ["positions", "dt", "arrivals"])
+def test_failed_execution_mask_does_not_hide_invalid_backend_data(malformed):
+    positions = torch.tensor([[[0.0], [0.25]], [[1.0], [2.0]]])
+    dt = torch.tensor([[0.0, 0.25], [0.0, 1.0]])
+    arrivals = torch.tensor([[1], [1]])
+    if malformed == "positions":
+        positions[1, 1, 0] = float("nan")
+    elif malformed == "dt":
+        dt[1, 1] = -1.0
+    else:
+        arrivals[1, 0] = 2
+    with pytest.raises(ValueError):
+        resample_planned_trajectory(
+            positions,
+            2,
+            dt=dt,
+            control_dt=0.25,
+            arrival_indices=arrivals,
+            success=torch.tensor([True, False]),
+        )
 
 
 class TestNormalizeSuccessMask:
