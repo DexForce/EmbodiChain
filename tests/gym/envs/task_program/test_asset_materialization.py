@@ -1156,8 +1156,9 @@ def test_requirements_lookup_does_not_resolve_runtime_assets(deployment, monkeyp
     )
 
 
-def test_materialized_registry_references_follow_destination_cache(
-    deployment, tmp_path, monkeypatch
+@pytest.mark.parametrize("reference_mode", ["registry", "local"])
+def test_materialized_demo_references_survive_relocation(
+    deployment, tmp_path, monkeypatch, reference_mode
 ):
     import numpy as np
     from types import SimpleNamespace
@@ -1198,6 +1199,8 @@ def test_materialized_registry_references_follow_destination_cache(
     )
     manifest = save_demo_skill(artifact, cache / "skill")
     reference = {"asset": "ReviewDemo", "path": "skill/demo_skill.json"}
+    if reference_mode == "local":
+        reference = "../cache_a/skill/demo_skill.json"
     original = data.get_data_class
 
     def asset_class(name):
@@ -1221,20 +1224,28 @@ def test_materialized_registry_references_follow_destination_cache(
     }
     _write(path, integration)
     result = materialize_asset_deployment(
-        source, requirements, resolved, output_dir=tmp_path / "out"
+        source, requirements, resolved, output_dir=tmp_path / "exports" / "run"
     )
     exported = yaml.safe_load(
         (result.deployment_path.parent / "integration.yaml").read_text()
     )
-    assert (
-        exported["runtime_services"]["demo_skills"]["trace"]["asset_manifest"]
-        == reference
-    )
-    destination = tmp_path / "cache_b"
-    cache.rename(destination)
-    cache = destination
-    assert (cache / manifest.relative_to(tmp_path / "cache_a")).is_file()
+    selected = exported["runtime_services"]["demo_skills"]["trace"]["asset_manifest"]
+    deployment_path = result.deployment_path
+    if reference_mode == "registry":
+        assert selected == reference
+        destination = tmp_path / "cache_b"
+        cache.rename(destination)
+        cache = destination
+        assert (cache / manifest.relative_to(tmp_path / "cache_a")).is_file()
+    else:
+        assert (deployment_path.parent / selected).resolve() == manifest
+        destination = tmp_path.with_name(tmp_path.name + "-moved")
+        tmp_path.rename(destination)
+        assert not tmp_path.exists()
+        deployment_path = destination / deployment_path.relative_to(tmp_path)
     config_to_cfg(
-        yaml.safe_load(result.deployment_path.read_text()),
-        source_path=result.deployment_path,
+        yaml.safe_load(deployment_path.read_text()),
+        source_path=deployment_path,
     )
+    if reference_mode == "local":
+        assert not Path(selected).is_absolute()

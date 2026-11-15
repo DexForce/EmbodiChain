@@ -29,6 +29,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import re
 import shutil
@@ -397,15 +398,18 @@ def materialize_asset_deployment(
         task_program["integration"], base_dir=source.parent
     )
     # Keep registry references declarative so each destination uses its own cache.
-    # Only local filenames need rebasing from their component's directory.
+    # Rebase local filenames from their component to the output integration,
+    # retaining portability when the export and its local assets move together.
     from embodichain.data._references import _resolve_data_reference
 
     for node in _walk(integration.get("runtime_services", {})):
         for field in ("asset_manifest", "prototype_manifest"):
             if field in node and isinstance(node[field], (str, Path)):
-                node[field] = str(
-                    _resolve_data_reference(node[field], base_dir=integration_base)
+                manifest = _resolve_data_reference(
+                    node[field], base_dir=integration_base
                 )
+                relative = os.path.relpath(manifest, Path(output_dir).resolve())
+                node[field] = "./" + Path(relative).as_posix()
     if (
         "asset_requirements" in integration
         and type(requirements).from_dict(integration["asset_requirements"]).to_dict()
