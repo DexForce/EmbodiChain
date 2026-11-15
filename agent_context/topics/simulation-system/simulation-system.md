@@ -31,6 +31,17 @@ perform native access. Spawn owns replication/isolation and source overlays.
 Contact sensors use the finalized Scene query boundary. Cameras/lights use the
 same Scene, including its pre-finalization prepared-Arena phase.
 
+The private `_GeometryNetForceSensor` qualifies native MuJoCo-Warp geometry-pair
+net forces for the Sharpa reference experiment. It resolves named source
+colliders after preparation, rejects ambiguous decompositions and topology
+changes, and closes borrowed buffers before manager teardown. Native material
+scaling and batched joint-gain writes are physics-owned private views: tasks
+submit row values, source reset defaults are preserved, and solver graphs are
+invalidated after parameter changes. The private `_shrink_cylinder_variants`
+helper scales only analytic cylinders by ratios in `(0, 1]`, scaling inertia at
+constant mass while keeping the enclosing template broad-phase bounds. It does
+not update render geometry or descriptors and must run once before collection.
+
 `VisualObject` owns appearance, visibility and pure-visual poses without physics
 buffers or collision API. Source selectors are exclusive with ordinary file/
 shape inputs. Explicit `visuals` and articulation `link_visuals` replace appearance
@@ -82,6 +93,40 @@ including explicit warmup, before `after_substep`. Preparation, render sync,
 reads, topology rebuilds and resets do not advance or rewind these clocks.
 Episode clocks may have an offset; physical evidence must validate the mapping.
 Caches also validate binding/topology identity, not only the step count.
+
+## Compound geometry and prepared variants
+
+Procedural rigid geometry can be a `CompoundShapeCfg` of flat body-local
+`ShapePartCfg` entries. Spawn emits one physical body and multiple independent
+colliders; owner `visuals` cannot become collision geometry. Explicit
+mass/COM/inertia applies once to the parent. `CylinderCfg` retains a native
+cylinder descriptor, but cooking fidelity remains backend-specific.
+Rigid appearance has one canonical `visuals` list. Legacy `visual_shape` and
+compound `visual_parts` migrate into that list with a warning and are cleared;
+competing inputs fail. Procedural arrays and singleton mesh files lower on the
+body for both physics backends. File-containing render batches use separate
+singleton imports with owner pose tracking; see [rendering](rendering.md).
+Gaussian and other companion visuals keep
+their separate binding capabilities. Semantic queries retain the physical
+surface unless the parent config explicitly selects a shared proxy.
+
+Preparation-time `RigidObjectCfg.env_variants` requires Newton and a supporting
+SDK. MuJoCo Warp requires compatible collider topology within a batch; arbitrary
+per-arena piece counts are not qualified. Spawn checks descriptor support for
+variants and raw Newton `solref`/`solimp`/`solmix` before materialization rather
+than silently discarding requested settings. A dependency version alone does
+not qualify every geometry or solver profile.
+Rigid-object groups retain member variants on selected resets. Variant checks
+precede replacement removals and material registration for the complete batch.
+Variants accept procedural shapes, physics, scale, visible mesh appearance and
+initial poses. Per-variant USD sources, semantic proxies, Gaussian resources,
+hidden visual elements and post-load UV generation are rejected; parent
+semantic proxies remain shared across the batch. Default semantic surfaces
+follow each selected row's physical shape. Ragged surfaces require row-wise
+queries rather than an ambiguous dense batch.
+The default ground is separately owned by `SimulationManagerCfg`: disable it
+for constrained probes or author `ground_plane_attrs` to match a reference
+contact profile. Omitting that profile preserves the existing scene defaults.
 
 ## Quaternion and pose convention
 

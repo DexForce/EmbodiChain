@@ -203,12 +203,14 @@ def test_multiple_resources_need_explicit_selection(component: Path) -> None:
     assert EmbodimentRobotProvider(resolved, "secondary").control_part == "custom_arm"
 
 
+@pytest.mark.parametrize("substeps", [1, 8])
 def test_runner_uses_component_robot_and_preserves_input_suite(
-    component: Path, monkeypatch
+    component: Path, monkeypatch, substeps: int
 ) -> None:
     from embodichain_benchmarks.motion_generation import runner as runner_module
 
     suite = SuiteCfg.from_dict(_suite_data(str(component)))
+    suite.protocol.physics_substeps = substeps
     runner = BenchmarkRunner(suite, suite.planners, device="cpu")
     factory = Mock()
     monkeypatch.setattr(runner_module, "SimulationManager", factory)
@@ -217,6 +219,10 @@ def test_runner_uses_component_robot_and_preserves_input_suite(
 
     assert sim is factory.return_value
     assert robot is sim.add_robot.return_value
+    sim_cfg = factory.call_args.args[0]
+    assert sim_cfg.physics_cfg.num_substeps == substeps
+    assert sim_cfg.physics_dt == 0.01
+    assert suite_to_dict(suite)["protocol"]["physics_substeps"] == substeps
     cfg = sim.add_robot.call_args.kwargs["cfg"]
     assert cfg.uid == "component_robot"
     assert runner.control_part == "custom_arm"
@@ -226,6 +232,16 @@ def test_runner_uses_component_robot_and_preserves_input_suite(
     resolved = suite_to_dict(runner.suite)
     assert "robot" not in resolved
     assert SuiteCfg.from_dict(resolved).embodiment.component == str(component)
+
+
+@pytest.mark.parametrize("substeps", [0, True, 1.5])
+def test_invalid_physics_substeps_fail_before_runtime(
+    component: Path, substeps
+) -> None:
+    data = _suite_data(str(component))
+    data["protocol"]["physics_substeps"] = substeps
+    with pytest.raises(ValueError, match="physics_substeps"):
+        SuiteCfg.from_dict(data)
 
 
 def test_gripper_and_domain_overrides_cannot_change_component_commands(

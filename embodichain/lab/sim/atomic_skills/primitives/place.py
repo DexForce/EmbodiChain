@@ -396,6 +396,7 @@ class Place(AtomicSkill[PlaceGoal | AssembleGoal, PlaceOptions]):
                 control_dt=context.control_dt,
                 arrival_indices=motion_result.waypoint_indices,
                 split_target_index=down_xpos.shape[1] - 1,
+                success=motion_result.success,
                 env_ids=self.planning_services.env_ids,
             )
             motion_success = motion_result.success

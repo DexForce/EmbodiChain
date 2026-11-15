@@ -110,8 +110,8 @@ class PhysicsBackendCfg:
     physics_dt: float = 1.0 / 100.0
     """Duration of one physics step in seconds.
 
-    Environment control steps may contain multiple physics steps.  For Newton,
-    this interval is further divided by :attr:`NewtonPhysicsCfg.num_substeps`.
+    Environment control steps may contain multiple physics steps. Each backend
+    further divides this interval by its configured ``num_substeps``.
     """
 
     device: str | torch.device = "cpu"
@@ -132,6 +132,14 @@ class PhysicsBackendCfg:
 @configclass
 class DefaultPhysicsCfg(PhysicsBackendCfg):
     """Configuration selector for the Default physics backend."""
+
+    num_substeps: int = 1
+    """Native integration steps per manager physics step.
+
+    Each native step advances ``physics_dt / num_substeps``. Manager clocks,
+    control commands, observers and rendering retain the outer step interval.
+    The default preserves one native step per manager step.
+    """
 
     cache_material: bool = False
     """Reuse identical physics materials across objects and environment clones.
@@ -168,10 +176,19 @@ class DefaultPhysicsCfg(PhysicsBackendCfg):
 
     def __post_init__(self) -> None:
         """Decode mapping input for the nested GPU-memory configuration."""
+        self._substep_count()
         if isinstance(self.gpu_memory, Mapping):
             self.gpu_memory = GPUMemoryCfg(**self.gpu_memory)
         if not isinstance(self.gpu_memory, GPUMemoryCfg):
             raise TypeError("gpu_memory must be a GPUMemoryCfg or mapping.")
+
+    def _substep_count(self) -> int:
+        """Validate the integration count, including mutable config overrides."""
+        if type(self.num_substeps) is not int or self.num_substeps < 1:
+            raise ValueError(
+                "DefaultPhysicsCfg.num_substeps must be a positive integer."
+            )
+        return self.num_substeps
 
     def to_dexsim_args(self) -> dict[str, Any]:
         """Convert to DexSim physics arguments.
@@ -179,6 +196,7 @@ class DefaultPhysicsCfg(PhysicsBackendCfg):
         Solver implementation details that are not exposed by
         :class:`DefaultPhysicsCfg` retain their established defaults here.
         """
+        self._substep_count()
         args = {
             "cache_material": self.cache_material,
             "gravity": _gravity_vector(self.gravity),

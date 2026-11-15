@@ -59,6 +59,37 @@ from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
 
 
 @pytest.mark.no_sim
+def test_empty_urdf_sensor_mapping_can_roundtrip_and_accept_new_sensors():
+    from embodichain.lab.sim.cfg import URDFCfg
+
+    cfg = URDFCfg.from_dict({"sensors": {}})
+    assert cfg.to_dict()["sensors"] == {}
+    assert cfg.add_sensor("camera", sensor_type="camera") is cfg
+    expected = [{"sensor_name": "camera", "sensor_type": "camera"}]
+    assert cfg.sensors == expected
+    assert URDFCfg.from_dict(cfg.to_dict()).sensors == expected
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize(
+    "prefix_patch,expected_arm", [(None, "custom_"), ({"arm": "other_"}, "other_")]
+)
+def test_partial_urdf_prefix_overrides_preserve_other_preset_prefixes(
+    prefix_patch, expected_arm
+):
+    from embodichain.lab.sim.cfg import URDFCfg
+
+    cfg = RobotCfg(
+        urdf_cfg=URDFCfg(component_prefix={"arm": "custom_", "hand": "tool_"})
+    )
+    merge_robot_cfg(cfg, {"urdf_cfg": {"component_prefix": prefix_patch}})
+
+    prefixes = dict(cfg.urdf_cfg.component_prefix)
+    assert prefixes["arm"] == expected_arm
+    assert prefixes["hand"] == "tool_"
+
+
+@pytest.mark.no_sim
 def test_generic_robot_assembly_json_roundtrip_preserves_output(
     tmp_path: Path,
 ) -> None:

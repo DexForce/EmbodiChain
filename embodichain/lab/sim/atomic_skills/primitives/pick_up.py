@@ -494,6 +494,7 @@ class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
                 control_dt=interpolation_dt,
                 arrival_indices=motion_result.waypoint_indices,
                 split_target_index=len(waypoints) - 2,
+                success=motion_result.success,
                 env_ids=self.planning_services.env_ids,
             )
             is_success = motion_result.success
