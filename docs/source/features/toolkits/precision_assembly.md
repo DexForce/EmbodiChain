@@ -100,6 +100,11 @@ grid = build_many_pegs(9, seed=0, family="primitive")
 grid.save("outputs/assembly/many_pegs.json")
 ```
 
+Programmatic generator configurations may contain NumPy arrays and scalars;
+these are detached into JSON primitives before storage and hashing. Generation
+uses inline meshes. The upstream `mesh_dir` option is rejected before files
+are written, so a saved source cannot depend on a temporary mesh directory.
+
 A many-pegs grid is **one physical scene**, not nine independent simulation
 environments. Its manifest records each cell's sampled configuration and pose.
 
@@ -275,11 +280,28 @@ reject these overrides rather than ignore them.
 
 The [recording metadata](../../_static/assembly/recordings.json) contains asset
 hashes, profiles, camera parameters, measurements and collision counts.
-A 0.3 s, four-direction S2 check at 100 μm clearance returned identical rows
-for the published MuJoCo Warp baseline and both new family selections. Two
-directions exceeded the 10 μm wall-error budget (worst error approximately
-18.49 μm), so the report correctly retained `failed`. Solver selection does not
-relax the accuracy threshold or turn a completed run into precision acceptance.
+Constrained probes use `ConstrainedProbeCfg.integration_substeps=4` by default.
+The requested 1 ms interval is integrated as four 0.25 ms steps on CPU reference,
+raw MuJoCo Warp and both Newton families. Every physical step in the settled
+window contributes to maximum error and drift; no intermediate states are
+filtered out. Reports record `integration_dt`, `integration_steps` and each row's
+`sample_count`, separately from the requested timestep. Physical duration,
+geometry, mass, force, damping and accuracy budgets are unchanged. Integration
+work and stored samples increase approximately fourfold.
+
+```bash
+# Explicit refined protocol (the default); compare with --integration-substeps 1.
+python scripts/benchmark/assembly/precision.py --configs circle --clearances .0001 --backends newton --routes direct --newton-solvers mujoco_warp dexuni --probe S2 --directions 4 --duration .3 --integration-substeps 4
+```
+
+At 100 μm clearance, the former 0.3 s/four-direction protocol at one 1 ms step
+produced float32 transient errors up to 18.49 μm, exceeding its 10 μm budget.
+The refined protocol passes every direction on all four reference/native
+profiles; the native worst error is approximately 5.22 μm. Each direction is
+scored over all 600 physical samples in the second half of the experiment.
+`--integration-substeps 1` retains the coarse protocol for reproducibility;
+it does not reduce the acceptance requirement. Native capacity qualification
+remains separate from the now-passing S2 error checks.
 
 Behavioral success does not certify micro-clearance accuracy or solver capacity:
 live native contact-overflow accounting remains unavailable, and native

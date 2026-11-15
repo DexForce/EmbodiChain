@@ -1118,9 +1118,11 @@
       "id": "toolkits",
       "label": "Toolkit directory",
       "kind": "package",
-      "topic_ids": [],
-      "summary": "Standalone grasp sampling, collision-mesh preparation, and URDF assembly utilities.",
-      "details": "Three standalone asset-preparation branches: GraspKit, URDF Assembly, and Convex Decomposition. Choose a branch for its input/output contract and public entry point. This package directory does not execute the tools as one pipeline.",
+      "topic_ids": [
+        "assembly-assets"
+      ],
+      "summary": "Standalone grasp sampling, collision-mesh preparation, URDF composition and precision assembly assets.",
+      "details": "Four standalone asset-preparation branches: GraspKit, URDF Assembly, Convex Decomposition and Precision Assembly. Precision Assembly preserves mating-part clearance, authored body ownership and mass properties in portable manifests, and offers explicit native preparation. Toolkits do not own simulation execution.",
       "boundaries": [
         "Toolkit operations do not own the simulation lifecycle."
       ],
@@ -1130,13 +1132,17 @@
           "symbol": "<module>",
           "start_line": 17,
           "end_line": 20,
-          "excerpt": "\"\"\"Standalone asset-preparation and manipulation utilities usable independently of the simulation loop.\n\nIncludes parallel-gripper grasp sampling, URDF convex decomposition, and URDF assembly.\n\"\"\""
+          "excerpt": "\"\"\"Standalone asset-preparation and manipulation utilities usable independently of the simulation loop.\n\nIncludes parallel-gripper grasp sampling, URDF convex decomposition, URDF assembly,\nand precision assembly assets.\n\"\"\""
         }
       ],
       "documentation": [
         {
           "docname": "features/toolkits/index",
           "label": "Toolkits documentation"
+        },
+        {
+          "docname": "features/toolkits/precision_assembly",
+          "label": "Precision Assembly guide and native demos"
         }
       ]
     },

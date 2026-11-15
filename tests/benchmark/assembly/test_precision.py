@@ -163,6 +163,7 @@ def _matrix_args(output: Path, manifest: Path) -> argparse.Namespace:
         warp_reference_initialization="cpu_compiled",
         probe="passive",
         directions=4,
+        integration_substeps=None,
         cell_timeout=60,
     )
 
@@ -237,7 +238,9 @@ def test_fresh_matrix_records_usd_failure_and_runs_cpu_cells(tmp_path: Path) -> 
     assert raw.with_suffix(".md").is_file()
 
 
-@pytest.mark.parametrize("outcome", ["valid", "crash", "wrong_asset", "wrong_config"])
+@pytest.mark.parametrize(
+    "outcome", ["valid", "crash", "wrong_asset", "wrong_config", "wrong_refinement"]
+)
 def test_matrix_isolates_runs_and_checks_worker_identity(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str
 ) -> None:
@@ -269,7 +272,8 @@ def test_matrix_isolates_runs_and_checks_worker_identity(
             config = json.loads(
                 Path(command[command.index("--cell-config") + 1]).read_text()
             )
-            config.pop("constrained_probe")
+            probe = config.pop("constrained_probe")
+            config.pop("integration_substeps", None)
             config.pop("num_directions")
             if outcome == "wrong_config":
                 config["duration"] = 123.0
@@ -281,6 +285,7 @@ def test_matrix_isolates_runs_and_checks_worker_identity(
                     "other_asset" if outcome == "wrong_asset" else asset.content_hash
                 ),
                 "config": config,
+                **({"integration_substeps": 4} if probe != "passive" else {}),
             }
             Path(command[command.index("--cell-output") + 1]).write_text(
                 json.dumps(result)
@@ -294,9 +299,11 @@ def test_matrix_isolates_runs_and_checks_worker_identity(
 
     monkeypatch.setattr(matrix, "compare_usd_geometry", unavailable_geometry)
     monkeypatch.setattr(matrix.subprocess, "run", run_worker)
-    paths = [
-        matrix.run_all_benchmarks(_matrix_args(output, manifest)) for _ in range(2)
-    ]
+    args = _matrix_args(output, manifest)
+    if outcome == "wrong_refinement":
+        args.probe = "S2"
+        args.integration_substeps = 2
+    paths = [matrix.run_all_benchmarks(args) for _ in range(2)]
     assert paths[0].parent != paths[1].parent
     assert json.loads((output / "cell_0.json").read_text()) == old
     for path in paths:
@@ -710,3 +717,23 @@ def test_matrix_keeps_families_failures_and_runtime_artifacts_separate(
     args.use_mujoco_cpu = True
     with pytest.raises(ValueError, match="passive probes only"):
         matrix.run_all_benchmarks(args)
+
+
+@pytest.mark.parametrize(
+    "scale,starts,advance", [(0.5, 1, 0.00075), (2.0, 1, 0.003), (2.0, 3, 0.009)]
+)
+def test_thread_lead_oracle_uses_physical_scaled_pitch(scale, starts, advance):
+    from embodichain_benchmarks.assembly.precision import PrecisionRunCfg, _score
+
+    asset = AssemblyAsset(
+        config={"kind": "thread", "pitch": 0.0015, "scale": scale, "n_starts": starts}
+    )
+    measured = _score(
+        asset,
+        {"bolt": np.array([[0.0, 0.0, 0.02]])},
+        {"bolt": np.array([[0.0, 0.0, 0.02 - advance]])},
+        PrecisionRunCfg(duration=1.0, timestep=0.001, spin_rate=2 * np.pi),
+    )
+    assert measured["ideal_advance_m"] == pytest.approx(advance)
+    assert measured["lead_relative_error"] < 1e-12
+    assert measured["success_rate"] == 1.0

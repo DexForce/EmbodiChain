@@ -576,3 +576,56 @@ def test_prepare_native_mixed_bodies_preserves_physics_and_empty_appearance(
     with pytest.raises(ValueError, match="names must be unique"):
         prepare_native_configs(asset, tmp_path / "duplicate", source_contact=False)
     assert not (tmp_path / "duplicate").exists()
+
+
+def test_hinge_cache_hash_directory_cannot_redirect_output(tmp_path):
+    asset = import_mjcf(
+        SOURCE.replace(
+            '<freejoint name="part_joint"/>', '<joint name="axis" type="hinge"/>'
+        )
+    )
+    root = tmp_path / "preparation"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    sentinel = outside / "part.urdf"
+    sentinel.write_text("preserve")
+    (root / asset.content_hash).symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match="escapes its preparation directory"):
+        prepare_native_configs(asset, root, source_contact=False)
+    assert sentinel.read_text() == "preserve"
+    assert list(outside.iterdir()) == [sentinel]
+
+
+def test_hinge_literal_link_name_matches_only_its_own_physics_overlay(tmp_path):
+    from dexsim.spawn.descs import (
+        ArticulationDesc,
+        LinkDesc,
+        CollisionDesc,
+        RigidBodyPhysicsDesc,
+    )
+    from embodichain.lab.sim.spawn.descriptors import configure_articulation_desc
+
+    asset = import_mjcf(
+        SOURCE.replace('name="part"', 'name="gear[0]"').replace(
+            '<freejoint name="part_joint"/>', '<joint name="axis" type="hinge"/>'
+        )
+    )
+    config = to_articulation_configs(asset, tmp_path, source_contact=False)["gear[0]"]
+
+    def link(name):
+        return LinkDesc(
+            name,
+            "",
+            np.eye(4),
+            collisions=[CollisionDesc()],
+            rigid_body=RigidBodyPhysicsDesc.dynamic(mass=10.0, inertia=np.eye(3)),
+        )
+
+    target, decoy = link("gear[0]"), link("gear0")
+    desc = ArticulationDesc(
+        name="gears", links=[target, decoy], root_link_name="gear[0]"
+    )
+    configure_articulation_desc(desc, config, newton_solver_type="mujoco_warp")
+    assert target.rigid_body.mass == pytest.approx(2.0)
+    assert decoy.rigid_body.mass == pytest.approx(10.0)

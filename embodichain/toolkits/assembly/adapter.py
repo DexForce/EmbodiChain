@@ -98,12 +98,20 @@ def build_assembly(
     The seed identifies an already-sampled configuration; fixed configurations
     are deterministic. Use :func:`sample_assemblies` for randomized pegs.
     Existing self-contained manifests can be loaded without this dependency.
+    ``mesh_dir`` is rejected before generation because portable manifests retain
+    inline source meshes; NumPy configuration arrays/scalars are stored as JSON
+    primitives.
     """
     mjfit, revision = load_mjfit()
     cfg = {
         **mjfit.load(str(config) if isinstance(config, Path) else config),
         **overrides,
     }
+    if cfg.get("mesh_dir") is not None:
+        raise ValueError(
+            "Portable assembly generation requires inline meshes; mesh_dir is unsupported. "
+            "Export a prepared manifest with write_usd() for file-backed inspection."
+        )
     # Include standalone solver options for the reference. The adapter discards
     # worldbody decorations and floor, retaining only named physical bodies.
     xml = mjfit.build(cfg, standalone=True)
@@ -125,6 +133,23 @@ def sample_assemblies(
         build_assembly(config, seed=seed)
         for config in mjfit.sample_pegs(count, seed=seed, family=family, **parameters)
     ]
+
+
+def _json_configuration(config: Mapping[str, Any]) -> dict[str, Any]:
+    """Detach public generator arrays/scalars into stable JSON primitives."""
+
+    def encode(value: Any) -> Any:
+        if isinstance(value, np.ndarray):
+            return value.tolist()
+        if isinstance(value, np.generic):
+            return value.item()
+        if isinstance(value, Mapping):
+            return dict(value)
+        raise TypeError(
+            f"Unsupported assembly configuration value: {type(value).__name__}"
+        )
+
+    return json.loads(json.dumps(dict(config), default=encode, allow_nan=False))
 
 
 def import_mjcf(
@@ -266,7 +291,7 @@ def import_mjcf(
     return AssemblyAsset(
         generator_revision=generator_revision,
         source_mjcf=xml,
-        config=dict(config or {}),
+        config=_json_configuration(config or {}),
         seed=int(seed),
         bodies=bodies,
         source_options={

@@ -1294,14 +1294,66 @@
         "passive_cells": 6,
         "behavior_accepted_cells": 6,
         "precision_status": "unverified",
-        "S2": {
+        "S2_coarse_baseline": {
           "duration_s": 0.3,
           "directions": 4,
           "clearance_m": 0.0001,
           "wall_error_budget_m": 1e-05,
           "status": "failed",
           "matches_published_baseline_rows": true,
-          "max_wall_error_m": 1.8488584121223534e-05
+          "max_wall_error_m": 1.8488584121223534e-05,
+          "integration_substeps": 1
+        },
+        "S2_refined": {
+          "requested_timestep_s": 0.001,
+          "duration_s": 0.3,
+          "directions": 4,
+          "profiles": [
+            {
+              "backend": "mujoco_cpu",
+              "newton_solver": null,
+              "status": "passed",
+              "integration_substeps": 4,
+              "integration_dt": 0.00025,
+              "integration_steps": 1200,
+              "sample_count_per_direction": 600,
+              "wall_error_budget_m": 1e-05,
+              "worst_error_m": 1.187219185063966e-06
+            },
+            {
+              "backend": "mujoco_warp",
+              "newton_solver": null,
+              "status": "passed",
+              "integration_substeps": 4,
+              "integration_dt": 0.00025,
+              "integration_steps": 1200,
+              "sample_count_per_direction": 600,
+              "wall_error_budget_m": 1e-05,
+              "worst_error_m": 4.2102521751075935e-06
+            },
+            {
+              "backend": "newton",
+              "newton_solver": "mujoco_warp",
+              "status": "unverified",
+              "integration_substeps": 4,
+              "integration_dt": 0.00025,
+              "integration_steps": 1200,
+              "sample_count_per_direction": 600,
+              "wall_error_budget_m": 1e-05,
+              "worst_error_m": 5.218379758298392e-06
+            },
+            {
+              "backend": "newton",
+              "newton_solver": "dexuni",
+              "status": "unverified",
+              "integration_substeps": 4,
+              "integration_dt": 0.00025,
+              "integration_steps": 1200,
+              "sample_count_per_direction": 600,
+              "wall_error_budget_m": 1e-05,
+              "worst_error_m": 5.218379758298392e-06
+            }
+          ]
         }
       }
     }

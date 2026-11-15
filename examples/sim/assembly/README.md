@@ -186,3 +186,12 @@ For heterogeneous cells in one scene:
 ```bash
 embodichain run-example sim/assembly/many_pegs --native-window --output outputs/many_pegs
 ```
+
+
+Constrained S2–S4 profiles refine each requested interval into four physical
+integration steps by default (`--integration-substeps 4`). CPU, raw Warp and
+native routes use the same effective interval and score every settled physical
+step. At a requested 1 ms interval the actual interval is 0.25 ms; duration,
+forces and error budgets remain unchanged. `--integration-substeps 1` reproduces
+the former coarse protocol. Reports retain the configured integration interval,
+step count and per-direction sample count; finer integration increases work.

@@ -108,7 +108,13 @@ matrix cell owns its preparation directory.
 
 `embodichain_benchmarks.assembly.probes` owns independent constrained circle/square clearance oracles.
 Many-pegs endpoint seating and gear ratios do not replace those independent
-measurements. The harness cannot certify an unavailable health measurement: backend
+measurements. Constrained `integration_substeps` defaults to four, resolving
+stiff float32 contacts with a finer interval on every reference/native route.
+Every settled physical step is scored; duration, constant efforts and the
+accuracy budget are preserved. Requested and integration intervals, physical
+step counts and sample counts remain distinct in results. The matrix rejects
+mismatched worker refinement settings. Refinement increases time/storage work;
+one substep remains an explicit reproducibility profile. The harness cannot certify an unavailable health measurement: backend
 warnings, unsupported shapes and missing overflow accounting remain explicit.
 Single-peg and grid scoring share a bounded seating predicate: centered
 endpoints below the valid seat are failures, including floor passage.

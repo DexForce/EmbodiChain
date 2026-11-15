@@ -60,6 +60,7 @@ def _settled_error_statistics(errors: np.ndarray, tolerance: float) -> dict[str,
     finite = bool(errors.size and np.isfinite(errors).all())
     if not finite:
         return {
+            "sample_count": int(errors.size),
             "wall_error_m": None,
             "wall_error_min_m": None,
             "wall_error_max_m": None,
@@ -73,6 +74,7 @@ def _settled_error_statistics(errors: np.ndarray, tolerance: float) -> dict[str,
     drift = float(errors[-quarter:].mean() - errors[:quarter].mean())
     worst = float(np.abs(errors).max())
     return {
+        "sample_count": int(errors.size),
         "wall_error_m": float(np.median(errors)),
         "wall_error_min_m": float(errors.min()),
         "wall_error_max_m": float(errors.max()),
@@ -216,6 +218,13 @@ class ConstrainedProbeCfg:
     num_directions: int = 24
     duration: float = 1.0
     timestep: float = 0.001
+    integration_substeps: int = 4
+    """Physical integration steps per requested interval, all sampled for scoring.
+
+    A 1 ms interval uses four 0.25 ms steps to resolve stiff contact on
+    float32 solvers. This increases integration work; the accuracy budget,
+    physical duration and applied generalized efforts remain unchanged.
+    """
     settle_time: float = 0.02
     force: float = 0.1
     tilt_torque: float = 0.0015
@@ -261,8 +270,24 @@ class ConstrainedProbeCfg:
             raise ValueError("A settled probe needs at least two integration steps.")
         if self.solver_iterations <= 0 or self.contact_capacity <= 0:
             raise ValueError("Solver iterations and contact capacity must be positive.")
+        if (
+            not isinstance(self.integration_substeps, int)
+            or isinstance(self.integration_substeps, bool)
+            or self.integration_substeps <= 0
+        ):
+            raise ValueError("Integration substeps must be a positive integer.")
         if self.probe == "S0" and not self.gaps_um:
             raise ValueError("Static contact scans need nonempty gap samples.")
+
+    @property
+    def integration_dt(self) -> float:
+        """Actual solver/sample interval in seconds."""
+        return self.timestep / self.integration_substeps
+
+    @property
+    def integration_steps(self) -> int:
+        """Number of physical steps retaining the rounded requested duration."""
+        return round(self.duration / self.timestep) * self.integration_substeps
 
 
 @configclass
@@ -506,7 +531,7 @@ def prepare_probe(
     if option is None:
         option = ET.SubElement(root, "option")
     option.set("gravity", "0 0 0")
-    option.set("timestep", str(cfg.timestep))
+    option.set("timestep", str(cfg.integration_dt))
     option.set("iterations", str(cfg.solver_iterations))
     option.set("integrator", "implicitfast")
     world = root.find("worldbody")
@@ -611,7 +636,7 @@ def run_reference_probe(
                 )
     else:
         forces = directions if cfg.probe == "S2" else directions[:1]
-        steps = round(cfg.duration / cfg.timestep)
+        steps = cfg.integration_steps
         for direction in forces:
             data = mujoco.MjData(model)
             mujoco.mj_forward(model, data)
@@ -663,6 +688,8 @@ def run_reference_probe(
         "status": "passed" if all(row["passed"] for row in rows) else "failed",
         "asset_sha256": asset.content_hash,
         "config": cfg.to_dict(),
+        "integration_dt": cfg.integration_dt,
+        "integration_steps": 0 if cfg.probe == "S0" else cfg.integration_steps,
         "analytic_geometry": geometry.to_dict(),
         "mujoco_version": mujoco.__version__,
         "wall_error_tolerance_m": tolerance,
@@ -731,6 +758,8 @@ def run_native_probe(
         ),
         "asset_sha256": asset.content_hash,
         "config": cfg.to_dict(),
+        "integration_dt": cfg.integration_dt,
+        "integration_steps": 0 if cfg.probe == "S0" else cfg.integration_steps,
         "analytic_geometry": definition.geometry.to_dict(),
         "rows": [],
         "status": "unverified",
@@ -791,7 +820,7 @@ def run_native_probe(
                 enable_entity_gizmo=False,
                 enable_ground_plane=False,
                 num_envs=count,
-                physics_dt=cfg.timestep,
+                physics_dt=cfg.integration_dt,
                 sim_device=device,
                 physics_cfg=physics,
                 render_cfg=RenderCfg(renderer="no-render"),
@@ -817,7 +846,7 @@ def run_native_probe(
             efforts[:, indices[2]] = (
                 cfg.tilt_torque if cfg.probe == "S3" else cfg.yaw_torque
             )
-        steps = round(cfg.duration / cfg.timestep)
+        steps = cfg.integration_steps
         trajectory = torch.empty(
             count,
             steps - steps // 2,
@@ -906,6 +935,8 @@ def run_warp_probe(asset: AssemblyAsset, cfg: ConstrainedProbeCfg) -> dict[str, 
         "backend": "mujoco_warp",
         "asset_sha256": asset.content_hash,
         "config": cfg.to_dict(),
+        "integration_dt": cfg.integration_dt,
+        "integration_steps": 0 if cfg.probe == "S0" else cfg.integration_steps,
         "analytic_geometry": definition.geometry.to_dict(),
         "rows": [],
         "status": "unverified",
@@ -1019,7 +1050,7 @@ def run_warp_probe(asset: AssemblyAsset, cfg: ConstrainedProbeCfg) -> dict[str, 
                 wp.copy(
                     dw.qfrc_applied, wp.array(effort, dtype=wp.float32, device="cuda:0")
                 )
-                steps = round(cfg.duration / cfg.timestep)
+                steps = cfg.integration_steps
                 history = wp.empty(
                     (count, steps, model.nq), dtype=wp.float32, device="cuda:0"
                 )
