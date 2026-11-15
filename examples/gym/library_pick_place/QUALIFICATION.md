@@ -1,5 +1,10 @@
 # Native qualification — 2026-11-15
 
+**Metric depth qualification failed in the subsequent geometry audit.** The
+earlier passes below establish physical task outcomes, RGB rendering and raw
+stream integrity, not visible-surface depth correctness. The current Library
+composite depth must not be used as geometric supervision or collision evidence.
+
 Qualified on Linux with Python 3.12, NVIDIA RTX PRO 5000 72 GB Blackwell,
 driver 580.126.20, CPU physics and native Hybrid rendering. Software:
 
@@ -138,3 +143,43 @@ setup/audit exclusion as the previous recording timings. Native pipeline state
 is saved in the benchmark JSON so configured mode can be distinguished from
 capability fallback. DLAA quality 5 would retain native internal resolution;
 that alternative was not qualified in this comparison.
+
+## Depth geometry audit — failed
+
+The complete off, OptiX and DLSS recordings were inspected (479 depth images
+each). All are float32 540x960, positive and finite, with no NaN or negative
+values. Capture identity/cadence also passes. Nevertheless, **each recording
+contains only one unique depth image**, and the three modes have exactly the
+same image hash:
+`e5eaedb14a4715fd9581a1c095a289215d658b640a3e15bdd84d10fb53a7a8a3`.
+The image does not show the robot, tabletop or cube moving in RGB.
+
+An independent camera-ray/plane and ray/box oracle used the recorded OpenGL
+camera pose, intrinsics and object poses. Tabletop samples are strictly inside
+the top face with a 2 cm edge margin; pixel centers use the +0.5 convention.
+An identical-pose native experiment then hid and removed the GS visual while
+retaining the original meshes, camera and physics state:
+
+| Check | GS + mesh | Mesh-only control |
+| --- | ---: | ---: |
+| Tabletop median absolute view-Z error | 0.2554 m | 0.0000051 m |
+| Initial cube interior median absolute error | 0.6918 m | 0.00000078 m |
+| Depth pixels changed between initial/lifted poses | 0% | 9.65% |
+
+Hiding and removing the GS produced identical mesh-only controls. This rules out
+the camera coordinate convention and Python buffer copying as explanations for
+the composite discrepancy. Mesh-only background uses the SDK's large invalid
+sentinel and was masked in the diagnostic visualization.
+
+The native contract explicitly describes **first accepted Gaussian contribution
+view-Z**, with `selected_surface_depth=false`. A dominant composite value,
+1.1799105 m, matches the view-Z of a large source Gaussian (PLY index 1584068,
+largest activated scale about 1.37 m). The evidence localizes the limitation to
+Gaussian depth composition/selection; it does not establish a CUDA-kernel defect
+against that first-contribution contract. Changing denoisers cannot fix it.
+
+The example's current verifier checks storage/frame integrity and measured task
+poses. Its `valid` result must not be interpreted as certification of metric
+depth. A selected/opacity-aware Gaussian surface-depth policy with correct mesh
+composition, or explicitly separate mesh-only depth, requires further native
+integration. RGB and physical task acceptance remain independently verified.

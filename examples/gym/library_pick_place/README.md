@@ -7,6 +7,13 @@ Run the configured Dual UR5 verified Pick/Place task inside the existing
 boundary, including the post-reset initial and terminal frames. This composes
 the existing Task Program executor, native trajectory writer and `MediaSpool`.
 
+**Depth limitation:** the subsequent [geometry audit](QUALIFICATION.md#depth-geometry-audit--failed)
+found that the Library's composite depth does not represent the visible robot,
+tabletop or cube. It follows native first-Gaussian-contribution depth, not a
+selected surface. Current verifier success covers stream integrity and task
+poses; it does not certify metric depth. Keep these depth arrays as diagnostics,
+not geometric training labels or collision evidence.
+
 ## Run
 
 Use Python 3.12, an installed EmbodiChain checkout and a qualified DexSim build
