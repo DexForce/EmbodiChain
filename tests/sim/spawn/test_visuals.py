@@ -1246,3 +1246,121 @@ def test_gaussian_randomization_is_selective_validated_and_resettable(tmp_path):
     snapshot = binding.describe()[0]["instance_state"]
     snapshot["geometry_scales"][:] = 99
     assert binding.gaussian_state[0]["geometry_scales"][0] == 1
+
+
+@pytest.mark.parametrize("bound", [False, True])
+def test_rigid_render_ids_preserve_physical_ids_and_environment_selection(bound):
+    from embodichain.lab.sim.objects import RigidObject
+
+    owner = object.__new__(RigidObject)
+    owner.device = torch.device("cpu")
+    owner._entities = [object(), object()]
+    owner._all_indices = [0, 1]
+    owner.user_ids = torch.tensor([2, 6], dtype=torch.int32)
+    expected = torch.tensor([[2], [6]], dtype=torch.int32)
+    if bound:
+        owner._visual_binding = SimpleNamespace(
+            elements=[SimpleNamespace(gaussian=False), SimpleNamespace(gaussian=True)],
+            handles=[
+                tuple(
+                    SimpleNamespace(get_user_id=lambda uid=uid: uid) for uid in [3, 7]
+                ),
+                (object(), object()),  # Gaussian handles have no mesh mask IDs.
+            ],
+        )
+        expected = torch.tensor([[2, 3], [6, 7]], dtype=torch.int32)
+    torch.testing.assert_close(owner.get_render_ids(), expected)
+    torch.testing.assert_close(owner.get_render_ids([1, 0]), expected[[1, 0]])
+    torch.testing.assert_close(owner.get_render_ids([]), expected[:0])
+    torch.testing.assert_close(owner.get_user_ids(), expected[:, 0])
+    with pytest.raises(IndexError):
+        owner.get_render_ids([-1])
+    with pytest.raises(ValueError):
+        owner.get_render_ids([0, 0])
+
+
+@pytest.mark.requires_sim
+@pytest.mark.gpu
+@pytest.mark.renderer
+def test_file_appearance_camera_mask_matches_logical_foreground(tmp_path):
+    from embodichain.lab.gym.envs.managers.observations import compute_semantic_mask
+    from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+    from embodichain.lab.sim.cfg import DefaultPhysicsCfg, DenoisingCfg, RenderCfg
+    from embodichain.lab.sim.sensors import CameraCfg
+    from embodichain.lab.sim.shapes import MeshCfg
+
+    mesh = tmp_path / "tetra.obj"
+    mesh.write_text(
+        "v 0 0 0\nv 0.1 0 0\nv 0 0.1 0\nv 0 0 0.1\n"
+        "f 1 3 2\nf 1 2 4\nf 1 4 3\nf 2 3 4\n"
+    )
+    offset = np.eye(4)
+    offset[0, 3] = 0.7
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            device="cpu",
+            width=64,
+            height=64,
+            enable_ground_plane=False,
+            physics_cfg=DefaultPhysicsCfg(),
+            render_cfg=RenderCfg(
+                renderer="hybrid",
+                denoising=DenoisingCfg(window="off", offscreen="off"),
+            ),
+        )
+    )
+    try:
+        owner = sim.add_rigid_object(
+            RigidObjectCfg(
+                uid="foreground",
+                body_type="static",
+                shape=CubeCfg(size=(0.1, 0.1, 0.1)),
+                visuals=[
+                    VisualElementCfg(
+                        id="file",
+                        representation=MeshCfg(fpath=str(mesh)),
+                        local_pose=offset,
+                    ),
+                    VisualElementCfg(id="cube", representation=CubeCfg()),
+                ],
+            )
+        )
+        camera = sim.add_sensor(
+            CameraCfg(
+                uid="camera",
+                width=32,
+                height=32,
+                intrinsics=(28, 28, 16, 16),
+                enable_mask=True,
+                extrinsics=CameraCfg.ExtrinsicsCfg(
+                    eye=(0, 0, 3), target=(0, 0, 0), up=(0, 1, 0)
+                ),
+            )
+        )
+        sim.prepare()
+        physical_ids = owner.get_user_ids().clone()
+        sim.render_camera_group([camera.group_id])
+        camera.update(fetch_only=True)
+        mask = camera.get_data()["mask"]
+        center_id = int(mask[0, 16, 16])
+        assert center_id != int(physical_ids[0])
+        assert center_id in owner.get_render_ids()[0].tolist()
+        env = SimpleNamespace(
+            sim=sim,
+            robot=SimpleNamespace(
+                link_names=[], user_ids=torch.empty((1, 0), dtype=torch.int32)
+            ),
+        )
+        labels = compute_semantic_mask(
+            env,
+            {"sensor": {"camera": {"mask": mask}}},
+            entity_cfg=SimpleNamespace(uid="camera"),
+            foreground_uids=[owner.uid],
+        )
+        assert bool(labels[0, 16, 16, 1])
+        assert not bool(labels[0, 16, 16, 0])
+        torch.testing.assert_close(owner.get_user_ids(), physical_ids)
+    finally:
+        sim.destroy(exit_process=False)
+        SimulationManager.flush_cleanup_queue()

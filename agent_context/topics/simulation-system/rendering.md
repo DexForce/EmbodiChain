@@ -12,6 +12,9 @@ through a separate visual object and tracks the physical owner's pose on Default
 and Newton. This also covers a compound physical shape whose default appearance
 mixes files and primitives. Physical collision pieces and semantic geometry stay
 independent; imported file materials and UVs use the native file importer.
+Camera foreground segmentation matches `RigidObject.get_render_ids()`, including
+mesh companion IDs in each selected environment. `get_user_ids()` retains only
+physical body IDs for physics consumers; Gaussian splats have no mesh mask IDs.
 Without a companion, file-batch semantic queries still decode the physical shape
 or explicit proxy, including on NoRender; empty native render buffers are not a
 semantic source. Existing local files resolve before data-root or registry paths.

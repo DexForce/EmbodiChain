@@ -2141,6 +2141,47 @@ class RigidObject(BatchEntity):
         local_env_ids = self._all_indices if env_ids is None else env_ids
         return self.user_ids[local_env_ids]
 
+    def get_render_ids(
+        self, env_ids: Sequence[int] | torch.Tensor | None = None
+    ) -> torch.Tensor:
+        """Return mesh instance IDs belonging to this logical rigid object.
+
+        Camera segmentation can contain IDs from separate appearance actors.
+        These IDs supplement the owner ID here; :meth:`get_user_ids` continues
+        to return only physical body IDs. Gaussian splats do not expose mesh
+        instance-mask IDs and are excluded.
+
+        Args:
+            env_ids: Environment indices, or None for all environments.
+
+        Returns:
+            Int32 IDs of shape (B, K), with the physical owner in column zero.
+
+        Raises:
+            IndexError: If an environment index is invalid.
+            ValueError: If environment indices repeat.
+        """
+        from ..common import _validated_env_ids
+
+        ids = _validated_env_ids(env_ids, self.num_instances)
+        owner_ids = self.get_user_ids(ids).unsqueeze(1)
+        binding = getattr(self, "_visual_binding", None)
+        if binding is None:
+            return owner_ids
+        mesh_handles = [
+            handles
+            for element, handles in zip(binding.elements, binding.handles)
+            if not element.gaussian
+        ]
+        if not mesh_handles:
+            return owner_ids
+        companion_ids = torch.tensor(
+            [[handles[i].get_user_id() for handles in mesh_handles] for i in ids],
+            dtype=owner_ids.dtype,
+            device=self.device,
+        ).reshape(len(ids), len(mesh_handles))
+        return torch.cat((owner_ids, companion_ids), dim=1)
+
     def enable_collision(
         self, enable: torch.Tensor, env_ids: Sequence[int] | None = None
     ) -> None:
