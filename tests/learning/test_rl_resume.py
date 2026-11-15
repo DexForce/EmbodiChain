@@ -902,8 +902,8 @@ def test_gym_snapshot_export_hook_runs_on_unwrapped_environment(tmp_path):
             artifact = config_dir / "physical-asset.json"
             artifact.write_text('{"version": 4}')
             frozen_config.setdefault("env", {}).setdefault("extensions", {})[
-                "assembly_manifest"
-            ] = "./physical-asset.json"
+                "physical_asset"
+            ] = {"fpath": "./physical-asset.json"}
             return frozen_config
 
     gym_data = {"id": "test", "env": {}}
@@ -929,8 +929,75 @@ def test_gym_snapshot_export_hook_runs_on_unwrapped_environment(tmp_path):
     )
     manifest = RunManifest.load(tmp_path)
     frozen = yaml.safe_load(manifest.configs["gym"].read_text())
-    reference = frozen["env"]["extensions"]["assembly_manifest"]
+    reference = frozen["env"]["extensions"]["physical_asset"]["fpath"]
     artifact = manifest.configs["gym"].parent / reference
     assert json.loads(artifact.read_text()) == {"version": 4}
     assert gym_data == {"id": "test", "env": {}}
     assert trainer._checkpoint_context["gym"] == gym_data
+
+
+@pytest.mark.parametrize("algorithm,expected_value_calls", [("ppo", 2), ("grpo", 1)])
+def test_trainer_requests_timeout_bootstrap_only_when_algorithm_consumes_it(
+    tmp_path, monkeypatch, algorithm, expected_value_calls
+):
+    from unittest.mock import Mock
+
+    trainer = _trainer(tmp_path, algorithm=algorithm)
+    get_value = Mock(wraps=trainer.policy.get_value)
+    monkeypatch.setattr(trainer.policy, "get_value", get_value)
+    rollout = trainer.collector.collect(4, trainer.buffer.start_rollout())
+    assert get_value.call_count == expected_value_calls
+    assert torch.isfinite(rollout["timeout_value"]).any().item() == (algorithm == "ppo")
+
+
+@pytest.mark.parametrize("inline", [False, True])
+def test_saved_policy_task_program_reloads_from_unrelated_directory(
+    tmp_path, monkeypatch, inline
+):
+    from types import SimpleNamespace
+    from embodichain.lab.gym.utils.gym_utils import config_to_cfg
+    from embodichain.utils.config_paths import resolve_config_path
+
+    source = (
+        Path(__file__).resolve().parents[2]
+        / "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.policy.cobotmagic.yaml"
+    )
+    raw = yaml.safe_load(source.read_text())
+    if inline:
+        for field in ("program", "integration", "execution_policy"):
+            selected = raw["task_program"][field]
+            selected = selected["component"] if isinstance(selected, dict) else selected
+            path = resolve_config_path(selected, base_dir=source.parent)
+            raw["task_program"][field] = {"inline": yaml.safe_load(path.read_text())}
+    original = deepcopy(raw)
+    expected = config_to_cfg(raw, source_path=source, _register_env=False)
+    run = tmp_path / "run"
+    run.mkdir()
+    checkpoint = run / "checkpoint.pt"
+    checkpoint.write_bytes(b"snapshot fixture")
+    trainer = SimpleNamespace(rank=0)
+    _configure_checkpoints(
+        trainer,
+        _config("ppo"),
+        source.parent / "train.yaml",
+        run,
+        gym_config=source,
+        gym_data=raw,
+    )
+    trainer._checkpoint_callback(
+        {"latest_checkpoint_path": str(checkpoint), "best_checkpoint_path": None}
+    )
+    snapshot = RunManifest.load(run).configs["gym"]
+    # A same-named invalid component must not shadow the original owner.
+    (snapshot.parent / "env.policy.yaml").write_text("invalid: component")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    frozen = yaml.safe_load(snapshot.read_text())
+    actual = config_to_cfg(frozen, source_path=snapshot, _register_env=False)
+    assert actual.task_program_execution == "policy"
+    assert actual.task_program_action_owners == expected.task_program_action_owners
+    assert actual.task_program.program_id == expected.task_program.program_id
+    assert actual.robot.uid == expected.robot.uid
+    assert "embodiment" in frozen
+    assert raw == original

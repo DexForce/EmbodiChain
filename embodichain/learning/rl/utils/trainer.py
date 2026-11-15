@@ -147,6 +147,7 @@ class Trainer:
                     getattr(self.algorithm, "cfg", None), "reset_every_rollout", False
                 )
             ),
+            bootstrap_timeouts=getattr(self.algorithm, "uses_value_bootstrap", True),
         )
 
         self.curr_ret = torch.zeros(num_envs, dtype=torch.float32, device=self.device)
@@ -159,18 +160,6 @@ class Trainer:
         else:
             x = np.asarray(x)
         return float(np.mean(x))
-
-    def _log_scalar_dict(self, prefix: str, data: dict):
-        if not self.writer or not isinstance(data, dict):
-            return
-        for tag, value in self._pack_log_dict(prefix, data).items():
-            try:
-                self.writer.add_scalar(tag, value, self.global_step)
-            except Exception:
-                continue
-
-    def _pack_log_dict(self, prefix: str, data: dict) -> dict:
-        return self._pack_log_dicts({prefix: data})
 
     def _pack_log_dicts(self, groups: dict[str, dict | None]) -> dict[str, float]:
         """Reduce on the source device and copy one scalar batch per device.

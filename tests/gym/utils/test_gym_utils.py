@@ -3028,11 +3028,11 @@ def test_checkpoint_resource_paths_resolve_from_config_owner(tmp_path, monkeypat
         "id": "FrozenAssembly-v1",
         "physics": "newton",
         "robot": {"fpath": "./resources/robot.urdf"},
-        "env": {"extensions": {"assembly_manifest": "./resources/part.json"}},
+        "env": {"extensions": {"physical_asset": {"fpath": "./resources/part.json"}}},
     }
     resolved = _resolve_gym_components(raw, base_dir=owner).config
     assert resolved["robot"]["fpath"] == str(resources / "robot.urdf")
-    assert resolved["env"]["extensions"]["assembly_manifest"] == str(
+    assert resolved["env"]["extensions"]["physical_asset"]["fpath"] == str(
         resources / "part.json"
     )
     assert raw["robot"]["fpath"] == "./resources/robot.urdf"

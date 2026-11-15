@@ -516,6 +516,119 @@ def test_timeout_bootstraps_terminal_state_instead_of_current_or_reset_state() -
     torch.testing.assert_close(returns, torch.tensor([[7.3]]))
 
 
+@pytest.mark.parametrize("compact", [False, True])
+@pytest.mark.parametrize("ending", ["running", "terminated", "truncated", "both"])
+def test_terminal_values_only_infer_actual_timeout_rows(compact, ending) -> None:
+    """Full and reordered compact terminal batches use transition flags first."""
+
+    class Env:
+        num_envs = 3
+        device = torch.device("cpu")
+
+        def reset(self):
+            return {"state": torch.tensor([[1.0], [2.0], [3.0]])}, {}
+
+        def step(self, action):
+            terminal = torch.tensor([[5.0], [7.0], [11.0]])
+            terminated = torch.tensor([True, ending in {"terminated", "both"}, False])
+            truncated = torch.tensor([True, ending in {"truncated", "both"}, False])
+            info = {"terminal_observation": {"state": terminal}}
+            if compact:
+                ids = torch.tensor([2, 0, 1])
+                info.update(
+                    terminal_env_ids=ids,
+                    terminal_observation={"state": terminal[ids]},
+                    terminal_observation_mask=truncated & ~terminated,
+                )
+            return (
+                {"state": torch.full((3, 1), 99.0)},
+                torch.ones(3),
+                terminated,
+                truncated,
+                info,
+            )
+
+    critic = nn.Linear(1, 1, bias=False)
+    with torch.no_grad():
+        critic.weight.fill_(1.0)
+    batches = []
+    critic.register_forward_pre_hook(
+        lambda module, inputs: batches.append(inputs[0].clone())
+    )
+    policy = ActorCritic(1, 1, torch.device("cpu"), nn.Linear(1, 1), critic)
+    buffer = RolloutBuffer(3, 1, 1, 1, torch.device("cpu"))
+    rollout = SyncCollector(Env(), policy, torch.device("cpu")).collect(
+        1, rollout=buffer.start_rollout()
+    )
+    if ending == "truncated":
+        assert [len(batch) for batch in batches] == [3, 1, 3]
+        torch.testing.assert_close(batches[1], torch.tensor([[7.0]]))
+        assert rollout["timeout_value"][1, 0] == 7.0
+    else:
+        assert [len(batch) for batch in batches] == [3, 3]
+        assert torch.isnan(rollout["timeout_value"]).all()
+    assert torch.isnan(rollout["timeout_value"][[0, 2], 0]).all()
+
+
+@pytest.mark.parametrize("fail_terminal", [False, True])
+def test_single_timeout_critic_inference_restores_mode_and_batchnorm(
+    fail_terminal,
+) -> None:
+    """A singleton bootstrap uses fixed statistics and restores modes on failure."""
+
+    class Critic(nn.Sequential):
+        def forward(self, value):
+            if value.shape[0] == 1:
+                assert not self.training
+                if fail_terminal:
+                    raise OSError("terminal critic failed")
+            return super().forward(value)
+
+    critic = Critic(nn.BatchNorm1d(1), nn.Linear(1, 1, bias=False))
+    with torch.no_grad():
+        critic[1].weight.fill_(1.0)
+    terminal_stats = []
+
+    class Env:
+        num_envs = 2
+        device = torch.device("cpu")
+
+        def reset(self):
+            return {"state": torch.tensor([[-1.0], [1.0]])}, {}
+
+        def step(self, action):
+            terminal_stats.append(
+                (critic[0].running_mean.clone(), critic[0].running_var.clone())
+            )
+            return (
+                {"state": torch.tensor([[99.0], [3.0]])},
+                torch.ones(2),
+                torch.tensor([False, False]),
+                torch.tensor([True, False]),
+                {
+                    "terminal_observation": {"state": torch.tensor([[7.0]])},
+                    "terminal_env_ids": torch.tensor([0]),
+                    "terminal_observation_mask": torch.tensor([True, False]),
+                },
+            )
+
+    policy = ActorCritic(1, 1, torch.device("cpu"), nn.Linear(1, 1), critic)
+    collector = SyncCollector(Env(), policy, torch.device("cpu"))
+    rollout = RolloutBuffer(2, 1, 1, 1, torch.device("cpu")).start_rollout()
+    if fail_terminal:
+        with pytest.raises(OSError, match="terminal critic failed"):
+            collector.collect(1, rollout=rollout)
+        assert critic[0].num_batches_tracked == 1
+    else:
+        collector.collect(1, rollout=rollout)
+        mean, variance = terminal_stats[0]
+        expected = (7.0 - mean) / (variance + critic[0].eps).sqrt()
+        torch.testing.assert_close(rollout["timeout_value"][0, 0], expected.squeeze())
+        # Only ordinary full-batch action/final-value calls update statistics.
+        assert critic[0].num_batches_tracked == 2
+    assert all(module.training for module in policy.modules())
+
+
 @pytest.mark.parametrize("tensor_dict_info", [False, True])
 def test_base_env_preserves_terminal_rows_before_reused_reset_storage(
     tensor_dict_info: bool,

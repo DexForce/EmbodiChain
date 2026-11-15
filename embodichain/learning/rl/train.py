@@ -753,15 +753,46 @@ def _freeze_gym_config(gym_data: dict, source_path: str | Path) -> dict:
     not the run's ``configs`` directory. Configured Task Programs retain their
     selectors because embodiment selection also carries semantic skill metadata.
     """
-    if "task_program" in gym_data:
-        return deepcopy(gym_data)
-    from embodichain.lab.gym.utils._component_composition import (
-        _resolve_gym_components,
+    from embodichain.lab.gym.utils.composition import resolve_gym_components
+
+    base_dir = Path(source_path).expanduser().resolve().parent
+    resolved = resolve_gym_components(gym_data, base_dir=base_dir).config
+    if "task_program" not in gym_data:
+        return resolved
+
+    from embodichain.utils.config_paths import resolve_config_path
+    from embodichain.lab.task_program.integrations._configured_composition import (
+        _resolve_task_program_components,
     )
 
-    return _resolve_gym_components(
-        gym_data, base_dir=Path(source_path).expanduser().resolve().parent
-    ).config
+    def owned_selector(value: str | dict) -> str | dict:
+        if isinstance(value, str):
+            return str(resolve_config_path(value, base_dir=base_dir).resolve())
+        selected = deepcopy(value)
+        for name in ("component", "default", "newton", "variants"):
+            if name in selected:
+                selected[name] = owned_selector(selected[name])
+        return selected
+
+    # Embodiment selectors also own semantic skill metadata. Retain them while
+    # fixing their owner, rather than flattening away that information.
+    frozen = deepcopy(gym_data)
+    for name in frozen.keys() & resolved.keys():
+        frozen[name] = resolved[name]
+    for name in ("environment", "embodiment", "scene", "evaluation", "objective"):
+        if name in frozen:
+            frozen[name] = owned_selector(frozen[name])
+    program, integration, policy = _resolve_task_program_components(
+        gym_data["task_program"], base_dir=base_dir
+    )
+    # Reuse the owner's decoder to bind inline integration resources as well as
+    # file-backed ones; both forms must reload from the saved config directory.
+    frozen["task_program"].update(
+        program=str(program) if isinstance(program, Path) else {"inline": program},
+        integration={"inline": integration},
+        execution_policy={"inline": policy},
+    )
+    return frozen
 
 
 def _configure_checkpoints(
@@ -775,8 +806,30 @@ def _configure_checkpoints(
 ) -> None:
     trainer._checkpoint_context = deepcopy(_checkpoint_context(cfg_data, gym_data))
     trainer._checkpoint_config = deepcopy(cfg_data)
-    if getattr(trainer, "rank", 0) != 0:
-        return
+    error = None
+    try:
+        if getattr(trainer, "rank", 0) == 0:
+            _configure_checkpoint_files(
+                trainer,
+                config_path,
+                run_base,
+                gym_config=gym_config,
+                gym_data=gym_data,
+            )
+    except Exception as exc:
+        error = exc
+    _sync_errors(error, getattr(trainer, "distributed", False))
+
+
+def _configure_checkpoint_files(
+    trainer,
+    config_path: str | Path,
+    run_base: str | Path,
+    *,
+    gym_config: str | Path | None,
+    gym_data: dict | None,
+) -> None:
+    """Prepare rank-zero snapshot files before the shared error barrier."""
     trainer._checkpoint_run = Path(run_base)
     config_dir = Path(run_base) / "configs"
     train_path = config_dir / f"train{Path(config_path).suffix.lower() or '.yaml'}"
