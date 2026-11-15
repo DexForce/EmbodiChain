@@ -56,15 +56,35 @@ class PreviewClip:
 
 def annotations(metadata: Any, measured: MeasuredTrajectory) -> dict[str, Any]:
     records = metadata.get("expansion", ())
-    env_ids = {r["env_id"] for r in records if "env_id" in r}
+    env_ids = {r["env_id"] for r in records if r.get("env_id") is not None}
+    if metadata.get("source_env_id") is not None:
+        source_row = metadata["source_env_id"]
+        if type(source_row) is not int or source_row < 0:
+            raise ValueError("source_env_id must be a nonnegative integer")
+        env_ids.add(source_row)
     if len(env_ids) > 1:
         raise ValueError("Episode expansion annotations refer to multiple rows")
     env_id = next(iter(env_ids), None)
     branches, candidates, targets, phases = [], [], [], []
+    phase_safe = True
     for segment in metadata.get("program_segments", ()):
         for call in segment.get("metadata", {}).get("runtime", {}).get("calls", ()):
             for event in call.get("events", ()):
                 if event.get("kind") == "trajectory_segment_entered":
+                    mask = event.get("env_mask")
+                    if mask:
+                        if env_id is not None:
+                            index = 0 if len(mask) == 1 else env_id
+                            if index >= len(mask):
+                                phase_safe = False
+                                continue
+                            if not mask[index]:
+                                continue
+                        elif len(set(mask)) > 1:
+                            phase_safe = False
+                            continue
+                        elif not any(mask):
+                            continue
                     phases.append(
                         (
                             str(call["call"]["call_kind"])
@@ -93,9 +113,8 @@ def annotations(metadata: Any, measured: MeasuredTrajectory) -> dict[str, Any]:
                 else 0 if env_id is None and len(rows) == 1 else None
             )
             if row is None:
-                raise ValueError(
-                    "Cannot bind grasp annotation to the recorded environment row"
-                )
+                # Legacy numeric evidence remains usable; never guess another row's grasp.
+                continue
             if not sample["success"][row]:
                 continue
             sampling = sample.get("sampling") or {}
@@ -127,7 +146,8 @@ def annotations(metadata: Any, measured: MeasuredTrajectory) -> dict[str, Any]:
     phases = [v for i, v in enumerate(phases) if i == 0 or v != phases[i - 1]]
     anchors = np.array([p[1] for p in phases] + [measured.timestamps[-1]])
     if (
-        not phases
+        not phase_safe
+        or not phases
         or anchors[0] < 0
         or not np.isfinite(anchors).all()
         or not np.all(np.diff(anchors) > 0)
@@ -203,6 +223,7 @@ class PreviewData:
     eef_link: str
     boxes: dict[str, tuple[float, ...]]
     ground_visible: bool = True
+    coverage: dict[str, Any] | None = None
 
     @property
     def all_clips(self) -> list[PreviewClip]:
@@ -226,6 +247,21 @@ def load_preview(
 ) -> PreviewData:
     if not outputs or not 1 <= max_episodes <= 64:
         raise ValueError("Provide result directories and max_episodes in [1,64]")
+    coverage = None
+    if len(outputs) == 1 and (Path(outputs[0]) / "preview-plan.json").is_file():
+        root = Path(outputs[0]).resolve()
+        coverage = json.loads((root / "preview-plan.json").read_text())
+        outputs = []
+        for record in coverage["records"]:
+            path = (root / record["result"]).resolve()
+            if not path.is_relative_to(root):
+                raise ValueError("Preview result path escapes the manifest directory")
+            if record["confirmed"] > 0:
+                outputs.append(path)
+        if not outputs:
+            raise ValueError(
+                "Preview plan has no qualified trajectories; inspect its rejection/unrun records"
+            )
     paths = [Path(p).expanduser().resolve() for p in outputs]
     if len(set(paths)) != len(paths):
         raise ValueError("Duplicate output directory")
@@ -335,7 +371,7 @@ def load_preview(
             else:
                 clips.append(clip)
                 clip.label = f"C-{len(clips):03d}"
-    return PreviewData(clips, reference_clip, asset, end, boxes, ground)
+    return PreviewData(clips, reference_clip, asset, end, boxes, ground, coverage)
 
 
 class PreviewState:
@@ -443,6 +479,7 @@ class PreviewState:
             "total": len(self.data.clips),
             "options": self.options,
             "has_reference": self.data.reference is not None,
+            "coverage": self.data.coverage,
             "label": c.label if visible else "No matches",
             "source_frame": f if visible else None,
             "source_frames": len(c.measured.timestamps) if visible else 0,

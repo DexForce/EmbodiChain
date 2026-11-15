@@ -212,6 +212,31 @@ class NativeRenderer:
                 )
             },
         )
+        self.planned = markers(
+            "planned_parameter_positions",
+            {
+                "confirmed": MarkerPrototypeCfg(
+                    shape="sphere",
+                    scale=(0.018, 0.018, 0.018),
+                    color=(0.3, 0.8, 0.4, 0.4),
+                ),
+                "unqualified": MarkerPrototypeCfg(
+                    shape="sphere",
+                    scale=(0.022, 0.022, 0.022),
+                    color=(1, 0.25, 0.15, 0.65),
+                ),
+            },
+        )
+        if data.coverage:
+            points, types = [], []
+            for record in data.coverage["records"]:
+                for point in record.get("requested_positions", {}).values():
+                    points.append(point)
+                    types.append(0 if record["status"] == "confirmed" else 1)
+            self.planned.visualize(
+                np.asarray(points).reshape(-1, 3),
+                marker_indices=np.asarray(types, dtype=int),
+            )
         self.camera = scene.add_camera(
             spawn.CameraDesc(name="expansion_preview_camera", resolution=(1100, 760))
         )
@@ -314,6 +339,7 @@ class NativeRenderer:
                     objects.visualize(
                         p[:, :3], p[:, 3:], marker_indices=np.arange(len(p))
                     )
+        self.planned.set_visibility(v["positions"] and v["space"] == "all")
         self.paths.set_visibility(v["paths"])
         self.targets.set_visibility(v["targets"])
         self.positions.set_visibility(v["positions"])

@@ -937,6 +937,10 @@ def _combined_augmentation_payload(
             }
         },
     }
+    if spatial.joint_samples:
+        payload["factors"]["spatial"]["joint_samples"] = spatial.joint_samples
+    if spatial.knot_samples:
+        payload["factors"]["spatial"]["knot_samples"] = spatial.knot_samples
     if spatial.dedup_tolerance is not None:
         payload["coverage"] = {
             "joint_dedup_normalized_tol": spatial.dedup_tolerance,

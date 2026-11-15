@@ -121,6 +121,7 @@ class GymEpisodeAssembler:
                 observations[key] = torch.stack(values)
                 scene_keys.append({"key": key, "entity_uid": uid, "field": field})
             metadata = {
+                "source_env_id": row,
                 "attempt_sequence": ctx.requests[row].sequence,
                 "job_instance_id": ctx.journal.job_instance_id,
                 "recipe_id": ctx.requests[row].recipe.recipe_id,

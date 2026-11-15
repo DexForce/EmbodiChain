@@ -279,7 +279,7 @@ def test_preview_cli_dispatch_does_not_collect(monkeypatch, recorded_job):
         "from_job",
         lambda *a, **kw: pytest.fail("preview must not collect"),
     )
-    assert main(["preview", "--output", str(path), "--gpu", "2", "--open"]) == 0
+    assert main(["preview", "--input", str(path), "--gpu", "2", "--open"]) == 0
     assert (
         called[0][0] == 1 and called[0][1]["gpu"] == 2 and called[0][1]["open_browser"]
     )
@@ -314,3 +314,74 @@ def test_viewer_html_is_in_package_data(tmp_path):
     command.run()
     packaged = Path(command.build_lib) / "embodichain/lab/expansion/_preview.html"
     assert packaged.read_bytes() == original.read_bytes()
+
+
+def test_manifest_keeps_rejected_points_visible_in_coverage(recorded_job):
+    path, _, _ = recorded_job
+    root = path.parent
+    manifest = {
+        "records": [
+            {"result": path.name, "confirmed": 1, "status": "confirmed"},
+            {"result": "unqualified", "confirmed": 0, "status": "rejected"},
+        ],
+        "coverage_complete": False,
+    }
+    (root / "preview-plan.json").write_text(json.dumps(manifest))
+    data = load_preview([root])
+    assert len(data.clips) == 1
+    assert (
+        PreviewState(data).snapshot()["coverage"]["records"][1]["status"] == "rejected"
+    )
+    manifest["records"][1]["result"] = "../escape"
+    (root / "preview-plan.json").write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="escapes"):
+        load_preview([root])
+
+
+def test_job_preview_collects_then_opens_and_input_alias_stays_read_only(
+    monkeypatch, recorded_job
+):
+    from embodichain.cli.expansion import main
+    import embodichain.lab.expansion._preview_job as job
+    import embodichain.lab.expansion._preview_server as server
+    import torch
+
+    path, _, _ = recorded_job
+    calls = []
+    monkeypatch.setattr(
+        job,
+        "plan_preview",
+        lambda *a, **kw: {"output": str(path), "records": [{}], "planned_attempts": 1},
+    )
+
+    def collect(plan):
+        calls.append("collect")
+        return {**plan, "confirmed": 1, "coverage_complete": True}
+
+    monkeypatch.setattr(job, "collect_preview", collect)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 1)
+    monkeypatch.setattr(
+        server,
+        "serve_preview",
+        lambda data, **kw: calls.append(("serve", kw["open_browser"])),
+    )
+    assert main(["preview", "--job", "job.yaml"]) == 0
+    assert calls == ["collect", ("serve", True)]
+    calls.clear()
+    assert main(["preview", "--inpu", str(path)]) == 0
+    assert calls == [("serve", False)]
+
+
+def test_row_identity_without_motion_and_legacy_ambiguity(recorded_job):
+    from embodichain.lab.expansion._preview_data import annotations
+    from embodichain.lab.gym.envs._json import json_safe_copy
+
+    path, _, episode = recorded_job
+    measured = load_preview([path]).clips[0].measured
+    metadata = json_safe_copy(episode.metadata, field_name="metadata")
+    metadata["expansion"] = []
+    assert annotations(metadata, measured)["targets"].shape == (0, 4, 4)
+    metadata["source_env_id"] = 7
+    result = annotations(metadata, measured)
+    np.testing.assert_allclose(result["targets"][0, :3, 3], [12, 20, 0])
+    assert result["candidate_ids"] == ("31",)

@@ -26,17 +26,26 @@ capabilities remain explicit. `--reuse` rebuilds the offline page without a Worl
 
 ## Native ghost preview
 
-Replay confirmed results directly, without recollection or physics stepping:
+Compute Task Program expansion at both parameter bounds and stratified interior
+points, validate the real results, then automatically open the native viewer:
 
 ```bash
-embodichain expansion preview --output /path/to/job-output --gpu 0 --open
+embodichain expansion preview --job examples/expansion/engine/job.preview.yaml
 ```
 
-Repeat `--output` for spatial groups and optionally add `--reference` with one
-confirmed reference episode. The [native preview guide](ghost-preview.md) covers
-linked spatial/affordance/trajectory filters, asset recovery, supported scene
-geometry, replay semantics and the WebRTC TODO. Rendering is native; browser
-transport currently uses HTTP JPEG, not WebRTC.
+Preview existing results without any collection:
+
+```bash
+embodichain expansion preview --input /path/to/job-output --gpu 0 --open
+```
+
+Repeat `--input` for groups, or point it at a generated preview-plan directory.
+`--inpu` is an alias for `--input`. In job mode `--output` selects a **new** output
+folder; it is no longer the existing-result input flag. `--plan-only` freezes and
+validates samples without executing, and `--no-open` suppresses automatic opening.
+The [preview guide](ghost-preview.md) explains budgets, failed-boundary evidence,
+scene-atlas domains, finite-sampling limitations and the WebRTC TODO. Rendering is
+native; browser transport remains HTTP JPEG, not WebRTC.
 
 ## Run a configured job
 

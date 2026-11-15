@@ -93,7 +93,7 @@ time; physics stays disabled and render updates do not mutate saved evidence.
 cross-group frame through the public marker layer. Task assets and any collection
 process orchestration remain outside the replay core.
 
-`embodichain expansion preview` reads confirmed job outputs through `_preview_data.py`,
+`embodichain expansion preview --input` reads confirmed job outputs through `_preview_data.py`,
 then replays full measured states using `_preview_render.py` and a loopback-only
 `_preview_server.py`. Inputs retain their original evidence; no collection or
 physics stepping occurs. The first version accepts one URDF robot and Cube rigid
@@ -102,6 +102,17 @@ input directories; missing motion annotations remain explicit. HTTP publishes a
 single immutable image/state snapshot; WebRTC is follow-up work. FK and episode
 budgets bound preload, controls are queued for the render owner, and native
 resources/ports close on exit. See the example's `ghost-preview.md` for usage.
+
+`preview --job` uses `_preview_job.py` to freeze lower/upper/center and stratified
+interior parameter points, then invokes ordinary native collection in owned child
+processes before opening the viewer. Physical ranges, atlas request domains and
+explicit joint/via-point draws retain original validation. Each point enumerates
+its configured motion/affordance recipes; exact-zero residuals collapse to the
+unique nominal variant. Source semantics and aggregate attempts/time budgets are
+checked, failed endpoints remain in the coverage manifest, and no replacement
+sampling or success credit is allowed. Original job outputs remain untouched. Episodes archive `source_env_id` for
+row-correct diagnostics even without a motion profile; ambiguous legacy grasp
+annotations remain unavailable rather than selecting row zero.
 
 `TaskProgramDemoBridge.program_id` and `env_ids` expose binding identity without
 runtime traversal. `EmbodiedEnv.task_program_bridge_scope()` restores the borrowed

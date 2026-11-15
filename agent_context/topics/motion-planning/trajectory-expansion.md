@@ -93,3 +93,13 @@ separate from path, dynamic and task validation.
 
 Use `tests/sim/motion/expansion/` for algorithm/contracts coverage and host tests
 for stepping, acceptance and persistence. Examples are not production test APIs.
+
+## Explicit boundary draws
+
+Spatial profiles optionally carry `joint_samples` (named controlled-joint signed
+fractions) and `knot_samples` (via-point magnitudes), each finite in [-1,1].
+The combined Task Program adapter forwards them to the ordinary operators;
+absence retains local-RNG sampling. Explicit draws never bypass phase permissions,
+endpoint protection, deduplication, joint limits or measured acceptance. One named
+joint draw is reused across permitted phases. The Expansion Engine preview owns
+parameter-domain sampling and coverage accounting, not the motion operators.

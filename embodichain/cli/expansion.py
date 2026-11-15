@@ -48,11 +48,37 @@ def main(argv: Sequence[str] | None = None) -> int:
     command = commands.add_parser(
         "preview", help="Replay confirmed results with native ghost rendering"
     )
+    source = command.add_mutually_exclusive_group(required=True)
+    source.add_argument(
+        "--input",
+        "--inpu",
+        dest="inputs",
+        action="append",
+        help="Existing job output or preview-plan directory; repeat for groups",
+    )
+    source.add_argument(
+        "--job",
+        help="Compute an endpoint/interior preview from a Task Program expansion job",
+    )
     command.add_argument(
         "--output",
-        action="append",
-        required=True,
-        help="Result directory with job.json; repeat for spatial groups",
+        help="New collection directory for --job; never an existing-result input",
+    )
+    command.add_argument(
+        "--interior-samples",
+        type=int,
+        default=5,
+        help="Stratified interior parameter points, in addition to center and both extrema",
+    )
+    command.add_argument(
+        "--plan-only",
+        action="store_true",
+        help="Freeze and validate the preview plan without collection/rendering",
+    )
+    command.add_argument(
+        "--no-open",
+        action="store_true",
+        help="Do not open a browser after --job collection",
     )
     command.add_argument(
         "--reference",
@@ -97,8 +123,72 @@ def main(argv: Sequence[str] | None = None) -> int:
         from embodichain.lab.expansion._preview_server import serve_preview
 
         try:
+            if args.open and args.no_open:
+                parser.error("--open and --no-open are mutually exclusive")
+            coverage = None
+            if args.job:
+                if args.reference:
+                    parser.error(
+                        "--reference is only valid with existing --input results"
+                    )
+                from embodichain.lab.expansion._preview_job import (
+                    plan_preview,
+                    collect_preview,
+                )
+
+                coverage = plan_preview(
+                    Path(args.job),
+                    Path(args.output) if args.output else None,
+                    interior=args.interior_samples,
+                    max_episodes=args.max_episodes,
+                )
+                print(
+                    json.dumps(
+                        {
+                            "preview_plan": str(
+                                Path(coverage["output"]) / "preview-plan.json"
+                            ),
+                            "parameter_points": len(coverage["records"]),
+                            "planned_attempts": coverage["planned_attempts"],
+                        }
+                    ),
+                    flush=True,
+                )
+                if args.plan_only:
+                    return 0
+                import torch
+
+                if args.gpu >= torch.cuda.device_count():
+                    parser.error(
+                        "preview GPU is outside CUDA_VISIBLE_DEVICES; use a visible device ordinal"
+                    )
+                coverage = collect_preview(coverage)
+                print(
+                    json.dumps(
+                        {
+                            "confirmed": coverage["confirmed"],
+                            "planned_attempts": coverage["planned_attempts"],
+                            "coverage_complete": coverage["coverage_complete"],
+                            "output": coverage["output"],
+                        }
+                    ),
+                    flush=True,
+                )
+                if not coverage["confirmed"]:
+                    print(
+                        "No qualified trajectories; inspect preview-plan.json and sample logs. No boundary was replaced.",
+                        flush=True,
+                    )
+                    return 2
+                inputs = [Path(coverage["output"])]
+            else:
+                if args.output or args.plan_only:
+                    parser.error(
+                        "--output and --plan-only require --job; use --input for existing results"
+                    )
+                inputs = [Path(p) for p in args.inputs]
             data = load_preview(
-                [Path(p) for p in args.output],
+                inputs,
                 Path(args.reference) if args.reference else None,
                 robot_asset=Path(args.robot_asset) if args.robot_asset else None,
                 eef_link=args.eef_link,
@@ -108,14 +198,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 data,
                 port=args.port,
                 gpu=args.gpu,
-                open_browser=args.open,
+                open_browser=(bool(args.job) or args.open) and not args.no_open,
                 duration=args.duration,
             )
         except KeyboardInterrupt:
             return 0
         except (ValueError, OSError) as exc:
             parser.error(str(exc))
-        return 0
+        return 2 if coverage and not coverage["coverage_complete"] else 0
     from embodichain.lab.expansion.configured import (
         load_expansion_job,
     )

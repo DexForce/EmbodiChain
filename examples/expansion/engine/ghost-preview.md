@@ -21,25 +21,97 @@
 仓库入口直接读取原始结果，不需要该源码快照、本地预处理 JSON 或实验脚本。
 [showcase](showcase/README.md) 的离线三维/RGB-D 页面也是另一条查看路径。
 
+## 基于 Task Program 重新计算并预览
+
+```bash
+# 一体化入口：检查配置 → 固定采样计划 → 实测扩增 → 验收 → 原生预览。
+embodichain expansion preview --job examples/expansion/engine/job.preview.yaml
+
+# 先查看计划。--output 必须是新目录，不会覆盖原 job 的数据。
+embodichain expansion preview --job examples/expansion/engine/job.preview.yaml \
+  --output /tmp/preview-plan-check --plan-only
+
+# 减少区间内采样点，用于快速验证；仍包含中心和两个端点。
+embodichain expansion preview --job examples/expansion/engine/job.preview.yaml \
+  --output /tmp/preview-run --interior-samples 1 --no-open --duration 10
+
+# 重放整个结果分布及失败/未执行记录，不重新计算。
+embodichain expansion preview --input /tmp/preview-run --open
+```
+
+`--job` 使用原生 Task Program source、原始动作/物理时钟和验收配置；不支持把
+Real2Sim 或视觉 profile 静默转换为另一种扩增。计算结束后默认尝试打开浏览器，
+`--no-open` 可关闭此行为。`--input` 是已有结果的只读入口，兼容别名 `--inpu`；
+`--job` 与 `--input` 互斥。`--output` 只在 job 模式指定新产物目录，省略时在原
+job 输出目录旁创建唯一目录。原 job 文件和原产物不修改，也不隐式 resume。
+
+### 参数空间与采样含义
+
+- 连续物理轴取自 job 的质量、摩擦、关节刚度/阻尼倍率及 CoM 区间。
+- 若配置 `scene_atlas`，读取其原始 request 中物体布局与机器人安装 XY/yaw 的
+  lower/upper，通过已有联合场景参数化转换为完整场景/安装姿态。保留组内关系，
+  不拼接不同可行区域的边界。采样的是**原始声明范围**，不是历史成功区域证明；
+  每个新点都必须重新执行并接受原来的实测验证。
+- 轨迹 `joint_residual` 的受控关节使用独立的有符号比例轴 `[-1,1]`，实际残差
+  幅值由原 `joint_offset_scale × joint range` 决定；`via_points` 另外包含节点
+  幅值轴。`joint_samples` / `knot_samples` 是可选的显式采样值，不设置时原随机
+  算法保持不变。受保护阶段、端点、非受控关节和关节限位检查均保留。
+- 每个参数点遍历配置的 affordance 分支和轨迹 recipe。全零关节残差在数学上
+  等于名义轨迹，因此该点只执行唯一名义变体，避免重复计成功或降低去重阈值。
+  轨迹数量不足以覆盖声明的全部算子时会提前拒绝，并要求补足配置。
+- 未声明范围的维度保持固定；不会把碰撞检查配置里的搜索范围自动当作启用的
+  场景扩增。需要空间扩增时，在 job 中显式设置已有 `scene_atlas`。
+
+默认采样包含全下界、全上界、中心和 **5 个 Latin-hypercube 分层区间内点**。
+每个变化轴都包含其两个端点，区间内各轴独立分层。`--interior-samples N` 可调整
+区间内点数。它覆盖的是有限参数样本，**不是所有混合角点的 Cartesian 穷举**，
+不是连续空间成功率估计；同一关节的显式偏移复用于各允许自由阶段，也不穷举
+独立分段方向组合。物理约束与 FK 非线性意味着参数端点不等于世界坐标轨迹包络端点。
+
+示例 `job.preview.yaml` 声明 2 个抓取分支 × 2 个轨迹变体，默认 8 个参数点；
+中心零残差折叠后计划 30 次实测，位于其 `max_attempts: 32` 预算内。
+所有点的总次数受原 job `max_attempts`、`--max-episodes` 和 64 条预览上限共同约束。
+超过预算在执行前报错，不静默截断端点或改窄范围；全部子作业共用原 job 的
+`max_wall_time_s` 总时间预算。`--duration` 仅控制之后的查看时长。
+每个参数点在独立子进程中运行原生 Engine，以明确释放 World；预览进程只在
+采集结束后创建渲染资源。`--gpu` 是当前 `CUDA_VISIBLE_DEVICES` 内的可见编号。
+
+### 覆盖报告与失败处理
+
+新目录包含 `preview-plan.json`、冻结的 `configs/`、逐点 `logs/` 和原生 `jobs/`
+结果。计划记录源文件哈希、上下界、归一化坐标、请求值、目标 recipe 数和后续
+实测结果；执行前重新核对语义身份，源配置发生变化则停止。
+
+不会为了填满预览而重新采样、替换失败端点、放宽验收或将轨迹回退算作边界覆盖。
+报告区分已确认、部分通过、拒绝、错误、预算耗尽和未执行。`complete` 表示计划
+尝试完成，`coverage_complete` 仅在全部唯一 recipe 被原样执行并确认时成立；抓取分支复用或轨迹回退不计作完整覆盖。
+存在有效结果时仍打开预览，最终返回 2 表示不完整覆盖；没有有效轨迹时返回 2，
+保留报告和日志，不伪造成功回放。
+
+页面显示所有计划点的参数和状态，候选虚影只来自确认结果；初始位置图层中，
+红色计划点表示未完全确认的参数点，不代表一条失败轨迹。筛选后没有匹配样本时
+显示空结果，不用别的候选替代。WebRTC 接入仍为 TODO。
+
 ## 从已有结果启动
 
 在安装了兼容 EmbodiChain、DexSim 原生渲染依赖的环境中运行：
 
 ```bash
 # 单个已完成或部分完成的作业：只加载已有确认回执，不继续采集。
-embodichain expansion preview --output /path/to/job-output --gpu 0 --open
+embodichain expansion preview --input /path/to/job-output --gpu 0 --open
 
 # 复用本次配方的两个空间组，叠加一条独立参考。
 embodichain expansion preview \
-  --output /path/to/results/space-a \
-  --output /path/to/results/space-b \
+  --input /path/to/results/space-a \
+  --input /path/to/results/space-b \
   --reference /path/to/results/reference \
   --gpu 0 --port 8769 --open
 ```
 
 每个输入是含 `job.json` 和 `episodes/` 的原始作业输出目录；不是导出的 LeRobot
-数据集或单个 NPZ。可重复传入 `--output`，空间筛选以输入结果目录分组。
-当前只支持固定布局，不把一个 scene-atlas 作业内部的不同布局合并成同一空间组。
+数据集或单个 NPZ。可重复传入 `--input`，空间筛选以输入结果目录分组。
+已有结果直接读取仍要求固定布局；`--job` 会将 scene-atlas 的每个采样点冻结为
+独立布局子作业，再作为一个参数组加载。
 `--reference` 可省略；指定时必须恰好含一个已确认参考 episode，且不能与候选重复。
 
 模型从 `job.json.resolved_deployment.robot` 的 URDF 路径恢复，场景方块尺寸从
@@ -50,7 +122,8 @@ embodichain expansion preview \
 
 默认从唯一的 solver `end_link_name` 推导末端路径，存在多个端点时必须提供
 `--eef-link LINK_NAME`。这里的路径是该 URDF link 的 FK 原点，不隐式附加工具 TCP。
-缺失 affordance/trajectory 注释显示“未记录”，不猜测为名义分支；只有所有轨迹
+缺失 affordance/trajectory 注释显示“未记录”，不猜测为名义分支；新记录保存
+`source_env_id`，旧批量记录无法绑定诊断行时省略抓取目标而不猜用第 0 行。只有所有轨迹
 具有一致、有效的动作阶段时才提供阶段对齐。
 
 服务默认仅监听 `127.0.0.1:8769`，打印就绪地址后才能访问；`--port 0` 自动选空闲端口。
@@ -116,7 +189,7 @@ embodichain expansion preview \
   实际初始物体位姿转换到世界坐标。坐标轴展示规划目标，不是实测接触点；
   原型把它固定在初始抓取位置，不随搬运中的方块移动。
 - **轨迹**：V0/V1 来自执行元数据中的实际选择。末端路径由实测关节 FK 推导，
-  原型轨迹线每 4 帧取点并保留末帧；机器人和物体回放仍可访问全部原始状态帧。
+  轨迹线每 4 帧取点并保留末帧；机器人和物体回放仍可访问全部原始状态帧。
 - **时间**：支持公共真实时间或六个记录动作阶段的归一化对齐。每个样本取目标
   时刻之前最近的已记录帧，不插值生成新姿态；短轨迹到末帧后保持。
   阶段对齐只改变浏览进度映射，不改变原始时间戳。页面保留实际秒数和源帧号。
@@ -147,7 +220,7 @@ CLI 不触发采集和安装包页面资源由生产模块的聚焦测试覆盖�
 `_preview_render.py` 负责，HTTP 服务与页面由 `_preview_server.py`、`_preview.html`
 负责，CLI 由 `embodichain/cli/expansion.py` 分发。
 
-当前明确支持单 URDF 机器人、单位机器人缩放和 Cube 刚体场景。其他 articulated
+当前渲染明确支持单 URDF 机器人、单位机器人缩放和 Cube 刚体场景。其他 articulated
 objects、软体、流体、线缆、mesh/source 物体、背景资产和 scene-atlas 输入会被拒绝；
 不会用方块代替不支持的几何。预览保持记录中的运动与尺寸，方块颜色和灯光是展示
 外观，不声称精确恢复采集时材质。新任务支持应扩展场景恢复契约并验证实测坐标。
@@ -155,6 +228,18 @@ objects、软体、流体、线缆、mesh/source 物体、背景资产和 scene-
 HTTP JPEG 轮询不提供 WebRTC 的编码、拥塞控制、连接恢复或低延迟保证。
 页面是单个服务的共享回放会话，多人操作会改变同一状态；尚未提供独立会话、
 认证或通用资产包恢复。当前不应对外公开监听。
+
+## 一体化入口的实测验收
+
+使用已有 UR5 抓取放置任务、default 后端和已保存的联合场景 atlas，覆盖物体
+XY、安装 XY/yaw、质量、摩擦与六个受控关节残差，共 13 个变化轴。
+中心、全下界、全上界和一个区间内点共计划 14 条非重复轨迹（中心 2 条，
+其余各 4 条）；14 条均完成原有验收并确认，没有轨迹回退或抓取分支复用。
+这是固定小配置的实测结果，不是对任意参数范围或总体成功率的保证。
+
+浏览器复测了覆盖报告和 14 → 4 → 2 → 1 → 0 的筛选，包括无结果时隐藏候选
+图层；回放物理推进为 0，自动关闭后端口释放。另行验证了无 motion profile 的
+普通 Task Program 作业也能重新计算并进入预览；批内诊断由来源行号绑定。
 
 ## TODO：接入 EmbodiChain 原生 WebRTC 推流
 
