@@ -92,6 +92,13 @@ recorded boundary. Missing or foreign evidence cannot satisfy a predicate.
 
 ## Lifecycle and boundaries
 
+An owned `scene_preparation` functor prepares ordinary `EmbodiedEnvCfg` before
+World creation; registered defaults and explicit config use the same route.
+Explicit config wins. Preparation returns configuration and does not own a
+runtime environment. `resource_export` freezes generated task resources when
+saving native RL checkpoints; task-specific preparation/export stays in the
+task extension so registration can use ordinary `EmbodiedEnv`.
+
 Construction seeds before scene setup, acquires enabled sensors, prepares
 simulation and initializes dependent managers. Robot joint selections are
 instance-owned and preserve control-part order across repeated setup.

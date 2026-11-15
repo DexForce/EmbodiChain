@@ -53,6 +53,8 @@ class GRPO(BaseAlgorithm[TensorDict]):
     by their valid transition counts, including ranks with empty tail batches.
     """
 
+    uses_value_bootstrap = False
+
     def __init__(self, cfg: GRPOCfg, policy):
         if cfg.group_size < 2:
             raise ValueError(

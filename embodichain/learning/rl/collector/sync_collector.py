@@ -31,7 +31,15 @@ __all__ = ["SyncCollector"]
 
 
 class SyncCollector(BaseCollector):
-    """Synchronously collect rollouts from a vectorized environment."""
+    """Synchronously collect rollouts from a vectorized environment.
+
+    Args:
+        env: Batched environment with automatic row resets.
+        policy: Policy used for action and value inference.
+        device: Device owning the rollout tensors.
+        reset_every_rollout: Reset all environments before each collection.
+        bootstrap_timeouts: Collect terminal values for algorithms using GAE.
+    """
 
     def __init__(
         self,
@@ -39,11 +47,14 @@ class SyncCollector(BaseCollector):
         policy,
         device: torch.device,
         reset_every_rollout: bool = False,
+        *,
+        bootstrap_timeouts: bool = True,
     ) -> None:
         self.env = env
         self.policy = policy
         self.device = device
         self.reset_every_rollout = reset_every_rollout
+        self.bootstrap_timeouts = bootstrap_timeouts
         policy_module = getattr(policy, "module", policy)
         self.actor_obs_groups = getattr(policy_module, "actor_obs_groups", None)
         self.critic_obs_groups = getattr(policy_module, "critic_obs_groups", None)
@@ -102,6 +113,9 @@ class SyncCollector(BaseCollector):
                 self._to_env_action(step_td["action"])
             )
             next_obs_td = dict_to_tensordict(next_obs, self.device)
+            self._write_timeout_values(
+                rollout, step_idx, env_info, terminated, truncated
+            )
             self._write_step(
                 rollout=rollout,
                 step_idx=step_idx,
@@ -140,6 +154,57 @@ class SyncCollector(BaseCollector):
         )
         self.policy.get_value(last_next_td)
         rollout["value"][:, -1] = last_next_td["value"]
+
+    def _write_timeout_values(
+        self,
+        rollout: TensorDict,
+        step_idx: int,
+        env_info: dict,
+        terminated: torch.Tensor,
+        truncated: torch.Tensor,
+    ) -> None:
+        """Use pre-reset terminal observations for time-limit bootstrapping."""
+        if not self.bootstrap_timeouts or "timeout_value" not in rollout.keys():
+            return
+        rollout["timeout_value"][:, step_idx].fill_(float("nan"))
+        terminal = env_info.get("terminal_observation")
+        if terminal is None:
+            return
+        timeout = truncated.to(self.device).bool() & ~terminated.to(self.device).bool()
+        mask = env_info.get("terminal_observation_mask")
+        if mask is not None:
+            timeout &= mask.to(self.device).bool()
+        env_ids = env_info.get("terminal_env_ids")
+        if env_ids is None:
+            rows = timeout.nonzero(as_tuple=False).squeeze(-1)
+            env_ids = rows
+        else:
+            env_ids = env_ids.to(self.device)
+            rows = timeout[env_ids].nonzero(as_tuple=False).squeeze(-1)
+            env_ids = env_ids[rows]
+        if rows.numel() == 0:
+            return
+        observation = dict_to_tensordict(terminal, self.device)
+        actor_obs, critic_obs = self._model_observations(observation)
+        actor_obs = actor_obs[rows]
+        if critic_obs is not None:
+            critic_obs = critic_obs[rows]
+        fields = {"obs": actor_obs}
+        if critic_obs is not None:
+            fields["critic_obs"] = critic_obs
+        terminal_td = TensorDict(
+            fields, batch_size=[actor_obs.shape[0]], device=self.device
+        )
+        # A terminal subset can contain one row. Inference must neither require
+        # a training batch nor update BatchNorm statistics or sample Dropout.
+        modes = [(module, module.training) for module in self.policy.modules()]
+        try:
+            self.policy.eval()
+            self.policy.get_value(terminal_td)
+        finally:
+            for module, training in modes:
+                module.training = training
+        rollout["timeout_value"][env_ids, step_idx] = terminal_td["value"]
 
     def _reset_env(self) -> TensorDict:
         obs, _ = self.env.reset()
