@@ -15,8 +15,9 @@ The example generates its own overhead image, replays fixed E1 interpretation
 and grounding, qualifies a UR5 scene, compiles and executes Pick/Place, and
 measures the small block against the large block in the terminal frame.
 Inspect `execution.json`, `terminal.json` and the separate certificate verdict.
-[Recorded acceptance](stack_result.json) is historical evidence, not a guarantee
-for a new run.
+The historical fixed-input run completed 1028 steps with a 2.0 mm terminal
+support gap. Its result JSON is archived locally; inspect the new run's outputs
+for its own verdict.
 
 ## task1186: handovers and coordinated transport
 
@@ -36,9 +37,10 @@ python -m examples.gensim.goal_authoring.fruit_pilot --image "$IMAGE" --output o
 ```
 
 The fixed `task1186_fixture.json` makes this an installation example independent
-of live model sampling. [Recorded task1186 acceptance](task1186_result.json)
-includes the negative controls and geometric measurements; it does not certify
-per-hand contact force.
+of live model sampling. An executed run writes `review.json` with negative
+controls and geometric measurements. The historical run completed 4096 steps,
+including a 66 mm tray lift and three satisfied terminal support relations.
+These checks do not certify per-hand contact force.
 
 ## Live default image entry
 
@@ -56,9 +58,10 @@ python -m examples.gensim.goal_authoring.auto_acceptance "$OUTPUT" "$INSTALLATIO
 
 `auto_acceptance` reuses only the matching installation and calibration,
 requalifies the new plan, compiles it and performs independent terminal geometry
-checks. Do not reuse a scene from a different source image. See
-[recorded live acceptance](automatic_results.json). These results cover the two
-installations, not general image-to-execution success.
+checks and writes `$OUTPUT/acceptance.json`. Do not reuse a scene from a different
+source image. Historical live-default runs completed 1027 steps for blocks and
+4096 for task1186; they cover these two installations, not general
+image-to-execution success.
 
 ## Unsupported hinge closing
 
@@ -87,3 +90,12 @@ locally in `outputs/task1186-pr-preview/`, excluded from Git. Open its
 
 For same-budget route comparisons, scoring and the concise results table, see
 [Task Engine benchmarks](../../../scripts/benchmark/task_engine/README.md).
+
+## Historical result files
+
+`automatic_results.json`, `stack_result.json` and `task1186_result.json` are
+archived under `outputs/task-engine-review-history/` on the authoring host.
+They are excluded from Git and are not required to run these examples. The
+archive's `sha256.json` records their original digests. A clean checkout retains
+`task1186_fixture.json`, `close_hinge.json` and `services.json` as example inputs;
+use the commands above to generate new run-specific results under `outputs`.

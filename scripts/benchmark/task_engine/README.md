@@ -102,7 +102,7 @@ validated grounding artifacts; published plans use the manifest's visual state.
   missing upright restoration (1189). Archived ambiguity and invalid-entity
   responses remain rejected by current validation.
 - No physics was run in these cohort comparisons. Separate installation evidence
-  is retained in the examples: fixed block execution (1028 steps), task1186
+  is archived locally: fixed block execution (1028 steps), task1186
   (4096 steps), and later live-default block/task1186 acceptance (1027/4096).
   These are geometric checks, not per-hand contact-force certificates. This
   development cohort and single sampling do not establish unseen-task reliability.
@@ -113,7 +113,9 @@ The full previous report and all 22 pre-cleanup example files are preserved,
 byte-for-byte, under `outputs/task-engine-review-history/` on the authoring host.
 `sha256.json` records each original file's digest. Complete cohort record files
 are `default_cohort_results.json`, `template_format_results.json` and
-`review_results.json`; the full multi-round narrative is `REPORT.md`. Raw plans,
+`review_results.json`. The same archive holds `automatic_results.json`,
+`stack_result.json` and `task1186_result.json`; these are run outputs rather than
+required example inputs. The full multi-round narrative is `REPORT.md`. Raw plans,
 failures and scene/deployment artifacts remain in their original local `outputs`
 run directories. Neither this archive nor demo media are included in a clean
 checkout. Rerun the commands above to generate independent records; do not claim
@@ -127,6 +129,7 @@ could be regenerated without new model calls. task1186 was freshly qualified and
 compiled with all three arm/tray/order negative controls, and its accepted-run
 viewer was regenerated. Existing production CLI and goal-planning tests passed
 (87), including hinge-closing rejection, plus 42 context checks. This validation
-did not resample model plans or repeat physical execution. Retained small
-acceptance records and all 22 archived source files were checked against their
-pre-cleanup SHA-256 values.
+did not resample model plans or repeat physical execution. All 22 archived source
+files, including the three acceptance result JSON files
+subsequently removed from the examples, were checked against their pre-cleanup
+SHA-256 values. Required example inputs remain tracked.
