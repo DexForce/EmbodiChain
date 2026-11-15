@@ -128,6 +128,7 @@ from embodichain.lab.sim.motion.planners import (
 from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
 
 NUM_ENVS = 2
+_REAL_CARTESIAN_RETIMING = MotionGenerator._interpolate_cartesian_with_limits
 ARM_DOF = 6
 HAND_DOF = 2
 ROBOT_DOF = ARM_DOF + HAND_DOF
@@ -9710,7 +9711,7 @@ def test_place_cartesian_approach_preserves_goal_and_closing_pressure() -> None:
         ),
         _context(task),
     )
-    states = generator.generate.call_args_list[0].args[0]
+    states = generator.generate.call_args_list[-2].args[0]
     options = generator.generate.call_args_list[0].kwargs["options"]
     assert options.preserve_cartesian_samples
     torch.testing.assert_close(states[-1].xpos, goal.expand(NUM_ENVS, -1, -1))
@@ -9721,3 +9722,84 @@ def test_place_cartesian_approach_preserves_goal_and_closing_pressure() -> None:
         hand[:, approach.start : approach.stop],
         torch.ones_like(hand[:, approach.start : approach.stop]),
     )
+
+
+def test_new_skill_options_preserve_existing_positional_arguments() -> None:
+    handover = HandOverOptions(0.10, 0.25)
+    assert handover.lift_height == 0.25
+    assert handover.grasp_retract_distance == 0.0
+    place = PlaceOptions(5, 0, 0.1, None, 1, True)
+    assert place.preserve_current_object_orientation is True
+    assert place.cartesian_approach is False
+    assert HandOverOptions(grasp_retract_distance=0.02).grasp_retract_distance == 0.02
+    assert PlaceOptions(cartesian_approach=True).cartesian_approach is True
+
+
+@pytest.mark.parametrize("control_dt", [0.04, 0.02])
+@pytest.mark.parametrize("partial_failure", [False, True])
+def test_place_required_waypoints_survive_real_cartesian_retiming(
+    monkeypatch, control_dt: float, partial_failure: bool
+) -> None:
+    """Exercise final commands with exact IK/FK and the real adaptive retimer."""
+    monkeypatch.setattr(
+        MotionGenerator, "_interpolate_cartesian_with_limits", _REAL_CARTESIAN_RETIMING
+    )
+    generator = _motion_generator()
+
+    def ik(pose, **kwargs):
+        joints = pose.new_zeros((*pose.shape[:-2], ARM_DOF))
+        joints[..., :3] = pose[..., :3, 3]
+        valid = torch.ones(pose.shape[:-2], dtype=torch.bool)
+        if partial_failure:
+            valid[1] &= ~(
+                torch.isclose(joints[1, ..., 0], torch.tensor(0.1))
+                & (joints[1, ..., 1] > 0)
+            )
+        return valid, joints
+
+    def fk(qpos, **kwargs):
+        poses = torch.eye(4).expand(*qpos.shape[:-1], 4, 4).clone()
+        poses[..., :3, 3] = qpos[..., :3]
+        return poses
+
+    generator.robot.compute_ik.side_effect = ik
+    generator.robot.compute_batch_ik.side_effect = ik
+    generator.robot.compute_fk.side_effect = fk
+    action = _bind_action(generator, Place())
+    points = torch.tensor([[0.1, 0, 0], [0.1, 0.02, 0], [0.2, 0.02, 0]])
+    goals = torch.eye(4).repeat(NUM_ENVS, len(points), 1, 1)
+    goals[..., :3, 3] = points
+    task = TaskState(batch_size=NUM_ENVS, device="cpu", held_objects={"arm": _held()})
+    plan = _plan_action(
+        action,
+        SkillInvocation(
+            skill_id="place",
+            goal=PlaceGoal(goals),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(
+                strategy="ik_interp",
+                sample_count=20,
+                velocity_limit=0.2,
+                acceleration_limit=0.5,
+            ),
+            skill_options=PlaceOptions(cartesian_approach=True, lift_height=0.0),
+        ),
+        replace(_context(task), control_dt=control_dt),
+    )
+    assert plan.plan_success.tolist() == [True, not partial_failure]
+    commands = _joint_command_positions(plan, "arm")[plan.plan_success]
+    for row in commands:
+        cursor = 0
+        for point in points:
+            matches = torch.isclose(row[cursor:, :3], point, rtol=0, atol=1e-6).all(
+                dim=-1
+            )
+            assert matches.any()
+            cursor += int(matches.nonzero()[0])
+    velocity = commands.diff(dim=1) / control_dt
+    acceleration = (
+        torch.cat([velocity[:, :1], velocity.diff(dim=1), -velocity[:, -1:]], dim=1)
+        / control_dt
+    )
+    assert velocity.abs().max() <= 0.2 + 1e-6
+    assert acceleration.abs().max() <= 0.5 + 1e-5

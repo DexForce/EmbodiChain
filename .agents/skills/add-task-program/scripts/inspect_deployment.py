@@ -53,12 +53,9 @@ def _configuration_view(
     """Explain production-composed declarations and their authored owners."""
     from dataclasses import asdict, fields, is_dataclass
 
-    from embodichain.lab.task_program.integrations._configured_composition import (
-        _merge_runtime_services,
-        _resolve_task_program_components,
-    )
     from embodichain.lab.task_program.integrations.catalog import _canonical_value
     from embodichain.lab.task_program.integrations.configured import (
+        _RECOVERY_POLICY_KEY_ALIASES,
         _normalize_skill_options_key,
     )
     from embodichain.lab.task_program.semantics.effects import CompositeEffectMonitorCfg
@@ -66,9 +63,9 @@ def _configuration_view(
     from embodichain.utils.utility import load_config
 
     task_program = physical.config["task_program"]
-    _, integration, policy = _resolve_task_program_components(
-        task_program, base_dir=path.parent
-    )
+    declarations = deployment._composed_declarations
+    integration = declarations["integration"]
+    policy = declarations["execution_policy"]
 
     def source(value: object, prefix: tuple[str, ...]) -> tuple[Path, tuple[str, ...]]:
         if isinstance(value, Mapping):
@@ -110,13 +107,29 @@ def _configuration_view(
     )
     parameters: list[dict[str, object]] = []
 
+    def authored_path(
+        scope: str, declaration: Mapping[str, object], keys: tuple[str, ...]
+    ) -> tuple[str, ...]:
+        if (
+            scope == "integration"
+            and keys[:2] == ("profile", "skill_options")
+            and "action_options" in declaration.get("profile", {})
+        ):
+            return ("profile", "action_options", *keys[2:])
+        if scope == "execution_policy" and keys[:1] == ("recovery",):
+            for old, new in _RECOVERY_POLICY_KEY_ALIASES.items():
+                if keys == ("recovery", new) and old in declaration.get("recovery", {}):
+                    return ("recovery", old)
+        return keys
+
     def origin(scope: str, keys: tuple[str, ...]) -> dict[str, object]:
         selector = integration_selector if scope == "integration" else policy_selector
         patch = selector.get("overrides", {}) if isinstance(selector, Mapping) else {}
-        if _has_path(patch, keys):
+        patch_keys = authored_path(scope, patch, keys)
+        if _has_path(patch, patch_keys):
             return {
                 "file": str(path),
-                "path": ["task_program", scope, "overrides", *keys],
+                "path": ["task_program", scope, "overrides", *patch_keys],
                 "kind": "deployment_override",
             }
         owner, prefix = (
@@ -124,16 +137,10 @@ def _configuration_view(
             if scope == "integration"
             else (policy_source, policy_prefix)
         )
-        authored_keys = keys
-        if (
-            scope == "integration"
-            and keys[:2] == ("profile", "skill_options")
-            and "action_options" in authored_integration.get("profile", {})
-        ):
-            authored_keys = ("profile", "action_options", *keys[2:])
         declaration = (
             authored_integration if scope == "integration" else authored_policy
         )
+        authored_keys = authored_path(scope, declaration, keys)
         kind = "component" if owner != path else "inline"
         if not _has_path(declaration, authored_keys):
             kind = "derived"
@@ -236,12 +243,7 @@ def _configuration_view(
             "path": ["skill_profile", "resources"],
         },
         "runtime_services": {
-            "values": _canonical_value(
-                _merge_runtime_services(
-                    physical.embodiment_skill_profile.get("runtime_services", {}),
-                    integration.get("runtime_services", {}),
-                )
-            ),
+            "values": _canonical_value(declarations["runtime_services"]),
             "sources": service_sources,
         },
         "runtime_presets": _canonical_value(unpack(presets)),

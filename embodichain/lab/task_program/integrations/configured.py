@@ -369,6 +369,14 @@ def _identifier_mapping(value: object, *, path: str) -> dict[str, str]:
     }
 
 
+def _resolve_simulation_uid(config: Mapping[str, object], *, path: str) -> str:
+    """Resolve an optional native UID without accepting explicit invalid values."""
+    entity_id = _identifier(config["entity_id"], path=f"{path}.entity_id")
+    return _identifier(
+        config.get("simulation_uid", entity_id), path=f"{path}.simulation_uid"
+    )
+
+
 def _decode_scene_entity_common(
     config: Mapping[str, object],
     *,
@@ -378,10 +386,7 @@ def _decode_scene_entity_common(
     entity_id = _identifier(config["entity_id"], path=f"{path}.entity_id")
     return {
         "entity_id": entity_id,
-        "simulation_uid": _identifier(
-            config.get("simulation_uid", entity_id),
-            path=f"{path}.simulation_uid",
-        ),
+        "simulation_uid": _resolve_simulation_uid(config, path=path),
         "aliases": _identifier_tuple(config.get("aliases", ()), path=f"{path}.aliases"),
         "dynamics": _enum(
             config.get("dynamics", SceneDynamics.UNKNOWN.value),
@@ -1983,14 +1988,17 @@ def _decode_tracking_policy(value: object, *, path: str) -> TrackingPolicy:
     )
 
 
+_RECOVERY_POLICY_KEY_ALIASES = {
+    "max_action_retries": "max_skill_retries",
+    "action_timeout": "skill_timeout",
+}
+
+
 def _normalize_recovery_policy_keys(value: object, *, path: str) -> object:
     """Normalize legacy recovery keys before strict validation and overrides."""
     if isinstance(value, Mapping):
         value = dict(value)
-        for old, new in (
-            ("max_action_retries", "max_skill_retries"),
-            ("action_timeout", "skill_timeout"),
-        ):
+        for old, new in _RECOVERY_POLICY_KEY_ALIASES.items():
             if old in value:
                 if new in value:
                     raise ValueError(f"{path} cannot specify both {old!r} and {new!r}.")

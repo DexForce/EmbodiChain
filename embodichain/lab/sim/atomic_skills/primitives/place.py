@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import ClassVar, Literal
 
 import torch
@@ -147,7 +147,7 @@ class PlaceOptions(SkillOptions):
     cartesian_waypoint_count: int = 1
     """Number of fixed-orientation Cartesian keyframes per translation segment."""
 
-    cartesian_approach: bool = False
+    cartesian_approach: bool = field(default=False, kw_only=True)
     """Follow the approach with sampled Cartesian poses under joint motion limits."""
 
     preserve_current_object_orientation: bool = False
@@ -319,19 +319,50 @@ class Place(AtomicSkill[PlaceGoal | AssembleGoal, PlaceOptions]):
                 raise ValueError("cartesian_approach requires strategy='ik_interp'.")
             from embodichain.lab.sim.motion.ik import sample_cartesian_targets
 
-            sampled = sample_cartesian_targets(
-                start_xpos, build_pose_plan_states(down_xpos), n_down
-            )
-            down_success, down_arm = plan_named_arm_trajectory(
-                self.motion_generator,
-                control_part,
-                start_arm_qpos,
-                torch.stack([state.xpos for state in sampled], dim=1),
-                n_down,
-                request.motion_policy,
-                context.control_dt,
-                cartesian_linear=True,
-            )
+            required = build_pose_plan_states(down_xpos)
+            if n_down - 1 < len(required):
+                raise ValueError(
+                    "Cartesian approach sampling needs one sample per target."
+                )
+            remaining = n_down - 1
+            current_qpos, current_xpos = start_arm_qpos, start_xpos
+            down_success = torch.ones_like(eligible)
+            legs = []
+            for index, target_pose in enumerate(required):
+                intervals = remaining // (len(required) - index)
+                sampled = sample_cartesian_targets(
+                    current_xpos, [target_pose], intervals + 1
+                )
+                leg_success, leg = plan_named_arm_trajectory(
+                    self.motion_generator,
+                    control_part,
+                    current_qpos,
+                    torch.stack([state.xpos for state in sampled], dim=1),
+                    intervals + 1,
+                    request.motion_policy,
+                    context.control_dt,
+                    cartesian_linear=True,
+                )
+                down_success &= leg_success
+                # Retain both adjacent endpoints: the one-interval stop keeps
+                # independently qualified acceleration bounds valid at corners.
+                legs.append(leg)
+                if not bool(down_success.any()):
+                    break
+                current_qpos = leg[:, -1]
+                if index + 1 < len(required):
+                    current_xpos = self.robot.compute_fk(
+                        qpos=current_qpos,
+                        name=control_part,
+                        to_matrix=True,
+                        **(
+                            {"env_ids": self.planning_services.env_ids}
+                            if self.planning_services.env_ids is not None
+                            else {}
+                        ),
+                    )
+                remaining -= intervals
+            down_arm = torch.cat(legs, dim=1)
             if bool(down_success.any()):
                 back_success, back_arm = plan_named_arm_trajectory(
                     self.motion_generator,

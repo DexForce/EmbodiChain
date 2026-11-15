@@ -1661,7 +1661,7 @@ class TestConfigToCfgFromFile:
         self,
         task_name: str,
     ) -> None:
-        """CobotMagic task solutions share one exact physical component."""
+        """CobotMagic task solutions reuse one component with bounded placement tuning."""
         filename = (
             "task.cobotmagic.yaml"
             if task_name in {"blocks_ranking_rgb", "stack_blocks_two"}
@@ -1670,9 +1670,13 @@ class TestConfigToCfgFromFile:
         config_path = _TABLEWARE_CONFIG_ROOT / task_name / filename
         config = load_config(config_path)
 
-        assert config["embodiment"] == {
-            "component": "../../../../components/embodiments/cobotmagic.yaml"
-        }
+        assert (
+            config["embodiment"]["component"]
+            == "../../../../components/embodiments/cobotmagic.yaml"
+        )
+        assert config["embodiment"].get("overrides", {}) == (
+            {"init_pos": [0.0, 0.3, 0.9]} if task_name == "stack_blocks_two" else {}
+        )
         assert "robot" not in config
         assert "sensor" not in config
 
@@ -1683,6 +1687,8 @@ class TestConfigToCfgFromFile:
         )
 
         assert cfg.robot.uid == "CobotMagic"
+        if task_name == "stack_blocks_two":
+            assert cfg.robot.init_pos == pytest.approx([0.0, 0.3, 0.9])
         assert [sensor.uid for sensor in cfg.sensor] == ["cam_high"]
         assert [sensor.uid for sensor in [*cfg.sensor, *cfg.robot.sensors]] == [
             "cam_high",

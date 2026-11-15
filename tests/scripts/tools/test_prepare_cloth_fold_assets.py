@@ -40,7 +40,10 @@ def _installer():
     return module
 
 
-def test_install_qualified_inputs_and_preserve_local_meshes(tmp_path, monkeypatch):
+@pytest.mark.parametrize("interrupted_file", (None, "robot.urdf", "pad.obj"))
+def test_install_qualified_inputs_and_preserve_local_meshes(
+    tmp_path, monkeypatch, interrupted_file
+):
     module = _installer()
     archive = tmp_path / "qualified.zip"
     files = {
@@ -70,6 +73,22 @@ def test_install_qualified_inputs_and_preserve_local_meshes(tmp_path, monkeypatc
 
     monkeypatch.setattr(module.urllib.request, "urlretrieve", download)
     root = tmp_path / "cache"
+    if interrupted_file is not None:
+        copy = module.shutil.copy2
+
+        def interrupt(source, destination):
+            if source.name == interrupted_file:
+                Path(destination).write_bytes(b"partial")
+                raise OSError("interrupted input copy")
+            return copy(source, destination)
+
+        monkeypatch.setattr(module.shutil, "copy2", interrupt)
+        with pytest.raises(OSError, match="interrupted input copy"):
+            module._prepare(root)
+        expected = next(name for name in files if Path(name).name == interrupted_file)
+        assert not (root / expected).exists()
+        assert not list((root / "w1_v030").rglob("*.partial"))
+        monkeypatch.setattr(module.shutil, "copy2", copy)
     module._prepare(root)
     module._prepare(root)
     assert downloads == [module._URL]

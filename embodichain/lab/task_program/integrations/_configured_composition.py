@@ -441,6 +441,7 @@ def _apply_integration_overrides(
                 required=frozenset(),
                 optional=frozenset(existing[name]),
             )
+            existing[name] = deepcopy(dict(existing[name]))
             for slot, resource in resources.items():
                 existing[name][slot] = _identifier(
                     resource,
@@ -475,7 +476,11 @@ def _apply_integration_overrides(
                 required=frozenset(),
                 optional=allowed,
             )
-            result["profile"]["skill_options"][name].update(deepcopy(dict(fields)))
+            existing = result["profile"]["skill_options"]
+            existing[name] = {
+                **deepcopy(dict(existing[name])),
+                **deepcopy(dict(fields)),
+            }
     return result
 
 
@@ -880,6 +885,11 @@ def _load_configured_task_program_deployment(
         integration=integration,
         scene_binding=deepcopy(dict(scene_binding)),
         planner_config=planner_config,
+        _composed_declarations={
+            "integration": deepcopy(task),
+            "execution_policy": deepcopy(policy),
+            "runtime_services": deepcopy(payload.get("runtime_services", {})),
+        },
     )
 
 

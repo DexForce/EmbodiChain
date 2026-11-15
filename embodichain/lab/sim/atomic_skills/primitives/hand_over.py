@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import ClassVar, Literal
 
 import torch
@@ -106,7 +106,7 @@ class HandOverOptions(SkillOptions):
     pre_grasp_distance: float = 0.10
     """Distance from each grasp pose to its approach pose, in metres."""
 
-    grasp_retract_distance: float = 0.0
+    grasp_retract_distance: float = field(default=0.0, kw_only=True)
     """Back off sampled grasp TCPs along their approach axis, in metres."""
 
     lift_height: float = 0.10

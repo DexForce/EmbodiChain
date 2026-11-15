@@ -193,7 +193,9 @@ validate a real selected-model download separately.
 `scripts/tools/prepare_cloth_fold_assets.py` installs the pinned M02 input bundle
 into the normal data root. It uses the shared download lock, verifies archive
 and task-owned URDF/mesh SHA-256 values, includes URDF-relative visual and
-collision dependencies, and rejects conflicting local files. The packaged
+collision dependencies, and rejects conflicting local files. Each input is copied
+to a same-directory temporary file, verified and atomically published without
+overwriting an existing file, so interrupted copies remain retryable. The packaged
 cloth task retains its qualified replay stream and 15 mm final centroid rules.
 The installer also supports an explicit custom root; launch with that same
 `EMBODICHAIN_DATA_ROOT`. It does not change the global root or substitute the

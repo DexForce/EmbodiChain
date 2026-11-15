@@ -4812,6 +4812,43 @@ def test_final_acceptance_rejects_invalid_refs_before_registration(
     assert config["id"] not in REGISTERED_ENVS
 
 
+def test_integration_tuning_detaches_yaml_aliases() -> None:
+    import yaml
+    from embodichain.lab.task_program.integrations._configured_composition import (
+        _apply_integration_overrides,
+    )
+
+    source = yaml.safe_load("""
+requires: {embodiment_contract: dual}
+profile:
+  defaults:
+    pick_up: &resources {primary: left}
+    place: *resources
+  skill_options:
+    pick: &options {kind: pick_up, lift_height: 0.1}
+    other_pick: *options
+""")
+    original = deepcopy(source)
+    result = _apply_integration_overrides(
+        source,
+        {
+            "profile": {
+                "defaults": {"pick_up": {"primary": "right"}},
+                "skill_options": {"pick": {"lift_height": 0.2}},
+            }
+        },
+    )
+    assert result["profile"]["defaults"] == {
+        "pick_up": {"primary": "right"},
+        "place": {"primary": "left"},
+    }
+    assert result["profile"]["skill_options"] == {
+        "pick": {"kind": "pick_up", "lift_height": 0.2},
+        "other_pick": {"kind": "pick_up", "lift_height": 0.1},
+    }
+    assert source == original
+
+
 def test_integration_tuning_is_owned_and_closed() -> None:
     from embodichain.lab.task_program.integrations._configured_composition import (
         _apply_integration_overrides,
@@ -5117,6 +5154,30 @@ def test_inspector_explains_backend_parameter_owners_and_monitor_defaults(
     assert "SDK default (CompositeEffectMonitorCfg)" in text
 
 
+def test_inspector_explains_named_demo_skill_registry(evaluation_deployment) -> None:
+    import runpy
+    import yaml
+
+    path, _, _ = evaluation_deployment
+    config = load_config(path)
+    integration = load_config(config["task_program"]["integration"])
+    integration.setdefault("runtime_services", {})["demo_skills"] = {}
+    config["task_program"]["integration"] = {"inline": integration}
+    path.write_text(yaml.safe_dump(config))
+    inspect = runpy.run_path(
+        str(
+            _REPOSITORY_ROOT
+            / ".agents/skills/add-task-program/scripts/inspect_deployment.py"
+        )
+    )["inspect_deployment"]
+    summary = inspect(path, explain=True)
+    assert summary["call_count"] > 0
+    assert (
+        "demo_skills"
+        not in summary["resolved_configuration"]["runtime_services"]["values"]
+    )
+
+
 def test_compact_quaternion_normalization_has_one_rotation_identity() -> None:
     from embodichain.lab.task_program.integrations.configured import _pose_matrix
     import struct
@@ -5160,6 +5221,10 @@ def test_inspector_tracks_policy_inline_and_override_origins(
     if style == "inline":
         tuned = deepcopy(original)
         tuned["motion"]["velocity_limit"] = 0.3
+        tuned["recovery"].pop("skill_timeout", None)
+        tuned["recovery"]["action_timeout"] = 120.0
+        tuned["recovery"].pop("max_skill_retries", None)
+        tuned["recovery"]["max_action_retries"] = 2
         tuned["planner"] = {"type": "toppra"}
         config["task_program"]["execution_policy"] = {"inline": tuned}
         expected_path = [
@@ -5172,7 +5237,10 @@ def test_inspector_tracks_policy_inline_and_override_origins(
     else:
         config["task_program"]["execution_policy"] = {
             "component": component,
-            "overrides": {"motion": {"velocity_limit": 0.3}},
+            "overrides": {
+                "motion": {"velocity_limit": 0.3},
+                "recovery": {"action_timeout": 120.0},
+            },
         }
         expected_path = [
             "task_program",
@@ -5198,8 +5266,35 @@ def test_inspector_tracks_policy_inline_and_override_origins(
     assert parameter["value"] == 0.3
     assert parameter["source"]["file"] == str(path.resolve())
     assert parameter["source"]["path"] == expected_path
+    timeout = next(
+        p
+        for p in summary["resolved_configuration"]["parameters"]
+        if p["scope"] == "execution_policy"
+        and p["path"] == ["recovery", "skill_timeout"]
+    )
+    assert timeout["value"] == 120.0
+    assert timeout["source"]["path"] == [
+        *expected_path[:-2],
+        "recovery",
+        "action_timeout",
+    ]
+    assert timeout["source"]["kind"] == (
+        "inline" if style == "inline" else "deployment_override"
+    )
     assert load_config(component) == original
     if style == "inline":
+        retries = next(
+            p
+            for p in summary["resolved_configuration"]["parameters"]
+            if p["scope"] == "execution_policy"
+            and p["path"] == ["recovery", "max_skill_retries"]
+        )
+        assert retries["value"] == 2
+        assert retries["source"]["path"] == [
+            *expected_path[:-2],
+            "recovery",
+            "max_action_retries",
+        ]
         derived = next(
             p
             for p in summary["resolved_configuration"]["parameters"]

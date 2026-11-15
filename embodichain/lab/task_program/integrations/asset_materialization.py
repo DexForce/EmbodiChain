@@ -43,6 +43,7 @@ from ._asset_pouring import (
     finish_pour_adaptation,
 )
 from ._configured_composition import _resolve_execution_policy
+from .configured import _resolve_simulation_uid
 
 from embodichain.utils import configclass
 from embodichain.utils.config_paths import resolve_config_path
@@ -479,11 +480,16 @@ def materialize_asset_deployment(
                     "Rigid MeshCfg cannot consume a distinct collision_path"
                 )
             entity = entities.get(role.entity_id)
-            if entity is None or entity["simulation_uid"] not in objects:
+            uid = (
+                _resolve_simulation_uid(entity, path=f"scene_binding.{role.entity_id}")
+                if entity is not None
+                else None
+            )
+            if uid not in objects:
                 raise ValueError(
                     f"Role {name} must map to a declared physical rigid object"
                 )
-            obj = objects[entity["simulation_uid"]]
+            obj = objects[uid]
             if obj.get("init_local_pose") is not None:
                 raise ValueError(f"Role {name} cannot inherit init_local_pose")
             if any(float(v) != 0.0 for v in obj.get("init_rot", [0, 0, 0])):

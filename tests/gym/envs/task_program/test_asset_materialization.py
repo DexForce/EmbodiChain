@@ -188,10 +188,24 @@ def deployment(tmp_path: Path):
 
 
 @pytest.mark.parametrize("with_policy_overrides", (False, True))
+@pytest.mark.parametrize("uid_mode", ("omitted", "same", "different"))
 def test_materialized_deployment_uses_production_loader_and_fresh_geometry(
-    deployment, tmp_path, with_policy_overrides
+    deployment, tmp_path, with_policy_overrides, uid_mode
 ):
     source, requirements, resolved = deployment
+    uid = "native_cube" if uid_mode == "different" else "cube"
+    integration_path = source.parent / "integration.yaml"
+    integration = yaml.safe_load(integration_path.read_text())
+    cube = integration["scene_binding"]["rigid_objects"][0]
+    if uid_mode == "omitted":
+        cube.pop("simulation_uid", None)
+    else:
+        cube["simulation_uid"] = uid
+    _write(integration_path, integration)
+    env_path = source.parent / "env.yaml"
+    env = yaml.safe_load(env_path.read_text())
+    env["simulation"]["rigid_object"][0]["uid"] = uid
+    _write(env_path, env)
     if with_policy_overrides:
         task = yaml.safe_load(source.read_text())
         task["task_program"]["execution_policy"] = {
@@ -218,12 +232,14 @@ def test_materialized_deployment_uses_production_loader_and_fresh_geometry(
         assert policy["motion"]["velocity_limit"] == 0.15
         assert policy["recovery"]["skill_timeout"] == 111.0
     assert config["physics"] == "default"
+    assert config["rigid_object"][0]["uid"] == uid
     assert config["id"] != yaml.safe_load(source.read_text())["id"]
     assert config["rigid_object"][0]["init_pos"][2] == pytest.approx(0.04)
     assert config["rigid_object"][0]["shape"]["fpath"].startswith("./assets/")
     integration = yaml.safe_load(
         (result.deployment_path.parent / "integration.yaml").read_text()
     )
+    assert integration["scene_binding"]["rigid_objects"][0]["entity_id"] == "cube"
     target = integration["scene_binding"]["rigid_objects"][1]["affordances"][0]
     assert target["object_target_pose"][11] == pytest.approx(0.10)
     assert target["object_target_frame"] == "parent"
@@ -232,6 +248,21 @@ def test_materialized_deployment_uses_production_loader_and_fresh_geometry(
         == requirements.to_dict()
     )
     validate_materialized_deployment(result)
+
+
+@pytest.mark.parametrize("invalid_uid", (None, "", 42))
+def test_materialization_rejects_explicit_invalid_uid(
+    deployment, tmp_path, invalid_uid
+):
+    source, requirements, resolved = deployment
+    path = source.parent / "integration.yaml"
+    integration = yaml.safe_load(path.read_text())
+    integration["scene_binding"]["rigid_objects"][0]["simulation_uid"] = invalid_uid
+    _write(path, integration)
+    with pytest.raises(ValueError, match="simulation_uid must be a non-empty string"):
+        materialize_asset_deployment(
+            source, requirements, resolved, output_dir=tmp_path / "out"
+        )
 
 
 def test_materialized_files_can_move_and_detect_tampering(deployment, tmp_path):

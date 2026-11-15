@@ -204,10 +204,19 @@ retains explicit matrix coefficients without orthogonalization. Compact forms
 require exactly one orientation; coordinate-frame ownership is unchanged.
 Geometry/TCP declarations retain their existing four-row matrix form as well.
 
+Scene-root `simulation_uid` is optional when it equals `entity_id`. Normal
+loading, asset materialization and pouring adaptation share
+`configured.py._resolve_simulation_uid`; explicit different UIDs remain mappings,
+and explicit invalid values are rejected rather than defaulted. Asset changes
+retain logical entity IDs.
+
 The read-only deployment inspector's `--explain` output identifies the concrete
 physical backend and traces composed integration/policy fields to component,
 inline, or deployment-override locations. `--json` includes
-`resolved_configuration` and typed preset defaults. Built-in composite monitor
+`resolved_configuration` and typed preset defaults. Its service view uses the
+production-composed declarations, including expanded named DemoSkills; normalized
+recovery fields retain their original authored key in source locations.
+Built-in composite monitor
 defaults are resolved through `CompositeEffectMonitorCfg`; other providers'
 defaults are not inferred. Inspection neither constructs simulation nor provides
 physical-effect evidence. See the task package usage for the authoring forms.

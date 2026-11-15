@@ -256,8 +256,11 @@ The runner cancels/holds safely before its once-only abort notification.
 Pickup's optional `cartesian_lift` and placement's `cartesian_approach` use the
 existing sampled Cartesian path and joint-limit retiming with `ik_interp`.
 Pickup plans a separate straight world-Z lift only after a feasible approach;
-failed rows remain ineligible. Placement retains its closing pressure until
-release. The default paths remain unchanged. HandOver can explicitly retract
+failed rows remain ineligible. Placement times each required approach leg
+separately and retains both adjacent endpoints as a one-control-interval stop,
+preserving exact arrivals and the independently checked acceleration bounds at
+corners. It retains its closing pressure until release. The default paths remain
+unchanged. HandOver can explicitly retract
 sampled grasp TCPs through `grasp_retract_distance` before deriving transport
 and handover targets. The offset is a planning declaration; acquisition,
 retention and final acceptance still require the original physical evidence.

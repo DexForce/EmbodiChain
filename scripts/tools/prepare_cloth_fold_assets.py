@@ -24,8 +24,10 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 from pathlib import Path
 import shutil
+import tempfile
 import urllib.request
 import zipfile
 
@@ -104,7 +106,27 @@ def _prepare(data_root: Path) -> None:
                 destination = data_root / source.relative_to(inputs)
                 if not destination.exists():
                     destination.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(source, destination)
+                    with tempfile.NamedTemporaryFile(
+                        dir=destination.parent,
+                        prefix=f".{destination.name}.",
+                        suffix=".partial",
+                        delete=False,
+                    ) as stream:
+                        temporary = Path(stream.name)
+                    try:
+                        shutil.copy2(source, temporary)
+                        if _sha256(temporary) != _sha256(source):
+                            raise ValueError(f"Input copy SHA-256 mismatch: {source}")
+                        # Same-filesystem publication never overwrites a local file.
+                        try:
+                            os.link(temporary, destination)
+                        except FileExistsError:
+                            if _sha256(destination) != _sha256(temporary):
+                                raise ValueError(
+                                    f"Existing input differs from the qualified bundle: {destination}"
+                                )
+                    finally:
+                        temporary.unlink(missing_ok=True)
         for name in _FILES:
             print(data_root / name)
 
