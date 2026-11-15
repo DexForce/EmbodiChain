@@ -5091,6 +5091,9 @@ embodichain.toolkits.assembly
 
 Public assembly generation and portable manifests preserve one physical body with multiple convex collision pieces. Generator dependencies are optional at manifest load time. GenSim and simulation integrations consume this toolkit; its data model does not import either runtime.
 
+See :doc:`Precision Assembly <../features/toolkits/precision_assembly>` for
+functional entry points, installation, native demo recordings and research attribution.
+
 .. currentmodule:: embodichain.toolkits.assembly
 
 .. autosummary::
@@ -5168,7 +5171,7 @@ independent simulation arenas.
 embodichain.toolkits.assembly.model
 -----------------------------------
 
-Self-contained body-local geometry, joint attachment and mass-property records with content-addressed, checksummed serialization. Native configuration conversion is owned by ``embodichain.lab.sim.assembly``.
+Self-contained body-local geometry, joint attachment and mass-property records with content-addressed, checksummed serialization. Native configuration conversion is owned by ``embodichain.toolkits.assembly.native``.
 
 .. currentmodule:: embodichain.toolkits.assembly.model
 
