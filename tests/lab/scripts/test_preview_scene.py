@@ -96,8 +96,8 @@ def test_plain_usd_headless_preserves_explicit_stepping_and_cleanup(
     result = preview_scene(
         source, sim_cfg=cfg, simulate=steps is not None, steps=steps, report=report
     )
-    assert instances[0].sim_config.default_ground is False
-    assert not hasattr(cfg, "default_ground")
+    assert instances[0].sim_config.enable_ground_plane is False
+    assert not hasattr(cfg, "enable_ground_plane")
     assert cfg.render_cfg.renderer == "auto"
     assert instances[0].sim_config.render_cfg.renderer == "hybrid"
     assert result["physics_steps"] == (0 if steps is None else steps)

@@ -75,7 +75,7 @@ and does not infer or remove robots from prim names. Existing object lists can
 add other physical resources, provided their UIDs do not conflict.
 
 An imported scene defaults to no extra ground plane. Set the environment's
-`default_ground: true` to add one deliberately. Backend and gravity remain
+`enable_ground_plane: true` to add one deliberately. Backend and gravity remain
 owned by `env.yaml`; explicit USD gravity must agree after unit/axis and scene
 placement conversion. Imported physical types, constraints and materials use
 the existing SDK/backend support. Unsupported types fail explicitly.

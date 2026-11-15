@@ -639,8 +639,8 @@ def test_two_way_full_surface_options_are_forwarded_to_native() -> None:
     )
 
 
-def test_default_ground_is_an_explicit_independent_boolean():
-    assert SimulationManagerCfg().default_ground is True
-    assert SimulationManagerCfg(default_ground=False).default_ground is False
-    with pytest.raises(TypeError, match="default_ground"):
-        SimulationManagerCfg(default_ground="false")
+def test_enable_ground_plane_is_an_explicit_independent_boolean():
+    assert SimulationManagerCfg().enable_ground_plane is True
+    assert SimulationManagerCfg(enable_ground_plane=False).enable_ground_plane is False
+    with pytest.raises(TypeError, match="enable_ground_plane"):
+        SimulationManagerCfg(enable_ground_plane="false")

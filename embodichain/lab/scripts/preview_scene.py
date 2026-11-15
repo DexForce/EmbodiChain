@@ -156,11 +156,11 @@ def preview_scene(
         )
 
         cfg = (
-            SimulationManagerCfg(default_ground=False)
+            SimulationManagerCfg(enable_ground_plane=False)
             if sim_cfg is None
             else deepcopy(sim_cfg)
         )
-        cfg.default_ground = False
+        cfg.enable_ground_plane = False
         # Scene content (including cameras) is discovered after constructing
         # the manager. Reserve rendering for auto rather than upgrading an
         # already-created no-render World later; explicit no-render is honored.
@@ -176,7 +176,7 @@ def preview_scene(
             "viser" if is_viser else "window" if interactive else "headless"
         )
         result["simulate"] = simulate
-        result["default_ground"] = False
+        result["enable_ground_plane"] = False
         running = simulate
         while True:
             try:

@@ -318,7 +318,7 @@ def _exercise_gaussian_zip_no_render(package):
     sim = SimulationManager(
         SimulationManagerCfg(
             headless=True,
-            default_ground=False,
+            enable_ground_plane=False,
             render_cfg=RenderCfg(renderer="no-render"),
             num_envs=2,
         )
@@ -495,7 +495,7 @@ def test_usd_inventory_and_evaluation_component_coexist(scene_files, tmp_path):
     assert "evaluation" not in resolved.config
 
 
-def test_component_paths_binding_types_and_default_ground(
+def test_component_paths_binding_types_and_enable_ground_plane(
     scene_files, tmp_path, monkeypatch
 ):
     import yaml
@@ -549,11 +549,13 @@ def test_component_paths_binding_types_and_default_ground(
         )
     cfg = config_to_cfg(config, source_path=tmp_path / "task.yaml")
     assert cfg.usd_scene.source.file_path == str(scene_files["usd"])
-    assert cfg.sim_cfg.default_ground is False
+    assert cfg.sim_cfg.enable_ground_plane is False
     assert cfg.background == [] and cfg.rigid_object == [] and cfg.articulation == []
-    config["default_ground"] = True
+    config["enable_ground_plane"] = True
     assert (
-        config_to_cfg(config, source_path=tmp_path / "task.yaml").sim_cfg.default_ground
+        config_to_cfg(
+            config, source_path=tmp_path / "task.yaml"
+        ).sim_cfg.enable_ground_plane
         is True
     )
     del environment["simulation"]["usd_scene"]["asset_cfgs"]["/World/frame/box"]
@@ -639,7 +641,7 @@ def _exercise_native_import_reset_and_package_lifetime(scene_files, kind):
     sim = SimulationManager(
         SimulationManagerCfg(
             headless=True,
-            default_ground=False,
+            enable_ground_plane=False,
             render_cfg=RenderCfg(renderer="no-render"),
             num_envs=2,
         )

@@ -74,6 +74,62 @@ def test_cpu_body_data_reads_angular_velocity_from_angular_api():
     body_view.fetch_linear_velocity.assert_not_called()
 
 
+@pytest.mark.no_sim
+@pytest.mark.parametrize("env_ids", [None, [2, 0], torch.tensor([2, 0]), []])
+def test_group_reset_preserves_prepared_variant_poses_and_selection(env_ids):
+    from embodichain.lab.sim.shapes import CubeCfg
+
+    explicit_pose = torch.tensor(
+        [[0, 0, 1, 9], [1, 0, 0, 8], [0, 1, 0, 7], [0, 0, 0, 1]],
+        dtype=torch.float32,
+    )
+    member = RigidObjectCfg(
+        shape=CubeCfg(),
+        init_pos=(1, 0, 0),
+        env_variants={
+            1: RigidObjectCfg(shape=CubeCfg(), init_pos=(5, 0, 0), init_rot=(0, 0, 90)),
+            2: RigidObjectCfg(shape=CubeCfg(), init_local_pose=explicit_pose.tolist()),
+        },
+    )
+    group = object.__new__(RigidObjectGroup)
+    group.device = torch.device("cpu")
+    group.cfg = RigidObjectGroupCfg(
+        rigid_objects={
+            "variant": member,
+            "constant": RigidObjectCfg(shape=CubeCfg(), init_pos=(-1, 0, 0)),
+        }
+    )
+    group._entities = [[object(), object()] for _ in range(3)]
+    group._declared_num_objects = 2
+    group._all_indices = [0, 1, 2]
+    group._all_obj_indices = [0, 1]
+    state = torch.eye(4).repeat(3, 2, 1, 1)
+    state[:, :, :3, 3] = -99
+    expected = state.clone()
+    ids = list(range(3)) if env_ids is None else [int(index) for index in env_ids]
+    initial = torch.eye(4).repeat(3, 2, 1, 1)
+    initial[:, 1, 0, 3] = -1
+    initial[0, 0, 0, 3] = 1
+    initial[1, 0] = torch.tensor(
+        [[0, -1, 0, 5], [1, 0, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]],
+        dtype=torch.float32,
+    )
+    initial[2, 0] = explicit_pose
+    expected[ids] = initial[ids]
+    group._restore_default_physical_properties = Mock()
+    group.clear_dynamics = Mock()
+
+    def write_pose(poses, *, env_ids):
+        state[env_ids] = poses
+
+    group.set_local_pose = Mock(side_effect=write_pose)
+
+    group.reset(env_ids)
+
+    torch.testing.assert_close(state, expected, atol=1e-6, rtol=0)
+    group.clear_dynamics.assert_called_once_with(env_ids=ids)
+
+
 class BaseRigidObjectGroupTest:
     """Shared test logic for CPU and CUDA."""
 

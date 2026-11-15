@@ -40,7 +40,7 @@ _ENVIRONMENT_COMPONENT_FIELDS = frozenset(
         "arena_space",
         "physics",
         "physics_config",
-        "default_ground",
+        "enable_ground_plane",
         "render_cfg",
         "visualization",
         "simulation",
@@ -608,7 +608,7 @@ def _resolve_gym_components(
         from embodichain.lab.sim.spawn._usd_scene import _inspect_usd_scene
 
         reserved = set()
-        if resolved.get("default_ground", False):
+        if resolved.get("enable_ground_plane", False):
             reserved.add("default_plane")
         for field in (
             "background",

@@ -318,10 +318,10 @@ class EmbodiedEnvCfg(EnvCfg):
     coexist with the ordinary object lists and must have distinct UIDs.
     """
 
-    default_ground: bool | None = None
+    enable_ground_plane: bool | None = None
     """Explicit default-plane selection; USD scenes default to no added plane.
 
-    Without a USD scene, ``None`` preserves ``sim_cfg.default_ground``.
+    Without a USD scene, ``None`` preserves ``sim_cfg.enable_ground_plane``.
     """
     cable_object: list[CableObjectCfg] = []
     """Fixed-topology cables declared before simulation preparation."""
@@ -1320,11 +1320,11 @@ class EmbodiedEnv(BaseEnv):
         """Filter configuration independently of the overridable demand hook."""
         self._apply_functor_filter()
         recipe = getattr(self.cfg, "usd_scene", None)
-        ground = getattr(self.cfg, "default_ground", None)
+        ground = getattr(self.cfg, "enable_ground_plane", None)
         if ground is not None and type(ground) is not bool:
-            raise TypeError("default_ground must be a bool or None.")
+            raise TypeError("enable_ground_plane must be a bool or None.")
         if ground is not None or recipe is not None:
-            self.sim_cfg.default_ground = False if ground is None else ground
+            self.sim_cfg.enable_ground_plane = False if ground is None else ground
         if recipe is not None:
             from embodichain.lab.sim.cfg.physics import physics_backend_from_cfg
             from embodichain.lab.sim.spawn._usd_scene import (
@@ -1365,7 +1365,7 @@ class EmbodiedEnv(BaseEnv):
                 reserved.update(
                     item.uid for item in selected_robot.sensors if item.uid is not None
                 )
-            if self.sim_cfg.default_ground:
+            if self.sim_cfg.enable_ground_plane:
                 reserved.add("default_plane")
             if self.cfg.enable_sensor:
                 reserved.update(

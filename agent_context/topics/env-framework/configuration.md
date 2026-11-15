@@ -94,7 +94,7 @@ native UID and logical entity mappings. Use the
 [USD pick/place example](../../../examples/gym/usd_scene_pick_place/README.md)
 for the existing `run-task` entry and measured qualification.
 
-`default_ground` is an optional physical environment setting. With a USD scene,
+`enable_ground_plane` is an optional physical environment setting. With a USD scene,
 omission disables the added plane; ordinary environments retain their existing
 default. Backend and world gravity remain environment-owned, and an explicitly
 authored USD gravity must agree after source-convention and scene-pose conversion.
