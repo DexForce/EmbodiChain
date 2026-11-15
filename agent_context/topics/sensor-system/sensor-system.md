@@ -279,6 +279,9 @@ Use kinematic targets for movable geometry. Target mesh topology, vertex data
 and scale must be shared across replicas. VLP16 adds the nominal firing-order
 elevation table through the bundled entry point. Replace an asset to change cached
 geometry. Each dynamic instance supplies its current arena-frame pose.
+On CUDA, dynamic rigid ray targets convert packed position and quaternion
+poses to matrices in one launch on the caller's stream. Collision offsets and
+topology checks stay in the ray provider.
 
 | Changed boundary | Existing coverage |
 |---|---|

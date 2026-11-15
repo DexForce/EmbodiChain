@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Literal
 
 import torch
 
+from embodichain.compute.geometry._rigid_pose import _rigid_pose_matrices
 from embodichain.compute.geometry.raycast import TriangleRayMesh, cast_rays
 from embodichain.utils import configclass
 
@@ -225,7 +226,11 @@ def _build_ray_scene(
                 raise NotImplementedError(
                     f"Visual ray target {uid!r} requires shared authored triangle geometry."
                 )
-            pose_reader = _RayPose(visual_owner.get_local_pose, device)
+            pose_reader = _RayPose(
+                visual_owner.get_local_pose,
+                device,
+                dynamic_rigid=asset is not None and not asset.is_static,
+            )
             pose = (
                 pose_reader() if asset is not None and asset.is_static else pose_reader
             )
@@ -240,7 +245,9 @@ def _build_ray_scene(
                 raise NotImplementedError(
                     f"Collision ray target {uid!r} requires shared cooked geometry."
                 )
-            pose_reader = _RayPose(asset.get_local_pose, device)
+            pose_reader = _RayPose(
+                asset.get_local_pose, device, dynamic_rigid=not asset.is_static
+            )
             static_pose = pose_reader() if asset.is_static else None
             shapes = asset.get_collision_shapes()
         else:
@@ -285,12 +292,24 @@ def _build_ray_scene(
 
 
 class _RayPose:
-    def __init__(self, fetch, device):
+    def __init__(
+        self,
+        fetch: Callable[..., torch.Tensor],
+        device: torch.device,
+        *,
+        dynamic_rigid: bool = False,
+    ) -> None:
         self._fetch = fetch
         self._device = device
+        self._packed = dynamic_rigid and device.type == "cuda"
 
-    def __call__(self):
-        return self._fetch(to_matrix=True).to(device=self._device, dtype=torch.float32)
+    def __call__(self) -> torch.Tensor:
+        pose = self._fetch(to_matrix=not self._packed).to(
+            device=self._device, dtype=torch.float32
+        )
+        if self._packed:
+            return _rigid_pose_matrices(pose)
+        return pose
 
 
 @configclass

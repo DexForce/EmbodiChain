@@ -22,7 +22,7 @@ import pytest
 import torch
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import DefaultPhysicsCfg, RigidObjectCfg
+from embodichain.lab.sim.cfg import DefaultPhysicsCfg, NewtonPhysicsCfg, RigidObjectCfg
 from embodichain.lab.sim.sensors import SensorCfg, SensorContext
 from embodichain.lab.sim.shapes import CubeCfg
 
@@ -66,13 +66,19 @@ def test_registered_terrain_scanner_samples_headless_ground_and_static_cube() ->
         SimulationManager.flush_cleanup_queue()
 
 
-def test_dynamic_rays_observe_live_pose_and_separate_axial_depth() -> None:
+@pytest.mark.parametrize(
+    "device", ["cpu", pytest.param("cuda:0", marks=pytest.mark.gpu)]
+)
+def test_dynamic_rays_observe_live_pose_and_separate_axial_depth(device: str) -> None:
     from embodichain.lab.sim.sensors import RayDepthCameraCfg
 
+    physics = (
+        DefaultPhysicsCfg(device=device)
+        if device == "cpu"
+        else NewtonPhysicsCfg(device=device)
+    )
     manager = SimulationManager(
-        SimulationManagerCfg(
-            headless=True, num_envs=2, physics_cfg=DefaultPhysicsCfg(device="cpu")
-        )
+        SimulationManagerCfg(headless=True, num_envs=2, physics_cfg=physics)
     )
     try:
         target = manager.add_rigid_object(
@@ -106,26 +112,44 @@ def test_dynamic_rays_observe_live_pose_and_separate_axial_depth() -> None:
             )
         )
         manager.update(step=1, render_final_step=False)
-        torch.testing.assert_close(sensor.get_data()["depth"], torch.ones((2, 1, 3)))
+        torch.testing.assert_close(
+            sensor.get_data()["depth"], torch.ones((2, 1, 3), device=device)
+        )
         assert (sensor.get_data()["distance"][:, 0] > 1).all()
         torch.testing.assert_close(
-            visual.get_data()["depth"], torch.full((2, 1, 3), 0.8)
+            visual.get_data()["depth"], torch.full((2, 1, 3), 0.8, device=device)
         )
         target.set_local_pose(
-            torch.tensor([[0.0, 0.0, 1.6, 0.0, 0.0, 0.0, 1.0]]), env_ids=[1]
+            torch.tensor([[0.0, 0.0, 1.6, 0.0, 0.0, 0.0, 1.0]], device=device),
+            env_ids=[1],
         )
         manager.update(step=1, render_final_step=False)
         torch.testing.assert_close(
-            sensor.get_data()["depth"][:, 0, 1], torch.tensor([1.0, 1.4])
+            sensor.get_data()["depth"][:, 0, 1], torch.tensor([1.0, 1.4], device=device)
         )
         torch.testing.assert_close(
-            visual.get_data()["depth"][:, 0, 1], torch.tensor([0.8, 1.2])
+            visual.get_data()["depth"][:, 0, 1], torch.tensor([0.8, 1.2], device=device)
+        )
+        sin_half_angle = 0.5**0.5
+        target.set_local_pose(
+            torch.tensor(
+                [[0.0, 0.0, 1.6, 0.0, sin_half_angle, 0.0, sin_half_angle]],
+                device=device,
+            ),
+            env_ids=[1],
+        )
+        manager.update(step=1, render_final_step=False)
+        torch.testing.assert_close(
+            sensor.get_data()["depth"][:, 0, 1], torch.tensor([1.0, 0.6], device=device)
+        )
+        torch.testing.assert_close(
+            visual.get_data()["depth"][:, 0, 1], torch.tensor([0.8, 0.6], device=device)
         )
         scene = SensorContext.from_manager(manager).ray_factory(("target",), "visual")
         other = RigidObjectCfg(uid="other", shape=CubeCfg(size=(0.2, 0.2, 0.2)))
         manager.add_rigid_object(other)
         manager.prepare()
-        rays = torch.zeros((2, 1, 3))
+        rays = torch.zeros((2, 1, 3), device=device)
         with pytest.raises(RuntimeError, match="topology is stale"):
             scene.cast(rays, rays, 3.0)
         assert not sensor.get_sample_metadata()["valid"].any()
