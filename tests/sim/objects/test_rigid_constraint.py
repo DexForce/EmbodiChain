@@ -258,6 +258,9 @@ class _RigidConstraintTestSim:
     """
 
     def __init__(self, num_envs=4, arenas=None):
+        from embodichain.lab.sim import SimulationManagerCfg
+
+        self.sim_config = SimulationManagerCfg()
         self._lights = {}
         self._sensors = {}
         self._robots = {}

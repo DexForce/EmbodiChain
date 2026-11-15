@@ -40,7 +40,7 @@ _ENVIRONMENT_COMPONENT_FIELDS = frozenset(
         "arena_space",
         "physics",
         "physics_config",
-        "enable_default_ground",
+        "enable_ground_plane",
         "render_cfg",
         "visualization",
         "simulation",

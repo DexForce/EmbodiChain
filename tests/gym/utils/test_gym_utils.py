@@ -1506,7 +1506,7 @@ class TestConfigToCfgFromFile:
         environment = load_config(environment_path)
         environment["physics"] = "newton"
         environment["physics_config"] = {"num_substeps": 2}
-        environment["enable_default_ground"] = False
+        environment["enable_ground_plane"] = False
         save_config(environment_path, environment)
 
         cfg = config_to_cfg(
@@ -1517,17 +1517,17 @@ class TestConfigToCfgFromFile:
 
         assert isinstance(cfg.sim_cfg.physics_cfg, NewtonPhysicsCfg)
         assert cfg.sim_cfg.physics_cfg.num_substeps == 2
-        assert cfg.sim_cfg.enable_default_ground is False
+        assert cfg.sim_cfg.enable_ground_plane is False
 
     def test_environment_component_owns_ground_declaration(self, tmp_path) -> None:
         """A deployment cannot re-enable physical ground owned by its component."""
         self._write_deployment(tmp_path)
         environment_path = tmp_path / "env.yaml"
         environment = load_config(environment_path)
-        environment["enable_default_ground"] = False
+        environment["enable_ground_plane"] = False
         save_config(environment_path, environment)
         config = self._environment_component_gym_config()
-        config["enable_default_ground"] = True
+        config["enable_ground_plane"] = True
         with pytest.raises(ValueError, match="environment.component"):
             config_to_cfg(
                 config,
@@ -2855,7 +2855,88 @@ def test_mesh_asset_paths_resolve_collision_and_visual_geometry(
     if collection == "rigid_object_group":
         parsed = parsed.rigid_objects["cup"]
     assert parsed.shape.fpath == paths["TaskMeshes/collision.obj"]
-    assert parsed.visual_shape.fpath == paths["TaskMeshes/visual.glb"]
+    assert parsed.visual_shape is None
+    assert parsed.visuals[0].representation.fpath == paths["TaskMeshes/visual.glb"]
+
+
+@pytest.mark.parametrize(
+    "collection", ["background", "rigid_object", "rigid_object_group"]
+)
+@pytest.mark.parametrize("variant", [False, True])
+def test_nested_physical_mesh_paths_resolve_from_data_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, collection: str, variant: bool
+) -> None:
+    from embodichain.data import constants
+
+    root = tmp_path / "data"
+    path = root / "meshes" / "piece.obj"
+    path.parent.mkdir(parents=True)
+    path.write_text("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.chdir(outside)
+    monkeypatch.setattr(constants, "EMBODICHAIN_DEFAULT_DATA_ROOT", str(root))
+    compound = {
+        "shape_type": "Compound",
+        "parts": [
+            {
+                "shape": {
+                    "shape_type": "Mesh",
+                    "fpath": "meshes/piece.obj",
+                    "collision": {"approximation": "convex_hull"},
+                }
+            }
+        ],
+    }
+    body_type = "static" if collection == "background" else "dynamic"
+    obj = {"uid": "piece", "body_type": body_type, "shape": compound}
+    if variant:
+        obj = {
+            "uid": "piece",
+            "body_type": body_type,
+            "shape": {"shape_type": "Cube"},
+            "env_variants": {"1": {"body_type": body_type, "shape": compound}},
+        }
+    boundary = {
+        "shape_type": "Mesh",
+        "fpath": "meshes/piece.obj",
+        "collision": {"approximation": "sdf", "force_sdf": False},
+    }
+    obj["particle_collision_shape"] = deepcopy(boundary)
+    if body_type == "dynamic":
+        obj["attrs"] = {"mass_props": {"mass": 1.0, "inertia": np.eye(3).tolist()}}
+    if variant:
+        obj["env_variants"]["1"]["particle_collision_shape"] = deepcopy(boundary)
+        if body_type == "dynamic":
+            obj["env_variants"]["1"]["attrs"] = deepcopy(obj["attrs"])
+    entries = (
+        [{"uid": "group", "rigid_objects": {"piece": obj}}]
+        if collection == "rigid_object_group"
+        else [obj]
+    )
+    cfg = config_to_cfg(
+        {
+            "id": "EmbodiedEnv-v1",
+            "physics": "newton",
+            "env": {},
+            "robot": {"uid": "robot"},
+            collection: entries,
+        },
+        manager_modules=DEFAULT_MANAGER_MODULES,
+    )
+    parsed = getattr(cfg, collection)[0]
+    if collection == "rigid_object_group":
+        parsed = parsed.rigid_objects["piece"]
+    from embodichain.lab.sim.spawn.descriptors import rigid_desc_from_cfg
+
+    descriptor, _ = rigid_desc_from_cfg(parsed, newton_solver_type="dexuni")
+    assert descriptor.collisions[-1].file_path == str(path)
+    if variant:
+        parsed = parsed.env_variants[1]
+        descriptor = descriptor.env_variants[1]
+    assert parsed.shape.parts[0].shape.fpath == str(path)
+    assert parsed.particle_collision_shape.fpath == str(path)
+    assert descriptor.collisions[-1].file_path == str(path)
 
 
 @pytest.mark.parametrize("owner", ["inline", "environment", "scene"])

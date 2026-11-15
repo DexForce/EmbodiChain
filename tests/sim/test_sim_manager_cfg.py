@@ -217,15 +217,15 @@ def test_registered_builtin_cannot_bypass_gradient_or_identity_guards(monkeypatc
 
 @pytest.mark.no_sim
 def test_default_ground_is_creation_owned_and_serialized():
-    cfg = SimulationManagerCfg(enable_default_ground=False)
-    assert cfg.to_dict()["enable_default_ground"] is False
+    cfg = SimulationManagerCfg(enable_ground_plane=False)
+    assert cfg.to_dict()["enable_ground_plane"] is False
     sim = object.__new__(SimulationManager)
     sim.sim_config = cfg
     sim._spawn_scene = MagicMock()
     sim._declare_spawn_default_plane()
     sim._spawn_scene.declare.assert_not_called()
     with pytest.raises(TypeError, match="boolean"):
-        SimulationManagerCfg(enable_default_ground="false")
+        SimulationManagerCfg(enable_ground_plane="false")
 
 
 @pytest.mark.no_sim

@@ -131,7 +131,7 @@ exactly one backend and its optional `physics_config`; the thin deployment
 cannot repeat either field. `config_to_cfg()` constructs the backend-specific
 typed physics config and rejects fields from the other backend.
 
-The physical environment also owns `enable_default_ground`. It controls
+The physical environment also owns `enable_ground_plane`. It controls
 creation of the default physical/render plane and can be disabled for
 contact-free scenes; a deployment cannot repeat or override the field.
 
