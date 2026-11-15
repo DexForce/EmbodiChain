@@ -834,7 +834,13 @@ def test_componentized_gym_snapshot_reloads_after_source_components_are_removed(
     source = tmp_path / "source"
     source.mkdir()
     robot_file = source / "robot.urdf"
-    robot_file.write_text('<robot name="snapshot"><link name="base"/></robot>')
+    robot_file.write_text("""<robot name="snapshot">
+      <link name="base"/><link name="first"/><link name="second"/>
+      <joint name="joint_0" type="revolute"><parent link="base"/>
+        <child link="first"/><limit lower="-1" upper="1" effort="1" velocity="1"/></joint>
+      <joint name="joint_1" type="revolute"><parent link="first"/>
+        <child link="second"/><limit lower="-1" upper="1" effort="1" velocity="1"/></joint>
+    </robot>""")
     environment = source / "environment.yaml"
     environment.write_text(
         yaml.safe_dump(
@@ -842,7 +848,18 @@ def test_componentized_gym_snapshot_reloads_after_source_components_are_removed(
                 "environment_id": "snapshot",
                 "physics": "default",
                 "simulation": {},
-                "env": {},
+                "env": {
+                    "actions": {
+                        "first": {
+                            "func": "RelativeJointPositionAction",
+                            "params": {"joint_names": ["joint_0"]},
+                        },
+                        "second": {
+                            "func": "RelativeJointPositionAction",
+                            "params": {"joint_names": ["joint_1"]},
+                        },
+                    }
+                },
                 "max_episode_steps": 17,
             }
         )
@@ -914,19 +931,23 @@ def test_componentized_gym_snapshot_reloads_after_source_components_are_removed(
 
     changed = deepcopy(frozen)
     changed["max_episode_steps"] += 1
-    incompatible = _trainer(tmp_path / "incompatible" / "checkpoints")
-    _configure_checkpoints(
-        incompatible,
-        _config("ppo"),
-        "train.yaml",
-        tmp_path / "incompatible",
-        gym_config=snapshot,
-        gym_data=changed,
-    )
-    before = deepcopy(incompatible.policy.state_dict())
-    with pytest.raises(ValueError, match="Incompatible checkpoint configuration"):
-        incompatible.load_checkpoint(checkpoint)
-    _assert_state_equal(before, incompatible.policy.state_dict())
+    reordered = deepcopy(frozen)
+    assert list(reordered["env"]["actions"]) == ["first", "second"]
+    reordered["env"]["actions"] = dict(reversed(reordered["env"]["actions"].items()))
+    for name, candidate in (("parameter", changed), ("action_order", reordered)):
+        incompatible = _trainer(tmp_path / name / "checkpoints")
+        _configure_checkpoints(
+            incompatible,
+            _config("ppo"),
+            "train.yaml",
+            tmp_path / name,
+            gym_config=snapshot,
+            gym_data=candidate,
+        )
+        before = deepcopy(incompatible.policy.state_dict())
+        with pytest.raises(ValueError, match="Incompatible checkpoint configuration"):
+            incompatible.load_checkpoint(checkpoint)
+        _assert_state_equal(before, incompatible.policy.state_dict())
 
 
 def test_gym_snapshot_export_hook_runs_on_unwrapped_environment(tmp_path):

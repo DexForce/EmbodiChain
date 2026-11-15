@@ -140,8 +140,9 @@ mapping. Explicit local physical-resource paths resolve from the saved config.
 Task Program snapshots retain embodiment skill metadata and bind physical and
 semantic resource references before relocation. Policy Task Programs also run
 their configured resource exporters. Checkpoints bind the original declaration
-to the exact exported snapshot checksum so that saved Gym configs can resume
-without relaxing checks on changed parameters. Resource-packaging failures are
+to the exact exported snapshot checksum, including manager term order. Saved
+Gym configs can resume without relaxing checks on changed parameters.
+Resource-packaging failures are
 synchronized across ranks before resume or training starts.
 
 ## Invariants and validation

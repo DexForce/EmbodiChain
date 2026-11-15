@@ -98,7 +98,8 @@ def _type_name(value: Any) -> str:
 
 def _gym_snapshot_fingerprint(config: Mapping[str, Any]) -> str:
     """Identify the exact serializable Gym declaration recorded in a run."""
-    encoded = json.dumps(_plain(config), sort_keys=True, separators=(",", ":"))
+    # Manager term order is semantic, particularly for policy action columns.
+    encoded = json.dumps(_plain(config), separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
