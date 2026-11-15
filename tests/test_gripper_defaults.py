@@ -498,6 +498,51 @@ def test_task_calibration_overrides_reject_structural_or_invalid_changes(
         _compose_calibrated(tmp_path, overrides)
 
 
+def test_task_calibration_override_preserves_yaml_aliased_gains(tmp_path):
+    """Overriding one gain does not rewrite another that shares its YAML node."""
+    from embodichain.lab.gym.utils.composition import resolve_gym_components
+
+    (tmp_path / "arm.yaml").write_text(
+        "embodiment_id: aliased\n"
+        "simulation:\n"
+        "  class_type: URRobot\n"
+        "  robot_type: ur5\n"
+        "  joint_drive_props:\n"
+        "    stiffness: &gains {elbow_joint: 100.0}\n"
+        "    damping: *gains\n"
+        "sensor: []\n"
+    )
+    physical = resolve_gym_components(
+        {
+            "embodiment": {
+                "component": "arm.yaml",
+                "overrides": {
+                    "joint_drive_props": {"stiffness": {"elbow_joint": 200.0}}
+                },
+            }
+        },
+        base_dir=tmp_path,
+    )
+    drives = physical.config["robot"]["joint_drive_props"]
+    assert drives["stiffness"] == {"elbow_joint": 200.0}
+    assert drives["damping"] == {"elbow_joint": 100.0}
+
+
+def test_explicit_null_grippers_remain_invalid(tmp_path):
+    from embodichain.lab.gym.utils.composition import resolve_gym_components
+
+    (tmp_path / "arm.yaml").write_text(
+        "embodiment_id: nulled\n"
+        "simulation: {class_type: URRobot, robot_type: ur5}\n"
+        "sensor: []\n"
+        "grippers: null\n"
+    )
+    with pytest.raises(TypeError, match="embodiment.grippers must be a mapping"):
+        resolve_gym_components(
+            {"embodiment": {"component": "arm.yaml"}}, base_dir=tmp_path
+        )
+
+
 def test_static_decode_rejects_missing_physical_geometry(tmp_path):
     from embodichain.lab.task_program.integrations.configured import (
         _decode_grasp_generator,

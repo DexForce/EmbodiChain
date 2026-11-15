@@ -310,12 +310,18 @@ def _override_drive_gains(simulation: dict[str, object], value: object) -> None:
         optional=_DRIVE_GAIN_OVERRIDE_FIELDS,
     )
     drives = simulation.get("joint_drive_props")
+    if isinstance(drives, Mapping):
+        # YAML aliases may share one mapping between gains; rebind owned copies.
+        drives = dict(drives)
+        simulation["joint_drive_props"] = drives
     for field_name, entries in gains.items():
         path = f"embodiment.overrides.joint_drive_props.{field_name}"
         replacements = _owned_mapping(entries, path=path)
-        existing = drives.get(field_name) if isinstance(drives, Mapping) else None
-        if not isinstance(existing, dict) or not replacements:
+        existing = drives.get(field_name) if isinstance(drives, dict) else None
+        if not isinstance(existing, Mapping) or not replacements:
             raise ValueError(f"{path} must replace named entries of the component.")
+        existing = dict(existing)
+        drives[field_name] = existing
         for name, gain in replacements.items():
             if name not in existing:
                 raise ValueError(f"{path} names no existing entry {name!r}.")
@@ -420,7 +426,8 @@ def _resolve_embodiment_component(
             component["skill_profile"],
             path="embodiment component.skill_profile",
         )
-    if grippers is not None:
+    # Presence, not value, selects expansion, so an explicit null is rejected.
+    if "grippers" in component:
         from embodichain.lab.gym.utils._gripper_composition import _expand_grippers
 
         # Expansion validates complete native-joint commands within hand limits.
