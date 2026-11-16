@@ -20,8 +20,10 @@ from __future__ import annotations
 __all__: list[str] = []
 
 import json
+import hashlib
 from pathlib import Path
 import shutil
+import struct
 import time
 
 import numpy as np
@@ -257,8 +259,8 @@ class SceneExporter:
             else:
                 asset_root.unlink()
 
-    @staticmethod
     def _scene_object_config(
+        self,
         *,
         scene_object: SceneObject,
         asset_relative_path: str,
@@ -284,6 +286,7 @@ class SceneExporter:
         )
 
         return {
+            **self._appearance_metadata(self.export_root / asset_relative_path),
             "uid": scene_object.id,
             "category": scene_object.category,
             "name": scene_object.name,
@@ -306,6 +309,167 @@ class SceneExporter:
             "support_contour_xy": scene_object.support_contour_xy,
             "support_optimization_rect_xy": scene_object.support_optimization_rect_xy,
             "max_convex_hull_num": scene_object.physics.max_convex_hull_num,
+        }
+
+    @staticmethod
+    def _opaque_glb_materials(path: Path) -> bool:
+        """Accept only self-contained core-material GLBs before color quantization."""
+        try:
+            with path.open("rb") as stream:
+                magic, version, length, size, kind = struct.unpack(
+                    "<4sIIII", stream.read(20)
+                )
+                if (
+                    magic != b"glTF"
+                    or version != 2
+                    or kind != 0x4E4F534A
+                    or length != path.stat().st_size
+                    or size > length - 20
+                ):
+                    return False
+                document = json.loads(stream.read(size))
+            # The proof hashes only this GLB. Relative/remote buffers can change
+            # rendered colors without changing that digest.
+            if any(
+                "uri" in buffer and not buffer["uri"].startswith("data:")
+                for buffer in document.get("buffers", [])
+            ):
+                return False
+            materials = document.get("materials", [])
+            for mesh in document.get("meshes", []):
+                for primitive in mesh["primitives"]:
+                    material = (
+                        materials[primitive["material"]]
+                        if "material" in primitive
+                        else {}
+                    )
+                    # Extensions may replace the core alpha/color source (e.g.
+                    # pbrSpecularGlossiness.diffuseFactor). Do not certify their
+                    # appearance until an extension-specific reader owns it.
+                    if material.get("extensions"):
+                        return False
+                    # Missing images may disappear from Trimesh's loaded material.
+                    # Authored texture use is ineligible even if decoding failed.
+                    if "baseColorTexture" in material.get("pbrMetallicRoughness", {}):
+                        return False
+                    mode = material.get("alphaMode", "OPAQUE")
+                    if mode == "OPAQUE":
+                        continue
+                    # Non-opaque vertex alpha needs its own accessor decoder.
+                    if "COLOR_0" in primitive.get("attributes", {}):
+                        return False
+                    alpha = material.get("pbrMetallicRoughness", {}).get(
+                        "baseColorFactor", [1, 1, 1, 1]
+                    )[3]
+                    if (
+                        isinstance(alpha, bool)
+                        or not isinstance(alpha, (int, float))
+                        or not np.isfinite(alpha)
+                        or not 0 <= alpha <= 1
+                    ):
+                        return False
+                    if mode == "MASK":
+                        cutoff = material.get("alphaCutoff", 0.5)
+                        if (
+                            isinstance(cutoff, bool)
+                            or not isinstance(cutoff, (int, float))
+                            or not np.isfinite(cutoff)
+                            or not 0 <= cutoff <= 1
+                            or alpha < cutoff
+                        ):
+                            return False
+                    elif mode != "BLEND" or alpha != 1:
+                        return False
+            return True
+        except (
+            OSError,
+            ValueError,
+            TypeError,
+            KeyError,
+            IndexError,
+            AttributeError,
+            struct.error,
+        ):
+            return False
+
+    @staticmethod
+    def _appearance_metadata(path: Path) -> dict[str, object]:
+        """Measure only uniform opaque palette colors in the exported GLB.
+
+        Descriptions, default material colors, textures, combined material/vertex
+        channels and mixed appearance cannot certify a named color through this
+        conservative adapter.
+        """
+        import trimesh
+
+        palette = {
+            "red": (255, 0, 0),
+            "green": (0, 255, 0),
+            "blue": (0, 0, 255),
+            "white": (255, 255, 255),
+            "black": (0, 0, 0),
+            "yellow": (255, 255, 0),
+        }
+        if not SceneExporter._opaque_glb_materials(path):
+            return {}
+        try:
+            scene = trimesh.load_scene(path, process=False)
+        except (OSError, ValueError, TypeError, NotImplementedError):
+            return {}
+        measured = []
+        for mesh in scene.geometry.values():
+            if not isinstance(mesh, trimesh.Trimesh):
+                return {}
+            visual = mesh.visual
+            material = getattr(visual, "material", None)
+            if visual.kind == "vertex":
+                colors = np.asarray(visual.vertex_colors)
+            elif visual.kind == "face":
+                colors = np.asarray(visual.face_colors)
+            elif visual.kind == "texture":
+                material = visual.material
+                if (
+                    getattr(material, "baseColorTexture", None) is not None
+                    or getattr(material, "image", None) is not None
+                    # glTF multiplies COLOR_0 by the material factor. The
+                    # single-channel palette adapter cannot qualify both.
+                    or visual.vertex_attributes.get("color") is not None
+                ):
+                    return {}
+                color = getattr(material, "baseColorFactor", None)
+                if color is None:
+                    return {}
+                colors = np.asarray(color).reshape(1, -1)
+            else:
+                return {}
+            if (
+                colors.ndim != 2
+                or colors.shape[1] not in {3, 4}
+                or not len(colors)
+                or not np.isfinite(colors).all()
+            ):
+                return {}
+            labels = [
+                name
+                for name, rgb in palette.items()
+                if (np.abs(colors[:, :3].astype(float) - rgb) <= 32).all()
+            ]
+            if len(labels) != 1:
+                return {}
+            measured.append(labels[0])
+        if not measured or len(set(measured)) != 1:
+            return {}
+        color = measured[0]
+        return {
+            "properties": {"color": color},
+            "property_evidence": {
+                "color": {
+                    "value": color,
+                    "method": "uniform_opaque_srgb_palette/v1",
+                    "source": path.relative_to(path.parents[2]).as_posix(),
+                    "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                }
+            },
         }
 
     def _articulation_config(

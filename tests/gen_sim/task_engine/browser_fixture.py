@@ -387,6 +387,107 @@ def build_fixtures(output: Path, reference: Path | None = None) -> None:
         )
         assert match is not None
         data = json.loads(match[2])
+        if name == "failed":
+            from embodichain.gen_sim.task_spec import TaskSpec
+            from embodichain.gen_sim.task_spec.publication import freeze_task_spec
+            from embodichain.gen_sim.task_engine.semantic_graph_html import (
+                _viewer_document,
+            )
+
+            review_spec = freeze_task_spec(
+                TaskSpec.from_dict(spec),
+                image_sha256="a" * 64,
+                image_ref="source.png",
+                role_descriptions={"role_001": "can"},
+                interpretation=[],
+                generalization=[],
+            )
+            call_id = graph["nodes"][1]["id"]
+            review = dict(
+                spec=review_spec,
+                pairing={
+                    "role_entities": {"role_001": ["a"]},
+                    "goal_groups": spec["metadata"]["goal_sources"],
+                    "milestone_groups": spec["metadata"]["milestone_sources"],
+                },
+                pending=0,
+                attempt={
+                    "status": "failed",
+                    "physical": "unavailable",
+                    "verdict": "not_evaluated",
+                    "calls": {
+                        call_id: {
+                            "success": False,
+                            "start_step": 2,
+                            "end_step": 7,
+                            "issues": [
+                                {
+                                    "kind": "session_failed",
+                                    "message": "fixture measured failure",
+                                    "timestamp": 1.0,
+                                }
+                            ],
+                            "env_ids": [0],
+                            "successes": [False],
+                            "active": [True],
+                        }
+                    },
+                },
+            )
+            (output / "unified.html").write_text(
+                _viewer_document({**data, "review": review})
+            )
+            omitted = deepcopy(data)
+            for node in omitted["graph"]["nodes"]:
+                node["call"].pop("resources", None)
+            (output / "unified-omitted-resources.html").write_text(
+                _viewer_document({**omitted, "review": review})
+            )
+            rows = deepcopy(review)
+            rows["attempt"]["calls"][call_id].update(
+                start_step=0,
+                end_step=60,
+                env_ids=[0, 1],
+                active=[True, True],
+                successes=[False, False],
+                start_steps=[0, 5],
+                end_steps=[60, 30],
+                failure_reasons=["release_failed", "truncated"],
+                issues=[
+                    dict(
+                        kind="phase_effect_gate_failed",
+                        message="'source_released' failed for env 0",
+                        timestamp=1.0,
+                        env_mask=[True, False],
+                    ),
+                    dict(
+                        kind="session_failed",
+                        message="env 1 capture ended",
+                        timestamp=2.0,
+                        env_mask=[False, True],
+                    ),
+                ],
+            )
+            (output / "unified-multi.html").write_text(
+                _viewer_document({**data, "review": rows})
+            )
+            inactive = deepcopy(rows)
+            inactive["attempt"]["calls"][call_id].update(
+                active=[True, False],
+                start_steps=[0, 5],
+                end_steps=[60, 5],
+            )
+            (output / "unified-inactive.html").write_text(
+                _viewer_document({**data, "review": inactive})
+            )
+            rows["attempt"]["calls"][call_id]["successes"][1] = True
+            rows["attempt"]["calls"][call_id]["failure_reasons"][1] = None
+            rows["attempt"]["calls"][call_id]["issues"] = rows["attempt"]["calls"][
+                call_id
+            ]["issues"][:1]
+            (output / "unified-mixed-outcome.html").write_text(
+                _viewer_document({**data, "review": rows})
+            )
         (output / f"{name}.html").write_text(html)
         (output / f"{name}.json").write_text(
             json.dumps(data, ensure_ascii=False, indent=2)

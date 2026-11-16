@@ -1,0 +1,541 @@
+/*
+Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+Licensed under the Apache License, Version 2.0.
+*/
+.rv-detail:has(.rv-spec-summary) {
+  width: min(440px, 40vw);
+}
+.rv-spec-summary section {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+.rv .rv-spec-summary h3 {
+  margin: 0 0 6px;
+  font-size: 14px;
+}
+.rv-spec-summary h4 {
+  font-weight: 500;
+  color: var(--quiet);
+  margin: 10px 0 5px;
+}
+.rv-spec-summary p {
+  margin: 4px 0;
+  line-height: 1.6;
+}
+.rv .rv-spec-summary details {
+  padding: 0;
+  border: 0;
+  margin: 6px 0;
+  color: var(--quiet);
+}
+.rv-spec-summary ul {
+  padding-left: 18px;
+  margin: 4px 0;
+}
+.rv-spec-summary ol {
+  list-style: none;
+  padding: 0;
+  margin: 4px 0;
+}
+.rv-spec-summary ol li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 3px 0;
+}
+.rv-spec-summary ol li span {
+  font: 11px monospace;
+  color: var(--quiet);
+}
+.rv-spec-summary li button {
+  display: block;
+  padding: 2px 0;
+  text-align: left;
+}
+.rv-spec-summary li button:hover {
+  text-decoration: underline;
+}
+@media (max-width: 760px) {
+  .rv-detail:has(.rv-spec-summary) {
+    width: 100%;
+  }
+}
+.rv-source {
+  position: relative;
+  margin: 8px 0;
+  display: inline-block;
+}
+.rv .rv-source img {
+  width: 100%;
+  max-height: none;
+  display: block;
+}
+.rv-source span {
+  position: absolute;
+  border: 2px solid #319176;
+  background: #31897612;
+}
+.rv {
+  --ink: #193b35;
+  --pale: #e8f0eb;
+  --red: #a34c3b;
+  --weak: #fbf1eb;
+  --paper: #fcfbf7;
+  --border: #d7dfd9;
+  --quiet: #586e67;
+  --white: #fffefa;
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  min-height: 440px;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "Inter Variable", "DV Plex SC", sans-serif;
+}
+.rv[data-theme="dark"] {
+  --ink: #e5eee8;
+  --pale: #263e36;
+  --red: #f6aa96;
+  --weak: #422f2d;
+  --paper: #182320;
+  --border: #374a42;
+  --quiet: #b0c2b8;
+  --white: #1e2c26;
+}
+.rv button,
+.rv select,
+.rv summary,
+.rv-back {
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.rv button {
+  background: none;
+  border: 0;
+}
+.rv button:focus-visible,
+.rv summary:focus-visible {
+  outline: 2px solid #3f8d7e;
+  outline-offset: 2px;
+}
+.rv-bar,
+.rv-summary-row,
+.rv-tools,
+.rv-brand,
+.rv-state,
+.rv-chips,
+.rv-kicker,
+.rv-graphbar,
+.rv-graphbar strong,
+.rv-detailbar,
+.rv-foot,
+.rv-stage,
+.rv-toggle,
+.rv-alert,
+.rv-conditions button,
+.rv-action-meta,
+.rv-action-meta span,
+.rv-result {
+  display: flex;
+  align-items: center;
+}
+.rv-bar {
+  height: 54px;
+  flex: none;
+  padding: 0 30px;
+  border-bottom: 1px solid var(--border);
+  background: var(--white);
+  gap: 12px;
+}
+.rv-brand {
+  gap: 9px;
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.5px;
+}
+.rv-bread,
+.rv small,
+.rv code,
+.rv-foot {
+  color: var(--quiet);
+}
+.rv-tools {
+  margin-left: auto;
+  gap: 7px;
+}
+.rv-tools button,
+.rv-detailbar button,
+.rv-toggle,
+.rv-graphbar button,
+.rv-foot button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 6px;
+  padding: 6px 9px;
+}
+.rv
+  button:hover:is(
+    .rv-tools button,
+    .rv-toggle,
+    .rv-graphbar button,
+    .rv-detailbar button,
+    .rv-foot button
+  ) {
+  background: var(--pale);
+}
+.rv-summary {
+  padding: 22px 32px 21px;
+  border-bottom: 1px solid var(--border);
+  background: var(--white);
+}
+.rv-kicker {
+  gap: 7px;
+  color: var(--quiet);
+  font-size: 11px;
+  font-weight: 600;
+}
+.rv-kicker span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #588879;
+}
+.rv h1 {
+  margin: 7px 0 14px;
+  font-size: clamp(22px, 2.3vw, 33px);
+  letter-spacing: -1px;
+  line-height: 1.2;
+  font-weight: 600;
+}
+.rv-summary-row,
+.rv-chips,
+.rv-state {
+  gap: 9px;
+  flex-wrap: wrap;
+}
+.rv-state {
+  margin-left: auto;
+  font-size: 12px;
+}
+.rv-state span,
+.rv-chips button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.rv-chips button {
+  background: var(--pale);
+  border: 1px solid var(--border);
+  padding: 4px 10px;
+  border-radius: 16px;
+  font-size: 12px;
+}
+.rv-chips button[aria-pressed="true"] {
+  outline: 1px solid var(--ink);
+}
+.rv-state span {
+  padding: 4px 9px;
+  border-radius: 5px;
+  color: var(--quiet);
+  background: var(--pale);
+}
+.rv .bad,
+.rv .rv-state .bad {
+  color: var(--red);
+  background: var(--weak);
+}
+.rv-work {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  position: relative;
+}
+.rv-graph {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.rv-graphbar {
+  height: 48px;
+  flex: none;
+  padding: 0 28px;
+  gap: 15px;
+  border-bottom: 1px solid var(--border);
+}
+.rv-graphbar strong {
+  gap: 8px;
+  font-weight: 550;
+}
+.rv-graphbar button,
+.rv-detailbar button,
+.rv-foot button {
+  margin-left: auto;
+}
+.rv-canvas {
+  flex: 1;
+  min-height: 180px;
+  position: relative;
+  background: var(--paper);
+}
+.rv-controls {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  z-index: 4;
+}
+.rv .react-flow__node-reviewPart {
+  pointer-events: all;
+}
+.rv .review-frame-node > .react-flow__handle {
+  opacity: 0;
+}
+.rv .react-flow__edges {
+  z-index: 1;
+  pointer-events: none;
+}
+.rv .react-flow__edge {
+  pointer-events: none;
+}
+.rv-frame {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--white);
+  box-shadow: 0 5px 20px #17392a0a;
+}
+.rv-frame.highlight {
+  outline: 2px solid #579184;
+}
+.rv-frame-head {
+  display: flex;
+  align-items: center;
+  padding: 12px 17px;
+  background: var(--pale);
+  border-radius: 11px 11px 0 0;
+  border-bottom: 1px solid var(--border);
+}
+.rv-stage {
+  gap: 8px;
+  font-weight: 600 !important;
+}
+.rv-stage span {
+  border-left: 1px solid var(--border);
+  padding-left: 10px;
+}
+.rv-toggle {
+  margin-left: auto;
+  font-size: 11px !important;
+}
+.rv-arm-line,
+.rv-arm-badge {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.rv-arm-line {
+  margin: 6px 17px 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rv-arm-badge {
+  border-radius: 4px;
+  padding: 1px 6px;
+  background: var(--pale);
+}
+.rv-action {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  height: 100%;
+  padding: 12px 16px !important;
+  background: var(--white) !important;
+  border: 1px solid #a5bbb0 !important;
+  border-radius: 9px;
+  box-shadow: 0 2px 6px #25392f09;
+  text-align: left;
+}
+.rv-action.failed {
+  border-color: #d9aaa0 !important;
+  background: var(--weak) !important;
+}
+.rv-action:hover,
+.rv-action.selected {
+  outline: 2px solid #629485;
+  outline-offset: 2px;
+}
+.rv-action.faded {
+  opacity: 0.42;
+}
+.rv-action-meta {
+  width: 100%;
+  justify-content: space-between;
+  color: var(--quiet);
+  font:
+    11px "IBM Plex Mono",
+    monospace;
+}
+.rv-action-meta span {
+  gap: 4px;
+  font:
+    11px "Inter Variable",
+    sans-serif;
+}
+.rv-action.failed .rv-action-meta span {
+  color: var(--red);
+}
+.rv-action strong {
+  font-size: 17px;
+  font-weight: 600;
+}
+.rv-action-id,
+.rv code {
+  font:
+    10px "IBM Plex Mono",
+    monospace;
+  color: var(--quiet);
+}
+.rv .react-flow__handle {
+  background: #81968a;
+  border: 1px solid var(--white);
+}
+.rv-conditions {
+  position: absolute;
+  bottom: 10px;
+  left: 16px;
+  right: 16px;
+}
+.rv-conditions button {
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 7px;
+  border-top: 1px solid var(--border);
+  font-weight: 550;
+}
+.rv-conditions small {
+  margin-left: auto;
+  font-size: 10px;
+}
+.rv-alert {
+  background: var(--weak) !important;
+  border-top: 1px solid var(--border) !important;
+  gap: 12px;
+  padding: 12px 28px;
+  color: var(--red) !important;
+  text-align: left;
+}
+.rv-alert span {
+  margin-left: auto;
+}
+.rv-detail {
+  width: min(365px, 37vw);
+  background: var(--white);
+  border-left: 1px solid var(--border);
+  overflow: auto;
+}
+.rv-detailbar {
+  height: 48px;
+  padding: 0 17px;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.rv-content {
+  padding: 18px 21px;
+}
+.rv-content h2 {
+  font-size: 23px;
+  margin: 0 0 3px;
+}
+.rv-content h3 {
+  margin: 24px 0 6px;
+  font-size: 13px;
+}
+.rv-event,
+.rv-result,
+.rv details {
+  margin: 12px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.rv-event p {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+.rv-event code {
+  font-size: 11px;
+}
+.rv-result {
+  gap: 8px;
+  background: var(--pale);
+}
+.rv-content pre {
+  font:
+    11px/1.6 "IBM Plex Mono",
+    monospace;
+  overflow: auto;
+}
+.rv-content img {
+  max-width: 100%;
+  max-height: 120px;
+  display: block;
+}
+.rv-foot {
+  height: 32px;
+  padding: 0 24px;
+  border-top: 1px solid var(--border);
+  font-size: 10px;
+}
+.rv-back {
+  position: fixed;
+  bottom: 0;
+  right: 0;
+  z-index: 25;
+  background: white;
+}
+@media (max-width: 760px) {
+  .rv-bar {
+    padding: 0 12px;
+  }
+  .rv-bread {
+    display: none;
+  }
+  .rv-summary {
+    padding: 14px;
+  }
+  .rv-summary-row {
+    align-items: flex-start;
+  }
+  .rv-state {
+    margin-left: 0;
+  }
+  .rv-graphbar {
+    padding: 0 12px;
+  }
+  .rv-detail {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    max-height: 65%;
+    border: 1px solid var(--border);
+    z-index: 7;
+    box-shadow: 0 -8px 28px #0002;
+  }
+  .rv-alert {
+    padding: 10px 12px;
+    flex-wrap: wrap;
+  }
+  .rv-graphbar small {
+    display: none;
+  }
+}

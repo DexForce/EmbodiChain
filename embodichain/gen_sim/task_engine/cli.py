@@ -72,5 +72,29 @@ def main(
     )
 
 
+def _revise(argv: Sequence[str] | None = None, *, prog: str) -> None:
+    import json
+    from ..workflow import revise_task_plan
+
+    parser = argparse.ArgumentParser(prog=prog)
+    parser.add_argument("--parent", type=Path, required=True)
+    parser.add_argument("--proposal", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--expected-spec-digest", required=True)
+    parser.add_argument("--expected-graph-digest", required=True)
+    parser.add_argument("--expected-plan-digest", required=True)
+    args = parser.parse_args(argv)
+    print(
+        revise_task_plan(
+            args.parent,
+            json.loads(args.proposal.read_text()),
+            args.output,
+            expected_spec_digest=args.expected_spec_digest,
+            expected_graph_digest=args.expected_graph_digest,
+            expected_plan_digest=args.expected_plan_digest,
+        )
+    )
+
+
 if __name__ == "__main__":
     main()
