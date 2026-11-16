@@ -241,16 +241,21 @@ def test_usd_mesh_keeps_sharp_face_normals_in_geometry_local_frame(tmp_path) -> 
     )
 
 
+@pytest.mark.parametrize("clearance", [None, np.float32(1e-4)])
 def test_many_pegs_preserves_official_sampling_prefixes_and_grid_placements(
     tmp_path,
+    clearance,
 ) -> None:
     """A grid is distinct bodies with their own source geometry and inertia."""
     mujoco = pytest.importorskip("mujoco")
     mjfit = pytest.importorskip("mjfit")
     from embodichain.toolkits.assembly import build_many_pegs
 
-    asset = build_many_pegs(2, seed=0, family="primitive", cache_dir=tmp_path)
-    configs = mjfit.sample_pegs(2, seed=0, family="primitive")
+    parameters = {} if clearance is None else {"clearance": clearance}
+    asset = build_many_pegs(
+        2, seed=0, family="primitive", cache_dir=tmp_path, **parameters
+    )
+    configs = mjfit.sample_pegs(2, seed=0, family="primitive", **parameters)
     source = mjfit.grid(
         [mjfit.build(config, standalone=False) for config in configs], spacing=0.3
     )
@@ -285,7 +290,11 @@ def test_many_pegs_preserves_official_sampling_prefixes_and_grid_placements(
     # public curved shape spec. Its tighter curve approximation must
     # produce more collider pieces while retaining the same sampled outline.
     precise = build_many_pegs(
-        2, seed=0, family="primitive", geometry_parameters={"max_error": 1e-5}
+        2,
+        seed=0,
+        family="primitive",
+        geometry_parameters={"max_error": 1e-5},
+        **parameters,
     )
     assert precise.config["geometry_parameters"] == {"max_error": 1e-5}
     assert precise.config["assemblies"][0]["sampled_config"] == configs[0]
@@ -294,6 +303,17 @@ def test_many_pegs_preserves_official_sampling_prefixes_and_grid_placements(
         "max_error": 1e-5,
     }
     assert sum(len(body.geometries) for body in precise.bodies) > model.ngeom - 1
+
+    for index, candidate in enumerate((asset, precise)):
+        json.dumps(candidate.config, allow_nan=False)
+        path = candidate.save(tmp_path / f"portable_{index}.json")
+        assert AssemblyAsset.load(path).content_hash == candidate.content_hash
+        if clearance is not None:
+            assert type(candidate.config["sampling_parameters"]["clearance"]) is float
+            entry = candidate.config["assemblies"][0]
+            assert type(entry["config"]["clearance"]) is float
+            if "sampled_config" in entry:
+                assert type(entry["sampled_config"]["clearance"]) is float
 
 
 def test_programmatic_configuration_arrays_are_portable_and_detached(tmp_path):

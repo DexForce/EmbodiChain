@@ -534,14 +534,16 @@ def test_terminal_values_only_infer_actual_timeout_rows(compact, ending) -> None
             truncated = torch.tensor([True, ending in {"truncated", "both"}, False])
             info = {"terminal_observation": {"state": terminal}}
             if compact:
-                ids = torch.tensor([2, 0, 1])
+                ids = (terminated | truncated).nonzero(as_tuple=False).flatten().flip(0)
                 info.update(
                     terminal_env_ids=ids,
                     terminal_observation={"state": terminal[ids]},
                     terminal_observation_mask=truncated & ~terminated,
                 )
+            next_state = terminal.clone()
+            next_state[terminated | truncated] = 99.0
             return (
-                {"state": torch.full((3, 1), 99.0)},
+                {"state": next_state},
                 torch.ones(3),
                 terminated,
                 truncated,
@@ -561,8 +563,8 @@ def test_terminal_values_only_infer_actual_timeout_rows(compact, ending) -> None
         1, rollout=buffer.start_rollout()
     )
     if ending == "truncated":
-        assert [len(batch) for batch in batches] == [3, 1, 3]
-        torch.testing.assert_close(batches[1], torch.tensor([[7.0]]))
+        assert [len(batch) for batch in batches] == [3, 3, 3]
+        torch.testing.assert_close(batches[1], torch.tensor([[5.0], [7.0], [11.0]]))
         assert rollout["timeout_value"][1, 0] == 7.0
     else:
         assert [len(batch) for batch in batches] == [3, 3]
@@ -574,14 +576,12 @@ def test_terminal_values_only_infer_actual_timeout_rows(compact, ending) -> None
 def test_single_timeout_critic_inference_restores_mode_and_batchnorm(
     fail_terminal,
 ) -> None:
-    """A singleton bootstrap uses fixed statistics and restores modes on failure."""
+    """One timeout uses fixed statistics and restores modes on failure."""
 
     class Critic(nn.Sequential):
         def forward(self, value):
-            if value.shape[0] == 1:
-                assert not self.training
-                if fail_terminal:
-                    raise OSError("terminal critic failed")
+            if not self.training and fail_terminal:
+                raise OSError("terminal critic failed")
             return super().forward(value)
 
     critic = Critic(nn.BatchNorm1d(1), nn.Linear(1, 1, bias=False))
@@ -627,6 +627,139 @@ def test_single_timeout_critic_inference_restores_mode_and_batchnorm(
         # Only ordinary full-batch action/final-value calls update statistics.
         assert critic[0].num_batches_tracked == 2
     assert all(module.training for module in policy.modules())
+
+
+@pytest.mark.parametrize("compact", [False, True])
+def test_one_timeout_retains_peers_for_batchnorm_without_running_statistics(compact):
+    """Batch statistics include hard-terminal and still-active peer states."""
+    terminal = torch.tensor([[5.0], [7.0], [11.0]])
+
+    class Env:
+        num_envs = 3
+        device = torch.device("cpu")
+
+        def reset(self):
+            return {"state": torch.tensor([[1.0], [2.0], [3.0]])}, {}
+
+        def step(self, action):
+            info = {"terminal_observation": {"state": terminal.clone()}}
+            if compact:
+                ids = torch.tensor([1, 0])
+                info.update(
+                    terminal_env_ids=ids, terminal_observation={"state": terminal[ids]}
+                )
+            return (
+                {"state": torch.tensor([[99.0], [99.0], [11.0]])},
+                torch.ones(3),
+                torch.tensor([True, False, False]),
+                torch.tensor([False, True, False]),
+                info,
+            )
+
+    critic = nn.Sequential(
+        nn.BatchNorm1d(1, track_running_stats=False), nn.Linear(1, 1, bias=False)
+    )
+    with torch.no_grad():
+        critic[1].weight.fill_(1.0)
+    policy = ActorCritic(1, 1, torch.device("cpu"), nn.Linear(1, 1), critic)
+    rollout = SyncCollector(Env(), policy, torch.device("cpu")).collect(
+        1, RolloutBuffer(3, 1, 1, 1, torch.device("cpu")).start_rollout()
+    )
+    expected = (terminal[1, 0] - terminal.mean()) / (
+        terminal.var(unbiased=False) + critic[0].eps
+    ).sqrt()
+    torch.testing.assert_close(rollout["timeout_value"][1, 0], expected)
+    assert torch.isnan(rollout["timeout_value"][[0, 2], 0]).all()
+    torch.testing.assert_close(rollout["obs"][0, 1], torch.tensor([99.0]))
+    assert all(module.training for module in policy.modules())
+
+
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
+@pytest.mark.parametrize(
+    "source_dtype,amp_dtype,compact",
+    [
+        (torch.float64, None, True),
+        (torch.float16, None, True),
+        (torch.uint8, None, True),
+        (torch.float64, None, False),
+        (torch.float32, torch.float16, True),
+        (torch.float32, torch.bfloat16, True),
+    ],
+)
+def test_terminal_bootstrap_preserves_rollout_dtypes(
+    device, source_dtype, amp_dtype, compact
+):
+    """Terminal actor/critic inputs and autocast values use their storage dtypes."""
+    if (
+        device == "cuda"
+        and amp_dtype == torch.bfloat16
+        and not torch.cuda.is_bf16_supported()
+    ):
+        pytest.skip("CUDA BF16 is unavailable on this device")
+    target_device = torch.device(device)
+
+    def observation(values):
+        state = torch.tensor(values, dtype=source_dtype, device=target_device).reshape(
+            -1, 1
+        )
+        return {
+            "policy": state,
+            "critic": torch.cat((state, torch.ones_like(state)), dim=-1),
+        }
+
+    class Env:
+        num_envs = 3
+        device = target_device
+
+        def reset(self):
+            return observation([1, 2, 3]), {}
+
+        def step(self, action):
+            terminal = observation([5, 7, 11])
+            info = {"terminal_observation": terminal}
+            if compact:
+                ids = torch.tensor([1], device=target_device)
+                info.update(
+                    terminal_env_ids=ids,
+                    terminal_observation={
+                        key: value[ids] for key, value in terminal.items()
+                    },
+                )
+            return (
+                observation([5, 99, 11]),
+                torch.ones(3, device=target_device),
+                torch.tensor([False, False, False], device=target_device),
+                torch.tensor([False, True, False], device=target_device),
+                info,
+            )
+
+    critic = nn.Linear(2, 1, bias=False)
+    with torch.no_grad():
+        critic.weight.fill_(1.0)
+    policy = ActorCritic(
+        1,
+        1,
+        target_device,
+        nn.Linear(1, 1),
+        critic,
+        critic_obs_dim=2,
+        actor_obs_groups=("policy",),
+        critic_obs_groups=("critic",),
+    )
+    buffer = RolloutBuffer(3, 1, 1, 1, target_device, critic_obs_dim=2)
+    collector = SyncCollector(Env(), policy, target_device)
+    with torch.autocast(
+        device_type=device, dtype=amp_dtype, enabled=amp_dtype is not None
+    ):
+        rollout = collector.collect(1, buffer.start_rollout())
+    assert rollout["timeout_value"].dtype == rollout["value"].dtype == torch.float32
+    torch.testing.assert_close(
+        rollout["timeout_value"][1, 0], torch.tensor(8.0, device=target_device)
+    )
+    assert torch.isnan(rollout["timeout_value"][[0, 2], 0]).all()
+    torch.testing.assert_close(
+        rollout["obs"][1, 1], torch.tensor([99.0], device=target_device)
+    )
 
 
 @pytest.mark.parametrize("tensor_dict_info", [False, True])

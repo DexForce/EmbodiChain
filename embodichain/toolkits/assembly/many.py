@@ -25,7 +25,7 @@ from typing import Any
 
 import numpy as np
 
-from .adapter import load_mjfit, import_mjcf
+from .adapter import load_mjfit, import_mjcf, _json_configuration
 from .model import AssemblyAsset
 
 __all__ = ["build_many_pegs"]
@@ -131,7 +131,7 @@ def build_many_pegs(
             assemblies[-1]["sampled_config"] = sampled_configs[index]
     if len(bodies) != 2 * count:
         raise RuntimeError("The many-pegs grid contains unexpected physical bodies.")
-    asset.config = {
+    configuration = {
         "kind": "many_pegs",
         "count": count,
         "family": family,
@@ -140,7 +140,8 @@ def build_many_pegs(
         "assemblies": assemblies,
     }
     if geometry_parameters:
-        asset.config["geometry_parameters"] = geometry_parameters
+        configuration["geometry_parameters"] = geometry_parameters
+    asset.config = _json_configuration(configuration)
     asset.generator_version = mjfit.__version__
     if cache_dir is not None:
         asset.save(Path(cache_dir) / f"{asset.content_hash}.json")

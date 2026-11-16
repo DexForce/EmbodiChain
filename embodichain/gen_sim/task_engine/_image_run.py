@@ -49,6 +49,7 @@ def _plan_image_task(
     *,
     task_id: str = "image_task",
     services: GenSimServices | None = None,
+    max_repairs: int = 1,
 ) -> Path:
     """Generate and publish a fresh semantic plan without initializing simulation."""
     image_path = image_path.expanduser().resolve(strict=True)
@@ -56,7 +57,11 @@ def _plan_image_task(
     with WorkflowRunArtifacts(output) as artifacts:
         try:
             result = generate_semantic_task_graph_from_image(
-                image_path, instruction, task_id=task_id, services=services
+                image_path,
+                instruction,
+                task_id=task_id,
+                services=services,
+                max_repairs=max_repairs,
             )
         except SemanticPlanningError as error:
             failure = output.with_name(

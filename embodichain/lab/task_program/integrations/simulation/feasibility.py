@@ -55,7 +55,7 @@ from embodichain.lab.sim.motion.expansion import (
     ValidationResult,
 )
 from embodichain.lab.task_program.integrations.scene_expansion import (
-    execute_scene_variant,
+    execute_scene_variants,
 )
 from .scene_expansion import SimulationSceneExpansionHost
 
@@ -443,10 +443,12 @@ class TaskProgramFeasibilityHost:
                 return result
 
             host = SimulationSceneExpansionHost(
-                env, initial_validator=initial, settle_steps=self._settle_steps
+                env,
+                initial_validator=lambda row: initial(),
+                settle_steps=self._settle_steps,
             )
-            prepared = host(candidate.scene)
-            snapshot = host.initial_state
+            prepared = host({0: candidate.scene})[0]
+            snapshot = host.initial_states[0]
             snapshot_id = prepared.initial_state_id
             for stage in ("semantics", "geometry"):
                 relevant = next(
@@ -553,7 +555,7 @@ class TaskProgramFeasibilityHost:
                 return CandidateEvaluation(
                     candidate.candidate_id, tuple(checks), initial_state_id=snapshot_id
                 )
-            restored_preparation = host.restore_initial_state(snapshot)
+            restored_preparation = host.restore_initial_states({0: snapshot})[0]
             snapshot_id = restored_preparation.initial_state_id
             if not restored_preparation.validation.accepted:
                 return CandidateEvaluation(
@@ -760,12 +762,12 @@ class TaskProgramFeasibilityHost:
 
                 try:
                     with _planning_budget_scope(budget):
-                        outcome = execute_scene_variant(
+                        outcome = execute_scene_variants(
                             env,
-                            candidate.scene,
-                            prepare_scene=lambda _: restored_preparation,
-                            measured_validator=measured,
-                        )
+                            {0: candidate.scene},
+                            prepare_scene=lambda variants: {0: restored_preparation},
+                            measured_validator=lambda row: measured(),
+                        )[0]
                 except TaskProgramBridgeError as error:
                     if self._step_error is not None:
                         raise self._step_error from error

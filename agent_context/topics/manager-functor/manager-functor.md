@@ -188,9 +188,9 @@ helper. See [profiling](../env-framework/profiling.md).
 ### Camera recording
 
 `record_camera_data` is an interval event, independent of policy dataset
-recording. It renders its camera group before reading the buffers because
-interval events precede observation rendering. Views use arena-relative camera
-extrinsics. It retains separate owned CPU frames and episode counters per row.
+recording. It renders all groups belonging to its camera before reading buffers
+because interval events precede observation rendering. Views use arena-relative
+camera extrinsics. It retains separate owned CPU frames and episode counters per row.
 It captures only the event's selected `env_ids` within `max_env_num`, preserving
 their original arena IDs; `None` captures all views within that limit. Selected
 save/discard only touches those rows. `fps=None` follows control frequency for
