@@ -608,6 +608,8 @@ def run_gym_expansion_workloads(
                     "sensor",
                     "expert_trajectory",
                     "actions",
+                    "control_parts",
+                    "active_joint_ids",
                 )
                 if hasattr(cfg, name)
             }
@@ -617,18 +619,6 @@ def run_gym_expansion_workloads(
         raise ValueError(
             "workloads must share physical environment, robot, sensors, cadence and expert action schema"
         )
-
-    def control_schema(raw: Mapping[str, Any]) -> tuple:
-        cls = REGISTERED_ENVS[raw["id"]].cls
-        return (
-            tuple(getattr(cls, "control_parts", None) or ()),
-            tuple(getattr(cls, "active_joint_ids", ())),
-        )
-
-    if any(
-        control_schema(raw) != control_schema(configs[0][0]) for raw, _ in configs[1:]
-    ):
-        raise ValueError("workloads must share the expert controlled-joint schema")
 
     owner = source = None
     groups: dict[str, Any] = {}

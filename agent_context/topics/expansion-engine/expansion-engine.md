@@ -46,7 +46,10 @@ configured jobs. `sampled_rigid_v1` collision profiles independently check all
 physical box/plane scene bodies and task predicates from measured states. Their
 robot-base transforms are rebound after each cohort's scene preparation.
 State-only jobs retain independent and robot-mounted ContactSensors while
-omitting cameras; contact acquisition does not require media capture.
+omitting cameras; contact acquisition does not require media capture. Sustained
+contact windows round off-grid durations upward, allowing only ULP-scale grid
+roundoff. Their elapsed time sums measured physics intervals within the bounded
+window; it does not subtract accumulated World clocks.
 Immutable recipes declare
 source/backend/phase/scope and shared-resource compatibility; the host checks them
 before mutating the World.

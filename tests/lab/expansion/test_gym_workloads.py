@@ -157,7 +157,14 @@ def test_admission_expiry_race_only_suppresses_budget_exhaustion(stop):
 
 
 @pytest.mark.parametrize(
-    "difference", [None, "position_velocity", "use_action_manager", "joint_selection"]
+    "difference",
+    [
+        None,
+        "position_velocity",
+        "use_action_manager",
+        "active_joint_ids",
+        "joint_order",
+    ],
 )
 def test_workload_action_schema_checked_before_constructing_world(
     tmp_path, monkeypatch, difference
@@ -173,6 +180,16 @@ def test_workload_action_schema_checked_before_constructing_world(
 
     factory = Mock(side_effect=ReachedWorld)
     monkeypatch.setattr(host, "GymExpansionHost", factory)
+    from copy import deepcopy
+    from pathlib import Path
+    from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+    from embodichain.utils.utility import load_config
+
+    deployment = (
+        Path(__file__).resolve().parents[3]
+        / "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
+    )
+    base = utils.config_to_cfg(load_config(deployment), source_path=deployment)
     workloads, configs = [], {}
     for i, name in enumerate(("first", "second")):
         deployment = tmp_path / f"{name}.json"
@@ -185,26 +202,19 @@ def test_workload_action_schema_checked_before_constructing_world(
             ),
             use_action_manager=bool(i and difference == "use_action_manager"),
         )
-        configs[name] = SimpleNamespace(
-            robot=SimpleNamespace(
-                to_dict=lambda: {
-                    "joint_names": ["a", "b"],
-                    "control_parts": {"arm": [0, 1]},
-                }
-            ),
-            expert_trajectory=expert,
-        )
-        cls = type(
-            f"Env{i}",
-            (),
-            {
-                "control_parts": ["arm"],
-                "active_joint_ids": (
-                    [1] if i and difference == "joint_selection" else [0]
-                ),
-            },
-        )
-        monkeypatch.setitem(REGISTERED_ENVS, name, SimpleNamespace(cls=cls))
+        config = deepcopy(base)
+        config.expert_trajectory = expert
+        config.control_parts = ["arm"]
+        config.active_joint_ids = []
+        if difference in ("active_joint_ids", "joint_order"):
+            config.control_parts = None
+            config.active_joint_ids = (
+                [i] if difference == "active_joint_ids" else ([1, 0] if i else [0, 1])
+            )
+        configs[name] = config
+        # Configured tasks share this implementation class. Selection belongs
+        # to the resolved configs above, never to artificial per-task classes.
+        monkeypatch.setitem(REGISTERED_ENVS, name, SimpleNamespace(cls=EmbodiedEnv))
         cfg = ExpansionRunCfg(
             deployment=str(deployment),
             output_dir=str(tmp_path / name),
@@ -243,3 +253,71 @@ def test_workload_action_schema_checked_before_constructing_world(
                 workloads, execution, output_dir=tmp_path / "run"
             )
         factory.assert_not_called()
+
+
+def test_real_deployments_with_shared_class_reject_different_control_parts(
+    tmp_path, monkeypatch
+):
+    from pathlib import Path
+    from embodichain.lab.expansion import ExpansionRunCfg
+    from embodichain.lab.expansion.task_program_jobs import _prepare_deployment
+    from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+    from embodichain.lab.gym.utils.gym_utils import config_to_cfg
+    from embodichain.lab.gym.utils.registration import REGISTERED_ENVS
+    from embodichain.utils.utility import load_config
+    import embodichain.lab.expansion.host as host
+
+    import yaml
+
+    task = (
+        Path(__file__).resolve().parents[3]
+        / "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
+    )
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    base = load_config(_prepare_deployment(task, inputs))
+    workloads = []
+    for name, parts in (("Arm", ["arm"]), ("ArmEef", ["arm", "eef"])):
+        component = load_config(task.parent / "envs/default.yaml")
+        component["env"]["control_parts"] = parts
+        physical = inputs / f"{name}.environment.yaml"
+        physical.write_text(yaml.safe_dump(component))
+        declaration = {
+            **base,
+            "id": f"WorkloadControlSchema-{name}-v1",
+            "environment": {"component": str(physical)},
+        }
+        path = inputs / f"{name}.json"
+        path.write_text(json.dumps(declaration))
+        config = config_to_cfg(declaration, source_path=path)
+        assert config.control_parts == parts
+        assert REGISTERED_ENVS[declaration["id"]].cls is EmbodiedEnv
+        cfg = ExpansionRunCfg(
+            deployment=str(path),
+            output_dir=str(tmp_path / name),
+            max_steps=20,
+            settling_steps=1,
+        )
+        workloads.append(
+            GymExpansionWorkload(
+                name,
+                cfg,
+                {
+                    "input_files": {
+                        "deployment": hashlib.sha256(path.read_bytes()).hexdigest()
+                    }
+                },
+                {},
+            )
+        )
+    constructor = Mock(side_effect=AssertionError("World must not be constructed"))
+    monkeypatch.setattr(host, "GymExpansionHost", constructor)
+    with pytest.raises(ValueError, match="schema"):
+        run_gym_expansion_workloads(
+            workloads,
+            WorkloadExecutionCfg(
+                workload_count=2, batch_size=1, max_steps=20, settling_steps=1
+            ),
+            output_dir=tmp_path / "run",
+        )
+    constructor.assert_not_called()

@@ -276,8 +276,17 @@ def _probe(output):
             ],
         }
         for backend in ("geometry", "native_contacts"):
+            selected = dict(configuration)
+            if backend == "native_contacts":
+                selected["contact_hold"] = {
+                    "entity": "cube",
+                    "links": ["gripper_finger1_link_1", "gripper_finger2_link_1"],
+                    "duration_s": env.step_dt * 1.4,
+                    "max_translation_drift_m": 0.001,
+                    "max_rotation_drift_rad": 0.001,
+                }
             check = MeasuredExpansionValidator(
-                env, configuration, Path(output) / backend, backend=backend
+                env, selected, Path(output) / backend, backend=backend
             )
             try:
                 check.prepare()
@@ -293,6 +302,13 @@ def _probe(output):
                 assert check.terminal[1] is peer and 0 not in check.terminal
                 if backend == "native_contacts":
                     assert check.rows[1].substeps > 0 and check.rows[0].substeps == 0
+                    # The clock uses the same native physics intervals that
+                    # supplied contact evidence, independently of World time.
+                    report = check.rows[1]._hold_report()
+                    assert report["samples"] == report["required_samples"] == 3
+                    assert report["elapsed_duration_s"] == pytest.approx(
+                        2 * env.step_dt
+                    )
             finally:
                 check.close()
     finally:

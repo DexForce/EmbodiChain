@@ -28,7 +28,7 @@ pytestmark = pytest.mark.no_sim
 
 @pytest.fixture
 def contact_row(tmp_path):
-    def build(duration=0.25, ground=False):
+    def build(duration=0.25, ground=False, frequency=10):
         asset = tmp_path / "robot.urdf"
         asset.write_text(
             '<robot name="test"><link name="root"/><link name="left"/><link name="right"/></robot>'
@@ -45,7 +45,7 @@ def contact_row(tmp_path):
 
         sensor = SimpleNamespace(get_actor_ids=actor_ids)
         env = SimpleNamespace(
-            control_frequency=10,
+            control_frequency=frequency,
             robot=SimpleNamespace(
                 uid="robot",
                 link_names=["root", "left", "right"],
@@ -83,31 +83,96 @@ def contact_row(tmp_path):
     return build
 
 
-@pytest.mark.parametrize("duration,required", [(0.25, 4), (0.025, 2), (0.3, 4)])
+@pytest.fixture
+def sample_contacts():
+    """Feed the production observer/sample boundary using explicit physics intervals."""
+    from unittest.mock import Mock
+    from embodichain.lab.expansion.acceptance import MeasuredExpansionValidator
+    from embodichain.lab.expansion.contracts import ValidationCheck, ValidationResult
+
+    def build(row):
+        passed = ValidationResult((ValidationCheck("task.success", "passed"),))
+        row.monitor = SimpleNamespace(observe=Mock(), validation=lambda env: passed)
+        row.active = True
+        state = SimpleNamespace(
+            pose=torch.tensor([[0.0, 0, 0, 0, 0, 0, 1]]),
+            contacts=torch.ones((1, 2), dtype=torch.bool),
+        )
+        row.env.sim.get_rigid_object = lambda uid: SimpleNamespace(
+            get_local_pose=lambda: state.pose
+        )
+        row.env.sim.simulation_time = 0.0
+        row.env.sim.physics_step_index = 0
+        row.sensor.get_data = lambda: {
+            "user_ids": torch.tensor([[[11, 2], [11, 3]]]),
+            "is_valid": state.contacts,
+            "impulse_valid": torch.ones((1, 2), dtype=torch.bool),
+        }
+        validator = object.__new__(MeasuredExpansionValidator)
+        validator.rows = {0: row}
+        validator.sensor = row.sensor
+        validator.checker = SimpleNamespace(
+            check=lambda: torch.zeros((1, 3), dtype=torch.int64)
+        )
+        validator.terminal, validator.results = {}, {}
+
+        def sample(dts=None):
+            validator.begin_control_step()
+            for dt in ((1 / row.env.control_frequency,) if dts is None else dts):
+                row.env.sim.simulation_time += dt
+                row.env.sim.physics_step_index += 1
+                validator.after_sample(dt, None)
+            validator.sample((0,), None)
+            return row.terminal[0]
+
+        return sample, state
+
+    return build
+
+
+@pytest.mark.parametrize(
+    "duration,frequency,required",
+    [
+        (0.25, 10, 4),
+        (0.025, 10, 2),
+        (0.3, 10, 4),
+        (0.14, 50, 8),
+        (0.07, 100, 8),
+        (0.1400000001, 50, 9),
+        (0.0700000001, 100, 9),
+    ],
+)
 def test_contact_hold_requires_full_duration_and_distinct_measured_times(
-    contact_row, duration, required
+    contact_row, sample_contacts, duration, frequency, required
 ):
-    row = contact_row(duration, ground=True)
-    pose = [0, 0, 0, 0, 0, 0, 1]
-    for i in range(required - 1):
-        row.samples.append((pose.copy(), [True, True], i / 10))
-    assert not row._hold_report()["passed"]
-    row.samples.append((pose.copy(), [True, True], (required - 1) / 10))
+    row = contact_row(duration, ground=True, frequency=frequency)
+    sample, state = sample_contacts(row)
+    for _ in range(required - 1):
+        assert not sample().accepted
+    assert sample().accepted
     report = row._hold_report()
-    assert report["passed"]
-    assert report["elapsed_duration_s"] >= duration
-    assert row.samples.maxlen == required
-    # Enough samples at one physical instant cannot establish a hold duration.
-    row.samples.clear()
-    row.samples.extend((pose.copy(), [True, True], 0.0) for _ in range(required))
+    assert report["elapsed_duration_s"] >= duration - 1e-15
+    assert report["required_samples"] == required
+    # Repeated observations without physics cannot establish a hold.
+    row.reset()
+    row.active = True
+    for _ in range(required):
+        assert not sample(()).accepted
     assert not row._hold_report()["passed"]
-    row.samples.clear()
-    row.samples.extend((pose.copy(), [True, True], i / 10) for i in range(required))
-    row.samples[-1][1][0] = False
-    assert not row._hold_report()["passed"]
-    row.samples[-1][1][0] = True
-    row.samples[-1][0][0] = 0.1
-    assert not row._hold_report()["passed"]
+    row.reset()
+    row.active = True
+    for _ in range(required - 1):
+        sample()
+    state.contacts[0, 0] = False
+    assert not sample().accepted
+    row.reset()
+    row.active = True
+    state.contacts.fill_(True)
+    for _ in range(required - 1):
+        sample()
+    state.pose[0, 0] = 0.1
+    assert not sample().accepted
+    assert row._hold_report()["max_translation_drift_m"] == pytest.approx(0.1)
 
 
 @pytest.mark.parametrize("ground", [False, True])
@@ -119,24 +184,44 @@ def test_native_contacts_only_resolve_present_default_plane(contact_row, ground)
     assert ("default_plane" in row.frames.values()) is ground
 
 
-def test_contact_sampling_uses_measured_world_time(contact_row):
-    from unittest.mock import Mock
-    from embodichain.lab.expansion.contracts import ValidationCheck, ValidationResult
-
+def test_contact_sampling_uses_measured_physics_intervals(contact_row, sample_contacts):
     row = contact_row(ground=True)
-    passed = ValidationResult((ValidationCheck("task.success", "passed"),))
-    row.monitor = SimpleNamespace(observe=Mock(), validation=lambda env: passed)
-    row.env.sim.get_rigid_object = lambda uid: SimpleNamespace(
-        get_local_pose=lambda: torch.tensor([[0.0, 0, 0, 0, 0, 0, 1]])
-    )
-    row.sensor.get_data = lambda: {
-        "user_ids": torch.tensor([[[11, 2], [11, 3]]]),
-        "is_valid": torch.ones((1, 2), dtype=torch.bool),
-        "impulse_valid": torch.ones((1, 2), dtype=torch.bool),
-    }
-    for timestamp, accepted in ((0.0, False), (0.1, False), (0.2, False), (0.3, True)):
-        row.env.sim.simulation_time = timestamp
-        row._interval_samples = 1
-        row.sample((0,), None)
-        assert row.terminal[0].accepted is accepted
-    assert row._hold_report()["elapsed_duration_s"] == 0.3
+    sample, _ = sample_contacts(row)
+    for accepted in (False, False, False, True):
+        assert sample().accepted is accepted
+    assert row._hold_report()["elapsed_duration_s"] == pytest.approx(0.3)
+
+
+@pytest.mark.parametrize("prior_steps", [500_000, 5_000_000])
+@pytest.mark.parametrize("physics_dt,passed", [(0.001, True), (0.0009999, False)])
+def test_hold_clock_is_independent_of_long_running_world_roundoff(
+    contact_row, sample_contacts, prior_steps, physics_dt, passed
+):
+    row = contact_row(0.7, ground=True, frequency=100)
+    sample, _ = sample_contacts(row)
+    clock = 0.0
+    for _ in range(prior_steps):
+        clock += 0.001
+    row.env.sim.simulation_time = clock
+    row.env.sim.physics_step_index = prior_steps
+    # 71 samples span 700 steps; verify additional rolling windows as well.
+    for index in range(80):
+        result = sample((physics_dt,) * 10)
+        assert result.accepted is (passed and index >= 70)
+    report = row._hold_report()
+    assert report["elapsed_duration_s"] == pytest.approx(700 * physics_dt, abs=1e-15)
+    assert row.env.sim.simulation_time > clock
+    assert report["passed"] is passed
+
+
+def test_hold_clock_follows_variable_physics_intervals(contact_row, sample_contacts):
+    row = contact_row(0.25, ground=True, frequency=10)
+    sample, _ = sample_contacts(row)
+    for intervals, passed in (
+        ((0.03, 0.07), False),
+        ((0.02, 0.08), False),
+        ((0.01, 0.04, 0.05), False),
+        ((0.04, 0.06), True),
+    ):
+        assert sample(intervals).accepted is passed
+    assert row._hold_report()["elapsed_duration_s"] == pytest.approx(0.3)

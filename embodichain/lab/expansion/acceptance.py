@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from collections import deque
+from itertools import islice
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 from collections.abc import Mapping, Sequence
@@ -268,12 +269,18 @@ class _ContactRow(_GeometryRow):
             0,
         )
         self.hold = configuration.get("contact_hold")
-        count = (
-            math.ceil(self.hold["duration_s"] * env.control_frequency) + 1
-            if self.hold
-            else 1
-        )
+        count = 1
+        if self.hold:
+            intervals = self.hold["duration_s"] * env.control_frequency
+            nearest = round(intervals)
+            # Multiplication can place an exact grid duration just above an
+            # integer (e.g. 0.14 * 50). Only normalize floating-point roundoff;
+            # genuinely off-grid holds still round upward.
+            if abs(intervals - nearest) <= 2 * math.ulp(intervals):
+                intervals = nearest
+            count = max(1, math.ceil(intervals)) + 1
         self.samples = deque(maxlen=count)
+        self._interval_dts: list[float] = []
         self.sensor = sensor
         self.frames = {}
         for link, actor in zip(
@@ -317,6 +324,7 @@ class _ContactRow(_GeometryRow):
             0,
         )
         self.samples.clear()
+        self._interval_dts.clear()
 
     def prepare(self, snapshot=None):
         super().prepare(snapshot)
@@ -326,6 +334,7 @@ class _ContactRow(_GeometryRow):
     def begin_control_step(self):
         self._bad = None
         self._interval_samples = 0
+        self._interval_dts.clear()
 
     def before_sample(self):
         return None
@@ -338,7 +347,10 @@ class _ContactRow(_GeometryRow):
         }
         if len(self.samples) != self.samples.maxlen:
             return {**report, "passed": False}
-        elapsed = self.samples[-1][2] - self.samples[0][2]
+        # The first pose starts the hold; count only subsequent measured
+        # physics intervals. Bounded-window fsum avoids subtracting accumulated
+        # World clocks, whose rounding error grows throughout a collection.
+        elapsed = math.fsum(sample[2] for sample in islice(self.samples, 1, None))
         report.update(
             elapsed_duration_s=elapsed, required_duration_s=self.hold["duration_s"]
         )
@@ -357,9 +369,15 @@ class _ContactRow(_GeometryRow):
         )
         report["passed"] = (
             (
-                elapsed >= self.hold["duration_s"]
-                or math.isclose(
-                    elapsed, self.hold["duration_s"], rel_tol=1e-12, abs_tol=1e-12
+                elapsed > 0
+                and (
+                    elapsed >= self.hold["duration_s"]
+                    or math.isclose(
+                        elapsed,
+                        self.hold["duration_s"],
+                        rel_tol=0,
+                        abs_tol=2 * math.ulp(self.hold["duration_s"]),
+                    )
                 )
             )
             and report["both_fingers_samples"] == self.samples.maxlen
@@ -406,7 +424,8 @@ class _ContactRow(_GeometryRow):
                 .get_local_pose()[self.env_id]
                 .tolist()
             )
-            self.samples.append((pose, touching, self.env.sim.simulation_time))
+            self.samples.append((pose, touching, math.fsum(self._interval_dts)))
+            self._interval_dts.clear()
             report = (
                 self._hold_report()
                 if terminal.accepted
@@ -586,6 +605,8 @@ class MeasuredExpansionValidator:
         for check in active:
             check.substeps += 1
             check._interval_samples += 1
+            if check.hold:
+                check._interval_dts.append(dt)
             code, actor_a, actor_b = summaries[check.env_id]
             if code:
                 check._bad = f"native contact evidence rejected: code={code}; actors={actor_a},{actor_b}"

@@ -44,7 +44,8 @@ existing session, frame collector, episode assembler and confirmed artifact sink
 Different integration/grasp policies may share that World only when their
 physical configuration, program, cadence and expert action schema agree.
 Command mode, ActionManager declarations and controlled-joint selections cannot
-vary between workloads in one World. Physical/visual/prototype
+vary between workloads in one World. Selections belong to the resolved environment
+configurations, not the shared registered environment implementation class. Physical/visual/prototype
 operators remain on the cohort API; unsupported payloads fail explicitly.
 Explicit contact sampling conventions may differ per integration through
 `SimulationTaskProgramAdapterFactory.create_adapter(grasp_contact_frames=...)`;
