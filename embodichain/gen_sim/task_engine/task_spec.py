@@ -56,6 +56,12 @@ def task_spec_from_candidate(
     candidate/bundle layer.  Candidate IDs and the legacy step hash are kept
     only in metadata and therefore do not define the reusable semantic hash.
     """
+    return _project_candidate(candidate, metadata=metadata)
+
+
+def _project_candidate(
+    candidate, *, metadata=None, policy="grounded_state_slots/v2", grounding=None
+):
     selected = validate_task_candidate(candidate)
     draft = selected["draft"]
     references = selected["scene_request"]["references"]
@@ -123,7 +129,8 @@ def task_spec_from_candidate(
 
     for step in steps:
         if (
-            step["task_type"] in {"E1", "E2"}
+            policy != "legacy_state_slots/v1"
+            and step["task_type"] in {"E1", "E2"}
             and step.get("terminal_behavior") == "hold"
         ):
             args = {
@@ -133,7 +140,29 @@ def task_spec_from_candidate(
             if step.get("required_arm") not in {None, "none", "auto"}:
                 args["required_arm"] = step["required_arm"]
             step_goals[step["id"]].append(Predicate("held", args))
-    goals, goal_sources = _terminal_goals(steps, step_roles, step_goals)
+    identities = {}
+    if grounding is not None and policy == "grounded_state_slots/v2":
+        references_by_role = {}
+        for role, refs in {
+            r.name: [
+                str(ref["reference_id"])
+                for ref in references
+                if reference_roles[_reference_key(ref)] == r.name
+            ]
+            for r in role_specs
+        }.items():
+            members = tuple(
+                sorted({uid for ref in refs for uid in grounding["bindings"][ref]})
+            )
+            if members:
+                identities[role] = references_by_role.setdefault(members, role)
+    goals, goal_sources = _terminal_goals(
+        steps,
+        step_roles,
+        step_goals,
+        identities=identities,
+        terminal_holds=policy != "legacy_state_slots/v1",
+    )
     requirements = _requirements(role_specs, steps, goals)
     milestones = []
     milestone_sources = {}
@@ -179,7 +208,11 @@ def task_spec_from_candidate(
         "candidate_id": selected["candidate_id"],
         "legacy_semantic_hash": selected["semantic_hash"],
         "task_candidate_schema": draft["schema_version"],
-        "terminal_goal_policy": "explicit_state_slots/v1",
+        "terminal_goal_policy": (
+            "grounded_state_slots/v2"
+            if policy == "grounded_state_slots/v2"
+            else "explicit_state_slots/v1"
+        ),
         "instruction_coverage": "validated_draft_only",
         "step_roles": step_roles,
         "role_references": {
@@ -209,6 +242,20 @@ def task_spec_from_candidate(
     )
     validate_task_spec(template)
     return template
+
+
+def _published_projection(candidate, spec, grounding=None):
+    """Match frozen contracts against their supported historical projection rules."""
+    policies = (
+        ["grounded_state_slots/v2"]
+        if spec.metadata.get("terminal_goal_policy") == "grounded_state_slots/v2"
+        else ["legacy_state_slots/v1", "terminal_grasp_slots/v1"]
+    )
+    for policy in policies:
+        projected = _project_candidate(candidate, policy=policy, grounding=grounding)
+        if projected.to_dict() == spec.to_dict():
+            return projected
+    raise ValueError("Semantic plan TaskSpec differs from source")
 
 
 def task_template_from_candidate(
@@ -400,6 +447,9 @@ def _terminal_goals(
     steps: list[Mapping[str, Any]],
     roles: Mapping[str, Mapping[str, str]],
     achievements: Mapping[str, list[Predicate]],
+    *,
+    identities: Mapping[str, str] | None = None,
+    terminal_holds: bool = True,
 ) -> tuple[list[Predicate], dict[str, list[str]]]:
     # State slots can be superseded; historical achievements remain milestones.
     slots: dict[tuple[str, str], tuple[Predicate, str]] = {}
@@ -407,6 +457,7 @@ def _terminal_goals(
     for step in steps:
         step_id, kind = str(step["id"]), str(step["task_type"])
         subject = roles[step_id]["object"]
+        subject = (identities or {}).get(subject, subject)
         predicates = achievements[step_id]
         if kind in {"E1", "E3", "E4", "E5"}:
             slots.pop((subject, "placement"), None)
@@ -417,7 +468,7 @@ def _terminal_goals(
         if kind == "E2":
             slots.pop((subject, "attachment"), None)
             slots.pop((subject, "orientation_preserve"), None)
-            if step.get("terminal_behavior") == "hold":
+            if terminal_holds and step.get("terminal_behavior") == "hold":
                 slots.pop((subject, "placement"), None)
             previous = slots.get((subject, "placement"))
             if previous is not None and previous[0].arguments.get("relation") not in {

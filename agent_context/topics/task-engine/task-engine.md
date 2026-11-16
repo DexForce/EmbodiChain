@@ -215,3 +215,12 @@ bound targets for different per-occurrence landing poses. Legacy configured
 transport lowerers retain their own targets and geometry. Pour omission checks
 operate on affirmative action clauses; noun uses and explicit prohibitions do
 not create pouring obligations. Input paths expand before any model requests.
+
+
+New template image plans project surviving terminal state after grounding, using
+exact entity-member sets to recognize different references to the same object.
+The normative metadata records `grounded_state_slots/v2`. Display and revision
+of frozen image plans match their exact historical projection, including both
+legacy `explicit_state_slots/v1` variants; neither operation upgrades their
+normative predicates or evidence identity. Grounding cannot silently retarget a
+source clause whose terminal target was superseded.

@@ -1553,3 +1553,89 @@ def test_hybrid_cli_compiles_pick_place_and_rejects_hinge(
     check = read("deployment_preflight")
     assert check["compilation"] == "rejected" and not check["execution_ready"]
     assert "closing_direction_unsupported" in {i["code"] for i in check["issues"]}
+
+
+@pytest.mark.parametrize("version", [0, 1])
+def test_frozen_hold_projection_stays_viewable_and_revisable(
+    source_image, tmp_path, monkeypatch, version
+):
+    from embodichain.gen_sim.task_spec import TaskSpec, canonical_hash
+    from embodichain.gen_sim.task_spec.publication import freeze_task_spec
+    from embodichain.gen_sim.task_engine import _image_run
+    from embodichain.gen_sim.task_engine._review import write_review
+    from embodichain.gen_sim.workflow import load_task_plan, revise_task_plan
+
+    frozen = json.loads(
+        (Path(__file__).with_name("data") / "hold_projection_history.json").read_text()
+    )
+    result = _plan(source_image, "E2", _terminal_hold("E2"))
+    assert result["task_candidates"]["candidates"][0] == frozen["candidate"]
+    spec = TaskSpec.from_dict(frozen["projections"][version]["task_spec"])
+    old = result["task_spec_v1"]
+    result["task_spec"] = spec.to_dict()
+    result["task_spec_v1"] = freeze_task_spec(
+        spec,
+        image_ref=old["inputs"]["image"]["ref"],
+        image_sha256=old["inputs"]["image"]["sha256"],
+        role_descriptions=old["configuration"]["descriptions"],
+        interpretation=old["interpretation"]["references"],
+        generalization=[],
+        interpreted_steps=frozen["candidate"]["draft"]["steps"],
+    )
+    result["semantic_graph_validation"]["task_spec_digest"] = canonical_hash(
+        spec.to_dict()
+    )
+    monkeypatch.setattr(
+        _image_run,
+        "generate_semantic_task_graph_from_image",
+        lambda *a, **kw: deepcopy(result),
+    )
+    parent = _image_run.plan_image_task(
+        source_image, "执行测试任务", tmp_path / "old", task_id="case"
+    )
+    plan = load_task_plan(parent)
+    write_review(parent, tmp_path / "old.html")
+    step, grounding, proposal = _fixture("E2")
+    _terminal_hold("E2")(step, grounding, proposal)
+    revised = revise_task_plan(
+        parent,
+        proposal,
+        tmp_path / "revised",
+        expected_spec_digest=plan["spec_digest"],
+        expected_graph_digest=plan["semantic_graph_sha256"],
+        expected_plan_digest=plan["plan_digest"],
+    )
+    assert load_task_plan(revised)["spec_digest"] == plan["spec_digest"]
+
+
+def test_grounded_alias_release_retires_previous_grasp(source_image):
+    first, grounding, plan = _fixture("E2")
+    _terminal_hold("E2")(first, grounding, plan)
+    first["object"] = _selector("cube")
+    second, extra, placement = _fixture("E1")
+    second.update(id="step_02", object=_selector("red cube"), depends_on=["step_01"])
+    grounding["bindings"].update(
+        {"step_02.object": ["source"], "step_02.target": ["tray"]}
+    )
+    node = placement["nodes"][-1]
+    node.update(id="n2", step_id="step_02", depends_on=["n1"])
+    plan["nodes"].append(node)
+    plan["requirements"][0]["node_ids"].append("n2")
+    result = generate_semantic_task_graph_from_image(
+        source_image,
+        "执行测试任务",
+        task_id="case",
+        instruction_caller=lambda **kw: dict(steps=[first, second]),
+        image_caller=lambda **kw: json.dumps(grounding),
+        planning_caller=lambda **kw: json.dumps(plan),
+    )
+    from embodichain.gen_sim.task_spec import TaskSpec, evaluate_task_spec
+
+    spec = TaskSpec.from_dict(result["task_spec"])
+    assert all(p.name != "held" for p in spec.goal)
+    assert any(p.name == "held" for p in spec.milestones[0].achieve)
+    observations = {p.id: True for p in spec.goal}
+    observations["trajectory"] = [
+        {p.id: True for p in m.achieve} for m in spec.milestones
+    ]
+    assert evaluate_task_spec(spec, observations).status.value == "satisfied"
