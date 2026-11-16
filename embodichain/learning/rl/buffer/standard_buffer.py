@@ -128,6 +128,12 @@ class RolloutBuffer:
                 dtype=torch.float32,
                 device=self.device,
             ),
+            "timeout_value": torch.full(
+                (self.num_envs, self.rollout_len + 1),
+                float("nan"),
+                dtype=torch.float32,
+                device=self.device,
+            ),
             "reward": torch.empty(
                 self.num_envs,
                 self.rollout_len + 1,
@@ -182,6 +188,7 @@ class RolloutBuffer:
             if key in self._rollout.keys():
                 del self._rollout[key]
         self._reset_padding_slot()
+        self._rollout["timeout_value"].fill_(float("nan"))
 
     def _reset_padding_slot(self) -> None:
         """Reset the last transition-only slot reused as padding."""
@@ -203,6 +210,7 @@ class RolloutBuffer:
             "action": (self.num_envs, self.rollout_len + 1, self.action_dim),
             "sample_log_prob": (self.num_envs, self.rollout_len + 1),
             "value": (self.num_envs, self.rollout_len + 1),
+            "timeout_value": (self.num_envs, self.rollout_len + 1),
             "reward": (self.num_envs, self.rollout_len + 1),
             "done": (self.num_envs, self.rollout_len + 1),
             "terminated": (self.num_envs, self.rollout_len + 1),

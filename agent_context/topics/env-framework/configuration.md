@@ -28,6 +28,12 @@ class MyTaskEnv(EmbodiedEnv):
    classes/types). A `RuntimeError` is raised otherwise.
 6. Use `override=True` to re-register an existing uid (useful in scripts/tests).
 
+In a source checkout, `embodichain_tasks/__init__.py` resolves the sibling
+`configs` package before eager registration. This keeps task code and resources
+in the same selected worktree even when an editable install maps configs to
+another checkout. Its temporary search path is removed before walking task
+modules; wheel installations retain their normal nested resource layout.
+
 ### Gym ID convention
 
 Format: `<TaskName>-v<N>` (e.g. `PourWater-v1`, `PushCubeRL`).

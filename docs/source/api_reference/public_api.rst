@@ -5100,6 +5100,17 @@ qualified DriverOpeningBinding type must be rebuilt with its Atomic owner.
 .. autoclass:: DriverOpeningBinding
    :members:
 
+Shared locomotion observation functor
+------------------------------------
+
+The observation package exposes task-built actor or critic state and preserves the
+existing locomotion configuration name while implementations move into a package.
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.observations
+
+.. autofunction:: velocity_locomotion_observation
+
+
 Stability execution ownership
 ----------------------------
 
