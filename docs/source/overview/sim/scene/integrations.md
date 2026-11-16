@@ -77,8 +77,8 @@ Two layers connect proposals to actual expert execution:
 
 | Owner | Responsibility |
 | --- | --- |
-| `embodichain/lab/task_program/integrations/scene_expansion.py` | `execute_scene_variant`: preparation callback, canonical Task Program execution, and measured result collection |
-| `embodichain/lab/task_program/integrations/simulation/scene_expansion.py` | `SimulationSceneExpansionHost`: fixed B=1 physical preparation and restoration, initial checks, sensor/history refresh, and fresh bridge creation |
+| `embodichain/lab/task_program/integrations/scene_expansion.py` | `execute_scene_variants`: preparation callback, canonical Task Program execution, and measured result collection |
+| `embodichain/lab/task_program/integrations/simulation/scene_expansion.py` | `SimulationSceneExpansionHost`: selected-row physical preparation and restoration, initial checks, sensor/history refresh, and fresh bridge creation |
 | `embodichain/lab/gym/envs/base_env.py`, `embodied_env.py`, `demo.py` | Reset ordering, environment stepping, observation/recording initialization, and persistence eligibility |
 
 The simulation host delegates numeric capture/restore, rigid-pose application,

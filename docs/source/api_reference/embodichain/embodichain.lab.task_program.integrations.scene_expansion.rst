@@ -1,12 +1,11 @@
 embodichain.lab.task_program.integrations.scene_expansion
 =========================================================
 
-This integration evaluates one
-:class:`~embodichain.lab.sim.scene.expansion.SceneVariant` through the existing
-Task Program and Gym demonstration execution path. An injected host prepares
-the physical scene; a separate validator supplies measured task evidence.
-The API currently requires a single environment row and an explicit or
-environment-configured Task Program.
+This integration evaluates an ordered mapping of physical environment rows to
+:class:`~embodichain.lab.sim.scene.expansion.SceneVariant` proposals through the
+existing batched Task Program and Gym demonstration path. An injected host
+prepares the selected rows together; a row-addressed validator supplies measured
+task evidence. The rows share an explicit or environment-configured Task Program.
 
 .. currentmodule:: embodichain.lab.task_program.integrations.scene_expansion
 
@@ -15,25 +14,27 @@ environment-configured Task Program.
 
    ScenePreparationResult
    SceneVariantEpisodeResult
-   execute_scene_variant
+   execute_scene_variants
 
 Preparation and execution boundary
 ----------------------------------
 
 The preparation callback applies or restores the candidate, settles physics,
 checks the actual initial state, saves its initial-state artifact, and refreshes
-recording observations and affected bindings. It returns a
-``ScenePreparationResult`` with the actual initial-state ID and nonempty
-``ValidationResult`` checks. Rejecting that initial state prevents execution.
+recording observations and affected bindings. It returns a mapping containing
+exactly the requested rows, each with a ``ScenePreparationResult`` holding the
+actual initial-state ID and nonempty ``ValidationResult`` checks. Rejecting an
+initial state prevents execution of that row while valid peers can proceed.
 Physical preparation and workspace screening are supplied by the caller at
 this layer; the fixed-candidate API does not instantiate a simulation host.
 For existing-rigid-object layouts, use
 :class:`~embodichain.lab.task_program.integrations.simulation.scene_expansion.SimulationSceneExpansionHost`
 with task-specific initial checks and measured acceptance.
 
-For valid initial states, ``execute_scene_variant`` creates a fresh bridge using
+For valid initial states, ``execute_scene_variants`` creates a fresh bridge using
 the canonical ``EmbodiedEnv.create_demo_segments(task_program=...)`` path and
-passes the resulting segments through ``execute_demo_episode``. Handwritten
+passes the resulting segments through ``execute_demo_episode`` with explicit
+``active_env_ids``. Physics still advances the whole World. Handwritten
 segment-planner overrides do not replace the selected Task Program. The normal
 Gym executor owns ``env.step()``. Automatic resets are suspended throughout
 preparation, execution, and measurement. Explicit resets during either callback
@@ -46,7 +47,9 @@ Measured acceptance and persistence
 ``SceneVariantEpisodeResult`` preserves initial checks, program execution, and
 measured task checks independently. ``program_completed`` records normal
 completion of the selected canonical bridge, and ``program_completion_mask``
-owns its single-row acceptance snapshot. The execution entry point leaves the
+owns its row-specific acceptance snapshot; ``env_id`` identifies the physical
+row. ``execution`` retains the complete batch result, while ``program_success``
+uses only that row's completion and success flags. The execution entry point leaves the
 mask empty when the bridge did not complete. ``program_success`` requires that
 bridge evidence and a successful demo execution. Generic Gym success from a
 legacy task override or early termination does not establish program completion.
@@ -56,7 +59,8 @@ failed measured goals cannot accept the scene. A completed program with
 projected effects still needs physical evidence from the measured validator.
 
 The attempt's proposal, actual initial-state identity, and validation evidence
-are published under ``scene_expansion`` in the existing episode metadata.
+are published per row under the existing ``episode_context`` source
+``scene_expansion/task_program``.
 Preparation provenance is owned and recursively immutable; ``to_metadata()``
 returns JSON-compatible values, including the canonical bridge completion
 evidence. While an attempt is active, reset cannot persist dataset, camera, or
@@ -72,7 +76,8 @@ recording before retrying, using ``env.reset(options={"save_data": False})``.
 
 The integration performs one attempt, propagates configuration and host errors,
 and creates no retry scheduler or persistence session. The caller closes the
-normal transaction with ``env.reset(options={"save_data": result.accepted})``.
+normal transaction by resetting the selected rows and supplying accepted row IDs
+as ``commit_env_ids``. Failed rows remain ineligible even when save is requested.
 An accepted execution is not confirmation that a dataset write succeeded.
 
 Injecting a host and measured validator
@@ -84,39 +89,38 @@ not substitute a constant passing check for physical evidence:
 
 .. code-block:: python
 
-   from collections.abc import Callable
+   from collections.abc import Callable, Mapping
 
    from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
    from embodichain.lab.sim.motion.expansion import ValidationResult
-   from embodichain.lab.sim.scene.expansion import (
-       FixedSceneCandidateSource,
-       SceneVariant,
-   )
+   from embodichain.lab.sim.scene.expansion import FixedSceneCandidateSource, SceneVariant
    from embodichain.lab.task_program.integrations.scene_expansion import (
        ScenePreparationResult,
        SceneVariantEpisodeResult,
-       execute_scene_variant,
+       execute_scene_variants,
    )
 
    def collect_fixed_variants(
        env: EmbodiedEnv,
        source: FixedSceneCandidateSource,
        *,
-       prepare_scene: Callable[[SceneVariant], ScenePreparationResult],
-       measured_validator: Callable[[], ValidationResult],
+       prepare_scene: Callable[
+           [Mapping[int, SceneVariant]], Mapping[int, ScenePreparationResult]
+       ],
+       measured_validator: Callable[[int], ValidationResult],
    ) -> list[SceneVariantEpisodeResult]:
        results = []
        for variant in source:
-           result = execute_scene_variant(
+           result = execute_scene_variants(
                env,
-               variant,
+               {0: variant},
                prepare_scene=prepare_scene,
                measured_validator=measured_validator,
                episode_index=variant.ordinal,
                attempt_id=variant.ordinal,
-           )
+           )[0]
            results.append(result)
-           env.reset(options={"save_data": result.accepted})
+           env.reset(options={"reset_ids": [0], "save_data": result.accepted})
        return results
 
 The environment must already have its Task Program integration configured.
@@ -137,4 +141,4 @@ Public interfaces
 .. autoclass:: SceneVariantEpisodeResult
    :members:
 
-.. autofunction:: execute_scene_variant
+.. autofunction:: execute_scene_variants

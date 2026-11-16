@@ -35,6 +35,7 @@ from embodichain.lab.sim.sensors import CameraCfg
 
 class _CameraHandle:
     group_id = 7
+    group_ids = (7, 8)
 
 
 class _Simulation:
@@ -64,6 +65,7 @@ def test_record_camera_is_marked_for_visualization() -> None:
 
     assert env.sim.sensor_cfg is not None
     assert env.sim.sensor_cfg.visualization_role == "record"
+    assert env.camera_group_ids == [7, 8]
 
 
 @pytest.mark.parametrize("fps", [0, -1, float("nan"), float("inf")])
@@ -82,7 +84,7 @@ def camera_env():
     context._finish_initialization([0, 1, 2, 3])
     rgb = torch.stack([torch.full((4, 6, 4), i, dtype=torch.uint8) for i in range(4)])
     camera = SimpleNamespace(
-        group_id=1, update=lambda **kwargs: None, get_data=lambda: {"color": rgb}
+        group_ids=(1, 2), update=lambda **kwargs: None, get_data=lambda: {"color": rgb}
     )
     env = SimpleNamespace(
         num_envs=4,
@@ -121,7 +123,7 @@ def test_camera_recording_uses_control_rate_and_renders_current_state(
     )
     recorder(env, [0], name="camera", fps=None)
     recorder.save_and_clear([0])
-    assert rendered == [[1]]
+    assert rendered == [[1, 2]]
     assert rates == [40.0]
 
 

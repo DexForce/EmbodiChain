@@ -80,7 +80,7 @@ COMMANDS = {
     "scene_engine": {
         "module": "embodichain",
         "base_args": ("scene-engine",),
-        "preview_script": "embodichain/gen_sim/scene_engine/cli/preview.py",
+        "preview_script": "embodichain/lab/scripts/preview_scene.py",
     },
 }
 

@@ -59,6 +59,8 @@ _LAYOUTS = frozenset({"none", "line"})
 _AXES = frozenset({"none", "world_x", "world_y"})
 _DIRECTIONS = TRANSPORT_DIRECTIONS
 _TERMINAL_BEHAVIORS = TERMINAL_BEHAVIORS
+# Single-arm placements whose released terminal may instead be held.
+_HOLDABLE_PLACEMENTS = frozenset({"E1", "E2"})
 _SELECTOR_KINDS = frozenset({"none", "scene_ref", "step_result"})
 _QUANTIFIERS = frozenset({"one", "all", "count"})
 _STEP_KEYS = frozenset(
@@ -462,6 +464,20 @@ def _normalize_instruction_intent_fields(
                     "reason": "e5_hold_defaults_to_lift",
                 }
             )
+        if (
+            task_type in _HOLDABLE_PLACEMENTS
+            and raw_step.get("terminal_behavior") == "place"
+        ):
+            # Release is the default E1/E2 terminal; only hold is explicit.
+            raw_step["terminal_behavior"] = "none"
+            changes.append(
+                {
+                    "path": f"steps[{index}].terminal_behavior",
+                    "from": "place",
+                    "to": "none",
+                    "reason": "release_is_the_default_terminal",
+                }
+            )
         if task_type == "E4" and raw_step.get("terminal_behavior") == "none":
             terminal = (
                 "place"
@@ -664,7 +680,9 @@ def _validate_instruction_resources(steps: Sequence[Mapping[str, Any]]) -> None:
                         if known_owner and known_owner != (resource,):
                             continue
                         updated = list(state)
-                        updated[resource] = None
+                        updated[resource] = (
+                            subject if step["terminal_behavior"] == "hold" else None
+                        )
                         next_states.add(tuple(updated))
                     elif state[resource] is None:
                         next_states.add(state)
@@ -841,8 +859,13 @@ def _validate_task_fields(step: Mapping[str, Any], context: str) -> None:
     if task_type not in {"E4", "E5"}:
         if step["direction"] != "none":
             raise ValueError(f"{context} direction is only valid for E5.")
-        if step["terminal_behavior"] != "none":
-            raise ValueError(f"{context} terminal_behavior is only valid for E5.")
+        if step["terminal_behavior"] != "none" and not (
+            task_type in _HOLDABLE_PLACEMENTS and step["terminal_behavior"] == "hold"
+        ):
+            raise ValueError(
+                f"{context} terminal_behavior is only valid for E4/E5, or hold "
+                "for E1/E2."
+            )
     if task_type == "E4":
         transfer = str(step["transfer_arm"])
         receive = str(step["receive_arm"])
@@ -914,7 +937,12 @@ def _instruction_prompt(instruction: str) -> str:
         "the same user intent, emit one E4 with target, relation, and "
         "terminal_behavior=place; do not emit a trailing E1. Use "
         "terminal_behavior=hold only when the receiver should keep holding the "
-        "object. Each gripper can hold only one object: a held receiver cannot "
+        "object. E1 and E2 release by default (terminal_behavior=none); use "
+        "terminal_behavior=hold on E1/E2 only when the instruction requires the "
+        "object to stay in the gripper at the end, such as lifting it upright and "
+        "holding it, or striking/touching a target with a held tool. An E1 hold "
+        "keeps its target and relation: they describe where the held object (a "
+        "held tool's working end) ends. Each gripper can hold only one object: a held receiver cannot "
         "accept another handover, and an E5 pickup requires both hands free. "
         "For multiple objects that are handed over and then placed, use per-object "
         "transfer and placement before the next object's handover, unless the "

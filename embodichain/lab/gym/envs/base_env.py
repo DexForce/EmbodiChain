@@ -215,11 +215,14 @@ class BaseEnv(gym.Env):
                 )
 
             self.sensors = self._setup_sensors(**kwargs)
-            self._camera_group_ids = [
-                sensor.group_id
-                for sensor in self.sensors.values()
-                if isinstance(sensor, Camera)
-            ]
+            self._camera_group_ids = list(
+                dict.fromkeys(
+                    group_id
+                    for sensor in self.sensors.values()
+                    if isinstance(sensor, Camera)
+                    for group_id in sensor.group_ids
+                )
+            )
 
             if not self.sim_cfg.headless:
                 self.sim.open_window()
@@ -494,7 +497,8 @@ class BaseEnv(gym.Env):
         """
         if not hasattr(self, "_camera_group_ids"):
             self._camera_group_ids: List[int] = []
-        self._camera_group_ids.append(group_id)
+        if group_id not in self._camera_group_ids:
+            self._camera_group_ids.append(group_id)
 
     def _requires_native_renderer(self) -> bool:
         """Predict native render consumers before constructing the World.

@@ -344,10 +344,20 @@ class GaussianRenderCfg:
     workspace_slot_count: int = 0
     lod_target_pixel_size: float = 2.0
     lod_max_nodes_per_camera: int = 0
+    apply_display_srgb: bool = True
+    """Apply the shared sRGB display transfer, preserving existing behavior.
+
+    Set False for display-referred captures such as SuperSplat/Inria PLYs to
+    avoid encoding their colors twice. This is a World-construction snapshot,
+    shared by all Gaussian assets in that World. Lit mesh/background blending
+    remains scene-linear; tone mapping can still change the displayed colors.
+    DexSim 0.6.0 provides this as a temporary option.
+    """
 
     def __post_init__(self) -> None:
         if (
             type(self.enabled) is not bool
+            or type(self.apply_display_srgb) is not bool
             or type(self.enable_render_profiler) is not bool
         ):
             raise TypeError("Gaussian enable flags must be booleans.")
@@ -387,6 +397,7 @@ class GaussianRenderCfg:
         native = dexsim.GaussianSplatConfig()
         world_config.enable_render_profiler = self.enable_render_profiler
         native.enabled = True
+        native.apply_display_srgb = self.apply_display_srgb
         native.approach = dexsim.GaussianRenderApproach.RASTER_CUDA
         native.lod_mode = (
             dexsim.GaussianLodMode.DISABLED
