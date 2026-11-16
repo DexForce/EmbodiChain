@@ -2265,11 +2265,29 @@ class SimulationManager:
                     sensor._snapshot_render_metadata()
             if getattr(self, "_sampling_sensors", {}).get("render"):
                 self._sensor_frame_index = getattr(self, "_sensor_frame_index", 0) + 1
-                self._sample_managed_sensors("render", self._sensor_frame_index, 0.0)
+                self._sample_managed_sensors(
+                    "render",
+                    self._sensor_frame_index,
+                    0.0,
+                    rendered_camera_uids={camera.uid for camera in cameras},
+                )
         self._log_scene_summary()
 
-    def _sample_managed_sensors(self, phase: str, boundary: int, dt: float) -> None:
+    def _sample_managed_sensors(
+        self,
+        phase: str,
+        boundary: int,
+        dt: float,
+        *,
+        rendered_camera_uids: set[str] | None = None,
+    ) -> None:
         for sensor in getattr(self, "_sampling_sensors", {}).get(phase, {}).values():
+            if (
+                rendered_camera_uids is not None
+                and isinstance(sensor, Camera)
+                and sensor.uid not in rendered_camera_uids
+            ):
+                continue
             sensor._sample(boundary, self.simulation_time, self.physics_step_index, dt)
 
     def _plan_camera_groups(self, configs: Sequence[SensorCfg]) -> None:

@@ -459,7 +459,12 @@ class BaseSensor(BatchEntity):
         if time - self._sample_time + 1e-12 < period:
             return
         elapsed = time - self._sample_time if self._sample_boundary is not None else dt
-        self.update(sample_dt=elapsed, fetch_only=self.cfg.sample_phase == "render")
+        try:
+            self.update(sample_dt=elapsed, fetch_only=self.cfg.sample_phase == "render")
+        except BaseException:
+            # Acquisition may have already overwritten the borrowed output buffers.
+            metadata["valid"].fill_(False)
+            raise
         self._sample_boundary = boundary
         self._sample_time = time
         self._sample_number += 1
