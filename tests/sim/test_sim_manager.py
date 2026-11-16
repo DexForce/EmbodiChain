@@ -20,6 +20,7 @@ from contextlib import nullcontext
 import gc
 import queue
 import threading
+import weakref
 
 from pathlib import Path
 
@@ -606,7 +607,19 @@ def test_deferred_destroy_prepares_backend_before_releasing_world(
     )
     sim._gizmos = {}
     sim._markers = {}
-    sim._rigid_objects = {}
+
+    class CyclicView:
+        def __init__(self):
+            self.retained_view = self
+
+    view = CyclicView()
+    released = weakref.finalize(view, events.append, "view_released")
+    sim._rigid_objects = {
+        "asset": SimpleNamespace(
+            _data=view, _entities=[view], _spawn_result=spawn_scene
+        )
+    }
+    del view
     sim._constraints = {}
     sim._rigid_object_groups = {}
     sim._fluid_objects = {}
@@ -638,10 +651,21 @@ def test_deferred_destroy_prepares_backend_before_releasing_world(
         instances.pop(instance_id)
 
     monkeypatch.setattr(SimulationManager, "reset", reset)
-    monkeypatch.setattr(gc, "collect", lambda: events.append("gc_collect"))
+    collect = gc.collect
+
+    def collect_views():
+        events.append("gc_collect")
+        return collect()
+
+    monkeypatch.setattr(gc, "collect", collect_views)
 
     sim._deferred_destroy()
 
+    # Clearing a facade can make its cyclic native views collectible. Their
+    # finalizers must run before the owning native Scene/World are closed.
+    assert not released.alive
+    assert events.index("backend_prepare") < events.index("view_released")
+    assert events.index("view_released") < events.index("spawn_close")
     assert events.index("backend_prepare") < events.index("gc_collect")
     assert events.index("backend_prepare") < events.index("spawn_close")
     assert events.index("backend_prepare") < events.index("world_quit")
