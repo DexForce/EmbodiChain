@@ -360,9 +360,12 @@ narrowing. When omitted, runtime assembly scopes the embodiment service to the
 selected scene's graspable rigid objects, so reusable embodiments do not name
 task-local objects.
 
-Deployment embodiment overrides affect only the robot simulation fields and
-are restricted to `uid`, `init_pos`, `init_rot`, and `init_qpos`. Sensor lists
-are selected atomically with the embodiment. Task grasp-generator overrides
+Deployment embodiment robot installation overrides are restricted to `uid`,
+`init_pos`, `init_rot`, and `init_qpos`. Sensor membership remains owned by the
+embodiment; the separate UID-keyed `camera_overrides` permits only explicitly
+declared ordinary-camera calibration, under the
+[physical composition contract](../env-framework/configuration.md#reusable-gym-deployment-components).
+Task grasp-generator overrides
 are similarly allowlisted. This gives one embodiment to many tasks and one
 task to many compatible embodiments without copying either declaration or
 admitting arbitrary merge semantics. `repeated_pick_place` and `open_drawer`

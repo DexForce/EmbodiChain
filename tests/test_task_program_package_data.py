@@ -246,10 +246,7 @@ _RESOURCE_PATHS = frozenset(
             Path(f"tasks/manipulation/gaussian_pick_place/env.{scene}.yaml")
             for scene in ("office", "discoverse", "robosimgs")
         ),
-        *(
-            Path(f"components/embodiments/franka_gs_{scene}_dual_camera.yaml")
-            for scene in ("office", "discoverse", "robosimgs")
-        ),
+        Path("components/embodiments/franka_gs_dual_camera.yaml"),
         Path("components/execution_policies/franka_gs_verified.yaml"),
         Path("tasks/manipulation/gaussian_pick_place/task_program/integration.yaml"),
         Path("tasks/manipulation/gaussian_pick_place/catalog.yaml"),
@@ -673,6 +670,12 @@ gaussian_ids = {
     "discoverse": "FrankaGSPickPlace-Discoverse-v1",
     "robosimgs": "FrankaGSPickPlace-Robosimgs-v1",
 }
+gaussian_calibration = {
+    "office": ([710.4, 710.4, 480, 270], [1.5, -2, 1.65], [0.25, 0, 1]),
+    "discoverse": ([480, 480, 480, 270], [-0.55, 0.1, 1.5], [-0.02, 0.99, 1.03]),
+    "robosimgs": ([480, 480, 480, 270], [0.85, -0.65, 0.85], [0.3, 0, 0.38]),
+}
+shared_embodiments = set()
 for scene, expected_id in gaussian_ids.items():
     path = resolve_config_path(
         "extensions/embodichain_tasks/configs/tasks/manipulation/"
@@ -682,6 +685,9 @@ for scene, expected_id in gaussian_ids.items():
     assert path.is_relative_to(installed)
     raw = load_config(path)
     assert raw["id"] == expected_id
+    component = resolve_config_path(raw["embodiment"]["component"], base_dir=path.parent)
+    assert component.is_relative_to(installed)
+    shared_embodiments.add(component)
     cfg = config_to_cfg(raw, source_path=path)
     assert get_env_spec(expected_id).cls is EmbodiedEnv
     robot = (
@@ -691,8 +697,20 @@ for scene, expected_id in gaussian_ids.items():
     cameras = {camera.uid: camera for camera in [*cfg.sensor, *robot.sensors]}
     assert set(cameras) == {"cam_third", "cam_wrist"}
     assert cameras["cam_wrist"].extrinsics.parent == "fr3_hand"
+    assert list(cameras["cam_wrist"].intrinsics) == [430, 430, 480, 270]
+    assert list(cameras["cam_wrist"].extrinsics.pos) == [0.1, 0, 0.065]
+    assert list(cameras["cam_wrist"].extrinsics.quat) == [
+        0.576704088924317, 0.576704088924317, 0.4091605966096607, 0.4091605966096607
+    ]
+    intrinsics, eye, target = gaussian_calibration[scene]
+    third = cameras["cam_third"]
+    assert list(third.intrinsics) == intrinsics
+    assert list(third.extrinsics.eye) == eye
+    assert list(third.extrinsics.target) == target
+    assert list(third.extrinsics.up) == [0, 0, 1]
     assert all((camera.width, camera.height) == (960, 540) for camera in cameras.values())
     assert all(camera.enable_color and not camera.enable_depth for camera in cameras.values())
+assert len(shared_embodiments) == 1
 assert not (installed / "embodichain_tasks/manipulation/gaussian_pick_place.py").exists()
 assert not (installed / "share/embodichain/examples/gym/gaussian_pick_place/configs").exists()
 

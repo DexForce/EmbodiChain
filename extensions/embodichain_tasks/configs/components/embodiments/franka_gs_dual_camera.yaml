@@ -1,4 +1,4 @@
-embodiment_id: franka_gs_discoverse_dual_camera
+embodiment_id: franka_gs_dual_camera
 simulation:
   class_type: Franka
   arm_model: fr3
@@ -67,19 +67,19 @@ sensor:
   width: 960
   height: 540
   intrinsics:
-  - 480
-  - 480
+  - 710.4
+  - 710.4
   - 480
   - 270
   extrinsics:
     eye:
-    - -0.55
-    - 0.1
     - 1.5
+    - -2
+    - 1.65
     target:
-    - -0.02
-    - 0.99
-    - 1.03
+    - 0.25
+    - 0
+    - 1
     up:
     - 0
     - 0

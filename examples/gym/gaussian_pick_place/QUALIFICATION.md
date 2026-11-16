@@ -245,6 +245,69 @@ the complete `show-task` output corrected that measurement without changing CLI
 behavior. These are reset/packaging checks at seed 42, not a multi-seed
 reliability claim. Metric GS depth remains outside this qualification.
 
+## Shared-embodiment calibration regression — 2026-11-16
+
+The three deployments now select one `franka_gs_dual_camera` component.
+Each retains its original `cam_third` calibration through the closed
+`embodiment.camera_overrides` selector. The component retains the original
+robot/hand/home, wrist calibration, sensor suite and skill profile. Expanded
+physical declarations and skill profiles match commit `5380f6283` for all three
+scenes; Gym IDs, both camera UIDs and native trajectory schemas are unchanged.
+
+562 focused Gym/configuration, Task Program, catalog, packaging and path tests
+passed. After covering the camera's nullable default `up`, all 216 relevant
+configuration/wheel cases passed again. Coverage exercises independent and
+mounted cameras, file-free snapshots, partial calibration and representation
+switching, unchanged later loads, and rejection of unknown/duplicate UIDs,
+non-camera targets, forbidden fields, malformed/nonfinite numbers, nonpositive
+focal lengths, invalid quaternions and degenerate/mixed look-at poses.
+The three static deployment inspections and 42 context tests passed.
+
+The final tested wheel SHA256 is
+`63de7f24f5cd85d61f80bcc3003f81f395ca08ba269cca56bc16a0eb85e5d2ce`.
+It was installed in a separate virtual environment with the qualified native
+dependencies. From an unrelated working directory, with `PYTHONPATH` empty,
+installed discovery and all three preparation commands passed. The public
+`run-task --max_episodes 2 --record_trajectory` path produced:
+
+| Deployment | Accepted episodes | Worlds | Observed resets | Maximum reset joint delta |
+| --- | ---: | ---: | ---: | ---: |
+| Office | 2 | 1 | 6 | 0 |
+| DISCOVERSE lab3 | 2 | 1 | 6 | 0 |
+| RoboSimGS tabletop | 2 | 1 | 6 | 0 |
+
+Every reset checked the native intrinsic matrices, third-person position/viewing
+direction, wrist-local position/orientation and qualified parent binding against
+the original calibration. The World identity stayed fixed, cube/home state was
+restored, and all six unique episodes succeeded on attempt zero. Each lifted
+the cube at least 0.1294 m and finished within 7.3 mm of its target.
+
+The installed recorder also completed all three scenes under the shared
+component: collection `franka-gs-20261116-231414-4869ada0`, 851 actions,
+854 paired observations and 1,708 RGB images. T+1 clocks/identity, measured
+pickup/release/stability and decoded-video/raw-RGB audits passed. Comparing with
+the previous migration collection confirmed equal root/metadata keys,
+action dtype/dimensions and ordered joints, state/terminal-state leaf schemas,
+`rgb_recording` fields, media feature declarations, intrinsic matrices and
+initial camera/wrist transforms. These recordings used the preceding wheel;
+the final wheel adds only nullable-default validation handling to the resolver
+and repeated all six native episodes with the same effective calibration.
+
+With no GPU visible, the final installed offline verifier accepted the relocated
+recording, and negative acceptance passed 9/9 checks (baseline, seven isolated
+corruptions, unchanged original). No recording format or example execution code
+changed. Black 26.10.1, API coverage 4961/4961, syntax/header checks and the
+context/skill validators passed.
+
+Local evidence is retained under `outputs/pr1210-camera-overrides/`: expanded
+configuration and trajectory-schema comparisons, both tested wheels, installed
+preparation/native logs, reset samples, full recordings, and offline checks.
+An earlier instrumentation probe stopped at reset because it compared the
+runtime-qualified `FrankaPanda/fr3_hand` parent with the authored `fr3_hand`.
+Correcting that audit assertion changed no production code or configuration;
+both subsequent six-episode batches passed. These remain seed-42 regression
+checks, rather than a multi-seed reliability claim or metric GS-depth audit.
+
 ## Limits
 
 Only the independent task support/cube physics and RGB streams are qualified.

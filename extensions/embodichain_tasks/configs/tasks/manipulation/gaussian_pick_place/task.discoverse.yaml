@@ -3,7 +3,7 @@ enable_sensor: true
 environment:
   component: env.discoverse.yaml
 embodiment:
-  component: ../../../components/embodiments/franka_gs_discoverse_dual_camera.yaml
+  component: ../../../components/embodiments/franka_gs_dual_camera.yaml
   overrides:
     init_pos:
     - -0.4
@@ -13,6 +13,26 @@ embodiment:
     - 0
     - 0
     - 0
+  camera_overrides:
+    cam_third:
+      intrinsics:
+      - 480
+      - 480
+      - 480
+      - 270
+      extrinsics:
+        eye:
+        - -0.55
+        - 0.1
+        - 1.5
+        target:
+        - -0.02
+        - 0.99
+        - 1.03
+        up:
+        - 0
+        - 0
+        - 1
 task_program:
   program: task_program/program.discoverse.yaml
   integration: task_program/integration.yaml

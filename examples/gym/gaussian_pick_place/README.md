@@ -40,8 +40,8 @@ embodichain run-task \
   --trajectory_save_dir outputs/gaussian_pick_place/office
 ```
 
-Each deployment selects one physical `env.<scene>.yaml`, one
-scene-specific embodiment component, a two-segment `program.<scene>.yaml`, the
+Each deployment selects one physical `env.<scene>.yaml`, the shared
+`franka_gs_dual_camera` embodiment, a two-segment `program.<scene>.yaml`, the
 common semantic integration and a shared single-arm verified execution policy.
 These definitions live only in the task extension. Configuration
 loading performs strict schema, physical UID, capability-contract and lowering
@@ -49,6 +49,8 @@ checks before World construction. No environment subclass is added.
 
 The physical environments own the backend, scene and settling event. Embodiments
 own the FR3, parallel hand, reusable skill profile and camera declarations.
+The deployments preserve each scene's `cam_third` calibration with UID-scoped
+`camera_overrides`; the wrist calibration remains shared.
 Programs own `Pick → Place → wait_stable`, world targets and acceptance.
 The integration binds only the cube and support surface to semantics. Gaussian
 backgrounds are imported as pure visuals with their authored placement preserved;

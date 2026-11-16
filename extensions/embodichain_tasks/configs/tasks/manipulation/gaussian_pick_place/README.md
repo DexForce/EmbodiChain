@@ -26,9 +26,11 @@ The same official configuration references resolve from an installed wheel and
 an unrelated working directory. Loading a deployment registers its existing
 Gym ID; task discovery does not require a live simulator or asset downloads.
 
-Environments own Default/CPU physics, the scene and settling. Each embodiment
-component owns its calibrated robot/hand and complete camera suite; its
-third-person extrinsic is specific to that scene. The shared
+Environments own Default/CPU physics, the scene and settling. All three
+deployments select `franka_gs_dual_camera`, which owns the common robot/hand,
+wrist calibration and complete camera suite. Each deployment declares its
+existing third-person intrinsics/extrinsics through
+`embodiment.camera_overrides.cam_third`. The shared
 `franka_gs_verified` execution policy retains the original single-arm contract,
 timed tracking and verified effects. Program targets and acceptance remain
 scene-specific; the common integration binds only the cube and support.
