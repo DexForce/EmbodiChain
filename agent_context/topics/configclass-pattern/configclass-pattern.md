@@ -10,6 +10,10 @@
 `@configclass` wraps `dataclass`, infers annotations from ordinary defaults,
 copies mutable/nested defaults per instance, and adds `validate()`, `to_dict()`,
 `replace()` and `copy()`. Public configuration fields should still be annotated.
+The decorator retains each class's original declarations as private metadata
+before flattening inherited annotations. Domain decoders use that ownership to
+resolve postponed type names in the declaring module; the metadata is not a
+configuration field and does not appear in serialization.
 
 ## Required values and validation
 
