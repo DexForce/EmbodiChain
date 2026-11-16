@@ -94,16 +94,9 @@ def _run_recording(urdf: str, usd: str) -> None:
         UsdSourceCfg,
     )
 
-    class CableRecordingEnv(EmbodiedEnv):
-        def _prepare_scene(self, **kwargs) -> None:
-            super()._prepare_scene(**kwargs)
-            result = self.sim.add_usd(
-                UsdImportCfg(name="scene", source=UsdSourceCfg(file_path=usd))
-            )
-            assert result["/World/wire"] is self.sim.get_cable_object("wire")
-
     cfg = EmbodiedEnvCfg(
         num_envs=2,
+        enable_ground_plane=True,
         max_episode_steps=4,
         sim_steps_per_control=1,
         ignore_terminations=True,
@@ -123,6 +116,11 @@ def _run_recording(urdf: str, usd: str) -> None:
                 num_substeps=2,
                 solver_cfg={"solver_type": "dexuni"},
             ),
+        ),
+        usd_scene=UsdImportCfg(
+            name="scene",
+            source=UsdSourceCfg(file_path=usd),
+            asset_cfgs={"/World/wire": {"uid": "wire", "collision_filter_span": 2}},
         ),
         robot=RobotCfg(
             uid="slider",
@@ -153,7 +151,10 @@ def _run_recording(urdf: str, usd: str) -> None:
     )
     env = None
     try:
-        env = CableRecordingEnv(cfg)
+        env = EmbodiedEnv(cfg)
+        cable = env.usd_scene_import["/World/wire"]
+        assert cable is env.sim.get_cable_object("wire")
+        assert cable.cfg.collision_filter_span == 2
         assert not env.sim.has_native_renderer
         obs, _ = env.reset(seed=73)
         manager = env.observation_manager
@@ -277,7 +278,7 @@ def _run_recording(urdf: str, usd: str) -> None:
         cfg.num_envs = 1
         cfg.sim_cfg.num_envs = 1
         cfg.record_trajectory = False
-        env = CableRecordingEnv(cfg)
+        env = EmbodiedEnv(cfg)
         replay = ReplayWrapper(env, saved)
         replay.reset()
         for _ in range(saved["meta"]["lengths"][0]):
