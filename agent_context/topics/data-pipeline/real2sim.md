@@ -55,7 +55,9 @@ nonphysical. `_prepared_physics.py` materializes separate portable asset revisio
 preserving source observations and resealing geometry identities and checksums.
 Model-specific collision recipes belong to the robot extension; native model
 qualification belongs to `gen_sim.real2sim._robot_qualification`. Structural or
-native-model checks do not grant task-success credit.
+native-model checks do not grant task-success credit. Attaching native evidence
+requires exact input hashes for the metadata, trajectory, URDF and its resources;
+matching kinematics/collision geometry alone does not qualify a new recording.
 `trajectory_corrections.apply_trajectory_corrections()` converts structured
 Cartesian/gripper residuals into commands on the recorded sample grid. Its
 approximate IK is isolated in `_real2sim_ik.py`; finite output and joint-limit

@@ -408,6 +408,107 @@ def test_physical_entry_preflight_precedes_model_and_native_work(
     assert not output.exists()
 
 
+@pytest.mark.parametrize("failure_stage", ["constructor", "destroy"])
+def test_robot_qualification_releases_failed_native_resources(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure_stage: str
+) -> None:
+    import gc
+    import queue
+    import weakref
+
+    from embodichain.gen_sim.real2sim._robot_qualification import qualify_physical_robot
+    from embodichain.lab.sim import SimulationManager
+
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "robot.urdf").write_text(
+        '<robot name="fixture"><link name="base"/>'
+        '<link name="pad_a"><collision><geometry><box size="0.01 0.01 0.01"/>'
+        "</geometry></collision></link>"
+        '<link name="pad_b"><collision><geometry><box size="0.01 0.01 0.01"/>'
+        "</geometry></collision></link>"
+        '<joint name="finger" type="prismatic"><parent link="base"/>'
+        '<child link="pad_a"/><limit lower="0" upper="0.1" effort="40"/>'
+        "</joint></robot>"
+    )
+    (source / "robot.json").write_text(
+        json.dumps(
+            {
+                "urdf": "robot.urdf",
+                "side_names": ["left"],
+                "gripper_calibrations": [
+                    {
+                        "pad_links": ["pad_a", "pad_b"],
+                        "joint_names": ["finger"],
+                        "width_m": [0.01, 0.09],
+                        "qpos": [[0.01], [0.09]],
+                    }
+                ],
+            }
+        )
+    )
+    np.savez(source / "trajectory_original.npz", joint_names=["finger"], qpos=[[0.09]])
+    live = object()
+    instances = {0: live}
+    cleanup_queue = queue.Queue()
+    world = SimpleNamespace(closed=False)
+    views = []
+    created = []
+
+    class NativeView:
+        pass
+
+    def fail_native_work() -> None:
+        view = NativeView()
+        views.append(weakref.ref(view))
+        raise RuntimeError("native initialization failed")
+
+    def initialize(self, *args, **kwargs) -> None:
+        self._world = world
+        self._visualization_runtime = None
+        created.append(self)
+        if failure_stage == "constructor":
+            fail_native_work()
+
+    def release_native_resources(self) -> None:
+        gc.collect()
+        assert views[0]() is None, "Unwound failure frame still owns a native view"
+        self._world.closed = True
+        self._world = None
+        SimulationManager.reset(self.instance_id)
+
+    # Keep the real constructor, destroy queue, and flush behavior; replace only
+    # native allocation/teardown with observable, offline resource sentinels.
+    monkeypatch.setattr(SimulationManager, "_instances", instances)
+    monkeypatch.setattr(SimulationManager, "_cleanup_queue", cleanup_queue)
+    monkeypatch.setattr(SimulationManager, "_initialize_simulation", initialize)
+    monkeypatch.setattr(
+        SimulationManager, "_deferred_destroy", release_native_resources
+    )
+    monkeypatch.setattr(
+        SimulationManager, "add_robot", lambda *args: fail_native_work()
+    )
+    if failure_stage == "destroy":
+        destroy = SimulationManager.destroy
+
+        def fail_destroy(self, *, exit_process: bool) -> None:
+            destroy(self, exit_process=exit_process)
+            raise RuntimeError("destroy failed after queuing cleanup")
+
+        monkeypatch.setattr(SimulationManager, "destroy", fail_destroy)
+
+    output = tmp_path / "native"
+    with pytest.raises(RuntimeError):
+        qualify_physical_robot(source, output)
+    assert world.closed
+    assert created[0]._world is None
+    assert instances == {0: live}
+    assert cleanup_queue.empty()
+    report = json.loads((output / "report.json").read_text())
+    assert report["status"] == "failed"
+    assert report["error"] == "native initialization failed"
+
+
 def test_pipeline_preflight_does_not_launch_services_or_create_output(tmp_path):
     output = tmp_path / "run"
     with pytest.raises(ValueError, match="injected chat"):

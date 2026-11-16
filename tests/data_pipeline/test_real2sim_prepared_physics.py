@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import hashlib
 from pathlib import Path
+import shutil
 import xml.etree.ElementTree as ET
 
 import pytest
@@ -84,7 +85,8 @@ def _physical_robot(source: Path, output: Path) -> tuple[Path, dict]:
 
 
 def _native_report(output: Path, geometry: str) -> dict:
-    native = output / "samples/example/physical_validation/native"
+    sample = output / "samples/example"
+    native = sample / "physical_validation/native"
     native.mkdir()
     trace = b"fixture native trace bytes"
     (native / "trace.npz").write_bytes(trace)
@@ -93,6 +95,14 @@ def _native_report(output: Path, geometry: str) -> dict:
         "status": "passed",
         "robot_geometry_sha256": geometry,
         "task_success_verified": False,
+        "input_sha256": {
+            name: hashlib.sha256((sample / name).read_bytes()).hexdigest()
+            for name in (
+                "robot.json",
+                "trajectory_original.npz",
+                "robot_physical/robot.urdf",
+            )
+        },
         "traces": {"path": "trace.npz", "sha256": hashlib.sha256(trace).hexdigest()},
     }
     (native / "report.json").write_text(json.dumps(result))
@@ -204,4 +214,61 @@ def test_native_attachment_requires_persisted_report_and_trace(
         b"changed"
     )
     with pytest.raises(ValueError, match="trace checksum mismatch"):
+        record_native_qualification(output, "example", result)
+
+
+@pytest.mark.parametrize("changed_input", ["calibration", "trajectory", "inertia"])
+def test_native_attachment_rejects_foreign_inputs_with_identical_geometry(
+    package: Path, tmp_path: Path, changed_input: str
+) -> None:
+    foreign_source = tmp_path / "foreign_source"
+    shutil.copytree(package, foreign_source)
+    sample = foreign_source / "samples/example"
+    if changed_input == "calibration":
+        metadata = json.loads((sample / "robot.json").read_text())
+        metadata["gripper_calibrations"][0]["width_m"] = [0.01, 0.09]
+        (sample / "robot.json").write_text(json.dumps(metadata))
+    elif changed_input == "trajectory":
+        (sample / "trajectory_original.npz").write_bytes(b"different initial pose")
+    else:
+        urdf = sample / "robot/robot.urdf"
+        tree = ET.parse(urdf)
+        inertial = ET.SubElement(tree.getroot().find("link"), "inertial")
+        ET.SubElement(inertial, "mass", value="2")
+        tree.write(urdf)
+    seal_prepared_checksums(foreign_source)
+    output, foreign = tmp_path / "physical", tmp_path / "foreign_physical"
+    receipts = [
+        prepare_physical_inputs(
+            original, derived, sample_id="example", prepare_robot=_physical_robot
+        )
+        for original, derived in ((package, output), (foreign_source, foreign))
+    ]
+    assert receipts[0]["robot_geometry_sha256"] == receipts[1]["robot_geometry_sha256"]
+    result = _native_report(foreign, receipts[1]["robot_geometry_sha256"])
+    relative = "samples/example/physical_validation"
+    shutil.copytree(foreign / relative / "native", output / relative / "native")
+    checksums = (output / "SHA256SUMS").read_bytes()
+    with pytest.raises(
+        ValueError, match="Native qualification input checksum mismatch"
+    ):
+        record_native_qualification(output, "example", result)
+    assert (output / "SHA256SUMS").read_bytes() == checksums
+    receipt = json.loads((output / relative / "preparation.json").read_text())
+    assert receipt["native_qualification"] == "not_run"
+
+
+def test_native_attachment_requires_complete_input_bindings(
+    package: Path, tmp_path: Path
+) -> None:
+    output = tmp_path / "physical"
+    receipt = prepare_physical_inputs(
+        package, output, sample_id="example", prepare_robot=_physical_robot
+    )
+    result = _native_report(output, receipt["robot_geometry_sha256"])
+    del result["input_sha256"]["trajectory_original.npz"]
+    (output / "samples/example/physical_validation/native/report.json").write_text(
+        json.dumps(result)
+    )
+    with pytest.raises(ValueError, match="complete measured input hashes"):
         record_native_qualification(output, "example", result)

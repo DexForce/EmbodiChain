@@ -22,6 +22,7 @@ import json
 from pathlib import Path
 from typing import Any
 import sys
+import traceback
 import xml.etree.ElementTree as ET
 import numpy as np
 
@@ -56,6 +57,43 @@ def qualify_physical_robot(
         ValueError: Calibration or physical input is incomplete.
         RuntimeError: Native geometry, motion, contact, or release checks fail.
     """
+    from embodichain.lab.sim import SimulationManager
+
+    failure: BaseException | None = None
+    try:
+        report = _qualify_physical_robot(source, output, device=device)
+    except BaseException as error:
+        # Constructor failure can queue cleanup without returning a manager.
+        # Release native views retained by unwound frames before draining it.
+        pending = [error]
+        seen: set[int] = set()
+        while pending:
+            current = pending.pop()
+            if id(current) in seen:
+                continue
+            seen.add(id(current))
+            traceback.clear_frames(current.__traceback__)
+            pending.extend(
+                chained
+                for chained in (current.__cause__, current.__context__)
+                if chained is not None
+            )
+        failure = error.with_traceback(None)
+    try:
+        SimulationManager.flush_cleanup_queue()
+    except BaseException as error:
+        if failure is None:
+            raise
+        failure.add_note(f"Deferred robot qualification cleanup failed: {error!r}")
+    if failure is not None:
+        raise failure
+    return report
+
+
+def _qualify_physical_robot(
+    source: Path, output: Path, *, device: str
+) -> dict[str, Any]:
+    """Run and persist native checks before the outer caller drains cleanup."""
     import torch
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
     from embodichain.lab.sim.cfg import (
@@ -443,4 +481,3 @@ def qualify_physical_robot(
         finally:
             if sim is not None:
                 sim.destroy(exit_process=False)
-                SimulationManager.flush_cleanup_queue()

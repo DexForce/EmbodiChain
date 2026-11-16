@@ -24,6 +24,7 @@ from pathlib import Path
 import shutil
 from tempfile import TemporaryDirectory
 from typing import Any
+import xml.etree.ElementTree as ET
 
 from ._robot_geometry import required_collision_links, validate_robot_collisions
 
@@ -233,7 +234,7 @@ def prepare_physical_inputs(
 def record_native_qualification(
     root: Path, sample_id: str, result: dict[str, Any]
 ) -> None:
-    """Attach a geometry-matching native result and reseal the prepared package."""
+    """Attach a native result bound to the exact measured inputs, then reseal."""
     root = root.resolve()
     manifest = json.loads((root / "manifest.json").read_text())
     sample = next(entry for entry in manifest["samples"] if entry["id"] == sample_id)
@@ -252,6 +253,25 @@ def record_native_qualification(
         raise ValueError("Invalid native qualification report")
     if result.get("task_success_verified") is not False:
         raise ValueError("Robot qualification cannot attest task success")
+    source = _contained(root, sample["prepared_source"])
+    metadata = json.loads((source / "robot.json").read_text())
+    urdf = _contained(source, metadata["urdf"])
+    resources = {urdf, source / "robot.json", source / "trajectory_original.npz"}
+    tree = ET.parse(urdf).getroot()
+    resources.update(
+        (urdf.parent / node.get("filename")).resolve()
+        for node in tree.findall(".//mesh") + tree.findall(".//texture")
+    )
+    if any(not path.is_relative_to(source) for path in resources):
+        raise ValueError("Native qualification requires package-local robot resources")
+    bindings = result.get("input_sha256")
+    if not isinstance(bindings, dict) or set(bindings) != {
+        path.relative_to(source).as_posix() for path in resources
+    }:
+        raise ValueError("Native qualification requires complete measured input hashes")
+    for name, checksum in bindings.items():
+        if _digest(_contained(source, name)) != checksum:
+            raise ValueError(f"Native qualification input checksum mismatch: {name}")
     trace = result.get("traces")
     if result["status"] == "passed" and not trace:
         raise ValueError("Passed native qualification requires its recorded trace")

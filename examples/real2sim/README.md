@@ -71,7 +71,10 @@ separate `robot_physical/robot.urdf`; `input.json`, `manifest.json`,
 conversion. `physical_validation/preflight.json` records structural validation;
 `physical_validation/native/report.json` and `trace.npz` record native collision
 import, finite stepping, calibrated opening/closing, sustained bilateral pad
-contact and release. The command checks all 36 native collision-bearing links
+contact and release. Attaching a report verifies its complete input hashes,
+including calibration, initial trajectory and URDF inertials, before updating
+qualification status and package checksums. The command checks all 36 native
+collision-bearing links
 and every calibrated pad. These checks do not establish grasp stability,
 hardware validity, or successful execution of the toy-placement task. They also
 do not add Task Program/DemoSkill deployment integration.
