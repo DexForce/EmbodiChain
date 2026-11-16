@@ -13,7 +13,7 @@ outputs can live outside the source checkout.
 
 Use a source checkout that includes the runtime prerequisites from #836 and the
 motion-tracking changes from #924. FastRT replay also requires #833. From the
-repository root, install the published `dexsim_engine==0.6.0rc1` wheel matching
+repository root, install the published `dexsim_engine==0.6.0rc2` wheel matching
 Python 3.11 and the host Linux ABI, then install EmbodiChain and its bundled tasks
 and models:
 
@@ -23,7 +23,7 @@ uv pip install --python .venv-g1/bin/python --torch-backend cu128 \
   'torch>=2.7,<2.8' 'torchvision>=0.22,<0.23'
 uv pip install --python .venv-g1/bin/python \
   --index http://pyp.open3dv.site:2345/simple \
-  --allow-insecure-host pyp.open3dv.site 'dexsim_engine==0.6.0rc1'
+  --allow-insecure-host pyp.open3dv.site 'dexsim_engine==0.6.0rc2'
 uv pip install --python .venv-g1/bin/python .
 uv pip check --python .venv-g1/bin/python
 source .venv-g1/bin/activate

@@ -637,3 +637,10 @@ def test_two_way_full_surface_options_are_forwarded_to_native() -> None:
         native.solver_cfg.collision_options["enable_rigid_soft_full_surface_contact"]
         is True
     )
+
+
+def test_enable_ground_plane_is_an_explicit_independent_boolean():
+    assert SimulationManagerCfg().enable_ground_plane is True
+    assert SimulationManagerCfg(enable_ground_plane=False).enable_ground_plane is False
+    with pytest.raises(TypeError, match="enable_ground_plane"):
+        SimulationManagerCfg(enable_ground_plane="false")

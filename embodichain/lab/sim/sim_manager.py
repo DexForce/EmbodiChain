@@ -455,6 +455,8 @@ class SimulationManagerCfg:
 
     def __post_init__(self) -> None:
         """Validate physics and apply visualization-dependent defaults."""
+        if not isinstance(self.enable_ground_plane, bool):
+            raise TypeError("enable_ground_plane must be a boolean.")
         if self.startup_summary not in ("compact", "full", "off"):
             raise ValueError("startup_summary must be 'compact', 'full', or 'off'.")
         validate_physics_cfg(self.physics_cfg)
@@ -828,7 +830,8 @@ class SimulationManager:
         if self.has_native_renderer:
             self._init_sim_resources()
             self.set_default_background()
-        self._declare_spawn_default_plane()
+        if sim_config.enable_ground_plane:
+            self._declare_spawn_default_plane()
         if self.has_native_renderer:
             self.set_default_global_lighting()
 
@@ -3051,6 +3054,9 @@ class SimulationManager:
         validated at ``prepare()``;
         native creation failures do not promise rollback.
 
+        Standard AssetRevision ZIPs are validated by the SDK and extracted
+        into Spawn-owned files kept until scene teardown. Returned facade
+        sources address the resolved USD; the caller's recipe is unchanged.
         Gaussian USD references retain the single-Arena, Default-physics and
         Hybrid-renderer requirements; use explicit GaussianSplatCfg visuals
         for replicated Arenas. NoRender omits Gaussian render resources.
@@ -3085,6 +3091,13 @@ class SimulationManager:
             usd=usd,
             asset_cfgs=asset_cfgs,
         )
+        recipe.validate_import()
+        if recipe.source.file_path.lower().endswith(".zip"):
+            from .spawn._usd_scene import _open_usd_scene_source
+
+            recipe = self._spawn_scene._usd_source_files.enter_context(
+                _open_usd_scene_source(recipe)
+            )
         plan = _compile_usd_import(self, recipe)
         plan.source.materials = self._spawn_scene._resolve_materials(
             plan.source.materials
@@ -4981,7 +4994,7 @@ class SimulationManager:
         scene = self._spawn_scene
         if uid not in scene:
             return False
-        if uid == "default_plane":
+        if uid == "default_plane" and self.sim_config.enable_ground_plane:
             raise ValueError("The Spawn-owned default plane cannot be removed.")
 
         scene._require_removable(uid)
