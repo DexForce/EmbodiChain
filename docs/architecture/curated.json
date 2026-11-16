@@ -3588,9 +3588,9 @@
         },
         {
           "path": "embodichain/gen_sim/task_engine/task_spec.py",
-          "symbol": "task_spec_from_candidate",
-          "start_line": 186,
-          "end_line": 186,
+          "symbol": "_project_candidate",
+          "start_line": 231,
+          "end_line": 231,
           "excerpt": "    template = TaskSpec("
         },
         {
@@ -6015,9 +6015,9 @@
       "evidence": [
         {
           "path": "embodichain/gen_sim/task_engine/task_spec.py",
-          "symbol": "task_spec_from_candidate",
-          "start_line": 186,
-          "end_line": 186,
+          "symbol": "_project_candidate",
+          "start_line": 231,
+          "end_line": 231,
           "excerpt": "    template = TaskSpec("
         }
       ]
