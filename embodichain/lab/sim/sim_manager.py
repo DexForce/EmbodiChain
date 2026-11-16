@@ -275,6 +275,8 @@ class SimulationManagerCfg:
         enable_ground_plane: bool = True,
         ground_plane_attrs: RigidBodyPhysicsCfg | None = None,
     ) -> None:
+        if not isinstance(enable_ground_plane, bool):
+            raise TypeError("enable_ground_plane must be boolean")
         self.startup_summary = startup_summary
         self.dexsim_startup_info = dexsim_startup_info
         self.scene_node_capacity = scene_node_capacity
@@ -3713,13 +3715,44 @@ class SimulationManager:
         if solver_type == "dexuni" and getattr(self, "_fluid_objects", {}):
             raise NotImplementedError("DexUni fluids cannot coexist with deformables.")
         supported_solvers = {"dexuni", "xpbd", "semi_implicit", "vbd"}
-        if solver_type not in supported_solvers:
+        if solver_type in {"mujoco_warp", "featherstone"}:
             raise NotImplementedError(
-                f"Newton solver {solver_type!r} does not support deformable "
-                "particle sets; select one of 'dexuni', 'xpbd', "
-                "'semi_implicit', or 'vbd'."
+                f"Newton solver {solver_type!r} does not support deformable particle sets."
             )
         physics_cfg = self.sim_config.physics_cfg
+        if solver_type not in supported_solvers:
+            from dexsim.engine.newton_physics import (
+                ProviderNewtonSolverCfg,
+                RegisteredNewtonSolverCfg,
+            )
+
+            native_config = getattr(
+                getattr(getattr(self, "_world_config", None), "newton_cfg", None),
+                "solver_cfg",
+                physics_cfg.solver_cfg,
+            )
+            external = (
+                isinstance(native_config, ProviderNewtonSolverCfg)
+                and native_config.solver_type == "provider"
+            ) or (
+                isinstance(native_config, RegisteredNewtonSolverCfg)
+                and solver_type
+                not in {
+                    "dexuni",
+                    "mujoco_warp",
+                    "xpbd",
+                    "semi_implicit",
+                    "featherstone",
+                    "vbd",
+                }
+            )
+            if not external:
+                raise NotImplementedError(
+                    f"Newton solver {solver_type!r} does not support deformable "
+                    "particle sets; select a particle solver or an external Provider."
+                )
+            # Finalized particle-kind/device support is validated by the SDK
+            # from the Provider's actual capabilities, not its registered name.
         if isinstance(physics_cfg, NewtonPhysicsCfg) and physics_cfg.requires_grad:
             raise NotImplementedError(
                 "Newton deformable state mutation is unavailable when "
