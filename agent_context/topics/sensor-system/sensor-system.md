@@ -9,6 +9,7 @@
 | Explicit clock and joint-state service | `embodichain/lab/sim/sensors/context.py` → `SensorContext` |
 | Exported sensor/config names | `embodichain/lab/sim/sensors/__init__.py` |
 | Image configuration, data flags, extrinsics | `embodichain/lab/sim/sensors/camera.py` → `CameraCfg`, `Camera` |
+| UID-scoped deployment calibration | `embodichain/lab/gym/utils/_component_composition.py`; [configuration ownership](../env-framework/configuration.md#reusable-gym-deployment-components) |
 | Two-eye transforms and attachment | `embodichain/lab/sim/sensors/stereo.py` → `StereoCameraCfg`, `StereoCamera` |
 | Parent-name resolution | `embodichain/lab/sim/sensors/attachment.py` → `resolve_parent_nodes` |
 | Creation, preparation and attachment coordination | `embodichain/lab/sim/sim_manager.py` → `add_sensor`, `prepare` |

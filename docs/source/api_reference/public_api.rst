@@ -213,6 +213,30 @@ respect the configured download host, with the official Hub as fallback.
 .. autoclass:: DemoStudio
 .. autoclass:: CleanLab
 
+Captured Gaussian backgrounds
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+These versioned, visual-only packages provide a metre/Z-up USD entry and an
+AssetRevision inventory. They preserve upstream point data and licensing
+evidence; collision reconstruction and metric-depth certification are separate.
+
+.. autosummary::
+   :nosignatures:
+
+   RoboSplatterOfficeGS
+   DiscoverseLab3GS
+   RoboSimGSTabletopGS
+
+.. autoclass:: RoboSplatterOfficeGS
+   :members:
+
+.. autoclass:: DiscoverseLab3GS
+   :members:
+
+.. autoclass:: RoboSimGSTabletopGS
+   :members:
+
+
 embodichain.data.assets.solver_assets
 -------------------------------------
 

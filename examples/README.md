@@ -1,5 +1,11 @@
 # Running examples
 
+The [Gaussian scene Pick/Place example](gym/gaussian_pick_place/README.md)
+records the official `gaussian_pick_place` task deployments from the task
+extension, using standardized public 3DGS backgrounds, independent collision
+supports, and third-person/wrist RGB cameras.
+Use `embodichain run-example gym/gaussian_pick_place/run --scene office`.
+
 Use the path of any Python script under this directory, with or without `.py`:
 
 ```bash
@@ -108,6 +114,11 @@ include it, then change selected environment policies and reset one camera row.
 It saves RGB mosaics, depth arrays and capture-policy metadata. This requires the
 DexSim camera render-category API; the default camera configuration continues to
 work with older SDKs. Ground hidden in a camera still supports the falling box.
+
+The [Library Pick/Place example](gym/library_pick_place/README.md) combines the
+existing Library Gaussian scan with a verified Dual UR5 task. It records every
+initial, control and terminal RGB-D boundary, saves the native trajectory, and
+provides a CPU-only offline integrity and physical-result verifier.
 
 The [Expansion Engine showcase](expansion/engine/showcase/README.md) demonstrates
 native and real-demonstration-driven experts through the shared engine. Its offline
