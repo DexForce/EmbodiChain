@@ -154,3 +154,24 @@ def test_pour_goal_mode_rejects_wrong_task_or_unknown_meaning(kind, mode):
         value.update(target=selector("cup"), relation="above")
     with pytest.raises(ValueError):
         validate_instruction_intent({"steps": [value]})
+
+
+def test_placement_then_upright_hold_retains_only_historical_placement():
+    from embodichain.gen_sim.task_spec import evaluate_task_spec
+
+    spec = task_spec_from_candidate(
+        candidate(
+            step("E1", "cube", target=selector("table"), relation="on"),
+            step("E2", "cube", terminal_behavior="hold"),
+        )
+    )
+    assert {g.name for g in spec.goal} == {"held", "object_upright"}
+    assert any(p.name == "semantic_goal" for p in spec.milestones[0].achieve)
+    observations = {g.id: True for g in spec.goal}
+    observations["trajectory"] = [
+        {p.id: True for p in m.achieve} for m in spec.milestones
+    ]
+    assert evaluate_task_spec(spec, observations).status.value == "satisfied"
+    held = next(g for g in spec.goal if g.name == "held")
+    observations[held.id] = False
+    assert evaluate_task_spec(spec, observations).status.value == "failed"

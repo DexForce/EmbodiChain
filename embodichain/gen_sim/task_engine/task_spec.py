@@ -121,6 +121,18 @@ def task_spec_from_candidate(
         ):
             step_goals[step_id].append(Predicate("held_by_both_grippers", arguments))
 
+    for step in steps:
+        if (
+            step["task_type"] in {"E1", "E2"}
+            and step.get("terminal_behavior") == "hold"
+        ):
+            args = {
+                "subject": step_roles[step["id"]]["object"],
+                "task_type": step["task_type"],
+            }
+            if step.get("required_arm") not in {None, "none", "auto"}:
+                args["required_arm"] = step["required_arm"]
+            step_goals[step["id"]].append(Predicate("held", args))
     goals, goal_sources = _terminal_goals(steps, step_roles, step_goals)
     requirements = _requirements(role_specs, steps, goals)
     milestones = []
@@ -405,6 +417,8 @@ def _terminal_goals(
         if kind == "E2":
             slots.pop((subject, "attachment"), None)
             slots.pop((subject, "orientation_preserve"), None)
+            if step.get("terminal_behavior") == "hold":
+                slots.pop((subject, "placement"), None)
             previous = slots.get((subject, "placement"))
             if previous is not None and previous[0].arguments.get("relation") not in {
                 "on",
@@ -427,6 +441,8 @@ def _terminal_goals(
                 slots[(subject, slot)] = (predicate, step_id)
             elif predicate.name == "articulation_joint_near":
                 slots[(subject, "articulation")] = (predicate, step_id)
+            elif predicate.name == "held":
+                slots[(subject, "attachment")] = (predicate, step_id)
             elif predicate.name == "semantic_goal":
                 slots[(subject, "placement")] = (predicate, step_id)
             elif (
