@@ -109,6 +109,11 @@ def main() -> None:
     parser.add_argument("--episodes", type=int, default=3)
     parser.add_argument("--seed", type=int, default=30000)
     parser.add_argument("--device", default="cuda:0")
+    parser.add_argument(
+        "--headless",
+        action="store_true",
+        help="Record native camera RGB without opening a presentation window.",
+    )
     parser.add_argument("--renderer", choices=("hybrid", "fast-rt"), default="hybrid")
     parser.add_argument("--fps", type=float, default=25)
     parser.add_argument("--width", type=int, default=960)
@@ -147,12 +152,13 @@ def main() -> None:
         parse_args,
     )
 
-    native_args = parse_args([str(args.run), "--viewer"])
+    native_args = parse_args([str(args.run)] + ([] if args.headless else ["--viewer"]))
     vars(native_args).update(
         checkpoint=args.checkpoint,
         renderer=args.renderer,
         seed=args.seed,
         device=args.device,
+        num_envs=1,
         gym_config=str(args.gym_config.resolve()) if args.gym_config else None,
     )
     trace: dict[str, Any] = {
@@ -161,7 +167,8 @@ def main() -> None:
         "episodes": [],
         "samples": [],
         "frames": [],
-        "capture_source": "DexSim native RGB camera sharing the window viewpoint; no matplotlib renderer",
+        "capture_source": "DexSim native RGB camera at the configured eye/target viewpoint",
+        "headless": args.headless,
         "scope": "fixed seeded visual preview, all episode outcomes included; not a success-rate qualification",
         "timing_scope": "episode_simulation_seconds is control_step multiplied by configured control_dt, not a measured native clock. Camera capture publishes/renders without requesting physics steps.",
         "action_scope": "policy_action is the deterministic network output; applied_arm_action is the manager's clipped dimensionless request after warmup masking; arm_position_target is the processed joint-position command, not measured torque.",
@@ -183,21 +190,23 @@ def main() -> None:
         discover_task_packages()
         execute_init_hooks()
         _validate_native_options(native_args)
-        native = _build_native_runtime(native_args, resolved, viewer=True)
+        native = _build_native_runtime(native_args, resolved, viewer=not args.headless)
         native.runtime.policy.eval()
         env = native.runtime.env
         base = getattr(env, "unwrapped", env)
         previous_auto_reset = getattr(base, "_demo_no_auto_reset", False)
         base._demo_no_auto_reset = True
         sim = base.sim
-        if not sim.open_window():
-            raise RuntimeError("DexSim native window did not open.")
-        window = sim.get_world().get_windows()
-        window.set_look_at(
-            eye=np.asarray(args.eye, dtype=np.float32),
-            look_at=np.asarray(args.target, dtype=np.float32),
-            up=np.asarray([0, 0, 1], dtype=np.float32),
-        )
+        window = None
+        if not args.headless:
+            if not sim.open_window():
+                raise RuntimeError("DexSim native window did not open.")
+            window = sim.get_world().get_windows()
+            window.set_look_at(
+                eye=np.asarray(args.eye, dtype=np.float32),
+                look_at=np.asarray(args.target, dtype=np.float32),
+                up=np.asarray([0, 0, 1], dtype=np.float32),
+            )
         height = max(
             2, round(args.width * sim.sim_config.height / sim.sim_config.width / 2) * 2
         )
@@ -265,7 +274,7 @@ def main() -> None:
             reward_sum = 0.0
             started = time.perf_counter()
             for step in range(1, base.max_episode_steps + 1):
-                if not sim.get_world().is_window_initialized():
+                if not args.headless and not sim.get_world().is_window_initialized():
                     raise RuntimeError(
                         "Native window closed before the fixed episode sequence finished."
                     )
@@ -288,22 +297,29 @@ def main() -> None:
                         "episode_simulation_seconds": step * base.step_dt,
                         "policy_action": _plain(action[0]),
                         "applied_arm_action": _plain(
-                            base.action_manager.get_term("arm_delta").raw_actions[0]
+                            base.action_manager.get_term(
+                                base.assembly_state.cfg.action_term
+                            ).raw_actions[0]
                         ),
                         "arm_position_target": _plain(
-                            base.action_manager.get_term("arm_delta").processed_actions[
+                            base.action_manager.get_term(
+                                base.assembly_state.cfg.action_term
+                            ).processed_actions[0]
+                        ),
+                        "qpos": _plain(
+                            base.robot.get_qpos(name=base.assembly_state.cfg.arm_part)[
                                 0
                             ]
                         ),
-                        "qpos": _plain(base.robot.get_qpos(name="arm")[0]),
                         "metrics": _plain(info.get("metrics", {})),
                     }
                 )
                 if step % stride == 0 or done:
                     last = capture(episode, step, "terminal" if done else "policy")
-                window.set_window_title(
-                    f"Learned blind peg | episode {episode+1}/{args.episodes} | t={step*base.step_dt:.2f}s"
-                )
+                if window is not None:
+                    window.set_window_title(
+                        f"Learned blind peg | episode {episode+1}/{args.episodes} | t={step*base.step_dt:.2f}s"
+                    )
                 time.sleep(max(0, started + step * base.step_dt - time.perf_counter()))
                 if done:
                     trace["episodes"].append(
@@ -333,6 +349,21 @@ def main() -> None:
                     "Task episode limit did not produce a terminal result."
                 )
         time.sleep(args.hold_seconds)
+        _encode(output, fps, count)
+        tiles = [
+            Image.open(output / "frames" / f"{index:06d}.png").convert("RGB")
+            for index in contacts
+        ]
+        thumb_height = round(320 * height / args.width)
+        sheet = Image.new("RGB", (640, thumb_height * args.episodes))
+        for index, tile in enumerate(tiles):
+            sheet.paste(
+                tile.resize((320, thumb_height)),
+                ((index % 2) * 320, (index // 2) * thumb_height),
+            )
+        sheet.save(output / "contact_sheet.png")
+        print(f"Native learned-policy preview: {output / 'preview.mp4'}", flush=True)
+
         trace["status"] = "completed"
     except Exception:
         trace["status"] = "failed"
@@ -346,23 +377,11 @@ def main() -> None:
                 getattr(
                     native.runtime.env, "unwrapped", native.runtime.env
                 )._demo_no_auto_reset = previous_auto_reset
+                camera = window = None
+                env = base = sim = None
                 native.runtime.close()
         finally:
             _flush_simulator(True)
-    _encode(output, fps, count)
-    tiles = [
-        Image.open(output / "frames" / f"{index:06d}.png").convert("RGB")
-        for index in contacts
-    ]
-    thumb_height = round(320 * height / args.width)
-    sheet = Image.new("RGB", (640, thumb_height * args.episodes))
-    for index, tile in enumerate(tiles):
-        sheet.paste(
-            tile.resize((320, thumb_height)),
-            ((index % 2) * 320, (index // 2) * thumb_height),
-        )
-    sheet.save(output / "contact_sheet.png")
-    print(f"Native learned-policy preview: {output / 'preview.mp4'}", flush=True)
 
 
 if __name__ == "__main__":
