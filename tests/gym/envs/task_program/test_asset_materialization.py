@@ -1156,7 +1156,7 @@ def test_requirements_lookup_does_not_resolve_runtime_assets(deployment, monkeyp
     )
 
 
-@pytest.mark.parametrize("reference_mode", ["registry", "local", "absolute"])
+@pytest.mark.parametrize("reference_mode", ["registry", "local", "absolute", "home"])
 def test_materialized_demo_references_survive_relocation(
     deployment, tmp_path, monkeypatch, reference_mode
 ):
@@ -1203,6 +1203,11 @@ def test_materialized_demo_references_survive_relocation(
         reference = "../cache_a/skill/demo_skill.json"
     elif reference_mode == "absolute":
         reference = str(manifest)
+    elif reference_mode == "home":
+        import os
+
+        # Exercise real home expansion without changing HOME or user files.
+        reference = "~/" + Path(os.path.relpath(manifest, Path.home())).as_posix()
     original = data.get_data_class
 
     def asset_class(name):
@@ -1239,7 +1244,7 @@ def test_materialized_demo_references_survive_relocation(
         cache.rename(destination)
         cache = destination
         assert (cache / manifest.relative_to(tmp_path / "cache_a")).is_file()
-    elif reference_mode == "absolute":
+    elif reference_mode in {"absolute", "home"}:
         destination = tmp_path / "relocated" / "deeper" / "run"
         destination.parent.mkdir(parents=True)
         shutil.move(deployment_path.parent, destination)
@@ -1257,5 +1262,5 @@ def test_materialized_demo_references_survive_relocation(
     )
     if reference_mode == "local":
         assert not Path(selected).is_absolute()
-    elif reference_mode == "absolute":
+    elif reference_mode in {"absolute", "home"}:
         assert selected == reference

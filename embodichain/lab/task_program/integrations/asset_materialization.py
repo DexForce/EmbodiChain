@@ -399,13 +399,13 @@ def materialize_asset_deployment(
     )
     # Keep registry references declarative so each destination uses its own cache.
     # Rebase component-relative filenames to the output integration. Explicit
-    # absolute paths remain anchored to the authored external library.
+    # absolute and home-anchored paths keep their authored external-library spelling.
     from embodichain.data._references import _resolve_data_reference
 
     for node in _walk(integration.get("runtime_services", {})):
         for field in ("asset_manifest", "prototype_manifest"):
             if field in node and isinstance(node[field], (str, Path)):
-                if Path(node[field]).is_absolute():
+                if Path(node[field]).expanduser().is_absolute():
                     node[field] = str(node[field])
                     continue
                 manifest = _resolve_data_reference(

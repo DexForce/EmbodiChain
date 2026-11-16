@@ -56,8 +56,9 @@ does not resolve runtime manifests. Exported registry references retain their
 `{asset, path}` declarations for resolution against the destination cache;
 component-relative service manifests resolve from their owner and are stored
 relative to the exported integration, so the export and referenced tree can move
-together. Explicitly absolute service manifests remain anchored to the authored
-external library when the export moves alone. Explicit `./` or `../`
+together. Service manifests that are absolute after home expansion remain anchored
+to the authored external library when the export moves alone; their authored
+spelling, including `~/...`, is preserved. Explicit `./` or `../`
 resource paths resolve from the component
 that declares them; bare paths retain dataset registry semantics.
 Execution-policy selections use the same configured resolver as normal task
