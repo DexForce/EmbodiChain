@@ -847,9 +847,7 @@ Entity metadata and deterministic UID indexing for schema-v2 USD scene stages.
 .. autosummary::
 
    USD_SCENE_SCHEMA
-   UsdEntityBinding
    UsdEntityDesc
-   UsdSceneBinding
    UsdSceneIndex
 
 embodichain.gen_sim.scene_engine.randomization.adapter
@@ -3035,6 +3033,22 @@ preview with managed control-part Gizmos and optional joint controls.
 .. autofunction:: main
 
 
+embodichain.lab.scripts.preview_scene
+------------------------------------
+
+.. currentmodule:: embodichain.lab.scripts.preview_scene
+
+Preview ordinary USD scenes through the Lab import owner. The default preserves
+imported initial state without physics steps; explicit simulation, offscreen PNG
+output and portable stage diagnostics share the same owned lifecycle.
+
+.. autosummary::
+
+   preview_scene
+
+.. autofunction:: preview_scene
+
+
 embodichain.lab.scripts.run_task
 -------------------------------
 
@@ -4851,9 +4865,12 @@ Resolve source geometry and project numerical generator inputs at the Sim bounda
    :nosignatures:
 
    build_gripper_collision_geometry
+   build_gripper_closing_geometry
    grasp_generator_parameters
 
 .. autofunction:: build_gripper_collision_geometry
+
+.. autofunction:: build_gripper_closing_geometry
 
 .. autofunction:: grasp_generator_parameters
 

@@ -24,8 +24,10 @@ import os
 import gc
 import sys
 import queue
+import struct
 import time
 import threading
+import zlib
 from contextlib import contextmanager
 import dexsim
 import torch
@@ -99,6 +101,7 @@ from embodichain.lab.sim.sensors import (
     ContactSensor,
 )
 from embodichain.lab.sim.sensors.attachment import resolve_parent_nodes
+from embodichain.lab.sim.sensors._camera_group_pool import _CameraGroupPool
 from embodichain.lab.sim.cfg import (
     CableObjectCfg,
     RenderCfg,
@@ -109,9 +112,11 @@ from embodichain.lab.sim.cfg import (
     validate_physics_cfg,
     MarkerCfg,
     WindowRecordCfg,
+    WindowCaptureCfg,
     WindowCameraPoseCfg,
     LightCfg,
     RigidObjectCfg,
+    RigidBodyPhysicsCfg,
     VisualObjectCfg,
     UsdSourceCfg,
     UsdImportCfg,
@@ -132,6 +137,9 @@ from embodichain.lab.sim.spawn.descriptors import (
     articulation_desc_from_cfg,
     configure_articulation_desc,
     rigid_desc_from_cfg,
+    _resolve_rigid_physics,
+    _compile_default_collision,
+    _compile_newton_collision,
     visual_desc_from_cfg,
     surface_deformable_desc_from_cfg,
     volume_deformable_desc_from_cfg,
@@ -260,13 +268,18 @@ class SimulationManagerCfg:
         visualization: VisualizationCfg | None = None,
         window_record: WindowRecordCfg | None = None,
         window_camera_pose: WindowCameraPoseCfg | None = None,
+        window_capture: WindowCaptureCfg | Mapping[str, object] | None = None,
         startup_summary: Literal["compact", "full", "off"] = "compact",
         dexsim_startup_info: bool = False,
         scene_node_capacity: int | None = None,
+        enable_ground_plane: bool = True,
+        ground_plane_attrs: RigidBodyPhysicsCfg | None = None,
     ) -> None:
         self.startup_summary = startup_summary
         self.dexsim_startup_info = dexsim_startup_info
         self.scene_node_capacity = scene_node_capacity
+        self.enable_ground_plane = enable_ground_plane
+        self.ground_plane_attrs = ground_plane_attrs
         self.width = width
         self.height = height
         self.headless = headless
@@ -296,6 +309,15 @@ class SimulationManagerCfg:
         )
         self.window_record = (
             WindowRecordCfg() if window_record is None else window_record
+        )
+        if isinstance(window_capture, Mapping):
+            window_capture = WindowCaptureCfg(**window_capture)
+        if window_capture is not None and not isinstance(
+            window_capture, WindowCaptureCfg
+        ):
+            raise TypeError("window_capture must be a WindowCaptureCfg or mapping.")
+        self.window_capture = (
+            WindowCaptureCfg() if window_capture is None else window_capture
         )
         self.window_camera_pose = (
             WindowCameraPoseCfg() if window_camera_pose is None else window_camera_pose
@@ -389,6 +411,17 @@ class SimulationManagerCfg:
     num_envs: int = 1
     """The number of parallel environments (arenas) to simulate."""
 
+    enable_ground_plane: bool = True
+    """Whether to declare the shared static ground at world Z=0."""
+
+    ground_plane_attrs: RigidBodyPhysicsCfg | None = None
+    """Optional contact/material settings for the shared ground.
+
+    ``None`` retains the established default material. Explicit settings use
+    the normal rigid-body descriptor compiler; mass values are ignored because
+    the ground is static. Disable the ground for contact-isolation experiments.
+    """
+
     arena_space: float = 5.0
     """The distance between each arena when building multiple arenas."""
 
@@ -414,11 +447,16 @@ class SimulationManagerCfg:
     window_camera_pose: WindowCameraPoseCfg = field(default_factory=WindowCameraPoseCfg)
     """Interactive viewer camera-pose printing settings."""
 
+    window_capture: WindowCaptureCfg = field(default_factory=WindowCaptureCfg)
+    """Single-frame native viewer capture settings (hotkey and output path)."""
+
     visualization: VisualizationCfg = field(default_factory=VisualizationCfg)
     """Live browser visualization settings."""
 
     def __post_init__(self) -> None:
         """Validate physics and apply visualization-dependent defaults."""
+        if not isinstance(self.enable_ground_plane, bool):
+            raise TypeError("enable_ground_plane must be a boolean.")
         if self.startup_summary not in ("compact", "full", "off"):
             raise ValueError("startup_summary must be 'compact', 'full', or 'off'.")
         validate_physics_cfg(self.physics_cfg)
@@ -623,6 +661,9 @@ class SimulationManager:
         self._spawn_scene: SpawnScene | None = None
         self._window_record_state: _WindowRecordState | None = None
         self._window_record_save_threads: list[threading.Thread] = []
+        self._window_capture_requests: queue.SimpleQueue[
+            tuple[ObjectManipulator, Path]
+        ] = queue.SimpleQueue()
         self._visualization_runtime = None
         self._arenas: list[dexsim.environment.Arena] = []
         self._gizmos: dict[str, object] = {}
@@ -704,6 +745,18 @@ class SimulationManager:
             else None
         )
         self._window_record_input_control: ObjectManipulator | None = None
+        self._window_capture_camera: object | None = None
+        wc = sim_config.window_capture
+        self._window_capture_hotkey_cfg: dict[str, object] | None = (
+            {
+                "save_path": wc.save_path,
+                "image_prefix": wc.image_prefix,
+                "hotkey": wc.hotkey,
+            }
+            if wc.enable_hotkey
+            else None
+        )
+        self._window_capture_input_control: ObjectManipulator | None = None
         wcp = sim_config.window_camera_pose
         self._window_camera_pose_hotkey_cfg: dict[str, object] | None = (
             {"convert_to_look_at": wcp.convert_to_look_at}
@@ -744,6 +797,7 @@ class SimulationManager:
         self._robots: Dict[str, Robot] = dict()
 
         self._sensors: Dict[str, BaseSensor] = dict()
+        self._camera_group_pool = _CameraGroupPool(sim_config.num_envs)
         self._lights: Dict[str, Light] = dict()
 
         self._spawn_scene = SpawnScene(
@@ -776,7 +830,8 @@ class SimulationManager:
         if self.has_native_renderer:
             self._init_sim_resources()
             self.set_default_background()
-        self._declare_spawn_default_plane()
+        if sim_config.enable_ground_plane:
+            self._declare_spawn_default_plane()
         if self.has_native_renderer:
             self.set_default_global_lighting()
 
@@ -787,6 +842,7 @@ class SimulationManager:
             self._window = self._world.get_windows()
             self.is_window_opened = self._window is not None
             self._enable_default_entity_gizmo()
+            self._register_default_window_controls()
 
         self._is_constructed = True
         if not self._defer_startup_summary:
@@ -1017,7 +1073,11 @@ class SimulationManager:
         Returns:
             List[str]: list of all assets uid.
         """
-        uid_list = ["default_plane"]
+        uid_list = (
+            ["default_plane"]
+            if getattr(self.sim_config, "enable_ground_plane", True)
+            else []
+        )
         uid_list.extend(list(self._lights.keys()))
         uid_list.extend(list(self._sensors.keys()))
         uid_list.extend(list(self._robots.keys()))
@@ -1895,7 +1955,7 @@ class SimulationManager:
             self._env = result.get_arena("default")
             self._arenas = [result.get_arena(name) for name in scene.arena_names]
             self.__dict__.pop("arena_offsets", None)
-            if self._default_plane is None:
+            if self._default_plane is None and self.sim_config.enable_ground_plane:
                 self._bind_default_plane(scene.handles("default_plane")[0])
 
         # Runtime readiness belongs to the SimulationManager. Keep this and
@@ -2010,6 +2070,7 @@ class SimulationManager:
                 record_dt > 0 and self.physics._requires_step_render_sync
             ):
                 self._ensure_render_state(wait=False)
+            self._process_window_capture_requests()
             yield
             if (
                 self._window_record_state is not None
@@ -2131,16 +2192,26 @@ class SimulationManager:
         Note: This interface is only valid when Ray Tracing rendering backend is enabled.
         """
 
+        group_ids = list(dict.fromkeys(group_ids))
         if group_ids:
             self._ensure_render_state()
         elif self.is_window_opened:
             self._ensure_render_state(wait=False)
         if group_ids:
-            cameras = [
-                sensor
-                for sensor in self._sensors.values()
-                if isinstance(sensor, Camera) and sensor.group_id in group_ids
-            ]
+            requested = set(group_ids)
+            cameras = []
+            for sensor in self._sensors.values():
+                if not isinstance(sensor, Camera):
+                    continue
+                owned = set(sensor.group_ids)
+                if not requested.intersection(owned):
+                    continue
+                if not owned.issubset(requested):
+                    raise ValueError(
+                        f"Camera {sensor.uid!r} requires all of its group IDs "
+                        "for a complete render."
+                    )
+                cameras.append(sensor)
             for sensor in cameras:
                 sensor._capture_metadata = None
                 sensor._pending_capture_metadata = None
@@ -2160,6 +2231,13 @@ class SimulationManager:
                 for sensor in cameras:
                     sensor._snapshot_render_metadata()
         self._log_scene_summary()
+
+    def _plan_camera_groups(self, configs: Sequence[SensorCfg]) -> None:
+        """Reserve startup camera slots before the first sensor is created."""
+        if self.sim_config.render_cfg.gaussian.enabled:
+            # Gaussian capture status is owned by one camera group and camera.
+            return
+        self._camera_group_pool.plan(configs)
 
     def _invalidate_gaussian_captures(self, group_id: int | None = None) -> None:
         """Discard capture identities before replacement or after failed writes."""
@@ -2248,9 +2326,11 @@ class SimulationManager:
 
         Args:
             physics_dt (float | None, optional): the time step for physics simulation. Defaults to None.
-            step (int, optional): the number of :meth:`World.update` calls per invocation. Defaults to 10.
+            step (int, optional): Number of manager physics intervals to advance.
+                Each interval may contain multiple native integration steps,
+                according to the backend configuration. Defaults to 10.
             after_substep: Observer called with the elapsed physics time after
-                each world update, before recording and visualization. It runs
+                each manager physics interval, before recording and visualization. It runs
                 inside this update call and is not retained by the manager.
             render_final_step: Render the final substep immediately. Gym defers
                 it until after interval events, then enters :meth:`render_frame`
@@ -2439,23 +2519,14 @@ class SimulationManager:
             )
             return False
         if self.is_window_opened:
+            self._register_default_window_controls()
             return True
         self._world.open_window()
         self._window = self._world.get_windows()
         if self._window is None:
             return False
         self._enable_default_entity_gizmo()
-
-        if (
-            self._window_record_hotkey_cfg is not None
-            and self._window_record_input_control is None
-        ):
-            self.enable_window_record_hotkey(**self._window_record_hotkey_cfg)
-        if (
-            self._window_camera_pose_hotkey_cfg is not None
-            and self._window_camera_pose_input_control is None
-        ):
-            self.enable_window_camera_pose_hotkey(**self._window_camera_pose_hotkey_cfg)
+        self._register_default_window_controls()
         self.is_window_opened = True
         if self.spawn_result is not None:
             self.sync_render_state()
@@ -2468,9 +2539,15 @@ class SimulationManager:
             self.stop_window_record()
         for _, gizmo in self.get_gizmo_items():
             gizmo.detach_native_window()
+        capture_camera = getattr(self, "_window_capture_camera", None)
+        if capture_camera is not None and hasattr(capture_camera, "is_open"):
+            if capture_camera.is_open() and hasattr(capture_camera, "close_camera"):
+                capture_camera.close_camera()
         self._world.close_window()
         self._window = None
         self._window_record_input_control = None
+        self._window_capture_input_control = None
+        self._window_capture_requests = queue.SimpleQueue()
         self._window_camera_pose_input_control = None
         self.is_window_opened = False
 
@@ -2523,6 +2600,9 @@ class SimulationManager:
     def _declare_spawn_default_plane(self) -> None:
         """Declare the global ground in the World's Spawn scene."""
 
+        if not self.sim_config.enable_ground_plane:
+            return
+
         from dexsim.spawn import (
             CollisionApproximation,
             CollisionDesc,
@@ -2559,6 +2639,18 @@ class SimulationManager:
             static_friction=0.5,
         )
         collision.newton = NewtonCollisionDesc(mu=0.5)
+        if self.sim_config.ground_plane_attrs is not None:
+            physics = _resolve_rigid_physics(
+                self.sim_config.ground_plane_attrs,
+                newton_solver_type=self._active_newton_solver_type,
+            )
+            collision.dexsim = _compile_default_collision(physics)
+            collision.newton = _compile_newton_collision(
+                physics,
+                newton_solver_type=self._active_newton_solver_type,
+                author_shape_defaults=True,
+            )
+            collision.enable_collision = physics.collision_enabled
         collision.render_source_index = 0
         descriptor = ObjectDesc(
             name="default_plane",
@@ -2604,9 +2696,17 @@ class SimulationManager:
 
         Raises:
             RuntimeError: The scene physics has already been prepared.
+            ValueError: The ground is disabled but enabling or editing it was requested.
         """
         if self.spawn_result is not None:
             raise RuntimeError("Ground collision must be configured before prepare().")
+        if not self.sim_config.enable_ground_plane:
+            if not enabled and newton is None and geometry is None:
+                return
+            raise ValueError(
+                "The default ground plane is disabled; enable_ground_plane must "
+                "be set before constructing the simulation."
+            )
         if geometry is not None:
             from dataclasses import fields
             from dexsim.spawn import GeometryDesc
@@ -2954,6 +3054,9 @@ class SimulationManager:
         validated at ``prepare()``;
         native creation failures do not promise rollback.
 
+        Standard AssetRevision ZIPs are validated by the SDK and extracted
+        into Spawn-owned files kept until scene teardown. Returned facade
+        sources address the resolved USD; the caller's recipe is unchanged.
         Gaussian USD references retain the single-Arena, Default-physics and
         Hybrid-renderer requirements; use explicit GaussianSplatCfg visuals
         for replicated Arenas. NoRender omits Gaussian render resources.
@@ -2988,6 +3091,13 @@ class SimulationManager:
             usd=usd,
             asset_cfgs=asset_cfgs,
         )
+        recipe.validate_import()
+        if recipe.source.file_path.lower().endswith(".zip"):
+            from .spawn._usd_scene import _open_usd_scene_source
+
+            recipe = self._spawn_scene._usd_source_files.enter_context(
+                _open_usd_scene_source(recipe)
+            )
         plan = _compile_usd_import(self, recipe)
         plan.source.materials = self._spawn_scene._resolve_materials(
             plan.source.materials
@@ -3029,13 +3139,25 @@ class SimulationManager:
         return dict(result) if legacy_result else result
 
     def _validate_visual_config(self, cfg: object) -> None:
-        from .cfg.visuals import GaussianSplatCfg, _visual_elements
+        from .cfg.visuals import (
+            GaussianSplatCfg,
+            _visual_elements,
+            _uses_descriptor_visuals,
+        )
+
+        if isinstance(cfg, RigidObjectCfg):
+            cfg._normalize_visuals()
+            cfg._validate_env_variants()
 
         groups = getattr(cfg, "link_visuals", {})
         values = getattr(cfg, "visuals", None)
         if values is not None:
             groups = {None: values}
-        if groups and self.sim_config.visualization.backend == "viser":
+        if (
+            groups
+            and not _uses_descriptor_visuals(cfg)
+            and self.sim_config.visualization.backend == "viser"
+        ):
             raise NotImplementedError(
                 "Explicit visual composition is not yet supported by Viser; use native cameras or a native window."
             )
@@ -3306,7 +3428,8 @@ class SimulationManager:
                 rigid_obj._source_visual_elements = source_elements
             declarations.append((cfg.uid, descriptor, materials, rigid_obj))
 
-        for uid, _, _, _ in declarations:
+        for uid, descriptor, _, _ in declarations:
+            self._spawn_scene._validate_rigid_variants(descriptor)
             if replace:
                 self._spawn_scene._require_removable(uid)
             else:
@@ -3927,8 +4050,14 @@ class SimulationManager:
             The stable Group facade. During initial scene construction it is
             bound to Spawn handles by :meth:`prepare`.
         """
+        from .cfg.visuals import _file_visual_binding_elements, _uses_descriptor_visuals
+
         if isinstance(cfg.rigid_objects, dict) and any(
-            getattr(member, "visuals", None) is not None
+            (
+                getattr(member, "visuals", None) is not None
+                and not _uses_descriptor_visuals(member)
+            )
+            or _file_visual_binding_elements(member) is not None
             for member in cfg.rigid_objects.values()
         ):
             raise NotImplementedError(
@@ -3978,6 +4107,7 @@ class SimulationManager:
                     f"Rigid object group member {index} has no rigid-body physics."
                 )
             descriptor.physics.actor_type = actor_type
+            self._spawn_scene._validate_rigid_variants(descriptor)
             self._spawn_scene._require_available_uid(descriptor.name)
             material_batches.append(materials)
             descriptors.append(descriptor)
@@ -4864,7 +4994,7 @@ class SimulationManager:
         scene = self._spawn_scene
         if uid not in scene:
             return False
-        if uid == "default_plane":
+        if uid == "default_plane" and self.sim_config.enable_ground_plane:
             raise ValueError("The Spawn-owned default plane cannot be removed.")
 
         scene._require_removable(uid)
@@ -5246,6 +5376,355 @@ class SimulationManager:
 
         for control in controls:
             self._window.add_input_control(control)
+
+    def _register_default_window_controls(self) -> None:
+        """Register configured built-in controls on an available window."""
+        if getattr(self, "_window", None) is None:
+            return
+        if (
+            getattr(self, "_window_record_hotkey_cfg", None) is not None
+            and getattr(self, "_window_record_input_control", None) is None
+        ):
+            self.enable_window_record_hotkey(**self._window_record_hotkey_cfg)
+        if (
+            getattr(self, "_window_capture_hotkey_cfg", None) is not None
+            and getattr(self, "_window_capture_input_control", None) is None
+        ):
+            self.enable_window_capture_hotkey(**self._window_capture_hotkey_cfg)
+        if (
+            getattr(self, "_window_camera_pose_hotkey_cfg", None) is not None
+            and getattr(self, "_window_camera_pose_input_control", None) is None
+        ):
+            self.enable_window_camera_pose_hotkey(**self._window_camera_pose_hotkey_cfg)
+
+    @staticmethod
+    def _resolve_window_hotkey_code(hotkey: object) -> int:
+        """Resolve an ``InputKey``, scancode, or single-letter hotkey."""
+        if isinstance(hotkey, str):
+            normalized = hotkey.strip().upper()
+            if len(normalized) == 1:
+                normalized = f"SCANCODE_{normalized}"
+            elif not normalized.startswith("SCANCODE_"):
+                normalized = f"SCANCODE_{normalized}"
+            try:
+                from dexsim.types import InputKey
+
+                hotkey = getattr(InputKey, normalized)
+            except (AttributeError, TypeError) as exc:
+                raise ValueError(
+                    f"Unknown native-window hotkey {hotkey!r}. Use an InputKey, "
+                    "SDL scancode, or a single letter."
+                ) from exc
+
+        value = getattr(hotkey, "value", hotkey)
+        if isinstance(value, Integral):
+            return int(value)
+        raise TypeError(
+            "Native-window hotkey must be an InputKey, integer scancode, or string."
+        )
+
+    @classmethod
+    def _validate_window_capture_hotkey(cls, hotkey: object) -> int:
+        """Validate a capture key against native and EmbodiChain controls."""
+        key_code = cls._resolve_window_hotkey_code(hotkey)
+        from dexsim.types import InputKey
+
+        reserved_names = (
+            # Existing EmbodiChain controls.
+            "SCANCODE_R",
+            "SCANCODE_P",
+            "SCANCODE_I",
+            # DexSim selection and entity-gizmo controls.
+            "SCANCODE_F",
+            "SCANCODE_L",
+            "SCANCODE_G",
+            # DexSim camera movement controls.
+            "SCANCODE_W",
+            "SCANCODE_A",
+            "SCANCODE_S",
+            "SCANCODE_D",
+            "SCANCODE_E",
+            "SCANCODE_Q",
+            "SCANCODE_SPACE",
+        )
+        reserved_codes = {int(getattr(InputKey, name).value) for name in reserved_names}
+        if key_code in reserved_codes:
+            raise ValueError(
+                "Window capture hotkey conflicts with an existing native-window "
+                "control. Choose an unused key such as 'c'."
+            )
+        return key_code
+
+    @staticmethod
+    def _build_window_capture_output(
+        save_path: str | os.PathLike[str] | None,
+        image_prefix: str,
+    ) -> Path:
+        """Resolve a PNG path for a native viewer capture."""
+        if save_path is None:
+            output_dir = Path.cwd() / "outputs" / "images"
+            timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S-%f")
+            return output_dir / f"{image_prefix}_{timestamp}.png"
+
+        path = Path(save_path)
+        if path.suffix.lower() != ".png":
+            path = (
+                path.with_suffix(".png")
+                if path.suffix
+                else path.with_name(path.name + ".png")
+            )
+        return path
+
+    @staticmethod
+    def _normalize_window_capture_image(image: object) -> np.ndarray | None:
+        """Copy and validate one renderer image for ownership-safe use."""
+        if image is None:
+            return None
+        try:
+            array = np.asarray(image)
+        except Exception:
+            return None
+        if array.size == 0 or array.ndim not in (2, 3):
+            return None
+        if array.ndim == 3 and array.shape[2] not in (1, 3, 4):
+            return None
+
+        if array.dtype != np.uint8:
+            if np.issubdtype(array.dtype, np.floating):
+                finite = np.nan_to_num(array, nan=0.0, posinf=1.0, neginf=0.0)
+                if finite.size and float(np.max(finite)) <= 1.0:
+                    finite = finite * 255.0
+                array = finite
+            array = np.clip(array, 0, 255).astype(np.uint8)
+        return np.array(array, dtype=np.uint8, order="C", copy=True)
+
+    @staticmethod
+    def _write_window_capture_png(image: np.ndarray, path: Path) -> None:
+        """Write an RGB/RGBA/gray uint8 image as a PNG without optional deps."""
+        array = np.asarray(image, dtype=np.uint8)
+        if array.ndim == 2:
+            color_type = 0
+        elif array.ndim == 3 and array.shape[2] == 1:
+            array = array[..., 0]
+            color_type = 0
+        elif array.ndim == 3 and array.shape[2] == 3:
+            color_type = 2
+        elif array.ndim == 3 and array.shape[2] == 4:
+            color_type = 6
+        else:
+            raise ValueError(f"Unsupported PNG image shape {array.shape}.")
+
+        height, width = array.shape[:2]
+        rows = b"".join(b"\x00" + row.tobytes() for row in array)
+
+        def chunk(kind: bytes, payload: bytes) -> bytes:
+            return (
+                struct.pack(">I", len(payload))
+                + kind
+                + payload
+                + struct.pack(">I", zlib.crc32(kind + payload) & 0xFFFFFFFF)
+            )
+
+        png = b"\x89PNG\r\n\x1a\n"
+        png += chunk(
+            b"IHDR",
+            struct.pack(">IIBBBBB", width, height, 8, color_type, 0, 0, 0),
+        )
+        png += chunk(b"IDAT", zlib.compress(rows))
+        png += chunk(b"IEND", b"")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(png)
+
+    def _capture_native_window_frame(self) -> np.ndarray | None:
+        """Read one owned frame from DexSim's native window when available."""
+        if self._window is None:
+            return None
+        get_picture = getattr(self._window, "get_picture", None)
+        if not callable(get_picture):
+            return None
+        frame = self._normalize_window_capture_image(get_picture())
+        if frame is None:
+            logger.log_warning(
+                "Native window did not provide a non-empty rendered frame."
+            )
+        return frame
+
+    def _capture_window_fallback_frame(self) -> np.ndarray | None:
+        """Capture the current window pose through an offscreen camera fallback.
+
+        DexSim 0.5.0 does not expose a CPU readback for every native renderer
+        (notably Hybrid and Fast-RT window surfaces).  The fallback keeps the
+        current camera pose and asks the renderer's regular camera readback
+        path for one frame, so callers still receive the simulation viewport
+        rather than an empty placeholder.
+        """
+        if self._window is None:
+            return None
+        get_pose_matrix = getattr(self._window, "get_pose_matrix", None)
+        if not callable(get_pose_matrix):
+            return None
+
+        try:
+            pose = np.asarray(get_pose_matrix(), dtype=np.float32)
+            if pose.shape != (4, 4):
+                raise ValueError(f"expected a 4x4 pose, got {pose.shape}")
+            capture_camera = getattr(self, "_window_capture_camera", None)
+            if capture_camera is None:
+                camera_name = f"viewer_capture_camera_{self.instance_id}"
+                capture_camera = self._env.create_camera(
+                    camera_name, self.sim_config.width, self.sim_config.height
+                )
+                self._window_capture_camera = capture_camera
+            camera = capture_camera
+            if hasattr(camera, "is_open") and camera.is_open() is False:
+                camera.open_camera()
+            camera.set_world_pose(pose)
+            camera.render()
+            return self._normalize_window_capture_image(camera.get_rgb_map())
+        except Exception as exc:
+            logger.log_warning(
+                "Native window capture fallback could not render the current "
+                f"viewport: {exc}"
+            )
+            return None
+
+    def capture_window(
+        self,
+        save_path: str | os.PathLike[str] | None = None,
+        image_prefix: str = "viewer_capture",
+    ) -> np.ndarray | None:
+        """Capture one owned image from the current native viewer viewport.
+
+        The method first consumes DexSim's native ``Windows.get_picture()``
+        frame. If the method is missing or returns an empty frame, an offscreen
+        camera is rendered at the current viewer pose. A native readback error
+        returns ``None`` without querying the possibly retired window camera. The
+        fallback is needed by the DexSim 0.5.0 Hybrid and Fast-RT window
+        implementations, whose swapchain does not expose a CPU buffer.
+
+        Args:
+            save_path: Optional PNG path.  A ``.png`` suffix is added when it
+                is omitted.  When ``None``, the image is returned without
+                writing a file.
+            image_prefix: Prefix used by the native hotkey when it generates a
+                default output path.  Direct calls that omit ``save_path`` only
+                return the image and do not write a file.
+
+        Returns:
+            A caller-owned ``uint8`` image array, or ``None`` when the window is
+            closed or neither readback path produced a non-empty frame.
+        """
+        if self._window is None or getattr(self, "is_window_opened", True) is False:
+            logger.log_warning("No simulation window available to capture.")
+            return None
+
+        try:
+            frame = self._capture_native_window_frame()
+        except Exception as exc:
+            logger.log_warning(f"Native window frame readback failed: {exc}")
+            return None
+        if frame is None:
+            frame = self._capture_window_fallback_frame()
+        if frame is None:
+            logger.log_warning(
+                "Native window capture produced no image; no file was written."
+            )
+            return None
+
+        if save_path is not None:
+            path = self._build_window_capture_output(save_path, image_prefix)
+            try:
+                self._write_window_capture_png(frame, path)
+            except Exception as exc:
+                logger.log_warning(f"Failed to save native window capture: {exc}")
+            else:
+                logger.log_info(f"Native window capture saved to {path}")
+        return frame
+
+    def capture_window_image(
+        self,
+        save_path: str | os.PathLike[str] | None = None,
+    ) -> np.ndarray | None:
+        """Alias for :meth:`capture_window` for image-oriented callers.
+
+        Args:
+            save_path: Optional PNG path to write alongside the returned image.
+
+        Returns:
+            The owned image array, or ``None`` when capture is unavailable.
+        """
+        return self.capture_window(save_path=save_path)
+
+    def enable_window_capture_hotkey(
+        self,
+        save_path: str | os.PathLike[str] | None = None,
+        image_prefix: str = "viewer_capture",
+        hotkey: object = "c",
+    ) -> bool:
+        """Register a hotkey that requests one native viewer frame as a PNG.
+
+        The input callback queues the request. The next :meth:`render_frame`
+        (also entered by :meth:`update`) captures it on the caller's thread,
+        since native window readback cannot block the render thread. Closing
+        the window discards its pending requests.
+
+        Args:
+            save_path: Optional PNG path.  If omitted, a timestamped path is
+                generated under ``outputs/images`` for each key press.
+            image_prefix: Prefix for generated output names.
+            hotkey: DexSim ``InputKey``, SDL scancode, or key name to register.
+
+        Returns:
+            Whether the control is registered on an open native window.
+
+        Raises:
+            ValueError: If the key conflicts with an existing native control.
+        """
+        self._validate_window_capture_hotkey(hotkey)
+        self._window_capture_hotkey_cfg = {
+            "save_path": save_path,
+            "image_prefix": image_prefix,
+            "hotkey": hotkey,
+        }
+        if self._window is None:
+            logger.log_warning(
+                "No simulation window available yet. The viewer capture hotkey "
+                "will be registered after `open_window()`."
+            )
+            return False
+        if getattr(self, "_window_capture_input_control", None) is not None:
+            return True
+
+        sim = self
+
+        class WindowCaptureEvent(ObjectManipulator):
+            def on_key_down(self, key: int) -> None:
+                config = sim._window_capture_hotkey_cfg
+                if key == sim._resolve_window_hotkey_code(config["hotkey"]):
+                    output_path = sim._build_window_capture_output(
+                        config["save_path"], config["image_prefix"]
+                    )
+                    sim._window_capture_requests.put((self, output_path))
+
+        self._window_capture_input_control = WindowCaptureEvent()
+        self._window.add_input_control(self._window_capture_input_control)
+        logger.log_info(
+            f"Viewer capture hotkey registered. Press {hotkey!r} to save a frame."
+        )
+        return True
+
+    def _process_window_capture_requests(self) -> None:
+        """Consume native-input requests outside the render-owner callback."""
+        requests = getattr(self, "_window_capture_requests", None)
+        if requests is None:
+            return
+        while True:
+            try:
+                control, output_path = requests.get_nowait()
+            except queue.Empty:
+                return
+            if control is getattr(self, "_window_capture_input_control", None):
+                self.capture_window(save_path=output_path)
 
     def _build_window_record_output(
         self, save_path: str | None, video_prefix: str

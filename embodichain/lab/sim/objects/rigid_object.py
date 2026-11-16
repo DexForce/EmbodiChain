@@ -106,6 +106,8 @@ class CollisionShapeDesc:
     construct input envelopes; their provenance belongs to that provider and
     must not be confused with native cooked geometry. Consumers must not apply
     :attr:`RigidObjectCfg.body_scale` again to either already-scaled description.
+    Cylinder descriptors use a circumscribed 128-sided convex proxy for
+    planning; their simulation shape remains analytic.
 
     Attributes:
         name: Stable shape name within the owning rigid object.
@@ -126,6 +128,76 @@ class CollisionShapeDesc:
     half_height: float | None = None
     vertices: torch.Tensor | None = None
     triangles: torch.Tensor | None = None
+
+
+def _apply_entity_visual_uv(cfg: RigidObjectCfg, entity: object) -> None:
+    """Apply UV projection only when this row's effective appearance requests it."""
+    shape = getattr(cfg, "visual_shape", None) or cfg.shape
+    visuals = cfg.visuals
+    if visuals is not None:
+        shape = visuals[0].representation if len(visuals) == 1 else None
+    if not isinstance(shape, MeshCfg) or not shape.compute_uv:
+        return
+    render_body = entity.get_render_body()
+    if render_body is None:
+        return
+    project_uv = getattr(render_body, "set_projective_uv", None)
+    if project_uv is None:
+        raise NotImplementedError(
+            "compute_uv requires a render body with set_projective_uv()."
+        )
+    project_uv(np.asarray(shape.project_direction, dtype=np.float32))
+
+
+def _build_cfg_init_pose(
+    cfg: RigidObjectCfg, env_ids: Sequence[int] | torch.Tensor, device: torch.device
+) -> torch.Tensor:
+    """Build initial root poses from cfg as ``(N, 4, 4)`` matrices."""
+    if cfg.env_variants:
+        if len(env_ids) == 0:
+            return torch.empty((0, 4, 4), dtype=torch.float32, device=device)
+        from scipy.spatial.transform import Rotation
+
+        # Config lookup is host-side; transfer batched IDs once rather than
+        # synchronizing each CUDA scalar during a vectorized environment reset.
+        ids = (
+            env_ids.detach().cpu().tolist()
+            if isinstance(env_ids, torch.Tensor)
+            else env_ids
+        )
+        configs = [cfg.env_variants.get(int(env_id), cfg) for env_id in ids]
+        poses = np.repeat(np.eye(4)[None], len(configs), axis=0)
+        positions = np.asarray([cfg.init_pos for cfg in configs])
+        rotations = Rotation.from_euler(
+            "XYZ", [cfg.init_rot for cfg in configs], degrees=True
+        ).as_matrix()
+        poses[:, :3, 3] = positions
+        poses[:, :3, :3] = rotations
+        for index, cfg in enumerate(configs):
+            if cfg.init_local_pose is not None:
+                poses[index] = np.asarray(cfg.init_local_pose).reshape(4, 4)
+        return torch.as_tensor(poses, dtype=torch.float32, device=device)
+    num_instances = len(env_ids)
+    if cfg.init_local_pose is not None:
+        return (
+            torch.as_tensor(
+                cfg.init_local_pose,
+                dtype=torch.float32,
+                device=device,
+            )
+            .reshape(1, 4, 4)
+            .repeat(num_instances, 1, 1)
+        )
+    pos = torch.as_tensor(cfg.init_pos, dtype=torch.float32, device=device)
+    rot = (
+        torch.as_tensor(cfg.init_rot, dtype=torch.float32, device=device)
+        * torch.pi
+        / 180.0
+    )
+    pose = torch.eye(4, dtype=torch.float32, device=device)
+    pose[:3, 3] = pos
+    pose[:3, :3] = matrix_from_euler(rot.reshape(1, 3), "XYZ")[0]
+    return pose.unsqueeze(0).repeat(num_instances, 1, 1)
 
 
 @dataclass
@@ -506,24 +578,10 @@ class RigidObject(BatchEntity):
         self._has_collision_visible_node = False
 
     def _apply_spawn_visual_uv(self) -> None:
-        """Apply configured projective UV mapping to spawned render bodies."""
-        shape = getattr(self.cfg, "visual_shape", None) or getattr(
-            self.cfg, "shape", None
-        )
-        if not isinstance(shape, MeshCfg) or not shape.compute_uv:
-            return
-
-        project_direction = np.asarray(shape.project_direction, dtype=np.float32)
-        for entity in self._entities:
-            render_body = entity.get_render_body()
-            if render_body is None:
-                continue
-            project_uv = getattr(render_body, "set_projective_uv", None)
-            if project_uv is None:
-                raise NotImplementedError(
-                    "compute_uv requires a render body with set_projective_uv()."
-                )
-            project_uv(project_direction)
+        """Apply projection using each row's complete replacement configuration."""
+        variants = self.cfg.env_variants or {}
+        for env_id, entity in enumerate(self._entities):
+            _apply_entity_visual_uv(variants.get(env_id, self.cfg), entity)
 
     def bind_spawn(
         self,
@@ -1922,7 +1980,7 @@ class RigidObject(BatchEntity):
         )
 
     def get_semantic_mesh(
-        self, env_ids: Sequence[int] | None = None
+        self, env_ids: Sequence[int] | torch.Tensor | None = None
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Return independent scaled semantic vertices and triangle indices.
 
@@ -1934,13 +1992,57 @@ class RigidObject(BatchEntity):
 
         Returns:
             Owner-local vertices of shape (B, V, 3) with body scaling applied,
-            and triangle indices of shape (B, F, 3).
+            and triangle indices of shape (B, F, 3). Empty selections return
+            typed ``(0, 0, 3)`` tensors without reading geometry or scales.
 
         Raises:
-            ValueError: If no semantic surface or explicit proxy is available.
+            IndexError: If an environment index is invalid.
+            ValueError: If indices repeat, or no semantic surface is available.
         """
+        from ..common import _validated_env_ids
+
+        ids = _validated_env_ids(env_ids, self.num_instances)
+        if not ids:
+            return (
+                torch.empty((0, 0, 3), dtype=torch.float32, device=self.device),
+                torch.empty((0, 0, 3), dtype=torch.int32, device=self.device),
+            )
         binding = getattr(self, "_visual_binding", None)
         if binding is None:
+            from ..cfg.visuals import (
+                _file_visual_binding_elements,
+                _uses_descriptor_visuals,
+            )
+
+            if self.cfg.semantic_shape is None and (
+                _uses_descriptor_visuals(self.cfg)
+                or _file_visual_binding_elements(self.cfg) is not None
+                or getattr(self.cfg, "env_variants", None)
+            ):
+                from ..spawn._visuals import _semantic_mesh_arrays
+
+                meshes = [
+                    _semantic_mesh_arrays(
+                        (self.cfg.env_variants or {}).get(index, self.cfg).shape
+                    )
+                    for index in ids
+                ]
+                if (
+                    len({(vertices.shape, faces.shape) for vertices, faces in meshes})
+                    != 1
+                ):
+                    raise ValueError(
+                        "Semantic meshes differ across environments; query one environment at a time."
+                    )
+                vertices = torch.as_tensor(
+                    np.stack([mesh[0] for mesh in meshes]), device=self.device
+                )
+                faces = torch.as_tensor(
+                    np.stack([mesh[1] for mesh in meshes]),
+                    dtype=torch.int32,
+                    device=self.device,
+                )
+                return vertices * self.get_body_scale(ids).unsqueeze(1), faces
             if self.cfg.semantic_shape is None:
                 if getattr(self.cfg, "source", None) is not None:
                     elements = self.get_visual_elements()
@@ -1951,13 +2053,10 @@ class RigidObject(BatchEntity):
                         raise ValueError(
                             "Semantic mesh is unavailable for Gaussian-only USD appearance; configure semantic_shape."
                         )
-                return self.get_vertices(env_ids, scale=True), self.get_triangles(
-                    env_ids
-                )
+                return self.get_vertices(ids, scale=True), self.get_triangles(ids)
             from ..spawn._visuals import _semantic_mesh_arrays
 
             vertices, faces = _semantic_mesh_arrays(self.cfg.semantic_shape)
-            ids = list(range(self.num_instances)) if env_ids is None else env_ids
             vertices = torch.as_tensor(vertices, device=self.device)
             faces = torch.as_tensor(faces, dtype=torch.int32, device=self.device)
             return (
@@ -1966,14 +2065,15 @@ class RigidObject(BatchEntity):
             )
         if binding.semantic is None or binding.semantic[0].shape[1] == 0:
             raise ValueError("Semantic mesh is unavailable; configure semantic_shape.")
-        ids = binding.indices(env_ids)
         vertices, faces = binding.semantic
         return (
             vertices[ids].clone() * self.get_body_scale(ids).unsqueeze(1),
             faces[ids].clone(),
         )
 
-    def get_collision_shapes(self, env_id: int = 0) -> list[CollisionShapeDesc]:
+    def get_collision_shapes(
+        self, env_id: int = 0, *, allow_heterogeneous: bool = False
+    ) -> list[CollisionShapeDesc]:
         """Snapshot the physical collision shapes used by DexSim.
 
         Unlike :meth:`get_vertices` and :meth:`get_triangles`, this method reads
@@ -1989,6 +2089,9 @@ class RigidObject(BatchEntity):
 
         Args:
             env_id: Environment row whose collision geometry is returned.
+            allow_heterogeneous: Return only the selected row without requiring
+                identical topology in other environments. Useful for prepared
+                asset variants; batched planner callers retain the default guard.
 
         Returns:
             Physical collision-shape descriptors in stable shape-index order.
@@ -2004,6 +2107,8 @@ class RigidObject(BatchEntity):
             )
 
         requested = self._get_collision_shapes_for_entity(env_id)
+        if allow_heterogeneous:
+            return requested
         requested_topology = self._collision_shape_topology(requested)
         for other_env_id in range(self.num_instances):
             if other_env_id == env_id:
@@ -2054,6 +2159,47 @@ class RigidObject(BatchEntity):
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
         return self.user_ids[local_env_ids]
+
+    def get_render_ids(
+        self, env_ids: Sequence[int] | torch.Tensor | None = None
+    ) -> torch.Tensor:
+        """Return mesh instance IDs belonging to this logical rigid object.
+
+        Camera segmentation can contain IDs from separate appearance actors.
+        These IDs supplement the owner ID here; :meth:`get_user_ids` continues
+        to return only physical body IDs. Gaussian splats do not expose mesh
+        instance-mask IDs and are excluded.
+
+        Args:
+            env_ids: Environment indices, or None for all environments.
+
+        Returns:
+            Int32 IDs of shape (B, K), with the physical owner in column zero.
+
+        Raises:
+            IndexError: If an environment index is invalid.
+            ValueError: If environment indices repeat.
+        """
+        from ..common import _validated_env_ids
+
+        ids = _validated_env_ids(env_ids, self.num_instances)
+        owner_ids = self.get_user_ids(ids).unsqueeze(1)
+        binding = getattr(self, "_visual_binding", None)
+        if binding is None:
+            return owner_ids
+        mesh_handles = [
+            handles
+            for element, handles in zip(binding.elements, binding.handles)
+            if not element.gaussian
+        ]
+        if not mesh_handles:
+            return owner_ids
+        companion_ids = torch.tensor(
+            [[handles[i].get_user_id() for handles in mesh_handles] for i in ids],
+            dtype=owner_ids.dtype,
+            device=self.device,
+        ).reshape(len(ids), len(mesh_handles))
+        return torch.cat((owner_ids, companion_ids), dim=1)
 
     def enable_collision(
         self, enable: torch.Tensor, env_ids: Sequence[int] | None = None
@@ -2167,38 +2313,11 @@ class RigidObject(BatchEntity):
         for env_idx in (self._all_indices if env_ids is None else env_ids):
             set_visible(self._entities[env_idx], visible)
 
-    def _build_cfg_init_pose(self, env_ids: Sequence[int]) -> torch.Tensor:
+    def _build_cfg_init_pose(
+        self, env_ids: Sequence[int] | torch.Tensor
+    ) -> torch.Tensor:
         """Build initial root poses from cfg as ``(N, 4, 4)`` matrices."""
-        num_instances = len(env_ids)
-        if self.cfg.init_local_pose is not None:
-            return (
-                torch.as_tensor(
-                    self.cfg.init_local_pose,
-                    dtype=torch.float32,
-                    device=self.device,
-                )
-                .reshape(1, 4, 4)
-                .repeat(num_instances, 1, 1)
-            )
-        pos = torch.as_tensor(
-            self.cfg.init_pos, dtype=torch.float32, device=self.device
-        )
-        rot = (
-            torch.as_tensor(self.cfg.init_rot, dtype=torch.float32, device=self.device)
-            * torch.pi
-            / 180.0
-        )
-        pos = pos.unsqueeze(0).repeat(num_instances, 1)
-        rot = rot.unsqueeze(0).repeat(num_instances, 1)
-        mat = matrix_from_euler(rot, "XYZ")
-        pose = (
-            torch.eye(4, dtype=torch.float32, device=self.device)
-            .unsqueeze(0)
-            .repeat(num_instances, 1, 1)
-        )
-        pose[:, :3, 3] = pos
-        pose[:, :3, :3] = mat
-        return pose
+        return _build_cfg_init_pose(self.cfg, env_ids, self.device)
 
     def _apply_initial_state(self) -> None:
         """Apply cfg initial pose after construction.
@@ -2220,6 +2339,14 @@ class RigidObject(BatchEntity):
         binding = getattr(self, "_visual_binding", None)
         if binding is not None:
             binding.reset(local_env_ids)
+        else:
+            from ..common import _validated_env_ids
+            from ..cfg.visuals import _descriptor_visual_env_ids
+
+            ids = _validated_env_ids(local_env_ids, self.num_instances)
+            visual_ids = _descriptor_visual_env_ids(self.cfg, ids)
+            if visual_ids:
+                self.set_visible(True, env_ids=visual_ids)
         self.restore_visual_material(env_ids=local_env_ids)
 
         # Preserve the legacy Default-backend attribute reset before restoring

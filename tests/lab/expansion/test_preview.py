@@ -181,7 +181,7 @@ def test_result_loading_binds_grasp_row_and_fk_without_writing_results(recorded_
 
 def test_result_loader_rejects_incomplete_scene_and_budget(recorded_job, tmp_path):
     path, job, episode = recorded_job
-    with pytest.raises(ValueError, match="missing job.json"):
+    with pytest.raises(ValueError, match="aggregate result or native job"):
         load_preview([tmp_path / "missing"])
     assert not (tmp_path / "missing").exists()
     ArtifactEpisodeSink(path).submit(

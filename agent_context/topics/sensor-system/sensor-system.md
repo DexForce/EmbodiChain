@@ -14,6 +14,7 @@
 | Joint and contact acquisition windows | `embodichain/lab/sim/sensors/contact/observation.py` |
 | Native support observations and pair ownership | `embodichain/lab/sim/sensors/support_observation.py` |
 | Fixed contact-buffer scatter | `embodichain/lab/sim/sensors/contact/_warp/scatter.py` |
+| Private native geometry-pair net forces | `embodichain/lab/sim/sensors/contact/_geometry_contact_sensor.py` |
 
 Sensors inherit `BaseSensor`/`BatchEntity` and expose per-environment data through
 a TensorDict buffer. `SensorCfg.from_dict()` resolves `sensor_type + "Cfg"`
@@ -43,6 +44,19 @@ and registers them through `add_sensor()`. Sensor UIDs remain scene-wide;
 multiple robots need distinct sensor UIDs. Camera creation and rebuilds retain
 the same manager-owned lifecycle. Removing a robot destroys its automatically
 initialized cameras before rebuilding the physical scene.
+
+For a configured Gym deployment, the manager plans Scene-owned groups before
+creating robot-mounted and independent cameras. Cameras with matching
+resolution, enabled outputs and visual-overlay policy share a target; individual
+intrinsics, poses and ground visibility remain view-owned. FastRT and offline RT
+use one group per compatible set with DexSim 0.6.0rc2, while Hybrid
+packs at most 32 views per group. Sensors added after startup keep independent
+targets. The manager owns group lifetime, and each sensor reads only its leased
+slots in Arena/eye order. Gym and recording consumers render each unique group
+once; direct sensor captures include all groups in its shared set. A partial
+group render cannot publish a complete capture-metadata snapshot.
+Gaussian-enabled render configurations keep independent groups so each camera
+retains its own capture identity.
 
 Componentized Gym deployments select the robot and independent sensors through
 an embodiment component. The component/inline exclusion rules, Gym acquisition

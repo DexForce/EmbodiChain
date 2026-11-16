@@ -92,7 +92,7 @@ There are three independent batching scopes:
 | --- | --- |
 | Numerical geometry | Leading dimensions index independent layouts; `(B, N, 2, 3)` means B layouts containing N AABBs. `compute.geometry` supports CPU/CUDA tensor operations. |
 | Basic physical services | `SceneView` accepts nonempty, unique `env_ids` in a caller-chosen order. Capture and restore preserve that selection. `apply_changes` broadcasts one change set; `apply_changes_batch` accepts distinct changes keyed by environment ID. |
-| Host execution | The Task Program `SimulationSceneExpansionHost` prepares and restores a fixed B=1 scene for `execute_scene_variant`. This does not restrict the separate batched layout application API. |
+| Host execution | The Task Program `SimulationSceneExpansionHost` prepares and restores explicitly selected rows of a fixed-topology scene for `execute_scene_variants`. Settling advances the whole World and requires all rows; source tracing and specialized workspace/search adapters retain their own qualification limits. |
 
 Views support rigid objects, robots, and articulations. Worlds containing rigid
 object groups, deformables, or explicit rigid constraints are rejected by this

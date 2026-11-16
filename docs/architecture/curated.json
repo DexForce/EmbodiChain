@@ -1290,24 +1290,24 @@
     },
     {
       "id": "scene-expansion-integration",
-      "label": "Scene expansion attempt",
+      "label": "Scene expansion attempts",
       "kind": "function",
       "topic_ids": [
         "scene-expansion",
         "task-programs"
       ],
-      "summary": "Prepares one scene candidate and executes a Task Program with separate measured acceptance.",
-      "details": "execute_scene_variant connects a scene proposal to injected preparation and measurement callbacks. For a valid initial state it creates the canonical Task Program segments and uses the existing Gym demo executor, recording separate initial-state, program, and measured-outcome evidence.",
+      "summary": "Prepares selected scene candidates and executes a shared Task Program with per-row measured acceptance.",
+      "details": "execute_scene_variants connects a row-to-candidate mapping to batched preparation and row-addressed measurement callbacks. Initially valid rows use canonical Task Program segments and the existing batched Gym demo executor; initial checks, program completion and measured acceptance remain independent per row.",
       "boundaries": [
-        "One B=1 attempt; the caller supplies physical preparation, measured task evidence, retry policy, and the reset-time persistence transaction."
+        "Explicit selected-row attempts on one World clock; the caller supplies physical preparation, row-specific measured evidence, retry policy and reset-time persistence. Settling requires the complete World selection."
       ],
       "evidence": [
         {
           "path": "embodichain/lab/task_program/integrations/scene_expansion.py",
-          "symbol": "execute_scene_variant",
-          "start_line": 195,
-          "end_line": 195,
-          "excerpt": "def execute_scene_variant("
+          "symbol": "execute_scene_variants",
+          "start_line": 241,
+          "end_line": 241,
+          "excerpt": "def execute_scene_variants("
         }
       ],
       "documentation": [
@@ -3328,7 +3328,7 @@
         "Arena-local Z-up geometry in metres; AABB layout is not exact mesh collision or task-success evidence.",
         "Basic state capture, restoration and rigid pose changes support explicit ordered environment selections with fixed topology; snapshots remain owner-bound physical state, not complete backend checkpoints.",
         "GenSim retains model calls, assets, editing semantics, temporary simulation lifetime and export formats.",
-        "Tensor geometry and expansion sampling have separate CPU/CUDA batch contracts; CPU strategies do not become GPU solvers. Settling requires full-world selection, while the Task Program scene expansion host remains B=1."
+        "Tensor geometry and expansion sampling have separate CPU/CUDA batch contracts; CPU strategies do not become GPU solvers. Settling requires full-world selection; the Task Program scene expansion host prepares and restores explicit rows with independent measured acceptance."
       ],
       "evidence": [
         {
@@ -5778,10 +5778,10 @@
       "evidence": [
         {
           "path": "embodichain/lab/task_program/integrations/scene_expansion.py",
-          "symbol": "execute_scene_variant",
-          "start_line": 294,
-          "end_line": 296,
-          "excerpt": "            segments = EmbodiedEnv.create_demo_segments("
+          "symbol": "execute_scene_variants",
+          "start_line": 400,
+          "end_line": 400,
+          "excerpt": "                segments = EmbodiedEnv.create_demo_segments("
         }
       ]
     },
@@ -5937,9 +5937,9 @@
         {
           "path": "extensions/embodichain_benchmarks/motion_generation/runner.py",
           "symbol": "BenchmarkRunner._create_simulation",
-          "start_line": 166,
-          "end_line": 173,
-          "excerpt": "        sim = SimulationManager(\n            SimulationManagerCfg(\n                headless=self.headless,\n                sim_device=str(self.device),\n                num_envs=batch_size,\n                arena_space=2.0,\n            )\n        )"
+          "start_line": 276,
+          "end_line": 286,
+          "excerpt": "        sim = SimulationManager(\n            SimulationManagerCfg(\n                headless=self.headless,\n                sim_device=str(self.device),\n                num_envs=batch_size,\n                arena_space=2.0,\n                physics_cfg=DefaultPhysicsCfg(\n                    num_substeps=self.suite.protocol.physics_substeps\n                ),\n            )\n        )"
         }
       ]
     },

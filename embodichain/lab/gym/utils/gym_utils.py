@@ -729,6 +729,18 @@ def config_to_cfg(
     from embodichain.utils import configclass
     from embodichain.data import get_data_path
     from embodichain.lab.sim.cfg.source import _asset_file_path
+    from embodichain.lab.sim.shapes import CompoundShapeCfg
+
+    def resolve_shape_paths(shape: object) -> None:
+        if (
+            isinstance(shape, MeshCfg)
+            and isinstance(shape.fpath, (str, Path))
+            and shape.fpath
+        ):
+            shape.fpath = get_data_path(shape.fpath)
+        elif isinstance(shape, CompoundShapeCfg):
+            for part in shape.parts:
+                resolve_shape_paths(part.shape)
 
     def resolve_asset_paths(
         asset: RigidObjectCfg | VisualObjectCfg | ArticulationCfg,
@@ -740,9 +752,15 @@ def config_to_cfg(
             asset.shape.fpath = get_data_path(path)
         elif isinstance(asset, ArticulationCfg) and path is not None:
             asset.fpath = get_data_path(path)
+        if isinstance(asset, RigidObjectCfg):
+            if isinstance(asset.shape, CompoundShapeCfg):
+                resolve_shape_paths(asset.shape)
+            resolve_shape_paths(asset.particle_collision_shape)
+            for variant in (asset.env_variants or {}).values():
+                resolve_asset_paths(variant)
 
     def _resolve_mesh_asset_paths(obj_dict: dict[str, Any]) -> None:
-        for key in ("visual_shape", "particle_collision_shape"):
+        for key in ("visual_shape",):
             shape = obj_dict.get(key)
             if (
                 shape is not None
@@ -895,6 +913,7 @@ def config_to_cfg(
         _validate_scene_binding_targets(
             deployment.scene_binding,
             simulation=component_resolution.scene_config,
+            usd_scene_inventory=component_resolution.usd_scene_inventory,
         )
         configured_task_program_deployment = deployment
         configured_task_program_integration = deployment.integration
@@ -1000,6 +1019,18 @@ def config_to_cfg(
     env_cfg.num_envs = config.get("num_envs", 1)
     env_cfg.seed = config.get("seed", None)
     env_cfg.enable_sensor = config.get("enable_sensor", True)
+    from embodichain.lab.sim.cfg import UsdImportCfg
+
+    env_cfg.usd_scene = (
+        UsdImportCfg.from_dict(config["usd_scene"]) if "usd_scene" in config else None
+    )
+    env_cfg._usd_scene_inventory = component_resolution.usd_scene_inventory
+    env_cfg.enable_ground_plane = config.get("enable_ground_plane")
+    if (
+        env_cfg.enable_ground_plane is not None
+        and type(env_cfg.enable_ground_plane) is not bool
+    ):
+        raise TypeError("enable_ground_plane must be a bool or None.")
     ground_plane_visible = config.get("ground_plane_visible")
     if ground_plane_visible is not None and type(ground_plane_visible) is not bool:
         raise TypeError("ground_plane_visible must be a bool or None.")
@@ -1022,6 +1053,11 @@ def config_to_cfg(
         viser_server = ViserServerCfg(**viser_server_config)
 
     env_cfg.sim_cfg = SimulationManagerCfg(
+        enable_ground_plane=(
+            env_cfg.usd_scene is None
+            if env_cfg.enable_ground_plane is None
+            else env_cfg.enable_ground_plane
+        ),
         startup_summary=config.get("startup_summary", "compact"),
         dexsim_startup_info=config.get("dexsim_startup_info", False),
         scene_node_capacity=config.get("scene_node_capacity"),
