@@ -257,9 +257,11 @@ those caps rather than replacing them.
 Configured motion accepts `interpolate_position_step` for native Cartesian
 sampling. `MoveEndEffectorOptions.preserve_cartesian_samples` retains authored
 Cartesian samples; `MoveJointsOptions.preserve_samples` consumes explicitly
-sampled joint commands at the host cadence using `ik_interp`. These declarations
-retain normal Atomic velocity qualification and do not certify collision-free
-motion. Inactive sampling additions preserve existing integration fingerprints.
+sampled joint commands at the host cadence using `ik_interp`. The joint speed
+check includes the step from the observed posture to the first command and every
+subsequent step. Each row must satisfy the effective per-joint limits.
+Registration fingerprints include shared skill goal types and declared motion
+policies, even when a deployment uses their defaults.
 
 Configured motion also accepts explicit `interpolation_mode` and `ik_seed_mode`.
 `fixed_grid` requires `acceleration_limit: null` and no scalar speed override;
@@ -282,6 +284,8 @@ coordinates and closed target declarations. Its calls lower to existing
 `PickUp(ContactGraspGoal)`, `MoveEndEffector`, and `MoveJoints` skills; the program
 owns stage ordering. The bridge captures contact references only after an
 acknowledged close frame and checks material slip after every consumed action.
+Measured cable conditions reject individual eligible rows. Healthy rows continue
+to the next stage.
 References are fresh per bridge, guarded by its episode scope, and mapped from
 selected robot rows to native cable arenas. Evaluation consumes qualified
 `cables/<uid>/<measurement>` channels, including strict endpoint geometry and

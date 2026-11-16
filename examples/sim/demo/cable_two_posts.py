@@ -32,6 +32,11 @@ import cv2
 import numpy as np
 from scipy.interpolate import make_interp_spline
 
+from embodichain.lab.visualization import (
+    add_viser_args_to_parser,
+    visualization_cfg_from_args,
+)
+
 FPS = 60
 DURATION = 14.0
 RADIUS = 0.008
@@ -166,7 +171,7 @@ def run(args: argparse.Namespace) -> None:
         NewtonPhysicsCfg,
         NewtonRigidBodyMaterialCfg,
         RenderCfg,
-        DLSSCfg,
+        DenoisingCfg,
         RigidBodyPhysicsCfg,
     )
     from embodichain.lab.sim.sensors import CameraCfg
@@ -187,8 +192,11 @@ def run(args: argparse.Namespace) -> None:
             headless=True,
             startup_summary="compact",
             robot_ik_gizmo=None,
+            visualization=visualization_cfg_from_args(args),
             render_cfg=RenderCfg(
-                renderer="hybrid", spp=4, dlss=DLSSCfg(dlss_enabled=False)
+                renderer="no-render" if args.no_video else "hybrid",
+                spp=4,
+                denoising=DenoisingCfg(window="off", offscreen="off"),
             ),
             physics_cfg=NewtonPhysicsCfg(
                 physics_dt=1 / FPS,
@@ -291,8 +299,11 @@ def run(args: argparse.Namespace) -> None:
         initial_tip = cable.data.segment_pos_w[0, -1].detach().cpu().numpy()
         tip_offset = initial_tip - controls[0, :3]
         for frame, t in enumerate(times):
+            write_video_frame = camera is not None and frame % 2 == 0
             if frame:
-                sim.update(step=1, render_final_step=False)
+                sim.update(
+                    step=1, render_final_step=args.viser and not write_video_frame
+                )
             state = cable.data.segment_state_w[0].detach().cpu()
             p = xyz_quat_to_4x4_matrix(state[:, :7]).numpy()
             v = state[:, 7:].numpy()
@@ -310,8 +321,8 @@ def run(args: argparse.Namespace) -> None:
                     flush=True,
                 )
                 phase = current
-            if camera is not None and frame % 2 == 0:
-                with sim.render_frame(capture_camera_images=False):
+            if write_video_frame:
+                with sim.render_frame(capture_camera_images=args.viser):
                     sim.sync_render_state()
                     camera.update()
                 rgb = camera.get_data()["color"][0, ..., :3].cpu().numpy()
@@ -407,6 +418,7 @@ def run(args: argparse.Namespace) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
+    add_viser_args_to_parser(parser)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--segments", type=int, default=64)
     parser.add_argument("--duration", type=float, default=DURATION)

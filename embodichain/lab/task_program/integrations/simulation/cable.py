@@ -603,15 +603,21 @@ class _CableCheckLowerer(_CableLowerer):
             passed &= service.seated()
         else:
             raise ValueError("Unknown declared cable precondition.")
-        if not bool(passed.all()):
-            raise ValueError(
-                f"Cable condition {target.target_id!r} failed in envs {context.env_ids[~passed].tolist()}: {details}; max_slip_m={service.max_slip.tolist()}"
+        failures = {}
+        for row in (~passed).nonzero().flatten().tolist():
+            measured = {name: values[row] for name, values in details.items()}
+            measured["max_slip_m"] = service.max_slip[row].item()
+            failures[int(context.env_ids[row])] = (
+                f"Cable condition {target.target_id!r} failed: {measured}"
             )
         ids = service.robot.get_joint_ids(name=part)
         qpos = service.robot.get_qpos(target=True).index_select(0, context.env_ids)[
             :, ids
         ]
-        return SemanticLowering(goal=JointPositionGoal(qpos[:, None].repeat(1, 2, 1)))
+        return SemanticLowering(
+            goal=JointPositionGoal(qpos[:, None].repeat(1, 2, 1)),
+            failed_preconditions=failures,
+        )
 
 
 @dataclass(frozen=True, slots=True)

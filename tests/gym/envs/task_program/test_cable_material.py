@@ -54,7 +54,7 @@ def _declaration():
     ]["cable_material"]
 
 
-def test_cable_deployment_preflights_all_calls_and_measured_final_acceptance():
+def _deployment():
     path = _TASK / "task.yam.yaml"
     raw = yaml.safe_load(path.read_text())
     physical = resolve_gym_components(raw, base_dir=path.parent)
@@ -65,6 +65,11 @@ def test_cable_deployment_preflights_all_calls_and_measured_final_acceptance():
         base_dir=path.parent,
     )
     physical.validate_scene_bindings(deployment.scene_binding)
+    return deployment
+
+
+def test_cable_deployment_preflights_all_calls_and_measured_final_acceptance():
+    deployment = _deployment()
     registration = deployment.integration.registration
     compiled = registration.catalog.preflight(deployment.load_program())
     assert compiled.segment_count == 51
@@ -367,11 +372,7 @@ def test_seated_rows_preserve_contact_loading_command_while_other_rows_move():
     assert path[1, 0, 2, 3] > commanded[1, 2]
 
 
-def test_cable_tracking_rejects_wrong_orientation_at_same_position():
-    service, _, _ = _runtime()
-    target = service.tool("left_arm")
-    target[:, :2, :2] *= -1
-    service.last_targets["left_arm"] = target
+def _lower_check(service, target):
     lowerer = _CableCheckLowerer(service.cfg)
     lowerer.runtime = service
     endpoint = SimpleNamespace(runtime_target=SimpleNamespace(control_part="left_arm"))
@@ -380,17 +381,24 @@ def test_cable_tracking_rejects_wrong_orientation_at_same_position():
             resources={"primary": SimpleNamespace(endpoints={"motion": endpoint})}
         )
     )
-    call = RegisteredSemanticCall(
-        call_id="simulation.cable_check",
-        arguments={"target": "stage_free_end_tracking"},
+    return lowerer.lower(
+        RegisteredSemanticCall(
+            call_id="simulation.cable_check", arguments={"target": target}
+        ),
+        context=SimpleNamespace(env_ids=service.env_ids),
+        bound=bound,
+        option_template=MoveJointsOptions(),
     )
-    with pytest.raises(ValueError, match="orientation_error_rad"):
-        lowerer.lower(
-            call,
-            context=SimpleNamespace(env_ids=service.env_ids),
-            bound=bound,
-            option_template=MoveJointsOptions(),
-        )
+
+
+def test_cable_tracking_rejects_wrong_orientation_at_same_position():
+    service, _, _ = _runtime()
+    target = service.tool("left_arm")
+    target[:, :2, :2] *= -1
+    service.last_targets["left_arm"] = target
+    failures = _lower_check(service, "stage_free_end_tracking").failed_preconditions
+    assert set(failures) == {3, 1}
+    assert "orientation_error_rad" in failures[3]
 
 
 @pytest.mark.parametrize("tracking_error", ["position", "orientation"])
@@ -407,25 +415,8 @@ def test_release_alignment_above_channel_does_not_bypass_tcp_tracking(tracking_e
         )
     service.seated = lambda: torch.tensor([True, True])
     service.metrics = lambda: {"strict_port": torch.tensor([True, False])}
-    lowerer = _CableCheckLowerer(service.cfg)
-    lowerer.runtime = service
-    endpoint = SimpleNamespace(runtime_target=SimpleNamespace(control_part="left_arm"))
-    bound = SimpleNamespace(
-        binding=SimpleNamespace(
-            resources={"primary": SimpleNamespace(endpoints={"motion": endpoint})}
-        )
-    )
-    call = RegisteredSemanticCall(
-        call_id="simulation.cable_check",
-        arguments={"target": "lower_channel_3_tracking"},
-    )
-    with pytest.raises(ValueError, match=r"failed in envs \[1\]"):
-        lowerer.lower(
-            call,
-            context=SimpleNamespace(env_ids=service.env_ids),
-            bound=bound,
-            option_template=MoveJointsOptions(),
-        )
+    failures = _lower_check(service, "lower_channel_3_tracking").failed_preconditions
+    assert set(failures) == {1}
     # The hovered row can proceed once it meets the original tracking limit;
     # the inserted row may retain its contact-loaded command.
     if tracking_error == "position":
@@ -434,12 +425,91 @@ def test_release_alignment_above_channel_does_not_bypass_tcp_tracking(tracking_e
         service.last_targets["left_arm"][1, :2, :2] = torch.tensor(
             [[math.cos(0.2), -math.sin(0.2)], [math.sin(0.2), math.cos(0.2)]]
         )
-    lowerer.lower(
-        call,
-        context=SimpleNamespace(env_ids=service.env_ids),
-        bound=bound,
-        option_template=MoveJointsOptions(),
+    assert not _lower_check(service, "lower_channel_3_tracking").failed_preconditions
+
+
+@pytest.mark.parametrize("prior_slip", [False, True])
+def test_cable_check_allows_surviving_row_to_execute_next_segment(prior_slip):
+    from test_simulation_environment import _DualRobot, _motion_generator
+    from embodichain.lab.task_program.integrations import SimulationTaskProgramFactory
+
+    # Run the deployed YAM check and two short holds through the actual semantic
+    # executor, command sink and Gym bridge, with selected physical rows 3, 1.
+    deployment = _deployment()
+    full = deployment.load_program()
+    first = full.program.items[0]
+    _, hold, check = first.steps.items
+    segments = tuple(
+        replace(first, name=name, steps=node)
+        for name, node in (("before", hold), ("check", check), ("after", hold))
     )
+    program = replace(full, program=replace(full.program, items=segments))
+    service, _, _ = _runtime()
+    robot = _DualRobot()
+    robot._joint_ids = {
+        "left_arm": (0,),
+        "right_arm": (1,),
+        "left_eef": (2, 3),
+        "right_eef": (4, 5),
+    }
+    robot.control_parts = {
+        part: tuple(f"joint_{i}" for i in ids) for part, ids in robot._joint_ids.items()
+    }
+    robot.dof = 6
+    robot.qpos = torch.zeros(4, robot.dof)
+    robot.body_data = service.robot.body_data
+    simulation = service.simulation
+    simulation.get_robot = lambda uid: robot if uid == robot.uid else None
+    generator = _motion_generator(robot)
+    generator._env_ids = (3, 1)
+    generator.planner.cfg.planner_type = "trapezoidal"
+    generator.joint_steps_within_velocity_limits.return_value = torch.ones(
+        2, dtype=torch.bool
+    )
+    factory = SimulationTaskProgramFactory(
+        simulation,
+        robot,
+        deployment.integration.registration,
+        step_dt=1 / 60,
+        motion_generator_factory=lambda: generator,
+    )
+    adapter = factory.for_env_ids((3, 1)).create_adapter()
+    bridge = adapter.create_bridge(adapter.compile(program))
+    cable = bridge.post_policy_port._cable_runtime
+    cable.last_targets["right_arm"] = cable.tool("right_arm")
+    if prior_slip:
+        cable.max_slip[0] = 0.013
+    else:
+        cable.last_targets["right_arm"][0, 0, 3] += 0.1
+
+    accepted = []
+    rejected_ids = []
+    for index, segment in enumerate(bridge.iter_segments()):
+        commands = list(segment.actions)
+        assert any(
+            a.metadata["bridge_action_kind"] == "runtime_command" for a in commands
+        )
+        rejected_ids.extend(
+            i for a in commands for i in a.metadata.get("rejected_env_ids", ())
+        )
+        accepted.append(segment.validator().tolist())
+        call = segment.metadata["runtime"]["calls"][0]
+        if index == 1:
+            diagnostics = call["plan_attempts"][-1]["planner_diagnostics"]
+            if prior_slip:
+                assert call["masks"]["entered"] == [False, True]
+                assert not diagnostics["messages"]
+            else:
+                assert call["masks"]["failed"] == [True, False]
+                assert diagnostics["failure"]["code"] == "semantic_precondition_failed"
+                assert diagnostics["messages"][0].startswith("env 3: Cable condition")
+        if index == 2:
+            assert call["masks"]["entered"] == [False, True]
+            assert call["masks"]["completed"] == [False, True]
+    assert accepted == [[not prior_slip, True], [False, True], [False, True]]
+    # The earlier slip went through the bridge's physical guard. A new check
+    # failure is reported directly by the semantic executor during planning.
+    assert rejected_ids == ([3] if prior_slip else [])
 
 
 def test_cable_observation_rejects_invalid_quaternion_per_row():

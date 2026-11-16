@@ -10362,6 +10362,37 @@ def test_move_joints_preserves_authored_samples_and_cadence() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("first_bad_sample", "velocity_limit", "displacement"),
+    [
+        (0, None, 1.0),  # Jump from the observed position, then hold.
+        (1, 2.0, 1.0),  # A loose request cannot raise the Robot's 1 rad/s cap.
+        (1, 0.3, 0.01),  # Within the Robot cap but above the requested speed.
+    ],
+)
+def test_move_joints_rejects_overspeed_authored_samples_per_row(
+    first_bad_sample: int, velocity_limit: float | None, displacement: float
+) -> None:
+    action = _bind_action(_motion_generator(), MoveJoints())
+    context = _context()
+    context.robot.qpos.fill_(0.5)
+    samples = context.robot.qpos[:, None, :ARM_DOF].repeat(1, 2, 1)
+    samples[0, 1, 0] += 0.002
+    samples[1, first_bad_sample:, 0] += displacement
+    invocation = replace(
+        _invocation(action, JointPositionGoal(samples)),
+        motion_policy=MotionPolicy(velocity_limit=velocity_limit),
+        skill_options=MoveJointsOptions(preserve_samples=True),
+    )
+    plan = _plan_action(action, invocation, context)
+    assert plan.plan_success.tolist() == [True, False]
+    commands = _joint_command_positions(plan, "arm")
+    torch.testing.assert_close(commands[0], samples[0])
+    torch.testing.assert_close(
+        commands[1], context.robot.qpos[1, :ARM_DOF].expand_as(commands[1])
+    )
+
+
 def test_move_end_effector_preserves_authored_cartesian_samples() -> None:
     generator = _motion_generator()
     calls = []

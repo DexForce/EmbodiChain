@@ -609,7 +609,20 @@ class SemanticLowering:
     )
     registered_effect: RegisteredSemanticEffect | None = None
 
+    failed_preconditions: Mapping[int, str] = field(default_factory=dict)
+    """Measured grounding failures by physical environment ID."""
+
     def __post_init__(self) -> None:
+        failures = dict(self.failed_preconditions)
+        if any(
+            type(env_id) is not int
+            or env_id < 0
+            or not isinstance(reason, str)
+            or not reason
+            for env_id, reason in failures.items()
+        ):
+            raise ValueError("Grounding failures require physical env IDs and reasons.")
+        object.__setattr__(self, "failed_preconditions", MappingProxyType(failures))
         if self.skill_options is not None and not isinstance(
             self.skill_options, SkillOptions
         ):
@@ -875,6 +888,7 @@ class GroundedSemanticCall:
     effect_monitor: EffectMonitor | None = field(repr=False, compare=False)
     effect_guards: tuple[GroundedHeldObjectGuard, ...]
     effect_gates: tuple[GroundedPhaseEffectGate, ...]
+    failed_preconditions: Mapping[int, str]
     _eligible_mask: torch.Tensor = field(repr=False, compare=False)
 
     def __init__(self, *args: object, **kwargs: object) -> None:
@@ -895,6 +909,7 @@ class GroundedSemanticCall:
         effect_monitor: EffectMonitor | None,
         effect_guards: tuple[GroundedHeldObjectGuard, ...],
         effect_gates: tuple[GroundedPhaseEffectGate, ...],
+        failed_preconditions: Mapping[int, str],
         eligible_mask: torch.Tensor,
     ) -> GroundedSemanticCall:
         """Create one compiler-owned grounded result."""
@@ -905,6 +920,11 @@ class GroundedSemanticCall:
         object.__setattr__(instance, "effect_monitor", effect_monitor)
         object.__setattr__(instance, "effect_guards", tuple(effect_guards))
         object.__setattr__(instance, "effect_gates", tuple(effect_gates))
+        object.__setattr__(
+            instance,
+            "failed_preconditions",
+            MappingProxyType(dict(failed_preconditions)),
+        )
         object.__setattr__(instance, "_eligible_mask", eligible_mask.clone())
         instance.__post_init__()
         return instance
@@ -1750,6 +1770,17 @@ class SemanticCallCompiler:
                 invocation,
                 phase_effect_gates=tuple(value.requirement for value in effect_gates),
             )
+        failures = lowering.failed_preconditions
+        if failures:
+            if not failures.keys() <= set(context.env_ids.tolist()):
+                raise ValueError(
+                    "Grounding failures must refer to selected environment IDs."
+                )
+            failures = {
+                i: failures[i]
+                for i in context.env_ids[eligible].tolist()
+                if i in failures
+            }
         return GroundedSemanticCall._create(
             analyzed=analyzed,
             invocation=invocation,
@@ -1757,6 +1788,7 @@ class SemanticCallCompiler:
             effect_monitor=effect_monitor,
             effect_guards=effect_guards,
             effect_gates=effect_gates,
+            failed_preconditions=failures,
             eligible_mask=eligible,
         )
 

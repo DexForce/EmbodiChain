@@ -86,7 +86,7 @@ class MoveJointsOptions(SkillOptions):
     """Per-invocation behavior for :class:`MoveJoints`."""
 
     preserve_samples: bool = False
-    """Consume explicitly sampled joint positions at the host control cadence."""
+    """Keep authored joint samples at host cadence, rejecting overspeed rows."""
 
     def __post_init__(self) -> None:
         if type(self.preserve_samples) is not bool:
@@ -170,15 +170,22 @@ class MoveJoints(AtomicSkill[JointPositionGoal, MoveJointsOptions]):
 
             if target_qpos.ndim != 3:
                 raise ValueError("preserve_samples requires batched joint samples.")
+            step_dt = context.require_control_dt()
             dt = torch.full(
                 target_qpos.shape[:2],
-                context.require_control_dt(),
+                step_dt,
                 dtype=torch.float64,
                 device=target_qpos.device,
             )
             dt[:, 0] = 0
             result = PlanResult(
-                success=torch.isfinite(target_qpos).all(dim=(1, 2)),
+                success=self.motion_generator.joint_steps_within_velocity_limits(
+                    start_qpos,
+                    target_qpos,
+                    control_part,
+                    velocity_limit=request.motion_policy.velocity_limit,
+                    step_dt=step_dt,
+                ),
                 positions=target_qpos,
                 dt=dt,
             )

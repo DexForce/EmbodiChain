@@ -695,6 +695,29 @@ class MotionGenerator:
             requested_limits,
         )
 
+    def joint_steps_within_velocity_limits(
+        self,
+        start_qpos: torch.Tensor,
+        trajectory: torch.Tensor,
+        control_part: str,
+        *,
+        velocity_limit: float | None,
+        step_dt: float,
+    ) -> torch.Tensor:
+        """Check each row of a sampled joint path, including its first command."""
+        limits = self._resolve_velocity_limits(
+            control_part=control_part,
+            batch_size=start_qpos.shape[0],
+            dof=start_qpos.shape[-1],
+            requested=velocity_limit,
+            reference=start_qpos,
+        )
+        positions = torch.cat((start_qpos[:, None], trajectory), dim=1)
+        max_step = limits.view(1, 1, -1) * step_dt
+        return torch.isfinite(positions).all(dim=(1, 2)) & (
+            positions.diff(dim=1).abs() <= max_step + 1.0e-6
+        ).all(dim=(1, 2))
+
     @classmethod
     def register_planner_type(cls, name: str, planner_class, planner_cfg_class) -> None:
         """
