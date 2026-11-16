@@ -27,14 +27,12 @@ __all__ = [
     "USD_SCENE_SCHEMA",
     "UsdEntityDesc",
     "UsdSceneIndex",
-    "UsdEntityBinding",
-    "UsdSceneBinding",
 ]
 
 
 @dataclass(frozen=True, slots=True)
 class UsdEntityDesc:
-    """One EmbodiChain entity authored on a USD prim.
+    """One generation-provenance entity authored on a USD prim.
 
     Args:
         uid: Stable logical entity identifier used by Gym scene bindings.
@@ -59,9 +57,9 @@ class UsdEntityDesc:
 class UsdSceneIndex:
     """Index EmbodiChain entity metadata from one USD stage.
 
-    The index deliberately reads entity identity from USD prim custom data. A
-    manifest can remain as a derived compatibility cache, but runtime callers
-    do not need a second source of entity names or paths.
+    This read-only artifact index does not participate in scene preview. Lab
+    imports ordinary USD through the native scene owner and treats producer
+    custom data as opaque.
     """
 
     def __init__(
@@ -88,7 +86,8 @@ class UsdSceneIndex:
         Args:
             stage_path: USD file to open.
             require_schema: Require ``embodichain.scene/v2`` metadata on
-                ``/World``. Set this for newly generated runtime scenes;
+                ``/World`` or its packaged ``/Asset/World`` path.
+                Set this when auditing generated artifacts;
                 leave it false for legacy USD snapshots.
 
         Returns:
@@ -109,6 +108,10 @@ class UsdSceneIndex:
             raise ValueError(f"Could not open USD scene: {resolved_path}")
 
         world = stage.GetPrimAtPath("/World")
+        if not world.IsValid():
+            # DexSim's scheme-one package preserves the scene below a neutral
+            # /Asset wrapper, retargeting USD relationships in its private copy.
+            world = stage.GetPrimAtPath("/Asset/World")
         schema_version = (
             world.GetCustomDataByKey("embodichain:scene_schema")
             if world.IsValid()
@@ -118,7 +121,8 @@ class UsdSceneIndex:
             raise ValueError("USD scene schema metadata must be a string.")
         if require_schema and schema_version != USD_SCENE_SCHEMA:
             raise ValueError(
-                f"Expected {USD_SCENE_SCHEMA!r} on /World, got {schema_version!r}."
+                f"Expected {USD_SCENE_SCHEMA!r} on /World or /Asset/World, "
+                f"got {schema_version!r}."
             )
 
         entities: list[UsdEntityDesc] = []
@@ -201,87 +205,3 @@ class UsdSceneIndex:
             return self._by_uid[uid]
         except KeyError as exc:
             raise KeyError(f"USD scene entity {uid!r} is not registered.") from exc
-
-
-@dataclass(frozen=True, slots=True)
-class UsdEntityBinding:
-    """One USD entity paired with its simulator facade."""
-
-    desc: UsdEntityDesc
-    runtime: object
-
-
-class UsdSceneBinding:
-    """Map one USD entity index to DexSim/EmbodiChain runtime objects.
-
-    ``SceneEntityCfg(uid=...)`` objects can be created from this binding, so
-    Gym managers resolve the same stable UID that the USD stage uses.
-    """
-
-    def __init__(
-        self,
-        *,
-        index: UsdSceneIndex,
-        bindings: tuple[UsdEntityBinding, ...],
-    ) -> None:
-        self.index = index
-        self._bindings = bindings
-        self._by_uid = {binding.desc.uid: binding for binding in bindings}
-
-    @classmethod
-    def load_into(cls, sim: object, stage_path: str | Path) -> "UsdSceneBinding":
-        """Import a schema-v2 USD stage and bind every indexed entity."""
-        path = Path(stage_path).expanduser().resolve()
-        index = UsdSceneIndex.load(path, require_schema=True)
-        from embodichain.lab.sim.cfg import UsdImportCfg, UsdSourceCfg
-
-        assets = sim.add_usd(
-            UsdImportCfg(name=path.stem, source=UsdSourceCfg(file_path=str(path)))
-        )
-        bindings: list[UsdEntityBinding] = []
-        for desc in index.entities:
-            runtime = assets.get(desc.prim_path)
-            if runtime is None:
-                getter = (
-                    sim.get_articulation
-                    if desc.kind == "articulation"
-                    else sim.get_rigid_object
-                )
-                runtime = getter(desc.uid)
-            if runtime is None:
-                raise RuntimeError(
-                    f"USD entity {desc.uid!r} has no simulator runtime binding."
-                )
-            bindings.append(UsdEntityBinding(desc=desc, runtime=runtime))
-        return cls(index=index, bindings=tuple(bindings))
-
-    @property
-    def entities(self) -> tuple[UsdEntityBinding, ...]:
-        """Return all UID-to-runtime bindings in USD prim order."""
-        return self._bindings
-
-    def get(self, uid: str) -> UsdEntityBinding:
-        """Return the runtime binding for one stable entity UID."""
-        try:
-            return self._by_uid[uid]
-        except KeyError as exc:
-            raise KeyError(f"USD scene entity {uid!r} is not bound.") from exc
-
-    def scene_entity_cfg(self, uid: str) -> object:
-        """Create the Gym ``SceneEntityCfg`` corresponding to ``uid``."""
-        self.get(uid)
-        from embodichain.lab.gym.envs.managers.cfg import SceneEntityCfg
-
-        return SceneEntityCfg(uid=uid)
-
-    def apply_initial_state(self) -> None:
-        """Apply authored articulation qpos after the simulator is prepared."""
-        for binding in self._bindings:
-            if binding.desc.kind != "articulation" or not binding.desc.initial_qpos:
-                continue
-            setter = getattr(binding.runtime, "set_qpos", None)
-            if setter is None:
-                raise RuntimeError(
-                    f"USD articulation {binding.desc.uid!r} cannot apply initial qpos."
-                )
-            setter(binding.desc.initial_qpos, target=False)

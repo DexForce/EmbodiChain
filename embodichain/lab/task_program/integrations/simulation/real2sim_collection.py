@@ -1484,8 +1484,8 @@ def install_real2sim_tabletop_owner(
             )
 
         preparation = SimulationSceneExpansionHost(
-            environment, initial_validator=initial
-        )(variant)
+            environment, initial_validator=lambda row: initial()
+        )({0: variant})[0]
         if not preparation.validation.accepted:
             raise ValueError("scene layout failed initial validation")
         validator = TabletopPrototypeCollisionValidator(
