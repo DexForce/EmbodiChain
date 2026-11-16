@@ -847,9 +847,7 @@ Entity metadata and deterministic UID indexing for schema-v2 USD scene stages.
 .. autosummary::
 
    USD_SCENE_SCHEMA
-   UsdEntityBinding
    UsdEntityDesc
-   UsdSceneBinding
    UsdSceneIndex
 
 embodichain.gen_sim.scene_engine.randomization.adapter
@@ -2831,6 +2829,22 @@ preview with managed control-part Gizmos and optional joint controls.
 .. autofunction:: cli
 
 .. autofunction:: main
+
+
+embodichain.lab.scripts.preview_scene
+------------------------------------
+
+.. currentmodule:: embodichain.lab.scripts.preview_scene
+
+Preview ordinary USD scenes through the Lab import owner. The default preserves
+imported initial state without physics steps; explicit simulation, offscreen PNG
+output and portable stage diagnostics share the same owned lifecycle.
+
+.. autosummary::
+
+   preview_scene
+
+.. autofunction:: preview_scene
 
 
 embodichain.lab.scripts.run_task

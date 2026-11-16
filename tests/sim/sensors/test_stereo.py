@@ -199,3 +199,25 @@ def test_stereo_camera_backend_smoke(sim_device, renderer):
         assert data["color"].shape == (SMOKE_NUM_ENVS, SMOKE_HEIGHT, SMOKE_WIDTH, 4)
     finally:
         test.teardown_method()
+
+
+def test_stereo_hybrid_groups_preserve_eye_batches() -> None:
+    """Hybrid splits 34 views while keeping both 17-row eye observations."""
+    test = StereoCameraTest()
+    test.setup_simulation(
+        "cpu",
+        renderer="hybrid",
+        num_envs=17,
+        width=32,
+        height=32,
+        enable_auxiliary_data=False,
+    )
+    try:
+        assert len(test.camera.group_ids) == 2
+        test.sim.render_camera_group(list(test.camera.group_ids))
+        test.camera.update(fetch_only=True)
+        data = test.camera.get_data()
+        assert data["color"].shape == (17, 32, 32, 4)
+        assert data["color_right"].shape == (17, 32, 32, 4)
+    finally:
+        test.teardown_method()

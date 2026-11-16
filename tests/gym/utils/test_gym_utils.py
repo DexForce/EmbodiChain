@@ -1507,6 +1507,7 @@ class TestConfigToCfgFromFile:
         environment = load_config(environment_path)
         environment["physics"] = "newton"
         environment["physics_config"] = {"num_substeps": 2}
+        environment["enable_ground_plane"] = False
         save_config(environment_path, environment)
 
         cfg = config_to_cfg(
@@ -1517,6 +1518,23 @@ class TestConfigToCfgFromFile:
 
         assert isinstance(cfg.sim_cfg.physics_cfg, NewtonPhysicsCfg)
         assert cfg.sim_cfg.physics_cfg.num_substeps == 2
+        assert cfg.sim_cfg.enable_ground_plane is False
+
+    def test_environment_component_owns_ground_declaration(self, tmp_path) -> None:
+        """A deployment cannot re-enable physical ground owned by its component."""
+        self._write_deployment(tmp_path)
+        environment_path = tmp_path / "env.yaml"
+        environment = load_config(environment_path)
+        environment["enable_ground_plane"] = False
+        save_config(environment_path, environment)
+        config = self._environment_component_gym_config()
+        config["enable_ground_plane"] = True
+        with pytest.raises(ValueError, match="environment.component"):
+            config_to_cfg(
+                config,
+                manager_modules=DEFAULT_MANAGER_MODULES,
+                source_path=tmp_path / "task.ur5.yaml",
+            )
 
     @pytest.mark.parametrize(
         ("field_name", "value"),

@@ -21,8 +21,8 @@ prepared separately by each example.
 | Outputs | Relative state changes decoded by a physical codec | Next robot state | Future object geometry |
 | Action conditioning | Generalized efforts | Explicitly configured control vector | No action input |
 | Gradients | Network and codec retain input gradients | State/action gradients through multi-step prediction | `forward()` trains parameters; public `rollout()` disables autograd |
-| Runtime | PyTorch on CPU or CUDA | PyTorch on CPU or CUDA | CUDA for geometry prediction; `embodichain[rigidformer]` dependencies |
-| Included workflows | Cartpole/Ant resources, offline evaluation, training and export | Controlled fitting, differentiable prediction and transition replay | MOVi resources, engine demo, training, export and evaluation |
+| Runtime | PyTorch on CPU or CUDA; reference online FK uses Newton/Warp | PyTorch on CPU or CUDA | CUDA for geometry prediction; `embodichain[rigidformer]` dependencies |
+| Included workflows | Cartpole/Ant SL, learning-env policy training and optional native solver deployment | Controlled fitting, differentiable prediction and transition replay | MOVi resources, engine demo, training, export and evaluation |
 
 Use **NeRD** when your transition model needs a history of joint efforts and
 contact observations. Its shipped reference systems are Cartpole and Ant.

@@ -120,7 +120,7 @@ them before clearing row state. Dataset persistence and optional physical
 objectives remain separate. Source-bound Real2Sim episodes
 use the qualified synchronous receipt owner, not the ordinary reset recorder.
 
-`EpisodeContext` follows reset and recorder eligibility. A trusted B=1
+`EpisodeContext` follows reset and recorder eligibility. A trusted
 `episode_prepare` callback runs after reset events and before physical objectives
 and final observations; it is not a functor parameter. Recording starts from
 that final observation. Optional info snapshots may be disabled for batched RL
