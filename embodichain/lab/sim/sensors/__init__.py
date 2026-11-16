@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 from .base_sensor import BaseSensor, SensorCfg
+from .context import SensorClock, SensorStateProvider, SensorContext
 from .camera import Camera, CameraCfg
 from .stereo import StereoCamera, StereoCameraCfg
 from .contact import (
@@ -30,3 +31,41 @@ from .contact import (
     ArticulationContactFilterCfg,
     ContactPermissionChecker,
 )
+from .registry import (
+    SensorRegistration,
+    register_sensor,
+    discover_sensor_plugins,
+    get_sensor_registration,
+    list_sensor_types,
+)
+
+__all__ = [
+    "BaseSensor",
+    "SensorCfg",
+    "SensorClock",
+    "SensorStateProvider",
+    "SensorContext",
+    "SensorRegistration",
+    "register_sensor",
+    "discover_sensor_plugins",
+    "get_sensor_registration",
+    "list_sensor_types",
+    "Camera",
+    "CameraCfg",
+    "StereoCamera",
+    "StereoCameraCfg",
+    "ContactSensor",
+    "ContactSensorCfg",
+    "ArticulationContactFilterCfg",
+]
+
+# Built-ins use the same registry as plugins. Their direct constructors and
+# manager-owned render/contact lifecycle remain compatible.
+_builtin_sensor_factories = {}
+for _name, _config, _factory in (
+    ("Camera", CameraCfg, Camera),
+    ("StereoCamera", StereoCameraCfg, StereoCamera),
+    ("ContactSensor", ContactSensorCfg, ContactSensor),
+):
+    register_sensor(SensorRegistration(_name, _config, _factory, legacy_factory=True))
+    _builtin_sensor_factories[_name] = _factory

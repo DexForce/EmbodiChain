@@ -70,6 +70,7 @@ class MotionPolicy:
 
     PickUp reads pre_grasp/grasp/lift (and optional initial_lift); Place reads
     pre_place/place/retreat. Other primitives retain their own declared paths.
+    Placement translation keyframes all retain their original phase's path.
     """
 
     sample_count: int = 50

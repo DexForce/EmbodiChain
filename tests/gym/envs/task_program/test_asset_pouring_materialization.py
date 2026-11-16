@@ -198,10 +198,26 @@ def _prepared(tmp_path, *, bottle_height=0.14, cup_height=0.1, change=None):
 
 
 @pytest.mark.parametrize("bottle_height,cup_height", [(0.14, 0.1), (0.18, 0.12)])
+@pytest.mark.parametrize("remapped", (False, True))
 def test_pouring_rebinds_selected_bottle_and_cup_geometry(
-    pouring, tmp_path, bottle_height, cup_height
+    pouring, tmp_path, bottle_height, cup_height, remapped
 ):
     source, requirements = pouring
+    if remapped:
+        path = source.parent / "integration.yaml"
+        integration = yaml.safe_load(path.read_text())
+        for entity in integration["scene_binding"]["rigid_objects"]:
+            entity["simulation_uid"] = "native_" + entity["entity_id"]
+        # An existing support may itself omit a same-name native UID.
+        integration["scene_binding"]["rigid_objects"].append(
+            {"entity_id": "table", "dynamics": "static", "affordances": []}
+        )
+        _dump(path, integration)
+        path = source.parent / "env.yaml"
+        env = yaml.safe_load(path.read_text())
+        for obj in env["simulation"]["rigid_object"]:
+            obj["uid"] = "native_" + obj["uid"]
+        _dump(path, env)
     selected = resolve_asset_set(
         requirements,
         _prepared(
@@ -260,7 +276,8 @@ def test_pouring_rebinds_selected_bottle_and_cup_geometry(
         pose[:3, 3].tolist()
     )
     assert arrival.parameters["bottle_above_cup"]["tolerance"] == 0.01
-    assert all(item["reference"] == "bottle_asset_return_table" for item in validators)
+    support_id = "table" if remapped else "bottle_asset_return_table"
+    assert all(item["reference"] == support_id for item in validators)
     assert validators[0]["position_tolerance"] == pytest.approx(
         [0.05 / math.sqrt(3)] * 3
     )

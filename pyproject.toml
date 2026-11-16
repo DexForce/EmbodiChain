@@ -94,6 +94,10 @@ gensim = [
 # decomposition, benchmarks, and workspace cache management.
 embodichain = "embodichain.__main__:main"
 
+[project.entry-points."dexsim.newton_solvers"]
+nerd = "embodichain_solvers.physics.nerd.provider:NeRDProvider"
+worldparticle = "embodichain_solvers.physics.worldparticle.provider:WorldParticleProvider"
+
 [project.entry-points."embodichain.tasks"]
 embodichain_tasks = "embodichain_tasks"
 

@@ -19,6 +19,9 @@ World-model naming does not introduce a parallel `world_models` domain.
 | Request | Owner |
 |---|---|
 | NeRD network, portable checkpoint, physical codec | `extensions/embodichain_models/embodichain_models/dynamics/nerd/{model,checkpoint,codec}.py` |
+| Online canonical state/history, injected FK/contact geometry and prediction | Model package `transition.py`, `geometry.py` |
+| Lightweight Cartpole/Ant learning factories | Example `_support/{_cartpole_env,_ant_env,_model_env,_model_factory}.py` |
+| Optional native Provider, indices and physics admission | `extensions/embodichain_solvers/embodichain_solvers/physics/nerd/` |
 | Committed HDF5 shards and bounded windows | Model package `data.py`, private `_resident.py` |
 | Encoding, frozen moments and offline errors | Model package `integration.py` |
 | Objective and common trainer factory | Model package `supervised.py`, `sl_recipe.py` |
@@ -34,11 +37,28 @@ Direct `embodichain train-sl --config FILE` works independently of example
 bootstrap. An explicitly selected `dynamics.train.*.yaml` uses the historical
 trainer for controlled comparisons and its legacy checkpoint contract.
 
-The extension imports neither examples nor simulation. Generation uses Newton's
+The model extension imports neither examples nor simulation. Generation uses Newton's
 built-in Featherstone/MuJoCo solvers directly without a DexSim custom solver or
-Scene API. Native learned-solver deployment and functional Gym integration are
-separate consumers. There are no NeRD-specific core `compute/dynamics`,
+Scene API. Native learned-solver deployment and lightweight learning environments
+are separate consumers of the same independent transition. There are no NeRD-specific core `compute/dynamics`,
 `data_pipeline/dynamics`, `learning/dynamics` modules or core `dynamics` command.
+
+Online rollout owns canonical `q`, COM `qd`, named history and valid lengths in
+`NeRDState`. `NeRDTransition.step` computes contact conditioning from that same
+state through injected FK; geometry caches only detached fixed tensors. Offline
+SL continues to accept measured contact features. Learning reset/terminal/TBPTT
+semantics use the existing [learning contract](../rl-learning/rl-learning.md).
+Full reset creates independent episode graphs; partial reset preserves peers.
+The optional native adapter retains indexing, physical admission and publication.
+The FK-only reference factory isolates SDK descriptor lowering without creating
+a World, Scene or solver; signatures guard that SDK compatibility surface.
+Its injected Newton backend uses the private `lab.sim.diff._newton_fk` gradient
+adapter. Reusable tensor FK/IK remains owned by `compute.kinematics` and
+`learning.layers`; the native adapter does not introduce another public FK API.
+The example's [native quickstart](../../../examples/learning/nerd/DEPLOYMENT.md)
+owns complete resource/configuration/step/reset/close instructions;
+[validation](../../../examples/learning/nerd/VALIDATION.md) owns measured budgets,
+runtime identity and viewer limits.
 
 ## RigidFormer author model
 
@@ -64,6 +84,36 @@ model predictions after four observed frames, through a native window or an
 engine-camera recording. It uses explicit prepared geometry and weight paths.
 Assets/results stay outside the wheel. Numerical agreement, recovery and full
 benchmark/retraining qualification remain distinct evidence requirements.
+
+## WorldParticle frozen particle transition
+
+`dynamics.worldparticle.WorldParticleModel` owns the stateless world-space
+particle transition, authored features/boundaries/CSR topology, checkpoint
+loading and model-frame conversion. Its package imports neither simulation
+nor examples. Coordinate transport stays FP32 even under caller autocast;
+the original frozen network uses BF16. No learned-robot codec or history
+contract is shared with NeRD. Both families use the existing optional Newton
+Provider lifecycle in `embodichain_solvers.physics` for native deployment.
+
+`physics.worldparticle.provider.WorldParticleProvider` owns native admission and
+delegates stream/state/force/write/reset machinery to the SDK's generic
+`ParticleInferenceSolver`, included in SDK 0.6.0rc2. The example's
+[native quickstart](../../../examples/learning/worldparticle/DEPLOYMENT.md),
+[input contract](../../../examples/learning/worldparticle/INPUTS.md) and
+[runtime/verification summary](../../../examples/learning/worldparticle/README.md)
+own reproduction details and checked budgets. Compatible Open3D/FlashAttention
+operators must be provisioned separately; dependency build/patch tooling is
+outside this model integration.
+Tests with a small deterministic predictor
+qualify adapter behavior; real BF16 inference does not establish bitwise
+determinism, native/model parity or historical/paper accuracy.
+
+Only one CUDA particle world with static authored network boundaries is
+supported. It does not provide functional gradients/APG, dynamic rigid-body
+coupling, native contact reports or CUDA Graph capture. Keep its learning-env
+adapter deferred until an actual differentiable training contract is qualified.
+Preparation and four forward demonstrations belong to
+`examples/learning/worldparticle`; weights, data and native wheels stay external.
 
 ## Resource and physical identity
 
@@ -123,6 +173,8 @@ owns model selection and the shared training entry point; the
 own their model principles and user workflows; the
 [RWM guide](../../../docs/source/features/neural_dynamics/rwm.md) covers prediction
 and replay under the linked robot-world-model contract. The
+[WorldParticle guide](../../../docs/source/features/neural_dynamics/worldparticle.md)
+owns frozen inference, operator provisioning and native demo navigation. The
 [model API](../../../docs/source/api_reference/model_catalogs.rst) owns exported
 definitions. Transition error, accumulated rollout error and paper-scale
 accuracy remain separate claims.

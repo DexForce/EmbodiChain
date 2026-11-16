@@ -59,6 +59,7 @@ ordinary native requests; composition retains the total control grid and row
 failure masks. No robot UID or waypoint count enables the behavior. Atomic
 `MotionPolicy.phase_paths` names the PickUp/Place phases that opt into this path;
 ordinary calls and other primitives retain their own planning semantics.
+All inserted Place translation keyframes inherit their original phase's mode.
 
 `motion_gen` delegates timing to its backend. `ik_interp` needs explicit
 start/count/dt, rejects backend-specific options and uses minimum-jerk segments

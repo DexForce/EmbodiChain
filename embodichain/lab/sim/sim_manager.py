@@ -98,10 +98,14 @@ from embodichain.lab.sim.sensors import (
     Camera,
     CameraCfg,
     StereoCamera,
+    StereoCameraCfg,
     ContactSensor,
+    SensorContext,
 )
+from embodichain.lab.sim.sensors import _builtin_sensor_factories
 from embodichain.lab.sim.sensors.attachment import resolve_parent_nodes
 from embodichain.lab.sim.sensors._camera_group_pool import _CameraGroupPool
+from embodichain.lab.sim.sensors.registry import _resolve_sensor_factory
 from embodichain.lab.sim.cfg import (
     CableObjectCfg,
     RenderCfg,
@@ -275,6 +279,8 @@ class SimulationManagerCfg:
         enable_ground_plane: bool = True,
         ground_plane_attrs: RigidBodyPhysicsCfg | None = None,
     ) -> None:
+        if not isinstance(enable_ground_plane, bool):
+            raise TypeError("enable_ground_plane must be boolean")
         self.startup_summary = startup_summary
         self.dexsim_startup_info = dexsim_startup_info
         self.scene_node_capacity = scene_node_capacity
@@ -584,11 +590,9 @@ class SimulationManager:
     _cleanup_queue: queue.Queue = queue.Queue()
     _DEFAULT_PLANE_GIZMO_TARGET_ID = (1 << 64) - 1
 
-    SUPPORTED_SENSOR_TYPES = {
-        "Camera": Camera,
-        "StereoCamera": StereoCamera,
-        "ContactSensor": ContactSensor,
-    }
+    # Compatibility overrides for pre-registry factories. New extensions use
+    # register_sensor()/embodichain.sensors, shared with SensorCfg.from_dict().
+    SUPPORTED_SENSOR_TYPES = dict(_builtin_sensor_factories)
 
     def __new__(
         cls,
@@ -1080,6 +1084,7 @@ class SimulationManager:
         )
         uid_list.extend(list(self._lights.keys()))
         uid_list.extend(list(self._sensors.keys()))
+        uid_list.extend(getattr(self, "_pending_mounted_sensors", {}))
         uid_list.extend(list(self._robots.keys()))
         uid_list.extend(getattr(self, "_visual_objects", {}))
         uid_list.extend(list(self._rigid_objects.keys()))
@@ -1988,6 +1993,24 @@ class SimulationManager:
             self._camera_attachment_topology_revision = topology_revision
         self._ready_spawn_topology_revision = topology_revision
         self._refresh_marker_attachments()
+        self._prepare_mounted_sensors()
+
+    def _prepare_mounted_sensors(self) -> None:
+        """Construct deferred USD cameras only after the caller finalizes the scene."""
+        if getattr(self, "_materializing_mounted_sensors", False):
+            return
+        pending = getattr(self, "_pending_mounted_sensors", {})
+        self._materializing_mounted_sensors = True
+        try:
+            for uid in tuple(pending):
+                cfg = pending.pop(uid)
+                try:
+                    self.add_sensor(cfg)
+                except Exception:
+                    pending[uid] = cfg
+                    raise
+        finally:
+            self._materializing_mounted_sensors = False
 
     def _prepare_spawn_runtime(self, result: Scene) -> None:
         """Prepare backend runtime buffers for one Spawn topology revision."""
@@ -3024,7 +3047,7 @@ class SimulationManager:
                 "Gaussian recording requires a managed Camera, not the native viewer recorder."
             )
         for sensor in self._sensors.values():
-            self._validate_gaussian_camera(sensor.cfg)
+            self._validate_gaussian_camera(sensor.cfg, type(sensor))
         return True
 
     def add_usd(
@@ -3127,7 +3150,15 @@ class SimulationManager:
             registry[descriptor.name] = facade
             assets[source_path] = facade
         for sensor_cfg in plan.mounted_sensors:
-            self.add_sensor(sensor_cfg)
+            _, factory, legacy = _resolve_sensor_factory(
+                sensor_cfg.sensor_type, self.SUPPORTED_SENSOR_TYPES
+            )
+            if legacy and isinstance(factory, type) and issubclass(factory, Camera):
+                self.add_sensor(sensor_cfg)
+            else:
+                if not hasattr(self, "_pending_mounted_sensors"):
+                    self._pending_mounted_sensors = {}
+                self._pending_mounted_sensors[sensor_cfg.uid] = sensor_cfg
         self.notify_visualization_topology_changed()
         result = UsdImportResult(
             assets,
@@ -3218,10 +3249,15 @@ class SimulationManager:
         ):
             raise ValueError("Hybrid standalone NRD omits Gaussian composition.")
         for sensor in self._sensors.values():
-            self._validate_gaussian_camera(sensor.cfg)
+            self._validate_gaussian_camera(sensor.cfg, type(sensor))
 
-    def _validate_gaussian_camera(self, cfg: object) -> None:
-        if getattr(cfg, "sensor_type", None) == "StereoCamera":
+    def _validate_gaussian_camera(
+        self, cfg: object, sensor_factory: object = None
+    ) -> None:
+        if isinstance(cfg, StereoCameraCfg) or (
+            isinstance(sensor_factory, type)
+            and issubclass(sensor_factory, StereoCamera)
+        ):
             raise NotImplementedError(
                 "Gaussian capture metadata is currently qualified for Camera; StereoCamera is not yet supported."
             )
@@ -3713,13 +3749,44 @@ class SimulationManager:
         if solver_type == "dexuni" and getattr(self, "_fluid_objects", {}):
             raise NotImplementedError("DexUni fluids cannot coexist with deformables.")
         supported_solvers = {"dexuni", "xpbd", "semi_implicit", "vbd"}
-        if solver_type not in supported_solvers:
+        if solver_type in {"mujoco_warp", "featherstone"}:
             raise NotImplementedError(
-                f"Newton solver {solver_type!r} does not support deformable "
-                "particle sets; select one of 'dexuni', 'xpbd', "
-                "'semi_implicit', or 'vbd'."
+                f"Newton solver {solver_type!r} does not support deformable particle sets."
             )
         physics_cfg = self.sim_config.physics_cfg
+        if solver_type not in supported_solvers:
+            from dexsim.engine.newton_physics import (
+                ProviderNewtonSolverCfg,
+                RegisteredNewtonSolverCfg,
+            )
+
+            native_config = getattr(
+                getattr(getattr(self, "_world_config", None), "newton_cfg", None),
+                "solver_cfg",
+                physics_cfg.solver_cfg,
+            )
+            external = (
+                isinstance(native_config, ProviderNewtonSolverCfg)
+                and native_config.solver_type == "provider"
+            ) or (
+                isinstance(native_config, RegisteredNewtonSolverCfg)
+                and solver_type
+                not in {
+                    "dexuni",
+                    "mujoco_warp",
+                    "xpbd",
+                    "semi_implicit",
+                    "featherstone",
+                    "vbd",
+                }
+            )
+            if not external:
+                raise NotImplementedError(
+                    f"Newton solver {solver_type!r} does not support deformable "
+                    "particle sets; select a particle solver or an external Provider."
+                )
+            # Finalized particle-kind/device support is validated by the SDK
+            # from the Provider's actual capabilities, not its registered name.
         if isinstance(physics_cfg, NewtonPhysicsCfg) and physics_cfg.requires_grad:
             raise NotImplementedError(
                 "Newton deformable state mutation is unavailable when "
@@ -4302,6 +4369,7 @@ class SimulationManager:
         mounted_sensors = []
         if cfg.enable_sensor:
             sensor_uids = set(self._sensors)
+            sensor_uids.update(getattr(self, "_pending_mounted_sensors", {}))
             for sensor_cfg in cfg.sensors:
                 if not isinstance(sensor_cfg, CameraCfg):
                     raise TypeError("RobotCfg.sensors supports mounted cameras only.")
@@ -4829,28 +4897,64 @@ class SimulationManager:
         Returns:
             BaseSensor: The added sensor instance handle.
         """
-        if getattr(getattr(self, "_spawn_scene", None), "has_gaussians", False) is True:
-            self._validate_gaussian_camera(sensor_cfg)
         sensor_type = sensor_cfg.sensor_type
         uid = sensor_cfg.uid
         if uid is None:
-            uid = f"{sensor_type.lower()}_{len(self._sensors)}"
+            index = len(self._sensors)
+            uid = f"{sensor_type.lower()}_{index}"
+            while uid in self._sensors or uid in getattr(
+                self, "_pending_mounted_sensors", {}
+            ):
+                index += 1
+                uid = f"{sensor_type.lower()}_{index}"
             sensor_cfg.uid = uid
-        if uid in self._sensors:
+        if uid in self._sensors or uid in getattr(self, "_pending_mounted_sensors", {}):
             raise ValueError(f"Sensor {uid!r} already exists.")
 
-        sensor_factory = self.SUPPORTED_SENSOR_TYPES.get(sensor_type)
-        if sensor_factory is None:
-            raise ValueError(
-                f"Unsupported sensor type {sensor_type!r}. Supported types: "
-                f"{sorted(self.SUPPORTED_SENSOR_TYPES)}."
-            )
-        if sensor_type == "ContactSensor" and not self.physics.supports_contact_sensor:
+        registration, sensor_factory, legacy_factory = _resolve_sensor_factory(
+            sensor_type, self.SUPPORTED_SENSOR_TYPES
+        )
+        has_gaussians = (
+            getattr(getattr(self, "_spawn_scene", None), "has_gaussians", False) is True
+        )
+        if has_gaussians:
+            self._validate_gaussian_camera(sensor_cfg, sensor_factory)
+        if (
+            legacy_factory
+            and sensor_type == "ContactSensor"
+            and not self.physics.supports_contact_sensor
+        ):
             raise NotImplementedError(
                 f"ContactSensor is not supported by the {self.physics.name} "
                 "physics backend."
             )
-        if isinstance(sensor_factory, type) and issubclass(sensor_factory, Camera):
+        if not legacy_factory:
+            if not isinstance(sensor_cfg, registration.config_cls):
+                raise TypeError(
+                    f"Sensor {sensor_type!r} requires {registration.config_cls.__name__}."
+                )
+            sensor_cfg.validate()
+            self.prepare()
+            if (
+                isinstance(sensor_cfg, CameraCfg)
+                and sensor_cfg.extrinsics.parent is not None
+            ):
+                # Validate before allocating native resources in a context factory.
+                self._resolve_spawn_sensor_parent_nodes(sensor_cfg.extrinsics.parent)
+            sensor = sensor_factory(
+                sensor_cfg, context=SensorContext.from_manager(self)
+            )
+            if not isinstance(sensor, BaseSensor):
+                raise TypeError(
+                    f"Sensor factory {sensor_type!r} must return BaseSensor."
+                )
+            if isinstance(sensor, Camera):
+                try:
+                    self._attach_camera_parent(sensor)
+                except Exception:
+                    sensor.destroy()
+                    raise
+        elif isinstance(sensor_factory, type) and issubclass(sensor_factory, Camera):
             if len(self._arenas) != self.num_envs:
                 raise RuntimeError(
                     "Camera creation requires all Spawn Arenas to be "
@@ -4901,10 +5005,27 @@ class SimulationManager:
             # Custom native sensors require a prepared physics scene; cameras
             # only depend on the pre-created Arenas.
             self.prepare()
+            if (
+                isinstance(sensor_cfg, CameraCfg)
+                and sensor_cfg.extrinsics.parent is not None
+            ):
+                self._resolve_spawn_sensor_parent_nodes(sensor_cfg.extrinsics.parent)
             # Preserve custom test/plugin factories whose two-argument
             # constructor predates the manager-owned render context.
             sensor = sensor_factory(sensor_cfg, self.device)
+            if isinstance(sensor_cfg, CameraCfg) and isinstance(sensor, Camera):
+                try:
+                    self._attach_camera_parent(sensor)
+                except Exception:
+                    sensor.destroy()
+                    raise
 
+        if has_gaussians and isinstance(sensor, Camera):
+            try:
+                self._validate_gaussian_camera(sensor.cfg, type(sensor))
+            except Exception:
+                sensor.destroy()
+                raise
         self._sensors[uid] = sensor
         self.notify_visualization_topology_changed()
         return sensor
@@ -4977,6 +5098,10 @@ class SimulationManager:
         Returns:
             bool: True if the asset is removed successfully, otherwise False.
         """
+        pending = getattr(self, "_pending_mounted_sensors", {})
+        if uid in pending:
+            del pending[uid]
+            return True
         if uid in self._sensors:
             sensor = self._sensors.pop(uid)
             destroy = getattr(sensor, "destroy", None)
@@ -5001,6 +5126,13 @@ class SimulationManager:
         robot = self._robots.get(uid)
         if robot is not None and robot.cfg.enable_sensor:
             for sensor_cfg in robot.cfg.sensors:
+                queued = pending.get(sensor_cfg.uid)
+                if (
+                    queued is not None
+                    and queued.extrinsics.parent is not None
+                    and queued.extrinsics.parent.startswith(f"{uid}/")
+                ):
+                    pending.pop(sensor_cfg.uid)
                 sensor = self._sensors.get(sensor_cfg.uid)
                 if (
                     isinstance(sensor, Camera)

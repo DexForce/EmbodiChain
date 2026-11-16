@@ -456,15 +456,11 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
         gpu_id: int,
     ) -> NewtonCfg:
         """Convert this config to ``dexsim.engine.newton_physics.NewtonCfg``."""
+        from dexsim.engine import newton_physics
         from dexsim.engine.newton_physics import (
-            DexUniSolverCfg,
-            FeatherstoneSolverCfg,
-            MJWarpSolverCfg,
             NewtonCfg,
             NewtonCollisionPipelineCfg as DexsimNewtonCollisionPipelineCfg,
-            SemiImplicitSolverCfg,
-            VBDSolverCfg,
-            XPBDSolverCfg,
+            RegisteredNewtonSolverCfg,
         )
 
         torch_device = (
@@ -476,14 +472,40 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
             else str(torch_device)
         )
 
-        solver_cfg_map: dict[str, type] = {
-            "dexuni": DexUniSolverCfg,
-            "mujoco_warp": MJWarpSolverCfg,
-            "xpbd": XPBDSolverCfg,
-            "semi_implicit": SemiImplicitSolverCfg,
-            "featherstone": FeatherstoneSolverCfg,
-            "vbd": VBDSolverCfg,
+        builtin_types = {
+            "dexuni": "DexUniSolverCfg",
+            "mujoco_warp": "MJWarpSolverCfg",
+            "xpbd": "XPBDSolverCfg",
+            "semi_implicit": "SemiImplicitSolverCfg",
+            "featherstone": "FeatherstoneSolverCfg",
+            "vbd": "VBDSolverCfg",
         }
+        # Explicit SDK objects already own their selection. Resolve only a
+        # mapping/registered built-in that actually needs construction, so a
+        # Provider cannot depend on unrelated optional built-in exports.
+        solver_cfg_map: dict[str, type] = {}
+        if isinstance(self.solver_cfg, Mapping):
+            selected = (
+                self.solver_cfg.get("solver_type")
+                or self.solver_cfg.get("class_type")
+                or "dexuni"
+            )
+        elif isinstance(self.solver_cfg, RegisteredNewtonSolverCfg):
+            selected = self.solver_cfg.solver_type
+        elif self.solver_cfg is None:
+            selected = "dexuni"
+        else:
+            selected = None
+        if selected is not None:
+            normalized = _normalize_newton_solver_type(str(selected))
+            if normalized in builtin_types:
+                class_name = builtin_types[normalized]
+                try:
+                    solver_cfg_map[normalized] = getattr(newton_physics, class_name)
+                except AttributeError as exc:
+                    raise ImportError(
+                        f"cannot import name '{class_name}' from dexsim.engine.newton_physics"
+                    ) from exc
         solver_cfg = _newton_solver_cfg_to_dexsim(
             solver_cfg=self.solver_cfg,
             solver_cfg_map=solver_cfg_map,
@@ -492,7 +514,7 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
         solver_name = "dexuni" if solver_cfg is None else str(solver_cfg.solver_type)
         if (
             self.requires_grad
-            and solver_name in solver_cfg_map
+            and solver_name in builtin_types
             and solver_name != "semi_implicit"
         ):
             logger.log_error(
@@ -600,7 +622,18 @@ def _newton_solver_cfg_to_dexsim(
     if solver_cfg is None:
         return None
 
+    from dexsim.engine.newton_physics import RegisteredNewtonSolverCfg
+
     if not isinstance(solver_cfg, Mapping):
+        if isinstance(solver_cfg, RegisteredNewtonSolverCfg):
+            name = _normalize_newton_solver_type(str(solver_cfg.solver_type))
+            if name in solver_cfg_map:
+                if {"solver_type", "class_type"}.intersection(solver_cfg.options):
+                    raise ValueError(
+                        "Builtin solver options cannot override the registered name"
+                    )
+                return solver_cfg_map[name](**dict(solver_cfg.options))
+            return RegisteredNewtonSolverCfg(name, options=dict(solver_cfg.options))
         if not hasattr(solver_cfg, "solver_type"):
             logger.log_error(
                 "Newton solver_cfg must be a mapping or a DexSim Newton solver "
@@ -626,9 +659,15 @@ def _newton_solver_cfg_to_dexsim(
     )
     normalized_solver_type = _normalize_newton_solver_type(str(configured_solver_type))
     if normalized_solver_type not in solver_cfg_map:
-        from dexsim.engine.newton_physics import RegisteredNewtonSolverCfg
-
-        return RegisteredNewtonSolverCfg(normalized_solver_type, solver_cfg_data)
+        unexpected = set(solver_cfg_data) - {"options"}
+        if unexpected:
+            raise ValueError(
+                "Registered solver settings belong in options; unexpected fields: "
+                f"{sorted(unexpected)}"
+            )
+        return RegisteredNewtonSolverCfg(
+            normalized_solver_type, options=solver_cfg_data.get("options", {})
+        )
     solver_cfg_type = solver_cfg_map[normalized_solver_type]
     return solver_cfg_type(**solver_cfg_data)
 

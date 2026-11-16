@@ -33,6 +33,9 @@ network as buffers.
    load_model
    convert_legacy_checkpoint
    NeRDStateCodec
+   NeRDGeometry
+   NeRDState
+   NeRDTransition
    NeRDObjective
    make_nerd_batch
    NeRDWindowSource
@@ -52,6 +55,12 @@ network as buffers.
 
 .. autoclass:: NeRDStateCodec
 
+.. autoclass:: NeRDGeometry
+
+.. autoclass:: NeRDState
+
+.. autoclass:: NeRDTransition
+
 .. autoclass:: NeRDObjective
 
 .. autofunction:: make_nerd_batch
@@ -59,6 +68,55 @@ network as buffers.
 .. autoclass:: NeRDWindowSource
 
 .. autofunction:: build_supervised_trainer
+
+Graph-connected rollout and contact geometry
+--------------------------------------------
+
+The rollout computes current-state FK and contact features before encoding,
+history advancement, prediction and decoding. The geometry owns only detached
+fixed parameters and receives a tensor FK callable; neither implementation
+imports a simulator. State and history are explicit and treated as immutable.
+Learning environments own reset and TBPTT boundaries. Offline supervised
+objectives may continue using measured contact features.
+
+.. currentmodule:: embodichain_models.dynamics.nerd.geometry
+
+.. autosummary::
+
+   NeRDGeometry
+
+.. currentmodule:: embodichain_models.dynamics.nerd.transition
+
+.. autosummary::
+
+   NeRDState
+   NeRDTransition
+
+Optional native NeRD deployment
+-------------------------------
+
+The :doc:`NeRD guide </features/neural_dynamics/nerd>` distinguishes measured
+window prediction, online rollout, learning-env training and native inference.
+Its native quickstart links model preparation with step/reset/close and records
+the verified physical domain and execution environment.
+
+The Provider maps native coordinates and controls into the same independent
+transition. It owns inference history and resource validation; SDK Scene owns
+publication, reset baselines and scheduling. The lightweight learning route
+does not construct this solver. Support remains limited to the recorded
+Cartpole/Ant physical domains, without general contact-force reports or
+external wrenches.
+
+.. currentmodule:: embodichain_solvers.physics.nerd.provider
+
+.. autosummary::
+
+   NeRDProvider
+   NeuralRobotDynamicSolver
+
+.. autoclass:: NeRDProvider
+
+.. autoclass:: NeuralRobotDynamicSolver
 
 Network and normalization
 --------------------------
@@ -260,3 +318,34 @@ Other dynamics families
    :maxdepth: 2
 
    rwm
+
+
+WorldParticle independent transition
+------------------------------------
+
+WorldParticle predicts frozen world-space particle transitions. The model
+package owns authored features/topology, network loading and coordinate
+conversion. The optional native Provider belongs to the solver extension and
+uses the SDK particle inference adapter. Operator/runtime qualification is
+separate from discovery; main's Torch/SDK pins are unchanged.
+
+The :doc:`WorldParticle guide </features/neural_dynamics/worldparticle>` links
+the complete native quickstart, standalone call, NPZ/frame contract, operator
+installation/preflight and measured execution record. Frozen inference does not
+establish a learning-env or functional-gradient contract.
+
+.. autoclass:: embodichain_models.dynamics.worldparticle.WorldParticleModel
+   :noindex:
+
+.. autofunction:: embodichain_models.dynamics.worldparticle.load_model
+   :noindex:
+
+.. autoclass:: embodichain_models.dynamics.worldparticle.model.WorldParticleModel
+   :noindex:
+
+.. autofunction:: embodichain_models.dynamics.worldparticle.model.load_model
+   :noindex:
+
+.. autofunction:: embodichain_models.dynamics.worldparticle.data.load_sample
+
+.. autoclass:: embodichain_solvers.physics.worldparticle.provider.WorldParticleProvider

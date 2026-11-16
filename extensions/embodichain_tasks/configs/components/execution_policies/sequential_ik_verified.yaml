@@ -16,9 +16,9 @@ tracking:
   in_flight_max_abs_error: 1.0
   terminal_max_abs_error: 1.0
 recovery:
-  action_timeout: 120.0
+  skill_timeout: 120.0
   max_replans: 3
-  max_action_retries: 0
+  max_skill_retries: 0
   goal_rotation_threshold: 0.5
 workflow_recovery:
   max_recovery_attempts: 2

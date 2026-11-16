@@ -199,23 +199,16 @@ _DUAL_ARM_RESOURCES = {
             f"tasks/manipulation/{task}/task_program/integration.dexforce_w1_030_pika.yaml"
         )
         for task in _DUAL_ARM_PROGRAMS
-    ),
-    Path(
-        "tasks/manipulation/tableware/pour_water/task_program/integration.dual_ur5.yaml"
+        if task
+        not in {
+            "tableware/blocks_ranking_rgb",
+            "tableware/stack_blocks_two",
+            "repeated_pick_place",
+        }
     ),
     Path("components/execution_policies/motion_gen_projected_manipulation.yaml"),
     Path(
         "components/execution_policies/trajectory_open_loop_dual_arm_manipulation.yaml"
-    ),
-    Path(
-        "tasks/manipulation/repeated_pick_place/task_program/integration.dual_ur.yaml"
-    ),
-    *(
-        Path(
-            f"tasks/manipulation/tableware/{task}/task_program/integration.{kind}.yaml"
-        )
-        for task in ("stack_blocks_two", "blocks_ranking_rgb")
-        for kind in ("dual_ur", "tianji_marvin")
     ),
     *(
         Path(f"tasks/manipulation/tableware/{task}/{filename}")
@@ -267,6 +260,8 @@ _RESOURCE_PATHS = frozenset(
             "tasks/manipulation/repeated_pick_place/task_program/program.robotiq_workbench.yaml"
         ),
         Path("components/execution_policies/sequential_ik_verified.yaml"),
+        Path("components/execution_policies/sequential_ik_projected_manipulation.yaml"),
+        Path("components/embodiments/franka_panda_cartesian.yaml"),
         Path("tasks/manipulation/hand_over/envs/dual_franka_robotiq140.default.yaml"),
         Path("tasks/manipulation/hand_over/task_program/integration.robotiq140.yaml"),
         Path("tasks/manipulation/hand_over/task_program/program.upright_can.yaml"),
@@ -330,7 +325,7 @@ _RESOURCE_PATHS = frozenset(
         Path("tasks/manipulation/repeated_pick_place/envs/default.yaml"),
         Path("tasks/manipulation/repeated_pick_place/envs/tabletop.default.yaml"),
         Path(
-            "tasks/manipulation/repeated_pick_place/task_program/integration.tianji_marvin.yaml"
+            "tasks/manipulation/repeated_pick_place/task_program/integration.tabletop.yaml"
         ),
         Path("components/embodiments/dexforce_w1_030_cloth_fold.yaml"),
         Path("tasks/manipulation/cloth_fold/env.yaml"),
@@ -355,7 +350,7 @@ _RESOURCE_PATHS = frozenset(
         Path("tasks/manipulation/tableware/pour_water/task_program/integration.yaml"),
         Path("tasks/manipulation/tableware/pour_water/task_program/evaluation.yaml"),
         Path(
-            "tasks/manipulation/tableware/pour_water/task_program/integration.tianji_marvin.yaml"
+            "tasks/manipulation/tableware/pour_water/task_program/integration.dual_arm.yaml"
         ),
     }
 )
@@ -549,11 +544,12 @@ print(json.dumps(decoded_deployments, sort_keys=True))
         ],
         cwd=runtime_dir,
         env=environment,
-        check=True,
+        check=False,
         capture_output=True,
         text=True,
     )
 
+    assert completed.returncode == 0, completed.stdout + completed.stderr
     assert json.loads(completed.stdout.splitlines()[-1]) == {
         path: list(identifiers) for path, identifiers in expected_deployments.items()
     }

@@ -5,11 +5,21 @@ four phases. The W1 integration binds them to ranges of one qualified joint
 stream, including the grippers. Newton interpolates the stream inside each
 physics step. The Gym bridge still owns phase execution and completion.
 
-Set `EMBODICHAIN_DATA_ROOT` to the `inputs` directory extracted from the
+Install the pinned inputs into the normal SDK cache before launching the task:
+
+```bash
+python scripts/tools/prepare_cloth_fold_assets.py
+```
+
+The installer verifies the archive and task-owned URDF/mesh SHA-256 digests,
+includes all URDF-relative collision and visual meshes, and refuses to overwrite
+local variants. `--data-root` selects a custom cache; launch with the same
+`EMBODICHAIN_DATA_ROOT`. Existing manual input directories remain supported.
+The source is the
 [M02 input bundle](https://huggingface.co/datasets/DexForceAI/embodichain_reports/resolve/cafe3e14f650f93123d47fe338e49c003443f3a4/reports/dexuni-physics-2026-10-27/inputs/m02_cloth_single_fold/m02_cloth_single_fold.zip).
 The deployment checks the cloth mesh and W1 URDF against the qualified inputs.
-The wheel includes the placement-adjusted command stream. Its float32 position
-array has SHA-256
+The wheel includes the placement-adjusted command stream. Its 991-frame float32
+position array has SHA-256
 `6a71627357c1a5729204fecdcc7be5e690ca5ad4221f8da40beb4210d4728a2e`.
 
 Use the installed task package and its standard Gym Task Program executor:

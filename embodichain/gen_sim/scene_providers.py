@@ -123,6 +123,8 @@ class SceneGenerationRequest:
 
 @dataclass(frozen=True)
 class SceneJobRef:
+    """Durable provider job identity with serializable provider metadata."""
+
     provider: str
     job_id: str
     request_hash: str
@@ -148,6 +150,8 @@ class SceneJobRef:
 
 @dataclass(frozen=True)
 class SceneJobStatus:
+    """Provider-reported lifecycle state and an optional successful candidate."""
+
     job: SceneJobRef
     status: str
     candidate_id: str | None = None
@@ -175,6 +179,8 @@ class SceneJobStatus:
 
 @dataclass(frozen=True)
 class CancellationReport:
+    """Acknowledged job stop state including possible completed side effects."""
+
     job: SceneJobRef
     status: str
     stopped: bool
@@ -202,7 +208,19 @@ class SceneGenerationProvider(Protocol):
 def load_scene_generation_provider(
     provider_id: str, profile: Mapping[str, Any] | None = None
 ) -> SceneGenerationProvider:
-    """Load only the selected built-in or installed provider."""
+    """Load the selected built-in or installed provider.
+
+    Args:
+        provider_id: Built-in ID or installed scene-provider entry-point name.
+        profile: Explicit configuration passed to that provider factory.
+
+    Returns:
+        Provider exposing the scene job lifecycle operations.
+
+    Raises:
+        ValueError: The selected provider is absent, ambiguous or mismatched.
+        TypeError: The provider lacks a required lifecycle operation.
+    """
     if not isinstance(provider_id, str) or not provider_id.strip():
         raise ValueError("Scene provider ID must be nonempty")
     selected = provider_id.strip()

@@ -188,4 +188,7 @@ def test_manipulation_grasp_dwell_and_placement_use_shared_atomic_options(
     assert options["pick"].grasp_settle_steps == 45
     assert options["pick"].hand_interp_steps == 10
     assert options["place"].preserve_current_object_orientation is True
-    assert preset.motion_policy.sample_count == 90
+    assert (
+        preset.motion_policy.sample_count
+        == {"stack_blocks_two": 220, "blocks_ranking_rgb": 90}[task_name]
+    )

@@ -113,7 +113,10 @@ trajectories retain their original physical identity; the independent direct
 Newton collector uses `nerd-direct-newton-builder-v1`. A shared schema or profile
 name does not make different solvers, versions or construction paths identical.
 
-### Use the model in PyTorch
+### Use measured windows in PyTorch
+
+This is the offline network/codec path. Online model rollout and native solver
+deployment use the separate execution paths described below.
 
 After preparing Cartpole resources, read one matching held-out window:
 
@@ -159,6 +162,51 @@ physical identity. When supplying your own data, verify those contracts before
 prediction, as the example's `eval` command does. `encode_batch` returns named
 features, relative targets and a validity mask. `codec.decode()` reconstructs
 native `q/qd` from the current state and its predicted change.
+
+### Online rollout, learning-env and native deployment
+
+These are separate consumers of the same `NeRDTransition`:
+
+| Execution path | Entry and owner | Gradient/reset boundary |
+| --- | --- | --- |
+| Online tensor rollout | `NeRDState` plus `NeRDTransition.step(state, effort)` | State/history are explicit; the caller owns detach and reset |
+| Policy learning | `trainer.learning_env`, bootstrapped by `run-example learning/nerd train-policy` | Environment owns reward, terminal observations, row reset and `detach_state()` |
+| Native scene inference | `embodichain_solvers.physics.nerd.provider.NeRDProvider` | SDK owns buffers/step/reset/close; native prediction uses `no_grad` |
+
+Online `step` computes current-state FK/contact features through its injected
+`NeRDGeometry`, appends history, predicts and decodes the next state. Offline
+SL may still encode measured contacts as above. Ant transition effort has eight
+actuated columns; the native example helper accepts fourteen generalized
+columns with the first six zero. Cartpole uses two generalized columns.
+
+For policy learning, set `trainer.learning_env.cfg.checkpoint` in the supplied
+agent recipe to your matching export and run from the source repository root:
+
+```bash
+embodichain run-example learning/nerd train-policy --config examples/learning/nerd/configs/cartpole/agents/apg.nerd.yaml
+```
+
+The factory builds an FK-only reference model, without a World, Scene or solver.
+RWM uses the same learning-env/trainer protocols. The existing Warp
+`DifferentiableEnv` retains its kinematic execution path. Geometry caches only
+fixed tensors; full resets allocate independent episode storage, partial resets
+preserve peers, and boolean contact switches have piecewise gradients.
+
+The [native solver quickstart](https://github.com/DexForce/EmbodiChain/blob/main/examples/learning/nerd/DEPLOYMENT.md)
+provides both the model-only preparation code and a complete two-robot native
+step/readback/reset/close example. It uses the existing example-owned
+`DynamicsSimulation` helper and also shows the direct Provider and registered
+`nerd` configuration forms. It is separate from policy training and offline
+evaluation. Use one prediction per export interval, `num_substeps=1` and
+`use_cuda_graph=False`; finalized geometry, COM conventions, ordered contacts,
+gravity and physical signatures must match the export.
+
+The [execution record](https://github.com/DexForce/EmbodiChain/blob/main/examples/learning/nerd/VALIDATION.md)
+records published-weight Cartpole/Ant runs with two environments and sixty
+native steps each, followed by reset/history replay, on the specified CUDA
+runtime. No desktop viewer or NeRD rendered output was qualified. The Newton
+FK gradient adapter is private; reusable tensor FK/IK remains in
+`compute.kinematics` and `learning.layers`.
 
 ### Comparison videos
 
