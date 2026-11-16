@@ -1074,7 +1074,10 @@ def _bind_deployment(
                     "Handover must preserve the named receiver until Place"
                 )
 
-        if cid == "simulation.coordinated_transport":
+        if (
+            cid == "simulation.coordinated_transport"
+            and resolved_placements is not None
+        ):
             ref = annotations[node["id"]]["reference"]
             obj = call["arguments"]["object"]
             placement = (resolved_placements or {}).get(node["id"])
@@ -1099,14 +1102,25 @@ def _bind_deployment(
             if entry is None:
                 entry = dict(kind="coordinated_transport", routes=[])
                 lowerers.append(entry)
-            entry["routes"].append(
-                dict(
-                    object_id=obj,
-                    target_id=ref,
-                    reference_entity_id=ref,
-                    relative_pose=placement["object_target_pose"],
-                )
+            route = dict(
+                object_id=obj,
+                target_id=ref,
+                reference_entity_id=ref,
+                relative_pose=placement["object_target_pose"],
             )
+            previous = next(
+                (
+                    r
+                    for r in entry["routes"]
+                    if (r["object_id"], r["target_id"]) == (obj, ref)
+                ),
+                None,
+            )
+            if previous is not None and previous != route:
+                route["target_id"] = f"gensim_transport_{node['id']}"
+                call["arguments"]["target"] = route["target_id"]
+            if previous != route:
+                entry["routes"].append(route)
 
         grasped = (
             call["object"]
@@ -1311,7 +1325,10 @@ def _bind_deployment(
                 position_offset=[pose[i] for i in (3, 7, 11)],
                 position_tolerance=[0.04, 0.04, 0.012],
             )
-        if cid == "simulation.coordinated_transport":
+        if (
+            cid == "simulation.coordinated_transport"
+            and resolved_placements is not None
+        ):
             post = [dict(kind="wait_stable", entity=obj)]
             validators = [
                 dict(

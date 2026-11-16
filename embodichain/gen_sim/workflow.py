@@ -994,10 +994,20 @@ def qualify_task_scene(
         )
     placements = {}
     occupied: dict[str, list[tuple[float, float, float]]] = {}
+    landed_objects = {}
     annotations = validation["source"]["annotations"]
     try:
         for node in graph["nodes"]:
             call = node["call"]
+            subject = call.get("arguments", call).get("object")
+            if (
+                call["kind"] == "pick"
+                or call.get("call_id") == "simulation.coordinated_transport"
+            ):
+                previous = landed_objects.pop(subject, None)
+                if previous:
+                    support, landing = previous
+                    occupied[support].remove(landing)
             if call.get("call_id") != "simulation.coordinated_transport" and (
                 call["kind"] != "place" or not ({"on", "inside"} & call.keys())
             ):
@@ -1010,6 +1020,7 @@ def qualify_task_scene(
                 scene_root,
                 occupied.setdefault(reference, []),
             )
+            landed_objects[subject] = (reference, occupied[reference][-1])
             placements[node["id"]] = {
                 "object_target_pose": pose,
                 "displacement": displacement,

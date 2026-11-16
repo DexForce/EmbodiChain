@@ -253,6 +253,8 @@ def test_installed_wheel_cli_reads_external_profiles_without_package_edits(tmp_p
                 "gensim",
                 "task",
                 "plan",
+                "--route",
+                "template",
                 "--image",
                 str(image),
                 "--instruction",

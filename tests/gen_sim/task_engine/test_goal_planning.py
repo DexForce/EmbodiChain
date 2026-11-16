@@ -19,6 +19,7 @@ from __future__ import annotations
 import pytest
 import json
 from copy import deepcopy
+from pathlib import Path
 
 from embodichain.gen_sim.task_engine.goal_planning import author_goal_plan
 from embodichain.gen_sim.task_engine.goal_planning import publish
@@ -410,3 +411,147 @@ def test_hybrid_held_vessel_pours_without_reacquisition():
     ops[-1]["primary"] = "right"
     with pytest.raises(ValueError, match="occupied"):
         _supported_program(ops, text)
+
+
+@pytest.mark.parametrize(
+    "instruction",
+    ["把杯子放在托盘上，不要倒水。", "Place the pouring jug on the table."],
+)
+def test_nonaffirmative_pour_reaches_publication_and_review(
+    tmp_path, monkeypatch, instruction
+):
+    from PIL import Image
+    from embodichain.gen_sim.services import compat
+    from embodichain.gen_sim.task_engine.hybrid import publish_hybrid
+    from embodichain.gen_sim.task_engine._review import write_review
+    from embodichain.gen_sim.workflow import load_task_plan
+    from embodichain.gen_sim.task_spec import canonical_hash
+
+    image = tmp_path / "scene.png"
+    Image.new("RGB", (20, 20)).save(image)
+    ops = [
+        dict(
+            template="E1",
+            object="jug" if instruction.startswith("Place") else "cup",
+            reference="table" if instruction.startswith("Place") else "tray",
+            relation="on",
+            quote=instruction,
+        )
+    ]
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(
+        compat.VisionFacade,
+        "complete",
+        lambda *a, **kw: json.dumps(dict(operations=ops)),
+    )
+
+    def respond(**kw):
+        if kw["role"] == "task_interpretation":
+            return {"issues": []}
+        return {
+            r: dict(description=r, bbox=[10, 10, 200, 200])
+            for r in kw["schema"]["required"]
+        }
+
+    monkeypatch.setattr(compat, "structured_call", respond)
+    out = tmp_path / "plan"
+    publish_hybrid(instruction, "example", Path("~/scene.png"), Path("~/plan"))
+    plan = load_task_plan(out)
+    assert plan["schema_version"] == "embodichain.hybrid-task-plan/v1"
+    native = tmp_path / "attempt"
+    native.mkdir()
+    identities = {
+        k: "measured"
+        for k in (
+            "bundle_digest",
+            "scene_digest",
+            "program_digest",
+            "policy_sha256",
+            "run_id",
+            "attempt_id",
+        )
+    }
+    identities.update(
+        spec_digest=plan["spec_digest"],
+        graph_digest=plan["semantic_graph_sha256"],
+        plan_digest=plan["plan_digest"],
+    )
+    report = dict(
+        status="succeeded",
+        segments=[
+            dict(
+                name="call_1",
+                success=True,
+                start_step=0,
+                end_step=12,
+                active=[True],
+                successes=[True],
+                start_steps=[0],
+                end_steps=[12],
+            )
+        ],
+    )
+    for file, data in {
+        "run_manifest": identities,
+        "attempt_feedback": dict(
+            identities,
+            schema_version="embodichain.attempt-feedback/v1",
+            execution="succeeded",
+            physical_verdict="not_evaluated",
+            execution_report_digest=canonical_hash(report),
+        ),
+        "execution_report": report,
+    }.items():
+        (native / (file + ".json")).write_text(json.dumps(data))
+    html = tmp_path / "review.html"
+    write_review(out, html, native)
+    import re
+
+    data = json.loads(
+        re.search(
+            r'<script[^>]*id="graph-data"[^>]*>(.*?)</script>', html.read_text(), re.S
+        ).group(1)
+    )
+    assert data["review"]["attempt"]["calls"]["call_1"]["end_step"] == 12
+    assert data["review"]["source_image"].startswith("data:image/jpeg;base64,")
+
+
+def test_hybrid_two_mats_project_each_occurrence(tmp_path, monkeypatch):
+    from PIL import Image
+    from embodichain.gen_sim.services import compat
+    from embodichain.gen_sim.task_engine.hybrid import publish_hybrid
+    from embodichain.gen_sim.workflow import load_task_plan
+
+    instruction = (
+        "Place the cube on the first mat, then place the cube on the second mat."
+    )
+    image = tmp_path / "scene.png"
+    Image.new("RGB", (20, 20)).save(image)
+    ops = [
+        dict(
+            template="E1", object="cube", reference=r, relation="on", quote=instruction
+        )
+        for r in ("first_mat", "second_mat")
+    ]
+    monkeypatch.setattr(
+        compat.VisionFacade,
+        "complete",
+        lambda *a, **kw: json.dumps(dict(operations=ops)),
+    )
+    monkeypatch.setattr(
+        compat,
+        "structured_call",
+        lambda **kw: (
+            {"issues": []}
+            if kw["role"] == "task_interpretation"
+            else {
+                r: dict(description=r, bbox=[10, 10, 200, 200])
+                for r in kw["schema"]["required"]
+            }
+        ),
+    )
+    result = publish_hybrid(instruction, "example", image, tmp_path / "plan")
+    load_task_plan(tmp_path / "plan")
+    annotations = result["semantic_graph_validation"]["source"]["annotations"]
+    assert annotations["call_2"]["reference"] == "first_mat"
+    assert annotations["call_4"]["reference"] == "second_mat"

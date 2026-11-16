@@ -205,3 +205,13 @@ These APIs create no simulation, Robot, skill or planner. Shared Task Program
 composition accepts owned inline components, and the Gym parser consumes the
 sealed component snapshots when configuring an environment. Bundle changes
 require preparing a new identity; historical run outputs remain separate.
+
+Hybrid review dispatch uses the verified publication schema, so `task view`
+consumes hybrid contracts and attempt identities without template candidates.
+Grounded manipulation associates each landing with its producing milestone;
+intermediate placements remain scene requirements even after their terminal
+state is superseded. Repeated transport reuses equal routes or assigns separate
+bound targets for different per-occurrence landing poses. Legacy configured
+transport lowerers retain their own targets and geometry. Pour omission checks
+operate on affirmative action clauses; noun uses and explicit prohibitions do
+not create pouring obligations. Input paths expand before any model requests.

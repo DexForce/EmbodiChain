@@ -59,7 +59,13 @@ def _check_source_intent(instruction, operations):
     motion = r"倾倒动作|倾倒运动|倾倒姿势|倒水姿势|模拟倾倒|pouring motion|pouring gesture|mimic pouring"
     no_fluid = r"(?:不(?:需要|要求|用)?|不要)(?:实际|真的)?(?:倒出|倒入|转移)(?:液体|水)|without (?:transferring|pouring) (?:water|liquid)"
     fluid = r"(?:水|液体|牛奶|饮料)(?:倒入|倒进|注入|进入|转移到)|(?:倒入|倒进|倒出)(?:液体|水)|(?:pour|transfer) (?:the )?(?:liquid|water|milk)"
-    if re.search(r"倾倒|倒水|倒入|倒进|pour", source) and not pours:
+    affirmative = re.sub(
+        r"(?:不要|别|禁止|无需|不用|不必|不需要)[^，。；;.!?]*(?:倾倒|倒水|倒入|倒进|倒出)[^，。；;.!?]*",
+        "",
+        source,
+    )
+    affirmative = re.sub(r"(?:do not|don't|never)\s+pour[^,;.!?]*", "", affirmative)
+    if re.search(r"倾倒|倒水|倒入|倒进|\bpour\b", affirmative) and not pours:
         raise ValueError("source_omission: missing pour operation")
     for op in pours:
         text = source if len(pours) == 1 else op["quote"].casefold()
@@ -569,24 +575,51 @@ def _scene_projection(doc, graph, packet):
 
     goals = doc["objectives"]["goal"]
     nodes = graph["nodes"]
-    destinations = {g["subject"]: g for g in goals if g["predicate"] == "relation"}
+    from ..task_spec import TaskSpec
+
+    spec = TaskSpec.from_dict(
+        {"roles": doc["configuration"]["roles"], **doc["objectives"]}
+    )
+    coverage = verify_witness(
+        spec,
+        graph,
+        support_targets={
+            g["reference"]: g["reference"] for g in goals if g.get("reference")
+        },
+    )
+    if coverage["status"] != "covered":
+        raise ValueError("Uncovered scene witness")
+    achieved = {}
+    for milestone in doc["objectives"]["milestones"]:
+        producer = coverage["producers"].get(milestone["id"])
+        if producer:
+            for predicate in milestone["achieve"]:
+                if predicate["predicate"] == "relation":
+                    achieved[producer[0]] = predicate
     annotations = {}
-    if not nodes or len(destinations) != len(goals):
-        raise ValueError("Grounded manipulation requires terminal placement relations")
-    for n in nodes:
+    for index, n in enumerate(nodes):
         c = n["call"]
         carry = c.get("call_id") == "simulation.coordinated_transport"
         if not carry and c["kind"] not in {"pick", "hand_over", "place"}:
             raise ValueError("Unsupported grounded manipulation call")
         subject = c.get("arguments", c)["object"]
-        goal = destinations.get(subject)
+        landing = next(
+            (
+                row
+                for row in nodes[index:]
+                if row["id"] in achieved
+                and achieved[row["id"]].get("subject") == subject
+            ),
+            None,
+        )
+        goal = achieved.get(landing["id"]) if landing else None
         if not goal or goal["relation"] not in {"on", "inside"}:
-            raise ValueError("Missing frozen destination for " + subject)
-        relation, reference = goal["relation"], goal["reference"]
+            raise ValueError("Missing occurrence destination")
+        reference, relation = goal["reference"], goal["relation"]
         if (carry and (relation != "on" or c["arguments"]["target"] != reference)) or (
             c["kind"] == "place" and c.get(relation) != reference
         ):
-            raise ValueError("Placement witness does not match the frozen objective")
+            raise ValueError("Placement witness mismatch")
         annotations[n["id"]] = dict(
             object=subject, reference=reference, relation=relation
         )
@@ -718,6 +751,10 @@ def publish_hybrid(
     from ..services.compat import VisionFacade, structured_call
     from .image_planning import _json_response
 
+    image = Path(image).expanduser().resolve(strict=True)
+    output = Path(output).expanduser().absolute()
+    if scene_grounding is not None:
+        scene_grounding = Path(scene_grounding).expanduser().resolve(strict=True)
     image_bytes = image.read_bytes()
     prompt = {
         "instruction": instruction,
@@ -907,6 +944,7 @@ def publish_hybrid(
         else "authoring_only"
     )
     with WorkflowRunArtifacts(output) as artifacts:
+        output = artifacts.output_dir
         (output / doc["inputs"]["image"]["ref"]).write_bytes(image_bytes)
         for k, v in result.items():
             write_run_json(output / (k + ".json"), v)
