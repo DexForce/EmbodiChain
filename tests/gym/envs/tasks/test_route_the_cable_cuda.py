@@ -244,6 +244,17 @@ class _SpoolReleaseCUDAScenario:
         settling_steps = 0
         last_segment = None
         env.reset()
+        qpos = env.robot.get_qpos()
+        for side, ready_y in (("right", -0.26), ("left", 0.26)):
+            arm = f"{side}_arm"
+            tcp = env.robot.compute_fk(
+                qpos[:, env.robot.get_joint_ids(arm)], name=arm, to_matrix=True
+            )[0]
+            torch.testing.assert_close(
+                tcp[:3, 3], tcp.new_tensor([0.45, ready_y, 0.93]), atol=0.01, rtol=0
+            )
+            assert tcp[2, 2] < -0.85  # Tool +Z points down toward the work surface.
+            assert bool((qpos[:, env.robot.get_joint_ids(f"{side}_eef")] > 0.045).all())
         for segment in env.create_demo_segments():
             last_segment = segment.name
             segment_distance = 0.0

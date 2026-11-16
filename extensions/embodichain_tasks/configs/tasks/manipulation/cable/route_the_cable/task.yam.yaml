@@ -3,6 +3,14 @@ environment:
   component: env.yaml
 embodiment:
   component: ../../../../components/embodiments/yam_i2rt.yaml
+  overrides:
+    # Park the open grippers above their own sides of the bench, facing the cable.
+    # Arm joints are paired left/right (J1 through J6), followed by the four fingers.
+    init_qpos: [
+      -0.414, 0.359, 0.945, 0.943, 1.021, 1.019,
+      -1.243, -1.236, -0.171, 0.149, 1.192, -1.243,
+      0.0475, 0.0475, 0.0475, 0.0475,
+    ]
 headless: true
 render_cfg:
   renderer: no-render

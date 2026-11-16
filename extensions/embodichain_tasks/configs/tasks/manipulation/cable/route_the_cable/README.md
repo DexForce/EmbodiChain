@@ -96,6 +96,11 @@ once the release condition is reached. They do not run an unbounded Python loop.
 
 The program contains 51 segments and 129 Semantic Call invocations.
 
+The deployment starts with both grippers open, 180 mm above the bench.
+In the arena frame, the right TCP starts at approximately `(0.45, -0.26, 0.93)` m
+and the left at `(0.45, 0.26, 0.93)` m. Both tool axes point down and tilt
+25° toward +X. Each arm returns to its own starting pose after releasing the cable.
+
 The right arm places capsule centres at material distances 0.162, 0.282 and
 0.438 m; these are the nearest capsule centres to the upstream nominal grasp
 locations. The left arm grasps at 0.57 m, leaving a 30 mm free span. All four
@@ -241,6 +246,12 @@ took 5,981 and 5,994 control steps, respectively. The final tip positions differ
 by 1.184 mm, both inside the strict channel. Maximum grasp slip was 0.316 mm
 and 0.307 mm, respectively, and both runs reported zero final sampled cable
 penetration against the bench, spools and port.
+
+With the two-arm ready pose, the same USD deployment passed all 51 segments
+in 4,802 control steps at seed 73. The first approaches took 181 steps for
+the right arm and 301 for the left, down from 638 and 518. The separate
+full-route contact regression reported zero robot penetration against the
+bench, spools and port.
 
 The earlier three NoRender CUDA regressions ran on DexSim development build
 `b040478a`, using seed 73 and a fresh process per case. The full-route case naturally
