@@ -24,8 +24,8 @@ terminal state is captured before the next manual
 reset; no pose or physical state is scripted. This small visual preview is
 separate from the held-out episode evaluation and includes failures as well
 as successes. The default visual seeds are 30000, 30001 and 30002, separate
-from the nominal evaluation's default reset seed. Use the documented assembly
-dependency overlays.
+from the nominal evaluation's default reset seed. Use a supporting SDK build
+and the saved run's physical resources.
 """
 
 from __future__ import annotations

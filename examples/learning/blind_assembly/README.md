@@ -1,13 +1,16 @@
 # Blind assembly policy examples
 
-The peg, gear and nut tasks use EmbodiChain's native managers, temporal policy
-and PPO. Actor inputs contain encoder-derived features and action history;
-privileged state and contact labels are training-only inputs.
+The peg, gear and nut tasks use EmbodiChain's native managers and PPO.
+`ActorCritic` composes a temporal actor with optional contact supervision;
+the actor reads a proprioceptive history window and produces its own features.
+Privileged state and contact labels remain training-only inputs. Existing
+training recipes retain `proprioceptive_actor_critic` as a checkpoint-compatible
+construction entry; actor export supports both entries.
 
 A pinned checkpoint, frozen physical resources and native replay evidence are
 available through [the reproduction guide](REPRODUCING.md) and `model.json`.
 Those measured replay results use a pinned historical source/SDK profile. The
-current Python 3.12 / DexSim 0.6.0rc1 task lifecycle has separate smoke checks;
+current Python 3.12 / DexSim 0.6.0rc2 task lifecycle has separate smoke checks;
 the historical success rates do not qualify its learning performance.
 
 ## Training and evaluation

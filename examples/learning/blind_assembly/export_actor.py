@@ -28,7 +28,7 @@ from pathlib import Path
 
 import torch
 
-from embodichain.learning.rl.policies import build_policy
+from embodichain.learning.rl.policies import ActorCritic, TemporalActor, build_policy
 from embodichain.utils.utility import load_config
 
 
@@ -44,17 +44,21 @@ def main() -> None:
     checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=True)
     attributes = checkpoint["metadata"]["policy_attributes"]
     config = load_config(str(args.config))["policy"]
-    if config["name"] != "proprioceptive_actor_critic":
-        raise ValueError(
-            "This example exports the native temporal assembly policy only."
-        )
     policy = build_policy(
         config,
         attributes["obs_dim"],
         attributes["action_dim"],
         torch.device("cpu"),
-        critic_obs_space=attributes["critic_obs_dim"],
+        critic_obs_space=(
+            attributes["critic_obs_dim"]
+            if attributes.get("uses_separate_critic_obs", True)
+            else None
+        ),
     )
+    if not isinstance(policy, ActorCritic) or not isinstance(
+        policy.actor, TemporalActor
+    ):
+        raise ValueError("This example requires an ActorCritic with a temporal actor.")
     policy.load_state_dict(checkpoint["policy"])
     actor = policy.export_actor().cpu().eval()
     torch.manual_seed(0)

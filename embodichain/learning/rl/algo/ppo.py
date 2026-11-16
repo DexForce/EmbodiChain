@@ -86,6 +86,12 @@ class PPO(BaseAlgorithm[TensorDict]):
             raise ValueError(
                 "auxiliary_coef requires a policy auxiliary_loss implementation."
             )
+        if cfg.auxiliary_coef and not getattr(
+            getattr(policy, "module", policy), "supports_auxiliary_loss", True
+        ):
+            raise ValueError(
+                "auxiliary_coef requires configured tasks for auxiliary_loss."
+            )
         self.cfg = cfg
         self.policy = policy
         self.device = torch.device(cfg.device)

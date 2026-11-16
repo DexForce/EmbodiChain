@@ -119,14 +119,28 @@ orbit/zoom and recorder view. Use
 camera changes; the [evaluation guide](../../../docs/source/guides/policy_evaluation.md)
 owns user controls.
 
-## Temporal proprioceptive policy
+## Composable actors and auxiliary objectives
 
-The registered `proprioceptive_actor_critic` policy separates actor, critic and
-training-only label groups. `architecture_version` preserves history ordering
-and normalizer semantics: `legacy_v1` accepts previous history followed by the
-current frame; `official_v1` accepts current followed by history including
-current. Equal dimensions do not establish feature or checkpoint equivalence.
-Environment observation producers must use the matching layout and convention.
+`ActorCritic` accepts ordinary actor/critic modules and optional named
+`AuxiliaryTask` objectives. An actor's `forward_with_features` supplies action
+means and graph-connected features in one pass; ordinary actors retain their
+existing forward path. The policy registers objective heads/buffers, aggregates
+training-field declarations, evaluates losses and exports inference-only actors.
+Shared actor/critic observations remain valid. `ContactPrediction` owns contact
+labels, decoder and cross-entropy, including its actor-label isolation check.
+
+Configuration selects `actor.type: temporal` with `TemporalActorCfg` fields in
+`actor.network_cfg`, an ordinary MLP critic, and optional
+`auxiliary_tasks.<name>.type: contact_prediction` declarations. Temporal networks
+and history storage live in `policies/temporal.py`; objectives live in
+`policies/auxiliary.py`. `proprioceptive_actor_critic` remains the historical
+configuration/checkpoint adapter, preserving parameter paths, module identities
+and optimizer ordering without duplicating training or export logic.
+
+`architecture_version` preserves history ordering and normalizer semantics:
+`legacy_v1` accepts previous history followed by current; `official_v1` accepts
+current followed by history including current. Environment observation producers
+must match that layout. Equal dimensions do not establish checkpoint equivalence.
 
 Named training fields travel with the observation that produced each action.
 PPO's optional auxiliary decoder loss recomputes the latent in each minibatch

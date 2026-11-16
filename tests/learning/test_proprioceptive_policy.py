@@ -17,7 +17,9 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import json
 import math
+from pathlib import Path
 
 import pytest
 import torch
@@ -27,11 +29,50 @@ from embodichain.learning.rl.algo import PPO, PPOCfg
 from embodichain.learning.rl.buffer import RolloutBuffer, transition_view
 from embodichain.learning.rl.collector import SyncCollector
 from embodichain.learning.rl.policies import (
+    ActorCritic,
+    AuxiliaryTask,
+    ContactPrediction,
     ObservationHistory,
     ProprioceptiveActorCriticCfg,
     build_policy,
 )
 from embodichain.learning.rl.utils import OptimizerCfg
+
+
+def _build_test_policy(block, *args, composed=False, **kwargs):
+    if composed:
+        block = deepcopy(block)
+        cfg = ProprioceptiveActorCriticCfg(**block.pop("cfg", {}))
+        block.update(
+            name="actor_critic",
+            actor={
+                "type": "temporal",
+                "network_cfg": {
+                    "frame_dim": cfg.frame_dim,
+                    "history_length": cfg.history_length,
+                    "use_history": cfg.use_history,
+                    "latent_dim": cfg.latent_dim,
+                    "hidden_sizes": cfg.actor_hidden_sizes,
+                    "architecture_version": cfg.architecture_version,
+                },
+            },
+            critic={
+                "type": "mlp",
+                "network_cfg": {"hidden_sizes": cfg.critic_hidden_sizes},
+            },
+        )
+        if cfg.contact_points:
+            block["auxiliary_tasks"] = {
+                "contact": {
+                    "type": "contact_prediction",
+                    "contact_points": cfg.contact_points,
+                    "contact_classes": cfg.contact_classes,
+                    "hidden_sizes": cfg.decoder_hidden_sizes,
+                    "class_weights": cfg.contact_class_weights,
+                    "observation_group": cfg.contact_observation_group,
+                }
+            }
+    return build_policy(block, *args, **kwargs)
 
 
 def test_config_retains_legacy_positional_arguments() -> None:
@@ -49,8 +90,9 @@ def _policy(
     use_history: bool = True,
     normalize: bool = False,
     architecture_version: str = "legacy_v1",
+    composed: bool = False,
 ):
-    return build_policy(
+    return _build_test_policy(
         {
             "name": "proprioceptive_actor_critic",
             "obs_groups": {"actor": ["proprioception"], "critic": ["privileged"]},
@@ -72,6 +114,7 @@ def _policy(
         2,
         torch.device("cpu"),
         critic_obs_space=4,
+        composed=composed,
     )
 
 
@@ -102,10 +145,14 @@ def test_history_selective_reset_and_snapshot_ownership() -> None:
 
 
 @pytest.mark.parametrize("architecture_version", ["legacy_v1", "official_v1"])
+@pytest.mark.parametrize("composed", [False, True])
 def test_actor_does_not_read_privileged_values_and_export_matches(
     architecture_version: str,
+    composed: bool,
 ) -> None:
-    policy = _policy(normalize=True, architecture_version=architecture_version)
+    policy = _policy(
+        normalize=True, architecture_version=architecture_version, composed=composed
+    )
     td = _batch(policy)
     policy.update_normalization(td)
     original = policy.get_action(td.clone(), deterministic=True)
@@ -119,22 +166,29 @@ def test_actor_does_not_read_privileged_values_and_export_matches(
     assert not any(
         "critic" in name or "decoder" in name for name in exported.state_dict()
     )
-    restored = _policy(normalize=True, architecture_version=architecture_version)
+    restored = _policy(
+        normalize=True, architecture_version=architecture_version, composed=composed
+    )
     restored.load_state_dict(deepcopy(policy.state_dict()))
     assert int(restored.actor_obs_normalizer.count) == 2
     torch.testing.assert_close(restored.export_actor()(td["obs"]), original["action"])
 
 
 @pytest.mark.parametrize("architecture_version", ["legacy_v1", "official_v1"])
+@pytest.mark.parametrize("composed", [False, True])
 def test_weighted_contact_loss_matches_independent_logsumexp_and_backpropagates(
     architecture_version: str,
+    composed: bool,
 ) -> None:
-    policy = _policy(architecture_version=architecture_version)
+    policy = _policy(architecture_version=architecture_version, composed=composed)
     batch = _batch(policy)
     policy.get_action(batch)
     labels = torch.tensor([[0, 1], [1, 1]])
     batch["contact_labels"] = labels
+    encoder_calls = []
+    policy.actor.encoder.register_forward_hook(lambda *args: encoder_calls.append(1))
     evaluated = policy.evaluate_actions(batch)
+    assert encoder_calls == [1]
     logits = evaluated["contact_logits"]
     selected = logits.gather(-1, labels[..., None]).squeeze(-1)
     nll = logits.logsumexp(-1) - selected
@@ -181,7 +235,8 @@ def test_official_normalizer_uses_variance_epsilon_clipping_and_finite_input() -
     )
 
 
-def test_official_network_matches_independent_browser_reference() -> None:
+@pytest.mark.parametrize("composed", [False, True])
+def test_official_network_matches_independent_browser_reference(composed) -> None:
     """Fixed weights/inputs and expected outputs from author's PolicyNet JS.
 
     The controlled tensors use the published peg.json ordering; no author
@@ -190,7 +245,7 @@ def test_official_network_matches_independent_browser_reference() -> None:
     (retrieved 2026-10-26). The browser reference uses scalar double accumulation
     with FP32 layer outputs, whereas this implementation uses native FP32 GEMMs.
     """
-    policy = build_policy(
+    policy = _build_test_policy(
         {
             "name": "proprioceptive_actor_critic",
             "obs_groups": {"actor": ["proprioception"], "critic": ["privileged"]},
@@ -205,6 +260,7 @@ def test_official_network_matches_independent_browser_reference() -> None:
         7,
         torch.device("cpu"),
         critic_obs_space=235,
+        composed=composed,
     )
     offset = 0
     with torch.no_grad():
@@ -295,8 +351,11 @@ class _LabelEnv:
         )
 
 
-def test_labels_are_pre_action_aligned_across_rollouts_and_ppo_updates() -> None:
-    policy = _policy()
+@pytest.mark.parametrize("composed", [False, True])
+def test_labels_are_pre_action_aligned_across_rollouts_and_ppo_updates(
+    composed,
+) -> None:
+    policy = _policy(composed=composed)
     env = _LabelEnv(policy.obs_dim)
     collector = SyncCollector(env, policy, env.device)
     buffer = RolloutBuffer(
@@ -357,11 +416,15 @@ def test_training_fields_cannot_silently_replace_derived_transition_data(
 
 
 @pytest.mark.parametrize(("history_length", "use_history"), [(0, True), (30, False)])
+@pytest.mark.parametrize("composed", [False, True])
 def test_no_history_no_decoder_ablation_has_current_only_actor(
-    history_length: int, use_history: bool
+    history_length: int, use_history: bool, composed: bool
 ) -> None:
     policy = _policy(
-        contact_points=0, history_length=history_length, use_history=use_history
+        contact_points=0,
+        history_length=history_length,
+        use_history=use_history,
+        composed=composed,
     )
     td = _batch(policy)
     policy.get_action(td)
@@ -395,3 +458,293 @@ def test_contact_labels_cannot_be_selected_as_actor_observations(
             torch.device("cpu"),
             critic_obs_space=4,
         )
+
+
+def test_actor_critic_composes_generic_objectives_with_one_feature_pass() -> None:
+    """Shared observations, non-temporal actors and non-contact tasks remain valid."""
+
+    class FeatureActor(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.head = torch.nn.Linear(3, 2)
+            self.input_dim = (3,)  # Custom actors need no scalar dimension convention.
+            self.feature_calls = 0
+
+        def forward(self, value):
+            return self.head(value)
+
+        def forward_with_features(self, value):
+            self.feature_calls += 1
+            return self.head(value), {"latent": value}
+
+    class FeatureRegression(AuxiliaryTask):
+        modules = {}
+        training_observation_groups = {"target": ("feature_target",)}
+        training_field_specs = {"target": ((3,), torch.float32)}
+        output_names = ("prediction",)
+
+        def evaluate(self, features):
+            return {"prediction": features["latent"]}
+
+        def loss(self, labels, outputs, buffers):
+            return (outputs["prediction"] - labels["target"]).square().mean()
+
+    actor = FeatureActor()
+    shared_normalizer = torch.nn.LayerNorm(3)
+    policy = ActorCritic(
+        3,
+        2,
+        torch.device("cpu"),
+        actor,
+        torch.nn.Linear(3, 1),
+        actor_obs_groups=("state",),
+        actor_normalizer=shared_normalizer,
+        critic_normalizer=shared_normalizer,
+        auxiliary_tasks={
+            "contact": ContactPrediction(
+                3, 2, class_weights=(1.0, 3.0), hidden_sizes=(8,)
+            ),
+            "regression": FeatureRegression(),
+        },
+    ).to(dtype=torch.float64)
+    assert policy.actor_obs_groups == policy.critic_obs_groups
+    assert policy.contact_class_weights.dtype == torch.float64
+    calls = []
+    policy.contact_decoder.register_forward_hook(lambda *args: calls.append(1))
+    batch = TensorDict(
+        {
+            "obs": torch.tensor(
+                [[1.0, 2.0, 3.0], [2.0, -1.0, 0.0]],
+                dtype=torch.float64,
+                requires_grad=True,
+            ),
+            "contact_labels": torch.tensor([[0, 1], [1, 0]], dtype=torch.long),
+            "regression_target": torch.zeros(2, 3),
+        },
+        batch_size=[2],
+    )
+    policy.get_action(batch)
+    assert calls == []
+    evaluated = policy.evaluate_actions(batch)
+    assert actor.feature_calls == 1
+    assert calls == [1]
+    loss = policy.auxiliary_loss(batch, evaluated)
+    logits = evaluated["contact_logits"]
+    target = batch["contact_labels"]
+    nll = logits.logsumexp(-1) - logits.gather(-1, target[..., None]).squeeze(-1)
+    weights = torch.tensor([[1.0, 3.0], [3.0, 1.0]], dtype=torch.float64)
+    obs = batch["obs"]
+    normalized = (obs - obs.mean(-1, keepdim=True)) / (
+        obs.var(-1, unbiased=False, keepdim=True) + policy.actor_obs_normalizer.eps
+    ).sqrt()
+    expected = (nll * weights).sum() / weights.sum() + normalized.square().mean()
+    torch.testing.assert_close(loss, expected)
+    loss.backward()
+    assert batch["obs"].grad.abs().sum() > 0
+    assert policy.contact_decoder[0].weight.grad.abs().sum() > 0
+    actor_params, critic_params = policy.optimization_parameter_groups()
+    ids = [id(parameter) for parameter in (*actor_params, *critic_params)]
+    assert len(ids) == len(set(ids))
+    assert set(ids) == {id(parameter) for parameter in policy.parameters()}
+    copied = deepcopy(policy)
+    assert copied.auxiliary_tasks["contact"].decoder is copied.contact_decoder
+    exported = policy.export_actor()
+    expected_action = policy.get_action(batch.clone(), deterministic=True)["action"]
+    torch.testing.assert_close(exported(batch["obs"]), expected_action)
+    assert not any(
+        "contact" in name or "critic" in name for name in exported.state_dict()
+    )
+
+
+def test_auxiliary_tasks_require_an_actor_feature_interface_and_isolated_labels():
+    with pytest.raises(ValueError, match="forward_with_features"):
+        ActorCritic(
+            3,
+            2,
+            torch.device("cpu"),
+            torch.nn.Linear(3, 2),
+            torch.nn.Linear(3, 1),
+            actor_obs_groups=("state",),
+            auxiliary_tasks={"contact": ContactPrediction(3, 2)},
+        )
+    with pytest.raises(ValueError, match="Contact labels"):
+        policy = _policy(composed=True)
+        ActorCritic(
+            policy.obs_dim,
+            2,
+            torch.device("cpu"),
+            policy.actor,
+            policy.critic,
+            actor_obs_groups=("robot",),
+            auxiliary_tasks={
+                "contact": ContactPrediction(
+                    32, 2, observation_group="robot.contact_labels"
+                )
+            },
+        )
+
+
+@pytest.mark.parametrize("architecture_version", ["legacy_v1", "official_v1"])
+def test_legacy_checkpoint_layout_and_optimizer_continuation(
+    tmp_path, architecture_version
+):
+    """Use the frozen pre-refactor layout rather than today's class names as oracle."""
+    from embodichain.learning.rl.checkpoint import _metadata
+    from embodichain.learning.rl.utils.trainer import Trainer
+
+    reference = json.loads(
+        (
+            Path(__file__).parents[1] / "fixtures/rl/proprioceptive_v1_layouts.json"
+        ).read_text()
+    )
+    expected = reference["versions"][architecture_version]
+
+    def trainer(directory):
+        policy = _policy(normalize=True, architecture_version=architecture_version)
+        env = _LabelEnv(policy.obs_dim)
+        algorithm = PPO(
+            PPOCfg(
+                device="cpu",
+                n_epochs=1,
+                batch_size=6,
+                auxiliary_coef=1.0,
+                optimizer=OptimizerCfg(learning_rate=1e-3),
+            ),
+            policy,
+        )
+        return Trainer(
+            policy,
+            env,
+            algorithm,
+            buffer_size=3,
+            batch_size=6,
+            writer=None,
+            eval_freq=0,
+            save_freq=0,
+            checkpoint_dir=str(directory),
+            exp_name="legacy",
+            use_wandb=False,
+        )
+
+    original = trainer(tmp_path / "original")
+    metadata = _metadata(original)
+    for key in (
+        "policy",
+        "policy_attributes",
+        "modules",
+        "normalizers",
+        "optimizer_groups",
+    ):
+        assert metadata[key] == expected[key], key
+    assert [
+        [name, list(value.shape), str(value.dtype)]
+        for name, value in original.policy.state_dict().items()
+    ] == expected["state_layout"]
+    composed = _policy(
+        normalize=True, architecture_version=architecture_version, composed=True
+    )
+    composed.load_state_dict(original.policy.state_dict())
+    probe = _batch(original.policy)
+    torch.testing.assert_close(
+        composed.get_action(probe.clone(), deterministic=True)["action"],
+        original.policy.get_action(probe.clone(), deterministic=True)["action"],
+        rtol=0,
+        atol=0,
+    )
+    original.train(6)
+    fixed = original.collector.collect(3, original.buffer.start_rollout()).clone()
+    path = original.save_checkpoint()
+    payload = torch.load(path, weights_only=True)
+    for key in (
+        "policy",
+        "policy_attributes",
+        "modules",
+        "normalizers",
+        "optimizer_groups",
+    ):
+        payload["metadata"][key] = expected[key]
+    torch.save(payload, path)
+    original.load_checkpoint(path)
+    expected_metrics = original.algorithm.update(fixed.clone())
+    expected_state = deepcopy(original.policy.state_dict())
+    expected_optimizer = deepcopy(original.algorithm.optimizer.state_dict())
+    resumed = trainer(tmp_path / "resumed")
+    resumed.load_checkpoint(path)
+    actual_metrics = resumed.algorithm.update(fixed.clone())
+    assert actual_metrics == expected_metrics
+    for name, value in resumed.policy.state_dict().items():
+        torch.testing.assert_close(value, expected_state[name], rtol=0, atol=0)
+    actual_optimizer = resumed.algorithm.optimizer.state_dict()
+    assert actual_optimizer["param_groups"] == expected_optimizer["param_groups"]
+    for key, state in actual_optimizer["state"].items():
+        for field, value in state.items():
+            torch.testing.assert_close(
+                value, expected_optimizer["state"][key][field], rtol=0, atol=0
+            )
+
+
+def test_composed_actor_is_built_through_the_learning_runtime():
+    from gymnasium import spaces
+    from types import SimpleNamespace
+    from embodichain.learning.rl.runtime import _build_learning_policy
+
+    block = {
+        "name": "actor_critic",
+        "obs_groups": {"actor": ["proprioception"], "critic": ["privileged"]},
+        "actor": {
+            "type": "temporal",
+            "network_cfg": {"frame_dim": 3, "history_length": 30, "hidden_sizes": [8]},
+        },
+        "critic": {"type": "mlp", "network_cfg": {"hidden_sizes": [8]}},
+        "auxiliary_tasks": {
+            "contact": {
+                "type": "contact_prediction",
+                "contact_points": 2,
+                "hidden_sizes": [8],
+            }
+        },
+    }
+    env = SimpleNamespace(
+        single_observation_space=spaces.Dict(
+            {
+                "proprioception": spaces.Box(-1.0, 1.0, shape=(93,)),
+                "privileged": spaces.Box(-1.0, 1.0, shape=(4,)),
+                "contact_labels": spaces.Box(0, 1, shape=(2,), dtype="int64"),
+            }
+        ),
+        single_action_space=spaces.Box(-1.0, 1.0, shape=(2,)),
+    )
+    before = deepcopy(block)
+    policy = _build_learning_policy(block, env, torch.device("cpu"))
+    assert type(policy) is ActorCritic
+    assert policy.obs_dim == 93 and policy.critic_obs_dim == 4
+    assert policy.training_field_specs == {"contact_labels": ((2,), torch.long)}
+    assert block == before
+
+
+@pytest.mark.parametrize("override_style", ["subclass", "instance"])
+def test_custom_auxiliary_override_remains_supported_without_registered_tasks(
+    override_style,
+):
+    class CustomObjective(ActorCritic):
+        def auxiliary_loss(self, batch, evaluated):
+            return evaluated["action_mean"].square().mean()
+
+    def policy(cls):
+        return cls(
+            3, 2, torch.device("cpu"), torch.nn.Linear(3, 2), torch.nn.Linear(3, 1)
+        )
+
+    custom = policy(CustomObjective if override_style == "subclass" else ActorCritic)
+    if override_style == "instance":
+        custom.auxiliary_loss = (
+            lambda batch, evaluated: evaluated["action_mean"].square().mean()
+        )
+    PPO(PPOCfg(device="cpu", auxiliary_coef=1.0), custom)
+    td = TensorDict({"obs": torch.ones(2, 3)}, batch_size=[2])
+    custom.get_action(td)
+    evaluated = custom.evaluate_actions(td)
+    custom.auxiliary_loss(td, evaluated).backward()
+    assert custom.actor.weight.grad.abs().sum() > 0
+    with pytest.raises(ValueError, match="configured tasks"):
+        PPO(PPOCfg(device="cpu", auxiliary_coef=1.0), policy(ActorCritic))

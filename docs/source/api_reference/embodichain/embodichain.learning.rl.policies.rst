@@ -55,3 +55,66 @@ and critic groups isolate privileged state. Contact labels are rollout-aligned
 training fields; their weighted decoder loss updates the encoder without
 entering the actor. ``export_actor`` omits critic and decoder. The policy uses
 the existing PPO, collector and checkpoint contracts.
+
+Composable temporal actors and training objectives
+--------------------------------------------------
+
+``ActorCritic`` accepts an ordinary actor and critic plus optional named
+auxiliary objectives. A feature-producing actor evaluates its action mean and
+latent together; each objective owns its predictions and loss. The policy
+registers all neural heads and persistent buffers, combines state-aligned
+training declarations, and exports only the deterministic actor and its input
+normalizer. Ordinary shared actor/critic observation groups remain supported.
+
+For configuration-driven construction, ``actor.type: temporal`` reads
+``TemporalActorCfg`` fields from ``actor.network_cfg``. The critic retains the
+ordinary MLP declaration. A contact objective can be selected as follows within
+an existing training configuration; the point/class counts and coefficient are
+example settings::
+
+    policy:
+      name: actor_critic
+      obs_groups:
+        actor: [proprioception]
+        critic: [privileged]
+      actor_obs_normalization: true
+      critic_obs_normalization: true
+      actor:
+        type: temporal
+        network_cfg:
+          frame_dim: 33
+          history_length: 30
+          architecture_version: official_v1
+      critic:
+        type: mlp
+        network_cfg:
+          hidden_sizes: [256, 256, 128]
+      auxiliary_tasks:
+        contact:
+          type: contact_prediction
+          contact_points: 64
+          contact_classes: 3
+          observation_group: contact_labels
+    algorithm:
+      name: ppo
+      cfg:
+        auxiliary_coef: 0.1
+
+The environment owns feature order and history advancement. Contact labels are
+integer class indices and cannot be selected as actor inputs. The ``official_v1``
+layout places current first and also includes it at the end of history; it must
+not be substituted for the legacy layout solely because dimensions match.
+
+Existing ``proprioceptive_actor_critic`` configurations remain the compatibility
+entry for complete historical checkpoints. Their parameter paths, module
+identities, normalization state and optimizer ordering remain unchanged. An
+explicitly composed policy can load equivalent actor/critic weights; full
+training resume retains the original configuration identity checks.
+
+.. automodule:: embodichain.learning.rl.policies.temporal
+   :members:
+   :show-inheritance:
+
+.. automodule:: embodichain.learning.rl.policies.auxiliary
+   :members:
+   :show-inheritance:

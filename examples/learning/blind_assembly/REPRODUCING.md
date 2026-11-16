@@ -8,11 +8,13 @@ and calibrated robot distribution.
 
 ## Runtime
 
-Current main uses Python 3.12 and DexSim 0.6.0rc1. The synchronized tasks passed
+The synchronized source uses Python 3.12 and DexSim 0.6.0rc2. Its tasks passed
 two-environment reset, three control steps and selected-row reset checks on
 that profile (default robot assets for peg, explicit nominal assets for gear
 and nut). Full training and the 8192-episode success-rate evaluation have not
-been repeated on the new profile.
+been repeated on the new profile. A separate four-transition native smoke
+checks the composable actor, contact auxiliary loss, PPO update and actor
+export; it does not establish task learning performance.
 
 The results below describe the pre-sync split at commit
 `5401a00ce26beee81be2248629e3d993b27f618d`. Use that source revision and an
@@ -32,7 +34,7 @@ contact parameters. SDK binaries are not redistributed with the model.
 The earlier dev integration was tracked separately by
 [Dexverse Draft MR !1562](http://192.168.3.16/Engine/dexverse/-/merge_requests/1562);
 its status does not qualify a different native release. Current direct-compound
-smoke checks use the installed 0.6.0rc1 package without the historical overlay.
+smoke checks use the installed 0.6.0rc2 package without the historical overlay.
 A new SDK/solver profile requires a new evaluation and must not inherit the
 historical result.
 
