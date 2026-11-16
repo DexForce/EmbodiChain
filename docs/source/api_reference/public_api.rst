@@ -847,9 +847,7 @@ Entity metadata and deterministic UID indexing for schema-v2 USD scene stages.
 .. autosummary::
 
    USD_SCENE_SCHEMA
-   UsdEntityBinding
    UsdEntityDesc
-   UsdSceneBinding
    UsdSceneIndex
 
 embodichain.gen_sim.scene_engine.randomization.adapter
@@ -2831,6 +2829,22 @@ preview with managed control-part Gizmos and optional joint controls.
 .. autofunction:: cli
 
 .. autofunction:: main
+
+
+embodichain.lab.scripts.preview_scene
+------------------------------------
+
+.. currentmodule:: embodichain.lab.scripts.preview_scene
+
+Preview ordinary USD scenes through the Lab import owner. The default preserves
+imported initial state without physics steps; explicit simulation, offscreen PNG
+output and portable stage diagnostics share the same owned lifecycle.
+
+.. autosummary::
+
+   preview_scene
+
+.. autofunction:: preview_scene
 
 
 embodichain.lab.scripts.run_task
@@ -5220,13 +5234,15 @@ the same force/torque and geometry; unmeasured health limits qualification.
    run_native_probe
    run_warp_probe
 
+Shared locomotion observation functor
+------------------------------------
 
+The observation package exposes task-built actor or critic state and preserves the
+existing locomotion configuration name while implementations move into a package.
 
-Historical assembly reference preparation
-----------------------------------------
+.. currentmodule:: embodichain.lab.gym.envs.managers.observations
 
-.. toctree::
-   :maxdepth: 1
+.. autofunction:: velocity_locomotion_observation
 
 
 Stability execution ownership

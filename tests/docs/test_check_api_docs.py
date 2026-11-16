@@ -276,6 +276,11 @@ def test_main_writes_missing_json_to_stdout(
             "embodichain_models.dynamics.nerd.model",
             {"NeRDModel", "NeRDModelCfg"},
         ),
+        (
+            "embodichain_solvers",
+            "embodichain_solvers.physics.nerd.provider",
+            {"NeRDProvider", "NeuralRobotDynamicSolver"},
+        ),
     ],
 )
 def test_default_inventory_includes_bundled_extension_public_exports(

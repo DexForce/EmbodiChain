@@ -23,7 +23,9 @@ Run from the repository root with a qualified DexSim build::
 
 Downloads are SHA256 checked and cached under EMBODICHAIN_DATA_ROOT. The USD
 preset requires the corporate network. No capture is bundled or relicensed.
-On Linux the native offscreen renderer still requires a working DISPLAY.
+These scan presets preserve display-referred colors by default. Use
+--apply-display-srgb for scene-linear colors. On Linux the native offscreen
+renderer still requires a working DISPLAY.
 """
 
 from __future__ import annotations
@@ -110,6 +112,16 @@ def main() -> None:
     parser.add_argument(
         "--data-root", type=Path, default=Path(EMBODICHAIN_DEFAULT_DATA_ROOT)
     )
+    parser.add_argument(
+        "--apply-display-srgb",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Apply the shared sRGB display transfer (default: off for scanned display-referred colors). "
+            "Use --no-apply-display-srgb for SuperSplat/Inria captures; "
+            "this setting applies to every Gaussian asset in the World."
+        ),
+    )
     parser.add_argument("--output", type=Path, default=Path("outputs/gaussian_scenes"))
     parser.add_argument("--download-only", action="store_true")
     parser.add_argument(
@@ -136,7 +148,11 @@ def main() -> None:
             startup_summary="off",
             enable_entity_gizmo=False,
             visualization=VisualizationCfg(backend="none"),
-            render_cfg=RenderCfg.for_gaussian(renderer="hybrid", spp=1),
+            render_cfg=RenderCfg.for_gaussian(
+                renderer="hybrid",
+                spp=1,
+                gaussian={"apply_display_srgb": args.apply_display_srgb},
+            ),
         )
     )
     try:
@@ -201,6 +217,7 @@ def main() -> None:
         np.save(args.output / f"{args.scene}-depth.npy", depth)
         report = dict(
             scene=args.scene,
+            apply_display_srgb=args.apply_display_srgb,
             asset=str(asset),
             preset=preset,
             rgb_mean=rgb.mean(axis=(0, 1)).tolist(),

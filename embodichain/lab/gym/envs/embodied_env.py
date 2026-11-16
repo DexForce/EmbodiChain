@@ -56,6 +56,7 @@ from embodichain.lab.sim.cfg import (
     VisualObjectCfg,
     RigidObjectGroupCfg,
     ArticulationCfg,
+    UsdImportCfg,
     CableObjectCfg,
     LightCfg,
 )
@@ -310,6 +311,18 @@ class EmbodiedEnvCfg(EnvCfg):
 
     articulation: List[ArticulationCfg] = []
 
+    usd_scene: UsdImportCfg | None = None
+    """Optional whole-scene USD/USDZ or standard AssetRevision ZIP import.
+
+    Robot construction remains owned by the embodiment. Imported resources
+    coexist with the ordinary object lists and must have distinct UIDs.
+    """
+
+    enable_ground_plane: bool | None = None
+    """Explicit default-plane selection; USD scenes default to no added plane.
+
+    Without a USD scene, ``None`` preserves ``sim_cfg.enable_ground_plane``.
+    """
     cable_object: list[CableObjectCfg] = []
     """Fixed-topology cables declared before simulation preparation."""
     fluid_object: list[FluidObjectCfg] = []
@@ -429,6 +442,16 @@ class EmbodiedEnvCfg(EnvCfg):
     """If True (and record_trajectory is True), auto-save each env's trajectory to
     ``trajectory_save_dir`` before an explicitly committed episode reset.
     Closing discards trajectories that were never committed."""
+
+    scene_preparation: FunctorCfg | None = None
+    """Optional preparation function ``func(cfg, **params) -> EmbodiedEnvCfg``.
+
+    Runs on an owned configuration before World creation. The result declares
+    ordinary scene entities and manager terms; it does not receive an environment.
+    """
+
+    resource_export: FunctorCfg | None = None
+    """Optional ``func(env, config, config_dir, **params)`` checkpoint packager."""
 
     rl_task: embodichain.lab.gym.envs.managers.RLTaskCfg | None = None
     """Optional measured RL success, failure and truncation conditions.
@@ -550,8 +573,41 @@ class EmbodiedEnv(BaseEnv):
         cfg: EmbodiedEnvCfg,
         *,
         task_program_adapter_factory: TaskProgramAdapterFactory | None = None,
+        scene_preparation: dict[str, Any] | None = None,
+        resource_export: dict[str, Any] | None = None,
         **kwargs,
     ):
+        # Registered defaults and explicit config use the same pre-World path.
+        # Copy before preparation so one reusable configuration can build peers.
+        preparation_seed = None
+        if (
+            scene_preparation is not None
+            or resource_export is not None
+            or cfg.scene_preparation is not None
+        ):
+            cfg = copy.deepcopy(cfg)
+            for name, default in (
+                ("scene_preparation", scene_preparation),
+                ("resource_export", resource_export),
+            ):
+                if getattr(cfg, name) is None and default is not None:
+                    setattr(cfg, name, FunctorCfg(**copy.deepcopy(default)))
+            if cfg.scene_preparation is not None:
+                operation = cfg.scene_preparation
+                operation.validate()
+                prepare = (
+                    string_to_callable(operation.func)
+                    if isinstance(operation.func, str)
+                    else operation.func
+                )
+                if cfg.seed is not None:
+                    preparation_seed = self._apply_process_seed(cfg.seed)
+                    cfg.seed = preparation_seed
+                cfg = prepare(cfg, **operation.params)
+                if not isinstance(cfg, EmbodiedEnvCfg):
+                    raise TypeError("scene_preparation must return EmbodiedEnvCfg.")
+                if preparation_seed is not None:
+                    cfg.seed = preparation_seed
         replay = getattr(cfg, "replay", None)
         if replay is not None:
             cfg = copy.deepcopy(cfg)
@@ -677,7 +733,7 @@ class EmbodiedEnv(BaseEnv):
             if getattr(registration, "evaluation_conditions", None)
             else {}
         )
-        super().__init__(cfg, **kwargs)
+        super().__init__(cfg, _initialization_seed=preparation_seed, **kwargs)
 
         try:
             if self._evaluation_recording:
@@ -1306,6 +1362,68 @@ class EmbodiedEnv(BaseEnv):
     def _setup_scene(self, **kwargs) -> None:
         """Filter configuration independently of the overridable demand hook."""
         self._apply_functor_filter()
+        recipe = getattr(self.cfg, "usd_scene", None)
+        ground = getattr(self.cfg, "enable_ground_plane", None)
+        if ground is not None and type(ground) is not bool:
+            raise TypeError("enable_ground_plane must be a bool or None.")
+        if ground is not None or recipe is not None:
+            self.sim_cfg.enable_ground_plane = False if ground is None else ground
+        if recipe is not None:
+            from embodichain.lab.sim.cfg.physics import physics_backend_from_cfg
+            from embodichain.lab.sim.spawn._usd_scene import (
+                _assert_usd_scene_current,
+                _inspect_usd_scene,
+            )
+
+            previous = getattr(self.cfg, "_usd_scene_inventory", None)
+            if previous is not None:
+                _assert_usd_scene_current(previous)
+            reserved = {
+                item.uid
+                for field in (
+                    "background",
+                    "rigid_object",
+                    "articulation",
+                    "visual_object",
+                    "rigid_object_group",
+                    "cable_object",
+                    "fluid_object",
+                )
+                for item in getattr(self.cfg, field)
+                if item.uid is not None
+            }
+            for group in self.cfg.rigid_object_group:
+                reserved.update(
+                    item.uid
+                    for item in group.rigid_objects.values()
+                    if item.uid is not None
+                )
+            selected_robot = (
+                self.cfg.robot.resolve(self.sim_cfg.physics_cfg)
+                if isinstance(self.cfg.robot, RobotPresetCfg)
+                else self.cfg.robot
+            )
+            reserved.add(selected_robot.uid or "robot")
+            if self.cfg.enable_sensor:
+                reserved.update(
+                    item.uid for item in selected_robot.sensors if item.uid is not None
+                )
+            if self.sim_cfg.enable_ground_plane:
+                reserved.add("default_plane")
+            if self.cfg.enable_sensor:
+                reserved.update(
+                    item.uid for item in self.cfg.sensor if item.uid is not None
+                )
+            reserved.update(
+                item.uid for item in self.cfg.light.direct if item.uid is not None
+            )
+            self._usd_scene_inventory = _inspect_usd_scene(
+                recipe,
+                reserved_uids=tuple(reserved),
+                physics_backend=physics_backend_from_cfg(self.sim_cfg.physics_cfg),
+                device=str(self.sim_cfg.device),
+                gravity=self.sim_cfg.physics_cfg.gravity,
+            )
         self.cfg.ground_plane_visible = self._resolve_ground_plane_visibility()
         super()._setup_scene(**kwargs)
 
@@ -1342,6 +1460,11 @@ class EmbodiedEnv(BaseEnv):
         from embodichain.lab.sim import SimulationManager
 
         if super()._requires_native_renderer():
+            return True
+        inventory = getattr(self, "_usd_scene_inventory", None)
+        if inventory is not None and {"camera", "light"}.intersection(
+            inventory["resource_types"].values()
+        ):
             return True
         if self.cfg.enable_sensor:
             for sensor_cfg in self._sensor_configs():
@@ -1526,6 +1649,22 @@ class EmbodiedEnv(BaseEnv):
         self._setup_background()
         self._setup_interactive_objects()
         self._setup_lights()
+        if self.cfg.usd_scene is not None:
+            from embodichain.lab.sim.spawn._usd_scene import _assert_usd_scene_current
+
+            _assert_usd_scene_current(self._usd_scene_inventory)
+            self.usd_scene_import = self.sim.add_usd(self.cfg.usd_scene)
+            for field in (
+                "resource_uids",
+                "resource_types",
+                "resource_source_paths",
+                "constraint_uids",
+            ):
+                if (
+                    dict(getattr(self.usd_scene_import, field))
+                    != self._usd_scene_inventory[field]
+                ):
+                    raise ValueError(f"USD scene {field} changed since preflight.")
         if self._physical_replay is not None:
             self._physical_replay.prepare_scene(self)
 
@@ -3818,7 +3957,9 @@ class EmbodiedEnv(BaseEnv):
         else:
             robot_cfg.enable_sensor = self.cfg.enable_sensor
             selected_cfg = robot_cfg
-        _collect_sensor_cfgs(selected_cfg, self.cfg.sensor)
+        sensor_cfgs = _collect_sensor_cfgs(selected_cfg, self.cfg.sensor)
+        if self.cfg.enable_sensor:
+            self.sim._plan_camera_groups(sensor_cfgs)
         self._robot_sensor_cfgs = selected_cfg.sensors
         return self.sim.add_robot(robot_cfg)
 
@@ -4159,6 +4300,8 @@ class EmbodiedEnv(BaseEnv):
             kwargs["nominal_source_factory"] = nominal_source_factory
         if plan_transform_factory is not None:
             kwargs["plan_transform_factory"] = plan_transform_factory
+        if self.num_envs > 1:
+            kwargs["isolate_policy_sessions"] = True
         bridge = self._checked_task_program_adapter().create_bridge(
             program,
             expansion_profile=expansion_profile,

@@ -322,8 +322,8 @@ def preview_editable_scene(
         preview_command = [
             sys.executable,
             COMMANDS["scene_engine"]["preview_script"],
-            "--output_root",
-            str(scene_root),
+            "--usd-file",
+            str(scene_root / "scene_usd" / "scene.usda"),
             "--viser",
             "--viser-host",
             "0.0.0.0",
@@ -406,8 +406,8 @@ def preview_saved_scene(
         preview_command = [
             sys.executable,
             COMMANDS["scene_engine"]["preview_script"],
-            "--output_root",
-            str(scene_root),
+            "--usd-file",
+            str(scene_root / "scene_usd" / "scene.usda"),
             "--viser",
             "--viser-host",
             "0.0.0.0",
@@ -638,8 +638,8 @@ def run_scene_engine(
         preview_command = [
             sys.executable,
             COMMANDS["scene_engine"]["preview_script"],
-            "--output_root",
-            str(output_root),
+            "--usd-file",
+            str(output_root / "scene_usd" / "scene.usda"),
             "--viser",
             "--viser-host",
             "0.0.0.0",
@@ -862,8 +862,8 @@ def run_scene_edit(
         preview_command = [
             sys.executable,
             COMMANDS["scene_engine"]["preview_script"],
-            "--output_root",
-            str(output_root),
+            "--usd-file",
+            str(output_root / "scene_usd" / "scene.usda"),
             "--viser",
             "--viser-host",
             "0.0.0.0",

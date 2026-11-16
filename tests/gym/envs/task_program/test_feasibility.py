@@ -220,16 +220,16 @@ def test_host_preserves_restored_identity_on_write_error_or_rollout_exhaustion(
 
     class SceneHost:
         def __init__(self, environment, **kwargs):
-            self.initial_state = object()
+            self.initial_states = {0: object()}
             self.env = environment
 
         def __call__(self, variant):
             self.env.reset(options={"save_data": False})
-            return ScenePreparationResult("before_restore", checks)
+            return {0: ScenePreparationResult("before_restore", checks)}
 
-        def restore_initial_state(self, snapshot):
+        def restore_initial_states(self, snapshots):
             self.env.reset(options={"save_data": False})
-            return ScenePreparationResult("actual_restored", checks)
+            return {0: ScenePreparationResult("actual_restored", checks)}
 
     monkeypatch.setattr(module, "SimulationSceneExpansionHost", SceneHost)
 
@@ -259,18 +259,20 @@ def test_host_preserves_restored_identity_on_write_error_or_rollout_exhaustion(
     )
 
     def execute(environment, variant, *, prepare_scene, measured_validator):
-        actual = prepare_scene(variant)
+        actual = prepare_scene(variant)[0]
         environment.step(torch.tensor([[0.2]]))
-        assert measured_validator().accepted
-        return SimpleNamespace(
-            accepted=True,
-            program_success=True,
-            program_completed=True,
-            execution=SimpleNamespace(to_metadata=lambda: {"completed": True}),
-            to_metadata=lambda: {"initial_state_id": actual.initial_state_id},
-        )
+        assert measured_validator(0).accepted
+        return {
+            0: SimpleNamespace(
+                accepted=True,
+                program_success=True,
+                program_completed=True,
+                execution=SimpleNamespace(to_metadata=lambda: {"completed": True}),
+                to_metadata=lambda: {"initial_state_id": actual.initial_state_id},
+            )
+        }
 
-    monkeypatch.setattr(module, "execute_scene_variant", execute)
+    monkeypatch.setattr(module, "execute_scene_variants", execute)
     req = TaskFeasibilityRequest(
         "task",
         "robot",
