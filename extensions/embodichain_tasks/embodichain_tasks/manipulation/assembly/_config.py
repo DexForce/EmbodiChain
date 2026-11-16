@@ -57,8 +57,11 @@ class AssemblyCfg:
     file_visuals: bool = True
     require_heterogeneous_assets: bool = False
     require_exact_robot_dynamics: bool = False
-    assembly_contact_capacity: int = 2048
-    grasp_contact_capacity: int = 128
+    # Dense gear contacts can exceed small grasp buffers after long training.
+    # Defaults cover the official profiles' entire per-world contact budget;
+    # smaller development profiles declare their measured capacities explicitly.
+    assembly_contact_capacity: int = 4096
+    grasp_contact_capacity: int = 4096
     grasp_warmup_steps: int = 10
     initial_position_range: float = 0.0125
     grasp_position_range: float = 0.0025

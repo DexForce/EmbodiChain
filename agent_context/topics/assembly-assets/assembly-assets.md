@@ -72,7 +72,10 @@ pieces and authored mass/contact data independent of a small number of visual
 material groups. MuJoCo-Warp startup impedance writes use the physics-owned
 batched gain view once, with the configured arm names and unchanged gain values. `_config.py` validates
 `extensions.assembly`, including entity/control-part bindings, sampling counts
-and measurement thresholds. The configured interval event advances shared state
+and measurement thresholds. Standard profiles explicitly size mating and grasp
+sampling buffers for the solver's 4096-contact budget; smaller development
+profiles retain their measured overrides. Buffer overflow fails immediately
+instead of accepting truncated grasp evidence. The configured interval event advances shared state
 once after each control transition, independently of selected termination terms.
 Observation, reward and condition functors read that snapshot; reset updates only
 selected rows. Encoder features stay in the observation package, with dimensions

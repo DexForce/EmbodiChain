@@ -221,6 +221,13 @@ def test_nominal_task_uses_production_component_loader(
     assert cfg.sim_steps_per_control == 20
     assert cfg.control_parts == ["arm"]
     assert cfg.extensions["assembly"]["gripper_model"] == "parallel_jaw"
+    # Dense mating/grasp contacts must fit even when the backend uses its full
+    # declared per-world budget. A 128-contact grasp buffer failed late in PPO.
+    for name in ("assembly_contact_capacity", "grasp_contact_capacity"):
+        assert (
+            cfg.extensions["assembly"][name]
+            >= cfg.sim_cfg.physics_cfg.solver_cfg["nconmax"]
+        )
     assert len(cfg.robot.control_parts["eef"]) == 2
     gains = cfg.robot.joint_drive_props.stiffness
     assert gains["joint1"] == 289.0
@@ -432,7 +439,7 @@ def test_assembly_sensor_capacity_defaults_and_development_override(
         ),
     )
     scene = AssemblyScene(cfg)
-    expected = (2048, 128) if capacities is None else capacities
+    expected = (4096, 4096) if capacities is None else capacities
     assert tuple(sensor.max_contacts_per_env for sensor in scene.sensors) == expected
 
 
