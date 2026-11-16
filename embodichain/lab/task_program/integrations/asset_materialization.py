@@ -398,13 +398,16 @@ def materialize_asset_deployment(
         task_program["integration"], base_dir=source.parent
     )
     # Keep registry references declarative so each destination uses its own cache.
-    # Rebase local filenames from their component to the output integration,
-    # retaining portability when the export and its local assets move together.
+    # Rebase component-relative filenames to the output integration. Explicit
+    # absolute paths remain anchored to the authored external library.
     from embodichain.data._references import _resolve_data_reference
 
     for node in _walk(integration.get("runtime_services", {})):
         for field in ("asset_manifest", "prototype_manifest"):
             if field in node and isinstance(node[field], (str, Path)):
+                if Path(node[field]).is_absolute():
+                    node[field] = str(node[field])
+                    continue
                 manifest = _resolve_data_reference(
                     node[field], base_dir=integration_base
                 )

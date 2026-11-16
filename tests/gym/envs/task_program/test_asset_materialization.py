@@ -1156,7 +1156,7 @@ def test_requirements_lookup_does_not_resolve_runtime_assets(deployment, monkeyp
     )
 
 
-@pytest.mark.parametrize("reference_mode", ["registry", "local"])
+@pytest.mark.parametrize("reference_mode", ["registry", "local", "absolute"])
 def test_materialized_demo_references_survive_relocation(
     deployment, tmp_path, monkeypatch, reference_mode
 ):
@@ -1201,6 +1201,8 @@ def test_materialized_demo_references_survive_relocation(
     reference = {"asset": "ReviewDemo", "path": "skill/demo_skill.json"}
     if reference_mode == "local":
         reference = "../cache_a/skill/demo_skill.json"
+    elif reference_mode == "absolute":
+        reference = str(manifest)
     original = data.get_data_class
 
     def asset_class(name):
@@ -1237,6 +1239,12 @@ def test_materialized_demo_references_survive_relocation(
         cache.rename(destination)
         cache = destination
         assert (cache / manifest.relative_to(tmp_path / "cache_a")).is_file()
+    elif reference_mode == "absolute":
+        destination = tmp_path / "relocated" / "deeper" / "run"
+        destination.parent.mkdir(parents=True)
+        shutil.move(deployment_path.parent, destination)
+        deployment_path = destination / deployment_path.name
+        assert manifest.is_file()
     else:
         assert (deployment_path.parent / selected).resolve() == manifest
         destination = tmp_path.with_name(tmp_path.name + "-moved")
@@ -1249,3 +1257,5 @@ def test_materialized_demo_references_survive_relocation(
     )
     if reference_mode == "local":
         assert not Path(selected).is_absolute()
+    elif reference_mode == "absolute":
+        assert selected == reference
