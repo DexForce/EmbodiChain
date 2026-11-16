@@ -113,6 +113,8 @@ def test_callable_mounted_camera_keeps_multiple_usd_declarations_open(
         BaseSensor,
         Camera,
         CameraCfg,
+        SensorCfg,
+        SensorContext,
         SensorRegistration,
         register_sensor,
         registry,
@@ -153,6 +155,24 @@ def test_callable_mounted_camera_keeps_multiple_usd_declarations_open(
             "DeferredMounted", MountedCfg, factory, legacy_factory=legacy
         )
     )
+
+    @configclass
+    class MountedProbeCfg(SensorCfg):
+        sensor_type: str = "DeferredProbe"
+
+    def canceled_factory(cfg: MountedProbeCfg, *, context: SensorContext) -> BaseSensor:
+        pytest.fail("Removing the owner must cancel its deferred probe")
+
+    register_sensor(
+        SensorRegistration("DeferredProbe", MountedProbeCfg, canceled_factory)
+    )
+    sensors: list[SensorCfg] = [
+        MountedCfg(uid="camera", extrinsics=CameraCfg.ExtrinsicsCfg(parent="base"))
+    ]
+    if reuse_camera_uid:
+        sensors.append(
+            MountedProbeCfg(uid="probe", mount=SensorCfg.OffsetCfg(parent="base"))
+        )
     manager.add_sensor = lambda cfg: SimulationManager.add_sensor(manager, cfg)
     manager._resolve_spawn_sensor_parent_nodes = MagicMock(return_value=[object()])
 
@@ -181,12 +201,7 @@ def test_callable_mounted_camera_keeps_multiple_usd_declarations_open(
                 "/Robot": RobotCfg(
                     build_pk_chain=False,
                     enable_sensor=True,
-                    sensors=[
-                        MountedCfg(
-                            uid="camera",
-                            extrinsics=CameraCfg.ExtrinsicsCfg(parent="base"),
-                        )
-                    ],
+                    sensors=sensors,
                     joint_drive_props=None,
                 )
             },
@@ -239,7 +254,9 @@ def test_callable_mounted_camera_keeps_multiple_usd_declarations_open(
         )
         manager._spawn_scene._require_removable = lambda uid: None
         manager._spawn_scene.remove = lambda uid: None
+        assert manager._pending_mounted_sensors["probe"].mount.parent == "Robot/base"
         assert manager.remove_asset("Robot")
+        assert "probe" not in manager._pending_mounted_sensors
         assert "RobotB" in manager._robots
         assert (
             manager._pending_mounted_sensors["camera"].extrinsics.parent
