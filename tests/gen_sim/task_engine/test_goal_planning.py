@@ -415,7 +415,12 @@ def test_hybrid_held_vessel_pours_without_reacquisition():
 
 @pytest.mark.parametrize(
     "instruction",
-    ["把杯子放在托盘上，不要倒水。", "Place the pouring jug on the table."],
+    [
+        "把杯子放在托盘上，不要倒水。",
+        "把杯子放在托盘上，请勿倒水。",
+        "把杯子放在托盘上，不能倒水。",
+        "Place the pouring jug on the table.",
+    ],
 )
 def test_nonaffirmative_pour_reaches_publication_and_review(
     tmp_path, monkeypatch, instruction
@@ -516,20 +521,23 @@ def test_nonaffirmative_pour_reaches_publication_and_review(
     assert data["review"]["source_image"].startswith("data:image/jpeg;base64,")
 
 
-def test_hybrid_two_mats_project_each_occurrence(tmp_path, monkeypatch):
+@pytest.mark.parametrize("family", ["E1", "E5"])
+def test_hybrid_two_mats_project_each_occurrence(tmp_path, monkeypatch, family):
     from PIL import Image
     from embodichain.gen_sim.services import compat
     from embodichain.gen_sim.task_engine.hybrid import publish_hybrid
     from embodichain.gen_sim.workflow import load_task_plan
 
-    instruction = (
-        "Place the cube on the first mat, then place the cube on the second mat."
-    )
+    instruction = "Using both arms, place the cube on the first mat, then place the cube on the second mat."
     image = tmp_path / "scene.png"
     Image.new("RGB", (20, 20)).save(image)
     ops = [
         dict(
-            template="E1", object="cube", reference=r, relation="on", quote=instruction
+            template=family,
+            object="cube",
+            reference=r,
+            relation="on",
+            quote=instruction,
         )
         for r in ("first_mat", "second_mat")
     ]
@@ -553,5 +561,11 @@ def test_hybrid_two_mats_project_each_occurrence(tmp_path, monkeypatch):
     result = publish_hybrid(instruction, "example", image, tmp_path / "plan")
     load_task_plan(tmp_path / "plan")
     annotations = result["semantic_graph_validation"]["source"]["annotations"]
-    assert annotations["call_2"]["reference"] == "first_mat"
-    assert annotations["call_4"]["reference"] == "second_mat"
+    assert (
+        annotations["call_2" if family == "E1" else "call_1"]["reference"]
+        == "first_mat"
+    )
+    assert (
+        annotations["call_4" if family == "E1" else "call_2"]["reference"]
+        == "second_mat"
+    )

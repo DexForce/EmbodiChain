@@ -60,7 +60,7 @@ def _check_source_intent(instruction, operations):
     no_fluid = r"(?:不(?:需要|要求|用)?|不要)(?:实际|真的)?(?:倒出|倒入|转移)(?:液体|水)|without (?:transferring|pouring) (?:water|liquid)"
     fluid = r"(?:水|液体|牛奶|饮料)(?:倒入|倒进|注入|进入|转移到)|(?:倒入|倒进|倒出)(?:液体|水)|(?:pour|transfer) (?:the )?(?:liquid|water|milk)"
     affirmative = re.sub(
-        r"(?:不要|别|禁止|无需|不用|不必|不需要)[^，。；;.!?]*(?:倾倒|倒水|倒入|倒进|倒出)[^，。；;.!?]*",
+        r"(?:请)?(?:勿|别|禁止|无需|不(?:需要|要|能|得|可|许|必|用))[^，。；;.!?]*(?:倾倒|倒水|倒入|倒进|倒出)[^，。；;.!?]*",
         "",
         source,
     )
@@ -568,6 +568,19 @@ def verify_witness(spec, graph, *, support_targets, bindings=None):
     )
 
 
+def _declared_support_targets(doc):
+    """Allow only support identities declared by frozen goals or milestones."""
+    predicates = [
+        *doc["objectives"]["goal"],
+        *[p for m in doc["objectives"]["milestones"] for p in m["achieve"]],
+    ]
+    return {
+        p["reference"]: p["reference"]
+        for p in predicates
+        if p["predicate"] == "relation" and p.get("reference")
+    }
+
+
 def _scene_projection(doc, graph, packet):
     """Project the rigid objects and destinations of a checked manipulation sequence."""
     from .image_planning import _validate_grounding
@@ -583,9 +596,7 @@ def _scene_projection(doc, graph, packet):
     coverage = verify_witness(
         spec,
         graph,
-        support_targets={
-            g["reference"]: g["reference"] for g in goals if g.get("reference")
-        },
+        support_targets=_declared_support_targets(doc),
     )
     if coverage["status"] != "covered":
         raise ValueError("Uncovered scene witness")

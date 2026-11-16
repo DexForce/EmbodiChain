@@ -98,7 +98,11 @@ def load_task_plan(path: str | Path) -> dict[str, Any]:
         "embodichain.hybrid-task-plan/v1",
         "embodichain.hybrid-authoring/v1",
     }:
-        from .task_engine.hybrid import _scene_projection, verify_witness
+        from .task_engine.hybrid import (
+            _scene_projection,
+            verify_witness,
+            _declared_support_targets,
+        )
         from .task_spec import TaskSpec, canonical_hash
         from .task_spec.publication import decode_task_document
 
@@ -144,11 +148,7 @@ def load_task_plan(path: str | Path) -> dict[str, Any]:
             verify_witness(
                 spec,
                 graph,
-                support_targets={
-                    g["reference"]: g["reference"]
-                    for g in doc["objectives"]["goal"]
-                    if g.get("reference")
-                },
+                support_targets=_declared_support_targets(doc),
             )["status"]
             != "covered"
         ):
