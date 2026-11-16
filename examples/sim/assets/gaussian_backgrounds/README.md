@@ -91,5 +91,7 @@ normalization operations are pinned and independently hashed. The generic SDK
 converter is deliberately not used because it also generates an enclosing box.
 
 The publication includes actual native render previews in `validation/`.
-The complete physical consumer is
-[the Franka dual-camera Task Program example](../../../gym/gaussian_pick_place/README.md).
+The official physical consumer is
+[the Franka dual-camera Pick/Place task](../../../../extensions/embodichain_tasks/configs/tasks/manipulation/gaussian_pick_place/README.md).
+The [recording example](../../../gym/gaussian_pick_place/README.md) consumes those
+definitions and adds complete RGB capture, video export and offline acceptance.

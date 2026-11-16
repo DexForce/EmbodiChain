@@ -3,7 +3,7 @@ enable_sensor: true
 environment:
   component: env.office.yaml
 embodiment:
-  component: embodiment.office.yaml
+  component: ../../../components/embodiments/franka_gs_office_dual_camera.yaml
   overrides:
     init_pos:
     - -0.15
@@ -16,4 +16,4 @@ embodiment:
 task_program:
   program: task_program/program.office.yaml
   integration: task_program/integration.yaml
-  execution_policy: execution_policy.yaml
+  execution_policy: ../../../components/execution_policies/franka_gs_verified.yaml

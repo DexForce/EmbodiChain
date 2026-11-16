@@ -30,10 +30,13 @@ import yaml
 __all__ = ["HERE", "SCENES", "prepare", "digest", "write_json"]
 
 HERE = Path(__file__).resolve().parent
+TASK_CONFIG_ROOT = (
+    "extensions/embodichain_tasks/configs/tasks/manipulation/gaussian_pick_place"
+)
 SCENES = {
-    "discoverse": {"title": "DISCOVERSE lab3", "asset": "DiscoverseLab3GS"},
-    "office": {"title": "RoboSplatter office", "asset": "RoboSplatterOfficeGS"},
-    "robosimgs": {"title": "RoboSimGS tabletop", "asset": "RoboSimGSTabletopGS"},
+    "discoverse": {"title": "DISCOVERSE lab3"},
+    "office": {"title": "RoboSplatter office"},
+    "robosimgs": {"title": "RoboSimGS tabletop"},
 }
 
 
@@ -48,6 +51,45 @@ def write_json(path: Path, value: Any) -> None:
     temporary = path.with_suffix(path.suffix + ".pending")
     temporary.write_text(json.dumps(value, indent=2, allow_nan=False))
     temporary.replace(path)
+
+
+def _snapshot_configs(resolved: Path) -> Path:
+    """Freeze official definitions in the existing portable recording layout."""
+    from embodichain.utils.config_paths import resolve_config_path
+
+    task_root = (
+        resolve_config_path(TASK_CONFIG_ROOT + "/task.office.yaml", base_dir=HERE)
+        .resolve(strict=True)
+        .parent
+    )
+    if resolved.resolve().is_relative_to(task_root):
+        raise ValueError(
+            "Recording output must be outside the official task definitions"
+        )
+    shutil.copytree(task_root, resolved)
+    policy_source = None
+    for scene in SCENES:
+        path = resolved / f"task.{scene}.yaml"
+        deployment = yaml.safe_load(path.read_text())
+        embodiment = resolve_config_path(
+            deployment["embodiment"]["component"], base_dir=task_root
+        ).resolve(strict=True)
+        snapshot = f"embodiment.{scene}.yaml"
+        shutil.copyfile(embodiment, resolved / snapshot)
+        deployment["embodiment"]["component"] = snapshot
+        policy = resolve_config_path(
+            deployment["task_program"]["execution_policy"], base_dir=task_root
+        ).resolve(strict=True)
+        if policy_source is not None and policy_source != policy:
+            raise ValueError(
+                "Scene deployments must share the recording execution policy"
+            )
+        if policy_source is None:
+            shutil.copyfile(policy, resolved / "execution_policy.yaml")
+            policy_source = policy
+        deployment["task_program"]["execution_policy"] = "execution_policy.yaml"
+        path.write_text(yaml.safe_dump(deployment, sort_keys=False))
+    return task_root
 
 
 def prepare(
@@ -70,7 +112,7 @@ def prepare(
 
     recipe = SCENES[scene]
     resolved = output / "resolved"
-    shutil.copytree(HERE / "configs", resolved)
+    task_root = _snapshot_configs(resolved)
     env_path = resolved / f"env.{scene}.yaml"
     environment = yaml.safe_load(env_path.read_text())
     environment["render_cfg"]["spp"] = spp
@@ -83,7 +125,13 @@ def prepare(
     cfg.seed = seed
     cfg.sim_cfg.headless = not viewer
     cfg.sim_cfg.startup_summary = "off"
-    entry = Path(get_data_path(recipe["asset"] + "/asset.usda"))
+    background = next(
+        item
+        for item in environment["simulation"]["visual_object"]
+        if item["uid"] == "scan_background"
+    )
+    asset_reference = background["source"]["file_path"]
+    entry = Path(get_data_path(asset_reference))
     asset_document = json.loads((entry.parent / "asset.json").read_text())
     program = yaml.safe_load(
         (resolved / f"task_program/program.{scene}.yaml").read_text()
@@ -109,6 +157,8 @@ def prepare(
         "title": recipe["title"],
         "task_id": deployment["id"],
         "task_config": source.name,
+        "task_reference": TASK_CONFIG_ROOT + "/" + source.name,
+        "task_definition_sha256": digest(task_root / source.name),
         "seed": seed,
         "robot": {
             "model": embodiment["simulation"]["arm_model"],
@@ -124,7 +174,7 @@ def prepare(
             "target_center": program["targets"]["rest_pose"]["position"],
         },
         "asset": {
-            "reference": recipe["asset"] + "/asset.usda",
+            "reference": asset_reference,
             "asset_id": asset_document["asset_id"],
             "revision_id": asset_document["revision_id"],
             "asset_json_sha256": digest(entry.parent / "asset.json"),

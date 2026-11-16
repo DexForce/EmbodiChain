@@ -172,6 +172,79 @@ acceptance separately passed with GPU visibility disabled. No dependency
 fallback or production-code workaround was added. These are one attempt per
 scene at one seed, not a multi-seed stability qualification.
 
+## Task-extension migration qualification — 2026-11-16
+
+The three deployments now belong to the official `gaussian_pick_place` task
+under `embodichain_tasks`; embodiment and execution-policy components belong to
+the shared component directories. No task Python subclass was introduced.
+Examples retain capture, portable snapshot preparation, video export and
+offline/negative acceptance. All 14 pre-migration resolved YAML declarations
+were compared by value and retained, including the existing task/camera IDs,
+calibration, policy and physical settings.
+
+66 focused catalog, package-data, official-layout, example-packaging and
+configuration-path tests passed. The actual wheel-install test was rerun after
+the recorder's asset identity lookup was changed to derive its reference from
+the official environment instead of another example-owned asset mapping.
+42 context tests passed; the new task query routes to `env-framework`.
+
+The native-qualified wheel, `embodichain-0.3.2-py3-none-any.whl`, has SHA256
+`944dc8eba0912513370571f9d78855990dd8096d250abd69539177727dc08254`.
+It was installed without editable source into an isolated virtual environment
+reusing the qualified native dependency environment. Commands ran from an
+unrelated `/tmp` directory with `PYTHONPATH` empty. Core, task and robot module
+paths and all configuration paths were checked to belong to that installation.
+
+| Official deployment | Consecutive accepted episodes | World constructions | Observed resets | Maximum reset joint delta |
+| --- | ---: | ---: | ---: | ---: |
+| Office | 2 | 1 | 6 | 0 |
+| DISCOVERSE lab3 | 2 | 1 | 6 | 0 |
+| RoboSimGS tabletop | 2 | 1 | 6 | 0 |
+
+The standard installed `run-task --max_episodes 2 --record_trajectory` path
+performed the resets; no example execution loop replaced it. Qualification
+instrumentation only counted actual construction/reset calls and sampled
+state. World identity remained stable, cubes returned to their configured
+initial support positions, camera UIDs stayed `cam_third`/`cam_wrist`, and both
+saved episodes had distinct UUIDs and successful first attempts. All six
+episodes passed lift and final-placement bounds, along with the original
+native action-contract checks.
+
+The final installed `run-example .../run_all` also completed all three full
+recordings: 851 actions, 854 paired observations and 1,708 RGB images, with
+physical and decoded-video audits passing. Collection identity:
+`franka-gs-20261116-220002-db809168`. Comparisons with pre-migration recordings
+passed for root/metadata keys, action dtype/dimensions and joint ordering,
+state/terminal-state leaf schemas, `rgb_recording` keys, raw RGB feature schemas,
+camera intrinsics and the wrist mount transform.
+
+Installed default `show-task`/`list-task` discovery passed for all three original
+Gym IDs. This host's CUDA-only Open3D installation still prevents default
+runtime-package discovery when all GPUs are hidden; static `--config-root`
+catalog inspection passed without a visible GPU. Installed offline verification
+accepted old original/relocated recordings, and all nine acceptance checks
+passed against the new recordings with no visible GPU. Original recording
+fingerprints remained unchanged.
+
+The release wheel adds a preparation guard against output nested inside the
+official task directory and updated example documentation. Its SHA256 is
+`7c574a1a41e8a4f75e50a2e06a4f122f5db8abcbd56744bb41f9e196b3c8870f`.
+All 1,654 core/task/robot package files are byte-identical to the native-qualified
+wheel, retaining the runtime and reset qualification above. After installing
+the release wheel, all three installed `--prepare-only` commands passed and
+again preserved the 14 resolved declarations; a self-nested output was rejected
+before copying or constructing a World. The wheel-install unit case was rerun
+successfully for this release.
+
+Earlier installed candidate checks also passed (one target-install Office run
+with two episodes, then a three-scene six-episode virtual-environment check and
+three full recordings). Their logs are retained separately; the table above
+and final collection refer to the native-qualified wheel. The first listing probe assumed
+long IDs appeared on one line; checking the formatter's wrapped ID column and
+the complete `show-task` output corrected that measurement without changing CLI
+behavior. These are reset/packaging checks at seed 42, not a multi-seed
+reliability claim. Metric GS depth remains outside this qualification.
+
 ## Limits
 
 Only the independent task support/cube physics and RGB streams are qualified.

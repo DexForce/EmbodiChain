@@ -1,7 +1,8 @@
 # Pick/Place in three 3DGS scenes with Franka and two cameras
 
-Run a fresh Task Program against the registered, standardized Gaussian scene
-packages. The example retains the FR3/parallel-hand model and initial pose,
+Record the official Task Program deployments from `embodichain_tasks` against
+the registered, standardized Gaussian scene packages. The example retains the
+FR3/parallel-hand model and initial pose,
 executes physical Pick/Place, and records a fixed third-person camera plus a
 camera rigidly mounted on `fr3_hand`. It generates actions from the live state;
 it does not read a prerecorded action trajectory or animate robot joint states.
@@ -25,13 +26,24 @@ through `embodichain data download --name <asset-name>`.
 
 | Scene | Runnable config | Registered background |
 | --- | --- | --- |
-| RoboSplatter office | [task.office.yaml](configs/task.office.yaml) | `RoboSplatterOfficeGS/asset.usda` |
-| DISCOVERSE lab3 | [task.discoverse.yaml](configs/task.discoverse.yaml) | `DiscoverseLab3GS/asset.usda` |
-| RoboSimGS tabletop | [task.robosimgs.yaml](configs/task.robosimgs.yaml) | `RoboSimGSTabletopGS/asset.usda` |
+| RoboSplatter office | [task.office.yaml](../../../extensions/embodichain_tasks/configs/tasks/manipulation/gaussian_pick_place/task.office.yaml) | `RoboSplatterOfficeGS/asset.usda` |
+| DISCOVERSE lab3 | [task.discoverse.yaml](../../../extensions/embodichain_tasks/configs/tasks/manipulation/gaussian_pick_place/task.discoverse.yaml) | `DiscoverseLab3GS/asset.usda` |
+| RoboSimGS tabletop | [task.robosimgs.yaml](../../../extensions/embodichain_tasks/configs/tasks/manipulation/gaussian_pick_place/task.robosimgs.yaml) | `RoboSimGSTabletopGS/asset.usda` |
+
+Task discovery and ordinary trajectory collection work without this recorder:
+
+```bash
+embodichain show-task gaussian_pick_place
+embodichain run-task \
+  --gym-config extensions/embodichain_tasks/configs/tasks/manipulation/gaussian_pick_place/task.office.yaml \
+  --headless --seed 42 --max_episodes 2 --record_trajectory \
+  --trajectory_save_dir outputs/gaussian_pick_place/office
+```
 
 Each deployment selects one physical `env.<scene>.yaml`, one
-`embodiment.<scene>.yaml`, a two-segment `program.<scene>.yaml`, the common
-semantic integration and a single-arm verified execution policy. Configuration
+scene-specific embodiment component, a two-segment `program.<scene>.yaml`, the
+common semantic integration and a shared single-arm verified execution policy.
+These definitions live only in the task extension. Configuration
 loading performs strict schema, physical UID, capability-contract and lowering
 checks before World construction. No environment subclass is added.
 
@@ -41,6 +53,16 @@ Programs own `Pick → Place → wait_stable`, world targets and acceptance.
 The integration binds only the cube and support surface to semantics. Gaussian
 backgrounds are imported as pure visuals with their authored placement preserved;
 Office's packaged coordinate rotation must not be repeated in the deployment.
+
+Preparation resolves the authoritative definitions through the imported SDK,
+including an installed wheel, and freezes them in the existing flat `resolved/`
+recording layout. The snapshot's component references are local to the run;
+`embodiment.<scene>.yaml` and `execution_policy.yaml` retain their previous
+snapshot names. Task IDs, `cam_third`/`cam_wrist`, calibration, native trajectory
+keys and `rgb_recording` references are unchanged. Examples own only the
+recording, export and acceptance workflows, not another set of task definitions.
+Choose an output directory outside the official task-configuration tree;
+preparation rejects snapshots nested inside their own source definitions.
 
 | Scene | Robot base | Stable object target |
 | --- | --- | --- |

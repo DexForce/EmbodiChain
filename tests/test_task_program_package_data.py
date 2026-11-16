@@ -38,6 +38,12 @@ _SETUP_PATH = _REPOSITORY_ROOT / "setup.py"
 _CONFIG_PACKAGE = "embodichain_tasks.configs"
 _CONFIG_SOURCE = _REPOSITORY_ROOT / "extensions" / "embodichain_tasks" / "configs"
 _PROGRAMS = (
+    *(
+        Path(
+            f"tasks/manipulation/gaussian_pick_place/task_program/program.{scene}.yaml"
+        )
+        for scene in ("office", "discoverse", "robosimgs")
+    ),
     Path("tasks/manipulation/carton_stocking/task_program/program.yaml"),
     Path("tasks/manipulation/hand_over/task_program/program.bar.yaml"),
     Path("tasks/manipulation/repeated_pick_place/task_program/program.tabletop.yaml"),
@@ -56,6 +62,14 @@ _PROGRAMS = (
     ),
 )
 _DEPLOYMENTS = {
+    **{
+        Path(f"tasks/manipulation/gaussian_pick_place/task.{scene}.yaml"): (
+            "franka_gs_pick_place",
+            "franka_gs_tabletop",
+            "franka_panda",
+        )
+        for scene in ("office", "discoverse", "robosimgs")
+    },
     Path("tasks/manipulation/repeated_pick_place/task.tianji_marvin.yaml"): (
         "repeated_tabletop_cube_pick_place",
         "repeated_pick_place_tabletop",
@@ -228,6 +242,18 @@ _DUAL_ARM_RESOURCES = {
 
 _RESOURCE_PATHS = frozenset(
     {
+        *(
+            Path(f"tasks/manipulation/gaussian_pick_place/env.{scene}.yaml")
+            for scene in ("office", "discoverse", "robosimgs")
+        ),
+        *(
+            Path(f"components/embodiments/franka_gs_{scene}_dual_camera.yaml")
+            for scene in ("office", "discoverse", "robosimgs")
+        ),
+        Path("components/execution_policies/franka_gs_verified.yaml"),
+        Path("tasks/manipulation/gaussian_pick_place/task_program/integration.yaml"),
+        Path("tasks/manipulation/gaussian_pick_place/catalog.yaml"),
+        Path("tasks/manipulation/gaussian_pick_place/README.md"),
         Path("tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"),
         Path("tasks/manipulation/tableware/pour_cup/env.fluid.yaml"),
         Path("tasks/manipulation/tableware/pour_cup/task_program/program.fluid.yaml"),
@@ -555,8 +581,8 @@ print(json.dumps(decoded_deployments, sort_keys=True))
     }
 
 
-def test_installed_wheel_registers_drawer_storage(tmp_path: Path) -> None:
-    """Register both drawer deployments from installed YAML and discover the catalog."""
+def test_installed_wheel_registers_configured_tasks(tmp_path: Path) -> None:
+    """Register drawer/GS deployments from installed YAML and discover their IDs."""
     source = tmp_path / "source"
     source.mkdir()
     for name in ("setup.py", "pyproject.toml", "README.md", "VERSION", "MANIFEST.in"):
@@ -618,6 +644,11 @@ from embodichain.lab.gym.utils.gym_utils import config_to_cfg
 from embodichain.lab.gym.utils.registration import get_env_spec
 from embodichain.utils.utility import load_config
 from gymnasium import registry
+from embodichain.lab.sim.cfg import RobotPresetCfg
+from embodichain.utils.config_paths import resolve_config_path
+
+import embodichain
+assert Path(embodichain.__file__).is_relative_to(installed)
 
 configs = installed / "embodichain_tasks/configs/tasks/manipulation/drawer_storage"
 assert not (installed / "embodichain_tasks/manipulation/drawer_storage.py").exists()
@@ -637,6 +668,34 @@ for name, open_positions in (("ur5", (0.0,)), ("franka", (0.04, 0.04))):
     assert len(rules["fingers_clear"].required_fields) == 3
     assert "cube_contained" in registration.evaluation_final_refs
 
+gaussian_ids = {
+    "office": "FrankaGSPickPlace-Office-v1",
+    "discoverse": "FrankaGSPickPlace-Discoverse-v1",
+    "robosimgs": "FrankaGSPickPlace-Robosimgs-v1",
+}
+for scene, expected_id in gaussian_ids.items():
+    path = resolve_config_path(
+        "extensions/embodichain_tasks/configs/tasks/manipulation/"
+        f"gaussian_pick_place/task.{scene}.yaml",
+        base_dir=Path.cwd(),
+    )
+    assert path.is_relative_to(installed)
+    raw = load_config(path)
+    assert raw["id"] == expected_id
+    cfg = config_to_cfg(raw, source_path=path)
+    assert get_env_spec(expected_id).cls is EmbodiedEnv
+    robot = (
+        cfg.robot.resolve(cfg.sim_cfg.physics_cfg)
+        if isinstance(cfg.robot, RobotPresetCfg) else cfg.robot
+    )
+    cameras = {camera.uid: camera for camera in [*cfg.sensor, *robot.sensors]}
+    assert set(cameras) == {"cam_third", "cam_wrist"}
+    assert cameras["cam_wrist"].extrinsics.parent == "fr3_hand"
+    assert all((camera.width, camera.height) == (960, 540) for camera in cameras.values())
+    assert all(camera.enable_color and not camera.enable_depth for camera in cameras.values())
+assert not (installed / "embodichain_tasks/manipulation/gaussian_pick_place.py").exists()
+assert not (installed / "share/embodichain/examples/gym/gaussian_pick_place/configs").exists()
+
 import embodichain_tasks
 from embodichain.cli.list_task import _collect_environment_entries
 
@@ -645,6 +704,7 @@ assert "embodichain_tasks.manipulation.drawer_storage" not in sys.modules
 assert {entry.env_id for entry in _collect_environment_entries()} >= {
     "TaskProgramDrawerStorage-UR5-v1",
     "TaskProgramDrawerStorage-Franka-v1",
+    *gaussian_ids.values(),
 }
 
 """,

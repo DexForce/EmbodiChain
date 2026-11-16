@@ -57,7 +57,7 @@ topics:
     fluid Gym, 流体 Gym, fluid replay, 粒子回放, DemoQualification, ObjectMotionMetrics, ExpertTrajectoryCfg, joint_command_mode, position_velocity, qpos qvel, expert action schema, ObservationHistorySnapshot, ObservationFrame,
     EvaluationSpec, RuleSession, evaluate_recorded_rules,
     task_instruction, resolve_demo_instruction, usd_scene, program_stage_reward, program_stage_condition,
-    show-task, task catalog, task gallery, 任务画廊, physical_objective, 物理目标, RLTaskCfg, rl_task]
+    show-task, task catalog, task gallery, gaussian_pick_place, 任务画廊, physical_objective, 物理目标, RLTaskCfg, rl_task]
   paths: [topics/env-framework/env-framework.md]
   source_of_truth:
   - embodichain/cli/main.py
@@ -84,6 +84,7 @@ topics:
   - embodichain/lab/gym/envs/managers/observation_types.py
   - embodichain/lab/gym/envs/demo.py
   - embodichain/lab/gym/utils/profiler.py
+  - extensions/embodichain_tasks/configs/tasks/manipulation/gaussian_pick_place/
   watch_paths: [embodichain/lab/gym/utils/, embodichain/lab/gym/envs/task_program/, embodichain/cli/, extensions/embodichain_tasks/,
     tests/gym/envs/, embodichain/lab/evaluation/, tests/lab/evaluation/, tests/lab/scripts/test_evaluate_task_objective.py]
   related_topics: [simulation-system, manager-functor, sim-visualization, task-programs, data-pipeline]
