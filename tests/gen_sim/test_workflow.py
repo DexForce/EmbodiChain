@@ -1739,3 +1739,313 @@ def test_run_cli_propagates_native_failure_as_nonzero_exit(
     with pytest.raises(SystemExit) as error:
         main(["gensim", "run", "--config", "run.yaml"])
     assert error.value.code == 1
+
+
+@pytest.mark.parametrize("seen", [True, False])
+def test_grounded_hybrid_placement_uses_scene_qualification(run_cfg, seen):
+    from embodichain.gen_sim.workflow import (
+        load_task_plan,
+        qualify_task_scene,
+        prepare_task_deployment,
+    )
+    from embodichain.gen_sim.task_engine.hybrid import publish_hybrid
+
+    base = run_cfg.output.parent
+    text = "Place the cube on the table."
+    roles = ["cube_native", "table"]
+    packet = dict(
+        image_sha256=hashlib.sha256(run_cfg.image.read_bytes()).hexdigest(),
+        grounding=dict(
+            bindings={k: [k] for k in roles},
+            objects=[
+                dict(
+                    id=k,
+                    description=k,
+                    bbox=[100, 100, 200, 200] if seen or k == "table" else None,
+                    provenance=(
+                        "observed" if seen or k == "table" else "runtime_required"
+                    ),
+                )
+                for k in roles
+            ],
+        ),
+    )
+    ground = base / "ground.json"
+    ground.write_text(json.dumps(packet))
+    op = dict(
+        template="E1", object=roles[0], reference=roles[1], relation="on", quote=text
+    )
+    with GenSimServices(
+        GenSimServicesCfg(),
+        injected={
+            "task_image_grounding": _ScriptedChat(
+                {"operations": [op]},
+                {
+                    o["id"]: {"description": o["description"], "bbox": o["bbox"]}
+                    for o in packet["grounding"]["objects"]
+                },
+            ),
+            "task_interpretation": _ScriptedChat({"issues": []}),
+        },
+    ) as services:
+        publish_hybrid(
+            text,
+            "place",
+            run_cfg.image,
+            base / "plan",
+            services,
+            scene_grounding=ground if seen else None,
+        )
+    plan = load_task_plan(base / "plan")
+    scene = _provider_scene(
+        base / "provider", plan, affordances=["graspable", "placeable"], properties=None
+    )
+    q = qualify_task_scene(
+        base / "plan",
+        scene,
+        run_cfg.runtime,
+        run_cfg.execution_policy,
+        base / "qualification",
+    )
+    verdict = json.loads((q / "scene_qualification.json").read_text())
+    assert verdict["status"] == ("accepted" if seen else "ambiguous")
+    if seen:
+        path = prepare_task_deployment(
+            base / "plan",
+            scene,
+            q,
+            run_cfg.runtime,
+            run_cfg.execution_policy,
+            base / "prepared",
+        )
+        assert path.exists()
+        manifest = json.loads((base / "prepared/deployment_manifest.json").read_text())
+        assert (
+            manifest["input_revisions"]["graph_digest"] == plan["semantic_graph_sha256"]
+        )
+        assert manifest["runtime_evidence_status"] == "not_run"
+    else:
+        with pytest.raises(ValueError, match="accepted qualification"):
+            prepare_task_deployment(
+                base / "plan",
+                scene,
+                q,
+                run_cfg.runtime,
+                run_cfg.execution_policy,
+                base / "prepared",
+            )
+
+
+def test_dual_arm_scene_binding_rejects_resource_alias(monkeypatch):
+    from embodichain.gen_sim._run_binding import _ground_ids
+    from embodichain.gen_sim.services import compat
+
+    # Even a valid object match must not allow a resolver to alias both arms.
+    monkeypatch.setattr(
+        compat,
+        "structured_call",
+        lambda **kw: {
+            "objects": {"fruit": "apple"},
+            "resources": {"right": "left", "left": "left"},
+        },
+    )
+    with pytest.raises(ValueError, match="distinct declared sides"):
+        _ground_ids(
+            {"objects": [{"id": "fruit", "provenance": "observed"}]},
+            {"transfer": {"object": "fruit"}},
+            {
+                "nodes": [
+                    {"call": {"resources": {"source": "right", "destination": "left"}}}
+                ]
+            },
+            {"apple": {}},
+            {"resources": [{"resource_id": "left"}, {"resource_id": "right"}]},
+            services=None,
+        )
+
+
+def _dual_runtime(run_cfg):
+    runtime = yaml.safe_load(run_cfg.runtime.read_text())
+    runtime["embodiment"] = {
+        "component": str(
+            _ROOT
+            / "extensions/embodichain_tasks/configs/components/embodiments/dual_franka_robotiq_arg2f_140_handover.yaml"
+        )
+    }
+    run_cfg.runtime.write_text(yaml.safe_dump(runtime))
+    policy = yaml.safe_load(run_cfg.execution_policy.read_text())
+    policy["requires"]["embodiment_contract"] = "dual_arm_parallel_gripper"
+    run_cfg.execution_policy.write_text(yaml.safe_dump(policy))
+
+
+def test_legacy_configured_coordinated_target_survives_binding(run_cfg, monkeypatch):
+    from embodichain.gen_sim.workflow import plan_image_task, load_task_plan
+    from embodichain.gen_sim._run_binding import _bind_deployment, _load_runtime
+
+    _dual_runtime(run_cfg)
+    step = _step(task_type="E5", required_arm="none", terminal_behavior="place")
+    call = dict(
+        kind="registered",
+        call_id="simulation.coordinated_transport",
+        arguments=dict(object="source", target="tray_target"),
+        resources=dict(left="left", right="right"),
+    )
+    proposed = dict(
+        nodes=[
+            dict(
+                id="carry",
+                step_id="step_01",
+                call=call,
+                depends_on=[],
+                semantic=dict(
+                    object="source",
+                    reference="table",
+                    relation="on",
+                    intent=dict(relation="on", terminal_behavior="place"),
+                ),
+            )
+        ],
+        requirements=[dict(id="source", quote=run_cfg.instruction, node_ids=["carry"])],
+    )
+    route = dict(
+        object_id="source", target_id="tray_target", world_displacement=[0.1, 0.0, 0.0]
+    )
+    run_cfg.binding = {
+        "runtime_services": {
+            "registered_semantic_lowerers": [
+                dict(kind="coordinated_transport", routes=[route])
+            ]
+        },
+        "profile": {
+            "action_options": {
+                "simulation.coordinated_transport": dict(
+                    kind="coordinated_pickment", release=True
+                )
+            }
+        },
+    }
+    run_cfg.output.mkdir()
+    with _services(step=step, plan=proposed) as services:
+        task = plan_image_task(
+            run_cfg.image,
+            run_cfg.instruction,
+            run_cfg.output / "task",
+            services=services,
+        )
+        scene = run_cfg.output / "scene"
+        _write_scene(scene)
+        from embodichain.gen_sim.services import compat
+
+        monkeypatch.setattr(
+            compat,
+            "structured_call",
+            lambda **kw: dict(
+                objects={"source": "cube_native", "table": "table"},
+                resources={"left": "left", "right": "right"},
+            ),
+        )
+        runtime, policy, profile = _load_runtime(run_cfg)
+        path = _bind_deployment(
+            run_cfg,
+            scene,
+            task,
+            runtime,
+            policy,
+            profile,
+            services=services,
+            expected_plan_digest=load_task_plan(task)["plan_digest"],
+        )
+    program = json.loads((path.parent / "program.json").read_text())
+    assert (
+        program["program"]["items"][0]["steps"]["call"]["arguments"]["target"]
+        == "tray_target"
+    )
+    integration = yaml.safe_load((path.parent / "integration.yaml").read_text())
+    assert integration["runtime_services"]["registered_semantic_lowerers"][0][
+        "routes"
+    ] == [route]
+
+
+@pytest.mark.parametrize("different_pose", [False, True])
+def test_repeated_coordinated_release_has_unique_routes(run_cfg, different_pose):
+    from embodichain.gen_sim.task_engine.hybrid import publish_hybrid
+    from embodichain.gen_sim.workflow import (
+        load_task_plan,
+        qualify_task_scene,
+        prepare_task_deployment,
+    )
+
+    _dual_runtime(run_cfg)
+    base = run_cfg.output.parent
+    text = "Using both arms, place the cube on the table, then repeat once."
+    ops = [
+        dict(
+            template="E5",
+            object="cube_native",
+            reference="table",
+            relation="on",
+            quote=text,
+        )
+    ] * 2
+    packet = dict(
+        image_sha256=hashlib.sha256(run_cfg.image.read_bytes()).hexdigest(),
+        grounding=dict(
+            objects=[
+                dict(
+                    id=k, description=k, bbox=[10, 10, 200, 200], provenance="observed"
+                )
+                for k in ("cube_native", "table")
+            ],
+            bindings={k: [k] for k in ("cube_native", "table")},
+        ),
+    )
+    ground = base / "ground.json"
+    ground.write_text(json.dumps(packet))
+    with GenSimServices(
+        GenSimServicesCfg(),
+        injected={
+            "task_image_grounding": _ScriptedChat(dict(operations=ops)),
+            "task_interpretation": _ScriptedChat(dict(issues=[])),
+        },
+    ) as services:
+        publish_hybrid(
+            text,
+            "repeat",
+            run_cfg.image,
+            base / "plan",
+            services,
+            scene_grounding=ground,
+        )
+    plan = load_task_plan(base / "plan")
+    scene = _provider_scene(base / "scene", plan, affordances=None, properties=None)
+    q = qualify_task_scene(
+        base / "plan",
+        scene,
+        run_cfg.runtime,
+        run_cfg.execution_policy,
+        base / "qualification",
+    )
+    report_path = q / "scene_qualification.json"
+    report = json.loads(report_path.read_text())
+    assert report["status"] == "accepted"
+    assert report["placements"]["call_2"] == report["placements"]["call_1"]
+    if different_pose:
+        # A separately qualified occurrence may choose another valid site.
+        report["placements"]["call_2"]["object_target_pose"][3] += 0.05
+        report["placements"]["call_2"]["displacement"][0] += 0.05
+        report_path.write_text(json.dumps(report))
+    path = prepare_task_deployment(
+        base / "plan",
+        scene,
+        q,
+        run_cfg.runtime,
+        run_cfg.execution_policy,
+        base / "deployment",
+    )
+    integration = yaml.safe_load((path.parent / "integration.yaml").read_text())
+    routes = integration["runtime_services"]["registered_semantic_lowerers"][0][
+        "routes"
+    ]
+    assert len(routes) == (2 if different_pose else 1)
+    selectors = {(r["object_id"], r["target_id"]) for r in routes}
+    assert len(selectors) == len(routes)

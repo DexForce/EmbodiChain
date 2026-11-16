@@ -94,6 +94,87 @@ def load_task_plan(path: str | Path) -> dict[str, Any]:
     root = Path(path).expanduser().resolve(strict=True)
     manifest = _load_json(root / "task_plan_manifest.json", "task plan manifest")
     version = manifest.get("schema_version")
+    if version in {
+        "embodichain.hybrid-task-plan/v1",
+        "embodichain.hybrid-authoring/v1",
+    }:
+        from .task_engine.hybrid import (
+            _scene_projection,
+            verify_witness,
+            _declared_support_targets,
+        )
+        from .task_spec import TaskSpec, canonical_hash
+        from .task_spec.publication import decode_task_document
+
+        inventory = manifest["artifacts"]
+        _verify_inventory(root, inventory)
+
+        def read(name):
+            if name + ".json" not in inventory:
+                raise ValueError("Incomplete hybrid plan inventory: " + name)
+            return _load_json(root / (name + ".json"), name)
+
+        spec = TaskSpec.from_dict(read("task_spec"))
+        doc = decode_task_document(read("task_spec_v1"), spec)
+        graph = read("semantic_task_graph")
+        image = doc["inputs"]["image"]
+        if (
+            doc["spec_digest"] != manifest["spec_digest"]
+            or canonical_hash(graph) != manifest["semantic_graph_sha256"]
+            or doc["task_id"] != manifest["task_id"]
+            or doc["inputs"]["instruction"] != manifest["instruction"]
+            or image["ref"] not in inventory
+            or inventory[image["ref"]] != image["sha256"]
+            or image["sha256"] != manifest["image_sha256"]
+        ):
+            raise ValueError("Hybrid publication identity mismatch")
+        if version == "embodichain.hybrid-authoring/v1":
+            from .task_spec.publication import project_scene_requirements
+
+            requirements = read("scene_requirements")
+            if (
+                requirements != project_scene_requirements(doc)
+                or manifest.get("stage") != "authoring_only"
+            ):
+                raise ValueError("Invalid authoring-only publication")
+            return {
+                **manifest,
+                "root": str(root),
+                "plan_digest": _file_hash(root / "task_plan_manifest.json"),
+                "task_document": doc,
+                "scene_requirements": requirements,
+            }
+        if (
+            verify_witness(
+                spec,
+                graph,
+                support_targets=_declared_support_targets(doc),
+            )["status"]
+            != "covered"
+        ):
+            raise ValueError("Uncovered hybrid placement")
+        projection = _scene_projection(doc, graph, read("scene_grounding"))
+        if any(read(k) != v for k, v in projection.items()):
+            raise ValueError("Hybrid scene projection mismatch")
+        pending = [
+            o["id"]
+            for o in projection["image_grounding"]["objects"]
+            if o["provenance"] != "observed"
+        ]
+        if "stage" in manifest and (
+            manifest["stage"]
+            != ("pending_visual_binding" if pending else "ready_for_qualification")
+            or pending != manifest["pending_roles"]
+            or manifest["execution_ready"] is not False
+        ):
+            raise ValueError("Hybrid publication stage differs from verified grounding")
+        return {
+            **manifest,
+            "root": str(root),
+            "plan_digest": _file_hash(root / "task_plan_manifest.json"),
+            "task_document": doc,
+            "scene_requirements": projection["scene_requirements"],
+        }
     if version not in {
         "embodichain.task-plan-artifact/v1",
         "embodichain.task-plan-artifact/v2",
@@ -279,6 +360,13 @@ def revise_task_plan(
         or plan["plan_digest"] != expected_plan_digest
     ):
         raise ValueError("Stale task plan revision")
+    if plan["schema_version"] in {
+        "embodichain.hybrid-task-plan/v1",
+        "embodichain.hybrid-authoring/v1",
+    }:
+        raise ValueError(
+            "Hybrid graph revisions require a fresh grounded hybrid publication"
+        )
     root = Path(plan["root"])
     target = Path(output).resolve()
     if target.is_relative_to(root):
@@ -710,7 +798,7 @@ def qualify_task_scene(
     *,
     services: GenSimServices | None = None,
 ) -> Path:
-    """Bind and statically qualify one rigid E1 plan.
+    """Bind and statically qualify a supported rigid manipulation plan.
 
     Args:
         task_plan_dir: Verified Task Engine publication.
@@ -749,6 +837,20 @@ def qualify_task_scene(
         "requirements_sha256": scene.get("requirements_sha256"),
         "feedback_sha256": scene.get("feedback_sha256"),
     }
+    if plan["schema_version"] == "embodichain.hybrid-authoring/v1":
+        return _publish_qualification(
+            output,
+            status="rejected",
+            inputs=inputs,
+            issues=[
+                dict(
+                    code="authoring_only",
+                    owner="task_plan",
+                    retry_scope="none",
+                    message="No qualified grounded witness",
+                )
+            ],
+        )
     requirements_hash = _file_hash(plan_root / "scene_requirements.json")
     if scene.get("requirements_sha256") != requirements_hash:
         return _publish_qualification(
@@ -798,7 +900,7 @@ def qualify_task_scene(
             {},
         )
         steps = candidate.get("draft", {}).get("steps")
-    if (
+    if plan["schema_version"] != "embodichain.hybrid-task-plan/v1" and (
         not isinstance(steps, list)
         or len(steps) != 1
         or steps[0].get("task_type") != "E1"
@@ -892,13 +994,25 @@ def qualify_task_scene(
         )
     placements = {}
     occupied: dict[str, list[tuple[float, float, float]]] = {}
+    landed_objects = {}
     annotations = validation["source"]["annotations"]
     try:
         for node in graph["nodes"]:
             call = node["call"]
-            if call["kind"] != "place" or not ({"on", "inside"} & call.keys()):
+            subject = call.get("arguments", call).get("object")
+            if (
+                call["kind"] == "pick"
+                or call.get("call_id") == "simulation.coordinated_transport"
+            ):
+                previous = landed_objects.pop(subject, None)
+                if previous:
+                    support, landing = previous
+                    occupied[support].remove(landing)
+            if call.get("call_id") != "simulation.coordinated_transport" and (
+                call["kind"] != "place" or not ({"on", "inside"} & call.keys())
+            ):
                 continue
-            subject = call["object"]
+            subject = call.get("arguments", call)["object"]
             reference = annotations[node["id"]]["reference"]
             pose, displacement = _placement(
                 entries[bindings["objects"][subject]],
@@ -906,6 +1020,7 @@ def qualify_task_scene(
                 scene_root,
                 occupied.setdefault(reference, []),
             )
+            landed_objects[subject] = (reference, occupied[reference][-1])
             placements[node["id"]] = {
                 "object_target_pose": pose,
                 "displacement": displacement,
@@ -944,6 +1059,8 @@ def prepare_task_deployment(
     execution_policy: str | Path,
     output_dir: str | Path,
     *,
+    handover_pose: Mapping[str, Any] | None = None,
+    skill_options: Mapping[str, Mapping[str, Any]] | None = None,
     expected_revisions: Mapping[str, str] | None = None,
 ) -> Path:
     """Publish an execution-ready deployment from one accepted qualification.
@@ -955,6 +1072,8 @@ def prepare_task_deployment(
         runtime_config: Trusted robot and physical runtime configuration.
         execution_policy: Trusted execution policy configuration.
         output_dir: Fresh deployment publication directory.
+        handover_pose: Trusted installation exchange pose for handovers.
+        skill_options: Optional trusted deployment-side Semantic Call parameters.
         expected_revisions: Optional caller-selected input digests.
 
     Returns:
@@ -967,7 +1086,13 @@ def prepare_task_deployment(
     from ._run_config import _RunCfg
     from .task_engine.orchestration.workflow_artifacts import write_run_json
 
+    from .task_spec import canonical_hash
+
     plan = load_task_plan(task_plan_dir)
+    if plan.get("stage") in {"authoring_only", "pending_visual_binding"}:
+        raise ValueError(
+            "Deployment preparation requires its matching accepted qualification"
+        )
     scene = load_generated_scene(generated_scene_dir)
     plan_root, scene_root = Path(plan["root"]), Path(scene["root"])
     qualification_root = Path(qualification_dir).expanduser().resolve(strict=True)
@@ -984,6 +1109,8 @@ def prepare_task_deployment(
     }
     revisions = {
         **expected,
+        "handover_pose_digest": canonical_hash(dict(handover_pose or {})),
+        "skill_options_digest": canonical_hash(dict(skill_options or {})),
         "spec_digest": plan.get("spec_digest"),
         "graph_digest": plan.get("semantic_graph_sha256"),
         "plan_digest": plan["plan_digest"],
@@ -1004,6 +1131,15 @@ def prepare_task_deployment(
         )
     output = Path(output_dir).expanduser().absolute()
     output.mkdir(parents=True, exist_ok=False)
+    profile_binding = {"action_options": dict(skill_options or {})}
+    runtime_services = {}
+    if handover_pose is not None:
+        profile_binding["grounding_providers"] = {
+            "hand_over": "simulation.configured_handover_pose"
+        }
+        runtime_services["handover_pose_providers"] = [
+            {**handover_pose, "kind": "configured_pose"}
+        ]
     cfg = _RunCfg(
         image=_source_image(plan_root),
         instruction=plan["instruction"],
@@ -1011,6 +1147,7 @@ def prepare_task_deployment(
         runtime=runtime_path,
         execution_policy=policy_path,
         task_id=plan["task_id"],
+        binding={"profile": profile_binding, "runtime_services": runtime_services},
     )
     runtime, policy, profile = _load_runtime(cfg)
     deployment = _bind_deployment(

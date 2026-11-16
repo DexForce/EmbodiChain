@@ -103,6 +103,51 @@ def _attempt(plan: dict[str, Any], root: Path, nodes: set[str]) -> dict[str, Any
     }
 
 
+def _hybrid_preview(result, image, attempt):
+    """Render verified hybrid contracts without template candidate metadata."""
+    import base64
+    from io import BytesIO
+    from PIL import Image
+    from .semantic_graph_html import _graph_data, _viewer_document
+
+    graph = result["semantic_task_graph"]
+    spec = result["task_spec_v1"]
+    coverage = result["coverage"]
+    group = {n["id"]: n["task_instance_id"] for n in graph["nodes"]}
+    data = _graph_data(graph, task_spec=result["task_spec"])
+    with Image.open(image) as picture:
+        picture = picture.convert("RGB")
+        picture.thumbnail((640, 480))
+        buffer = BytesIO()
+        picture.save(buffer, "JPEG")
+    data["review"] = {
+        "source_image": "data:image/jpeg;base64,"
+        + base64.b64encode(buffer.getvalue()).decode(),
+        "spec": spec,
+        "pending": sum(
+            o["provenance"] != "observed"
+            for o in result.get("image_grounding", {}).get("objects", [])
+        ),
+        "attempt": attempt,
+        "pairing": {
+            "role_entities": {
+                r["id"]: [r["id"]] for r in spec["configuration"]["roles"]
+            },
+            "milestone_groups": {
+                m["id"]: group[coverage["producers"][m["id"]][0]]
+                for m in spec["objectives"]["milestones"]
+                if m["id"] in coverage["producers"]
+            },
+            "goal_groups": {
+                g["id"]: [group[coverage["producers"][g["id"]][0]]]
+                for g in spec["objectives"]["goal"]
+                if g["id"] in coverage["producers"]
+            },
+        },
+    }
+    return _viewer_document(data)
+
+
 def write_review(plan_dir: Path, output: Path, run_dir: Path | None = None) -> None:
     from ..workflow import _source_image, load_task_plan
 
@@ -115,14 +160,21 @@ def write_review(plan_dir: Path, output: Path, run_dir: Path | None = None) -> N
         raise ValueError(
             "Select a fresh HTML file outside the published plan or bundle"
         )
-    keys = [
-        "semantic_task_graph",
-        "semantic_graph_validation",
-        "task_spec",
-        "task_candidates",
-        "image_grounding",
-    ]
-    if "task_document" in plan:
+    hybrid = plan["schema_version"].startswith("embodichain.hybrid-")
+    keys = (
+        ["semantic_task_graph", "task_spec", "task_spec_v1", "coverage"]
+        if hybrid
+        else [
+            "semantic_task_graph",
+            "semantic_graph_validation",
+            "task_spec",
+            "task_candidates",
+            "image_grounding",
+        ]
+    )
+    if hybrid and (root / "image_grounding.json").is_file():
+        keys.append("image_grounding")
+    if not hybrid and "task_document" in plan:
         keys.extend(["task_spec_v1", "plan_coverage"])
     result = {k: json.loads((root / (k + ".json")).read_text()) for k in keys}
     if "qualifier_coverage" in plan:
@@ -141,7 +193,11 @@ def write_review(plan_dir: Path, output: Path, run_dir: Path | None = None) -> N
             attempt = {"error": str(exc)}
     summary = json.loads((root / "run_manifest.json").read_text())
     image = _source_image(root, plan)
-    html = _image_preview(result, image, summary, attempt=attempt)
+    html = (
+        _hybrid_preview(result, image, attempt)
+        if hybrid
+        else _image_preview(result, image, summary, attempt=attempt)
+    )
     destination.parent.mkdir(parents=True, exist_ok=True)
     with destination.open("x", encoding="utf-8") as stream:
         stream.write(html)

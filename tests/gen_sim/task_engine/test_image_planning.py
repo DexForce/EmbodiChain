@@ -784,6 +784,41 @@ def test_invalid_grounding_rejects_before_graph_planning(source_image, box):
     )
 
 
+def test_empty_visual_side_tables_preserve_frozen_contract(source_image):
+    baseline = _plan(source_image)
+
+    def empty(step, grounding, plan):
+        grounding.update(milestones=[], constraints=[], cross_with=[])
+
+    actual = _plan(source_image, mutate=empty)
+    assert actual["task_spec_v1"] == baseline["task_spec_v1"]
+    assert actual["image_grounding"] == baseline["image_grounding"]
+
+
+@pytest.mark.parametrize(
+    ("damage", "diagnostic"),
+    [
+        ("unattached_constraint", "Unexpected grounding keys"),
+        ("observed_with_candidates", "Ambiguous references"),
+        ("unknown_entity_field", "Malformed entity evidence"),
+    ],
+)
+def test_visual_compatibility_never_drops_obligations_or_invalid_evidence(
+    source_image, damage, diagnostic
+):
+    def mutate(step, grounding, plan):
+        grounding.update(constraints=[], cross_with=[])
+        if damage == "unattached_constraint":
+            grounding["constraints"] = [{"kind": "restore_upright"}]
+        elif damage == "observed_with_candidates":
+            grounding["objects"][0]["candidates"] = ["tray"]
+        else:
+            grounding["objects"][0]["invented"] = "tray"
+
+    with pytest.raises(SemanticPlanningError, match=diagnostic):
+        _plan(source_image, mutate=mutate)
+
+
 def test_handover_direction_is_checked_against_task_contract(source_image):
     def mutate(s, g, p):
         p["nodes"][1]["call"]["resources"] = {"source": "left", "destination": "right"}
@@ -830,6 +865,8 @@ def test_preview_and_existing_output_remain_read_only(
     output = tmp_path / "preview"
     argv = [
         "task-engine",
+        "--route",
+        "template",
         "--image",
         "~/scene.png" if home_path else str(source_image),
         "--instruction",
@@ -1377,6 +1414,145 @@ def test_repair_receives_explicit_intent_to_logical_resource_mapping(source_imag
         result["task_candidates"]["candidates"][0]["draft"]["steps"][0]["transfer_arm"]
         == "right_arm"
     )
+
+
+def test_hybrid_cli_compiles_pick_place_and_rejects_hinge(
+    source_image, tmp_path, monkeypatch
+):
+    from embodichain.gen_sim.services import compat
+    from embodichain.gen_sim.task_engine.cli import main
+    from embodichain.gen_sim.task_spec import canonical_hash
+    from embodichain.gen_sim.task_spec.publication import decode_task_document
+
+    root = Path(__file__).resolve().parents[3]
+    deployment = (
+        root
+        / "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.cobotmagic.yaml"
+    )
+    instruction = "把第二块积木放在第一块积木顶面"
+    from embodichain.gen_sim.task_engine import _image_run
+
+    def fixed_template(step, grounding, plan):
+        step["relation"] = "on"
+        grounding["objects"][0]["description"] = "第二块积木"
+        grounding["objects"][1]["description"] = "第一块积木顶面"
+        plan["requirements"][0]["quote"] = instruction
+        for node in plan["nodes"]:
+            node["semantic"].update(relation="on")
+            node["semantic"]["intent"]["relation"] = "on"
+            if node["call"]["kind"] == "place":
+                del node["call"]["inside"]
+                node["call"]["on"] = "on__tray__source"
+
+    monkeypatch.setattr(
+        _image_run,
+        "generate_semantic_task_graph_from_image",
+        lambda image, text, **_: _plan(image, instruction=text, mutate=fixed_template),
+    )
+    default = tmp_path / "default"
+    main(
+        [
+            "--route",
+            "template",
+            "--image",
+            str(source_image),
+            "--instruction",
+            instruction,
+            "--output",
+            str(default),
+            "--task-id",
+            "case",
+        ]
+    )
+    legacy = json.loads((default / "task_plan_manifest.json").read_text())
+    assert legacy["semantic_graph_sha256"] == canonical_hash(
+        json.loads((default / legacy["graph_path"]).read_text())
+    )
+    assert (
+        legacy["spec_digest"]
+        == decode_task_document(
+            json.loads((default / legacy["spec_path"]).read_text())
+        )["spec_digest"]
+    )
+    op = dict(
+        template="E1",
+        object="block_2",
+        reference="block_1_top",
+        relation="on",
+        quote=instruction,
+    )
+    monkeypatch.setattr(
+        compat.VisionFacade, "complete", lambda *a, **kw: json.dumps([op])
+    )
+    monkeypatch.setattr(
+        compat,
+        "structured_call",
+        lambda **kw: (
+            {
+                r: {
+                    "description": r,
+                    "bbox": (
+                        [100, 200, 300, 400] if r == "block_2" else [50, 600, 550, 900]
+                    ),
+                }
+                for r in ("block_2", "block_1_top")
+            }
+            if kw["role"] == "task_image_grounding"
+            else {"issues": []}
+        ),
+    )
+    out = tmp_path / "hybrid"
+    main(
+        [
+            "--image",
+            str(source_image),
+            "--instruction",
+            instruction,
+            "--deployment",
+            str(deployment),
+            "--output",
+            str(out),
+        ]
+    )
+
+    def read(name):
+        return json.loads((out / (name + ".json")).read_text())
+
+    manifest = read("run_manifest")
+    graph = read("semantic_task_graph")
+    assert manifest["route"] == "hybrid"
+    assert (
+        manifest["spec_digest"]
+        == decode_task_document(read("task_spec_v1"))["spec_digest"]
+    )
+    assert manifest["graph_digest"] == canonical_hash(graph)
+    pick, place = [node["call"] for node in graph["nodes"]]
+    assert pick["kind"] == "pick" and place["kind"] == "place"
+    assert (
+        pick["object"] == place["object"] == "block_2" and place["on"] == "block_1_top"
+    )
+    assert pick["resources"] == place["resources"] == {}
+    check = read("deployment_preflight")
+    assert check["compilation"] == "passed", check
+    assert check["physical_verdict"] == "not_evaluated" and not check["execution_ready"]
+    out = tmp_path / "hinge"
+    main(
+        [
+            "--route",
+            "goal",
+            "--instruction",
+            "关上铰链门",
+            "--deployment",
+            str(deployment),
+            "--proposal",
+            str(root / "examples/gensim/goal_authoring/close_hinge.json"),
+            "--output",
+            str(out),
+        ]
+    )
+    check = read("deployment_preflight")
+    assert check["compilation"] == "rejected" and not check["execution_ready"]
+    assert "closing_direction_unsupported" in {i["code"] for i in check["issues"]}
 
 
 @pytest.mark.parametrize("version", [0, 1])

@@ -67,7 +67,17 @@ type Variation = {
   cross_with?: string[];
   quote: string;
 };
+type Support = {
+  subject: string;
+  reference: string;
+  footprint_margin_m: number;
+  vertical_gap_m: number;
+  satisfied: boolean;
+};
 type Observation = {
+  holders?: Record<string, string>;
+  terminal?: Record<string, Support>;
+  tray_lift_m?: number;
   success: boolean | null;
   failure_reason: string | null;
   start_step: number;
@@ -95,6 +105,8 @@ type Attempt = {
   identity: Record<string, string>;
 };
 export type Review = {
+  replayVideo?: boolean;
+  displayNames?: Record<string, { zh: string; en: string }>;
   source_image?: string;
   spec: {
     inputs: { instruction: string };
@@ -447,7 +459,11 @@ export default function TaskReview({
   );
   const flow = useReactFlow();
   const name = (id?: string) =>
-    id ? spec.configuration.descriptions[id] || model.name(id) : "";
+    id
+      ? review.displayNames?.[id]?.[locale] ||
+        spec.configuration.descriptions[id] ||
+        model.name(id)
+      : "";
   const predicate = (p: Predicate) => {
     const subject = name(p.subject || String(p.arguments?.subject || "")),
       ref = name(p.reference || String(p.arguments?.reference || ""));
@@ -483,6 +499,10 @@ export default function TaskReview({
   const selectedGoal = spec.objectives.goal.find(
     (p) => selected === "goal:" + p.id,
   );
+  const measuredGoal =
+    selectedGoal &&
+    Object.values(run?.calls || {}).find((c) => c.terminal?.[selectedGoal.id])
+      ?.terminal?.[selectedGoal.id];
   const selectedGroup = groups.find((g) => selected === "group:" + g.id);
   const variation = selected.startsWith("variation:")
     ? spec.generalization[Number(selected.slice(10))]
@@ -531,13 +551,23 @@ export default function TaskReview({
     if (left && right) return t("双臂协同", "Both arms together");
     return primary ? armName(primary) : "";
   };
+  const titles = (c: TaskNode) => {
+    const object = name(c.call.object || c.call.arguments?.object);
+    if (c.call.call_id === "simulation.coordinated_transport")
+      return t("双臂搬", "Carry together: ") + object;
+    if (c.call.kind === "place" && c.call.resources?.primary === "left")
+      return t("左臂放", "Left arm places ") + object;
+    if (c.call.kind === "hand_over") return t("交接", "Hand over ") + object;
+    return null;
+  };
   const titleFor = (c: TaskNode) =>
+    titles(c) ||
     model.callLabel(c) +
-    " " +
-    name(c.call.object || c.call.arguments?.object || anns[c.id]?.object) +
-    (c.call.kind === "place" && anns[c.id]?.reference
-      ? " → " + name(anns[c.id]?.reference)
-      : "");
+      " " +
+      name(c.call.object || c.call.arguments?.object || anns[c.id]?.object) +
+      (c.call.kind === "place" && anns[c.id]?.reference
+        ? " → " + name(anns[c.id]?.reference)
+        : "");
   const toggle = (id: string) =>
     setOpen((current) => {
       const next = new Set(current);
@@ -564,7 +594,19 @@ export default function TaskReview({
           .map((d) => levels.get(d)! + 1),
       );
       levels.set(id, level);
-      local.set(id, { x: 32 + level * 278, y: 98 + (rows[level] || 0) * 112 });
+      const wrap =
+        !!review.displayNames &&
+        groups.length === 1 &&
+        g.node_ids.every(
+          (id, i) =>
+            i === 0 ||
+            model.calls.get(id)?.depends_on.join() === g.node_ids[i - 1],
+        );
+      const band = wrap ? Math.floor(level / 3) : 0;
+      local.set(id, {
+        x: 32 + (wrap ? (band % 2 ? 2 - (level % 3) : level % 3) : level) * 278,
+        y: 98 + (band + (rows[level] || 0)) * 112,
+      });
       rows[level] = (rows[level] || 0) + 1;
     }
     const count =
@@ -575,9 +617,16 @@ export default function TaskReview({
         pairing.goal_groups[p.id]?.includes(g.id),
       ).length;
     const size = {
-      w: open.has(g.id) ? Math.max(420, rows.length * 278 + 10) : 370,
+      w: open.has(g.id)
+        ? Math.max(
+            420,
+            Math.max(...g.node_ids.map((id) => local.get(id)!.x)) + 246,
+          )
+        : 370,
       h:
-        (open.has(g.id) ? Math.max(1, ...rows) * 112 + 118 : 100) +
+        (open.has(g.id)
+          ? Math.max(...g.node_ids.map((id) => local.get(id)!.y)) + 132
+          : 100) +
         Math.max(1, count) * 34,
     };
     const col = Math.max(
@@ -1032,6 +1081,60 @@ export default function TaskReview({
                         {startStep ?? t("未记录", "Not recorded")} –{" "}
                         {endStep ?? t("未记录", "Not recorded")}
                       </p>
+                      {seg.holders && (
+                        <p>
+                          {t("段末持有", "Held at segment end")} ·{" "}
+                          {Object.entries(seg.holders)
+                            .map(
+                              ([arm, obj]) => armName(arm) + "：" + name(obj),
+                            )
+                            .join(" / ") ||
+                            t("双手已释放", "Both hands released")}
+                        </p>
+                      )}
+                      {seg.tray_lift_m != null && (
+                        <p>
+                          {t("搬盘抬升", "Tray lift")} ·{" "}
+                          {(seg.tray_lift_m * 1000).toFixed(1)} mm
+                        </p>
+                      )}
+                      {seg.terminal && (
+                        <>
+                          <h3>
+                            {t(
+                              "搬盘后 · 三项支撑关系",
+                              "Support after transport",
+                            )}
+                          </h3>
+                          {Object.entries(seg.terminal).map(([id, v]) => (
+                            <div key={id} className="rv-event">
+                              <strong>
+                                {v.satisfied ? "✓" : "×"} {name(v.subject)} →{" "}
+                                {name(v.reference)}
+                              </strong>
+                              <p>
+                                {t("底面间隙", "Vertical gap")}{" "}
+                                {(v.vertical_gap_m * 1000).toFixed(2)} mm ·{" "}
+                                {t("边缘余量", "Edge margin")}{" "}
+                                {(v.footprint_margin_m * 1000).toFixed(1)} mm
+                              </p>
+                            </div>
+                          ))}
+                        </>
+                      )}
+                      {review.replayVideo && (
+                        <details>
+                          <summary>
+                            {t("查看同部署复跑录像", "Deployment replay")}
+                          </summary>
+                          <video
+                            controls
+                            preload="none"
+                            width="100%"
+                            src="./execution.mp4"
+                          />
+                        </details>
+                      )}
                       {events(seg)
                         .slice(0, 8)
                         .map((v, i) => (
@@ -1124,9 +1227,18 @@ export default function TaskReview({
                   </p>
                   <p>
                     {t("终态证据", "Final evidence")}　
-                    {run?.verdict === "not_evaluated" || !run
-                      ? t("未评估", "Not evaluated")
-                      : t("未提供逐目标证据", "No per-goal evidence")}
+                    {measuredGoal
+                      ? t("搬盘后几何测量", "Post-transport geometry") +
+                        " · " +
+                        (measuredGoal.satisfied
+                          ? t("满足", "Satisfied")
+                          : t("未满足", "Failed")) +
+                        " · " +
+                        (measuredGoal.vertical_gap_m * 1000).toFixed(2) +
+                        " mm"
+                      : run?.verdict === "not_evaluated" || !run
+                        ? t("未评估", "Not evaluated")
+                        : t("未提供逐目标证据", "No per-goal evidence")}
                   </p>
                   <details>
                     <summary>{t("谓词", "Predicate")}</summary>
