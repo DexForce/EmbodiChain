@@ -32,7 +32,7 @@ from PIL import Image, ImageDraw
 
 from embodichain.data_pipeline.recording.media import MediaFrameReader
 from _prepare import SCENES, digest, write_json
-from _verify import verify_episode
+from _verify import verify_run
 from _recording import CAMERAS
 
 __all__ = ["build_bundle", "main"]
@@ -87,12 +87,9 @@ def build_bundle(runs: list[Path], output: Path) -> dict[str, Any]:
             raise ValueError(
                 "Expected exactly one complete run per selected background"
             )
-        for name, expected in run["configuration_hashes"].items():
-            if digest(directory / "resolved" / name) != expected:
-                raise ValueError(f"Configuration changed: {scene}/{name}")
         episode = directory / run["episode"]
-        steps = json.loads((episode / "episode.json").read_text())["steps"]
-        metrics = verify_episode(episode, steps, require_marker=True)
+        metrics = verify_run(directory)
+        steps = metrics["steps"]
         execution = json.loads((episode / "execution_result.json").read_text())
         for segment, kind in zip(
             execution["segments"], ["attach", "release"], strict=True

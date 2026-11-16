@@ -32,25 +32,79 @@ from embodichain.data_pipeline.recording.media import (
     MediaFrameReader,
     verify_media_manifest,
 )
-from _prepare import digest, write_json
+from _prepare import SCENES, digest
 from _recording import CAMERAS, CAMERA, STEP_DT, validate_capture
 
-__all__ = ["verify_episode", "main"]
+__all__ = ["EPISODE_FILES", "verify_episode", "verify_run", "main"]
+
+EPISODE_FILES = frozenset(
+    {
+        "trajectory.pt",
+        "execution_result.json",
+        "physical_metrics.json",
+        "captures.jsonl",
+        "media/manifest.json",
+        "sensor_full.mp4",
+        "cam_third.mp4",
+        "cam_wrist.mp4",
+        "preview.jpg",
+    }
+)
+
+
+def _local(root: Path, name: str) -> Path:
+    path = Path(name)
+    if path.is_absolute() or ".." in path.parts:
+        raise ValueError(f"Artifact path must be contained and relative: {name}")
+    selected = (root / path).resolve(strict=True)
+    if not selected.is_relative_to(root.resolve()):
+        raise ValueError(f"Artifact escapes recording directory: {name}")
+    return selected
+
+
+def _verify_configuration(root: Path, run: dict[str, Any]) -> None:
+    scene = run["scene"]
+    if scene not in SCENES:
+        raise ValueError("Unknown recorded scene")
+    required = {
+        f"env.{scene}.yaml",
+        f"embodiment.{scene}.yaml",
+        f"task.{scene}.yaml",
+        f"task_program/program.{scene}.yaml",
+        "task_program/integration.yaml",
+        "execution_policy.yaml",
+        "runtime_overrides.json",
+    }
+    hashes = run.get("configuration_hashes")
+    if not isinstance(hashes, dict) or not required.issubset(hashes):
+        raise ValueError("Resolved configuration inventory is incomplete")
+    for name, expected in hashes.items():
+        if digest(_local(root / "resolved", name)) != expected:
+            raise ValueError(f"Configuration changed: {name}")
 
 
 def verify_episode(
     directory: Path, steps: int, *, require_marker: bool = False
 ) -> dict[str, Any]:
+    if type(steps) is not int or steps <= 0:
+        raise ValueError("Expected a positive integer action count")
     if require_marker:
         marker = json.loads((directory / "episode.json").read_text())
         if (
             marker["status"] != "complete"
             or marker["episode_uuid"] != directory.name
             or marker["steps"] != steps
+            or marker.get("frames") != steps + 1
+            or not math.isclose(marker.get("step_dt", 0), STEP_DT)
         ):
             raise ValueError("Invalid completion marker")
+        if (
+            not isinstance(marker.get("files"), dict)
+            or set(marker["files"]) != EPISODE_FILES
+        ):
+            raise ValueError("Episode file inventory is incomplete or unexpected")
         for name, expected in marker["files"].items():
-            if digest(directory / name) != expected:
+            if digest(_local(directory, name)) != expected:
                 raise ValueError(f"Artifact hash mismatch: {name}")
     result = json.loads((directory / "execution_result.json").read_text())
     if not (
@@ -72,6 +126,8 @@ def verify_episode(
         or not math.isclose(meta["step_dt"], STEP_DT)
     ):
         raise ValueError("Native trajectory identity/length/cadence mismatch")
+    if not torch.isfinite(trajectory["actions"]).all():
+        raise ValueError("Trajectory contains non-finite actions")
     poses = np.concatenate(
         [
             trajectory["states"]["rigid_objects"]["cube"]["pose"][0].numpy(),
@@ -89,6 +145,7 @@ def verify_episode(
         raise ValueError("Invalid measured dynamic-cube states")
     root = directory.parents[1]
     run = json.loads((root / "run.json").read_text())
+    _verify_configuration(root, run)
     environment = yaml.safe_load(
         (root / f"resolved/env.{run['scene']}.yaml").read_text()
     )
@@ -101,7 +158,9 @@ def verify_episode(
         for item in environment["simulation"]["background"]
         if item["uid"] == "support_surface"
     )
-    target = np.asarray(program["targets"]["rest_pose"]["position"])
+    target = np.asarray(program["targets"]["rest_pose"]["position"], dtype=float)
+    if target.shape != (3,) or not np.isfinite(target).all():
+        raise ValueError("Invalid placement target")
     lift = float(poses[:, 2].max() - poses[0, 2])
     error = float(np.linalg.norm(poses[-1, :3] - target))
     tilt = float(
@@ -247,6 +306,12 @@ def verify_episode(
         max_lift_frame=int(np.argmax(poses[:, 2])),
         target_center=target.tolist(),
     )
+    if not all(
+        math.isfinite(value)
+        for value in metrics.values()
+        if isinstance(value, (int, float))
+    ):
+        raise ValueError("Non-finite physical metrics")
     if (
         lift < 0.04 - 1e-6
         or error > 0.02
@@ -259,7 +324,6 @@ def verify_episode(
         or wrist_motion < 0.05
     ):
         metrics["status"] = "FAIL"
-        write_json(directory / "physical_metrics.json", metrics)
         raise ValueError(f"Physical/two-camera qualification failed: {metrics}")
     metrics.update(
         wrist_framing="gripper_below_working_point",
@@ -269,20 +333,28 @@ def verify_episode(
     return metrics
 
 
+def verify_run(directory: Path) -> dict[str, Any]:
+    """Verify a complete local run without modifying its recorded artifacts.
+
+    Args:
+        directory: Run directory containing its resolved inputs and episode.
+
+    Returns:
+        Independently checked physical and two-camera metrics.
+    """
+    run = json.loads((directory / "run.json").read_text())
+    if run["status"] != "complete":
+        raise ValueError("Run is incomplete")
+    episode = _local(directory, run["episode"])
+    marker = json.loads((episode / "episode.json").read_text())
+    return verify_episode(episode, marker["steps"], require_marker=True)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run", type=Path)
     args = parser.parse_args()
-    run = json.loads((args.run / "run.json").read_text())
-    if run["status"] != "complete":
-        raise ValueError("Run is incomplete")
-    episode = args.run / run["episode"]
-    marker = json.loads((episode / "episode.json").read_text())
-    print(
-        json.dumps(
-            verify_episode(episode, marker["steps"], require_marker=True), indent=2
-        )
-    )
+    print(json.dumps(verify_run(args.run.resolve()), indent=2, allow_nan=False))
 
 
 if __name__ == "__main__":

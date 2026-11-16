@@ -182,25 +182,16 @@ def main() -> None:
         raise RuntimeError(failure)
     episode = root / report["episode"]
     try:
+        from _verify import EPISODE_FILES
+
         export_video(episode, report["metrics"])
-        names = [
-            "trajectory.pt",
-            "execution_result.json",
-            "physical_metrics.json",
-            "captures.jsonl",
-            "media/manifest.json",
-            "sensor_full.mp4",
-            "cam_third.mp4",
-            "cam_wrist.mp4",
-            "preview.jpg",
-        ]
         marker = {
             "status": "complete",
             "episode_uuid": episode.name,
             "steps": report["metrics"]["steps"],
             "frames": report["metrics"]["frames"],
             "step_dt": STEP_DT,
-            "files": {name: digest(episode / name) for name in names},
+            "files": {name: digest(episode / name) for name in sorted(EPISODE_FILES)},
         }
         write_json(episode / "episode.json", marker)
         report["status"] = "complete"

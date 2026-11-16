@@ -92,6 +92,53 @@ The local environment has no Sphinx installation, so a full Sphinx build was
 not run. Native-window preview was not exercised on the headless host. This is
 one attempt per scene, not a multi-seed or ten-episode reliability qualification.
 
+## Offline verifier regression qualification — 2026-11-16
+
+A further Office episode was recorded on the same Python 3.12 / DexSim rc2
+environment, using physical GPU 2 with the existing Hybrid/8 spp/OptiX settings.
+It completed 284 actions, 285 paired observations and 570 RGB images. Measured
+lift was 0.129430 m, final position error 0.007269 m and final tilt 0 degrees.
+Run identity: `office-20261116-135519-a327e447`; episode:
+`a6ca9055-3311-4361-a9c2-e7066cfabbf0`.
+
+The real standalone verifier CLI was then exercised against that native
+recording and isolated copies, with `CUDA_VISIBLE_DEVICES` empty. The original
+verifier from `a90785d3c` incorrectly accepted all seven damaged variants. The
+corrected verifier rejected every variant with its expected diagnostic:
+
+| Input | Original verifier exit | Corrected verifier exit |
+| --- | ---: | ---: |
+| Original native recording | 0 | 0 |
+| Empty episode file inventory | 0 | 1 |
+| Missing wrist video and its digest | 0 | 1 |
+| NaN action, trajectory digest updated | 0 | 1 |
+| Infinite action, trajectory digest updated | 0 | 1 |
+| Changed environment configuration | 0 | 1 |
+| Empty configuration hash inventory | 0 | 1 |
+| NaN target, configuration digest updated | 0 | 1 |
+| Original recording after all checks | 0 | 0 |
+
+The original recording's fingerprints were unchanged. All nine corrected
+checks passed; this includes seven expected nonzero exits and two valid-run
+checks. A separate relocated copy also passed the standalone CLI without a
+visible GPU. `_negative_checks.py` retains per-case CLI logs, verifier SHA256 and
+`acceptance.json`. Its `--verifier` option can select a saved older verifier
+and its sibling helpers for the before/after control. No unit-test harness
+imports the example: these checks exercise the real CLI and retained native
+artifacts rather than mocked sensor or storage data.
+
+Completion inventory is shared with the writer; the standalone CLI and video
+collection exporter use the same run verification path. Configuration checks
+also apply before an episode's completion marker is published. Offline failure
+no longer overwrites `physical_metrics.json`. These changes affect artifact
+admission, not simulation, rendering, control or metric GS-depth support.
+
+Black 26.10.1 (`black .`), changed-source syntax/header checks and public API
+coverage (4916/4916) passed. Context impact was reviewed; existing recording and
+ownership guidance remains accurate, with example-specific checks documented
+in the example README. Earlier asset/rendering test counts above were not
+rerun for this verifier-only correction.
+
 ## Limits
 
 Only the independent task support/cube physics and RGB streams are qualified.

@@ -120,6 +120,29 @@ python examples/gym/gaussian_pick_place/_verify.py /path/to/completed/run
 The current native Python environment must remain available for SDK imports.
 FFmpeg/H.264 previews are lossy; raw NPZ RGB is the pixel-consistency source.
 
+The standalone verifier and collection exporter share the same run checks.
+Completed episodes require the full artifact inventory, matching file/configuration
+hashes and finite trajectory actions, placement targets and physical metrics.
+The verifier does not modify the recording, including when a check fails.
+
+Exercise the rejection paths against a completed recording without a World,
+network access or a visible GPU:
+
+```bash
+python examples/gym/gaussian_pick_place/_negative_checks.py \
+  --run /path/to/completed/run --output /path/to/new/negative-checks
+```
+
+This runs the actual verifier CLI on the original and seven isolated damaged
+copies: empty episode inventory, missing video and its digest, NaN/Inf actions
+with updated artifact digests, changed configuration, empty configuration
+inventory, and a NaN placement target with an updated configuration digest.
+Each rejection must report its expected cause. The original is verified again
+and fingerprinted after the checks. Unchanged files can share storage through
+hard links; mutations atomically replace only the copy. Logs and
+`acceptance.json` retain every attempt. The output directory must be fresh and
+outside the original run.
+
 ## Scope and qualification
 
 See [QUALIFICATION.md](QUALIFICATION.md) for measured outcomes and published
