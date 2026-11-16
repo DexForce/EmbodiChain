@@ -143,6 +143,27 @@ def _check_place_keyframes(env, generator):
             ),
             context,
         )
+    for period, steps, expected in ((0.04, 0, 3), (0.02, 0, 6), (0.04, 5, 5)):
+        timed = engine.plan(
+            replace(
+                invocation,
+                skill_options=replace(
+                    options, release_settle_duration=0.11, release_settle_steps=steps
+                ),
+            ),
+            engine.initial_context(control_dt=period),
+        )
+        release = timed.segment("release")
+        assert release.stop - release.start == options.hand_interp_steps + expected
+        hand_ids = env.robot.get_joint_ids("eef")
+        torch.testing.assert_close(
+            timed.joint_trajectory.positions[
+                :, release.stop - expected : release.stop, hand_ids
+            ],
+            hand_limits[None, :, 0].expand(1, expected, -1),
+            rtol=0,
+            atol=0,
+        )
 
 
 def _probe(output):

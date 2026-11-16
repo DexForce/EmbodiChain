@@ -18,9 +18,13 @@ This example prepares fixed inputs, runs the shared GenSim workflow, and measure
 wall-clock time through native execution and cleanup. It demonstrates the
 previous dual-UR5 table/cube case without a live model or reconstruction service.
 
-The recorded outcome is **pickup succeeds, placement release verification fails**.
-It is a reproducible failure investigation, not a successful expert dataset
-collection or qualification of real photograph-to-scene generation.
+The current defaults release 0.02 m above the resting target and hold open for
+0.4 physical seconds before release verification. This avoids the previously
+recorded finger/support interference while retaining measured opening,
+separation, stability and landing requirements. Explicit zero clearance can
+still reproduce a physically rejected contact placement. The historical failure
+measurements below remain tied to their original revision; this scripted case
+does not qualify real photograph-to-scene generation or model quality.
 
 ## Requirements and inputs
 

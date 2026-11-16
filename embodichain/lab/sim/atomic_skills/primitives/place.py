@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import math
 from typing import ClassVar, Literal
 
 import torch
@@ -138,6 +139,14 @@ class PlaceOptions(SkillOptions):
     release_settle_steps: int = 0
     """Fully open hold frames before retracting the end-effector."""
 
+    release_settle_duration: float = field(default=0.0, kw_only=True)
+    """Minimum physical seconds to hold open in a newly planned native Place.
+
+    Rounded upward to control intervals and combined with release_settle_steps
+    using the larger hold. This is actuation time, not an acceptance tolerance.
+    External nominal sources retain their authored release timing unchanged.
+    """
+
     lift_height: float = 0.1
     """Height (m) to retract the end-effector after opening the gripper."""
 
@@ -157,6 +166,13 @@ class PlaceOptions(SkillOptions):
     """Keep the held object's observed world orientation at the place target."""
 
     def __post_init__(self) -> None:
+        if (
+            isinstance(self.release_settle_duration, bool)
+            or not isinstance(self.release_settle_duration, (int, float))
+            or not math.isfinite(self.release_settle_duration)
+            or self.release_settle_duration < 0
+        ):
+            raise ValueError("release_settle_duration must be finite and nonnegative.")
         if type(self.cartesian_approach) is not bool:
             raise TypeError("cartesian_approach must be boolean.")
         if self.hand_interp_steps < 1:
@@ -459,7 +475,10 @@ class Place(AtomicSkill[PlaceGoal | AssembleGoal, PlaceOptions]):
             hold_hand_qpos, hand_open_qpos, n_waypoints=n_open
         )
 
-        n_settle = options.release_settle_steps
+        n_settle = max(
+            options.release_settle_steps,
+            math.ceil(options.release_settle_duration / context.require_control_dt()),
+        )
         open_start = n_down
         settle_start = open_start + n_open
         back_start = settle_start + n_settle

@@ -1087,6 +1087,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                 "object_motion_keyframes",
                 "grasp_settle_steps",
                 "release_settle_steps",
+                "release_settle_duration",
                 "pick_object_part",
                 "lift_height",
                 "pre_grasp_distance",
@@ -1287,6 +1288,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                 {
                     "hand_interp_steps",
                     "release_settle_steps",
+                    "release_settle_duration",
                     "lift_height",
                     "max_approach_retract_z",
                     "cartesian_waypoint_count",
@@ -1311,6 +1313,12 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                 config["release_settle_steps"],
                 path=f"{path}.release_settle_steps",
                 minimum=0,
+            )
+        if "release_settle_duration" in config:
+            kwargs["release_settle_duration"] = _real(
+                config["release_settle_duration"],
+                path=f"{path}.release_settle_duration",
+                minimum=0.0,
             )
         if "lift_height" in config:
             kwargs["lift_height"] = _real(

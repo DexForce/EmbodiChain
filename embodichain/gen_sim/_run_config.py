@@ -82,13 +82,14 @@ class _RunCfg:
                 "binding supports profile, release_clearance, resource_anchors, "
                 "runtime_services, scene_binding and segments"
             )
-        clearance = self.binding.get("release_clearance", 0.0)
+        clearance = self.binding.get("release_clearance", 0.02)
         if (
             isinstance(clearance, bool)
             or not isinstance(clearance, (int, float))
             or not 0.0 <= clearance < 0.2
         ):
             raise ValueError("release_clearance must be a height in [0, 0.2) m")
+        self.binding = {**self.binding, "release_clearance": float(clearance)}
         anchors = self.binding.get("resource_anchors", {})
         if type(anchors) is not dict or any(
             type(value) is not list

@@ -259,6 +259,19 @@ def run_cfg(tmp_path: Path) -> _RunCfg:
     )
 
 
+@pytest.mark.parametrize(
+    "binding,expected",
+    [({}, 0.02), ({"profile": {}}, 0.02), ({"release_clearance": 0.0}, 0.0)],
+)
+def test_release_clearance_default_preserves_explicit_contact_placement(
+    run_cfg, binding, expected
+):
+    original = json.loads(json.dumps(binding))
+    cfg = _RunCfg(**{**run_cfg.to_dict(), "binding": binding})
+    assert cfg.binding["release_clearance"] == expected
+    assert binding == original
+
+
 @pytest.mark.parametrize("success", [True, False])
 def test_workflow_generates_binds_and_preserves_actual_execution_verdict(
     run_cfg: _RunCfg, monkeypatch: pytest.MonkeyPatch, success: bool
@@ -274,7 +287,7 @@ def test_workflow_generates_binds_and_preserves_actual_execution_verdict(
         run_cfg.instruction += " \n"
         run_cfg.task_id = " gensim_task "
 
-    # Releasing above the resting pose is opt-in; cover both settings.
+    # Exercise raised release and an explicit zero-clearance contact placement.
     clearance = 0.03 if success else 0.0
     run_cfg = _RunCfg(
         **{
