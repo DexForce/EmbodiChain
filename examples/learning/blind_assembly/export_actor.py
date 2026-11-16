@@ -51,7 +51,7 @@ def main() -> None:
         torch.device("cpu"),
         critic_obs_space=(
             attributes["critic_obs_dim"]
-            if attributes.get("uses_separate_critic_obs", True)
+            if attributes["uses_separate_critic_obs"]
             else None
         ),
     )

@@ -23,10 +23,7 @@ import numpy as np
 from scipy.spatial import ConvexHull
 from scipy.spatial.transform import Rotation
 from embodichain.toolkits.assembly import AssemblyAsset
-from embodichain.toolkits.assembly.native import (
-    to_rigid_config,
-    to_articulation_configs,
-)
+from embodichain.toolkits.assembly.native import prepare_native_configs
 from embodichain.lab.sim.cfg import NewtonPhysicsCfg
 from embodichain.lab.sim.sensors import ContactSensorCfg, ArticulationContactFilterCfg
 from embodichain.lab.gym.envs import EmbodiedEnvCfg
@@ -145,12 +142,23 @@ class AssemblyScene:
             else "default"
         )
         if self.materialize:
-            for body in self.assembly_asset.bodies:
-                if body.joint.kind != "hinge":
-                    config = to_rigid_config(
-                        body, source_contact=source_contact, backend=backend
-                    )
-                    if body.name != self._moving_uid:
+            configs = prepare_native_configs(
+                self.assembly_asset,
+                self.directory.parent,
+                source_contact=source_contact,
+                backend=backend,
+                file_visuals=self.task_cfg.file_visuals,
+            )
+            hinges = {
+                body.name
+                for body in self.assembly_asset.bodies
+                if body.joint.kind == "hinge"
+            }
+            for name, config in configs.items():
+                if name in hinges:
+                    self.cfg.articulation.append(config)
+                else:
+                    if name != self._moving_uid:
                         config.body_type = "kinematic"
                     target = (
                         self.cfg.rigid_object
@@ -158,14 +166,6 @@ class AssemblyScene:
                         else self.cfg.background
                     )
                     target.append(config)
-        if self.materialize:
-            for config in to_articulation_configs(
-                self.assembly_asset,
-                self.directory,
-                source_contact=source_contact,
-                backend=backend,
-            ).values():
-                self.cfg.articulation.append(config)
         bodies = {body.name: body for body in self.assembly_asset.bodies}
         self._moving_definition = bodies[self._moving_uid]
         self._fixture_definition = bodies[self._fixture_uid]

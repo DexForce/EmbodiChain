@@ -23,19 +23,10 @@ import torch
 import numpy as np
 from embodichain.lab.gym.envs.objectives.conditions import ConditionResult
 
-from .observations import (
-    AssemblyProprioception,
-    assembly_contact_labels,
-    assembly_privileged_state,
-)
-
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
 
 __all__ = [
-    "AssemblyProprioception",
-    "assembly_privileged_state",
-    "assembly_contact_labels",
     "reset_assembly",
     "assembly_success",
     "assembly_failure",

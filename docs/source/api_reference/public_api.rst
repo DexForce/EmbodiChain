@@ -5287,9 +5287,6 @@ Stateful proprioceptive history, privileged labels, reset and milestone rewards 
 
 .. autosummary::
 
-   AssemblyProprioception
-   assembly_privileged_state
-   assembly_contact_labels
    reset_assembly
    assembly_milestone_reward
 
@@ -5314,8 +5311,6 @@ Blind assembly observation functors
 These task-specific observations maintain proprioceptive history and provide
 privileged mating state and contact labels for training. Only the proprioceptive
 observation belongs to the actor input.
-
-.. currentmodule:: embodichain_tasks.manipulation.assembly.obs
 
 .. autosummary::
 

@@ -54,6 +54,7 @@ class AssemblyCfg:
     assembly_seed: int | None = None
     assembly_config: dict[str, Any] = {}
     preserve_source_contacts: bool = True
+    file_visuals: bool = True
     require_heterogeneous_assets: bool = False
     require_exact_robot_dynamics: bool = False
     assembly_contact_capacity: int = 2048
@@ -101,6 +102,8 @@ class AssemblyCfg:
     def check(self) -> None:
         """Reject incomplete, ambiguous or physically invalid declarations."""
         self.validate()
+        if type(self.file_visuals) is not bool:
+            raise ValueError("Assembly file_visuals must be a boolean.")
         if self.kind not in {"peg", "gear", "nut"}:
             raise ValueError("Assembly kind must be peg, gear or nut.")
         if self.orientation_representation not in {"euler_xyz", "rotation6d"}:
@@ -170,7 +173,7 @@ class AssemblyCfg:
 
 
 def assembly_cfg(extensions: Mapping[str, Any]) -> AssemblyCfg:
-    """Decode the single assembly namespace without legacy field aliases."""
+    """Decode the validated assembly namespace."""
     if not isinstance(extensions.get("assembly"), Mapping):
         raise ValueError("Assembly requires an env.extensions.assembly mapping.")
     cfg = AssemblyCfg(**extensions["assembly"])

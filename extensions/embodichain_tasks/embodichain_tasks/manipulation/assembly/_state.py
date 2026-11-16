@@ -196,19 +196,38 @@ class AssemblyState:
         arm_ids = self.env.robot.get_joint_ids(
             name=self.cfg.arm_part, remove_mimic=True
         )
-        self.env.robot.set_joint_drive(
-            stiffness=torch.full(
-                (self.env.num_envs, self.arm_dof),
-                self.cfg.joint_stiffness,
-                device=self.env.device,
-            ),
-            damping=torch.full(
-                (self.env.num_envs, self.arm_dof),
-                self.cfg.joint_damping,
-                device=self.env.device,
-            ),
-            joint_ids=arm_ids,
+        stiffness = torch.full(
+            (self.env.num_envs, self.arm_dof),
+            self.cfg.joint_stiffness,
+            dtype=torch.float32,
+            device=self.env.device,
         )
+        damping = torch.full(
+            (self.env.num_envs, self.arm_dof),
+            self.cfg.joint_damping,
+            dtype=torch.float32,
+            device=self.env.device,
+        )
+        if (
+            self.env.sim.is_newton_backend
+            and self.env.sim.physics.solver_type == "mujoco_warp"
+        ):
+            from embodichain.lab.sim.physics._joint_drive_view import (
+                _JointDriveGainView,
+            )
+
+            names = tuple(self.env.robot.joint_names[index] for index in arm_ids)
+            view = _JointDriveGainView(self.env.sim, names)
+            try:
+                view.apply(stiffness, damping)
+            finally:
+                view.close()
+        else:
+            self.env.robot.set_joint_drive(
+                stiffness=stiffness,
+                damping=damping,
+                joint_ids=arm_ids,
+            )
 
     def advance(self) -> None:
         """Advance at most once for a control transition with new physics."""

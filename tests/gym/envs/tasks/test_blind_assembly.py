@@ -443,6 +443,7 @@ def test_assembly_sensor_capacity_defaults_and_development_override(
         ("grasp_contact_capacity", 0),
         ("assembly_contact_capacity", True),
         ("assembly_contact_capacity", 2.5),
+        ("file_visuals", "false"),
     ],
 )
 def test_invalid_assembly_sensor_capacity_precedes_preparation(
@@ -793,20 +794,6 @@ def test_manager_history_selective_reset_does_not_repeat_other_rows(
     assert torch.equal(before[1], after[1])
     assert after.reshape(2, 31, 33)[0, :, 0].tolist() == [5.0] * 31
     assert before.reshape(2, 31, 33)[0, 0, 0].item() == 3.0
-
-
-def test_legacy_assembly_observation_imports_remain_available() -> None:
-    from embodichain.lab.gym.envs.managers import assembly as legacy
-    from embodichain.lab.gym.envs.managers import observations
-    from embodichain_tasks.manipulation.assembly import obs
-
-    for name in (
-        "AssemblyProprioception",
-        "assembly_privileged_state",
-        "assembly_contact_labels",
-    ):
-        assert getattr(legacy, name) is getattr(observations, name)
-        assert getattr(obs, name) is getattr(observations, name)
 
 
 def test_checkpoint_task_resources_relocate_without_generator(

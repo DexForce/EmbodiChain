@@ -66,7 +66,11 @@ configuration loader, with distinct IDs for distinct deployments. Physical
 components explicitly select scene preparation, resource export, action, startup,
 interval, reset, observation and reward functors. `preparation.py` expands the
 configured manifest into native entities and contact sensors before World creation;
-it does not replace actions or inject events/conditions. `_config.py` validates
+it does not replace actions or inject events/conditions. Native preparation uses
+`prepare_native_configs` with configured file-backed appearance, keeping collision
+pieces and authored mass/contact data independent of a small number of visual
+material groups. MuJoCo-Warp startup impedance writes use the physics-owned
+batched gain view once, with the configured arm names and unchanged gain values. `_config.py` validates
 `extensions.assembly`, including entity/control-part bindings, sampling counts
 and measurement thresholds. The configured interval event advances shared state
 once after each control transition, independently of selected termination terms.
