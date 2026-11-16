@@ -11,6 +11,7 @@ both are implemented by this Real2Sim feature.
 
 | Stage | Example entry point | Implementation |
 | --- | --- | --- |
+| Repair the pinned AgiBot physical input | `python -m examples.real2sim.prepare_agibot` | Model-owned authored collision recipe and prepared-package validation |
 | Video to native Scene Engine export | `python -m examples.real2sim` | `gen_sim.real2sim.scene.reconstruct_video()` |
 | Export to calibrated, registered scene | Python snippet below | `gen_sim.real2sim.scene.register_scene_export()` |
 | Annotation, bounded correction, physical replay | `python -m examples.real2sim.agent` | `gen_sim.real2sim.execution.run_prepared_real2sim()` |
@@ -20,6 +21,60 @@ Reusable input, geometry, numerical correction, and evidence helpers live in
 `embodichain/data_pipeline/real2sim/adaptation/`. Composition, service calls, and
 simulation execution live in `embodichain/gen_sim/real2sim/`. The example modules
 only parse arguments and call those packages.
+
+## AgiBot prepared-input collision repair (#1212)
+
+The `03_agibot_toy` URDF in the
+[pinned prepared-input package](https://huggingface.co/datasets/DestoFaygo/embodichain-real2sim-inputs/tree/1b34442c9e3d3e6a3139d3df95d5cb0e61a93e1f)
+contains 41 visuals and no collisions. Loading, FK and file checksums do not
+establish physical replay eligibility. Physical execution now checks the URDF,
+mesh resources and declared gripper contact links before starting inference or
+native simulation; visual-only models remain available for nonphysical input
+loading. Replay never synthesizes collision geometry automatically.
+
+In an installed development environment, explicitly prepare a **new** package:
+
+```bash
+curl -L --fail \
+  'https://huggingface.co/datasets/DestoFaygo/embodichain-real2sim-inputs/resolve/1b34442c9e3d3e6a3139d3df95d5cb0e61a93e1f/real2sim_inputs_5.zip' \
+  -o real2sim_inputs_5.zip
+unzip real2sim_inputs_5.zip -d real2sim_inputs_original
+python -m examples.real2sim.prepare_agibot \
+  real2sim_inputs_original real2sim_inputs_physical --native-check
+```
+
+Use `real2sim_inputs_physical/samples/03_agibot_toy` as `REAL2SIM_SOURCE` for
+subsequent registration and replay. Omit `--native-check` for offline preparation;
+the resulting report explicitly says native qualification has not run. The
+native check uses the default backend without rendering or model services.
+
+The model-owned recipe in
+`embodichain_robots/agibot/g1/_replay_collisions.py` accepts only the pinned input
+URDF. It checks official source hashes and link-local geometric agreement before
+transferring 14 arm cylinders from the
+[official URDF](https://huggingface.co/datasets/agibot-world/GenieSimAssets/blob/37e760fdd15d27c45233baf11811059ecc65ee9d/G1_120s/G1_120s.urdf)
+and 22 gripper meshes from the
+[official USD collision prims](https://huggingface.co/datasets/agibot-world/GenieSimAssets/tree/a0813aad7c16165daffbe6c2737754e0344809ee/robot/G1_120s).
+This is an explicit derived physical model: the USD disables arm collisions,
+whereas this recipe enables the official URDF cylinders. Native URDF mesh
+cooking also differs from the USD's authored convex-decomposition settings on
+four support links. These differences are recorded, not treated as an identical
+USD dynamics model. The CC-BY-NC-SA-4.0 license and attribution accompany the
+derived resources. `--source-bundle` accepts an already downloaded, hash-verified
+official bundle with `old-G1_120s.urdf` for offline use.
+
+The output preserves the original robot directory, videos, source trajectories,
+timestamps, TCP definitions and gripper calibration. `robot.json` selects the
+separate `robot_physical/robot.urdf`; `input.json`, `manifest.json`,
+`input_validation.json` and `SHA256SUMS` record the new geometry identity.
+`robot_physical/collision_provenance.json` records official revisions and the
+conversion. `physical_validation/preflight.json` records structural validation;
+`physical_validation/native/report.json` and `trace.npz` record native collision
+import, finite stepping, calibrated opening/closing, sustained bilateral pad
+contact and release. The command checks all 36 native collision-bearing links
+and every calibrated pad. These checks do not establish grasp stability,
+hardware validity, or successful execution of the toy-placement task. They also
+do not add Task Program/DemoSkill deployment integration.
 
 ## How to run
 

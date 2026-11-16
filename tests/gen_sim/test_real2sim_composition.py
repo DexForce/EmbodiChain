@@ -16,6 +16,7 @@
 """Provider-free validation of Real2Sim service and graph boundaries."""
 
 from __future__ import annotations
+import json
 from pathlib import Path
 from types import SimpleNamespace
 import shutil
@@ -361,6 +362,50 @@ def test_source_grounding_uses_video_mapping_and_rejects_invented_or_missing_eve
         annotation.ground_gripper_events(
             inputs, scene, tmp_path / "missing_relation", chat
         )
+
+
+@pytest.mark.parametrize("entrypoint", ["agent", "replay"])
+@pytest.mark.parametrize("missing_pad", [False, True])
+def test_physical_entry_preflight_precedes_model_and_native_work(
+    tmp_path, monkeypatch, entrypoint, missing_pad
+):
+    from embodichain.gen_sim.real2sim import execution, replay
+
+    source = tmp_path / "source"
+    source.mkdir()
+    collision = (
+        '<collision><geometry><box size="0.1 0.1 0.1"/></geometry></collision>'
+        if missing_pad
+        else ""
+    )
+    (source / "robot.urdf").write_text(
+        f'<robot name="test"><link name="arm">{collision}</link>'
+        '<link name="pad"/></robot>'
+    )
+    (source / "robot.json").write_text(
+        json.dumps(
+            {"urdf": "robot.urdf", "gripper_calibrations": [{"pad_links": ["pad"]}]}
+        )
+    )
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("Invalid physical inputs must fail before model/native work")
+
+    monkeypatch.setattr(execution, "CodexTrajectoryAgent", unexpected)
+    monkeypatch.setattr(execution.subprocess, "run", unexpected)
+    monkeypatch.setattr(replay, "_resources", unexpected)
+    monkeypatch.setattr(replay, "_execute", unexpected)
+    output = tmp_path / "output"
+    with pytest.raises(
+        ValueError, match="pad" if missing_pad else "no collision geometry"
+    ):
+        if entrypoint == "agent":
+            execution.run_prepared_real2sim(
+                source, tmp_path / "registered", output, instruction="Pick the object"
+            )
+        else:
+            replay.replay_recording(source, output)
+    assert not output.exists()
 
 
 def test_pipeline_preflight_does_not_launch_services_or_create_output(tmp_path):

@@ -26,6 +26,10 @@ import subprocess
 import sys
 import numpy as np
 
+from embodichain.data_pipeline.real2sim.adaptation._robot_geometry import (
+    required_collision_links,
+    validate_robot_collisions,
+)
 from embodichain.data_pipeline.real2sim.adaptation.prepared import (
     load_prepared_source,
     load_registered_scene,
@@ -70,10 +74,19 @@ def run_prepared_real2sim(
 
     Returns:
         Bounded loop status and paths to its actual replay evidence.
+
+    Raises:
+        ValueError: Authored collision geometry or required contact links are
+            invalid. Physical preflight runs before inference or output creation.
+        FileNotFoundError: A required robot collision resource is absent.
     """
     if max_revisions < 0:
         raise ValueError("--max-revisions must be nonnegative")
     source, registered, output = (p.resolve() for p in (source, registered, output))
+    metadata = json.loads((source / "robot.json").read_text())
+    physical_robot = validate_robot_collisions(
+        source / metadata["urdf"], required_collision_links(metadata)
+    )
     previous = None
     if continue_from:
         if place_base:
@@ -143,6 +156,7 @@ def run_prepared_real2sim(
             raise ValueError("Continuation requires the same visual URDF")
         visual_urdf = prior_visual
     output.mkdir(parents=True, exist_ok=False)
+    write_json(output / "physical_robot_validation.json", physical_robot)
     os.setpriority(os.PRIO_PROCESS, 0, max(15, os.getpriority(os.PRIO_PROCESS, 0)))
     cpus = set(sorted(os.sched_getaffinity(0))[:2])
     for thread in Path("/proc/self/task").iterdir():

@@ -49,6 +49,13 @@ scene registration, same-camera pixel recovery, trajectory/evidence helpers and
 bounded numerical corrections. `prepared.load_prepared_source()` preserves source
 joints and explicit camera/frame mappings; `registration.register_scene()` fits
 one shared scene similarity rather than changing individual objects.
+Physical replay preflights explicit collisions, mesh resources and declared pad
+links through `adaptation/_robot_geometry.py`; generic loading/FK remains
+nonphysical. `_prepared_physics.py` materializes separate portable asset revisions,
+preserving source observations and resealing geometry identities and checksums.
+Model-specific collision recipes belong to the robot extension; native model
+qualification belongs to `gen_sim.real2sim._robot_qualification`. Structural or
+native-model checks do not grant task-success credit.
 `trajectory_corrections.apply_trajectory_corrections()` converts structured
 Cartesian/gripper residuals into commands on the recorded sample grid. Its
 approximate IK is isolated in `_real2sim_ik.py`; finite output and joint-limit

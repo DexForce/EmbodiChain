@@ -36,7 +36,10 @@ def recording(tmp_path: Path) -> tuple:
     asset = tmp_path / "cup.glb"
     asset.write_bytes(b"fixed scene asset")
     urdf = tmp_path / "robot.urdf"
-    urdf.write_text("<robot/>")
+    urdf.write_text(
+        '<robot name="test"><link name="base"><collision><geometry>'
+        '<box size="0.1 0.1 0.1"/></geometry></collision></link></robot>'
+    )
     inputs = SimpleNamespace(
         demonstration=SimpleNamespace(
             qpos=np.zeros((8, 2)),

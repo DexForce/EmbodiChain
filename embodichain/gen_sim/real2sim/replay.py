@@ -35,6 +35,10 @@ import xml.etree.ElementTree as ET
 
 import numpy as np
 
+from embodichain.data_pipeline.real2sim.adaptation._robot_geometry import (
+    required_collision_links,
+    validate_robot_collisions,
+)
 from embodichain.data_pipeline.real2sim.adaptation.media import (
     export_comparison,
     create_video_stream as _stream,
@@ -139,11 +143,10 @@ def _resources() -> Iterator[None]:
 
 def _robot_model(source: Path, visual: Path | None, output: Path) -> Path:
     """Replace only visuals; keep original joints, inertias and collision shapes."""
+    validate_robot_collisions(source)
     output.mkdir(parents=True, exist_ok=False)
     tree = ET.parse(source)
     root = tree.getroot()
-    if not root.findall("./link/collision"):
-        raise ValueError("Physical robot URDF has no collision geometry")
     asset_dirs = {}
 
     def local_assets(node: ET.Element, model: Path) -> None:
@@ -1004,9 +1007,18 @@ def replay_recording(
 
     Returns:
         Replay directory. Completion does not establish task success.
+
+    Raises:
+        ValueError: Renderer selection or authored collision geometry is invalid.
+            Physical preflight runs before acquiring native runtime resources.
+        FileNotFoundError: A required robot collision resource is absent.
     """
     if renderer not in ("rt", "no-render"):
         raise ValueError("renderer must be rt or no-render")
+    metadata = _read(source / "robot.json")
+    validate_robot_collisions(
+        source / metadata["urdf"], required_collision_links(metadata)
+    )
     with _resources():
         _execute(
             source,

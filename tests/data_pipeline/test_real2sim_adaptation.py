@@ -213,6 +213,99 @@ def test_visual_only_robot_gets_real_collision_inputs_without_editing_source(tmp
         prepare_robot_collisions(target, tmp_path / "invalid", ("missing_finger",))
 
 
+def test_physical_robot_preflight_checks_declared_links_and_mesh_identity(tmp_path):
+    import hashlib
+    from embodichain.data_pipeline.real2sim.adaptation._robot_geometry import (
+        required_collision_links,
+        validate_robot_collisions,
+    )
+
+    mesh = tmp_path / "finger.obj"
+    mesh.write_text("v 0 0 0\nv 0.01 0 0\nv 0 0.01 0\nf 1 2 3\n")
+    source = tmp_path / "robot.urdf"
+    source.write_text(
+        '<robot name="test"><link name="arm"><collision><geometry>'
+        '<box size="0.1 0.1 0.1"/></geometry></collision></link>'
+        '<link name="pad"><collision><origin xyz="0 0 0.01"/>'
+        '<geometry><mesh filename="finger.obj" scale="1 2 1"/>'
+        '</geometry></collision></link><link name="tcp"/></robot>'
+    )
+    required = required_collision_links(
+        {
+            "required_collision_links": ["arm", "pad"],
+            "gripper_calibrations": [{"pad_links": ["pad"]}],
+        }
+    )
+    assert required == ("arm", "pad")
+    report = validate_robot_collisions(source, required)
+    assert report["collision_count"] == 2
+    assert report["collision_links"] == ["arm", "pad"]
+    assert (
+        report["collision_mesh_sha256"][str(mesh)]
+        == hashlib.sha256(mesh.read_bytes()).hexdigest()
+    )
+    original = source.read_bytes()
+    mesh.write_text("v 0 0 0\nv 0.02 0 0\nv 0 0.01 0\nf 1 2 3\n")
+    changed = validate_robot_collisions(source, required)
+    assert changed["robot_geometry_sha256"] != report["robot_geometry_sha256"]
+    assert source.read_bytes() == original
+
+
+@pytest.mark.parametrize(
+    "collision, mesh_data, required, message",
+    [
+        ("", None, (), "no collision geometry"),
+        ("<collision/>", None, (), "one geometry shape"),
+        (
+            '<collision><geometry><box size="0 1 1"/></geometry></collision>',
+            None,
+            (),
+            "positive size",
+        ),
+        (
+            '<collision><origin xyz="nan 0 0"/><geometry><sphere radius="1"/></geometry></collision>',
+            None,
+            (),
+            "Invalid collision xyz",
+        ),
+        (
+            '<collision><geometry><box size="1 1 1"/></geometry></collision>',
+            None,
+            ("pad",),
+            "pad",
+        ),
+        (
+            '<collision><geometry><mesh filename="finger.obj"/></geometry></collision>',
+            None,
+            (),
+            "Missing collision mesh",
+        ),
+        (
+            '<collision><geometry><mesh filename="finger.obj"/></geometry></collision>',
+            "v 0 0 0\nv 0 0 0\nv 0 0 0\nf 1 2 3\n",
+            (),
+            "no usable triangles",
+        ),
+    ],
+)
+def test_physical_robot_preflight_rejects_unusable_geometry(
+    tmp_path, collision, mesh_data, required, message
+):
+    from embodichain.data_pipeline.real2sim.adaptation._robot_geometry import (
+        validate_robot_collisions,
+    )
+
+    source = tmp_path / "robot.urdf"
+    source.write_text(
+        f'<robot name="test"><link name="arm">{collision}</link>'
+        '<link name="pad"/><link name="tcp"/></robot>'
+    )
+    if mesh_data is not None:
+        (tmp_path / "finger.obj").write_text(mesh_data)
+    with pytest.raises((ValueError, FileNotFoundError), match=message):
+        validate_robot_collisions(source, required)
+
+
 def test_frame_mapping_and_metric_calibration_are_explicit():
     with pytest.raises(ValueError, match="frame IDs"):
         CameraObservation(Path("v"), Path("i"), np.array([0.0, 1.0]))

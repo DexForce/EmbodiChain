@@ -36,6 +36,13 @@ driver per gripper part. The [USD import contract](../simulation-system/simulati
 owns closed-loop constraints and backend support. Robot preview resolves local
 `source.file_path` USD and sensor URDF paths relative to the config file before
 World creation; inline sensor definitions and data IDs stay unchanged.
+The explicit `_replay_collisions.py` recipe under the AgiBot G1 model repairs the
+pinned observed-replay URDF using verified official collision sources. It keeps
+the prepared kinematics and calibration, checks local-frame agreement and emits
+separate provenance-bearing resources. This does not change the USD preset or
+implicitly convert visual-only robots during replay. See the
+[Real2Sim example](../../../examples/real2sim/README.md#agibot-prepared-input-collision-repair-1212)
+for package preparation and native-model qualification.
 
 Preset `_build_defaults()` assembles model defaults; base `RobotCfg.from_dict()`
 and `merge_robot_cfg` apply overrides. Do not route the base decoder back into
