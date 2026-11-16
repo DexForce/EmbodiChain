@@ -1,4 +1,4 @@
-integration_id: pour_water_dual_ur5_v1
+integration_id: pour_water_tianji_marvin_v1
 program_id: pour_water_with_right_arm
 requires:
   scene_contract: pour_water_scene_v1
@@ -8,11 +8,9 @@ scene_binding:
   registry_id: pour_water_tianji_marvin
   rigid_objects:
     - entity_id: cup
-      simulation_uid: cup
       dynamics: dynamic
       semantic_type: cup
     - entity_id: bottle
-      simulation_uid: bottle
       dynamics: dynamic
       semantic_type: bottle
       affordances:
@@ -35,23 +33,11 @@ profile:
       hand_interp_steps: 44
       grasp_settle_steps: 100
       fixed_object_to_eef:
-        - 0.0
-        - 0.0
-        - 1.0
-        # Insert the PGI pads around the bottle instead of pinching at their tips.
-        - 0.01
-        - 1.0
-        - 0.0
-        - 0.0
-        - 0.0
-        - 0.0
-        - 1.0
-        - 0.0
-        - -0.02
-        - 0.0
-        - 0.0
-        - 0.0
-        - 1.0
+        position: [-0.0175, 0.0, -0.02]
+        rotation_matrix:
+        - [0.0, 0.0, 1.0]
+        - [1.0, 0.0, 0.0]
+        - [0.0, 1.0, 0.0]
     simulation.move_held_object:
       kind: move_held_object
     simulation.pour:
@@ -69,21 +55,7 @@ runtime_services:
       target_id: cup_pour_pose
       reference_entity_id: cup
       relative_pose:
-        - 1.0
-        - 0.0
-        - 0.0
-        - 0.027645135849048517
-        - 0.0
-        - 1.0
-        - 0.0
-        - -0.053564902897726294
-        - 0.0
-        - 0.0
-        - 1.0
-        - 0.18
-        - 0.0
-        - 0.0
-        - 0.0
-        - 1.0
+        position: [0.027645135849048517, -0.053564902897726294, 0.18]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
     - kind: pour
       object_id: bottle

@@ -2,17 +2,16 @@ program_id: real2sim_carton_stocking
 instruction: Pick the carton and align its front with the marked support region.
 targets:
   above_worktop:
-    kind: cyclic_pose
-    values:
-    - position:
-      - 0.656938142745868
-      - 0.01285806378570287
-      - 0.1168918780165142
-      quaternion_xyzw:
-      - 0.0
-      - 0.0
-      - -0.3442393738635206
-      - 0.9388819166871047
+    kind: pose
+    position:
+    - 0.656938142745868
+    - 0.01285806378570287
+    - 0.1168918780165142
+    quaternion_xyzw:
+    - 0.0
+    - 0.0
+    - -0.3442393738635206
+    - 0.9388819166871047
 program:
 - segment: pick
   steps:
