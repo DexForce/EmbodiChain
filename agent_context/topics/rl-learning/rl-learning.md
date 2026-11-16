@@ -133,16 +133,14 @@ Configuration selects `actor.type: temporal` with `TemporalActorCfg` fields in
 `actor.network_cfg`, an ordinary MLP critic, and optional
 `auxiliary_tasks.<name>.type: contact_prediction` declarations. Temporal networks
 and history storage live in `policies/temporal.py`; objectives live in
-`policies/auxiliary.py`. `proprioceptive_actor_critic` remains the historical
-configuration/checkpoint adapter, preserving parameter paths, module identities
-and optimizer ordering without duplicating training or export logic.
-New composed entries record component contracts so shape-compatible history
-layouts and headless objective changes cannot silently resume as the same model.
-
-`architecture_version` preserves history ordering and normalizer semantics:
-`legacy_v1` accepts previous history followed by current; `official_v1` accepts
-current followed by history including current. Environment observation producers
-must match that layout. Equal dimensions do not establish checkpoint equivalence.
+`policies/auxiliary.py`. The temporal actor accepts only `official_v1`: current
+followed by chronological history including current, with the matching input
+normalizer. Environment observation producers use that same layout. There is no
+separate proprioceptive policy adapter or historical encoder/history branch.
+Component contracts record semantic settings, including parameterless objectives,
+so equal neural tensor shapes cannot silently change training semantics on resume.
+The checkpoint loader accepts only the current full schema and metadata; older
+schemas and incomplete historical metadata are rejected before model mutation.
 
 Named training fields travel with the observation that produced each action.
 PPO's optional auxiliary decoder loss recomputes the latent in each minibatch
@@ -152,9 +150,8 @@ export excludes critic and contact decoder; inference alignment does not
 qualify task learning or simulator throughput.
 
 Blind-assembly observation producers live in the manager observation package.
-Their `history_layout` and `proprioception_convention` must match the policy
-version. Official peg study/development profiles select `official_v1`; other
-profiles retain their declared legacy layout. Examples under
+All three task families use the current-first temporal input convention and
+encoder-derived joint/FK features. There are no per-task historical layout flags. Examples under
 `examples/learning/blind_assembly/` own actor export and native preview.
 
 ## Episode evaluation and saved resources

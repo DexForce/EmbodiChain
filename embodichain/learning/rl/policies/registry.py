@@ -28,7 +28,6 @@ import torch
 from .actor_critic import ActorCritic
 from .actor_only import ActorOnly
 from .policy import Policy
-from .proprioceptive_actor_critic import ProprioceptiveActorCritic
 from .auxiliary import ContactPrediction
 from .temporal import TemporalActor, TemporalObservationNormalizer
 from embodichain.learning.models import build_mlp_from_cfg
@@ -178,10 +177,7 @@ def build_policy(
             tasks[task_name] = ContactPrediction(
                 input_dim=dimensions[feature], **options
             )
-        use_export_normalizer = (
-            isinstance(actor, TemporalActor)
-            and actor.architecture_version == "official_v1"
-        )
+        use_export_normalizer = isinstance(actor, TemporalActor)
         return policy_cls(
             obs_dim=obs_dim,
             action_dim=action_dim,
@@ -282,7 +278,6 @@ def build_policy(
 # default registrations
 register_policy("actor_critic", ActorCritic)
 register_policy("actor_only", ActorOnly)
-register_policy("proprioceptive_actor_critic", ProprioceptiveActorCritic)
 
 __all__ = [
     "register_policy",

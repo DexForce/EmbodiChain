@@ -5278,19 +5278,6 @@ existing locomotion configuration name while implementations move into a package
 
 
    assembly_robot_reference
-embodichain.learning.rl.policies.proprioceptive_actor_critic
-------------------------------------------------------------
-
-Temporal encoder policy, selective observation-history storage and weighted training-only contact decoding. Actor export keeps the deployment input independent of privileged state.
-
-.. currentmodule:: embodichain.learning.rl.policies.proprioceptive_actor_critic
-
-.. autosummary::
-
-   ObservationHistory
-   ProprioceptiveActorCriticCfg
-   ProprioceptiveActorCritic
-
 embodichain.lab.gym.envs.managers.assembly
 ------------------------------------------
 

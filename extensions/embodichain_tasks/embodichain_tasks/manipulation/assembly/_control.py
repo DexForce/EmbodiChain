@@ -30,7 +30,7 @@ __all__ = ["AssemblyJointPositionAction"]
 class EncoderGravityCompensation:
     """Compute encoder-only feedforward from the prepared robot's URDF."""
 
-    def __init__(self, env: Any) -> None:
+    def __init__(self, env: Any, arm_part: str) -> None:
         self.env = env
         import xml.etree.ElementTree as ET
         import pytorch_kinematics as pk
@@ -43,7 +43,13 @@ class EncoderGravityCompensation:
             device=self.env.device,
         )
         self._gravity_arm_ids = torch.tensor(
-            [names.index(f"joint{i}") for i in range(1, 8)], device=self.env.device
+            [
+                names.index(self.env.robot.joint_names[index])
+                for index in self.env.robot.get_joint_ids(
+                    name=arm_part, remove_mimic=True
+                )
+            ],
+            device=self.env.device,
         )
         self._gravity_links = []
         for link in ET.fromstring(xml).findall("link"):
@@ -112,7 +118,7 @@ class EncoderGravityCompensation:
 class AssemblyJointPositionAction(RelativeJointPositionAction):
     """Own policy inputs, arm drive and held gripper command.
 
-    Preparation rejects additional terms that could write these resources.
+    The configuration selects this implementation and its arm control part.
     """
 
     def process_actions(self, actions: torch.Tensor) -> None:
@@ -123,20 +129,23 @@ class AssemblyJointPositionAction(RelativeJointPositionAction):
         """
         masked = actions.clone()
         masked[
-            self._env._elapsed_steps < int(getattr(self._env, "grasp_warmup_steps", 10))
+            self._env._elapsed_steps < self._env.assembly_state.cfg.grasp_warmup_steps
         ] = 0
         super().process_actions(masked)
 
     def apply_actions(self) -> None:
         """Apply encoder feedforward, held grasp and the processed arm target."""
         state = self._env.assembly_state
-        self._env.robot.set_qf(state.controller.torques(), name="arm")
+        self._env.robot.set_qf(state.controller.torques(), name=state.cfg.arm_part)
         self._env.robot.set_qpos(
             torch.full(
-                (self._env.num_envs, len(self._env.robot.get_joint_ids(name="eef"))),
+                (
+                    self._env.num_envs,
+                    len(self._env.robot.get_joint_ids(name=state.cfg.gripper_part)),
+                ),
                 state.scene._grasp_target_joint,
                 device=self._env.device,
             ),
-            name="eef",
+            name=state.cfg.gripper_part,
         )
         super().apply_actions()

@@ -35,11 +35,9 @@ __all__ = [
 class ObservationHistory:
     """Per-environment chronological history with owned observation snapshots.
 
-    The default output contains ``history_length`` previous frames followed by
-    the current frame. ``layout="current_history"`` instead emits the current
-    frame followed by ``history_length`` frames including that current frame,
-    matching the author's public browser-policy export. Call :meth:`append`
-    exactly once per control observation;
+    Output contains the current frame followed by ``history_length`` chronological
+    frames including current, matching the public browser-policy architecture.
+    Call :meth:`append` exactly once per control observation;
     repeated reads of :attr:`observation` never advance the history. Reset
     repeats the first observed state and zeros its previous-action features.
     Storage is FP32 and linear in environments, history length and frame size.
@@ -52,7 +50,6 @@ class ObservationHistory:
         history_length: int = 30,
         device: torch.device | str = "cpu",
         action_slice: tuple[int, int] | None = None,
-        layout: str = "previous_current",
     ) -> None:
         if num_envs <= 0 or frame_dim <= 0 or history_length < 0:
             raise ValueError(
@@ -66,11 +63,12 @@ class ObservationHistory:
         self.frame_dim = frame_dim
         self.history_length = history_length
         self.action_slice = action_slice
-        if layout not in {"previous_current", "current_history"}:
-            raise ValueError("Unknown proprioceptive history layout.")
-        self.layout = layout
         self._frames = torch.zeros(
-            num_envs, history_length + 1, frame_dim, device=device, dtype=torch.float32
+            num_envs,
+            max(1, history_length),
+            frame_dim,
+            device=device,
+            dtype=torch.float32,
         )
 
     @torch.no_grad()
@@ -114,7 +112,7 @@ class ObservationHistory:
     @property
     def observation(self) -> torch.Tensor:
         """Return an owned flattened snapshot in the selected layout."""
-        if self.layout == "current_history" and self.history_length:
+        if self.history_length:
             return torch.cat(
                 (self._frames[:, -1:], self._frames[:, -self.history_length :]),
                 dim=1,
@@ -126,9 +124,8 @@ class ObservationHistory:
 class TemporalActorCfg:
     """Temporal actor layout and network settings.
 
-    History acquisition stays with the environment. ``legacy_v1`` reads
-    previous frames followed by current; ``official_v1`` reads current followed
-    by history that also contains current. The version selects the encoder.
+    History acquisition stays with the environment. Inputs contain current
+    followed by chronological history including current (``official_v1``).
     """
 
     frame_dim: int = 33
@@ -136,7 +133,7 @@ class TemporalActorCfg:
     use_history: bool = True
     latent_dim: int = 32
     hidden_sizes: tuple[int, ...] = (256, 256, 128)
-    architecture_version: str = "legacy_v1"
+    architecture_version: str = "official_v1"
 
 
 class TemporalObservationNormalizer(EmpiricalNormalizer):
@@ -160,7 +157,7 @@ class TemporalObservationNormalizer(EmpiricalNormalizer):
         )
 
 
-class _ExportHistoryEncoder(nn.Module):
+class _TemporalEncoder(nn.Module):
     """Temporal encoder described by the author's public policy JSON.
 
     Each frame is projected before convolution. The oldest history frame is
@@ -201,12 +198,10 @@ class TemporalActor(nn.Module):
         action_dim: Number of policy action means.
     """
 
-    _official_encoder_type = _ExportHistoryEncoder
-
     def __init__(self, cfg: TemporalActorCfg | dict, action_dim: int) -> None:
         super().__init__()
         cfg = TemporalActorCfg(**cfg) if isinstance(cfg, dict) else cfg
-        if cfg.architecture_version not in {"legacy_v1", "official_v1"}:
+        if cfg.architecture_version != "official_v1":
             raise ValueError("Unknown temporal actor architecture_version.")
         if cfg.frame_dim <= 0 or cfg.history_length < 0:
             raise ValueError(
@@ -216,34 +211,17 @@ class TemporalActor(nn.Module):
         self.architecture_version = cfg.architecture_version
         self.frame_dim = cfg.frame_dim
         self.history_length = cfg.history_length
-        self.current_first = cfg.architecture_version == "official_v1"
         self.encoder: nn.Module | None = None
-        if self.history_length and cfg.use_history and self.current_first:
-            self.encoder = self._official_encoder_type(
+        if self.history_length and cfg.use_history:
+            self.encoder = _TemporalEncoder(
                 cfg.frame_dim, self.history_length, cfg.latent_dim
             )
-        elif self.history_length and cfg.use_history:
-            layers: list[nn.Module] = []
-            channels = self.frame_dim
-            length = self.history_length
-            for width, kernel, stride in ((64, 5, 2), (64, 3, 2), (32, 3, 1)):
-                length = (length - kernel) // stride + 1
-                if length <= 0:
-                    raise ValueError(
-                        "history_length is too short for the temporal encoder."
-                    )
-                layers.extend((nn.Conv1d(channels, width, kernel, stride), nn.ELU()))
-                channels = width
-            layers.extend((nn.Flatten(), nn.Linear(channels * length, cfg.latent_dim)))
-            self.encoder = nn.Sequential(*layers)
         latent_dim = cfg.latent_dim if self.encoder is not None else 0
         self.feature_dims = {
             "latent": cfg.latent_dim if self.encoder is not None else cfg.frame_dim,
             "current": cfg.frame_dim,
         }
-        self.head = nn.Sequential(
-            *MLP(self.frame_dim + latent_dim, action_dim, cfg.hidden_sizes).children()
-        )
+        self.head = MLP(self.frame_dim + latent_dim, action_dim, cfg.hidden_sizes)
 
     def features(self, obs: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Extract the decision vector and auxiliary latent without advancing history.
@@ -256,10 +234,10 @@ class TemporalActor(nn.Module):
             With history disabled, both are the current observation frame.
         """
         frames = obs.reshape(-1, self.history_length + 1, self.frame_dim)
-        current = frames[:, 0] if self.current_first else frames[:, -1]
+        current = frames[:, 0]
         if self.encoder is None:
             return current, current
-        history = frames[:, 1:] if self.current_first else frames[:, :-1]
+        history = frames[:, 1:]
         latent = self.encoder(history.transpose(1, 2))
         return torch.cat((current, latent), dim=-1), latent
 

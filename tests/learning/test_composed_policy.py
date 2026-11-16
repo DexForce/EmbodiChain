@@ -17,9 +17,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-import json
 import math
-from pathlib import Path
 
 import pytest
 import torch
@@ -33,88 +31,40 @@ from embodichain.learning.rl.policies import (
     AuxiliaryTask,
     ContactPrediction,
     ObservationHistory,
-    ProprioceptiveActorCriticCfg,
     build_policy,
 )
 from embodichain.learning.rl.utils import OptimizerCfg
 
 
-def _build_test_policy(block, *args, composed=False, **kwargs):
-    if composed:
-        block = deepcopy(block)
-        cfg = ProprioceptiveActorCriticCfg(**block.pop("cfg", {}))
-        block.update(
-            name="actor_critic",
-            actor={
-                "type": "temporal",
-                "network_cfg": {
-                    "frame_dim": cfg.frame_dim,
-                    "history_length": cfg.history_length,
-                    "use_history": cfg.use_history,
-                    "latent_dim": cfg.latent_dim,
-                    "hidden_sizes": cfg.actor_hidden_sizes,
-                    "architecture_version": cfg.architecture_version,
-                },
-            },
-            critic={
-                "type": "mlp",
-                "network_cfg": {"hidden_sizes": cfg.critic_hidden_sizes},
-            },
-        )
-        if cfg.contact_points:
-            block["auxiliary_tasks"] = {
-                "contact": {
-                    "type": "contact_prediction",
-                    "contact_points": cfg.contact_points,
-                    "contact_classes": cfg.contact_classes,
-                    "hidden_sizes": cfg.decoder_hidden_sizes,
-                    "class_weights": cfg.contact_class_weights,
-                    "observation_group": cfg.contact_observation_group,
-                }
-            }
-    return build_policy(block, *args, **kwargs)
-
-
-def test_config_retains_legacy_positional_arguments() -> None:
-    cfg = ProprioceptiveActorCriticCfg(33, 30)
-    assert (cfg.frame_dim, cfg.history_length, cfg.architecture_version) == (
-        33,
-        30,
-        "legacy_v1",
-    )
-
-
-def _policy(
-    contact_points: int = 2,
-    history_length: int = 30,
-    use_history: bool = True,
-    normalize: bool = False,
-    architecture_version: str = "legacy_v1",
-    composed: bool = False,
-):
-    return _build_test_policy(
-        {
-            "name": "proprioceptive_actor_critic",
-            "obs_groups": {"actor": ["proprioception"], "critic": ["privileged"]},
-            "actor_obs_normalization": normalize,
-            "critic_obs_normalization": normalize,
-            "cfg": {
-                "architecture_version": architecture_version,
+def _policy(contact_points=2, history_length=30, use_history=True, normalize=False):
+    block = {
+        "name": "actor_critic",
+        "obs_groups": {"actor": ["proprioception"], "critic": ["privileged"]},
+        "actor_obs_normalization": normalize,
+        "critic_obs_normalization": normalize,
+        "actor": {
+            "type": "temporal",
+            "network_cfg": {
                 "frame_dim": 3,
                 "history_length": history_length,
                 "use_history": use_history,
-                "contact_points": contact_points,
-                "contact_class_weights": [1.0, 3.0],
-                "actor_hidden_sizes": [8],
-                "critic_hidden_sizes": [8],
-                "decoder_hidden_sizes": [8],
+                "hidden_sizes": [8],
             },
         },
-        3 * (history_length + 1),
-        2,
-        torch.device("cpu"),
-        critic_obs_space=4,
-        composed=composed,
+        "critic": {"type": "mlp", "network_cfg": {"hidden_sizes": [8]}},
+    }
+    if contact_points:
+        block["auxiliary_tasks"] = {
+            "contact": {
+                "type": "contact_prediction",
+                "contact_points": contact_points,
+                "contact_classes": 2,
+                "class_weights": [1.0, 3.0],
+                "hidden_sizes": [8],
+            }
+        }
+    return build_policy(
+        block, 3 * (history_length + 1), 2, torch.device("cpu"), critic_obs_space=4
     )
 
 
@@ -140,19 +90,13 @@ def test_history_selective_reset_and_snapshot_ownership() -> None:
     torch.testing.assert_close(before[0], torch.tensor([1.0, 2.0, 0.0] * 3))
     torch.testing.assert_close(after[0], torch.tensor([[11.0, 12.0, 0.0]] * 3))
     torch.testing.assert_close(
-        after[1], torch.tensor([[3.0, 4.0, 0.0], [8.0, 9.0, 10.0], [14.0, 15.0, 16.0]])
+        after[1],
+        torch.tensor([[14.0, 15.0, 16.0], [8.0, 9.0, 10.0], [14.0, 15.0, 16.0]]),
     )
 
 
-@pytest.mark.parametrize("architecture_version", ["legacy_v1", "official_v1"])
-@pytest.mark.parametrize("composed", [False, True])
-def test_actor_does_not_read_privileged_values_and_export_matches(
-    architecture_version: str,
-    composed: bool,
-) -> None:
-    policy = _policy(
-        normalize=True, architecture_version=architecture_version, composed=composed
-    )
+def test_actor_does_not_read_privileged_values_and_export_matches() -> None:
+    policy = _policy(normalize=True)
     td = _batch(policy)
     policy.update_normalization(td)
     original = policy.get_action(td.clone(), deterministic=True)
@@ -166,21 +110,16 @@ def test_actor_does_not_read_privileged_values_and_export_matches(
     assert not any(
         "critic" in name or "decoder" in name for name in exported.state_dict()
     )
-    restored = _policy(
-        normalize=True, architecture_version=architecture_version, composed=composed
-    )
+    restored = _policy(normalize=True)
     restored.load_state_dict(deepcopy(policy.state_dict()))
     assert int(restored.actor_obs_normalizer.count) == 2
     torch.testing.assert_close(restored.export_actor()(td["obs"]), original["action"])
 
 
-@pytest.mark.parametrize("architecture_version", ["legacy_v1", "official_v1"])
-@pytest.mark.parametrize("composed", [False, True])
-def test_weighted_contact_loss_matches_independent_logsumexp_and_backpropagates(
-    architecture_version: str,
-    composed: bool,
-) -> None:
-    policy = _policy(architecture_version=architecture_version, composed=composed)
+def test_weighted_contact_loss_matches_independent_logsumexp_and_backpropagates() -> (
+    None
+):
+    policy = _policy()
     batch = _batch(policy)
     policy.get_action(batch)
     labels = torch.tensor([[0, 1], [1, 1]])
@@ -209,7 +148,7 @@ def test_weighted_contact_loss_matches_independent_logsumexp_and_backpropagates(
 
 
 def test_official_history_includes_current_and_resets_selected_rows() -> None:
-    history = ObservationHistory(2, 1, history_length=2, layout="current_history")
+    history = ObservationHistory(2, 1, history_length=2)
     history.reset(torch.tensor([[1.0], [10.0]]))
     history.append(torch.tensor([[2.0], [20.0]]))
     before = history.observation
@@ -224,7 +163,7 @@ def test_official_history_includes_current_and_resets_selected_rows() -> None:
 
 
 def test_official_normalizer_uses_variance_epsilon_clipping_and_finite_input() -> None:
-    policy = _policy(normalize=True, architecture_version="official_v1")
+    policy = _policy(normalize=True)
     normalizer = policy.actor_obs_normalizer
     with torch.no_grad():
         normalizer.variance.zero_()
@@ -235,8 +174,7 @@ def test_official_normalizer_uses_variance_epsilon_clipping_and_finite_input() -
     )
 
 
-@pytest.mark.parametrize("composed", [False, True])
-def test_official_network_matches_independent_browser_reference(composed) -> None:
+def test_official_network_matches_independent_browser_reference() -> None:
     """Fixed weights/inputs and expected outputs from author's PolicyNet JS.
 
     The controlled tensors use the published peg.json ordering; no author
@@ -245,22 +183,25 @@ def test_official_network_matches_independent_browser_reference(composed) -> Non
     (retrieved 2026-10-26). The browser reference uses scalar double accumulation
     with FP32 layer outputs, whereas this implementation uses native FP32 GEMMs.
     """
-    policy = _build_test_policy(
+    policy = build_policy(
         {
-            "name": "proprioceptive_actor_critic",
+            "name": "actor_critic",
             "obs_groups": {"actor": ["proprioception"], "critic": ["privileged"]},
             "actor_obs_normalization": True,
-            "cfg": {
-                "architecture_version": "official_v1",
-                "contact_points": 64,
-                "contact_classes": 3,
+            "actor": {"type": "temporal", "network_cfg": {}},
+            "critic": {"type": "mlp", "network_cfg": {"hidden_sizes": [256, 256, 128]}},
+            "auxiliary_tasks": {
+                "contact": {
+                    "type": "contact_prediction",
+                    "contact_points": 64,
+                    "contact_classes": 3,
+                }
             },
         },
         33 * 31,
         7,
         torch.device("cpu"),
         critic_obs_space=235,
-        composed=composed,
     )
     offset = 0
     with torch.no_grad():
@@ -351,11 +292,8 @@ class _LabelEnv:
         )
 
 
-@pytest.mark.parametrize("composed", [False, True])
-def test_labels_are_pre_action_aligned_across_rollouts_and_ppo_updates(
-    composed,
-) -> None:
-    policy = _policy(composed=composed)
+def test_labels_are_pre_action_aligned_across_rollouts_and_ppo_updates() -> None:
+    policy = _policy()
     env = _LabelEnv(policy.obs_dim)
     collector = SyncCollector(env, policy, env.device)
     buffer = RolloutBuffer(
@@ -416,15 +354,14 @@ def test_training_fields_cannot_silently_replace_derived_transition_data(
 
 
 @pytest.mark.parametrize(("history_length", "use_history"), [(0, True), (30, False)])
-@pytest.mark.parametrize("composed", [False, True])
 def test_no_history_no_decoder_ablation_has_current_only_actor(
-    history_length: int, use_history: bool, composed: bool
+    history_length: int,
+    use_history: bool,
 ) -> None:
     policy = _policy(
         contact_points=0,
         history_length=history_length,
         use_history=use_history,
-        composed=composed,
     )
     td = _batch(policy)
     policy.get_action(td)
@@ -449,9 +386,17 @@ def test_contact_labels_cannot_be_selected_as_actor_observations(
     with pytest.raises(ValueError, match="Contact labels"):
         build_policy(
             {
-                "name": "proprioceptive_actor_critic",
+                "name": "actor_critic",
                 "obs_groups": {"actor": [actor_group], "critic": ["privileged"]},
-                "cfg": {"frame_dim": 3, "contact_observation_group": label_group},
+                "actor": {"type": "temporal", "network_cfg": {"frame_dim": 3}},
+                "critic": {"type": "mlp", "network_cfg": {"hidden_sizes": [8]}},
+                "auxiliary_tasks": {
+                    "contact": {
+                        "type": "contact_prediction",
+                        "contact_points": 2,
+                        "observation_group": label_group,
+                    }
+                },
             },
             93,
             2,
@@ -568,7 +513,7 @@ def test_auxiliary_tasks_require_an_actor_feature_interface_and_isolated_labels(
             auxiliary_tasks={"contact": ContactPrediction(3, 2)},
         )
     with pytest.raises(ValueError, match="Contact labels"):
-        policy = _policy(composed=True)
+        policy = _policy()
         ActorCritic(
             policy.obs_dim,
             2,
@@ -584,23 +529,11 @@ def test_auxiliary_tasks_require_an_actor_feature_interface_and_isolated_labels(
         )
 
 
-@pytest.mark.parametrize("architecture_version", ["legacy_v1", "official_v1"])
-def test_legacy_checkpoint_layout_and_optimizer_continuation(
-    tmp_path, architecture_version
-):
-    """Use the frozen pre-refactor layout rather than today's class names as oracle."""
-    from embodichain.learning.rl.checkpoint import _metadata
+def test_composed_checkpoint_continues_optimizer_state(tmp_path):
     from embodichain.learning.rl.utils.trainer import Trainer
 
-    reference = json.loads(
-        (
-            Path(__file__).parents[1] / "fixtures/rl/proprioceptive_v1_layouts.json"
-        ).read_text()
-    )
-    expected = reference["versions"][architecture_version]
-
     def trainer(directory):
-        policy = _policy(normalize=True, architecture_version=architecture_version)
+        policy = _policy(normalize=True)
         env = _LabelEnv(policy.obs_dim)
         algorithm = PPO(
             PPOCfg(
@@ -622,48 +555,14 @@ def test_legacy_checkpoint_layout_and_optimizer_continuation(
             eval_freq=0,
             save_freq=0,
             checkpoint_dir=str(directory),
-            exp_name="legacy",
+            exp_name="composed",
             use_wandb=False,
         )
 
     original = trainer(tmp_path / "original")
-    metadata = _metadata(original)
-    for key in (
-        "policy",
-        "policy_attributes",
-        "modules",
-        "normalizers",
-        "optimizer_groups",
-    ):
-        assert metadata[key] == expected[key], key
-    assert [
-        [name, list(value.shape), str(value.dtype)]
-        for name, value in original.policy.state_dict().items()
-    ] == expected["state_layout"]
-    composed = _policy(
-        normalize=True, architecture_version=architecture_version, composed=True
-    )
-    composed.load_state_dict(original.policy.state_dict())
-    probe = _batch(original.policy)
-    torch.testing.assert_close(
-        composed.get_action(probe.clone(), deterministic=True)["action"],
-        original.policy.get_action(probe.clone(), deterministic=True)["action"],
-        rtol=0,
-        atol=0,
-    )
     original.train(6)
     fixed = original.collector.collect(3, original.buffer.start_rollout()).clone()
     path = original.save_checkpoint()
-    payload = torch.load(path, weights_only=True)
-    for key in (
-        "policy",
-        "policy_attributes",
-        "modules",
-        "normalizers",
-        "optimizer_groups",
-    ):
-        payload["metadata"][key] = expected[key]
-    torch.save(payload, path)
     original.load_checkpoint(path)
     expected_metrics = original.algorithm.update(fixed.clone())
     expected_state = deepcopy(original.policy.state_dict())
@@ -750,11 +649,10 @@ def test_custom_auxiliary_override_remains_supported_without_registered_tasks(
         PPO(PPOCfg(device="cpu", auxiliary_coef=1.0), policy(ActorCritic))
 
 
-@pytest.mark.parametrize("change", ["history_layout", "objective"])
-def test_component_checkpoint_contract_rejects_shape_preserving_changes(
-    tmp_path, change
+def test_component_checkpoint_contract_rejects_shape_preserving_objective_changes(
+    tmp_path,
 ):
-    """Neither layout changes nor headless loss settings can hide behind equal tensors."""
+    """Headless loss settings cannot hide behind equal neural tensors."""
     from embodichain.learning.rl.policies import TemporalActor, TemporalActorCfg
     from embodichain.learning.rl.utils.trainer import Trainer
 
@@ -783,19 +681,10 @@ def test_component_checkpoint_contract_rejects_shape_preserving_changes(
                 history_length=30,
                 use_history=False,
                 hidden_sizes=(8,),
-                architecture_version=(
-                    "official_v1"
-                    if changed and change == "history_layout"
-                    else "legacy_v1"
-                ),
             ),
             2,
         )
-        tasks = (
-            {"penalty": FeaturePenalty(2 if changed else 1)}
-            if change == "objective"
-            else {}
-        )
+        tasks = {"penalty": FeaturePenalty(2 if changed else 1)}
         policy = ActorCritic(
             93,
             2,
@@ -834,3 +723,12 @@ def test_component_checkpoint_contract_rejects_shape_preserving_changes(
         changed.load_checkpoint(path)
     for key, value in changed.policy.state_dict().items():
         torch.testing.assert_close(value, before[key], rtol=0, atol=0)
+
+
+def test_removed_policy_and_history_versions_are_rejected():
+    from embodichain.learning.rl.policies import TemporalActor, TemporalActorCfg
+
+    with pytest.raises(ValueError, match="not registered"):
+        build_policy({"name": "proprioceptive_actor_critic"}, 3, 2, torch.device("cpu"))
+    with pytest.raises(ValueError, match="architecture_version"):
+        TemporalActor(TemporalActorCfg(architecture_version="legacy_v1"), 2)

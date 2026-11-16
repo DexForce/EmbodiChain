@@ -96,7 +96,7 @@ def export_assembly_resources(
     frozen["robot"].pop("urdf_cfg", None)
     for solver in frozen["robot"].get("solver_cfg", {}).values():
         solver["urdf_path"] = prepared
-    frozen.setdefault("env", {}).setdefault("extensions", {})[
+    frozen.setdefault("env", {}).setdefault("extensions", {})["assembly"][
         "assembly_manifest"
     ] = f"./resources/assembly/{manifest_name}"
     return frozen

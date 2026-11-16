@@ -50,7 +50,7 @@ def reset_assembly(env: EmbodiedEnv, env_ids: torch.Tensor) -> None:
     n = len(ids)
     if n == 0:
         return
-    q = state.env.robot.get_qpos(name="arm")[ids]
+    q = state.env.robot.get_qpos(name=state.cfg.arm_part)[ids]
     tcp = (
         state._assembly_robot_base[None]
         @ state._assembly_chain.forward_kinematics(q).get_matrix()
@@ -72,7 +72,7 @@ def reset_assembly(env: EmbodiedEnv, env_ids: torch.Tensor) -> None:
         .expand(n, -1)
         .unsqueeze(-1)
     ).squeeze(-1)
-    grasp_jitter = float(getattr(state.env, "grasp_position_range", 0.0025))
+    grasp_jitter = state.cfg.grasp_position_range
     # Along-pad displacement is along z; lateral x does not change the
     # closing aperture. A y displacement would create an invalid initial
     # one-sided clamp rather than the paper's along-pad randomization.
@@ -84,13 +84,7 @@ def reset_assembly(env: EmbodiedEnv, env_ids: torch.Tensor) -> None:
         ).unsqueeze(-1)
     ).squeeze(-1)
     fixture = part.clone()
-    initial_offset = float(
-        getattr(
-            state.env,
-            "initial_position_range",
-            {"peg": 0.0125, "gear": 0.0075, "nut": 0.015}[state.scene.assembly_kind],
-        )
-    )
+    initial_offset = state.cfg.initial_position_range
     offset = (torch.rand((n, 3), device=state.env.device) - 0.5) * torch.tensor(
         [2 * initial_offset, 2 * initial_offset, 0.0], device=state.env.device
     )
@@ -109,10 +103,12 @@ def reset_assembly(env: EmbodiedEnv, env_ids: torch.Tensor) -> None:
     )
     if state.scene.assembly_kind == "gear":
         # Every fixture entity is transformed rigidly with the shaft.
-        anchor = state.env.sim.get_articulation("gear_a")
+        anchor = state.env.sim.get_articulation(state.scene._hinge_uid)
         source_shaft = np.asarray(state.scene._fixture_definition.position)
         source_anchor = next(
-            b for b in state.scene.assembly_asset.bodies if b.name == "gear_a"
+            b
+            for b in state.scene.assembly_asset.bodies
+            if b.name == state.scene._hinge_uid
         )
         local = torch.as_tensor(
             np.asarray(source_anchor.position) - source_shaft,
@@ -130,7 +126,11 @@ def reset_assembly(env: EmbodiedEnv, env_ids: torch.Tensor) -> None:
             target=False,
         )
     grip_ids, grip_values = _grasp_joint_reset(
-        state.env.robot, state.scene._grasp_reset_joint, n, state.env.device
+        state.env.robot,
+        state.cfg.gripper_part,
+        state.scene._grasp_reset_joint,
+        n,
+        state.env.device,
     )
     state.env.robot.set_qpos(
         grip_values,
@@ -140,11 +140,11 @@ def reset_assembly(env: EmbodiedEnv, env_ids: torch.Tensor) -> None:
     )
     state.env.robot.set_qpos(
         torch.full(
-            (n, len(state.env.robot.get_joint_ids(name="eef"))),
+            (n, len(state.env.robot.get_joint_ids(name=state.cfg.gripper_part))),
             state.scene._grasp_target_joint,
             device=state.env.device,
         ),
-        name="eef",
+        name=state.cfg.gripper_part,
         env_ids=ids,
     )
     state._assembly_reset_rows[ids] = True
@@ -171,15 +171,27 @@ def reset_assembly(env: EmbodiedEnv, env_ids: torch.Tensor) -> None:
 
 
 def assembly_milestone_reward(
-    env: EmbodiedEnv, obs: Any, action: torch.Tensor, info: dict[str, Any]
+    env: EmbodiedEnv,
+    obs: Any,
+    action: torch.Tensor,
+    info: dict[str, Any],
+    weights: list[float],
 ) -> torch.Tensor:
-    """Pay each capture/mesh/seat milestone once in the current episode."""
+    """Weight the newly reached milestones in this control transition.
+
+    Args:
+        env: Host containing the shared assembly measurement state.
+        obs: Current manager observations.
+        action: Policy action for this transition.
+        info: Current environment outcomes.
+        weights: Four finite capture/depth/success/reserved milestone weights.
+
+    Returns:
+        Batched reward; the state records each milestone once per episode.
+    """
     env.assembly_state.refresh_assembly_state()
-    weights = (
-        [1.0, 0.0, 1.0, 0.0]
-        if env.assembly_state.scene.assembly_kind == "peg"
-        else [1.0, 1.0, 1.0, 0.0]
-    )
+    if len(weights) != 4 or not np.isfinite(weights).all():
+        raise ValueError("Assembly milestone weights must contain four finite values.")
     return (
         env.assembly_state._assembly_new_milestones.float()
         * torch.tensor(weights, device=env.device)
@@ -187,10 +199,10 @@ def assembly_milestone_reward(
 
 
 def _grasp_joint_reset(
-    robot: Any, value: float, rows: int, device: torch.device
+    robot: Any, gripper_part: str, value: float, rows: int, device: torch.device
 ) -> tuple[list[int], torch.Tensor]:
     """Expand the EEF leaders through source mimic relations without name rules."""
-    values = {int(i): value for i in robot.get_joint_ids(name="eef")}
+    values = {int(i): value for i in robot.get_joint_ids(name=gripper_part)}
     relations = list(
         zip(
             robot.mimic_ids,
@@ -210,7 +222,7 @@ def _grasp_joint_reset(
 
 
 def assembly_success(env: EmbodiedEnv) -> ConditionResult:
-    """Advance once per new control state and measure physical success.
+    """Read physical success from the configured interval measurement snapshot.
 
     Args:
         env: Environment with startup-bound assembly state.
@@ -219,7 +231,7 @@ def assembly_success(env: EmbodiedEnv) -> ConditionResult:
         Physical success, validity and shared geometric diagnostics.
     """
     state = env.assembly_state
-    state.advance()
+    state.refresh_assembly_state()
     values = state._assembly_metrics
     metrics = {
         k: v for k, v in values.items() if k not in {"success", "fail", "relative_pose"}

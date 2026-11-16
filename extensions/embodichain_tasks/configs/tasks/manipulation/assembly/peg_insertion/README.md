@@ -11,6 +11,15 @@ workspace-wide and per-world geometry distribution. No success rate is implied. 
 embodichain train-rl --config extensions/embodichain_tasks/configs/tasks/manipulation/assembly/peg_insertion/agents/ppo.study.nominal.yaml
 ```
 
+The deployment's root `rl_task` owns success/failure conditions and its unique Gym
+ID. `env.*.yaml` explicitly selects `scene_preparation`, `resource_export`,
+`AssemblyJointPositionAction`, startup/interval/reset events, observations and
+weighted milestone rewards. `env.extensions.assembly` binds manifest entities,
+arm/gripper control groups and the action term, and configures contact sampling,
+grip guards, penetration limits and success duration. Preparation only expands
+assets/sensors; it never replaces configured managers. Historical import-owned
+IDs and flat extension fields are not accepted.
+
 For a smoke run, override trainer `num_envs: 1`, `iterations: 1`, `buffer_size: 8`,
 `enable_eval: false`. The full nominal template retains the intended batch budget
 so capacity failures are visible. Do not label a reduced batch as paper reproduction.

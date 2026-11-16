@@ -3,9 +3,13 @@
 The peg, gear and nut tasks use EmbodiChain's native managers and PPO.
 `ActorCritic` composes a temporal actor with optional contact supervision;
 the actor reads a proprioceptive history window and produces its own features.
-Privileged state and contact labels remain training-only inputs. Existing
-training recipes retain `proprioceptive_actor_critic` as a checkpoint-compatible
-construction entry; actor export supports both entries.
+Privileged state and contact labels remain training-only inputs. Current
+training recipes select `actor_critic`, `actor.type: temporal` and optional named
+contact supervision. Task deployments declare `rl_task`; physical components own
+explicit preparation, export, startup/interval/reset events and action selection.
+Entity bindings, sampling counts and measurement thresholds live in the validated
+`env.extensions.assembly` namespace. Old import-registered assembly environment
+IDs and flat extension fields are removed.
 
 A pinned checkpoint, frozen physical resources and native replay evidence are
 available through [the reproduction guide](REPRODUCING.md) and `model.json`.

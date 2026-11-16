@@ -375,7 +375,7 @@ topics:
     PPO, GRPO, APG, APGActorCritic, apg_actor_critic, SyncCollector, ScheduledDifferentiableEnvProtocol, DifferentiableRolloutSpec,
     complete rollout, full horizon, gradient accumulation, action adjoint, observation normalization,
     ActorCritic, AuxiliaryTask, ContactPrediction, TemporalActor, TemporalActorCfg,
-    ProprioceptiveActorCritic, temporal proprioception, composable actor, 可组合策略,
+    temporal proprioception, composable actor, 可组合策略,
     blind assembly, 本体感知装配]
   paths: [topics/rl-learning/rl-learning.md]
   source_of_truth:

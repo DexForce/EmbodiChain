@@ -55,6 +55,8 @@ if _source_root.parent.name == "extensions" and _source_config.is_file():
 register_manager_modules(
     [
         "embodichain.lab.gym.envs.managers.assembly",
+        "embodichain_tasks.manipulation.assembly._control",
+        "embodichain_tasks.manipulation.assembly._state",
         "embodichain_tasks.locomotion.managers.observations",
         "embodichain_tasks.locomotion.managers.rewards",
     ]

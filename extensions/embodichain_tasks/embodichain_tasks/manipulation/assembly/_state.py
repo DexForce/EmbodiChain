@@ -24,9 +24,10 @@ from embodichain.lab.gym.envs.managers.observations._assembly import (
     _assembly_kinematic_chain,
 )
 from .preparation import AssemblyScene
+from ._config import assembly_cfg
 from ._control import EncoderGravityCompensation
 
-__all__ = ["initialize_assembly"]
+__all__ = ["initialize_assembly", "update_assembly"]
 
 
 def _signed_polygon_distance(
@@ -74,7 +75,16 @@ class AssemblyState:
     def __init__(self, env: Any) -> None:
         self.env = env
         self._last_control_physics_step = env.sim.physics_step_index
-        self.scene = AssemblyScene(env.cfg, env.assembly_kind)
+        self.cfg = assembly_cfg(env.cfg.extensions)
+        self.scene = AssemblyScene(env.cfg)
+        self.arm_dof = len(
+            env.robot.get_joint_ids(name=self.cfg.arm_part, remove_mimic=True)
+        )
+        self.frame_dim = (
+            3 * self.arm_dof
+            + 9
+            + (6 if self.cfg.orientation_representation == "rotation6d" else 3)
+        )
         self._assembly_revision = 0
         self._assembly_physics_revision = 0
         self._assembly_state_revision = -1
@@ -85,38 +95,40 @@ class AssemblyState:
         self._assembly_pending_reset_ids = None
         self._assembly_frame_reset_ids = None
         self._assembly_chain = _assembly_kinematic_chain(
-            self.env.cfg.robot, self.env.device
+            self.env.cfg.robot, self.env.device, self.cfg.arm_part
         )
-        self._assembly_observation_convention = getattr(
-            self.env, "proprioception_convention", "legacy_v1"
-        )
-        if self._assembly_observation_convention not in {"legacy_v1", "official_v1"}:
-            raise ValueError("Unknown assembly proprioception_convention.")
-        if self._assembly_observation_convention == "official_v1":
-            limits = torch.as_tensor(
-                self.env.proprioceptive_joint_limits,
+        limits = (
+            self.env.robot.get_qpos_limits(name=self.cfg.arm_part)[0]
+            if self.cfg.proprioceptive_joint_limits is None
+            else torch.as_tensor(
+                self.cfg.proprioceptive_joint_limits,
                 dtype=torch.float32,
                 device=self.env.device,
             )
-            velocity = torch.as_tensor(
-                self.env.proprioceptive_velocity_scale,
+        )
+        velocity = (
+            self.env.robot.get_qvel_limits(name=self.cfg.arm_part)[0]
+            if self.cfg.proprioceptive_velocity_scale is None
+            else torch.as_tensor(
+                self.cfg.proprioceptive_velocity_scale,
                 dtype=torch.float32,
                 device=self.env.device,
             )
-            if (
-                limits.shape != (7, 2)
-                or velocity.shape != (7,)
-                or not torch.isfinite(limits).all()
-                or not torch.isfinite(velocity).all()
-                or not (limits[:, 0] < limits[:, 1]).all()
-                or not (velocity > 0).all()
-            ):
-                raise ValueError(
-                    "Assembly proprioception requires 7 finite joint scales."
-                )
-            self._assembly_q_center = limits.mean(-1)
-            self._assembly_q_half_range = (limits[:, 1] - limits[:, 0]) * 0.5
-            self._assembly_velocity_scale = velocity
+        )
+        if (
+            limits.shape != (self.arm_dof, 2)
+            or velocity.shape != (self.arm_dof,)
+            or not torch.isfinite(limits).all()
+            or not torch.isfinite(velocity).all()
+            or not (limits[:, 0] < limits[:, 1]).all()
+            or not (velocity > 0).all()
+        ):
+            raise ValueError(
+                "Assembly proprioception requires finite scales matching the selected arm joints."
+            )
+        self._assembly_q_center = limits.mean(-1)
+        self._assembly_q_half_range = (limits[:, 1] - limits[:, 0]) * 0.5
+        self._assembly_velocity_scale = velocity
         self._assembly_success_hold = torch.zeros(
             self.env.num_envs, dtype=torch.long, device=self.env.device
         )
@@ -137,7 +149,11 @@ class AssemblyState:
             (self.env.num_envs,), float("nan"), device=self.env.device
         )
         self._assembly_labels = torch.zeros(
-            (self.env.num_envs, 128 if self.scene.assembly_kind == "gear" else 64),
+            (
+                self.env.num_envs,
+                self.cfg.contact_points_per_ring
+                * (2 if self.cfg.kind == "gear" else 1),
+            ),
             dtype=torch.long,
             device=self.env.device,
         )
@@ -148,12 +164,12 @@ class AssemblyState:
         self._assembly_bottom_vertices = torch.as_tensor(
             self.scene._bottom_vertices, dtype=torch.float32, device=self.env.device
         )
-        self.controller = EncoderGravityCompensation(env)
+        self.controller = EncoderGravityCompensation(env, self.cfg.arm_part)
         self._assembly_robot_base = self.controller.robot_base
         self.scene.assembly_fidelity["gravity_compensation"] = (
             "URDF COM potential gradient from encoders, held at control frequency"
         )
-        grasp_sensor = self.env.get_sensor("grasp_contacts")
+        grasp_sensor = self.env.get_sensor(self.cfg.grasp_sensor)
         self._assembly_pad_actor_ids = grasp_sensor.get_actor_ids(
             self.env.robot.uid, self.scene._assembly_grasp_links
         )
@@ -164,28 +180,31 @@ class AssemblyState:
             "bilateral_grasp",
             self._assembly_pad_actor_ids,
             counterpart_ids=self._assembly_part_actor_ids[:, None],
-            force_threshold=0.05,
+            force_threshold=self.cfg.grasp_force_threshold,
         )
         # Both contact consumers belong to the physics-substep lifecycle.
         # Reset observations read cleared buffers until a solved step exists.
-        mating_sensor = self.env.get_sensor("assembly_contacts")
+        mating_sensor = self.env.get_sensor(self.cfg.mating_sensor)
         self._mating_history = mating_sensor.create_history(
             "mating_contacts",
             mating_sensor.get_actor_ids(self.scene._moving_uid),
         )
         self.scene.assembly_fidelity["grasp_guard"] = (
-            "bilateral part-pad contact in the control interval, at most 5 ms current air time, force threshold 0.05 N"
+            f"bilateral part-pad contact; max air time {self.cfg.grasp_max_air_time:g} s, "
+            f"force threshold {self.cfg.grasp_force_threshold:g} N"
         )
-        arm_ids = self.env.robot.get_joint_ids(name="arm", remove_mimic=True)
+        arm_ids = self.env.robot.get_joint_ids(
+            name=self.cfg.arm_part, remove_mimic=True
+        )
         self.env.robot.set_joint_drive(
             stiffness=torch.full(
-                (self.env.num_envs, 7),
-                float(getattr(self.env, "joint_stiffness", 40.0)),
+                (self.env.num_envs, self.arm_dof),
+                self.cfg.joint_stiffness,
                 device=self.env.device,
             ),
             damping=torch.full(
-                (self.env.num_envs, 7),
-                float(getattr(self.env, "joint_damping", 20.0)),
+                (self.env.num_envs, self.arm_dof),
+                self.cfg.joint_damping,
                 device=self.env.device,
             ),
             joint_ids=arm_ids,
@@ -201,43 +220,14 @@ class AssemblyState:
         self.refresh_assembly_state()
 
     def _contact_grasp(self) -> torch.Tensor:
-        sensor = self.env.get_sensor("grasp_contacts")
+        sensor = self.env.get_sensor(self.cfg.grasp_sensor)
         if sensor.dropped_contacts:
             raise RuntimeError(
                 "Grasp contact buffer overflow; increase the configured capacity."
             )
-        history = getattr(self, "_grasp_history", None)
-        if history is not None:
-            return history.found.all(dim=1) & (history.current_air_time <= 0.005).all(
-                dim=1
-            )
-        data = sensor.get_data()
-        if not hasattr(self, "_assembly_pad_actor_ids"):
-            self._assembly_pad_actor_ids = sensor.get_actor_ids(
-                self.env.robot.uid,
-                getattr(
-                    self,
-                    "_assembly_grasp_links",
-                    ["gripper_right_pad", "gripper_left_pad"],
-                ),
-            )
-            self._assembly_part_actor_ids = sensor.get_actor_ids(
-                self.scene._moving_uid
-            )[:, 0]
-        robot_ids = self._assembly_pad_actor_ids
-        part_ids = self._assembly_part_actor_ids
-        pairs = data["user_ids"]
-        valid = data["is_valid"] & (data["distance"] <= 0.0005)
-        touches = []
-        for side in range(2):
-            pad = robot_ids[:, side]
-            match = (
-                (pairs[:, :, 0] == pad[:, None]) & (pairs[:, :, 1] == part_ids[:, None])
-            ) | (
-                (pairs[:, :, 1] == pad[:, None]) & (pairs[:, :, 0] == part_ids[:, None])
-            )
-            touches.append((valid & match).any(dim=1))
-        return touches[0] & touches[1]
+        return self._grasp_history.found.all(dim=1) & (
+            self._grasp_history.current_air_time <= self.cfg.grasp_max_air_time
+        ).all(dim=1)
 
     def refresh_assembly_state(self) -> None:
         """Compute supervision and milestone transitions once per physical step."""
@@ -291,7 +281,7 @@ class AssemblyState:
         points = points @ relative[:, :3, :3].transpose(1, 2) + relative[:, None, :3, 3]
         radial = torch.linalg.vector_norm(relative[:, :2, 3], dim=-1)
         tilt = torch.acos(relative[:, 2, 2].clamp(-1, 1))
-        sensor = self.env.get_sensor("assembly_contacts")
+        sensor = self.env.get_sensor(self.cfg.mating_sensor)
         if sensor.dropped_contacts:
             raise RuntimeError(
                 "Assembly contact buffer overflow; increase the configured capacity."
@@ -304,9 +294,12 @@ class AssemblyState:
         ).amax(dim=1)
         grasped = select(self._contact_grasp())
         clearance = float(self.scene.assembly_asset.config.get("clearance", 0.0005))
-        penetration_ok = penetration <= max(0.0001, clearance * 0.5)
+        penetration_ok = penetration <= max(
+            self.cfg.penetration_tolerance,
+            clearance * self.cfg.penetration_clearance_fraction,
+        )
         elapsed = select(self.env._elapsed_steps)
-        warm = elapsed >= int(getattr(self.env, "grasp_warmup_steps", 10))
+        warm = elapsed >= self.cfg.grasp_warmup_steps
         yaw = torch.atan2(relative[:, 1, 0], relative[:, 0, 0])
         previous_yaw = select(self._assembly_previous_yaw)
         delta = torch.atan2(
@@ -336,11 +329,9 @@ class AssemblyState:
                 self._hole_polygon = torch.tensor(
                     outline, dtype=torch.float32, device=self.env.device
                 )
-            # Supervision samples 64 points; success checks every actual
+            # Supervision uses configured samples; success checks every actual
             # convex bottom vertex, so corners between samples cannot escape.
-            bottom = getattr(
-                self, "_assembly_bottom_vertices", self._assembly_edge_points
-            )
+            bottom = self._assembly_bottom_vertices
             bottom_points = (
                 bottom[None] @ relative[:, :3, :3].transpose(1, 2)
                 + relative[:, None, :3, 3]
@@ -353,7 +344,7 @@ class AssemblyState:
             edge_distance = signed_distance[:, : points.shape[1]]
             all_inside = (signed_distance[:, points.shape[1] :] <= 0).all(dim=-1)
             depth = self.scene._fixture_zmax - bottom_points[:, :, 2].amax(dim=1)
-            band = 0.001
+            band = self.cfg.contact_band
             height = points[:, :, 2] - self.scene._fixture_zmax
             near_surface = height.abs() <= band
             near_edge = edge_distance.abs() <= band
@@ -384,8 +375,17 @@ class AssemblyState:
             )
             capture = aligned & (depth > 0)
             bottom = points[:, :, 2].mean(dim=1)
-            success = capture & (bottom.abs() < 0.001) & (tilt < 0.05)
-            rim = torch.arange(64, device=self.env.device) * 2 * torch.pi / 64
+            success = (
+                capture
+                & (bottom.abs() < self.cfg.contact_band)
+                & (tilt < self.cfg.gear_tilt_tolerance)
+            )
+            rim = (
+                torch.arange(self.cfg.contact_points_per_ring, device=self.env.device)
+                * 2
+                * torch.pi
+                / self.cfg.contact_points_per_ring
+            )
             shaft_pts = torch.stack(
                 [
                     torch.cos(rim) * float(cfg["shaft_radius"]),
@@ -397,7 +397,7 @@ class AssemblyState:
             in_part = (shaft_pts[None] - relative[:, None, :3, 3]) @ relative[:, :3, :3]
             in_bore = torch.linalg.vector_norm(in_part[:, :, :2], dim=-1) < bore
             rim_labels = torch.where(
-                in_part[:, :, 2] < self.scene._moving_zmin - 0.001,
+                in_part[:, :, 2] < self.scene._moving_zmin - self.cfg.contact_band,
                 0,
                 torch.where(in_bore, 2, 1),
             )
@@ -415,9 +415,13 @@ class AssemblyState:
         else:
             cfg = self.scene.assembly_asset.config
             pitch = float(cfg["pitch"])
-            near_axis = radial < 0.001
+            near_axis = radial < self.cfg.nut_radial_tolerance
             advance = depth.clamp_min(0)
-            capture = near_axis & (advance > 0.29 * pitch) & (tilt < 0.15)
+            capture = (
+                near_axis
+                & (advance > self.cfg.nut_capture_pitch_fraction * pitch)
+                & (tilt < self.cfg.nut_tilt_tolerance)
+            )
             capture_angle = select(self._assembly_capture_angle)
             capture_depth = select(self._assembly_capture_depth)
             first_capture = capture & ~torch.isfinite(capture_angle) & update_rows
@@ -434,11 +438,17 @@ class AssemblyState:
             # explicit nominal tolerance, not an author calibration.
             success = (
                 capture
-                & (turned >= torch.pi / 2)
-                & (axial_progress >= pitch * 0.2)
-                & ((axial_progress - expected_progress).abs() <= pitch * 0.1)
+                & (turned >= self.cfg.nut_min_turn)
+                & (axial_progress >= pitch * self.cfg.nut_min_advance_fraction)
+                & (
+                    (axial_progress - expected_progress).abs()
+                    <= pitch * self.cfg.nut_advance_tolerance_fraction
+                )
             )
-            free = points[:, :, 2] > self.scene._fixture_zmax + 0.29 * pitch
+            free = (
+                points[:, :, 2]
+                > self.scene._fixture_zmax + self.cfg.nut_capture_pitch_fraction * pitch
+            )
             around = near_axis[:, None] & (points[:, :, 2] < self.scene._fixture_zmax)
             labels = torch.where(
                 free, 0, torch.where(capture[:, None], 3, torch.where(around, 2, 1))
@@ -459,12 +469,12 @@ class AssemblyState:
             self._assembly_success_hold = hold
         else:
             self._assembly_success_hold[ids] = hold
-        stable_success = hold >= 3
+        stable_success = hold >= self.cfg.success_hold_steps
         milestones = (
             torch.stack(
                 [
                     capture,
-                    capture & (depth > 0.001),
+                    capture & (depth > self.cfg.milestone_depth),
                     stable_success,
                     torch.zeros_like(success),
                 ],
@@ -481,9 +491,10 @@ class AssemblyState:
         else:
             self._assembly_new_milestones[ids] = new_milestones
             self._assembly_milestones[ids] = next_milestones
-        failure = (torch.linalg.vector_norm(relative[:, :3, 3], dim=-1) > 0.25) | (
-            ~grasped & (elapsed > 25)
-        )
+        failure = (
+            torch.linalg.vector_norm(relative[:, :3, 3], dim=-1)
+            > self.cfg.failure_distance
+        ) | (~grasped & (elapsed > self.cfg.grasp_failure_after_steps))
         metrics = {
             "radial_error": radial,
             "tilt": tilt,
@@ -518,3 +529,13 @@ def initialize_assembly(env: Any, env_ids: Any) -> None:
         env_ids: Startup selection supplied by EventManager; state covers all rows.
     """
     env.assembly_state = AssemblyState(env)
+
+
+def update_assembly(env: Any, env_ids: Any) -> None:
+    """Refresh shared measurements once after each configured control interval.
+
+    Args:
+        env: Host containing the startup-bound assembly state.
+        env_ids: Event selection; solved physics advances the shared batch.
+    """
+    env.assembly_state.advance()

@@ -45,6 +45,12 @@ historical profile rather than the current SDK installation.
 
 ## Download and replay
 
+Current assembly deployments use explicit configuration-owned registration,
+manager declarations and the nested `env.extensions.assembly` schema. They do
+not accept historical import-registered task IDs or flat-field run configs.
+Use the pinned historical source above for the unchanged archive replay; the
+fresh configuration-driven runs have separate checkpoint and evaluation evidence.
+
 The adjacent `model.json` pins the downloadable archive by immutable Git commit
 and SHA-256. Model binaries, frozen physical resources and raw evidence live
 in a separate artifact branch; they are not merged into the feature source.

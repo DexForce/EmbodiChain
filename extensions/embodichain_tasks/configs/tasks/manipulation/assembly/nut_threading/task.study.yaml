@@ -1,5 +1,14 @@
-id: BlindNutThreadingRL-v1
+id: BlindNutThreadingRL-Study-v1
 environment:
   component: env.study.yaml
 embodiment:
   component: ../../../../components/embodiments/flexiv_rizon4s_robotiq2f85.yaml
+rl_task:
+  success:
+    assembly:
+      func: assembly_success
+      params: {}
+  failure:
+    assembly:
+      func: assembly_failure
+      params: {}

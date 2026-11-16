@@ -40,8 +40,8 @@ __all__ = [
 class AssemblyProprioception(Functor):
     """Build per-environment proprioceptive history for a blind assembly actor.
 
-    The configured layout determines whether the current frame comes before or
-    after the history. A selective reset reinitializes only the requested rows.
+    Current comes first, followed by chronological history including current.
+    A selective reset reinitializes only the requested rows.
 
     Args:
         cfg: Functor configuration containing the history length and layout.
@@ -52,14 +52,13 @@ class AssemblyProprioception(Functor):
         super().__init__(cfg, env)
         from embodichain.learning.rl.policies import ObservationHistory
 
-        dimension = 36 if env.assembly_state.scene.assembly_kind == "nut" else 33
+        dimension = env.assembly_state.frame_dim
         self._history = ObservationHistory(
             env.num_envs,
             dimension,
             history_length=int(cfg.params.get("history_length", 30)),
             device=env.device,
-            action_slice=(dimension - 7, dimension),
-            layout=cfg.params.get("history_layout", "previous_current"),
+            action_slice=(dimension - env.assembly_state.arm_dof, dimension),
         )
         self._revision = -1
         self._needs_reset = True
@@ -82,7 +81,6 @@ class AssemblyProprioception(Functor):
         env: EmbodiedEnv,
         obs: Any,
         history_length: int = 30,
-        history_layout: str = "previous_current",
     ) -> torch.Tensor:
         """Return history with the current frame without duplicating reads.
 
@@ -90,7 +88,6 @@ class AssemblyProprioception(Functor):
             env: Assembly environment providing the current frame.
             obs: Existing observations, unused by this functor.
             history_length: Length also specified in the initialization config.
-            history_layout: Layout also specified in the initialization config.
 
         Returns:
             Batched proprioceptive history flattened per environment.
@@ -162,10 +159,12 @@ def assembly_contact_labels(env: EmbodiedEnv, obs: Any) -> torch.Tensor:
     return env.assembly_state._assembly_labels.clone()
 
 
-def _assembly_kinematic_chain(robot_cfg: Any, device: torch.device) -> Any:
+def _assembly_kinematic_chain(
+    robot_cfg: Any, device: torch.device, arm_part: str
+) -> Any:
     """Include the application's solver TCP in encoder-only FK and Jacobians."""
-    chain = robot_cfg.build_pk_serial_chain(device=torch.device("cpu"))["arm"]
-    tcp = np.asarray(robot_cfg.solver_cfg["arm"].tcp)
+    chain = robot_cfg.build_pk_serial_chain(device=torch.device("cpu"))[arm_part]
+    tcp = np.asarray(robot_cfg.solver_cfg[arm_part].tcp)
     if not np.array_equal(tcp, np.eye(4)):
         import pytorch_kinematics as pk
 
@@ -202,35 +201,30 @@ def _proprioceptive_frame(state) -> torch.Tensor:
         and pending is not None
         and 0 < len(pending) < state.env.num_envs
     )
-    q = state.env.robot.get_qpos(name="arm")
-    qvel = state.env.robot.get_qvel(name="arm")
+    q = state.env.robot.get_qpos(name=state.cfg.arm_part)
+    qvel = state.env.robot.get_qvel(name=state.cfg.arm_part)
     if partial:
         q, qvel = q[pending], qvel[pending]
     count = q.shape[0]
     jacobian, transform = state._assembly_chain.jacobian(q, ret_eef_pose=True)
-    official = state._assembly_observation_convention == "official_v1"
-    if official:
-        transform = state._assembly_robot_base @ transform
+    transform = state._assembly_robot_base @ transform
     position = transform[:, :3, 3]
     rotation = transform[:, :3, :3]
     orientation = (
         rotation[:, :, :2].transpose(1, 2).reshape(count, 6)
-        if state.scene.assembly_kind == "nut"
+        if state.cfg.orientation_representation == "rotation6d"
         else torch.stack(euler_xyz_from_quat(quat_from_matrix(rotation)), dim=-1)
     )
     twist = (jacobian @ qvel.unsqueeze(-1)).squeeze(-1)
-    if official:
-        base_rotation = state._assembly_robot_base[:3, :3]
-        linear = twist[:, :3] @ base_rotation.T
-        angular_world = twist[:, 3:] @ base_rotation.T
-        angular_local = (
-            rotation.transpose(1, 2) @ angular_world.unsqueeze(-1)
-        ).squeeze(-1)
-        twist = torch.cat([linear, angular_local], dim=-1)
-        q = (q - state._assembly_q_center) / state._assembly_q_half_range
-        qvel = qvel / state._assembly_velocity_scale
+    base_rotation = state._assembly_robot_base[:3, :3]
+    linear = twist[:, :3] @ base_rotation.T
+    angular_world = twist[:, 3:] @ base_rotation.T
+    angular_local = (rotation.transpose(1, 2) @ angular_world.unsqueeze(-1)).squeeze(-1)
+    twist = torch.cat([linear, angular_local], dim=-1)
+    q = (q - state._assembly_q_center) / state._assembly_q_half_range
+    qvel = qvel / state._assembly_velocity_scale
     previous = (
-        state.env.action_manager.get_term("arm_delta").raw_actions
+        state.env.action_manager.get_term(state.cfg.action_term).raw_actions
         if state.env.action_manager is not None
         else None
     )

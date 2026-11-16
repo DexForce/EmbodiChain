@@ -26,7 +26,11 @@ from scipy.spatial.transform import Rotation
 import pytest
 import torch
 
-from embodichain_tasks.manipulation.assembly._state import AssemblyState
+from embodichain_tasks.manipulation.assembly._state import (
+    AssemblyState,
+    update_assembly,
+)
+from embodichain_tasks.manipulation.assembly._config import AssemblyCfg, assembly_cfg
 from embodichain_tasks.manipulation.assembly.preparation import (
     AssemblyScene,
     prepare_assembly_scene,
@@ -40,27 +44,31 @@ from embodichain.lab.gym.utils.gym_utils import config_to_cfg, register_manager_
 from embodichain.utils.utility import load_config
 
 
+def _assembly_options(kind="peg") -> dict:
+    task = {"peg": "peg_insertion", "gear": "gear_meshing", "nut": "nut_threading"}[
+        kind
+    ]
+    return load_config(str(_CONFIG_ROOT / task / "env.study.nominal.yaml"))["env"][
+        "extensions"
+    ]["assembly"]
+
+
 def _state_fixture() -> AssemblyState:
     state = object.__new__(AssemblyState)
     state.env = SimpleNamespace(device=torch.device("cpu"), num_envs=1)
     state.scene = SimpleNamespace()
+    state.cfg = assembly_cfg({"assembly": _assembly_options()})
+    state.arm_dof = 7
+    state.frame_dim = 33
+    state._assembly_q_center = torch.zeros(7)
+    state._assembly_q_half_range = torch.ones(7)
+    state._assembly_velocity_scale = torch.ones(7)
+    state._assembly_robot_base = torch.eye(4)
     state.env.assembly_state = state
     return state
 
 
-@pytest.mark.parametrize(
-    "task",
-    ["BlindPegInsertionRL-v1", "BlindGearMeshingRL-v1", "BlindNutThreadingRL-v1"],
-)
-def test_assembly_registration_constructs_the_common_environment(task):
-    import embodichain_tasks
-    from embodichain.lab.gym.envs import EmbodiedEnv
-    from embodichain.lab.gym.utils.registration import get_env_spec
-
-    assert get_env_spec(task).cls is EmbodiedEnv
-
-
-def test_condition_advances_once_and_observation_reads_do_not_advance():
+def test_configured_interval_advances_once_and_condition_reads_do_not_advance():
     from embodichain.lab.gym.envs.managers.assembly import (
         assembly_success,
         assembly_failure,
@@ -69,6 +77,7 @@ def test_condition_advances_once_and_observation_reads_do_not_advance():
     state, _ = _analytic_mating_state()
     state._last_control_physics_step = 0
     state.env.sim.physics_step_index = 20
+    update_assembly(state.env, None)
     assembly_success(state.env)
     before = state._assembly_success_hold.clone()
     revision = state._assembly_physics_revision
@@ -78,6 +87,7 @@ def test_condition_advances_once_and_observation_reads_do_not_advance():
     assert state._assembly_physics_revision == revision
     torch.testing.assert_close(state._assembly_success_hold, before)
     state.env.sim.physics_step_index = 40
+    update_assembly(state.env, None)
     assembly_success(state.env)
     assert state._assembly_physics_revision == revision + 1
 
@@ -102,6 +112,7 @@ def test_assembly_action_preserves_warmup_history_and_encoder_relative_targets()
         _elapsed_steps=torch.tensor([0, 10]),
         grasp_warmup_steps=10,
         assembly_state=SimpleNamespace(
+            cfg=assembly_cfg({"assembly": _assembly_options()}),
             controller=SimpleNamespace(torques=lambda: torque),
             scene=SimpleNamespace(_grasp_target_joint=0.6),
         ),
@@ -147,7 +158,7 @@ def test_grasp_reset_uses_source_mimic_relations_without_joint_name_assumptions(
         mimic_multipliers=[-1.0, 2.0],
         mimic_offsets=[0.1, 0.0],
     )
-    indices, positions = _grasp_joint_reset(robot, 0.3, 2, torch.device("cpu"))
+    indices, positions = _grasp_joint_reset(robot, "eef", 0.3, 2, torch.device("cpu"))
     assert indices == [7, 8, 9]
     torch.testing.assert_close(
         positions, torch.tensor([[0.3, 0.6, -0.5]]).expand(2, -1)
@@ -184,7 +195,19 @@ def test_nominal_task_uses_production_component_loader(
     monkeypatch.setattr(module, "get_data_path", lambda path: str(urdf))
     register_manager_modules(["embodichain.lab.gym.envs.managers.assembly"])
     path = _CONFIG_ROOT / task / f"task.{profile}.nominal.yaml"
-    cfg = config_to_cfg(load_config(str(path)), source_path=path)
+    declaration = load_config(str(path))
+    cfg = config_to_cfg(declaration, source_path=path)
+    from embodichain.lab.gym.utils.registration import get_env_spec
+    from embodichain.lab.gym.envs import EmbodiedEnv
+    from embodichain_tasks.manipulation.assembly._control import (
+        AssemblyJointPositionAction,
+    )
+
+    assert get_env_spec(declaration["id"]).cls is EmbodiedEnv
+    assert cfg.actions.arm_delta.func is AssemblyJointPositionAction
+    assert cfg.events.initialize_assembly.mode == "startup"
+    assert cfg.events.update_assembly.interval_step == 1
+    assert cfg.rl_task.success["assembly"].func.__name__ == "assembly_success"
     from embodichain.lab.gym.envs.managers.observations import (
         AssemblyProprioception,
         assembly_contact_labels,
@@ -197,7 +220,7 @@ def test_nominal_task_uses_production_component_loader(
     assert cfg.sim_cfg.physics_dt == pytest.approx(0.001)
     assert cfg.sim_steps_per_control == 20
     assert cfg.control_parts == ["arm"]
-    assert cfg.extensions["gripper_model"] == "parallel_jaw"
+    assert cfg.extensions["assembly"]["gripper_model"] == "parallel_jaw"
     assert len(cfg.robot.control_parts["eef"]) == 2
     gains = cfg.robot.joint_drive_props.stiffness
     assert gains["joint1"] == 289.0
@@ -206,12 +229,12 @@ def test_nominal_task_uses_production_component_loader(
         cfg.robot.control_parts["arm"] + cfg.robot.control_parts["eef"]
     )
     assert cfg.actions.arm_delta.params["part_name"] == "arm"
-    assert cfg.extensions["require_heterogeneous_assets"] is False
+    assert cfg.extensions["assembly"]["require_heterogeneous_assets"] is False
     agent = load_config(
         str(_CONFIG_ROOT / task / "agents" / f"ppo.{profile}.nominal.yaml")
     )
     assert agent["policy"]["obs_groups"]["actor"] == ["proprioception"]
-    assert agent["policy"]["cfg"]["contact_classes"] == (
+    assert agent["policy"]["auxiliary_tasks"]["contact"]["contact_classes"] == (
         4 if task == "nut_threading" else 3
     )
 
@@ -252,7 +275,6 @@ def test_official_proprioception_uses_world_linear_and_tcp_angular_velocity() ->
     env.env.num_envs = 1
     env.scene.assembly_kind = "peg"
     env._assembly_revision = 0
-    env._assembly_observation_convention = "official_v1"
     q = torch.arange(1.0, 8.0).unsqueeze(0)
     env.env.robot = SimpleNamespace(
         get_qpos=lambda **kwargs: q, get_qvel=lambda **kwargs: q
@@ -295,9 +317,9 @@ def test_partial_reset_recomputes_only_selected_proprioceptive_rows(kind: str) -
     env = _state_fixture()
     env.env.num_envs = 2
     env.scene.assembly_kind = kind
+    env.cfg = assembly_cfg({"assembly": _assembly_options(kind)})
     env._assembly_revision = 0
     env._assembly_physics_revision = 0
-    env._assembly_observation_convention = "legacy_v1"
     q = torch.zeros((2, 7))
     env.env.robot = SimpleNamespace(
         get_qpos=lambda **kwargs: q, get_qvel=lambda **kwargs: torch.zeros_like(q)
@@ -324,36 +346,30 @@ def test_partial_reset_recomputes_only_selected_proprioceptive_rows(kind: str) -
     assert after[1, 0].item() == pytest.approx(0.5)
 
 
-def test_bilateral_grasp_requires_the_part_on_both_pads() -> None:
-    env = _state_fixture()
-    env.env.robot = SimpleNamespace(uid="robot")
-    env.scene._moving_uid = "part"
-    data = {
-        "user_ids": torch.tensor([[[1, 3], [3, 2]], [[1, 3], [1, 2]]]),
-        "distance": torch.zeros((2, 2)),
-        "is_valid": torch.ones((2, 2), dtype=torch.bool),
-    }
-    sensor = SimpleNamespace(
-        dropped_contacts=0,
-        get_data=lambda: data,
-        get_actor_ids=lambda uid, links=None: (
-            torch.tensor([[1, 2], [1, 2]])
-            if uid == "robot"
-            else torch.tensor([[3], [3]])
-        ),
+def test_bilateral_grasp_requires_both_pads_and_respects_configured_air_time() -> None:
+    state = _state_fixture()
+    state.env.get_sensor = lambda name: SimpleNamespace(dropped_contacts=0)
+    state._grasp_history = SimpleNamespace(
+        found=torch.tensor([[True, True], [True, False], [True, True]]),
+        current_air_time=torch.tensor([[0.0, 0.0], [0.0, 0.0], [0.0, 0.006]]),
     )
-    env.env.get_sensor = lambda name: sensor
-    assert env._contact_grasp().tolist() == [True, False]
+    assert state._contact_grasp().tolist() == [True, False, False]
+    state.cfg.grasp_max_air_time = 0.007
+    assert state._contact_grasp().tolist() == [True, False, True]
 
 
 def test_formal_geometry_gate_precedes_world_creation() -> None:
-    cfg = SimpleNamespace(extensions={"require_heterogeneous_assets": True})
+    cfg = SimpleNamespace(
+        extensions={
+            "assembly": dict(_assembly_options(), require_heterogeneous_assets=True)
+        }
+    )
     with pytest.raises(RuntimeError, match="per-arena"):
-        prepare_assembly_scene(cfg, "peg")
+        prepare_assembly_scene(cfg)
 
 
 @pytest.mark.parametrize("field", ["enable_sensor", "rl_task"])
-def test_assembly_rejects_missing_contacts_or_competing_conditions_before_generation(
+def test_assembly_requires_contacts_and_explicit_conditions_before_generation(
     monkeypatch, field
 ):
     from embodichain.lab.gym.envs import EmbodiedEnvCfg
@@ -361,11 +377,12 @@ def test_assembly_rejects_missing_contacts_or_competing_conditions_before_genera
     from embodichain_tasks.manipulation.assembly import preparation
 
     cfg = EmbodiedEnvCfg()
-    setattr(cfg, field, False if field == "enable_sensor" else RLTaskCfg())
+    cfg.extensions = {"assembly": _assembly_options()}
+    setattr(cfg, field, False if field == "enable_sensor" else None)
     generate = Mock(side_effect=AssertionError("must fail before generation"))
     monkeypatch.setattr(preparation, "build_task_assembly", generate)
     with pytest.raises(ValueError, match="require|owns"):
-        prepare_assembly_scene(cfg, "peg")
+        prepare_assembly_scene(cfg)
     generate.assert_not_called()
 
 
@@ -396,7 +413,8 @@ def test_assembly_sensor_capacity_defaults_and_development_override(
     from embodichain.lab.sim.cfg import NewtonPhysicsCfg
 
     monkeypatch.setattr(AssemblyAsset, "load", lambda manifest: asset)
-    options = {"assembly_manifest": str(tmp_path / "asset.json")}
+    options = dict(_assembly_options(), assembly_manifest=str(tmp_path / "asset.json"))
+    options["robot_entity_cfg"] = {"uid": "robot"}
     if capacities is not None:
         options.update(
             assembly_contact_capacity=capacities[0],
@@ -404,7 +422,7 @@ def test_assembly_sensor_capacity_defaults_and_development_override(
         )
     cfg = SimpleNamespace(
         seed=0,
-        extensions=options,
+        extensions={"assembly": options},
         sensor=[],
         rigid_object=[],
         articulation=[],
@@ -413,7 +431,7 @@ def test_assembly_sensor_capacity_defaults_and_development_override(
             uid="robot", fpath="robot.urdf", _pk_urdf_path="robot.urdf"
         ),
     )
-    scene = AssemblyScene(cfg, "peg")
+    scene = AssemblyScene(cfg)
     expected = (2048, 128) if capacities is None else capacities
     assert tuple(sensor.max_contacts_per_env for sensor in scene.sensors) == expected
 
@@ -430,9 +448,11 @@ def test_assembly_sensor_capacity_defaults_and_development_override(
 def test_invalid_assembly_sensor_capacity_precedes_preparation(
     name: str, capacity: object
 ) -> None:
-    cfg = SimpleNamespace(extensions={name: capacity})
+    cfg = SimpleNamespace(
+        extensions={"assembly": dict(_assembly_options(), **{name: capacity})}
+    )
     with pytest.raises(ValueError, match=name):
-        AssemblyScene(cfg, "peg")
+        AssemblyScene(cfg)
 
 
 def _analytic_mating_state(
@@ -440,6 +460,7 @@ def _analytic_mating_state(
 ) -> tuple[AssemblyState, torch.Tensor]:
     env = _state_fixture()
     env.scene.assembly_kind = kind
+    env.cfg = assembly_cfg({"assembly": _assembly_options(kind)})
     env.env.num_envs = 1
     env.scene._moving_uid, env.scene._fixture_uid = "peg", "plate"
     part = torch.eye(4).unsqueeze(0)
@@ -459,6 +480,7 @@ def _analytic_mating_state(
     env._assembly_edge_points = torch.tensor(
         [[-0.004, -0.004, 0], [0.004, -0.004, 0], [0.004, 0.004, 0], [-0.004, 0.004, 0]]
     )
+    env._assembly_bottom_vertices = env._assembly_edge_points.clone()
     env.scene._fixture_zmax = 0.0
     env.scene._moving_zmin = 0.0
     env.scene.assembly_asset = SimpleNamespace(
@@ -673,8 +695,9 @@ def test_nut_rotation_at_fixed_capture_depth_is_not_threading() -> None:
 
 
 @pytest.mark.parametrize("base_pitch", [0.0, 0.4])
+@pytest.mark.parametrize("dof", [4, 7])
 def test_encoder_gravity_feedforward_matches_mujoco_bias(
-    tmp_path: Path, base_pitch: float
+    tmp_path: Path, base_pitch: float, dof: int
 ) -> None:
     mujoco = pytest.importorskip("mujoco")
     pytest.importorskip("pytorch_kinematics")
@@ -690,9 +713,9 @@ def test_encoder_gravity_feedforward_matches_mujoco_bias(
         world, "body", name="base", quat=" ".join(map(str, quaternion))
     )
     ET.SubElement(body, "geom", type="box", size=".02 .02 .02")
-    for i in range(1, 8):
+    for i in range(1, dof + 1):
         body = ET.SubElement(body, "body", name=f"link{i}", pos="0 0 .1")
-        ET.SubElement(body, "joint", name=f"joint{i}", axis="0 1 0", range="-170 170")
+        ET.SubElement(body, "joint", name=f"axis_{i}", axis="0 1 0", range="-170 170")
         ET.SubElement(
             body, "geom", type="box", size=".01 .01 .05", pos="0 0 .05", mass="1"
         )
@@ -701,7 +724,7 @@ def test_encoder_gravity_feedforward_matches_mujoco_bias(
     _append_model(urdf, reference, tmp_path)
     path = tmp_path / "gravity.urdf"
     path.write_text(ET.tostring(urdf, encoding="unicode"))
-    q = torch.tensor([[0.2, -0.1, 0.3, -0.2, 0.1, 0.4, -0.3]])
+    q = torch.tensor([[0.2, -0.1, 0.3, -0.2, 0.1, 0.4, -0.3][:dof]])
     env = _state_fixture()
     env.env.num_envs = 1
     env.env.sim = SimpleNamespace(device=torch.device("cpu"))
@@ -716,15 +739,17 @@ def test_encoder_gravity_feedforward_matches_mujoco_bias(
         )
     )
     env.env.robot = SimpleNamespace(
-        joint_names=[f"joint{i}" for i in range(1, 8)], get_qpos=lambda: q
+        joint_names=[f"axis_{i}" for i in range(1, dof + 1)],
+        get_qpos=lambda: q,
+        get_joint_ids=lambda **kwargs: list(reversed(range(dof))),
     )
     env.scene.assembly_fidelity = {}
-    controller = EncoderGravityCompensation(env.env)
+    controller = EncoderGravityCompensation(env.env, "manipulator")
     actual = controller.torques().numpy()[0]
     data = mujoco.MjData(reference)
     data.qpos[:] = q.numpy()[0]
     mujoco.mj_forward(reference, data)
-    np.testing.assert_allclose(actual, data.qfrc_bias, atol=2e-5, rtol=2e-5)
+    np.testing.assert_allclose(actual, data.qfrc_bias[::-1], atol=2e-5, rtol=2e-5)
 
 
 def test_manager_history_selective_reset_does_not_repeat_other_rows(
@@ -748,6 +773,8 @@ def test_manager_history_selective_reset_does_not_repeat_other_rows(
 
     env.assembly_state = SimpleNamespace(
         scene=SimpleNamespace(assembly_kind="peg"),
+        frame_dim=33,
+        arm_dof=7,
         _assembly_physics_revision=0,
         _assembly_reset_rows=torch.ones(2, dtype=torch.bool),
         refresh_assembly_state=lambda: None,
@@ -765,7 +792,7 @@ def test_manager_history_selective_reset_does_not_repeat_other_rows(
     after = history(env, {})
     assert torch.equal(before[1], after[1])
     assert after.reshape(2, 31, 33)[0, :, 0].tolist() == [5.0] * 31
-    assert before.reshape(2, 31, 33)[0, -1, 0].item() == 3.0
+    assert before.reshape(2, 31, 33)[0, 0, 0].item() == 3.0
 
 
 def test_legacy_assembly_observation_imports_remain_available() -> None:
@@ -815,7 +842,7 @@ def test_checkpoint_task_resources_relocate_without_generator(
             "robot": {
                 "class_type": "FlexivRizon4S",
             },
-            "env": {"extensions": {}},
+            "env": {"extensions": {"assembly": _assembly_options()}},
         },
         directory,
     )
@@ -829,7 +856,7 @@ def test_checkpoint_task_resources_relocate_without_generator(
     path.write_text(yaml.safe_dump(frozen))
     cfg = config_to_cfg(load_config(str(path)), source_path=path)
     assert cfg.robot.fpath == str(target / "resources" / "robot" / "robot.urdf")
-    asset = AssemblyAsset.load(cfg.extensions["assembly_manifest"])
+    asset = AssemblyAsset.load(cfg.extensions["assembly"]["assembly_manifest"])
     assert asset.content_hash == env.scene.assembly_asset.content_hash
     assert (
         target / "resources/robot/licenses/robotiq_2f85.LICENSE"
@@ -940,7 +967,7 @@ def test_default_asset_composition_keeps_materials_joint_names_and_arm_tcp(
     assert len(root.findall("./link/collision")) == 2
     assert len(root.findall("./joint/mimic")) == 5
     assert cfg.control_parts["eef"] == ["finger_joint"]
-    chain = _assembly_kinematic_chain(cfg, torch.device("cpu"))
+    chain = _assembly_kinematic_chain(cfg, torch.device("cpu"), "arm")
     assert chain.get_joint_parameter_names() == [f"joint{i}" for i in range(1, 8)]
     pose = chain.forward_kinematics(torch.zeros(1, 7)).get_matrix()[0]
     torch.testing.assert_close(pose[:3, 3], torch.tensor([0.0, 0.0, 0.845]))
@@ -960,7 +987,7 @@ def test_default_asset_composition_keeps_materials_joint_names_and_arm_tcp(
     assert cfg.fpath == cfg.solver_cfg["arm"].urdf_path
     assert tuple(cfg.root_props.newton_mimic_solref) == (0.002, 1.0)
     env_cfg = config_to_cfg(config, source_path=path)
-    assert env_cfg.extensions["grasp_link_names"] == [
+    assert env_cfg.extensions["assembly"]["grasp_link_names"] == [
         "right_inner_finger",
         "left_inner_finger",
     ]
@@ -982,11 +1009,13 @@ def test_default_asset_composition_keeps_materials_joint_names_and_arm_tcp(
 
 def test_exact_robot_dynamics_gate_belongs_to_task_environment(tmp_path: Path) -> None:
     cfg = SimpleNamespace(
-        extensions={"require_exact_robot_dynamics": True},
+        extensions={
+            "assembly": dict(_assembly_options(), require_exact_robot_dynamics=True)
+        },
         robot=SimpleNamespace(_pk_urdf_path=str(tmp_path / "robot.urdf")),
     )
     with pytest.raises(ValueError, match="qualified robot dynamics"):
-        prepare_assembly_scene(cfg, "peg")
+        prepare_assembly_scene(cfg)
 
 
 def test_peg_task_floor_is_plate_attached_and_preserves_free_part() -> None:
@@ -1063,3 +1092,97 @@ def test_elevated_peg_task_seats_on_local_floor_not_global_ground() -> None:
     np.testing.assert_allclose(world_bottom[:, 2], expected_floor_height, atol=5e-5)
     floor_id = model.geom("bottom").id
     assert any(floor_id in contact.geom for contact in data.contact[: data.ncon])
+
+
+def test_preparation_preserves_explicit_managers_and_custom_conditions(
+    monkeypatch, tmp_path
+):
+    from embodichain_tasks.manipulation.assembly import preparation
+    from embodichain.lab.gym.envs import EmbodiedEnvCfg
+    from embodichain.lab.gym.envs.managers.cfg import (
+        ActionTermCfg,
+        EventCfg,
+        RLTaskCfg,
+        ConditionCfg,
+    )
+    from embodichain.lab.gym.envs.managers.actions import RelativeJointPositionAction
+    from embodichain.lab.gym.envs.managers.conditions import object_below_height
+
+    cfg = EmbodiedEnvCfg()
+    options = _assembly_options()
+    options.update(arm_part="manipulator", gripper_part="hand", action_term="command")
+    cfg.extensions = {"assembly": options}
+    cfg.robot = SimpleNamespace(
+        control_parts={"manipulator": ["axis_a"], "hand": ["finger"]}
+    )
+    cfg.actions = {
+        "command": ActionTermCfg(
+            func=RelativeJointPositionAction,
+            params={"part_name": "manipulator", "scale": 0.1},
+        )
+    }
+    cfg.events = {
+        "explicit_startup": EventCfg(func=lambda env, env_ids: None, mode="startup")
+    }
+    cfg.rl_task = RLTaskCfg(failure={"custom": ConditionCfg(func=object_below_height)})
+    cfg.sensor = []
+    original = (cfg.actions, cfg.events, cfg.rl_task)
+    monkeypatch.setattr(
+        preparation,
+        "AssemblyScene",
+        lambda config, materialize: SimpleNamespace(sensors=[]),
+    )
+    result = prepare_assembly_scene(cfg)
+    assert (result.actions, result.events, result.rl_task) == original
+    assert result.actions["command"].func is RelativeJointPositionAction
+    assert result.rl_task.failure["custom"].func is object_below_height
+
+
+def test_proprioception_respects_configured_arm_and_action_names_with_four_joints():
+    state = _state_fixture()
+    state.cfg.arm_part, state.cfg.action_term = "manipulator", "command"
+    state._assembly_revision = 0
+    q = torch.tensor([[0.1, 0.2, 0.3, 0.4]])
+    state._assembly_q_center = torch.zeros(4)
+    state._assembly_q_half_range = torch.ones(4)
+    state._assembly_velocity_scale = torch.ones(4)
+    seen = []
+
+    def positions(name):
+        seen.append(name)
+        return q
+
+    state.env.robot = SimpleNamespace(get_qpos=positions, get_qvel=positions)
+    state._assembly_chain = SimpleNamespace(
+        jacobian=lambda values, ret_eef_pose: (
+            torch.zeros(1, 6, 4),
+            torch.eye(4).unsqueeze(0),
+        )
+    )
+    state.env.action_manager = SimpleNamespace(
+        get_term=lambda name: (
+            seen.append(name),
+            SimpleNamespace(raw_actions=torch.ones(1, 4)),
+        )[1]
+    )
+    actual = _proprioceptive_frame(state)
+    assert actual.shape == (1, 24)
+    torch.testing.assert_close(actual[:, :8], q.repeat(1, 2))
+    torch.testing.assert_close(actual[:, -4:], torch.ones(1, 4))
+    assert seen == ["manipulator", "manipulator", "command"]
+
+
+def test_configured_milestone_weights_and_hold_duration_are_effective():
+    from embodichain.lab.gym.envs.managers.assembly import assembly_milestone_reward
+
+    state, _ = _analytic_mating_state()
+    state.cfg.success_hold_steps = 2
+    for revision in range(2):
+        state._assembly_revision = state._assembly_physics_revision = revision
+        _task_state(state)
+        assert state._assembly_metrics["success"].item() is (revision == 1)
+    state._assembly_new_milestones[:] = torch.tensor([[True, False, True, False]])
+    actual = assembly_milestone_reward(
+        state.env, {}, torch.zeros(1, 7), {}, weights=[2.0, 7.0, 5.0, 11.0]
+    )
+    torch.testing.assert_close(actual, torch.tensor([7.0]))
