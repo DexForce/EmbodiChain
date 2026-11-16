@@ -101,6 +101,7 @@ from embodichain.lab.sim.sensors import (
     ContactSensor,
 )
 from embodichain.lab.sim.sensors.attachment import resolve_parent_nodes
+from embodichain.lab.sim.sensors._camera_group_pool import _CameraGroupPool
 from embodichain.lab.sim.cfg import (
     CableObjectCfg,
     RenderCfg,
@@ -456,6 +457,8 @@ class SimulationManagerCfg:
 
     def __post_init__(self) -> None:
         """Validate physics and apply visualization-dependent defaults."""
+        if not isinstance(self.enable_ground_plane, bool):
+            raise TypeError("enable_ground_plane must be a boolean.")
         if self.startup_summary not in ("compact", "full", "off"):
             raise ValueError("startup_summary must be 'compact', 'full', or 'off'.")
         validate_physics_cfg(self.physics_cfg)
@@ -796,6 +799,7 @@ class SimulationManager:
         self._robots: Dict[str, Robot] = dict()
 
         self._sensors: Dict[str, BaseSensor] = dict()
+        self._camera_group_pool = _CameraGroupPool(sim_config.num_envs)
         self._lights: Dict[str, Light] = dict()
 
         self._spawn_scene = SpawnScene(
@@ -828,7 +832,8 @@ class SimulationManager:
         if self.has_native_renderer:
             self._init_sim_resources()
             self.set_default_background()
-        self._declare_spawn_default_plane()
+        if sim_config.enable_ground_plane:
+            self._declare_spawn_default_plane()
         if self.has_native_renderer:
             self.set_default_global_lighting()
 
@@ -2189,16 +2194,26 @@ class SimulationManager:
         Note: This interface is only valid when Ray Tracing rendering backend is enabled.
         """
 
+        group_ids = list(dict.fromkeys(group_ids))
         if group_ids:
             self._ensure_render_state()
         elif self.is_window_opened:
             self._ensure_render_state(wait=False)
         if group_ids:
-            cameras = [
-                sensor
-                for sensor in self._sensors.values()
-                if isinstance(sensor, Camera) and sensor.group_id in group_ids
-            ]
+            requested = set(group_ids)
+            cameras = []
+            for sensor in self._sensors.values():
+                if not isinstance(sensor, Camera):
+                    continue
+                owned = set(sensor.group_ids)
+                if not requested.intersection(owned):
+                    continue
+                if not owned.issubset(requested):
+                    raise ValueError(
+                        f"Camera {sensor.uid!r} requires all of its group IDs "
+                        "for a complete render."
+                    )
+                cameras.append(sensor)
             for sensor in cameras:
                 sensor._capture_metadata = None
                 sensor._pending_capture_metadata = None
@@ -2218,6 +2233,13 @@ class SimulationManager:
                 for sensor in cameras:
                     sensor._snapshot_render_metadata()
         self._log_scene_summary()
+
+    def _plan_camera_groups(self, configs: Sequence[SensorCfg]) -> None:
+        """Reserve startup camera slots before the first sensor is created."""
+        if self.sim_config.render_cfg.gaussian.enabled:
+            # Gaussian capture status is owned by one camera group and camera.
+            return
+        self._camera_group_pool.plan(configs)
 
     def _invalidate_gaussian_captures(self, group_id: int | None = None) -> None:
         """Discard capture identities before replacement or after failed writes."""
@@ -3034,6 +3056,9 @@ class SimulationManager:
         validated at ``prepare()``;
         native creation failures do not promise rollback.
 
+        Standard AssetRevision ZIPs are validated by the SDK and extracted
+        into Spawn-owned files kept until scene teardown. Returned facade
+        sources address the resolved USD; the caller's recipe is unchanged.
         Gaussian USD references retain the single-Arena, Default-physics and
         Hybrid-renderer requirements; use explicit GaussianSplatCfg visuals
         for replicated Arenas. NoRender omits Gaussian render resources.
@@ -3068,6 +3093,13 @@ class SimulationManager:
             usd=usd,
             asset_cfgs=asset_cfgs,
         )
+        recipe.validate_import()
+        if recipe.source.file_path.lower().endswith(".zip"):
+            from .spawn._usd_scene import _open_usd_scene_source
+
+            recipe = self._spawn_scene._usd_source_files.enter_context(
+                _open_usd_scene_source(recipe)
+            )
         plan = _compile_usd_import(self, recipe)
         plan.source.materials = self._spawn_scene._resolve_materials(
             plan.source.materials
@@ -4995,7 +5027,7 @@ class SimulationManager:
         scene = self._spawn_scene
         if uid not in scene:
             return False
-        if uid == "default_plane":
+        if uid == "default_plane" and self.sim_config.enable_ground_plane:
             raise ValueError("The Spawn-owned default plane cannot be removed.")
 
         scene._require_removable(uid)

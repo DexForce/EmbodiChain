@@ -1185,6 +1185,64 @@ def test_runner_narrows_native_resource_nodes_and_preserves_original_options(
     )
 
 
+@pytest.mark.parametrize("fail_chunk", [None, 1])
+def test_resource_lane_restarts_native_process_between_modules(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fail_chunk: int | None
+) -> None:
+    """Chunking preserves the discovered selection and stops on first failure."""
+    nodes = [
+        "tests/a.py::test_one",
+        "tests/a.py::test_two",
+        "tests/b.py::test_one",
+        "tests/c.py::test_one",
+        "tests/c.py::test_two",
+    ]
+    chunks: list[list[str]] = []
+    monkeypatch.setattr(run_test_plan, "_GPU_NODES_PER_PROCESS", 2)
+
+    def run(command: list[str], **kwargs: object) -> SimpleNamespace:
+        collected = next(
+            (arg for arg in command if arg.startswith("--ci-collect-manifest=")), None
+        )
+        if collected is not None:
+            Path(collected.split("=", 1)[1]).write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "files": ["tests/a.py", "tests/b.py", "tests/c.py"],
+                        "nodeids": nodes,
+                        "markers": {node: ["gpu"] for node in nodes},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            return SimpleNamespace(returncode=0)
+        expected = next(
+            arg for arg in command if arg.startswith("--ci-expected-collection=")
+        )
+        recorded = json.loads(Path(expected.split("=", 1)[1]).read_text())
+        selected = command[5 : command.index("-m", 3)]
+        assert selected == recorded["nodeids"]
+        assert recorded["files"] == list(
+            dict.fromkeys(node.split("::", 1)[0] for node in selected)
+        )
+        assert recorded["markers"] == {node: ["gpu"] for node in selected}
+        chunks.append(selected)
+        return SimpleNamespace(returncode=int(len(chunks) - 1 == fail_chunk))
+
+    monkeypatch.setattr(run_test_plan.subprocess, "run", run)
+    plan = {"version": 1, "mode": "full", "lanes": {"gpu": ["tests"]}}
+    assert run_test_plan.run_plan(
+        plan,
+        root=tmp_path,
+        lanes=["gpu"],
+        no_finalize_resource_lanes=True,
+        freeze_native_imports=True,
+    ) == (0 if fail_chunk is None else 1)
+    expected = [nodes[:2], nodes[2:3], nodes[3:]]
+    assert chunks == expected[: 2 if fail_chunk is not None else 3]
+
+
 def test_import_freezing_requires_owned_native_process(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="requires no_finalize_resource_lanes"):
         run_test_plan.run_plan(

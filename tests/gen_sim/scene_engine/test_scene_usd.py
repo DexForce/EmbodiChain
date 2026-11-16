@@ -206,3 +206,67 @@ def test_scalar_material_export_keeps_legacy_base_color_getter():
     material = _export_material_without_texture(native, stage, Sdf.Path("/World"))
     shader = material.ComputeSurfaceSource()[0]
     np.testing.assert_allclose(shader.GetInput("diffuseColor").Get(), (0.1, 0.2, 0.3))
+
+
+def test_scene_usd_authors_one_root_and_explicit_physics_units(tmp_path: Path) -> None:
+    from pxr import UsdPhysics
+    from embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd import (
+        _author_usd_entity_metadata,
+    )
+    from embodichain.gen_sim.scene_engine.pipeline.utils.usd_scene import UsdSceneIndex
+
+    path = tmp_path / "scene.usda"
+    stage = Usd.Stage.CreateNew(str(path))
+    root = UsdGeom.Xform.Define(stage, "/DexsimRoot").GetPrim()
+    stage.SetDefaultPrim(root)
+    body = UsdGeom.Xform.Define(stage, "/DexsimRoot/arena_0/native_box").GetPrim()
+    UsdPhysics.RigidBodyAPI.Apply(body)
+    UsdPhysics.MassAPI.Apply(body).CreateMassAttr(0.25)
+    stage.GetRootLayer().Save()
+    sim = SimpleNamespace(
+        sim_config=SimpleNamespace(
+            physics_cfg=SimpleNamespace(gravity=[0.0, 0.0, -3.7])
+        ),
+        get_rigid_object=lambda uid: SimpleNamespace(
+            _entities=[SimpleNamespace(get_name=lambda: "native_box")]
+        ),
+    )
+    _author_usd_entity_metadata(
+        scene_usd_path=path,
+        scene_config={"rigid_object": [{"uid": "box", "body_type": "dynamic"}]},
+        sim=sim,
+    )
+
+    stage = Usd.Stage.Open(str(path))
+    assert [str(p.GetPath()) for p in stage.GetPseudoRoot().GetChildren()] == ["/World"]
+    assert str(stage.GetDefaultPrim().GetPath()) == "/World"
+    assert stage.GetMetadata("upAxis") == "Z"
+    assert stage.GetMetadata("metersPerUnit") == 1.0
+    assert stage.GetMetadata("kilogramsPerUnit") == 1.0
+    physics = UsdPhysics.Scene(stage.GetPrimAtPath("/World/PhysicsScene"))
+    assert tuple(physics.GetGravityDirectionAttr().Get()) == (0.0, 0.0, -1.0)
+    assert physics.GetGravityMagnitudeAttr().Get() == pytest.approx(3.7)
+    index = UsdSceneIndex.load(path, require_schema=True)
+    assert index.get("box").prim_path == "/World/arena_0/native_box"
+    assert index.get("box").body_type == "dynamic"
+
+
+def test_opaque_material_binding_requires_an_unambiguous_source(tmp_path: Path) -> None:
+    from embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd import (
+        _usd_materials_by_gltf_index,
+    )
+
+    stage, material = _textured_triangle()
+    path = tmp_path / "model.gltf"
+    path.write_text('{"materials": [{}, {}]}')
+    root = stage.GetPrimAtPath("/World")
+    assert (
+        _usd_materials_by_gltf_index(stage=stage, object_prim=root, runtime_asset=path)
+        == {}
+    )
+
+    path.write_text('{"materials": [{}]}')
+    bindings = _usd_materials_by_gltf_index(
+        stage=stage, object_prim=root, runtime_asset=path
+    )
+    assert bindings[0].GetPath() == material.GetPath()
