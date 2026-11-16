@@ -111,7 +111,10 @@ deformables. `SimulationManager.add_cable_object()` lowers through
 and binds the same facade in place during `prepare()`. `add_usd(UsdImportCfg)`
 also returns a `CableObject` per imported cable under its source resource key,
 with the same UID lookup, segment state and reset as a procedural declaration.
-The parsed `CableDesc` remains the source of cable physics and visuals.
+Cable geometry, placement and visuals come from the parsed `CableDesc`.
+A sparse `asset_cfgs` entry keyed by the simulation curve prim can override
+the UID, `fixed_segments`, `collision_filter_span` and individual `attrs` physics and
+contact fields before declaration. Omitted fields retain the parsed values.
 Cable declarations require DexUni on CUDA with gradient mode disabled.
 With this backend, an arena containing a cable cannot also contain fluid,
 cloth or soft-body particles: cable episode reset does not support those

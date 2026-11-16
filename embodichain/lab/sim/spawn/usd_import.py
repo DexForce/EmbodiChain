@@ -19,8 +19,9 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Mapping
 from copy import deepcopy
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field, fields, replace
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -59,10 +60,17 @@ from embodichain.lab.sim.objects import (
 )
 from embodichain.lab.sim.sensors import Camera, CameraCfg, StereoCamera, StereoCameraCfg
 from embodichain.lab.sim.sensors.registry import _resolve_sensor_factory
-from .descriptors import _pose_from_cfg, configure_articulation_desc
+from .descriptors import (
+    _cable_contact_spec,
+    _compile_newton_collision,
+    _pose_from_cfg,
+    _required_uid,
+    configure_articulation_desc,
+)
 from .usd import (
     _configure_articulation_usd,
     _configure_rigid_usd,
+    _overlay_optional_properties,
     _parse_usd_source,
     _source_pose,
     _set_resolved_usd_pose,
@@ -94,6 +102,67 @@ class _UsdImportPlan:
 def _source_path(descriptor: Any) -> str:
     usd = getattr(descriptor, "usd", None)
     return usd.prim_path if usd is not None and usd.prim_path else descriptor.name
+
+
+def _usd_cable_cfg(
+    descriptor: CableDesc, overrides: Mapping[str, Any] | None
+) -> CableObjectCfg:
+    """Apply sparse cable properties before declaring the descriptor and its facade."""
+    if overrides is None:
+        overrides = {}
+    if not isinstance(overrides, Mapping):
+        raise TypeError("USD cable overrides must be a sparse mapping.")
+    unknown = overrides.keys() - {
+        "uid",
+        "attrs",
+        "fixed_segments",
+        "collision_filter_span",
+    }
+    if unknown:
+        raise ValueError(f"Unknown USD cable override fields: {sorted(unknown)}.")
+    attrs = overrides.get("attrs", {})
+    if not isinstance(attrs, Mapping):
+        raise TypeError("USD cable attrs must be a sparse mapping.")
+    parsed_physics = {
+        item.name: getattr(descriptor.physics, item.name)
+        for item in fields(descriptor.physics)
+    }
+    physics_cfg = CablePhysicsCfg(**{**parsed_physics, **attrs})
+    if overrides:
+        if "uid" in overrides:
+            descriptor.name = _required_uid(overrides["uid"], "Cable object")
+        # Preserve the difference between an omitted coefficient and an explicit zero/None.
+        descriptor.physics = replace(
+            descriptor.physics,
+            **{key: attrs[key] for key in attrs.keys() & parsed_physics.keys()},
+        )
+        contact = _cable_contact_spec(physics_cfg)
+        descriptor.collision = _overlay_optional_properties(
+            descriptor.collision,
+            _compile_newton_collision(contact, newton_solver_type="dexuni"),
+        )
+        if contact.collision_enabled is not None:
+            descriptor.enable_collision = contact.collision_enabled
+        for name in ("fixed_segments", "collision_filter_span"):
+            if name in overrides:
+                setattr(descriptor, name, overrides[name])
+        # Revalidate indices, attachments and thickness against the source
+        # geometry before publishing any part of this freshly parsed scene.
+        descriptor.__post_init__()
+
+    frames = descriptor.segment_quaternions
+    return CableObjectCfg(
+        uid=descriptor.name,
+        points=descriptor.points,
+        radius=descriptor.radius,
+        init_local_pose=descriptor.pose,
+        segment_quaternions=None if frames is None else frames[:, [1, 2, 3, 0]],
+        closed=descriptor.closed,
+        fixed_segments=descriptor.fixed_segments,
+        attrs=physics_cfg,
+        collision_filter_span=descriptor.collision_filter_span,
+        render_mode=descriptor.render_mode,
+    )
 
 
 def _compile_usd_import(
@@ -170,7 +239,12 @@ def _compile_usd_import(
             if item.usd is not None and item.usd.prim_path
             else item.name
         )
-        for item in (*source.mesh_objects, *source.articulations, *source.particle_sets)
+        for item in (
+            *source.mesh_objects,
+            *source.articulations,
+            *source.particle_sets,
+            *source.cables,
+        )
     }
     overlap = robot_cfgs.keys() & asset_cfgs.keys()
     missing = (robot_cfgs.keys() | asset_cfgs.keys()) - source_paths
@@ -258,6 +332,21 @@ def _compile_usd_import(
             and descriptor.physics is None
             and not descriptor.collisions
         )
+        if isinstance(descriptor, CableDesc):
+            if root_pose is not None:
+                descriptor.pose = root_pose @ descriptor.pose
+            cfg = _usd_cable_cfg(descriptor, configured)
+            if descriptor.name in occupied:
+                raise ValueError(f"USD asset UID already exists: {descriptor.name!r}.")
+            occupied.add(descriptor.name)
+            renamed[original_name] = descriptor.name
+            facade = (
+                None if manager is None else CableObject(cfg, device=manager.device)
+            )
+            declarations.append(
+                (resource_keys[id(descriptor)], "cable_object", descriptor, facade)
+            )
+            continue
         if configured is not None and not isinstance(
             descriptor, (MeshObjectDesc, ArticulationDesc, SoftBodyDesc, ClothDesc)
         ):
@@ -390,39 +479,6 @@ def _compile_usd_import(
             cfg.body_type = None
             cfg.body_scale = None
             pose_mode = "preserve"
-        elif isinstance(descriptor, CableDesc):
-            if original_name in occupied:
-                raise ValueError(f"USD asset UID already exists: {original_name!r}.")
-            occupied.add(original_name)
-            if root_pose is not None:
-                descriptor.pose = root_pose @ descriptor.pose
-            # Keep the parsed descriptor as the source of physics and rendering.
-            # The facade config exposes the resolved segment and placement data.
-            frames = descriptor.segment_quaternions
-            cfg = CableObjectCfg(
-                uid=original_name,
-                points=descriptor.points,
-                radius=descriptor.radius,
-                init_local_pose=descriptor.pose,
-                segment_quaternions=None if frames is None else frames[:, [1, 2, 3, 0]],
-                closed=descriptor.closed,
-                fixed_segments=descriptor.fixed_segments,
-                attrs=CablePhysicsCfg(
-                    **{
-                        item.name: getattr(descriptor.physics, item.name)
-                        for item in fields(descriptor.physics)
-                    }
-                ),
-                collision_filter_span=descriptor.collision_filter_span,
-                render_mode=descriptor.render_mode,
-            )
-            facade = (
-                None if manager is None else CableObject(cfg, device=manager.device)
-            )
-            declarations.append(
-                (resource_keys[id(descriptor)], "cable_object", descriptor, facade)
-            )
-            continue
         else:
             if descriptor.name in occupied:
                 raise ValueError(f"USD asset UID already exists: {descriptor.name!r}.")

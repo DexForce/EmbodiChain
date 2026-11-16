@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -27,6 +28,9 @@ import torch
 from pxr import Sdf, Usd, UsdGeom, UsdPhysics
 
 from dexsim.spawn import (
+    CableDesc,
+    CablePhysicsDesc,
+    NewtonCollisionDesc,
     MeshObjectDesc,
     ConstraintDesc,
     RigidBodyPhysicsDesc,
@@ -929,6 +933,70 @@ def test_curve_prim_resources_keep_all_uids_and_stable_source_keys(
             assert cable.is_declared and cable.data is None
         with pytest.raises(TypeError):
             result.resource_source_paths[expected_keys[0]] = "/Other"
+
+
+def test_usd_cable_sparse_overrides_preserve_source_geometry_and_material(monkeypatch):
+    import dexsim.kit.usd
+
+    source = _source()
+    key = "/World/Wire"
+    points = np.array([[0, 0, 1], [0.2, 0, 1], [0.55, 0, 1]], dtype=np.float32)
+    source.cables.append(
+        CableDesc(
+            name="wire",
+            points=points,
+            radius=0.015,
+            usd=UsdSourceDesc(prim_path=key),
+            physics=CablePhysicsDesc(density=321, twist_stiffness=7, bend_damping=2),
+            collision=NewtonCollisionDesc(mu=0.77),
+        )
+    )
+    monkeypatch.setattr(dexsim.kit.usd, "parse_usd", lambda *a, **k: deepcopy(source))
+    manager = _manager()
+    manager.device = torch.device("cuda")
+    manager.physics = SimpleNamespace(
+        name="newton", solver_type="dexuni", supports_cables=True
+    )
+    manager.sim_config.physics_cfg = SimpleNamespace(requires_grad=False)
+    recipe = UsdImportCfg(
+        name="scene",
+        source=UsdSourceCfg(file_path="scene.usda"),
+        asset_cfgs={key: {"fixed_segments": [2]}},
+    )
+    with pytest.raises(ValueError, match="fixed_segments"):
+        manager.add_usd(recipe)
+    manager._spawn_scene.builder.add_scene.assert_not_called()
+
+    recipe.asset_cfgs[key] = {
+        "uid": "cable",
+        "fixed_segments": [0],
+        "collision_filter_span": 2,
+        "attrs": {
+            "stretch_stiffness": 1e5,
+            "bend_damping": 0,
+            "collision_props": {"contact_offset": 0.01, "rest_offset": 0.0},
+            "material_props": {"backend": "newton", "ke": 10000, "kd": 0.1},
+        },
+    }
+    imported = manager.add_usd(recipe)
+    native = manager._spawn_scene.builder.add_scene.call_args.args[0].cables[0]
+    assert native.name == imported.resource_uids[key] == "cable"
+    facade = manager.get_cable_object("cable")
+    assert facade is imported[key]
+    np.testing.assert_array_equal(native.points, points)
+    assert native.radius == pytest.approx(0.015)
+    assert native.fixed_segments == facade.cfg.fixed_segments == (0,)
+    assert native.collision_filter_span == facade.cfg.collision_filter_span == 2
+    for physics in (native.physics, facade.cfg.attrs):
+        assert physics.stretch_stiffness == 1e5
+        assert physics.bend_damping == 0
+        assert physics.density == 321
+        assert physics.twist_stiffness == 7
+    assert native.collision.mu == 0.77
+    assert native.collision.margin == 0
+    assert native.collision.gap == 0.01
+    assert native.collision.ke == 10000
+    assert native.collision.kd == 0.1
 
 
 def test_portable_sparse_articulation_pose_matrix_is_decoded(monkeypatch):
