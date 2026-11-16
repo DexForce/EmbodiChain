@@ -176,3 +176,11 @@ These APIs create no simulation, Robot, skill or planner. Shared Task Program
 composition accepts owned inline components, and the Gym parser consumes the
 sealed component snapshots when configuring an environment. Bundle changes
 require preparing a new identity; historical run outputs remain separate.
+
+New template image plans project surviving terminal state after grounding, using
+exact entity-member sets to recognize different references to the same object.
+The normative metadata records `grounded_state_slots/v2`. Display and revision
+of frozen image plans match their exact historical projection, including both
+legacy `explicit_state_slots/v1` variants; neither operation upgrades their
+normative predicates or evidence identity. Grounding cannot silently retarget a
+source clause whose terminal target was superseded.

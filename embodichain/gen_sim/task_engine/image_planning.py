@@ -181,6 +181,31 @@ def generate_semantic_task_graph_from_image(
                 clauses = grounding.pop("clauses", [])
                 properties = grounding.pop("role_properties", {})
                 entities = {obj["id"]: obj for obj in grounding["objects"]}
+                from .task_spec import _project_candidate
+
+                before = spec
+                spec = _project_candidate(candidate, grounding=grounding)
+
+                def signature(predicate):
+                    raw = predicate.to_dict()
+                    raw.pop("id", None)
+                    return canonical_hash(raw)
+
+                remap = {
+                    p.id: next(
+                        (n.id for n in spec.goal if signature(p) == signature(n)), None
+                    )
+                    for p in before.goal
+                }
+                for clause in clauses:
+                    if clause["target"] in remap:
+                        target = remap[clause["target"]]
+                        if target is None:
+                            raise ValueError(
+                                "Grounding superseded the clause's terminal target"
+                            )
+                        clause["target"] = target
+                artifacts["task_spec"] = spec.to_dict()
                 document = freeze_task_spec(
                     spec,
                     image_sha256=digest,
