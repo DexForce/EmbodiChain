@@ -84,13 +84,18 @@ def _update_load(
         if last_shape[env, row, col] == shape:
             probe = row * depth.shape[2] + col
             pad_now = current[shape, env]
+            pad_before = previous[shape, env]
+            tangent = tangents[probe]
+            bitangent = bitangents[probe]
+            history = displacement[env, row, col]
+            stored_local = tangent * history[0] + bitangent * history[1]
+            stored_target = _rotation(pad_before) * stored_local
             travel = wp.transform_point(pad_now, points[probe]) - wp.transform_point(
-                previous[shape, env], points[probe]
+                pad_before, points[probe]
             )
-            local = wp.transpose(_rotation(pad_now)) * travel
-            deformation = displacement[env, row, col] - wp.vec2(
-                wp.dot(local, tangents[probe]), wp.dot(local, bitangents[probe])
-            )
+            # Transport history through the shared target frame before adding travel.
+            local = wp.transpose(_rotation(pad_now)) * (stored_target - travel)
+            deformation = wp.vec2(wp.dot(local, tangent), wp.dot(local, bitangent))
             magnitude = wp.length(deformation)
             slip_limit = friction * normal / shear_stiffness
             if magnitude > slip_limit:

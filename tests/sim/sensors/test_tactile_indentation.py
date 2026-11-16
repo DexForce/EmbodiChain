@@ -347,3 +347,12 @@ def test_shear_reads_strided_mount_and_target_poses(device: str) -> None:
     )
     torch.testing.assert_close(data["marker_displacement"][:, 0], expected)
     torch.testing.assert_close(data["shear_force"][:, 0, 0], 50.0 * expected)
+
+    # The central probe stays fixed when the pad yaws by 90 degrees.
+    mount[0, :2, :2] = torch.tensor([[0.0, -1.0], [1.0, 0.0]], device=device)
+    sensor._sample(3, 0.03, 3, 0.01)
+
+    expected = torch.tensor([[0.0, -0.002], [-0.004, 0.0]], device=device)
+    assert data["shape_id"][:, 0, 0].tolist() == [0, 0]
+    torch.testing.assert_close(data["marker_displacement"][:, 0], expected)
+    torch.testing.assert_close(data["shear_force"][:, 0, 0], 50.0 * expected)
