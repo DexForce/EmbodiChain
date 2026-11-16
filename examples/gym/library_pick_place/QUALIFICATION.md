@@ -108,9 +108,8 @@ sampling pattern, so temporal variance is not used as a noise-quality metric.
 The native denoiser's output and the raw output are both retained; MP4 previews
 are encoded from those actual sensor frames at the original 25 fps.
 
-The reproducible harness is
-`scripts/benchmark/rendering/library_denoising.py`; it records raw latency
-samples, native versions, source hashes, memory scope and matching-pose PNGs.
+The recorded comparison includes raw latency samples, native versions, source
+hashes, memory scope and matching-pose PNGs.
 The renderer/configuration and example-CLI regression suites passed 263 tests
 after exposing the `--denoising off|optix` example option.
 

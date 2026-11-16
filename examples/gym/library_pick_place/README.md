@@ -154,21 +154,9 @@ cover Gaussian subtree selection, normal/safe-stop observers and exact
 float32/invalid-depth media ownership. The example exports raw recordings and
 trajectories; LeRobot conversion is outside this example.
 
-## Compare sensor denoising
+## Sensor denoising measurements
 
-Use one saved trajectory to compare completed camera calls at exactly the same
-initial, lifted and terminal states, with disk writing outside the timed scope:
-
-```bash
-PYTHONPATH=. python scripts/benchmark/rendering/library_denoising.py \
-  --gym-config /path/to/run_uuid/resolved/task.dual_ur5.yaml \
-  --trajectory /path/to/run_uuid/episodes/episode_uuid/trajectory.pt \
-  --modes off optix dlss \
-  --output outputs/library_pick_place/denoising_benchmark
-```
-
-The harness runs four fresh processes in off/optix/optix/off order, saves
-matching-pose PNGs and reports raw timings plus native memory. When selecting a
-GPU through `CUDA_VISIBLE_DEVICES`, set `--nvml-device` to its physical index.
 The [qualification](QUALIFICATION.md#optix-sensor-denoising-comparison) records
-the measured 960x540, `spp=1` tradeoff and the separate full-recording comparison.
+the Off/OptiX/DLSS comparison at 960x540 and `spp=1`, including completed
+camera-call timings, native memory scope and full-recording measurements.
+Use the example's `--denoising off|optix|dlss` option for new task recordings.
