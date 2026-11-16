@@ -233,8 +233,17 @@ spool:
 python -m pytest tests/gym/envs/tasks/test_route_the_cable_cuda.py --run-gpu -m gpu -q
 ```
 
-The three NoRender CUDA regressions pass on the development build listed above,
-using seed 73 and a fresh process per case. The full-route case naturally
+The standard headless collector completed one episode with the original point
+list and one with the packaged USD on DexSim `0.6.0rc2` (build `dbaca660`),
+using the same RTX 5090 D v2 and seed 73. Both passed all 51 segments and final
+physical acceptance after two seconds of settling. The original and USD runs
+took 5,981 and 5,994 control steps, respectively. The final tip positions differed
+by 1.184 mm, both inside the strict channel. Maximum grasp slip was 0.316 mm
+and 0.307 mm, respectively, and both runs reported zero final sampled cable
+penetration against the bench, spools and port.
+
+The earlier three NoRender CUDA regressions ran on DexSim development build
+`b040478a`, using seed 73 and a fresh process per case. The full-route case naturally
 exhausts all Task Program segments, validates every stage, then requires
 `task_success=True` after release, retreat and two seconds of physical settling.
 
