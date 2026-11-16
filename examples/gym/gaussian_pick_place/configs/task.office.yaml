@@ -1,0 +1,19 @@
+id: FrankaGSPickPlace-Office-v1
+enable_sensor: true
+environment:
+  component: env.office.yaml
+embodiment:
+  component: embodiment.office.yaml
+  overrides:
+    init_pos:
+    - -0.15
+    - -0.1
+    - 0.76
+    init_rot:
+    - 0
+    - 0
+    - 0
+task_program:
+  program: task_program/program.office.yaml
+  integration: task_program/integration.yaml
+  execution_policy: execution_policy.yaml

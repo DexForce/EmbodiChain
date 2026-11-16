@@ -208,6 +208,11 @@ materials. Resource definitions and their reset baselines are owned by the
 `RenderCfg.gaussian` configures native CUDA raster before World construction.
 `RenderCfg.for_gaussian()` composes a native renderer and compatible denoising;
 `RenderCfg.from_dict()` also resolves `preset: gaussian` for Gym YAML/JSON.
+`GaussianRenderCfg.apply_display_srgb` retains the native True default. Set
+False before World construction for display-referred SuperSplat/Inria captures
+to avoid applying their display transfer twice. The setting applies to every
+Gaussian in that World; lit blending remains scene-linear and tone mapping can
+still change displayed colors.
 Explicit overrides remain authoritative; conflicting preset choices fail
 instead of silently disabling rendering or changing denoising. The preset is
 resolved to ordinary typed settings, and configuration writes need not retain

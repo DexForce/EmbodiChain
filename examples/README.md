@@ -1,5 +1,10 @@
 # Running examples
 
+The [Gaussian scene Pick/Place example](gym/gaussian_pick_place/README.md)
+downloads standardized public 3DGS backgrounds, runs Franka Task Programs with
+independent collision supports, and records third-person and wrist RGB cameras.
+Use `embodichain run-example gym/gaussian_pick_place/run --scene office`.
+
 Use the path of any Python script under this directory, with or without `.py`:
 
 ```bash

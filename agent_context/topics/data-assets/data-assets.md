@@ -107,6 +107,17 @@ Keep its source revision and complete file checksums together when updating it.
 ZIP bundles must include directory entries before nested files for Open3D
 extraction. Validate new bundles through `get_data_path()` with an empty cache.
 
+Captured Gaussian backgrounds register as `RoboSplatterOfficeGS`,
+`DiscoverseLab3GS` and `RoboSimGSTabletopGS` in `assets/scene_assets.py`.
+Each resolves `asset.usda` from an immutable Hub snapshot and a versioned cache.
+The metre/Z-up entry references original or separately decoded PLY data; the
+package includes an AssetRevision inventory, source hashes and licensing
+evidence. These are visual-only scenes and supply no enclosing collision box.
+`scripts/tools/prepare_gaussian_scene_assets.py` owns explicit offline packaging;
+normal runtime consumers download the completed archive. Package admission and
+native RGB evidence do not certify metric Gaussian depth or industrial readiness.
+The configured consumer is `examples/gym/gaussian_pick_place/`.
+
 `Franka` also materializes `Panda/Fr3HandV1.urdf` from the pinned integrated
 hand subtree, retaining source names and relative mesh paths. Bare FR3 arms
 resolve the existing `Panda/Panda.urdf`; embodiments mount the derived hand

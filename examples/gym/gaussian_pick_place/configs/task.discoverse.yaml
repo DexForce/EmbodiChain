@@ -1,0 +1,19 @@
+id: FrankaGSPickPlace-Discoverse-v1
+enable_sensor: true
+environment:
+  component: env.discoverse.yaml
+embodiment:
+  component: embodiment.discoverse.yaml
+  overrides:
+    init_pos:
+    - -0.4
+    - 1
+    - 0.7
+    init_rot:
+    - 0
+    - 0
+    - 0
+task_program:
+  program: task_program/program.discoverse.yaml
+  integration: task_program/integration.yaml
+  execution_policy: execution_policy.yaml
