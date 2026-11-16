@@ -92,6 +92,15 @@ recorded boundary. Missing or foreign evidence cannot satisfy a predicate.
 
 ## Lifecycle and boundaries
 
+An owned `scene_preparation` functor prepares ordinary `EmbodiedEnvCfg` before
+World creation; registered defaults and explicit config use the same route.
+Explicit config wins. Preparation returns configuration and does not own a
+runtime environment. The effective environment seed is resolved and applied
+before preparation; subsequent initialization reuses that seed and RNG stream.
+`resource_export` freezes generated task resources when
+saving native RL checkpoints; task-specific preparation/export stays in the
+task extension so registration can use ordinary `EmbodiedEnv`.
+
 Construction seeds before scene setup, acquires enabled sensors, prepares
 simulation and initializes dependent managers. Robot joint selections are
 instance-owned and preserve control-part order across repeated setup.
@@ -111,7 +120,7 @@ them before clearing row state. Dataset persistence and optional physical
 objectives remain separate. Source-bound Real2Sim episodes
 use the qualified synchronous receipt owner, not the ordinary reset recorder.
 
-`EpisodeContext` follows reset and recorder eligibility. A trusted B=1
+`EpisodeContext` follows reset and recorder eligibility. A trusted
 `episode_prepare` callback runs after reset events and before physical objectives
 and final observations; it is not a functor parameter. Recording starts from
 that final observation. Optional info snapshots may be disabled for batched RL

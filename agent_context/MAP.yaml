@@ -7,7 +7,7 @@ topics:
 - id: simulation-system
   title: Simulation System
   aliases: [simulation system, simulation manager, Newton physics backend, motion module, sim motion, camera attachment, 运动能力模块, 仿真系统, 仿真管理器]
-  keywords: [SimulationManager, SimulationManagerCfg, RenderCfg, DenoisingCfg, DenoisingMode, DLSSCfg,
+  keywords: [GaussianSplatCfg, VisualElementCfg, GaussianRenderCfg, 3DGS, Gaussian visual, SimulationManager, SimulationManagerCfg, RenderCfg, DenoisingCfg, DenoisingMode, DLSSCfg,
     NRDCfg, DLSS, NRD, frame_time_delta_ms, explicit physics stepping, simulation_time, arena, DexSim, UsdImportCfg, UsdImportResult, root_prim_path, LightCfg, LightBatch, 灯光批次, PhysicsBackendCfg,
     DefaultPhysicsCfg, NewtonPhysicsCfg, VisualObject, VisualObjectCfg, VisualMaterial, VisualMaterialCfg, VisualMaterialInst, preview-material, 材质预览, UsdSourceCfg, source_prim_path, add_visual_object, 纯渲染对象, DexUniSolverCfg, DexUni, runtime control, deformable, particle set,
     UsdSourceSnapshot, read_usd_source, LinkMesh,
@@ -15,7 +15,8 @@ topics:
     ArticulationJointKinematics, get_parent_joint_chain, asset_physics_mode, joint_drive_props, enable_gravity,
     fixed-cadence playback, FluidObjectCfg, FluidSpawnCfg, FluidObject, sph_cfg, DFSPH, revolved_volume, fill_level,
     粒子采样, fluid, 流体, quaternion, xyzw, cable, CableObject, CableObjectCfg,
-    CableObjectData, 线缆对象]
+    CableObjectData, 线缆对象,
+    CompoundShapeCfg, ShapePartCfg, CylinderCfg, env_variants, enable_ground_plane, ground_plane_attrs]
   paths: [topics/simulation-system/simulation-system.md]
   source_of_truth:
   - embodichain/lab/sim/motion/__init__.py
@@ -48,14 +49,14 @@ topics:
   status: active
 - id: env-framework
   title: Environment Framework
-  aliases: [env framework, environment framework, task registration, list task, expert trajectory, 环境框架, 任务环境,
+  aliases: [env framework, environment framework, task registration, list task, expert trajectory, USD environment import, 统一USD环境导入, 环境框架, 任务环境,
     专家轨迹]
   keywords: [UnitreeG1MotionRL-v1, motion_tracking, BaseEnv, EmbodiedEnv, EpisodeContext, EnvCfg, ReplayWrapper, native_joint_positions, ControlTiming, resolve_control_timing, register_env, list-task, run-task, run-example, target_control_frequency,
     sim_steps_per_control, step_dt, environment.component, embodiment.component, file-owned physics backend,
     physics_config, ControllerAction, EnvProfiler, startup_summary, dexsim_startup_info,
     fluid Gym, 流体 Gym, fluid replay, 粒子回放, DemoQualification, ObjectMotionMetrics, ExpertTrajectoryCfg, joint_command_mode, position_velocity, qpos qvel, expert action schema, ObservationHistorySnapshot, ObservationFrame,
     EvaluationSpec, RuleSession, evaluate_recorded_rules,
-    task_instruction, resolve_demo_instruction,
+    task_instruction, resolve_demo_instruction, usd_scene, program_stage_reward, program_stage_condition,
     show-task, task catalog, task gallery, 任务画廊, physical_objective, 物理目标, RLTaskCfg, rl_task]
   paths: [topics/env-framework/env-framework.md]
   source_of_truth:
@@ -89,8 +90,8 @@ topics:
   status: active
 - id: manager-functor
   title: Manager & Functor Pattern
-  aliases: [manager functor, functor pattern, observation manager, reward manager, event manager, action
-      manager, dataset manager, 管理器]
+  aliases: [manager functor, functor pattern, observation manager, observation functor, obs functor,
+    reward manager, event manager, action manager, dataset manager, 观测 functor, 观测管理器, 管理器]
   keywords: [FunctorCfg, ObservationCfg, RewardCfg, ActionTermCfg, ObservationManager, RewardManager,
     EventManager, ActionManager, ActionDescriptor, ActionTermDescriptor, ParallelGripperAction,
     DatasetManager, SceneEntityCfg, TerminationManager, ConditionResult, ObservationDescriptor, ObservationSample, get_entity_state, observation consumers]
@@ -102,6 +103,7 @@ topics:
   - embodichain/lab/gym/envs/managers/manager_base.py
   - embodichain/lab/gym/envs/managers/cfg.py
   - embodichain/lab/gym/envs/managers/observation_manager.py
+  - embodichain/lab/gym/envs/managers/observations/
   - embodichain/lab/gym/envs/managers/observation_types.py
   - embodichain/lab/gym/envs/managers/reward_manager.py
   - embodichain/lab/gym/envs/managers/event_manager.py
@@ -154,12 +156,14 @@ topics:
   status: active
 - id: sensor-system
   title: Sensor System
-  aliases: [sensor system, camera attachment, 传感器, 相机挂载]
+  aliases: [sensor system, camera attachment, third-party sensors, 传感器扩展, 传感器, 相机挂载]
   keywords: [CameraCfg, StereoCameraCfg, CameraBatch, 相机批次, ContactSensorCfg, ContactQuery, ContactSamplingObserver, ContactEvidenceSampler, ContactTimeline, JointContactObserver, Newton contact, SensorCfg,
-    get_sensor_obs, resolve_parent_nodes, scatter_contact_data, tiled image, quaternion, xyzw]
+    get_sensor_obs, resolve_parent_nodes, SensorRegistration, SensorContext, register_sensor, embodichain.sensors, scatter_contact_data, tiled image, quaternion, xyzw]
   paths: [topics/sensor-system/sensor-system.md]
   source_of_truth:
   - embodichain/lab/sim/sensors/base_sensor.py
+  - embodichain/lab/sim/sensors/registry.py
+  - embodichain/lab/sim/sensors/context.py
   - embodichain/lab/sim/sensors/camera.py
   - embodichain/lab/sim/sensors/stereo.py
   - embodichain/lab/sim/sensors/attachment.py
@@ -172,13 +176,13 @@ topics:
   - embodichain/lab/sim/evidence.py
   - embodichain/lab/sim/sensors/contact/_warp/scatter.py
   - embodichain/compute/image/
-  watch_paths: [embodichain/lab/sim/sensors/, tests/sim/sensors/]
+  watch_paths: [embodichain/lab/sim/sensors/, tests/sim/sensors/, examples/sim/sensors/external_joint_encoder/]
   related_topics: [simulation-system, robot-system, env-framework, sim-visualization]
   status: active
 - id: sim-visualization
   title: Simulation Visualization
-  aliases: [browser visualization, viser, sim visualization, marker visualization, 标志物可视化, 仿真可视化]
-  keywords: [VisualizationCfg, ViserServerCfg, SceneManifest, visualization, EntityGizmoManipulator, robot_ik_gizmo,
+  aliases: [browser visualization, viser, sim visualization, marker visualization, USD scene preview, 场景预览, 标志物可视化, 仿真可视化]
+  keywords: [preview-scene, preview_scene, VisualizationCfg, ViserServerCfg, SceneManifest, visualization, EntityGizmoManipulator, robot_ik_gizmo,
     GizmoCfg, MarkerGroup, MarkerPrototypeCfg, RobotMarkers, VisualizationMarkers, robot markers, ghost robot, 机器人可视化, backpressure, capture_visualization, Newton deformable, particle set,
     render topology, quaternion, xyzw, cable visualization, cable capsule]
   paths: [topics/sim-visualization/sim-visualization.md]
@@ -189,10 +193,13 @@ topics:
   - embodichain/lab/sim/sim_manager.py
   - embodichain/lab/sim/objects/gizmo.py
   - embodichain/lab/sim/objects/deformable/
+  - embodichain/lab/scripts/preview_scene.py
+  - embodichain/lab/scripts/_scene_preview.py
   - embodichain/lab/scripts/preview_asset.py
   - embodichain/lab/scripts/_preview.py
   - embodichain/lab/scripts/preview_joint_control.py
-  watch_paths: [tests/visualization/, tests/lab/scripts/test_preview_asset.py, tests/lab/scripts/test_preview_joint_control.py]
+  watch_paths: [tests/visualization/, tests/lab/scripts/test_preview_asset.py, tests/lab/scripts/test_preview_joint_control.py,
+    tests/lab/scripts/test_preview_scene.py, tests/lab/scripts/test_preview_scene_integration.py]
   related_topics: [simulation-system, env-framework, sensor-system, robot-system, configclass-pattern]
   status: active
 - id: expansion-engine
@@ -271,6 +278,7 @@ topics:
     NativePlanarPlacement, planar_floor_region, planar_placement_metrics, select_container_landing,
     SceneMeshSnapshot, SceneMeshComponent, capture_scene_meshes, CollisionObjectSnapshot, snapshot_collision_sources,
     LayoutSolution, PlanarRelation, SceneView, SceneState, SceneChangeSet, SceneCheckReport,
+    apply_group_transform, scene group, 组变换,
     SettlingCfg, declare_fragment, detect_support_region, clamp_group,
     solve_layout, capture_state, restore_state, settle_scene, check_layout,
     aabb_overlap_depth, aabb_containment_violation, transform_aabbs, triangle_geometry,
@@ -290,7 +298,7 @@ topics:
   aliases: [scene expansion, scene augmentation, scene variant, scene robot feasibility, feasible region search, 场景扩增, 场景变体, 联合可行区域搜索]
   keywords: [SceneLayoutInput, SceneRandomizationPolicyCfg, prepare_scene_randomization, generate_scene_variants, apply_scene_variants, load_scene_variants, SceneExpansionCfg, ScenePoseChange, SceneVariant, FixedSceneCandidateSource,
     SceneRobotFeasibilityCfg, TaskFeasibilityRequest, FeasibilityAtlas, RobotWorkspaceProposalSource, NewtonCollisionChecker, search-scene-feasibility,
-    ScenePreparationResult, SceneVariantEpisodeResult, execute_scene_variant,
+    ScenePreparationResult, SceneVariantEpisodeResult, execute_scene_variants,
     SimulationSceneExpansionHost, SimulationSceneInitialState, episode_prepare]
   paths: [topics/scene-expansion/scene-expansion.md]
   source_of_truth:
@@ -301,32 +309,35 @@ topics:
   - embodichain/lab/task_program/integrations/simulation/feasibility_geometry.py
   - embodichain/lab/task_program/integrations/scene_expansion.py
   - embodichain/lab/task_program/integrations/simulation/scene_expansion.py
-  - embodichain/lab/task_program/integrations/simulation/workspace.py
   - embodichain/lab/gym/envs/base_env.py
   - embodichain/lab/gym/envs/embodied_env.py
   - embodichain/lab/gym/envs/demo.py
   watch_paths: [embodichain/compute/geometry/planar.py, embodichain/compute/geometry/_warp/contact_query.py,
     tests/sim/scene/feasibility/, tests/gym/envs/task_program/test_feasibility.py, tests/sim/scene/expansion/,
-    tests/gym/envs/task_program/test_scene_expansion.py, tests/gym/envs/task_program/test_scene_workspace.py,
+    tests/gym/envs/task_program/test_scene_expansion.py, tests/gym/envs/task_program/test_scene_expansion_sim.py,
     tests/gym/envs/task_program/test_simulation_scene_expansion.py, tests/gym/envs/task_program/test_simulation_environment.py]
   related_topics: [scene-services, simulation-system, task-programs, robot-workspace, motion-planning, gen-sim, data-pipeline]
   status: active
 - id: neural-dynamics
   title: Neural Dynamics Models and Training
-  aliases: [neural dynamics, neural robot dynamics, NeRD, RigidFormer, 神经动力学, 动力学模型训练, NeRD 示例, RigidFormer 示例]
-  keywords: [NeRDStateCodec, NeRDModel, DynamicsGenerationCfg,
+  aliases: [neural dynamics, neural robot dynamics, NeRD, RigidFormer, WorldParticle, 神经动力学, 动力学模型训练, NeRD 示例, RigidFormer 示例]
+  keywords: [NeRDStateCodec, NeRDModel, NeRDGeometry, NeRDState, NeRDTransition, NeRDModelEnv, DynamicsGenerationCfg,
     DynamicsShardWriter, DynamicsWindowDataset, DynamicsTrainer, embodichain_models,
     learning/nerd, nerd reference assets, RigidFormerModel, MOViSequenceSource, build_rigidformer_trainer,
-    官方训练精度对比]
+    WorldParticleModel, WorldParticleProvider, learning/worldparticle, 官方训练精度对比]
   paths: [topics/neural-dynamics/neural-dynamics.md]
   source_of_truth:
   - extensions/embodichain_models/embodichain_models/dynamics/nerd/
+  - extensions/embodichain_solvers/embodichain_solvers/physics/nerd/
   - examples/learning/nerd/__main__.py
   - examples/learning/nerd/_resources.py
   - examples/learning/nerd/_support/
   - examples/learning/nerd/configs/
   - extensions/embodichain_models/embodichain_models/dynamics/rigidformer/
   - examples/learning/rigidformer/
+  - extensions/embodichain_models/embodichain_models/dynamics/worldparticle/
+  - extensions/embodichain_solvers/embodichain_solvers/physics/worldparticle/
+  - examples/learning/worldparticle/
   watch_paths: [extensions/embodichain_models/, examples/learning/nerd/, docs/source/features/neural_dynamics.md,
     docs/source/features/neural_dynamics/, docs/source/guides/neural_dynamics.md, docs/source/api_reference/model_catalogs.rst,
     docs/source/api_reference/model_rigidformer.rst]
@@ -358,7 +369,8 @@ topics:
   status: active
 - id: rl-learning
   title: RL Learning Pipeline
-  aliases: [rl learning, rl config, reinforcement learning, 强化学习, 训练配置]
+  aliases: [rl learning, rl config, reinforcement learning, 强化学习, 训练配置, Sharpa APG, 灵巧手 APG,
+    Wuji APG, Wuji 掌内转动]
   keywords: [train-rl, Trainer, trainer.gym_config, learning_env, RolloutKind, DifferentiableTrainer,
     PPO, GRPO, APG, APGActorCritic, apg_actor_critic, SyncCollector, ScheduledDifferentiableEnvProtocol, DifferentiableRolloutSpec,
     complete rollout, full horizon, gradient accumulation, action adjoint, observation normalization]
@@ -375,9 +387,13 @@ topics:
   - embodichain/learning/rl/utils/config.py
   - embodichain/learning/rl/algo/
   - embodichain/learning/rl/policies/
+  - embodichain/learning/rl/experimental/
   - embodichain/learning/models/
   - extensions/embodichain_tasks/configs/tasks/
-  watch_paths: [embodichain/learning/rl/, tests/learning/]
+  - examples/learning/sharpa_inhand/
+  - examples/learning/wuji_inhand/
+  watch_paths: [embodichain/learning/rl/, tests/learning/, examples/learning/sharpa_inhand/,
+    examples/learning/wuji_inhand/]
   related_topics: [simulation-system, env-framework, manager-functor, configclass-pattern]
   status: active
 - id: differentiable-env
@@ -447,7 +463,7 @@ topics:
 - id: task-programs
   title: Embodied Task Program
   aliases: [task program, semantic call, 任务程序, 语义调用]
-  keywords: [TaskProgramCfg, kinematic_joint_replay, MoveHeldObjectCfg, HoldPostCfg, PoseTargetCfg,
+  keywords: [TaskProgramCfg, TaskProgramProgress, kinematic_joint_replay, MoveHeldObjectCfg, HoldPostCfg, PoseTargetCfg,
     SceneRelativePoseTargetCfg, normalize_task_program, demo_skills,
     SimulationSettleMonitorCfg, program.yaml, integration.yaml, scene_binding, SceneManifest, SkillPolicyPreset,
     hand_geometries,

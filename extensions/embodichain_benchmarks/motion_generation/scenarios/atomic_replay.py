@@ -63,6 +63,7 @@ class _ReplayMetrics:
     replay_diagnostics: Mapping[str, object] = field(default_factory=dict)
     gripper_contact_thresholds_m: Mapping[str, float] = field(default_factory=dict)
     grasp_contact_metadata: Mapping[str, object] = field(default_factory=dict)
+    joint_tracking_metadata: Mapping[str, object] = field(default_factory=dict)
 
 
 @dataclass
@@ -114,6 +115,7 @@ class _PhysicsReplaySettings:
     hold_sim_steps: int
     joint_tracking_tolerance_rad: float
     clock: str = "fixed_samples"
+    joint_tracking_scope: str = "motion_control_parts"
 
 
 class AtomicReplayRuntime:
@@ -125,7 +127,7 @@ class AtomicReplayRuntime:
 
     Args:
         simulation: Simulator receiving the replay's physics steps.
-        robot: Robot receiving full-joint position commands.
+        robot: Robot receiving full-joint position and velocity targets.
         control_part: Arm used for end-effector and final-state observations.
         track_config: Track-owned physics replay settings.
         objects: Configured movable object handles indexed by object ID.
@@ -266,6 +268,7 @@ class AtomicReplayRuntime:
             replay_diagnostics=replay_metrics.replay_diagnostics,
             gripper_contact_thresholds_m=replay_metrics.gripper_contact_thresholds_m,
             grasp_contact_metadata=replay_metrics.grasp_contact_metadata,
+            joint_tracking_metadata=replay_metrics.joint_tracking_metadata,
         )
 
     def _physics_settings(self) -> _PhysicsReplaySettings:
@@ -281,9 +284,16 @@ class AtomicReplayRuntime:
                 physics.get("joint_tracking_tolerance_rad", 0.05)
             ),
             clock=str(physics.get("clock", "fixed_samples")),
+            joint_tracking_scope=str(
+                physics.get("joint_tracking_scope", "motion_control_parts")
+            ),
         )
         if settings.clock not in {"fixed_samples", "compiled"}:
             raise ValueError("physics.clock must be fixed_samples or compiled.")
+        if settings.joint_tracking_scope != "motion_control_parts":
+            raise ValueError(
+                "physics.joint_tracking_scope must be motion_control_parts."
+            )
         if (
             settings.steps_per_waypoint < 1
             or settings.hold_steps < 0
@@ -432,6 +442,8 @@ class AtomicReplayRuntime:
         if self.simulation is None or self.robot is None:
             raise RuntimeError("Atomic Skill runtime is not configured.")
         trajectory = compiled.trajectory.positions
+        velocity_targets = compiled.trajectory.velocities
+        hold_velocity = torch.zeros_like(trajectory[:, 0])
         plan_success = compiled.plan_success.to(
             device=trajectory.device, dtype=torch.bool
         )
@@ -458,6 +470,12 @@ class AtomicReplayRuntime:
                 trajectory,
                 hold_qpos[:, None, :],
             )
+            if velocity_targets is not None:
+                velocity_targets = torch.where(
+                    plan_success[:, None, None],
+                    velocity_targets,
+                    torch.zeros_like(velocity_targets),
+                )
         object_handle = self._objects.get(case.object_id or "")
         articulation_handle = self._articulations.get(case.object_id or "")
         settings = self._physics_settings()
@@ -489,10 +507,10 @@ class AtomicReplayRuntime:
             if diagnostics is not None
             else 0.0
         )
-        lift_start = None if provider is None else provider.lift_segment_start(compiled)
-        dynamics_cleared = False
         squared_tracking_error: torch.Tensor | None = None
         tracking_value_count = 0
+        tracking_joint_ids: torch.Tensor | None = None
+        joint_tracking_metadata: dict[str, object] = {}
         articulation_initial: torch.Tensor | None = None
         articulation_final: torch.Tensor | None = None
         articulation_peak: torch.Tensor | None = None
@@ -525,6 +543,30 @@ class AtomicReplayRuntime:
             if rotation_sign not in (-1.0, 1.0):
                 raise ValueError("object_rotation_sign must be 1 or -1.")
         if collect_metrics:
+            motion_parts = tuple(
+                dict.fromkeys(
+                    (self.control_part, *case.case_parameters.get("arm_waypoints", {}))
+                )
+            )
+            joint_ids = list(
+                dict.fromkeys(
+                    joint_id
+                    for part in motion_parts
+                    for joint_id in self.robot.get_joint_ids(name=part)
+                )
+            )
+            if not joint_ids:
+                raise ValueError("Tracking requires nonempty motion control parts.")
+            tracking_joint_ids = torch.tensor(
+                joint_ids, dtype=torch.long, device=trajectory.device
+            )
+            joint_tracking_metadata = {
+                "scope": settings.joint_tracking_scope,
+                "control_parts": list(motion_parts),
+                "joint_names": [self.robot.joint_names[index] for index in joint_ids],
+                "joint_indices": joint_ids,
+                "sample_weighting": "command_ends_and_terminal_holds",
+            }
             squared_tracking_error = torch.zeros(
                 case.batch_size, dtype=trajectory.dtype, device=trajectory.device
             )
@@ -636,6 +678,14 @@ class AtomicReplayRuntime:
                 )
             positions = trajectory[:, waypoint_index]
             self.robot.set_qpos(positions, target=True)
+            self.robot.set_qvel(
+                (
+                    hold_velocity
+                    if velocity_targets is None
+                    else velocity_targets[:, waypoint_index]
+                ),
+                target=True,
+            )
             for _ in range(arrival_steps[waypoint_index]):
                 self.simulation.update(step=1)
                 if (
@@ -692,9 +742,11 @@ class AtomicReplayRuntime:
                     articulation_joint_name
                 )
             if squared_tracking_error is not None:
+                assert tracking_joint_ids is not None
                 observed = self.robot.get_qpos()
-                squared_tracking_error += ((observed - positions) ** 2).sum(dim=1)
-                tracking_value_count += observed.shape[1]
+                error = (observed - positions).index_select(1, tracking_joint_ids)
+                squared_tracking_error += error.square().sum(dim=1)
+                tracking_value_count += error.shape[1]
             elapsed_steps += arrival_steps[waypoint_index]
             if diagnostics is not None and waypoint_index in diagnostics.sample_indices:
                 diagnostics.capture(
@@ -703,14 +755,6 @@ class AtomicReplayRuntime:
                     command=positions,
                     phase="command_end",
                 )
-            if (
-                object_handle is not None
-                and lift_start is not None
-                and not dynamics_cleared
-                and waypoint_index + 1 >= lift_start
-            ):
-                object_handle.entity.clear_dynamics()
-                dynamics_cleared = True
         final_command = trajectory[:, -1]
         settling = [
             trace_accumulators[window.observation_id]
@@ -726,6 +770,7 @@ class AtomicReplayRuntime:
         )
         for _ in range(settings.hold_steps):
             self.robot.set_qpos(final_command, target=True)
+            self.robot.set_qvel(hold_velocity, target=True)
             self.simulation.update(step=settings.hold_sim_steps)
             if (
                 articulation_handle is not None
@@ -739,9 +784,11 @@ class AtomicReplayRuntime:
                     (current_joint - articulation_initial) * effect_sign,
                 )
             if squared_tracking_error is not None:
+                assert tracking_joint_ids is not None
                 observed = self.robot.get_qpos()
-                squared_tracking_error += ((observed - final_command) ** 2).sum(dim=1)
-                tracking_value_count += observed.shape[1]
+                error = (observed - final_command).index_select(1, tracking_joint_ids)
+                squared_tracking_error += error.square().sum(dim=1)
+                tracking_value_count += error.shape[1]
             self._capture_replay_samples(
                 settling,
                 object_handle=object_handle,
@@ -769,6 +816,7 @@ class AtomicReplayRuntime:
             return _ReplayMetrics(
                 squared_tracking_error=squared_tracking_error,
                 tracking_value_count=tracking_value_count,
+                joint_tracking_metadata=joint_tracking_metadata,
                 physics_steps=sum(arrival_steps)
                 + settings.hold_steps * settings.hold_sim_steps,
                 articulation_joint_initial=articulation_initial,

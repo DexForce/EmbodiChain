@@ -155,6 +155,12 @@ class RobotCfg(ArticulationCfg):
         for key, value in init_dict.items():
             if key in file_fields:
                 continue
+            elif key == "link_visuals":
+                from .visuals import _visual_elements
+
+                cfg.link_visuals = {
+                    name: _visual_elements(elements) for name, elements in value.items()
+                }
             elif key == "link_attrs" and isinstance(value, dict):
                 cfg.link_attrs = link_attrs_from_dict(value)
             elif key == "mimic_compliance":

@@ -24,6 +24,7 @@ import pytest
 import torch
 from embodichain.compute.geometry.gripper import (
     adaptive_grasp_approaches,
+    closing_ground_clearance,
     full_object_opening_mask,
     interpolate_hand_samples,
 )
@@ -38,6 +39,24 @@ _REFERENCE = json.loads(
     (Path(__file__).parent / "data/grasp_clearance_b0.json").read_text()
 )
 _FIT = json.loads((Path(__file__).parent / "data/grasp_fit_scale_b0.json").read_text())
+
+
+def test_closing_floor_checks_contact_endpoint_but_excludes_post_contact_stroke():
+    body = torch.tensor([[[0.0, 0.0, 0.0]], [[0.0, 0.0, -0.1]], [[0.0, 0.0, -0.8]]])
+    pads = torch.zeros(3, 2, 1, 3)
+    gaps = torch.tensor([0.1, 0.05, 0.0])
+    widths = torch.tensor([0.075, 0.05, 0.0, 0.2, float("nan")]).repeat(7)
+    poses = torch.eye(4).repeat(len(widths), 1, 1)
+    poses[:, 2, 3] = 0.2
+    original = body.clone()
+    result = closing_ground_clearance(
+        body, pads, gaps, widths, poses, ground_height=0.05
+    )
+    # Linear contact endpoints are at z=-.05 and -.1. The -.8 sample belongs
+    # only to a fully closed hand, not the first two arrested closures.
+    expected = torch.tensor([0.1, 0.05, -0.65, -torch.inf, -torch.inf]).repeat(7)
+    torch.testing.assert_close(result, expected)
+    torch.testing.assert_close(body, original)
 
 
 def _dtype(case):

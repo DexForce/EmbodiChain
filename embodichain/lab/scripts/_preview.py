@@ -19,7 +19,8 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Sequence
+import time
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING
 
 from embodichain.utils.logger import log_info, log_warning
@@ -59,6 +60,7 @@ def _setup_viser_joint_control(
     args: argparse.Namespace,
     *,
     follow_external_targets: bool = False,
+    hold_pose: bool = True,
 ) -> ArticulationPreviewController | None:
     if not getattr(args, "viser", False) or not getattr(args, "joint_control", True):
         return None
@@ -77,6 +79,8 @@ def _setup_viser_joint_control(
         return None
 
     options = {"follow_external_targets": True} if follow_external_targets else {}
+    if not hold_pose:
+        options["hold_pose"] = False
     controller = ArticulationPreviewController(articulations, runtime, **options)
     if not controller.has_controls:
         log_warning("No supported independent articulation joints were found.")
@@ -110,13 +114,40 @@ def _run_preview_loop(
     *,
     interactive: bool,
     max_steps: int | None = None,
+    advance_physics: bool | Callable[[], bool] = True,
+    on_frame: Callable[[SimulationManager], bool] | None = None,
+    after_step: Callable[[], None] | None = None,
+    should_stop: Callable[[], bool] | None = None,
+    hold_during_simulation: bool = True,
+    frame_interval: float = 0.0,
 ) -> None:
     if not interactive and max_steps is None:
         return
     completed = 0
     try:
         while max_steps is None or completed < max_steps:
-            _step_preview_simulation(sim, joint_controller)
+            changed = on_frame(sim) if on_frame is not None else False
+            if should_stop is not None and should_stop():
+                break
+            advancing = (
+                advance_physics() if callable(advance_physics) else advance_physics
+            )
+            if advancing:
+                if hold_during_simulation:
+                    _step_preview_simulation(sim, joint_controller)
+                else:
+                    sim.update(step=1)
+                if after_step is not None:
+                    after_step()
+            else:
+                if joint_controller is not None:
+                    changed = bool(joint_controller.update()) or changed
+                with sim.render_frame(
+                    force_visualization=changed, capture_camera_images=False
+                ):
+                    pass
             completed += 1
+            if frame_interval:
+                time.sleep(frame_interval)
     except KeyboardInterrupt:
         pass

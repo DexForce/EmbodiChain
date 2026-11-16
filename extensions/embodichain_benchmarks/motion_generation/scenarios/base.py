@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from embodichain.lab.sim import SimulationManager
     from embodichain.lab.sim.objects import Robot
 
+    from .._case_preparation import _CasePreparation
     from ..config import SuiteCfg, TrackCfg
     from ..models import BenchmarkCase
     from ..planners.base import PlannerAdapter
@@ -71,6 +72,33 @@ class ScenarioProvider(ABC):
         batch_size: int,
     ) -> list["BenchmarkCase"]:
         """Build the frozen case manifest for one batch size."""
+
+    def prepare_cases(
+        self,
+        suite: "SuiteCfg",
+        track: "TrackCfg",
+        robot: "Robot",
+        control_part: str,
+        batch_size: int,
+        progress: "_CasePreparation",
+    ) -> list["BenchmarkCase"]:
+        """Prepare recoverable inputs, checkpointing one complete batch by default.
+
+        Args:
+            suite: Resolved suite configuration.
+            track: Track whose population is being prepared.
+            robot: Configured simulator robot.
+            control_part: Controlled arm group.
+            batch_size: Number of environments per request.
+            progress: Exclusive, source-bound preparation store.
+
+        Returns:
+            The same cases as :meth:`generate_cases`, including saved units.
+        """
+        return progress.get_or_create(
+            f"batch:{track.id}:{batch_size}",
+            lambda: self.generate_cases(suite, track, robot, control_part, batch_size),
+        )
 
     def configure_runtime(
         self,

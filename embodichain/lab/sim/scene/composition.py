@@ -28,13 +28,13 @@ from scipy.spatial.transform import Rotation
 from ._validation import _identifier, _rigid_pose
 
 if TYPE_CHECKING:
-    from embodichain.lab.sim.cfg import ArticulationCfg, RigidObjectCfg
+    from embodichain.lab.sim.cfg import ArticulationCfg, RigidObjectCfg, VisualObjectCfg
     from embodichain.lab.sim.sim_manager import SimulationManager
 
 __all__ = ["SceneFragment", "compose", "declare_fragment"]
 
 
-def _config_pose(cfg: RigidObjectCfg | ArticulationCfg) -> np.ndarray:
+def _config_pose(cfg: RigidObjectCfg | ArticulationCfg | VisualObjectCfg) -> np.ndarray:
     if cfg.init_local_pose is not None:
         return np.asarray(_rigid_pose(cfg.init_local_pose))
     pose = np.eye(4)
@@ -47,7 +47,7 @@ class SceneFragment:
     """Own existing entity configurations and named local anchor transforms.
 
     Args:
-        entities: Rigid-object or articulation configurations with unique UIDs.
+        entities: Rigid-object, visual-object or articulation configs with unique UIDs.
             Their existing ``init_local_pose`` takes precedence over Euler fields.
         anchors: Optional named 4x4 anchor-to-fragment rigid transforms.
 
@@ -57,21 +57,25 @@ class SceneFragment:
 
     def __init__(
         self,
-        entities: Sequence[RigidObjectCfg | ArticulationCfg],
+        entities: Sequence[RigidObjectCfg | ArticulationCfg | VisualObjectCfg],
         *,
         anchors: Mapping[str, object] | None = None,
     ) -> None:
-        from embodichain.lab.sim.cfg import ArticulationCfg, RigidObjectCfg
+        from embodichain.lab.sim.cfg import (
+            ArticulationCfg,
+            RigidObjectCfg,
+            VisualObjectCfg,
+        )
         from embodichain.lab.sim.cfg import RobotCfg
 
         owned = deepcopy(tuple(entities))
         seen = set()
         for cfg in owned:
-            if not isinstance(cfg, (RigidObjectCfg, ArticulationCfg)) or isinstance(
-                cfg, RobotCfg
-            ):
+            if not isinstance(
+                cfg, (RigidObjectCfg, ArticulationCfg, VisualObjectCfg)
+            ) or isinstance(cfg, RobotCfg):
                 raise TypeError(
-                    "Fragments support physical objects; robots belong to embodiments"
+                    "Fragments support rigid, visual and articulated objects; robots belong to embodiments"
                 )
             _identifier(cfg.uid, "entity UID")
             if "/" in cfg.uid:
@@ -88,7 +92,9 @@ class SceneFragment:
         }
 
     @property
-    def entities(self) -> tuple[RigidObjectCfg | ArticulationCfg, ...]:
+    def entities(
+        self,
+    ) -> tuple[RigidObjectCfg | ArticulationCfg | VisualObjectCfg, ...]:
         """Return owned copies of the entity configurations."""
         return deepcopy(self._entities)
 
@@ -175,10 +181,10 @@ def declare_fragment(
         Declared UIDs. Existing UIDs are rejected before declaration. Native
         failures propagate and do not promise rollback of earlier declarations.
     """
-    from embodichain.lab.sim.cfg import ArticulationCfg
+    from embodichain.lab.sim.cfg import ArticulationCfg, VisualObjectCfg
 
     entities = fragment.entities
-    existing = set()
+    existing = set(getattr(sim, "asset_uids", ()))
     for kind in (
         "rigid_object",
         "articulation",
@@ -187,20 +193,30 @@ def declare_fragment(
         "deformable_object",
     ):
         existing.update(getattr(sim, f"get_{kind}_uid_list")())
+    visual_uids = getattr(sim, "get_visual_object_uid_list", None)
+    if callable(visual_uids):
+        existing.update(visual_uids())
     duplicate = existing.intersection(cfg.uid for cfg in entities)
     if duplicate:
         raise ValueError(f"Fragment UIDs already exist: {sorted(duplicate)}")
-    for cfg in entities:
-        method = (
-            "add_articulation"
-            if isinstance(cfg, ArticulationCfg)
-            else "add_rigid_object"
+    declarations = [
+        (
+            (
+                "add_articulation"
+                if isinstance(cfg, ArticulationCfg)
+                else (
+                    "add_visual_object"
+                    if isinstance(cfg, VisualObjectCfg)
+                    else "add_rigid_object"
+                )
+            ),
+            cfg,
         )
+        for cfg in entities
+    ]
+    for method, _ in declarations:
         if not callable(getattr(sim, method, None)):
             raise ValueError(f"Simulation manager does not support {method}")
-    for cfg in entities:
-        if isinstance(cfg, ArticulationCfg):
-            sim.add_articulation(cfg)
-        else:
-            sim.add_rigid_object(cfg)
+    for method, cfg in declarations:
+        getattr(sim, method)(cfg)
     return tuple(cfg.uid for cfg in entities)

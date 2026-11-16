@@ -27,6 +27,7 @@ import numpy as np
 from embodichain.utils import configclass
 from ..shapes import ShapeCfg
 from .asset import ObjectBaseCfg
+from .visuals import GaussianSplatCfg, VisualElementCfg
 from .source import UsdSourceCfg
 
 __all__ = ["VisualObjectCfg"]
@@ -38,10 +39,22 @@ class VisualObjectCfg(ObjectBaseCfg):
 
     Like :class:`~embodichain.lab.sim.cfg.RigidObjectCfg`, ``MeshCfg.fpath``
     supplies ordinary mesh files such as OBJ, STL, GLB and glTF.
-    ``source=UsdSourceCfg(...)`` optionally selects one mesh object from a
-    source USD scene. Explicit
+    ``source=UsdSourceCfg(...)`` optionally selects one object from a source
+    USD scene, including an external Gaussian PLY visual. Explicit
     visual-object creation uses only its appearance; USD physics is omitted.
     Whole-scene import instead preserves each entity's authored physical type.
+    """
+
+    visuals: list[VisualElementCfg | GaussianSplatCfg] | GaussianSplatCfg | None = (
+        field(default=None, kw_only=True)
+    )
+    __annotations__["visuals"] = (
+        list[VisualElementCfg | GaussianSplatCfg] | GaussianSplatCfg | None
+    )
+    """Render replacement; one Gaussian may omit its element wrapper.
+
+    None preserves source appearance; [] removes it. Multiple elements require
+    explicit VisualElementCfg IDs.
     """
 
     shape: ShapeCfg | None = None

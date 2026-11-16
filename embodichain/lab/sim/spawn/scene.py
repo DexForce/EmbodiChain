@@ -19,11 +19,12 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, fields, replace
 from typing import TYPE_CHECKING, Any, Callable, Literal
 
 from ._usd_assets import _UsdTextureFiles
+from .usd import _has_native_gaussian_renders
 from .._material_presets import (
     _AssetMaterialDesc,
     _MaterialResources,
@@ -84,6 +85,7 @@ class SpawnScene:
         )
         self._assets: dict[str, _AssetDeclaration] = {}
         self._usd_texture_files = _UsdTextureFiles()
+        self._usd_source_files = ExitStack()
         if renderer is None:
             from dexsim.types import Renderer
 
@@ -196,6 +198,8 @@ class SpawnScene:
             value = getattr(descriptor, name, None)
             if value is not None:
                 self._bind_resource_materials(value)
+        for variant in (getattr(descriptor, "env_variants", None) or {}).values():
+            self._bind_resource_materials(variant)
 
     @property
     def arena_names(self) -> tuple[str, ...]:
@@ -251,6 +255,23 @@ class SpawnScene:
             self._require_mutable_topology()
         return declaration_only
 
+    def _validate_rigid_variants(self, descriptor: Any) -> None:
+        """Check variant compatibility before publishing or replacing assets."""
+        if isinstance(descriptor, (tuple, list)):
+            for member in descriptor:
+                self._validate_rigid_variants(member)
+            return
+        variants = getattr(descriptor, "env_variants", None) or {}
+        if variants:
+            if getattr(self.builder, "backend", None) != "newton":
+                raise NotImplementedError(
+                    "Per-environment rigid variants require the Newton backend."
+                )
+            if max(variants) >= self._num_envs:
+                raise ValueError(
+                    "env_variants contains an index outside the configured environment count."
+                )
+
     def _register_material_batches(self, batches: Iterable[dict[str, Any]]) -> None:
         """Check all material definitions before publishing a declaration batch."""
         definitions = {}
@@ -277,10 +298,43 @@ class SpawnScene:
     ) -> None:
         """Add a descriptor and associate it with an EmbodiChain facade."""
         declaration_only = self._preflight_declaration(kind, uid)
+        self._validate_rigid_variants(descriptor)
         if materials:
             self.builder.materials.update(self._resolve_materials(materials))
         self._bind_resource_materials(descriptor)
-        self._initialize_facade_declaration(facade)
+        self._initialize_facade_declaration(facade, descriptor)
+        binding = None
+        from ..cfg.visuals import (
+            _file_visual_binding_elements,
+            _uses_descriptor_visuals,
+        )
+
+        file_elements = _file_visual_binding_elements(getattr(facade, "cfg", None))
+
+        if (
+            facade is not None
+            and not _uses_descriptor_visuals(getattr(facade, "cfg", None))
+            and (
+                getattr(getattr(facade, "cfg", None), "visuals", None) is not None
+                or getattr(getattr(facade, "cfg", None), "link_visuals", {})
+                or file_elements is not None
+            )
+        ):
+            from ._visuals import _VisualBinding
+            from dexsim.scene import Scene
+
+            if self._material_resources.renderer != "no-render":
+                if self.builder.backend != "dexsim" and file_elements is None:
+                    raise NotImplementedError(
+                        "Explicit visual composition currently requires the Default backend."
+                    )
+                if not hasattr(Scene, "clear_visual_meshes"):
+                    raise RuntimeError(
+                        "Visual composition requires DexSim Scene.clear_visual_meshes; use the qualified integration build."
+                    )
+                binding = _VisualBinding(facade, self)
+                facade._visual_binding = binding
+
         declaration = _AssetDeclaration(
             kind=kind,
             descriptor=descriptor,
@@ -340,8 +394,31 @@ class SpawnScene:
                 "cable_object": "add_cable",
             }[kind]
             with self._native_material_scope():
-                declaration.descriptor = getattr(self.builder, add_name)(descriptor)
+                owner_name_exists = binding is not None and any(
+                    entity.name == descriptor.name
+                    for entity in self.builder.scene_desc.iter_entities()
+                )
+                try:
+                    declaration.descriptor = getattr(self.builder, add_name)(descriptor)
+                except Exception:
+                    if binding is not None:
+                        remove = (
+                            self.builder.remove_articulation
+                            if kind == "articulation"
+                            else self.builder.remove_object
+                        )
+                        if not owner_name_exists:
+                            remove(descriptor.name)
+                        facade._visual_binding = None
+                    raise
         self._assets[uid] = declaration
+        if binding is not None:
+            try:
+                binding.declare()
+            except Exception:
+                facade._visual_binding = None
+                self.remove(uid)
+                raise
         self._configure_materialized_source(uid)
         # A Newton replacement retains the old same-path handles until commit.
         # Bind the new facade only after those handles have been replaced.
@@ -391,7 +468,7 @@ class SpawnScene:
         """Track a descriptor that was already added to ``SceneBuilder``."""
         if uid in self._assets:
             raise ValueError(f"Spawn asset uid is already declared: {uid!r}.")
-        self._initialize_facade_declaration(facade)
+        self._initialize_facade_declaration(facade, descriptor)
         declaration = _AssetDeclaration(kind, descriptor, facade)
         self._assets[uid] = declaration
         handles = self.handles(uid)
@@ -402,6 +479,10 @@ class SpawnScene:
         """Remove a declared asset from its DexSim owner."""
         self._require_removable(uid)
         declaration = self._assets[uid]
+        binding = getattr(declaration.facade, "_visual_binding", None)
+        if binding is not None:
+            binding.remove()
+            declaration.facade._visual_binding = None
         if getattr(declaration, "declaration_only", False):
             del self._assets[uid]
             return
@@ -549,6 +630,54 @@ class SpawnScene:
                 facade.attach_spawn_handles(self.handles(uid))
             facade.bind_spawn(result)
 
+    def bind_visuals(self) -> None:
+        """Bind render companions after physical and sensor metadata is ready."""
+        for declaration in self._assets.values():
+            binding = getattr(declaration.facade, "_visual_binding", None)
+            if binding is not None:
+                binding.bind(self.builder.result)
+
+    def sync_visuals(self) -> None:
+        """Publish owner-local visual transforms without advancing physics."""
+        for declaration in self._assets.values():
+            binding = getattr(declaration.facade, "_visual_binding", None)
+            if binding is not None:
+                binding.sync()
+
+    def _gaussian_capture_state(self) -> dict[str, object]:
+        """Snapshot instance parameters without copying source point arrays."""
+        state = {}
+        for uid, declaration in self._assets.items():
+            binding = getattr(declaration.facade, "_visual_binding", None)
+            if binding is not None:
+                if binding.has_gaussians:
+                    state[uid] = binding.describe()
+            elif declaration.facade is not None and _has_native_gaussian_renders(
+                declaration.descriptor
+            ):
+                state[uid] = declaration.facade.get_visual_elements()
+        return state
+
+    @property
+    def has_visual_composition(self) -> bool:
+        """Whether any declaration owns explicit companion visuals."""
+        return any(
+            getattr(d.facade, "_visual_binding", None) is not None
+            for d in self._assets.values()
+        )
+
+    @property
+    def has_gaussians(self) -> bool:
+        """Whether managed declarations contain Gaussian resources."""
+        return any(
+            (
+                binding.has_gaussians
+                if (binding := getattr(d.facade, "_visual_binding", None)) is not None
+                else _has_native_gaussian_renders(d.descriptor)
+            )
+            for d in self._assets.values()
+        )
+
     def prepare_runtime_config(self, result: Any) -> None:
         """Apply facade configuration required before backend initialization.
 
@@ -572,6 +701,16 @@ class SpawnScene:
         """Release Spawn resources and facade references."""
         result = self.builder.result
         self._pending_material_assignments = None
+        for declaration in self._assets.values():
+            binding = getattr(
+                getattr(declaration, "facade", None), "_visual_binding", None
+            )
+            if binding is not None:
+                binding.handles.clear()
+                binding.gaussian_batch = None
+                binding.materials.clear()
+                binding.default_materials.clear()
+                declaration.facade._visual_binding = None
         try:
             if result is not None:
                 result.close()
@@ -579,6 +718,7 @@ class SpawnScene:
             self.builder.result = None
             self._assets.clear()
             self._usd_texture_files.close()
+            self._usd_source_files.close()
             getattr(self, "_no_render_material_definitions", {}).clear()
             if hasattr(self, "_material_resources"):
                 self._material_resources.close()
@@ -606,7 +746,9 @@ class SpawnScene:
             return ()
         return tuple(result.handles[path] for path in paths)
 
-    def _initialize_facade_declaration(self, facade: Any | None) -> None:
+    def _initialize_facade_declaration(
+        self, facade: Any | None, descriptor: Any
+    ) -> None:
         """Give a Spawn facade the instance count owned by this scene.
 
         The duck-typed fallback keeps ``SpawnScene`` usable by lightweight
@@ -617,7 +759,7 @@ class SpawnScene:
             return
         initialize = getattr(facade, "_initialize_spawn_declaration", None)
         if initialize is not None:
-            initialize(self._num_envs)
+            initialize(self._num_envs if getattr(descriptor, "per_env", True) else 1)
 
     def _resolve_articulation_source(self, descriptor: Any) -> None:
         """Resolve one descriptor through the available DexSim boundary."""

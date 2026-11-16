@@ -26,8 +26,29 @@ from embodichain.lab.sim.cfg import ObjectBaseCfg
 from embodichain.utils import logger
 import dexsim
 from copy import deepcopy
+from numbers import Integral
 
 T = TypeVar("T")
+
+
+def _validated_env_ids(
+    env_ids: Sequence[int] | torch.Tensor | None, count: int
+) -> list[int]:
+    """Validate complete visual/semantic selections before reading or writing."""
+    if isinstance(env_ids, torch.Tensor):
+        env_ids = env_ids.detach().cpu().tolist()
+    ids = list(range(count)) if env_ids is None else list(env_ids)
+    if any(
+        isinstance(index, bool)
+        or not isinstance(index, Integral)
+        or index < 0
+        or index >= count
+        for index in ids
+    ):
+        raise IndexError("Visual environment indices are out of range.")
+    if len(set(ids)) != len(ids):
+        raise ValueError("Visual environment indices must be unique.")
+    return [int(index) for index in ids]
 
 
 @dataclass
@@ -98,6 +119,144 @@ class BatchEntity(ABC):
             env_ids (Sequence[int] | None): The environment IDs to reset. If None, reset all environments.
         """
         pass
+
+    def get_visual_elements(self) -> tuple[dict[str, object], ...]:
+        """Return owned metadata snapshots for configured or USD source visuals.
+
+        Gaussian arrays are not copied. Resource IDs are diagnostics scoped to
+        the current Scene; USD-native visual references do not expose them.
+        Configuration element IDs and USD prim paths remain stable.
+
+        Returns:
+            Element metadata with representation, local transform and resource IDs.
+        """
+        binding = getattr(self, "_visual_binding", None)
+        if binding is not None:
+            return binding.describe()
+        source_elements = getattr(self, "_source_visual_elements", None)
+        if source_elements is not None:
+            from copy import deepcopy
+
+            return deepcopy(source_elements)
+        if getattr(self.cfg, "source", None) is not None and getattr(
+            self, "is_spawn_bound", False
+        ):
+            from embodichain.lab.sim.spawn.usd import _source_visual_elements
+
+            entities = getattr(self, "_entities", ())
+            descriptor = getattr(entities[0], "object_desc", None) if entities else None
+            if descriptor is not None:
+                return _source_visual_elements(descriptor)
+        from embodichain.lab.sim.cfg.visuals import GaussianSplatCfg, _visual_elements
+
+        groups = getattr(self.cfg, "link_visuals", {})
+        if getattr(self.cfg, "visuals", None) is not None:
+            groups = {None: self.cfg.visuals}
+        return tuple(
+            {
+                "id": element.id,
+                "link_name": link,
+                "representation": (
+                    "gaussian_splat"
+                    if isinstance(element.representation, GaussianSplatCfg)
+                    else "mesh"
+                ),
+                "file_path": getattr(
+                    element.representation,
+                    "file_path",
+                    getattr(element.representation, "fpath", None),
+                ),
+                "local_pose": element.local_pose.copy(),
+                "scale": element.scale,
+                "resource_ids": (),
+            }
+            for link, elements in groups.items()
+            for element in (_visual_elements(elements) or ())
+        )
+
+    def set_visual_visibility(
+        self, visible: bool, env_ids: Sequence[int] | torch.Tensor | None = None
+    ) -> None:
+        """Set visibility of configured visual elements in selected environments.
+
+        Args:
+            visible: Whether the configured elements should be rendered.
+            env_ids: Environment indices, or None for all environments.
+
+        Raises:
+            IndexError: If a selected environment index is invalid.
+            TypeError: If visible is not a boolean.
+            ValueError: If a selected row has no explicit visual composition.
+                Duplicate environment IDs are also rejected before any writes.
+        """
+        binding = getattr(self, "_visual_binding", None)
+        if binding is None:
+            from .cfg.visuals import _descriptor_visual_env_ids
+
+            if not isinstance(visible, bool):
+                raise TypeError("visible must be a bool.")
+            ids = _validated_env_ids(env_ids, self.num_instances)
+            visual_ids = _descriptor_visual_env_ids(self.cfg, ids)
+            if len(visual_ids) != len(ids):
+                raise ValueError(
+                    "Explicit visuals are required for every selected environment."
+                )
+            if ids:
+                self.set_visible(visible, env_ids=ids)
+            return
+        binding.set_visible(visible, env_ids)
+
+    def set_gaussian_visual_state(
+        self,
+        element_id: str,
+        env_ids: Sequence[int] | None = None,
+        *,
+        link_name: str | None = None,
+        color_gain: object = None,
+        opacity_gain: object = None,
+        scale: object = None,
+        visible: object = None,
+        lod_enabled: object = None,
+        lod_detail_scale: object = None,
+    ) -> None:
+        """Stage Gaussian instance randomization for the next managed render.
+
+        The shared immutable point data and physical properties remain unchanged.
+        Reset restores the configured baseline for selected environments. Declare
+        several Gaussian elements and select their visibility for an asset bank;
+        each source is shared across arenas and charged once to residency.
+
+        Args:
+            element_id: Stable visual element ID within its owner/link.
+            env_ids: Selected environments, or None for all.
+            link_name: Articulation link name, or None for a root/body visual.
+            color_gain: RGB radiance multipliers, shape (3,) or (N,3).
+            opacity_gain: Nonnegative opacity multiplier, scalar or (N,).
+            scale: Positive uniform geometry scale including owner body scale,
+                scalar or (N,). Does not scale physics or the local translation.
+            visible: Element visibility, boolean scalar or (N,).
+            lod_enabled: Hierarchy selection, boolean scalar or (N,).
+            lod_detail_scale: Positive detail multiplier, scalar or (N,).
+
+        Raises:
+            ValueError: No matching Gaussian element or invalid state values.
+        """
+        binding = getattr(self, "_visual_binding", None)
+        if binding is None:
+            raise ValueError(
+                "Explicit Gaussian visuals are required for this operation."
+            )
+        binding.set_gaussian_state(
+            element_id,
+            env_ids,
+            link_name=link_name,
+            color_gain=color_gain,
+            opacity_gain=opacity_gain,
+            geometry_scales=scale,
+            visible=visible,
+            lod_enabled=lod_enabled,
+            lod_detail_scale=lod_detail_scale,
+        )
 
     def destroy(self) -> None:
         """Destroy all entities managed by this batch entity."""

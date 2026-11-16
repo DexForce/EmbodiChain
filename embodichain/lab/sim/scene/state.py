@@ -143,7 +143,9 @@ def capture_state(view: SceneView) -> SceneState:
     """Capture all physical fields without stepping or retaining live buffers.
 
     Args:
-        view: Fixed-topology scene selection with explicit ordered environment indices.
+        view: Fixed-topology scene selection with explicit ordered environment
+            indices. Only physical entities are captured; pure visual group
+            members retain their independent render state.
     Returns:
         Immutable arena-local poses, velocities, joints, targets and efforts.
     """
@@ -240,7 +242,11 @@ def _preflight_restore(
         recorded = tuple(
             (row.kind, row.uid, row.body_type, row.joint_names) for row in batch
         )
-        if recorded != tuple(description[:4] for description in view.topology):
+        if recorded != tuple(
+            description[:4]
+            for description in view.topology
+            if description[0] != "visual_object"
+        ):
             raise ValueError(
                 "Snapshot entity set, body types or joint names differ from the scene"
             )

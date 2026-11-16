@@ -56,11 +56,12 @@ from embodichain.lab.sim.cfg import (
     VisualObjectCfg,
     RigidObjectGroupCfg,
     ArticulationCfg,
+    UsdImportCfg,
     CableObjectCfg,
     LightCfg,
 )
 from embodichain.lab.sim.objects import Robot
-from embodichain.lab.sim.sensors import BaseSensor, Camera, SensorCfg
+from embodichain.lab.sim.sensors import BaseSensor, Camera, CameraCfg, SensorCfg
 from embodichain.lab.sim.types import EnvObs, EnvAction
 from embodichain.lab.gym.envs import BaseEnv, EnvCfg
 from embodichain.lab.gym.envs._physical_replay import _PhysicalReplay, _ReplaySurface
@@ -310,6 +311,18 @@ class EmbodiedEnvCfg(EnvCfg):
 
     articulation: List[ArticulationCfg] = []
 
+    usd_scene: UsdImportCfg | None = None
+    """Optional whole-scene USD/USDZ or standard AssetRevision ZIP import.
+
+    Robot construction remains owned by the embodiment. Imported resources
+    coexist with the ordinary object lists and must have distinct UIDs.
+    """
+
+    enable_ground_plane: bool | None = None
+    """Explicit default-plane selection; USD scenes default to no added plane.
+
+    Without a USD scene, ``None`` preserves ``sim_cfg.enable_ground_plane``.
+    """
     cable_object: list[CableObjectCfg] = []
     """Fixed-topology cables declared before simulation preparation."""
     fluid_object: list[FluidObjectCfg] = []
@@ -430,11 +443,21 @@ class EmbodiedEnvCfg(EnvCfg):
     ``trajectory_save_dir`` before an explicitly committed episode reset.
     Closing discards trajectories that were never committed."""
 
+    scene_preparation: FunctorCfg | None = None
+    """Optional preparation function ``func(cfg, **params) -> EmbodiedEnvCfg``.
+
+    Runs on an owned configuration before World creation. The result declares
+    ordinary scene entities and manager terms; it does not receive an environment.
+    """
+
+    resource_export: FunctorCfg | None = None
+    """Optional ``func(env, config, config_dir, **params)`` checkpoint packager."""
+
     rl_task: embodichain.lab.gym.envs.managers.RLTaskCfg | None = None
     """Optional measured RL success, failure and truncation conditions.
 
     Configured conditions use cached per-step outcomes and recorded reset-target
-    context. Keep this declaration and ``task_program`` in separate deployments.
+    context. Task Program declarations may coexist only in explicit policy mode.
     """
 
     task_program: TaskProgramCfg | None = None
@@ -444,6 +467,11 @@ class EmbodiedEnvCfg(EnvCfg):
     requests an explicit environment compiler and bridge through the dedicated
     hooks. No live provider, planner, or callable is stored in this config.
     """
+
+    task_program_execution: Literal["expert", "policy"] = "expert"
+    """Action producer; policy mode loads declarations without an expert adapter."""
+    task_program_action_owners: dict[str, str] = {}
+    """Explicit policy ownership of the declared robot resource IDs."""
 
     replay: _AuthoredJointStream | None = None
     """Explicit physical command-stream replay, independent of semantic lowerers."""
@@ -545,8 +573,41 @@ class EmbodiedEnv(BaseEnv):
         cfg: EmbodiedEnvCfg,
         *,
         task_program_adapter_factory: TaskProgramAdapterFactory | None = None,
+        scene_preparation: dict[str, Any] | None = None,
+        resource_export: dict[str, Any] | None = None,
         **kwargs,
     ):
+        # Registered defaults and explicit config use the same pre-World path.
+        # Copy before preparation so one reusable configuration can build peers.
+        preparation_seed = None
+        if (
+            scene_preparation is not None
+            or resource_export is not None
+            or cfg.scene_preparation is not None
+        ):
+            cfg = copy.deepcopy(cfg)
+            for name, default in (
+                ("scene_preparation", scene_preparation),
+                ("resource_export", resource_export),
+            ):
+                if getattr(cfg, name) is None and default is not None:
+                    setattr(cfg, name, FunctorCfg(**copy.deepcopy(default)))
+            if cfg.scene_preparation is not None:
+                operation = cfg.scene_preparation
+                operation.validate()
+                prepare = (
+                    string_to_callable(operation.func)
+                    if isinstance(operation.func, str)
+                    else operation.func
+                )
+                if cfg.seed is not None:
+                    preparation_seed = self._apply_process_seed(cfg.seed)
+                    cfg.seed = preparation_seed
+                cfg = prepare(cfg, **operation.params)
+                if not isinstance(cfg, EmbodiedEnvCfg):
+                    raise TypeError("scene_preparation must return EmbodiedEnvCfg.")
+                if preparation_seed is not None:
+                    cfg.seed = preparation_seed
         replay = getattr(cfg, "replay", None)
         if replay is not None:
             cfg = copy.deepcopy(cfg)
@@ -554,13 +615,25 @@ class EmbodiedEnv(BaseEnv):
         if rl_task is not None:
             if not isinstance(rl_task, RLTaskCfg):
                 raise TypeError("rl_task must be an RLTaskCfg or None.")
-            if (
+            if getattr(cfg, "task_program_execution", "expert") != "policy" and (
                 getattr(cfg, "task_program", None) is not None
                 or task_program_adapter_factory is not None
             ):
                 raise ValueError(
                     "rl_task and task_program cannot share one deployment."
                 )
+        if getattr(cfg, "task_program_execution", "expert") not in ("expert", "policy"):
+            raise ValueError("task_program_execution must be expert or policy.")
+        if getattr(cfg, "task_program_execution", "expert") == "policy" and (
+            rl_task is None
+            or cfg.task_program is None
+            or task_program_adapter_factory is None
+        ):
+            raise ValueError(
+                "Policy Task Program declarations require rl_task and a registered deployment."
+            )
+        self.task_program_progress = None
+        self._program_transition = 0
         self.termination_manager: (
             embodichain.lab.gym.envs.managers.TerminationManager | None
         ) = None
@@ -593,6 +666,16 @@ class EmbodiedEnv(BaseEnv):
                 "Extensions cannot override configured acceptance or environment fields."
             )
 
+        if cfg.task_program_execution == "policy":
+            from embodichain.lab.task_program.integrations.progress import (
+                _validate_policy_extensions,
+            )
+
+            _validate_policy_extensions(cfg)
+            if any(hasattr(self, name) for name in extensions):
+                raise ValueError(
+                    "Policy extensions cannot override environment-owned state or methods."
+                )
         for name, value in extensions.items():
             setattr(cfg, name, value)
             setattr(self, name, value)
@@ -615,6 +698,12 @@ class EmbodiedEnv(BaseEnv):
         self._expert_controller_qpos_history: list[list[torch.Tensor]] | None = None
 
         registration = getattr(task_program_adapter_factory, "registration", None)
+        if cfg.task_program_execution == "policy":
+            from embodichain.lab.task_program.integrations.progress import (
+                _validate_policy_deployment,
+            )
+
+            _validate_policy_deployment(cfg, registration)
         from embodichain.lab.gym.envs.objectives.ordered_placement import (
             _objective_rule,
         )
@@ -644,7 +733,7 @@ class EmbodiedEnv(BaseEnv):
             if getattr(registration, "evaluation_conditions", None)
             else {}
         )
-        super().__init__(cfg, **kwargs)
+        super().__init__(cfg, _initialization_seed=preparation_seed, **kwargs)
 
         try:
             if self._evaluation_recording:
@@ -665,6 +754,32 @@ class EmbodiedEnv(BaseEnv):
                     (ref, bound[ref]) for ref, _ in self._process_evaluation_rules
                 )
                 self._physical_objective_rule = _objective_rule(cfg.objective, bound)
+                if cfg.task_program_execution == "policy":
+                    from embodichain.lab.task_program.integrations.progress import (
+                        TaskProgramProgress,
+                        _validate_policy_action_coverage,
+                    )
+
+                    _validate_policy_action_coverage(
+                        registration, self.robot, self.action_manager
+                    )
+
+                    self.task_program_progress = TaskProgramProgress(
+                        registration.catalog.preflight(
+                            cfg.task_program, strict_contracts=True
+                        ),
+                        bound,
+                        env_ids=tuple(range(self.num_envs)),
+                        # Unstarted rows expect their first reset (episode 0).
+                        # Frames remain unqualified while the owner is at -1.
+                        episode_ids=tuple(
+                            max(0, episode)
+                            for episode in self.episode_context.episode_ids
+                        ),
+                        device=self.device,
+                        final_rules=dict(self._final_acceptance_rules),
+                        process_rules=dict(self._process_evaluation_rules),
+                    )
             if self._explicit_policy_rollout and self.action_manager is None:
                 raise ValueError(
                     "policy_request rollout recording requires an ActionManager."
@@ -684,7 +799,10 @@ class EmbodiedEnv(BaseEnv):
                 dtype=np.float32,
             )
 
-            if task_program_adapter_factory is not None:
+            if (
+                task_program_adapter_factory is not None
+                and cfg.task_program_execution == "expert"
+            ):
                 from embodichain.lab.task_program.integrations import (
                     TaskProgramEnvironmentAdapter,
                 )
@@ -1092,13 +1210,17 @@ class EmbodiedEnv(BaseEnv):
             if "startup" in self.event_manager.available_modes:
                 self.event_manager.apply(mode="startup")
 
-        if self.cfg.observations or self.cfg.record_trajectory:
+        policy_program = (
+            getattr(getattr(self, "cfg", None), "task_program_execution", "expert")
+            == "policy"
+        )
+        if self.cfg.observations or self.cfg.record_trajectory or policy_program:
             recording = (
                 trajectory_observation_cfgs(self, self.cfg.trajectory_uids)
                 if self.cfg.record_trajectory
                 else {}
             )
-            if self.cfg.record_trajectory:
+            if self.cfg.record_trajectory or policy_program:
                 recording.update(getattr(self, "_evaluation_recording", {}))
             self.observation_manager = ObservationManager(
                 self.cfg.observations, self, recording=recording
@@ -1240,6 +1362,68 @@ class EmbodiedEnv(BaseEnv):
     def _setup_scene(self, **kwargs) -> None:
         """Filter configuration independently of the overridable demand hook."""
         self._apply_functor_filter()
+        recipe = getattr(self.cfg, "usd_scene", None)
+        ground = getattr(self.cfg, "enable_ground_plane", None)
+        if ground is not None and type(ground) is not bool:
+            raise TypeError("enable_ground_plane must be a bool or None.")
+        if ground is not None or recipe is not None:
+            self.sim_cfg.enable_ground_plane = False if ground is None else ground
+        if recipe is not None:
+            from embodichain.lab.sim.cfg.physics import physics_backend_from_cfg
+            from embodichain.lab.sim.spawn._usd_scene import (
+                _assert_usd_scene_current,
+                _inspect_usd_scene,
+            )
+
+            previous = getattr(self.cfg, "_usd_scene_inventory", None)
+            if previous is not None:
+                _assert_usd_scene_current(previous)
+            reserved = {
+                item.uid
+                for field in (
+                    "background",
+                    "rigid_object",
+                    "articulation",
+                    "visual_object",
+                    "rigid_object_group",
+                    "cable_object",
+                    "fluid_object",
+                )
+                for item in getattr(self.cfg, field)
+                if item.uid is not None
+            }
+            for group in self.cfg.rigid_object_group:
+                reserved.update(
+                    item.uid
+                    for item in group.rigid_objects.values()
+                    if item.uid is not None
+                )
+            selected_robot = (
+                self.cfg.robot.resolve(self.sim_cfg.physics_cfg)
+                if isinstance(self.cfg.robot, RobotPresetCfg)
+                else self.cfg.robot
+            )
+            reserved.add(selected_robot.uid or "robot")
+            if self.cfg.enable_sensor:
+                reserved.update(
+                    item.uid for item in selected_robot.sensors if item.uid is not None
+                )
+            if self.sim_cfg.enable_ground_plane:
+                reserved.add("default_plane")
+            if self.cfg.enable_sensor:
+                reserved.update(
+                    item.uid for item in self.cfg.sensor if item.uid is not None
+                )
+            reserved.update(
+                item.uid for item in self.cfg.light.direct if item.uid is not None
+            )
+            self._usd_scene_inventory = _inspect_usd_scene(
+                recipe,
+                reserved_uids=tuple(reserved),
+                physics_backend=physics_backend_from_cfg(self.sim_cfg.physics_cfg),
+                device=str(self.sim_cfg.device),
+                gravity=self.sim_cfg.physics_cfg.gravity,
+            )
         self.cfg.ground_plane_visible = self._resolve_ground_plane_visibility()
         super()._setup_scene(**kwargs)
 
@@ -1274,16 +1458,23 @@ class EmbodiedEnv(BaseEnv):
             validation_cameras,
         )
         from embodichain.lab.sim import SimulationManager
+        from embodichain.lab.sim.sensors.registry import _resolve_sensor_factory
 
         if super()._requires_native_renderer():
             return True
+        inventory = getattr(self, "_usd_scene_inventory", None)
+        if inventory is not None and {"camera", "light"}.intersection(
+            inventory["resource_types"].values()
+        ):
+            return True
         if self.cfg.enable_sensor:
             for sensor_cfg in self._sensor_configs():
-                sensor_factory = SimulationManager.SUPPORTED_SENSOR_TYPES.get(
-                    sensor_cfg.sensor_type
+                _, sensor_factory, _ = _resolve_sensor_factory(
+                    sensor_cfg.sensor_type, SimulationManager.SUPPORTED_SENSOR_TYPES
                 )
-                if isinstance(sensor_factory, type) and issubclass(
-                    sensor_factory, Camera
+                if isinstance(sensor_cfg, CameraCfg) or (
+                    isinstance(sensor_factory, type)
+                    and issubclass(sensor_factory, Camera)
                 ):
                     return True
         for _, _, term in self._iter_configured_functors():
@@ -1460,6 +1651,22 @@ class EmbodiedEnv(BaseEnv):
         self._setup_background()
         self._setup_interactive_objects()
         self._setup_lights()
+        if self.cfg.usd_scene is not None:
+            from embodichain.lab.sim.spawn._usd_scene import _assert_usd_scene_current
+
+            _assert_usd_scene_current(self._usd_scene_inventory)
+            self.usd_scene_import = self.sim.add_usd(self.cfg.usd_scene)
+            for field in (
+                "resource_uids",
+                "resource_types",
+                "resource_source_paths",
+                "constraint_uids",
+            ):
+                if (
+                    dict(getattr(self.usd_scene_import, field))
+                    != self._usd_scene_inventory[field]
+                ):
+                    raise ValueError(f"USD scene {field} changed since preflight.")
         if self._physical_replay is not None:
             self._physical_replay.prepare_scene(self)
 
@@ -1475,13 +1682,31 @@ class EmbodiedEnv(BaseEnv):
                     self.event_manager.apply(mode="interval")
 
         termination = getattr(self, "termination_manager", None)
-        if termination is not None:
+        if (
+            termination is not None
+            and getattr(getattr(self, "cfg", None), "task_program_execution", "expert")
+            != "policy"
+        ):
             # BaseEnv advances elapsed steps after rewards. Supply this
             # transition's deadline once; Gym flags later consume this cache.
             termination.compute(
                 self._elapsed_steps + 1 >= self.max_episode_steps,
                 ignore_terminations=self.cfg.ignore_terminations,
             )
+
+    def _after_observation(self, frame: ObservationFrame) -> None:
+        """Advance policy progress once before reward and termination read caches."""
+        progress = getattr(self, "task_program_progress", None)
+        if progress is None:
+            return
+        progress.advance(
+            frame, step=self._program_transition, episode_owner=self.episode_context
+        )
+        self._program_transition += 1
+        self.termination_manager.compute(
+            self._elapsed_steps + 1 >= self.max_episode_steps,
+            ignore_terminations=self.cfg.ignore_terminations,
+        )
 
     def _initialize_physical_objective(self) -> None:
         """Bind an optional objective to an existing measured rigid object."""
@@ -1532,6 +1757,12 @@ class EmbodiedEnv(BaseEnv):
             objective.reset(env_ids)
         if getattr(self, "termination_manager", None) is not None:
             self.initialize_task_outcome(env_ids)
+        progress = getattr(self, "task_program_progress", None)
+        if progress is not None:
+            ids = (
+                env_ids.tolist() if isinstance(env_ids, torch.Tensor) else list(env_ids)
+            )
+            progress.reset(ids, [self.episode_context.episode_ids[row] for row in ids])
 
     def _rl_target_keys(self) -> tuple[str, ...]:
         return tuple(
@@ -1637,7 +1868,11 @@ class EmbodiedEnv(BaseEnv):
         self.initialize_task_outcome()
 
     def _task_success_before_reset(self, env_ids: torch.Tensor) -> torch.Tensor:
-        rules = getattr(self, "_final_acceptance_rules", ())
+        rules = (
+            ()
+            if getattr(self, "task_program_progress", None) is not None
+            else getattr(self, "_final_acceptance_rules", ())
+        )
         rows = getattr(self, "_demo_episode_metadata", ())
         if not rows and not rules:
             return super()._task_success_before_reset(env_ids)
@@ -1778,6 +2013,15 @@ class EmbodiedEnv(BaseEnv):
                 "objective": metadata.get("physical_objective"),
                 "conditions": metadata.get("task_outcome"),
                 "final_acceptance": final,
+                **(
+                    {
+                        "stage_progress": _outcome_row(
+                            self.task_program_progress.snapshot(), env_id
+                        )
+                    }
+                    if getattr(self, "task_program_progress", None) is not None
+                    else {}
+                ),
             },
             "acceptance": {
                 "eligible": eligible,
@@ -1804,7 +2048,10 @@ class EmbodiedEnv(BaseEnv):
         if (
             "success" not in info
             or not getattr(self, "_demo_episode_metadata", None)
-            or getattr(self, "_final_acceptance_rules", ())
+            or (
+                getattr(self, "_final_acceptance_rules", ())
+                and getattr(self, "task_program_progress", None) is None
+            )
         ):
             return
         rows = env_ids.tolist()
@@ -2047,6 +2294,7 @@ class EmbodiedEnv(BaseEnv):
             self.dataset_manager is not None
             or getattr(self, "rollout_buffer", None) is not None
             or getattr(self, "_traj_buffer", None) is not None
+            or getattr(self, "task_program_progress", None) is not None
         ):
             episode_metadata = self._demo_episode_metadata = _EpisodeMetadataRows(
                 self.num_envs, self._new_demo_episode_metadata(0)
@@ -2214,6 +2462,13 @@ class EmbodiedEnv(BaseEnv):
         replan: bool = False,
     ) -> None:
         """Start annotation metadata for a new demonstration episode."""
+        if (
+            getattr(getattr(self, "cfg", None), "task_program_execution", "expert")
+            == "policy"
+        ):
+            raise RuntimeError(
+                "Policy-owned resources cannot start expert demonstration execution."
+            )
         selected = range(self.num_envs) if active_env_ids is None else active_env_ids
         bridge = getattr(self, "_active_task_program_bridge", None)
         if (not replan and getattr(bridge, "program_completed", False)) or (
@@ -3359,6 +3614,9 @@ class EmbodiedEnv(BaseEnv):
         outcome = getattr(self, "termination_manager", None)
         if outcome is not None:
             info["task_outcome"] = outcome.snapshot()
+        progress = getattr(self, "task_program_progress", None)
+        if progress is not None:
+            info["task_program_progress"] = progress.snapshot()
         if getattr(self.cfg, "episode_context_in_info", True):
             info["episode_context"] = self.episode_context.snapshot()
         return info
@@ -3409,6 +3667,14 @@ class EmbodiedEnv(BaseEnv):
         self._last_action_manager_qpos = None
         self._last_action_trace = None
         is_controller_action = isinstance(action, ControllerAction)
+        if (
+            is_controller_action
+            and getattr(getattr(self, "cfg", None), "task_program_execution", "expert")
+            == "policy"
+        ):
+            raise ValueError(
+                "Policy-owned resources require ActionManager policy actions."
+            )
         expert_cfg = getattr(getattr(self, "cfg", None), "expert_trajectory", None)
         managed_expert = is_controller_action and bool(
             getattr(expert_cfg, "use_action_manager", False)
@@ -3693,7 +3959,9 @@ class EmbodiedEnv(BaseEnv):
         else:
             robot_cfg.enable_sensor = self.cfg.enable_sensor
             selected_cfg = robot_cfg
-        _collect_sensor_cfgs(selected_cfg, self.cfg.sensor)
+        sensor_cfgs = _collect_sensor_cfgs(selected_cfg, self.cfg.sensor)
+        if self.cfg.enable_sensor:
+            self.sim._plan_camera_groups(sensor_cfgs)
         self._robot_sensor_cfgs = selected_cfg.sensors
         return self.sim.add_robot(robot_cfg)
 
@@ -4022,11 +4290,20 @@ class EmbodiedEnv(BaseEnv):
             Atomic demo bridge whose segments are consumed lazily.
 
         """
+        if (
+            getattr(getattr(self, "cfg", None), "task_program_execution", "expert")
+            == "policy"
+        ):
+            raise RuntimeError(
+                "Policy-only Task Program declarations cannot activate an expert bridge."
+            )
         kwargs = {}
         if nominal_source_factory is not None:
             kwargs["nominal_source_factory"] = nominal_source_factory
         if plan_transform_factory is not None:
             kwargs["plan_transform_factory"] = plan_transform_factory
+        if self.num_envs > 1:
+            kwargs["isolate_policy_sessions"] = True
         bridge = self._checked_task_program_adapter().create_bridge(
             program,
             expansion_profile=expansion_profile,

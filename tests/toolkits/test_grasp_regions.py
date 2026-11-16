@@ -40,6 +40,7 @@ from embodichain.toolkits.graspkit.pg_grasp.regions import (
 
 def backend(*, center_mode="centroid", body=None):
     result = object.__new__(_AntipodalMeshBackend)
+    result._closing_geometry = None
     result.device = torch.device("cpu")
     result.vertices = torch.tensor(
         [[-0.1, -0.1, 0.0], [0.1, 0.1, 0.0], [-0.1, 0.1, 1.0], [0.1, -0.1, 1.0]]

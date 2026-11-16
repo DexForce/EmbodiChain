@@ -28,6 +28,12 @@ class MyTaskEnv(EmbodiedEnv):
    classes/types). A `RuntimeError` is raised otherwise.
 6. Use `override=True` to re-register an existing uid (useful in scripts/tests).
 
+In a source checkout, `embodichain_tasks/__init__.py` resolves the sibling
+`configs` package before eager registration. This keeps task code and resources
+in the same selected worktree even when an editable install maps configs to
+another checkout. Its temporary search path is removed before walking task
+modules; wheel installations retain their normal nested resource layout.
+
 ### Gym ID convention
 
 Format: `<TaskName>-v<N>` (e.g. `PourWater-v1`, `PushCubeRL`).
@@ -74,6 +80,32 @@ owns capture, completion qualification and terminal evidence.
 
 Component files do not use compatibility `version` fields. Inline runnable
 Gym configs remain supported when no conflicting component selector is used.
+
+### Whole-scene USD environments
+
+An environment's `simulation.usd_scene` (inline: `usd_scene`) supplies one
+`UsdImportCfg`, alongside any ordinary physical declarations. Its file resolves
+from the declaring environment file. Task-bound imported resources need explicit
+`asset_cfgs` UIDs; `integration.yaml.scene_binding` retains logical/native mapping
+and affordance ownership. The embodiment supplies the robot: source scenes must
+already omit robots, and this route rejects USD robot configuration bindings.
+The source importer does not identify robots from names or generate task semantics.
+
+Component resolution statically compiles the scene without a World or facades,
+retaining a detached `usd_scene_inventory`. Binding validation includes imported
+resource types and link names. Environment construction rechecks source bytes and
+the actual import mapping, declares the whole scene once, then uses the ordinary
+prepare/reset/Task Program lifecycle. The deployment inspector prints source prim,
+native UID and logical entity mappings. Use the
+[USD pick/place example](../../../examples/gym/usd_scene_pick_place/README.md)
+for the existing `run-task` entry and measured qualification.
+
+`enable_ground_plane` is an optional physical environment setting. With a USD scene,
+omission disables the added plane; ordinary environments retain their existing
+default. Backend and world gravity remain environment-owned, and an explicitly
+authored USD gravity must agree after source-convention and scene-pose conversion.
+Package admission and dependency lifetime belong to the
+[simulation importer](../simulation-system/simulation-system.md).
 
 ### Reusable Gym deployment components
 
@@ -130,6 +162,10 @@ An inline runnable config must declare exactly one
 exactly one backend and its optional `physics_config`; the thin deployment
 cannot repeat either field. `config_to_cfg()` constructs the backend-specific
 typed physics config and rejects fields from the other backend.
+
+The physical environment also owns `enable_ground_plane`. It controls
+creation of the default physical/render plane and can be disabled for
+contact-free scenes; a deployment cannot repeat or override the field.
 
 An `environment` selection may name one `component`, or declare separate
 `default` / `newton` component paths (also accepted inside `variants`). These
@@ -235,7 +271,12 @@ Python task registration module. `config_to_cfg` decodes `RLTaskCfg`, reuses the
 ordinary manager and physical-component configuration, and registers the common
 host with explicit RL capability. Conditions are grouped as success, failure
 and truncation; their `func`/`params` use the manager registry and entity binding.
-The same deployment cannot select both `rl_task` and `task_program`.
+A deployment may combine `rl_task` and `task_program` only with explicit
+`task_program.execution: policy` and `action_owners` assigning every declared
+robot resource to `policy`. The default `expert` execution remains exclusive
+with RL. Policy mode loads declarations and integration metadata without
+creating an expert adapter. Its supported subset and consumer bindings are
+owned by [policy stage progress](../task-programs/execution.md#policy-stage-progress).
 
 The registration signature preserves manager ordering, measured conditions,
 physical declarations and episode limits while excluding runtime device, batch

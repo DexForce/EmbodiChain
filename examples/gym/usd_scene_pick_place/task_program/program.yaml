@@ -1,0 +1,40 @@
+program_id: usd_scene_cube_pick_place
+instruction: Pick up the cube and place it at the other position on the table.
+targets:
+  drop_pose:
+    kind: pose
+    position: [0.55, 0.05, 0.8]
+    quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+  rest_pose:
+    kind: pose
+    position: [0.55, 0.05, 0.775]
+    quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+program:
+  kind: sequence
+  items:
+    - segment: pick_cube
+      instruction: Grasp and lift the cube.
+      steps:
+        pick:
+          object: cube
+      validators:
+        - kind: object_lifted
+          object: cube
+          minimum_lift: 0.04
+    - segment: place_cube
+      instruction: Place the cube on the table and release it.
+      steps:
+        place:
+          object: cube
+          at: drop_pose
+      post:
+        - kind: wait_stable
+          entity: cube
+      validators:
+        - kind: object_near_target
+          object: cube
+          target: rest_pose
+          position_tolerance: 0.02
+        - kind: object_upright
+          object: cube
+          maximum_tilt_degrees: 15.0

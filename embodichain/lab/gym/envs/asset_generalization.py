@@ -53,7 +53,7 @@ from embodichain.lab.task_program.integrations.asset_materialization import (
     validate_materialized_deployment,
 )
 from embodichain.lab.task_program.integrations.scene_expansion import (
-    execute_scene_variant,
+    execute_scene_variants,
 )
 from embodichain.lab.task_program.integrations.simulation.scene_expansion import (
     SimulationSceneExpansionHost,
@@ -388,7 +388,7 @@ def _collect_batch(
     report["replacement"] = deepcopy(target._asset_generalization_replacement)
     host = SimulationSceneExpansionHost(
         target,
-        initial_validator=lambda: initial_validator(target),
+        initial_validator=lambda row: initial_validator(target),
         settle_steps=cfg.settle_steps,
     )
     for episode_index in range(cfg.episodes_per_batch):
@@ -405,13 +405,13 @@ def _collect_batch(
             pose_changes=(),
             metadata=(("asset_set_id", deployment.asset_set_id),),
         )
-        result = execute_scene_variant(
+        result = execute_scene_variants(
             env,
-            variant,
+            {0: variant},
             prepare_scene=host,
-            measured_validator=lambda: measured_validator(target),
+            measured_validator=lambda row: measured_validator(target),
             episode_index=episode_index,
-        )
+        )[0]
         episode["accepted"] = result.accepted
         episode["validation"] = result.to_metadata()
         target._demo_episode_metadata[0]["asset_generalization"] = {

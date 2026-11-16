@@ -239,7 +239,8 @@ def settle_scene(
     """Run caller-owned physics steps and measure optional velocity convergence.
 
     Args:
-        view: Full-world scene selection; no temporary simulation is created here.
+        view: Full physical entity set and all environment rows. Pure visual
+            members are not physical convergence evidence.
         step: Host callback advancing the supplied number of physics substeps.
         cfg: Fixed-step or convergence policy. This advances the whole world.
     Returns:
@@ -251,6 +252,11 @@ def settle_scene(
         raise ValueError(
             "Settling requires a full-world selection because physics advances every row"
         )
+    if view.entity_uids is not None:
+        whole = SceneView(view.sim, env_ids=view.env_ids)
+        selected = {(kind, uid) for kind, uid, _ in view.entities()}
+        if selected != {(kind, uid) for kind, uid, _ in whole.entities()}:
+            raise ValueError("Settling requires a full-world physical entity selection")
     if cfg.mode == "fixed_steps":
         if cfg.max_steps:
             step(cfg.max_steps)

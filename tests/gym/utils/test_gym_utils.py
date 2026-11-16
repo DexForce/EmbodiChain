@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+
 import argparse
 from copy import deepcopy
 from pathlib import Path
@@ -244,7 +245,7 @@ def test_config_to_cfg_rejects_invalid_physics_backend(backend: object) -> None:
 @pytest.mark.parametrize(
     ("backend", "physics_config", "field_name"),
     (
-        ("default", {"num_substeps": 2}, "num_substeps"),
+        ("default", {"requires_grad": True}, "requires_grad"),
         ("newton", {"enable_ccd": True}, "enable_ccd"),
     ),
 )
@@ -272,7 +273,7 @@ def test_config_to_cfg_rejects_other_backend_physics_fields(
 @pytest.mark.parametrize(
     ("backend", "physics_config", "config_type"),
     (
-        ("default", {"enable_ccd": True}, DefaultPhysicsCfg),
+        ("default", {"enable_ccd": True, "num_substeps": 2}, DefaultPhysicsCfg),
         ("newton", {"num_substeps": 2}, NewtonPhysicsCfg),
     ),
 )
@@ -293,6 +294,8 @@ def test_config_to_cfg_builds_declared_physics_config(
     cfg = config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
 
     assert type(cfg.sim_cfg.physics_cfg) is config_type
+    for name, value in physics_config.items():
+        assert getattr(cfg.sim_cfg.physics_cfg, name) == value
 
 
 @pytest.mark.parametrize(
@@ -1504,6 +1507,7 @@ class TestConfigToCfgFromFile:
         environment = load_config(environment_path)
         environment["physics"] = "newton"
         environment["physics_config"] = {"num_substeps": 2}
+        environment["enable_ground_plane"] = False
         save_config(environment_path, environment)
 
         cfg = config_to_cfg(
@@ -1514,6 +1518,23 @@ class TestConfigToCfgFromFile:
 
         assert isinstance(cfg.sim_cfg.physics_cfg, NewtonPhysicsCfg)
         assert cfg.sim_cfg.physics_cfg.num_substeps == 2
+        assert cfg.sim_cfg.enable_ground_plane is False
+
+    def test_environment_component_owns_ground_declaration(self, tmp_path) -> None:
+        """A deployment cannot re-enable physical ground owned by its component."""
+        self._write_deployment(tmp_path)
+        environment_path = tmp_path / "env.yaml"
+        environment = load_config(environment_path)
+        environment["enable_ground_plane"] = False
+        save_config(environment_path, environment)
+        config = self._environment_component_gym_config()
+        config["enable_ground_plane"] = True
+        with pytest.raises(ValueError, match="environment.component"):
+            config_to_cfg(
+                config,
+                manager_modules=DEFAULT_MANAGER_MODULES,
+                source_path=tmp_path / "task.ur5.yaml",
+            )
 
     @pytest.mark.parametrize(
         ("field_name", "value"),
@@ -2765,6 +2786,42 @@ def test_launcher_can_explicitly_disable_configured_headless() -> None:
     assert merged["headless"] is False
 
 
+@pytest.mark.parametrize("suffix", ["yaml", "json"])
+def test_gym_config_loads_gaussian_preset_and_single_visual(tmp_path, suffix):
+    from embodichain.lab.sim.cfg import GaussianSplatCfg
+
+    resource = tmp_path / "scan.ply"
+    resource.write_text("fixture")
+    config = {
+        "id": "EmbodiedEnv-v1",
+        "physics": "default",
+        "env": {},
+        "robot": {"uid": "robot"},
+        "render_cfg": {"preset": "gaussian", "spp": 4},
+        "visual_object": [
+            {
+                "uid": "room",
+                "visuals": {"type": "gaussian_splat", "file_path": str(resource)},
+            }
+        ],
+    }
+    path = tmp_path / f"gaussian.{suffix}"
+    save_config(path, config)
+    cfg = config_to_cfg(load_config(path), manager_modules=DEFAULT_MANAGER_MODULES)
+    assert cfg.sim_cfg.render_cfg.renderer == "hybrid"
+    assert cfg.sim_cfg.render_cfg.gaussian.enabled is True
+    assert cfg.sim_cfg.render_cfg.denoising.offscreen == "optix"
+    assert cfg.sim_cfg.render_cfg.spp == 4
+    element = cfg.visual_object[0].visuals[0]
+    assert element.id == "appearance"
+    assert isinstance(element.representation, GaussianSplatCfg)
+    assert element.representation.file_path == str(resource)
+    config["renderer"] = "fast-rt"
+    overridden = config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+    assert overridden.sim_cfg.render_cfg.renderer == "fast-rt"
+    assert cfg.sim_cfg.render_cfg.renderer == "hybrid"
+
+
 @pytest.mark.parametrize(
     "collection", ["background", "rigid_object", "rigid_object_group"]
 )
@@ -2799,7 +2856,88 @@ def test_mesh_asset_paths_resolve_collision_and_visual_geometry(
     if collection == "rigid_object_group":
         parsed = parsed.rigid_objects["cup"]
     assert parsed.shape.fpath == paths["TaskMeshes/collision.obj"]
-    assert parsed.visual_shape.fpath == paths["TaskMeshes/visual.glb"]
+    assert parsed.visual_shape is None
+    assert parsed.visuals[0].representation.fpath == paths["TaskMeshes/visual.glb"]
+
+
+@pytest.mark.parametrize(
+    "collection", ["background", "rigid_object", "rigid_object_group"]
+)
+@pytest.mark.parametrize("variant", [False, True])
+def test_nested_physical_mesh_paths_resolve_from_data_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, collection: str, variant: bool
+) -> None:
+    from embodichain.data import constants
+
+    root = tmp_path / "data"
+    path = root / "meshes" / "piece.obj"
+    path.parent.mkdir(parents=True)
+    path.write_text("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.chdir(outside)
+    monkeypatch.setattr(constants, "EMBODICHAIN_DEFAULT_DATA_ROOT", str(root))
+    compound = {
+        "shape_type": "Compound",
+        "parts": [
+            {
+                "shape": {
+                    "shape_type": "Mesh",
+                    "fpath": "meshes/piece.obj",
+                    "collision": {"approximation": "convex_hull"},
+                }
+            }
+        ],
+    }
+    body_type = "static" if collection == "background" else "dynamic"
+    obj = {"uid": "piece", "body_type": body_type, "shape": compound}
+    if variant:
+        obj = {
+            "uid": "piece",
+            "body_type": body_type,
+            "shape": {"shape_type": "Cube"},
+            "env_variants": {"1": {"body_type": body_type, "shape": compound}},
+        }
+    boundary = {
+        "shape_type": "Mesh",
+        "fpath": "meshes/piece.obj",
+        "collision": {"approximation": "sdf", "force_sdf": False},
+    }
+    obj["particle_collision_shape"] = deepcopy(boundary)
+    if body_type == "dynamic":
+        obj["attrs"] = {"mass_props": {"mass": 1.0, "inertia": np.eye(3).tolist()}}
+    if variant:
+        obj["env_variants"]["1"]["particle_collision_shape"] = deepcopy(boundary)
+        if body_type == "dynamic":
+            obj["env_variants"]["1"]["attrs"] = deepcopy(obj["attrs"])
+    entries = (
+        [{"uid": "group", "rigid_objects": {"piece": obj}}]
+        if collection == "rigid_object_group"
+        else [obj]
+    )
+    cfg = config_to_cfg(
+        {
+            "id": "EmbodiedEnv-v1",
+            "physics": "newton",
+            "env": {},
+            "robot": {"uid": "robot"},
+            collection: entries,
+        },
+        manager_modules=DEFAULT_MANAGER_MODULES,
+    )
+    parsed = getattr(cfg, collection)[0]
+    if collection == "rigid_object_group":
+        parsed = parsed.rigid_objects["piece"]
+    from embodichain.lab.sim.spawn.descriptors import rigid_desc_from_cfg
+
+    descriptor, _ = rigid_desc_from_cfg(parsed, newton_solver_type="dexuni")
+    assert descriptor.collisions[-1].file_path == str(path)
+    if variant:
+        parsed = parsed.env_variants[1]
+        descriptor = descriptor.env_variants[1]
+    assert parsed.shape.parts[0].shape.fpath == str(path)
+    assert parsed.particle_collision_shape.fpath == str(path)
+    assert descriptor.collisions[-1].file_path == str(path)
 
 
 @pytest.mark.parametrize("owner", ["inline", "environment", "scene"])
@@ -2890,6 +3028,57 @@ def test_config_to_cfg_resolves_usd_source_files(monkeypatch, tmp_path):
         assert isinstance(asset.source, UsdSourceCfg)
         assert asset.source.file_path == str(tmp_path / "scene.usda")
         assert asset.source.source_prim_path == "/World/Asset"
+
+
+def test_checkpoint_resource_paths_resolve_from_config_owner(tmp_path, monkeypatch):
+    """Prepared robot and manifest paths survive a change of working directory."""
+    from embodichain.lab.gym.utils._component_composition import _resolve_gym_components
+
+    owner = tmp_path / "run" / "configs"
+    resources = owner / "resources"
+    resources.mkdir(parents=True)
+    (resources / "robot.urdf").write_text('<robot name="frozen"/>')
+    (resources / "part.json").write_text("{}")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    raw = {
+        "id": "FrozenAssembly-v1",
+        "physics": "newton",
+        "robot": {"fpath": "./resources/robot.urdf"},
+        "env": {"extensions": {"physical_asset": {"fpath": "./resources/part.json"}}},
+    }
+    resolved = _resolve_gym_components(raw, base_dir=owner).config
+    assert resolved["robot"]["fpath"] == str(resources / "robot.urdf")
+    assert resolved["env"]["extensions"]["physical_asset"]["fpath"] == str(
+        resources / "part.json"
+    )
+    assert raw["robot"]["fpath"] == "./resources/robot.urdf"
+
+
+@pytest.mark.parametrize("field", ["scene_preparation", "resource_export"])
+def test_configured_rl_rejects_changed_preparation_or_export(field):
+    from copy import deepcopy
+    from gymnasium.envs.registration import registry
+    from embodichain.lab.gym.utils.gym_utils import _register_configured_rl
+    from embodichain.lab.gym.utils.registration import REGISTERED_ENVS
+
+    name = f"ConfigOperationIdentity-{field}-v0"
+    config = {
+        "id": name,
+        "physics": "newton",
+        "rl_task": {},
+        "env": {field: {"func": "fixture:prepare", "params": {"variant": 1}}},
+    }
+    try:
+        _register_configured_rl(config, 10)
+        changed = deepcopy(config)
+        changed["env"][field]["params"]["variant"] = 2
+        with pytest.raises(ValueError, match="different declaration"):
+            _register_configured_rl(changed, 10)
+    finally:
+        REGISTERED_ENVS.pop(name, None)
+        registry.pop(name, None)
 
 
 def test_recording_only_observation_does_not_expand_policy_rollout_schema():

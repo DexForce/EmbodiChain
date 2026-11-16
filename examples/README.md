@@ -61,6 +61,16 @@ state-transition fitting and state/action gradients. Its generated recipes use
 the installable `embodichain_models.dynamics.rwm` model family and shared SL
 trainer; its corpus generation and acceptance helpers remain private to the example.
 
+The [Sharpa in-hand example](learning/sharpa_inhand/README.md) trains cylinder
+rotation with native eight-scale, domain-randomized physics, EmbodiChain APG
+actor updates and the pinned upstream teacher/world model, then evaluates saved
+policies against frozen source receipts.
+
+The [Wuji in-hand example](learning/wuji_inhand/README.md) adapts that learner
+to the 20-joint Wuji hand with authored actuator limits and screened holding
+states. It is evaluated separately from Sharpa and does not imply identical
+randomization or an algorithm comparison.
+
 The [visual ACT example](learning/act/README.md) collects Franka PushCube
 demonstrations, trains an RGB and proprioception action-chunking policy, and
 evaluates checkpoints on independently seeded simulator scenes.
@@ -118,15 +128,15 @@ python scripts/tutorials/sim/create_cable.py
 python scripts/tutorials/sim/create_cable.py --headless --renderer no-render --num-envs 2
 ```
 
-The cable examples use CUDA and DexSim `0.6.0rc1` (engine commit
-`1b968250ada2b06b210bc7aa08ef219769f01217`). The DexForce package index
+The cable examples use CUDA and DexSim `0.6.0rc2` (engine commit
+`dbaca660471d5aaa7e750093e7fe1c207465c4af`). The DexForce package index
 provides Linux x86_64 wheels for Python 3.11 and 3.12. To install the pinned
 engine in your EmbodiChain environment and check its build, run:
 
 ```bash
 python -m pip install --index-url https://pypi.org/simple \
   --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site \
-  dexsim-engine==0.6.0rc1
+  dexsim-engine==0.6.0rc2
 python -c "import dexsim; from dexsim.scene import SpawnedCable; print(dexsim.__version__, dexsim.__commit_id__)"
 ```
 

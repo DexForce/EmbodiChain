@@ -90,6 +90,7 @@ def inspect_deployment(
     _validate_scene_binding_targets(
         deployment.scene_binding,
         simulation=physical.scene_config,
+        usd_scene_inventory=physical.usd_scene_inventory,
     )
 
     from embodichain.lab.task_program.integrations.demo_skill import (
@@ -113,6 +114,14 @@ def inspect_deployment(
             "Task integration expects program_id "
             f"{deployment.program_id!r}, got {program.program_id!r}."
         )
+    if (
+        isinstance(task_program, Mapping)
+        and task_program.get("execution", "expert") == "policy"
+    ):
+        # Use the production decoder/validator, without mutating Gym's registry.
+        from embodichain.lab.gym.utils.gym_utils import config_to_cfg
+
+        config_to_cfg(dict(payload), source_path=deployment_path, _register_env=False)
     compiled = catalog.preflight(program, strict_contracts=strict_contracts)
     calls = tuple(
         compiled_call.call
@@ -132,10 +141,31 @@ def inspect_deployment(
         "scene_registry": deployment.selection.scene_registry,
         "robot_profile": deployment.selection.robot_profile,
         "runtime_preset": deployment.selection.runtime_preset,
+        "execution": task_program.get("execution", "expert"),
+        "action_owners": task_program.get("action_owners", {}),
         "segment_count": compiled.segment_count,
         "call_count": len(calls),
         "semantic_calls": semantic_calls,
     }
+    if physical.usd_scene_inventory is not None:
+        inventory = physical.usd_scene_inventory
+        logical = {
+            item.get("simulation_uid", item["entity_id"]): item["entity_id"]
+            for field in ("rigid_objects", "articulations", "rigidized_articulations")
+            for item in deployment.scene_binding.get(field, ())
+        }
+        summary["usd_scene"] = {
+            **inventory,
+            "bindings": [
+                {
+                    "source_prim_path": inventory["resource_source_paths"][key],
+                    "simulation_uid": uid,
+                    "kind": inventory["resource_types"][key],
+                    "entity_id": logical.get(uid),
+                }
+                for key, uid in inventory["resource_uids"].items()
+            ],
+        }
     if explain:
         from embodichain.lab.task_program.integrations.catalog import _canonical_value
         from embodichain.lab.task_program.integrations._program_identity import (

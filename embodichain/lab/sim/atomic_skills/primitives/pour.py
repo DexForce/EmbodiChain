@@ -357,6 +357,7 @@ class Pour(AtomicSkill[PourGoal, PourOptions]):
             dt=result.dt,
             control_dt=control_dt,
             arrival_indices=result.waypoint_indices,
+            success=result.success,
             split_target_index=0,
             minimum_segment_duration=options.rotation_duration,
         )
@@ -603,6 +604,7 @@ class Pour(AtomicSkill[PourGoal, PourOptions]):
                         dt=result.dt,
                         control_dt=context.require_control_dt(),
                         arrival_indices=result.waypoint_indices,
+                        success=result.success,
                     )
                 else:
                     planned, arm = plan_named_arm_trajectory(

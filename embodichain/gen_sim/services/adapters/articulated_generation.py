@@ -277,7 +277,7 @@ class ArticulatedGenerationClient:
 
 
 def _validate_articulated_usdc(path: str | Path) -> None:
-    """Reject structurally invalid physics; this is not semantic/runtime acceptance."""
+    """Validate physics and optional endpoint metadata without inventing semantics."""
     from pxr import Usd, UsdPhysics
 
     try:
@@ -332,20 +332,22 @@ def _validate_articulated_usdc(path: str | Path) -> None:
                 raise ValueError(f"invalid axis or motion range: {prim.GetPath()}")
             if prim.IsA(UsdPhysics.PrismaticJoint):
                 closed_attr = prim.GetAttribute("gen_sim:closedPosition")
-                closed = closed_attr.Get() if closed_attr else None
-                if (
-                    closed is None
-                    or not isinstance(closed, (int, float))
-                    or not math.isfinite(closed)
-                    or not any(
-                        math.isclose(closed, endpoint, abs_tol=1.0e-6)
-                        for endpoint in (lower, upper)
-                    )
-                ):
-                    raise ValueError(
-                        "prismatic joint requires a finite closed endpoint at one "
-                        f"limit via gen_sim:closedPosition: {prim.GetPath()}"
-                    )
+                if closed_attr:
+                    closed = closed_attr.Get()
+                    if (
+                        closed is None
+                        or isinstance(closed, bool)
+                        or not isinstance(closed, (int, float))
+                        or not math.isfinite(closed)
+                        or not any(
+                            math.isclose(closed, endpoint, abs_tol=1.0e-6)
+                            for endpoint in (lower, upper)
+                        )
+                    ):
+                        raise ValueError(
+                            "declared gen_sim:closedPosition must be a finite closed endpoint "
+                            f"at one joint limit: {prim.GetPath()}"
+                        )
             movable.append(prim.GetPath())
         if not movable:
             raise ValueError("no enabled non-fixed joint")
