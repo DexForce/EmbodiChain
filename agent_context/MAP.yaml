@@ -292,7 +292,7 @@ topics:
   aliases: [scene expansion, scene augmentation, scene variant, scene robot feasibility, feasible region search, 场景扩增, 场景变体, 联合可行区域搜索]
   keywords: [SceneLayoutInput, SceneRandomizationPolicyCfg, prepare_scene_randomization, generate_scene_variants, apply_scene_variants, load_scene_variants, SceneExpansionCfg, ScenePoseChange, SceneVariant, FixedSceneCandidateSource,
     SceneRobotFeasibilityCfg, TaskFeasibilityRequest, FeasibilityAtlas, RobotWorkspaceProposalSource, NewtonCollisionChecker, search-scene-feasibility,
-    ScenePreparationResult, SceneVariantEpisodeResult, execute_scene_variant,
+    ScenePreparationResult, SceneVariantEpisodeResult, execute_scene_variants,
     SimulationSceneExpansionHost, SimulationSceneInitialState, episode_prepare]
   paths: [topics/scene-expansion/scene-expansion.md]
   source_of_truth:
@@ -303,13 +303,12 @@ topics:
   - embodichain/lab/task_program/integrations/simulation/feasibility_geometry.py
   - embodichain/lab/task_program/integrations/scene_expansion.py
   - embodichain/lab/task_program/integrations/simulation/scene_expansion.py
-  - embodichain/lab/task_program/integrations/simulation/workspace.py
   - embodichain/lab/gym/envs/base_env.py
   - embodichain/lab/gym/envs/embodied_env.py
   - embodichain/lab/gym/envs/demo.py
   watch_paths: [embodichain/compute/geometry/planar.py, embodichain/compute/geometry/_warp/contact_query.py,
     tests/sim/scene/feasibility/, tests/gym/envs/task_program/test_feasibility.py, tests/sim/scene/expansion/,
-    tests/gym/envs/task_program/test_scene_expansion.py, tests/gym/envs/task_program/test_scene_workspace.py,
+    tests/gym/envs/task_program/test_scene_expansion.py, tests/gym/envs/task_program/test_scene_expansion_sim.py,
     tests/gym/envs/task_program/test_simulation_scene_expansion.py, tests/gym/envs/task_program/test_simulation_environment.py]
   related_topics: [scene-services, simulation-system, task-programs, robot-workspace, motion-planning, gen-sim, data-pipeline]
   status: active

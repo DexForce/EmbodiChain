@@ -4161,6 +4161,8 @@ class EmbodiedEnv(BaseEnv):
             kwargs["nominal_source_factory"] = nominal_source_factory
         if plan_transform_factory is not None:
             kwargs["plan_transform_factory"] = plan_transform_factory
+        if self.num_envs > 1:
+            kwargs["isolate_policy_sessions"] = True
         bridge = self._checked_task_program_adapter().create_bridge(
             program,
             expansion_profile=expansion_profile,
