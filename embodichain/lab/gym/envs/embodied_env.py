@@ -61,7 +61,7 @@ from embodichain.lab.sim.cfg import (
     LightCfg,
 )
 from embodichain.lab.sim.objects import Robot
-from embodichain.lab.sim.sensors import BaseSensor, Camera, SensorCfg
+from embodichain.lab.sim.sensors import BaseSensor, Camera, CameraCfg, SensorCfg
 from embodichain.lab.sim.types import EnvObs, EnvAction
 from embodichain.lab.gym.envs import BaseEnv, EnvCfg
 from embodichain.lab.gym.envs._physical_replay import _PhysicalReplay, _ReplaySurface
@@ -443,6 +443,16 @@ class EmbodiedEnvCfg(EnvCfg):
     ``trajectory_save_dir`` before an explicitly committed episode reset.
     Closing discards trajectories that were never committed."""
 
+    scene_preparation: FunctorCfg | None = None
+    """Optional preparation function ``func(cfg, **params) -> EmbodiedEnvCfg``.
+
+    Runs on an owned configuration before World creation. The result declares
+    ordinary scene entities and manager terms; it does not receive an environment.
+    """
+
+    resource_export: FunctorCfg | None = None
+    """Optional ``func(env, config, config_dir, **params)`` checkpoint packager."""
+
     rl_task: embodichain.lab.gym.envs.managers.RLTaskCfg | None = None
     """Optional measured RL success, failure and truncation conditions.
 
@@ -563,8 +573,41 @@ class EmbodiedEnv(BaseEnv):
         cfg: EmbodiedEnvCfg,
         *,
         task_program_adapter_factory: TaskProgramAdapterFactory | None = None,
+        scene_preparation: dict[str, Any] | None = None,
+        resource_export: dict[str, Any] | None = None,
         **kwargs,
     ):
+        # Registered defaults and explicit config use the same pre-World path.
+        # Copy before preparation so one reusable configuration can build peers.
+        preparation_seed = None
+        if (
+            scene_preparation is not None
+            or resource_export is not None
+            or cfg.scene_preparation is not None
+        ):
+            cfg = copy.deepcopy(cfg)
+            for name, default in (
+                ("scene_preparation", scene_preparation),
+                ("resource_export", resource_export),
+            ):
+                if getattr(cfg, name) is None and default is not None:
+                    setattr(cfg, name, FunctorCfg(**copy.deepcopy(default)))
+            if cfg.scene_preparation is not None:
+                operation = cfg.scene_preparation
+                operation.validate()
+                prepare = (
+                    string_to_callable(operation.func)
+                    if isinstance(operation.func, str)
+                    else operation.func
+                )
+                if cfg.seed is not None:
+                    preparation_seed = self._apply_process_seed(cfg.seed)
+                    cfg.seed = preparation_seed
+                cfg = prepare(cfg, **operation.params)
+                if not isinstance(cfg, EmbodiedEnvCfg):
+                    raise TypeError("scene_preparation must return EmbodiedEnvCfg.")
+                if preparation_seed is not None:
+                    cfg.seed = preparation_seed
         replay = getattr(cfg, "replay", None)
         if replay is not None:
             cfg = copy.deepcopy(cfg)
@@ -690,7 +733,7 @@ class EmbodiedEnv(BaseEnv):
             if getattr(registration, "evaluation_conditions", None)
             else {}
         )
-        super().__init__(cfg, **kwargs)
+        super().__init__(cfg, _initialization_seed=preparation_seed, **kwargs)
 
         try:
             if self._evaluation_recording:
@@ -1415,6 +1458,7 @@ class EmbodiedEnv(BaseEnv):
             validation_cameras,
         )
         from embodichain.lab.sim import SimulationManager
+        from embodichain.lab.sim.sensors.registry import _resolve_sensor_factory
 
         if super()._requires_native_renderer():
             return True
@@ -1425,11 +1469,12 @@ class EmbodiedEnv(BaseEnv):
             return True
         if self.cfg.enable_sensor:
             for sensor_cfg in self._sensor_configs():
-                sensor_factory = SimulationManager.SUPPORTED_SENSOR_TYPES.get(
-                    sensor_cfg.sensor_type
+                _, sensor_factory, _ = _resolve_sensor_factory(
+                    sensor_cfg.sensor_type, SimulationManager.SUPPORTED_SENSOR_TYPES
                 )
-                if isinstance(sensor_factory, type) and issubclass(
-                    sensor_factory, Camera
+                if isinstance(sensor_cfg, CameraCfg) or (
+                    isinstance(sensor_factory, type)
+                    and issubclass(sensor_factory, Camera)
                 ):
                     return True
         for _, _, term in self._iter_configured_functors():
@@ -3914,7 +3959,9 @@ class EmbodiedEnv(BaseEnv):
         else:
             robot_cfg.enable_sensor = self.cfg.enable_sensor
             selected_cfg = robot_cfg
-        _collect_sensor_cfgs(selected_cfg, self.cfg.sensor)
+        sensor_cfgs = _collect_sensor_cfgs(selected_cfg, self.cfg.sensor)
+        if self.cfg.enable_sensor:
+            self.sim._plan_camera_groups(sensor_cfgs)
         self._robot_sensor_cfgs = selected_cfg.sensors
         return self.sim.add_robot(robot_cfg)
 
@@ -4255,6 +4302,8 @@ class EmbodiedEnv(BaseEnv):
             kwargs["nominal_source_factory"] = nominal_source_factory
         if plan_transform_factory is not None:
             kwargs["plan_transform_factory"] = plan_transform_factory
+        if self.num_envs > 1:
+            kwargs["isolate_policy_sessions"] = True
         bridge = self._checked_task_program_adapter().create_bridge(
             program,
             expansion_profile=expansion_profile,

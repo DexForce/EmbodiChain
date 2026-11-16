@@ -20,7 +20,8 @@ to zero; proposal prefixes require the same recorded feedback stream.
 `integrations/simulation/feasibility.py` owns the B=1 Gym host. It rebuilds an
 installation from copied configuration, prepares through
 `SimulationSceneExpansionHost`, screens the phase graph, restores and identifies
-the actual execution start, then uses `execute_scene_variant`. Runtime controller
+the actual execution start, then uses `execute_scene_variants` with its explicit
+single-row candidate mapping. Runtime controller
 provenance selects phase contact permissions; measured object poses replace
 projected attachment poses during actual execution. `ExpansionSession` remains
 the owner of attempts, reservations, accepted episodes and persistence receipts.

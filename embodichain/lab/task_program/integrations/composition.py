@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -85,6 +85,9 @@ class ConfiguredTaskProgramDeployment:
     scene_binding: dict[str, object]
     planner_config: dict[str, object] | None
     program_declaration: dict[str, Any] | None = None
+    _composed_declarations: dict[str, object] = field(
+        default_factory=dict, repr=False, compare=False, kw_only=True
+    )
 
     @property
     def program_source(self) -> Path | dict[str, Any]:

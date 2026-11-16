@@ -28,6 +28,12 @@ class MyTaskEnv(EmbodiedEnv):
    classes/types). A `RuntimeError` is raised otherwise.
 6. Use `override=True` to re-register an existing uid (useful in scripts/tests).
 
+In a source checkout, `embodichain_tasks/__init__.py` resolves the sibling
+`configs` package before eager registration. This keeps task code and resources
+in the same selected worktree even when an editable install maps configs to
+another checkout. Its temporary search path is removed before walking task
+modules; wheel installations retain their normal nested resource layout.
+
 ### Gym ID convention
 
 Format: `<TaskName>-v<N>` (e.g. `PourWater-v1`, `PushCubeRL`).
@@ -156,6 +162,10 @@ An inline runnable config must declare exactly one
 exactly one backend and its optional `physics_config`; the thin deployment
 cannot repeat either field. `config_to_cfg()` constructs the backend-specific
 typed physics config and rejects fields from the other backend.
+
+The physical environment also owns `enable_ground_plane`. It controls
+creation of the default physical/render plane and can be disabled for
+contact-free scenes; a deployment cannot repeat or override the field.
 
 An `environment` selection may name one `component`, or declare separate
 `default` / `newton` component paths (also accepted inside `variants`). These

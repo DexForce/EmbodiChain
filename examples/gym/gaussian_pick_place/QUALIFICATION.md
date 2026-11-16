@@ -139,6 +139,39 @@ ownership guidance remains accurate, with example-specific checks documented
 in the example README. Earlier asset/rendering test counts above were not
 rerun for this verifier-only correction.
 
+## Main synchronization qualification — 2026-11-16
+
+The candidate merging `main@8170fca184da253c617fe79dd0f635598587c46f`
+into `a6bcf6c1a` was requalified after the sensor-context and Task Program
+updates. Conflict resolution retains the upstream display-transfer CLI guidance,
+the PR's USD/ZIP visual-subtree isolation cases, and both numeric/string rejection
+cases for the display-transfer boolean.
+
+- All three deployment inspections passed without World construction.
+- 664 focused rendering/configuration, USD admission, Task Program composition,
+  preview, visualization and asset tests passed; 15 native cases were deselected
+  from that lane. One unrelated Dash/pytest plugin deprecation warning remains.
+- All three fresh seed-42 native attempts passed, with process exits zero:
+  851 actions, 854 paired observations and 1,708 RGB images. Measured lift was
+  0.129429–0.129431 m, final position error 7.237–7.269 mm and final tilt 0 degrees.
+  Every camera video was decoded against its raw RGB source; the largest
+  per-frame mean absolute uint8 compression error was below 1.640.
+- The complete native collection is identified by
+  `franka-gs-20261116-183539-1e2537d1`. Its bundle audit includes measured
+  attach/release, settled placement, T+1 camera alignment and rigid wrist mounting.
+- The offline original-recording check and all nine negative-acceptance checks
+  passed with no visible GPU, preserving the earlier three P2 fixes and the
+  original artifact fingerprints.
+- Black 26.10.1 (`black .`), context-map validation, `git diff --check` and
+  public API coverage (4961/4961 exports) passed.
+
+The first GPU-hidden deployment-inspector attempt encountered this host's
+missing `open3d.cpu` binding. Inspection and the focused tests passed in the
+qualified GPU-visible native environment; recording verification and negative
+acceptance separately passed with GPU visibility disabled. No dependency
+fallback or production-code workaround was added. These are one attempt per
+scene at one seed, not a multi-seed stability qualification.
+
 ## Limits
 
 Only the independent task support/cube physics and RGB streams are qualified.

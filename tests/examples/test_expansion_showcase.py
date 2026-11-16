@@ -429,3 +429,22 @@ def test_preview_reuse_verifies_all_generated_artifacts(tmp_path):
     for invalid in (None, [], "invalid", {}):
         dump(signature, invalid)
         assert not preview_cache_valid(tmp_path, index, signature, source)
+
+
+def test_carton_present_preparation_needs_no_demonstration_assets(
+    tmp_path, monkeypatch
+):
+    from examples.expansion.demo_skill.present import prepare
+    import embodichain.data._references as references
+
+    resolve = references._resolve_data_reference
+
+    def offline(value, **kwargs):
+        asset = value.get("asset") if isinstance(value, dict) else str(value)
+        if asset.startswith("Real2SimCarton"):
+            raise AssertionError("Present preparation requested demonstration assets")
+        return resolve(value, **kwargs)
+
+    monkeypatch.setattr(references, "_resolve_data_reference", offline)
+    path = prepare(tmp_path / "present")
+    assert path.is_file()

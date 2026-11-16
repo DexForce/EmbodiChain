@@ -5,7 +5,7 @@ environment:
 
 task_program:
   program: task_program/program.tianji_marvin.yaml
-  integration: task_program/integration.tianji_marvin.yaml
+  integration: task_program/integration.dual_arm.yaml
   execution_policy:
     component: ../../../../components/execution_policies/trajectory_open_loop_dual_arm_manipulation.yaml
     overrides:

@@ -44,6 +44,7 @@ __all__ = [
     "prepare_task_deployment",
     "qualify_task_scene",
     "resume_scene_generation",
+    "revise_task_plan",
     "submit_scene_generation",
 ]
 
@@ -61,6 +62,8 @@ def _load_json(path: Path, label: str) -> dict[str, Any]:
 def _artifact_path(root: Path, relative: str) -> Path:
     if not isinstance(relative, str) or not relative:
         raise ValueError("Artifact path must be nonempty")
+    if Path(relative).is_absolute() or ".." in Path(relative).parts:
+        raise ValueError(f"Invalid artifact path: {relative}")
     path = (root / relative).resolve()
     if not path.is_relative_to(root) or not path.is_file() or path.is_symlink():
         raise ValueError(f"Invalid artifact path: {relative}")
@@ -80,13 +83,219 @@ def _verify_inventory(root: Path, inventory: Mapping[str, Any]) -> None:
 
 
 def load_task_plan(path: str | Path) -> dict[str, Any]:
-    """Load a published Task Engine plan after verifying every artifact."""
+    """Load a published Task Engine plan after verifying every artifact.
+
+    Args:
+        path: Directory containing a versioned task-plan manifest.
+
+    Returns:
+        Verified manifest, resolved root and structured scene requirements.
+    """
     root = Path(path).expanduser().resolve(strict=True)
     manifest = _load_json(root / "task_plan_manifest.json", "task plan manifest")
-    if manifest.get("schema_version") != "embodichain.task-plan-artifact/v1":
+    version = manifest.get("schema_version")
+    if version in {
+        "embodichain.hybrid-task-plan/v1",
+        "embodichain.hybrid-authoring/v1",
+    }:
+        from .task_engine.hybrid import (
+            _scene_projection,
+            verify_witness,
+            _declared_support_targets,
+        )
+        from .task_spec import TaskSpec, canonical_hash
+        from .task_spec.publication import decode_task_document
+
+        inventory = manifest["artifacts"]
+        _verify_inventory(root, inventory)
+
+        def read(name):
+            if name + ".json" not in inventory:
+                raise ValueError("Incomplete hybrid plan inventory: " + name)
+            return _load_json(root / (name + ".json"), name)
+
+        spec = TaskSpec.from_dict(read("task_spec"))
+        doc = decode_task_document(read("task_spec_v1"), spec)
+        graph = read("semantic_task_graph")
+        image = doc["inputs"]["image"]
+        if (
+            doc["spec_digest"] != manifest["spec_digest"]
+            or canonical_hash(graph) != manifest["semantic_graph_sha256"]
+            or doc["task_id"] != manifest["task_id"]
+            or doc["inputs"]["instruction"] != manifest["instruction"]
+            or image["ref"] not in inventory
+            or inventory[image["ref"]] != image["sha256"]
+            or image["sha256"] != manifest["image_sha256"]
+        ):
+            raise ValueError("Hybrid publication identity mismatch")
+        if version == "embodichain.hybrid-authoring/v1":
+            from .task_spec.publication import project_scene_requirements
+
+            requirements = read("scene_requirements")
+            if (
+                requirements != project_scene_requirements(doc)
+                or manifest.get("stage") != "authoring_only"
+            ):
+                raise ValueError("Invalid authoring-only publication")
+            return {
+                **manifest,
+                "root": str(root),
+                "plan_digest": _file_hash(root / "task_plan_manifest.json"),
+                "task_document": doc,
+                "scene_requirements": requirements,
+            }
+        if (
+            verify_witness(
+                spec,
+                graph,
+                support_targets=_declared_support_targets(doc),
+            )["status"]
+            != "covered"
+        ):
+            raise ValueError("Uncovered hybrid placement")
+        projection = _scene_projection(doc, graph, read("scene_grounding"))
+        if any(read(k) != v for k, v in projection.items()):
+            raise ValueError("Hybrid scene projection mismatch")
+        pending = [
+            o["id"]
+            for o in projection["image_grounding"]["objects"]
+            if o["provenance"] != "observed"
+        ]
+        if "stage" in manifest and (
+            manifest["stage"]
+            != ("pending_visual_binding" if pending else "ready_for_qualification")
+            or pending != manifest["pending_roles"]
+            or manifest["execution_ready"] is not False
+        ):
+            raise ValueError("Hybrid publication stage differs from verified grounding")
+        return {
+            **manifest,
+            "root": str(root),
+            "plan_digest": _file_hash(root / "task_plan_manifest.json"),
+            "task_document": doc,
+            "scene_requirements": projection["scene_requirements"],
+        }
+    if version not in {
+        "embodichain.task-plan-artifact/v1",
+        "embodichain.task-plan-artifact/v2",
+    }:
         raise ValueError("Unsupported task plan artifact schema")
     _verify_inventory(root, manifest.get("artifacts"))
     requirements = _load_json(root / "scene_requirements.json", "scene requirements")
+    if version == "embodichain.task-plan-artifact/v2":
+        required_files = {
+            "task_spec_v1.json",
+            "task_spec.json",
+            "semantic_task_graph.json",
+            "plan_coverage.json",
+            "image_grounding.json",
+            "semantic_graph_validation.json",
+            "scene_requirements.json",
+        }
+        if required_files - manifest["artifacts"].keys():
+            raise ValueError("Incomplete task-plan inventory")
+        from .task_spec import TaskSpec, canonical_hash
+        from .task_spec.publication import (
+            decode_task_document,
+            project_scene_requirements,
+        )
+
+        from .task_engine.agent import derive_scene_request
+        from .task_engine.contracts import TASK_DRAFT_SCHEMA, validate_task_draft
+        from .task_engine.semantic_plan_validation import (
+            _validate_interpreted_plan,
+            _validate_clause_coverage,
+        )
+
+        normative = TaskSpec.from_dict(
+            _load_json(root / "task_spec.json", "normative source")
+        )
+        document = decode_task_document(
+            _load_json(root / "task_spec_v1.json", "task document"),
+            normative,
+        )
+        graph = _load_json(root / "semantic_task_graph.json", "semantic graph")
+        coverage = _load_json(root / "plan_coverage.json", "plan coverage")
+        validation = _load_json(
+            root / "semantic_graph_validation.json", "coverage validation"
+        )
+        draft = validate_task_draft(
+            {
+                "schema_version": TASK_DRAFT_SCHEMA,
+                "task_id": document["task_id"],
+                "instruction": document["inputs"]["instruction"],
+                "steps": document["interpretation"]["steps"],
+            }
+        )
+        source = validation["source"]
+        if source["grounding"] != _load_json(
+            root / "image_grounding.json", "image grounding"
+        ):
+            raise ValueError("Grounding differs from the validated plan")
+        qualifiers = _validate_clause_coverage(
+            document,
+            source["requirements"],
+            graph,
+            source["annotations"],
+            source["bindings"],
+            {
+                **normative.metadata["goal_sources"],
+                **{k: [v] for k, v in normative.metadata["milestone_sources"].items()},
+            },
+            source["grounding"],
+        )
+        declared_coverage = _validate_interpreted_plan(
+            graph,
+            draft,
+            derive_scene_request(draft)["references"],
+            source["grounding"],
+            source["annotations"],
+            source["requirements"],
+            source["bindings"],
+        )
+        if (
+            any(
+                document[k] != manifest[k]
+                for k in ("spec_digest", "task_semantic_hash", "generalization_hash")
+            )
+            or coverage["spec_digest"] != document["spec_digest"]
+            or manifest["task_spec_sha256"] != validation["task_spec_digest"]
+            or validation["graph_digest"] != coverage["graph_digest"]
+            or declared_coverage != validation["coverage"]
+            or validation["task_spec_digest"] != document["source_spec_digest"]
+            or coverage["milestone_groups"] != normative.metadata["milestone_sources"]
+            or coverage["goal_groups"] != normative.metadata["goal_sources"]
+            or coverage["role_entities"]
+            != {
+                role: sorted(
+                    {
+                        uid
+                        for ref in refs
+                        for uid in validation["source"]["grounding"]["bindings"][ref]
+                    }
+                )
+                for role, refs in normative.metadata["role_references"].items()
+            }
+            or document["inputs"]["image"]["ref"] not in manifest["artifacts"]
+            or document["inputs"]["instruction"] != manifest["instruction"]
+            or document["task_id"] != manifest["task_id"]
+            or document["inputs"]["image"]["sha256"] != manifest["image_sha256"]
+            or _file_hash(_artifact_path(root, document["inputs"]["image"]["ref"]))
+            != manifest["image_sha256"]
+            or canonical_hash(graph) != coverage["graph_digest"]
+            or coverage["graph_digest"] != manifest["semantic_graph_sha256"]
+            or project_scene_requirements(document) != requirements
+            or validation.get("qualifier_coverage", qualifiers) != qualifiers
+        ):
+            raise ValueError("Task plan spec, graph or scene projection mismatch")
+        return {
+            **manifest,
+            "plan_digest": _file_hash(root / "task_plan_manifest.json"),
+            "root": str(root),
+            "scene_requirements": requirements,
+            "task_document": document,
+            "qualifier_coverage": qualifiers,
+        }
     if (
         requirements.get("schema_version") != "embodichain.scene-requirements/v1"
         or requirements.get("task_id") != manifest.get("task_id")
@@ -94,11 +303,167 @@ def load_task_plan(path: str | Path) -> dict[str, Any]:
         or requirements.get("image_sha256") != manifest.get("image_sha256")
     ):
         raise ValueError("Scene requirements do not match the task plan")
-    return {**manifest, "root": str(root), "scene_requirements": requirements}
+    return {
+        **manifest,
+        "plan_digest": _file_hash(root / "task_plan_manifest.json"),
+        "root": str(root),
+        "scene_requirements": requirements,
+    }
+
+
+def revise_task_plan(
+    parent: str | Path,
+    proposal: Mapping[str, Any],
+    output: str | Path,
+    *,
+    expected_spec_digest: str,
+    expected_graph_digest: str,
+    expected_plan_digest: str,
+) -> Path:
+    """Publish a fresh graph revision against the parent's frozen task and grounding.
+
+    The proposal uses the ordinary planner response schema (nodes and quoted
+    requirements). Both expected identities are checked before publication.
+
+    Args:
+        parent: Directory containing the source task plan.
+        proposal: Canonical planner response with nodes and quoted requirements.
+        output: Fresh directory for the graph revision.
+        expected_spec_digest: Frozen task identity selected by the caller.
+        expected_graph_digest: Source graph identity selected by the caller.
+        expected_plan_digest: Complete publication identity, including deployment
+            annotations, binding requests and grounding.
+
+    Returns:
+        Published revision directory retaining the parent task specification.
+
+    Raises:
+        ValueError: The revisions are stale or the proposal fails validation.
+    """
+    import shutil
+    from .task_spec import canonical_hash
+    from .task_engine.image_planning import _assemble
+    from .task_engine._image_run import _image_preview
+    from .task_engine.semantic_plan_validation import (
+        validate_semantic_plan,
+        _validate_clause_coverage,
+    )
+    from .task_engine.orchestration.workflow_artifacts import (
+        WorkflowRunArtifacts,
+        write_run_json,
+    )
+
+    plan = load_task_plan(parent)
+    if (
+        plan.get("spec_digest") != expected_spec_digest
+        or plan["semantic_graph_sha256"] != expected_graph_digest
+        or plan["plan_digest"] != expected_plan_digest
+    ):
+        raise ValueError("Stale task plan revision")
+    if plan["schema_version"] in {
+        "embodichain.hybrid-task-plan/v1",
+        "embodichain.hybrid-authoring/v1",
+    }:
+        raise ValueError(
+            "Hybrid graph revisions require a fresh grounded hybrid publication"
+        )
+    root = Path(plan["root"])
+    target = Path(output).resolve()
+    if target.is_relative_to(root):
+        raise ValueError("Select a revision directory outside the parent plan")
+    report = _load_json(root / "semantic_graph_validation.json", "plan validation")
+    source = report["source"]
+    graph, annotations, bindings = _assemble(dict(proposal), source["candidate"])
+    source.update(
+        annotations=annotations,
+        bindings=bindings,
+        requirements=proposal["requirements"],
+    )
+    pairing = _load_json(root / "plan_coverage.json", "pairing")
+    qualifiers = _validate_clause_coverage(
+        plan["task_document"],
+        source["requirements"],
+        graph,
+        annotations,
+        bindings,
+        {
+            **pairing["goal_groups"],
+            **{k: [v] for k, v in pairing["milestone_groups"].items()},
+        },
+        source["grounding"],
+    )
+    if any(item["status"] != "covered" for item in qualifiers):
+        raise ValueError(
+            "Unverified instruction qualifiers require clarification before revision"
+        )
+    report.update(
+        graph_digest=canonical_hash(graph),
+        coverage=validate_semantic_plan(graph, **source),
+        qualifier_coverage=qualifiers,
+    )
+    pairing["graph_digest"] = report["graph_digest"]
+    revised = {
+        "semantic_task_graph": graph,
+        "semantic_graph_validation": report,
+        "binding_requirements": bindings,
+        "instruction_requirements": proposal["requirements"],
+        "plan_coverage": pairing,
+    }
+    manifest = _load_json(root / "task_plan_manifest.json", "manifest")
+    with WorkflowRunArtifacts(target) as publication:
+        for name in manifest["artifacts"]:
+            origin = _artifact_path(root, name)
+            destination = target / name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(origin, destination)
+        for key, value in revised.items():
+            write_run_json(target / (key + ".json"), value)
+        preview = {
+            **revised,
+            **{
+                k: _load_json(target / (k + ".json"), k)
+                for k in (
+                    "task_spec",
+                    "task_spec_v1",
+                    "task_candidates",
+                    "image_grounding",
+                )
+            },
+        }
+        summary = _load_json(target / "run_manifest.json", "summary")
+        summary.update(
+            pending_bindings=len(bindings),
+            semantic_status=report["coverage"]["semantic_status"],
+            visual_status=report["coverage"]["visual_status"],
+        )
+        write_run_json(target / "run_manifest.json", summary)
+        (target / "semantic_task_graph.html").write_text(
+            _image_preview(preview, _source_image(target, plan), summary)
+        )
+        manifest.update(
+            parent_plan_sha256=_file_hash(root / "task_plan_manifest.json"),
+            semantic_graph_sha256=pairing["graph_digest"],
+            semantic_status=summary["semantic_status"],
+            visual_status=summary["visual_status"],
+            artifacts={
+                name: _file_hash(target / name) for name in manifest["artifacts"]
+            },
+        )
+        write_run_json(target / "task_plan_manifest.json", manifest, overwrite=False)
+        load_task_plan(target)
+        publication.commit()
+    return target
 
 
 def load_generated_scene(path: str | Path) -> dict[str, Any]:
-    """Load one provider-neutral generated scene and verify its contained files."""
+    """Load one provider-neutral generated scene and verify its contained files.
+
+    Args:
+        path: Directory containing the generated-scene manifest and assets.
+
+    Returns:
+        Verified scene manifest with its resolved root directory.
+    """
     root = Path(path).expanduser().resolve(strict=True)
     manifest = _load_json(root / "generated_scene.json", "generated scene manifest")
     if manifest.get("schema_version") != "embodichain.generated-scene/v1":
@@ -191,43 +556,207 @@ def submit_scene_generation(
     *,
     idempotency_key: str,
 ) -> SceneJobRef:
+    """Submit a scene request through the selected provider.
+
+    Args:
+        provider: Selected scene-generation lifecycle owner.
+        request: Source and requirements bound by content identity.
+        idempotency_key: Provider-scoped submission identity.
+
+    Returns:
+        Provider-owned durable job reference.
+    """
     return provider.submit(request, idempotency_key=idempotency_key)
 
 
 def inspect_scene_generation(
     provider: SceneGenerationProvider, job: SceneJobRef
 ) -> SceneJobStatus:
+    """Read the selected provider's current job status.
+
+    Args:
+        provider: Job lifecycle owner.
+        job: Previously submitted job reference.
+
+    Returns:
+        Current provider-reported job status and artifact reference.
+    """
     return provider.inspect(job)
 
 
 def resume_scene_generation(
     provider: SceneGenerationProvider, job: SceneJobRef
 ) -> SceneJobStatus:
+    """Reconcile an existing job through its selected provider.
+
+    Args:
+        provider: Job lifecycle owner.
+        job: Durable job reference to reconcile.
+
+    Returns:
+        Reconciled provider status.
+    """
     return provider.resume(job)
 
 
 def cancel_scene_generation(
     provider: SceneGenerationProvider, job: SceneJobRef
 ) -> CancellationReport:
+    """Request cancellation and return the provider's actual acknowledgement.
+
+    Args:
+        provider: Job lifecycle owner.
+        job: Durable job reference to cancel.
+
+    Returns:
+        Acknowledged stop state and possible partial effects.
+    """
     return provider.cancel(job)
 
 
 def materialize_scene_generation(
     provider: SceneGenerationProvider, job: SceneJobRef, output: str | Path
 ) -> Path:
+    """Materialize a completed provider job at the requested output location.
+
+    Args:
+        provider: Job and materialization owner.
+        job: Successful durable job reference.
+        output: Destination selected by the caller.
+
+    Returns:
+        Existing resolved directory returned by the provider.
+    """
     path = provider.materialize(job, Path(output).expanduser().absolute())
     return Path(path).resolve(strict=True)
 
 
-def _source_image(root: Path) -> Path:
-    matches = sorted(root.glob("source_image.*"))
-    if len(matches) != 1:
-        raise ValueError("Task plan must contain exactly one source image")
-    return matches[0]
+def _source_image(root: Path, plan: Mapping[str, Any] | None = None) -> Path:
+    plan = load_task_plan(root) if plan is None else plan
+    if "task_document" in plan:
+        relative = plan["task_document"]["inputs"]["image"]["ref"]
+    else:
+        matches = [
+            name
+            for name in plan["artifacts"]
+            if name.startswith("source_image.") and "/" not in name
+        ]
+        if len(matches) != 1:
+            raise ValueError("Task plan inventory must identify one source image")
+        relative = matches[0]
+    path = _artifact_path(root, relative)
+    if relative not in plan["artifacts"] or _file_hash(path) != plan["image_sha256"]:
+        raise ValueError("Task plan source image does not match its verified input")
+    return path
 
 
 def _file_hash(path: str | Path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def _check_scene_roles(
+    plan: Mapping[str, Any],
+    bindings: Mapping[str, Any],
+    assets: Mapping[str, Any],
+    *,
+    asset_root: Path,
+    asset_sources: Mapping[str, Mapping[str, Any]],
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Check frozen properties and bind any measured proofs to deployed assets."""
+    if "task_document" not in plan:
+        return {}, []
+    members = _load_json(Path(plan["root"]) / "plan_coverage.json", "coverage")[
+        "role_entities"
+    ]
+    report = {}
+    issues = [
+        {"code": "unverified_instruction_qualifier", **item}
+        for item in plan.get("qualifier_coverage", [])
+        if item["status"] != "covered"
+    ]
+    for role in plan["task_document"]["configuration"]["roles"]:
+        role_id = role["id"]
+        selected = [bindings["objects"].get(entity) for entity in members[role_id]]
+        row = report[role_id] = {"members": selected, "verified": [], "pending": []}
+        for uid in selected:
+            if uid not in assets:
+                issues.append(
+                    {"code": "scene_role_unbound", "role_id": role_id, "uid": uid}
+                )
+                continue
+            asset = assets[uid]
+            for capability in role["affordances"]:
+                declared = asset.get("affordances")
+                if isinstance(declared, list) and capability in declared:
+                    row["verified"].append(capability)
+                else:
+                    row["pending"].append(capability)
+                    # generated-scene/v1 never required this optional metadata.
+                    # An explicit declaration is authoritative when supplied.
+                    if "affordances" in asset:
+                        issues.append(
+                            {
+                                "code": "missing_asset_capability",
+                                "role_id": role_id,
+                                "expected": capability,
+                                "measured": declared,
+                                "uid": uid,
+                            }
+                        )
+            properties = asset.get("properties", {})
+            for key, expected in role["properties"].items():
+                available = isinstance(properties, Mapping) and key in properties
+                measured = properties[key] if available else None
+                if available and "property_evidence" in asset:
+                    proofs = asset["property_evidence"]
+                    proof = proofs.get(key) if isinstance(proofs, Mapping) else None
+                    available = False
+                    if isinstance(proof, Mapping) and proof.get("value") == measured:
+                        try:
+                            root = asset_root.resolve()
+                            deployed = asset_sources.get(uid, {})
+                            # A proxy GLB cannot certify a packaged USD prim.
+                            # This adapter does not measure package materials.
+                            if "source_prim_path" not in deployed:
+                                mesh = _artifact_path(root, deployed.get("path"))
+                                source = _artifact_path(root, proof.get("source"))
+                                available = source == mesh and _file_hash(
+                                    mesh
+                                ) == proof.get("sha256")
+                                if (
+                                    available
+                                    and proof.get("method")
+                                    == "uniform_opaque_srgb_palette/v1"
+                                ):
+                                    from .scene_engine.pipeline.utils.scene_exporter import (
+                                        SceneExporter,
+                                    )
+
+                                    # Older proofs may hash only the main GLB even
+                                    # when appearance lives in mutable sidecars.
+                                    available = SceneExporter._opaque_glb_materials(
+                                        mesh
+                                    )
+                        except (OSError, ValueError, TypeError):
+                            available = False
+                if available and measured == expected:
+                    row["verified"].append("property:" + key)
+                else:
+                    row["pending"].append("property:" + key)
+                    issues.append(
+                        {
+                            "code": (
+                                "asset_property_mismatch"
+                                if available
+                                else "asset_property_unverified"
+                            ),
+                            "role_id": role_id,
+                            "expected": {key: expected},
+                            "measured": measured,
+                            "uid": uid,
+                        }
+                    )
+    return report, issues
 
 
 def _publish_qualification(
@@ -238,6 +767,7 @@ def _publish_qualification(
     issues: list[dict[str, Any]],
     bindings: dict[str, Any] | None = None,
     placements: dict[str, Any] | None = None,
+    role_report: dict[str, Any] | None = None,
 ) -> Path:
     output.mkdir(parents=True, exist_ok=False)
     from .task_engine.orchestration.workflow_artifacts import write_run_json
@@ -251,6 +781,7 @@ def _publish_qualification(
             "issues": issues,
             "bindings": bindings,
             "placements": placements or {},
+            "roles": role_report or {},
         },
         overwrite=False,
     )
@@ -267,9 +798,22 @@ def qualify_task_scene(
     *,
     services: GenSimServices | None = None,
 ) -> Path:
-    """Bind and statically qualify one rigid E1 plan without publishing a deployment."""
+    """Bind and statically qualify a supported rigid manipulation plan.
+
+    Args:
+        task_plan_dir: Verified Task Engine publication.
+        generated_scene_dir: Provider-neutral generated scene publication.
+        runtime_config: Trusted robot and physical runtime configuration.
+        execution_policy: Trusted execution policy configuration.
+        output_dir: Fresh qualification-report directory.
+        services: Optional caller-owned services for logical role binding.
+
+    Returns:
+        Directory containing the qualification verdict and binding diagnostics.
+    """
     from ._run_binding import (
         _generated_scene_data,
+        _deployment_asset_sources,
         _ground_ids,
         _load_runtime,
         _placement,
@@ -293,6 +837,20 @@ def qualify_task_scene(
         "requirements_sha256": scene.get("requirements_sha256"),
         "feedback_sha256": scene.get("feedback_sha256"),
     }
+    if plan["schema_version"] == "embodichain.hybrid-authoring/v1":
+        return _publish_qualification(
+            output,
+            status="rejected",
+            inputs=inputs,
+            issues=[
+                dict(
+                    code="authoring_only",
+                    owner="task_plan",
+                    retry_scope="none",
+                    message="No qualified grounded witness",
+                )
+            ],
+        )
     requirements_hash = _file_hash(plan_root / "scene_requirements.json")
     if scene.get("requirements_sha256") != requirements_hash:
         return _publish_qualification(
@@ -322,17 +880,27 @@ def qualify_task_scene(
                 }
             ],
         )
-    candidates = _load_json(plan_root / "task_candidates.json", "task candidates")
-    candidate = next(
-        (
-            value
-            for value in candidates.get("candidates", [])
-            if value.get("candidate_id") == plan["candidate_id"]
-        ),
-        None,
-    )
-    steps = None if candidate is None else candidate.get("draft", {}).get("steps")
-    if (
+    if "task_document" in plan:
+        goals = plan["task_document"]["objectives"]["goal"]
+        placements = [p for p in goals if p["predicate"] == "semantic_goal"]
+        steps = [
+            {**p.get("arguments", {}), "relation": p.get("relation")}
+            for p in placements
+        ]
+        if len(plan["task_document"]["objectives"]["milestones"]) != 1:
+            steps = []
+    else:
+        candidates = _load_json(plan_root / "task_candidates.json", "task candidates")
+        candidate = next(
+            (
+                c
+                for c in candidates["candidates"]
+                if c["candidate_id"] == plan["candidate_id"]
+            ),
+            {},
+        )
+        steps = candidate.get("draft", {}).get("steps")
+    if plan["schema_version"] != "embodichain.hybrid-task-plan/v1" and (
         not isinstance(steps, list)
         or len(steps) != 1
         or steps[0].get("task_type") != "E1"
@@ -408,15 +976,43 @@ def qualify_task_scene(
                 }
             ],
         )
+    role_report, issues = _check_scene_roles(
+        plan,
+        bindings,
+        {item["uid"]: item for item in scene["objects"]},
+        asset_root=scene_root,
+        asset_sources=_deployment_asset_sources({}, generated_scene=scene),
+    )
+    if issues:
+        return _publish_qualification(
+            output,
+            status="rejected",
+            inputs=inputs,
+            issues=issues,
+            bindings=bindings,
+            role_report=role_report,
+        )
     placements = {}
     occupied: dict[str, list[tuple[float, float, float]]] = {}
+    landed_objects = {}
     annotations = validation["source"]["annotations"]
     try:
         for node in graph["nodes"]:
             call = node["call"]
-            if call["kind"] != "place" or not ({"on", "inside"} & call.keys()):
+            subject = call.get("arguments", call).get("object")
+            if (
+                call["kind"] == "pick"
+                or call.get("call_id") == "simulation.coordinated_transport"
+            ):
+                previous = landed_objects.pop(subject, None)
+                if previous:
+                    support, landing = previous
+                    occupied[support].remove(landing)
+            if call.get("call_id") != "simulation.coordinated_transport" and (
+                call["kind"] != "place" or not ({"on", "inside"} & call.keys())
+            ):
                 continue
-            subject = call["object"]
+            subject = call.get("arguments", call)["object"]
             reference = annotations[node["id"]]["reference"]
             pose, displacement = _placement(
                 entries[bindings["objects"][subject]],
@@ -424,6 +1020,7 @@ def qualify_task_scene(
                 scene_root,
                 occupied.setdefault(reference, []),
             )
+            landed_objects[subject] = (reference, occupied[reference][-1])
             placements[node["id"]] = {
                 "object_target_pose": pose,
                 "displacement": displacement,
@@ -450,6 +1047,7 @@ def qualify_task_scene(
         issues=[],
         bindings=bindings,
         placements=placements,
+        role_report=role_report,
     )
 
 
@@ -460,13 +1058,41 @@ def prepare_task_deployment(
     runtime_config: str | Path,
     execution_policy: str | Path,
     output_dir: str | Path,
+    *,
+    handover_pose: Mapping[str, Any] | None = None,
+    skill_options: Mapping[str, Mapping[str, Any]] | None = None,
+    expected_revisions: Mapping[str, str] | None = None,
 ) -> Path:
-    """Publish an execution-ready deployment from one accepted qualification."""
+    """Publish an execution-ready deployment from one accepted qualification.
+
+    Args:
+        task_plan_dir: Verified Task Engine publication.
+        generated_scene_dir: Qualified generated scene publication.
+        qualification_dir: Matching accepted qualification report.
+        runtime_config: Trusted robot and physical runtime configuration.
+        execution_policy: Trusted execution policy configuration.
+        output_dir: Fresh deployment publication directory.
+        handover_pose: Trusted installation exchange pose for handovers.
+        skill_options: Optional trusted deployment-side Semantic Call parameters.
+        expected_revisions: Optional caller-selected input digests.
+
+    Returns:
+        Path to the runnable deployment configuration.
+
+    Raises:
+        ValueError: Qualification or expected input identities do not match.
+    """
     from ._run_binding import _bind_deployment, _load_runtime
     from ._run_config import _RunCfg
     from .task_engine.orchestration.workflow_artifacts import write_run_json
 
+    from .task_spec import canonical_hash
+
     plan = load_task_plan(task_plan_dir)
+    if plan.get("stage") in {"authoring_only", "pending_visual_binding"}:
+        raise ValueError(
+            "Deployment preparation requires its matching accepted qualification"
+        )
     scene = load_generated_scene(generated_scene_dir)
     plan_root, scene_root = Path(plan["root"]), Path(scene["root"])
     qualification_root = Path(qualification_dir).expanduser().resolve(strict=True)
@@ -481,6 +1107,19 @@ def prepare_task_deployment(
         "runtime_sha256": _file_hash(runtime_path),
         "policy_sha256": _file_hash(policy_path),
     }
+    revisions = {
+        **expected,
+        "handover_pose_digest": canonical_hash(dict(handover_pose or {})),
+        "skill_options_digest": canonical_hash(dict(skill_options or {})),
+        "spec_digest": plan.get("spec_digest"),
+        "graph_digest": plan.get("semantic_graph_sha256"),
+        "plan_digest": plan["plan_digest"],
+    }
+    if expected_revisions is not None and any(
+        key not in revisions or revisions[key] != value
+        for key, value in expected_revisions.items()
+    ):
+        raise ValueError("Stale task deployment input revision")
     if (
         qualification.get("schema_version") != "embodichain.scene-qualification/v1"
         or qualification.get("status") != "accepted"
@@ -492,6 +1131,15 @@ def prepare_task_deployment(
         )
     output = Path(output_dir).expanduser().absolute()
     output.mkdir(parents=True, exist_ok=False)
+    profile_binding = {"action_options": dict(skill_options or {})}
+    runtime_services = {}
+    if handover_pose is not None:
+        profile_binding["grounding_providers"] = {
+            "hand_over": "simulation.configured_handover_pose"
+        }
+        runtime_services["handover_pose_providers"] = [
+            {**handover_pose, "kind": "configured_pose"}
+        ]
     cfg = _RunCfg(
         image=_source_image(plan_root),
         instruction=plan["instruction"],
@@ -499,6 +1147,7 @@ def prepare_task_deployment(
         runtime=runtime_path,
         execution_policy=policy_path,
         task_id=plan["task_id"],
+        binding={"profile": profile_binding, "runtime_services": runtime_services},
     )
     runtime, policy, profile = _load_runtime(cfg)
     deployment = _bind_deployment(
@@ -509,6 +1158,7 @@ def prepare_task_deployment(
         policy,
         profile,
         services=None,
+        expected_plan_digest=plan["plan_digest"],
         generated_scene=scene,
         resolved_bindings=qualification["bindings"],
         resolved_placements=qualification.get("placements", {}),
@@ -526,6 +1176,29 @@ def prepare_task_deployment(
             "binding_report_sha256": _file_hash(output / "binding_report.json"),
             "preflight_report_sha256": _file_hash(output / "preflight_report.json"),
             "execution_ready": True,
+            "input_revisions": revisions,
+            "evidence_requirements": [
+                {"predicate_id": p["id"], "scope": scope}
+                for scope, predicates in (
+                    (
+                        "final",
+                        plan.get("task_document", {})
+                        .get("objectives", {})
+                        .get("goal", []),
+                    ),
+                    (
+                        "recorded",
+                        [
+                            p
+                            for m in plan.get("task_document", {})
+                            .get("objectives", {})
+                            .get("milestones", [])
+                            for p in m["achieve"]
+                        ],
+                    ),
+                )
+                for p in predicates
+            ],
             "runtime_evidence_status": "not_run",
         },
         overwrite=False,

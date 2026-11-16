@@ -39,16 +39,26 @@ image/edit mode generates first. [Pipeline details](pipeline-details.md) own
 stage, ingest, resume, UI and grouped-randomization contracts.
 
 Full scene providers are separate from model-service roles. The selected
-`embodichain.gensim_scene_providers` adapter owns external job transport and
-materialization; GenSim owns requirements, qualification and deployment validity.
-Task plans, generated scenes, qualification reports and prepared deployments
-use separate immutable manifests. Expected incompatibility returns structured
-qualification; corrupt artifacts and transport failures remain errors. These
-operations expose durable identity/feedback boundaries for a later agent loop.
+`embodichain.gensim_scene_providers` adapter owns its external job transport and
+materialization, while GenSim owns task requirements, qualification and deployment
+validity. Task plans, generated scenes, qualification reports and prepared
+deployments use separate immutable manifests. Expected scene incompatibility is a
+structured qualification result; artifact corruption and transport failure remain
+errors. These operations reserve the durable identity and feedback boundary needed
+by a later bounded agent loop, but do not implement an agent runtime, MCP transport
+or automatic retry loop.
+
+Owned transports close when the run exits; explicit legacy clients and supplied
+service runs remain caller-owned. Chat requests own their stateless transport.
+Edit: import export → validate graph/typed edit plan → generate additions
+→ change layout → overwrite export. Combined image/edit mode generates first.
 
 `gensim run` binds a generated scene to a trusted embodiment/execution policy,
-preflights Task Program and uses ordinary Gym demo execution. Its source graph
-stays unbound; bound graph/deployment have separate run-owned paths. Ambiguous
+preflights Task Program and uses ordinary Gym demo execution. Placement,
+relative placement, axis alignment and held-transport targets bind from measured
+rigid geometry; optional calibration, room, recording and arm-anchor fields are in
+the command guide. Its source graph stays unbound; bound graph/deployment have
+separate run-owned paths. Ambiguous
 references reject and failures retain stage artifacts. Native success and
 normative TaskSpec certification remain distinct. See the
 [command guide](../../../embodichain/gen_sim/README.md) and provider-free
@@ -80,6 +90,15 @@ relations/table regions; directional vocabularies require quarter turns.
 
 - `scene_export/` contains scene/config/graph JSON and mesh/articulation assets;
   imported/exported graph node IDs must equal object IDs.
+- Rigid exports carry conservatively measured uniform GLB color properties and
+  content-bound provenance. Opacity uses authored GLB floating-point alpha and
+  material mode before library color quantization. Material extensions and
+  external buffers withhold GLB-only color proofs, including on replay. Authored
+  base-color texture declarations remain ineligible even if their image is missing. Unsupported
+  geometry, textures and mixed appearance leave the measurement unverified.
+  Role checks verify measured proofs against the mesh the deployment consumes,
+  including the legacy `shape.fpath` selection. Proxy GLB proofs cannot certify
+  the appearance of packaged USD prims; a runtime-material measurement is required.
 - Editable state is Y-up and runtime output Z-up. Preserve `body_scale` separately.
   Native execution bakes scale/axis conversion into run-owned OBJ vertices and
   isolated material sidecars; GLB node transforms alone are insufficient.
