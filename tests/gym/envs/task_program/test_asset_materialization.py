@@ -188,12 +188,32 @@ def deployment(tmp_path: Path):
 
 
 @pytest.mark.parametrize("with_policy_overrides", (False, True))
+@pytest.mark.parametrize("uid_mode", ("omitted", "same", "different"))
 def test_materialized_deployment_uses_production_loader_and_fresh_geometry(
-    deployment, tmp_path, with_policy_overrides
+    deployment, tmp_path, with_policy_overrides, uid_mode
 ):
     source, requirements, resolved = deployment
+    uid = "native_cube" if uid_mode == "different" else "cube"
+    integration_path = source.parent / "integration.yaml"
+    integration = yaml.safe_load(integration_path.read_text())
+    cube = integration["scene_binding"]["rigid_objects"][0]
+    if uid_mode == "omitted":
+        cube.pop("simulation_uid", None)
+    else:
+        cube["simulation_uid"] = uid
+    _write(integration_path, integration)
+    env_path = source.parent / "env.yaml"
+    env = yaml.safe_load(env_path.read_text())
+    env["simulation"]["rigid_object"][0]["uid"] = uid
+    _write(env_path, env)
     if with_policy_overrides:
         task = yaml.safe_load(source.read_text())
+        task["task_program"]["integration"] = {
+            "component": "integration.yaml",
+            "overrides": {
+                "profile": {"skill_options": {"pick": {"lift_height": 0.08}}}
+            },
+        }
         task["task_program"]["execution_policy"] = {
             "component": task["task_program"]["execution_policy"],
             "overrides": {
@@ -202,6 +222,10 @@ def test_materialized_deployment_uses_production_loader_and_fresh_geometry(
             },
         }
         _write(source, task)
+    assert (
+        load_asset_requirements_from_deployment(source).to_dict()
+        == requirements.to_dict()
+    )
     original = source.read_bytes()
     result = materialize_asset_deployment(
         source, requirements, resolved, output_dir=tmp_path / "out"
@@ -218,12 +242,16 @@ def test_materialized_deployment_uses_production_loader_and_fresh_geometry(
         assert policy["motion"]["velocity_limit"] == 0.15
         assert policy["recovery"]["skill_timeout"] == 111.0
     assert config["physics"] == "default"
+    assert config["rigid_object"][0]["uid"] == uid
     assert config["id"] != yaml.safe_load(source.read_text())["id"]
     assert config["rigid_object"][0]["init_pos"][2] == pytest.approx(0.04)
     assert config["rigid_object"][0]["shape"]["fpath"].startswith("./assets/")
     integration = yaml.safe_load(
         (result.deployment_path.parent / "integration.yaml").read_text()
     )
+    assert integration["scene_binding"]["rigid_objects"][0]["entity_id"] == "cube"
+    if with_policy_overrides:
+        assert integration["profile"]["skill_options"]["pick"]["lift_height"] == 0.08
     target = integration["scene_binding"]["rigid_objects"][1]["affordances"][0]
     assert target["object_target_pose"][11] == pytest.approx(0.10)
     assert target["object_target_frame"] == "parent"
@@ -232,6 +260,21 @@ def test_materialized_deployment_uses_production_loader_and_fresh_geometry(
         == requirements.to_dict()
     )
     validate_materialized_deployment(result)
+
+
+@pytest.mark.parametrize("invalid_uid", (None, "", 42))
+def test_materialization_rejects_explicit_invalid_uid(
+    deployment, tmp_path, invalid_uid
+):
+    source, requirements, resolved = deployment
+    path = source.parent / "integration.yaml"
+    integration = yaml.safe_load(path.read_text())
+    integration["scene_binding"]["rigid_objects"][0]["simulation_uid"] = invalid_uid
+    _write(path, integration)
+    with pytest.raises(ValueError, match="simulation_uid must be a non-empty string"):
+        materialize_asset_deployment(
+            source, requirements, resolved, output_dir=tmp_path / "out"
+        )
 
 
 def test_materialized_files_can_move_and_detect_tampering(deployment, tmp_path):
@@ -1078,3 +1121,146 @@ def test_materialized_deployment_keeps_named_evaluation_component(deployment, tm
         source, requirements, resolved, output_dir=tmp_path / "second"
     )
     assert yaml.safe_load(second.deployment_path.read_text())["id"] != selected["id"]
+
+
+def test_requirements_lookup_does_not_resolve_runtime_assets(deployment, monkeypatch):
+    source, requirements, _ = deployment
+    path = source.parent / "integration.yaml"
+    integration = yaml.safe_load(path.read_text())
+    integration["runtime_services"] = {
+        "nominal_motion_sources": [
+            {
+                "provider_id": "real2sim",
+                "prototype_manifest": {
+                    "asset": "Real2SimCarton",
+                    "path": "inputs/measured/0/prototype.json",
+                },
+            }
+        ]
+    }
+    _write(path, integration)
+    task = yaml.safe_load(source.read_text())
+    task["task_program"]["integration"] = {
+        "component": "integration.yaml",
+        "overrides": {"profile": {"skill_options": {"pick": {"lift_height": 0.08}}}},
+    }
+    _write(source, task)
+
+    def offline(*args, **kwargs):
+        raise AssertionError("Role-contract lookup must not load runtime assets")
+
+    monkeypatch.setattr("embodichain.data._references._resolve_data_reference", offline)
+    assert (
+        load_asset_requirements_from_deployment(source).to_dict()
+        == requirements.to_dict()
+    )
+
+
+@pytest.mark.parametrize("reference_mode", ["registry", "local", "absolute", "home"])
+def test_materialized_demo_references_survive_relocation(
+    deployment, tmp_path, monkeypatch, reference_mode
+):
+    import numpy as np
+    from types import SimpleNamespace
+    import embodichain.data as data
+    from embodichain.data_pipeline.real2sim import (
+        RobotDemonstration,
+        DemoSkillSpec,
+        DemoSkillPhase,
+        DemoSkillConstraint,
+        JointSpec,
+        build_demo_skill,
+        save_demo_skill,
+    )
+
+    source, requirements, resolved = deployment
+    cache = tmp_path / "cache_a"
+    artifact = build_demo_skill(
+        RobotDemonstration(
+            "teleop",
+            "1",
+            "specialized",
+            ("a",),
+            ("rad",),
+            np.zeros((6, 1)),
+            np.arange(6) * 0.02,
+            "s",
+            "a" * 64,
+            "b" * 64,
+        ),
+        DemoSkillSpec(
+            asset_id="task.trace",
+            instruction="Trace",
+            phases=(DemoSkillPhase("continuous", 0, 6),),
+            constraints=(DemoSkillConstraint("done", "metric", "terminal"),),
+        ),
+        joints=(JointSpec("a", "revolute"),),
+        control_dt=0.02,
+    )
+    manifest = save_demo_skill(artifact, cache / "skill")
+    reference = {"asset": "ReviewDemo", "path": "skill/demo_skill.json"}
+    if reference_mode == "local":
+        reference = "../cache_a/skill/demo_skill.json"
+    elif reference_mode == "absolute":
+        reference = str(manifest)
+    elif reference_mode == "home":
+        import os
+
+        # Exercise real home expansion without changing HOME or user files.
+        reference = "~/" + Path(os.path.relpath(manifest, Path.home())).as_posix()
+    original = data.get_data_class
+
+    def asset_class(name):
+        return (
+            (lambda: SimpleNamespace(extract_dir=str(cache)))
+            if name == "ReviewDemo"
+            else original(name)
+        )
+
+    monkeypatch.setattr(data, "get_data_class", asset_class)
+    path = source.parent / "integration.yaml"
+    integration = yaml.safe_load(path.read_text())
+    integration["runtime_services"] = {
+        "demo_skills": {
+            "trace": {
+                "call_id": "task.trace",
+                "asset_manifest": reference,
+                "asset_sha256": artifact.content_sha256,
+            }
+        }
+    }
+    _write(path, integration)
+    result = materialize_asset_deployment(
+        source, requirements, resolved, output_dir=tmp_path / "exports" / "run"
+    )
+    exported = yaml.safe_load(
+        (result.deployment_path.parent / "integration.yaml").read_text()
+    )
+    selected = exported["runtime_services"]["demo_skills"]["trace"]["asset_manifest"]
+    deployment_path = result.deployment_path
+    if reference_mode == "registry":
+        assert selected == reference
+        destination = tmp_path / "cache_b"
+        cache.rename(destination)
+        cache = destination
+        assert (cache / manifest.relative_to(tmp_path / "cache_a")).is_file()
+    elif reference_mode in {"absolute", "home"}:
+        destination = tmp_path / "relocated" / "deeper" / "run"
+        destination.parent.mkdir(parents=True)
+        shutil.move(deployment_path.parent, destination)
+        deployment_path = destination / deployment_path.name
+        assert manifest.is_file()
+    else:
+        assert (deployment_path.parent / selected).resolve() == manifest
+        destination = tmp_path.with_name(tmp_path.name + "-moved")
+        tmp_path.rename(destination)
+        assert not tmp_path.exists()
+        deployment_path = destination / deployment_path.relative_to(tmp_path)
+    config_to_cfg(
+        yaml.safe_load(deployment_path.read_text()),
+        source_path=deployment_path,
+    )
+    if reference_mode == "local":
+        assert not Path(selected).is_absolute()
+    elif reference_mode in {"absolute", "home"}:
+        assert selected == reference
