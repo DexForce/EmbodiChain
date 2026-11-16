@@ -20,12 +20,134 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import Mock
+import random
 
+import numpy as np
 import pytest
+import torch
 
 import embodichain.lab.gym.envs.base_env as module
 
 pytestmark = pytest.mark.no_sim
+
+
+@pytest.mark.parametrize("from_registration", [False, True])
+def test_scene_preparation_owns_config_and_precedes_world(
+    monkeypatch, from_registration
+):
+    from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
+    from embodichain.lab.gym.envs.managers.cfg import FunctorCfg
+
+    cfg = EmbodiedEnvCfg(extensions={"value": 1})
+    prepared = []
+
+    def prepare(owned, value):
+        assert owned is not cfg
+        owned.extensions["value"] = value.pop()
+        prepared.append(owned)
+        return owned
+
+    def construct(env, owned, **kwargs):
+        assert prepared == [owned]
+        assert owned.extensions["value"] == 2
+        raise RuntimeError("World boundary reached")
+
+    declaration = {"func": prepare, "params": {"value": [2]}}
+    kwargs = {"scene_preparation": declaration} if from_registration else {}
+    if not from_registration:
+        cfg.scene_preparation = FunctorCfg(**declaration)
+    monkeypatch.setattr(module.BaseEnv, "__init__", construct)
+    with pytest.raises(RuntimeError, match="World boundary reached"):
+        EmbodiedEnv(cfg, **kwargs)
+    assert cfg.extensions == {"value": 1}
+    assert declaration["params"]["value"] == [2]
+
+
+def test_invalid_preparation_result_never_constructs_world(monkeypatch):
+    from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
+    from embodichain.lab.gym.envs.managers.cfg import FunctorCfg
+
+    construct = Mock()
+    monkeypatch.setattr(module.BaseEnv, "__init__", construct)
+    cfg = EmbodiedEnvCfg(scene_preparation=FunctorCfg(func=lambda cfg: {}))
+    with pytest.raises(TypeError, match="must return EmbodiedEnvCfg"):
+        EmbodiedEnv(cfg)
+    construct.assert_not_called()
+
+
+@pytest.mark.parametrize("seed", [None, 0, 42, -1])
+def test_preparation_seed_precedes_hook_and_is_reused_during_scene_setup(
+    monkeypatch, seed
+):
+    from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
+    from embodichain.lab.gym.envs.managers.cfg import FunctorCfg
+
+    seeds = []
+
+    def seed_process(value):
+        seeds.append(value)
+        effective = 321 if value == -1 else value
+        random.seed(effective)
+        np.random.seed(effective)
+        torch.manual_seed(effective)
+        return effective
+
+    monkeypatch.setattr(module, "set_seed", seed_process)
+    prepared, scenes = [], []
+
+    def sample():
+        return (random.random(), float(np.random.random()), float(torch.rand(())))
+
+    def prepare(owned):
+        prepared.append((owned.seed, sample()))
+        return owned
+
+    def resolve_prepare(name):
+        assert name == "seed_fixture:prepare"
+        sample()  # Callable resolution/imports may consume process randomness.
+        return prepare
+
+    monkeypatch.setattr(
+        "embodichain.lab.gym.envs.embodied_env.string_to_callable", resolve_prepare
+    )
+
+    def setup_scene(env, **kwargs):
+        scenes.append((env.cfg.seed, sample(), env.np_random_seed))
+        raise RuntimeError("World boundary reached")
+
+    monkeypatch.setattr(module.BaseEnv, "_setup_scene", setup_scene)
+    cfg = EmbodiedEnvCfg(
+        seed=seed, scene_preparation=FunctorCfg(func="seed_fixture:prepare")
+    )
+    for initial in (12, 87):
+        random.seed(initial)
+        np.random.seed(initial)
+        torch.manual_seed(initial)
+        with pytest.raises(RuntimeError, match="World boundary reached"):
+            EmbodiedEnv(cfg)
+    assert cfg.seed == seed
+    if seed is None:
+        assert seeds == []
+        assert prepared[0][1] != prepared[1][1]
+    else:
+        effective = 321 if seed == -1 else seed
+        assert seeds == [seed, seed]
+        assert prepared[0] == prepared[1]
+        assert scenes[0] == scenes[1]
+        assert prepared[0][0] == scenes[0][0] == scenes[0][2] == effective
+        py = random.Random(effective)
+        numpy = np.random.RandomState(effective)
+        generator = torch.Generator().manual_seed(effective)
+        expected = [
+            (
+                py.random(),
+                float(numpy.random()),
+                float(torch.rand((), generator=generator)),
+            )
+            for _ in range(2)
+        ]
+        assert prepared[0][1] == expected[0]
+        assert scenes[0][1] == expected[1]
 
 
 @pytest.mark.parametrize("phase", ["scene", "prepare", "robot"])

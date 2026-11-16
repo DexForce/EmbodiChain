@@ -53,6 +53,7 @@ from embodichain.lab.sim.objects import (
     SurfaceDeformableObject,
 )
 from embodichain.lab.sim.sensors import Camera, CameraCfg, StereoCamera, StereoCameraCfg
+from embodichain.lab.sim.sensors.registry import _resolve_sensor_factory
 from .descriptors import _pose_from_cfg, configure_articulation_desc
 from .usd import (
     _configure_articulation_usd,
@@ -98,10 +99,11 @@ def _compile_usd_import(
     physics_backend: str = "default",
     device_type: str = "cpu",
 ) -> _UsdImportPlan:
-    """Plan source identities and descriptors, optionally declaring facades.
+    """Compile source identities and descriptors, optionally declaring facades.
 
     Without a manager, no World or facade is created and Gaussian appearance
-    remains descriptive metadata. Native admission belongs to the manager path.
+    remains descriptive metadata. Identity, overrides and constraints use the
+    same compiler; native admission belongs to the manager path.
     """
     recipe.validate_import()
     solver_type = None if manager is None else manager._active_newton_solver_type
@@ -195,6 +197,8 @@ def _compile_usd_import(
     declarations = []
     mounted_sensors = []
     sensor_uids = set() if manager is None else set(manager._sensors)
+    if manager is not None:
+        sensor_uids.update(getattr(manager, "_pending_mounted_sensors", {}))
     robot_paths: set[str] = set()
     renamed = {}
     rigid_renames = {}
@@ -472,6 +476,8 @@ def _compile_usd_import(
             descriptor.per_env = False
         source.materials.update(materials)
         if isinstance(cfg, RobotCfg) and cfg.enable_sensor:
+            if manager is None and cfg.sensors:
+                raise ValueError("Static environment imports do not bind USD robots.")
             for sensor_cfg in cfg.sensors:
                 if not isinstance(sensor_cfg, CameraCfg):
                     raise TypeError("RobotCfg.sensors supports mounted cameras only.")
@@ -482,15 +488,19 @@ def _compile_usd_import(
                     if manager is None
                     else manager.SUPPORTED_SENSOR_TYPES
                 )
-                sensor_factory = factories.get(sensor_cfg.sensor_type)
-                if not isinstance(sensor_factory, type) or not issubclass(
+                _, sensor_factory, _ = _resolve_sensor_factory(
+                    sensor_cfg.sensor_type, factories
+                )
+                if isinstance(sensor_factory, type) and not issubclass(
                     sensor_factory, Camera
                 ):
                     raise ValueError(
                         f"Unsupported mounted camera type {sensor_cfg.sensor_type!r}."
                     )
-                if issubclass(sensor_factory, StereoCamera) and not isinstance(
-                    sensor_cfg, StereoCameraCfg
+                if (
+                    isinstance(sensor_factory, type)
+                    and issubclass(sensor_factory, StereoCamera)
+                    and not isinstance(sensor_cfg, StereoCameraCfg)
                 ):
                     raise TypeError(
                         "StereoCamera requires a StereoCameraCfg configuration."

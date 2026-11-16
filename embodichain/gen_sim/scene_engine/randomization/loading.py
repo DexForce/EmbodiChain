@@ -537,16 +537,18 @@ def preview_layouts(
     ):
         raise ValueError("interval must be finite and greater than zero.")
     loaded = load_layouts(layout_dir)
-    from embodichain.gen_sim.scene_engine.cli.preview import preview_scene_export
+    from embodichain.lab.scripts.preview_scene import preview_scene
+    from embodichain.lab.sim import SimulationManagerCfg
 
-    preview_scene_export(
-        output_root=loaded.output_root,
-        device=device,
-        headless=headless,
-        visualization=visualization,
+    preview_scene(
+        loaded.output_root / "scene_usd" / "scene.usda",
+        sim_cfg=SimulationManagerCfg(
+            sim_device=device,
+            headless=headless,
+            **({"visualization": visualization} if visualization is not None else {}),
+        ),
         joint_control=False,
         on_frame=_Playback(loaded, float(interval)).update,
-        advance_physics=False,
     )
 
 

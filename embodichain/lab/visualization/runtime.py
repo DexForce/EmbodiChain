@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import queue
 import threading
+import math
 from collections import deque
 from dataclasses import dataclass, replace
 from time import perf_counter
@@ -290,6 +291,15 @@ class VisualizationRuntime:
         self._backend.set_replay_control_command_sink(
             self._enqueue_replay_control_command
         )
+        self._backend.set_preview_command_sink(self._enqueue_preview_command)
+        self._preview_commands: queue.Queue[str] = queue.Queue(maxsize=64)
+        self._preview_stop = threading.Event()
+        self._preview_camera: LatestFrameQueue[
+            tuple[tuple[float, float, float], tuple[float, float, float]]
+        ] = LatestFrameQueue()
+        self._preview_states: LatestFrameQueue[tuple[bool, int, bool]] = (
+            LatestFrameQueue()
+        )
         self._frames: LatestFrameQueue[SceneFrame] = LatestFrameQueue()
         self._camera_images: LatestFrameQueue[CameraImageFrame] = LatestFrameQueue()
         self._replay_control_states: LatestFrameQueue[tuple[int, int, bool]] = (
@@ -337,6 +347,74 @@ class VisualizationRuntime:
         if not self.cfg.allow_commands:
             return ()
         return self._joint_control_commands.drain()
+
+    def _enqueue_preview_command(self, command: str) -> None:
+        if self.cfg.allow_commands and command in {
+            "play",
+            "pause",
+            "step",
+            "reset",
+            "stop",
+        }:
+            if command == "stop":
+                self._preview_stop.set()
+                return
+            try:
+                self._preview_commands.put_nowait(command)
+            except queue.Full:
+                pass
+
+    def drain_preview_commands(self) -> tuple[str, ...]:
+        """Drain bounded scene-preview commands on the simulation thread.
+
+        Returns:
+            Accepted commands in queue order; stop takes priority over queued work.
+        """
+        commands = []
+        if self._preview_stop.is_set():
+            self._preview_stop.clear()
+            commands.append("stop")
+        while True:
+            try:
+                commands.append(self._preview_commands.get_nowait())
+            except queue.Empty:
+                return tuple(commands)
+
+    def publish_preview_control(
+        self, *, running: bool, steps: int, visible: bool = True
+    ) -> None:
+        """Publish preview mode and committed physics-step count asynchronously.
+
+        Args:
+            running: Whether physics is advancing.
+            steps: Non-negative committed physics-step count.
+            visible: Whether the panel should be visible.
+        """
+        if steps < 0:
+            raise ValueError("Preview step count must be non-negative.")
+        self._raise_worker_error()
+        self._preview_states.put_latest((running, steps, visible))
+
+    def publish_preview_camera(
+        self, *, eye: tuple[float, float, float], target: tuple[float, float, float]
+    ) -> None:
+        """Fit the viewer without moving a simulation camera or entity.
+
+        Args:
+            eye: Finite viewer position in world meters/Z-up.
+            target: Distinct finite look-at position in the same frame.
+        """
+        if (
+            len(eye) != 3
+            or len(target) != 3
+            or not all(math.isfinite(v) for v in (*eye, *target))
+            or eye == target
+        ):
+            raise ValueError(
+                "Preview eye and target must be distinct finite 3D positions."
+            )
+        self._raise_worker_error()
+        self._preview_camera.put_latest((eye, target))
 
     def _enqueue_replay_control_command(self, step: int) -> None:
         if self.cfg.allow_commands:
@@ -596,6 +674,20 @@ class VisualizationRuntime:
 
     def _publish_pending_replay_control(self) -> None:
         try:
+            eye, target = self._preview_camera.get_nowait()
+        except queue.Empty:
+            pass
+        else:
+            self._backend.publish_preview_camera(eye=eye, target=target)
+        try:
+            running, steps, visible = self._preview_states.get_nowait()
+        except queue.Empty:
+            pass
+        else:
+            self._backend.publish_preview_control(
+                running=running, steps=steps, visible=visible
+            )
+        try:
             step, max_step, visible = self._replay_control_states.get_nowait()
         except queue.Empty:
             return
@@ -676,6 +768,10 @@ class VisualizationRuntime:
         self._camera_images.clear()
         self._replay_control_states.clear()
         self._replay_control_commands.clear()
+        self._preview_states.clear()
+        self._preview_camera.clear()
+        self._preview_stop.clear()
+        self.drain_preview_commands()
         self._gizmo_commands.clear()
         self._pick_commands.clear()
         self._joint_control_commands.clear()

@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+
 import argparse
 from copy import deepcopy
 from pathlib import Path
@@ -1506,6 +1507,7 @@ class TestConfigToCfgFromFile:
         environment = load_config(environment_path)
         environment["physics"] = "newton"
         environment["physics_config"] = {"num_substeps": 2}
+        environment["enable_ground_plane"] = False
         save_config(environment_path, environment)
 
         cfg = config_to_cfg(
@@ -1516,6 +1518,23 @@ class TestConfigToCfgFromFile:
 
         assert isinstance(cfg.sim_cfg.physics_cfg, NewtonPhysicsCfg)
         assert cfg.sim_cfg.physics_cfg.num_substeps == 2
+        assert cfg.sim_cfg.enable_ground_plane is False
+
+    def test_environment_component_owns_ground_declaration(self, tmp_path) -> None:
+        """A deployment cannot re-enable physical ground owned by its component."""
+        self._write_deployment(tmp_path)
+        environment_path = tmp_path / "env.yaml"
+        environment = load_config(environment_path)
+        environment["enable_ground_plane"] = False
+        save_config(environment_path, environment)
+        config = self._environment_component_gym_config()
+        config["enable_ground_plane"] = True
+        with pytest.raises(ValueError, match="environment.component"):
+            config_to_cfg(
+                config,
+                manager_modules=DEFAULT_MANAGER_MODULES,
+                source_path=tmp_path / "task.ur5.yaml",
+            )
 
     @pytest.mark.parametrize(
         ("field_name", "value"),
@@ -3015,6 +3034,57 @@ def test_config_to_cfg_resolves_usd_source_files(monkeypatch, tmp_path):
         assert isinstance(asset.source, UsdSourceCfg)
         assert asset.source.file_path == str(tmp_path / "scene.usda")
         assert asset.source.source_prim_path == "/World/Asset"
+
+
+def test_checkpoint_resource_paths_resolve_from_config_owner(tmp_path, monkeypatch):
+    """Prepared robot and manifest paths survive a change of working directory."""
+    from embodichain.lab.gym.utils._component_composition import _resolve_gym_components
+
+    owner = tmp_path / "run" / "configs"
+    resources = owner / "resources"
+    resources.mkdir(parents=True)
+    (resources / "robot.urdf").write_text('<robot name="frozen"/>')
+    (resources / "part.json").write_text("{}")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    raw = {
+        "id": "FrozenAssembly-v1",
+        "physics": "newton",
+        "robot": {"fpath": "./resources/robot.urdf"},
+        "env": {"extensions": {"physical_asset": {"fpath": "./resources/part.json"}}},
+    }
+    resolved = _resolve_gym_components(raw, base_dir=owner).config
+    assert resolved["robot"]["fpath"] == str(resources / "robot.urdf")
+    assert resolved["env"]["extensions"]["physical_asset"]["fpath"] == str(
+        resources / "part.json"
+    )
+    assert raw["robot"]["fpath"] == "./resources/robot.urdf"
+
+
+@pytest.mark.parametrize("field", ["scene_preparation", "resource_export"])
+def test_configured_rl_rejects_changed_preparation_or_export(field):
+    from copy import deepcopy
+    from gymnasium.envs.registration import registry
+    from embodichain.lab.gym.utils.gym_utils import _register_configured_rl
+    from embodichain.lab.gym.utils.registration import REGISTERED_ENVS
+
+    name = f"ConfigOperationIdentity-{field}-v0"
+    config = {
+        "id": name,
+        "physics": "newton",
+        "rl_task": {},
+        "env": {field: {"func": "fixture:prepare", "params": {"variant": 1}}},
+    }
+    try:
+        _register_configured_rl(config, 10)
+        changed = deepcopy(config)
+        changed["env"][field]["params"]["variant"] = 2
+        with pytest.raises(ValueError, match="different declaration"):
+            _register_configured_rl(changed, 10)
+    finally:
+        REGISTERED_ENVS.pop(name, None)
+        registry.pop(name, None)
 
 
 def test_recording_only_observation_does_not_expand_policy_rollout_schema():

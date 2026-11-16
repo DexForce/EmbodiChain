@@ -1083,6 +1083,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                 "retreat_steps",
                 "receive_pick_object_part",
                 "grasp_retract_distance",
+                "paired_object_to_eef",
                 "object_motion_keyframes",
                 "grasp_settle_steps",
                 "release_settle_steps",
@@ -1354,6 +1355,7 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
             required=frozenset({"kind"}),
             optional=frozenset(
                 {
+                    "paired_object_to_eef",
                     "object_motion_keyframes",
                     "pre_grasp_distance",
                     "lift_height",
@@ -1415,6 +1417,16 @@ def _decode_skill_options(value: object, *, path: str) -> SkillOptions:
                     ),
                     dtype=torch.float32,
                 )
+        if "paired_object_to_eef" in config:
+            kwargs["paired_object_to_eef"] = torch.tensor(
+                [
+                    _finite_tuple(
+                        v, path=f"{path}.paired_object_to_eef", expected_length=16
+                    )
+                    for v in _sequence(config["paired_object_to_eef"], path=path)
+                ],
+                dtype=torch.float32,
+            ).reshape(-1, 4, 4)
         return CoordinatedPickmentOptions(**kwargs)
     if kind == "pour":
         config = _mapping(

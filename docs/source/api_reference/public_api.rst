@@ -847,9 +847,7 @@ Entity metadata and deterministic UID indexing for schema-v2 USD scene stages.
 .. autosummary::
 
    USD_SCENE_SCHEMA
-   UsdEntityBinding
    UsdEntityDesc
-   UsdSceneBinding
    UsdSceneIndex
 
 embodichain.gen_sim.scene_engine.randomization.adapter
@@ -1162,6 +1160,7 @@ execution remains with the ordinary task runner.
    prepare_task_deployment
    qualify_task_scene
    resume_scene_generation
+   revise_task_plan
    submit_scene_generation
 
 .. autofunction:: cancel_scene_generation
@@ -1182,6 +1181,7 @@ execution remains with the ordinary task runner.
 
 .. autofunction:: resume_scene_generation
 
+.. autofunction:: revise_task_plan
 .. autofunction:: submit_scene_generation
 
 embodichain.gen_sim.task_engine.evidence
@@ -1497,6 +1497,36 @@ normalization are standard-library-only.
 
 .. autofunction:: evaluate_pour_evidence
 
+
+embodichain.gen_sim.task_spec.publication
+-----------------------------------------
+
+Publish a task with independent episode and generalization identities. Scene
+providers consume the initial conditions and achievable goals, while expansion
+consumers check requested coverage against their available dimensions.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.publication
+
+.. autosummary::
+
+   freeze_task_spec
+   decode_task_document
+   project_scene_requirements
+   project_expansion_requirements
+   scene_agent_messages
+   evaluate_attempt_observations
+
+.. autofunction:: freeze_task_spec
+
+.. autofunction:: decode_task_document
+
+.. autofunction:: project_scene_requirements
+
+.. autofunction:: project_expansion_requirements
+
+.. autofunction:: scene_agent_messages
+
+.. autofunction:: evaluate_attempt_observations
 
 embodichain.gen_sim.task_spec.registry
 --------------------------------------
@@ -2831,6 +2861,22 @@ preview with managed control-part Gizmos and optional joint controls.
 .. autofunction:: cli
 
 .. autofunction:: main
+
+
+embodichain.lab.scripts.preview_scene
+------------------------------------
+
+.. currentmodule:: embodichain.lab.scripts.preview_scene
+
+Preview ordinary USD scenes through the Lab import owner. The default preserves
+imported initial state without physics steps; explicit simulation, offscreen PNG
+output and portable stage diagnostics share the same owned lifecycle.
+
+.. autosummary::
+
+   preview_scene
+
+.. autofunction:: preview_scene
 
 
 embodichain.lab.scripts.run_task
@@ -5086,6 +5132,17 @@ qualified DriverOpeningBinding type must be rebuilt with its Atomic owner.
 .. autoclass:: DriverOpeningBinding
    :members:
 
+Shared locomotion observation functor
+------------------------------------
+
+The observation package exposes task-built actor or critic state and preserves the
+existing locomotion configuration name while implementations move into a package.
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.observations
+
+.. autofunction:: velocity_locomotion_observation
+
+
 Stability execution ownership
 ----------------------------
 
@@ -5921,3 +5978,76 @@ live one-way rigid-to-fluid simulation.
    :members:
 
 .. autofunction:: embodichain.lab.scripts.run_fluid_task_program.main
+
+
+Sensor extension contracts
+--------------------------
+
+Registration and runtime dependencies
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The sensor registry pairs configuration classes with factories for both Python
+and YAML. Installed entry points are discovered by name and loaded only when
+selected. Context-backed factories acquire owned joint-state snapshots and
+read the explicitly selected manager's simulation clock; legacy built-in
+constructors retain their existing signatures.
+
+.. currentmodule:: embodichain.lab.sim.sensors
+
+.. autosummary::
+   :nosignatures:
+
+   SensorClock
+   SensorStateProvider
+   SensorContext
+   SensorRegistration
+   register_sensor
+   discover_sensor_plugins
+   get_sensor_registration
+   list_sensor_types
+
+.. autoclass:: SensorClock
+   :members:
+
+.. autoclass:: SensorStateProvider
+   :members:
+
+.. autoclass:: SensorContext
+   :members:
+
+.. autoclass:: SensorRegistration
+   :members:
+
+.. autofunction:: register_sensor
+
+.. autofunction:: discover_sensor_plugins
+
+.. autofunction:: get_sensor_registration
+
+.. autofunction:: list_sensor_types
+
+Implementation module imports
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+These are the implementation paths for the same public runtime and registry
+contracts. The package-level imports above are the convenient extension API.
+
+.. currentmodule:: embodichain.lab.sim.sensors.context
+
+.. autosummary::
+   :nosignatures:
+
+   SensorClock
+   SensorStateProvider
+   SensorContext
+
+.. currentmodule:: embodichain.lab.sim.sensors.registry
+
+.. autosummary::
+   :nosignatures:
+
+   SensorRegistration
+   register_sensor
+   discover_sensor_plugins
+   get_sensor_registration
+   list_sensor_types
