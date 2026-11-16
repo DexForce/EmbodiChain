@@ -246,6 +246,11 @@ def _metadata(trainer: Any) -> dict[str, Any]:
     snapshot_hash = getattr(trainer, "_checkpoint_gym_snapshot_hash", None)
     if snapshot_hash is not None:
         metadata["gym_snapshot_sha256"] = snapshot_hash
+    describe = getattr(policy, "checkpoint_contract", None)
+    if callable(describe):
+        components = describe()
+        if components:
+            metadata["policy_components"] = _plain(components)
     return metadata
 
 

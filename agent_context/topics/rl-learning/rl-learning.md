@@ -136,6 +136,8 @@ and history storage live in `policies/temporal.py`; objectives live in
 `policies/auxiliary.py`. `proprioceptive_actor_critic` remains the historical
 configuration/checkpoint adapter, preserving parameter paths, module identities
 and optimizer ordering without duplicating training or export logic.
+New composed entries record component contracts so shape-compatible history
+layouts and headless objective changes cannot silently resume as the same model.
 
 `architecture_version` preserves history ordering and normalizer semantics:
 `legacy_v1` accepts previous history followed by current; `official_v1` accepts

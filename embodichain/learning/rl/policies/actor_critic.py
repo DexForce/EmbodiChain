@@ -134,6 +134,9 @@ class ActorCritic(Policy):
         )
         self.actor_obs_normalizer.to(self.device)
         self.critic_obs_normalizer.to(self.device)
+        self._custom_normalization = (
+            actor_normalizer is not None or critic_normalizer is not None
+        )
         for enabled, normalizer in (
             (self.actor_obs_normalization, self.actor_obs_normalizer),
             (self.critic_obs_normalization, self.critic_obs_normalizer),
@@ -426,3 +429,29 @@ class ActorCritic(Policy):
         return nn.Sequential(
             deepcopy(self.actor_obs_normalizer), deepcopy(self.actor)
         ).eval()
+
+    def checkpoint_contract(self) -> dict[str, object]:
+        """Describe configured component semantics beyond the neural state layout.
+
+        Returns:
+            Serializable component contracts. Ordinary policies without composed
+            components retain their original checkpoint metadata.
+        """
+        contract = {}
+        for name, module in (("actor", self.actor), ("critic", self.critic)):
+            describe = getattr(module, "checkpoint_contract", None)
+            if callable(describe):
+                declared = describe()
+                if declared:
+                    contract[name] = declared
+        if self._auxiliary_tasks:
+            contract["auxiliary_tasks"] = {
+                name: task.checkpoint_contract()
+                for name, task in self._auxiliary_tasks.items()
+            }
+        if contract or self._custom_normalization:
+            contract["normalization_updates"] = {
+                "actor": self.actor_obs_normalization,
+                "critic": self.critic_obs_normalization,
+            }
+        return contract

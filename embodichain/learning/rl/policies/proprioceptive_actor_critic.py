@@ -108,6 +108,10 @@ class ProprioceptiveActorCritic(ActorCritic):
     evaluation, auxiliary training and export are owned by :class:`ActorCritic`.
     """
 
+    def checkpoint_contract(self) -> dict[str, object]:
+        """Retain historical identity; legacy configuration/module checks still apply."""
+        return {}
+
     def __init__(
         self,
         obs_dim: int,

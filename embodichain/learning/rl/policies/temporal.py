@@ -263,6 +263,20 @@ class TemporalActor(nn.Module):
         latent = self.encoder(history.transpose(1, 2))
         return torch.cat((current, latent), dim=-1), latent
 
+    def checkpoint_contract(self) -> dict[str, object]:
+        """Describe temporal input semantics even when the encoder is disabled.
+
+        Returns:
+            Stable layout/version information for the policy checkpoint contract.
+        """
+        return {
+            "architecture_version": self.architecture_version,
+            "frame_dim": self.frame_dim,
+            "history_length": self.history_length,
+            "use_history": self.encoder is not None,
+            "feature_dims": dict(self.feature_dims),
+        }
+
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
         """Return action means from complete normalized observation histories."""
         features, _ = self.features(obs)

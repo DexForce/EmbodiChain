@@ -748,3 +748,89 @@ def test_custom_auxiliary_override_remains_supported_without_registered_tasks(
     assert custom.actor.weight.grad.abs().sum() > 0
     with pytest.raises(ValueError, match="configured tasks"):
         PPO(PPOCfg(device="cpu", auxiliary_coef=1.0), policy(ActorCritic))
+
+
+@pytest.mark.parametrize("change", ["history_layout", "objective"])
+def test_component_checkpoint_contract_rejects_shape_preserving_changes(
+    tmp_path, change
+):
+    """Neither layout changes nor headless loss settings can hide behind equal tensors."""
+    from embodichain.learning.rl.policies import TemporalActor, TemporalActorCfg
+    from embodichain.learning.rl.utils.trainer import Trainer
+
+    class FeaturePenalty(AuxiliaryTask):
+        modules = {}
+        training_observation_groups = {}
+        training_field_specs = {}
+        output_names = ("prediction",)
+
+        def __init__(self, scale):
+            self.scale = scale
+
+        def evaluate(self, features):
+            return {"prediction": features["latent"]}
+
+        def loss(self, labels, outputs, buffers):
+            return outputs["prediction"].square().mean() * self.scale
+
+        def checkpoint_contract(self):
+            return {**super().checkpoint_contract(), "scale": self.scale}
+
+    def trainer(changed):
+        actor = TemporalActor(
+            TemporalActorCfg(
+                frame_dim=3,
+                history_length=30,
+                use_history=False,
+                hidden_sizes=(8,),
+                architecture_version=(
+                    "official_v1"
+                    if changed and change == "history_layout"
+                    else "legacy_v1"
+                ),
+            ),
+            2,
+        )
+        tasks = (
+            {"penalty": FeaturePenalty(2 if changed else 1)}
+            if change == "objective"
+            else {}
+        )
+        policy = ActorCritic(
+            93,
+            2,
+            torch.device("cpu"),
+            actor,
+            torch.nn.Linear(4, 1),
+            critic_obs_dim=4,
+            actor_obs_groups=("proprioception",),
+            critic_obs_groups=("privileged",),
+            auxiliary_tasks=tasks,
+        )
+        algorithm = PPO(
+            PPOCfg(device="cpu", auxiliary_coef=1.0 if tasks else 0.0), policy
+        )
+        return Trainer(
+            policy,
+            _LabelEnv(93),
+            algorithm,
+            buffer_size=3,
+            batch_size=6,
+            writer=None,
+            eval_freq=0,
+            save_freq=0,
+            checkpoint_dir=str(tmp_path),
+            exp_name="contract",
+            use_wandb=False,
+        )
+
+    original, changed = trainer(False), trainer(True)
+    assert [
+        (key, value.shape) for key, value in original.policy.state_dict().items()
+    ] == [(key, value.shape) for key, value in changed.policy.state_dict().items()]
+    path = original.save_checkpoint()
+    before = deepcopy(changed.policy.state_dict())
+    with pytest.raises(ValueError, match="policy_components"):
+        changed.load_checkpoint(path)
+    for key, value in changed.policy.state_dict().items():
+        torch.testing.assert_close(value, before[key], rtol=0, atol=0)

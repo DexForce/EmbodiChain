@@ -59,6 +59,23 @@ class AuxiliaryTask(ABC):
             actor_groups: Selected actor observation paths, or a flat input.
         """
 
+    def checkpoint_contract(self) -> dict[str, object]:
+        """Describe stable objective semantics independently of parameter shapes.
+
+        Returns:
+            Serializable identity and data declarations. Custom objectives add
+            loss settings that change behavior without changing neural state.
+        """
+        return {
+            "type": f"{type(self).__module__}.{type(self).__qualname__}",
+            "observations": dict(self.training_observation_groups),
+            "fields": {
+                name: {"shape": shape, "dtype": str(dtype)}
+                for name, (shape, dtype) in self.training_field_specs.items()
+            },
+            "outputs": self.output_names,
+        }
+
     @abstractmethod
     def evaluate(self, features: Mapping[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Produce named predictions from graph-connected actor features.
@@ -152,6 +169,16 @@ class ContactPrediction(AuxiliaryTask):
             "class_weights": self._class_weight_tensor(
                 self.class_weights, self.contact_classes
             )
+        }
+
+    def checkpoint_contract(self) -> dict[str, object]:
+        """Record contact target and feature semantics for strict training resume."""
+        return {
+            **super().checkpoint_contract(),
+            "feature_key": self.feature_key,
+            "contact_points": self.contact_points,
+            "contact_classes": self.contact_classes,
+            "class_weights": self.class_weights,
         }
 
     def validate_observation_groups(self, actor_groups: Sequence[str] | None) -> None:
