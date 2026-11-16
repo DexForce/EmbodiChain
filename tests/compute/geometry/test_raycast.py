@@ -46,3 +46,29 @@ def test_batched_mesh_rays_have_independent_closest_hits(device: str) -> None:
     torch.testing.assert_close(distances[:, 0], torch.tensor([2.5, 1.5], device=device))
     assert torch.isinf(distances[:, 1:]).all()
     assert indices.tolist() == [[1, -1, -1], [1, -1, -1]]
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("mesh_device_index", [0, 1])
+def test_mesh_ready_event_uses_its_construction_stream(mesh_device_index: int) -> None:
+    if torch.cuda.device_count() <= mesh_device_index:
+        pytest.skip(f"Requires CUDA device {mesh_device_index}")
+    device = torch.device("cuda", mesh_device_index)
+    build = torch.cuda.Stream(device=device)
+    query = torch.cuda.Stream(device=device)
+    with torch.cuda.stream(build), torch.cuda.device(0):
+        vertices = torch.tensor(
+            [[-1.0, -1.0, 0.0], [1.0, -1.0, 0.0], [0.0, 1.0, 0.0]], device=device
+        )
+        mesh = TriangleRayMesh(vertices, torch.tensor([[0, 1, 2]], device=device))
+
+    # CUDA allows another device to wait on an event. Check the event's
+    # producer device so a successful hit cannot mask the wrong dependency.
+    assert mesh._ready.device == device
+    with torch.cuda.stream(query):
+        origins = torch.tensor([[[0.0, 0.0, 3.0]]], device=device)
+        directions = torch.tensor([[[0.0, 0.0, -1.0]]], device=device)
+        transform = torch.eye(4, device=device).unsqueeze(0)
+        distances, indices = cast_rays(origins, directions, [(mesh, transform)], 10.0)
+        assert distances.tolist() == [[3.0]]
+        assert indices.tolist() == [[0]]

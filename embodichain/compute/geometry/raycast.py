@@ -57,10 +57,13 @@ class TriangleRayMesh:
             .clone()
         )
         wp.get_device(str(self.device))
-        stream = (
-            wp.stream_from_torch(torch.cuda.current_stream(self.device))
+        torch_stream = (
+            torch.cuda.current_stream(self.device)
             if self.device.type == "cuda"
             else None
+        )
+        stream = (
+            wp.stream_from_torch(torch_stream) if torch_stream is not None else None
         )
         with wp.ScopedStream(stream):
             self._mesh = wp.Mesh(
@@ -68,9 +71,9 @@ class TriangleRayMesh:
                 wp.from_torch(self._indices),
             )
         self._ready = None
-        if stream is not None:
+        if torch_stream is not None:
             self._ready = torch.cuda.Event()
-            self._ready.record()
+            self._ready.record(torch_stream)
 
 
 def cast_rays(
