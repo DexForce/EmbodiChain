@@ -3,7 +3,7 @@
 The public loader accepts an `options` mapping. It loads fixed inputs once;
 the callable receives only the current world-space state and total acceleration
 at each step. See [README.md](README.md) for complete examples and
-[BUILDING.md](BUILDING.md) for the compatible CUDA runtime.
+[the runtime requirements](README.md#runtime-requirements) for the CUDA environment.
 
 ## Loader options
 

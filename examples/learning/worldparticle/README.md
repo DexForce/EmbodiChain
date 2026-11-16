@@ -7,44 +7,33 @@ is `embodichain_solvers.physics.worldparticle.provider.WorldParticleProvider`; t
 solver adapter is DexSim's model-independent `ParticleInferenceSolver`.
 Providers are constructed per scene through the existing Newton lifecycle.
 
-Start with [installation/build checks](BUILDING.md#install-and-check-the-built-operators),
-the [complete native solver quickstart](DEPLOYMENT.md), and the
-[input/coordinate contract](INPUTS.md). [VALIDATION.md](VALIDATION.md) records
-the full headless examples and bounded offscreen rendering checks.
+Start with the [runtime requirements](#runtime-requirements),
+[native solver quickstart](DEPLOYMENT.md) and [input contract](INPUTS.md).
 
-## Runtime qualification
+## Runtime requirements
 
-The historical PR demo used a dedicated Python 3.12 environment with `dexsim_engine==0.6.0rc2`.
-Linux x86_64, glibc >=2.35, Python 3.12,
-Torch 2.7.1+cu128/CXX11 ABI and SM120 form that historical operator profile.
-NumPy is 2.2.6; Torchvision matches Torch. The published CPython 3.12 SDK wheel
-contains `ParticleInferenceSolver`.
+Use Linux x86_64 / Python 3.12, CUDA 12.8, CXX11 ABI and an SM120 GPU with
+SDK 0.6.0rc2. The current project profile uses Torch 2.11.0+cu128, Torchvision
+0.26.0+cu128, NumPy 2.2.6 and Einops 0.8.2. Supply Open3D
+`0.19.0+1e7b1743` and FlashAttention `2.8.3` operators built against that same
+Torch/CUDA profile. Operator build/patch tooling belongs to those dependencies
+and is outside this model integration.
 
-`runtime-manifest.json`, the Open3D patch and relocation utility retain that
-profile's immutable build provenance. They are not an installation profile for
-the main distribution. The main distribution's
-Python 3.12 training profile currently requires Torch 2.11 and Tensordict 0.15,
-which conflicts with those historical model operators. Main now pins SDK
-0.6.0rc2, including the generic `ParticleInferenceSolver` for native deployment.
-The model loader rejects an unqualified runtime before loading weights; a
-missing SDK facility fails explicitly.
+Compatible operator wheels are not bundled or published by this PR, and there
+is no `worldparticle` dependency extra. A default project installation alone
+does not provide these binaries. The loader checks recorded versions, ABI and
+GPU architecture before loading weights; package versions alone do not ensure
+that native symbols match Torch. Check your provisioned environment before
+running the examples:
 
-Open3D and FlashAttention have also been rebuilt against Torch 2.11.0+cu128.
-`runtime-manifest.torch211.json` records the local wheel identities and
-[BUILDING.md](BUILDING.md) gives the source recipe. CUDA operator checks and
-two-step inference with all four published models passed, both standalone and
-through SDK 0.6.0rc2. Standalone execution uses no Newton/DexSim imports and preserves
-input storage. Native adapter transport/reset is separately tested with a
-deterministic predictor. Real BF16 network rollouts do not establish bitwise
-determinism, native/standalone numerical parity, historical-runtime equivalence
-or long-horizon accuracy.
+```bash
+python -c 'import torch, open3d.ml.torch, flash_attn; from dexsim.engine.newton_physics.particle_inference import ParticleInferenceSolver; print(torch.__version__, torch.cuda.get_device_capability())'
+```
 
-No conflicting `worldparticle` dependency extra is provided. This integration
-preserves main's Torch 2.11 / SDK 0.6.0rc2 requirements. The Torch 2.11 binaries
-remain local artifacts; operator distribution must be resolved before
-advertising a default installable native runtime. Source-only
-experiments with the historical profile must use an isolated environment and
-the recorded wheel hashes. No environment, weight or native wheel is committed.
+An undefined-symbol or missing-kernel error requires a matching operator build,
+not weaker loader checks. The older standalone Torch 2.7.1+cu128 / Open3D
+`0.19.0+1e7b174` combination remains recognized by the loader; it is not a
+replacement for the project's Torch 2.11 environment.
 
 ## Independent transition and optional deployment
 
@@ -147,6 +136,22 @@ identity or a permutation. Only a single CUDA particle world is supported, witho
 rigid collision shapes, gradients or CUDA Graph capture. Static boundaries and
 features come from model inputs. Changing them requires closing/recreating the
 scene; reset restores physical state and does not reload model assets.
+
+## Verification
+
+On implementation commit `b0875186c`, the Torch 2.11 / SDK rc2 / SM120 setup
+above completed the four default headless budgets (199 / 80 / 15 / 199 steps)
+with finite state and normal exit. Each scene also produced two 1920×1080 RGB
+offscreen captures in a separate two-step run. Reproduce inference with
+`demo --scene SCENE --headless --once --hold-seconds 0`; add
+`--steps 2 --capture-dir DIR` for the bounded offscreen check.
+
+These runs do not qualify desktop window interaction, accuracy, historical
+runtime equivalence, native/model numerical parity or bitwise replay. The
+unchanged network contains CUDA reductions/hash-neighbor construction without
+an established determinism guarantee. Runtime/unit checks separately cover
+CSR validation, FP32 transport under autocast, force units, native reset and
+unsupported-configuration rejection.
 
 ## Licensing
 

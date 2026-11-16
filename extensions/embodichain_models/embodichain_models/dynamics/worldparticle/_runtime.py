@@ -201,7 +201,7 @@ def load_network(cfg: dict[str, Any], checkpoint: str | Path, device: str) -> An
         raise RuntimeError(
             "WorldParticle Open3D/FlashAttention operators do not match the "
             "recorded runtime profile; see examples/learning/worldparticle/README.md "
-            "and BUILDING.md for the historical and Torch 2.11 profiles"
+            "for the supported operator profiles"
         )
     from ._network.particle_network_cross_attn_feat import (
         ParticleNetworkCrossAttnLocalFeature,

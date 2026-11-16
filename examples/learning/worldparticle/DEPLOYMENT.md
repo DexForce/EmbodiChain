@@ -1,6 +1,6 @@
 # WorldParticle native solver quickstart
 
-Complete the [operator installation check](BUILDING.md#install-and-check-the-built-operators)
+Check the [runtime requirements](README.md#runtime-requirements)
 first. Run from a source checkout with the main EmbodiChain package/dependencies
 installed and bundled extension mappings refreshed. This example uses public
 SDK SceneBuilder and the direct WorldParticle Provider. It does not create a
@@ -134,5 +134,5 @@ Reset restores physical state without reloading fixed model inputs. Recreate
 the model/scene when features, boundaries, topology or rotation change. Missing
 SDK facilities, rejected runtime versions or undefined operator symbols require
 the matching environment/build. Count, gravity and timestep errors require a
-matching authored scene/export pair. [VALIDATION.md](VALIDATION.md) states the
-tested budgets, rendering scope and numerical limits.
+matching authored scene/export pair. The [verification summary](README.md#verification)
+states the tested budgets, rendering scope and numerical limits.

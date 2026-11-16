@@ -42,9 +42,9 @@ Use the following canonical packages for the current model directions:
 WorldParticle's [showcase](../../examples/learning/worldparticle/README.md),
 [input contract](../../examples/learning/worldparticle/INPUTS.md),
 [native quickstart](../../examples/learning/worldparticle/DEPLOYMENT.md) and
-[operator installation/preflight](../../examples/learning/worldparticle/BUILDING.md)
-cover the frozen inference path. Its [execution record](../../examples/learning/worldparticle/VALIDATION.md)
-records full headless runs and bounded offscreen captures. It has no shared-SL
+[runtime requirements](../../examples/learning/worldparticle/README.md#runtime-requirements)
+cover the frozen inference path. A [verification summary](../../examples/learning/worldparticle/README.md#verification)
+states the checked headless/offscreen scope. It has no shared-SL
 recipe, learning-env or qualified functional-gradient/APG contract in this stage.
 
 Visual ACT's configuration and inference adapters are documented in the
