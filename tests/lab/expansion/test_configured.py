@@ -96,3 +96,43 @@ def test_resource_changes_preserve_semantics_but_record_new_execution(tmp_path):
     assert a["execution_id"] != b["execution_id"]
     cfg.mass_scale = {"cube": (2.0, 3.0)}
     assert preflight_expansion_job(cfg)["semantic_id"] != a["semantic_id"]
+
+
+@pytest.mark.parametrize("owner", ["environment", "scene"])
+def test_deployment_snapshot_preserves_component_relative_assets(tmp_path, owner):
+    import json
+    import yaml
+    from embodichain.lab.expansion.task_program_jobs import _prepare_deployment
+    from embodichain.lab.gym.utils.composition import resolve_gym_components
+
+    source = tmp_path / "source"
+    source.mkdir()
+    mesh = source / "mesh.obj"
+    mesh.write_text("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
+    simulation = {
+        "rigid_object": [
+            {"uid": "mesh", "shape": {"shape_type": "Mesh", "fpath": "./mesh.obj"}}
+        ]
+    }
+    component = (
+        {
+            "environment_id": "mesh-test",
+            "physics": "default",
+            "simulation": simulation,
+            "env": {},
+        }
+        if owner == "environment"
+        else {"scene_id": "mesh-test", "simulation": simulation}
+    )
+    (source / "component.yaml").write_text(yaml.safe_dump(component))
+    declaration = {"id": "SnapshotTest-v1", owner: {"component": "component.yaml"}}
+    deployment = source / "deployment.yaml"
+    deployment.write_text(yaml.safe_dump(declaration))
+    before = {p.name: p.read_bytes() for p in source.iterdir()}
+    output = tmp_path / "output"
+    output.mkdir()
+    derived = _prepare_deployment(deployment, output)
+    snapshot = json.loads(derived.read_text())
+    resolved = resolve_gym_components(snapshot, base_dir=derived.parent).config
+    assert resolved["rigid_object"][0]["shape"]["fpath"] == str(mesh)
+    assert {p.name: p.read_bytes() for p in source.iterdir()} == before

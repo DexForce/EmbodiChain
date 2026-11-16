@@ -188,7 +188,13 @@ def _prepare_deployment(deployment: Path, output: Path) -> Path:
     snapshot = paths(deepcopy(original))
     owner = "environment" if "environment" in snapshot else "scene"
     if "component" in snapshot[owner]:
-        physical = load_mapping(Path(snapshot[owner]["component"]))
+        from embodichain.lab.gym.utils._component_composition import (
+            _resolve_local_resource_paths,
+        )
+
+        component_path = Path(snapshot[owner]["component"])
+        physical = load_mapping(component_path)
+        _resolve_local_resource_paths(physical, base_dir=component_path.parent)
         snapshot[owner] = {"component": str((output / "environment.yaml").resolve())}
     else:
         from embodichain.lab.gym.utils.composition import resolve_gym_components

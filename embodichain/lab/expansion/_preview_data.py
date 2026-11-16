@@ -331,6 +331,7 @@ def load_preview(
     ground = True
     seen = set()
     frames = 0
+    reference_index = len(paths) - 1 if reference is not None else None
     for group, path in enumerate(paths):
         job_path = path / "job.json"
         if not job_path.is_file():
@@ -382,7 +383,7 @@ def load_preview(
         ):
             raise ValueError("Outputs disagree about ground visibility")
         receipts = [r for r in ArtifactEpisodeSink(path).inspect() if r.confirmed]
-        is_reference = reference is not None and group == len(outputs)
+        is_reference = group == reference_index
         if not receipts or (is_reference and len(receipts) != 1):
             raise ValueError(
                 "Each output needs confirmed episodes; reference must contain exactly one"

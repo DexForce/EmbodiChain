@@ -376,16 +376,27 @@ class WorkloadProgramExecutor:
 
         for row in tuple(self.warming):
             state = self.warming[row]
-            if state["settled"] < self.cfg.settling_steps:
-                continue
             assignment = state["assignment"]
-            self.env._elapsed_steps[row] = 0
-            self.env._reset_physical_objective((row,))
-            bridge = self.source.activate(assignment, self.observation)
+            expired = (
+                time.monotonic() - self.started_at[assignment.workload_id]
+                >= self.workloads[assignment.workload_id].max_wall_time_s
+            )
+            if state["settled"] < self.cfg.settling_steps and not expired:
+                continue
+            if expired:
+                bridge = None
+            else:
+                self.env._elapsed_steps[row] = 0
+                self.env._reset_physical_objective((row,))
+                bridge = self.source.activate(assignment, self.observation)
             del self.warming[row]
             if bridge is None:
                 outcome = ProgramBatchResult(
-                    (row,), (0,), (False,), ("preparation_rejected",), ((),)
+                    (row,),
+                    (0,),
+                    (False,),
+                    ("wall_time_exhausted" if expired else "preparation_rejected",),
+                    ((),),
                 )
                 if (
                     self.source.complete(

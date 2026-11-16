@@ -42,7 +42,9 @@ independent collection budget, artifacts and row callbacks. The facade opens one
 World, captures the original seeded nominal scene in row zero, and composes the
 existing session, frame collector, episode assembler and confirmed artifact sink.
 Different integration/grasp policies may share that World only when their
-physical configuration, program and cadence agree. Physical/visual/prototype
+physical configuration, program, cadence and expert action schema agree.
+Command mode, ActionManager declarations and controlled-joint selections cannot
+vary between workloads in one World. Physical/visual/prototype
 operators remain on the cohort API; unsupported payloads fail explicitly.
 Explicit contact sampling conventions may differ per integration through
 `SimulationTaskProgramAdapterFactory.create_adapter(grasp_contact_frames=...)`;
@@ -63,7 +65,11 @@ After at least the declared physical settling substeps, `activate` captures the
 initial measured boundary, performs the source's required preparation checks,
 registers a native candidate and uses `ExpansionEngine.admit_row`. It returns a
 fresh bridge bound exactly to that row and the environment's control cadence.
-Rejected preparation returns None and never earns quota.
+Rejected preparation returns None and never earns quota. A warming row whose
+admission time budget expires is retired without proposal or receipt; its group
+can finish incomplete while already-admitted peers continue and export normally.
+The native source also handles expiry during initial-state validation before
+atomic session proposal.
 
 `started` calls `mark_row_started` after the first actual command. `observe`
 captures every active T+1 boundary and performs the original physical checks;

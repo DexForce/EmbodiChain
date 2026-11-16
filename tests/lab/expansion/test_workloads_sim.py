@@ -521,6 +521,59 @@ def _facade_probe(output: str) -> None:
         )
     assert not SimulationManager._instances
 
+    # Expiry during settling retires only the unstarted group. A peer must
+    # still collect/export a real receipt, and the aggregate stays incomplete.
+    from dataclasses import replace
+
+    budget_groups = [
+        replace(
+            workloads[0],
+            workload_id=name,
+            cfg=ExpansionRunCfg(
+                **{
+                    **workloads[0].cfg.to_dict(),
+                    "output_dir": str(path / name),
+                    "target_episodes": 1,
+                    "max_attempts": 1,
+                    "max_wall_time_s": budget,
+                }
+            ),
+        )
+        for name, budget in (("expired", 1e-9), ("peer", 240.0))
+    ]
+    budget_result = run_gym_expansion_workloads(
+        budget_groups,
+        WorkloadExecutionCfg(
+            workload_count=2, batch_size=1, max_steps=2500, settling_steps=5
+        ),
+        extensions=GymExpansionHostExtensions(
+            validator_factory=lambda env, output: _MeasuredCollision(
+                env,
+                str(
+                    root / "examples/expansion/scene_robot_feasibility/search.ur5.yaml"
+                ),
+                output,
+            )
+        ),
+        output_dir=path / "budget-execution",
+    )
+    assert not budget_result["complete"]
+    assert budget_result["counts"]["expired"] == {
+        "attempts": 1,
+        "rollouts": 0,
+        "committed": 0,
+    }
+    assert budget_result["workloads"]["peer"]["complete"]
+    assert len(ArtifactEpisodeSink(path / "peer").inspect()) == 1
+    assert len(budget_result["workloads"]["peer"]["lerobot"]["datasets"]) == 1
+    assert not ArtifactEpisodeSink(path / "expired").inspect()
+    records = list((path / "expired" / "attempts").glob("*/attempt.json"))
+    assert len(records) == 1
+    expired_record = json.loads(records[0].read_text())
+    assert expired_record["status"] == "initial_rejected"
+    assert expired_record["reason"] == "wall_time_exhausted"
+    assert not SimulationManager._instances
+
 
 def _declarative_probe(output: str) -> None:
     import json

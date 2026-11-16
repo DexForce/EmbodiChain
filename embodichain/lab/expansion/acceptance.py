@@ -24,6 +24,7 @@ from typing import Any, TYPE_CHECKING
 from collections.abc import Mapping, Sequence
 from types import SimpleNamespace
 import xml.etree.ElementTree as ET
+import math
 import numpy as np
 import torch
 from embodichain.data_pipeline.recording.media import _atomic_json as atomic_json
@@ -268,7 +269,7 @@ class _ContactRow(_GeometryRow):
         )
         self.hold = configuration.get("contact_hold")
         count = (
-            round(self.hold["duration_s"] * env.control_frequency) + 1
+            math.ceil(self.hold["duration_s"] * env.control_frequency) + 1
             if self.hold
             else 1
         )
@@ -282,7 +283,10 @@ class _ContactRow(_GeometryRow):
             ].tolist(),
         ):
             self.frames[actor] = f"{env.robot.uid}/{link}"
-        for uid in (*env.sim.get_rigid_object_uid_list(), "default_plane"):
+        objects = list(env.sim.get_rigid_object_uid_list())
+        if env.sim.sim_config.enable_ground_plane:
+            objects.append("default_plane")
+        for uid in objects:
             self.frames[int(self.sensor.get_actor_ids(uid)[self.env_id, 0])] = uid
         ignored, allowed = self.contact_permissions(
             env, configuration, set(self.frames.values())
@@ -334,6 +338,10 @@ class _ContactRow(_GeometryRow):
         }
         if len(self.samples) != self.samples.maxlen:
             return {**report, "passed": False}
+        elapsed = self.samples[-1][2] - self.samples[0][2]
+        report.update(
+            elapsed_duration_s=elapsed, required_duration_s=self.hold["duration_s"]
+        )
         poses = np.asarray([sample[0] for sample in self.samples])
         from scipy.spatial.transform import Rotation
 
@@ -348,7 +356,13 @@ class _ContactRow(_GeometryRow):
             ),
         )
         report["passed"] = (
-            report["both_fingers_samples"] == self.samples.maxlen
+            (
+                elapsed >= self.hold["duration_s"]
+                or math.isclose(
+                    elapsed, self.hold["duration_s"], rel_tol=1e-12, abs_tol=1e-12
+                )
+            )
+            and report["both_fingers_samples"] == self.samples.maxlen
             and report["max_translation_drift_m"]
             <= self.hold["max_translation_drift_m"]
             and report["max_rotation_drift_rad"] <= self.hold["max_rotation_drift_rad"]
@@ -392,7 +406,7 @@ class _ContactRow(_GeometryRow):
                 .get_local_pose()[self.env_id]
                 .tolist()
             )
-            self.samples.append((pose, touching))
+            self.samples.append((pose, touching, self.env.sim.simulation_time))
             report = (
                 self._hold_report()
                 if terminal.accepted

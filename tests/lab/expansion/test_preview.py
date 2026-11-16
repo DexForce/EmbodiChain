@@ -414,3 +414,45 @@ def test_row_identity_without_motion_and_legacy_ambiguity(recorded_job):
     result = annotations(metadata, measured)
     np.testing.assert_allclose(result["targets"][0, :3, 3], [12, 20, 0])
     assert result["candidate_ids"] == ("31",)
+
+
+@pytest.mark.parametrize("second_count", [1, 2])
+def test_aggregate_input_keeps_explicit_reference_separate(recorded_job, second_count):
+    path, job, episode = recorded_job
+    root = path.parent
+    directories = []
+    for name, count in (("first", 1), ("second", second_count), ("reference", 1)):
+        directory = root / name
+        directory.mkdir()
+        (directory / "job.json").write_text(json.dumps(job))
+        for index in range(count):
+            ArtifactEpisodeSink(directory).submit(
+                replace(
+                    episode,
+                    episode_id=f"{name}-{index}",
+                    commit_id=f"{name}-commit-{index}",
+                ),
+                submission_id=index,
+            )
+        directories.append(directory)
+    aggregate = root / "aggregate"
+    aggregate.mkdir()
+    (aggregate / "expansion.json").write_text(
+        json.dumps(
+            {
+                "operators": {
+                    str(i): {
+                        "directory": str(p),
+                        "committed_episodes": 1 if i == 0 else second_count,
+                    }
+                    for i, p in enumerate(directories[:2])
+                }
+            }
+        )
+    )
+    data = load_preview(
+        [aggregate], reference=directories[2], max_episodes=1 + second_count
+    )
+    assert len(data.clips) == 1 + second_count
+    assert data.reference.space.endswith("reference")
+    assert all(not clip.space.endswith("reference") for clip in data.clips)

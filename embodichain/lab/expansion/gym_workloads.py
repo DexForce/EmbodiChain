@@ -191,6 +191,11 @@ class _GymWorkloadSource:
         host, engine = group["host"], group["engine"]
         ctx = host._context
         request = ctx.requests[row]
+        if group["session"].stop_reason == "wall_time_exhausted":
+            ctx.journal.update(
+                request, status="initial_rejected", reason="wall_time_exhausted"
+            )
+            return None
         if self.activation_snapshot is None:
             self.activation_snapshot = (
                 capture_state(ctx.view),
@@ -243,15 +248,25 @@ class _GymWorkloadSource:
         )
         session = group["session"]
         session.register_case(case, ctx.limits, joint_names=ctx.names)
-        identity, _ = session.propose(
-            case.scene_case_id,
-            initial_id,
-            source_id=ctx.program.program_id,
-            source_revision=ctx.report["recipe_revision"],
-            template_id=request.recipe.recipe_id,
-            operator_id="episode",
-            attempt_id=request.attempt_id,
-        )
+        try:
+            identity, _ = session.propose(
+                case.scene_case_id,
+                initial_id,
+                source_id=ctx.program.program_id,
+                source_revision=ctx.report["recipe_revision"],
+                template_id=request.recipe.recipe_id,
+                operator_id="episode",
+                attempt_id=request.attempt_id,
+            )
+        except RuntimeError:
+            # The budget can expire during initial-state validation, including
+            # between the early check and the session's atomic proposal guard.
+            if session.stop_reason != "wall_time_exhausted":
+                raise
+            ctx.journal.update(
+                request, status="initial_rejected", reason="wall_time_exhausted"
+            )
+            return None
         episode_id, commit_id = session.episode_ids(identity)
         record = ctx.journal.update(
             request,
@@ -360,6 +375,13 @@ class _GymWorkloadSource:
         row = result.assignment.env_id
         state = self.active.pop(row, None)
         if state is None:
+            ctx = self.groups[result.assignment.workload_id]["host"]._context
+            if result.program.reasons == ("wall_time_exhausted",):
+                ctx.journal.update(
+                    ctx.requests[row],
+                    status="initial_rejected",
+                    reason="wall_time_exhausted",
+                )
             return None
         group = state["group"]
         ctx = group["host"]._context
@@ -584,6 +606,8 @@ def run_gym_expansion_workloads(
                     "sim_steps_per_control",
                     "events",
                     "sensor",
+                    "expert_trajectory",
+                    "actions",
                 )
                 if hasattr(cfg, name)
             }
@@ -591,8 +615,20 @@ def run_gym_expansion_workloads(
 
     if any(physical_key(cfg) != physical_key(first) for _, cfg in configs[1:]):
         raise ValueError(
-            "workloads must share physical environment, robot, sensors and cadence"
+            "workloads must share physical environment, robot, sensors, cadence and expert action schema"
         )
+
+    def control_schema(raw: Mapping[str, Any]) -> tuple:
+        cls = REGISTERED_ENVS[raw["id"]].cls
+        return (
+            tuple(getattr(cls, "control_parts", None) or ()),
+            tuple(getattr(cls, "active_joint_ids", ())),
+        )
+
+    if any(
+        control_schema(raw) != control_schema(configs[0][0]) for raw, _ in configs[1:]
+    ):
+        raise ValueError("workloads must share the expert controlled-joint schema")
 
     owner = source = None
     groups: dict[str, Any] = {}
