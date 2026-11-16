@@ -183,8 +183,7 @@ def generate_semantic_task_graph_from_image(
                 entities = {obj["id"]: obj for obj in grounding["objects"]}
                 from .task_spec import _project_candidate
 
-                before = spec
-                spec = _project_candidate(candidate, grounding=grounding)
+                projected_spec = _project_candidate(candidate, grounding=grounding)
 
                 def signature(predicate):
                     raw = predicate.to_dict()
@@ -193,9 +192,14 @@ def generate_semantic_task_graph_from_image(
 
                 remap = {
                     p.id: next(
-                        (n.id for n in spec.goal if signature(p) == signature(n)), None
+                        (
+                            n.id
+                            for n in projected_spec.goal
+                            if signature(p) == signature(n)
+                        ),
+                        None,
                     )
-                    for p in before.goal
+                    for p in spec.goal
                 }
                 for clause in clauses:
                     if clause["target"] in remap:
@@ -205,9 +209,8 @@ def generate_semantic_task_graph_from_image(
                                 "Grounding superseded the clause's terminal target"
                             )
                         clause["target"] = target
-                artifacts["task_spec"] = spec.to_dict()
                 document = freeze_task_spec(
-                    spec,
+                    projected_spec,
                     image_sha256=digest,
                     image_ref="source_image" + image.suffix.lower(),
                     role_descriptions={
@@ -230,6 +233,9 @@ def generate_semantic_task_graph_from_image(
                     role_properties=properties,
                     interpreted_steps=candidate["draft"]["steps"],
                 )
+                # Commit the candidate only after its clauses and frozen document validate.
+                spec = projected_spec
+                artifacts["task_spec"] = spec.to_dict()
                 break
             except (ValueError, TypeError, KeyError) as error:
                 errors = [str(error)]

@@ -1463,3 +1463,73 @@ def test_grounded_alias_release_retires_previous_grasp(source_image):
         {p.id: True for p in m.achieve} for m in spec.milestones
     ]
     assert evaluate_task_spec(spec, observations).status.value == "satisfied"
+
+
+@pytest.mark.parametrize("repair", [False, True])
+def test_grounding_retries_keep_original_goal_meaning(source_image, repair):
+    text = (
+        "Put the cube on the table, then lift the red cube upright and keep holding it."
+    )
+    first, grounding, plan = _fixture("E1")
+    first.update(object=_selector("cube"), relation="on")
+    for node in plan["nodes"]:
+        node["semantic"]["relation"] = "on"
+        node["semantic"]["intent"]["relation"] = "on"
+        if node["call"]["kind"] == "place":
+            node["call"].pop("inside")
+            node["call"]["on"] = "on__tray__source"
+    second, _, hold = _fixture("E2")
+    _terminal_hold("E2")(second, {}, hold)
+    second.update(id="step_02", object=_selector("red cube"), depends_on=["step_01"])
+    grounding["bindings"]["step_02.object"] = ["source"]
+    for index, node in enumerate(hold["nodes"], 2):
+        node.update(id=f"n{index}", step_id="step_02", depends_on=[f"n{index-1}"])
+        plan["nodes"].append(node)
+    plan["requirements"][0].update(quote=text, node_ids=["n0", "n1", "n2", "n3"])
+    grounding["clauses"] = [
+        dict(
+            id="source_placement",
+            quote="on the table",
+            target="goal_001",
+            origin="explicit",
+            resolution="resolved",
+        )
+    ]
+    requests = []
+
+    def respond(**kwargs):
+        requests.append(json.loads(kwargs["user_prompt"]))
+        response = deepcopy(grounding)
+        if repair and len(requests) == 2:
+            response["clauses"][0].update(quote="upright", target="goal_002")
+        return json.dumps(response)
+
+    def generate():
+        return generate_semantic_task_graph_from_image(
+            source_image,
+            text,
+            task_id="case",
+            instruction_caller=lambda **kw: dict(steps=[first, second]),
+            image_caller=respond,
+            planning_caller=lambda **kw: json.dumps(plan),
+        )
+
+    if repair:
+        result = generate()
+        clause = result["task_spec_v1"]["interpretation"]["clauses"][0]
+        assert clause["quote"] == "upright"
+        goal = next(
+            p
+            for p in result["task_spec_v1"]["objectives"]["goal"]
+            if p["id"] == clause["target"]
+        )
+        assert goal["predicate"] == "object_upright"
+    else:
+        with pytest.raises(SemanticPlanningError, match="superseded") as caught:
+            generate()
+        original = caught.value.artifacts["task_spec"]
+        placement = next(p for p in original["goal"] if p["id"] == "goal_001")
+        assert placement["predicate"] == "semantic_goal"
+        assert placement["relation"] == "on"
+    assert len(requests) == 2
+    assert requests[0]["objectives"] == requests[1]["objectives"]
