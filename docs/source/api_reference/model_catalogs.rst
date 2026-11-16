@@ -318,3 +318,34 @@ Other dynamics families
    :maxdepth: 2
 
    rwm
+
+
+WorldParticle independent transition
+------------------------------------
+
+WorldParticle predicts frozen world-space particle transitions. The model
+package owns authored features/topology, network loading and coordinate
+conversion. The optional native Provider belongs to the solver extension and
+uses the SDK particle inference adapter. Operator/runtime qualification is
+separate from discovery; main's Torch/SDK pins are unchanged.
+
+The :doc:`WorldParticle guide </features/neural_dynamics/worldparticle>` links
+the complete native quickstart, standalone call, NPZ/frame contract, operator
+installation/preflight and measured execution record. Frozen inference does not
+establish a learning-env or functional-gradient contract.
+
+.. autoclass:: embodichain_models.dynamics.worldparticle.WorldParticleModel
+   :noindex:
+
+.. autofunction:: embodichain_models.dynamics.worldparticle.load_model
+   :noindex:
+
+.. autoclass:: embodichain_models.dynamics.worldparticle.model.WorldParticleModel
+   :noindex:
+
+.. autofunction:: embodichain_models.dynamics.worldparticle.model.load_model
+   :noindex:
+
+.. autofunction:: embodichain_models.dynamics.worldparticle.data.load_sample
+
+.. autoclass:: embodichain_solvers.physics.worldparticle.provider.WorldParticleProvider

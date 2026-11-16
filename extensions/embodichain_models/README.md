@@ -37,6 +37,15 @@ Use the following canonical packages for the current model directions:
 | NeRD | `embodichain_models.dynamics.nerd` | Network/codec, shared SL, independent transition/geometry and learning-env consumers. |
 | Robot world model (RWM) | `embodichain_models.dynamics.rwm` | Implemented. |
 | RigidFormer | `embodichain_models.dynamics.rigidformer` | Native author architecture, official weights and shared-SL recipe. |
+| WorldParticle | `embodichain_models.dynamics.worldparticle` | Frozen particle transition; optional native deployment and operator qualification are separate. |
+
+WorldParticle's [showcase](../../examples/learning/worldparticle/README.md),
+[input contract](../../examples/learning/worldparticle/INPUTS.md),
+[native quickstart](../../examples/learning/worldparticle/DEPLOYMENT.md) and
+[runtime requirements](../../examples/learning/worldparticle/README.md#runtime-requirements)
+cover the frozen inference path. A [verification summary](../../examples/learning/worldparticle/README.md#verification)
+states the checked headless/offscreen scope. It has no shared-SL
+recipe, learning-env or qualified functional-gradient/APG contract in this stage.
 
 Visual ACT's configuration and inference adapters are documented in the
 [API reference](../../docs/source/api_reference/visual_act.rst); its runnable

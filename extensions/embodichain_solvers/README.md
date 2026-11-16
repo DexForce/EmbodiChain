@@ -32,3 +32,21 @@ supported; a solver entry point does not establish general physical coupling.
 Refresh editable mappings after adding the extension. Checkpoints/reference
 assets remain outside Git and the wheel; preparation and task/benchmark
 workflows belong to `examples/learning/nerd`.
+
+`physics.worldparticle.provider` supplies the optional `worldparticle` name.
+See the [complete WorldParticle solver quickstart](../../examples/learning/worldparticle/DEPLOYMENT.md),
+[input contract](../../examples/learning/worldparticle/INPUTS.md),
+[runtime requirements](../../examples/learning/worldparticle/README.md#runtime-requirements)
+and [verification summary](../../examples/learning/worldparticle/README.md#verification).
+The independent `WorldParticleModel` owns features, topology, frozen network
+and coordinate conversion. The Provider validates native scene, particle count,
+dt, gravity and supported capabilities; callers must preserve authored particle
+order/topology. It delegates read/force/write/reset
+and stream ownership to the SDK's `ParticleInferenceSolver` (SDK 0.6.0rc2).
+Main's SDK 0.6.0rc2 pin provides this facility. Older SDKs missing the facility
+fail before network loading; deployment also needs qualified model operators.
+No core particle inference solver or second model transition is introduced.
+WorldParticle currently supports one CUDA particle world with static model
+boundaries, without functional gradients, dynamic rigid coupling or CUDA Graph
+capture. Its optional operator runtime is documented in the example README;
+the main distribution's Torch/SDK pins remain unchanged.

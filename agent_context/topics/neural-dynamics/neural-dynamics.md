@@ -85,6 +85,36 @@ engine-camera recording. It uses explicit prepared geometry and weight paths.
 Assets/results stay outside the wheel. Numerical agreement, recovery and full
 benchmark/retraining qualification remain distinct evidence requirements.
 
+## WorldParticle frozen particle transition
+
+`dynamics.worldparticle.WorldParticleModel` owns the stateless world-space
+particle transition, authored features/boundaries/CSR topology, checkpoint
+loading and model-frame conversion. Its package imports neither simulation
+nor examples. Coordinate transport stays FP32 even under caller autocast;
+the original frozen network uses BF16. No learned-robot codec or history
+contract is shared with NeRD. Both families use the existing optional Newton
+Provider lifecycle in `embodichain_solvers.physics` for native deployment.
+
+`physics.worldparticle.provider.WorldParticleProvider` owns native admission and
+delegates stream/state/force/write/reset machinery to the SDK's generic
+`ParticleInferenceSolver`, included in SDK 0.6.0rc2. The example's
+[native quickstart](../../../examples/learning/worldparticle/DEPLOYMENT.md),
+[input contract](../../../examples/learning/worldparticle/INPUTS.md) and
+[runtime/verification summary](../../../examples/learning/worldparticle/README.md)
+own reproduction details and checked budgets. Compatible Open3D/FlashAttention
+operators must be provisioned separately; dependency build/patch tooling is
+outside this model integration.
+Tests with a small deterministic predictor
+qualify adapter behavior; real BF16 inference does not establish bitwise
+determinism, native/model parity or historical/paper accuracy.
+
+Only one CUDA particle world with static authored network boundaries is
+supported. It does not provide functional gradients/APG, dynamic rigid-body
+coupling, native contact reports or CUDA Graph capture. Keep its learning-env
+adapter deferred until an actual differentiable training contract is qualified.
+Preparation and four forward demonstrations belong to
+`examples/learning/worldparticle`; weights, data and native wheels stay external.
+
 ## Resource and physical identity
 
 `prepare --robot cartpole|ant --resource-root DIR` downloads the pinned dataset,
@@ -143,6 +173,8 @@ owns model selection and the shared training entry point; the
 own their model principles and user workflows; the
 [RWM guide](../../../docs/source/features/neural_dynamics/rwm.md) covers prediction
 and replay under the linked robot-world-model contract. The
+[WorldParticle guide](../../../docs/source/features/neural_dynamics/worldparticle.md)
+owns frozen inference, operator provisioning and native demo navigation. The
 [model API](../../../docs/source/api_reference/model_catalogs.rst) owns exported
 definitions. Transition error, accumulated rollout error and paper-scale
 accuracy remain separate claims.
