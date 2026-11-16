@@ -17,7 +17,7 @@ embodichain show-task gaussian_pick_place
 embodichain list-task --category manipulation
 embodichain run-task \
   --gym-config extensions/embodichain_tasks/configs/tasks/manipulation/gaussian_pick_place/task.office.yaml \
-  --headless --seed 42 --max_episodes 2 --record_trajectory \
+  --headless --seed 42 --num_envs 4 --max_episodes 4 --record_trajectory \
   --trajectory_save_dir outputs/gaussian_pick_place/office
 ```
 
@@ -35,6 +35,12 @@ existing third-person intrinsics/extrinsics through
 timed tracking and verified effects. Program targets and acceptance remain
 scene-specific; the common integration binds only the cube and support.
 
+Backgrounds use explicit `GaussianSplatCfg` PLY visuals, sharing one immutable
+resource across arenas. Each arena owns its instance pose and visibility.
+Office retains the source-to-scene X-axis rotation of 90 degrees; Lab3 uses
+its decoded PLY and RoboSimGS uses its original PLY with identity placement.
+`num_envs` defaults to one and can be increased with the launcher override.
+
 The source Gaussian packages are visual-only and supply no scanned collision
 geometry. Task acceptance requires lift >=4 cm, final position error <=2 cm,
 tilt <=15 degrees, measured release and stable placement. These deployments
@@ -48,3 +54,5 @@ loads these authoritative definitions, writes portable configuration snapshots,
 and records complete paired RGB, native trajectories and capture metadata.
 Media spooling, video export and offline/negative acceptance remain example
 workflows. Their task IDs, camera UIDs and native trajectory layout are retained.
+The example's `verify_parallel` command checks all rows of a batched execution,
+both cameras at every control boundary, and cross-arena background isolation.

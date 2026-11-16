@@ -69,6 +69,39 @@ CUBE_ROBOT_PROFILE_ID = "ur5_dh_pgi_140_80"
 CUBE_SCENE_REGISTRY_ID = "task_program_repeated_pick_place"
 
 
+@pytest.mark.parametrize(
+    "scene, resource, rotation",
+    [
+        ("office", "RoboSplatterOfficeGS/source/original.ply", (90, 0, 0)),
+        ("discoverse", "DiscoverseLab3GS/visual/scene.ply", (0, 0, 0)),
+        ("robosimgs", "RoboSimGSTabletopGS/source/original.ply", (0, 0, 0)),
+    ],
+)
+def test_gaussian_task_backgrounds_allow_replication_with_original_coordinates(
+    scene: str, resource: str, rotation: tuple[int, int, int]
+) -> None:
+    """Official tasks use replicable PLY visuals and retain their source axes."""
+    from embodichain.lab.sim.cfg import GaussianSplatCfg
+
+    path = (
+        _REPOSITORY_ROOT
+        / "extensions/embodichain_tasks/configs/tasks/manipulation/gaussian_pick_place"
+        / f"task.{scene}.yaml"
+    )
+    raw = load_config(path)
+    raw["num_envs"] = 4
+    cfg = config_to_cfg(raw, source_path=path)
+    background = next(
+        item for item in cfg.visual_object if item.uid == "scan_background"
+    )
+    assert cfg.num_envs == 4
+    assert background.source is None
+    assert tuple(background.init_rot) == rotation
+    assert isinstance(background.visuals[0].representation, GaussianSplatCfg)
+    assert background.visuals[0].representation.file_path == resource
+    assert cfg.sim_cfg.render_cfg.gaussian.apply_display_srgb is False
+
+
 @pytest.fixture
 def camera_component(tmp_path: Path) -> tuple[dict, dict]:
     """An embodiment with independently calibrated world and mounted cameras."""

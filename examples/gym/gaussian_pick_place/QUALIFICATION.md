@@ -308,6 +308,64 @@ Correcting that audit assertion changed no production code or configuration;
 both subsequent six-episode batches passed. These remain seed-42 regression
 checks, rather than a multi-seed reliability claim or metric GS-depth audit.
 
+## Explicit Gaussian multi-arena qualification
+
+The official environments now declare explicit `GaussianSplatCfg` PLY visuals
+instead of native USD Gaussian references. Office retains the packaged X-axis
+rotation of 90 degrees exactly once; Lab3 uses `visual/scene.ply`, while Office
+and RoboSimGS use `source/original.ply`. Each arena has its own instance pose
+and visibility, with one shared immutable native resource per background.
+
+Fresh seed-42 batches were measured with `num_envs=4`, Python 3.12.16, DexSim
+0.6.0rc2 and NVIDIA RTX PRO 5000 72 GB Blackwell GPUs. Default/CPU physics,
+Hybrid/8 spp, OptiX, 960x540 cameras, 25 Hz control and
+`apply_display_srgb=False` retain the original settings.
+
+| Scene | Accepted rows | Actions per row | Frames per camera | RGB images |
+| --- | ---: | ---: | ---: | ---: |
+| Office | 4/4 | 284 | 285 | 2,280 |
+| DISCOVERSE lab3 | 4/4 | 284 | 285 | 2,280 |
+| RoboSimGS tabletop | 4/4 | 284 | 285 | 2,280 |
+
+All 12 rows passed measured Pick/Place effects, lift, release and settled
+placement. Independent captures measured lift >=0.129421 m and final position
+error <=7.271 mm. The batch native trajectories have shape `(4, 284, 9)`;
+all captured cube poses match their corresponding native trajectory rows
+exactly, including the terminal state.
+
+The `verify_parallel` example checked all 6,840 native RGB images and exported
+24 full-resolution camera videos. Every camera boundary passed completed
+Gaussian status, arena ordering, native frame identity, control clock,
+nonblank uint8 RGB, fixed third-person pose and rigid wrist-mount checks.
+The initial projected cube pixels were red in all 24 views. Every encoded
+video frame was decoded against the original raw RGB; maximum per-frame mean
+absolute compression error was below 1.640 uint8 levels.
+
+Before each batch, hiding only arena 1's background changed both of that
+arena's views. Pixel differences in arenas 0, 2 and 3 were exactly zero for
+both cameras in all three scenes. The background resources retained identical
+resource IDs across the four instances.
+
+The standard `run-task --num_envs 4 --max_episodes 4 --record_trajectory`
+entry point also saved four accepted episodes in one batch for each deployment.
+All three existing single-environment recorder preparation commands passed.
+295 focused configuration, package-data, catalog and context cases passed;
+Black 26.10.1, source syntax/header checks, API coverage (4961/4961) and context
+validation passed. The three added configuration cases protect replicable PLY
+selection, source-axis placement and the display-transfer setting. Existing
+camera/component and packaging coverage was reused.
+
+Evidence is retained under `outputs/gaussian-parallel-validation/`, including
+per-scene resolved definitions, raw RGB, execution results, batch trajectories,
+capture metadata, videos, the isolation measurements and a combined preview.
+The [machine-readable summary](evidence/parallel_qualification.json) and
+[four-arena RGB preview](evidence/parallel_rgb_preview.png) are included here
+for review without access to the local raw recordings.
+Context impact was reviewed: environment guidance now identifies the explicit
+PLY replication route; Task Program and RL ownership guidance remains accurate.
+These are seed-42, four-arena checks, rather than multi-seed or scale-limit
+qualification. Metric GS depth remains unqualified.
+
 ## Limits
 
 Only the independent task support/cube physics and RGB streams are qualified.
