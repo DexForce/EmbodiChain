@@ -95,6 +95,10 @@ sampling. A camera advances only after its own groups render. A failed
 acquisition invalidates the current output and leaves the boundary retryable.
 Legacy Gym-driven camera and contact acquisition keeps its existing ordering.
 
+Newton frame state includes the body-local center-of-mass offset as
+`linear_velocity_offset`. PVA and IMU transport the reported linear velocity
+to the configured sensor point before taking finite differences.
+
 The independently installable example and usage instructions
 live in
 [external joint encoder](../../../examples/sim/sensors/external_joint_encoder/README.md).

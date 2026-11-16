@@ -110,12 +110,19 @@ class PVA(_ReadOnlySensor):
             self.cfg.asset_uid, self.cfg.link_name
         )
         pose = state["pose"]
-        offset = matrix_from_quat(pose[:, 3:]) @ self._offset_position
+        rotation = matrix_from_quat(pose[:, 3:])
+        offset = rotation @ self._offset_position
         orientation = quat_mul(
             pose[:, 3:], self._offset_quat.expand(self.num_instances, -1)
         )
         angular = state["angular_velocity"]
-        linear = state["linear_velocity"] + torch.linalg.cross(angular, offset)
+        arm = offset
+        reference = state.get("linear_velocity_offset")
+        if reference is not None:
+            arm = (
+                rotation @ (self._offset_position - reference).unsqueeze(-1)
+            ).squeeze(-1)
+        linear = state["linear_velocity"] + torch.linalg.cross(angular, arm)
         elapsed = now - self._last_time if self._last_time is not None else 0.0
         if elapsed > 0:
             dv = (linear - self._previous_linear) / elapsed

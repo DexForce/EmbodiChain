@@ -83,7 +83,10 @@ class SensorStateProvider(Protocol):
 
         Returns:
             Pose in metres and xyzw, linear velocity in m/s and angular
-            velocity in rad/s, with one row per environment.
+            velocity in rad/s, with one row per environment. The optional
+            ``linear_velocity_offset`` gives the body-local reference point
+            of the reported linear velocity in metres. Its default is the
+            frame origin.
         """
         ...
 
@@ -174,23 +177,35 @@ class _ManagerSensorServices:
     ) -> TensorDict:
         manager = self._manager()
         asset = self._physical_asset(asset_uid)
+        is_newton = getattr(getattr(manager, "physics", None), "name", None) == "newton"
+        link_index = None
         if link_name is not None:
             if link_name not in getattr(asset, "link_names", ()):
                 raise ValueError(f"Unknown link {link_name!r} on {asset_uid!r}.")
-            index = asset.link_names.index(link_name)
-            state = asset.body_state[:, index]
-            pose, linear, angular = state[:, :7], state[:, 7:10], state[:, 10:13]
+            link_index = asset.link_names.index(link_name)
+            state = asset.body_state[:, link_index]
         elif getattr(type(asset), "root_state", None) is not None:
             state = asset.root_state
-            pose, linear, angular = state[:, :7], state[:, 7:10], state[:, 10:13]
+            if is_newton:
+                link_index = asset.link_names.index(asset.root_link_name)
         else:
             state = asset.body_state
-            pose, linear, angular = state[:, :7], state[:, 7:10], state[:, 10:13]
+
+        fields = {
+            "pose": state[:, :7],
+            "linear_velocity": state[:, 7:10],
+            "angular_velocity": state[:, 10:13],
+        }
+        if is_newton and not getattr(asset, "is_static", False):
+            # Newton pairs the body-frame pose with velocity at the center of mass.
+            com_pose = asset.body_data.com_pose
+            if link_index is not None:
+                com_pose = com_pose[:, link_index]
+            fields["linear_velocity_offset"] = com_pose[:, :3]
         return TensorDict(
             {
-                "pose": pose.expand(manager.num_envs, -1).clone(),
-                "linear_velocity": linear.expand(manager.num_envs, -1).clone(),
-                "angular_velocity": angular.expand(manager.num_envs, -1).clone(),
+                key: value.expand(manager.num_envs, -1).clone()
+                for key, value in fields.items()
             },
             batch_size=[manager.num_envs],
             device=manager.device,
