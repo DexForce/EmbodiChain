@@ -610,6 +610,7 @@ def run_gym_expansion_workloads(
                     "actions",
                     "control_parts",
                     "active_joint_ids",
+                    "scene_preparation",
                 )
                 if hasattr(cfg, name)
             }
@@ -617,7 +618,7 @@ def run_gym_expansion_workloads(
 
     if any(physical_key(cfg) != physical_key(first) for _, cfg in configs[1:]):
         raise ValueError(
-            "workloads must share physical environment, robot, sensors, cadence and expert action schema"
+            "workloads must share physical environment, robot, sensors, cadence, expert action schema and scene preparation"
         )
 
     owner = source = None

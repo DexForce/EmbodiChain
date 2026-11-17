@@ -39,6 +39,21 @@ from embodichain.lab.expansion.workloads import (
 pytestmark = pytest.mark.no_sim
 
 
+def _prepare_cube_scene(cfg, *, x):
+    """A valid pre-World hook whose parameters alter the prepared scene."""
+    from copy import deepcopy
+
+    prepared = deepcopy(cfg)
+    cube = next(obj for obj in prepared.rigid_object if obj.uid == "cube")
+    cube.init_pos = (x, *cube.init_pos[1:])
+    return prepared
+
+
+def _prepare_cube_scene_offset(cfg, *, x):
+    """A distinct callable declaration with different scene preparation."""
+    return _prepare_cube_scene(cfg, x=x + 0.1)
+
+
 @pytest.mark.parametrize("settled", [0, 5])
 def test_expired_warming_row_finishes_group_without_disturbing_live_peer(
     monkeypatch, settled
@@ -164,6 +179,9 @@ def test_admission_expiry_race_only_suppresses_budget_exhaustion(stop):
         "use_action_manager",
         "active_joint_ids",
         "joint_order",
+        "preparation_params",
+        "preparation_func",
+        "preparation_same",
     ],
 )
 def test_workload_action_schema_checked_before_constructing_world(
@@ -211,6 +229,18 @@ def test_workload_action_schema_checked_before_constructing_world(
             config.active_joint_ids = (
                 [i] if difference == "active_joint_ids" else ([1, 0] if i else [0, 1])
             )
+        if difference in {"preparation_params", "preparation_func", "preparation_same"}:
+            from embodichain.lab.gym.envs.managers.cfg import FunctorCfg
+
+            function = (
+                "_prepare_cube_scene_offset"
+                if i and difference == "preparation_func"
+                else "_prepare_cube_scene"
+            )
+            config.scene_preparation = FunctorCfg(
+                func=f"{__name__}:{function}",
+                params={"x": 0.8 if i and difference == "preparation_params" else 0.2},
+            )
         configs[name] = config
         # Configured tasks share this implementation class. Selection belongs
         # to the resolved configs above, never to artificial per-task classes.
@@ -241,7 +271,7 @@ def test_workload_action_schema_checked_before_constructing_world(
     execution = WorkloadExecutionCfg(
         workload_count=2, batch_size=1, max_steps=20, settling_steps=1
     )
-    if difference is None:
+    if difference in (None, "preparation_same"):
         with pytest.raises(ReachedWorld):
             run_gym_expansion_workloads(
                 workloads, execution, output_dir=tmp_path / "run"
@@ -255,8 +285,9 @@ def test_workload_action_schema_checked_before_constructing_world(
         factory.assert_not_called()
 
 
-def test_real_deployments_with_shared_class_reject_different_control_parts(
-    tmp_path, monkeypatch
+@pytest.mark.parametrize("field", ["control_parts", "scene_preparation"])
+def test_real_deployments_reject_incompatible_shared_world_setup(
+    tmp_path, monkeypatch, field
 ):
     from pathlib import Path
     from embodichain.lab.expansion import ExpansionRunCfg
@@ -277,9 +308,17 @@ def test_real_deployments_with_shared_class_reject_different_control_parts(
     inputs.mkdir()
     base = load_config(_prepare_deployment(task, inputs))
     workloads = []
-    for name, parts in (("Arm", ["arm"]), ("ArmEef", ["arm", "eef"])):
+    settings = (
+        (("Arm", ["arm"]), ("ArmEef", ["arm", "eef"]))
+        if field == "control_parts"
+        else tuple(
+            (name, {"func": f"{__name__}:_prepare_cube_scene", "params": {"x": x}})
+            for name, x in (("Near", 0.2), ("Far", 0.8))
+        )
+    )
+    for name, value in settings:
         component = load_config(task.parent / "envs/default.yaml")
-        component["env"]["control_parts"] = parts
+        component["env"][field] = value
         physical = inputs / f"{name}.environment.yaml"
         physical.write_text(yaml.safe_dump(component))
         declaration = {
@@ -290,7 +329,11 @@ def test_real_deployments_with_shared_class_reject_different_control_parts(
         path = inputs / f"{name}.json"
         path.write_text(json.dumps(declaration))
         config = config_to_cfg(declaration, source_path=path)
-        assert config.control_parts == parts
+        if field == "control_parts":
+            assert config.control_parts == value
+        else:
+            assert config.scene_preparation.func == value["func"]
+            assert config.scene_preparation.params == value["params"]
         assert REGISTERED_ENVS[declaration["id"]].cls is EmbodiedEnv
         cfg = ExpansionRunCfg(
             deployment=str(path),

@@ -223,7 +223,10 @@ class PickUpOptions(SkillOptions):
     """
 
     cartesian_lift: bool = False
-    """Preserve a straight world-Z lift with IK interpolation and native limits."""
+    """Preserve a straight world-Z lift with IK interpolation and native limits.
+
+    Mutually exclusive with explicit ``MotionPolicy.phase_paths``.
+    """
 
     initial_lift_height: float = field(default=0.0, kw_only=True)
     """Initial world-Z clearance (m) from the current TCP pose before approach."""
@@ -382,6 +385,8 @@ class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
         hand_grasp_qpos: torch.Tensor,
         interpolation_dt: float,
     ) -> tuple[torch.Tensor, torch.Tensor, dict[str, int]]:
+        if options.cartesian_lift and motion_policy.phase_paths:
+            raise ValueError("cartesian_lift and phase_paths are mutually exclusive.")
         if options.approach_along_grasp_axis:
             approach_direction = grasp_xpos[:, :3, 2]
         pre_grasp_xpos = translate_pose_world(
