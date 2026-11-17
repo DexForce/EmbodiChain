@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import argparse
+from importlib import metadata
 import math
 from pathlib import Path
 
@@ -56,6 +57,12 @@ CAMERA_CENTER = (0.0, 0.0, 0.68)
 DEPTH_SIZE = (112, 76)
 COLLISION_SIZE = (0.42, 0.82, 0.91)
 VISUAL_SIZE = (0.62, 0.70, 1.06)
+VLP_BOXES = (
+    ("east_wall", (2.35, 0.15, 0.84), (0.18, 2.1, 1.68)),
+    ("north_wall", (-0.20, 2.1, 0.59), (2.12, 0.20, 1.18)),
+    ("west_crate", (-1.65, -0.72, 0.48), (0.72, 0.85, 0.96)),
+    ("south_crate", (0.60, -1.85, 0.31), (0.85, 0.65, 0.62)),
+)
 
 Sample = dict[str, np.ndarray]
 
@@ -63,7 +70,9 @@ Sample = dict[str, np.ndarray]
 def build_parser() -> argparse.ArgumentParser:
     """Configure the headless sequence and output format."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mode", choices=("terrain", "dynamic"), default="terrain")
+    parser.add_argument(
+        "--mode", choices=("terrain", "dynamic", "vlp16"), default="terrain"
+    )
     parser.add_argument(
         "--geometry",
         choices=("collision", "visual"),
@@ -232,6 +241,61 @@ def record_dynamic(sim: SimulationManager, frames: int, geometry: str) -> list[S
     return samples
 
 
+def record_vlp16(sim: SimulationManager, frames: int) -> list[Sample]:
+    """Resolve the installed VLP16 entry point and acquire nominal snapshots."""
+    if not metadata.entry_points(group="embodichain.sensors", name="VLP16"):
+        raise RuntimeError("Install this checkout to register the VLP16 entry point.")
+    for uid, center, size in VLP_BOXES:
+        add_box(sim, uid, center, size)
+    mount = add_box(sim, "scanner", (0.0, 0.0, 0.62), (0.03, 0.03, 0.03), "kinematic")
+    cfg = SensorCfg.from_dict(
+        {
+            "sensor_type": "VLP16",
+            "uid": "vlp16",
+            "mount": {"parent": "scanner"},
+            "target_uids": [uid for uid, _, _ in VLP_BOXES],
+        }
+    )
+    sensor = sim.add_sensor(cfg)
+    samples = []
+    camera = scene_camera(
+        sim,
+        (3.9, -6.9, 5.4),
+        (0.0, 0, 0.48),
+        {
+            "scanner": (0.86, 0.48, 0.18),
+            **{uid: (0.19, 0.47, 0.61) for uid, _, _ in VLP_BOXES},
+        },
+    )
+    for phase in np.linspace(0, 1, frames):
+        yaw = math.radians(-26 + 52 * phase)
+        mount.set_local_pose(
+            torch.tensor(
+                [
+                    [
+                        0.18 * math.sin(math.pi * phase),
+                        -0.22 + 0.44 * phase,
+                        0.62,
+                        0,
+                        0,
+                        math.sin(yaw / 2),
+                        math.cos(yaw / 2),
+                    ]
+                ],
+                dtype=torch.float32,
+                device=sim.device,
+            )
+        )
+        sim.update(step=1, render_final_step=False)
+        sample = read_sample(sensor)
+        sample["scanner_position"] = mount.get_local_pose()[0, :3].cpu().numpy().copy()
+        sample["elevation_deg"] = np.asarray(cfg.vertical_angles)
+        sample["azimuth_samples"] = np.asarray(cfg.horizontal_samples)
+        sample["camera_rgb"] = capture_rgb(sim, camera)
+        samples.append(sample)
+    return samples
+
+
 def style_scene(
     axis: Axes,
     xlim: tuple[float, float],
@@ -350,6 +414,55 @@ def draw_dynamic(figure: Figure, sample: Sample) -> None:
     )
 
 
+def draw_vlp16(figure: Figure, sample: Sample) -> None:
+    """Render the channel-colored world-frame points and full scan layout."""
+    figure.clear()
+    show_scene(figure.add_subplot(1, 3, 1), sample["camera_rgb"])
+    scene = figure.add_subplot(1, 3, 2, projection="3d")
+    layout = figure.add_subplot(1, 3, 3)
+    channels = sample["elevation_deg"].size
+    columns = int(sample["azimuth_samples"])
+    hit = sample["hit"].reshape(channels, columns)
+    positions = sample["position"].reshape(channels, columns, 3)[:, ::4]
+    show = hit[:, ::4]
+    channel_ids = np.broadcast_to(np.arange(channels)[:, None], show.shape)
+    points = scene.scatter(
+        *positions[show].T,
+        s=3,
+        c=channel_ids[show],
+        cmap="turbo",
+        vmin=0,
+        vmax=channels - 1,
+        depthshade=False,
+    )
+    scene.scatter(
+        *sample["scanner_position"], s=28, c="#223e57", marker="^", depthshade=False
+    )
+    style_scene(scene, (-2.25, 2.75), (-2.30, 2.55), (0.05, 1.65))
+    scene.set_title("Simultaneous point cloud")
+    figure.colorbar(
+        points, ax=scene, label="Channel", shrink=0.65, ticks=(0, 5, 10, 15)
+    )
+    draw_range(
+        figure,
+        layout,
+        sample["distance"].reshape(channels, columns),
+        hit,
+        extent=(-180, 180, -0.5, channels - 0.5),
+        limits=(0.8, 3.25),
+        title=f"{channels} channels × {columns} azimuth samples",
+        labels=("Azimuth (°)", "Firing-order channel"),
+        color_label="Radial range (m)",
+        origin="lower",
+    )
+    layout.set_aspect("auto")
+    layout.set_yticks((0, 5, 10, 15))
+    figure.supxlabel(
+        f"Sample {sample['sample_id']}   ·   t = {sample['time']:.3f} s   ·   Gray: no hit",
+        fontsize=9,
+    )
+
+
 def export(samples: list[Sample], args: argparse.Namespace) -> None:
     """Save the raw data, the middle PNG and the optional full sequence."""
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -357,8 +470,11 @@ def export(samples: list[Sample], args: argparse.Namespace) -> None:
         args.output_dir / "samples.npz",
         **{key: np.stack([sample[key] for sample in samples]) for key in samples[0]},
     )
-    draw = draw_terrain if args.mode == "terrain" else draw_dynamic
-    width = 8.8 if args.mode == "terrain" else 12.6
+    draw, width = {
+        "terrain": (draw_terrain, 8.8),
+        "dynamic": (draw_dynamic, 12.6),
+        "vlp16": (draw_vlp16, 10.0),
+    }[args.mode]
     figure = plt.figure(figsize=(width, 4.0), dpi=120, layout="constrained")
     preview = len(samples) // (4 if args.mode == "dynamic" else 2)
     draw(figure, samples[preview])
@@ -398,8 +514,10 @@ def main() -> None:
     try:
         if args.mode == "terrain":
             samples = record_terrain(sim, args.frames)
-        else:
+        elif args.mode == "dynamic":
             samples = record_dynamic(sim, args.frames, args.geometry)
+        else:
+            samples = record_vlp16(sim, args.frames)
     finally:
         sim.destroy(exit_process=False)
         SimulationManager.flush_cleanup_queue()

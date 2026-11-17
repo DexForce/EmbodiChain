@@ -45,3 +45,21 @@ authored render box and works with no native renderer. It supports procedural
 and array-backed geometry on rigid and visual objects. Moving rigid targets
 can change pose between samples. Replace an asset to change cached mesh
 geometry or scale.
+
+## VLP16 preset
+
+Install this checkout or its wheel so the `embodichain.sensors` entry point
+is visible. For an editable checkout, use `python -m pip install -e .` in the
+same environment as the following command.
+
+```bash
+python -m examples.sim.sensors.ray_scan.demo --mode vlp16 --output-dir /tmp/vlp16 --video
+```
+
+This mode resolves `sensor_type: VLP16` with `SensorCfg.from_dict`. It scans
+360° at 1,800 azimuth samples with 16 nominal channels and a 100 m limit.
+Each scan is a simultaneous geometric first-return snapshot. It has no
+rolling acquisition, intensity or dual returns. The point cloud is colored by
+firing-order channel and displays every fourth azimuth for clarity. The range
+map and archive retain all rays. The archive also stores the channel elevations
+in degrees.
