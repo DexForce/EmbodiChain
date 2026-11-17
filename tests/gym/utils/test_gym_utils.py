@@ -2478,6 +2478,7 @@ class TestConfigToCfgFromFile:
                 "renderer": "rt",
                 "spp": 4,
                 "tone_mapping_enabled": True,
+                "tone_mapping_type": "aces",
                 "tone_mapping_exposure": 1.25,
                 "denoising": {
                     "window": "optix",
@@ -2486,6 +2487,9 @@ class TestConfigToCfgFromFile:
                 "dlss": {
                     "dlss_quality": 1,
                     "tiled_enabled": False,
+                    "tiled_gutter_pixels": 0,
+                    "tiled_overscan_pixels": 0,
+                    "frame_time_delta_ms": 1000 / 240,
                 },
                 "nrd": {
                     "max_accumulated_frame_num": 24,
@@ -2554,6 +2558,7 @@ class TestConfigToCfgFromFile:
         assert cfg.sim_cfg.render_cfg.renderer == "rt"
         assert cfg.sim_cfg.render_cfg.spp == 4
         assert cfg.sim_cfg.render_cfg.tone_mapping_enabled is True
+        assert cfg.sim_cfg.render_cfg.tone_mapping_type == "aces"
         assert cfg.sim_cfg.render_cfg.tone_mapping_exposure == 1.25
         from embodichain.lab.sim import DenoisingCfg, DLSSCfg, NRDCfg
         import dexsim
@@ -2573,6 +2578,13 @@ class TestConfigToCfgFromFile:
         )
         assert world_config.dlss_config.dlss_quality == 1
         assert world_config.dlss_config.tiled_enabled is False
+        assert world_config.dlss_config.tiled_gutter_pixels == 0
+        assert getattr(world_config.dlss_config, "tiled_overscan_pixels", 0) == 0
+        assert world_config.dlss_config.frame_time_delta_ms == pytest.approx(1000 / 240)
+        assert (
+            world_config.postprocess_config.tone_mapping_type
+            == dexsim.types.ToneMappingType.ACES
+        )
         assert world_config.nrd_config.max_accumulated_frame_num == 24
         assert world_config.nrd_config.taa_min_current_weight == pytest.approx(0.125)
         assert cfg.sim_cfg.visualization.backend == "viser"
