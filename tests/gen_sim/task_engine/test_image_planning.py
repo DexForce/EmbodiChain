@@ -646,6 +646,55 @@ def test_terminal_hold_rejects_a_releasing_plan(source_image):
         _plan(source_image, "E2", _terminal_hold("E2", release=True))
 
 
+@pytest.mark.parametrize("planned_height", [0.10, None, 0.20])
+def test_metric_lift_keeps_the_source_height_on_the_held_transport(
+    source_image, planned_height
+):
+    instruction = "Pick up the figurine, then lift it vertically by more than 10 centimetres. Keep it held."
+
+    def mutate(step, grounding, plan):
+        _terminal_hold("E1")(step, grounding, plan)
+        # The episode's original model output declared the motion but did not
+        # have a field for its height.
+        step.update(target=_selector(), relation="none", direction="up")
+        grounding["bindings"].pop("step_01.target")
+        grounding["objects"] = [
+            item for item in grounding["objects"] if item["id"] == "source"
+        ]
+        plan["requirements"][0][
+            "quote"
+        ] = "lift it vertically by more than 10 centimetres"
+        for node in plan["nodes"]:
+            node["semantic"].update(reference=None, relation="none")
+            node["semantic"]["intent"].pop("relation", None)
+        held_intent = plan["nodes"][1]["semantic"]["intent"]
+        held_intent["direction"] = "up"
+        if planned_height is not None:
+            held_intent["lift_height_m"] = planned_height
+
+    if planned_height != 0.10:
+        with pytest.raises(SemanticPlanningError, match="lift_height_m=0.1"):
+            _plan(source_image, "E1", mutate, instruction)
+        return
+    result = _plan(source_image, "E1", mutate, instruction)
+    candidate = result["task_candidates"]["candidates"][0]
+    (step,) = candidate["draft"]["steps"]
+    assert step["lift_height_m"] == 0.10
+    assert step["target"]["kind"] == "none"
+    assert result["semantic_graph_validation"]["coverage"]["semantic_status"] == "valid"
+
+
+def test_e1_placement_still_requires_a_target():
+    from embodichain.gen_sim.task_engine.interpretation import (
+        validate_instruction_intent,
+    )
+
+    step, _, _ = _fixture("E1")
+    step["target"] = _selector()
+    with pytest.raises(ValueError, match="E1 requires a target selector"):
+        validate_instruction_intent({"steps": [step]})
+
+
 def test_terminal_hold_acquires_with_pick_not_axis_alignment(source_image):
     def align_first(s, g, p):
         _terminal_hold("E2")(s, g, p)
