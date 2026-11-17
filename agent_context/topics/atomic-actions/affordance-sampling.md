@@ -34,8 +34,10 @@ and receiving grasps in separate named streams while preserving opposite object
 ends and per-row arm assignment; its diagnostics retain the selected assignment's
 candidate metadata and control parts. Press samples local contact-frame roll;
 the Twist example explicitly declares `grasp_roll_range=(-pi, pi)` for parallel
-branches. Press, Slide, and OpenDoor examples use `ik_interp` for their exact
-Cartesian contact/path samples.
+branches. Twist's opt-in `grasp_tilt` turns the grasp about a target-local
+`grasp_tilt_axis` through the grasp point after any sampled roll, so the roll
+stays about the twist axis. Press, Slide, and OpenDoor examples use `ik_interp`
+for their exact Cartesian contact/path samples.
 
 The seed and attempt identity control Affordance selection, not upstream grasp
 generation. Antipodal approach-direction perturbations still use PyTorch's

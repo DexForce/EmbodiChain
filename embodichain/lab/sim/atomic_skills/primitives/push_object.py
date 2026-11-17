@@ -157,6 +157,24 @@ class PushObjectToolCalibration:
             )
 
 
+def _nearest_planar_axis(
+    x_axis: torch.Tensor, y_axis: torch.Tensor, direction: torch.Tensor
+) -> torch.Tensor:
+    """Return the signed frame axis among ``±x`` and ``±y`` nearest ``direction``.
+
+    Args:
+        x_axis: Frame x-axes shaped ``(B, 3)``.
+        y_axis: Frame y-axes shaped ``(B, 3)``.
+        direction: Unit directions shaped ``(B, 3)``.
+
+    Returns:
+        The selected unit axes shaped ``(B, 3)``.
+    """
+    axes = torch.stack((x_axis, -x_axis, y_axis, -y_axis), dim=1)
+    nearest = (axes * direction[:, None]).sum(dim=-1).argmax(dim=1)
+    return axes[torch.arange(axes.shape[0], device=axes.device), nearest]
+
+
 @dataclass(frozen=True, slots=True, eq=False)
 class PushObjectOptions(SkillOptions):
     """Per-invocation planar pushing behavior."""
@@ -172,6 +190,17 @@ class PushObjectOptions(SkillOptions):
 
     contact_distance: float = 0.03
     """Initial planar clearance behind the object along the push direction."""
+
+    contact_along_target_face: bool = False
+    """Offset the contact along the target frame's face nearest the push.
+
+    The contact frame's x-axis follows the target, so a box aligned with it
+    presents a face normal to one of that frame's planar axes. When enabled,
+    the contact sits ``contact_distance`` behind the axis nearest the push
+    direction instead of straight back along the push, keeping the same
+    clearance to that face for any push direction. The end effector still
+    travels along the push direction.
+    """
 
     push_overshoot: float = 0.0
     """Additional end-effector travel beyond the object's target displacement."""
@@ -194,6 +223,8 @@ class PushObjectOptions(SkillOptions):
     def __post_init__(self) -> None:
         if type(self.hand_interp_steps) is not int or self.hand_interp_steps < 1:
             raise ValueError("hand_interp_steps must be a positive integer.")
+        if type(self.contact_along_target_face) is not bool:
+            raise TypeError("contact_along_target_face must be a boolean.")
         for name in (
             "approach_height",
             "retract_height",
@@ -464,7 +495,12 @@ class PushObject(AtomicSkill[PushObjectGoal, PushObjectOptions]):
             contact_offset = support_planar_offset + object_normal_offset
         contact_center = contact_offset + object_pose[:, :3, 3]
         contact_distance = options._contact_distance_for(control_part)
-        contact_frame[:, :3, 3] = contact_center - push_direction * contact_distance
+        contact_axis = push_direction
+        if options.contact_along_target_face:
+            contact_axis = _nearest_planar_axis(
+                contact_frame[:, :3, 0], contact_frame[:, :3, 1], push_direction
+            )
+        contact_frame[:, :3, 3] = contact_center - contact_axis * contact_distance
         calibration = options._calibration_for(control_part).to(
             device=self.device,
             dtype=torch.float32,

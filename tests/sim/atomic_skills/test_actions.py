@@ -298,7 +298,7 @@ def _torch_interpolation(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         MotionGenerator,
         "_interpolate_cartesian_with_limits",
-        lambda self, target_poses, solved_keyframes, options: (
+        lambda self, target_poses, solved_keyframes, options, row_success=None: (
             torch.ones(
                 solved_keyframes.shape[0],
                 dtype=torch.bool,
@@ -5662,6 +5662,67 @@ def test_push_object_plans_contact_and_target_directed_planar_motion() -> None:
     )
 
 
+def test_push_object_contact_can_follow_the_nearest_target_face() -> None:
+    generator = _motion_generator()
+    action = _bind_action(generator, PushObject())
+    yaw = math.radians(20.0)
+    rotation = torch.tensor(
+        [
+            [math.cos(yaw), -math.sin(yaw), 0.0],
+            [math.sin(yaw), math.cos(yaw), 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+    )
+    object_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    object_pose[:, :3, :3] = rotation
+    object_pose[:, 0, 3] = 0.4
+    target_pose = object_pose.clone()
+    target_pose[:, 1, 3] += 0.12
+    scene = SceneSnapshot(
+        timestamp=0.0,
+        version=0,
+        entities={
+            "utensil": EntityState(object_pose),
+            "slot": EntityState(target_pose),
+        },
+    )
+    options = PushObjectOptions(
+        hand_interp_steps=3,
+        contact_distance=0.03,
+        contact_along_target_face=True,
+    )
+
+    plan = _plan_action(
+        action,
+        SkillInvocation(
+            skill_id="push_object",
+            goal=PushObjectGoal(
+                _semantics(entity_id="utensil"),
+                SceneEntityPose("slot"),
+            ),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(sample_count=24),
+            skill_options=options,
+        ),
+        _context(scene=scene),
+    )
+
+    assert plan.plan_success.tolist() == [True, True]
+    planned_targets = _cartesian_targets(generator)
+    motion_lengths = PushObject._motion_segment_lengths(24, options.hand_interp_steps)
+    contact_stop = 1 + motion_lengths[1] - 1
+    push_stop = contact_stop + motion_lengths[2] - 1
+    # Behind the rotated face nearest the push, not straight back along it.
+    expected_contact = object_pose[:, :3, 3] - rotation[:, 1] * 0.03
+    assert torch.allclose(planned_targets[contact_stop - 1][:, :3, 3], expected_contact)
+    assert torch.allclose(
+        planned_targets[push_stop - 1][:, :3, 3],
+        expected_contact + torch.tensor([0.0, 0.12, 0.0]),
+    )
+    with pytest.raises(TypeError, match="contact_along_target_face"):
+        PushObjectOptions(contact_along_target_face=1)
+
+
 def test_push_object_holds_rows_without_a_planar_displacement() -> None:
     generator = _motion_generator()
     action = _bind_action(generator, PushObject())
@@ -6021,8 +6082,9 @@ def test_exact_contact_path_holds_row_after_partial_ik_failure(
         target_poses: torch.Tensor,
         solved_keyframes: torch.Tensor,
         options,
+        row_success: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        del target_poses
+        del target_poses, row_success
         if options.cartesian_path_sampler is not None:
             sampled = options.cartesian_path_sampler(torch.tensor([0.0, 1.0]))
             start_pose = self.robot.compute_fk(

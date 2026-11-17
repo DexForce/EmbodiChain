@@ -408,6 +408,25 @@ def test_twist_sampling_requires_explicit_roll_symmetry():
         ),
     )
 
+    # A tilted approach keeps the sampled roll about the twist axis itself.
+    tilted = TwistAffordance(
+        grasp_position=(0.1, 0.0, 0.0),
+        axis_origin=(0.0, 0.0, 0.0),
+        grasp_roll_range=(-0.2, 0.2),
+        grasp_tilt=0.3,
+        grasp_tilt_axis=(1.0, 0.0, 0.0),
+    )
+    tilted_sample = tilted.sample_grasp_pose(
+        targets,
+        sampling=_sampling(4),
+        env_ids=torch.arange(4),
+        key="twist",
+    )
+    tilt = axis_angle_to_rotation_matrix(torch.tensor([[0.3, 0.0, 0.0]]))
+    torch.testing.assert_close(
+        tilted_sample.poses[:, :3, :3], tilt @ sample.poses[:, :3, :3]
+    )
+
 
 def test_assembly_sampling_uses_only_declared_rotational_symmetry():
     rotations = _poses(3)
