@@ -86,13 +86,12 @@ def contact_row(tmp_path):
 @pytest.fixture
 def sample_contacts():
     """Feed the production observer/sample boundary using explicit physics intervals."""
-    from unittest.mock import Mock
     from embodichain.lab.expansion.acceptance import MeasuredExpansionValidator
-    from embodichain.lab.expansion.contracts import ValidationCheck, ValidationResult
 
     def build(row):
-        passed = ValidationResult((ValidationCheck("task.success", "passed"),))
-        row.monitor = SimpleNamespace(observe=Mock(), validation=lambda env: passed)
+        row.env.num_envs = 1
+        row.env.robot.joint_names = ["j"]
+        row.env.robot.get_qpos = lambda: torch.zeros((1, 1))
         row.active = True
         state = SimpleNamespace(
             pose=torch.tensor([[0.0, 0, 0, 0, 0, 0, 1]]),
@@ -108,7 +107,9 @@ def sample_contacts():
             "is_valid": state.contacts,
             "impulse_valid": torch.ones((1, 2), dtype=torch.bool),
         }
+        row.monitor.reset(row.env)
         validator = object.__new__(MeasuredExpansionValidator)
+        validator.env = row.env
         validator.rows = {0: row}
         validator.sensor = row.sensor
         validator.checker = SimpleNamespace(
