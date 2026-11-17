@@ -396,6 +396,159 @@ def test_explicit_phase_paths_and_selected_row_acceptance(tmp_path):
     assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-5000:]
 
 
+def _check_coordinated_grasp_targets(env):
+    """Real selected-row IK keeps commanded preload on contact-blocked hands."""
+    import torch
+    from embodichain.lab.sim.atomic_skills import (
+        AntipodalAffordance,
+        AtomicSkillEngine,
+        ControlPartCommandProfile,
+        CoordinatedPlacementGoal,
+        CoordinatedPlacementOptions,
+        HeldObjectState,
+        MotionPolicy,
+        ObjectSemantics,
+        SkillInvocation,
+        TaskState,
+    )
+    from embodichain.lab.sim.motion.motion_generator import (
+        MotionGenerator,
+        MotionGenCfg,
+    )
+    from embodichain.lab.sim.motion.planners.trapezoidal_planner import (
+        TrapezoidalPlannerCfg,
+    )
+
+    rows = (3, 1)
+    generator_cfg = MotionGenCfg(
+        planner_cfg=TrapezoidalPlannerCfg(
+            robot_uid=env.robot.uid, sim_instance_id=env.sim.instance_id
+        )
+    )
+    generator = MotionGenerator(generator_cfg, env_ids=rows)
+    profiles = {}
+    for part in ("left_eef", "right_eef"):
+        limits = env.robot.get_qpos_limits(name=part)[0]
+        profiles[part] = ControlPartCommandProfile.joint_positions(
+            open=limits[:, 0], grasp=limits[:, 1]
+        )
+    engine = AtomicSkillEngine(generator, env_ids=rows, control_profiles=profiles)
+    binding = engine.bind_control_parts(
+        "coordinated_placement",
+        {
+            "placing": {"motion": "left_arm", "grasp": "left_eef"},
+            "support": {"motion": "right_arm", "grasp": "right_eef"},
+        },
+    )
+    poses, held = {}, {}
+    for slot, arm in (("placing", "left_arm"), ("support", "right_arm")):
+        poses[slot] = env.robot.compute_fk(
+            qpos=env.robot.get_qpos(name=arm)[list(rows)],
+            name=arm,
+            to_matrix=True,
+            env_ids=rows,
+        )
+        held[binding.endpoint(slot, "motion").task_state_key] = HeldObjectState(
+            semantics=ObjectSemantics(
+                entity_id=slot,
+                label=slot,
+                geometry={},
+                affordance=AntipodalAffordance(),
+            ),
+            object_to_eef=torch.eye(4).repeat(2, 1, 1),
+            grasp_xpos=poses[slot],
+        )
+    context = engine.initial_context(
+        task=TaskState(batch_size=2, device="cpu", held_objects=held), control_dt=0.04
+    )
+    before = env.sim.physics_step_index
+    # The stronger solver capability must preserve actual preceding-seed IK,
+    # including a failed peer, without losing non-contiguous physical rows.
+    start = context.robot.qpos[:, env.robot.get_joint_ids("right_arm")]
+    nodes = start[:, None].repeat(1, 4, 1)
+    nodes[:, :, 0] += torch.tensor([0.0, 0.01, 0.02, 0.03])
+    targets = torch.stack(
+        [
+            env.robot.compute_fk(
+                qpos=node, name="right_arm", to_matrix=True, env_ids=rows
+            )
+            for node in nodes.unbind(1)
+        ],
+        dim=1,
+    )
+    for failed_peer in (False, True):
+        requested = targets.clone()
+        if failed_peer:
+            requested[1, 2, 0, 3] += 100
+        seed, points = start, []
+        accepted = torch.ones(2, dtype=torch.bool)
+        for pose in requested.unbind(1):
+            valid, point = env.robot.compute_ik(
+                pose=pose, name="right_arm", joint_seed=seed, env_ids=rows
+            )
+            seed = torch.where(valid[:, None], point, seed)
+            points.append(seed)
+            accepted &= valid
+        expected = torch.where(
+            accepted[:, None, None], torch.stack(points, 1), start[:, None]
+        )
+        valid, actual = generator._solve_seeded_cartesian_waypoints(
+            requested, start, "right_arm"
+        )
+        assert torch.equal(valid, accepted)
+        torch.testing.assert_close(actual, expected, rtol=0, atol=1e-6)
+    from embodichain.lab.expansion._planning_batches import batched_planning
+
+    class PathQuery:
+        # A numerical request producer, with the real Robot/SSIK implementation.
+        def __init__(self, index):
+            self.index = index
+
+        def next(self):
+            index = self.index
+            single = MotionGenerator(generator_cfg, env_ids=(rows[index],))
+            return single._solve_seeded_cartesian_waypoints(
+                requested[index : index + 1], start[index : index + 1], "right_arm"
+            )
+
+    with batched_planning(env.robot, seed=2) as broker:
+        answers = broker.gather({row: PathQuery(i) for i, row in enumerate(rows)})
+        assert broker.stats["max_group"] == 2
+    for index, row in enumerate(rows):
+        assert torch.equal(answers[row][0], accepted[index : index + 1])
+        torch.testing.assert_close(
+            answers[row][1], expected[index : index + 1], rtol=0, atol=1e-6
+        )
+    for release in (False, True):
+        plan = engine.plan(
+            SkillInvocation(
+                skill_id="coordinated_placement",
+                binding=binding,
+                goal=CoordinatedPlacementGoal(
+                    placing_object_target_pose=poses["placing"],
+                    support_object_target_pose=poses["support"],
+                ),
+                motion_policy=MotionPolicy(sample_count=30, strategy="ik_interp"),
+                skill_options=CoordinatedPlacementOptions(
+                    release=release, lift_height=0, hand_interp_steps=4, retreat_steps=4
+                ),
+            ),
+            context,
+        )
+        assert plan.success_all, plan.diagnostics
+        for part in ("left_eef", "right_eef"):
+            ids = env.robot.get_joint_ids(part)
+            expected = env.robot.get_qpos_limits(name=part)[0, :, 1]
+            actual = plan.joint_trajectory.positions[:, :, ids]
+            if part == "left_eef" and release:
+                actual = actual[:, : plan.segments[0].stop]
+            assert not torch.equal(context.robot.qpos[:, ids], expected.expand(2, -1))
+            torch.testing.assert_close(
+                actual, expected.expand_as(actual), rtol=0, atol=0
+            )
+    assert env.sim.physics_step_index == before
+
+
 def _probe_handover_rows():
     """Plan and consume selected rows in a larger real handover World."""
     import torch
@@ -427,6 +580,7 @@ def _probe_handover_rows():
     adapters = []
     try:
         env.reset(seed=2)
+        _check_coordinated_grasp_targets(env)
         program = env.task_program_adapter.compile(cfg.task_program)
         bridges = {}
         for row in (3, 1):

@@ -98,7 +98,10 @@ class PlanningBatches:
         self.solve_rng = self._rng()
         self._restore_rng(previous)
         for solver in dict.fromkeys(robot._solvers.values()):
-            for name in ("get_fk", "get_ik", "get_jacobian"):
+            names = ("get_fk", "get_ik", "get_jacobian")
+            if getattr(solver, "supports_sequential_batch_ik", False):
+                names += ("_get_continuous_ik_path",)
+            for name in names:
                 self._bind(solver, name)
         from ._motion_batches import MotionBatches
 

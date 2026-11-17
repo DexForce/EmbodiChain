@@ -105,6 +105,10 @@ are calibrated scene inputs. Preserve their selected owners and fingerprints;
 never infer capabilities or general physical success from a sample name. The
 host's sampled footprint/support checks remain finite measured acceptance,
 separate from geometric proposal qualification.
+`CoordinatedPlacement` retains each binding's configured grasp command during
+approach/hold and on the support hand through release/retreat. Contact-blocked
+measured jaw positions cannot replace these closing targets. Measured robot
+observations and held-object transforms still supply geometry and validation.
 
 ## Recommended change sites
 

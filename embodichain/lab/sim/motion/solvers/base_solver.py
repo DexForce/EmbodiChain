@@ -532,6 +532,16 @@ class BaseSolver(metaclass=ABCMeta):
         return self.tcp_xpos
 
     @property
+    def supports_sequential_batch_ik(self) -> bool:
+        """Whether continuous batching uses each preceding point-query seed.
+
+        This stronger contract also preserves seed-dependent candidate search.
+        Merely supporting continuous selection from a fixed candidate pool is
+        insufficient. Solvers opt in only when their path hook implements it.
+        """
+        return False
+
+    @property
     def supports_continuous_batch_ik(self) -> bool:
         """Whether all-candidate IK and temporally continuous selection are supported.
 

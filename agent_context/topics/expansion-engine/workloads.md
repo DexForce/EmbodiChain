@@ -74,6 +74,12 @@ can finish incomplete while already-admitted peers continue and export normally.
 The native source also handles expiry during initial-state validation before
 atomic session proposal.
 
+Settling rows remain controller-active so Gym consumes their explicit reset
+hold targets. They are not live trajectories: only cursor rows receive source
+observations, command acknowledgements, trajectory lengths or receipt credit.
+Using Gym's inactive measured-qpos substitution during settling would remove
+restoring drive error on every tick and change the admitted initial posture.
+
 `started` calls `mark_row_started` after the first actual command. `observe`
 captures every active T+1 boundary and performs the original physical checks;
 it returns only active rows needing native safe rejection. The executor retains
@@ -95,7 +101,10 @@ Partial quotas remain explicit failures even when some episodes were exported.
 
 The optional cooperative planner merges compatible fixed-grid motion requests
 and pure FK/IK/Jacobian calls. Budget-bearing whole-motion requests keep their
-original execution so charge semantics are preserved. Context variables and
+original execution so charge semantics are preserved. Solvers declaring the
+strong sequential-path capability also merge compatible native path requests,
+retaining each row's preceding-valid seed and independently owned results.
+Context variables and
 candidate random streams remain row-local; results are independently owned.
 Default CPU command gathering shares native numeric reads through a bounded
 World-owner scope in `sim/objects/backends/_numeric_observations.py`. It ends

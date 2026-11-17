@@ -193,9 +193,22 @@ def _probe(output: str) -> None:
 
             def prepare(self, assignments):
                 assert len(SimulationManager._instances) == 1
+                self.reset_holds = getattr(self, "reset_holds", {})
+                for assignment in assignments:
+                    self.reset_holds[assignment.env_id] = robot.get_qpos(target=True)[
+                        assignment.env_id
+                    ].clone()
 
             def activate(self, assignment, observation):
                 row = assignment.env_id
+                # The physical settling ticks must keep the authored drive
+                # target, rather than repeatedly holding gravity-displaced qpos.
+                torch.testing.assert_close(
+                    robot.get_qpos(target=True)[row],
+                    self.reset_holds[row],
+                    rtol=0,
+                    atol=0,
+                )
                 checks.prepare(env_ids=(row,))
                 from copy import deepcopy
 

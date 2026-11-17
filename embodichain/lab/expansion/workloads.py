@@ -585,6 +585,11 @@ class WorkloadProgramExecutor:
                         env.num_envs, dtype=torch.bool, device=env.device
                     )
                     mask[list(commands)] = True
+                    # Settling rows execute their explicit reset hold. Marking
+                    # them inactive lets Gym replace that target with measured
+                    # qpos at every tick, removing the drive's restoring error.
+                    # They still have no cursor, receipt or acceptance samples.
+                    mask[list(self.warming)] = True
                     env._demo_active_mask = mask
                     before = env.sim.physics_step_index
                     self.observation, _, terminated, truncated, _ = env.step(action)

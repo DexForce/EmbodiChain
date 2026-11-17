@@ -70,6 +70,11 @@ when limits apply. Adaptive timing and batched IK remain defaults. Explicit
 `fixed_grid` preserves count/intervals and rejects overspeed rows against runtime
 and authored joint caps; `sequential` retains previous-valid-posture seeds and
 callback/RNG order. Neither mode is a generic option for other strategies.
+Solvers may opt into `supports_sequential_batch_ik` only when their continuous
+path hook enumerates the ordinary candidate pool against each preceding valid
+seed. SSIK Warp SRS `seed_local` supplies this stronger contract, allowing
+bounded path batches instead of Python point dispatch. Other solvers and active
+planning budgets retain the original point-query sequence and charging rules.
 
 Rejected rows hold their start; `rejected_candidate` retains original samples
 and rejected-row identity for audit/recovery. A zero-speed hold does not prove

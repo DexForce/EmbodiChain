@@ -400,8 +400,11 @@ class CoordinatedPlacement(
 
         placing_place_qpos = placing_approach_traj[:, -1]
         support_place_qpos = support_approach_traj[:, -1]
-        placing_hand_qpos = state.last_qpos[:, list(resources.placing_hand.joint_ids)]
-        support_hand_qpos = state.last_qpos[:, list(resources.support_hand.joint_ids)]
+        # A contact-blocked measured position does not retain closing effort.
+        # Both bindings already require a grasp command; use it until release,
+        # just as MoveHeldObject does for a single held object.
+        placing_hand_qpos = resources.placing_hand_close_qpos
+        support_hand_qpos = resources.support_hand_close_qpos
         approach_trajectory = self._assemble_segment(
             state.last_qpos,
             placing_approach_traj,

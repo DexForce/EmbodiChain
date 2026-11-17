@@ -1270,6 +1270,17 @@ class MotionGenerator:
             or poses.shape[1] == 0
         ):
             raise ValueError("Cartesian waypoints must have shape (B, N, 4, 4), N > 0.")
+        solver = self.robot.get_solver(control_part)
+        from ._budget import _ACTIVE_BUDGET
+
+        if (
+            solver is not None
+            and getattr(solver, "supports_sequential_batch_ik", False)
+            and _ACTIVE_BUDGET.get() is None
+        ):
+            # The solver owns the sequential dependency inside its bounded
+            # path hook. Do not re-enter Python/Robot once per Cartesian node.
+            return self._solve_cartesian_waypoints(poses, seed, control_part)
         success = torch.ones(batch, dtype=torch.bool, device=seed.device)
         points = []
         for index in range(poses.shape[1]):
