@@ -3,8 +3,8 @@
   "kind": "static-architecture",
   "coverage": "curated-sample",
   "repository": "DexForce/EmbodiChain",
-  "revision": "fd89d8bf2cba796e366312ee5b9f208708d97ca1",
-  "source_ref": "HEAD",
+  "revision": "c933f9600a0b728d74a1b8774e7c8c4044d0457f",
+  "source_ref": "c933f9600a0b728d74a1b8774e7c8c4044d0457f",
   "package_version": "0.3.2",
   "topic_index": "agent_context/MAP.yaml",
   "limitations": [
