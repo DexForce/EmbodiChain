@@ -35,7 +35,10 @@ _OPERATIONS = {
 
 
 def _main() -> None:
-    request_path, response_path = map(Path, sys.argv[1:])
+    arguments = (
+        sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else sys.argv[1:]
+    )
+    request_path, response_path = map(Path, arguments)
     request = json.loads(request_path.read_text(encoding="utf-8"))
     function = _OPERATIONS[request["operation"]]
     path = Path(__file__).with_name("_blender_operations.py")

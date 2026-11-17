@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from embodichain.compute._evaluation import _within_target
+
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, fields
 import math
@@ -586,7 +588,7 @@ def _recorded_values(
         flags = [
             ok
             and minimum <= positions[row] <= maximum
-            and abs(observed[row] - target) <= tolerance
+            and _within_target(observed[row], target, tolerance)
             for row, ok in enumerate(available)
         ]
         masks.extend(
@@ -737,9 +739,9 @@ def _final_values(
             ],
             dtype=dtype,
         )
-        accepted = (measured - binding.condition["target"]).abs() <= binding.condition[
-            "tolerance"
-        ]
+        accepted = _within_target(
+            measured, binding.condition["target"], binding.condition["tolerance"]
+        )
         flags = [
             bool(value) and available
             for value, available in zip(accepted.tolist(), valid, strict=True)

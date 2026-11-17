@@ -1,5 +1,3 @@
-:orphan:
-
 AgiBot G1
 =========
 
@@ -8,8 +6,14 @@ controls. It uses the source-authored mimic and gripper closure relationships
 on the Default physics backend. See :doc:`../resources/robot/agibot/g1` for
 preview and local source selection.
 
-.. autoclass:: embodichain_robots.AgibotG1Cfg
-   :members: from_dict
+.. py:class:: embodichain_robots.AgibotG1Cfg
+
+   Source-preserving USD robot configuration with torso, head, dual-arm and
+   single-driver gripper control groups. Construct with ``from_dict()`` or
+   resolve catalog ID ``AgibotG1`` to apply the preset defaults. Serial-chain
+   construction is disabled; the preset supplies joint-space control.
+
+.. automethod:: embodichain_robots.AgibotG1Cfg.from_dict
 
 .. py:class:: embodichain_robots.agibot.g1.AgibotG1Cfg
 

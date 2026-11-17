@@ -69,7 +69,7 @@ python .agents/skills/project-dev-context/scripts/context.py affected embodichai
 
 Review affected topics in the same change; this is an impact hint, not proof
 that prose is stale or that unchanged paths are fresh. Choose **no update**,
-**revise**, or **add** using `conventions/topic-lifecycle.md`, and briefly state
+**revise**, or **add** using the loaded maintenance conventions, and briefly state
 the outcome in the PR or task result. Edit only guidance or metadata made
 inaccurate or materially incomplete. Replace/consolidate the owning passage;
 do not append a PR summary. Add a topic for a requested or recurring missing

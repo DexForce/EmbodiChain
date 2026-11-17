@@ -1,7 +1,7 @@
 environment_id: open_drawer
 physics: default
 max_episodes: 1
-max_episode_steps: 600
+max_episode_steps: 3600
 num_envs: 1
 arena_space: 3.0
 

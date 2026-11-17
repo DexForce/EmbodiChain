@@ -2598,3 +2598,77 @@ def test_adapter_rejects_noncallable_scope_before_live_assembly(monkeypatch):
             runtime_scope_guard=object(),
         )
     adapter.close()
+
+
+def test_environment_owned_lowerer_survives_subset_binding_without_retaining_host():
+    import gc
+    import weakref
+    from embodichain.lab.sim.atomic_skills import MoveJoints
+    from embodichain.lab.task_program.semantics import (
+        RegisteredSemanticCall,
+        SemanticCallDescriptor,
+        builtin_semantic_call_catalog,
+    )
+    from embodichain.lab.task_program.integrations._kinematic_replay import (
+        _KinematicReplayFactory,
+    )
+    from embodichain.lab.gym.utils._replay import (
+        _AuthoredJointStream,
+        _JointCommandSnapshot,
+    )
+
+    robot = _Robot()
+    source = _AuthoredJointStream("commands", "unused.npz", "a" * 64, 60)
+    snapshot = _JointCommandSnapshot(
+        source, ("a", "b"), torch.zeros(2, _ROBOT_DOF), robot
+    )
+    descriptor = SemanticCallDescriptor(
+        call_id=_KinematicReplayFactory.call_id,
+        spec_type=RegisteredSemanticCall,
+        target_descriptor=MoveJoints.descriptor(),
+    )
+    registration = SimulationTaskProgramRegistration(
+        SimulationSceneBinding(registry_id="scene"),
+        _profile_binding(),
+        call_catalog=builtin_semantic_call_catalog().with_descriptor(descriptor),
+        registered_semantic_lowerer_factories=(
+            _KinematicReplayFactory("commands", (("all", 0, 1),)),
+        ),
+    )
+
+    class Host:
+        def _replay_snapshot(self, source_id):
+            assert source_id == "commands"
+            return snapshot
+
+    host = Host()
+    host.sim = _Simulation(robot)
+    host.robot = robot
+    host.step_dt = _STEP_DT
+
+    def selected_generator():
+        generator = _motion_generator(robot)
+        generator._env_ids = (0,)
+        return generator
+
+    factory = SimulationTaskProgramFactory.from_environment(
+        host,
+        registration=registration,
+        motion_generator_factory=selected_generator,
+    )
+    selected = factory.for_env_ids((0,))
+    scene = selected.create_scene_registry()
+    engine = selected.create_atomic_skill_engine(selected.create_robot_skill_profile())
+    created = selected.create_registered_semantic_lowerers(
+        scene_registry=scene, engine=engine
+    )
+    assert len(created) == 1
+    assert created[0]._snapshot is snapshot
+    host_ref = weakref.ref(host)
+    del host
+    gc.collect()
+    assert host_ref() is None
+    with pytest.raises(ValueError, match="environment-owned runtime source"):
+        selected.create_registered_semantic_lowerers(
+            scene_registry=scene, engine=engine
+        )

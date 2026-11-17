@@ -1,0 +1,39 @@
+id: FrankaGSPickPlace-Office-v1
+enable_sensor: true
+environment:
+  component: env.office.yaml
+embodiment:
+  component: ../../../components/embodiments/franka_gs_dual_camera.yaml
+  overrides:
+    init_pos:
+    - -0.15
+    - -0.1
+    - 0.76
+    init_rot:
+    - 0
+    - 0
+    - 0
+  camera_overrides:
+    cam_third:
+      intrinsics:
+      - 710.4
+      - 710.4
+      - 480
+      - 270
+      extrinsics:
+        eye:
+        - 1.5
+        - -2
+        - 1.65
+        target:
+        - 0.25
+        - 0
+        - 1
+        up:
+        - 0
+        - 0
+        - 1
+task_program:
+  program: task_program/program.office.yaml
+  integration: task_program/integration.yaml
+  execution_policy: ../../../components/execution_policies/franka_gs_verified.yaml

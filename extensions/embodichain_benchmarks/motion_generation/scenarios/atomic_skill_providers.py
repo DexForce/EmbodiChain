@@ -64,9 +64,9 @@ from ..contracts import PhysicalEvaluation, ReplayObservationWindow
 from ..evaluation import StageEvidence, evaluate_skill_stage_batch
 from ..models import BenchmarkCase, CaseOutcome
 from .atomic_case_utils import (
+    _pre_pick_pose,
     TOP_DOWN_ROTATION,
     atomic_case_id,
-    canonical_case_qpos,
     case_hand_qpos,
     case_name,
     case_pose,
@@ -95,6 +95,7 @@ from .atomic_evaluation import (
 from ..atomic_skill import register_atomic_skill_provider
 
 if TYPE_CHECKING:
+    from ..config import ProtocolCfg
     from ..planners.base import PlannerAdapter
     from .atomic_objects import AtomicObjectHandle
     from .atomic_skill import AtomicSkillScenario
@@ -455,21 +456,23 @@ def _set_pre_pick_start(
 ) -> None:
     """Start above the object with the gripper open, as the PickUp cases do."""
     arm_start = scenario.robot.get_qpos(name=scenario.control_part)
-    pre_pick_pose = scenario.robot.compute_fk(
+    ready_pose = scenario.robot.compute_fk(
         arm_start, name=scenario.control_part, to_matrix=True
-    ).clone()
-    pre_pick_pose[:, :2, 3] = object_pose[:, :2, 3]
-    pre_pick_pose[:, 2, 3] = float(config.get("pre_pick_height_m", 0.36))
-    success, pre_pick_qpos = scenario.robot.compute_ik(
-        pose=pre_pick_pose,
-        joint_seed=arm_start,
-        name=scenario.control_part,
     )
-    if not bool(torch.as_tensor(success).all().item()):
-        raise RuntimeError(
-            f"Independent IK rejected the {skill} start {case_name(config)!r}."
-        )
-    scenario.set_robot_start(canonical_case_qpos(pre_pick_qpos), open_gripper=True)
+    pre_pick_pose = _pre_pick_pose(
+        ready_pose,
+        object_pose,
+        config,
+        root_pose=(
+            scenario.robot.get_local_pose(to_matrix=True)
+            if config.get("pre_pick_orientation") == "base_radial"
+            else None
+        ),
+    )
+    pre_pick_qpos = scenario.solve_reference_qpos(arm_start, pre_pick_pose[:, None])[
+        :, 0
+    ]
+    scenario.set_robot_start(pre_pick_qpos, open_gripper=True)
 
 
 def _fixed_grasp(
@@ -1269,14 +1272,10 @@ class _PourCases(AtomicSkillCaseProvider):
                 object_pose, object_to_eef.expand(batch_size, -1, -1)
             )
         targets = poses(object_pose, grasp_pose)
-        success, pre_pick_qpos = scenario.robot.compute_ik(
-            pose=targets[:, 0], joint_seed=screen_start, name=scenario.control_part
-        )
-        if not bool(torch.as_tensor(success).all().item()):
-            raise RuntimeError(
-                f"Independent IK rejected the Pour pre-grasp {case_name(config)!r}."
-            )
-        scenario.set_robot_start(canonical_case_qpos(pre_pick_qpos), open_gripper=True)
+        pre_pick_qpos = scenario.solve_reference_qpos(screen_start, targets[:, :1])[
+            :, 0
+        ]
+        scenario.set_robot_start(pre_pick_qpos, open_gripper=True)
         start_qpos, full_start_qpos = snapshot_case_qpos(
             scenario.robot, scenario.control_part
         )
@@ -1391,7 +1390,7 @@ class _PourCases(AtomicSkillCaseProvider):
         )
 
     def lift_segment_start(self, compiled: CompiledTrajectory) -> int | None:
-        """Release residual contact impulses once the PickUp lift begins."""
+        """Return the prefix PickUp lift boundary."""
         return compiled.segment(0, "lift").start
 
     def object_rotation_segment(self, compiled: CompiledTrajectory) -> tuple[int, int]:
@@ -1592,6 +1591,35 @@ def _axis_align_inward_distances(
     return tuple(float(v) for v in values)
 
 
+def _axis_align_offset_candidates(
+    config: Mapping[str, object],
+) -> tuple[tuple[float, float, float], ...] | None:
+    """Validate ordered world-space alternatives, exclusive of other offset rules."""
+    if "alignment_offset_candidates_m" not in config:
+        return None
+    if "alignment_offset_m" in config or "alignment_inward_candidates_m" in config:
+        raise ValueError(
+            "Choose alignment_offset_candidates_m, alignment_offset_m or "
+            "alignment_inward_candidates_m."
+        )
+    values = config["alignment_offset_candidates_m"]
+    if (
+        not isinstance(values, (list, tuple))
+        or not values
+        or any(
+            not isinstance(row, (list, tuple))
+            or len(row) != 3
+            or any(type(v) not in (int, float) or not math.isfinite(v) for v in row)
+            for row in values
+        )
+    ):
+        raise ValueError(
+            "alignment_offset_candidates_m must be a nonempty ordered list "
+            "of finite three-dimensional world-space offsets."
+        )
+    return tuple(tuple(float(v) for v in row) for row in values)
+
+
 def _axis_align_grasp_order(
     rotation_axis: torch.Tensor, candidates: torch.Tensor, costs: torch.Tensor
 ) -> torch.Tensor:
@@ -1605,7 +1633,7 @@ def _axis_align_grasp_order(
     return by_cost[torch.argsort(quantized, stable=True)]
 
 
-def _select_inward_axis_grasp(
+def _select_axis_grasp(
     scenario: "AtomicSkillScenario",
     handle: "AtomicObjectHandle",
     object_pose: torch.Tensor,
@@ -1613,8 +1641,10 @@ def _select_inward_axis_grasp(
     start_qpos: torch.Tensor,
     start_pose: torch.Tensor,
     rotation_axis: torch.Tensor,
-    distances: tuple[float, ...],
+    distances: tuple[float, ...] | None,
     *,
+    offset_candidates: tuple[tuple[float, float, float], ...] | None = None,
+    reference_protocol: ProtocolCfg | None = None,
     grasp_parameters: Mapping[str, object],
     build_poses: Callable[..., torch.Tensor],
     seed: int,
@@ -1629,12 +1659,29 @@ def _select_inward_axis_grasp(
     ``closure_tcp_rotation`` ``(B, 3, 3)`` is the world TCP rotation each row
     closes with; the pool's closure support check evaluates candidates there.
     """
-    base = scenario.robot.get_control_part_base_pose(
-        name=scenario.control_part, to_matrix=True
-    ).to(object_pose)
-    inward = torch.zeros_like(object_pose[:, :3, 3])
-    inward[:, :2] = base[:, :2, 3] - object_pose[:, :2, 3]
-    inward = torch.nn.functional.normalize(inward, dim=-1)
+    if distances is not None:
+        base = scenario.robot.get_control_part_base_pose(
+            name=scenario.control_part, to_matrix=True
+        ).to(object_pose)
+        inward = torch.zeros_like(object_pose[:, :3, 3])
+        inward[:, :2] = base[:, :2, 3] - object_pose[:, :2, 3]
+        inward = torch.nn.functional.normalize(inward, dim=-1)
+        candidates = [inward * distance for distance in distances]
+        values = list(distances)
+        value_key = "inward_distance_m"
+        kind = "ordered_inward_offsets_then_grasp"
+        candidates_key = "inward_candidates_m"
+    else:
+        if offset_candidates is None:
+            raise ValueError("AxisAlign position search requires declared offsets.")
+        candidates = [
+            object_pose.new_tensor(offset).expand(len(object_pose), -1)
+            for offset in offset_candidates
+        ]
+        values = [list(offset) for offset in offset_candidates]
+        value_key = "offset_m"
+        kind = "ordered_offsets_then_grasp"
+        candidates_key = "offset_candidates_m"
     pools = scenario._ranked_antipodal_grasp_pools(
         handle,
         object_pose,
@@ -1654,13 +1701,13 @@ def _select_inward_axis_grasp(
     )
     selected = torch.stack([pool[0] for pool in pools])
     found = torch.zeros(len(object_pose), device=object_pose.device, dtype=torch.bool)
-    selected_offsets = torch.zeros_like(inward)
+    selected_offsets = torch.zeros_like(object_pose[:, :3, 3])
     rows: list[dict[str, object]] = [
-        {"env_index": row, "selected_inward_distance_m": None, "rejected": []}
+        {"env_index": row, f"selected_{value_key}": None, "rejected": []}
         for row in range(len(object_pose))
     ]
-    for distance in distances:
-        offsets = torch.where(found[:, None], selected_offsets, inward * distance)
+    for value, candidate in zip(values, candidates, strict=True):
+        offsets = torch.where(found[:, None], selected_offsets, candidate)
 
         def waypoint_poses(grasp: torch.Tensor) -> Sequence[torch.Tensor]:
             return build_poses(
@@ -1680,6 +1727,7 @@ def _select_inward_axis_grasp(
             waypoint_poses=waypoint_poses,
             initial_selection=selected,
             initial_found=found,
+            reference_protocol=reference_protocol,
         )
         accepted = found & ~previous_found
         selected_offsets = torch.where(accepted[:, None], offsets, selected_offsets)
@@ -1689,11 +1737,11 @@ def _select_inward_axis_grasp(
             if already:
                 continue
             if solved:
-                rows[row]["selected_inward_distance_m"] = distance
+                rows[row][f"selected_{value_key}"] = value
             else:
                 rows[row]["rejected"].append(
                     {
-                        "inward_distance_m": distance,
+                        value_key: value,
                         "result": "unresolved_search",
                         "reason": "Declared grasp pool has no independently solved complete pose chain.",
                     }
@@ -1704,15 +1752,15 @@ def _select_inward_axis_grasp(
         failed = torch.nonzero(~found, as_tuple=False).flatten().cpu().tolist()
         raise _AntipodalGraspSearchError(
             f"AxisAlign environment rows {failed} have no independently reachable "
-            f"realisation at declared inward offsets {list(distances)}: "
+            f"realisation at declared {candidates_key} {values}: "
             f"{[rows[row] for row in failed]}"
         )
     return (
         nearest_half_turn_pose(selected, start_pose),
         selected_offsets,
         {
-            "kind": "ordered_inward_offsets_then_grasp",
-            "inward_candidates_m": list(distances),
+            "kind": kind,
+            candidates_key: values,
             "rows": rows,
         },
     )
@@ -1734,9 +1782,13 @@ class _AxisAlignCases(AtomicSkillCaseProvider):
         seed: int,
         batch_size: int,
     ) -> BenchmarkCase:
+        start_pose_mode = config.get("start_pose_mode", "pre_pick")
+        if start_pose_mode not in {"pre_pick", "pre_grasp"}:
+            raise ValueError("AxisAlign start_pose_mode must be pre_pick or pre_grasp.")
         object_id = config.get("object")
         if not isinstance(object_id, str) or not object_id:
             raise ValueError("AxisAlign cases must reference a non-empty object id.")
+        offset_candidates = _axis_align_offset_candidates(config)
         inward_distances = _axis_align_inward_distances(config)
         handle = scenario.activate_object(object_id)
         scenario.restore_base_robot()
@@ -1771,7 +1823,8 @@ class _AxisAlignCases(AtomicSkillCaseProvider):
         )
         pre_grasp_distance = float(config.get("pre_grasp_distance_m", 0.15))
         lift_height = float(config.get("lift_height_m", 0.16))
-        _set_pre_pick_start(scenario, object_pose, config, skill="AxisAlign")
+        if start_pose_mode == "pre_pick":
+            _set_pre_pick_start(scenario, object_pose, config, skill="AxisAlign")
         start_qpos, full_start_qpos = snapshot_case_qpos(
             scenario.robot, scenario.control_part
         )
@@ -1821,10 +1874,10 @@ class _AxisAlignCases(AtomicSkillCaseProvider):
         grasp = _grasp_parameters(config)
         selected_offsets = None
         realisation = None
-        if inward_distances is not None:
+        if inward_distances is not None or offset_candidates is not None:
             if grasp["grasp_source"] != "antipodal":
-                raise ValueError("Inward AxisAlign search requires antipodal grasps.")
-            sampled, selected_offsets, realisation = _select_inward_axis_grasp(
+                raise ValueError("AxisAlign position search requires antipodal grasps.")
+            sampled, selected_offsets, realisation = _select_axis_grasp(
                 scenario,
                 handle,
                 object_pose,
@@ -1833,6 +1886,10 @@ class _AxisAlignCases(AtomicSkillCaseProvider):
                 start_pose,
                 rotation_axis,
                 inward_distances,
+                offset_candidates=offset_candidates,
+                reference_protocol=(
+                    suite.protocol if offset_candidates is not None else None
+                ),
                 grasp_parameters=grasp,
                 build_poses=poses,
                 seed=seed,
@@ -1867,6 +1924,17 @@ class _AxisAlignCases(AtomicSkillCaseProvider):
             sampled = torch.bmm(object_pose, object_to_eef.expand(batch_size, -1, -1))
         grasp_pose = nearest_half_turn_pose(sampled, start_pose)
         targets = poses(object_pose, grasp_pose, alignment_offset_m=selected_offsets)
+        if start_pose_mode == "pre_grasp":
+            # Use the already screened approach pose as the declared start,
+            # without imposing another tool tilt at a fixed world height.
+            # The complete approach/grasp/lift/alignment chain remains required.
+            pre_grasp_qpos = scenario.solve_reference_qpos(start_qpos, targets[:, :1])[
+                :, 0
+            ]
+            scenario.set_robot_start(pre_grasp_qpos, open_gripper=True)
+            start_qpos, full_start_qpos = snapshot_case_qpos(
+                scenario.robot, scenario.control_part
+            )
         references = scenario.solve_reference_qpos(start_qpos, targets)
         return BenchmarkCase(
             suite_version=suite.suite_version,
@@ -1879,7 +1947,7 @@ class _AxisAlignCases(AtomicSkillCaseProvider):
             batch_size=batch_size,
             num_waypoints=targets.shape[1],
             path_shape="approach_grasp_lift_align",
-            start_state_bin="pre_pick",
+            start_state_bin=start_pose_mode,
             start_qpos=start_qpos,
             target_waypoints=targets,
             reference_qpos=references,
@@ -1890,6 +1958,11 @@ class _AxisAlignCases(AtomicSkillCaseProvider):
             primary_success="physical_skill_success",
             full_start_qpos=full_start_qpos,
             case_parameters={
+                **(
+                    {"start_pose_mode": start_pose_mode}
+                    if "start_pose_mode" in config
+                    else {}
+                ),
                 "sample_count": int(config.get("sample_count", 180)),
                 **grasp,
                 "hand_interp_steps": int(config.get("hand_interp_steps", 12)),
@@ -1977,7 +2050,7 @@ class _AxisAlignCases(AtomicSkillCaseProvider):
         )
 
     def lift_segment_start(self, compiled: CompiledTrajectory) -> int | None:
-        """Release residual contact impulses once the held object starts moving."""
+        """Return the start of the held-object manipulation segment."""
         return compiled.segment(0, "manipulate").start
 
     def replay_observation_windows(

@@ -106,6 +106,36 @@ def test_partial_settling_cannot_advance_other_arenas():
     assert sim.steps == 0
 
 
+@pytest.mark.parametrize("mode", ["fixed_steps", "convergence"])
+def test_partial_entity_settling_cannot_hide_moving_neighbors(mode):
+    sim = Sim()
+    sim.rigid["cube"].body_type = "static"
+    sim.rigid["cube"].value[:, 7:] = 0
+    view = SceneView(sim, entity_uids=("cube",))
+    with pytest.raises(ValueError, match="full-world physical"):
+        settle_scene(
+            view, sim.step, SettlingCfg(mode=mode, max_steps=1, consecutive_steps=1)
+        )
+    assert sim.steps == 0
+
+
+def test_explicit_complete_physical_group_still_qualifies_for_settling():
+    from ._runtime_ports import Visual
+
+    sim = Sim()
+    sim.visuals["scan"] = Visual()
+    for entity in sim.rigid.values():
+        entity.value[:, 7:] = 0
+    sim.articulations["drawer"].state["qvel"].zero_()
+    view = SceneView(sim, entity_uids=("scan", "drawer", "other", "cube"))
+    result = settle_scene(
+        view,
+        sim.step,
+        SettlingCfg(mode="convergence", max_steps=1, consecutive_steps=1),
+    )
+    assert result.passed and sim.steps == 1
+
+
 def test_settling_measures_all_selected_arenas():
     sim = Sim(4)
     for entity in sim.rigid.values():

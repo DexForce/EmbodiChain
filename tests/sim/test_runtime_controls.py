@@ -224,6 +224,9 @@ def test_initial_mimic_defaults_and_targets_match_articulation_reset(
     result = SimpleNamespace(
         get_articulation=lambda target: handle,
         create_articulation_batch=lambda handles: batch,
+        dynamics_capabilities=lambda: SimpleNamespace(
+            supported_control_fields=frozenset({"joint_target_q"})
+        ),
     )
     control = _InitialJointState(
         "arena/tool", initial_qpos, mimic_stabilizer=stabilizer
@@ -249,11 +252,9 @@ def test_initial_mimic_defaults_and_targets_match_articulation_reset(
     articulation.device = torch.device("cpu")
     articulation._all_indices = np.array([0])
     articulation._entities = [handle]
+    articulation._spawn_result = result
     articulation._data = SimpleNamespace(
         is_newton_backend=True, articulation_view=MagicMock()
-    )
-    articulation._spawn_result = SimpleNamespace(
-        dynamics_capabilities=lambda: SimpleNamespace(supported_control_fields=None)
     )
     articulation._mimic_info = SimpleNamespace(
         mimic_id=np.array([0]),
@@ -270,6 +271,10 @@ def test_initial_mimic_defaults_and_targets_match_articulation_reset(
     articulation.set_local_pose = MagicMock()
     articulation.set_qpos = MagicMock()
     articulation.reset(clear_dynamics=False)
+    assert [call.kwargs["target"] for call in articulation.set_qpos.call_args_list] == [
+        False,
+        True,
+    ]
     for call in articulation.set_qpos.call_args_list:
         np.testing.assert_allclose(call.args[0].numpy(), seeded_positions, atol=1e-7)
 

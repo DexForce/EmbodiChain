@@ -1,5 +1,11 @@
 # Running examples
 
+The [Gaussian scene Pick/Place example](gym/gaussian_pick_place/README.md)
+records the official `gaussian_pick_place` task deployments from the task
+extension, using standardized public 3DGS backgrounds, independent collision
+supports, and third-person/wrist RGB cameras.
+Use `embodichain run-example gym/gaussian_pick_place/run --scene office`.
+
 Use the path of any Python script under this directory, with or without `.py`:
 
 ```bash
@@ -11,6 +17,13 @@ embodichain run-example learning/rwm --help
 embodichain run-example learning/rigidformer demo --help
 embodichain run-example sim/atomic_skill --skill place --variants 8
 embodichain run-example sim/atomic_skill/coordinated_pickment --help
+```
+
+The DexUni pouring example plans a fresh Franka grasp, pour and place sequence
+with live fluid physics. It requires CUDA and a DexSim build with DFSPH support:
+
+```bash
+embodichain run-example sim/demo/franka_dexuni_pour_demo --help
 ```
 
 A directory with `__main__.py` can be selected by its directory path. All arguments
@@ -54,6 +67,16 @@ state-transition fitting and state/action gradients. Its generated recipes use
 the installable `embodichain_models.dynamics.rwm` model family and shared SL
 trainer; its corpus generation and acceptance helpers remain private to the example.
 
+The [Sharpa in-hand example](learning/sharpa_inhand/README.md) trains cylinder
+rotation with native eight-scale, domain-randomized physics, EmbodiChain APG
+actor updates and the pinned upstream teacher/world model, then evaluates saved
+policies against frozen source receipts.
+
+The [Wuji in-hand example](learning/wuji_inhand/README.md) adapts that learner
+to the 20-joint Wuji hand with authored actuator limits and screened holding
+states. It is evaluated separately from Sharpa and does not imply identical
+randomization or an algorithm comparison.
+
 The [visual ACT example](learning/act/README.md) collects Franka PushCube
 demonstrations, trains an RGB and proprioception action-chunking policy, and
 evaluates checkpoints on independently seeded simulator scenes.
@@ -92,6 +115,11 @@ It saves RGB mosaics, depth arrays and capture-policy metadata. This requires th
 DexSim camera render-category API; the default camera configuration continues to
 work with older SDKs. Ground hidden in a camera still supports the falling box.
 
+The [Library Pick/Place example](gym/library_pick_place/README.md) combines the
+existing Library Gaussian scan with a verified Dual UR5 task. It records every
+initial, control and terminal RGB-D boundary, saves the native trajectory, and
+provides a CPU-only offline integrity and physical-result verifier.
+
 The [Expansion Engine showcase](expansion/engine/showcase/README.md) demonstrates
 native and real-demonstration-driven experts through the shared engine. Its offline
 viewer pairs measured 3D playback with RGB-D, recipes, source clocks and explicit
@@ -111,15 +139,15 @@ python scripts/tutorials/sim/create_cable.py
 python scripts/tutorials/sim/create_cable.py --headless --renderer no-render --num-envs 2
 ```
 
-The cable examples use CUDA and DexSim `0.6.0rc1` (engine commit
-`1b968250ada2b06b210bc7aa08ef219769f01217`). The DexForce package index
+The cable examples use CUDA and DexSim `0.6.0rc2` (engine commit
+`dbaca660471d5aaa7e750093e7fe1c207465c4af`). The DexForce package index
 provides Linux x86_64 wheels for Python 3.11 and 3.12. To install the pinned
 engine in your EmbodiChain environment and check its build, run:
 
 ```bash
 python -m pip install --index-url https://pypi.org/simple \
   --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site \
-  dexsim-engine==0.6.0rc1
+  dexsim-engine==0.6.0rc2
 python -c "import dexsim; from dexsim.scene import SpawnedCable; print(dexsim.__version__, dexsim.__commit_id__)"
 ```
 
@@ -127,3 +155,10 @@ EmbodiChain defaults to DexUni when no solver is selected;
 legacy `auto`/`AutoSolverCfg` selections must migrate to `dexuni` or the concrete
 solver needed by the scene. Explicit `semi_implicit` remains required for
 Newton gradient mode.
+
+The [cable Viser demo](sim/demo/cable_viser.py) displays replicated segment
+capsules in the browser:
+
+```bash
+python -m embodichain run-example sim/demo/cable_viser --num-envs 2 --port 8080 --duration 12
+```

@@ -11,7 +11,7 @@ profiles introduced by [PR #911](https://github.com/DexForce/EmbodiChain/pull/91
 RigidFormer extra dependencies and model weights are not preinstalled. Models,
 task assets and remote service credentials remain runtime inputs.
 
-This checkout's profiles select DexSim 0.6.0rc1 and Newton 1.7.0. The published
+This checkout's profiles select DexSim 0.6.0rc2 and Newton 1.7.0. The published
 tags and image digests recorded in [VALIDATION.md](VALIDATION.md) describe the
 earlier DexSim 0.5.1rc1 runtime. Build and qualify a source-commit candidate for
 the current profiles before promoting a replacement; the historical image
@@ -162,6 +162,25 @@ Set `EMBODICHAIN_BLENDER_PYTHON` to that environment's Python executable.
 `.[gensim]` installs the Python-facing GenSim dependencies; Blender is supplied
 by the independent runtime.
 
+If Eevee cannot create a graphics context through the `bpy` module, select the
+standalone Blender application with `EMBODICHAIN_BLENDER_EXECUTABLE`. This takes
+precedence over `EMBODICHAIN_BLENDER_PYTHON` and runs the same worker with Blender's
+background/factory startup, which initializes the graphics context before rendering.
+Install the worker dependencies into the application's bundled Python, keeping
+Torch and DexSim in the business environment:
+
+```bash
+uv pip install --python /opt/blender/4.5/python/bin/python3.11 \
+  --constraint docker/locks/blender311.txt Pillow scipy
+export EMBODICHAIN_BLENDER_EXECUTABLE=/opt/blender/blender
+```
+
+Adjust the paths to the installed Blender application. The selectors can also
+be set in the shared GenSim `.env` or `EMBODICHAIN_ENV_FILE`; process values take
+precedence. The launcher reads these settings without changing the process
+environment. Both launch modes use the same file protocol, error propagation,
+environment isolation and process cleanup.
+
 Each business environment owns its CPython-specific DexSim wheel and Torch
 libraries. Do not globally add either environment's `dexsim/lib` or
 `site-packages` to `LD_LIBRARY_PATH`/`PYTHONPATH`. Shared FFmpeg/HDF5 libraries
@@ -175,7 +194,7 @@ complete Python dependency sets and explicit conda package URLs/checksums.
 The CUDA base, Node base, Miniforge installer and cuRobo commit are pinned.
 Both DexSim wheel URLs carry SHA256 pins, which the installer verifies even
 though the wheel server uses HTTP. These match the published index checksums
-for DexSim 0.6.0rc1. Build and qualify both updated profiles before promoting
+for DexSim 0.6.0rc2. Build and qualify both updated profiles before promoting
 new image digests.
 DexSim and LeRobot currently require different OpenCV distributions sharing
 `cv2`. Python-selected dependencies pin both to the same release; qualification

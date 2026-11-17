@@ -35,6 +35,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 if TYPE_CHECKING:
+    from .contact_fit import SampledHandGeometry
     from .pose_generator import GraspRegionSelector
 from embodichain.utils import logger
 from embodichain.utils.nms import pose_nms
@@ -95,6 +96,9 @@ class _AntipodalMeshBackend:
         approach_alignment_angle: float | None = None,
         check_collision: bool = True,
         prepared: _AntipodalMeshBackend | None = None,
+        closing_geometry: SampledHandGeometry | None = None,
+        closing_ground_height_m: float | None = None,
+        closing_ground_clearance_m: float = 0.0,
     ) -> None:
         """Initialize the private backend for one target-local mesh.
 
@@ -135,6 +139,18 @@ class _AntipodalMeshBackend:
             )
         )
         self._collision_checker = None
+        self._closing_geometry = closing_geometry if check_collision else None
+        self._closing_ground_height_m = closing_ground_height_m
+        self._closing_ground_clearance_m = closing_ground_clearance_m
+        calibration = torch.as_tensor(
+            collision_geometry.provenance["grasp_from_tcp"],
+            dtype=vertices.dtype,
+            device=self.device,
+        )
+        half_turn = torch.diag(vertices.new_tensor([-1, -1, 1, 1]))
+        self._contact_half_turn = (
+            calibration @ half_turn @ torch.linalg.inv(calibration)
+        )
         if check_collision:
             self._collision_checker = GripperCollisionChecker(
                 object_mesh_verts=vertices,
@@ -938,6 +954,33 @@ class _AntipodalMeshBackend:
             valid_open_lengths = valid_open_lengths[~is_colliding]
             valid_centers = valid_centers[~is_colliding]
             valid_pair_ids = valid_pair_ids[~is_colliding]
+        if self._closing_geometry is not None:
+            from embodichain.compute.geometry.gripper import closing_ground_clearance
+
+            hand = self._closing_geometry
+            clearances = [
+                closing_ground_clearance(
+                    hand.body,
+                    hand.pads,
+                    hand.gaps,
+                    valid_open_lengths,
+                    poses,
+                    ground_height=self._closing_ground_height_m,
+                )
+                for poses in (
+                    valid_grasp_poses,
+                    valid_grasp_poses @ self._contact_half_turn.to(valid_grasp_poses),
+                )
+            ]
+            # The benchmark may try a TCP half-turn during independent IK.
+            # Qualify both variants before either can become a frozen reference.
+            accepted = torch.minimum(*clearances) >= self._closing_ground_clearance_m
+            if not bool(accepted.any().item()):
+                return empty()
+            valid_grasp_poses = valid_grasp_poses[accepted]
+            valid_open_lengths = valid_open_lengths[accepted]
+            valid_centers = valid_centers[accepted]
+            valid_pair_ids = valid_pair_ids[accepted]
         return _GraspGeometry(
             valid_grasp_poses,
             valid_open_lengths,

@@ -280,7 +280,7 @@ def test_preview_uses_one_scene_and_cycles_absolute_poses_on_deadlines(
     saved_pool: tuple[Path, Path, SceneRandomizationResult],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from embodichain.gen_sim.scene_engine.cli import preview
+    from embodichain.lab.scripts import preview_scene as preview
 
     workspace, directory, result = saved_pool
     baseline_poses = _source_poses(workspace)
@@ -307,10 +307,10 @@ def test_preview_uses_one_scene_and_cycles_absolute_poses_on_deadlines(
     calls = []
     observed = []
 
-    def preview_once(**kwargs: Any) -> None:
-        calls.append(kwargs)
+    def preview_once(usd_file: Path, **kwargs: Any) -> None:
+        calls.append({**kwargs, "usd_file": usd_file})
         callback = kwargs["on_frame"]
-        assert kwargs["advance_physics"] is False
+        assert kwargs.get("simulate", False) is False
         for timestamp, changed in (
             (100.0, True),
             (100.5, False),
@@ -337,13 +337,13 @@ def test_preview_uses_one_scene_and_cycles_absolute_poses_on_deadlines(
                     {uid: entity.pose.copy() for uid, entity in sim.entities.items()}
                 )
 
-    monkeypatch.setattr(preview, "preview_scene_export", preview_once)
+    monkeypatch.setattr(preview, "preview_scene", preview_once)
     loading.preview_layouts(directory, interval=1.0, device="cpu", headless=True)
 
     assert len(calls) == 1
-    assert calls[0]["output_root"] == workspace
-    assert calls[0]["device"] == "cpu"
-    assert calls[0]["headless"] is True
+    assert calls[0]["usd_file"] == workspace / "scene_usd" / "scene.usda"
+    assert calls[0]["sim_cfg"].sim_device == "cpu"
+    assert calls[0]["sim_cfg"].headless is True
     expected = [baseline_poses]
     for candidate in result.candidates:
         assert candidate.variant is not None

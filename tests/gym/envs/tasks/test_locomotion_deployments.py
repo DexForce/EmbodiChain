@@ -132,6 +132,12 @@ def test_packaged_deployment_and_agent_config_agree(
         "no-render",
     }
     if task.startswith("locomotion/"):
+        from embodichain.lab.gym.envs.managers.observations import (
+            velocity_locomotion_observation,
+        )
+
+        assert cfg.observations.policy.func is velocity_locomotion_observation
+        assert cfg.observations.critic.func is velocity_locomotion_observation
         assert "renderer" not in raw
         assert "renderer" not in raw.get("render_cfg", {})
         assert "renderer" not in agent["trainer"]

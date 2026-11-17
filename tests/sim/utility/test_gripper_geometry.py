@@ -28,11 +28,37 @@ _GRIPPER_IDS = {
 from embodichain.robot_registry import resolve_gripper_defaults
 from embodichain.lab.sim.utility.gripper_geometry import (
     build_gripper_collision_geometry,
+    build_gripper_closing_geometry,
 )
+from embodichain.compute.geometry.gripper import closing_ground_clearance
 
 import numpy as np
 import pytest
 import torch
+
+
+def test_robotiq_closing_arc_rejects_floor_interference_missed_by_open_hand():
+    defaults = resolve_gripper_defaults("RobotiqArg2F140")
+    opened = build_gripper_collision_geometry(defaults)
+    hand = build_gripper_closing_geometry(defaults, sample_count=33)
+    poses = torch.diag(torch.tensor([1.0, -1.0, -1.0, 1.0])).repeat(2, 1, 1)
+    poses[:, 2, 3] = torch.tensor([0.027, 0.05])
+    # Both poses clear the plane when open. The first is the original low,
+    # downward tabletop grasp; its closing arc intersects the floor.
+    assert bool((0.027 - opened.points[:, 2].max()) > 0)
+    clearance = closing_ground_clearance(
+        hand.body,
+        hand.pads,
+        hand.gaps,
+        torch.full((2,), 0.05),
+        poses,
+        ground_height=0.0,
+    )
+    assert clearance[0] < 0
+    assert clearance[1] > 0.002
+    # The independent native command curve closes a roughly 128.5 mm opening.
+    assert float(hand.gaps[0]) == pytest.approx(0.12853463, abs=1e-6)
+    assert abs(float(hand.gaps[-1])) < 0.0002
 
 
 @pytest.mark.parametrize(

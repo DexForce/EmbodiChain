@@ -69,6 +69,7 @@ from .rigid import (
 )
 from .rigid_object import RigidObjectCfg, RigidObjectGroupCfg
 from .visual_object import VisualObjectCfg
+from .visuals import GaussianSplatCfg, VisualElementCfg, GaussianRenderCfg
 from .scene import LightCfg, RigidConstraintCfg
 from .physics import (
     DefaultPhysicsCfg,
@@ -82,7 +83,7 @@ from .physics import (
 )
 from .rendering import DenoisingCfg, DenoisingMode, DLSSCfg, NRDCfg, RenderCfg
 from .urdf import URDFCfg
-from .viewer import MarkerCfg, WindowCameraPoseCfg, WindowRecordCfg
+from .viewer import MarkerCfg, WindowCameraPoseCfg, WindowCaptureCfg, WindowRecordCfg
 
 # The renderer selection code intentionally mutates this package-level value.
 DEFAULT_RENDERER: Literal["auto", "no-render", "hybrid", "fast-rt", "rt"] = "auto"
@@ -113,6 +114,7 @@ __all__ = [
     "validate_physics_cfg",
     "MarkerCfg",
     "WindowRecordCfg",
+    "WindowCaptureCfg",
     "WindowCameraPoseCfg",
     "ShapeCfg",
     "MeshCfg",
@@ -132,6 +134,9 @@ __all__ = [
     "LightCfg",
     "RigidObjectCfg",
     "VisualObjectCfg",
+    "GaussianSplatCfg",
+    "VisualElementCfg",
+    "GaussianRenderCfg",
     "CableObjectCfg",
     "CablePhysicsCfg",
     "CableAttachmentCfg",

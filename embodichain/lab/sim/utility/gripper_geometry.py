@@ -22,6 +22,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from embodichain.toolkits.graspkit.pg_grasp.contact_fit import SampledHandGeometry
     from embodichain.toolkits.graspkit.pg_grasp.fixed_geometry import (
         FixedGripperCollisionGeometry,
     )
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
 __all__ = [
     "attach_closure_samples",
     "build_gripper_collision_geometry",
+    "build_gripper_closing_geometry",
     "grasp_generator_parameters",
 ]
 
@@ -85,6 +87,95 @@ def _closure_samples(
     apertures = torch.tensor([item[0] for item in ladder], dtype=geometry.points.dtype)
     surfaces = torch.stack([item[1] for item in ladder])
     return apertures, surfaces
+
+
+def build_gripper_closing_geometry(
+    defaults: Mapping[str, object],
+    *,
+    sample_count: int,
+    point_spacing: float = 0.012,
+) -> SampledHandGeometry:
+    """Sample model-owned hand commands in their canonical contact frame.
+
+    Args:
+        defaults: Explicit calibrated model data, including the two pad links
+            and native named open/grasp commands.
+        sample_count: Number of uniformly spaced command samples, at least two.
+        point_spacing: Collision-surface sampling spacing in metres.
+
+    Returns:
+        Owned CPU body/pad surfaces and measured pad gaps. These describe
+        nominal kinematic closure, not runtime contact or physical attachment.
+        The shared fixed-geometry loader retains URDF mimic and limit checks.
+    """
+    import numpy as np
+    import torch
+    from embodichain.toolkits.graspkit.pg_grasp.contact_fit import SampledHandGeometry
+    from embodichain.toolkits.graspkit.pg_grasp.fixed_geometry import (
+        FixedGripperCollisionGeometry,
+    )
+
+    if type(sample_count) is not int or sample_count < 2:
+        raise ValueError("sample_count must be an integer of at least two.")
+    opened = dict(defaults["joint_commands"]["open"])
+    closed = dict(defaults["joint_commands"]["grasp"])
+    if opened.keys() != closed.keys():
+        raise ValueError("Closing geometry needs matching named hand commands.")
+    pad_names = tuple(defaults["pad_links"])
+    if len(pad_names) != 2 or len(set(pad_names)) != 2:
+        raise ValueError("Closing geometry requires two distinct pad links.")
+    initial = build_gripper_collision_geometry(defaults, point_spacing=point_spacing)
+    source = initial.provenance
+    bodies, pads = [], []
+    for index, fraction in enumerate(np.linspace(0, 1, sample_count)):
+        geometry = (
+            initial
+            if index == 0
+            else FixedGripperCollisionGeometry.from_urdf(
+                source["urdf_path"],
+                root_link=source["root_link"],
+                tcp_link=source["tcp_link"],
+                collision_links=tuple(defaults["collision_links"]),
+                joint_positions={
+                    name: float(value + fraction * (closed[name] - value))
+                    for name, value in opened.items()
+                },
+                joint_limits=source["joint_limits"],
+                grasp_from_tcp=np.asarray(source["grasp_from_tcp"]),
+                point_spacing=point_spacing,
+                link_from_tcp=np.asarray(source["link_from_tcp"]),
+                mesh_paths=source["mesh_paths"],
+            )
+        )
+        per_link = {}
+        offset = 0
+        for part in geometry.provenance["parts"]:
+            count = part["surface_point_count"]
+            per_link.setdefault(part["link"], []).append(
+                geometry.points[offset : offset + count]
+            )
+            offset += count
+        per_link = {name: torch.cat(parts) for name, parts in per_link.items()}
+        if index == 0:
+            pad_names = tuple(
+                sorted(pad_names, key=lambda name: float(per_link[name][:, 0].mean()))
+            )
+        pad_points = [per_link[name] for name in pad_names]
+        maximum = max(map(len, pad_points))
+        # Repeated vertices preserve minima and pad geometry for unequal meshes.
+        pad_points = [
+            torch.cat((points, points[-1:].expand(maximum - len(points), -1)))
+            for points in pad_points
+        ]
+        pads.append(torch.stack(pad_points))
+        bodies.append(
+            torch.cat(
+                [points for name, points in per_link.items() if name not in pad_names]
+            )
+        )
+    pad_tensor = torch.stack(pads)
+    gaps = pad_tensor[:, 1, :, 0].amin(-1) - pad_tensor[:, 0, :, 0].amax(-1)
+    return SampledHandGeometry(torch.stack(bodies), pad_tensor, gaps)
 
 
 def build_gripper_collision_geometry(

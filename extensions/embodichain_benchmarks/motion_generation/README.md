@@ -134,6 +134,16 @@ any directory. Robot assets and optional cuRobo or ONNX Runtime dependencies
 follow their normal installation and asset-resolution rules. TOPPRA uses the
 in-tree implementation and needs no separate `toppra` package.
 
+Atomic execution tracking uses `physics.joint_tracking_scope: motion_control_parts`.
+Its RMSE includes the primary motion part and all arms declared by the frozen
+case's `arm_waypoints`, with each joint counted once. Gripper closure residuals
+are excluded: contact can prevent empty-hand closure, and prismatic finger travel
+cannot be mixed with arm error in radians. The same command-end and terminal-hold
+samples and 0.05 rad default threshold apply. Raw execution metadata identifies
+the measured parts and joints. Grasp, contact, object motion and physical task
+success retain their separate checks; passing arm tracking does not establish
+physical success. Results from the previous all-joint metric require reevaluation.
+
 ### Franka Atomic Skills with Robotiq 2F-140
 
 All packaged Franka Atomic Skill suites use Robotiq 2F-140, including
@@ -817,11 +827,18 @@ artifacts, and replay identical selected cases for every method:
   from the lifted object centre, as a vector or one vector per row; zero keeps
   the fixed-centre target. Instead of an offset, `alignment_inward_candidates_m`
   accepts finite, nonnegative, strictly increasing distances starting at zero.
-  Preparation samples one original batched grasp pool and tries shifts toward
-  the control-part base in world XY. Each row freezes its first complete
-  independent IK chain in offset and existing grasp/half-turn order. Accepted
+  Those distances shift toward the control-part base in world XY. Alternatively,
+  `alignment_offset_candidates_m` declares a nonempty ordered list of finite
+  world-space translation vectors from the lifted object centre. These three
+  offset options are mutually exclusive. Preparation samples one original
+  batched grasp pool and tries the declared offsets. Each row freezes its first
+  complete independent IK chain in offset and existing grasp/half-turn order. Accepted
   grasps/offsets stay fixed while unresolved rows continue; resetting the sampler
-  seed separately per row would change the original batched stream.
+  seed separately per row would change the original batched stream. The explicit
+  Cartesian candidate rule qualifies its chains using the same bounded
+  arrival-region IK and FK checks as final reference generation; requests and
+  protocol thresholds remain unchanged. The inward and fixed-offset rules keep
+  their existing exact-IK screening.
 - **Pour:** `grasp_approach_candidates` declares ordered
   `{yaw_offset_rad, max_candidates}` entries. World-Z offsets preserve approach
   elevation, begin at zero and share the original `grasp_max_candidates` budget.

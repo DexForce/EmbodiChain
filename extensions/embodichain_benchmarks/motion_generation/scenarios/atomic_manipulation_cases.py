@@ -50,9 +50,9 @@ from .atomic_evaluation import (
     PlaceEvaluator,
 )
 from .atomic_case_utils import (
+    _pre_pick_pose,
     TOP_DOWN_ROTATION,
     atomic_case_id,
-    canonical_case_qpos,
     case_name,
     case_pose,
     difficulty,
@@ -112,21 +112,22 @@ class PickUpCases(AtomicSkillCaseProvider):
             settle_steps=raw_settle_steps,
         )
         arm_start = scenario.robot.get_qpos(name=scenario.control_part)
-        pre_pick_pose = scenario.robot.compute_fk(
+        ready_pose = scenario.robot.compute_fk(
             arm_start, name=scenario.control_part, to_matrix=True
-        ).clone()
-        pre_pick_pose[:, :2, 3] = object_pose[:, :2, 3]
-        pre_pick_pose[:, 2, 3] = float(config.get("pre_pick_height_m", 0.36))
-        success, pre_pick_qpos = scenario.robot.compute_ik(
-            pose=pre_pick_pose,
-            joint_seed=arm_start,
-            name=scenario.control_part,
         )
-        if not bool(torch.as_tensor(success).all().item()):
-            raise RuntimeError(
-                f"Independent IK rejected PickUp case {case_name(config)!r}."
-            )
-        pre_pick_qpos = canonical_case_qpos(pre_pick_qpos)
+        pre_pick_pose = _pre_pick_pose(
+            ready_pose,
+            object_pose,
+            config,
+            root_pose=(
+                scenario.robot.get_local_pose(to_matrix=True)
+                if config.get("pre_pick_orientation") == "base_radial"
+                else None
+            ),
+        )
+        pre_pick_qpos = scenario.solve_reference_qpos(
+            arm_start, pre_pick_pose[:, None]
+        )[:, 0]
         scenario.set_robot_start(pre_pick_qpos, open_gripper=True)
 
         approach = torch.tensor(
@@ -349,11 +350,8 @@ class HeldObjectCases(AtomicSkillCaseProvider):
         """Return the prepended PickUp lift boundary for composite cases.
 
         ``move_held_object`` and ``place`` are compiled as
-        ``PickUp -> transport/place`` sequences.  Once the first PickUp lift
-        segment begins, the benchmark replay should clear residual rigid-body
-        dynamics just as it does for an isolated PickUp; otherwise gravity and
-        contact impulses can make the cube drift out of the gripper before the
-        second action starts.
+        ``PickUp -> transport/place`` sequences. This boundary identifies the
+        prefix action's lift; it does not reset the object's physical state.
         """
         return compiled.segment(0, "lift").start
 
@@ -451,16 +449,7 @@ class HeldObjectCases(AtomicSkillCaseProvider):
         else:
             raise ValueError("grasp_source must be 'antipodal' or 'fixed'.")
         arm_seed = scenario.robot.get_qpos(name=scenario.control_part)
-        success, arm_start = scenario.robot.compute_ik(
-            pose=grasp_pose,
-            joint_seed=arm_seed,
-            name=scenario.control_part,
-        )
-        if not bool(torch.as_tensor(success).all().item()):
-            raise RuntimeError(
-                f"Independent IK rejected held-object start {case_name(config)!r}."
-            )
-        arm_start = canonical_case_qpos(arm_start)
+        arm_start = scenario.solve_reference_qpos(arm_seed, grasp_pose[:, None])[:, 0]
         scenario.set_robot_start(arm_start, open_gripper=False, grasp_gripper=True)
         handle.entity.set_local_pose(object_pose)
         handle.entity.clear_dynamics()
@@ -534,17 +523,9 @@ class MoveHeldObjectCases(HeldObjectCases):
         pre_grasp_distance = float(config.get("pre_grasp_distance_m", 0.15))
         pre_grasp = grasp_pose.clone()
         pre_grasp[:, :3, 3] -= approach_direction * pre_grasp_distance
-        ik_success, pre_pick_qpos = scenario.robot.compute_ik(
-            pose=pre_grasp,
-            joint_seed=scenario.robot.get_qpos(name=scenario.control_part),
-            name=scenario.control_part,
-        )
-        if not bool(torch.as_tensor(ik_success).all().item()):
-            raise RuntimeError(
-                "Independent IK rejected MoveHeldObject pre-pick pose "
-                f"{case_name(config)!r}."
-            )
-        pre_pick_qpos = canonical_case_qpos(pre_pick_qpos)
+        pre_pick_qpos = scenario.solve_reference_qpos(
+            scenario.robot.get_qpos(name=scenario.control_part), pre_grasp[:, None]
+        )[:, 0]
         scenario.set_robot_start(pre_pick_qpos, open_gripper=True)
         start_qpos, full_start_qpos = snapshot_case_qpos(
             scenario.robot, scenario.control_part
@@ -692,16 +673,9 @@ class PlaceCases(HeldObjectCases):
         pre_grasp_distance = float(config.get("pre_grasp_distance_m", 0.15))
         pre_grasp = grasp_pose.clone()
         pre_grasp[:, :3, 3] -= approach_direction * pre_grasp_distance
-        ik_success, pre_pick_qpos = scenario.robot.compute_ik(
-            pose=pre_grasp,
-            joint_seed=scenario.robot.get_qpos(name=scenario.control_part),
-            name=scenario.control_part,
-        )
-        if not bool(torch.as_tensor(ik_success).all().item()):
-            raise RuntimeError(
-                f"Independent IK rejected Place pre-pick pose {case_name(config)!r}."
-            )
-        pre_pick_qpos = canonical_case_qpos(pre_pick_qpos)
+        pre_pick_qpos = scenario.solve_reference_qpos(
+            scenario.robot.get_qpos(name=scenario.control_part), pre_grasp[:, None]
+        )[:, 0]
         scenario.set_robot_start(pre_pick_qpos, open_gripper=True)
         start_qpos, full_start_qpos = snapshot_case_qpos(
             scenario.robot, scenario.control_part

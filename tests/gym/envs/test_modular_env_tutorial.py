@@ -26,17 +26,8 @@ from embodichain.lab.sim.spawn.descriptors import rigid_desc_from_cfg
 pytestmark = pytest.mark.no_sim
 
 
-def test_tutorial_rigid_objects_compile_to_spawn_descriptors(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # Resolve paths without downloading assets; descriptor construction is pure.
-    monkeypatch.setattr("embodichain.data.get_data_path", lambda path: path)
-    namespace = runpy.run_path(
-        str(
-            Path(__file__).resolve().parents[3] / "scripts/tutorials/gym/modular_env.py"
-        )
-    )
-    cfg = namespace["ExampleCfg"]()
+def test_tutorial_rigid_objects_compile_to_spawn_descriptors(tutorial) -> None:
+    cfg = tutorial["ExampleCfg"]()
 
     for object_cfg in [*cfg.background, *cfg.rigid_object]:
         descriptor, _ = rigid_desc_from_cfg(object_cfg)
@@ -47,6 +38,14 @@ def test_tutorial_rigid_objects_compile_to_spawn_descriptors(
 
 @pytest.fixture
 def tutorial(monkeypatch):
+    from embodichain.lab.sim.cfg import RobotCfg
+    from embodichain_robots import DexforceW1Cfg
+
+    # These tests exercise object descriptors and event setup, not W1 assembly.
+    # Its imported asset resolvers can bypass the package-level path stub.
+    monkeypatch.setattr(
+        DexforceW1Cfg, "from_dict", lambda config: RobotCfg(uid=config["uid"])
+    )
     monkeypatch.setattr("embodichain.data.get_data_path", lambda path: path)
     return runpy.run_path(
         str(

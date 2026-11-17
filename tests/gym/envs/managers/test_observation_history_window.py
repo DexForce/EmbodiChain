@@ -43,11 +43,12 @@ def _history():
     context._begin_episode([0, 1, 2])
     context._finish_initialization([0, 1, 2])
     manager = ObservationManager({}, SimpleNamespace(episode_context=context))
+    manager._required_fields = ("pose", "pose_alias")
     storage = TensorDict({}, batch_size=[3])
     _init_raw_rollout(
         storage,
         context,
-        {},
+        {"pose": torch.zeros(3, 4, 7)},
         torch.zeros(3, 3, 2),
     )
     manager.bind_rollout_storage(storage)
@@ -108,6 +109,7 @@ def _history():
 
 def test_owned_windows_preserve_ragged_native_rows_aliases_and_unavailable_samples():
     manager, _, storage = _history()
+    assert manager.field_ids["pose_alias"] == "pose"
     storage["raw_timestamp"][2, 1] = float("nan")
     result = manager.read_history_window(
         [1, 0],

@@ -94,6 +94,7 @@ documentation. CI runs this same checker after style checks and before tests.
    :maxdepth: 2
 
    robot_catalogs
+   agibot_g1
    data/eef_assets
    model_catalogs
    model_rigidformer

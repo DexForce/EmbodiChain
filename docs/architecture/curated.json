@@ -1290,24 +1290,24 @@
     },
     {
       "id": "scene-expansion-integration",
-      "label": "Scene expansion attempt",
+      "label": "Scene expansion attempts",
       "kind": "function",
       "topic_ids": [
         "scene-expansion",
         "task-programs"
       ],
-      "summary": "Prepares one scene candidate and executes a Task Program with separate measured acceptance.",
-      "details": "execute_scene_variant connects a scene proposal to injected preparation and measurement callbacks. For a valid initial state it creates the canonical Task Program segments and uses the existing Gym demo executor, recording separate initial-state, program, and measured-outcome evidence.",
+      "summary": "Prepares selected scene candidates and executes a shared Task Program with per-row measured acceptance.",
+      "details": "execute_scene_variants connects a row-to-candidate mapping to batched preparation and row-addressed measurement callbacks. Initially valid rows use canonical Task Program segments and the existing batched Gym demo executor; initial checks, program completion and measured acceptance remain independent per row.",
       "boundaries": [
-        "One B=1 attempt; the caller supplies physical preparation, measured task evidence, retry policy, and the reset-time persistence transaction."
+        "Explicit selected-row attempts on one World clock; the caller supplies physical preparation, row-specific measured evidence, retry policy and reset-time persistence. Settling requires the complete World selection."
       ],
       "evidence": [
         {
           "path": "embodichain/lab/task_program/integrations/scene_expansion.py",
-          "symbol": "execute_scene_variant",
-          "start_line": 195,
-          "end_line": 195,
-          "excerpt": "def execute_scene_variant("
+          "symbol": "execute_scene_variants",
+          "start_line": 241,
+          "end_line": 241,
+          "excerpt": "def execute_scene_variants("
         }
       ],
       "documentation": [
@@ -3328,7 +3328,7 @@
         "Arena-local Z-up geometry in metres; AABB layout is not exact mesh collision or task-success evidence.",
         "Basic state capture, restoration and rigid pose changes support explicit ordered environment selections with fixed topology; snapshots remain owner-bound physical state, not complete backend checkpoints.",
         "GenSim retains model calls, assets, editing semantics, temporary simulation lifetime and export formats.",
-        "Tensor geometry and expansion sampling have separate CPU/CUDA batch contracts; CPU strategies do not become GPU solvers. Settling requires full-world selection, while the Task Program scene expansion host remains B=1."
+        "Tensor geometry and expansion sampling have separate CPU/CUDA batch contracts; CPU strategies do not become GPU solvers. Settling requires full-world selection; the Task Program scene expansion host prepares and restores explicit rows with independent measured acceptance."
       ],
       "evidence": [
         {
@@ -3341,16 +3341,16 @@
         {
           "path": "embodichain/lab/sim/scene/query.py",
           "symbol": "SceneView.__init__",
-          "start_line": 40,
-          "end_line": 44,
-          "excerpt": "        self.sim = sim\n        self.env_ids = tuple(env_ids)\n        self._num_envs = getattr(sim, \"num_envs\", 1)\n        self._validate_selection()\n        self.topology = self.describe_entities()"
+          "start_line": 47,
+          "end_line": 54,
+          "excerpt": "        self.sim = sim\n        self.env_ids = tuple(env_ids)\n        if isinstance(entity_uids, str):\n            raise ValueError(\"entity_uids must be a nonempty sequence of UIDs\")\n        self.entity_uids = None if entity_uids is None else tuple(entity_uids)\n        self._num_envs = getattr(sim, \"num_envs\", 1)\n        self._validate_selection()\n        self.topology = self.describe_entities()"
         },
         {
           "path": "embodichain/lab/sim/scene/operations.py",
           "symbol": "apply_changes_batch",
-          "start_line": 123,
-          "end_line": 130,
-          "excerpt": "def apply_changes_batch(\n    view: SceneView, changes: Mapping[int, SceneChangeSet]\n) -> SceneChangeResult:\n    \"\"\"Apply distinct per-arena changes after preflighting the entire selection.\n\n    Args:\n        view: Ordered set of physical rows to prepare.\n        changes: Exactly one change set for every selected environment index."
+          "start_line": 130,
+          "end_line": 137,
+          "excerpt": "def apply_changes_batch(\n    view: SceneView, changes: Mapping[int, SceneChangeSet]\n) -> SceneChangeResult:\n    \"\"\"Apply distinct per-arena rigid/visual changes after preflighting all rows.\n\n    Args:\n        view: Ordered set of physical rows to prepare.\n        changes: Exactly one change set for every selected environment index."
         },
         {
           "path": "embodichain/lab/sim/scene/validation.py",
@@ -3588,21 +3588,21 @@
         },
         {
           "path": "embodichain/gen_sim/task_engine/task_spec.py",
-          "symbol": "task_spec_from_candidate",
-          "start_line": 186,
-          "end_line": 186,
+          "symbol": "_project_candidate",
+          "start_line": 231,
+          "end_line": 231,
           "excerpt": "    template = TaskSpec("
         },
         {
           "path": "embodichain/gen_sim/task_engine/_image_run.py",
-          "symbol": "_plan_image_task",
+          "symbol": "plan_image_task",
           "start_line": 99,
           "end_line": 103,
           "excerpt": "            \"pending_bindings\": len(result[\"binding_requirements\"]),\n            \"execution_ready\": False,\n            \"runtime_evidence_status\": \"not_run\",\n            \"image_sha256\": result[\"image_grounding\"][\"image_sha256\"],\n            \"integration_status\": \"unbound\","
         },
         {
           "path": "embodichain/gen_sim/task_engine/semantic_plan_validation.py",
-          "symbol": "validate_semantic_plan",
+          "symbol": "_validate_interpreted_plan",
           "start_line": 549,
           "end_line": 556,
           "excerpt": "        \"status\": \"covered\",\n        \"semantic_status\": \"valid\",\n        \"visual_status\": (\"complete\" if observed == total else \"pending\"),\n        \"pending_bindings\": len(bindings),\n        \"visual_observed_entities\": observed,\n        \"visual_total_entities\": total,\n        \"execution_ready\": False,\n        \"runtime_evidence_status\": \"not_run\","
@@ -3712,9 +3712,9 @@
         {
           "path": "embodichain/lab/gym/envs/embodied_env.py",
           "symbol": "EmbodiedEnv.create_task_program_bridge",
-          "start_line": 2242,
-          "end_line": 2242,
-          "excerpt": "        return self._checked_task_program_adapter().create_bridge("
+          "start_line": 3932,
+          "end_line": 3932,
+          "excerpt": "        bridge = self._checked_task_program_adapter().create_bridge("
         }
       ]
     },
@@ -4289,9 +4289,9 @@
         {
           "path": "embodichain/lab/scripts/run_task.py",
           "symbol": "cli",
-          "start_line": 1680,
-          "end_line": 1680,
-          "excerpt": "    env = gymnasium.make(id=gym_config[\"id\"], cfg=env_cfg, **action_config)"
+          "start_line": 2180,
+          "end_line": 2180,
+          "excerpt": "        env = gymnasium.make(id=gym_config[\"id\"], cfg=env_cfg, **action_config)"
         }
       ]
     },
@@ -5648,14 +5648,14 @@
       "relation": "constructs",
       "description": "Creates the assembly helper for this responsibility.",
       "provenance": "source-reviewed",
-      "scope": "Fresh local helper created during merge_urdfs; constructor injection does not select this merge-time instance.",
+      "scope": "Creates a default component manager during initialization when none is injected; merge reuses the selected instance.",
       "evidence": [
         {
           "path": "embodichain/toolkits/urdf_assembly/urdf_assembly_manager.py",
-          "symbol": "URDFAssemblyManager.merge_urdfs",
-          "start_line": 875,
-          "end_line": 875,
-          "excerpt": "        component_manager = URDFComponentManager("
+          "symbol": "URDFAssemblyManager.__init__",
+          "start_line": 159,
+          "end_line": 159,
+          "excerpt": "            else URDFComponentManager(self.mesh_manager, name_case=self._name_case)"
         }
       ]
     },
@@ -5666,14 +5666,14 @@
       "relation": "constructs",
       "description": "Creates the assembly helper for this responsibility.",
       "provenance": "source-reviewed",
-      "scope": "Fresh local helper created during merge_urdfs; constructor injection does not select this merge-time instance.",
+      "scope": "Creates a default sensor manager during initialization when none is injected; merge reuses it with an isolated working cache.",
       "evidence": [
         {
           "path": "embodichain/toolkits/urdf_assembly/urdf_assembly_manager.py",
-          "symbol": "URDFAssemblyManager.merge_urdfs",
-          "start_line": 883,
-          "end_line": 883,
-          "excerpt": "        sensor_manager = URDFSensorManager(mesh_manager)"
+          "symbol": "URDFAssemblyManager.__init__",
+          "start_line": 164,
+          "end_line": 164,
+          "excerpt": "            else URDFSensorManager(self.mesh_manager)"
         }
       ]
     },
@@ -5684,14 +5684,14 @@
       "relation": "constructs",
       "description": "Creates the assembly helper for this responsibility.",
       "provenance": "source-reviewed",
-      "scope": "Fresh local helper created during merge_urdfs; constructor injection does not select this merge-time instance.",
+      "scope": "Creates a default mesh manager during initialization when none is injected; merge updates the selected managers to the output directory.",
       "evidence": [
         {
           "path": "embodichain/toolkits/urdf_assembly/urdf_assembly_manager.py",
-          "symbol": "URDFAssemblyManager.merge_urdfs",
-          "start_line": 873,
-          "end_line": 873,
-          "excerpt": "        mesh_manager = URDFMeshManager(output_dir)"
+          "symbol": "URDFAssemblyManager.__init__",
+          "start_line": 152,
+          "end_line": 152,
+          "excerpt": "            else URDFMeshManager(output_dir=\".\")"
         }
       ]
     },
@@ -5720,13 +5720,13 @@
       "relation": "constructs",
       "description": "Creates the assembly helper for this responsibility.",
       "provenance": "source-reviewed",
-      "scope": "Fresh local connection helper created during merge_urdfs.",
+      "scope": "Creates a fresh connection helper in the merge implementation.",
       "evidence": [
         {
           "path": "embodichain/toolkits/urdf_assembly/urdf_assembly_manager.py",
-          "symbol": "URDFAssemblyManager.merge_urdfs",
-          "start_line": 878,
-          "end_line": 878,
+          "symbol": "URDFAssemblyManager._merge_urdfs",
+          "start_line": 762,
+          "end_line": 762,
           "excerpt": "        connection_manager = URDFConnectionManager("
         }
       ]
@@ -5778,10 +5778,10 @@
       "evidence": [
         {
           "path": "embodichain/lab/task_program/integrations/scene_expansion.py",
-          "symbol": "execute_scene_variant",
-          "start_line": 294,
-          "end_line": 296,
-          "excerpt": "            segments = EmbodiedEnv.create_demo_segments("
+          "symbol": "execute_scene_variants",
+          "start_line": 400,
+          "end_line": 400,
+          "excerpt": "                segments = EmbodiedEnv.create_demo_segments("
         }
       ]
     },
@@ -5865,9 +5865,9 @@
         {
           "path": "embodichain/lab/sim/scene/composition.py",
           "symbol": "declare_fragment",
-          "start_line": 205,
-          "end_line": 205,
-          "excerpt": "            sim.add_rigid_object(cfg)"
+          "start_line": 220,
+          "end_line": 221,
+          "excerpt": "    for method, cfg in declarations:\n        getattr(sim, method)(cfg)"
         }
       ]
     },
@@ -5937,9 +5937,9 @@
         {
           "path": "extensions/embodichain_benchmarks/motion_generation/runner.py",
           "symbol": "BenchmarkRunner._create_simulation",
-          "start_line": 166,
-          "end_line": 173,
-          "excerpt": "        sim = SimulationManager(\n            SimulationManagerCfg(\n                headless=self.headless,\n                sim_device=str(self.device),\n                num_envs=batch_size,\n                arena_space=2.0,\n            )\n        )"
+          "start_line": 276,
+          "end_line": 286,
+          "excerpt": "        sim = SimulationManager(\n            SimulationManagerCfg(\n                headless=self.headless,\n                sim_device=str(self.device),\n                num_envs=batch_size,\n                arena_space=2.0,\n                physics_cfg=DefaultPhysicsCfg(\n                    num_substeps=self.suite.protocol.physics_substeps\n                ),\n            )\n        )"
         }
       ]
     },
@@ -6015,9 +6015,9 @@
       "evidence": [
         {
           "path": "embodichain/gen_sim/task_engine/task_spec.py",
-          "symbol": "task_spec_from_candidate",
-          "start_line": 186,
-          "end_line": 186,
+          "symbol": "_project_candidate",
+          "start_line": 231,
+          "end_line": 231,
           "excerpt": "    template = TaskSpec("
         }
       ]

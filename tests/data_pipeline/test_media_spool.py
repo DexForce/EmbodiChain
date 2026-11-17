@@ -29,6 +29,7 @@ def test_chunks_are_bounded_owned_and_cover_terminal_observation(tmp_path):
         "camera/depth": np.zeros((2, 3), dtype=np.float32),
     }
     size = sum(value.nbytes for value in frames.values())
+    frames["camera/depth"][0, 0] = np.inf
     writer = MediaSpool(
         tmp_path / "media",
         max_buffer_bytes=size * 2,
@@ -37,9 +38,11 @@ def test_chunks_are_bounded_owned_and_cover_terminal_observation(tmp_path):
     )
     for i in range(5):
         frames["camera/rgb"].fill(i)
+        frames["camera/depth"][1, 2] = i + 0.25
         writer.append(i * 0.02, frames)
         assert writer.buffered_bytes <= size * 2
     frames["camera/rgb"].fill(99)
+    frames["camera/depth"][1, 2] = 99
     path = writer.finish()
     manifest = verify_media_manifest(
         path, expected_frames=5, parent_episode_id="episode"
@@ -47,6 +50,9 @@ def test_chunks_are_bounded_owned_and_cover_terminal_observation(tmp_path):
     assert [chunk["count"] for chunk in manifest["chunks"]] == [2, 2, 1]
     with np.load(path.parent / manifest["chunks"][-1]["path"]) as data:
         assert np.all(data["feature_1"] == 4)
+        assert data["feature_0"].dtype == np.float32
+        assert np.isposinf(data["feature_0"][0, 0, 0])
+        assert data["feature_0"][0, 1, 2] == 4.25
     assert writer.finish() == path
     with pytest.raises(RuntimeError):
         writer.append(0.1, frames)

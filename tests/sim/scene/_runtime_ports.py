@@ -59,6 +59,25 @@ class Rigid:
         self.value[env_ids, 10:] = ang_vel
 
 
+class Visual:
+    """Render-only facade deliberately lacking rigid-body state and dynamics."""
+
+    def __init__(self, num_envs=1):
+        self.value = torch.eye(4).repeat(num_envs, 1, 1)
+        self.writes = 0
+
+    def get_local_pose(self, *, to_matrix=True):
+        if to_matrix:
+            return self.value
+        return torch.cat(
+            (self.value[:, :3, 3], quat_from_matrix(self.value[:, :3, :3])), -1
+        )
+
+    def set_local_pose(self, value, *, env_ids):
+        self.writes += 1
+        self.value[env_ids] = value
+
+
 class Articulation:
     joint_names = ("hinge",)
 
@@ -106,6 +125,7 @@ class Sim:
         self.num_envs = num_envs
         self.rigid = {"cube": Rigid(num_envs), "other": Rigid(num_envs)}
         self.articulations = {"drawer": Articulation(num_envs)}
+        self.visuals = {}
         self.steps = 0
         self.syncs = 0
 
@@ -126,6 +146,12 @@ class Sim:
 
     def get_articulation(self, uid):
         return self.articulations.get(uid)
+
+    def get_visual_object_uid_list(self):
+        return list(self.visuals)
+
+    def get_visual_object(self, uid):
+        return self.visuals.get(uid)
 
     def sync_render_state(self):
         self.syncs += 1

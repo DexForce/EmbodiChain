@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 import torch
 
@@ -28,11 +30,52 @@ from embodichain.lab.sim.atomic_skills.primitives._helpers import (
     resolve_batched_pose,
     resolve_object_target,
     resample_planned_trajectory,
+    plan_named_arm_trajectory,
 )
+from embodichain.lab.sim.atomic_skills.policies import MotionPolicy
+from embodichain.compute.trajectory._trace import _capture_trajectories
 
 BATCH_SIZE = 2
 ROBOT_DOF = 6
 WAYPOINT_COUNT = 3
+
+
+def test_named_arm_planning_preserves_cartesian_options_timing_and_trace() -> None:
+    positions = torch.tensor([[[0.0], [1.0]]])
+    received = []
+
+    def generate(states, *, options):
+        received.append(options)
+        return SimpleNamespace(
+            success=torch.tensor([True]),
+            positions=positions,
+            dt=torch.tensor([[0.0, 0.2]]),
+            waypoint_indices=None,
+        )
+
+    poses = torch.eye(4).repeat(1, 2, 1, 1)
+
+    def sampler(fractions):
+        return poses
+
+    with _capture_trajectories(True) as records:
+        success, trajectory = plan_named_arm_trajectory(
+            SimpleNamespace(generate=generate),
+            "custom_arm",
+            torch.zeros(1, 1),
+            poses,
+            3,
+            MotionPolicy(strategy="ik_interp"),
+            0.1,
+            cartesian_linear=True,
+            cartesian_path_sampler=sampler,
+        )
+
+    assert success.tolist() == [True]
+    torch.testing.assert_close(trajectory, torch.tensor([[[0.0], [0.5], [1.0]]]))
+    assert received[0].preserve_cartesian_samples is True
+    assert received[0].cartesian_path_sampler is sampler
+    assert records and all(record["control_part"] == "custom_arm" for record in records)
 
 
 def test_symmetric_pose_selection_is_row_local_and_does_not_mutate_inputs() -> None:

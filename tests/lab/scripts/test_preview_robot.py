@@ -137,6 +137,14 @@ def test_registered_body_configs_pass_preview_validation(
     import embodichain.lab.sim.cfg as sim_cfg
     from embodichain_robots.dexforce.w1 import utils
 
+    # Import before patching the shared resolver so newly loaded presets cannot
+    # retain the temporary asset function after monkeypatch teardown.
+    preset_modules = []
+    for spec in ROBOT_CONFIGS.values():
+        path, _, name = spec["class_path"].partition(":")
+        cls = getattr(import_module(path), name)
+        preset_modules.append(import_module(cls.__module__))
+
     def local(asset: str) -> str:
         return str(
             robot_asset.with_suffix(".usda") if asset.endswith(".usda") else robot_asset
@@ -145,12 +153,8 @@ def test_registered_body_configs_pass_preview_validation(
     monkeypatch.setattr(embodichain.data, "get_data_path", local)
     monkeypatch.setattr(sim_cfg, "get_data_path", local)
     monkeypatch.setattr(utils, "get_data_path", local)
-    for spec in ROBOT_CONFIGS.values():
-        path, _, name = spec["class_path"].partition(":")
-        cls = getattr(import_module(path), name)
-        monkeypatch.setattr(
-            import_module(cls.__module__), "get_data_path", local, raising=False
-        )
+    for module in preset_modules:
+        monkeypatch.setattr(module, "get_data_path", local, raising=False)
     cfg = preview_robot.build_robot_cfg(_args("--robot", robot_id))
     assert cfg.fpath or cfg.source is not None or cfg.urdf_cfg is not None
 

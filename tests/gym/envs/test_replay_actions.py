@@ -532,8 +532,10 @@ def test_replay_reset_reseeds_raw_history_after_restoring_source_state():
 
 
 @pytest.mark.parametrize("completed", [False, True])
+@pytest.mark.parametrize("record_policy", [False, True])
 def test_expert_opt_in_uses_policy_controller_with_full_joint_target(
     completed: bool,
+    record_policy: bool,
 ) -> None:
     """Converted expert targets keep measured holds on completed demo rows."""
     from types import MethodType
@@ -547,6 +549,15 @@ def test_expert_opt_in_uses_policy_controller_with_full_joint_target(
     )
 
     env = _ReplayEnv(num_envs=2)
+    env._explicit_policy_rollout = record_policy
+    env._record_raw_actions = record_policy
+    env._raw_action_history = [[], []]
+    env._validate_policy_rollout_action = MethodType(
+        EmbodiedEnv._validate_policy_rollout_action, env
+    )
+    if record_policy:
+        env._traj_buffer = {}
+        env._trajectory_action_kind = "policy"
     env._demo_no_auto_reset = True
     env._demo_active_mask = torch.tensor([not completed, True])
     env._mask_controller_demo_action = MethodType(
@@ -578,10 +589,21 @@ def test_expert_opt_in_uses_policy_controller_with_full_joint_target(
     )
     requested = torch.full((2, 2), 0.04)
     prepared = env._preprocess_action(ControllerAction(requested))
-    env._step_action(prepared)
+    applied = env._step_action(prepared)
     expected = requested.clone()
     if completed:
         expected[0] = measured[0, 1:]
     torch.testing.assert_close(env.robot.set_qpos.call_args.kwargs["qpos"], expected)
     torch.testing.assert_close(prepared.value, expected)
     assert env._step_uses_action_manager
+    if record_policy:
+        labels = env.action_manager.action.clone()
+        assert labels.shape == (2, 1)
+        torch.testing.assert_close(applied, labels)
+        torch.testing.assert_close(env._last_action_trace.requested, labels)
+        torch.testing.assert_close(env._traj_raw_action, labels)
+        torch.testing.assert_close(env._raw_action_history[1][0], labels[1])
+        if completed:
+            assert env._raw_action_history[0] == []
+        env.action_manager.action.zero_()
+        torch.testing.assert_close(env._traj_raw_action, labels)

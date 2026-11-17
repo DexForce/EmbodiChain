@@ -1,0 +1,108 @@
+{
+  "schema_version": "2.0-draft",
+  "registry_id": "ec-gs-packaging",
+  "version": "1",
+  "rules": [
+    {
+      "rule_id": "GS-ZUP-METRES",
+      "version": "1",
+      "domain": "coordinates",
+      "title": "Z-up metre scene entry",
+      "requirement": "The USD scene entry declares Z-up and one metre per unit.",
+      "capability_id": "gs-scene-coordinates",
+      "source": {
+        "namespace": "embodichain",
+        "document_uri": "urn:embodichain:gaussian-backgrounds:v1",
+        "version": "1",
+        "retrieved_at": "2026-11-16T00:00:00Z",
+        "document_digest": null,
+        "requirement_id": "GS-ZUP-METRES",
+        "mapping": "none"
+      },
+      "usd_binding": null,
+      "applicability": {
+        "asset_kinds": [
+          "3dgs"
+        ],
+        "formats": [
+          "usda"
+        ],
+        "required_declarations": [],
+        "subject_scope": "asset",
+        "condition_description": "Visual-only scanned Gaussian background packages."
+      },
+      "checker": {
+        "id": "ec-gs-package-coordinates",
+        "version": "1",
+        "method": "static",
+        "parameters_schema": {
+          "type": "object",
+          "additionalProperties": false
+        },
+        "implementation": "partial"
+      },
+      "acceptance": "upAxis is Z and metersPerUnit is 1; runtime admission is checked separately.",
+      "default_severity": "error",
+      "evidence_kinds": [
+        "measurement",
+        "log"
+      ]
+    }
+  ],
+  "capabilities": [
+    {
+      "capability_id": "gs-scene-coordinates",
+      "version": "1",
+      "domain": "coordinates",
+      "requirement_ids": [
+        "GS-ZUP-METRES"
+      ]
+    }
+  ],
+  "features": [
+    {
+      "feature_id": "gs-background-entry",
+      "version": "1",
+      "required_rules": [
+        {
+          "rule_id": "GS-ZUP-METRES",
+          "version": "1"
+        }
+      ],
+      "runtime_test_ids": [],
+      "dependencies": []
+    }
+  ],
+  "profiles": [
+    {
+      "profile_id": "ec-gs-background",
+      "version": "1",
+      "namespace": "embodichain",
+      "source": null,
+      "features": [
+        {
+          "feature_id": "gs-background-entry",
+          "version": "1"
+        }
+      ],
+      "required_runtime_tests": [],
+      "asset_kinds": [
+        "3dgs"
+      ],
+      "target_runtimes": [
+        "dexsim"
+      ],
+      "policy": {
+        "policy_version": "1",
+        "blocking_rule_ids": [
+          "GS-ZUP-METRES"
+        ],
+        "allow_manual_evidence": false,
+        "required_evaluation_methods": [
+          "static"
+        ],
+        "parameters": {}
+      }
+    }
+  ]
+}

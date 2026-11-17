@@ -1,5 +1,40 @@
 # Task Engine semantic contracts
 
+`gensim task plan --route goal` authors a normative contract before requesting
+an ordered call witness. It accepts text, an optional image, or an external
+agent proposal. `goal_planning.py` owns the goal-authoring manifest, exact
+operand coverage, resource checks and optional configured deployment preflight.
+Goal-route publication requires a verbatim instruction quote per terminal goal
+and milestone ID. Graph repair is bounded to two additional model proposals
+against the frozen objective; inspect `planning_history.json` for each candidate,
+pre-call holdings, checked coverage and the selected round. Source matching
+establishes traceability, not semantic entailment.
+The explicit `--route template` route retains the existing image plan and revision format.
+Its visual response nests constraints in source clauses and crossed dimensions in generalization entries. Empty auxiliary tables are harmless; misplaced nonempty declarations, malformed entities and invalid ambiguity evidence trigger a diagnostic repair, not silent removal.
+The default hybrid route composes quoted E1–E9 operations into goal contracts
+and ordered calls. Orientation, pour receiver, original support, slider endpoint
+and twist mode can require occurrence-bound deployment parameters. The hybrid
+validator checks symbolic declaration coverage, including acquisition versus
+release in coordinated transport. Physical evidence and calibrated installation
+remain separate; motion-only pouring never establishes liquid transfer.
+Before freezing the hybrid objective, source checks distinguish explicit pour
+motion, requested liquid transfer and ambiguous outcomes. A separately prompted
+source audit checks omissions and invented actions against both the declarations and their expanded calls and occurrence bindings. During expansion, a following placement or pour can reuse the same held object; explicit incompatible arms remain errors. Diagnostics feed a bounded
+reinterpretation; a failed audit prevents plan publication.
+For rigid pick/place, named handovers and coordinated tray release, hybrid automatically grounds frozen roles in the original image, or verifies a supplied `--scene-grounding FILE`. A null box retains a pending role. Plans outside this deployment scope publish an authoring-only manifest. Qualification and deployment preparation then use the same
+role, geometry, resource and configuration checks as template plans. The same tray identity is retained across fruit landings and the final transport;
+qualification selects non-overlapping landing poses and the terminal segment
+rechecks retained payloads. A handover requires a trusted exchange pose. Ungrounded
+authoring outputs do not authorize deployment.
+See the [20-case comparison](../../../scripts/benchmark/task_engine/README.md)
+for the current qualification boundary.
+
+`gensim task revise` validates a planner proposal against the frozen v1
+document and grounding in a published plan. The caller supplies expected spec,
+graph and complete publication digests plus a new output directory. The complete
+identity covers deployment annotations and binding requests. The revised graph and
+its coverage report share the original document and scene requirements.
+
 `embodichain.gen_sim.task_engine` owns instruction understanding, candidate
 contracts, TaskSpec generation, canonical Semantic Call graphs and declaration
 coverage. Importing its front end does not initialize Lab or a simulator.
@@ -41,20 +76,25 @@ handoff. Public API descriptions are in the
 
 ## Image semantic planning entry
 
-`embodichain gensim task plan --image IMAGE --instruction TEXT --output DIRECTORY`
+`embodichain gensim task plan --route template --image IMAGE --instruction TEXT --output DIRECTORY`
 uses the configured GenSim model to interpret the complete instruction, ground
 logical image references and plan canonical calls from the data-only Task Program
 catalog. It always ends at the unbound semantic graph; there are no model or
 stage-selection flags. `image_planning.py` retains raw provider attempts and
-allows one diagnostic repair per grounding/planning stage. It contains no
-per-task graph construction templates.
+allows a bounded number of diagnostic repairs per grounding/planning stage (one
+by default). It contains no per-task graph construction templates.
 
 `lab/task_program/language/semantic_contracts.py` owns provider-free call argument,
 resource, precondition/effect and runtime-binding declarations. Configured live
 lowerers consume those same argument contracts and retain their stricter scene
 and route checks. The catalog must import without `lab.sim`, Gym or DexSim.
 `semantic_plan_validation.py` checks task producers, source identity, topology,
-held-object/arm state, quoted instruction obligations and deferred binding needs.
+held-object/arm state, structured instruction qualifiers and deferred binding needs.
+Qualifier witnesses must reference their frozen target and implementing calls;
+return-to-origin also requires its source-pose binding and must be the subject's
+final pose-changing operation in the targeted milestone. Each clause needs its
+own structured meaning; an unrelated role property cannot cover it. Unsupported meanings
+remain unverified and cannot authorize a revision or deployment.
 Task producer obligations derive from the existing task affordances and catalog
 capabilities rather than per-E-type construction branches. Explicit part parents
 retain drawer/handle identity; step-result selectors inherit earlier source IDs.
@@ -68,7 +108,10 @@ complete strict validator. Task Engine side enums `left_arm`/`right_arm` map
 explicitly to logical resources `left`/`right`; custom resource identifiers and
 robot control-part names are preserved for runtime binding. Terminal holds are checked at
 the source step boundary; coordinated hold is rejected until a matching hold
-call is available in the catalog.
+call is available in the catalog. E1/E2 release by default; with
+`terminal_behavior=hold` their producer is one held transport after a pick
+(`terminal_hold_requires_one_of`), which also realizes and must declare the step's
+orientation goal, so a hold step rejects `simulation.axis_align`.
 
 Image entities distinguish `observed`, `instruction_declared` and
 `runtime_required`; only observed entities carry normalized boxes. Ambiguous references retain
@@ -94,6 +137,16 @@ clauses of the pinned task1171–task1190 cohort. These checks supplement manual
 semantic review and never qualify physical execution.
 
 ## Read-only graph display
+
+Version-2 plans and revisions embed the frozen v1 specification and its pairing
+report in the offline viewer. The grouped action canvas links milestones, final
+goals and roles. Native run review is published separately at `task_review.html`;
+`gensim task view --plan PLAN [--run RUN] --output NEW.html` also renders
+existing artifacts. Only matching attempt identities, complete plan identities and
+execution-report digests supply native call evidence. Per-environment details
+retain row reasons, step ranges and event masks. Source images come from the
+verified input reference or legacy inventory. Archived graph-only views retain
+their existing renderer.
 
 `semantic_graph_html.py` renders an existing graph and optional TaskSpec,
 recomputed coverage and recorded execution report. `reporting.py` owns the
@@ -152,3 +205,22 @@ These APIs create no simulation, Robot, skill or planner. Shared Task Program
 composition accepts owned inline components, and the Gym parser consumes the
 sealed component snapshots when configuring an environment. Bundle changes
 require preparing a new identity; historical run outputs remain separate.
+
+Hybrid review dispatch uses the verified publication schema, so `task view`
+consumes hybrid contracts and attempt identities without template candidates.
+Grounded manipulation associates each landing with its producing milestone;
+intermediate placements remain scene requirements even after their terminal
+state is superseded. Repeated transport reuses equal routes or assigns separate
+bound targets for different per-occurrence landing poses. Legacy configured
+transport lowerers retain their own targets and geometry. Pour omission checks
+operate on affirmative action clauses; noun uses and explicit prohibitions do
+not create pouring obligations. Input paths expand before any model requests.
+
+
+New template image plans project surviving terminal state after grounding, using
+exact entity-member sets to recognize different references to the same object.
+The normative metadata records `grounded_state_slots/v2`. Display and revision
+of frozen image plans match their exact historical projection, including both
+legacy `explicit_state_slots/v1` variants; neither operation upgrades their
+normative predicates or evidence identity. Grounding cannot silently retarget a
+source clause whose terminal target was superseded.

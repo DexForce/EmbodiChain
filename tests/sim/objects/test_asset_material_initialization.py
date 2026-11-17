@@ -209,6 +209,7 @@ def test_asset_reset_restores_selected_environment_material(asset_type):
         init_pos=(0.0, 0.0, 0.0),
         init_rot=(0.0, 0.0, 0.0),
         init_qpos=(0.0,),
+        env_variants=None,
     )
     asset.restore_visual_material = MagicMock()
     asset.set_local_pose = MagicMock()

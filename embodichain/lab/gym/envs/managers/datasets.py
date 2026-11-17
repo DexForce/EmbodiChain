@@ -62,6 +62,7 @@ from embodichain.lab.gym.envs.expert_trajectory import encode_expert_action
 from .action_types import ActionDescriptor
 from .manager_base import Functor
 from .cfg import DatasetFunctorCfg
+from .dataset_manager import _DatasetSaveReceipts
 
 __all__ = ["LeRobotRecorder"]
 
@@ -649,7 +650,7 @@ class LeRobotRecorder(Functor):
         extra: Optional[Dict] = None,
         use_videos: bool = False,
         **kwargs,
-    ) -> None:
+    ) -> _DatasetSaveReceipts | None:
         """Main entry point for the recorder functor.
 
         This method is called by DatasetManager.apply(mode="save") to save completed episodes.
@@ -686,12 +687,12 @@ class LeRobotRecorder(Functor):
 
             # Save episodes for specified environments
             if len(env_ids) > 0:
-                self._save_episodes(env_ids)
+                return self._save_episodes(env_ids)
 
     def _save_episodes(
         self,
         env_ids: torch.Tensor,
-    ) -> None:
+    ) -> _DatasetSaveReceipts:
         """Save completed episodes for specified environments.
 
         This reads each env's slice from the rollout buffer and delegates to
@@ -700,6 +701,7 @@ class LeRobotRecorder(Functor):
         clone the slice and defer the actual conversion/disk-write to a
         background worker without racing the buffer reuse on reset.
         """
+        receipts: dict[int, list[str]] = {}
         for env_id in env_ids.cpu().tolist():
             step = self._episode_length(env_id)
             # The first env.reset() can request a dataset save before any
@@ -764,6 +766,9 @@ class LeRobotRecorder(Functor):
                     raise RuntimeError(f"Committed {label} was not persisted.")
                 if fragment_id is not None:
                     resolved_fragment_ids.append(fragment_id)
+                if payload[-1] is not None and "episode_uuid" in payload[-1]:
+                    receipts.setdefault(env_id, []).append(payload[-1]["episode_uuid"])
+        return _DatasetSaveReceipts("persisted", receipts)
 
     def _episode_payloads(
         self,
@@ -1247,6 +1252,14 @@ class LeRobotRecorder(Functor):
         )
         journal = getattr(self, "_recording_journal", None)
         identity = sidecar_metadata["episode_uuid"]
+        if "episode_outcome" in sidecar_metadata:
+            # Prepare the intended sidecar for recovery. It is published only
+            # after the dataset and depth commits below have succeeded.
+            sidecar_metadata["episode_outcome"]["persistence"] = {
+                "dataset_selected": True,
+                "dataset": [{"status": "persisted", "episode_uuid": identity}],
+                "trajectory": sidecar_metadata.get("trajectory_path"),
+            }
         commit_started = False
         journal_prepared = False
         try:

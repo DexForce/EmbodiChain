@@ -102,6 +102,197 @@ def _source():
     return scene
 
 
+@pytest.mark.parametrize("legacy", [False, True])
+@pytest.mark.parametrize("reuse_camera_uid", [False, True])
+def test_callable_mounted_camera_keeps_multiple_usd_declarations_open(
+    monkeypatch, legacy, reuse_camera_uid
+):
+    import dexsim.kit.usd
+    from embodichain.lab.sim.cfg import RobotCfg
+    from embodichain.lab.sim.sensors import (
+        Camera,
+        CameraCfg,
+        SensorRegistration,
+        register_sensor,
+        registry,
+    )
+    from embodichain.utils import configclass
+
+    @configclass
+    class MountedCfg(CameraCfg):
+        sensor_type: str = "DeferredMounted"
+
+    manager = _manager()
+    manager.num_envs = 1
+    created = []
+
+    def factory(cfg, *args, **kwargs):
+        assert manager._spawn_scene.builder.is_finalized
+        camera = object.__new__(Camera)
+        camera.cfg = cfg
+        camera.attach_to_parent_nodes = MagicMock()
+        created.append(camera)
+        return camera
+
+    monkeypatch.setattr(registry, "_registrations", registry._registrations.copy())
+    register_sensor(
+        SensorRegistration(
+            "DeferredMounted", MountedCfg, factory, legacy_factory=legacy
+        )
+    )
+    manager.add_sensor = lambda cfg: SimulationManager.add_sensor(manager, cfg)
+    manager._resolve_spawn_sensor_parent_nodes = MagicMock(return_value=[object()])
+
+    def prepare():
+        manager._spawn_scene.builder.is_finalized = True
+        manager._prepare_mounted_sensors()
+
+    manager.prepare = prepare
+    descriptor = ArticulationDesc(
+        name="Robot",
+        links=[
+            LinkDesc(name="base", parent_name=None, pose=np.eye(4, dtype=np.float32))
+        ],
+        usd=UsdSourceDesc(prim_path="/Robot"),
+    )
+    monkeypatch.setattr(
+        dexsim.kit.usd,
+        "parse_usd",
+        lambda *args, **kwargs: SceneDesc(articulations=[descriptor]),
+    )
+    manager.add_usd(
+        UsdImportCfg(
+            name="first",
+            source=UsdSourceCfg(file_path="first.usda"),
+            robot_cfgs={
+                "/Robot": RobotCfg(
+                    build_pk_chain=False,
+                    enable_sensor=True,
+                    sensors=[
+                        MountedCfg(
+                            uid="camera",
+                            extrinsics=CameraCfg.ExtrinsicsCfg(parent="base"),
+                        )
+                    ],
+                    joint_drive_props=None,
+                )
+            },
+        )
+    )
+    assert not created
+    assert not manager._spawn_scene.builder.is_finalized
+    if reuse_camera_uid:
+        assert manager.remove_asset("camera")
+        second_robot = ArticulationDesc(
+            name="RobotB",
+            links=[
+                LinkDesc(
+                    name="base", parent_name=None, pose=np.eye(4, dtype=np.float32)
+                )
+            ],
+            usd=UsdSourceDesc(prim_path="/RobotB"),
+        )
+        monkeypatch.setattr(
+            dexsim.kit.usd,
+            "parse_usd",
+            lambda *a, **k: SceneDesc(articulations=[second_robot]),
+        )
+        manager.add_usd(
+            UsdImportCfg(
+                name="other_robot",
+                source=UsdSourceCfg(file_path="other.usda"),
+                robot_cfgs={
+                    "/RobotB": RobotCfg(
+                        build_pk_chain=False,
+                        enable_sensor=True,
+                        sensors=[
+                            MountedCfg(
+                                uid="camera",
+                                extrinsics=CameraCfg.ExtrinsicsCfg(parent="base"),
+                            )
+                        ],
+                        joint_drive_props=None,
+                    )
+                },
+            )
+        )
+        manager._gizmos = {}
+        manager._disabled_robot_gizmos = set()
+        # Native tracking is stubbed in this fixture; keep manager removal real.
+        monkeypatch.setattr(
+            type(manager._spawn_scene),
+            "__contains__",
+            lambda scene, uid: uid in manager._robots,
+        )
+        manager._spawn_scene._require_removable = lambda uid: None
+        manager._spawn_scene.remove = lambda uid: None
+        assert manager.remove_asset("Robot")
+        assert "RobotB" in manager._robots
+        assert (
+            manager._pending_mounted_sensors["camera"].extrinsics.parent
+            == "RobotB/base"
+        )
+    monkeypatch.setattr(dexsim.kit.usd, "parse_usd", lambda *args, **kwargs: _source())
+    manager.add_usd(
+        UsdImportCfg(name="second", source=UsdSourceCfg(file_path="second.usda"))
+    )
+    assert not created
+    manager.prepare()
+    assert len(created) == 1
+    assert manager.get_sensor("camera") is created[0]
+    created[0].attach_to_parent_nodes.assert_called_once()
+    manager.prepare()
+    assert len(created) == 1
+
+
+@pytest.mark.parametrize("representation", ["mesh", "gaussian_splat"])
+def test_source_inventory_compiles_without_world_or_facades(
+    monkeypatch, representation
+):
+    """Source inspection preserves appearance without runtime admission/binding."""
+    from dexsim.spawn import GeometryType, RenderDesc
+    from embodichain.lab.sim.spawn.usd_import import _compile_usd_import
+    import dexsim.kit.usd
+
+    path = "/World/asset"
+    render = RenderDesc(
+        geometry_type=(
+            GeometryType.GAUSSIAN_SPLAT
+            if representation == "gaussian_splat"
+            else GeometryType.MESH
+        ),
+        file_path=(
+            "appearance.ply" if representation == "gaussian_splat" else "appearance.obj"
+        ),
+        usd=UsdSourceDesc(prim_path=path + "/appearance"),
+    )
+    descriptor = MeshObjectDesc(
+        name="asset",
+        usd=UsdSourceDesc(prim_path=path),
+        renders=[render],
+        physics=RigidBodyPhysicsDesc(actor_type=ActorType.DYNAMIC, mass=0.25),
+    )
+    source = SceneDesc(mesh_objects=[descriptor])
+    monkeypatch.setattr(dexsim.kit.usd, "parse_usd", lambda *args, **kwargs: source)
+    plan = _compile_usd_import(
+        None,
+        UsdImportCfg(
+            name="scene",
+            source=UsdSourceCfg(file_path="source.usda"),
+            asset_cfgs={path: {"uid": "object"}},
+        ),
+    )
+    assert plan.resource_uids == {path: "object"}
+    assert plan.resource_types == {path: "rigid_object"}
+    assert plan.declarations[0][3] is None
+    assert plan.source.mesh_objects[0].physics.mass == pytest.approx(0.25)
+    assert plan.source_visual_elements[path][0]["representation"] == representation
+    assert (
+        plan.source_visual_elements[path][0]["source_prim_path"] == path + "/appearance"
+    )
+    assert plan.source.mesh_objects[0].renders == [render]
+
+
 def test_sparse_override_keeps_actor_and_pose_and_remaps_constraint(monkeypatch):
     import dexsim.kit.usd
 
@@ -282,6 +473,8 @@ def test_import_recipe_selects_subtree_and_namespaces_runtime_identity(tmp_path)
     "parent,sensor_uid,renderer,sensor_type,valid",
     [
         ("base", "wrist", "hybrid", "Camera", True),
+        ("base", "wrist", "hybrid", "ExternalCamera", True),
+        ("base", "wrist", "hybrid", "CallableCamera", True),
         ("missing", "wrist", "hybrid", "Camera", False),
         ("base", "Robot", "hybrid", "Camera", False),
         ("base", "wrist", "no-render", "Camera", False),
@@ -295,7 +488,39 @@ def test_robot_metadata_preserves_source_identity_and_preflights_sensor_binding(
 ):
     import dexsim.kit.usd
     from embodichain.lab.sim.cfg import RobotCfg, ArticulationRootPropertiesCfg
-    from embodichain.lab.sim.sensors import CameraCfg
+    from embodichain.lab.sim.sensors import (
+        Camera,
+        CameraCfg,
+        SensorRegistration,
+        register_sensor,
+    )
+    from embodichain.lab.sim.sensors import registry
+    from embodichain.utils import configclass
+
+    camera_cfg_type = CameraCfg
+    if sensor_type in ("ExternalCamera", "CallableCamera"):
+        registered_type = sensor_type
+
+        @configclass
+        class ExternalCameraCfg(CameraCfg):
+            sensor_type: str = registered_type
+
+        class ExternalCamera(Camera):
+            pass
+
+        def create_camera(cfg, *, context):
+            pytest.fail("USD preflight must not construct a camera")
+
+        monkeypatch.setattr(registry, "_registrations", registry._registrations.copy())
+        register_sensor(
+            SensorRegistration(
+                sensor_type,
+                ExternalCameraCfg,
+                create_camera if sensor_type == "CallableCamera" else ExternalCamera,
+                legacy_factory=sensor_type != "CallableCamera",
+            )
+        )
+        camera_cfg_type = ExternalCameraCfg
 
     descriptor = ArticulationDesc(
         name="Robot",
@@ -323,7 +548,7 @@ def test_robot_metadata_preserves_source_identity_and_preflights_sensor_binding(
         build_pk_chain=False,
         enable_sensor=True,
         sensors=[
-            CameraCfg(
+            camera_cfg_type(
                 uid=sensor_uid,
                 sensor_type=sensor_type,
                 extrinsics=CameraCfg.ExtrinsicsCfg(parent=parent),
@@ -350,13 +575,20 @@ def test_robot_metadata_preserves_source_identity_and_preflights_sensor_binding(
             root_props.min_position_iters,
             root_props.min_velocity_iters,
         ) == (0.123, 16, 4)
+        if sensor_type == "CallableCamera":
+            manager.add_sensor.assert_not_called()
+            assert (
+                manager._pending_mounted_sensors[sensor_uid].extrinsics.parent
+                == "Robot/base"
+            )
+            manager._prepare_mounted_sensors()
         assert manager.add_sensor.call_args.args[0].extrinsics.parent == "Robot/base"
         assert metadata.uid == "metadata_uid"
         assert metadata.sensors[0].extrinsics.parent == "base"
     else:
         with pytest.raises(
             (ValueError, RuntimeError, TypeError),
-            match="unknown link|already exists|requires a native renderer|Unsupported mounted|StereoCamera requires",
+            match="unknown link|already exists|requires a native renderer|Unsupported mounted|Unsupported sensor type|StereoCamera requires",
         ):
             manager.add_usd(recipe)
         manager._spawn_scene.builder.add_scene.assert_not_called()

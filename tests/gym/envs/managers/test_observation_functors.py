@@ -26,6 +26,20 @@ import torch
 from unittest.mock import MagicMock, Mock, patch
 
 
+def test_public_exports_include_entity_and_fluid_queries() -> None:
+    from embodichain.lab.gym.envs.managers import observations
+
+    namespace = {}
+    exec("from embodichain.lab.gym.envs.managers.observations import *", namespace)
+    for name in (
+        "get_entity_state",
+        "get_fluid_particle_state",
+        "get_fluid_summary",
+        "get_fluid_volume_in_region",
+    ):
+        assert namespace[name] is getattr(observations, name)
+
+
 class MockRobot:
     """Mock robot for observation functor tests."""
 
@@ -260,6 +274,30 @@ from embodichain.lab.gym.envs.managers.observations import (
 )
 
 
+def test_locomotion_observation_keeps_legacy_import_and_selects_requested_group():
+    from types import SimpleNamespace
+
+    from embodichain.lab.gym.envs.managers.observations import (
+        velocity_locomotion_observation,
+    )
+    from embodichain_tasks.locomotion.managers.observations import (
+        velocity_locomotion_observation as legacy,
+    )
+
+    actor, critic = torch.tensor([[1.0]]), torch.tensor([[2.0]])
+    calls = []
+
+    def build(*, enable_corruption):
+        calls.append(enable_corruption)
+        return actor, critic
+
+    env = SimpleNamespace(build_velocity_locomotion_observations=build)
+    assert legacy is velocity_locomotion_observation
+    assert velocity_locomotion_observation(env, {}) is actor
+    assert legacy(env, {}, privileged=True, enable_corruption=True) is critic
+    assert calls == [False, True]
+
+
 class TestGetRigidObjectPose:
     """Tests for get_rigid_object_pose functor."""
 
@@ -405,7 +443,9 @@ class TestGetSensorIntrinsics:
 
         # Replace the mock sensor with a proper one that will pass isinstance check
         # by using patch to mock the Camera import
-        with patch("embodichain.lab.gym.envs.managers.observations.Camera", MockSensor):
+        with patch(
+            "embodichain.lab.gym.envs.managers.observations._common.Camera", MockSensor
+        ):
             result = get_sensor_intrinsics(env, obs, entity_cfg=MagicMock(uid="camera"))
 
         assert result.shape == (1, 3, 3)
@@ -492,7 +532,8 @@ class TestGetObjectUid:
     """Tests for get_object_uid functor."""
 
     @patch(
-        "embodichain.lab.gym.envs.managers.observations.RigidObject", MockRigidObject
+        "embodichain.lab.gym.envs.managers.observations._common.RigidObject",
+        MockRigidObject,
     )
     def test_returns_correct_shape(self):
         """Test that get_object_uid returns correct tensor shape."""
@@ -505,7 +546,8 @@ class TestGetObjectUid:
         assert result.dtype == torch.int32
 
     @patch(
-        "embodichain.lab.gym.envs.managers.observations.RigidObject", MockRigidObject
+        "embodichain.lab.gym.envs.managers.observations._common.RigidObject",
+        MockRigidObject,
     )
     def test_returns_correct_value(self):
         """Test that get_object_uid returns correct user ID from object."""
@@ -530,7 +572,8 @@ class TestGetObjectUid:
         assert torch.all(result == 0)
 
     @patch(
-        "embodichain.lab.gym.envs.managers.observations.RigidObject", MockRigidObject
+        "embodichain.lab.gym.envs.managers.observations._common.RigidObject",
+        MockRigidObject,
     )
     def test_different_num_envs(self):
         """Test that functor works with different number of environments."""
@@ -903,6 +946,43 @@ class TestComputeSemanticMask:
 
         # Background: 7 pixels with uid 0
         assert bg.sum().item() == 7
+
+    def test_companion_ids_belong_to_their_foreground_owner_per_environment(self):
+        from types import SimpleNamespace
+
+        from embodichain.lab.sim.objects import RigidObject
+
+        env, obs = self._make_env_and_obs(num_envs=2)
+        owner = object.__new__(RigidObject)
+        owner.uid = "fg_object"
+        owner.device = torch.device("cpu")
+        owner._entities = [object(), object()]
+        owner._all_indices = [0, 1]
+        owner.user_ids = torch.tensor([10, 20], dtype=torch.int32)
+        companion_ids = [[11, 21], [12, 22]]
+        owner._visual_binding = SimpleNamespace(
+            elements=[SimpleNamespace(gaussian=False)] * 2,
+            handles=[
+                tuple(SimpleNamespace(get_user_id=lambda uid=uid: uid) for uid in ids)
+                for ids in companion_ids
+            ],
+        )
+        env.sim.add_rigid_object(owner)
+        # Each row includes its physical owner, both companions, and another
+        # environment's companion, which must remain background.
+        obs["sensor"]["camera"]["mask"] = torch.tensor(
+            [[[10, 11, 12, 21]], [[20, 21, 22, 11]]], dtype=torch.int32
+        )
+        result = compute_semantic_mask(
+            env, obs, entity_cfg=MagicMock(uid="camera"), foreground_uids=[owner.uid]
+        )
+        expected = torch.tensor([[[True, True, True, False]]] * 2)
+        torch.testing.assert_close(result[..., 1], expected)
+        torch.testing.assert_close(result[..., 0], ~expected)
+        # Physics consumers still see one physical ID per environment.
+        torch.testing.assert_close(
+            owner.get_user_ids(), torch.tensor([10, 20], dtype=torch.int32)
+        )
 
     def test_background_is_negation_of_foreground_and_robot(self):
         """Test that background == ~(left | right | foreground)."""

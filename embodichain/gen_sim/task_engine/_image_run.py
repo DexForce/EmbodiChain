@@ -36,19 +36,20 @@ from .image_planning import (
     SemanticPlanningError,
 )
 from .orchestration.workflow_artifacts import WorkflowRunArtifacts, write_run_json
-from .semantic_graph_html import render_semantic_task_graph_html
+from .semantic_graph_html import _graph_data, _viewer_document
 
-__all__: list[str] = []
+__all__ = ["plan_image_task"]
 
 
 @service_entry
-def _plan_image_task(
+def plan_image_task(
     image_path: Path,
     instruction: str,
     output: Path,
     *,
     task_id: str = "image_task",
     services: GenSimServices | None = None,
+    max_repairs: int = 1,
 ) -> Path:
     """Generate and publish a fresh semantic plan without initializing simulation."""
     image_path = image_path.expanduser().resolve(strict=True)
@@ -56,7 +57,11 @@ def _plan_image_task(
     with WorkflowRunArtifacts(output) as artifacts:
         try:
             result = generate_semantic_task_graph_from_image(
-                image_path, instruction, task_id=task_id, services=services
+                image_path,
+                instruction,
+                task_id=task_id,
+                services=services,
+                max_repairs=max_repairs,
             )
         except SemanticPlanningError as error:
             failure = output.with_name(
@@ -73,6 +78,36 @@ def _plan_image_task(
                 overwrite=False,
             )
             raise
+        candidate_id = result["task_spec"]["metadata"]["candidate_id"]
+        from embodichain.gen_sim.task_spec.publication import (
+            project_expansion_requirements,
+            project_scene_requirements,
+            scene_agent_messages,
+        )
+
+        document = result["task_spec_v1"]
+        result["expansion_requirements"] = project_expansion_requirements(document)
+        result["scene_requirements"] = project_scene_requirements(document)
+        result["scene_agent_messages"] = scene_agent_messages(
+            result["scene_requirements"]
+        )
+        result["plan_coverage"] = {
+            "spec_digest": document["spec_digest"],
+            "graph_digest": result["semantic_graph_validation"]["graph_digest"],
+            "role_entities": {
+                role: sorted(
+                    {
+                        entity["id"]
+                        for row in document["interpretation"]["references"]
+                        if row["role_id"] == role
+                        for entity in row["entities"]
+                    }
+                )
+                for role in document["configuration"]["descriptions"]
+            },
+            "milestone_groups": result["task_spec"]["metadata"]["milestone_sources"],
+            "goal_groups": result["task_spec"]["metadata"]["goal_sources"],
+        }
         for name, value in result.items():
             write_run_json(artifacts.output_dir / f"{name}.json", value)
         source_copy = artifacts.output_dir / f"source_image{image_path.suffix.lower()}"
@@ -84,7 +119,7 @@ def _plan_image_task(
             raise ValueError("Input image changed before preview publication.")
         summary = {
             "schema_version": "task_engine.image_semantic_run/v1",
-            "task_id": task_id,
+            "task_id": document["task_id"],
             "created_at": datetime.now(timezone.utc).isoformat(),
             "elapsed_seconds": perf_counter() - started,
             "elapsed_scope": "instruction interpretation and image semantic planning",
@@ -108,6 +143,41 @@ def _plan_image_task(
         )
         services.write_records(artifacts.output_dir / "service_calls.json")
         write_run_json(artifacts.output_dir / "run_manifest.json", summary)
+        inventory = {
+            path.relative_to(artifacts.output_dir)
+            .as_posix(): hashlib.sha256(path.read_bytes())
+            .hexdigest()
+            for path in sorted(artifacts.output_dir.rglob("*"))
+            if path.is_file() and path.name != "task_plan_manifest.json"
+        }
+        write_run_json(
+            artifacts.output_dir / "task_plan_manifest.json",
+            {
+                "schema_version": "embodichain.task-plan-artifact/v2",
+                "spec_digest": document["spec_digest"],
+                "spec_path": "task_spec_v1.json",
+                "graph_path": "semantic_task_graph.json",
+                "task_semantic_hash": document["task_semantic_hash"],
+                "generalization_hash": document["generalization_hash"],
+                "task_id": document["task_id"],
+                "candidate_id": candidate_id,
+                "instruction": document["inputs"]["instruction"],
+                "image_sha256": summary["image_sha256"],
+                "semantic_graph_sha256": result["semantic_graph_validation"][
+                    "graph_digest"
+                ],
+                "task_spec_sha256": result["semantic_graph_validation"][
+                    "task_spec_digest"
+                ],
+                "semantic_status": summary["semantic_status"],
+                "visual_status": summary["visual_status"],
+                "execution_ready": False,
+                "artifacts": inventory,
+            },
+        )
+        from ..workflow import load_task_plan
+
+        load_task_plan(artifacts.output_dir)
         artifacts.commit()
     print(f"Semantic graph: {artifacts.output_dir / 'semantic_task_graph.json'}")
     print(f"Offline viewer: {artifacts.output_dir / 'semantic_task_graph.html'}")
@@ -116,8 +186,15 @@ def _plan_image_task(
     return artifacts.output_dir
 
 
+_plan_image_task = plan_image_task
+
+
 def _image_preview(
-    result: dict[str, Any], image_path: Path, summary: dict[str, Any]
+    result: dict[str, Any],
+    image_path: Path,
+    summary: dict[str, Any],
+    *,
+    attempt: dict[str, Any] | None = None,
 ) -> str:
     from PIL import Image
 
@@ -130,6 +207,13 @@ def _image_preview(
                 uid = result["image_grounding"]["bindings"][ref["reference_id"]][0]
                 names.setdefault(uid, ref["reference"])
     with Image.open(image_path) as source:
+        overview = source.convert("RGB")
+        overview.thumbnail((640, 480))
+        buffer = BytesIO()
+        overview.save(buffer, "JPEG")
+        source_preview = (
+            "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode()
+        )
         for item in result["image_grounding"]["objects"]:
             if item["bbox"] is None:
                 assets.append(
@@ -168,7 +252,7 @@ def _image_preview(
                     "cutout_source": f"source image crop: {item['bbox']}",
                 }
             )
-    return render_semantic_task_graph_html(
+    data = _graph_data(
         result["semantic_task_graph"],
         task_spec=result["task_spec"],
         validation=result["semantic_graph_validation"],
@@ -180,3 +264,15 @@ def _image_preview(
             "wall_source": summary["elapsed_scope"],
         },
     )
+    if "task_spec_v1" in result:
+        data["review"] = {
+            "source_image": source_preview,
+            "spec": result["task_spec_v1"],
+            "pairing": result["plan_coverage"],
+            "attempt": attempt,
+            "pending": summary["pending_bindings"],
+            "qualifiers": result["semantic_graph_validation"].get(
+                "qualifier_coverage", []
+            ),
+        }
+    return _viewer_document(data)

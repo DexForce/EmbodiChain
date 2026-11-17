@@ -123,6 +123,7 @@ def _blender() -> dict[str, object]:
     from PIL import Image
     import trimesh
     from embodichain.gen_sim._blender_runtime import _run_blender_job
+    from embodichain.gen_sim.env import load_gen_sim_env
     from embodichain.gen_sim.scene_engine.pipeline.utils.simready_processor_utils import (
         render_object_front_top_views,
         render_object_pose_switch_candidates,
@@ -166,7 +167,13 @@ def _blender() -> dict[str, object]:
         assert all(
             (root / "baked" / baked[key]).is_file() for key in ("obj", "png", "mtl")
         )
-    return {"python": os.environ.get("EMBODICHAIN_BLENDER_PYTHON"), "operations": 5}
+    settings = dict(os.environ)
+    load_gen_sim_env(settings)
+    return {
+        "python": settings.get("EMBODICHAIN_BLENDER_PYTHON"),
+        "executable": settings.get("EMBODICHAIN_BLENDER_EXECUTABLE"),
+        "operations": 5,
+    }
 
 
 def _cuda_act() -> dict[str, object]:

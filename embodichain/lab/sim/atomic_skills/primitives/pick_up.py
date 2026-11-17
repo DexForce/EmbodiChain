@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import ClassVar
 
 import torch
@@ -34,6 +34,7 @@ from embodichain.utils.math import (
 
 from embodichain.lab.sim.atomic_skills.primitives._helpers import (
     arm_qpos_from_state,
+    plan_named_arm_trajectory,
     require_shared_task_state_key,
     split_joint_trajectory_at_pose,
 )
@@ -80,6 +81,7 @@ from embodichain.lab.sim.atomic_skills.state import HeldObjectState, PlanningCon
 from embodichain.lab.sim.atomic_skills.trajectory_ops import (
     axis_translation_keyframes,
     build_pose_plan_states,
+    axis_translation_keyframes,
     interpolate_hand_qpos,
     resolve_pose_target,
     split_three_segments,
@@ -231,7 +233,8 @@ class PickUpOptions(SkillOptions):
     a free-space lift drag the held object across the support. ``0`` plans only
     the grasp and lift poses. AxisAlign inherits the same lift. Grasp-candidate
     IK screening still checks only the endpoints, and an external nominal
-    motion keeps its own path.
+    motion keeps its own path. ``cartesian_lift`` keyframes its own lift, so
+    the two cannot be combined.
     """
     approach_along_grasp_axis: bool = False
     """Use the realized calibrated TCP +Z for native pre-grasp translation.
@@ -240,7 +243,20 @@ class PickUpOptions(SkillOptions):
     observed rotation instead of a shared world vector.
     """
 
+    cartesian_lift: bool = False
+    """Preserve a straight world-Z lift with IK interpolation and native limits."""
+
+    initial_lift_height: float = field(default=0.0, kw_only=True)
+    """Initial world-Z clearance (m) from the current TCP pose before approach."""
+
     def __post_init__(self) -> None:
+        if (
+            isinstance(self.initial_lift_height, bool)
+            or not isinstance(self.initial_lift_height, (int, float))
+            or not math.isfinite(self.initial_lift_height)
+            or self.initial_lift_height < 0.0
+        ):
+            raise ValueError("initial_lift_height must be finite and non-negative.")
         if self.hand_interp_steps < 1:
             raise ValueError("hand_interp_steps must be at least 1.")
         if type(self.grasp_settle_steps) is not int or self.grasp_settle_steps < 0:
@@ -288,12 +304,16 @@ class PickUpOptions(SkillOptions):
         ):
             raise ValueError("obj_upright_direction must be a finite (3,) tensor.")
         _validate_single_se3(self.grasp_frame_to_eef, "grasp_frame_to_eef")
+        if type(self.cartesian_lift) is not bool:
+            raise TypeError("cartesian_lift must be boolean.")
         if type(self.approach_along_grasp_axis) is not bool:
             raise TypeError("approach_along_grasp_axis must be boolean.")
         if type(self.approach_waypoints) is not int or self.approach_waypoints < 0:
             raise ValueError("approach_waypoints must be a non-negative integer.")
         if type(self.lift_waypoints) is not int or self.lift_waypoints < 0:
             raise ValueError("lift_waypoints must be a non-negative integer.")
+        if self.cartesian_lift and self.lift_waypoints:
+            raise ValueError("cartesian_lift already keyframes its own lift.")
         if self.approach_along_grasp_axis and self.fixed_object_to_eef is None:
             raise ValueError("Grasp-axis approach requires fixed_object_to_eef.")
         if self.fixed_object_to_eef is not None:
@@ -418,6 +438,22 @@ class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
             # planner options were supplied.
             motion_options.sample_count = None
         approach_poses = [pre_grasp_xpos[:, None]]
+        if options.initial_lift_height > 0.0:
+            start_xpos = self.robot.compute_fk(
+                qpos=start_arm_qpos,
+                name=manipulator.control_part,
+                to_matrix=True,
+                **(
+                    {"env_ids": self.planning_services.env_ids}
+                    if self.planning_services.env_ids is not None
+                    else {}
+                ),
+            )
+            initial_lift = translate_pose_world(
+                start_xpos,
+                start_xpos.new_tensor([0.0, 0.0, options.initial_lift_height]),
+            )
+            approach_poses.insert(0, initial_lift[:, None])
         if options.approach_waypoints:
             approach_poses.append(
                 axis_translation_keyframes(
@@ -427,45 +463,87 @@ class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
                     n_waypoints=options.approach_waypoints + 1,
                 )[:, :-1]
             )
-        # Optional vertical lift keyframes follow the grasp target, so the
-        # grasp split index below depends only on the approach keyframes.
-        lift_poses = [lift_xpos[:, None]]
-        if options.lift_waypoints:
-            lift_poses.insert(
-                0,
-                axis_translation_keyframes(
-                    grasp_xpos,
-                    lift_xpos,
-                    lift_xpos.new_tensor([0.0, 0.0, 1.0]),
-                    n_waypoints=options.lift_waypoints + 1,
-                )[:, :-1],
+        approach_targets = torch.cat([*approach_poses, grasp_xpos[:, None]], dim=1)
+
+        if options.cartesian_lift:
+            if motion_policy.strategy != "ik_interp":
+                raise ValueError("cartesian_lift requires strategy='ik_interp'.")
+            if motion_policy.interpolation_mode == "adaptive":
+                n_approach = max(n_approach, approach_targets.shape[1] + 1)
+            approach_success, approach_arm = plan_named_arm_trajectory(
+                self.motion_generator,
+                manipulator.control_part,
+                start_arm_qpos,
+                approach_targets,
+                n_approach,
+                motion_policy,
+                interpolation_dt,
             )
-        motion_result = self.motion_generator.generate(
-            build_pose_plan_states(
-                torch.cat([*approach_poses, grasp_xpos[:, None], *lift_poses], dim=1)
-            ),
-            options=motion_options,
-        )
-        assert isinstance(motion_result.success, torch.Tensor)
-        assert motion_result.positions is not None
-        assert motion_result.dt is not None
-        approach_arm, lift_arm = split_joint_trajectory_at_pose(
-            motion_result.positions,
-            grasp_xpos,
-            robot=self.robot,
-            control_part=manipulator.control_part,
-            first_sample_count=n_approach,
-            second_sample_count=n_lift,
-            dt=motion_result.dt,
-            control_dt=interpolation_dt,
-            arrival_indices=motion_result.waypoint_indices,
-            split_target_index=1 + options.approach_waypoints,
-            env_ids=self.planning_services.env_ids,
-        )
+            if n_lift < 2:
+                raise ValueError("cartesian_lift requires at least two lift samples.")
+            lift_targets = axis_translation_keyframes(
+                grasp_xpos,
+                lift_xpos,
+                grasp_xpos.new_tensor([0.0, 0.0, 1.0]),
+                n_waypoints=n_lift - 1,
+            )
+            if bool(approach_success.any()):
+                lift_success, lift_arm = plan_named_arm_trajectory(
+                    self.motion_generator,
+                    manipulator.control_part,
+                    approach_arm[:, -1],
+                    lift_targets,
+                    n_lift,
+                    motion_policy,
+                    interpolation_dt,
+                    active_mask=approach_success,
+                    cartesian_linear=True,
+                )
+            else:
+                lift_arm = approach_arm[:, -1:].expand(-1, n_lift, -1).clone()
+                lift_success = approach_success.clone()
+            is_success = approach_success & lift_success
+        else:
+            # Optional vertical lift keyframes follow the grasp target, so the
+            # grasp split index below depends only on the approach keyframes.
+            lift_poses = [lift_xpos[:, None]]
+            if options.lift_waypoints:
+                lift_poses.insert(
+                    0,
+                    axis_translation_keyframes(
+                        grasp_xpos,
+                        lift_xpos,
+                        lift_xpos.new_tensor([0.0, 0.0, 1.0]),
+                        n_waypoints=options.lift_waypoints + 1,
+                    )[:, :-1],
+                )
+            motion_result = self.motion_generator.generate(
+                build_pose_plan_states(
+                    torch.cat([approach_targets, *lift_poses], dim=1)
+                ),
+                options=motion_options,
+            )
+            assert isinstance(motion_result.success, torch.Tensor)
+            assert motion_result.positions is not None
+            assert motion_result.dt is not None
+            approach_arm, lift_arm = split_joint_trajectory_at_pose(
+                motion_result.positions,
+                grasp_xpos,
+                robot=self.robot,
+                control_part=manipulator.control_part,
+                first_sample_count=n_approach,
+                second_sample_count=n_lift,
+                dt=motion_result.dt,
+                control_dt=interpolation_dt,
+                arrival_indices=motion_result.waypoint_indices,
+                split_target_index=approach_targets.shape[1] - 1,
+                success=motion_result.success,
+                env_ids=self.planning_services.env_ids,
+            )
+            is_success = motion_result.success
         n_approach = approach_arm.shape[1]
         n_lift = lift_arm.shape[1]
         grasp_arm_qpos = approach_arm[:, -1, :]
-        is_success = motion_result.success
 
         hand_close_path = interpolate_hand_qpos(
             hand_open_qpos, hand_grasp_qpos, n_waypoints=n_close

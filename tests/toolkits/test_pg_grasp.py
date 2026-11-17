@@ -73,6 +73,7 @@ def _prepared_backend(
     backend._hit_point_pairs = pairs
     backend._center_mode = center_mode
     backend._approach_alignment_angle = None
+    backend._closing_geometry = None
     return backend
 
 
@@ -86,6 +87,43 @@ def _object_pose() -> torch.Tensor:
             [0.0, 0.0, 0.0, 1.0],
         ]
     )
+
+
+def test_closing_floor_rejection_precedes_top_candidate_ranking() -> None:
+    from embodichain.toolkits.graspkit.pg_grasp.contact_fit import SampledHandGeometry
+
+    vertices, _ = _box_geometry()
+    centers = torch.tensor([[0.0, 0.0, 0.02], [0.0, 0.0, 0.06]])
+    offset = torch.tensor([0.02, 0.0, 0.0])
+    backend = _prepared_backend(
+        vertices, torch.stack((centers - offset, centers + offset), 1)
+    )
+    backend._max_deviation_angle = 0.1
+    backend._approach_direction_samples = 1
+    backend._max_candidates = 1
+    backend._filter_ground_collision = False
+    backend._collision_checker = Mock()
+    backend._collision_checker.query.side_effect = lambda obj, poses, **kwargs: (
+        torch.zeros(len(poses), dtype=torch.bool),
+        torch.zeros(len(poses)),
+    )
+    query = dict(
+        object_pose=torch.eye(4), approach_direction=torch.tensor([0.0, 0.0, -1.0])
+    )
+    success, poses, _, _ = backend.get_valid_grasp_poses(**query)
+    assert success and float(poses[0, 2, 3]) == pytest.approx(0.02)
+    backend._closing_geometry = SampledHandGeometry(
+        torch.tensor([[[0.0, 0.0, 0.0]], [[0.0, 0.0, 0.04]], [[0.0, 0.0, 0.08]]]),
+        torch.zeros(3, 2, 1, 3),
+        torch.tensor([0.1, 0.04, 0.0]),
+    )
+    backend._closing_ground_height_m = 0.0
+    backend._closing_ground_clearance_m = 0.002
+    backend._contact_half_turn = torch.diag(torch.tensor([-1.0, -1.0, 1.0, 1.0]))
+    success, poses, widths, costs = backend.get_valid_grasp_poses(**query)
+    assert success and len(poses) == 1 and torch.isfinite(costs).all()
+    assert float(poses[0, 2, 3]) == pytest.approx(0.06)
+    assert float(widths[0]) == pytest.approx(0.04)
 
 
 @pytest.mark.parametrize("second_center_x", [0.08, 0.0])

@@ -25,6 +25,7 @@ pytest.importorskip("open3d")
 from dexsim.kit import meshproc
 
 from embodichain.lab.sim.utility.dynamic_pybind import set_projective_uv
+from embodichain.lab.sim.objects import set_projective_uv as legacy_projective_uv
 
 
 class _FakeRenderBody:
@@ -56,8 +57,10 @@ class _FakeRenderBody:
         )
 
 
+@pytest.mark.parametrize("projective_uv", [set_projective_uv, legacy_projective_uv])
 def test_projective_uv_offsets_faces_for_multiple_meshes(
     monkeypatch: pytest.MonkeyPatch,
+    projective_uv,
 ) -> None:
     render_body = _FakeRenderBody()
     project_direction = np.array([1.0, 2.0, 3.0], dtype=np.float32)
@@ -71,7 +74,7 @@ def test_projective_uv_offsets_faces_for_multiple_meshes(
 
     monkeypatch.setattr(meshproc, "get_mesh_auto_uv", fake_get_mesh_auto_uv)
 
-    set_projective_uv(render_body, project_direction)
+    projective_uv(render_body, project_direction)
 
     np.testing.assert_array_equal(render_body.uv_mappings[0], generated_uv[:3])
     np.testing.assert_array_equal(render_body.uv_mappings[1], generated_uv[3:])

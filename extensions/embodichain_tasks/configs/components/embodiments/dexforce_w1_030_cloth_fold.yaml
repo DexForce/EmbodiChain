@@ -1,0 +1,23 @@
+embodiment_id: dexforce_w1_030_cloth_fold
+simulation:
+  uid: w1
+  fpath: w1_v030/robot.urdf
+  build_pk_chain: false
+  asset_physics_mode: overlay
+  control_parts:
+    fold_joints: [".*"]
+  root_props: {fixed_base: true}
+  attrs:
+    collision_props: {margin: 0.001, gap: 0.002}
+    material_props: {ke: 20000.0, kd: 100.0, dynamic_friction: 1.0}
+sensor: []
+skill_profile:
+  contract_id: dual_arm_parallel_gripper
+  profile_id: cloth_fold_w1
+  resources:
+    - resource_id: folder
+      endpoints:
+        - endpoint_id: motion
+          control_part: fold_joints
+          capabilities: [motion.joint_position]
+  command_presets: []

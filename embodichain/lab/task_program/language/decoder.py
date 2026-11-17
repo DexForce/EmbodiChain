@@ -26,6 +26,7 @@ from typing import Literal, Protocol, TypeAlias, runtime_checkable
 from .schema import (
     ArticulationJointPositionValidatorCfg,
     BarrierCfg,
+    ConditionValidatorCfg,
     MAX_PROGRAM_DEPTH,
     MAX_REPEAT_COUNT,
     CyclicPoseTargetCfg,
@@ -51,6 +52,8 @@ from .schema import (
     RegisteredSemanticCallCfg,
     RepeatCfg,
     SegmentCfg,
+    SegmentContractCfg,
+    SegmentEvidenceCfg,
     SemanticCallCfg,
     SequenceCfg,
     TargetCfg,
@@ -404,6 +407,34 @@ def _construct(
         raise _error("invalid_value", path, str(exc)) from exc
 
 
+def _decode_segment_contract(value: object, *, path: ConfigPath) -> SegmentContractCfg:
+    raw = _expect_mapping(value, path=path)
+    _validate_fields(
+        raw,
+        allowed=frozenset({"prerequisites", "outcomes"}),
+        required=frozenset({"outcomes"}),
+        path=path,
+    )
+    groups = {}
+    for group in ("prerequisites", "outcomes"):
+        groups[group] = []
+        for index, item in enumerate(
+            _expect_list(raw.get(group, []), path=(*path, group))
+        ):
+            item_path = (*path, group, index)
+            entry = _expect_mapping(item, path=item_path)
+            _validate_fields(
+                entry,
+                allowed=frozenset({"kind", "ref", "assurance", "required"}),
+                required=frozenset({"kind", "ref"}),
+                path=item_path,
+            )
+            groups[group].append(
+                _construct(SegmentEvidenceCfg, path=item_path, **entry)
+            )
+    return _construct(SegmentContractCfg, path=path, **groups)
+
+
 def _decode_pose(value: object, *, path: ConfigPath) -> PoseCfg:
     """Decode one finite pose value."""
     mapping = _expect_mapping(value, path=path)
@@ -737,8 +768,17 @@ def _decode_validator(
             "object_lifted",
             "object_relative_position",
             "object_upright",
+            "condition",
         ),
     )
+    if kind == "condition":
+        fields = frozenset({"kind", "ref"})
+        _validate_fields(mapping, allowed=fields, required=fields, path=path)
+        return _construct(
+            ConditionValidatorCfg,
+            path=path,
+            ref=_expect_identifier(mapping["ref"], path=(*path, "ref")),
+        )  # type: ignore[return-value]
     state_validator_types = {
         "object_lifted": (ObjectLiftedValidatorCfg, {"minimum_lift"}),
         "object_relative_position": (
@@ -990,7 +1030,15 @@ def _decode_program_node(
         _validate_fields(
             mapping,
             allowed=frozenset(
-                {"kind", "name", "steps", "post", "validators", "instruction"}
+                {
+                    "kind",
+                    "name",
+                    "steps",
+                    "post",
+                    "validators",
+                    "instruction",
+                    "contract",
+                }
             ),
             required=frozenset({"kind", "name", "steps"}),
             path=path,
@@ -1036,6 +1084,11 @@ def _decode_program_node(
             ),
             post=post,
             validators=validators,
+            contract=(
+                _decode_segment_contract(mapping["contract"], path=(*path, "contract"))
+                if mapping.get("contract") is not None
+                else None
+            ),
         )  # type: ignore[return-value]
 
     if kind == "parallel":

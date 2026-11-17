@@ -21,6 +21,7 @@
 | `embodichain/lab/visualization/markers/` | Marker prototype/group configuration, geometry generation, validation, and lifecycle |
 | `embodichain/lab/gym/utils/gym_utils.py` | Gym config parsing, common launcher arguments, and CLI overrides |
 | `embodichain/lab/gym/envs/base_env.py` | Environment scene setup, post-setup start, and forced reset capture |
+| `embodichain/lab/scripts/preview_scene.py` | Whole-scene USD preview, static default, explicit simulation, diagnostics and screenshots |
 | `embodichain/lab/scripts/preview_asset.py` | Standalone rigid-object and articulation browser preview |
 | `embodichain/lab/scripts/preview_robot.py` | Catalog/file robot preview with managed IK Gizmos and joint controls |
 | `embodichain/lab/scripts/_preview.py`, `preview_joint_control.py` | Shared preview stepping, frontend setup, and simulation-thread joint controls |
@@ -47,10 +48,12 @@ VisualizationBackend
              └── ViserBackend → HTTP/WebSocket browser UI
 ```
 
-Render-only `VisualObject` meshes export as `visual_object` nodes with root poses
-and live per-environment visibility. They share the mesh manifest/frame protocol
-without entering physical-object registries; non-mesh representations require a
-separate protocol extension.
+Legacy Mesh-backed `VisualObject` assets export as `visual_object` nodes with
+root poses and live per-environment visibility. They share the mesh manifest/frame
+protocol without entering physical registries. Procedural rigid-body mesh
+`visuals` are owner render descriptors and use ordinary mesh export. Companion
+`visuals`/`link_visuals` composition currently rejects Viser rather than publishing incomplete geometry;
+Gaussian resources require a separate typed protocol/backend extension.
 
 The simulation owns physics and assets. Scene export is read-only. When
 `allow_commands=True`, Viser Gizmo callbacks enqueue pose commands that
@@ -137,7 +140,8 @@ this invariant.
 | Symptom | Cause / action |
 |---|---|
 | `Visualization env_ids ... outside simulation range` | Selected IDs do not exist in the configured arenas. Validate them against `SimulationManager.num_envs`. |
-| Startup timeout or address-in-use error | The Viser worker did not become ready or the configured port is occupied. Select another port and inspect `visualization_health.worker_error`. |
+| Startup timeout, possibly just after Viser starts listening | The worker startup budget includes Viser frontend dependency installation/build and initial manifest publication. `VisualizationRuntime.start()` waits up to 120 seconds by default and returns as soon as ready; an unusually slow build may need a longer explicit `start(timeout=...)`. Inspect startup logs before retrying. |
+| Address-in-use error | The configured port is occupied. Select another port and inspect `visualization_health.worker_error`. |
 | Asset added after startup is missing | Step once, call `refresh_visualization()`, or mark topology dirty if the change bypassed manager APIs. |
 | Native marker creation reports missing render-actor support | Use a DexSim build exposing Scene render-only mesh lifecycle and generic RenderBody/MaterialInst overlay properties, or run with `--viser`. Overlay routing supports Hybrid, FastRT and OfflineRT. |
 | Newton Viser shows only the grid after declaring a robot | Check that Viser startup did not finalize an empty Spawn scene before asset declaration and that link poses remain finite after the first update. |
@@ -179,3 +183,26 @@ assets. USD singleton selection and USDZ texture extraction are shared through
 `sim/spawn/_usd_assets.py`; ghost-owned extraction directories survive until
 removal. Scaled marker transforms use the Scene visual batch, while rigid
 VisualObject poses use the World tensor batch.
+
+
+## Standard scene preview
+
+`preview-scene` and `gensim scene preview` dispatch to Lab's `preview_scene.py`.
+Only USD/USDA/USDC/USDZ file inputs are accepted; workspace, manifest and schema-v2
+preview adapters are removed. `SimulationManager.add_usd()` owns source resolution
+and supported representations. Producer-specific custom tags remain opaque.
+Scene preview disables the manager-owned default ground instead of adding a
+collider that was not authored in the input.
+
+The shared `_preview.py` loop separates display from stepping. Scene preview
+starts paused; `--simulate` opts into physics and headless simulation requires
+`--steps`. Paused joint edits only write explicitly commanded joints. Running
+simulation hides pose controls and does not hold qpos every frame. Asset/robot
+previews retain their existing holding/stepping defaults.
+
+Native shortcuts and Viser buttons enqueue play/pause/step/reset/stop commands;
+the simulation thread performs writes. Reset recreates the owned scene instead
+of restoring a partial solver checkpoint. Source-entry drift aborts reset.
+Reports distinguish input/load/prepare/display/render errors; screenshots warm
+up rendering without integrating physics. See
+[the scene preview guide](../../../embodichain/lab/scripts/preview_scene.md).

@@ -53,6 +53,9 @@ def semantic_plan_rules() -> dict[str, Any]:
         Required catalog capabilities and candidate calls for each task contract.
     """
     catalog = semantic_planning_catalog()["calls"]
+    held_transport = sorted(
+        cid for cid, call in catalog.items() if "transportable" in call["capabilities"]
+    )
     return {
         key: {
             "semantics": contract.semantics,
@@ -65,9 +68,172 @@ def semantic_plan_rules() -> dict[str, Any]:
                 if set(call["capabilities"])
                 & (contract.required_affordances - {"graspable"})
             ),
+            # A held single-arm result ends in held transport, not release.
+            **(
+                {"terminal_hold_requires_one_of": held_transport}
+                if contract.resource_mode == "single_arm"
+                and contract.moves_primary_object
+                and "terminal_behavior" in contract.applicable_intent_fields
+                else {}
+            ),
         }
         for key, contract in TASK_CONTRACTS.items()
     }
+
+
+def _validate_clause_coverage(
+    document: dict[str, Any],
+    requirements: list[dict[str, Any]],
+    graph: dict[str, Any],
+    annotations: dict[str, Any],
+    bindings: list[dict[str, Any]],
+    target_groups: dict[str, list[str]],
+    grounding: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Pair frozen qualifiers with their target and an actual implementing call."""
+    roles = {r["id"]: r for r in document["configuration"]["roles"]}
+    entities = {
+        role: {
+            e["id"]
+            for ref in document["interpretation"]["references"]
+            if ref["role_id"] == role
+            for e in ref["entities"]
+        }
+        for role in roles
+    }
+    predicates = {p["id"]: [p] for p in document["objectives"]["goal"]}
+    predicates.update(
+        {m["id"]: m["achieve"] for m in document["objectives"]["milestones"]}
+    )
+    entity_by_id = {item["id"]: item for item in grounding["objects"]}
+
+    def matches_role(uid: str | None, subjects: set[str]) -> bool:
+        seen = set()
+        while uid is not None and uid not in seen:
+            if uid in subjects:
+                return True
+            seen.add(uid)
+            uid = entity_by_id.get(uid, {}).get("parent")
+        return False
+
+    report = []
+    for clause in document["interpretation"]["clauses"]:
+        if clause["origin"] != "explicit":
+            continue
+        quoted = [r for r in requirements if clause["quote"] in r["quote"]]
+        if not quoted:
+            raise ValueError(f"Graph omits instruction qualifier {clause['id']!r}")
+        target = clause["target"]
+        target_roles = (
+            {target}
+            if target in roles
+            else {
+                p.get("subject", p.get("arguments", {}).get("subject"))
+                for p in predicates.get(target, [])
+            }
+            & roles.keys()
+        )
+        subjects = {entity for role in target_roles for entity in entities[role]}
+        node_ids = {node_id for r in quoted for node_id in r["node_ids"]}
+        candidates = [
+            n
+            for n in graph["nodes"]
+            if n["id"] in node_ids
+            and (
+                target not in target_groups
+                or n["task_instance_id"] in target_groups[target]
+            )
+            and (
+                matches_role(annotations[n["id"]]["object"], subjects)
+                or matches_role(annotations[n["id"]]["reference"], subjects)
+            )
+        ]
+        if not candidates:
+            raise ValueError(
+                f"Instruction qualifier {clause['id']!r} references the wrong target"
+            )
+        constraint = clause.get("constraint", {})
+        kind = constraint.get("kind")
+        covered = False
+        if kind == "role_property":
+            covered = (
+                target in roles
+                and constraint["key"] in roles[target]["properties"]
+                and roles[target]["properties"][constraint["key"]]
+                == constraint["value"]
+            )
+            if not covered:
+                raise ValueError(
+                    f"Instruction qualifier {clause['id']!r} has no frozen role property"
+                )
+        elif kind in {"return_to_origin", "restore_upright"}:
+            witnessed = set()
+            for node in candidates:
+                ann = annotations[node["id"]]
+                call = node["call"]
+                if kind == "return_to_origin":
+                    implements = (
+                        validate_semantic_call_payload(call)["effect"] == "release"
+                        and ann["intent"].get("return_to_origin") is True
+                        and ann["reference"] in {None, ann["object"]}
+                        and any(
+                            b["node_id"] == node["id"]
+                            and b["kind"] == "source_pose"
+                            and b["subject"] == ann["object"]
+                            for b in bindings
+                        )
+                    )
+                    if implements:
+                        later = graph["nodes"][graph["nodes"].index(node) + 1 :]
+                        implements = not any(
+                            (
+                                target not in target_groups
+                                or following["task_instance_id"]
+                                in target_groups[target]
+                            )
+                            and matches_role(
+                                annotations[following["id"]]["object"], {ann["object"]}
+                            )
+                            and validate_semantic_call_payload(following["call"])[
+                                "effect"
+                            ]
+                            != "preserve"
+                            for following in later
+                        )
+                else:
+                    # The catalog pour primitive restores its source orientation.
+                    implements = call.get("call_id") == "simulation.pour"
+                if implements:
+                    witnessed.add(ann["object"])
+            covered = bool(subjects) and subjects <= witnessed
+            if not covered:
+                raise ValueError(
+                    f"Instruction qualifier {clause['id']!r} is not implemented: {kind}"
+                )
+        report.append(
+            {
+                "clause_id": clause["id"],
+                "target": target,
+                "status": "covered" if covered else "unverified",
+                "node_ids": [n["id"] for n in candidates],
+                "reason": (
+                    "structured_declaration"
+                    if covered
+                    else "unsupported_or_unstructured_qualifier"
+                ),
+            }
+        )
+    return report
+
+
+def _producer_ids(step: dict[str, Any]) -> set[str]:
+    """Return the calls that can produce one source step's semantic goal."""
+    rules = semantic_plan_rules()[step["task_type"]]
+    if step.get("terminal_behavior") == "hold" and (
+        "terminal_hold_requires_one_of" in rules
+    ):
+        return set(rules["terminal_hold_requires_one_of"])
+    return set(rules["requires_one_of"])
 
 
 def validate_semantic_plan(
@@ -95,11 +261,26 @@ def validate_semantic_plan(
             request; these suggestions never change the input or establish
             validity without a complete subsequent validation.
     """
-    graph = validate_semantic_task_graph(graph)
     candidate = validate_task_candidate(candidate)
+    return _validate_interpreted_plan(
+        graph,
+        candidate["draft"],
+        candidate["scene_request"]["references"],
+        grounding,
+        annotations,
+        requirements,
+        bindings,
+    )
+
+
+def _validate_interpreted_plan(
+    graph, draft, references, grounding, annotations, requirements, bindings
+):
+    """Check an executable witness against resolved source intent."""
+    graph = validate_semantic_task_graph(graph)
     if (
-        graph["task_id"] != candidate["draft"]["task_id"]
-        or graph["instruction"] != candidate["draft"]["instruction"]
+        graph["task_id"] != draft["task_id"]
+        or graph["instruction"] != draft["instruction"]
     ):
         raise ValueError("Plan source identity mismatch")
     for entity in grounding["objects"]:
@@ -128,7 +309,7 @@ def validate_semantic_plan(
                 raise ValueError("Invalid normalized image evidence")
         elif box is not None:
             raise ValueError("Unobserved entities cannot have boxes")
-    steps = {s["id"]: s for s in candidate["draft"]["steps"]}
+    steps = {s["id"]: s for s in draft["steps"]}
     nodes = {n["id"]: n for n in graph["nodes"]}
     entities = {o["id"] for o in grounding["objects"]}
     entity_by_id = {o["id"]: o for o in grounding["objects"]}
@@ -159,9 +340,7 @@ def validate_semantic_plan(
             raise ValueError("Invalid semantic annotation: intent must be a dictionary")
     if set(g["id"] for g in graph["task_groups"]) != set(steps):
         raise ValueError("Graph must retain every source step")
-    _validate_reference_identity(
-        grounding["bindings"], candidate["scene_request"]["references"]
-    )
+    _validate_reference_identity(grounding["bindings"], references)
     expected_refs = {
         f"{step['id']}.{role}"
         for step in steps.values()
@@ -186,9 +365,15 @@ def validate_semantic_plan(
             set(binding)
             != {"id", "node_id", "kind", "parameter", "subject", "value", "source"}
             or binding["node_id"] not in nodes
-            or binding["subject"] not in entities
         ):
             raise ValueError("Malformed runtime binding requirement")
+        if binding["subject"] not in entities:
+            # Name the identity error so a repair can correct the subject.
+            raise ValueError(
+                f"Node {binding['node_id']} semantic.object "
+                f"{binding['subject']!r} is not a grounded entity ID; use one "
+                f"of {sorted(entities)}. Task role IDs are not entity IDs."
+            )
         node = nodes[binding["node_id"]]
         ann = annotations[binding["node_id"]]
         allowed = set(validate_semantic_call_payload(node["call"])["runtime_bindings"])
@@ -224,6 +409,30 @@ def validate_semantic_plan(
 
     def ancestors(nid: str) -> set[str]:
         return dependency_ancestors[nid]
+
+    # A one-shot repair can only fix what one diagnostic names, so report every
+    # placement relation mismatch together instead of the first one alone.
+    relation_mismatches = []
+    for node in graph["nodes"]:
+        call = node["call"]
+        if call["kind"] != "place":
+            continue
+        destination = "inside" if "inside" in call else "on" if "on" in call else None
+        relation = annotations.get(node["id"], {}).get("relation")
+        if destination is not None and relation != destination:
+            relation_mismatches.append((node["id"], destination, relation))
+    if len(relation_mismatches) > 1:
+        raise ValueError(
+            "Placement nodes use place.on/inside but declare a different "
+            "semantic.relation: "
+            + "; ".join(
+                f"{node_id} uses place.{destination} with relation={relation!r}"
+                for node_id, destination, relation in relation_mismatches
+            )
+            + ". Set EVERY listed placement node relation to its place "
+            "destination kind; a relative relation such as right_of requires "
+            "simulation.place_relative instead of builtin place."
+        )
 
     for node in graph["nodes"]:
         cid = node["call"].get("call_id", node["call"]["kind"])
@@ -425,9 +634,7 @@ def validate_semantic_plan(
     for step_id, step in steps.items():
         group = next(g for g in graph["task_groups"] if g["id"] == step_id)
         calls = [nodes[n] for n in group["node_ids"]]
-        if not set(effects[n["id"]] for n in calls) & set(
-            semantic_plan_rules()[step["task_type"]]["requires_one_of"]
-        ):
+        if not set(effects[n["id"]] for n in calls) & _producer_ids(step):
             raise ValueError(
                 f"Missing semantic producer for {step_id}:{step['task_type']}"
             )
@@ -449,7 +656,13 @@ def validate_semantic_plan(
             )
         ):
             raise ValueError("Requested printed knob setting was lost")
-        producer_ids = set(semantic_plan_rules()[step["task_type"]]["requires_one_of"])
+        producer_ids = _producer_ids(step)
+        held_transport = step.get("terminal_behavior") == "hold" and (
+            "terminal_hold_requires_one_of" in semantic_plan_rules()[step["task_type"]]
+        )
+        # Binding derives each held target and its validators from that
+        # subject's producing transport alone.
+        held_goal = step.get("orientation_goal", "none") if held_transport else "none"
         for subject in grounding["bindings"].get(f"{step_id}.object", []):
             producers = [
                 n
@@ -460,6 +673,17 @@ def validate_semantic_plan(
             if len(producers) != 1:
                 raise ValueError(
                     f"{step_id} requires exactly one semantic producer per declared subject, got {len(producers)} for {subject}"
+                )
+            producer = producers[0]
+            if (
+                held_goal != "none"
+                and annotations[producer["id"]]["intent"].get("orientation_goal")
+                != held_goal
+            ):
+                raise ValueError(
+                    f"{step_id} ends holding {subject} with orientation_goal="
+                    f"{held_goal}: declare it in semantic.intent of its held "
+                    f"transport {producer['id']}."
                 )
         expected = grounding["bindings"].get(f"{step_id}.object")
         if expected and not all(
@@ -475,6 +699,14 @@ def validate_semantic_plan(
             )
         target = grounding["bindings"].get(f"{step_id}.target")
         if step.get("terminal_behavior") == "hold":
+            if held_transport and any(
+                effects[n["id"]] == "simulation.axis_align" for n in calls
+            ):
+                raise ValueError(
+                    f"{step_id} ends holding its object: acquire it with pick; "
+                    "the held transport realizes any upright orientation, so "
+                    "remove simulation.axis_align."
+                )
             if TASK_CONTRACTS[step["task_type"]].resource_mode == "coordinated":
                 raise ValueError(
                     "Coordinated hold requires a matching hold call; the current transport call releases"
@@ -482,7 +714,7 @@ def validate_semantic_plan(
             if any(obj not in held_after[calls[-1]["id"]] for obj in expected or []):
                 raise ValueError("Requested terminal hold is not retained")
         if target:
-            placement_goal = (
+            placement_goal = step.get("terminal_behavior") != "hold" and (
                 "placeable" in TASK_CONTRACTS[step["task_type"]].required_affordances
                 or step.get("terminal_behavior") == "place"
             )

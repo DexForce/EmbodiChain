@@ -2438,6 +2438,18 @@ class SemanticCallCompiler:
                 expectation_id=expectation_id,
                 relation=relation,
             )
+            if type(call) is Place and gate_id == "source_released":
+                # At the landing pose an open gripper can still surround the object.
+                # Verify opening before retreat; verify separation at the terminal.
+
+                gate_spec = replace(
+                    gate_spec,
+                    clauses=tuple(
+                        clause
+                        for clause in gate_spec.clauses
+                        if isinstance(clause, BinaryEffectClause)
+                    ),
+                )
             try:
                 monitor = self._effect_monitor_registry.create(
                     gate_spec,

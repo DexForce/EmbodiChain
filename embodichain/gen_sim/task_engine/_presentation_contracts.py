@@ -58,10 +58,9 @@ def validate_display_coverage(
         ):
             raise ValueError("Semantic plan companion identity mismatch")
         source = envelope["source"]
-        from .task_spec import task_spec_from_candidate
+        from .task_spec import _published_projection
 
-        if task_spec_from_candidate(source["candidate"]).to_dict() != spec.to_dict():
-            raise ValueError("Semantic plan TaskSpec differs from source")
+        _published_projection(source["candidate"], spec, source["grounding"])
         coverage = validate_semantic_plan(selected, **source)
         if coverage != envelope.get("coverage"):
             raise ValueError("Semantic plan companion is stale")

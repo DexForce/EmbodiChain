@@ -70,6 +70,7 @@ from ._tcp_presets import ToolPoint, sample_tool_tcp
 
 if TYPE_CHECKING:
     import pytorch_kinematics as pk
+    from embodichain.toolkits.graspkit.pg_grasp.contact_fit import SampledHandGeometry
 
 __all__ = [
     "DUAL_UR5_INIT_POS",
@@ -174,6 +175,9 @@ def create_parallel_jaw_grasp_pose_generator(
     grasp_depth_offset_m: float = 0.0,
     closure_sweep: bool = False,
     ray_deviation_angle: float | None = None,
+    closing_geometry: SampledHandGeometry | None = None,
+    closing_ground_height_m: float | None = None,
+    closing_ground_clearance_m: float = 0.0,
 ) -> ParallelJawGraspPoseGenerator:
     """Create a standalone generator for the sample's mounted gripper.
 
@@ -193,6 +197,10 @@ def create_parallel_jaw_grasp_pose_generator(
             whose blocked closure intersects the inferred support plane.
         ray_deviation_angle: Maximum antipodal ray deviation from the sampled
             surface normal in radians; ``None`` keeps the generator default.
+        closing_geometry: Optional model stroke in the canonical contact frame.
+        closing_ground_height_m: Explicit world ground plane for that stroke.
+        closing_ground_clearance_m: Minimum floor clearance through each
+            proposed contact gap, including both runtime TCP half-turn variants.
 
     Returns:
         A generator with actual open hand collision surfaces and runtime TCP
@@ -206,6 +214,8 @@ def create_parallel_jaw_grasp_pose_generator(
         grasp_depth_offset_m
     ):
         raise ValueError("grasp_depth_offset_m must be finite.")
+    if (closing_geometry is None) != (closing_ground_height_m is None):
+        raise ValueError("Closing floor qualification needs geometry and a plane.")
     model = TUTORIAL_PARALLEL_JAW_MODEL if gripper_data is None else gripper_data
     defaults = resolve_gripper_defaults(model["catalog_id"])
     geometry = build_gripper_collision_geometry(
@@ -248,9 +258,29 @@ def create_parallel_jaw_grasp_pose_generator(
         )
         if closure_sweep:
             geometry = attach_closure_samples(geometry, defaults)
+        if closing_geometry is not None:
+            from embodichain.toolkits.graspkit.pg_grasp.contact_fit import (
+                SampledHandGeometry,
+            )
+
+            offset = closing_geometry.body.new_tensor([0.0, 0.0, grasp_depth_offset_m])
+            closing_geometry = SampledHandGeometry(
+                closing_geometry.body + offset,
+                closing_geometry.pads + offset,
+                closing_geometry.gaps,
+            )
     return AntipodalGraspPoseGenerator(
         **grasp_generator_parameters(model),
         collision_geometry=geometry,
+        **(
+            {
+                "closing_geometry": closing_geometry,
+                "closing_ground_height_m": closing_ground_height_m,
+                "closing_ground_clearance_m": closing_ground_clearance_m,
+            }
+            if closing_geometry is not None
+            else {}
+        ),
         algorithm_cfg=AntipodalGraspPoseGeneratorCfg(
             sample_count=n_sample,
             max_candidates=max_candidates,
@@ -570,13 +600,13 @@ def _create_franka_robotiq_cfg(overrides: dict[str, Any]) -> RobotCfg:
     cfg.control_parts["eef"] = list(_ROBOTIQ_HAND_JOINTS)
     cfg.init_qpos = list(cfg.init_qpos[:7]) + [0.0] * 6
     cfg.solver_cfg["arm"].tcp = sample_tool_tcp("franka", gripper="robotiq_2f_140")
-    for field, value in (
-        ("stiffness", 1e3),
-        ("damping", 1e2),
-        ("max_effort", _ROBOTIQ_MAX_EFFORT),
-    ):
+    # Native stiffness and damping with the reduced closing torque.
+    hand_drives = resolve_gripper_defaults("RobotiqArg2F140")["joint_drive_props"]
+    for field in ("stiffness", "damping"):
         for joint in _ROBOTIQ_HAND_JOINTS:
-            getattr(cfg.joint_drive_props, field)[joint] = value
+            getattr(cfg.joint_drive_props, field)[joint] = hand_drives[field]
+    for joint in _ROBOTIQ_HAND_JOINTS:
+        cfg.joint_drive_props.max_effort[joint] = _ROBOTIQ_MAX_EFFORT
     # The native compliant mimic lets the linkage fold under a held load, so the
     # pads lose parallel contact and the object slips. Couple it rigidly.
     cfg.mimic_compliance = {"finger_joint": MimicComplianceCfg(0.0, 0.0)}

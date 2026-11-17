@@ -23,7 +23,6 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 from embodichain.lab.sim.scene.layout import (
-    LayoutCfg,
     LayoutProblem,
     PlanarRelation,
     solve_layout,
@@ -40,6 +39,7 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.scene_layout_utils import (
     measure_scene_object_z_up_world_aabb,
     scene_object_y_up_layout,
 )
+from .table_surface_layout_optimizer import TableSurfaceLayoutOptimizerConfig
 
 if TYPE_CHECKING:
     from embodichain.gen_sim.scene_engine.pipeline.utils.scene_layout_constructor import (
@@ -130,33 +130,8 @@ class ParentSurfaceLayoutProblem:
 
 
 @dataclass(frozen=True)
-class ParentSurfaceLayoutOptimizerConfig:
+class ParentSurfaceLayoutOptimizerConfig(TableSurfaceLayoutOptimizerConfig):
     """Numerical controls for one non-table parent-surface sibling solve."""
-
-    relation_clearance_m: float = 0.03
-    collision_margin_m: float = 0.02
-    max_slsqp_iterations: int = 500
-    slsqp_ftol: float = 1e-6
-    max_collision_rounds: int = 8
-    max_added_collision_pairs: int = 64
-    imported_seed_weight: float = 5.0
-    min_center_distance_m: float = 0.01
-    min_center_distance_weight: float = 0.05
-
-    def __post_init__(self) -> None:
-        """Reject invalid controls before assembling parent-surface constraints."""
-        if self.relation_clearance_m < 0.0:
-            raise ValueError("relation_clearance_m must be non-negative.")
-        if self.collision_margin_m < 0.0:
-            raise ValueError("collision_margin_m must be non-negative.")
-        if self.max_slsqp_iterations <= 0:
-            raise ValueError("max_slsqp_iterations must be positive.")
-        if self.slsqp_ftol <= 0.0:
-            raise ValueError("slsqp_ftol must be positive.")
-        if self.max_collision_rounds <= 0:
-            raise ValueError("max_collision_rounds must be positive.")
-        if self.max_added_collision_pairs <= 0:
-            raise ValueError("max_added_collision_pairs must be positive.")
 
 
 class ParentSurfaceLayoutOptimizer:
@@ -197,16 +172,7 @@ class ParentSurfaceLayoutOptimizer:
                 ),
                 skip_fixed_collisions=True,
             ),
-            LayoutCfg(
-                relation_clearance_m=self.config.relation_clearance_m,
-                collision_margin_m=self.config.collision_margin_m,
-                max_slsqp_iterations=self.config.max_slsqp_iterations,
-                slsqp_ftol=self.config.slsqp_ftol,
-                max_collision_rounds=self.config.max_collision_rounds,
-                max_added_collision_pairs=self.config.max_added_collision_pairs,
-                imported_seed_weight=self.config.imported_seed_weight,
-                enforce_all_clearances=False,
-            ),
+            self.config._layout_cfg(),
         )
         if solution.status != "solved":
             raise ValueError(

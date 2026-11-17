@@ -19,7 +19,6 @@
 from __future__ import annotations
 
 import argparse
-from copy import deepcopy
 from pathlib import Path
 
 import yaml
@@ -47,7 +46,15 @@ def prepare(output: Path, *, duration_s: float = 2.0) -> Path:
     policy = yaml.safe_load(
         (base / task["task_program"]["execution_policy"]).read_text()
     )
+    physical = _resolve_gym_components(task, base_dir=base)
+    from embodichain.lab.task_program.language.decoder import _decode_target
+
     template = yaml.safe_load((base / task["task_program"]["program"]).read_text())
+    target = _decode_target(
+        template["targets"]["above_worktop"], path=("targets", "above_worktop")
+    )
+    if target.kind == "cyclic_pose":
+        target = target.values[0]
     integration["program_id"] = "carton_present"
     integration["integration_id"] = "carton_present"
     services = integration["runtime_services"]
@@ -61,7 +68,10 @@ def prepare(output: Path, *, duration_s: float = 2.0) -> Path:
         "revision": "1",
         "params": {},
     }
-    destination = deepcopy(template["targets"]["above_worktop"]["values"][0])
+    destination = {
+        "position": list(target.position),
+        "quaternion_xyzw": list(target.quaternion_xyzw),
+    }
     program = {
         "program_id": "carton_present",
         "instruction": "Pick the carton, move it above the worktop and hold it.",
@@ -97,7 +107,6 @@ def prepare(output: Path, *, duration_s: float = 2.0) -> Path:
         "integration": "integration.yaml",
         "execution_policy": "policy.yaml",
     }
-    physical = _resolve_gym_components(task, base_dir=base)
     # Validate before creating any output, using the normal configured composition.
     deployment = load_configured_task_program_deployment(
         task_program={

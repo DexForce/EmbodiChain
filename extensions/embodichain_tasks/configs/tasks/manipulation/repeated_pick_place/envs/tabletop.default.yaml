@@ -1,7 +1,7 @@
 environment_id: repeated_pick_place_tabletop
 physics: default
 max_episodes: 1
-max_episode_steps: 2400
+max_episode_steps: 4800
 num_envs: 1
 arena_space: 3.0
 

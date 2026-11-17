@@ -21,6 +21,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from pathlib import Path
 
+from .env import _iter_env_file
+
 __all__: list[str] = []
 
 _DEFAULT_ENV_PATH = Path(__file__).resolve().parent / ".env"
@@ -37,17 +39,7 @@ def _read_gen_sim_env_values(
     if not path.is_file():
         raise FileNotFoundError(f"{owner} .env file not found: {path}")
 
-    values: dict[str, str] = {}
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, raw_value = line.split("=", maxsplit=1)
-        key = key.strip()
-        value = raw_value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
-            value = value[1:-1]
-        values[key] = value
+    values = dict(_iter_env_file(path))
 
     aliases = {} if aliases is None else dict(aliases)
     resolved: dict[str, str] = {}

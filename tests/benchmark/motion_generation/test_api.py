@@ -1123,3 +1123,52 @@ def test_parallel_resolves_device_index_in_parent(
     assert current.call_count == int(uses_current)
     if torch.device(resolved).type == "cuda":
         assert torch.device(resolved).index is not None
+
+
+@pytest.mark.parametrize("change", ["none", "source", "config", "corrupt"])
+def test_preparation_progress_survives_interruption_and_rejects_mismatch(
+    fake_runtime, tmp_path, monkeypatch, change
+):
+    """Interrupted preparation retains inputs but never publishes a partial corpus."""
+    from embodichain_benchmarks.motion_generation import prepare_case_manifest
+
+    suite = load_suite()
+    output, progress = tmp_path / "frozen.json", tmp_path / "progress"
+    generate = Mock(wraps=fake_runtime[2].generate_cases)
+    monkeypatch.setattr(fake_runtime[2], "generate_cases", generate)
+    writer = runner_module.write_case_manifest
+    monkeypatch.setattr(
+        runner_module,
+        "write_case_manifest",
+        Mock(side_effect=KeyboardInterrupt("interrupted before final publication")),
+    )
+    kwargs = dict(
+        output=output, device="cpu", progress=progress, generation_revision="A"
+    )
+    with pytest.raises(KeyboardInterrupt):
+        prepare_case_manifest(suite, **kwargs)
+    assert not output.exists()
+    assert generate.call_count == 1
+    saved = list(progress.glob("case-*.json"))
+    assert len(saved) == 1
+    original = saved[0].read_bytes()
+    monkeypatch.setattr(runner_module, "write_case_manifest", writer)
+    if change == "source":
+        kwargs["generation_revision"] = "B"
+    elif change == "config":
+        suite.protocol.position_threshold_m *= 2
+    elif change == "corrupt":
+        payload = json.loads(saved[0].read_text())
+        payload["cases"][0]["seed"] += 1
+        saved[0].write_text(json.dumps(payload))
+    if change != "none":
+        with pytest.raises(ValueError, match="preparation|hash"):
+            prepare_case_manifest(suite, **kwargs)
+        assert not output.exists()
+    else:
+        prepare_case_manifest(suite, **kwargs)
+        assert saved[0].read_bytes() == original
+        payload = json.loads(output.read_text())
+        assert payload["cases"][0]["case_id"] == "test_case"
+        assert len(payload["cases"]) == 1
+    assert generate.call_count == 1

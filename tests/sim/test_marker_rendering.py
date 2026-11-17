@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 import pytest
 
@@ -24,6 +26,17 @@ from embodichain.lab.sim.cfg import RenderCfg
 from embodichain.lab.visualization.markers import MarkerGroupCfg, MarkerPrototypeCfg
 
 pytestmark = [pytest.mark.gpu, pytest.mark.requires_sim]
+
+_WINDOW_MODES = [
+    False,
+    pytest.param(
+        True,
+        marks=pytest.mark.skipif(
+            os.environ.get("SDL_VIDEODRIVER") == "dummy",
+            reason="SDL's dummy video driver cannot open a native window.",
+        ),
+    ),
+]
 
 
 def _require_render_actor_capability():
@@ -149,18 +162,23 @@ def _exercise_repeated_marker_lifecycle(sim):
         arena = None
 
 
-def test_marker_group_native_rendering_and_sensor_isolation():
+@pytest.mark.parametrize("window", _WINDOW_MODES)
+def test_marker_group_native_rendering_and_sensor_isolation(window: bool) -> None:
     _require_render_actor_capability()
     sim = SimulationManager(
         SimulationManagerCfg(
             headless=True,
             sim_device="cpu",
+            width=320,
+            height=240,
             enable_entity_gizmo=False,
             render_cfg=RenderCfg(renderer="hybrid"),
             startup_summary="off",
         )
     )
     try:
+        if window:
+            assert sim.open_window()
         _exercise_marker_rendering(sim)
     finally:
         sim.destroy(exit_process=False)
@@ -183,8 +201,12 @@ def _exercise_marker_rendering(sim):
     sim.prepare()
 
     def render():
-        sim.sync_render_state()
-        camera.render()
+        if sim.is_window_opened:
+            with sim.render_frame():
+                sim.render_camera_group([camera_group.get_group_id()])
+        else:
+            sim.sync_render_state()
+            camera.render()
         return np.array(camera.get_rgb_map()[..., :3], copy=True)
 
     baseline = render()
@@ -358,8 +380,9 @@ def test_native_environment_batches_selected_mutations_without_preparation():
 
 
 @pytest.mark.parametrize("stereo", [False, True])
+@pytest.mark.parametrize("window", _WINDOW_MODES)
 def test_robot_markers_textures_opacity_and_material_switch(
-    tmp_path, request: pytest.FixtureRequest, stereo: bool
+    tmp_path, request: pytest.FixtureRequest, stereo: bool, window: bool
 ) -> None:
     from PIL import Image
     import trimesh
@@ -393,6 +416,8 @@ def test_robot_markers_textures_opacity_and_material_switch(
         SimulationManagerCfg(
             headless=True,
             device="cpu",
+            width=320,
+            height=240,
             enable_entity_gizmo=False,
             render_cfg=RenderCfg(
                 renderer=request.config.getoption("--renderer"),
@@ -402,6 +427,8 @@ def test_robot_markers_textures_opacity_and_material_switch(
         )
     )
     try:
+        if window:
+            assert sim.open_window()
         _exercise_textured_ghost(sim, path, stereo)
     finally:
         sim.destroy(exit_process=False)
@@ -417,6 +444,9 @@ def _exercise_textured_ghost(sim, path, stereo):
         RobotMarkersCfg,
     )
 
+    # OfflineRT's lit marker preview is gray with either capture route in
+    # 0.6.0rc1. Unlit markers provide a color oracle for its synchronization.
+    unlit = sim.sim_config.render_cfg.renderer == "rt"
     sim.prepare()
     sim.set_ground_plane_visibility(False)
     scene = sim._spawn_scene.builder.result
@@ -442,8 +472,9 @@ def _exercise_textured_ghost(sim, path, stereo):
     preview = make_camera("preview", True)
 
     def render(camera):
-        sim.get_world()._flush_render_updates()
-        camera.update()
+        with sim.render_frame():
+            sim.render_camera_group([camera.group_id])
+            camera.update(fetch_only=True)
         data = camera.get_data()
         keys = ("color", "color_right") if stereo else ("color",)
         return np.stack([data[key][0, ..., :3].cpu().numpy() for key in keys]).astype(
@@ -464,7 +495,7 @@ def _exercise_textured_ghost(sim, path, stereo):
         RobotMarkersCfg(
             name="texture",
             asset_path=str(path),
-            appearance=RobotMarkersAppearanceCfg(mode="asset", opacity=1),
+            appearance=RobotMarkersAppearanceCfg(unlit=unlit, mode="asset", opacity=1),
         ),
         sim,
     )
@@ -481,30 +512,58 @@ def _exercise_textured_ghost(sim, path, stereo):
         visible = render(preview)
         assert np.all(colored(visible, 0) > 100) and np.all(colored(visible, 2) > 100)
     ghost.set_appearance(
-        RobotMarkersAppearanceCfg(mode="override", color=(0, 1, 0), opacity=1)
+        RobotMarkersAppearanceCfg(
+            unlit=unlit, mode="override", color=(0, 1, 0), opacity=1
+        )
     )
     opaque_green = render(preview)
     assert np.all(colored(opaque_green, 1) > 100)
     assert np.all(colored(opaque_green, 0) == 0) and np.all(
         colored(opaque_green, 2) == 0
     )
-    ghost.set_appearance(RobotMarkersAppearanceCfg(mode="asset", opacity=1))
+    ghost.set_appearance(
+        RobotMarkersAppearanceCfg(unlit=unlit, mode="asset", opacity=1)
+    )
     restored = render(preview)
     assert np.all(colored(restored, 0) > 100) and np.all(colored(restored, 2) > 100)
-    ghost.set_appearance(RobotMarkersAppearanceCfg(mode="asset", opacity=0))
+    ghost.set_appearance(
+        RobotMarkersAppearanceCfg(unlit=unlit, mode="asset", opacity=0)
+    )
     invisible = render(preview)
     assert np.all(colored(invisible, 0) <= colored(baseline, 0) + 2)
     assert np.all(colored(invisible, 2) <= colored(baseline, 2) + 2)
     ghost.set_appearance(
-        RobotMarkersAppearanceCfg(mode="override", color=(0, 1, 0), opacity=0.6)
+        RobotMarkersAppearanceCfg(
+            unlit=unlit, mode="override", color=(0, 1, 0), opacity=0.6
+        )
     )
     green = render(preview)
     assert np.all(colored(green, 1) > 100) and np.all(colored(green, 0) == 0)
-    ghost.set_appearance(RobotMarkersAppearanceCfg(mode="asset", opacity=0.6))
+    ghost.set_appearance(
+        RobotMarkersAppearanceCfg(unlit=unlit, mode="asset", opacity=0.6)
+    )
     translucent = render(preview)
     assert np.all(colored(translucent, 0) > 100) and np.all(
         colored(translucent, 2) > 100
     )
     assert np.all(colored(render(sensor), 0) <= colored(baseline, 0) + 2)
+    ghost.set_appearance(
+        RobotMarkersAppearanceCfg(
+            unlit=unlit, mode="override", color=(1, 0, 0), opacity=1
+        )
+    )
+    centers = []
+    for x in (-0.3, 0.3):
+        poses[..., 0, 3] = x
+        ghost.visualize_link_poses(poses)
+        sim.update(step=1)
+        frame = render(preview)
+        red = (frame[..., 0] > 100) & (frame[..., 0] > frame[..., 1:].max(-1) + 40)
+        assert np.all(red.sum(axis=(1, 2)) > 100)
+        centers.append([np.nonzero(eye)[1].mean() for eye in red])
+    # A 0.6 m lateral translation at 2 m depth with fx=105 moves 31.5 pixels.
+    np.testing.assert_allclose(np.subtract(centers[1], centers[0]), 31.5, atol=3)
     ghost.remove()
     assert set(scene.handles) == before
+    removed = render(preview)
+    assert np.all(colored(removed, 0) <= colored(baseline, 0) + 2)
