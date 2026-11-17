@@ -27,3 +27,18 @@ depth is the outward exit distance from inside that mesh, clipped to 0.012 m.
 - `samples.npz` stores depth, hit validity, shape IDs, the tool position and
   sample metadata. The first dimension is the completed sample index. The
   depth grid is ordered by local Y then X.
+
+## Tactile RGB
+
+```bash
+python -m examples.sim.sensors.tactile.demo --rgb --output-dir /tmp/tactile-rgb --video
+```
+
+The scene, depth, and RGB panels share one sample ID and simulation timestamp.
+RGB is a normalized, first-order optical model on the same pad grid. The
+triples supplied by `--background`, `--x-response`, and `--y-response` set the
+no-contact color and the three channel gains for depth slopes along increasing
+probe columns and rows. The defaults are illustrative settings. Calibrate all
+three triples for a physical pad before comparing its images. The sphere
+releases at the end and every pixel returns to the same background used by a
+reset row. The archive includes the normalized `rgb` array in Y/X/channel order.
