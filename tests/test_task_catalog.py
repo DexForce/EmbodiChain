@@ -86,6 +86,27 @@ def write(path: Path, value: dict) -> None:
     path.write_text(json.dumps(value), encoding="utf-8")
 
 
+def test_gaussian_pick_place_is_one_official_task_with_three_deployments() -> None:
+    root = (
+        Path(__file__).resolve().parents[1]
+        / "extensions/embodichain_tasks/configs/tasks"
+    )
+    tasks = catalog._load_catalog({"embodichain_tasks": root})
+    task = catalog._select_task(tasks, "embodichain_tasks:gaussian_pick_place")
+    assert task.task_path == ("manipulation", "gaussian_pick_place")
+    assert task.default_deployment == "office"
+    assert {deployment.name: deployment.env_id for deployment in task.deployments} == {
+        "office": "FrankaGSPickPlace-Office-v1",
+        "discoverse": "FrankaGSPickPlace-Discoverse-v1",
+        "robosimgs": "FrankaGSPickPlace-Robosimgs-v1",
+    }
+    assert all(
+        deployment.capabilities == {catalog._TASK_PROGRAM}
+        and deployment.physics == "default"
+        for deployment in task.deployments
+    )
+
+
 @pytest.fixture
 def task_root(tmp_path: Path) -> Path:
     task = tmp_path / "manipulation" / "pick"

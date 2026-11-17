@@ -153,6 +153,32 @@ IDs; changing the `embodiment.component` reference is sufficient when another
 embodiment satisfies the same contract. These files intentionally have no
 compatibility `version` field.
 
+Deployments may use `embodiment.camera_overrides` for scene-specific camera
+calibration without copying that suite:
+
+```yaml
+embodiment:
+  component: ../../../components/embodiments/franka_gs_dual_camera.yaml
+  camera_overrides:
+    cam_third:
+      intrinsics: [480, 480, 480, 270]
+      extrinsics:
+        eye: [0.85, -0.65, 0.85]
+        target: [0.3, 0, 0.38]
+        up: [0, 0, 1]
+```
+
+Only ordinary `Camera` UIDs explicitly declared in the component's `sensor`
+or `simulation.sensors` list are eligible. Unknown or duplicate UIDs fail.
+Only `intrinsics` and `extrinsics` are accepted; membership, type, parent,
+resolution and output flags remain with the component. Intrinsics contain four
+finite numbers with positive focal lengths. Extrinsics accept finite look-at
+vectors with nondegenerate direction/up, or position and a unit XYZW quaternion.
+Partial edits preserve the current representation's other fields. Switching
+between look-at and explicit pose requires a complete `eye`/`target` or
+`pos`/`quat`, clears stale fields and preserves parent. Sensor defaults owned
+only by a robot preset are not materialized by this selector.
+
 ## Dual-arm task deployments
 
 The following tasks provide `dual_ur5_dh_pgi_140_80` and

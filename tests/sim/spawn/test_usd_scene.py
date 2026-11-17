@@ -246,12 +246,13 @@ def gaussian_scene_files(scene_files, tmp_path):
 
 
 @pytest.mark.parametrize("kind", ["usd", "zip"])
+@pytest.mark.parametrize("visual_only", [False, True])
 @pytest.mark.skipif(
     find_spec("embodichain.lab.sim.cfg.visuals") is None,
     reason="Requires Gaussian visual integration from PR #934",
 )
 def test_gaussian_source_package_and_preset_resolve_without_world(
-    gaussian_scene_files, kind, tmp_path, monkeypatch
+    gaussian_scene_files, kind, visual_only, tmp_path, monkeypatch
 ):
     from unittest.mock import Mock
     import yaml
@@ -260,6 +261,9 @@ def test_gaussian_source_package_and_preset_resolve_without_world(
 
     recipe = _recipe(gaussian_scene_files[kind])
     prefix = "/Asset" if kind == "zip" else ""
+    if visual_only:
+        recipe.source.root_prim_path = prefix + "/World/capture"
+        recipe.asset_cfgs = {prefix + "/World/capture": {"uid": "background"}}
     trap = Mock(
         side_effect=AssertionError("Static preflight must not allocate a World")
     )
@@ -277,9 +281,18 @@ def test_gaussian_source_package_and_preset_resolve_without_world(
         resolved.usd_scene_inventory["resource_types"][prefix + "/World/capture"]
         == "visual_object"
     )
-    resolved.validate_scene_bindings(
-        {"rigid_objects": [{"entity_id": "box", "simulation_uid": "target"}]}
-    )
+    if visual_only:
+        # A selected scan must not inherit its siblings' room-sized colliders.
+        assert resolved.usd_scene_inventory["resource_uids"] == {
+            prefix + "/World/capture": "background"
+        }
+        assert resolved.usd_scene_inventory["resource_types"] == {
+            prefix + "/World/capture": "visual_object"
+        }
+    else:
+        resolved.validate_scene_bindings(
+            {"rigid_objects": [{"entity_id": "box", "simulation_uid": "target"}]}
+        )
     cfg = config_to_cfg(config, source_path=tmp_path / "task.yaml")
     assert cfg.sim_cfg.render_cfg.renderer == "hybrid"
     assert cfg.sim_cfg.render_cfg.gaussian.enabled

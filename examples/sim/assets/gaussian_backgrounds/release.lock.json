@@ -1,0 +1,80 @@
+{
+  "publication_scope": "visual-only GS scene packages; no metric-depth or industrial certification",
+  "scenes": [
+    {
+      "archive": "robosplatter_office_v1.zip",
+      "asset_id": "ed897207-9a71-59ae-8e90-622858a1ae9b",
+      "asset_json_sha256": "0b6368849976fc93b27ab9099c1b934d3a1350fe1accb5e0d045e0ebcc509089",
+      "bytes": 229834710,
+      "entry": "asset.usda",
+      "license": "Apache-2.0",
+      "md5": "c36ff7550a47677479f22a21a8ee3c40",
+      "name": "RoboSplatter Office",
+      "revision_id": "772549de-dbe9-441d-8bd2-c74352c272e1",
+      "scene": "office",
+      "sha256": "d82acd90af546a4b74548e360dbd37e757106ffcd14c2c80c2d95473b6ecac67",
+      "source_sha256": "7bee948f8e9c5a60168ed5a780ac7ca13dd20e514794988032da5edb4591bacb",
+      "validation": {
+        "asset_revision": "passed",
+        "collision_count": 0,
+        "meters_per_unit": 1,
+        "quality_certification": null,
+        "up_axis": "Z",
+        "usd_admission": "passed"
+      }
+    },
+    {
+      "archive": "discoverse_lab3_v1.zip",
+      "asset_id": "e5e1c37d-37f3-523f-88a1-2d7eca07fdaa",
+      "asset_json_sha256": "4fa2771bf71fb5e0a38e31e79e49f9bed0db60047aa9f313ea2ff4a162d64ba5",
+      "bytes": 25438135,
+      "entry": "asset.usda",
+      "license": null,
+      "md5": "ec9f17d4610e0dd5347ddb4815c531ad",
+      "name": "DISCOVERSE Lab3",
+      "revision_id": "95bf04bc-0637-413e-8572-e194134db62b",
+      "scene": "discoverse",
+      "sha256": "eedd035f5b56a02a53ebd4c95c16802fa83f65bf1a91e6f6efde7320fae06298",
+      "source_sha256": "522a9c434aa82a7d64e89482cc2b1963d76bd20dce6c3c5e81dfe345385b4ceb",
+      "validation": {
+        "asset_revision": "passed",
+        "collision_count": 0,
+        "meters_per_unit": 1,
+        "quality_certification": null,
+        "up_axis": "Z",
+        "usd_admission": "passed"
+      }
+    },
+    {
+      "archive": "robosimgs_tabletop_v1.zip",
+      "asset_id": "678a8dc4-e5c5-5306-9a69-656cd9c86a58",
+      "asset_json_sha256": "77fd0a6810b84695e57e9080a73b423634d06cd9376a8724ad35207865ba128f",
+      "bytes": 260934308,
+      "entry": "asset.usda",
+      "license": "MIT",
+      "md5": "b6fc69397d64ccff611bff5712931b1a",
+      "name": "RoboSimGS Tabletop",
+      "revision_id": "683ee363-2b62-4d7b-80a8-5d4cb4f8d629",
+      "scene": "robosimgs",
+      "sha256": "c7c02ac9b59e87e6a46d569168e2d41fb2d2287792ad9d21280719e555477db3",
+      "source_sha256": "fab316cfc24998c481792e075aa1430f0c1a324af197bfb891082ebe42d5ef07",
+      "validation": {
+        "asset_revision": "passed",
+        "collision_count": 0,
+        "meters_per_unit": 1,
+        "quality_certification": null,
+        "up_axis": "Z",
+        "usd_admission": "passed"
+      }
+    }
+  ],
+  "schema_version": 1,
+  "publication": {
+    "repo": "DexForceAI/embodichain_data",
+    "path": "scene_assets/gaussian_backgrounds_v1",
+    "commit": "3ec5b1fb7d320599c54f07bc20d4c49d570a2e2b",
+    "url": "https://huggingface.co/datasets/DexForceAI/embodichain_data/commit/3ec5b1fb7d320599c54f07bc20d4c49d570a2e2b",
+    "previous_head": "c23d7e39749e8e6622742a99bb7b7e65be20b049",
+    "file_count": 12
+  }
+}
