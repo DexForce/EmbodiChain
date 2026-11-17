@@ -58,7 +58,7 @@ def test_pose_batch_suite_declares_translation_only_batched_trials() -> None:
     track = suite.enabled_tracks()[0]
 
     settings = resolve_atomic_pose_randomization(track)
-    assert suite.suite_version == "atomic_franka_robotiq_pose_batch_v12"
+    assert suite.suite_version == "atomic_franka_robotiq_pose_batch_v13"
     assert settings.enabled is True
     assert settings.mode == "translation"
     assert settings.pose_batch_size == 8
@@ -227,7 +227,7 @@ def test_spatial_generalization_suite_covers_task_level_single_arm_skills() -> N
         ),
     }
 
-    assert suite.suite_version == "atomic_franka_robotiq_spatial_generalization_v20"
+    assert suite.suite_version == "atomic_franka_robotiq_spatial_generalization_v21"
     assert len(suite.evaluation_tracks()) == 79
     assert set(expected) == {track.id for track in suite.tracks}
     for track in suite.tracks:
@@ -414,6 +414,98 @@ def test_articulation_only_tracks_declare_rigid_solver_iterations() -> None:
                 )
     # The spatial suite's control-panel, drawer and door tracks.
     assert checked >= 3
+
+
+def test_robotiq_articulations_declare_zero_joint_friction() -> None:
+    """A partial drive keeps the asset's joint friction unless it is declared.
+
+    The URDF coefficients (1.0 on the drawer slide) scale constraint force in
+    PhysX and held the drawer and door still in replay.
+    """
+    from importlib.resources import files
+
+    suites = files("embodichain_benchmarks.motion_generation").joinpath("suites")
+    checked = 0
+    for path in sorted(suites.iterdir(), key=lambda entry: entry.name):
+        if not path.name.startswith("atomic_franka_robotiq_"):
+            continue
+        for track in load_suite(path.name[: -len(".yaml")]).tracks:
+            for articulation in track.config.get("articulations", []):
+                checked += 1
+                assert articulation["drive"]["friction"] == 0.0, (
+                    path.name,
+                    track.id,
+                    articulation["id"],
+                )
+    assert checked >= 9
+
+
+def test_spatial_door_qualifies_inputs_and_seeds_its_approach() -> None:
+    """Only the door's robustness domains resample unreachable batches."""
+    suite = load_suite("atomic_franka_robotiq_spatial_generalization")
+    doors = 0
+    for track in suite.evaluation_tracks():
+        attempts = track.config.get("case_generation_attempts")
+        if not track.id.startswith("spatial-door@"):
+            assert attempts is None, track.id
+            continue
+        doors += 1
+        nominal = track.domain is not None and track.domain.kind == "nominal"
+        assert attempts == (None if nominal else 16), track.id
+        (skill,) = track.config["skills"]
+        assert skill["approach_ik_seeds"] == 8
+        scales = {
+            case["name"]: case.get("articulation_jitter_scale")
+            for case in skill["cases"]
+        }
+        assert scales == {
+            "spatial_microwave_door_30deg": None,
+            "spatial_microwave_door_60deg": 0.75,
+            "spatial_microwave_door_90deg": 0.5,
+        }
+    assert doors == 8
+
+
+@pytest.mark.parametrize("scale", [1.0, 0.5, 0.0])
+def test_scene_pose_jitter_scale_narrows_every_resolved_range(scale: float) -> None:
+    from embodichain_benchmarks.motion_generation.scenarios._atomic_pose_sampling import (
+        randomized_scene_pose,
+    )
+
+    pose = torch.eye(4).repeat(8, 1, 1)
+    config = {
+        "articulation_position_jitter_m": [0.04, 0.02, 0.0],
+        "articulation_yaw_jitter_rad": 0.4,
+    }
+    full = randomized_scene_pose(pose, config, kind="articulation", seed=11, stream=3)
+    scaled = randomized_scene_pose(
+        pose,
+        {**config, "articulation_jitter_scale": scale},
+        kind="articulation",
+        seed=11,
+        stream=3,
+    )
+
+    torch.testing.assert_close(scaled[:, :3, 3], full[:, :3, 3] * scale)
+    full_yaw = torch.atan2(full[:, 1, 0], full[:, 0, 0])
+    scaled_yaw = torch.atan2(scaled[:, 1, 0], scaled[:, 0, 0])
+    torch.testing.assert_close(scaled_yaw, full_yaw * scale)
+
+
+@pytest.mark.parametrize("scale", [-0.1, 1.5, True, "0.5"])
+def test_scene_pose_jitter_scale_rejects_invalid_values(scale: object) -> None:
+    from embodichain_benchmarks.motion_generation.scenarios._atomic_pose_sampling import (
+        randomized_scene_pose,
+    )
+
+    with pytest.raises(ValueError, match="articulation_jitter_scale"):
+        randomized_scene_pose(
+            torch.eye(4).repeat(2, 1, 1),
+            {"articulation_jitter_scale": scale},
+            kind="articulation",
+            seed=11,
+            stream=3,
+        )
 
 
 def test_spatial_suites_cover_every_non_motion_atomic_skill() -> None:
@@ -1412,6 +1504,51 @@ def test_resolve_articulation_grasp_broadcasts_one_local_candidate_over_batch(
         call.kwargs["pose"].shape == (batch_size, 4, 4)
         for call in robot.compute_ik.call_args_list
     )
+
+
+def test_unreachable_articulation_grasp_is_an_input_qualification_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Tracks with case_generation_attempts draw another batch on this error."""
+    from embodichain_benchmarks.motion_generation import _atomic_fixtures
+    from embodichain_benchmarks.motion_generation.scenarios._case_qualification import (
+        _CaseQualificationError,
+    )
+
+    target_pose = torch.eye(4).repeat(2, 1, 1)
+    generator = Mock()
+    generator.get_valid_grasp_poses.return_value = [
+        (target_pose[:1].clone(), torch.zeros(1))
+    ]
+    monkeypatch.setattr(
+        _atomic_fixtures,
+        "create_parallel_jaw_grasp_pose_generator",
+        Mock(return_value=generator),
+    )
+    robot = Mock(device=torch.device("cpu"))
+    robot.cfg.solver_cfg = {"arm": {"tcp": torch.eye(4).tolist()}}
+    robot.compute_ik.side_effect = lambda pose, joint_seed, name: (
+        torch.tensor([True, False]),
+        joint_seed.clone(),
+    )
+    scenario = AtomicSkillScenario()
+    scenario.robot = robot
+    scenario.control_part = "arm"
+    scenario.track = Mock(config={})
+
+    with pytest.raises(_CaseQualificationError, match="articulation grasp"):
+        scenario.screen_articulation_grasp(
+            mesh_vertices=torch.zeros(3, 3),
+            mesh_triangles=torch.tensor([[0, 1, 2]]),
+            target_pose=target_pose,
+            approach_direction=torch.tensor([0.0, 0.0, 1.0]).repeat(2, 1),
+            start_qpos=torch.zeros(2, 7),
+            seed=11,
+            n_sample=32,
+            max_candidates=1,
+            alignment_max_angle_deg=10.0,
+            waypoint_poses=lambda pose: (pose,),
+        )
 
 
 def test_pickup_case_pins_settle_steps_in_pose_manifest() -> None:

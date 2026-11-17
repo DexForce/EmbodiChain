@@ -326,6 +326,13 @@ def randomization_parameters(
         ),
         "ranges": ranges,
     }
+    scales = {
+        str(key): value
+        for key, value in config.items()
+        if str(key).endswith("_jitter_scale")
+    }
+    if scales:
+        parameters["range_scales"] = scales
     if pose_batch_enabled:
         from dataclasses import asdict
 

@@ -746,6 +746,7 @@ class _OpenDoorCases(AtomicSkillCaseProvider):
             door_waypoint_count=int(config.get("door_waypoint_count", 20)),
             approach_distance=float(config.get("approach_distance_m", 0.1)),
             retract_distance=float(config.get("retract_distance_m", 0.1)),
+            approach_ik_seeds=config.get("approach_ik_seeds", 0),
         )
         link_pose = handle.link_pose(target_link).to(device=start_qpos.device)
         mesh_vertices = affordance.mesh_vertices.to(
@@ -813,6 +814,7 @@ class _OpenDoorCases(AtomicSkillCaseProvider):
                 "door_waypoint_count": options.door_waypoint_count,
                 "approach_distance_m": options.approach_distance,
                 "retract_distance_m": options.retract_distance,
+                "approach_ik_seeds": options.approach_ik_seeds,
                 "open_angle_rad": open_angle,
                 "open_fraction": open_fraction,
                 "target_joint_position": target_position,
@@ -873,6 +875,7 @@ class _OpenDoorCases(AtomicSkillCaseProvider):
                 door_waypoint_count=int(case.case_parameters["door_waypoint_count"]),
                 approach_distance=float(case.case_parameters["approach_distance_m"]),
                 retract_distance=float(case.case_parameters["retract_distance_m"]),
+                approach_ik_seeds=case.case_parameters.get("approach_ik_seeds", 0),
             ),
         )
 

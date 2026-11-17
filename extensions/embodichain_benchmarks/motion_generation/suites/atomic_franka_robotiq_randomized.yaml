@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_franka_robotiq_randomized
-suite_version: atomic_franka_robotiq_randomized_v8
+suite_version: atomic_franka_robotiq_randomized_v9
 profile: coverage
 
 robot:
@@ -109,6 +109,10 @@ tracks:
             stiffness: 0.001
             damping: 100.0
             max_effort: 0.01
+            # PhysX scales joint friction by constraint force, and the asset values
+            # (1.0 on the drawer slide) held the joints still. Zero was in effect
+            # until omitted drive fields began keeping the asset values (#1168).
+            friction: 0.0
           fix_base: true
           settle_steps: 10
       objects:

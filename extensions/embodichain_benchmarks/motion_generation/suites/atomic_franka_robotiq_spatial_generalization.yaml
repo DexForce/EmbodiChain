@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_franka_robotiq_spatial_generalization
-suite_version: atomic_franka_robotiq_spatial_generalization_v20
+suite_version: atomic_franka_robotiq_spatial_generalization_v21
 profile: coverage
 
 # Reusable strict-spatial domain definitions. Every track below selects only
@@ -26,7 +26,7 @@ x-domain-object-xy: &domain_object_xy
     object_yaw_jitter_rad: 0.0
     target_translation_jitter_m: [0.0, 0.0, 0.0]
     samples_per_seed: 8
-  overrides:
+  overrides: &overrides_object_xy
     batch_sizes: [8]
     randomization:
       enabled: true
@@ -48,7 +48,7 @@ x-domain-object-yaw: &domain_object_yaw
     object_yaw_jitter_rad: 0.523599
     target_translation_jitter_m: [0.0, 0.0, 0.0]
     samples_per_seed: 8
-  overrides:
+  overrides: &overrides_object_yaw
     batch_sizes: [8]
     randomization:
       enabled: true
@@ -70,7 +70,7 @@ x-domain-object-z: &domain_object_z
     object_yaw_jitter_rad: 0.0
     object_roll_pitch_jitter_rad: [0.0, 0.0]
     samples_per_seed: 8
-  overrides:
+  overrides: &overrides_object_z
     batch_sizes: [8]
     randomization:
       enabled: true
@@ -90,7 +90,7 @@ x-domain-object-roll-pitch: &domain_object_roll_pitch
     object_yaw_jitter_rad: 0.0
     object_roll_pitch_jitter_rad: [0.174533, 0.174533]
     samples_per_seed: 8
-  overrides:
+  overrides: &overrides_object_roll_pitch
     batch_sizes: [8]
     randomization:
       enabled: true
@@ -195,7 +195,7 @@ x-domain-task-frame-planar: &domain_task_frame_planar
     task_frame_translation_jitter_m: [0.03, 0.03, 0.0]
     task_frame_yaw_jitter_rad: 0.174533
     samples_per_seed: 8
-  overrides:
+  overrides: &overrides_task_frame_planar
     batch_sizes: [8]
     randomization:
       enabled: true
@@ -313,7 +313,7 @@ x-domain-articulation-spatial-pose: &domain_articulation_spatial_pose
     object_yaw_jitter_rad: 0.523599
     object_roll_pitch_jitter_rad: [0.174533, 0.174533]
     samples_per_seed: 8
-  overrides:
+  overrides: &overrides_articulation_spatial_pose
     batch_sizes: [8]
     randomization:
       enabled: true
@@ -375,7 +375,7 @@ x-domain-articulation-workspace-shell: &domain_articulation_workspace_shell
     object_translation_jitter_m: [0.05, 0.05, 0.02]
     workspace_buckets: [near, mid, far]
     samples_per_seed: 8
-  overrides:
+  overrides: &overrides_articulation_workspace_shell
     batch_sizes: [8]
     randomization:
       enabled: true
@@ -591,6 +591,10 @@ x-microwave-controls: &microwave_controls
       turntable_joint: 0.01
       knob_joint: 0.01
       button_joint: 5.0
+    # PhysX scales joint friction by constraint force, and the asset values
+    # (1.0 on the drawer slide) held the joints still. Zero was in effect
+    # until omitted drive fields began keeping the asset values (#1168).
+    friction: 0.0
   # Articulation-only tracks need explicit solver iterations: GPU physics
   # solves the whole scene with its largest per-actor count, the native
   # articulation default is 4/1, and without a 32/8 rigid object in the scene
@@ -608,6 +612,10 @@ x-drawer: &drawer
   init_qpos: [0.0]
   drive:
     drive_type: none
+    # PhysX scales joint friction by constraint force, and the asset values
+    # (1.0 on the drawer slide) held the joints still. Zero was in effect
+    # until omitted drive fields began keeping the asset values (#1168).
+    friction: 0.0
   attrs:
     material_props:
       static_friction: 1.0
@@ -627,6 +635,10 @@ x-microwave-door: &microwave_door
   init_qpos: [0.0, 0.0, 0.0, 0.0]
   drive:
     drive_type: none
+    # PhysX scales joint friction by constraint force, and the asset values
+    # (1.0 on the drawer slide) held the joints still. Zero was in effect
+    # until omitted drive fields began keeping the asset values (#1168).
+    friction: 0.0
   attrs:
     material_props:
       static_friction: 1.0
@@ -765,6 +777,9 @@ x-skill-open-door: &skill_open_door
   sample_count: 240
   hand_interp_steps: 12
   door_waypoint_count: 20
+  # The approach posture fixes the branch the hinge arc must follow; near a
+  # singular posture the arc otherwise jumps branches and cannot be timed.
+  approach_ik_seeds: 8
   approach_distance_m: 0.10
   retract_distance_m: 0.10
   articulation: microwave
@@ -781,11 +796,19 @@ x-skill-open-door: &skill_open_door
     - name: spatial_microwave_door_60deg
       task_difficulty: medium
       open_angle_rad: 1.0472
+      # The full articulation-pose ranges left about 3 in 10 rows without a
+      # reachable handle grasp; at 0.75 resampling qualifies every batch.
+      articulation_jitter_scale: 0.75
     - name: spatial_microwave_door_90deg
       task_difficulty: hard
       open_angle_rad: 1.5708
       # Preserve the full opening arc; the longer hand needs a shorter release retreat.
       retract_distance_m: 0.05
+      # With the full ranges a third to a half of the 90-degree arcs in the yaw
+      # and articulation-pose domains had no IK solution at their end, against
+      # none at the nominal pose. Halving them qualifies the roll/pitch and
+      # shell batches; yaw beyond a few degrees still leaves rows unsolved.
+      articulation_jitter_scale: 0.5
 
 x-skill-pour: &skill_pour
   id: pour
@@ -1340,6 +1363,9 @@ tracks:
   - id: spatial-door
     scenario: atomic_skill
     enabled: true
+    # A door arc that leaves the arm's reach in any row is an unqualified input
+    # (main's whole-batch qualification): robustness domains draw another
+    # batch, keep the rejected proposals as evidence, and fail after 16.
     domains:
       - <<: *domain_nominal
         applicability: [open_door]
@@ -1347,24 +1373,45 @@ tracks:
       - <<: *domain_object_xy
         applicability: [open_door]
         scene_layout: franka_robotiq_microwave_door_v1
+        overrides:
+          <<: *overrides_object_xy
+          case_generation_attempts: 16
       - <<: *domain_object_yaw
         applicability: [open_door]
         scene_layout: franka_robotiq_microwave_door_v1
+        overrides:
+          <<: *overrides_object_yaw
+          case_generation_attempts: 16
       - <<: *domain_object_z
         applicability: [open_door]
         scene_layout: franka_robotiq_microwave_door_v1
+        overrides:
+          <<: *overrides_object_z
+          case_generation_attempts: 16
       - <<: *domain_object_roll_pitch
         applicability: [open_door]
         scene_layout: franka_robotiq_microwave_door_v1
+        overrides:
+          <<: *overrides_object_roll_pitch
+          case_generation_attempts: 16
       - <<: *domain_task_frame_planar
         applicability: [open_door]
         scene_layout: franka_robotiq_microwave_door_v1
+        overrides:
+          <<: *overrides_task_frame_planar
+          case_generation_attempts: 16
       - <<: *domain_articulation_spatial_pose
         applicability: [open_door]
         scene_layout: franka_robotiq_microwave_door_v1
+        overrides:
+          <<: *overrides_articulation_spatial_pose
+          case_generation_attempts: 16
       - <<: *domain_articulation_workspace_shell
         applicability: [open_door]
         scene_layout: franka_robotiq_microwave_door_v1
+        overrides:
+          <<: *overrides_articulation_workspace_shell
+          case_generation_attempts: 16
     config:
       grasp_model: RobotiqArg2F140
       # Straight-line poses keep the open hand from sweeping the target.

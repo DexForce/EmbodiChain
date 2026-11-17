@@ -916,7 +916,7 @@ def _fake_articulation_geometry(*, joint_type: str) -> dict[str, torch.Tensor]:
 def test_atomic_suite_is_franka_robotiq_and_curobo_only():
     suite = load_suite("atomic_franka_robotiq_smoke")
 
-    assert suite.suite_version == "atomic_franka_robotiq_smoke_v11"
+    assert suite.suite_version == "atomic_franka_robotiq_smoke_v12"
     assert suite.robot.id == "franka_robotiq"
     assert suite.robot.provider == "franka_robotiq"
     assert [spec.id for spec in suite.planners if spec.enabled] == ["curobo"]
@@ -1002,6 +1002,7 @@ def test_atomic_suite_is_franka_robotiq_and_curobo_only():
             "stiffness": 0.001,
             "damping": 100.0,
             "max_effort": 0.01,
+            "friction": 0.0,
         },
         "fix_base": True,
         "settle_steps": 10,
@@ -1012,7 +1013,7 @@ def test_atomic_suite_is_franka_robotiq_and_curobo_only():
         "position": [-1.1, 0.0, 0.0],
         "rotation_deg": [0.0, 0.0, 90.0],
         "init_qpos": [0.0],
-        "drive": {"drive_type": "none"},
+        "drive": {"drive_type": "none", "friction": 0.0},
         "attrs": {"material_props": {"static_friction": 1.0, "dynamic_friction": 1.0}},
         "fix_base": True,
         "settle_steps": 10,
@@ -1048,7 +1049,7 @@ def test_randomized_atomic_suite_covers_four_interaction_skills_with_fixed_seed_
     suite = load_suite("atomic_franka_robotiq_randomized")
     track = suite.enabled_tracks()[0]
 
-    assert suite.suite_version == "atomic_franka_robotiq_randomized_v8"
+    assert suite.suite_version == "atomic_franka_robotiq_randomized_v9"
     assert track.id == "atomic-skill-randomized"
     assert track.config["seeds"] == list(range(101, 117))
     assert [item["id"] for item in track.config["skills"]] == [

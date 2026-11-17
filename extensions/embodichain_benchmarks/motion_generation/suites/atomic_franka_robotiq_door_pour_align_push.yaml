@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_franka_robotiq_door_pour_align_push
-suite_version: atomic_franka_robotiq_door_pour_align_push_v10
+suite_version: atomic_franka_robotiq_door_pour_align_push_v11
 profile: smoke
 
 # OpenDoor, Pour, AxisAlign and PushObject on the Franka + Robotiq 2F-140 embodiment.
@@ -99,6 +99,10 @@ tracks:
           init_qpos: [0.0, 0.0, 0.0, 0.0]
           drive:
             drive_type: none
+            # PhysX scales joint friction by constraint force, and the asset values
+            # (1.0 on the drawer slide) held the joints still. Zero was in effect
+            # until omitted drive fields began keeping the asset values (#1168).
+            friction: 0.0
           attrs:
             material_props:
               static_friction: 1.0

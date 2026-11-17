@@ -192,7 +192,10 @@ teardown failures point to ownership/unwind order. Motion namespaces stay lazy.
 Soft articulation contacts or fingers closing through a handle point to solver
 iterations: GPU physics solves the scene at its largest per-actor
 `min_position_iters`/`min_velocity_iters`, articulations default to the native
-4/1, so an articulation-only scene needs explicit counts.
+4/1, so an articulation-only scene needs explicit counts. Articulation joints
+that never move under contact point to joint friction: a partial drive keeps
+the asset's omitted fields, and PhysX applies URDF friction as a coefficient
+on constraint force, so declare it explicitly.
 
 Select focused tests from the owning detail page. Lifecycle coverage starts in
 `tests/sim/test_sim_manager.py` and `tests/sim/spawn/test_scene.py`; source,

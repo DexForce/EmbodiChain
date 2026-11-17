@@ -282,6 +282,38 @@ The shorter retreat passes the complete
 endpoint chain; native open-hand surface probes also clear the opened handle
 and door. These checks do not certify continuous motion or physical opening.
 
+The spatial OpenDoor track tries eight extra approach postures
+(`approach_ik_seeds: 8`, an `OpenDoorOptions` option), each with the arm's last
+joint held at an evenly spaced value, and keeps for each row the posture whose
+continuous reach, opening arc and retreat has the smallest joint step. From
+the start-state posture, the opening arc of some rows had to switch IK branches
+mid-arc, or kept a 0.09 rad step near a singular posture however densely it was
+sampled, so its retiming exhausted the budget. In a traced `object_xy` 90-degree
+batch, the opening arc then planned for 7 of 8 rows instead of 4.
+
+With the Robotiq TCP, which sits 5 to 6 cm further from the flange than the
+PGI one these ranges were set for, many spatial door rows had no IK solution at
+the end of the opening arc: a third to a half of the 90-degree rows in the yaw
+and articulation-pose domains, and about 3 in 10 of the 60-degree
+articulation-pose rows, against none at the nominal pose. The door's
+robustness domains therefore qualify inputs before measurement
+(`case_generation_attempts: 16`): a batch whose grasp screen leaves a row
+without a reachable handle grasp is redrawn as a whole, its rejected proposals
+stay in the case's `input_qualification`, and a case still unqualified after 16
+proposals fails preparation. Nominal cases keep their fixed input. The 60- and
+90-degree cases also narrow their articulation pose ranges
+(`articulation_jitter_scale` 0.75 and 0.5, which scales the position, yaw and
+roll/pitch range of every domain alike). Every 60-degree batch then qualifies.
+The 90-degree yaw and articulation-pose batches still exhaust their proposals,
+even at a quarter of the ranges: a door yawed beyond a few degrees leaves its
+arc end without an IK solution, so their rows count as preparation failures.
+
+Every Robotiq articulation drive declares `friction: 0.0`. A partial drive
+keeps the asset's other fields (#1168), and PhysX applies URDF joint friction
+(1.0 on the drawer slide, 0.08 on the door hinge) as a coefficient on the joint
+constraint force: with it, the drawer and door did not move at all in replay.
+Zero was the effective value before that change.
+
 Measured replay calibrates the Robotiq grasp and its cuRobo timing:
 
 - cuRobo samples at 0.04 s, a divisor of the 0.04 s and 0.16 s compiled

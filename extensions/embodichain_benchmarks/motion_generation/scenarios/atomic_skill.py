@@ -1722,7 +1722,9 @@ class AtomicSkillScenario(ScenarioProvider):
             The selected grasp batch with shape ``(B, 4, 4)``.
 
         Raises:
-            RuntimeError: No candidate variant reaches every skill pose.
+            _AntipodalGraspSearchError: No candidate variant reaches every
+                skill pose. This input qualification failure lets a track that
+                opts into ``case_generation_attempts`` propose another batch.
         """
         if self.robot is None:
             raise RuntimeError("Atomic Skill runtime is not configured.")
@@ -2108,7 +2110,9 @@ class AtomicSkillScenario(ScenarioProvider):
             The selected grasp batch with shape ``(B, 4, 4)``.
 
         Raises:
-            RuntimeError: No candidate variant reaches every skill pose.
+            _AntipodalGraspSearchError: No candidate variant reaches every
+                skill pose. This input qualification failure lets a track that
+                opts into ``case_generation_attempts`` propose another batch.
         """
         if self.robot is None:
             raise RuntimeError("Atomic Skill runtime is not configured.")
@@ -2188,9 +2192,13 @@ class AtomicSkillScenario(ScenarioProvider):
                     continue
                 if self._ik_chain_feasible(start_qpos, waypoint_poses(variant)):
                     return variant
-        raise RuntimeError(
+        raise _AntipodalGraspSearchError(
             "No independently reachable antipodal articulation grasp remained after "
-            f"screening {len(ranked)} candidates."
+            f"screening {len(ranked)} candidates.",
+            evidence={
+                "kind": "articulation_grasp_reference",
+                "candidates": len(ranked),
+            },
         )
 
     def restore_base_robot(self) -> None:
