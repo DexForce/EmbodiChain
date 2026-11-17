@@ -302,7 +302,6 @@ def test_reset_root_and_joint_pose_writes_preserve_physics_state(
     sim = SimulationManager(
         SimulationManagerCfg(headless=True, device=device, num_envs=2)
     )
-    art = cube = None
     try:
         art = sim.add_articulation(
             ArticulationCfg(
@@ -370,9 +369,8 @@ def test_reset_root_and_joint_pose_writes_preserve_physics_state(
             atol=1e-6,
         )
     finally:
+        # Let conftest drain cleanup after this frame releases native facades.
         sim.destroy(exit_process=False)
-        del art, cube
-        SimulationManager.flush_cleanup_queue()
 
 
 @pytest.mark.parametrize("physics", ["default", "newton"])
