@@ -115,6 +115,12 @@ pending writes plus confirmed commits can never exceed the original target.
 reconciliation path still owns uncertain or failed writes. Safe-stop controller
 values retain the interrupted invocation/phase metadata for ordinary physical
 validators, while their cancellation kind and reason remain explicit.
+When a runtime is already terminal with a final unconsumed motion, the joint
+controller owner supplies its actual already-applied position targets and zero
+velocity through the abort callback's optional `controller_hold`. The bridge
+prefers a runtime-generated hold, never relabels pending motion, and advances
+the clock only after the fallback hold receives a real `env.step`. Without an
+explicit owner-proven hold, the existing fail-closed abort behavior remains.
 
 Frozen groups can call `export_expansion_episodes` from bounded writer threads.
 The callback must not retain mutable live state or operate on the World.

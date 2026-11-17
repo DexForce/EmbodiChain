@@ -2095,12 +2095,14 @@ class TaskProgramDemoBridge:
             reason: str,
             *,
             last_action_consumed: bool,
+            controller_hold: ControllerAction | None = None,
         ) -> Iterator[ControllerAction]:
             return self._abort_segment(
                 segment,
                 lifecycle,
                 reason=reason,
                 last_action_consumed=last_action_consumed,
+                controller_hold=controller_hold,
             )
 
         return abort
@@ -2112,12 +2114,28 @@ class TaskProgramDemoBridge:
         *,
         reason: str,
         last_action_consumed: bool,
+        controller_hold: ControllerAction | None = None,
     ) -> Iterator[ControllerAction]:
-        """Abort one segment, surfacing a safe hold only after controller activity."""
+        """Abort after activity, preferring runtime-proven controller holds.
+
+        A trusted controller owner may supply an explicit labelled hold when
+        the runtime became terminal before its final yielded motion was
+        consumed. Pending motion alone is never promoted to a safe stop.
+        """
         if type(reason) is not str or not reason:
             raise ValueError("abort reason must be a non-empty string.")
         if type(last_action_consumed) is not bool:
             raise TypeError("last_action_consumed must be a bool.")
+        if controller_hold is not None:
+            if not isinstance(controller_hold, ControllerAction):
+                raise TypeError("controller_hold must be a ControllerAction or None.")
+            if (
+                controller_hold.metadata.get("bridge_action_kind")
+                not in _SAFE_HOLD_ACTION_KINDS
+            ):
+                raise ValueError(
+                    "controller_hold requires an explicit safe-hold action kind."
+                )
         if lifecycle.abort_started:
             raise RuntimeError(
                 f"Segment {segment.segment_id!r} abort handshake already started."
@@ -2181,6 +2199,15 @@ class TaskProgramDemoBridge:
         safe_action = self._sink.drain_safe_stop_action(
             fallback=None if last_action_consumed else pending,
         )
+        if safe_action is None and controller_hold is not None:
+            # A controller owner can prove a hold even after a runtime has
+            # become terminal while its final motion is still unconsumed.
+            # Never treat that pending motion itself as a safe stop.
+            held = controller_hold.snapshot()
+            safe_action = ControllerAction(
+                held.value,
+                metadata={**held.metadata, "abort_hold_source": "controller_owner"},
+            )
         if safe_action is None:
             raise TaskProgramBridgeError(
                 f"Segment {segment.segment_id!r} stopped before exhaustion, but "

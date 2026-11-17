@@ -362,6 +362,14 @@ class _GymWorkloadSource:
         for name in {a.workload_id for a in assignments}:
             self.groups[name]["host"]._context.journal.checkpoint()
         self.collector.observe(ids, action, observation)
+        if self.reuse_idle_rows:
+            row_metadata = action.metadata.get("row_actions", {})
+            for row in ids:
+                # Retain one already-owned metadata view, rather than copying
+                # command histories on the control hot path.
+                self.active[row]["last_controller_metadata"] = row_metadata.get(
+                    str(row), {}
+                )
         checks = self.owner.collision
         return tuple(
             row
@@ -458,6 +466,7 @@ class _GymWorkloadSource:
         ctx = group["host"]._context
         request = ctx.requests[row]
         record = {
+            "env_id": row,
             "status": "cancelled",
             "reason": reason,
             "program_accepted": result.program.accepted[0],
@@ -472,6 +481,11 @@ class _GymWorkloadSource:
             return
         try:
             group["engine"].cancel_row(state["native"], reason=reason)
+            record["last_controller_metadata"] = {
+                key: value
+                for key, value in state.get("last_controller_metadata", {}).items()
+                if value is None or type(value) in (str, int, float, bool)
+            }
             measured = (
                 None
                 if self.owner.collision is None

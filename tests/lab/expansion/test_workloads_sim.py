@@ -791,6 +791,9 @@ def _reuse_probe(output: str) -> None:
         record = json.loads(entry.read_text())
         assert record["reason"] == "quota_fulfilled_by_peer"
         if "partial_rollout" in record:
+            assert record["env_id"] in (0, 1)
+            if record["steps"]:
+                assert record["last_controller_metadata"].get("bridge_action_kind")
             with np.load(entry.parent / record["partial_rollout"]["path"]) as data:
                 assert len(data["qpos"]) == record["steps"] + 1
                 assert len(data.get("actions", [])) == record["steps"]

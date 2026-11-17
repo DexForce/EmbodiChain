@@ -76,7 +76,15 @@ class _WorkloadCursor(_Cursor):
                         # Phase-aware physical validators must see that context.
                         action = ControllerAction(
                             action.value,
-                            metadata={**self.last_command.metadata, **action.metadata},
+                            metadata={
+                                **self.last_command.metadata,
+                                **{
+                                    key: value
+                                    for key, value in action.metadata.items()
+                                    if value is not None
+                                    or key not in self.last_command.metadata
+                                },
+                            },
                         )
                     self.last_command = action
                 if self.finished and self.rejection is not None:
@@ -96,7 +104,7 @@ class _WorkloadCursor(_Cursor):
     def abort(self, reason: str) -> None:
         if self.finished or self.rejection is not None or self.emergency is not None:
             return
-        if not self.pending_consumed:
+        if not self.pending_consumed and self.last_command is None:
             # An unconsumed command must go through the original safe-stop
             # iterator; acknowledging it here would manufacture a World step.
             super().abort(reason)
@@ -111,5 +119,18 @@ class _WorkloadCursor(_Cursor):
             if "qvel" in previous:
                 fields["qvel"] = torch.zeros_like(hold)
             value = TensorDict(fields, batch_size=[len(ids)])
+        if not self.pending_consumed:
+            self.reason = reason
+            self.emergency = iter(
+                self.segment.abort_actions(
+                    reason,
+                    last_action_consumed=False,
+                    controller_hold=ControllerAction(
+                        value,
+                        metadata={"bridge_action_kind": "runtime_abort_safe_hold"},
+                    ),
+                )
+            )
+            return
         self.bridge.request_row_rejection(ids, ControllerAction(value), reason=reason)
         self.rejection = reason
