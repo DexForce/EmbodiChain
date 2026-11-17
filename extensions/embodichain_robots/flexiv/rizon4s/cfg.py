@@ -54,7 +54,8 @@ class FlexivRizon4SCfg(RobotCfg):
 
     ``arm`` contains ``joint1`` through ``joint7``. FK and Warp RR IK use
     ``base_link`` to ``flange`` with an identity TCP. An explicit URDF
-    ``fpath`` override is shared by simulation and serial-chain construction.
+    ``fpath`` override is shared by simulation and default serial-chain
+    construction. An explicit solver URDF can supply calibrated kinematics.
 
     Example:
         >>> cfg = FlexivRizon4SCfg.from_dict({})
@@ -79,8 +80,14 @@ class FlexivRizon4SCfg(RobotCfg):
         # Simulation and kinematics must use that same assembled source.
         if cfg.source is None:
             cfg.fpath = cfg.urdf_cfg.assemble_urdf()
-            for solver in cfg.solver_cfg.values():
-                if hasattr(solver, "urdf_path"):
+            overrides = init_dict.get("solver_cfg") or {}
+            for part, solver in cfg.solver_cfg.items():
+                provided = overrides.get(part, {})
+                if (
+                    hasattr(solver, "urdf_path")
+                    and isinstance(provided, dict)
+                    and "urdf_path" not in provided
+                ):
                     solver.urdf_path = cfg.fpath
         return cfg
 
@@ -150,7 +157,7 @@ class FlexivRizon4SCfg(RobotCfg):
     def build_pk_serial_chain(
         self, device: torch.device = torch.device("cpu"), **kwargs: Any
     ) -> dict[str, pk.SerialChain]:
-        """Build the seven-joint flange chain from the simulation's source URDF.
+        """Build the arm chain from its configured kinematics model.
 
         Args:
             device: Device for the chain's tensors.
@@ -163,7 +170,7 @@ class FlexivRizon4SCfg(RobotCfg):
 
         solver = self.solver_cfg["arm"]
         chain = create_pk_serial_chain(
-            urdf_path=self._pk_urdf_path,
+            urdf_path=solver.urdf_path,
             device=device,
             root_link_name=solver.root_link_name,
             end_link_name=solver.end_link_name,

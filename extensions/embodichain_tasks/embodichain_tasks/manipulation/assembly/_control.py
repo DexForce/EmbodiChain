@@ -41,7 +41,7 @@ class EncoderGravityCompensation:
             np.asarray(local_pose, dtype=float)[:3, :3]
             if local_pose is not None
             else Rotation.from_euler(
-                "xyz", self.env.cfg.robot.init_rot, degrees=True
+                "XYZ", self.env.cfg.robot.init_rot, degrees=True
             ).as_matrix()
         )
         root_transform = (

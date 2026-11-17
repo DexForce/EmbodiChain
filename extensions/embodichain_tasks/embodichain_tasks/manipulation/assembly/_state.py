@@ -395,7 +395,8 @@ class AssemblyState:
             labels = torch.cat([rim_labels, tooth_labels], dim=1).long()
         else:
             cfg = self.scene.assembly_asset.config
-            pitch = float(cfg["pitch"])
+            pitch = float(cfg["pitch"]) * float(cfg.get("scale", 1.0))
+            lead = pitch * int(cfg.get("n_starts", 1))
             near_axis = radial < self.cfg.nut_radial_tolerance
             advance = depth.clamp_min(0)
             capture = (
@@ -413,7 +414,7 @@ class AssemblyState:
                 self._assembly_capture_depth[ids] = capture_depth
             turned = (angle - capture_angle).abs()
             axial_progress = advance - capture_depth
-            expected_progress = pitch * turned / (2 * torch.pi)
+            expected_progress = lead * turned / (2 * torch.pi)
             # Require new axial advance *after* first capture. Rotating at a
             # fixed captured depth is not threading. The 0.1-pitch band is an
             # explicit nominal tolerance, not an author calibration.

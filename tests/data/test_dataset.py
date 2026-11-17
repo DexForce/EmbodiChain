@@ -36,38 +36,47 @@ PROCESS_JOIN_TIMEOUT_SECONDS = 5.0
 PROCESS_START_TIMEOUT_SECONDS = 60.0
 
 
-def test_cache_repair_preserves_prepared_rizon_model(tmp_path: Path) -> None:
-    from types import SimpleNamespace
-    from embodichain_robots.flexiv.rizon4s._menagerie_assets import _preserve_prepared
-    from embodichain.data.dataset import EmbodiChainDataset
+@pytest.mark.parametrize("healthy", [True, False])
+def test_source_cache_validation_keeps_prepared_models_readable(
+    tmp_path: Path, healthy: bool
+) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    from embodichain_robots.flexiv.rizon4s._menagerie_assets import (
+        FlexivRizon4SMenagerie,
+    )
+    from embodichain_benchmarks.assembly.robot_reference import prepare_rizon4s_urdf
 
-    root = tmp_path / "embodichain_data"
-    extracted = root / "extract" / "FlexivRizon4SMenagerie"
-    prepared = extracted / "prepared_v4_parallel_jaw"
-    prepared.mkdir(parents=True)
-    (prepared / "fidelity.json").write_text("custom calibration")
-    (extracted / "stale-source").write_text("remove during repair")
-    descriptor = SimpleNamespace(urls=["https://example.invalid/LICENSE"], md5="unused")
-    with _preserve_prepared(extracted):
-        EmbodiChainDataset.check_zip(
-            SimpleNamespace(), "FlexivRizon4SMenagerie", descriptor, str(root)
+    root = tmp_path / "cache"
+    prefix = "FlexivRizon4SMenagerie"
+    extracted = root / "extract" / prefix
+    extracted.mkdir(parents=True)
+    (extracted / "LICENSE").write_text("source seed")
+    download = root / "download" / prefix
+    download.mkdir(parents=True)
+    (download / "LICENSE").write_text("downloaded seed")
+    output = root / "generated" / "assembly" / prefix / "prepared_v4_parallel_jaw"
+    output.mkdir(parents=True)
+    urdf = output / "rizon4s_robotiq2f85.urdf"
+    urdf.write_text('<robot name="prepared"><link name="root"/></robot>')
+    (output / "fidelity.json").write_text("{}")
+    prepared = Path(prepare_rizon4s_urdf(extracted, gripper_model="parallel_jaw"))
+    assert not prepared.is_relative_to(extracted)
+    with ThreadPoolExecutor(max_workers=1) as readers:
+
+        def check_during_validation(path):
+            assert (
+                readers.submit(prepared.read_text).result(timeout=3) == urdf.read_text()
+            )
+            return "valid" if healthy else "invalid"
+
+        FlexivRizon4SMenagerie.check_zip(
+            SimpleNamespace(calculate_md5=check_during_validation),
+            prefix,
+            SimpleNamespace(urls=["https://example.invalid/LICENSE"], md5="valid"),
+            str(root),
         )
-    assert (prepared / "fidelity.json").read_text() == "custom calibration"
-    assert not (extracted / "stale-source").exists()
-
-    with pytest.raises(RuntimeError, match="failed repair"):
-        with _preserve_prepared(extracted):
-            raise RuntimeError("failed repair")
-    assert (prepared / "fidelity.json").read_text() == "custom calibration"
-
-    # A process killed after moving the model leaves a recoverable backup.
-    abandoned = root / "generated" / "assembly" / "preserved" / "rizon4s-abandoned"
-    abandoned.mkdir(parents=True)
-    prepared.rename(abandoned / prepared.name)
-    with _preserve_prepared(extracted):
-        pass
-    assert (prepared / "fidelity.json").read_text() == "custom calibration"
-    assert not abandoned.exists()
+    assert prepared.read_text().startswith('<robot name="prepared">')
+    assert extracted.exists() is healthy
 
 
 @pytest.mark.no_sim

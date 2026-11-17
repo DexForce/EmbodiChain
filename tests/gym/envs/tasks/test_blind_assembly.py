@@ -681,9 +681,14 @@ def test_peg_seating_checks_each_bottom_vertex_height() -> None:
     assert not success.item()
 
 
-def test_nut_rotation_at_fixed_capture_depth_is_not_threading() -> None:
+@pytest.mark.parametrize("n_starts,scale", [(1, 1.0), (2, 1.0), (1, 2.0)])
+def test_nut_rotation_at_fixed_capture_depth_is_not_threading(
+    n_starts: int, scale: float
+) -> None:
     env, part = _analytic_mating_state(kind="nut")
-    part[:, 2, 3] = -0.002
+    env.scene.assembly_asset.config.update(n_starts=n_starts, scale=scale)
+    pitch = 0.004 * scale
+    part[:, 2, 3] = -0.5 * pitch
     _task_state(env)
     assert env._assembly_metrics["captured"].item()
     for revision in range(1, 5):
@@ -694,18 +699,19 @@ def test_nut_rotation_at_fixed_capture_depth_is_not_threading() -> None:
         env._assembly_revision = env._assembly_physics_revision = revision
         success, _, _ = _task_state(env)
         assert success.item() is False
-    # A genuine quarter turn advances one quarter of the 4 mm pitch.
-    part[:, 2, 3] = -0.003
+    # A quarter turn advances one quarter of the scaled multi-start lead.
+    part[:, 2, 3] = -(0.5 * pitch + pitch * n_starts / 4)
     for revision in range(5, 8):
         env._assembly_revision = env._assembly_physics_revision = revision
         success, _, _ = _task_state(env)
     assert success.item() is True
 
 
-@pytest.mark.parametrize("base_pitch", [0.0, 0.4])
+@pytest.mark.parametrize("base_euler", [(0.0, 0.0, 0.0), (30.0, 45.0, -10.0)])
+@pytest.mark.parametrize("pose_source", ["euler", "matrix"])
 @pytest.mark.parametrize("dof", [4, 7])
 def test_encoder_gravity_feedforward_matches_mujoco_bias(
-    tmp_path: Path, base_pitch: float, dof: int
+    tmp_path: Path, base_euler: tuple[float, float, float], pose_source: str, dof: int
 ) -> None:
     mujoco = pytest.importorskip("mujoco")
     pytest.importorskip("pytorch_kinematics")
@@ -715,7 +721,7 @@ def test_encoder_gravity_feedforward_matches_mujoco_bias(
     model = ET.Element("mujoco")
     world = ET.SubElement(model, "worldbody")
 
-    rotation = Rotation.from_euler("y", base_pitch)
+    rotation = Rotation.from_euler("XYZ", base_euler, degrees=True)
     quaternion = np.roll(rotation.as_quat(), 1)
     body = ET.SubElement(
         world, "body", name="base", quat=" ".join(map(str, quaternion))
@@ -743,7 +749,10 @@ def test_encoder_gravity_feedforward_matches_mujoco_bias(
     root_pose[:3, :3] = rotation.as_matrix()
     env.env.cfg = SimpleNamespace(
         robot=SimpleNamespace(
-            _pk_urdf_path=str(path), init_rot=[0, 0, 0], init_local_pose=root_pose
+            _pk_urdf_path=str(path),
+            init_rot=base_euler,
+            init_pos=[0, 0, 0],
+            init_local_pose=root_pose if pose_source == "matrix" else None,
         )
     )
     env.env.robot = SimpleNamespace(
@@ -753,6 +762,7 @@ def test_encoder_gravity_feedforward_matches_mujoco_bias(
     )
     env.scene.assembly_fidelity = {}
     controller = EncoderGravityCompensation(env.env, "manipulator")
+    np.testing.assert_allclose(controller.robot_base.numpy(), root_pose, atol=1e-7)
     actual = controller.torques().numpy()[0]
     data = mujoco.MjData(reference)
     data.qpos[:] = q.numpy()[0]
@@ -1182,3 +1192,78 @@ def test_configured_milestone_weights_and_hold_duration_are_effective():
         state.env, {}, torch.zeros(1, 7), {}, weights=[2.0, 7.0, 5.0, 11.0]
     )
     torch.testing.assert_close(actual, torch.tensor([7.0]))
+
+
+def test_reset_preparation_precedes_first_privileged_state_and_contact_labels(
+    monkeypatch,
+) -> None:
+    from contextlib import nullcontext
+    from embodichain.lab.gym.envs.base_env import BaseEnv
+    from embodichain.lab.gym.envs.episode_context import EpisodeContext
+    from embodichain_tasks.manipulation.assembly import functors
+
+    state, part = _analytic_mating_state()
+    _task_state(state)
+    host = object.__new__(BaseEnv)
+    host._num_envs = 1
+    host.sim = state.env.sim
+    host.sim.reset_objects_state = Mock()
+    host.sim.render_frame = lambda **kwargs: nullcontext()
+    host.sim.physics_step_index = 0
+    host.cfg = SimpleNamespace(episode_context_in_info=False)
+    host._profiler = SimpleNamespace(section=lambda *args, **kwargs: nullcontext())
+    host.episode_context = EpisodeContext(1)
+    host._elapsed_steps = torch.zeros(1, dtype=torch.int32)
+    host._detached_uids_for_reset = []
+    host.sensors = {}
+    host.robot = SimpleNamespace(
+        get_qpos=lambda **kwargs: torch.zeros(1, 7),
+        get_joint_ids=lambda **kwargs: [7],
+        mimic_ids=[],
+        mimic_parents=[],
+        mimic_multipliers=[],
+        mimic_offsets=[],
+        set_qpos=Mock(),
+    )
+    host.assembly_state = state
+    host.get_sensor = state.env.get_sensor
+    state.env = host
+    state.cfg.initial_position_range = 0.0
+    state.cfg.grasp_position_range = 0.0
+    state.scene._moving_zmax = 0.02
+    state.scene._grasp_reset_joint = state.scene._grasp_target_joint = 0.0
+    tcp = torch.diag(torch.tensor([1.0, -1.0, -1.0, 1.0]))[None]
+    state._assembly_chain = SimpleNamespace(
+        forward_kinematics=lambda q: SimpleNamespace(get_matrix=lambda: tcp)
+    )
+    for uid in (state.scene._moving_uid, state.scene._fixture_uid):
+        obj = host.sim.get_rigid_object(uid)
+        pose = obj.get_local_pose()
+        obj.set_local_pose = lambda value, env_ids, pose=pose: pose.__setitem__(
+            env_ids, value
+        )
+        obj.set_velocity = Mock()
+    host._task_success_before_reset = lambda ids: torch.zeros(1, dtype=torch.bool)
+    host._before_episode_reset = lambda *args, **kwargs: {}
+    host._initialize_episode = lambda ids, **kwargs: functors.reset_assembly(host, ids)
+    host._reset_physical_objective = lambda ids: None
+    host._after_episode_reset = lambda obs, ids: None
+    host._record_initial_observation = lambda frame, ids: None
+    host.get_info = lambda **kwargs: {}
+    monkeypatch.setattr(
+        functors, "_proprioceptive_frame", lambda state: torch.zeros(1, state.frame_dim)
+    )
+    host._capture_observation = lambda **kwargs: SimpleNamespace(
+        policy={
+            "privileged": functors.assembly_privileged_state(host, None),
+            "labels": functors.assembly_contact_labels(host, None),
+        }
+    )
+
+    def prepare():
+        part[:, 0, 3] += 0.02
+
+    observation, _ = host.reset(options={"episode_prepare": prepare})
+    assert observation["privileged"][0, state.frame_dim].item() == pytest.approx(0.02)
+    assert observation["labels"].tolist() == [[1, 1, 1, 1]]
+    assert host.sim.physics_step_index == 0

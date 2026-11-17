@@ -85,10 +85,49 @@ def test_rizon_composition_keeps_sensor_and_component_prefix(
     )
     assert dict(robot.urdf_cfg.component_prefix)["arm"] == "custom_"
     assert robot.urdf_cfg.sensors[0]["sensor_name"] == "camera"
+    assert robot.solver_cfg["arm"].urdf_path == robot.fpath
     assert any(
         "sensor_link" in link.get("name", "")
         for link in ET.parse(robot.fpath).findall("link")
     )
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize("typed", [False, True])
+def test_rizon_preserves_explicit_calibrated_solver_urdf(
+    tmp_path: Path, monkeypatch, typed: bool
+) -> None:
+    from embodichain_robots.flexiv.rizon4s import cfg as module
+    from embodichain.lab.sim.motion.solvers import SSIKSolverCfg
+
+    arm = tmp_path / "simulation.urdf"
+    arm.write_text('<robot name="arm"><link name="base_link"/></robot>')
+    calibrated = tmp_path / "calibrated.urdf"
+    calibrated.write_text(
+        '<robot name="calibrated"><link name="calibrated_base"/>'
+        '<link name="calibrated_tip"/><joint name="joint1" type="revolute">'
+        '<parent link="calibrated_base"/><child link="calibrated_tip"/>'
+        '<origin xyz="0 0 0.4"/><axis xyz="0 0 1"/>'
+        '<limit lower="-2" upper="2" effort="1" velocity="1"/></joint></robot>'
+    )
+    monkeypatch.setattr(module, "get_data_path", lambda name: str(arm))
+    options = dict(
+        urdf_path=str(calibrated),
+        root_link_name="calibrated_base",
+        end_link_name="calibrated_tip",
+    )
+    solver = SSIKSolverCfg(**options) if typed else options
+    robot = FlexivRizon4SCfg.from_dict({"solver_cfg": {"arm": solver}})
+    assert robot.solver_cfg["arm"].urdf_path == str(calibrated)
+    assert robot.fpath == str(arm)
+    chain = robot.build_pk_serial_chain()["arm"]
+    pose = chain.forward_kinematics(torch.zeros(1, 1)).get_matrix()
+    torch.testing.assert_close(pose[0, :3, 3], torch.tensor([0.0, 0.0, 0.4]))
+    assert FlexivRizon4SCfg.from_dict(robot.to_dict()).solver_cfg[
+        "arm"
+    ].urdf_path == str(calibrated)
+    if typed:
+        assert solver.urdf_path == str(calibrated)
 
 
 @pytest.mark.no_sim

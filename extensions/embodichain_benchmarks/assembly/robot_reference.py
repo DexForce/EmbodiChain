@@ -24,6 +24,8 @@ import xml.etree.ElementTree as ET
 import numpy as np
 from scipy.spatial.transform import Rotation
 
+from embodichain.data.resources import snapshot_urdf_resources
+
 __all__ = ["prepare_rizon4s_urdf"]
 
 _CONVERTER_VERSION = 4
@@ -238,8 +240,8 @@ def prepare_rizon4s_urdf(
     if root.parent.name == "extract":
         from embodichain.data.dataset import _dataset_download_lock
 
-        # Preparation and source-cache repair share the dataset lock so a
-        # repair cannot move a model while its files are being authored.
+        # Serialize source reads with repair. Generated models live outside
+        # the repair directory, so their readers never need this lock.
         with _dataset_download_lock(str(root.parent.parent), root.name):
             return _prepare_rizon4s_urdf(root, gripper_model=gripper_model)
     return _prepare_rizon4s_urdf(root, gripper_model=gripper_model)
@@ -249,7 +251,12 @@ def _prepare_rizon4s_urdf(root: Path, *, gripper_model: str) -> str:
     """Build the reference while its source-cache lifetime is protected."""
     if gripper_model not in {"four_bar_mimic", "parallel_jaw"}:
         raise ValueError("gripper_model must be four_bar_mimic or parallel_jaw.")
-    output = root / (
+    generated = (
+        root.parent.parent / "generated" / "assembly" / root.name
+        if root.parent.name == "extract"
+        else root.with_name(root.name + "_generated")
+    )
+    output = generated / (
         f"prepared_v{_CONVERTER_VERSION}"
         + ("_parallel_jaw" if gripper_model == "parallel_jaw" else "")
     )
@@ -330,11 +337,12 @@ def _prepare_rizon4s_urdf(root: Path, *, gripper_model: str) -> str:
     _origin(joint, np.array([0, 0, 0.145]), Rotation.identity())
     ET.indent(robot)
     ET.ElementTree(robot).write(urdf, encoding="utf-8", xml_declaration=True)
+    snapshot_urdf_resources(urdf, output, provenance_root=root)
     marker.write_text(
         json.dumps(
             {
                 "converter_version": _CONVERTER_VERSION,
-                "source_manifest": str(root / "source_manifest.json"),
+                "source_manifest": "./source_manifest.json",
                 "arm": "source kinematics, mass, COM, principal inertia and compiled collision geometry",
                 "gripper": (
                     "force-limited prismatic finger carriages; four-bar configuration fixed open within each moving carriage; source finger masses and base/pad collision geometry retained"

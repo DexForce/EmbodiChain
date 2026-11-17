@@ -88,13 +88,19 @@ prepared robot-tree copying to `embodichain.data.resources.snapshot_urdf_resourc
 Pure polygon distances belong to `embodichain.compute.geometry`; URDF gravity
 feedforward belongs to `embodichain.compute.kinematics`. Robot joint-order and
 root-frame adaptation remains task-owned. Preparation/resource-export entry paths
-remain stable for frozen current-schema runs.
+remain stable for frozen current-schema runs. Reset events leave selected
+measurements pending until the host finishes `episode_prepare`, so first
+observations and labels reflect the final prepared scene. Robot-base Euler
+rotations follow the simulator's intrinsic `XYZ` convention. Nut advancement uses
+scaled pitch for thresholds and scaled pitch times thread starts for lead.
 No import-owned task registration aliases or environment-method replacements are used.
 
 `embodichain_benchmarks.assembly.robot_reference` prepares the historical public Rizon/Robotiq approximation
 from pinned source assets, with explicit gripper approximation and fidelity
 metadata. Preparation is optional and runs before config loading; replay uses
-frozen resources. Default arm/tool assembly belongs to task embodiment YAML,
+frozen resources. Prepared models and their manifest/licenses live under the
+data root's `generated/assembly/` tree, outside source-cache `extract/` repair.
+Source validation never renames a prepared model seen by concurrent readers. Default arm/tool assembly belongs to task embodiment YAML,
 not this converter or a combined robot preset.
 
 `embodichain_benchmarks.assembly.precision` checks geometry/USD ownership and runs passive source/native

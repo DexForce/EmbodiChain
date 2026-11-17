@@ -42,7 +42,9 @@ Preset `_build_defaults()` assembles model defaults; base `RobotCfg.from_dict()`
 and `merge_robot_cfg` apply overrides. Do not route the base decoder back into
 the subclass build/merge sequence. Configuration construction may leave MISSING
 fields; validate the completed config. Model URDFs and PK chains must agree in
-joint order and selected control parts.
+joint order and selected control parts. Rizon composition updates inherited solver
+paths to the assembled robot; explicit calibrated solver URDFs remain authoritative
+for both IK and the configured serial chain.
 
 Serialization must preserve components and avoid applying derived transforms
 twice. W1 serializes raw offsets and restores revision-owned transforms on

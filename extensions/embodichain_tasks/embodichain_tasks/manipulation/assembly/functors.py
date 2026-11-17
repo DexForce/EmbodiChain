@@ -384,7 +384,6 @@ def reset_assembly(env: EmbodiedEnv, env_ids: torch.Tensor) -> None:
             ),
         )
     state._assembly_revision += 1
-    state.refresh_assembly_state()
 
 
 def assembly_milestone_reward(
