@@ -32,6 +32,7 @@ from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
 )
 from embodichain.lab.sim.sensors import SensorCfg
+from embodichain.lab.visualization import VisualizationCfg
 
 from .._preview import write_preview
 from .._scene_camera import capture_rgb, scene_camera, show_scene, SCENE_RENDER
@@ -46,6 +47,7 @@ def run_state(output: Path, device: str, video: bool) -> None:
     sim = SimulationManager(
         SimulationManagerCfg(
             headless=True,
+            visualization=VisualizationCfg(backend="none"),
             physics_cfg=DefaultPhysicsCfg(device=device, gravity=(0, 0, 0)),
             physics_dt=DT,
             render_cfg=SCENE_RENDER,
