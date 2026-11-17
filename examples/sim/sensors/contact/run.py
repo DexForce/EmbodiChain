@@ -19,12 +19,14 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import torch
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
+from matplotlib.gridspec import GridSpec
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
@@ -50,6 +52,18 @@ PAD_TOP = 0.07
 CUBE_WIDTH = 0.08
 NORMAL_COLOR = "#265ebb"
 FRICTION_COLOR = "#bd5729"
+
+
+@dataclass(frozen=True)
+class GridSample:
+    """The mounted pad and the contact report for one completed step."""
+
+    count: np.ndarray
+    impulse: np.ndarray
+    origin: np.ndarray
+    complete: bool
+    duration: float
+    validity: tuple[bool, bool, bool]
 
 
 def draw_resultant(
@@ -93,7 +107,75 @@ def draw_resultant(
         axis.grid(axis="x", alpha=0.2)
 
 
-def run_contact(output: Path, backend: str, device: str, video: bool) -> None:
+def draw_grid(
+    figure: Figure,
+    scene: Axes,
+    layout: GridSpec,
+    samples: list[GridSample],
+    index: int,
+    quantity: str,
+    limits: tuple[float, float],
+    time: float,
+) -> None:
+    """Display the current pad frame and its metric XY contact fields."""
+    sample = samples[index]
+    origin = sample.origin[[0, 2]]
+    scene.quiver(
+        [origin[0]] * 2,
+        [origin[1]] * 2,
+        [0.06, 0],
+        [0, 0.06],
+        color=[NORMAL_COLOR, "#426c59"],
+        angles="xy",
+        scale_units="xy",
+        scale=1,
+    )
+    scene.text(origin[0] + 0.063, origin[1], "X", color=NORMAL_COLOR)
+    scene.text(origin[0], origin[1] + 0.066, "Z", color="#426c59")
+    scene.scatter(*origin, color="#3d505e", s=9)
+    extent = (-PAD_WIDTH / 2, PAD_WIDTH / 2, -PAD_WIDTH / 2, PAD_WIDTH / 2)
+    for row, values, pal, label, cap in (
+        (0, sample.count, "Blues", "Contact points", limits[0]),
+        (
+            1,
+            sample.impulse,
+            "YlOrRd",
+            f"{quantity.capitalize()} impulse (N·s)",
+            limits[1],
+        ),
+    ):
+        axis = figure.add_subplot(layout[row, 1])
+        image = axis.imshow(
+            values,
+            origin="lower",
+            extent=extent,
+            cmap=pal,
+            vmin=0,
+            vmax=cap,
+            interpolation="nearest",
+        )
+        figure.colorbar(image, ax=axis, label=label)
+        axis.set_xlabel("Pad X (m)")
+        axis.set_ylabel("Pad Y (m)")
+    status = figure.add_subplot(layout[1, 0])
+    status.axis("off")
+    valid_labels = ("Magnitude", "Normal", "Friction")
+    validity = ", ".join(
+        f"{name.lower()} {'valid' if valid else 'unavailable'}"
+        for name, valid in zip(valid_labels, sample.validity)
+    )
+    lines = (
+        f"Simulation time  {time:.2f} s",
+        f"Impulse duration  {sample.duration * 1000:.2f} ms",
+        f"Report  {'complete' if sample.complete else 'truncated'}",
+        validity,
+    )
+    status.text(0.04, 0.77, "\n".join(lines), fontsize=9, va="top", linespacing=1.6)
+
+
+def run_contact(
+    output: Path, backend: str, device: str, video: bool, show_grid: bool
+) -> None:
     """Drop and slide a small box using the requested physics provider."""
     physics = (
         DefaultPhysicsCfg(device=device)
@@ -116,6 +198,8 @@ def run_contact(output: Path, backend: str, device: str, video: bool) -> None:
         )
     )
     times, poses, normal, friction, contact = [], [], [], [], []
+    grid_samples: list[GridSample] = []
+    quantity = ""
     try:
         material = RigidBodyMaterialCfg(static_friction=0.55, dynamic_friction=0.45)
         sim.add_rigid_object(
@@ -147,6 +231,22 @@ def run_contact(output: Path, backend: str, device: str, video: bool) -> None:
                 }
             )
         )
+        grid = None
+        if show_grid:
+            grid = sim.add_sensor(
+                SensorCfg.from_dict(
+                    {
+                        "sensor_type": "ContactGrid",
+                        "uid": "grid",
+                        "asset_uid": "pad",
+                        "size": [PAD_WIDTH, PAD_WIDTH],
+                        "resolution": [12, 12],
+                        "mount": {"parent": "pad", "pos": [0, 0, PAD_DEPTH / 2]},
+                        "max_plane_distance": 0.012,
+                    }
+                )
+            )
+            quantity = grid.get_data_descriptors()["impulse_magnitude"]["quantity"]
         camera = scene_camera(
             sim,
             (0.25, -0.44, 0.25),
@@ -173,6 +273,34 @@ def run_contact(output: Path, backend: str, device: str, video: bool) -> None:
                 else np.nan
             )
             contact.append(bool(data["contact"][0]))
+            if grid is not None:
+                grid_meta = grid.get_sample_metadata()
+                if not torch.equal(metadata["physics_step"], grid_meta["physics_step"]):
+                    raise RuntimeError(
+                        "Expected the grid on the completed contact step."
+                    )
+                contents = grid.get_data()
+                count = contents["count"][0].cpu().numpy().copy()
+                magnitude = contents["impulse_magnitude"][0].cpu().numpy()
+                masks = tuple(
+                    contents[f"{kind}_valid"][0].cpu().numpy()
+                    for kind in ("magnitude", "normal", "friction")
+                )
+                filled = count > 0
+                validity = tuple(
+                    bool((mask | ~filled).all() and mask.any()) for mask in masks
+                )
+                grid_samples.append(
+                    GridSample(
+                        count,
+                        np.where(masks[0], magnitude, np.nan),
+                        grid.get_mount_pose()[0, :3, 3].cpu().numpy().copy(),
+                        bool(contents["complete"][0]),
+                        float(contents["impulse_duration"][0]),
+                        validity,
+                    )
+                )
+
     finally:
         sim.destroy(exit_process=False)
         SimulationManager.flush_cleanup_queue()
@@ -184,10 +312,43 @@ def run_contact(output: Path, backend: str, device: str, video: bool) -> None:
         f"Measured {len(active)} contact samples. Normal valid: {int(np.isfinite(normal).sum())}, friction valid: {int(np.isfinite(friction).sum())}"
     )
 
+    if show_grid:
+        limits = (
+            float(max(max(sample.count.max() for sample in grid_samples), 1)),
+            float(
+                max(
+                    max(
+                        np.nan_to_num(sample.impulse, nan=0.0).max()
+                        for sample in grid_samples
+                    ),
+                    1.0e-6,
+                )
+            ),
+        )
+        if not any(sample.count.any() for sample in grid_samples):
+            raise RuntimeError("The mounted grid did not see contact in its footprint.")
+        print(
+            f"Captured {sum(sample.count.any() for sample in grid_samples)} grid frames with contacts ({quantity} impulse)."
+        )
+
     def draw(figure: Figure, index: int) -> None:
         layout = figure.add_gridspec(
             2, 2, width_ratios=(1, 1.4), height_ratios=(1.3, 1)
         )
+        if show_grid:
+            scene = figure.add_subplot(layout[0, 0])
+            show_scene(scene, poses[index])
+            draw_grid(
+                figure,
+                scene,
+                layout,
+                grid_samples,
+                index,
+                quantity,
+                limits,
+                times[index],
+            )
+            return
         show_scene(figure.add_subplot(layout[:, 0]), poses[index])
         force = figure.add_subplot(layout[0, 1])
         draw_resultant(
@@ -205,6 +366,10 @@ def run_contact(output: Path, backend: str, device: str, video: bool) -> None:
         if np.isfinite(friction).any() and np.nanmax(friction) > 0
         else int(active[0])
     )
+    if show_grid:
+        still = max(
+            range(len(grid_samples)), key=lambda i: np.nansum(grid_samples[i].impulse)
+        )
     write_preview(output, times, draw, still=still, video=video)
 
 
@@ -214,11 +379,14 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--backend", choices=("newton", "default"), default="default")
     parser.add_argument("--device", default="cpu")
+    parser.add_argument(
+        "--grid", action="store_true", help="Plot pad contact and impulse maps."
+    )
     parser.add_argument("--no-video", action="store_true")
     args = parser.parse_args()
     if args.backend == "newton" and not args.device.startswith("cuda"):
         parser.error("The Newton MuJoCo Warp example requires --device cuda:0.")
-    run_contact(args.output, args.backend, args.device, not args.no_video)
+    run_contact(args.output, args.backend, args.device, not args.no_video, args.grid)
 
 
 if __name__ == "__main__":

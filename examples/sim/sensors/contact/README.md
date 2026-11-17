@@ -24,3 +24,18 @@ magnitudes in N. The sensor already converts native impulse using the
 solver's reported integration duration. Missing measurements leave gaps in the
 traces. Default CPU exposes a total impulse scalar rather than a separate
 normal component, so the normal trace is marked unavailable on that backend.
+
+## Contact grid
+
+```bash
+python -m examples.sim.sensors.contact.run --grid --backend default --device cpu --output /tmp/contact-grid
+python -m examples.sim.sensors.contact.run --grid --backend newton --device cuda:0 --output /tmp/contact-grid-newton
+```
+
+The registered `ContactGrid` partitions the pad's XY footprint into 12 × 12 cells.
+Its origin is attached to the top surface. The side view shows that origin and
+the X and Z axes. The two heatmaps show counts and the measured scalar impulse
+in N·s. White cells in the impulse heatmap indicate missing data. Default CPU
+reports total impulse magnitude, while the qualified Newton provider reports
+normal impulse magnitude. The report panel shows completeness, validity of
+the three impulse quantities and the native impulse duration in ms.
