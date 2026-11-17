@@ -332,6 +332,7 @@ def test_dexuni_pure_mujoco_contact_sensor_reports_impulse(solver_path: str) -> 
             ),
         )
     )
+    sensor = backend = report = raw = None
     try:
         sim.add_rigid_object(
             RigidObjectCfg(
@@ -429,6 +430,8 @@ def test_dexuni_pure_mujoco_contact_sensor_reports_impulse(solver_path: str) -> 
         assert raw_total > 0.0
         assert math.isclose(sensor_total, raw_total, rel_tol=2.0e-3, abs_tol=2.0e-4)
     finally:
+        # Release borrowed solver/query views while their Scene is still alive.
+        sensor = backend = report = raw = None
         sim.destroy(exit_process=False)
         SimulationManager.flush_cleanup_queue()
         from dexsim.engine.newton_physics import teardown_newton_physics

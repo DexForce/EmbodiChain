@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 from types import SimpleNamespace
+import weakref
 
 import pytest
 import torch
@@ -190,6 +191,38 @@ def _sensor_for_query(query, capacity=2):
         ),
         owner=owner,
     )
+
+
+@pytest.mark.parametrize("pending_sample", [False, True])
+def test_destroy_releases_query_after_producer_and_preserves_observations(
+    pending_sample: bool,
+) -> None:
+    wp.init()
+    query = _FakeQuery()
+    sensor = _sensor_for_query(query)
+    sensor.update()
+    observation = sensor.get_data()
+    expected = observation.clone()
+    events = []
+    query_ref = weakref.ref(query, lambda _: events.append("query_released"))
+    del query
+    if pending_sample:
+        sensor._sample_ready_stream = SimpleNamespace(
+            synchronize=lambda: events.append("producer_completed")
+        )
+
+    sensor.destroy()
+    assert query_ref() is None
+    assert events == (
+        ["producer_completed", "query_released"]
+        if pending_sample
+        else ["query_released"]
+    )
+    sensor.destroy()
+    assert events.count("query_released") == 1
+    assert events.count("producer_completed") == int(pending_sample)
+    for name in expected.keys():
+        torch.testing.assert_close(observation[name], expected[name])
 
 
 def test_contact_report_errors_other_than_reset_are_not_hidden():
