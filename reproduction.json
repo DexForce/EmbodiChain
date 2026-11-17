@@ -1,0 +1,270 @@
+{
+  "schema_version": 1,
+  "scope": "frozen configuration-driven peg model qualification on final production code",
+  "source_revision": "fb4ff20a87b6af835b2aa851d18cf2a609d67c44",
+  "policy": "ActorCritic + TemporalActor official_v1 + ContactPrediction",
+  "training": {
+    "initialization": "random",
+    "seed": 0,
+    "environments": 4096,
+    "rollout_controls": 32,
+    "selected_update": 300,
+    "selected_step": 39321600,
+    "maximum_updates": 1000,
+    "early_stop": "balanced validation 1988/2048; test not used for selection"
+  },
+  "source_evaluation": {
+    "task": "peg_insertion",
+    "execution": "source-final",
+    "code_revision": "fb4ff20a87b6af835b2aa851d18cf2a609d67c44",
+    "episodes": 8192,
+    "successes": 7930,
+    "success_rate": 0.968017578125,
+    "wilson95": [
+      0.9639825733710767,
+      0.9716138554431226
+    ],
+    "target": 0.95,
+    "target_met": true,
+    "raw_report": "/tmp/configured-assembly-qualification/test-peg-final/20261116T182759.836404Z-policy/evaluation.json",
+    "inputs": {
+      "checkpoint": {
+        "path": "/root/.codex/worktrees/actor-critic-composition/EmbodiChain/outputs/configured_current_peg_insertion_seed0_20261116_142503_454183886/checkpoints/configured_current_peg_insertion_seed0_best_step_39321600.pt",
+        "requested": "/root/.codex/worktrees/actor-critic-composition/EmbodiChain/outputs/configured_current_peg_insertion_seed0_20261116_142503_454183886/checkpoints/configured_current_peg_insertion_seed0_best_step_39321600.pt",
+        "selected": "explicit"
+      },
+      "configs": {
+        "gym": "/root/.codex/worktrees/actor-critic-composition/EmbodiChain/outputs/configured_current_peg_insertion_seed0_20261116_142503_454183886/configs/gym.yaml",
+        "train": "/root/.codex/worktrees/actor-critic-composition/EmbodiChain/outputs/configured_current_peg_insertion_seed0_20261116_142503_454183886/configs/train.yaml"
+      },
+      "device": "cuda:1",
+      "embodichain_version": "0.3.2",
+      "episode_allocation": "balanced",
+      "num_envs": 1024,
+      "run": "/root/.codex/worktrees/actor-critic-composition/EmbodiChain/outputs/configured_current_peg_insertion_seed0_20261116_142503_454183886",
+      "seed": 20000,
+      "task_id": "BlindPegInsertionRL-StudyDefaultAssets-v1"
+    },
+    "selection_receipt": "/tmp/configured-assembly-qualification/peg-candidate-frozen.json",
+    "reason": "predeclared same frozen candidate; verify final sensor-capacity changes do not regress PEG; preserve all earlier reports"
+  },
+  "installed_wheel_evaluation": {
+    "task": "peg_insertion",
+    "execution": "installed-wheel-final",
+    "code_revision": "fb4ff20a87b6af835b2aa851d18cf2a609d67c44",
+    "episodes": 8192,
+    "successes": 7933,
+    "success_rate": 0.9683837890625,
+    "wilson95": [
+      0.9643697231337447,
+      0.9719587842632513
+    ],
+    "inputs": {
+      "checkpoint": {
+        "path": "/root/.codex/worktrees/actor-critic-composition/EmbodiChain/outputs/configured_current_peg_insertion_seed0_20261116_142503_454183886/checkpoints/configured_current_peg_insertion_seed0_best_step_39321600.pt",
+        "requested": "/root/.codex/worktrees/actor-critic-composition/EmbodiChain/outputs/configured_current_peg_insertion_seed0_20261116_142503_454183886/checkpoints/configured_current_peg_insertion_seed0_best_step_39321600.pt",
+        "selected": "explicit"
+      },
+      "configs": {
+        "gym": "/root/.codex/worktrees/actor-critic-composition/EmbodiChain/outputs/configured_current_peg_insertion_seed0_20261116_142503_454183886/configs/gym.yaml",
+        "train": "/root/.codex/worktrees/actor-critic-composition/EmbodiChain/outputs/configured_current_peg_insertion_seed0_20261116_142503_454183886/configs/train.yaml"
+      },
+      "device": "cuda:5",
+      "embodichain_version": "0.3.2",
+      "episode_allocation": "balanced",
+      "num_envs": 1024,
+      "run": "/root/.codex/worktrees/actor-critic-composition/EmbodiChain/outputs/configured_current_peg_insertion_seed0_20261116_142503_454183886",
+      "seed": 20000,
+      "task_id": "BlindPegInsertionRL-StudyDefaultAssets-v1"
+    },
+    "raw_report": "/tmp/configured-assembly-qualification/test-peg-final-wheel/20261116T183507.000938Z-policy/evaluation.json",
+    "target": 0.95,
+    "target_met": true,
+    "reason": "same preselected update300 candidate; final source-matching wheel; earlier execution reports retained"
+  },
+  "dependencies": {
+    "mujoco-warp": {
+      "version": "3.15.0",
+      "files_checked": 75,
+      "record_hash_mismatches": []
+    },
+    "newton": {
+      "version": "1.7.0",
+      "files_checked": 809,
+      "record_hash_mismatches": []
+    },
+    "dexsim-engine": {
+      "version": "0.6.0rc2",
+      "files_checked": 663,
+      "record_hash_mismatches": []
+    }
+  },
+  "wheel": {
+    "wheel": "/tmp/configured-safe-wheel-build2/installed_benchmark0/dist/embodichain-0.3.2-py3-none-any.whl",
+    "sha256": "40becd3e8db8048c9882019b5fed80172f99b4337ff0830879165d696221768d",
+    "source_match": [
+      "embodichain/learning/rl/policies/actor_critic.py",
+      "embodichain_tasks/manipulation/assembly/_config.py",
+      "embodichain_tasks/manipulation/assembly/_state.py",
+      "embodichain_tasks/manipulation/assembly/preparation.py"
+    ],
+    "installed_package_paths": {
+      "ActorCritic": "/tmp/configured-assembly-installed/lib/python3.12/site-packages/embodichain/learning/rl/policies/actor_critic.py",
+      "embodichain_tasks": "/tmp/configured-assembly-installed/lib/python3.12/site-packages/embodichain_tasks/__init__.py",
+      "embodichain_robots": "/tmp/configured-assembly-installed/lib/python3.12/site-packages/embodichain_robots/__init__.py"
+    },
+    "code_revision": "fb4ff20a8",
+    "test_status_file": "/tmp/configured-assembly-qualification/safe-wheel-test-status.json"
+  },
+  "preview": {
+    "source_revision": "6c56265de4630d98c3c99c811e352fcc5117c9ee",
+    "episodes": 3,
+    "successes": 3,
+    "seeds": [
+      30000,
+      30001,
+      30002
+    ],
+    "frames": 151,
+    "width": 1280,
+    "height": 720,
+    "fps": 25.0,
+    "duration_seconds": 6.04,
+    "mode": "native RGB, headless Hybrid, returncode0",
+    "scope": "complete predeclared seed sequence; policy inference with original grasp,penetration,hold guards; terminal pauses do not advance physics"
+  },
+  "limitations": [
+    "single geometry and training seed; no paper heterogeneous distribution qualification",
+    "public default robot dynamics are not identified hardware dynamics",
+    "solver iteration-budget warnings are retained; no precision or real-device qualification",
+    "physics is not bitwise deterministic; both frozen-model execution results are reported"
+  ],
+  "runtime": {
+    "python": "3.12.14",
+    "torch": "2.11.0+cu128",
+    "mujoco": "3.15.0",
+    "mujoco_warp": "3.15.0",
+    "newton": "1.7.0",
+    "warp": "1.17.0",
+    "dexsim": "0.6.0rc2"
+  },
+  "earlier_executions": {
+    "code_revision": "ebed2593c8c6e768fb61e16bdd5f43026e1c0ff3",
+    "source": {
+      "task": "peg_insertion",
+      "episodes": 8192,
+      "successes": 7942,
+      "success_rate": 0.969482421875,
+      "wilson95": [
+        0.9655319901807395,
+        0.9729927529646467
+      ],
+      "protocol": {
+        "checkpoint": {
+          "path": "/root/.codex/worktrees/actor-critic-composition/EmbodiChain/outputs/configured_current_peg_insertion_seed0_20261116_142503_454183886/checkpoints/configured_current_peg_insertion_seed0_best_step_39321600.pt",
+          "requested": "/root/.codex/worktrees/actor-critic-composition/EmbodiChain/outputs/configured_current_peg_insertion_seed0_20261116_142503_454183886/checkpoints/configured_current_peg_insertion_seed0_best_step_39321600.pt",
+          "selected": "explicit"
+        },
+        "configs": {
+          "gym": "/root/.codex/worktrees/actor-critic-composition/EmbodiChain/outputs/configured_current_peg_insertion_seed0_20261116_142503_454183886/configs/gym.yaml",
+          "train": "/root/.codex/worktrees/actor-critic-composition/EmbodiChain/outputs/configured_current_peg_insertion_seed0_20261116_142503_454183886/configs/train.yaml"
+        },
+        "device": "cuda:5",
+        "embodichain_version": "0.3.2",
+        "episode_allocation": "balanced",
+        "num_envs": 1024,
+        "run": "/root/.codex/worktrees/actor-critic-composition/EmbodiChain/outputs/configured_current_peg_insertion_seed0_20261116_142503_454183886",
+        "seed": 20000,
+        "task_id": "BlindPegInsertionRL-StudyDefaultAssets-v1"
+      },
+      "target": 0.95,
+      "target_met": true,
+      "selection": {
+        "task": "peg_insertion",
+        "selected_update": 300,
+        "selected_step": 39321600,
+        "checkpoint": "/root/.codex/worktrees/actor-critic-composition/EmbodiChain/outputs/configured_current_peg_insertion_seed0_20261116_142503_454183886/checkpoints/configured_current_peg_insertion_seed0_best_step_39321600.pt",
+        "checkpoint_sha256": "42dfb6961c7a6e4ea0dd728ee072e010599746bc05ee104163284cb47863070f",
+        "selection_basis": "balanced validation seed11000,1988/2048; lower Wilson bound exceeds95%; no test episodes used",
+        "validation_metrics": {
+          "eval/avg_length": 47.26220703125,
+          "eval/avg_reward": 1.94482421875,
+          "eval/completed_episodes": 2048.0,
+          "eval/episodes_per_env_max": 8.0,
+          "eval/episodes_per_env_min": 8.0,
+          "eval/metrics/success.assembly.captured": 0.97412109375,
+          "eval/metrics/success.assembly.depth": 0.017180144244775875,
+          "eval/metrics/success.assembly.grasped": 0.978515625,
+          "eval/metrics/success.assembly.penetration": 3.9339449618269046e-06,
+          "eval/metrics/success.assembly.radial_error": 0.0018434761245558207,
+          "eval/metrics/success.assembly.tilt": 0.029047700931641884,
+          "eval/success_ci95_high": 0.977171657123087,
+          "eval/success_ci95_low": 0.9624720915260544,
+          "eval/success_rate": 0.970703125,
+          "eval/success_samples": 2048.0
+        },
+        "selected_at_utc": "2026-11-16T16:58:51.725823+00:00",
+        "test_protocol": {
+          "episodes": 8192,
+          "environments": 1024,
+          "seed": 20000,
+          "allocation": "balanced",
+          "action": "deterministic mean"
+        },
+        "later_updates_discarded": true
+      },
+      "raw_report": "/tmp/configured-assembly-qualification/test-peg/20261116T170207.281808Z-policy/evaluation.json"
+    },
+    "installed_wheel": {
+      "task": "peg_insertion",
+      "execution": "installed-wheel",
+      "episodes": 8192,
+      "successes": 7929,
+      "success_rate": 0.9678955078125,
+      "wilson95": [
+        0.9638535530096394,
+        0.9714988496102944
+      ],
+      "inputs": {
+        "checkpoint": {
+          "path": "/root/.codex/worktrees/actor-critic-composition/EmbodiChain/outputs/configured_current_peg_insertion_seed0_20261116_142503_454183886/checkpoints/configured_current_peg_insertion_seed0_best_step_39321600.pt",
+          "requested": "/root/.codex/worktrees/actor-critic-composition/EmbodiChain/outputs/configured_current_peg_insertion_seed0_20261116_142503_454183886/checkpoints/configured_current_peg_insertion_seed0_best_step_39321600.pt",
+          "selected": "explicit"
+        },
+        "configs": {
+          "gym": "/root/.codex/worktrees/actor-critic-composition/EmbodiChain/outputs/configured_current_peg_insertion_seed0_20261116_142503_454183886/configs/gym.yaml",
+          "train": "/root/.codex/worktrees/actor-critic-composition/EmbodiChain/outputs/configured_current_peg_insertion_seed0_20261116_142503_454183886/configs/train.yaml"
+        },
+        "device": "cuda:5",
+        "embodichain_version": "0.3.2",
+        "episode_allocation": "balanced",
+        "num_envs": 1024,
+        "run": "/root/.codex/worktrees/actor-critic-composition/EmbodiChain/outputs/configured_current_peg_insertion_seed0_20261116_142503_454183886",
+        "seed": 20000,
+        "task_id": "BlindPegInsertionRL-StudyDefaultAssets-v1"
+      },
+      "raw_report": "/tmp/configured-assembly-qualification/test-peg-wheel/20261116T171403.893135Z-policy/evaluation.json"
+    },
+    "scope": "same frozen candidate, before sampling-capacity-only fix for other profiles; kept separately, not used for selection"
+  },
+  "main_integration": {
+    "integration_revision": "c933f9600a0b728d74a1b8774e7c8c4044d0457f",
+    "main_revision": "9474d998d3fb5d78390aba7473ff7a89ffb77cda",
+    "training_revision": "fb4ff20a87b6af835b2aa851d18cf2a609d67c44",
+    "learning_and_assembly_files_checked": 107,
+    "source_differences": [],
+    "main_change_scope": "3DGS assets and opt-in camera calibration overrides; no changes to recorded RL/assembly algorithm/config files",
+    "validation": {
+      "focused_config_catalog_package_cases": 336,
+      "api_exports_documented": 5018,
+      "context_check": "passed",
+      "black": "26.10.1; black .;2701 files unchanged"
+    },
+    "architecture": {
+      "source_revision": "c933f9600a0b728d74a1b8774e7c8c4044d0457f",
+      "nodes": 123,
+      "edges": 248,
+      "tests_passed": 54
+    }
+  }
+}
