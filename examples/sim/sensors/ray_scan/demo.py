@@ -36,6 +36,7 @@ from embodichain.lab.sim.cfg import DefaultPhysicsCfg, RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject
 from embodichain.lab.sim.sensors import BaseSensor, SensorCfg
 from embodichain.lab.sim.shapes import CubeCfg
+from embodichain.lab.visualization import VisualizationCfg
 
 from .._scene_camera import capture_rgb, scene_camera, show_scene, SCENE_RENDER
 
@@ -236,6 +237,7 @@ def main() -> None:
     sim = SimulationManager(
         SimulationManagerCfg(
             headless=True,
+            visualization=VisualizationCfg(backend="none"),
             startup_summary="off",
             render_cfg=SCENE_RENDER,
             enable_entity_gizmo=False,
