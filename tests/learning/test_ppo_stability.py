@@ -435,6 +435,32 @@ def test_actor_and_critic_gradients_are_clipped_separately() -> None:
     assert float(critic_norm) == pytest.approx(1.0, rel=1e-5)
 
 
+def test_shared_actor_critic_parameters_are_clipped_once(monkeypatch) -> None:
+    shared = nn.Linear(2, 3)
+    policy = ActorCritic(
+        2,
+        1,
+        torch.device("cpu"),
+        nn.Sequential(shared, nn.Linear(3, 1)),
+        nn.Sequential(shared, nn.Linear(3, 1)),
+    )
+    algorithm = _algorithm(policy, max_grad_norm=1.0)
+    for parameter in policy.parameters():
+        parameter.grad = torch.ones_like(parameter)
+    clipped = []
+    original = torch.nn.utils.clip_grad_norm_
+
+    def observed(parameters, *args, **kwargs):
+        parameters = tuple(parameters)
+        clipped.extend(map(id, parameters))
+        return original(parameters, *args, **kwargs)
+
+    monkeypatch.setattr(torch.nn.utils, "clip_grad_norm_", observed)
+    algorithm._clip_gradients()
+    assert len(clipped) == len(set(clipped))
+    assert set(clipped) == {id(parameter) for parameter in policy.parameters()}
+
+
 def test_log_action_standard_deviation_uses_configured_range() -> None:
     policy = ActorCritic(
         obs_dim=2,

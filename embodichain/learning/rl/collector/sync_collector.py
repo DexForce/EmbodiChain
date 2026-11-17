@@ -108,11 +108,11 @@ class SyncCollector(BaseCollector):
             for name, groups in self.training_observation_groups.items():
                 labels = flatten_observation_groups(self.obs_td, groups)
                 target = rollout[name][:, step_idx]
-                if labels.shape != target.shape:
+                if labels.numel() != target.numel():
                     raise ValueError(f"Training observation '{name}' shape mismatch.")
                 if labels.dtype != target.dtype:
                     raise TypeError(f"Training observation '{name}' dtype mismatch.")
-                target.copy_(labels)
+                target.copy_(labels.reshape_as(target))
             step_fields = {"obs": rollout["obs"][:, step_idx]}
             if self.uses_separate_critic_obs:
                 step_fields["critic_obs"] = rollout["critic_obs"][:, step_idx]

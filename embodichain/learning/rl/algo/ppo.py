@@ -310,7 +310,16 @@ class PPO(BaseAlgorithm[TensorDict]):
             else (tuple(self.policy.parameters()),)
         )
         try:
+            seen: set[int] = set()
             for parameters in groups:
+                parameters = tuple(
+                    parameter
+                    for parameter in dict.fromkeys(parameters)
+                    if id(parameter) not in seen
+                )
+                seen.update(id(parameter) for parameter in parameters)
+                if not parameters:
+                    continue
                 torch.nn.utils.clip_grad_norm_(
                     parameters,
                     self.cfg.max_grad_norm,

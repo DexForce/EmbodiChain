@@ -96,7 +96,9 @@ def flatten_observation_groups(
         if isinstance(value, TensorDict):
             flattened.append(flatten_dict_observation(value))
         elif isinstance(value, torch.Tensor):
-            flattened.append(value.flatten(start_dim=1))
+            flattened.append(
+                value.flatten(start_dim=1) if value.ndim > 1 else value[:, None]
+            )
         else:
             raise TypeError(
                 f"Observation group '{group}' must contain tensors, got "

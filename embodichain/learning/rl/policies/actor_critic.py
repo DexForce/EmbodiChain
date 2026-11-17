@@ -251,7 +251,7 @@ class ActorCritic(Policy):
     def optimization_parameter_groups(
         self,
     ) -> tuple[tuple[nn.Parameter, ...], tuple[nn.Parameter, ...]]:
-        """Return parameter groups, assigning shared parameters once to actor first."""
+        """Return logical actor/critic groups, retaining any shared parameters."""
         actor_parameters = tuple(
             dict.fromkeys(
                 (
@@ -270,7 +270,6 @@ class ActorCritic(Policy):
                     *self.critic_obs_normalizer.parameters(),
                 )
             )
-            if id(parameter) not in seen
         )
         seen.update(id(parameter) for parameter in critic_parameters)
         extra = []

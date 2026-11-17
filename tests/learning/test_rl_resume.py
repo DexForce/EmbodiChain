@@ -227,6 +227,25 @@ def test_pending_scheduler_restart_survives_checkpoint_round_trip(
     _assert_state_equal(direct.policy.state_dict(), again.policy.state_dict())
 
 
+def test_schema_v2_ppo_without_optional_auxiliary_coefficient_restores(
+    tmp_path,
+) -> None:
+    trainer = _trainer(tmp_path / "first")
+    trainer.train(16)
+    payload = torch.load(trainer.save_checkpoint(), weights_only=True)
+    assert payload["schema_version"] == 2
+    payload["metadata"]["algorithm_config"].pop("auxiliary_coef")
+    path = tmp_path / "without-coefficient.pt"
+    torch.save(payload, path)
+    restored = _trainer(tmp_path / "restored")
+    restored.load_checkpoint(path)
+    _assert_state_equal(trainer.policy.state_dict(), restored.policy.state_dict())
+    _assert_state_equal(trainer.algorithm.state_dict(), restored.algorithm.state_dict())
+    assert restored.global_step == trainer.global_step == 16
+    restored.train(32)
+    assert restored.global_step == 32
+
+
 def test_checkpoint_without_pending_restart_field_restores(tmp_path):
     trainer = _trainer(
         tmp_path / "first", scheduler=dict(name="linear", kwargs=dict(total_iters=4))
@@ -249,6 +268,10 @@ def test_checkpoint_without_pending_restart_field_restores(tmp_path):
         (lambda c: c.update(schema_version=999), "schema version"),
         (lambda c: c.pop("rng_by_rank"), "required fields"),
         (lambda c: c["metadata"].update(environment="different"), "environment"),
+        (
+            lambda c: c["metadata"]["algorithm_config"].update(auxiliary_coef=0.5),
+            "auxiliary_coef",
+        ),
         (lambda c: c.update(world_size=2), "world_size"),
         (lambda c: c.update(restart_schedule="false"), "restart_schedule"),
         (

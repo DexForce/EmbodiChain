@@ -346,6 +346,17 @@ def _validate(trainer: Any, payload: Any, scheduler: str) -> list[str]:
         unavailable.append("shared CLI configuration context")
         saved_metadata.pop("context")
         current_metadata.pop("context")
+    from .algo.ppo import PPO
+
+    if isinstance(trainer.algorithm, PPO) and isinstance(
+        saved_metadata.get("algorithm_config"), Mapping
+    ):
+        # An omitted optional coefficient has zero-loss semantics in schema v2.
+        # Explicit values still participate in the strict configuration check.
+        saved_metadata["algorithm_config"] = {
+            "auxiliary_coef": 0.0,
+            **saved_metadata["algorithm_config"],
+        }
     differences = _differences(saved_metadata, current_metadata)
     if differences:
         raise ValueError(

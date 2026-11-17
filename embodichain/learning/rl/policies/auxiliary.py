@@ -37,6 +37,11 @@ class AuxiliaryTask(ABC):
     applies to fields, outputs and buffers, preserving established checkpoint
     paths without an extra neural container. Read live buffers from the loss
     argument so device/dtype changes and checkpoint loads remain authoritative.
+
+    Training observation groups are concatenated in their declared order and
+    reshaped to the corresponding field's feature dimensions. An empty feature
+    shape denotes one scalar per environment; multidimensional shapes retain
+    their axes in rollout storage and minibatches.
     """
 
     modules: Mapping[str, nn.Module]

@@ -489,7 +489,9 @@ def test_actor_critic_composes_generic_objectives_with_one_feature_pass() -> Non
     assert policy.contact_decoder[0].weight.grad.abs().sum() > 0
     actor_params, critic_params = policy.optimization_parameter_groups()
     ids = [id(parameter) for parameter in (*actor_params, *critic_params)]
-    assert len(ids) == len(set(ids))
+    assert set(map(id, actor_params)) & set(map(id, critic_params)) == {
+        id(parameter) for parameter in shared_normalizer.parameters()
+    }
     assert set(ids) == {id(parameter) for parameter in policy.parameters()}
     copied = deepcopy(policy)
     assert copied.auxiliary_tasks["contact"].decoder is copied.contact_decoder
@@ -732,3 +734,80 @@ def test_removed_policy_and_history_versions_are_rejected():
         build_policy({"name": "proprioceptive_actor_critic"}, 3, 2, torch.device("cpu"))
     with pytest.raises(ValueError, match="architecture_version"):
         TemporalActor(TemporalActorCfg(architecture_version="legacy_v1"), 2)
+
+
+@pytest.mark.parametrize("shape", [(2, 2), ()])
+def test_multidimensional_auxiliary_targets_keep_shape_and_pre_action_values(
+    shape: tuple[int, ...],
+) -> None:
+    class FeatureActor(torch.nn.Linear):
+        def forward_with_features(self, observation):
+            return self(observation), {"latent": observation}
+
+    class GridRegression(AuxiliaryTask):
+        modules = {}
+        training_observation_groups = {"target": ("nested.target",)}
+        training_field_specs = {"target": (shape, torch.long)}
+        output_names = ("prediction",)
+
+        def evaluate(self, features):
+            return {"prediction": features["latent"][:, 0]}
+
+        def loss(self, labels, outputs, buffers):
+            return (
+                (
+                    outputs["prediction"]
+                    - labels["target"]
+                    .float()
+                    .reshape(labels["target"].shape[0], -1)
+                    .mean(-1)
+                )
+                .square()
+                .mean()
+            )
+
+    class GridEnv(_LabelEnv):
+        def _observation(self):
+            self.labels.copy_(
+                torch.arange(self.labels.numel()).reshape(2, *shape)
+                + self.step_index * 10
+            )
+            return {
+                "proprioception": torch.full((2, 3), float(self.step_index)),
+                "privileged": torch.ones(2, 4),
+                "nested": {"target": self.labels},
+            }
+
+    env = GridEnv(3)
+    env.labels = torch.zeros(2, *shape, dtype=torch.long)
+    policy = ActorCritic(
+        3,
+        2,
+        torch.device("cpu"),
+        FeatureActor(3, 2),
+        torch.nn.Linear(4, 1),
+        critic_obs_dim=4,
+        actor_obs_groups=("proprioception",),
+        critic_obs_groups=("privileged",),
+        auxiliary_tasks={"grid": GridRegression()},
+    )
+    collector = SyncCollector(env, policy, env.device)
+    buffer = RolloutBuffer(
+        2,
+        2,
+        3,
+        2,
+        env.device,
+        critic_obs_dim=4,
+        distribution_param_dim=2,
+        training_field_specs=policy.training_field_specs,
+    )
+    rollout = collector.collect(2, rollout=buffer.start_rollout())
+    expected = torch.arange(2 * math.prod(shape)).reshape(2, *shape)
+    torch.testing.assert_close(rollout["grid_target"][:, 0], expected)
+    torch.testing.assert_close(rollout["grid_target"][:, 1], expected + 10)
+    assert transition_view(rollout, flatten=True)["grid_target"].shape == (4, *shape)
+    algorithm = PPO(
+        PPOCfg(device="cpu", n_epochs=1, batch_size=4, auxiliary_coef=1.0), policy
+    )
+    assert algorithm.update(rollout)["auxiliary_loss"] > 0

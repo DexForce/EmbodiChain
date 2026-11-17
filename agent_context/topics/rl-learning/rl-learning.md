@@ -141,8 +141,14 @@ Component contracts record semantic settings, including parameterless objectives
 so equal neural tensor shapes cannot silently change training semantics on resume.
 The checkpoint loader accepts only the current full schema and metadata; older
 schemas and incomplete historical metadata are rejected before model mutation.
+Within schema v2, an omitted optional PPO auxiliary coefficient means zero; an
+explicitly different coefficient remains incompatible.
 
 Named training fields travel with the observation that produced each action.
+Collectors preserve declared feature axes, including scalar fields, after
+combining their configured observation groups. Logical actor/critic parameter
+groups retain overlap so APG can reject shared trunks; PPO deduplicates shared
+parameters at gradient clipping.
 PPO's optional auxiliary decoder loss recomputes the latent in each minibatch
 so encoder gradients remain connected. Normalization statistics remain frozen
 through collection and PPO epochs, then update for the next rollout. Actor
