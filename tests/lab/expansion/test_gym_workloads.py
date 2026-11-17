@@ -189,7 +189,7 @@ def test_workload_action_schema_checked_before_constructing_world(
 ):
     from embodichain.lab.expansion import ExpansionRunCfg
     from embodichain.lab.gym.envs.expert_trajectory import ExpertTrajectoryCfg
-    from embodichain.lab.gym.utils.registration import REGISTERED_ENVS
+    from embodichain.lab.gym.utils.registration import REGISTERED_ENVS, EnvSpec
     import embodichain.lab.gym.utils.gym_utils as utils
     import embodichain.lab.expansion.host as host
 
@@ -244,7 +244,7 @@ def test_workload_action_schema_checked_before_constructing_world(
         configs[name] = config
         # Configured tasks share this implementation class. Selection belongs
         # to the resolved configs above, never to artificial per-task classes.
-        monkeypatch.setitem(REGISTERED_ENVS, name, SimpleNamespace(cls=EmbodiedEnv))
+        monkeypatch.setitem(REGISTERED_ENVS, name, EnvSpec(name, EmbodiedEnv))
         cfg = ExpansionRunCfg(
             deployment=str(deployment),
             output_dir=str(tmp_path / name),
@@ -285,16 +285,37 @@ def test_workload_action_schema_checked_before_constructing_world(
         factory.assert_not_called()
 
 
-@pytest.mark.parametrize("field", ["control_parts", "scene_preparation"])
-def test_real_deployments_reject_incompatible_shared_world_setup(
-    tmp_path, monkeypatch, field
+@pytest.mark.parametrize(
+    "field,registered_x,explicit_x,compatible",
+    [
+        ("control_parts", (None, None), (None, None), False),
+        ("scene_preparation", (None, None), (0.2, 0.8), False),
+        ("scene_preparation", (0.2, 0.8), (None, None), False),
+        ("scene_preparation", (0.2, 0.2), (None, None), True),
+        ("scene_preparation", (0.2, 0.8), (0.4, 0.4), True),
+        ("scene_preparation", (None, 0.2), (0.2, None), True),
+    ],
+    ids=[
+        "control_parts",
+        "explicit_preparation_mismatch",
+        "registered_preparation_mismatch",
+        "registered_preparation_same",
+        "explicit_preparation_overrides_defaults",
+        "explicit_matches_registered_preparation",
+    ],
+)
+def test_real_deployments_validate_shared_world_setup(
+    tmp_path, monkeypatch, field, registered_x, explicit_x, compatible
 ):
     from pathlib import Path
     from embodichain.lab.expansion import ExpansionRunCfg
     from embodichain.lab.expansion.task_program_jobs import _prepare_deployment
     from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
     from embodichain.lab.gym.utils.gym_utils import config_to_cfg
-    from embodichain.lab.gym.utils.registration import REGISTERED_ENVS
+    from embodichain.lab.gym.utils.registration import (
+        REGISTERED_ENVS,
+        register_env_function,
+    )
     from embodichain.utils.utility import load_config
     import embodichain.lab.expansion.host as host
 
@@ -308,17 +329,16 @@ def test_real_deployments_reject_incompatible_shared_world_setup(
     inputs.mkdir()
     base = load_config(_prepare_deployment(task, inputs))
     workloads = []
-    settings = (
-        (("Arm", ["arm"]), ("ArmEef", ["arm", "eef"]))
-        if field == "control_parts"
-        else tuple(
-            (name, {"func": f"{__name__}:_prepare_cube_scene", "params": {"x": x}})
-            for name, x in (("Near", 0.2), ("Far", 0.8))
-        )
-    )
-    for name, value in settings:
+
+    def preparation(x):
+        return {"func": f"{__name__}:_prepare_cube_scene", "params": {"x": x}}
+
+    for i, name in enumerate(("first", "second")):
         component = load_config(task.parent / "envs/default.yaml")
-        component["env"][field] = value
+        if field == "control_parts":
+            component["env"][field] = ["arm"] if i == 0 else ["arm", "eef"]
+        elif explicit_x[i] is not None:
+            component["env"][field] = preparation(explicit_x[i])
         physical = inputs / f"{name}.environment.yaml"
         physical.write_text(yaml.safe_dump(component))
         declaration = {
@@ -330,11 +350,27 @@ def test_real_deployments_reject_incompatible_shared_world_setup(
         path.write_text(json.dumps(declaration))
         config = config_to_cfg(declaration, source_path=path)
         if field == "control_parts":
-            assert config.control_parts == value
+            assert config.control_parts == component["env"][field]
+        elif explicit_x[i] is None:
+            assert config.scene_preparation is None
         else:
-            assert config.scene_preparation.func == value["func"]
-            assert config.scene_preparation.params == value["params"]
-        assert REGISTERED_ENVS[declaration["id"]].cls is EmbodiedEnv
+            assert config.scene_preparation.func == preparation(explicit_x[i])["func"]
+            assert config.scene_preparation.params == {"x": explicit_x[i]}
+        spec = REGISTERED_ENVS[declaration["id"]]
+        # Keep the real configured integration and ordinary environment class,
+        # but register task-owned defaults through the supported entry point.
+        register_env_function(
+            EmbodiedEnv,
+            declaration["id"],
+            override=True,
+            max_episode_steps=spec.max_episode_steps,
+            task_program_adapter_factory=spec.task_program_adapter_factory,
+            **(
+                {"scene_preparation": preparation(registered_x[i])}
+                if registered_x[i] is not None
+                else {}
+            ),
+        )
         cfg = ExpansionRunCfg(
             deployment=str(path),
             output_dir=str(tmp_path / name),
@@ -353,9 +389,16 @@ def test_real_deployments_reject_incompatible_shared_world_setup(
                 {},
             )
         )
-    constructor = Mock(side_effect=AssertionError("World must not be constructed"))
+
+    class ReachedWorld(Exception):
+        pass
+
+    constructor = Mock(side_effect=ReachedWorld)
     monkeypatch.setattr(host, "GymExpansionHost", constructor)
-    with pytest.raises(ValueError, match="schema"):
+    with pytest.raises(
+        ReachedWorld if compatible else ValueError,
+        match=None if compatible else "workloads must share",
+    ):
         run_gym_expansion_workloads(
             workloads,
             WorkloadExecutionCfg(
@@ -363,4 +406,7 @@ def test_real_deployments_reject_incompatible_shared_world_setup(
             ),
             output_dir=tmp_path / "run",
         )
-    constructor.assert_not_called()
+    if compatible:
+        constructor.assert_called_once()
+    else:
+        constructor.assert_not_called()

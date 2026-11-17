@@ -555,6 +555,7 @@ def run_gym_expansion_workloads(
     from .persistence import ArtifactEpisodeSink, load_expansion_episode
     from .workflow import _RecordedSink
     from .episode_export import export_expansion_episodes
+    from embodichain.lab.gym.envs.managers.cfg import FunctorCfg
     from embodichain.lab.gym.utils.gym_utils import config_to_cfg
     from embodichain.lab.gym.utils.registration import REGISTERED_ENVS
     from embodichain.utils.utility import load_config
@@ -647,43 +648,49 @@ def run_gym_expansion_workloads(
         )
     first = configs[0][1]
 
-    def physical_key(cfg: Any) -> str:
+    def physical_key(env_id: str, cfg: Any) -> str:
         robot = deepcopy(cfg.robot.to_dict())
         for binding in robot.get("gripper_bindings", {}).values():
             binding["declaration"].pop("root_from_contact_frame", None)
             binding["defaults"].pop("root_from_contact_frame", None)
             binding["defaults"].get("binding", {}).pop("root_from_contact_frame", None)
+        physical = {
+            name: getattr(cfg, name)
+            for name in (
+                "robot",
+                "sim_cfg",
+                "rigid_object",
+                "background",
+                "target_control_frequency",
+                "sim_steps_per_control",
+                "events",
+                "sensor",
+                "expert_trajectory",
+                "actions",
+                "control_parts",
+                "active_joint_ids",
+                "scene_preparation",
+            )
+            if hasattr(cfg, name)
+        }
+        physical["robot"] = robot
+        # EmbodiedEnv uses the registration default only without an explicit
+        # hook. Normalize both routes without mutating either declaration.
+        if physical.get("scene_preparation") is None:
+            default = REGISTERED_ENVS[env_id].default_kwargs.get("scene_preparation")
+            if default is not None:
+                physical["scene_preparation"] = FunctorCfg(**deepcopy(default))
         return _hash(
             {
-                name: (
-                    robot
-                    if name == "robot"
-                    else (
-                        getattr(cfg, name).to_dict()
-                        if hasattr(getattr(cfg, name), "to_dict")
-                        else getattr(cfg, name)
-                    )
-                )
-                for name in (
-                    "robot",
-                    "sim_cfg",
-                    "rigid_object",
-                    "background",
-                    "target_control_frequency",
-                    "sim_steps_per_control",
-                    "events",
-                    "sensor",
-                    "expert_trajectory",
-                    "actions",
-                    "control_parts",
-                    "active_joint_ids",
-                    "scene_preparation",
-                )
-                if hasattr(cfg, name)
+                name: value.to_dict() if hasattr(value, "to_dict") else value
+                for name, value in physical.items()
             }
         )
 
-    if any(physical_key(cfg) != physical_key(first) for _, cfg in configs[1:]):
+    if any(
+        physical_key(raw["id"], cfg) != physical_key(configs[0][0]["id"], first)
+        for raw, cfg in configs[1:]
+    ):
         raise ValueError(
             "workloads must share physical environment, robot, sensors, cadence, expert action schema and scene preparation"
         )

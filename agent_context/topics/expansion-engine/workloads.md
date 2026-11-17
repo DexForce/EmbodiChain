@@ -43,8 +43,10 @@ World, captures the original seeded nominal scene in row zero, and composes the
 existing session, frame collector, episode assembler and confirmed artifact sink.
 Different integration/grasp policies may share that World only when their
 physical configuration, program, cadence and expert action schema agree. The
-scene-preparation declaration and its parameters must also match, because the
-common nominal scene is prepared once before constructing the World.
+effective scene-preparation declaration and its parameters must also match:
+explicit configuration wins over the environment's registered default, following
+`EmbodiedEnv` construction. The common nominal scene is prepared once before
+constructing the World.
 Command mode, ActionManager declarations and controlled-joint selections cannot
 vary between workloads in one World. Selections belong to the resolved environment
 configurations, not the shared registered environment implementation class. Physical/visual/prototype
