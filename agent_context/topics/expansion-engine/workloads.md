@@ -118,6 +118,23 @@ each native event state machine and receipts. `ContactPermissionChecker` checks
 all valid native contact slots with the original applied-impulse and loss gates;
 hosts still own sampling at every required physics substep.
 
+`MeasuredExpansionValidator` uses these same batch interfaces. Compatible rows
+share one immutable geometry declaration/checker; selected rows are compacted
+into bounded Newton queries and mapped back in their original order. Different
+geometry retains separate checker groups. Query models never step physics.
+Predicate inputs share the current complete measured snapshot, while events,
+consecutive counts, failures and contact holds remain row-owned. Shape snapshots
+are needed only by declared support-bound predicates; native-contact rows do not
+gain a homogeneous-topology requirement.
+
+The built-in joint transport writes all of a frame's destinations into one owned
+output. Single commands, subclasses, replaced encoder methods and custom
+transports retain normal dispatch and registration order. Numerical/frame checks,
+inactive holds and position-velocity evidence remain unchanged. Episode assembly
+shares validated immutable segment metadata internally; mutable readback still
+owns its containers. Durable JSON uses the same finite sorted representation and
+fsync/atomic publication, with one encoded text allocation.
+
 Default GPU dynamics use Direct GPU reporting, whose static contact identity
 limitations remain explicit admission constraints. Physics devices and task
 qualification must be reported separately. Existing CPU deployments do not

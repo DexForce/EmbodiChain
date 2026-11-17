@@ -24,6 +24,12 @@ Hosts acquire versioned measurements; verification is the boundary that commits
 or invalidates observed effects. Preserve required stop/hold boundaries on the
 executed control grid instead of relying only on native planner timing.
 
+Row-local planning within a larger World must carry the same explicit
+`context.env_ids` through FK/IK, root poses and diagnostics. HandOver applies this
+to both source/destination arms, including its continuation and failed-waypoint
+diagnostic routes. A one-row planning context does not implicitly select arena
+zero or all arenas of the robot.
+
 ## Package map
 
 | Concern | Source of truth |

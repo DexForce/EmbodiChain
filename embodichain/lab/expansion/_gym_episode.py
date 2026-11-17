@@ -120,6 +120,11 @@ class GymEpisodeAssembler:
                 key = f"scene_state_{index}"
                 observations[key] = torch.stack(values)
                 scene_keys.append({"key": key, "entity_uid": uid, "field": field})
+            from embodichain.utils._owned_json import freeze_metadata
+
+            # Both compatibility fields describe the same immutable audit tree.
+            # Validate/own it once; mutable public projections still detach.
+            segments = freeze_metadata(result.segments[result_row])
             metadata = {
                 "source_env_id": row,
                 "attempt_sequence": ctx.requests[row].sequence,
@@ -146,13 +151,13 @@ class GymEpisodeAssembler:
                 "initial_state": record["initial_state"],
                 "scene_state_fields": scene_keys,
                 "physics_backend": env.sim.physics_backend,
-                "program_segments": result.segments[result_row],
+                "program_segments": segments,
                 "expansion": (
                     result.expansion_records[result_row]
                     if result.expansion_records
                     else ()
                 ),
-                "segments": result.segments[result_row],
+                "segments": segments,
                 "instruction": program.instruction,
                 "instruction_source": "task_program",
             }

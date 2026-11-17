@@ -452,14 +452,33 @@ class JointPositionGymTransportEncoder:
         active_mask: torch.Tensor,
     ) -> EnvAction:
         """Write addressed joints while holding every other qpos column."""
+        return self._encode_commands(
+            (command,), base_action=base_action, active_mask=active_mask
+        )
+
+    def _encode_commands(self, commands, *, base_action, active_mask):
+        """Own one output for a validated frame's built-in joint destinations."""
+        if not isinstance(base_action, (torch.Tensor, TensorDict)):
+            raise TypeError(
+                "The built-in joint-position encoder requires a tensor action or "
+                "a TensorDict containing qpos."
+            )
+        action = base_action.clone()
+        for command in commands:
+            self._write_command(command, action=action, active_mask=active_mask)
+        return action
+
+    @staticmethod
+    def _write_command(command, *, action, active_mask):
+        """Apply one command to an already-owned frame output."""
         if not isinstance(command.target, JointPositionTarget):
             raise TypeError("Joint-position transport requires JointPositionTarget.")
         if not isinstance(command.payload, JointPositionPayload):
             raise TypeError("Joint-position transport requires JointPositionPayload.")
-        if isinstance(base_action, torch.Tensor):
-            qpos = base_action
-        elif isinstance(base_action, TensorDict) and "qpos" in base_action:
-            qpos = base_action["qpos"]
+        if isinstance(action, torch.Tensor):
+            qpos = action
+        elif isinstance(action, TensorDict) and "qpos" in action:
+            qpos = action["qpos"]
         else:
             raise TypeError(
                 "The built-in joint-position encoder requires a tensor action or "
@@ -487,38 +506,34 @@ class JointPositionGymTransportEncoder:
         if not qpos.is_floating_point():
             raise TypeError("The full-qpos base action must be floating point.")
 
-        action_qpos = qpos.clone()
+        action_qpos = qpos
         columns = torch.tensor(joint_ids, dtype=torch.long, device=qpos.device)
         selected = action_qpos.index_select(1, columns)
         selected[active_mask] = positions[active_mask].to(dtype=action_qpos.dtype)
         action_qpos[:, columns] = selected
-        if isinstance(base_action, torch.Tensor):
-            return action_qpos
+        if isinstance(action, torch.Tensor):
+            return
 
         velocities = command.payload.velocities
         if velocities is None:
             raise ValueError(
                 "position_velocity joint commands require payload velocities."
             )
-        if "qvel" not in base_action:
+        if "qvel" not in action:
             raise TypeError(
                 "Position-velocity joint actions require qpos and qvel base targets."
             )
-        qvel = base_action["qvel"]
+        qvel = action["qvel"]
         if qvel.shape != qpos.shape or qvel.device != qpos.device:
             raise ValueError(
                 "Full qpos and qvel base targets must share shape and device."
             )
-        action_qvel = qvel.clone()
+        action_qvel = qvel
         selected_velocity = action_qvel.index_select(1, columns)
         selected_velocity[active_mask] = velocities[active_mask].to(
             dtype=action_qvel.dtype
         )
         action_qvel[:, columns] = selected_velocity
-        action = base_action.clone()
-        action["qpos"] = action_qpos
-        action["qvel"] = action_qvel
-        return action
 
     def hold(
         self,
@@ -532,6 +547,9 @@ class JointPositionGymTransportEncoder:
         if not all(isinstance(target, JointPositionTarget) for target in targets):
             raise TypeError("Joint-position hold received an incompatible target.")
         return base_action.clone()
+
+
+_BUILTIN_JOINT_ENCODE = JointPositionGymTransportEncoder.encode
 
 
 class RuntimeCommandFrameEncoder:
@@ -742,7 +760,17 @@ class RuntimeCommandFrameEncoder:
             self._validate_command_types(transport, command)
             by_transport.setdefault(command.transport_id, []).append(command)
         for transport_id, transport in self._transports.items():
-            for command in by_transport.get(transport_id, ()):
+            commands = by_transport.get(transport_id, ())
+            if (
+                len(commands) > 1
+                and type(transport) is JointPositionGymTransportEncoder
+                and getattr(transport.encode, "__func__", None) is _BUILTIN_JOINT_ENCODE
+            ):
+                action = transport._encode_commands(
+                    commands, base_action=action, active_mask=frame.active_mask
+                )
+                continue
+            for command in commands:
                 action = transport.encode(
                     command,
                     base_action=action,

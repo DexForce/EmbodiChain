@@ -137,7 +137,14 @@ class _GeometryRow:
         return ignored, allowed
 
     def __init__(
-        self, env, configuration: dict, output: Path, *, device="cpu", env_id=0
+        self,
+        env,
+        configuration: dict,
+        output: Path,
+        *,
+        device="cpu",
+        env_id=0,
+        checker_pool=None,
     ):
         self.env_id = env_id
         from embodichain.lab.task_program.integrations.simulation.feasibility_geometry import (
@@ -151,9 +158,14 @@ class _GeometryRow:
         ignored, self.allowed_contacts = self.contact_permissions(
             env, configuration, known
         )
-        checker = NewtonCollisionChecker(
-            bodies, ignored_pairs=ignored, device=device, max_shapes=512
-        )
+        key = (tuple(bodies), tuple(ignored), device)
+        checker = None if checker_pool is None else checker_pool.get(key)
+        if checker is None:
+            checker = NewtonCollisionChecker(
+                bodies, ignored_pairs=ignored, device=device, max_shapes=512
+            )
+            if checker_pool is not None:
+                checker_pool[key] = checker
         self.checkers = [(checker, self.allowed_contacts, known)]
         atomic_json(
             output / "collision-geometry.json",
@@ -222,27 +234,31 @@ class _GeometryRow:
                 allowed_contacts=contacts,
                 moving_objects=tuple(uid for uid in self.moving if uid in aliases),
             )
-            if self.env_id not in self.results or report.status != "passed":
-                self.results[self.env_id] = SimpleNamespace(
-                    status=report.status,
-                    reason=f"{report.reason}; pair={checker.last_pair}",
-                )
+            self.record_geometry(report, checker.last_pair, action)
             if report.status != "passed":
-                metadata = action.metadata.get("row_actions", {}).get(
-                    str(self.env_id), action.metadata
-                )
-                atomic_json(
-                    self.output / "collision-failure.json",
-                    {
-                        "reason": self.results[self.env_id].reason,
-                        "action": {
-                            key: str(value)
-                            for key, value in metadata.items()
-                            if isinstance(value, (str, int, float, bool))
-                        },
-                    },
-                )
                 break
+
+    def record_geometry(self, report, pair, action):
+        """Retain measured failure and its original row-owned diagnostic."""
+        if self.env_id not in self.results or report.status != "passed":
+            self.results[self.env_id] = SimpleNamespace(
+                status=report.status, reason=f"{report.reason}; pair={pair}"
+            )
+        if report.status != "passed":
+            metadata = action.metadata.get("row_actions", {}).get(
+                str(self.env_id), action.metadata
+            )
+            atomic_json(
+                self.output / "collision-failure.json",
+                {
+                    "reason": self.results[self.env_id].reason,
+                    "action": {
+                        key: str(value)
+                        for key, value in metadata.items()
+                        if isinstance(value, (str, int, float, bool))
+                    },
+                },
+            )
 
     def close(self):
         for checker, _, _ in self.checkers:
@@ -533,18 +549,48 @@ class MeasuredExpansionValidator:
                     )
                 )
                 environment.sensors[self.sensor_uid] = self.sensor
+            checker_pool = {}
             for row in range(environment.num_envs):
                 path = output if environment.num_envs == 1 else output / f"row-{row}"
                 path.mkdir(parents=True, exist_ok=True)
                 self.rows[row] = (
                     _GeometryRow(
-                        environment, configuration, path, device=device, env_id=row
+                        environment,
+                        configuration,
+                        path,
+                        device=device,
+                        env_id=row,
+                        checker_pool=checker_pool,
                     )
                     if self.sensor is None
                     else _ContactRow(
                         environment, configuration, path, sensor=self.sensor, env_id=row
                     )
                 )
+            conditions = [
+                *configuration["initial_checks"],
+                *configuration["final_checks"],
+            ]
+            for event in configuration["events"]:
+                conditions.extend(event["conditions"])
+            shape_entities = {
+                condition["entity"]
+                for condition in conditions
+                if condition["kind"] == "support_bounds"
+            }
+            self._shapes = {
+                uid: (
+                    tuple(
+                        environment.sim.get_rigid_object(uid).get_collision_shapes(
+                            env_id=row, allow_heterogeneous=True
+                        )
+                        for row in range(environment.num_envs)
+                    )
+                    if uid in shape_entities
+                    else ()
+                )
+                for uid in environment.sim.get_rigid_object_uid_list()
+            }
             if self.sensor is not None:
                 permissions = self.rows[0].allowed
                 self.checker = ContactPermissionChecker(
@@ -624,13 +670,83 @@ class MeasuredExpansionValidator:
         snapshot: SceneState | None = None,
     ) -> None:
         """Check measured task state and retain each row's first physical failure."""
+        if not ids:
+            return
+        from .collision import _measured_frame
+        from embodichain.lab.task_program.integrations.feasibility import (
+            MeasuredTaskMonitor,
+        )
+
+        env = self.env
+        measured = (
+            _measured_frame(env, snapshot, self._shapes)
+            if getattr(snapshot, "env_ids", None) == tuple(range(env.num_envs))
+            else env
+        )
+        monitors = tuple(self.rows[row].monitor for row in ids)
+        with MeasuredTaskMonitor.batch_scope(measured, monitors):
+            for row in ids:
+                check = self.rows[row]
+                if self.sensor is None:
+                    check.monitor.observe(measured, action)
+                    check.terminal[row] = check.monitor.validation(measured)
+                else:
+                    check.sample((row,), action, snapshot)
+                    check._interval_samples = 0
+                self.terminal[row] = check.terminal[row]
+        if self.sensor is None:
+            self._sample_geometry(ids, action)
+        for row in ids:
+            self.results[row] = self.rows[row].results[row]
+
+    def _sample_geometry(self, ids, action):
+        """Batch compatible physical geometry, retaining heterogeneous-row checks."""
+        from embodichain.utils.math import matrix_from_quat
+
+        env = self.env
+        poses = env.robot.body_data.body_link_pose
+        matrices = torch.eye(4, dtype=poses.dtype, device=poses.device).repeat(
+            env.num_envs, len(env.robot.link_names), 1, 1
+        )
+        matrices[..., :3, :3] = matrix_from_quat(poses[..., 3:])
+        matrices[..., :3, 3] = poses[..., :3]
+        matrices = matrices.detach().cpu().numpy()
+        frames = {
+            f"{env.robot.uid}/{link}": matrices[:, index]
+            for index, link in enumerate(env.robot.link_names)
+        }
+        frames.update(
+            {
+                uid: env.sim.get_rigid_object(uid)
+                .get_local_pose(to_matrix=True)
+                .detach()
+                .cpu()
+                .numpy()
+                for uid in env.sim.get_rigid_object_uid_list()
+            }
+        )
+        frames["default_plane"] = np.broadcast_to(np.eye(4), (env.num_envs, 4, 4))
+        groups = {}
         for row in ids:
             check = self.rows[row]
-            check.sample((row,), action, snapshot)
-            self.terminal[row] = check.terminal[row]
-            self.results[row] = check.results[row]
-            if self.sensor is not None:
-                check._interval_samples = 0
+            for checker, allowed, aliases in check.checkers:
+                moving = tuple(uid for uid in check.moving if uid in aliases)
+                groups.setdefault((checker, tuple(allowed), moving), []).append(row)
+        for (checker, allowed, moving), rows in groups.items():
+            # Respect the existing aggregate contact-buffer ceiling. Compact
+            # selected rows also prevent inactive/heterogeneous rows consuming it.
+            width = max(1, min(env.num_envs, 1048576 // checker._capacity))
+            for start in range(0, len(rows), width):
+                selected = rows[start : start + width]
+                reports = checker.check_batch(
+                    {uid: values[selected] for uid, values in frames.items()},
+                    allowed_contacts=allowed,
+                    moving_objects=moving,
+                )
+                for row, report, pair in zip(
+                    selected, reports, checker.last_batch_pairs
+                ):
+                    self.rows[row].record_geometry(report, pair, action)
 
     def close(self) -> None:
         """Detach owned observers before releasing resources; safe on failure."""

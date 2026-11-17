@@ -321,6 +321,52 @@ def _probe(output):
                 peer = check.terminal[1]
                 check.prepare(env_ids=(0,))
                 assert check.terminal[1] is peer and 0 not in check.terminal
+                if backend == "geometry":
+                    from embodichain.lab.gym.envs.types import ControllerAction
+
+                    # A real collider overlap in only one selected arena must
+                    # not reject the safe peer, including reordered selection.
+                    forbidden = {
+                        **configuration,
+                        "allowed_contacts": [
+                            pair
+                            for pair in configuration["allowed_contacts"]
+                            if not (
+                                "cube" in pair
+                                and any(
+                                    name.startswith(env.robot.uid + "/")
+                                    for name in pair
+                                )
+                            )
+                        ],
+                    }
+                    measured = MeasuredExpansionValidator(
+                        env,
+                        forbidden,
+                        Path(output) / "geometry-selected",
+                        backend="geometry",
+                    )
+                    cube = env.sim.get_rigid_object("cube")
+                    original = cube.get_local_pose(to_matrix=True)[1:2].clone()
+                    try:
+                        measured.prepare()
+                        body = next(
+                            b
+                            for b in collision_bodies_from_simulation(env, env_id=1)
+                            if b.robot and b.kind != "halfspace"
+                        )
+                        link = body.frame_uid.split("/", 1)[1]
+                        pose = env.robot.get_link_pose(link, to_matrix=True)[1:2]
+                        pose = pose @ torch.tensor(body.local_pose, dtype=pose.dtype)
+                        before_query = env.sim.physics_step_index
+                        cube.set_local_pose(pose, env_ids=[1])
+                        measured.sample((1, 0), ControllerAction(env.robot.get_qpos()))
+                        assert measured.results[0].status == "passed"
+                        assert measured.results[1].status == "failed"
+                        assert env.sim.physics_step_index == before_query
+                    finally:
+                        cube.set_local_pose(original, env_ids=[1])
+                        measured.close()
                 if backend == "native_contacts":
                     assert check.rows[1].substeps > 0 and check.rows[0].substeps == 0
                     # The clock uses the same native physics intervals that
@@ -350,5 +396,78 @@ def test_explicit_phase_paths_and_selected_row_acceptance(tmp_path):
     assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-5000:]
 
 
+def _probe_handover_rows():
+    """Plan and consume selected rows in a larger real handover World."""
+    import torch
+    from embodichain.lab.expansion.program import collect_program_batch
+    from embodichain.lab.gym.utils.gym_utils import config_to_cfg
+    from embodichain.lab.gym.utils.registration import (
+        REGISTERED_ENVS,
+        discover_task_packages,
+        execute_init_hooks,
+    )
+    from embodichain.lab.sim import SimulationManager
+    from embodichain.utils.utility import load_config
+
+    torch.set_num_threads(1)
+    root = Path(__file__).resolve().parents[3]
+    path = (
+        root
+        / "extensions/embodichain_tasks/configs/tasks/manipulation/hand_over/task.tianji_marvin.yaml"
+    )
+    discover_task_packages()
+    execute_init_hooks()
+    cfg = config_to_cfg(load_config(path), source_path=path)
+    cfg.num_envs = cfg.sim_cfg.num_envs = 4
+    cfg.sim_cfg.device, cfg.sim_cfg.headless = "cpu", True
+    cfg.sim_cfg.render_cfg.renderer = "no-render"
+    cfg.sensor, cfg.enable_sensor, cfg.dataset = [], False, None
+    cfg.init_rollout_buffer = cfg.record_trajectory = False
+    env = REGISTERED_ENVS[load_config(path)["id"]].make(cfg=cfg)
+    adapters = []
+    try:
+        env.reset(seed=2)
+        program = env.task_program_adapter.compile(cfg.task_program)
+        bridges = {}
+        for row in (3, 1):
+            adapter = env.task_program_adapter.for_env_ids((row,))
+            adapters.append(adapter)
+            bridges[row] = adapter.create_bridge(program, isolate_policy_sessions=True)
+        observed = []
+        result = collect_program_batch(
+            env,
+            bridges,
+            max_steps=2,
+            observe_step=lambda ids, action, observation: observed.append(ids),
+        )
+        # The original FK omitted selected IDs and rejected both plans at zero
+        # commands. Budget cancellation must instead follow real commands.
+        assert result.env_ids == (3, 1)
+        assert all(length >= 1 for length in result.lengths), result.lengths
+        assert observed and set(observed[0]) == {3, 1}
+        assert not any(result.accepted)
+    finally:
+        for adapter in adapters:
+            adapter.close()
+        env.close(exit_process=False)
+        SimulationManager.flush_cleanup_queue()
+
+
+@pytest.mark.subprocess_sim
+def test_selected_handover_rows_preserve_world_batch(tmp_path):
+    result = subprocess.run(
+        [sys.executable, __file__, "handover"],
+        cwd=Path(__file__).resolve().parents[3],
+        env={**os.environ, "SDL_VIDEODRIVER": "offscreen", "OMP_NUM_THREADS": "1"},
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-5000:]
+
+
 if __name__ == "__main__":
-    _probe(sys.argv[1])
+    if sys.argv[1] == "handover":
+        _probe_handover_rows()
+    else:
+        _probe(sys.argv[1])

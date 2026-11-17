@@ -740,6 +740,7 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
             qpos=source_start_qpos,
             name=resources.first.arm.control_part,
             to_matrix=True,
+            env_ids=context.env_ids,
         )
         current_object_pose = torch.bmm(source_eef, pose_inv(source_object_to_eef))
 
@@ -781,6 +782,7 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
             qpos=destination_start_qpos,
             name=resources.second.arm.control_part,
             to_matrix=True,
+            env_ids=context.env_ids,
         )
         # Approach diagonally from the receiver's side of the embodiment.  A
         # top-down receiver places two bulky parallel grippers in the same
@@ -1268,12 +1270,14 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
             qpos=handover_start_qpos,
             name=handover.arm.control_part,
             to_matrix=True,
+            env_ids=context.env_ids,
         )
         receive_start_qpos = start_qpos[:, list(receive.arm.joint_ids)]
         receive_start_eef = self.robot.compute_fk(
             qpos=receive_start_qpos,
             name=receive.arm.control_part,
             to_matrix=True,
+            env_ids=context.env_ids,
         )
 
         vertical_mode = (
@@ -1967,6 +1971,7 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
                     pose=target_poses[:, waypoint_index],
                     name=arm.control_part,
                     joint_seed=joint_seed,
+                    env_ids=context.env_ids,
                 )
                 ik_success = normalize_success_mask(
                     ik_success,
