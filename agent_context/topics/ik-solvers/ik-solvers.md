@@ -100,6 +100,17 @@ to the preceding selected posture under `ik_nearest_weight`; this continuous
 path selection is independent of its ordinary per-target
 `ik_solution_selection` policy.
 
+FEP opts in with `continuous_path_joint_step` (requires `redundancy_search`).
+Independent q7 searches seeded by the preceding answer alternate between
+sampled q7 values and, near the shoulder singularity (q2 near 0), between
+distant joint-1/joint-3 pairs, so Cartesian retiming never converges. The path
+hook tries the seed's q7 for every sample, then a quintic q7 ramp to the end
+value with the shortest bounded weighted joint path, then a bounded per-sample
+search with an unbounded fallback. A single keyframe keeps the point query.
+Such lookahead needs the whole path, so FEP also sets
+`continuous_ik_whole_path`; `MotionGenerator` then passes each Cartesian path
+in one call instead of 32-sample chunks. Both capabilities default to off.
+
 ## Computation and state ownership
 
 Stateful configuration, device buffers, seed policy, TCP and limit updates stay

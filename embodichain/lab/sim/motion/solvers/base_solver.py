@@ -541,6 +541,16 @@ class BaseSolver(metaclass=ABCMeta):
         """
         return False
 
+    @property
+    def continuous_ik_whole_path(self) -> bool:
+        """Whether continuous path IK needs each Cartesian path in one call.
+
+        Callers otherwise split long paths into fixed-size chunks seeded by the
+        preceding chunk, which suffices for nearest-branch selection but not for
+        redundancy resolution that looks ahead along the path.
+        """
+        return False
+
     def _get_continuous_ik_candidates(
         self, target_xpos: torch.Tensor, qpos_seed: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:

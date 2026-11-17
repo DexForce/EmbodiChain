@@ -81,6 +81,17 @@ class FEPSolverCfg(SolverCfg):
     """Weight on inverse normalized limit margins during search."""
     max_joint_step: float | None = None
     """Hard per-joint displacement bound from the seed, in radians, during search."""
+    continuous_path_joint_step: float | None = None
+    """Per-sample joint bound for temporally continuous batch IK, in radians.
+
+    When set, ``Robot.compute_batch_ik(continuous=True)`` solves path samples in
+    order, each seeded by the preceding solution and searched only within this
+    displacement, so q7 follows the path instead of alternating between
+    independently sampled values. A sample outside the bound, such as a distant
+    first keyframe or a coarse step near a singularity, is solved without it;
+    denser resampling then restores bounded steps. ``None`` leaves continuous
+    batch IK unsupported.
+    """
 
     def __post_init__(self) -> None:
         if self.ik_solution_selection not in ("nearest", "manipulability"):
@@ -121,6 +132,17 @@ class FEPSolverCfg(SolverCfg):
             self.arm_angle is not None or self.max_joint_step is not None
         ):
             raise ValueError("arm_angle and max_joint_step require redundancy_search")
+        if self.continuous_path_joint_step is not None:
+            if not math.isfinite(self.continuous_path_joint_step) or (
+                self.continuous_path_joint_step <= 0
+            ):
+                raise ValueError(
+                    "continuous_path_joint_step must be finite and positive"
+                )
+            if not self.redundancy_search:
+                raise ValueError(
+                    "continuous_path_joint_step requires redundancy_search"
+                )
 
     def init_solver(
         self, device: str | torch.device = "cpu", **kwargs: Any
@@ -226,6 +248,7 @@ class FEPSolver(BaseSolver):
         q7_samples: torch.Tensor | None = None,
         weights: torch.Tensor | None = None,
         score_bounds: torch.Tensor | None = None,
+        max_step: float | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         import warp as wp
         from embodichain.compute.kinematics._warp.fep import solve
@@ -257,7 +280,11 @@ class FEPSolver(BaseSolver):
                 wp.from_torch(
                     score_bounds if score_bounds is not None else self._dimensions
                 ),
-                wp.float64(self.cfg.max_joint_step or math.inf),
+                wp.float64(
+                    (self.cfg.max_joint_step or math.inf)
+                    if max_step is None
+                    else max_step
+                ),
                 score_bounds is not None and not guide_limits,
             ],
             outputs=[wp.from_torch(flags), wp.from_torch(candidates)],
@@ -366,6 +393,7 @@ class FEPSolver(BaseSolver):
         reference: torch.Tensor,
         count: int,
         stream: Any,
+        max_step: float | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         import warp as wp
         from embodichain.compute.kinematics._warp.fep import (
@@ -379,7 +407,8 @@ class FEPSolver(BaseSolver):
         scores = torch.full(
             (n, count), torch.inf, dtype=torch.float64, device=self.device
         )
-        max_step = self.cfg.max_joint_step or math.inf
+        if max_step is None:
+            max_step = self.cfg.max_joint_step or math.inf
         lo = torch.maximum(lower[6], seed[:, 6] - max_step)
         hi = torch.minimum(upper[6], seed[:, 6] + max_step)
 
@@ -405,6 +434,7 @@ class FEPSolver(BaseSolver):
                 q7_samples=samples.clamp(lower[6], upper[6]),
                 weights=weights,
                 score_bounds=scores[rows, -1].contiguous(),
+                max_step=max_step,
             )
             costs = torch.empty(flags.shape, dtype=torch.float64, device=self.device)
             guide_costs = torch.empty_like(costs) if guidance else costs
@@ -543,6 +573,201 @@ class FEPSolver(BaseSolver):
             spacing *= 0.5
         return valid, joints
 
+    @property
+    def supports_continuous_batch_ik(self) -> bool:
+        """Whether ``continuous_path_joint_step`` enables continuous path IK."""
+        return self.cfg.continuous_path_joint_step is not None
+
+    @property
+    def continuous_ik_whole_path(self) -> bool:
+        """Whether q7 ramps are chosen over whole paths rather than chunks."""
+        return self.supports_continuous_batch_ik
+
+    @torch.no_grad()
+    def _get_continuous_ik_path(
+        self, target_xpos: torch.Tensor, qpos_seed: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Solve path samples in order within the continuous joint bound.
+
+        Args:
+            target_xpos: Root-relative TCP goals shaped ``(B, N, 4, 4)``.
+            qpos_seed: Initial joints shaped ``(B, 7)``.
+
+        Returns:
+            Validity ``(B, N)`` and joints ``(B, N, 7)``. A failed sample repeats
+            the preceding posture, which seeds the next sample.
+
+        Raises:
+            ValueError: If continuous path IK is not configured or the shapes
+                do not match.
+        """
+        bound = self.cfg.continuous_path_joint_step
+        if bound is None:
+            raise ValueError("continuous_path_joint_step is not configured")
+        if target_xpos.ndim != 4 or target_xpos.shape[-2:] != (4, 4):
+            raise ValueError("Continuous targets must have shape (B, N, 4, 4)")
+        b, n = target_xpos.shape[:2]
+        if qpos_seed.shape != (b, 7):
+            raise ValueError("Continuous initial seeds must have shape (B, 7)")
+        seed = qpos_seed.to(device=self.device, dtype=torch.float32)
+        # Fast path: every sample's eight branches at the seed's q7, solved in
+        # one batch, then the branch nearest the preceding selection. Rows whose
+        # selection stays within the bound need no sequential search.
+        branch_valid, branches = self.get_ik(
+            target_xpos.reshape(-1, 4, 4),
+            seed[:, None].expand(b, n, 7).reshape(-1, 7),
+            return_all_solutions=True,
+            _hold_q7=True,
+        )
+        valid, joints, largest, _ = self._select_nearest_branches(
+            branches.reshape(b, n, -1, 7), branch_valid.reshape(b, n, -1), seed
+        )
+        # A single keyframe has no preceding path sample to stay near.
+        within = (largest <= bound) | (n == 1)
+        rows = (~(valid.all(dim=1) & within)).nonzero().flatten()
+        if len(rows) and n > 1:
+            ramp_valid, ramp_joints = self._ramp_continuous_path(
+                target_xpos[rows], seed[rows], bound
+            )
+            valid[rows], joints[rows] = ramp_valid, ramp_joints
+            rows = rows[~ramp_valid.all(dim=1)]
+        if len(rows):
+            valid[rows], joints[rows] = self._search_continuous_path(
+                target_xpos[rows], seed[rows], bound
+            )
+        return valid, joints
+
+    def _ramp_continuous_path(
+        self, target_xpos: torch.Tensor, seed: torch.Tensor, bound: float
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Ramp q7 to the end value giving the shortest bounded path.
+
+        Near the shoulder singularity a constant q7 can force a joint-1/joint-3
+        flip; a gradual q7 change along the path can stay on one branch. End
+        values within 1 rad of the seed's q7 are probed in 0.05 rad steps, all
+        in one batch. Rows without a bounded ramp are invalid.
+        """
+        b, n = target_xpos.shape[:2]
+        offsets = torch.arange(1, 21, device=self.device, dtype=seed.dtype) * 0.05
+        offsets = torch.stack((offsets, -offsets), dim=1).flatten()
+        k = len(offsets)
+        q7_end = (seed[:, 6:7] + offsets).clamp(
+            self.lower_qpos_limits[6], self.upper_qpos_limits[6]
+        )
+        # Quintic progress: q7 starts and ends at rest, like the sampled path,
+        # so the ramp adds no velocity step at either end.
+        u = torch.arange(1, n + 1, device=self.device, dtype=seed.dtype) / n
+        progress = u**3 * (10.0 - 15.0 * u + 6.0 * u**2)
+        q7 = seed[:, None, 6:7] + (q7_end[..., None] - seed[:, None, 6:7]) * progress
+        seeds = seed[:, None, None].expand(b, k, n, 7).clone()
+        seeds[..., 6] = q7
+        branch_valid, branches = self.get_ik(
+            target_xpos[:, None].expand(b, k, n, 4, 4).reshape(-1, 4, 4),
+            seeds.reshape(-1, 7),
+            return_all_solutions=True,
+            _hold_q7=True,
+        )
+        valid, joints, largest, length = self._select_nearest_branches(
+            branches.reshape(b * k, n, -1, 7),
+            branch_valid.reshape(b * k, n, -1),
+            seed[:, None].expand(b, k, 7).reshape(-1, 7),
+        )
+        bounded = valid.all(dim=1) & (largest <= bound)
+        # Keep the shortest weighted joint path. Unlike the smallest bounded
+        # offset, which creeps toward the singularity as a denser resampling
+        # shrinks every step, its ranking does not depend on the sample count;
+        # it also avoids needless q7 sweeps.
+        score = length.masked_fill(~bounded, torch.inf).view(b, k)
+        bounded = bounded.view(b, k)
+        choice = score.argmin(dim=1)
+        rows = torch.arange(b, device=self.device)
+        selected = rows * k + choice
+        found = bounded[rows, choice]
+        return (
+            valid[selected] & found[:, None],
+            torch.where(found[:, None, None], joints[selected], seed[:, None]),
+        )
+
+    def _select_nearest_branches(
+        self, branches: torch.Tensor, branch_valid: torch.Tensor, seed: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Follow each row's valid branch nearest the preceding selection.
+
+        Args:
+            branches: Candidates shaped ``(R, N, K, 7)``.
+            branch_valid: Candidate validity shaped ``(R, N, K)``.
+            seed: Initial postures shaped ``(R, 7)``.
+
+        Returns:
+            Validity ``(R, N)``, joints ``(R, N, 7)``, each row's largest
+            absolute joint step from the seed and its weighted path length.
+        """
+        import warp as wp
+        from embodichain.compute.kinematics._warp.fep import select_path
+
+        r, n = branch_valid.shape[:2]
+        branches = branches.to(device=self.device, dtype=torch.float32).contiguous()
+        branch_valid = branch_valid.to(device=self.device, dtype=torch.bool)
+        branch_valid = branch_valid.contiguous()
+        seed = seed.to(device=self.device, dtype=torch.float32).contiguous()
+        weights = self.ik_nearest_weight.to(device=self.device, dtype=torch.float32)
+        weights = weights.contiguous()
+        valid = torch.empty((r, n), dtype=torch.bool, device=self.device)
+        joints = torch.empty((r, n, 7), dtype=torch.float32, device=self.device)
+        largest = torch.empty(r, dtype=torch.float32, device=self.device)
+        length = torch.empty(r, dtype=torch.float32, device=self.device)
+        stream = None
+        if self.device.type == "cuda":
+            current = torch.cuda.current_stream(self.device)
+            for tensor in (branches, branch_valid, seed, weights):
+                tensor.record_stream(current)
+            stream = wp.stream_from_torch(current)
+        if r and n:
+            wp.launch(
+                select_path,
+                dim=r,
+                inputs=[
+                    wp.from_torch(branches),
+                    wp.from_torch(branch_valid),
+                    wp.from_torch(seed),
+                    wp.from_torch(weights),
+                ],
+                outputs=[
+                    wp.from_torch(joints),
+                    wp.from_torch(valid),
+                    wp.from_torch(largest),
+                    wp.from_torch(length),
+                ],
+                device=str(self.device),
+                stream=stream,
+            )
+        return valid, joints, largest, length
+
+    def _search_continuous_path(
+        self, target_xpos: torch.Tensor, seed: torch.Tensor, bound: float
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Search q7 sample by sample within the bound of the preceding solution.
+
+        A sample unreachable within the bound falls back to the unbounded point
+        query from the same seed.
+        """
+        b, n = target_xpos.shape[:2]
+        previous = seed
+        valid = torch.zeros((b, n), dtype=torch.bool, device=self.device)
+        joints = seed.new_empty((b, n, 7))
+        for index in range(n):
+            target = target_xpos[:, index]
+            found, solved = self.get_ik(target, previous, _max_joint_step=bound)
+            if not bool(found.all()):
+                free_found, free = self.get_ik(target, previous)
+                retry = ~found & free_found
+                found = found | retry
+                solved = torch.where(retry[:, None], free, solved)
+            previous = torch.where(found[:, None], solved, previous)
+            valid[:, index] = found
+            joints[:, index] = previous
+        return valid, joints
+
     @torch.no_grad()
     def get_ik(
         self,
@@ -551,6 +776,8 @@ class FEPSolver(BaseSolver):
         return_all_solutions: bool = False,
         arm_angle: float | torch.Tensor | None = None,
         num_samples: int | None = None,
+        _max_joint_step: float | None = None,
+        _hold_q7: bool = False,
         **kwargs: Any,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Solve geometric branches, optionally optimizing the redundant q7.
@@ -569,6 +796,10 @@ class FEPSolver(BaseSolver):
                 candidate angles are rejected when an angle preference is active.
             num_samples: Must be None. Numerical multi-start sampling is not
                 equivalent to FEP's adaptive q7 search; use ``redundancy_search``.
+            _max_joint_step: Internal search bound overriding ``max_joint_step``
+                for continuous path samples.
+            _hold_q7: Internal continuous-path switch keeping the seed's q7
+                even when redundancy search is configured.
             **kwargs: Reserved common solver arguments.
 
         Returns:
@@ -589,7 +820,8 @@ class FEPSolver(BaseSolver):
         self.cfg.__post_init__()
         if num_samples is not None:
             raise ValueError("FEP does not support num_samples; use redundancy_search")
-        if arm_angle is not None and not self.cfg.redundancy_search:
+        search = self.cfg.redundancy_search and not _hold_q7
+        if arm_angle is not None and not search:
             raise ValueError("arm_angle requires redundancy_search")
         target = torch.as_tensor(target_xpos, device=self.device, dtype=torch.float32)
         if target.ndim == 2:
@@ -666,7 +898,7 @@ class FEPSolver(BaseSolver):
             if code & (1 << bit):
                 raise ValueError(message)
         reference = None
-        if self.cfg.redundancy_search:
+        if search:
             preferred = self.cfg.arm_angle if arm_angle is None else arm_angle
             if preferred is None:
                 reference = self._arm_angles(seed, stream)
@@ -691,7 +923,7 @@ class FEPSolver(BaseSolver):
         valid = torch.empty((n, count), device=self.device, dtype=torch.bool)
         joints = seed.new_empty((n, count, 7))
         batch_size = self.cfg.batch_size or 16384
-        if self.cfg.redundancy_search:
+        if search:
             # Bound candidate memory even when q7 expands to 33 probes.
             batch_size = min(batch_size, 4096)
         if select_manipulability:
@@ -699,7 +931,7 @@ class FEPSolver(BaseSolver):
             batch_size = min(batch_size, 1024)
         for start in range(0, n, batch_size):
             end = start + batch_size
-            if self.cfg.redundancy_search:
+            if search:
                 valid[start:end], joints[start:end] = self._search_redundancy(
                     target[start:end],
                     seed[start:end],
@@ -709,6 +941,7 @@ class FEPSolver(BaseSolver):
                     reference[start:end],
                     count,
                     stream,
+                    max_step=_max_joint_step,
                 )
             else:
                 self._solve_branches(
