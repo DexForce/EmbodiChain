@@ -308,11 +308,17 @@ The 90-degree yaw and articulation-pose batches still exhaust their proposals,
 even at a quarter of the ranges: a door yawed beyond a few degrees leaves its
 arc end without an IK solution, so their rows count as preparation failures.
 
-Every Robotiq articulation drive declares `friction: 0.0`. A partial drive
-keeps the asset's other fields (#1168), and PhysX applies URDF joint friction
-(1.0 on the drawer slide, 0.08 on the door hinge) as a coefficient on the joint
-constraint force: with it, the drawer and door did not move at all in replay.
-Zero was the effective value before that change.
+A partial drive keeps the asset's omitted fields since #1168, so the Robotiq
+suites declare the values they were calibrated with. Every articulation drive
+declares `friction: 0.0`: PhysX applies URDF joint friction (1.0 on the drawer
+slide, 0.08 on the door hinge) as a coefficient on the joint constraint force,
+and with it the drawer and door did not move at all in replay. The control
+panel also declares `drive_type: force`, because the asset imports its joints
+undriven, which silently ignored the button's return spring and the button sank
+under gravity before the press. The drawer and door stay explicitly undriven.
+The Franka arm declares zero joint friction in place of the URDF's 0.2; an A/B
+replay of a spatial push batch recovered 3 of 8 rows. These were the effective
+values before that change.
 
 Measured replay calibrates the Robotiq grasp and its cuRobo timing:
 

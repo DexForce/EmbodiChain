@@ -58,7 +58,7 @@ def test_pose_batch_suite_declares_translation_only_batched_trials() -> None:
     track = suite.enabled_tracks()[0]
 
     settings = resolve_atomic_pose_randomization(track)
-    assert suite.suite_version == "atomic_franka_robotiq_pose_batch_v13"
+    assert suite.suite_version == "atomic_franka_robotiq_pose_batch_v14"
     assert settings.enabled is True
     assert settings.mode == "translation"
     assert settings.pose_batch_size == 8
@@ -227,7 +227,7 @@ def test_spatial_generalization_suite_covers_task_level_single_arm_skills() -> N
         ),
     }
 
-    assert suite.suite_version == "atomic_franka_robotiq_spatial_generalization_v21"
+    assert suite.suite_version == "atomic_franka_robotiq_spatial_generalization_v22"
     assert len(suite.evaluation_tracks()) == 79
     assert set(expected) == {track.id for track in suite.tracks}
     for track in suite.tracks:
@@ -416,11 +416,12 @@ def test_articulation_only_tracks_declare_rigid_solver_iterations() -> None:
     assert checked >= 3
 
 
-def test_robotiq_articulations_declare_zero_joint_friction() -> None:
-    """A partial drive keeps the asset's joint friction unless it is declared.
+def test_robotiq_articulations_declare_friction_and_drive_type() -> None:
+    """A partial drive keeps the asset's friction and drive type unless declared.
 
     The URDF coefficients (1.0 on the drawer slide) scale constraint force in
-    PhysX and held the drawer and door still in replay.
+    PhysX and held the drawer and door still in replay. The asset imports its
+    joints undriven, so configured gains act only with a declared force drive.
     """
     from importlib.resources import files
 
@@ -432,11 +433,11 @@ def test_robotiq_articulations_declare_zero_joint_friction() -> None:
         for track in load_suite(path.name[: -len(".yaml")]).tracks:
             for articulation in track.config.get("articulations", []):
                 checked += 1
-                assert articulation["drive"]["friction"] == 0.0, (
-                    path.name,
-                    track.id,
-                    articulation["id"],
-                )
+                drive = articulation["drive"]
+                label = (path.name, track.id, articulation["id"])
+                assert drive["friction"] == 0.0, label
+                gains = "stiffness" in drive or "damping" in drive
+                assert drive["drive_type"] == ("force" if gains else "none"), label
     assert checked >= 9
 
 

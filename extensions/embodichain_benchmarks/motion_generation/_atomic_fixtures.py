@@ -613,6 +613,10 @@ def _create_franka_robotiq_cfg(overrides: dict[str, Any]) -> RobotCfg:
     # Position-only replay lags a 1e4 servo by tens of mrad at the end of a
     # move; this stiffness matches the Panda arm preset.
     cfg.joint_drive_props.stiffness["fr3_joint[1-7]"] = 1e5
+    # Omitted drive fields keep the URDF values since #1168, which gave the
+    # arm 0.2 joint friction, scaled by constraint force in PhysX. The
+    # calibration ran with the former zero, and pushes lost rows without it.
+    cfg.joint_drive_props.friction = {"fr3_joint[1-7]": 0.0}
     cfg.link_attrs = {
         **(cfg.link_attrs or {}),
         "newton_gripper_contacts": _newton_gripper_contacts(

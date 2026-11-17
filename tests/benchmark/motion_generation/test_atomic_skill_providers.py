@@ -2084,6 +2084,7 @@ def test_franka_robotiq_calibration_couples_linkage_and_bounds_grip() -> None:
     drives = single.joint_drive_props
     assert {drives.max_effort[name] for name in _ROBOTIQ_HAND_JOINTS} == {5.0}
     assert drives.stiffness["fr3_joint[1-7]"] == 1e5
+    assert drives.friction == {"fr3_joint[1-7]": 0.0}
 
     pgi = _create_franka_pgi_cfg({})
     assert pgi.mimic_compliance is None
@@ -2102,6 +2103,10 @@ def test_franka_robotiq_calibration_couples_linkage_and_bounds_grip() -> None:
         for name, value in dual.joint_drive_props.max_effort.items()
         if "finger" in name or "knuckle" in name
     } == {5.0}
+    assert dual.joint_drive_props.friction == {
+        "left_fr3_joint[1-7]": 0.0,
+        "right_fr3_joint[1-7]": 0.0,
+    }
     explicit = create_dual_tutorial_robot_cfg(
         robot_type="franka", gripper="robotiq_2f_140", hand_max_effort=20.0, **names
     )

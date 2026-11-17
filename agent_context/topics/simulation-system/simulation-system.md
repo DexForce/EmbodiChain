@@ -195,7 +195,9 @@ iterations: GPU physics solves the scene at its largest per-actor
 4/1, so an articulation-only scene needs explicit counts. Articulation joints
 that never move under contact point to joint friction: a partial drive keeps
 the asset's omitted fields, and PhysX applies URDF friction as a coefficient
-on constraint force, so declare it explicitly.
+on constraint force, so declare it explicitly. Configured gains that have no
+effect point to the drive type: an asset may import its joints undriven
+(`NONE`), and a partial drive keeps that mode unless `drive_type` is declared.
 
 Select focused tests from the owning detail page. Lifecycle coverage starts in
 `tests/sim/test_sim_manager.py` and `tests/sim/spawn/test_scene.py`; source,
