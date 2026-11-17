@@ -132,6 +132,155 @@ def splice_joint_segment(
     return result
 
 
+def _connect_joint_segment(
+    original: np.ndarray,
+    replacement: np.ndarray,
+    timestamps: np.ndarray,
+    *,
+    start: int,
+    stop: int,
+    joint_indices: tuple[int, ...],
+    protected: tuple[int, int],
+    blend_samples: int,
+    velocity_limits: np.ndarray,
+    acceleration_limits: np.ndarray,
+) -> NDArray[np.floating]:
+    """Join a native path with quintic bridges, leaving its contact core exact.
+
+    Three original rows at each join retain the original discrete derivative
+    stencils. Unlike a pointwise blend, the bridges do not inherit interior
+    measurement noise. ``protected`` uses segment-relative half-open bounds.
+    """
+    q, t = _path(original, timestamps)
+    candidate = np.asarray(replacement)
+    count = stop - start
+    first, last = protected
+    if (
+        not 0 <= start < stop <= len(q)
+        or candidate.shape != (count, q.shape[1])
+        or not np.isfinite(candidate).all()
+        or not 6 <= first < last <= count - 6
+        or blend_samples < 4
+        or not joint_indices
+        or len(set(joint_indices)) != len(joint_indices)
+        or any(not 0 <= j < q.shape[1] for j in joint_indices)
+    ):
+        raise ValueError(
+            "Native contact core needs room for both boundary connections."
+        )
+    ids = list(joint_indices)
+    result = q.copy()
+    result[start:stop, ids] = candidate[:, ids]
+    segment = result[start:stop, ids].astype(np.float64)
+    source = q[start:stop, ids].astype(np.float64)
+    clock = t[start:stop]
+
+    def derivatives(
+        values: np.ndarray, indices: np.ndarray, at: int
+    ) -> tuple[np.ndarray, np.ndarray]:
+        offset = clock[indices] - clock[at]
+        polynomial = np.linalg.solve(
+            np.column_stack((np.ones(3), offset, offset**2)), values[indices]
+        )
+        return polynomial[1], 2 * polynomial[2]
+
+    def bridge(a: int, b: int, left_source: bool) -> None:
+        duration = clock[b] - clock[a]
+        if left_source:
+            p0, p1 = source[a], segment[b]
+            v0, a0 = derivatives(source, np.arange(a - 2, a + 1), a)
+            v1, a1 = derivatives(segment, np.arange(b - 1, b + 2), b)
+        else:
+            p0, p1 = segment[a], source[b]
+            v0, a0 = derivatives(segment, np.arange(a - 1, a + 2), a)
+            v1, a1 = derivatives(source, np.arange(b, b + 3), b)
+        c0, c1, c2 = p0, v0 * duration, a0 * duration**2 / 2
+        rhs = np.stack(
+            (p1 - c0 - c1 - c2, v1 * duration - c1 - 2 * c2, a1 * duration**2 - 2 * c2)
+        )
+        c3, c4, c5 = np.linalg.solve(
+            np.array([[1, 1, 1], [3, 4, 5], [6, 12, 20]], dtype=float), rhs
+        )
+        u = ((clock[a : b + 1] - clock[a]) / duration)[:, None]
+        segment[a : b + 1] = c0 + u * (c1 + u * (c2 + u * (c3 + u * (c4 + u * c5))))
+
+    def boundary_index(indices: range, left: bool) -> int:
+        # Preserve noisy measured boundary samples and start the connection at
+        # a quieter stencil inside the free phase. Do not propagate boundary
+        # noise into a long quintic polynomial or alter an unrelated interval.
+        best, best_score = indices[0], float("inf")
+        for index in indices:
+            stencil = (
+                np.arange(index - 2, index + 1) if left else np.arange(index, index + 3)
+            )
+            velocity, acceleration = derivatives(source, stencil, index)
+            score = max(
+                float(np.max(np.abs(velocity) / velocity_limits[ids])),
+                float(np.max(np.abs(acceleration) / acceleration_limits[ids])),
+            )
+            if score < 0.25:
+                return index
+            if score < best_score:
+                best, best_score = index, score
+        return best
+
+    a = boundary_index(range(2, max(3, first // 3)), True)
+    b = boundary_index(
+        range(count - 3, min(count - 4, last + 2 * (count - last) // 3), -1), False
+    )
+    left_end = min(first - 1, max(a + blend_samples, (a + first) // 2))
+    right_start = max(last, min(b - blend_samples, last + (b - last) // 4))
+    bridge(a, left_end, True)
+    bridge(right_start, b, False)
+    segment[: a + 1] = source[: a + 1]
+    segment[b:] = source[b:]
+    result[start:stop, ids] = segment.astype(q.dtype)
+    result[start : start + 3, ids] = q[start : start + 3, ids]
+    result[stop - 3 : stop, ids] = q[stop - 3 : stop, ids]
+    return result
+
+
+def _replacement_diagnostics(
+    original: np.ndarray,
+    proposed: np.ndarray,
+    timestamps: np.ndarray,
+    *,
+    lower: np.ndarray,
+    upper: np.ndarray,
+    velocity_limits: np.ndarray,
+    acceleration_limits: np.ndarray,
+) -> dict[str, object]:
+    """Qualify every changed position/edge/acceleration stencil, including joins.
+
+    Unchanged source data may already violate limits. It remains reported by
+    ``joint_path_diagnostics`` and cannot be repaired by editing another arm or
+    another interval. This check never excuses a newly generated violation.
+    """
+    q, t = _path(proposed, timestamps)
+    changed = q != original
+    velocity_mask = changed[1:] | changed[:-1]
+    acceleration_mask = velocity_mask[1:] | velocity_mask[:-1]
+    dt = np.diff(t)
+    velocity = np.diff(q.astype(float), axis=0) / dt[:, None]
+    acceleration = np.diff(velocity, axis=0) / ((dt[1:] + dt[:-1]) * 0.5)[:, None]
+    peak_v = np.max(np.where(velocity_mask, np.abs(velocity), 0), axis=0)
+    peak_a = np.max(np.where(acceleration_mask, np.abs(acceleration), 0), axis=0)
+    positions = changed & ((q < lower - 1e-6) | (q > upper + 1e-6))
+    return {
+        "accepted": bool(
+            not positions.any()
+            and np.all(peak_v <= velocity_limits * (1 + 1e-5))
+            and np.all(peak_a <= acceleration_limits * (1 + 1e-5))
+        ),
+        "position_violations": int(positions.sum()),
+        "peak_velocity": peak_v.tolist(),
+        "peak_acceleration": peak_a.tolist(),
+        "velocity_ratio": float(np.max(peak_v / velocity_limits)),
+        "acceleration_ratio": float(np.max(peak_a / acceleration_limits)),
+        "scope": "modified positions and their velocity/acceleration stencils",
+    }
+
+
 def joint_path_diagnostics(
     qpos: np.ndarray,
     timestamps: np.ndarray,

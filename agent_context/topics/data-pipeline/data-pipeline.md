@@ -39,7 +39,7 @@ planning do not establish collision freedom or physical task success. See
 video-to-joint clock conversion and standalone numeric/JSON reconstruction
 bundles. It does not relax Real2Sim's object-reference requirements. The
 [Atomic Skills overview](../atomic-actions/atomic-actions.md) owns the fitting
-entry point and the effect-free motion-goal boundary.
+entry point and the scene-grounded versus effect-free motion-only boundaries.
 
 Read [online sampling](online-sampling.md) for worker states, refill, shared
 errors, action schemas, sample provenance, causal histories and example-runner

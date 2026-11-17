@@ -457,6 +457,24 @@ def test_web_fitting_vfr_clock_concurrency_export_and_stale_revisions(
         assert client.get("/api/frame-index?time_seconds=nan").status_code == 422
         preview = client.get(f"/api/fitting/jobs/{job}/preview").json()
         assert preview["report"]["parameters"]["lift_height"] == 0.12
+        assert "original_links" not in preview
+        assert preview["viewer"]["phase"] == "ready"
+        viewer_endpoint = f"/api/fitting/jobs/{job}/viewer"
+        assert (
+            client.post(viewer_endpoint, json={"time_seconds": 0.5}).status_code == 403
+        )
+        assert (
+            client.post(
+                viewer_endpoint, json={"time_seconds": "nan"}, headers=headers
+            ).status_code
+            == 422
+        )
+        assert (
+            client.post(
+                viewer_endpoint, json={"time_seconds": 0.5}, headers=headers
+            ).status_code
+            == 200
+        )
         response = client.get(f"/api/fitting/jobs/{job}/bundle")
         assert response.status_code == 200
         with np.load(io.BytesIO(response.content), allow_pickle=False) as bundle:
@@ -481,6 +499,12 @@ def test_web_fitting_vfr_clock_concurrency_export_and_stale_revisions(
         assert client.get("/api/fitting").json()["stale"]
         for endpoint in ("bundle", "preview"):
             assert client.get(f"/api/fitting/jobs/{job}/{endpoint}").status_code == 409
+        assert (
+            client.post(
+                viewer_endpoint, json={"time_seconds": 0.5}, headers=headers
+            ).status_code
+            == 409
+        )
 
 
 def test_cli_fits_saved_core_and_retains_outer_annotation(
@@ -542,3 +566,455 @@ def test_cli_fits_saved_core_and_retains_outer_annotation(
         "start_frame": 5,
         "end_frame": 20,
     }
+
+
+@pytest.mark.parametrize("pickup_factor", [1, 2])
+def test_whole_episode_composes_both_fits_and_exports_original_demo_tensors(
+    make_video: Callable[..., Path],
+    tmp_path: Path,
+    fitting_oracle: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+    pickup_factor: int,
+) -> None:
+    """One submission retains both independently fitted cores and all original gaps."""
+    import io
+    import zipfile
+    import numpy as np
+    import torch
+    import yaml
+    from fastapi.testclient import TestClient
+    from embodichain.toolkits.trajectory_annotator._server import create_app
+    from embodichain.toolkits.trajectory_annotator.video import VideoFrameSource
+    from embodichain.lab.gym.utils.gym_utils import config_to_cfg, load_trajectory
+    from embodichain.toolkits.skill_fitting import _collision
+
+    fitting_oracle["replay_interpolation_factor"] = pickup_factor
+    profile_path = Path(fitting_oracle["profile"])
+    profile = json.loads(profile_path.read_text())
+    profile["simulation"] = dict(
+        root_props=dict(fixed_base=True, min_position_iters=32, min_velocity_iters=8),
+        joint_drive_props=dict(
+            stiffness={"arm": 70000.0, "hand": 500.0},
+            damping={"arm": 1000.0, "hand": 50.0},
+        ),
+    )
+    profile_path.write_text(json.dumps(profile))
+
+    # A supplied object-local convex piece exercises portable collision paths
+    # through the production exporter and strict deployment loader.
+    parts = tmp_path / "object.obj"
+    parts.write_text(
+        "o hull\nv 0 0 0\nv 1 0 0\nv 0 1 0\nv 0 0 1\nf 1 3 2\nf 1 2 4\nf 1 4 3\nf 2 3 4\n"
+    )
+    scene = tmp_path / "scene.yaml"
+    scene.write_text(
+        yaml.safe_dump(
+            dict(
+                objects=dict(
+                    target=dict(
+                        pose=np.eye(4).tolist(),
+                        shape=dict(
+                            shape_type="Mesh",
+                            fpath="./object.obj",
+                            collision=dict(
+                                approximation="convex_decomposition",
+                                max_hulls=8,
+                                decomposition_fpath="./object.obj",
+                            ),
+                        ),
+                    )
+                )
+            )
+        )
+    )
+    prepare = _collision.prepare_scene_collision
+    monkeypatch.setattr(
+        _collision,
+        "prepare_scene_collision",
+        lambda path, **kwargs: prepare(path, cache_root=tmp_path / "cache", **kwargs),
+    )
+
+    video = make_video()
+    app = create_app(lambda: VideoFrameSource(video), tmp_path / "whole.json")
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        deadline = time.monotonic() + 20
+        while client.get("/api/status").json()["phase"] != "ready":
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        headers = {
+            "X-Annotation-Token": client.get("/api/project").json()["session_token"]
+        }
+        segments = [
+            dict(id="second", label="Pickup", start_frame=24, end_frame=29),
+            dict(
+                id="first",
+                label="pick_up",
+                start_frame=6,
+                end_frame=11,
+                core_interval=dict(start_frame=7, end_frame=10),
+            ),
+        ]
+        response = client.put(
+            "/api/annotations",
+            json=dict(segments=segments, expected_revision=0),
+            headers=headers,
+        )
+        revision = response.json()["revision"]
+        payload = dict(
+            scope="episode",
+            expected_revision=revision,
+            inputs=dict(
+                joints=fitting_oracle["joints"],
+                robot_profile=fitting_oracle["profile"],
+                qpos_semantics="measured_state",
+                time_offset=0,
+                scene=str(scene),
+            ),
+        )
+        response = client.post("/api/fitting/jobs", json=payload, headers=headers)
+        assert response.status_code == 202
+        job = response.json()["job_id"]
+        while (state := client.get("/api/fitting").json())["phase"] == "running":
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        assert state["phase"] == "done", state
+        assert state["accepted"] and state["run_task_available"], state
+        assert len(fitting_oracle["calls"]) == 2
+        with np.load(
+            io.BytesIO(client.get(f"/api/fitting/jobs/{job}/bundle").content)
+        ) as result:
+            original, patched = result["original_qpos"], result["patched_qpos"]
+            expected = original.copy()
+            expected[27:34, 0] += 0.01
+            expected[83:97, 0] += 0.01
+            np.testing.assert_array_equal(patched, expected)
+            np.testing.assert_array_equal(original, fitting_oracle["original"])
+        response = client.get(f"/api/fitting/jobs/{job}/run-task")
+        assert response.status_code == 200
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            manifest = yaml.safe_load(archive.read("skills.yaml"))
+            timeline = manifest["timeline"]
+            assert [(s["skill_id"], s["start"], s["stop"]) for s in timeline] == [
+                ("execute_demo_skill", 0, 20),
+                ("pick_up", 20, 40),
+                ("execute_demo_skill", 40, 80),
+                ("pick_up", 80, 100),
+                ("execute_demo_skill", 100, 300),
+            ]
+            for span in timeline:
+                if span["kind"] == "atomic_skill":
+                    assert "tensor" not in span
+                    assert span["execution"] == "native_atomic_skill"
+                    assert span["control_parts"] == {
+                        "primary": {"motion": "arm", "grasp": "hand"}
+                    }
+                    assert span["options"]["lift_height"] == 0.12
+                    assert span["duration_scale"] == pickup_factor
+                    continue
+                data = torch.load(
+                    io.BytesIO(archive.read(span["tensor"])), weights_only=True
+                )
+                np.testing.assert_array_equal(
+                    data["qpos"].numpy(), original[span["start"] : span["stop"]].T
+                )
+                assert data["layout"] == "DOF x n_frame"
+            moved = tmp_path / "moved_bundle"
+            archive.extractall(moved)
+        assert not list(moved.glob("skills/*pick_up.pt"))
+        assert not (moved / "trajectory.pt").exists()
+        assert not (moved / "qpos.pt").exists()
+        task = moved / "task.yaml"
+        cfg = config_to_cfg(yaml.safe_load(task.read_text()), source_path=task)
+        assert cfg.robot.control_parts == {"arm": ["arm_joint"], "hand": ["hand_joint"]}
+        assert cfg.robot.root_props.min_position_iters == 32
+        assert cfg.robot.root_props.min_velocity_iters == 8
+        assert cfg.robot.joint_drive_props.stiffness == {"arm": 70000.0, "hand": 500.0}
+        assert (
+            json.loads((moved / "robot_profile.json").read_text())["simulation"]
+            == profile["simulation"]
+        )
+        assert Path(cfg.robot.fpath).is_relative_to(moved)
+        assert cfg.rigid_object[0].body_type == "dynamic"
+        collider = Path(cfg.rigid_object[0].shape.collision.decomposition_fpath)
+        assert collider.is_relative_to(moved) and collider.is_file()
+        assert manifest["scene_collision"]["target"]["hull_count"] == 1
+        # Changing either annotation invalidates the whole result and both exports.
+        segments[0]["end_frame"] = 30
+        client.put(
+            "/api/annotations",
+            json=dict(segments=segments, expected_revision=revision),
+            headers=headers,
+        )
+        for endpoint in ("bundle", "run-task", "preview"):
+            assert client.get(f"/api/fitting/jobs/{job}/{endpoint}").status_code == 409
+
+
+def test_unannotated_episode_preserves_irregular_source_tensor_and_exports_control_clock(
+    tmp_path: Path, fitting_oracle: dict[str, object]
+) -> None:
+    """Demo-only recordings retain raw evidence independently of replay sampling."""
+    import numpy as np
+    import torch
+    from embodichain.toolkits.skill_fitting._episode import fit_episode
+    from embodichain.toolkits.skill_fitting._export import export_run_task
+    from embodichain.toolkits.skill_fitting._pipeline import FitInputs
+    import yaml
+
+    times = np.arange(300, dtype=np.float64) / 100
+    times[1] = 0.017
+    original = fitting_oracle["original"]
+    recording = tmp_path / "irregular.npz"
+    np.savez(recording, qpos=original, timestamps=times)
+    inputs = FitInputs(
+        joints=str(recording),
+        robot_profile=fitting_oracle["profile"],
+        time_offset=0,
+        qpos_semantics="measured_state",
+    )
+    document = dict(
+        source=dict(frame_count=90, identity="known", timing="indexed"),
+        revision=0,
+        segments=[],
+    )
+
+    def no_frame_needed(first: int, last: int):
+        pytest.fail("A Demo-only recording does not need a video selection clock.")
+
+    arrays, report = fit_episode(inputs, document, no_frame_needed)
+    assert report["accepted"] and report["atomic_skill_count"] == 0
+    assert report["demo_skill_count"] == 1
+    directory = tmp_path / "demo_only"
+    export_run_task(directory, arrays, report, inputs)
+    raw = torch.load(directory / "skills/000.execute_demo_skill.pt", weights_only=True)
+    np.testing.assert_array_equal(raw["qpos"].numpy(), original.T)
+    np.testing.assert_array_equal(raw["timestamps"].numpy(), times)
+    manifest = yaml.safe_load((directory / "skills.yaml").read_text())
+    assert manifest["schema"] == "native-skill-sequence/v1"
+    assert manifest["step_dt"] == pytest.approx(0.01)
+    assert not (directory / "trajectory.pt").exists()
+    document["segments"] = [dict(id="pour", label="Pour", start_frame=5, end_frame=15)]
+    with pytest.raises(ValueError, match="Pour.*尚不支持"):
+        fit_episode(inputs, document, no_frame_needed)
+
+
+@pytest.mark.parametrize("include_video", [False, True])
+def test_portable_fitting_inputs_survive_move_without_original_resources(
+    tmp_path, fitting_oracle, make_video, monkeypatch, include_video
+):
+    import shutil
+    import numpy as np
+    import pytorch_kinematics as pk
+    import yaml
+    from embodichain.toolkits.skill_fitting._bundle import (
+        pack_inputs,
+        load_inputs,
+        load_annotation_inputs,
+    )
+    from embodichain.toolkits.skill_fitting._pipeline import FitInputs
+
+    mesh = tmp_path / "local.obj"
+    mesh.write_text(
+        "v 0 0 0\nv 1 0 0\nv 0 1 0\nv 0 0 1\nf 1 3 2\nf 1 2 4\nf 1 4 3\nf 2 3 4\n"
+    )
+    pose = np.eye(4)
+    pose[:3, 3] = [0.3, -0.2, 0.7]
+    scene = tmp_path / "scene.yaml"
+    scene.write_text(
+        yaml.safe_dump(
+            dict(
+                objects=dict(
+                    cube=dict(
+                        pose=pose.tolist(),
+                        body_type="dynamic",
+                        shape=dict(
+                            shape_type="Mesh",
+                            fpath=mesh.name,
+                            collision=dict(approximation="convex_hull"),
+                        ),
+                    )
+                )
+            )
+        )
+    )
+    inputs = FitInputs(
+        joints=fitting_oracle["joints"],
+        robot_profile=fitting_oracle["profile"],
+        scene=str(scene),
+        time_offset=0.125,
+        qpos_semantics="measured_state",
+    )
+    document = dict(
+        source=dict(frame_count=3, identity="vfr", timing="pts"),
+        revision=1,
+        segments=[],
+    )
+    clock = np.array([0, 0.03, 0.08])
+    durations = np.array([0.03, 0.05, 0.04])
+    video = None
+    if include_video:
+        from embodichain.toolkits.trajectory_annotator.video import VideoFrameSource
+        from embodichain.toolkits.trajectory_annotator._cfg import AnnotationCfg
+
+        video = make_video(count=3, variable=True, start=90)
+        source = VideoFrameSource(video)
+        try:
+            info = source.prepare(threading.Event(), lambda **_: None)
+            store = AnnotationStore(
+                tmp_path / "initial.json", AnnotationCfg().document_bytes
+            )
+            store.initialize(info)
+            document = store.snapshot()["document"]
+            frames = [source.get_frame(i) for i in range(3)]
+            clock = np.array([f.time_seconds for f in frames])
+            durations = np.array([f.delay_seconds for f in frames])
+        finally:
+            source.close()
+    packed = pack_inputs(
+        tmp_path / "packed", inputs, document, clock, durations, video=video
+    )
+    moved = tmp_path / "moved"
+    shutil.move(packed, moved)
+    scene.unlink()
+    mesh.unlink()
+    Path(fitting_oracle["profile"]).unlink()
+    Path(fitting_oracle["joints"]).unlink()
+    if video is not None:
+        video.unlink()
+    loaded, saved, times, display_durations = load_inputs(moved)
+    np.testing.assert_array_equal(times, clock)
+    np.testing.assert_array_equal(display_durations, durations)
+    assert loaded.time_offset == 0.125
+    assert saved["segments"] == document["segments"]
+    assert saved["source"]["identity"] == document["source"]["identity"]
+    with np.load(loaded.joints) as data:
+        np.testing.assert_array_equal(data["qpos"], fitting_oracle["original"])
+    scene_data = yaml.safe_load(Path(loaded.scene).read_text())
+    np.testing.assert_array_equal(scene_data["objects"]["cube"]["pose"], pose)
+    # Exercise the actual URDF string consumer: XML encoding headers broke moved fits.
+    pk.build_chain_from_urdf((moved / "robot/robot.urdf").read_text())
+    assert not list(moved.rglob("export_report.json"))
+    if include_video:
+        from fastapi.testclient import TestClient
+        from embodichain.toolkits.trajectory_annotator import _cli, app
+        from embodichain.toolkits.trajectory_annotator._server import create_app
+
+        launches = []
+
+        def launch(factory, annotations, **kwargs):
+            defaults = kwargs["fitting_options"]
+            for key in ("joints", "robot_profile", "scene"):
+                assert Path(defaults[key]).is_relative_to(moved)
+            assert defaults["time_offset"] == 0.125
+            with TestClient(
+                create_app(factory, annotations, fitting_options=defaults),
+                base_url="http://127.0.0.1",
+            ) as client:
+                deadline = time.monotonic() + 10
+                while client.get("/api/status").json()["phase"] != "ready":
+                    assert time.monotonic() < deadline
+                    time.sleep(0.01)
+                project = client.get("/api/project").json()
+                state = project["document"]
+                if not launches:
+                    response = client.put(
+                        "/api/annotations",
+                        json=dict(
+                            expected_revision=state["revision"],
+                            segments=[
+                                dict(
+                                    id="pickup",
+                                    label="pick_up",
+                                    start_frame=0,
+                                    end_frame=2,
+                                )
+                            ],
+                        ),
+                        headers={"X-Annotation-Token": project["session_token"]},
+                    )
+                    assert response.status_code == 200
+                else:
+                    assert state["segments"][0]["id"] == "pickup"
+            launches.append(annotations)
+
+        monkeypatch.setattr(app, "launch_annotation", launch)
+        for _ in range(2):
+            _cli.cli(["--bundle", str(moved), "--no-browser"])
+        assert launches == [moved / "annotations.edited.json"] * 2
+        # Editing is persistent, while the immutable seed and inventory still validate.
+        assert load_inputs(moved)[1]["segments"] == []
+        from embodichain.toolkits.skill_fitting.cli import main as fit_cli
+
+        repacked = tmp_path / "repacked"
+        fit_cli(["--bundle", str(moved), "--package-output", str(repacked)])
+        assert load_annotation_inputs(repacked)[0].is_relative_to(repacked)
+        with pytest.raises(ValueError, match="must not overwrite"):
+            load_annotation_inputs(moved, moved / "joints.npz")
+        with pytest.raises(SystemExit):
+            _cli.cli(["--bundle", str(moved), "--joints", "external.npz"])
+        packed_video = next((moved / "video").iterdir())
+        packed_video.write_bytes(b"changed video")
+        with pytest.raises(ValueError, match="Bundle resource changed: video/"):
+            load_annotation_inputs(moved)
+    else:
+        assert not list(moved.rglob("*.mp4"))
+        with pytest.raises(ValueError, match="offline-only bundle has no video"):
+            load_annotation_inputs(moved)
+    (moved / "joints.npz").write_bytes(b"changed recording")
+    with pytest.raises(ValueError, match="Bundle resource changed: joints.npz"):
+        load_inputs(moved)
+
+
+def test_scene_import_keeps_video_requests_live_and_reports_failure(
+    make_video, tmp_path, monkeypatch
+):
+    """A slow scene preparation owns no decoder/request thread; errors are visible."""
+    from fastapi.testclient import TestClient
+    from embodichain.toolkits.skill_fitting import _collision
+    from embodichain.toolkits.trajectory_annotator._server import create_app
+    from embodichain.toolkits.trajectory_annotator.video import VideoFrameSource
+
+    source = tmp_path / "scene.yaml"
+    source.write_text("objects: {}\n")
+    entered, release = threading.Event(), threading.Event()
+
+    def prepare(path, *, progress):
+        entered.set()
+        assert release.wait(5)
+        raise ValueError("invalid collision mesh")
+
+    monkeypatch.setattr(_collision, "prepare_scene_collision", prepare)
+    video = make_video()
+    app = create_app(lambda: VideoFrameSource(video), tmp_path / "annotations.json")
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        deadline = time.monotonic() + 10
+        while client.get("/api/status").json()["phase"] != "ready":
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        headers = {
+            "X-Annotation-Token": client.get("/api/project").json()["session_token"]
+        }
+        payload = dict(scene=str(source), joints="")
+        try:
+            assert (
+                client.post(
+                    "/api/fitting/scene", json=payload, headers=headers
+                ).status_code
+                == 202
+            )
+            assert entered.wait(5)
+            assert client.get("/api/fitting/scene").json()["phase"] == "running"
+            assert client.get("/api/frames/5").status_code == 200
+            assert (
+                client.post(
+                    "/api/fitting/scene",
+                    json={**payload, "joints": "other"},
+                    headers=headers,
+                ).status_code
+                == 409
+            )
+        finally:
+            release.set()
+        while (state := client.get("/api/fitting/scene").json())["phase"] == "running":
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        assert state["phase"] == "error" and state["error"] == "invalid collision mesh"

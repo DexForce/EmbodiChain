@@ -23,6 +23,7 @@ from collections.abc import Sequence
 from pathlib import Path
 import math
 import json
+import sys
 from typing import Any
 
 __all__ = ["cli"]
@@ -34,6 +35,21 @@ def _add_fitting_arguments(parser: argparse.ArgumentParser) -> None:
     group.add_argument("--joints", type=Path, help="关节记录：NPZ / HDF5 / Atomic PT。")
     group.add_argument(
         "--robot-profile", type=Path, help="FK/IK、TCP、关节顺序与限制的 JSON 配置。"
+    )
+    group.add_argument(
+        "--scene",
+        type=Path,
+        help="重建场景 YAML 或 physical_export 目录；默认尝试从关节记录旁发现。",
+    )
+    group.add_argument(
+        "--object-id",
+        default="",
+        help="目标物体 ID；留空时选择最接近实录抓取位置的物体。",
+    )
+    group.add_argument(
+        "--participant",
+        default="auto",
+        help="auto 自动选臂、configured 使用配置绑定，或指定控制部件名。",
     )
     group.add_argument(
         "--qpos-semantics",
@@ -60,6 +76,9 @@ def _fitting_options(args: argparse.Namespace) -> dict[str, Any]:
     for name in (
         "joints",
         "robot_profile",
+        "scene",
+        "object_id",
+        "participant",
         "qpos_semantics",
         "time_offset",
         "qpos_key",
@@ -81,7 +100,7 @@ def _fitting_options(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def cli(argv: Sequence[str] | None = None) -> None:
-    """Launch the local annotation website for a video or HDF5 image sequence.
+    """Launch web annotation for video, HDF5 images or a portable resource bundle.
 
     Args:
         argv: Command arguments, or process arguments when omitted.
@@ -93,6 +112,7 @@ def cli(argv: Sequence[str] | None = None) -> None:
     inputs = parser.add_mutually_exclusive_group(required=True)
     inputs.add_argument("--video", type=Path, help="本地视频文件（PyAV）。")
     inputs.add_argument("--hdf5", type=Path, help="本地 HDF5 图像序列。")
+    inputs.add_argument("--bundle", type=Path, help="包含视频的最小拟合资源包目录。")
     parser.add_argument(
         "--image-key",
         help="HDF5 图像 dataset，默认自动定位 observations/images/cam_high（也支持 observation）。",
@@ -124,11 +144,34 @@ def cli(argv: Sequence[str] | None = None) -> None:
     )
     _add_fitting_arguments(parser)
     args = parser.parse_args(argv)
+    if not 0 <= args.port <= 65535:
+        parser.error("端口必须在 0–65535 之间。")
+    bundle_defaults = None
+    bundle_annotations = None
+    if args.bundle:
+        flags = {
+            value.split("=", 1)[0]
+            for value in (sys.argv[1:] if argv is None else argv)
+            if value.startswith("--")
+        }
+        if flags - {"--bundle", "--port", "--no-browser", "--annotations", "--device"}:
+            parser.error(
+                "--bundle 使用包内视频和拟合配置；只允许覆盖端口、标注输出和 device。"
+            )
+        try:
+            from embodichain.toolkits.skill_fitting._bundle import (
+                load_annotation_inputs,
+            )
+
+            args.video, args.video_stream, bundle_annotations, bundle_defaults = (
+                load_annotation_inputs(args.bundle, args.annotations)
+            )
+            bundle_defaults["device"] = args.device
+        except (ImportError, OSError, ValueError) as error:
+            parser.error(f"无法加载资源包：{error}")
     source_path = (args.video or args.hdf5).resolve()
     if not source_path.is_file():
         parser.error(f"输入文件不存在：{source_path}")
-    if not 0 <= args.port <= 65535:
-        parser.error("端口必须在 0–65535 之间。")
     if args.video_stream is not None and (args.hdf5 or args.video_stream < 0):
         parser.error("--video-stream 仅适用于视频，且不能为负数。")
     if args.video and any(
@@ -145,7 +188,9 @@ def cli(argv: Sequence[str] | None = None) -> None:
         if args.hdf5
         else f"{source_path.stem}.segments.json"
     )
-    annotations = (args.annotations or source_path.with_name(default_name)).resolve()
+    annotations = (
+        bundle_annotations or args.annotations or source_path.with_name(default_name)
+    ).resolve()
     if annotations == source_path or (
         annotations.exists() and annotations.samefile(source_path)
     ):
@@ -176,7 +221,11 @@ def cli(argv: Sequence[str] | None = None) -> None:
             annotations,
             port=args.port,
             open_browser=not args.no_browser,
-            fitting_options=_fitting_options(args),
+            fitting_options=(
+                bundle_defaults
+                if bundle_defaults is not None
+                else _fitting_options(args)
+            ),
         )
     except ImportError as error:
         parser.exit(

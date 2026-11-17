@@ -683,6 +683,12 @@ def config_to_cfg(
             asset.shape.fpath = get_data_path(path)
         elif isinstance(asset, ArticulationCfg) and path is not None:
             asset.fpath = get_data_path(path)
+        if isinstance(getattr(asset, "shape", None), MeshCfg):
+            collision = asset.shape.collision
+            if collision is not None and collision.decomposition_fpath is not None:
+                collision.decomposition_fpath = get_data_path(
+                    collision.decomposition_fpath
+                )
 
     @configclass
     class ComponentCfg:

@@ -1447,6 +1447,21 @@ def replay_control(replay_env: ReplayWrapper) -> None:
 
 def main(args: Any, env: Any, gym_config: dict[str, Any]) -> None:
     """Run the selected workflow without taking ownership of ``env``."""
+    if getattr(args, "skill_sequence", None):
+        from embodichain.toolkits.skill_fitting._execution import execute_sequence
+
+        if (
+            getattr(args, "expansion_profile", None) is not None
+            or "expansion" in gym_config
+        ):
+            from embodichain.toolkits.skill_fitting._sequence_expansion import (
+                run_sequence_expansion,
+            )
+
+            run_sequence_expansion(env, args, gym_config)
+        else:
+            execute_sequence(env, Path(args.skill_sequence))
+        return
     if getattr(args, "replay", False):
         log_info("Replay mode.", color="green")
         replay(
@@ -1653,6 +1668,11 @@ def _create_parser() -> argparse.ArgumentParser:
 
     add_env_launcher_args_to_parser(parser, require_gym_config=True)
     parser.set_defaults(viser_image_fps=None)
+    parser.add_argument(
+        "--skill-sequence",
+        type=str,
+        help="Execute a fitted native-skill sequence with recorded qpos gaps (no replay trajectory).",
+    )
 
     parser.add_argument(
         "--task-program",
@@ -1800,6 +1820,12 @@ def cli(argv: Sequence[str] | None = None) -> None:
     torch.set_printoptions(precision=5, sci_mode=False)
 
     args = _create_parser().parse_args(argv)
+    if getattr(args, "skill_sequence", None) and (
+        args.replay or args.preview or args.task_program or args.real2sim_profile
+    ):
+        raise ValueError(
+            "--skill-sequence cannot be combined with replay, preview or Task Program."
+        )
 
     if getattr(args, "replay", False):
         if not args.replay_trajectory:
@@ -1816,6 +1842,12 @@ def cli(argv: Sequence[str] | None = None) -> None:
     execute_init_hooks()
 
     env_cfg, gym_config, action_config = build_env_cfg_from_args(args)
+    if getattr(args, "skill_sequence", None) and any(
+        k in gym_config for k in ("task_program", "real2sim")
+    ):
+        raise ValueError(
+            "Native fitted sequences require a plain physical Gym configuration."
+        )
 
     real2sim_profile = None
     real2sim_profile_path = getattr(args, "real2sim_profile", None)
@@ -1860,7 +1892,25 @@ def cli(argv: Sequence[str] | None = None) -> None:
         or "expansion" in gym_config
     ):
         expansion_request = _resolve_expansion_request(args, gym_config)
-    if expansion_request is not None:
+    if expansion_request is not None and getattr(args, "skill_sequence", None):
+        from embodichain.toolkits.skill_fitting._sequence_expansion import (
+            validate_sequence_expansion,
+            validate_sequence_collection,
+        )
+
+        validate_sequence_expansion(
+            expansion_request[0],
+            Path(args.skill_sequence).resolve(strict=True),
+            env_cfg.num_envs,
+        )
+        validate_sequence_collection(
+            args,
+            gym_config,
+            expansion_request[0],
+            expansion_request[1],
+            expansion_request[3],
+        )
+    elif expansion_request is not None:
         from embodichain.lab.sim.motion.expansion import CombinedExpansionProfile
 
         profile = expansion_request[0]

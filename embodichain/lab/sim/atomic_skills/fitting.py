@@ -28,6 +28,8 @@ import torch
 
 from embodichain.compute.trajectory.phase_alignment import align_joint_phase
 from embodichain.compute.trajectory.splicing import (
+    _connect_joint_segment,
+    _replacement_diagnostics,
     joint_path_diagnostics,
     splice_joint_segment,
 )
@@ -36,6 +38,7 @@ from embodichain.utils import configclass
 from .control import OPEN_COMMAND, GRASP_COMMAND
 from .policies import MotionPolicy, RecoveryPolicy
 from .primitives import (
+    GraspGoal,
     PickUpMotionGoal,
     PickUpOptions,
     SlideMotionGoal,
@@ -68,20 +71,41 @@ class SkillFitCfg:
     max_contact_error_m: float = 0.005
     max_contact_rotation_rad: float = 0.03
     min_twist_angle_rad: float = 0.05
+    grasp_sample_count: int = 4000
+    grasp_max_candidates: int = 64
+    grasp_rotation_weight_m: float = 0.05
+    grasp_approach_deviation_rad: float = np.pi / 3
+    grasp_filter_ground_collision: bool = False
+    max_grasp_distance_m: float = 0.2
+    grasp_contact_inset_m: float = 0.004
 
     def __post_init__(self) -> None:
         for key, value in asdict(self).items():
+            if key == "grasp_filter_ground_collision":
+                if type(value) is not bool:
+                    raise ValueError("grasp_filter_ground_collision must be a boolean.")
+                continue
             if isinstance(value, bool) or not np.isfinite(value) or value <= 0:
                 raise ValueError(f"SkillFitCfg.{key} must be finite and positive.")
-        for key in ("blend_samples", "max_samples", "max_candidates"):
+        for key in (
+            "blend_samples",
+            "max_samples",
+            "max_candidates",
+            "grasp_sample_count",
+            "grasp_max_candidates",
+        ):
             if type(getattr(self, key)) is not int:
                 raise ValueError(f"{key} must be an integer.")
         if (
             self.max_candidates > 9
             or self.max_samples > 200_000
             or self.blend_samples < 4
+            or self.grasp_sample_count > 100_000
+            or self.grasp_max_candidates > 256
         ):
             raise ValueError("Fitting budgets are outside supported bounds.")
+        if self.grasp_approach_deviation_rad > np.pi / 2:
+            raise ValueError("grasp_approach_deviation_rad must not exceed pi/2.")
 
 
 def _transitions(
@@ -111,8 +135,36 @@ def _rot_error(left: np.ndarray, right: np.ndarray) -> np.ndarray:
     ).magnitude()
 
 
-def _approach(poses: np.ndarray, close_start: int) -> tuple[np.ndarray, float, int]:
+def _approach(
+    poses: np.ndarray, close_start: int, *, relaxed: bool = False
+) -> tuple[np.ndarray, float, int]:
     grasp = poses[close_start]
+    if relaxed:
+        # Real approach motion may rotate and contain measurement noise. Estimate
+        # its final direction over a finite window, rather than demanding that
+        # multiple observed rotations coincide to 3e-5 radians.
+        if close_start < 6:
+            raise ValueError("Select an approach before the closing event.")
+        index = max(1, close_start // 2)
+        offset = grasp[:3, 3] - np.median(
+            poses[max(0, index - 2) : index + 3, :3, 3], axis=0
+        )
+        distance = float(np.linalg.norm(offset))
+        if distance < 1e-4:
+            raise ValueError("Approach displacement is not observable.")
+        direction = offset / distance
+        # A curved reach is not its final contact approach. Prefer the robust
+        # calibrated TCP +Z near closure when it agrees with the observed
+        # displacement within 45 degrees; retain displacement for other TCP
+        # conventions or a genuinely side-on reach.
+        axis = np.median(
+            poses[max(0, close_start - 4) : close_start + 1, :3, 2], axis=0
+        )
+        axis /= np.linalg.norm(axis)
+        if np.dot(axis, direction) >= np.sqrt(0.5):
+            direction = axis
+            distance = float(np.dot(offset, direction))
+        return direction, distance, index
     candidates = np.flatnonzero(_rot_error(poses[:close_start], grasp) < 0.00003)
     if len(candidates) < 2:
         raise ValueError("No stable TCP orientation before grasp; provide phase hints.")
@@ -159,6 +211,7 @@ def _phase_map(
     phases: list[dict[str, Any]],
     observations: np.ndarray,
     approach_anchor: tuple[int, int] | None = None,
+    source_times: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     if list(native_lengths) != [p["name"] for p in phases]:
         raise ValueError(
@@ -174,7 +227,19 @@ def _phase_map(
         start, stop = phase["start"], phase["stop"]
         if stop <= start:
             raise ValueError("Every source phase must contain a sample.")
-        if phase["name"] == "approach" and approach_anchor is not None:
+        if source_times is not None:
+            clock = source_times[start:stop]
+            progress = (
+                (clock - clock[0]) / (clock[-1] - clock[0])
+                if len(clock) > 1
+                else np.zeros(1)
+            )
+            native_clock = np.linspace(0, 1, len(part))
+            output[start:stop] = np.column_stack(
+                [np.interp(progress, native_clock, column) for column in part.T]
+            )
+            timing[start:stop] = progress
+        elif phase["name"] == "approach" and approach_anchor is not None:
             source_anchor, native_anchor = approach_anchor
             if not start < source_anchor < stop or not 0 < native_anchor < count - 1:
                 raise ValueError("Pre-grasp anchor must be inside its approach phase.")
@@ -214,8 +279,9 @@ def fit_skill_segment(
     acceleration_limits: np.ndarray,
     cfg: SkillFitCfg | None = None,
     phase_hints: list[dict[str, Any]] | None = None,
+    scene_grasps: tuple[GraspGoal, ...] | None = None,
 ) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
-    """Identify and regenerate one segment without object pose or geometry.
+    """Regenerate one segment using observed motion or supplied scene grasps.
 
     Only the native AtomicSkillEngine creates candidate joint motion. Source
     joints supply observations, initial seeds, phase clocks and outer boundary
@@ -232,6 +298,10 @@ def fit_skill_segment(
         cfg: Numerical budgets and independent native/patched acceptance gates.
         phase_hints: Optional complete contiguous phase partition. Indices are
             relative to this segment, with half-open bounds.
+        scene_grasps: Ranked geometry-qualified object grasps for a single-arm
+            skill. Scene fitting regenerates the skill from these anchors and
+            qualifies the modified trajectory, without requiring pointwise
+            agreement with the noisy source. Omission retains motion-only fitting.
 
     Returns:
         Full-length original/native/patched arrays and fit metadata. Rejected
@@ -240,6 +310,22 @@ def fit_skill_segment(
     cfg = SkillFitCfg() if cfg is None else cfg
     cfg.validate()
     cfg.__post_init__()
+    if scene_grasps is not None and (not scene_grasps or skill_id == "hand_over"):
+        raise ValueError(
+            "Scene grasp fitting requires a single-arm skill and at least one valid object grasp."
+        )
+    if scene_grasps is not None:
+        if len(scene_grasps) > cfg.max_candidates or any(
+            not isinstance(g, GraspGoal)
+            or not isinstance(g.grasp_xpos, torch.Tensor)
+            or g.grasp_xpos.shape != (4, 4)
+            or not isinstance(g.object_pose, torch.Tensor)
+            or g.object_pose.shape != (4, 4)
+            for g in scene_grasps
+        ):
+            raise ValueError(
+                "Scene candidates must be explicit single-row object/TCP poses within max_candidates."
+            )
     began = time.monotonic()
     if skill_id not in {"pick_up", "slide", "twist", "hand_over"}:
         raise ValueError("Unsupported reconstruction skill.")
@@ -302,7 +388,9 @@ def fit_skill_segment(
             opens = [(hints[open_name]["start"], hints[open_name]["stop"])]
         participant_data[role] = (poses, closes, opens, arm_ids, hand_ids)
 
-    params: dict[str, Any] = {"pose_origin": "fk_derived"}
+    params: dict[str, Any] = {
+        "pose_origin": "scene_affordance" if scene_grasps is not None else "fk_derived"
+    }
     contact_ranges: list[tuple[str, int, int]] = []
 
     def tensor(value: np.ndarray) -> torch.Tensor:
@@ -323,7 +411,7 @@ def fit_skill_segment(
                 "Expected one observable closure; select a complete skill or provide matching command data."
             )
         close_start, lift_start = closes[0]
-        if (
+        if scene_grasps is None and (
             np.max(
                 np.linalg.norm(
                     poses[close_start:lift_start, :3, 3] - poses[close_start, :3, 3],
@@ -337,7 +425,9 @@ def fit_skill_segment(
             raise ValueError(
                 "The native skill requires a stationary arm during closure."
             )
-        direction, pre_distance, pre_index = _approach(poses, close_start)
+        direction, pre_distance, pre_index = _approach(
+            poses, close_start, relaxed=scene_grasps is not None
+        )
         if "reach" in hints:
             pre_index = hints["reach"]["start"]
             offset = poses[close_start, :3, 3] - poses[pre_index, :3, 3]
@@ -345,15 +435,30 @@ def fit_skill_segment(
             if pre_distance <= 1e-4:
                 raise ValueError("Hinted pre-grasp displacement is not observable.")
             direction = offset / pre_distance
-        grasp = poses[close_start]
+        observed_grasp = poses[close_start]
+        grasp = (
+            observed_grasp
+            if scene_grasps is None
+            else scene_grasps[0].grasp_xpos.detach().cpu().numpy()
+        )
         close_count = lift_start - close_start
         if skill_id == "pick_up":
-            lift = poses[-1, :3, 3] - grasp[:3, 3]
-            if lift[2] <= 0 or np.linalg.norm(lift[:2]) > cfg.max_contact_error_m:
+            lift = poses[-1, :3, 3] - observed_grasp[:3, 3]
+            if lift[2] <= 0 or (
+                scene_grasps is None
+                and np.linalg.norm(lift[:2]) > cfg.max_contact_error_m
+            ):
                 raise ValueError("Pickup requires an observable world-Z lift.")
-            if float(_rot_error(poses[-1], grasp)) > cfg.max_contact_rotation_rad:
+            if (
+                scene_grasps is None
+                and float(_rot_error(poses[-1], grasp)) > cfg.max_contact_rotation_rad
+            ):
                 raise ValueError("Pickup lift changes TCP orientation.")
-            goal = PickUpMotionGoal(tensor(grasp))
+            goal = (
+                PickUpMotionGoal(tensor(grasp))
+                if scene_grasps is None
+                else scene_grasps[0]
+            )
             options = PickUpOptions(
                 lift_height=float(lift[2]),
                 pre_grasp_distance=pre_distance,
@@ -381,7 +486,7 @@ def fit_skill_segment(
                 raise ValueError("Slide/Twist requires one observable release.")
             open_start, retract_start = releases[0]
             if skill_id == "slide":
-                move = poses[open_start, :3, 3] - grasp[:3, 3]
+                move = poses[open_start, :3, 3] - observed_grasp[:3, 3]
                 distance = float(np.linalg.norm(move))
                 if distance < 1e-4:
                     raise ValueError("Slide displacement is not observable.")
@@ -391,10 +496,12 @@ def fit_skill_segment(
                 )
                 mode = "push" if retract_distance > cfg.max_contact_error_m else "pull"
                 axis = rail if mode == "push" else -rail
-                projected = (poses[lift_start:open_start, :3, 3] - grasp[:3, 3]) @ rail
+                projected = (
+                    poses[lift_start:open_start, :3, 3] - observed_grasp[:3, 3]
+                ) @ rail
                 residual = (
                     poses[lift_start:open_start, :3, 3]
-                    - grasp[:3, 3]
+                    - observed_grasp[:3, 3]
                     - projected[:, None] * rail
                 )
                 if np.max(np.linalg.norm(residual, axis=1)) > cfg.max_contact_error_m:
@@ -594,14 +701,81 @@ def fit_skill_segment(
         sample_count=max(len(q), 80),
         acceleration_limit=0.5,
     )
+    owned = sorted(
+        {j for data in participant_data.values() for ids in data[3:] for j in ids}
+    )
+    editable = tuple(owned)
+    untouched = [i for i in range(q.shape[1]) if i not in editable]
+    limits = robot.get_qpos_limits()[0].cpu().numpy()
+    velocity = robot.get_qvel_limits()[0].cpu().numpy()
+    acceleration = np.asarray(acceleration_limits, dtype=np.float64)
+
+    source_phases = [dict(p) for p in phases]
+    phase_options = [phases]
+    if scene_grasps is not None and skill_id == "pick_up" and phase_hints is None:
+        # Only the outer clock/boundaries are fixed for scene reconstruction.
+        # A changed grasp may need more time to connect to the recorded end.
+        # Search a bounded set of free-phase allocations while preserving the
+        # observed closing duration; explicit phase hints remain authoritative.
+        closing = lift_start - close_start
+        free = len(q) - closing
+        for fraction in (0.5, 0.45, 0.4, 0.55, 0.6):
+            before = int(round(free * fraction))
+            alternative = [
+                dict(name="approach", start=0, stop=before),
+                dict(name="close", start=before, stop=before + closing),
+                dict(name="lift", start=before + closing, stop=len(q)),
+            ]
+            if alternative not in phase_options:
+                phase_options.append(alternative)
+
+    def connect_scene(
+        values: np.ndarray, fit_phases: list[dict[str, Any]]
+    ) -> np.ndarray:
+        first_contact = next(p["start"] for p in fit_phases if p["name"] == "close")
+        last_contact = (
+            next(p["stop"] for p in fit_phases if p["name"] == "close")
+            if skill_id == "pick_up"
+            else next(p["start"] for p in fit_phases if p["name"] == "open")
+        )
+        return _connect_joint_segment(
+            recording.qpos,
+            values,
+            recording.timestamps,
+            start=start,
+            stop=stop,
+            joint_indices=editable,
+            blend_samples=cfg.blend_samples,
+            protected=(first_contact, last_contact),
+            velocity_limits=velocity,
+            acceleration_limits=acceleration,
+        )
+
+    def qualify_scene(values: np.ndarray) -> dict[str, object]:
+        return _replacement_diagnostics(
+            recording.qpos,
+            values,
+            recording.timestamps,
+            lower=limits[:, 0],
+            upper=limits[:, 1],
+            velocity_limits=velocity,
+            acceleration_limits=acceleration,
+        )
+
     candidates = []
-    for candidate in range(cfg.max_candidates if skill_id == "pick_up" else 1):
+    candidate_checks = []
+    attempts = (
+        len(scene_grasps)
+        if scene_grasps is not None
+        else (cfg.max_candidates if skill_id == "pick_up" else 1)
+    )
+    for candidate in range(attempts):
         if time.monotonic() - began > cfg.max_seconds:
             break
         distance = (
             pre_distance
             + (0.0, -0.005, 0.005, -0.01, 0.01, -0.02, 0.02, -0.03, 0.03)[candidate]
-            if skill_id == "pick_up"
+            if skill_id == "pick_up" and scene_grasps is None
             else None
         )
         trial = (
@@ -609,9 +783,17 @@ def fit_skill_segment(
             if distance is not None
             else options
         )
+        trial_goal = goal
+        if scene_grasps is not None:
+            selected = scene_grasps[candidate]
+            if skill_id == "pick_up":
+                trial_goal = selected
+                trial = replace(trial, approach_direction=selected.grasp_xpos[:3, 2])
+            else:
+                trial_goal = replace(goal, grasp_xpos=selected.grasp_xpos)
         invocation = engine.make_invocation(
             skill_id,
-            goal,
+            trial_goal,
             control_parts=endpoints,
             motion_policy=policy,
             skill_options=trial,
@@ -619,11 +801,12 @@ def fit_skill_segment(
         )
         plan = engine.plan(invocation, context)
         if not bool(plan.plan_success.all()):
+            candidate_checks.append({"rank": candidate, "plan_success": False})
             continue
         native = plan.joint_trajectory.positions[0].detach().cpu().numpy()
         lengths = {p.name: p.stop - p.start for p in plan.segments}
         anchor = None
-        if skill_id == "pick_up":
+        if skill_id == "pick_up" and scene_grasps is None:
             with torch.no_grad():
                 approach_fk = (
                     robot.compute_fk(
@@ -645,36 +828,120 @@ def fit_skill_segment(
             anchor = (
                 (pre_index, native_pre) if pre_index > 0 and native_pre > 0 else None
             )
-        mapped, timing = _phase_map(native, lengths, phases, q, anchor)
-        owned = sorted(
-            {j for data in participant_data.values() for ids in data[3:] for j in ids}
-        )
-        score = float(np.sqrt(np.mean((mapped[:, owned] - q[:, owned]) ** 2)))
-        candidates.append((score, mapped, native, lengths, trial, timing))
+        selected_trial = None
+        best_penalty = float("inf")
+        for fit_phases in phase_options:
+            mapped, timing = _phase_map(
+                native,
+                lengths,
+                fit_phases,
+                q,
+                anchor,
+                source_times=times if scene_grasps is not None else None,
+            )
+            mapped[:, untouched] = q[:, untouched]
+            score = float(np.sqrt(np.mean((mapped[:, owned] - q[:, owned]) ** 2)))
+            check = (
+                None
+                if scene_grasps is None
+                else qualify_scene(connect_scene(mapped, fit_phases))
+            )
+            qualifies = check is None or bool(check["accepted"])
+            penalty = (
+                0.0
+                if check is None
+                else max(
+                    check["velocity_ratio"],
+                    check["acceleration_ratio"],
+                    2.0 if check["position_violations"] else 0.0,
+                )
+            )
+            if qualifies or selected_trial is None or penalty < best_penalty:
+                # Keep one schedule's arrays rather than a path per trial.
+                selected_trial = (
+                    score,
+                    mapped,
+                    native,
+                    lengths,
+                    trial,
+                    timing,
+                    trial_goal,
+                    candidate,
+                    qualifies,
+                    fit_phases,
+                )
+                best_penalty = penalty
+            if check is not None:
+                candidate_checks.append(
+                    {
+                        "rank": candidate,
+                        "plan_success": True,
+                        "phases": fit_phases,
+                        "limits": check,
+                    }
+                )
+            if qualifies or time.monotonic() - began > cfg.max_seconds:
+                break
+        assert selected_trial is not None
+        qualifies = selected_trial[8]
+        candidates.append(selected_trial)
+        if scene_grasps is not None and qualifies:
+            # Candidate order is proximity to the real grasp, independent of
+            # source joint RMSE. Keep the closest fully qualified replacement.
+            break
     if not candidates:
         raise ValueError("Native skill generation failed within the fitting budget.")
-    score, mapped, raw_native, lengths, selected_options, timing = min(
-        candidates, key=lambda item: item[0]
+    (
+        score,
+        mapped,
+        raw_native,
+        lengths,
+        selected_options,
+        timing,
+        goal,
+        selected_index,
+        _,
+        phases,
+    ) = min(
+        candidates,
+        key=(
+            (lambda item: item[0])
+            if scene_grasps is None
+            else (lambda item: (not item[8], item[7]))
+        ),
     )
     if skill_id == "pick_up":
         params["pre_grasp_distance"] = selected_options.pre_grasp_distance
     # Every non-participant column stays observed, including passive/mimic state.
-    editable = tuple(owned)
-    mapped[:, [i for i in range(q.shape[1]) if i not in editable]] = q[
-        :, [i for i in range(q.shape[1]) if i not in editable]
-    ]
     candidate_full = recording.qpos.copy()
     candidate_full[start:stop] = mapped
-    patched = splice_joint_segment(
-        recording.qpos,
-        mapped,
-        recording.timestamps,
-        start=start,
-        stop=stop,
-        joint_indices=editable,
-        blend_samples=cfg.blend_samples,
-        anchors=tuple(start + p["start"] for p in phases[1:]),
-    )
+    if scene_grasps is None:
+        patched = splice_joint_segment(
+            recording.qpos,
+            mapped,
+            recording.timestamps,
+            start=start,
+            stop=stop,
+            joint_indices=editable,
+            blend_samples=cfg.blend_samples,
+            anchors=tuple(start + p["start"] for p in phases[1:]),
+        )
+    else:
+        patched = connect_scene(mapped, phases)
+        params.update(
+            grasp_xpos=scene_grasps[selected_index].grasp_xpos.detach().cpu().tolist(),
+            object_pose=scene_grasps[selected_index]
+            .object_pose.detach()
+            .cpu()
+            .tolist(),
+            object_id=scene_grasps[selected_index].semantics.entity_id,
+            grasp_rotation_error_rad=float(
+                _rot_error(
+                    scene_grasps[selected_index].grasp_xpos.detach().cpu().numpy(),
+                    observed_grasp,
+                )
+            ),
+        )
     errors = {}
     failures = []
     for role, (observed, _, _, arm_ids, _) in participant_data.items():
@@ -698,12 +965,14 @@ def fit_skill_segment(
             "native_tcp_rmse_m": float(np.sqrt(np.mean(position**2))),
             "native_rotation_rmse_rad": float(np.sqrt(np.mean(rotation**2))),
         }
-        if (
+        if scene_grasps is None and (
             errors[role]["native_tcp_rmse_m"] > cfg.max_tcp_rmse_m
             or errors[role]["native_rotation_rmse_rad"] > cfg.max_rotation_rmse_rad
         ):
             failures.append(f"{role}: native TCP reconstruction exceeds tolerance")
         for contact_role, a, b in contact_ranges:
+            if scene_grasps is not None:
+                continue
             if contact_role == role:
                 if (
                     position[a:b].max() > cfg.max_contact_error_m
@@ -723,11 +992,8 @@ def fit_skill_segment(
                     failures.append(
                         f"{role}: boundary correction changes protected contact motion"
                     )
-    if score > cfg.max_joint_rmse:
+    if scene_grasps is None and score > cfg.max_joint_rmse:
         failures.append("native joint RMSE exceeds tolerance")
-    limits = robot.get_qpos_limits()[0].cpu().numpy()
-    velocity = robot.get_qvel_limits()[0].cpu().numpy()
-    acceleration = np.asarray(acceleration_limits, dtype=np.float64)
     diagnostics = joint_path_diagnostics(
         patched,
         recording.timestamps,
@@ -736,6 +1002,17 @@ def fit_skill_segment(
         velocity_limits=velocity,
         acceleration_limits=acceleration,
     )
+    source_diagnostics = None
+    if scene_grasps is not None:
+        source_diagnostics = joint_path_diagnostics(
+            recording.qpos,
+            recording.timestamps,
+            lower=limits[:, 0],
+            upper=limits[:, 1],
+            velocity_limits=velocity,
+            acceleration_limits=acceleration,
+        )
+        diagnostics = qualify_scene(patched)
     if not diagnostics["accepted"]:
         failures.append("patched path exceeds joint limits")
     accepted = not failures
@@ -756,14 +1033,27 @@ def fit_skill_segment(
         "failures": failures,
         "parameters": params,
         "phases": phases,
+        "source_phases": source_phases,
         "native_phase_lengths": lengths,
         "native_joint_rmse": score,
         "native_options": serializable(asdict(selected_options)),
-        "native_goal": serializable(asdict(goal)),
+        "native_goal": (
+            serializable(asdict(goal))
+            if scene_grasps is None
+            else {
+                "object_id": params["object_id"],
+                "object_pose": params["object_pose"],
+                "grasp_xpos": params["grasp_xpos"],
+            }
+        ),
         "initial_qpos": q[0].tolist(),
-        "algorithm_revision": 1,
+        "algorithm_revision": 1 if scene_grasps is None else 3,
         "per_joint_native_rmse": np.sqrt(np.mean((mapped - q) ** 2, axis=0)).tolist(),
-        "time_mapping": "phasewise_monotone_native_path_projection",
+        "time_mapping": (
+            "phasewise_monotone_native_path_projection"
+            if scene_grasps is None
+            else "phasewise_physical_clock"
+        ),
         "native_motion_policy": {
             "strategy": policy.strategy,
             "sample_count": policy.sample_count,
@@ -775,6 +1065,8 @@ def fit_skill_segment(
         ),
         "tcp_errors": errors,
         "limits": diagnostics,
+        "source_limits": source_diagnostics,
+        "selected_grasp_rank": selected_index if scene_grasps is not None else None,
         "start": start,
         "stop": stop,
         "editable_joints": owned,
@@ -784,6 +1076,7 @@ def fit_skill_segment(
         "collision_evidence": "unverified",
         "fit_cfg": asdict(cfg),
         "candidate_count": len(candidates),
+        "candidate_checks": candidate_checks,
         "elapsed_seconds": time.monotonic() - began,
         "joint_names": list(recording.joint_names),
     }

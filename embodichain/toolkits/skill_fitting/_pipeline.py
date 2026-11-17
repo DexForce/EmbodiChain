@@ -19,9 +19,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 import math
 from pathlib import Path
 from typing import Any
+import time
 
 import numpy as np
 
@@ -36,6 +38,9 @@ class FitInputs:
 
     joints: str = ""
     robot_profile: str = ""
+    scene: str = ""
+    object_id: str = ""
+    participant: str = "auto"
     qpos_semantics: str = ""
     time_offset: float | None = None
     qpos_key: str = "qpos"
@@ -52,6 +57,14 @@ class FitInputs:
             value = getattr(self, key)
             if not isinstance(value, str) or not value.strip() or len(value) > 4096:
                 raise ValueError(f"{key} 需要非空字符串。")
+        for key in ("scene", "object_id", "participant"):
+            value = getattr(self, key)
+            if (
+                not isinstance(value, str)
+                or len(value) > 4096
+                or (key == "participant" and not value.strip())
+            ):
+                raise ValueError(f"Invalid {key}.")
         if self.qpos_semantics not in {
             "measured_state",
             "actual_submission",
@@ -103,6 +116,7 @@ def fit_recording(
     single fitting thread. Frame decoding remains with the annotation worker.
     """
     inputs.check()
+    began = time.monotonic()
     from embodichain.data_pipeline.skill_fitting import (
         file_digest,
         load_joint_recording,
@@ -122,6 +136,7 @@ def fit_recording(
         TrapezoidalPlannerCfg,
     )
     from ._robot import RobotPort, RobotProfile
+    from ._participants import select_participants
     import torch
 
     if set(inputs.fit_config) - set(SkillFitCfg.__dataclass_fields__):
@@ -160,8 +175,62 @@ def fit_recording(
         raise ValueError(
             f"选区映射为 {stop - start} 个关节采样，需要 12–{cfg.max_samples} 个。"
         )
-    progress("正在辨识参数、调用原生技能并校验连续回填…")
+    participants, participant_selection = select_participants(
+        profile,
+        recording.qpos[start:stop],
+        skill_id=skill_id,
+        selection=inputs.participant,
+        phase_hints=inputs.phase_hints,
+    )
+    progress(
+        "已选择控制部件："
+        + ", ".join(f"{p['motion']} / {p['grasp']}" for p in participants.values())
+    )
     robot = RobotPort(profile, recording.qpos[start], inputs.device)
+    scene_path = (
+        Path(inputs.scene).expanduser().resolve()
+        if inputs.scene
+        else paths[0].parent / "blender_scene" / "physical_export"
+    )
+    scene_grasps, scene_metadata, scene_files = None, None, {}
+    replay_interpolation_factor = 1
+    if inputs.scene or (
+        skill_id != "hand_over" and (scene_path / "scene_assets.yaml").is_file()
+    ):
+        if skill_id == "hand_over":
+            raise ValueError(
+                "Scene handover fitting needs a time-resolved object/attachment binding; use the explicit motion-only workflow for this skill."
+            )
+        from ._scene import _load_pickup_defaults, prepare_scene_grasps
+
+        options, defaults_files = {}, {}
+        if skill_id == "pick_up":
+            defaults, defaults_files = _load_pickup_defaults(scene_path)
+            replay_interpolation_factor = defaults.replay_interpolation_factor
+            if defaults.grasp_world_z_offset_m:
+                options["grasp_world_z_offset_m"] = defaults.grasp_world_z_offset_m
+
+        progress("正在读取重建物体并从有效 grasp affordance 中选择接近实录的抓取姿态…")
+        scene_grasps, scene_metadata, scene_files = prepare_scene_grasps(
+            scene_path,
+            inputs.object_id,
+            robot,
+            profile,
+            participants["primary"],
+            recording.qpos[start:stop],
+            cfg,
+            inputs.phase_hints,
+            **options,
+        )
+        if any(scene_files.get(p) != d for p, d in defaults_files.items()):
+            raise ValueError("重建场景在读取 pickup 默认参数期间发生变化。")
+    elif inputs.object_id:
+        raise ValueError("An object ID requires a reconstructed scene.")
+    remaining = cfg.max_seconds - (time.monotonic() - began)
+    if remaining <= 0:
+        raise ValueError("Scene/robot preparation exceeded the fitting time budget.")
+    planning_cfg = replace(cfg, max_seconds=remaining)
+    progress("正在调用原生技能并连接段首、段尾…")
     planner_cfg = TrapezoidalPlannerCfg(robot_uid="offline_skill_fit")
     planner = TrapezoidalPlanner(planner_cfg, robot=robot)
     motion = MotionGenerator(MotionGenCfg(planner_cfg=planner_cfg), planner=planner)
@@ -179,14 +248,15 @@ def fit_recording(
         recording,
         engine,
         skill_id=skill_id,
-        endpoints=profile.participants,
+        endpoints=participants,
         start=start,
         stop=stop,
         acceleration_limits=np.asarray(profile.acceleration_limits),
-        cfg=cfg,
+        cfg=planning_cfg,
         phase_hints=inputs.phase_hints,
+        scene_grasps=None if scene_grasps is None else tuple(scene_grasps),
     )
-    progress("正在生成关节曲线和 FK 对比…")
+    progress("正在准备轨迹对比数据…")
     grid = np.unique(
         np.r_[
             np.linspace(
@@ -213,10 +283,20 @@ def fit_recording(
             "interval": "closed",
         },
         time_offset=inputs.time_offset,
+        selected_participants=participants,
+        participant_selection=participant_selection,
+        scene=scene_metadata,
+        scene_files_sha256=scene_files,
+        replay_interpolation_factor=replay_interpolation_factor,
+        elapsed_seconds=time.monotonic() - began,
     )
-    if any(file_digest(path) != digest for path, digest in digests.items()) or any(
-        file_digest(profile.solvers[part]["urdf_path"]) != digest
-        for part, digest in models.items()
+    if (
+        any(file_digest(path) != digest for path, digest in digests.items())
+        or any(
+            file_digest(profile.solvers[part]["urdf_path"]) != digest
+            for part, digest in models.items()
+        )
+        or any(file_digest(path) != digest for path, digest in scene_files.items())
     ):
-        raise ValueError("关节记录、机器人配置或 URDF 在拟合期间发生变化。")
+        raise ValueError("关节记录、机器人配置、URDF 或重建场景在拟合期间发生变化。")
     return arrays, report

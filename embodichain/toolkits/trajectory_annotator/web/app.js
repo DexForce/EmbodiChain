@@ -8,7 +8,7 @@ const state = {
   project: null, skillIntervals: [], selected: null, draft: null, lastLabel: "",
   displayed: null, target: 0, delay: 1 / 30, playing: false, loading: false,
   serial: 0, pending: null, inFlight: false, timer: null, imageUrl: null,
-  speed: 1, zoom: 1, displayTimes: [], undo: [], redo: [],
+  speed: 1, zoom: 1, displayTimes: [], undo: [], redo: [], playUntil: null,
   version: 0, savedVersion: 0, persisted: false, saving: false,
   saveTimer: null, saveError: "", conflict: false, token: "", autosave: 1000,
 };
@@ -53,6 +53,7 @@ function renderTransport() {
 
 function pause(freeze = true) {
   state.playing = false;
+  state.playUntil = null;
   clearTimeout(state.timer);
   if (freeze) {
     state.serial += 1;
@@ -127,7 +128,7 @@ async function pumpFrames() {
             const fps = (state.displayTimes.length - 1) * 1000 / (state.displayTimes.at(-1) - state.displayTimes[0]);
             $("actual-fps").textContent = `实际 ${fps.toFixed(1)} fps`;
           }
-          if (index === maximum()) pause(false);
+          if (index >= (state.playUntil ?? maximum())) pause(false);
           else {
             const wait = Math.max(0, state.delay * 1000 / state.speed - (performance.now() - started));
             state.timer = setTimeout(() => {
@@ -639,7 +640,7 @@ async function initialize() {
       return tick;
     }));
     fittingPanel = createFittingPanel({
-      context: () => ({ selection: selected(), skills: state.project.skills, revision: state.project.document.revision, dirty: dirty(), draft: state.draft, token: state.token }),
+      context: () => ({ selection: selected(), segments: state.skillIntervals, frameCount: state.project.document.source.frame_count, skills: state.project.skills, revision: state.project.document.revision, dirty: dirty(), draft: state.draft, token: state.token }),
       saveAnnotations: async () => {
         if (state.draft) throw new Error("请先提交或取消当前标注草稿。");
         while (state.saving) await new Promise((resolve) => setTimeout(resolve, 50));
@@ -652,6 +653,13 @@ async function initialize() {
         const response = await checked(await fetch(`/api/frame-index?time_seconds=${encodeURIComponent(seconds)}`));
         const result = await response.json();
         if (serial === state.serial) requestFrame(result.index);
+      },
+      playRange: (first = 0, last = maximum()) => {
+        pause();
+        state.playUntil = last;
+        state.playing = true;
+        state.displayTimes = [];
+        requestFrame(first, true);
       },
     });
     fittingPanel.initialize();

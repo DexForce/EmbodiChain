@@ -51,29 +51,35 @@
           <div class="timeline-legend"><span><i class="legend-saved"></i>已标注</span><span><i class="legend-draft"></i>当前草稿</span><span class="muted">拖动时间轴定位 · ← → 精调一帧</span></div>
         </section>
         <section class="card fitting-card" aria-label="原子技能拟合与轨迹回填">
-          <div class="card-heading"><div><h2>原子技能拟合与轨迹回填</h2><p class="muted">选中一段已提交的标注，使用关节数据辨识参数并重建。</p></div><span id="fit-state" class="status-pill">未开始</span></div>
-          <div class="fit-target"><span id="fit-selection">请在右侧选择一段已标注区间</span><button id="fit-run" class="primary" disabled>拟合并回填选中区间</button></div>
+          <div class="card-heading"><div><h2>原子技能拟合与轨迹回填</h2><p class="muted">从实录估计接近方向，在重建场景的有效抓取中选择相近姿态，生成原生技能并衔接边界。</p></div><span id="fit-state" class="status-pill">未开始</span></div>
+          <div class="fit-target"><span id="fit-selection">整条轨迹 · 已标注区间按原子技能拟合</span><button id="fit-run" class="primary" disabled>拟合并回填完整轨迹</button></div>
           <p id="fit-selection-hint" class="fit-footnote"></p>
           <details id="fit-inputs" class="fit-inputs" open><summary>关节记录与机器人配置 <span class="muted">本机文件路径 · 可从启动参数预填</span></summary>
             <div class="fit-grid">
               <label>关节记录路径<input id="fit-joints" type="text" placeholder="/data/joints.npz、episode.hdf5 或 replay.pt" autocomplete="off"></label>
               <label>机器人配置 JSON<input id="fit-profile" type="text" placeholder="/data/robot_profile.json" autocomplete="off"></label>
-              <label>EmbodiChain 原子技能<select id="fit-skill"><option value="pick_up">Pickup · pick_up</option><option value="slide">Slide · slide</option><option value="twist">Twist · twist</option><option value="hand_over">HandOver · hand_over</option></select></label>
+              <label>重建场景目录 / YAML<input id="fit-scene" type="text" placeholder="留空时尝试 joints 旁的 blender_scene/physical_export" autocomplete="off"><small>填入路径后自动加载并缓存碰撞网格。</small></label>
+              <label>目标物体 ID<input id="fit-object" type="text" placeholder="留空时选择靠近实录抓取位置的物体" autocomplete="off"></label>
+              <label>参与控制部件<input id="fit-participant" type="text" value="auto" placeholder="auto / configured / 配置中的部件名" autocomplete="off"><small>默认根据夹爪事件自动选臂；其他部件保留原始轨迹。</small></label>
+              <label>原子技能来源<input value="自动使用全部已保存标注" disabled></label>
               <label>关节数据语义<select id="fit-semantics"><option value="">请选择数据语义</option><option value="measured_state">测量状态 · measured_state</option><option value="actual_submission">已发送指令 · actual_submission</option><option value="design_reference">设计参考 · design_reference</option></select></label>
               <label>视频零时刻对应的关节时间（秒）<input id="fit-offset" type="number" step="any" placeholder="例如 0，请显式指定"></label>
               <label>计算设备<input id="fit-device" type="text" value="cpu"></label>
             </div>
+            <div class="fit-scene-preparation"><button id="fit-load-scene" type="button">加载场景 / 检查碰撞缓存</button><span id="fit-scene-status" class="fit-footnote" role="status" aria-live="polite">加载场景后准备碰撞网格。</span></div>
             <details class="fit-advanced"><summary>数据字段、阶段提示与拟合容差</summary><div class="fit-grid">
               <label>关节字段<input id="fit-qpos-key" value="qpos"></label><label>时间戳字段<input id="fit-timestamps-key" value="timestamps"></label>
               <label>无时间戳时的关节采样周期（秒）<input id="fit-joint-dt" type="number" step="any" min="0" placeholder="留空表示使用记录中的时钟"></label><label>PT 环境索引<input id="fit-env-index" type="number" min="0" step="1" value="0"></label>
               <label class="fit-wide">阶段提示 JSON（可选）<textarea id="fit-phase-hints" rows="3" spellcheck="false" placeholder='例如 [{"name":"approach","start":0,"stop":100}, …]'></textarea><small>选区内的关节采样索引，半开区间；需完整、连续地覆盖选区。留空则从关节数据估计。</small></label>
               <label class="fit-wide">SkillFitCfg 覆盖项 JSON（可选）<textarea id="fit-config" rows="2" spellcheck="false" placeholder='例如 {"blend_samples":12,"max_candidates":3}'></textarea></label>
             </div></details>
-            <p class="fit-footnote">视频只用于选区与时间同步；参数辨识使用关节角与机器人 FK/IK 标定。每次回填一个选区，保留原始关节时钟与选区外的采样。</p>
+            <p class="fit-footnote">一次处理完整轨迹。已标注区间按对应技能拟合，未标注区间保留原始 qpos 并作为 DemoSkill 导出。保留原始关节时钟、段首段尾及未参与部件；目标物体留空可逐段自动选择。</p>
           </details>
           <p id="fit-message" class="fit-message" role="status" aria-live="polite">可读取 NPZ、HDF5 或 Atomic PT；需要包含配置中的夹爪关节。</p>
           <div id="fit-result" class="fit-result" hidden>
-            <div class="fit-result-heading"><strong id="fit-result-title"></strong><a id="fit-download" class="button-link" download>下载完整回填 NPZ</a></div>
+            <div class="fit-result-heading"><strong id="fit-result-title"></strong><a id="fit-download" class="button-link" download>下载完整回填 NPZ</a><a id="fit-download-task" class="button-link" download aria-disabled="true">下载 run-task 运行包</a></div>
+            <p id="fit-export-status" class="fit-footnote"></p>
+            <p id="fit-binding" class="fit-footnote"></p>
             <div id="fit-metrics" class="fit-metrics"></div>
             <dl id="fit-parameters" class="fit-parameters" aria-label="辨识参数"></dl>
             <div class="fit-view-controls"><label>关节 <select id="fit-joint"></select></label><span class="muted">曲线点击定位视频 · 当前帧联动</span></div>
@@ -81,9 +87,11 @@
             <canvas id="fit-joint-chart" class="fit-chart" height="210" role="img" aria-label="原始、原生技能和连续回填的关节位置曲线"></canvas>
             <canvas id="fit-error-chart" class="fit-chart fit-error-chart" height="120" role="img" aria-label="关节重建与回填误差曲线"></canvas>
             <div id="fit-cursor" class="fit-cursor"></div>
-            <div class="fit-view-controls"><strong>FK 骨架与 TCP 轨迹</strong><label>几何误差放大 <select id="fit-exaggeration"><option value="1">1×</option><option value="5">5×</option><option value="20">20×</option><option value="100">100×</option></select></label><button id="fit-reset-view">重置视角</button></div>
-            <canvas id="fit-geometry" class="fit-geometry" height="280" role="img" aria-label="可拖动旋转的原始、技能和回填 FK 骨架与 TCP 路径"></canvas>
-            <p class="fit-footnote">拖动旋转 · 滚轮缩放。几何误差放大仅用于显示。完整 NPZ 保留全部采样，网页曲线与 FK 已降采样。</p>
+            <div class="fit-view-controls fit-viewer-controls"><strong>Viser 机器人轨迹对比</strong><button id="fit-play-segment">播放回填区间</button><button id="fit-play-all">播放完整轨迹</button></div>
+            <div class="fit-legend"><span>● 原始机器人外观</span><span class="fit-blue">● 回填机器人 · 蓝色半透明</span></div>
+            <p id="fit-viewer-status" class="fit-footnote" role="status"></p>
+            <iframe id="fit-viewer" class="fit-viewer" title="Viser 原始与回填机器人模型对比" hidden></iframe>
+            <p class="fit-footnote">随视频播放和时间轴定位同步更新两套机器人的全部 qpos；模型使用完整关节采样插值。拖动旋转、滚轮缩放，暂停和倍速沿用视频控制。网页关节曲线已降采样。</p>
             <details class="fit-report"><summary>辨识参数、阶段与校验报告</summary><pre id="fit-report"></pre></details>
           </div>
         </section>

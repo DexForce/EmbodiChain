@@ -47,6 +47,8 @@ class RobotProfile:
     velocity_limits: list[float] = []
     acceleration_limits: list[float] = []
     calibration_revision: str = ""
+    simulation: dict[str, Any] = {}
+    """Explicit run-task physics overlays, independent of FK/TCP calibration."""
 
     @classmethod
     def load(cls, path: str | Path) -> RobotProfile:
@@ -76,6 +78,22 @@ class RobotProfile:
             raise ValueError(
                 "Profile needs unique joint names and a calibration revision."
             )
+        allowed_physics = {"root_props", "joint_drive_props", "attrs", "link_attrs"}
+        if (
+            not isinstance(self.simulation, dict)
+            or self.simulation.keys() - allowed_physics
+            or any(not isinstance(v, dict) for v in self.simulation.values())
+        ):
+            raise ValueError(
+                "simulation permits only root_props, joint_drive_props, attrs and link_attrs mappings; "
+                "robot model, placement and control parts remain profile-owned."
+            )
+        if self.simulation:
+            from embodichain.lab.sim.cfg import RobotCfg
+
+            json.dumps(self.simulation, allow_nan=False)
+            # Reuse the runtime's typed physics decoders without creating a robot.
+            RobotCfg.from_dict(self.simulation)
         for key in ("lower", "upper", "velocity_limits", "acceleration_limits"):
             value = np.asarray(getattr(self, key), dtype=float)
             if value.shape != (len(names),) or not np.isfinite(value).all():

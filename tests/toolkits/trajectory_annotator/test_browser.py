@@ -119,28 +119,50 @@ def test_web_fitting_comparison_download_rejection_and_invalidation(
 
     fitting_oracle["accepted"] = False
     open_project(page, annotation_server[0])
-    expect(page.locator("#fit-run")).to_be_disabled()
+    expect(page.locator("#fit-run")).to_be_enabled()
     create_skill_interval(page)
-    page.locator("#fit-joints").fill("known.npz")
-    page.locator("#fit-profile").fill("robot.json")
+    page.locator("#fit-joints").fill(fitting_oracle["joints"])
+    page.locator("#fit-profile").fill(fitting_oracle["profile"])
     page.locator("#fit-semantics").select_option("measured_state")
     page.locator("#fit-offset").fill("0")
     page.locator("#fit-run").click()
     expect(page.locator("#fit-state")).to_have_text("未通过校验", timeout=15000)
     expect(page.locator("#fit-result")).to_be_visible()
+    submitted = page.request.get(annotation_server[0] + "/api/fitting").json()["inputs"]
+    assert submitted["scene"] == ""
+    assert submitted["object_id"] == ""
+    assert submitted["participant"] == "auto"
     expect(page.locator("#fit-proposed-legend")).to_be_visible()
     expect(page.locator("#fit-message")).to_contain_text(
         "patched path exceeds joint limits"
     )
     page.locator("#fit-joint").select_option("1")
     expect(page.locator("#fit-cursor")).to_contain_text("hand_joint")
-    page.locator("#fit-exaggeration").select_option("20")
+    expect(page.locator("#fit-viewer")).to_be_visible()
+    expect(page.locator("#fit-geometry")).to_have_count(0)
+    page.locator("#fit-viewer").scroll_into_view_if_needed()
+    expect(page.frame_locator("#fit-viewer").locator("canvas").first).to_be_visible(
+        timeout=15000
+    )
+    # An empty WebGL canvas is not evidence of a loaded scene. Wait for both
+    # actual robot roots after the iframe enters the browser's render viewport.
+    for root in ("/original", "/patched"):
+        expect(
+            page.frame_locator("#fit-viewer").get_by_text(root, exact=True)
+        ).to_be_visible(timeout=15000)
     chart = page.locator("#fit-joint-chart").bounding_box()
     # The plot spans 0..2.99 s. This point is video t=.2 s, where the VFR
     # recording's displayed frame is 5 (its nonzero first PTS is normalized).
     x = chart["x"] + 62 + 0.2 / 2.99 * (chart["width"] - 76)
     page.mouse.click(x, chart["y"] + 65)
     expect(page.locator("#frame-current")).to_have_text("5")
+    expect(page.locator("#fit-viewer-status")).to_contain_text("0.200 s")
+    page.locator("#fit-play-segment").click()
+    expect(page.locator("#frame-current")).to_have_text("89", timeout=15000)
+    expect(page.locator("#playback-state")).to_have_text("已暂停")
+    page.locator("#fit-play-all").click()
+    expect(page.locator("#frame-current")).to_have_text("89", timeout=15000)
+    expect(page.locator("#playback-state")).to_have_text("已暂停")
     with page.expect_download() as download:
         page.locator("#fit-download").click()
     destination = tmp_path / "fit.npz"
@@ -152,6 +174,11 @@ def test_web_fitting_comparison_download_rejection_and_invalidation(
     page.locator("#commit").click()
     expect(page.locator("#fit-state")).to_have_text("标注已变化")
     expect(page.locator("#fit-download")).to_have_attribute("aria-disabled", "true")
+    expect(page.locator("#fit-viewer")).to_be_hidden()
+    expect(page.locator("#fit-play-segment")).to_be_disabled()
+    expect(page.locator("#fit-download-task")).to_have_attribute(
+        "aria-disabled", "true"
+    )
     # An unobservable segment must surface the error and release the job guard,
     # allowing a corrected configuration/selection to be fitted again.
     fitting_oracle["error"] = True
@@ -163,7 +190,32 @@ def test_web_fitting_comparison_download_rejection_and_invalidation(
     page.locator("#fit-run").click()
     expect(page.locator("#fit-state")).to_have_text("通过校验")
     expect(page.locator("#fit-proposed-legend")).to_be_hidden()
-    expect(page.locator("#fit-parameters")).to_contain_text("lift_height")
+    expect(page.locator("#fit-result-title")).to_contain_text("1 段原子技能")
+    expect(page.locator("#fit-download-task")).to_have_attribute(
+        "aria-disabled", "false"
+    )
+    with page.expect_download() as task_download:
+        page.locator("#fit-download-task").click()
+    import zipfile
+    import io
+    import torch
+    import yaml
+
+    with zipfile.ZipFile(task_download.value.path()) as archive:
+        manifest = yaml.safe_load(archive.read("skills.yaml"))
+        assert [s["skill_id"] for s in manifest["timeline"]] == [
+            "execute_demo_skill",
+            "pick_up",
+            "execute_demo_skill",
+        ]
+        for span in manifest["timeline"]:
+            data = torch.load(
+                io.BytesIO(archive.read(span["tensor"])), weights_only=True
+            )
+            np.testing.assert_array_equal(
+                data["qpos"].numpy(),
+                fitting_oracle["original"][span["start"] : span["stop"]].T,
+            )
 
 
 def test_keyboard_edit_delete_undo_and_resume(
@@ -350,9 +402,7 @@ def test_skill_dropdown_core_persistence_and_demoskill(
     page.locator("#core-start-frame").fill("3")
     page.locator("#core-end-frame").fill("4")
     page.locator("#commit").click()
-    expect(page.locator("#fit-skill")).to_have_value("twist")
-    expect(page.locator("#fit-skill")).to_be_disabled()
-    expect(page.locator("#fit-selection")).to_contain_text("核心 [3, 4]")
+    expect(page.locator("#fit-selection")).to_contain_text("1 段已标注")
     page.locator("#save").click()
     expect(page.locator("#save-status")).to_have_text("已保存")
     saved = json.loads(destination.read_text())
@@ -368,7 +418,7 @@ def test_skill_dropdown_core_persistence_and_demoskill(
     expect(page.locator("#core-start-frame")).to_have_value("3")
     page.locator("#label").select_option("execute_demo_skill")
     page.locator("#commit").click()
-    expect(page.locator("#fit-run")).to_be_disabled()
+    expect(page.locator("#fit-run")).to_be_enabled()
     expect(page.locator("#fit-selection-hint")).to_contain_text("DemoSkill")
     page.locator("#save").click()
     expect(page.locator("#save-status")).to_have_text("已保存")

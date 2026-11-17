@@ -134,11 +134,14 @@ solver-dependent pose/IK adaptation and compatibility re-exports. Trapezoidal/
 Double-S Warp profiles live in `compute/kinematics/_warp/trapezoidal.py`; compute
 must not import simulation objects.
 
-Offline atomic reconstruction uses `compute.trajectory.phase_alignment` for
+Motion-only atomic reconstruction uses `compute.trajectory.phase_alignment` for
 bounded monotone native-path clock fitting and `splicing` for fixed-clock joint
 replacement. Callers retain required anchors and qualify TCP constraints and
 joint derivatives after mapping and correction. The discrete boundary-stencil
-contract is not continuous-time smoothness or collision evidence. An explicitly
+contract is not continuous-time smoothness or collision evidence. Scene-grounded
+fitting retains the outer clock and native contact core through free-phase
+connections; its ownership and qualification scope live in the
+[Atomic Skills overview](../atomic-actions/atomic-actions.md). An explicitly
 injected planner/robot port bypasses simulator lookup; ordinary construction
 continues to resolve the simulator-owned robot.
 
@@ -206,7 +209,10 @@ expansion: they decode the combined profile, enumerate reference-family,
 affordance and trajectory recipes, assign one visual profile per episode, and
 reserve generic compatible slots. `schedule_digest` provides deterministic
 rerun identity; restoration, measured acceptance, and artifact writing remain
-host responsibilities. A profile that declares a conservative
+host responsibilities. `source.kind` selects `task_program` or `skill_sequence`;
+the native sequence host's supported factors and DemoSkill exclusion are owned by
+[Atomic Skills](../atomic-actions/atomic-actions.md).
+A profile that declares a conservative
 `trajectory.spatial.joint_offset_scale` also names a smaller
 `trajectory.spatial.dedup_tolerance`, which the Task Program integration
 forwards as the augmentation coverage tolerance; omitting it keeps the contract

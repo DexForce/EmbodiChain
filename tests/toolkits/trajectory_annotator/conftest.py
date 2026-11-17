@@ -30,7 +30,7 @@ import pytest
 
 
 @pytest.fixture
-def fitting_oracle(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+def fitting_oracle(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, Any]:
     """Isolate host lifecycle from IK with known accepted/rejected numeric bundles.
 
     Native reconstruction itself is independently covered by the Cartesian robot
@@ -39,10 +39,49 @@ def fitting_oracle(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     import numpy as np
     from embodichain.toolkits.skill_fitting import _pipeline
 
+    # Real lightweight geometry keeps browser playback tests independent of IK,
+    # while still exercising Viser's model, WebSocket and shutdown lifecycle.
+    urdf = tmp_path / "viewer.urdf"
+    urdf.write_text("""<robot name="comparison">
+      <link name="base"><visual><geometry><box size="0.1 0.1 0.1"/></geometry>
+        <material name="body"><color rgba="0.8 0.3 0.1 1"/></material></visual></link>
+      <link name="arm"><visual><geometry><box size="0.05 0.05 0.4"/></geometry></visual></link>
+      <link name="hand"><visual><geometry><box size="0.08 0.05 0.04"/></geometry></visual></link>
+      <joint name="arm_joint" type="prismatic"><parent link="base"/><child link="arm"/>
+        <origin xyz="0 0 0.2"/><axis xyz="1 0 0"/><limit lower="-1" upper="1" effort="10" velocity="2"/></joint>
+      <joint name="hand_joint" type="prismatic"><parent link="arm"/><child link="hand"/>
+        <origin xyz="0 0 0.2"/><axis xyz="0 0 1"/><limit lower="-1" upper="1" effort="10" velocity="2"/></joint>
+    </robot>""")
+
     control: dict[str, Any] = dict(
         accepted=True, entered=threading.Event(), release=threading.Event(), calls=[]
     )
     control["release"].set()
+    import json
+
+    times = np.arange(300, dtype=np.float64) / 100
+    original = np.column_stack((times / 10, -times / 20))
+    joints_path, profile_path = tmp_path / "joints.npz", tmp_path / "profile.json"
+    np.savez(joints_path, qpos=original, timestamps=times)
+    profile = dict(
+        joint_names=["arm_joint", "hand_joint"],
+        control_parts={"arm": ["arm_joint"], "hand": ["hand_joint"]},
+        solvers={
+            "arm": dict(urdf_path=str(urdf), root_link_name="base", end_link_name="arm")
+        },
+        base_poses={},
+        participants={},
+        hand_commands={"hand": {"open": [0.0], "grasp": [-0.1]}},
+        lower=[-1.0, -1.0],
+        upper=[1.0, 1.0],
+        velocity_limits=[2.0, 2.0],
+        acceleration_limits=[20.0, 20.0],
+        calibration_revision="known_fixture",
+    )
+    profile_path.write_text(json.dumps(profile))
+    control.update(
+        joints=str(joints_path), profile=str(profile_path), original=original
+    )
 
     def fit(inputs: Any, **kwargs: Any) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
         control["calls"].append(kwargs)
@@ -53,12 +92,16 @@ def fitting_oracle(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         if control.get("error"):
             raise ValueError("No observable closing event; provide phase hints.")
         # A 3 s recording, 100 Hz, with two known reference columns.
-        times = np.arange(300, dtype=np.float64) / 100
-        original = np.column_stack((times / 10, -times / 20))
+        start = int(np.searchsorted(times, kwargs["frame_times"][0] - 1e-7))
+        stop = int(
+            np.searchsorted(
+                times, kwargs["frame_times"][-1] + kwargs["frame_durations"][-1] - 1e-7
+            )
+        )
         native = original.copy()
-        native[20:84, 0] += 0.02
+        native[start:stop, 0] += 0.02
         proposed = original.copy()
-        proposed[23:81, 0] += 0.01
+        proposed[start + 3 : stop - 3, 0] += 0.01
         patched = proposed if control["accepted"] else original.copy()
         report = dict(
             schema_version=1,
@@ -68,13 +111,24 @@ def fitting_oracle(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
                 [] if control["accepted"] else ["patched path exceeds joint limits"]
             ),
             joint_names=["arm_joint", "hand_joint"],
-            start=20,
-            stop=84,
-            phases=[dict(name="approach", start=0, stop=64)],
+            start=start,
+            stop=stop,
+            phases=[dict(name="approach", start=0, stop=stop - start)],
             parameters=dict(lift_height=0.12),
+            native_goal=dict(grasp_xpos=np.eye(4).tolist()),
+            native_options=dict(lift_height=0.12),
+            native_motion_policy=dict(
+                strategy="motion_gen",
+                sample_count=80,
+                acceleration_limit=0.5,
+                control_dt=0.01,
+            ),
             native_joint_rmse=0.02,
             tcp_errors={"primary": {"native_tcp_rmse_m": 0.003}},
+            selected_participants={"primary": {"motion": "arm", "grasp": "hand"}},
             time_offset=inputs.time_offset,
+            robot_profile=profile,
+            replay_interpolation_factor=control.get("replay_interpolation_factor", 1),
             **kwargs["provenance"],
         )
         arrays = dict(timestamps=times, geometry_indices=np.arange(len(times)))

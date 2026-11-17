@@ -102,6 +102,8 @@ main { max-width:1680px; padding:22px 28px 12px; margin:auto; }
 .fit-wide { grid-column:1/-1; }
 .fit-advanced { margin-top:14px; }
 .fit-footnote { font-size:11px; color:var(--muted); margin-top:12px; }
+.fit-scene-preparation { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-top:12px; }
+.fit-scene-preparation .fit-footnote { margin:0; }
 .fit-message { margin:0 17px 15px; font-size:12px; color:var(--muted); white-space:pre-wrap; overflow-wrap:anywhere; }
 .fit-message.error { color:var(--danger); }
 .fit-message.warning { color:#efc88e; }
@@ -120,10 +122,12 @@ main { max-width:1680px; padding:22px 28px 12px; margin:auto; }
 .fit-view-controls button { padding:4px 8px; font-size:11px; margin-left:auto; }
 .fit-legend { display:flex; flex-wrap:wrap; gap:14px; font-size:10px; margin-bottom:8px; }
 .fit-legend .original { color:#fb8696; }.fit-legend .native { color:#f2b664; }.fit-legend .patched { color:#66d5bc; }.fit-legend .proposed { color:#b6a1ff; }
-.fit-chart,.fit-geometry { display:block; width:100%; background:#0e1622; border:1px solid #273449; border-radius:6px; }
+.fit-chart,.fit-viewer { display:block; width:100%; background:#0e1622; border:1px solid #273449; border-radius:6px; }
 .fit-chart { height:210px; cursor:crosshair; }.fit-error-chart { height:120px; margin-top:6px; }
 .fit-cursor { min-height:20px; font:10px/1.8 ui-monospace,SFMono-Regular,Consolas,monospace; color:var(--muted); }
-.fit-geometry { height:280px; cursor:grab; touch-action:none; }.fit-geometry:active { cursor:grabbing; }
+.fit-viewer { height:460px; }.fit-viewer[hidden] { display:none; }
+.fit-legend .fit-blue { color:#2878ff; }
+.fit-viewer-controls button { margin-left:0; }.fit-viewer-controls strong { margin-right:auto; }
 .fit-report { margin-top:12px; }.fit-report pre { max-height:320px; overflow:auto; font-size:11px; color:#aebed3; white-space:pre-wrap; overflow-wrap:anywhere; }
 @media (max-width:700px) { .fit-grid { grid-template-columns:1fr; }.fit-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }.fit-target,.fit-result-heading { align-items:flex-start; flex-direction:column; }.fit-inputs summary .muted { display:block; margin-left:15px; } }
 .editor-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(48px,.8fr); gap:10px; padding:0 17px; }

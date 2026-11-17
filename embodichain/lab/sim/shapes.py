@@ -71,6 +71,14 @@ class MeshCollisionCfg:
     VisACD requires a DexSim build with CUDA/OptiX support.
     """
 
+    decomposition_fpath: str | None = None
+    """Precomputed convex parts in an OBJ, one object/group per convex piece.
+
+    Valid only for ``convex_decomposition``. Parts use the source mesh's local
+    frame and units, before body scaling. Spawn loads each part as a separate
+    convex collider without running decomposition; the visual mesh is retained.
+    """
+
     sdf_resolution: int | None = None
     """Maximum SDF grid resolution; valid only for the ``sdf`` strategy."""
 
@@ -120,9 +128,21 @@ class MeshCollisionCfg:
                 )
             if self.acd_method not in (None, "visacd", "coacd", "vhacd"):
                 raise ValueError("acd_method must be 'visacd', 'coacd', or 'vhacd'.")
+            if self.decomposition_fpath is not None and (
+                not isinstance(self.decomposition_fpath, str)
+                or not self.decomposition_fpath.strip()
+            ):
+                raise ValueError("decomposition_fpath must be a non-empty path.")
         elif self.max_hulls is not None or self.acd_method is not None:
             raise ValueError(
                 "max_hulls and acd_method are valid only for convex_decomposition."
+            )
+        if (
+            self.decomposition_fpath is not None
+            and self.approximation != "convex_decomposition"
+        ):
+            raise ValueError(
+                "decomposition_fpath is valid only for convex_decomposition."
             )
 
         sdf_values = {
@@ -249,6 +269,7 @@ def _mesh_collision_cfg_init_with_legacy_max_hulls(
     sdf_padding: float | None = None,
     *,
     max_convex_hull_num: int | None = None,
+    decomposition_fpath: str | None = None,
 ) -> None:
     """Initialize with the deprecated hull-count spelling at the API boundary."""
     if max_convex_hull_num is not None:
@@ -283,6 +304,7 @@ def _mesh_collision_cfg_init_with_legacy_max_hulls(
         approximation="convex_hull" if approximation is None else approximation,
         max_hulls=max_hulls,
         acd_method=acd_method,
+        decomposition_fpath=decomposition_fpath,
         sdf_resolution=sdf_resolution,
         is_hydroelastic=is_hydroelastic,
         sdf_narrow_band_range=sdf_narrow_band_range,

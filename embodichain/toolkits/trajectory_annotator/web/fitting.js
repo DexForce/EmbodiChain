@@ -4,6 +4,7 @@ const $ = (id) => document.getElementById(id);
 const colors = { original: "#fb8696", native: "#f2b664", patched: "#66d5bc", proposed: "#b6a1ff" };
 const fields = {
   joints: "fit-joints", robot_profile: "fit-profile", qpos_semantics: "fit-semantics",
+  scene: "fit-scene", object_id: "fit-object", participant: "fit-participant",
   time_offset: "fit-offset", qpos_key: "fit-qpos-key", timestamps_key: "fit-timestamps-key",
   joint_dt: "fit-joint-dt", env_index: "fit-env-index", device: "fit-device",
 };
@@ -38,13 +39,47 @@ function surface(canvas) {
   return { ctx, width, height };
 }
 
-export function createFittingPanel({ context, saveAnnotations, seekTime }) {
+export function createFittingPanel({ context, saveAnnotations, seekTime, playRange }) {
   const state = { job: null, data: null, timer: null, loading: false, starting: false, time: 0, hover: null, seeking: false };
-  const camera = { yaw: -0.8, pitch: 0.5, zoom: 1, center: [0, 0, 0], radius: 1 };
+  const viewer = { job: null, pending: null, sending: false, timer: null, nextAt: 0 };
+  const scene = { state: null, timer: null, starting: false };
+  const sceneInputs = () => ({ scene: $("fit-scene").value.trim(), joints: $("fit-joints").value.trim() });
+
+  function showSceneStatus() {
+    $("fit-load-scene").disabled = scene.starting || scene.state?.phase === "running";
+    $("fit-scene-status").textContent = scene.state?.error || scene.state?.message || "加载场景后准备碰撞网格。";
+  }
+
+  async function prepareScene() {
+    if (scene.starting || scene.state?.phase === "running") return;
+    scene.starting = true;
+    showSceneStatus();
+    clearTimeout(scene.timer);
+    try {
+      scene.state = await jsonRequest("/api/fitting/scene", {
+        method: "POST", headers: { "Content-Type": "application/json", "X-Annotation-Token": context().token },
+        body: JSON.stringify(sceneInputs()),
+      });
+      if (scene.state.phase === "running") scene.timer = setTimeout(() => void pollScene(), 600);
+    } catch (error) {
+      scene.state = { phase: "error", error: error.message };
+    } finally { scene.starting = false; showSceneStatus(); }
+  }
+
+  async function pollScene() {
+    clearTimeout(scene.timer);
+    try {
+      scene.state = await jsonRequest("/api/fitting/scene");
+      showSceneStatus();
+      if (scene.state.phase === "running") scene.timer = setTimeout(() => void pollScene(), 600);
+      else if (JSON.stringify(scene.state.inputs) !== JSON.stringify(sceneInputs())) void prepareScene();
+    } catch (error) {
+      $("fit-scene-status").textContent = `无法读取场景准备状态：${error.message}`;
+      scene.timer = setTimeout(() => void pollScene(), 1500);
+    }
+  }
   const series = () => state.data?.report.accepted ? ["original", "native", "patched"] : ["original", "native", "patched", "proposed"];
   const stale = () => !!state.job && (state.job.stale || context().dirty || state.job.revision !== context().revision);
-  const key = (value) => value.toLowerCase().replace(/[_\s-]/g, "");
-  const selectedSkill = () => context().skills.find((skill) => context().selection && [key(skill.id), key(skill.name)].includes(key(context().selection.label)));
 
   function notify(text, kind = "") {
     $("fit-message").textContent = text;
@@ -53,22 +88,25 @@ export function createFittingPanel({ context, saveAnnotations, seekTime }) {
 
   function selectionChanged() {
     const current = context();
-    const skill = selectedSkill();
-    const core = current.selection?.core_interval;
-    $("fit-selection").textContent = current.selection ? `${current.selection.label} · 标注 [${current.selection.start_frame}, ${current.selection.end_frame}] 帧${core ? ` · 核心 [${core.start_frame}, ${core.end_frame}]` : ""}` : "请在右侧选择一段已标注区间";
-    $("fit-selection-hint").textContent = skill && !skill.can_fit ? `${skill.name} 可保存为示教标注；当前未提供该技能的参数重建。` : core ? "仅拟合核心区间，保留标注内前后过渡动作的原始采样。" : "标注包含额外过渡动作时，可在编辑区间中单独设置拟合核心范围。";
-    $("fit-skill").disabled = !!skill;
-    if (skill?.can_fit) $("fit-skill").value = skill.id;
-    if (skill && !skill.can_fit) $("fit-skill").value = "";
-    if (!skill && !$("fit-skill").value) $("fit-skill").value = "pick_up";
-    $("fit-run").disabled = !current.selection || !!current.draft || (!!skill && !skill.can_fit) || state.starting || state.job?.phase === "running";
-    $("fit-run").textContent = state.starting || state.job?.phase === "running" ? "正在拟合…" : "拟合并回填选中区间";
+    $("fit-selection").textContent = `完整轨迹 · ${current.frameCount} 帧 · ${current.segments.length} 段已标注`;
+    $("fit-selection-hint").textContent = current.draft ? "请先提交或取消正在编辑的区间。" : "按时间顺序处理全部标注；未标注区间作为 DemoSkill 保留。拟合核心之外的过渡采样保持原始值。";
+    $("fit-run").disabled = !!current.draft || state.starting || state.job?.phase === "running";
+    $("fit-run").textContent = state.starting || state.job?.phase === "running" ? "正在拟合完整轨迹…" : "拟合并回填完整轨迹";
     if (!state.job) return;
     const outdated = stale();
+    $("fit-play-segment").disabled = outdated || state.job.phase !== "done";
+    $("fit-play-all").disabled = outdated || state.job.phase !== "done";
+    if (outdated) clearViewer();
     const labels = { running: "拟合中", error: "拟合失败", done: state.job.accepted ? "通过校验" : "未通过校验" };
     $("fit-state").textContent = outdated ? "标注已变化" : labels[state.job.phase] || "未开始";
     $("fit-state").className = `status-pill ${outdated ? "dirty" : state.job.phase === "done" && state.job.accepted ? "saved" : state.job.phase === "error" ? "error" : ""}`;
     const link = $("fit-download");
+    const taskLink = $("fit-download-task");
+    const taskReady = !outdated && state.job.phase === "done" && state.job.run_task_available;
+    taskLink.setAttribute("aria-disabled", String(!taskReady));
+    if (taskReady) taskLink.href = `/api/fitting/jobs/${state.job.job_id}/run-task`;
+    else taskLink.removeAttribute("href");
+    $("fit-export-status").textContent = outdated ? "" : state.job.run_task_error ? `运行包导出失败：${state.job.run_task_error}。NPZ 拟合结果仍可下载。` : taskReady ? "运行包包含配置、模型和原生技能参数；仅 DemoSkill 保存原始 DOF × n_frame tensor。解压后按 README 执行 run-task。" : "";
     link.setAttribute("aria-disabled", String(outdated || state.job.phase !== "done"));
     if (outdated) {
       link.removeAttribute("href");
@@ -91,17 +129,15 @@ export function createFittingPanel({ context, saveAnnotations, seekTime }) {
     state.starting = true;
     selectionChanged();
     try {
-      if (selectedSkill() && !selectedSkill().can_fit) throw new Error("当前技能支持标注，尚不支持参数重建。");
       const inputs = readInputs();
-      const selection = structuredClone(context().selection);
       await saveAnnotations();
       const current = context();
-      if (!selection || JSON.stringify(selection) !== JSON.stringify(current.selection)) throw new Error("选区已变化，请重新开始拟合。");
       const job = await jsonRequest("/api/fitting/jobs", {
         method: "POST", headers: { "Content-Type": "application/json", "X-Annotation-Token": current.token },
-        body: JSON.stringify({ segment_id: selection.id, expected_revision: current.revision, skill_id: $("fit-skill").value, inputs }),
+        body: JSON.stringify({ scope: "episode", expected_revision: current.revision, inputs }),
       });
       state.job = { ...job, revision: current.revision };
+      clearViewer();
       state.data = null;
       $("fit-result").hidden = true;
       notify(job.message);
@@ -117,10 +153,10 @@ export function createFittingPanel({ context, saveAnnotations, seekTime }) {
       const job = await jsonRequest("/api/fitting");
       if (initial) {
         const defaults = job.inputs || job.defaults;
-        for (const [key, id] of Object.entries(fields)) $(id).value = defaults[key] ?? "";
+        for (const [key, id] of Object.entries(fields)) $(id).value = defaults[key] ?? (key === "participant" ? "auto" : "");
         $("fit-phase-hints").value = defaults.phase_hints ? JSON.stringify(defaults.phase_hints, null, 2) : "";
         $("fit-config").value = Object.keys(defaults.fit_config || {}).length ? JSON.stringify(defaults.fit_config, null, 2) : "";
-        if (job.skill_id) $("fit-skill").value = job.skill_id;
+        if (defaults.scene || defaults.joints) void prepareScene();
       }
       if (!job.job_id) return;
       state.job = { ...job, revision: job.annotation_revision };
@@ -148,19 +184,22 @@ export function createFittingPanel({ context, saveAnnotations, seekTime }) {
     const { report } = state.data;
     const selection = state.job.selection;
     const core = selection.core_interval || selection;
-    $("fit-result-title").textContent = `${selection.label} · ${report.skill_id} · 拟合 [${core.start_frame}, ${core.end_frame}]`;
+    $("fit-result-title").textContent = report.scope === "episode" ? `完整轨迹 · ${report.atomic_skill_count} 段原子技能 · ${report.demo_skill_count} 段 DemoSkill` : `${selection.label} · ${report.skill_id} · 拟合 [${core.start_frame}, ${core.end_frame}]`;
+    const parts = Object.values(report.selected_participants || {}).map((p) => `${p.motion} / ${p.grasp}`).join("，");
+    const graspRotation = report.parameters.grasp_rotation_error_rad;
+    $("fit-binding").textContent = `${parts ? `参与部件：${parts}` : ""}${report.scene ? ` · 目标物体：${report.scene.object_id} · 有效抓取候选：${report.scene.candidate_count}` : ""}${Number.isFinite(graspRotation) ? ` · 抓取旋转差：${(graspRotation * 180 / Math.PI).toFixed(1)}°` : ""}`;
     $("fit-result").hidden = false;
     $("fit-inputs").open = false;
     $("fit-proposed-legend").hidden = report.accepted;
     $("fit-joint").replaceChildren(...state.data.joint_names.map((name, index) => {
       const option = document.createElement("option"); option.value = index; option.textContent = name; return option;
     }));
-    const tcp = Math.max(...Object.values(report.tcp_errors).map((value) => value.native_tcp_rmse_m));
+    const tcp = Math.max(0, ...Object.values(report.tcp_errors).map((value) => value.native_tcp_rmse_m));
     const metrics = [
       [report.accepted ? "通过" : "未通过", "独立校验"],
       [report.native_joint_rmse.toExponential(2), "原生关节 RMSE · 原始关节单位"],
       [`${(tcp * 1000).toFixed(3)} mm`, "最大参与臂 TCP RMSE"],
-      [`${report.stop - report.start} 个采样`, "选区关节采样 · 原时钟"],
+      [`${report.stop - report.start} 个采样`, "关节采样 · 原时钟"],
     ];
     $("fit-metrics").replaceChildren(...metrics.map(([value, label]) => {
       const node = document.createElement("div"); node.className = "fit-metric";
@@ -176,16 +215,77 @@ export function createFittingPanel({ context, saveAnnotations, seekTime }) {
       $("fit-parameters").append(label, number);
     }
     $("fit-report").textContent = JSON.stringify(report, null, 2);
+    if (report.scope === "episode") {
+      const summary = (report.fits || []).map((fit) => {
+        const rotation = fit.parameters.grasp_rotation_error_rad;
+        const interval = fit.video_interval;
+        return `${fit.annotation_segment?.label || fit.skill_id}${interval ? ` [${interval.start_frame}, ${interval.end_frame}] 帧` : ""}${fit.scene ? ` · ${fit.scene.object_id}` : ""}${Number.isFinite(rotation) ? ` · 抓取旋转差 ${(rotation * 180 / Math.PI).toFixed(1)}°` : ""}`;
+      });
+      $("fit-binding").textContent = [parts ? `参与部件：${parts}` : "", ...summary].filter(Boolean).join("；");
+    }
     if (report.failures.length) notify(`${state.job.message}\n${report.failures.join("\n")}`, "warning");
     if (state.data.total_joints > state.data.joint_names.length) notify("仅预览前 128 个关节；完整 NPZ 包含所有关节。");
-    const lower = [Infinity, Infinity, Infinity], upper = [-Infinity, -Infinity, -Infinity];
-    for (const frame of state.data.original_links) for (const arm of frame) for (const point of arm) for (let axis = 0; axis < 3; axis++) {
-      lower[axis] = Math.min(lower[axis], point[axis]); upper[axis] = Math.max(upper[axis], point[axis]);
-    }
-    camera.center = lower.map((value, axis) => (value + upper[axis]) / 2);
-    camera.radius = Math.max(0.05, Math.hypot(...upper.map((value, axis) => value - lower[axis])) / 2);
-    camera.yaw = -0.8; camera.pitch = 0.5; camera.zoom = 1;
+    clearViewer();
+    if (state.data.viewer.phase === "ready") {
+      viewer.job = state.job.job_id;
+      const url = new URL(window.location.href);
+      url.port = String(state.data.viewer.port);
+      url.pathname = "/"; url.search = ""; url.hash = "";
+      $("fit-viewer").src = url.href;
+      $("fit-viewer").hidden = false;
+      syncViewer();
+    } else $("fit-viewer-status").textContent = state.data.viewer.error || "Viser 模型未就绪。";
     selectionChanged(); draw();
+  }
+
+  function clearViewer() {
+    viewer.job = null; viewer.pending = null;
+    clearTimeout(viewer.timer);
+    viewer.timer = null;
+    $("fit-viewer").hidden = true;
+    $("fit-viewer").removeAttribute("src");
+    $("fit-viewer-status").textContent = "";
+  }
+
+  function syncViewer() {
+    if (!viewer.job || stale()) return;
+    viewer.pending = { job: viewer.job, time: state.time };
+    scheduleViewer();
+  }
+
+  function scheduleViewer() {
+    if (viewer.sending || viewer.timer !== null || !viewer.pending) return;
+    viewer.timer = setTimeout(() => {
+      viewer.timer = null;
+      void pumpViewer();
+    }, Math.max(0, viewer.nextAt - performance.now()));
+  }
+
+  async function pumpViewer() {
+    if (viewer.sending || !viewer.pending) return;
+    viewer.sending = true;
+    viewer.nextAt = performance.now() + 34;
+    const task = viewer.pending;
+    viewer.pending = null;
+    try {
+      const result = await jsonRequest(`/api/fitting/jobs/${task.job}/viewer`, {
+        method: "POST", headers: { "Content-Type": "application/json", "X-Annotation-Token": context().token },
+        body: JSON.stringify({ time_seconds: task.time }),
+      });
+      if (viewer.job === task.job) {
+        if (result.phase !== "ready") throw new Error(result.error || "Viser 模型未就绪。");
+        $("fit-viewer-status").textContent = `与视频同步 · ${task.time.toFixed(3)} s${state.data.report.accepted ? "" : " · 未通过校验的区间保留原始轨迹"}`;
+      }
+    } catch (error) {
+      if (viewer.job === task.job) {
+        $("fit-viewer-status").textContent = `模型同步失败：${error.message}`;
+        viewer.pending = null;
+      }
+    } finally {
+      viewer.sending = false;
+      // Only the most recent displayed time is retained, at most 30 updates/s.
+      scheduleViewer();
+    }
   }
 
   function chart(canvas, errors = false) {
@@ -218,8 +318,12 @@ export function createFittingPanel({ context, saveAnnotations, seekTime }) {
       ctx.textAlign = "center"; ctx.fillText(`${(time - data.report.time_offset).toFixed(2)}s`, x(time), height - 9);
     }
     ctx.save(); ctx.beginPath(); ctx.rect(left, top, right - left, bottom - top); ctx.clip();
-    const a = data.indices.indexOf(data.report.start), b = data.indices.indexOf(data.report.stop - 1);
-    ctx.fillStyle = "#66d5bc0c"; ctx.fillRect(x(times[a]), top, Math.max(1, x(times[b]) - x(times[a])), bottom - top);
+    const spans = data.report.timeline?.filter((s) => s.kind === "atomic_skill") || [{ start: data.report.start, stop: data.report.stop }];
+    ctx.fillStyle = "#66d5bc12";
+    for (const interval of spans) {
+      const a = nearest(data.indices, interval.fit_start ?? interval.start), b = nearest(data.indices, (interval.fit_stop ?? interval.stop) - 1);
+      ctx.fillRect(x(times[a]), top, Math.max(1, x(times[b]) - x(times[a])), bottom - top);
+    }
     for (const name of names) {
       ctx.strokeStyle = colors[name]; ctx.lineWidth = name === "original" ? 2.8 : 1.5;
       ctx.setLineDash(name === "native" ? [5, 3] : name === "proposed" ? [2, 3] : []);
@@ -233,55 +337,9 @@ export function createFittingPanel({ context, saveAnnotations, seekTime }) {
     ctx.restore(); ctx.textAlign = "left";
   }
 
-  function geometry() {
-    const s = surface($("fit-geometry"));
-    if (!s) return;
-    const { ctx, width, height } = s, data = state.data;
-    const scale = Math.min(width, height) * 0.38 / camera.radius * camera.zoom;
-    const cy = Math.cos(camera.yaw), sy = Math.sin(camera.yaw), cp = Math.cos(camera.pitch), sp = Math.sin(camera.pitch);
-    function project(point) {
-      const [x, y, z] = point.map((value, axis) => value - camera.center[axis]);
-      return [width / 2 + (cy * x - sy * y) * scale, height / 2 - (sp * (sy * x + cy * y) + cp * z) * scale];
-    }
-    function line(points, color, thickness, dash = []) {
-      ctx.strokeStyle = color; ctx.lineWidth = thickness; ctx.setLineDash(dash); ctx.beginPath();
-      points.forEach((point, i) => { const [x, y] = project(point); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
-      ctx.stroke(); ctx.setLineDash([]);
-    }
-    const radius = camera.radius;
-    for (let i = -4; i <= 4; i++) {
-      const v = i * radius / 4;
-      line([[camera.center[0] - radius, camera.center[1] + v, 0], [camera.center[0] + radius, camera.center[1] + v, 0]], "#27354a", 0.6);
-      line([[camera.center[0] + v, camera.center[1] - radius, 0], [camera.center[0] + v, camera.center[1] + radius, 0]], "#27354a", 0.6);
-    }
-    const multiplier = Number($("fit-exaggeration").value);
-    const index = nearest(data.geometry_times, state.time + data.report.time_offset);
-    function exaggerate(point, original) { return point.map((value, axis) => original[axis] + (value - original[axis]) * multiplier); }
-    for (const name of series()) {
-      const arms = data[`${name}_tcp`][0].length;
-      for (let arm = 0; arm < arms; arm++) {
-        const points = data[`${name}_tcp`].map((value, i) => exaggerate(value[arm], data.original_tcp[i][arm]));
-        line(points, `${colors[name]}99`, name === "original" ? 2.5 : 1.5, name === "native" ? [5, 3] : []);
-        const skeleton = data[`${name}_links`][index][arm].map((point, node) => exaggerate(point, data.original_links[index][arm][node]));
-        line(skeleton, colors[name], name === "original" ? 4 : 2, name === "native" ? [5, 3] : []);
-        const [px, py] = project(exaggerate(data[`${name}_tcp`][index][arm], data.original_tcp[index][arm]));
-        ctx.fillStyle = colors[name]; ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI * 2); ctx.fill();
-      }
-    }
-    ctx.font = "10px ui-monospace,monospace";
-    ["X", "Y", "Z"].forEach((name, axis) => {
-      const origin = [camera.center[0] - radius * 0.8, camera.center[1] - radius * 0.8, 0];
-      const end = [...origin]; end[axis] += radius * 0.35;
-      line([origin, end], ["#dc7e8a", "#7aba9d", "#80a4e1"][axis], 1.4);
-      const [x, y] = project(end); ctx.fillStyle = "#b4c5dc"; ctx.fillText(name, x + 3, y);
-    });
-    ctx.fillStyle = "#8496b1";
-    ctx.fillText(`TCP · 视频 ${state.time.toFixed(3)}s · ${multiplier}×`, 12, 18);
-  }
-
   function draw() {
     if (!state.data) return;
-    chart($("fit-joint-chart")); chart($("fit-error-chart"), true); geometry();
+    chart($("fit-joint-chart")); chart($("fit-error-chart"), true);
     const data = state.data, joint = Number($("fit-joint").value), index = nearest(data.timestamps, state.hover ?? state.time + data.report.time_offset);
     $("fit-cursor").textContent = `预览采样 · 视频 ${(data.timestamps[index] - data.report.time_offset).toFixed(3)}s · ${data.joint_names[joint]} · 原始 ${data.original_qpos[index][joint].toFixed(6)} · 技能 ${data.native_qpos[index][joint].toFixed(6)} · 回填 ${data.patched_qpos[index][joint].toFixed(6)}`;
   }
@@ -303,24 +361,16 @@ export function createFittingPanel({ context, saveAnnotations, seekTime }) {
       finally { state.seeking = false; }
     });
   }
-  const canvas = $("fit-geometry");
-  let drag = null;
-  canvas.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0) return;
-    event.preventDefault(); drag = { id: event.pointerId, x: event.clientX, y: event.clientY };
-    canvas.setPointerCapture(event.pointerId);
-  });
-  canvas.addEventListener("pointermove", (event) => {
-    if (drag?.id !== event.pointerId) return;
-    camera.yaw += (event.clientX - drag.x) * 0.008;
-    camera.pitch = Math.max(-1.5, Math.min(1.5, camera.pitch + (event.clientY - drag.y) * 0.008));
-    drag.x = event.clientX; drag.y = event.clientY; draw();
-  });
-  const release = (event) => { if (drag?.id === event.pointerId) { drag = null; if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId); } };
-  canvas.addEventListener("pointerup", release); canvas.addEventListener("pointercancel", release); canvas.addEventListener("lostpointercapture", release);
-  canvas.addEventListener("wheel", (event) => { event.preventDefault(); camera.zoom = Math.max(0.2, Math.min(6, camera.zoom * Math.exp(-event.deltaY * 0.001))); draw(); }, { passive: false });
-  $("fit-reset-view").onclick = () => { camera.yaw = -0.8; camera.pitch = 0.5; camera.zoom = 1; draw(); };
-  $("fit-joint").onchange = draw; $("fit-exaggeration").onchange = draw; $("fit-run").onclick = () => void start();
+  $("fit-joint").onchange = draw;
+  $("fit-run").onclick = () => void start();
+  $("fit-load-scene").onclick = () => void prepareScene();
+  $("fit-scene").addEventListener("change", () => void prepareScene());
+  $("fit-joints").addEventListener("change", () => void prepareScene());
+  $("fit-play-segment").onclick = () => {
+    if (!state.job?.selection || stale()) return;
+    playRange(state.job.selection.start_frame, state.job.selection.end_frame);
+  };
+  $("fit-play-all").onclick = () => { if (!stale()) playRange(); };
   new ResizeObserver(draw).observe($("fit-result"));
-  return { initialize: () => void poll(true), selectionChanged, displayTime: (time) => { state.time = time; draw(); } };
+  return { initialize: () => void poll(true), selectionChanged, displayTime: (time) => { state.time = time; draw(); syncViewer(); } };
 }

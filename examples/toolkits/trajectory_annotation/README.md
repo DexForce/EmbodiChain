@@ -2,6 +2,16 @@
 
 在仓库根目录运行，默认绑定 `127.0.0.1`，自动选择端口并打开浏览器。服务运行期间保留终端，结束时按 Ctrl+C。
 
+含视频的最小资源包可直接启动正式网页入口，无需逐项传入原始录制路径：
+
+```bash
+conda activate py312_bk
+embodichain annotate-trajectory --bundle /data/pickup-workflow.inputs --port 8898 --no-browser
+```
+
+包内同时提供关节轨迹、机器人与重建场景；网页可完成区间标注、全轨迹拟合和 run-task 包导出。
+后续动态扩增使用导出包的 `skills.yaml` 和 `expansion.yaml`，详见[完整流程](../../../embodichain/toolkits/trajectory_annotator/README.md)。
+
 ```bash
 conda activate py312
 # 若尚未安装网页端依赖：
@@ -69,9 +79,11 @@ embodichain run-example toolkits/trajectory_annotation \
   --output-dir /tmp/pickup-labels
 ```
 
-在网页中用 **I / O** 标注完整 Pickup，从技能下拉菜单选择 **Pickup** 并提交，拟合面板自动选择同一技能，点击
-**“拟合并回填选中区间”**。会显示通过/拒绝状态、参数和误差，以及与视频联动的关节曲线、
-可旋转的 FK 骨架和 TCP 路径；可下载包含完整关节轨迹的 NPZ。此示例辨识出的 `lift_height` 约为 **0.16 m**。
+在网页中用 **I / O** 标注完整 Pickup，从技能下拉菜单选择 **Pickup** 并提交，点击
+**“拟合并回填完整轨迹”**。一次处理全部标注，空白区间保留为 DemoSkill。会显示通过/拒绝状态、参数和误差，以及与视频联动的关节曲线、
+Viser 中保留原始外观的机器人与蓝色半透明的回填机器人。可播放整个回填区间或完整录制，
+随视频时间同步更新两套模型的全部关节，并下载包含完整关节轨迹的 NPZ。
+此示例辨识出的 `lift_height` 约为 **0.16 m**。
 
 同一面板也支持 Slide、Twist、HandOver。任意真实记录需提供自己的机器人配置，示例 UR5 配置不能直接用于 Piper。
 区间边界较宽时，可勾选“单独设置拟合核心区间”，只重建内部完整技能，保留前后过渡采样；
@@ -80,8 +92,9 @@ embodichain run-example toolkits/trajectory_annotation \
 `--qpos-key`、`--timestamps-key`、`--joint-dt`、`--env-index`、`--phase-hints`、`--fit-config` 也可预填高级设置。
 默认 HDF5 标注流程保持可独立使用。
 
-每次仅回填当前选区，以原始关节记录为基准。未通过校验时回填数组保持原始值，并保留候选；
-修改标注后需重新拟合再下载。完整数据格式与边界说明见[工具说明](../../../embodichain/toolkits/trajectory_annotator/README.md)。
+每次以原始记录为基准，将全部已标注技能的核心合并回填。未通过校验的区间保持原始值，并保留候选；
+修改标注后需重新拟合再下载。全部通过后可下载 run-task 运行包，包含配置、模型、原生技能的对象/参数，以及仅 DemoSkill 区间的原始 `DOF × n_frame` qpos tensor。原子技能在运行时从当前状态重新规划，不保存轨迹 PT。
+解压后按 README 用 `run-task --replay` 执行。完整数据格式与边界说明见[工具说明](../../../embodichain/toolkits/trajectory_annotator/README.md)。
 
 ## 输入已有图像数组
 

@@ -931,6 +931,12 @@ def test_mesh_collision_cfg_rejects_both_hull_count_names() -> None:
         {"approximation": "sdf", "sdf_resolution": 64.5},
         {"approximation": "sdf", "sdf_padding": float("nan")},
         {"approximation": "sdf", "sdf_texture_format": "invalid"},
+        {"approximation": "convex_hull", "decomposition_fpath": "parts.obj"},
+        {
+            "approximation": "convex_decomposition",
+            "max_hulls": 8,
+            "decomposition_fpath": "",
+        },
     ],
 )
 def test_mesh_collision_cfg_rejects_invalid_numeric_types_and_values(

@@ -21,6 +21,7 @@ import pytest
 
 from embodichain.compute.trajectory.phase_alignment import align_joint_phase
 from embodichain.compute.trajectory.splicing import (
+    _replacement_diagnostics,
     splice_joint_segment,
     joint_path_diagnostics,
 )
@@ -86,6 +87,26 @@ def test_derivative_gate_detects_a_single_step_jump() -> None:
     assert not result["accepted"]
     assert result["peak_velocity"] == pytest.approx([100])
     assert result["peak_acceleration"] == pytest.approx([20000])
+
+
+def test_replacement_qualifies_new_stencils_without_hiding_new_violations() -> None:
+    times = np.arange(100) * 0.01
+    source = np.zeros((100, 2))
+    source[60:, 1] = 5  # Existing discontinuity on an untouched control part.
+    output = source.copy()
+    output[20:50, 0] = np.sin(np.linspace(0, np.pi, 30)) * 0.001
+    limits = dict(
+        lower=np.full(2, -10),
+        upper=np.full(2, 10),
+        velocity_limits=np.ones(2),
+        acceleration_limits=np.full(2, 10),
+    )
+    assert not joint_path_diagnostics(output, times, **limits)["accepted"]
+    assert _replacement_diagnostics(source, output, times, **limits)["accepted"]
+    output[30, 0] = 1
+    result = _replacement_diagnostics(source, output, times, **limits)
+    assert not result["accepted"]
+    assert result["velocity_ratio"] > 90
 
 
 def test_phase_clock_changes_timing_without_changing_the_native_path() -> None:

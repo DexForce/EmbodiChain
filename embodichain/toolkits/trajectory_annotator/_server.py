@@ -39,6 +39,7 @@ from ._models import ConflictError
 from ._storage import AnnotationStore
 from ._frames import SupersededError, FrameWorker
 from ._fitting import FitSession
+from ._scene_preparation import ScenePreparationSession
 from ._skills import RECONSTRUCTION_SKILLS, SKILL_CHOICES
 from .frames import FrameSource
 
@@ -68,20 +69,23 @@ def create_app(
     store = AnnotationStore(annotations, cfg.document_bytes)
     worker = FrameWorker(source_factory, cfg, store.initialize)
     fitting = FitSession(fitting_options)
+    scene_preparation = ScenePreparationSession()
     token = secrets.token_urlsafe(32)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        nonlocal worker, store, fitting
+        nonlocal worker, store, fitting, scene_preparation
         store = AnnotationStore(annotations, cfg.document_bytes)
         worker = FrameWorker(source_factory, cfg, store.initialize)
         fitting = FitSession(fitting_options)
+        scene_preparation = ScenePreparationSession()
         worker.start()
         try:
             yield
         finally:
             await run_in_threadpool(worker.close)
             await run_in_threadpool(fitting.close)
+            await run_in_threadpool(scene_preparation.close)
 
     app = FastAPI(
         title="Trajectory Annotator", lifespan=lifespan, docs_url=None, redoc_url=None
@@ -229,6 +233,22 @@ def create_app(
             state.update(stale=True, error=str(error))
         return {**state, "defaults": fitting.defaults}
 
+    @app.get("/api/fitting/scene")
+    async def scene_status() -> dict[str, Any]:
+        return scene_preparation.snapshot()
+
+    @app.post("/api/fitting/scene", status_code=202)
+    async def scene_start(request: Request) -> dict[str, Any]:
+        authorize(request)
+        ready()
+        payload = await read_json(request, 16 * 1024)
+        try:
+            return scene_preparation.start(payload)
+        except ConflictError as error:
+            raise HTTPException(409, str(error)) from error
+        except (ValueError, TypeError) as error:
+            raise HTTPException(422, str(error)) from error
+
     @app.post("/api/fitting/jobs", status_code=202)
     async def fit_start(request: Request) -> dict[str, Any]:
         authorize(request)
@@ -246,7 +266,9 @@ def create_app(
                 if store.snapshot()["document"] != document:
                     raise ConflictError("标注在拟合期间发生变化，请重新拟合。")
 
-            return fitting.start(payload, document, worker.interval, check_current)
+            return await run_in_threadpool(
+                fitting.start, payload, document, worker.interval, check_current
+            )
         except ConflictError as error:
             raise HTTPException(409, str(error)) from error
         except (ValueError, TypeError, OSError, RuntimeError) as error:
@@ -279,6 +301,46 @@ def create_app(
             media_type="application/octet-stream",
             headers={
                 "Content-Disposition": f'attachment; filename="trajectory.{job_id}.fit.npz"'
+            },
+            background=BackgroundTask(stream.close),
+        )
+
+    @app.post("/api/fitting/jobs/{job_id}/viewer")
+    async def fit_viewer(job_id: str, request: Request) -> dict[str, Any]:
+        authorize(request)
+        ready()
+        payload = await read_json(request, 1024)
+        if payload.keys() != {"time_seconds"}:
+            raise HTTPException(422, "模型播放请求需要 time_seconds。")
+        try:
+            # Check source edits off the event loop, as with result downloads.
+            await run_in_threadpool(store.check_unchanged)
+            return await run_in_threadpool(
+                fitting.update_viewer,
+                job_id,
+                store.snapshot()["document"],
+                payload["time_seconds"],
+            )
+        except ConflictError as error:
+            raise HTTPException(409, str(error)) from error
+        except (ValueError, TypeError, OSError) as error:
+            raise HTTPException(422, str(error)) from error
+
+    @app.get("/api/fitting/jobs/{job_id}/run-task")
+    async def fit_run_task(job_id: str) -> StreamingResponse:
+        ready()
+        try:
+            await run_in_threadpool(store.check_unchanged)
+            stream = fitting.open_run_task(job_id, store.snapshot()["document"])
+        except ConflictError as error:
+            raise HTTPException(409, str(error)) from error
+        except (ValueError, OSError) as error:
+            raise HTTPException(404, str(error)) from error
+        return StreamingResponse(
+            iter(lambda: stream.read(1024 * 1024), b""),
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f'attachment; filename="trajectory.{job_id}.run-task.zip"'
             },
             background=BackgroundTask(stream.close),
         )
