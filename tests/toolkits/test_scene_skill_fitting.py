@@ -401,7 +401,7 @@ def test_contact_grounding_preserves_a_virtual_runtime_tcp(tmp_path: Path) -> No
     tcp_pose = geometry.canonical_to_tcp_poses(contact)
     np.testing.assert_allclose(tcp_pose[:3, 3], [1.0, 2.0, 2.944], atol=1e-6)
     assert geometry.points[:, 2].max() == pytest.approx(0.004, abs=1e-6)
-    assert model.max_opening_width == pytest.approx(0.06)
+    assert model["max_opening_width"] == pytest.approx(0.06)
 
 
 @pytest.mark.parametrize(
@@ -427,7 +427,6 @@ def test_scene_selects_near_half_turn_only_when_its_query_accepts_it(
     from embodichain.toolkits.graspkit.pg_grasp.fixed_geometry import (
         FixedGripperCollisionGeometry,
     )
-    from embodichain.toolkits.graspkit.pose_generator import ParallelJawGripperModelCfg
     from embodichain.toolkits.skill_fitting import _scene
 
     mesh = trimesh.creation.box(extents=(0.02, 0.02, 0.02))
@@ -454,9 +453,7 @@ def test_scene_selects_near_half_turn_only_when_its_query_accepts_it(
             "files_sha256": {},
         },
     )
-    model = ParallelJawGripperModelCfg(
-        model_id="test_clamp", min_opening_width=0.001, max_opening_width=0.1
-    )
+    model = dict(model_id="test_clamp", min_opening_width=0.001, max_opening_width=0.1)
     monkeypatch.setattr(_scene, "_hand_geometry", lambda *args: (geometry, model))
 
     source_tcp = np.eye(4)

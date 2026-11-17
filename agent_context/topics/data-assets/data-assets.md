@@ -15,6 +15,7 @@ Online sampling and demonstration persistence belong to
 | Locked download and ZIP integrity | `embodichain/data/dataset.py`: `EmbodiChainDataset`, `_dataset_download_lock()` |
 | Shared class discovery | `embodichain/data/_asset_registry.py`: core modules and `embodichain.assets` catalogs |
 | Robot-owned asset definitions | `extensions/embodichain_robots/_asset_catalog.py` → vendor/model `assets.py` |
+| YAM source conversion and reproducible archive | `scripts/tools/prepare_yam_i2rt_assets.py` → [source and published assets](../../../docs/source/resources/robot/i2rt/yam.md#published-assets-and-offline-use) |
 | CLI list/download | `embodichain/data/download.py`: `get_registry()`, `download_asset()` |
 | Default material catalog / provenance | `embodichain/_material_catalog.py` → `embodichain/data/default_materials.py`; `embodichain/data/default_materials.json` |
 | Default material archive | `embodichain/data/assets/materials.py`: `DefaultMaterials` |
@@ -49,6 +50,17 @@ both ZIP integrity repair and the Open3D constructor's download/extraction.
 Keep the lock outside the directory repair may delete. POSIX uses `flock`;
 Windows uses a polled byte lock. Direct Open3D subclasses do not automatically
 receive the project's locking/repair behavior.
+
+For `hf-mirror.com/datasets/DexForceAI/embodichain_data/` descriptors, the shared
+dataset base appends the matching official `huggingface.co` URL after the
+declared sources. Open3D tries it when an earlier download or checksum check
+fails, retaining the descriptor's revision, digest and extraction subdirectory.
+Custom hosts and other repositories are unchanged; failure of every source
+still raises a download error.
+
+The `task` category registers `PourCupAssets` runtime meshes and
+`PourCupDemoData` historical recordings through `assets/task_assets.py`.
+Both use the shared download cache and class-prefixed paths.
 
 The CLI honors an asset class's optional `cache_prefix` when checking readiness
 and ensuring extraction; otherwise the class name is the cache entry.
@@ -94,6 +106,20 @@ Keep its source revision and complete file checksums together when updating it.
 
 ZIP bundles must include directory entries before nested files for Open3D
 extraction. Validate new bundles through `get_data_path()` with an empty cache.
+
+Captured Gaussian backgrounds register as `RoboSplatterOfficeGS`,
+`DiscoverseLab3GS` and `RoboSimGSTabletopGS` in `assets/scene_assets.py`.
+Each resolves `asset.usda` from an immutable Hub snapshot and a versioned cache.
+The metre/Z-up entry references original or separately decoded PLY data; the
+package includes an AssetRevision inventory, source hashes and licensing
+evidence. These are visual-only scenes and supply no enclosing collision box.
+`scripts/tools/prepare_gaussian_scene_assets.py` owns explicit offline packaging;
+normal runtime consumers download the completed archive. Package admission and
+native RGB evidence do not certify metric Gaussian depth or industrial readiness.
+Official Task Program deployments live under
+`extensions/embodichain_tasks/configs/tasks/manipulation/gaussian_pick_place/`.
+`examples/gym/gaussian_pick_place/` consumes those definitions for RGB recording,
+video export and offline acceptance; it does not own another task configuration.
 
 `Franka` also materializes `Panda/Fr3HandV1.urdf` from the pinned integrated
 hand subtree, retaining source names and relative mesh paths. Bare FR3 arms
@@ -175,6 +201,19 @@ cache. Robot references still use `get_data_path()` and its existing asset cache
 Task packages must already be installed; downloading weights does not register
 new environment implementations. Test the Hub boundary with fake downloads and
 validate a real selected-model download separately.
+
+## Qualified cloth replay inputs
+
+`scripts/tools/prepare_cloth_fold_assets.py` installs the pinned M02 input bundle
+into the normal data root. It uses the shared download lock, verifies archive
+and task-owned URDF/mesh SHA-256 values, includes URDF-relative visual and
+collision dependencies, and rejects conflicting local files. Each input is copied
+to a same-directory temporary file, verified and atomically published without
+overwriting an existing file, so interrupted copies remain retryable. The packaged
+cloth task retains its qualified replay stream and 15 mm final centroid rules.
+The installer also supports an explicit custom root; launch with that same
+`EMBODICHAIN_DATA_ROOT`. It does not change the global root or substitute the
+generic W1 archive for the qualified robot.
 
 ## Failure diagnosis and change sites
 

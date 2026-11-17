@@ -33,7 +33,8 @@ __all__: list[str] = []
 class _UsdTextureFiles:
     """Keep package texture files available through scene topology rebuilds."""
 
-    def __init__(self) -> None:
+    def __init__(self, directory: Path | None = None) -> None:
+        self._external_directory = directory
         self._directory: TemporaryDirectory[str] | None = None
         self._paths: dict[tuple[str, int, int], str] = {}
 
@@ -65,13 +66,14 @@ class _UsdTextureFiles:
         asset = Ar.GetResolver().OpenAsset(Ar.ResolvedPath(asset_path))
         if asset is None:
             raise FileNotFoundError(f"Cannot read USD package texture: {asset_path}")
-        if self._directory is None:
+        if self._external_directory is None and self._directory is None:
             self._directory = TemporaryDirectory(prefix="embodichain-usdz-textures-")
         _, inner = Ar.SplitPackageRelativePathInner(asset_path)
         # Use a generated filename, never an archive member path, so package
         # names cannot escape the scene's private temporary directory.
         digest = sha256(repr(key).encode("utf-8")).hexdigest()
-        destination = Path(self._directory.name) / f"{digest}{Path(inner).suffix}"
+        directory = self._external_directory or Path(self._directory.name)
+        destination = directory / f"{digest}{Path(inner).suffix}"
         destination.write_bytes(asset.GetBuffer())
         self._paths[key] = str(destination)
         return str(destination)
@@ -81,3 +83,37 @@ class _UsdTextureFiles:
         if self._directory is not None:
             self._directory.cleanup()
             self._directory = None
+
+
+def _parse_singleton(
+    path: object,
+    collection: str | tuple[str, ...],
+    label: str,
+    *,
+    prim_path: str | None = None,
+):
+    if path is None:
+        raise ValueError(f"A USD path is required for the {label}.")
+
+    from dexsim.kit.usd import parse_usd
+
+    scene = parse_usd(str(path))
+    collections = (collection,) if isinstance(collection, str) else collection
+    candidates = [item for name in collections for item in getattr(scene, name)]
+    if prim_path is not None:
+        candidates = [
+            item
+            for item in candidates
+            if item.usd is not None and item.usd.prim_path == prim_path
+        ]
+    if len(candidates) != 1:
+        found = [
+            (item.name, None if item.usd is None else item.usd.prim_path)
+            for item in candidates
+        ]
+        selection = "" if prim_path is None else f" at prim path {prim_path!r}"
+        raise ValueError(
+            f"Expected exactly one {label} in USD file {path!r}{selection}, found "
+            f"{len(candidates)}: {found}."
+        )
+    return scene, candidates[0]

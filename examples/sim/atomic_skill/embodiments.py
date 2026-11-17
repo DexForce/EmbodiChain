@@ -22,6 +22,12 @@ mesh mounting, tool frames, jaw commands and scene placement belong here.
 
 from __future__ import annotations
 
+from embodichain.robot_registry import resolve_gripper_defaults
+
+from embodichain.lab.sim.utility.gripper_geometry import (
+    build_gripper_collision_geometry,
+)
+
 import argparse
 from dataclasses import MISSING
 import json
@@ -37,14 +43,9 @@ from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
 from embodichain.lab.sim.atomic_skills import ControlPartCommandProfile
 from embodichain.lab.sim.cfg import RigidObjectCfg, RobotCfg
 from embodichain.lab.sim.shapes import CubeCfg
-from embodichain.toolkits.graspkit import (
-    ParallelJawGripperModelCfg,
-    get_parallel_jaw_gripper_model,
-)
+
 from embodichain.toolkits.graspkit.pg_grasp import FixedGripperCollisionGeometry
-from embodichain.toolkits.graspkit.pg_grasp.model_geometry import (
-    get_parallel_jaw_collision_geometry,
-)
+
 from .gripper_geometry import geometry_from_asset
 from embodichain.utils import configclass, logger
 from embodichain_robots import (
@@ -71,7 +72,7 @@ class EmbodimentCfg:
 
     robot_cfg: RobotCfg = MISSING
     binding: dict[str, dict[str, str]] = {}
-    models: dict[str, ParallelJawGripperModelCfg] = {}
+    models: dict[str, dict[str, object]] = {}
     collision_geometries: dict[str, FixedGripperCollisionGeometry] = {}
     commands: dict[str, dict[str, tuple[float, ...]]] = {}
     object_size: tuple[float, float, float] = (0.04, 0.04, 0.04)
@@ -144,7 +145,7 @@ def parse_arguments() -> argparse.Namespace:
 
 def _mounted_gripper(
     name: str,
-) -> tuple[str, tuple[str, ...], dict, np.ndarray, ParallelJawGripperModelCfg]:
+) -> tuple[str, tuple[str, ...], dict, np.ndarray, dict[str, object]]:
     """Return asset-local metadata; transforms map flange to canonical grasp TCP."""
     if name == "pika":
         # Mesh finger span is measured in GRIPPER_BASE; the root contains the
@@ -158,10 +159,11 @@ def _mounted_gripper(
             ("FINGER1_JOINT", "FINGER2_JOINT"),
             {"open": (0.05, 0.05), "grasp": (0.0, 0.0)},
             tcp,
-            ParallelJawGripperModelCfg(
-                model_id="tutorial_pika",
-                max_opening_width=0.1,
-            ),
+            {
+                "model_id": "tutorial_pika",
+                "max_opening_width": 0.1,
+                "min_opening_width": 0.001,
+            },
         )
     tcp = np.eye(4)
     tcp[2, 3] = 0.19
@@ -180,10 +182,11 @@ def _mounted_gripper(
         joints,
         {"open": (0.0,) * 6, "grasp": (0.90,) * 6},
         tcp,
-        ParallelJawGripperModelCfg(
-            model_id="tutorial_dh_ag95",
-            max_opening_width=0.095,
-        ),
+        {
+            "model_id": "tutorial_dh_ag95",
+            "max_opening_width": 0.095,
+            "min_opening_width": 0.001,
+        },
     )
 
 
@@ -244,7 +247,9 @@ def _mount_grippers(args: argparse.Namespace, cfg: EmbodimentCfg) -> None:
         cfg.commands = {f"{side}_eef": commands for side in ("left", "right")}
         cfg.models = {f"{side}_eef": model for side in ("left", "right")}
     geometry = (
-        get_parallel_jaw_collision_geometry("pika_gripper", root_from_tcp=tcp)
+        build_gripper_collision_geometry(
+            resolve_gripper_defaults("PikaGripper"), root_from_tcp=tcp
+        )
         if args.gripper == "pika"
         else geometry_from_asset(
             asset,
@@ -277,7 +282,7 @@ def create_embodiment(args: argparse.Namespace) -> EmbodimentCfg:
         # away from its limit and the redundant elbow on one continuous branch.
         cfg.ready_yaws = {"primary": 90.0}
         cfg.robot_cfg.root_props.self_collision_enabled = True
-        cfg.models = {"eef": get_parallel_jaw_gripper_model("franka_panda_hand")}
+        cfg.models = {"eef": resolve_gripper_defaults("FrankaPandaHand")}
         cfg.commands = {"eef": {"open": (0.04, 0.04), "grasp": (0.0, 0.0)}}
     elif args.robot == "arx5":
         cfg.robot_cfg = ARX5Cfg.from_dict({})
@@ -301,10 +306,11 @@ def create_embodiment(args: argparse.Namespace) -> EmbodimentCfg:
             (0.0, 0.0, 1.0),
         )
         cfg.models = {
-            "eef": ParallelJawGripperModelCfg(
-                model_id="tutorial_arx5",
-                max_opening_width=0.088,
-            )
+            "eef": {
+                "model_id": "tutorial_arx5",
+                "max_opening_width": 0.088,
+                "min_opening_width": 0.001,
+            }
         }
         cfg.commands = {"eef": {"open": (0.044, 0.044), "grasp": (0.0, 0.0)}}
     elif args.robot == "cobotmagic":
@@ -341,7 +347,7 @@ def create_embodiment(args: argparse.Namespace) -> EmbodimentCfg:
             for part, solver in cfg.robot_cfg.solver_cfg.items()
         }
         cfg.models = {
-            f"{s}_eef": get_parallel_jaw_gripper_model("cobotmagic_v100_gripper")
+            f"{s}_eef": resolve_gripper_defaults("CobotMagicV100Gripper")
             for s in ("left", "right")
         }
         cfg.commands = {
@@ -352,19 +358,23 @@ def create_embodiment(args: argparse.Namespace) -> EmbodimentCfg:
         # Reuse the explicit opt-in simulation calibration, including its
         # model-derived grasp axes and source-inertia overlay. No cameras or
         # Task Program runtime are created by this direct Atomic caller.
-        import yaml
         from importlib.resources import files
 
         path = files("embodichain_tasks.configs").joinpath(
             "components/embodiments/tianji_marvin.yaml"
         )
-        data = yaml.safe_load(path.read_text())
+        from embodichain.lab.gym.utils.composition import resolve_gym_components
+
+        physical = resolve_gym_components(
+            {"embodiment": {"component": str(path)}},
+            base_dir=".",
+        )
         cfg.robot_cfg = TianjiMarvinCfg.from_dict(
-            {k: v for k, v in data["simulation"].items() if k != "class_type"}
+            {k: v for k, v in physical.config["robot"].items() if k != "class_type"}
         )
         cfg.ready_clearance = 0.15
         cfg.models = {
-            f"{s}_eef": get_parallel_jaw_gripper_model("tianji_marvin_gripper")
+            f"{s}_eef": resolve_gripper_defaults("TianjiMarvinGripper", variant=s)
             for s in ("left", "right")
         }
         cfg.commands = {
@@ -407,9 +417,11 @@ def create_embodiment(args: argparse.Namespace) -> EmbodimentCfg:
                 root_from_tcp = root_from_tool @ np.asarray(
                     cfg.robot_cfg.solver_cfg[f"{side}_arm"].tcp
                 )
-            cfg.collision_geometries[part] = get_parallel_jaw_collision_geometry(
-                model.model_id,
-                side=side if args.robot == "tianji" else None,
+            cfg.collision_geometries[part] = build_gripper_collision_geometry(
+                resolve_gripper_defaults(
+                    model["catalog_id"],
+                    variant=side if args.robot == "tianji" else None,
+                ),
                 root_from_tcp=root_from_tcp,
             )
     if args.task == "pick_place":
@@ -612,7 +624,7 @@ def create_scene(
             {
                 "robot": robot.uid,
                 "grippers": {
-                    part: model.model_id for part, model in cfg.models.items()
+                    part: model["model_id"] for part, model in cfg.models.items()
                 },
                 "binding": cfg.binding,
                 "tcp": {

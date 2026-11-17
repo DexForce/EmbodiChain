@@ -76,6 +76,112 @@ from embodichain_benchmarks.motion_generation.atomic_skill import (
 CPU = torch.device("cpu")
 
 
+@pytest.mark.parametrize("mount_yaw", [0.0, math.pi, 0.7])
+def test_radial_pre_pick_preserves_tool_tilt_in_the_mounted_base(mount_yaw):
+    from embodichain_benchmarks.motion_generation.scenarios.atomic_case_utils import (
+        _pre_pick_pose,
+    )
+
+    root = torch.eye(4).repeat(3, 1, 1)
+    root[:, :3, :3] = _rotation_z(mount_yaw)
+    root[:, :3, 3] = torch.tensor([1.0, -2.0, 0.15])
+    ready_local = torch.eye(4).repeat(3, 1, 1)
+    ready_local[:, :3, :3] = torch.tensor(
+        [[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]]
+    )
+    ready_local[:, :3, 3] = torch.tensor([0.5, 0.0, 0.4])
+    ready = root @ ready_local
+    objects_local = torch.eye(4).repeat(3, 1, 1)
+    objects_local[:, :3, 3] = torch.tensor(
+        [[0.3, 0.0, -0.12], [0.0, 0.3, -0.12], [0.0, -0.3, -0.12]]
+    )
+    objects = root @ objects_local
+    original_ready, original_objects = ready.clone(), objects.clone()
+    actual = _pre_pick_pose(
+        ready, objects, {"pre_pick_orientation": "base_radial"}, root_pose=root
+    )
+    for row, yaw in enumerate([0.0, math.pi / 2, -math.pi / 2]):
+        expected = _rotation_z(mount_yaw + yaw) @ ready_local[row, :3, :3]
+        assert torch.allclose(actual[row, :3, :3], expected, atol=1e-6)
+    assert torch.equal(actual[:, :2, 3], objects[:, :2, 3])
+    assert torch.allclose(actual[:, 2, 3], torch.full((3,), 0.36))
+    assert torch.equal(ready, original_ready)
+    assert torch.equal(objects, original_objects)
+
+
+def test_pre_pick_default_keeps_world_orientation_and_validates_opt_in():
+    from embodichain_benchmarks.motion_generation.scenarios.atomic_case_utils import (
+        _pre_pick_pose,
+    )
+
+    ready = torch.eye(4)[None]
+    ready[:, :3, :3] = _rotation_z(0.4)
+    objects = torch.eye(4)[None]
+    objects[:, :3, 3] = torch.tensor([0.0, 0.4, 0.03])
+    actual = _pre_pick_pose(ready, objects, {"pre_pick_height_m": 0.5})
+    assert torch.equal(actual[:, :3, :3], ready[:, :3, :3])
+    assert torch.equal(actual[0, :3, 3], torch.tensor([0.0, 0.4, 0.5]))
+    with pytest.raises(ValueError, match="mounted root pose"):
+        _pre_pick_pose(ready, objects, {"pre_pick_orientation": "base_radial"})
+    with pytest.raises(ValueError, match="pre_pick_orientation"):
+        _pre_pick_pose(ready, objects, {"pre_pick_orientation": "guessed"})
+    # A TCP on the base axis has no defined azimuth; retain its orientation.
+    axis = _pre_pick_pose(
+        ready,
+        objects,
+        {"pre_pick_orientation": "base_radial"},
+        root_pose=torch.eye(4)[None],
+    )
+    assert torch.equal(axis[:, :3, :3], ready[:, :3, :3])
+
+
+def test_empty_grasp_geometry_pool_is_a_typed_input_rejection(monkeypatch):
+    from embodichain_benchmarks.motion_generation import _atomic_fixtures
+    from embodichain_benchmarks.motion_generation.scenarios._case_qualification import (
+        _CaseQualificationError,
+    )
+
+    scenario = AtomicSkillScenario()
+    scenario.robot = SimpleNamespace(device=CPU)
+    scenario.grasp_model = lambda: None
+    scenario.grasp_root_from_tcp = lambda: None
+    generator = Mock()
+    generator.get_valid_grasp_poses.return_value = [
+        (torch.eye(4)[None], torch.tensor([torch.inf]))
+    ]
+    monkeypatch.setattr(
+        _atomic_fixtures,
+        "create_parallel_jaw_grasp_pose_generator",
+        lambda **kwargs: generator,
+    )
+    monkeypatch.setattr(
+        _atomic_fixtures,
+        "create_antipodal_semantics",
+        lambda *args, **kwargs: SimpleNamespace(
+            affordance=SimpleNamespace(
+                mesh_vertices=torch.zeros(3, 3), mesh_triangles=torch.zeros(1, 3)
+            )
+        ),
+    )
+    pose = torch.eye(4)[None]
+    with pytest.raises(_CaseQualificationError) as caught:
+        scenario._ranked_antipodal_grasp_pools(
+            SimpleNamespace(object_id="cube", entity=object()),
+            pose,
+            torch.tensor([0.0, 0.0, -1.0]),
+            seed=17,
+            n_sample=10,
+            max_candidates=2,
+        )
+    assert caught.value.qualification_diagnostics == {
+        "kind": "grasp_geometry",
+        "object_id": "cube",
+        "rows": [0],
+        "proposal_seed": 17,
+        "object_poses": pose.tolist(),
+    }
+
+
 def _contact_trace(*, contact_distances=None, contact_target="cube", **channels):
     """Fixture contacts are 1 mm on both fingers, independent of joint values."""
     if contact_distances is None:
@@ -591,8 +697,10 @@ def test_axis_align_geometry_matches_the_axis_align_primitive(twist, offset) -> 
 
 
 @pytest.mark.parametrize("early_filter", [False, True])
-def test_axis_inward_rule_keeps_original_envs_and_smallest_reachable_offset(
+@pytest.mark.parametrize("cartesian", [False, True])
+def test_axis_offset_rule_keeps_original_envs_and_first_reachable_offset(
     early_filter,
+    cartesian,
 ) -> None:
     """Two independent rows select literal minimal offsets in one shared batch."""
     objects = torch.eye(4).repeat(2, 1, 1)
@@ -635,7 +743,7 @@ def test_axis_inward_rule_keeps_original_envs_and_smallest_reachable_offset(
             alignment_offset_m=alignment_offset_m,
         )
 
-    chosen, offsets, evidence = providers._select_inward_axis_grasp(
+    chosen, offsets, evidence = providers._select_axis_grasp(
         scenario,
         SimpleNamespace(object_id="cube"),
         objects,
@@ -643,7 +751,18 @@ def test_axis_inward_rule_keeps_original_envs_and_smallest_reachable_offset(
         torch.zeros(2, 7),
         grasps,
         torch.tensor([[-1.0, 0.0, 0.0]]).repeat(2, 1),
-        (0.0, 0.025, 0.1),
+        None if cartesian else (0.0, 0.025, 0.1),
+        **(
+            {
+                "offset_candidates": (
+                    (0.0, 0.0, 0.0),
+                    (-0.025, 0.0, 0.0),
+                    (0.0, -0.1, 0.0),
+                )
+            }
+            if cartesian
+            else {}
+        ),
         grasp_parameters={
             "grasp_sample_count": 10000,
             "grasp_max_candidates": 128,
@@ -661,10 +780,16 @@ def test_axis_inward_rule_keeps_original_envs_and_smallest_reachable_offset(
     torch.testing.assert_close(
         offsets, torch.tensor([[-0.025, 0.0, 0.0], [0.0, -0.1, 0.0]])
     )
-    assert [row["selected_inward_distance_m"] for row in evidence["rows"]] == [
-        0.025,
-        0.1,
-    ]
+    if cartesian:
+        assert [row["selected_offset_m"] for row in evidence["rows"]] == [
+            [-0.025, 0.0, 0.0],
+            [0.0, -0.1, 0.0],
+        ]
+    else:
+        assert [row["selected_inward_distance_m"] for row in evidence["rows"]] == [
+            0.025,
+            0.1,
+        ]
     assert [len(row["rejected"]) for row in evidence["rows"]] == [1, 2]
     # Earlier accepted rows retain their own offset while another row searches.
     torch.testing.assert_close(calls[-1], torch.tensor([0.025, 0.1]))
@@ -708,7 +833,7 @@ def test_axis_inward_rule_retains_unknowns_and_propagates_backend_errors(
     expected = RuntimeError if backend_error else providers._AntipodalGraspSearchError
     match = "broken backend" if backend_error else "environment rows.*0.*0.0, 0.1"
     with pytest.raises(expected, match=match):
-        providers._select_inward_axis_grasp(
+        providers._select_axis_grasp(
             scenario,
             SimpleNamespace(object_id="cube"),
             objects,
@@ -741,6 +866,76 @@ def test_axis_inward_rule_requires_an_explicit_ordered_bounded_search(values) ->
                 "alignment_offset_m": [0, 0, 0],
             }
         )
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"alignment_offset_candidates_m": []},
+        {"alignment_offset_candidates_m": [[0.0, 0.1]]},
+        {"alignment_offset_candidates_m": [[0.0, 0.1, float("nan")]]},
+        {
+            "alignment_offset_candidates_m": [[0.0, 0.1, 0.2]],
+            "alignment_offset_m": [0, 0, 0],
+        },
+        {
+            "alignment_offset_candidates_m": [[0.0, 0.1, 0.2]],
+            "alignment_inward_candidates_m": [0, 0.1],
+        },
+    ],
+)
+def test_axis_cartesian_rule_requires_finite_offsets_and_one_position_rule(config):
+    with pytest.raises(ValueError, match="alignment_offset_candidates_m"):
+        providers._axis_align_offset_candidates(config)
+
+
+@pytest.mark.parametrize("use_arrival_region", [False, True])
+def test_grasp_screen_qualifies_original_targets_with_declared_arrival_region(
+    use_arrival_region,
+):
+    """A bounded prismatic chain reaches 1.005 within 1 cm, but not 1.03."""
+    from embodichain_benchmarks.motion_generation.config import ProtocolCfg
+
+    def ik(*, pose, joint_seed, **kwargs):
+        x = pose[:, 0, 3]
+        return (x >= 0) & (x <= 1), x[:, None].clamp(0, 1)
+
+    def fk(*, qpos, **kwargs):
+        pose = torch.eye(4).repeat(len(qpos), 1, 1)
+        pose[:, 0, 3] = qpos[:, 0]
+        return pose
+
+    scenario = AtomicSkillScenario()
+    scenario.robot = SimpleNamespace(
+        device=CPU,
+        compute_ik=ik,
+        compute_fk=fk,
+        get_qpos_limits=lambda **kwargs: torch.tensor([[[0.0, 1.0]]]),
+    )
+    grasp = torch.eye(4).repeat(2, 1, 1)
+    targets = grasp[:, None].repeat(1, 4, 1, 1)
+    targets[:, :, 0, 3] = torch.tensor(
+        [[0.25, 0.5, 0.75, 1.005], [0.25, 0.5, 0.75, 1.03]]
+    )
+    original = targets.clone()
+    _, found = scenario._screen_antipodal_grasp_rows(
+        [grasp[i : i + 1] for i in range(2)],
+        torch.tensor([0.0, 0.0, 1.0]),
+        torch.zeros(2, 1),
+        alignment_max_angle_deg=10.0,
+        waypoint_poses=lambda _: targets.unbind(1),
+        **(
+            {
+                "reference_protocol": ProtocolCfg(
+                    position_threshold_m=0.01, rotation_threshold_rad=0.1
+                )
+            }
+            if use_arrival_region
+            else {}
+        ),
+    )
+    assert found.tolist() == ([True, False] if use_arrival_region else [False, False])
+    torch.testing.assert_close(targets, original, rtol=0, atol=0)
 
 
 def test_pour_approach_choices_preserve_elevation_budget_and_frozen_rows() -> None:
@@ -1091,6 +1286,8 @@ def test_replay_measures_hinge_at_segment_end_and_peak_object_rotation() -> None
     )
     scenario.robot = Mock()
     scenario.robot.get_qpos.side_effect = lambda: torch.zeros(1, 7)
+    scenario.robot.get_joint_ids.return_value = list(range(7))
+    scenario.robot.joint_names = [f"joint_{index}" for index in range(7)]
     scenario.track = Mock(
         config={
             "physics": {"steps_per_waypoint": 1, "hold_steps": 0, "hold_sim_steps": 1}
@@ -1106,7 +1303,7 @@ def test_replay_measures_hinge_at_segment_end_and_peak_object_rotation() -> None
     entity.get_local_pose.side_effect = object_pose
     scenario._objects = {"cube": SimpleNamespace(entity=entity)}
     compiled = SimpleNamespace(
-        trajectory=SimpleNamespace(positions=torch.zeros(1, 5, 7)),
+        trajectory=SimpleNamespace(positions=torch.zeros(1, 5, 7), velocities=None),
         plan_success=torch.tensor([True]),
     )
     provider = Mock()
@@ -1156,7 +1353,7 @@ def test_replay_measures_hinge_at_segment_end_and_peak_object_rotation() -> None
 
 
 def test_door_pour_align_push_suite_declares_the_four_skills() -> None:
-    suite = load_suite("atomic_franka_pgi_door_pour_align_push")
+    suite = load_suite("atomic_franka_robotiq_door_pour_align_push")
     track = suite.enabled_tracks()[0]
 
     assert [spec.id for spec in suite.planners if spec.enabled] == ["curobo", "toppra"]
@@ -1312,9 +1509,17 @@ def test_door_approach_uses_mesh_device_for_axis_and_origin(device):
 
 
 @pytest.mark.parametrize("early_filter", [False, True])
-@pytest.mark.parametrize("skill_id,waypoint_count", [("pour", 5), ("axis_align", 4)])
+@pytest.mark.parametrize(
+    "skill_id,waypoint_count,start_pose_mode,cartesian",
+    [
+        ("pour", 5, None, False),
+        ("axis_align", 4, None, False),
+        ("axis_align", 4, "pre_grasp", False),
+        ("axis_align", 4, "pre_grasp", True),
+    ],
+)
 def test_object_rotation_providers_screen_every_pose_row(
-    monkeypatch, skill_id, waypoint_count, early_filter
+    monkeypatch, skill_id, waypoint_count, early_filter, start_pose_mode, cartesian
 ):
     """Freeze independently feasible row grasps and match their reference chains."""
     from types import MethodType
@@ -1366,6 +1571,8 @@ def test_object_rotation_providers_screen_every_pose_row(
     calls = []
 
     def solve(*, target_xpos, qpos_seed, **kwargs):
+        if start_pose_mode == "pre_grasp" and torch.all(target_xpos[:, 2, 3] == 0.36):
+            raise RuntimeError("The unrelated fixed-height start is unreachable.")
         success = torch.ones(len(qpos_seed), dtype=torch.bool)
         if inside_screen:
             assert target_xpos.shape[0] == batch_size
@@ -1452,6 +1659,18 @@ def test_object_rotation_providers_screen_every_pose_row(
         "target_axis": [0.0, 0.0, 1.0],
         "pre_action_settle_steps": 0,
     }
+    protocol = object()
+    if cartesian:
+        from embodichain_benchmarks.motion_generation.scenarios import atomic_skill
+
+        def qualified_ik(robot, pose, seed, **kwargs):
+            assert kwargs["protocol"] is protocol
+            return robot.compute_ik(pose=pose, joint_seed=seed, name="arm")
+
+        monkeypatch.setattr(atomic_skill, "_qualified_reference_ik", qualified_ik)
+        config["alignment_offset_candidates_m"] = [[0.05, -0.02, 0.03]]
+    if start_pose_mode is not None:
+        config["start_pose_mode"] = start_pose_mode
     if early_filter:
         config["grasp_filter_before_ranking"] = True
         if skill_id == "pour":
@@ -1461,7 +1680,9 @@ def test_object_rotation_providers_screen_every_pose_row(
     case = create_atomic_skill_provider(skill_id).generate_case(
         scenario,
         SimpleNamespace(
-            suite_version="test_v1", robot=SimpleNamespace(id="franka_pgi")
+            suite_version="test_v1",
+            robot=SimpleNamespace(id="franka_pgi"),
+            protocol=protocol,
         ),
         SimpleNamespace(id="atomic-test"),
         config,
@@ -1488,7 +1709,7 @@ def test_object_rotation_providers_screen_every_pose_row(
     for index, call in enumerate(references):
         torch.testing.assert_close(call[2], case.start_qpos + index * 0.01)
     generator_factory.assert_called_once_with(
-        gripper_model=None,
+        gripper_data=None,
         root_from_tcp=robot.cfg.solver_cfg["arm"].tcp,
         n_sample=321,
         force_refresh=False,
@@ -1496,6 +1717,21 @@ def test_object_rotation_providers_screen_every_pose_row(
         **({"approach_alignment_angle": math.radians(10)} if early_filter else {}),
     )
     assert case.seed == 43001 and case.batch_size == 8
+    if cartesian:
+        torch.testing.assert_close(
+            torch.tensor(case.case_parameters["alignment_offset_m"]),
+            torch.tensor([[0.05, -0.02, 0.03]]).expand(batch_size, -1),
+        )
+        assert (
+            case.case_parameters["alignment_realisation"]["kind"]
+            == "ordered_offsets_then_grasp"
+        )
+    if start_pose_mode == "pre_grasp":
+        assert case.start_state_bin == "pre_grasp"
+        assert case.case_parameters["start_pose_mode"] == "pre_grasp"
+        start_reference = [call for call in calls if not call[0]][0]
+        torch.testing.assert_close(start_reference[1], case.target_waypoints[:, 0])
+        torch.testing.assert_close(case.start_qpos, initial + 0.01)
 
     assert (
         case.case_parameters.get("grasp_filter_before_ranking", False) is early_filter

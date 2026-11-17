@@ -26,9 +26,15 @@ Only first-order derivatives away from that cut are part of the contract.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 import torch
 
+from embodichain.compute.kinematics.matrix import matrix_product, matrix_vector_product
+
 __all__ = [
+    "pack_robot_state",
+    "unpack_robot_state",
     "rotation_exp",
     "rotation_log",
     "robot_state_features",
@@ -73,7 +79,7 @@ def rotation_exp(vector: torch.Tensor) -> torch.Tensor:
     )
     skew = _skew(vector)
     eye = torch.eye(3, dtype=vector.dtype, device=vector.device)
-    return eye + a.unsqueeze(-1) * skew + b.unsqueeze(-1) * (skew @ skew)
+    return eye + a.unsqueeze(-1) * skew + b.unsqueeze(-1) * matrix_product(skew, skew)
 
 
 def rotation_log(matrix: torch.Tensor) -> torch.Tensor:
@@ -140,7 +146,7 @@ def _parts(state: torch.Tensor) -> tuple[torch.Tensor, ...]:
 
 
 def _body(rotation: torch.Tensor, vector: torch.Tensor) -> torch.Tensor:
-    return (rotation.transpose(-1, -2) @ vector.unsqueeze(-1)).squeeze(-1)
+    return matrix_vector_product(rotation.transpose(-1, -2), vector)
 
 
 def robot_state_features(state: torch.Tensor) -> torch.Tensor:
@@ -188,7 +194,7 @@ def robot_state_increment(
     return torch.cat(
         (
             _body(r, p1 - p),
-            rotation_log(r.transpose(-1, -2) @ r1),
+            rotation_log(matrix_product(r.transpose(-1, -2), r1)),
             _body(r, v1 - v),
             _body(r, w1 - w),
             q1 - q,
@@ -213,11 +219,11 @@ def integrate_robot_state(state: torch.Tensor, increment: torch.Tensor) -> torch
     p, r, v, w, q, qd = _parts(state)
     joints = q.shape[-1]
     dp, dr, dv, dw, dq, dqd = increment.split((3, 3, 3, 3, joints, joints), -1)
-    world = lambda value: (r @ value.unsqueeze(-1)).squeeze(-1)
+    world = lambda value: matrix_vector_product(r, value)
     return torch.cat(
         (
             p + world(dp),
-            (r @ rotation_exp(dr)).flatten(-2),
+            matrix_product(r, rotation_exp(dr)).flatten(-2),
             v + world(dv),
             w + world(dw),
             q + dq,
@@ -238,3 +244,30 @@ def robot_state_error(predicted: torch.Tensor, target: torch.Tensor) -> torch.Te
         Position, angular, velocity and joint errors in increment layout.
     """
     return robot_state_increment(target, predicted)
+
+
+def pack_robot_state(state: Mapping[str, torch.Tensor]) -> torch.Tensor:
+    """Pack named root-origin state into an owned canonical matrix-based tensor.
+
+    Args:
+        state: ``pos``, ``rot``, ``v``, ``w``, ``q`` and ``qd`` tensors with aligned batches.
+
+    Returns:
+        Concatenated state, width ``18 + 2*J``, preserving input gradients.
+    """
+    return torch.cat(
+        (
+            state["pos"],
+            state["rot"].flatten(-2),
+            state["v"],
+            state["w"],
+            state["q"],
+            state["qd"],
+        ),
+        -1,
+    )
+
+
+def unpack_robot_state(state: torch.Tensor) -> dict[str, torch.Tensor]:
+    """Return named views of a canonical matrix-based state; no data is copied."""
+    return dict(zip(("pos", "rot", "v", "w", "q", "qd"), _parts(state)))

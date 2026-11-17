@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import argparse
 
 import numpy as np
@@ -693,64 +695,73 @@ def test_build_analyzer_config_plane_sets_plane_params():
 # ---------------------------------------------------------------------------
 
 
-def _make_cobotmagic_sim(tmp_path):
-    """Build a headless sim + CobotMagic robot for integration tests."""
-    from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-    from embodichain_robots import CobotMagicCfg
+@pytest.fixture(scope="class")
+def _cache_robot_scene(request: pytest.FixtureRequest) -> Iterator[None]:
+    """Keep cache files and analyzers isolated around one native robot."""
+    from embodichain.lab.sim import SimulationManager
 
-    config = SimulationManagerCfg(headless=True, sim_device="cpu")
-    sim = SimulationManager(config)
+    owner = request.cls
+    sim = None
+    robot = None
+    try:
+        from embodichain.lab.sim import SimulationManagerCfg
+        from embodichain_robots import CobotMagicCfg
 
-    cfg_dict = {
-        "uid": "CobotMagic",
-        "init_pos": [0.0, 0.0, 0.7775],
-        "init_qpos": [
-            -0.3,
-            0.3,
-            1.0,
-            1.0,
-            -1.2,
-            -1.2,
-            0.0,
-            0.0,
-            0.6,
-            0.6,
-            0.0,
-            0.0,
-            0.05,
-            0.05,
-            0.05,
-            0.05,
-        ],
-        "solver_cfg": {
-            "left_arm": {
-                "class_type": "OPWSolver",
-                "end_link_name": "left_link6",
-                "root_link_name": "left_arm_base",
-                "tcp": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0.143], [0, 0, 0, 1]],
+        config = SimulationManagerCfg(headless=True, sim_device="cpu")
+        sim = SimulationManager(config)
+
+        cfg_dict = {
+            "uid": "CobotMagic",
+            "init_pos": [0.0, 0.0, 0.7775],
+            "init_qpos": [
+                -0.3,
+                0.3,
+                1.0,
+                1.0,
+                -1.2,
+                -1.2,
+                0.0,
+                0.0,
+                0.6,
+                0.6,
+                0.0,
+                0.0,
+                0.05,
+                0.05,
+                0.05,
+                0.05,
+            ],
+            "solver_cfg": {
+                "left_arm": {
+                    "class_type": "OPWSolver",
+                    "end_link_name": "left_link6",
+                    "root_link_name": "left_arm_base",
+                    "tcp": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0.143], [0, 0, 0, 1]],
+                },
             },
-        },
-    }
-    robot = sim.add_robot(cfg=CobotMagicCfg.from_dict(cfg_dict))
-    sim.prepare()
-    return sim, robot
+        }
+        robot = sim.add_robot(cfg=CobotMagicCfg.from_dict(cfg_dict))
+        sim.prepare()
+
+        owner.sim = sim
+        owner.robot = robot
+        yield
+    finally:
+        if sim is not None:
+            sim.destroy(exit_process=False)
+        owner.robot = None
+        owner.sim = None
+        robot = None
+        sim = None
+        SimulationManager.flush_cleanup_queue()
 
 
+@pytest.mark.usefixtures("_cache_robot_scene")
 class TestWorkspaceResultsCacheIntegration:
     """Cache write/hit against the real analyzer (headless)."""
 
-    def setup_method(self):
-        self.sim = None
-
-    def teardown_method(self):
-        if self.sim is not None:
-            try:
-                self.sim.destroy()
-            except Exception:
-                pass
-            from embodichain.lab.sim.sim_manager import SimulationManager
-
-            SimulationManager.flush_cleanup_queue()
+    def setup_method(self) -> None:
+        self.sim.reset_objects_state()
 
     def test_cache_hit_skips_recompute(self, tmp_path):
         """A second analyze() with force_recompute=False loads from cache."""
@@ -764,7 +775,7 @@ class TestWorkspaceResultsCacheIntegration:
             WorkspaceAnalyzerConfig,
         )
 
-        self.sim, robot = _make_cobotmagic_sim(tmp_path)
+        robot = self.robot
 
         config = WorkspaceAnalyzerConfig(
             mode=AnalysisMode.JOINT_SPACE,
@@ -809,7 +820,7 @@ class TestWorkspaceResultsCacheIntegration:
             WorkspaceAnalyzerConfig,
         )
 
-        self.sim, robot = _make_cobotmagic_sim(tmp_path)
+        robot = self.robot
 
         config = WorkspaceAnalyzerConfig(
             mode=AnalysisMode.JOINT_SPACE,
@@ -847,7 +858,7 @@ class TestWorkspaceResultsCacheIntegration:
             WorkspaceAnalyzerConfig,
         )
 
-        self.sim, robot = _make_cobotmagic_sim(tmp_path)
+        robot = self.robot
 
         def run(n):
             config = WorkspaceAnalyzerConfig(

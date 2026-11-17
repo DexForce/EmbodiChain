@@ -32,24 +32,45 @@ class EmpiricalNormalizer(nn.Module):
 
     Args:
         feature_dim: Number of features in the final observation dimension.
-        epsilon: Stabilizer added to the running standard deviation.
+        epsilon: Positive scale stabilizer.
+        variance_epsilon: Use ``sqrt(variance + epsilon**2)`` instead of
+            ``standard_deviation + epsilon``.
+        clip: Optional symmetric normalized-value bound.
     """
 
-    def __init__(self, feature_dim: int, epsilon: float = 1e-2) -> None:
+    def __init__(
+        self,
+        feature_dim: int,
+        epsilon: float = 1e-2,
+        *,
+        variance_epsilon: bool = False,
+        clip: float | None = None,
+    ) -> None:
         super().__init__()
         if feature_dim <= 0:
             raise ValueError("feature_dim must be positive")
         if epsilon <= 0.0:
             raise ValueError("epsilon must be positive")
+        if clip is not None and not 0 < clip < float("inf"):
+            raise ValueError("clip must be finite and positive")
+        self.variance_epsilon, self.clip = variance_epsilon, clip
         self.epsilon = float(epsilon)
         self.register_buffer("mean", torch.zeros(1, feature_dim))
         self.register_buffer("variance", torch.ones(1, feature_dim))
         self.register_buffer("standard_deviation", torch.ones(1, feature_dim))
         self.register_buffer("count", torch.zeros((), dtype=torch.long))
 
+    @property
+    def scale(self) -> torch.Tensor:
+        """Return the stabilized scale used for normalization and decoding."""
+        if self.variance_epsilon:
+            return (self.variance + self.epsilon**2).sqrt()
+        return self.standard_deviation + self.epsilon
+
     def forward(self, value: torch.Tensor) -> torch.Tensor:
         """Return observations normalized by the current running moments."""
-        return (value - self.mean) / (self.standard_deviation + self.epsilon)
+        result = (value - self.mean) / self.scale
+        return result if self.clip is None else result.clamp(-self.clip, self.clip)
 
     @torch.no_grad()
     def update(self, value: torch.Tensor) -> None:

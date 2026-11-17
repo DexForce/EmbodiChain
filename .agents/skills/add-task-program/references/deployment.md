@@ -50,8 +50,11 @@ reference remains supported. Do not add policy inheritance or arbitrary merges.
 - An environment component is Task Program independent and may also serve a
   handwritten or RL deployment.
 - A physical scene component contains no Task Program metadata.
-- Embodiment overrides are limited to `uid`, `init_pos`, `init_rot`, and
-  `init_qpos`; the sensor suite is selected atomically.
+- Embodiment robot installation `overrides` are limited to `uid`, `init_pos`,
+  `init_rot`, and `init_qpos`. A separate UID-keyed `camera_overrides` may change
+  only declared ordinary cameras' intrinsics/extrinsics; sensor membership,
+  type, parent, resolution and outputs remain component-owned. See the
+  [calibration contract](../../../../agent_context/topics/env-framework/configuration.md#reusable-gym-deployment-components).
 
 ## Multiple embodiments
 
@@ -60,6 +63,11 @@ variants satisfy its required embodiment contract and task defaults address
 logical resources shared by those profiles. Otherwise create an intentionally
 different integration/policy pairing; do not fork the provider-independent
 program just to rename robot parts.
+A matching capability contract does not qualify the physical workspace, a fixed
+object-to-EEF grasp, or a handover target for another tool. Check base placement,
+open-hand approach, closing contacts and final physical acceptance before reusing
+an integration. Keep those task choices separate from hardware TCP/contact-frame
+calibration.
 
 Give every runnable deployment a unique Gym ID. Loading a configuration-owned
 ID is process-local and occurs when the config passes through

@@ -169,6 +169,9 @@ def _configured_files():
     from embodichain.gen_sim.task_engine.program_declarations import (
         build_program_declaration,
     )
+    from embodichain.lab.task_program.integrations._configured_composition import (
+        _resolve_execution_policy,
+    )
 
     root = (
         Path(__file__).parents[3]
@@ -182,8 +185,8 @@ def _configured_files():
     integration = yaml.safe_load(
         (root / original["task_program"]["integration"]).read_text()
     )
-    policy = yaml.safe_load(
-        (root / original["task_program"]["execution_policy"]).read_text()
+    _, policy = _resolve_execution_policy(
+        original["task_program"]["execution_policy"], base_dir=root
     )
     call = {"kind": "pick", "object": "rubiks_cube"}
     graph = dict(
@@ -215,13 +218,16 @@ def _configured_files():
         success={},
     )
     program = build_program_declaration(graph, integration["program_id"])
+    from embodichain.lab.gym.utils.composition import resolve_gym_components
+
+    physical = resolve_gym_components(original, base_dir=root)
     configured = load_configured_task_program_deployment(
         task_program={
             "program": {"inline": program},
             "integration": {"inline": integration},
             "execution_policy": {"inline": policy},
         },
-        skill_profile=embodiment["skill_profile"],
+        skill_profile=physical.embodiment_skill_profile,
         base_dir=root,
     )
     graph["integration_fingerprint"] = configured.integration.integration_fingerprint

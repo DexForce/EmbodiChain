@@ -30,10 +30,7 @@ from embodichain.lab.sim.motion.refinement import MotionRefinementCfg
 from embodichain.toolkits.graspkit.pg_grasp.fixed_geometry import (
     FixedGripperCollisionGeometry,
 )
-from embodichain.toolkits.graspkit.pose_generator import (
-    GraspPoseGenerator,
-    ParallelJawGripperModelCfg,
-)
+from embodichain.toolkits.graspkit.pose_generator import GraspPoseGenerator
 
 from .affordance import AntipodalAffordance
 from .bindings import JointPositionTarget
@@ -80,15 +77,15 @@ def _pick_refinement_anchor(
         JointPositionTarget
     )
     generator = generators.get(hand.control_part)
-    model = getattr(generator, "gripper_model", None)
-    if not isinstance(model, ParallelJawGripperModelCfg):
+    model = getattr(generator, "gripper_data", None)
+    if not isinstance(model, dict):
         raise ValueError("Pick refinement requires calibrated gripper geometry")
     vertices = affordance.mesh_vertices.detach().cpu().numpy().astype(np.float64)
     triangles = affordance.mesh_triangles.detach().cpu().numpy().astype(np.int64)
     digest = hashlib.sha256(
         vertices.astype("<f8").tobytes() + triangles.astype("<i8").tobytes()
     )
-    digest.update(json.dumps(model.to_dict(), sort_keys=True).encode())
+    digest.update(json.dumps(model, sort_keys=True).encode())
     geometry = getattr(generator, "collision_geometry", None)
     if geometry is not None and not isinstance(geometry, FixedGripperCollisionGeometry):
         raise ValueError("Pick refinement requires explicit fixed collision geometry")
@@ -175,7 +172,7 @@ def _pick_refinement_anchor(
         # Aperture is a necessary contact-pair condition. Actual hand, robot
         # and scene collision/contact checks belong to the provider's full
         # geometry validator; width bounds do not invent finger envelopes.
-        if not model.min_opening_width <= width <= model.max_opening_width:
+        if not model["min_opening_width"] <= width <= model["max_opening_width"]:
             continue
         if float(points[:, 0].min()) > 0 or float(points[:, 0].max()) < 0:
             continue
@@ -203,7 +200,7 @@ def _pick_refinement_anchor(
             digest.hexdigest(),
             {
                 "anchor_origin": origin,
-                "gripper_model_id": model.model_id,
+                "gripper_model_id": model["model_id"],
                 "object_opening_extent_m": width,
                 "candidate_index": int(index),
                 "candidates_tested": tested,

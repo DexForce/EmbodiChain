@@ -67,6 +67,8 @@ class ArticulationPreviewController:
         follow_external_targets: Read drive targets before browser commands so
             IK/Gizmo updates persist across preview steps. Defaults to False
             to preserve asset-preview pose holding.
+        hold_pose: Reapply desired poses on every update. Disable for paused
+            scene inspection, where only explicitly edited joints may change.
     """
 
     def __init__(
@@ -75,9 +77,12 @@ class ArticulationPreviewController:
         runtime: VisualizationRuntime,
         *,
         follow_external_targets: bool = False,
+        hold_pose: bool = True,
     ) -> None:
         self._runtime = runtime
         self._follow_external_targets = follow_external_targets
+        self._hold_pose = hold_pose
+        self._commanded_ids: set[str] = set()
         self._bindings: dict[str, _JointBinding] = {}
         self._articulation_bindings: list[
             tuple[Articulation, tuple[_JointBinding, ...]]
@@ -283,11 +288,20 @@ class ArticulationPreviewController:
                 command.value,
             )
             binding.applied_sequence = command.sequence
+            self._commanded_ids.add(command.control_id)
             accepted += 1
         return accepted
 
     def _hold_desired_positions(self) -> None:
         for articulation, bindings in self._articulation_bindings:
+            if not self._hold_pose:
+                bindings = tuple(
+                    binding
+                    for binding in bindings
+                    if binding.spec.control_id in self._commanded_ids
+                )
+                if not bindings:
+                    continue
             joint_ids = [binding.spec.joint_id for binding in bindings]
             qpos = torch.tensor(
                 [[binding.desired_value for binding in bindings]],
@@ -347,11 +361,12 @@ class ArticulationPreviewController:
                 binding.desired_value = self._clamp_value(binding.spec, value)
 
     def update(self) -> int:
-        """Consume browser commands and hold desired poses before one sim step.
+        """Consume browser commands and apply the configured pose-holding policy.
 
         Returns:
             Number of valid commands accepted during this update.
         """
+        self._commanded_ids.clear()
         if self._follow_external_targets:
             self._follow_drive_targets()
         accepted = self._apply_commands(self._runtime.drain_joint_control_commands())

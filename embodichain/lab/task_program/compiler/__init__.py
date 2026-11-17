@@ -27,6 +27,7 @@ from .program import (
     CompiledParallelBlock,
     CompiledParallelBranch,
     CompiledPostPolicy,
+    CompiledHoldPostPolicy,
     CompiledRepeatFrame,
     CompiledTargetSelection,
     CompiledTaskProgram,
@@ -34,11 +35,13 @@ from .program import (
     CompiledTaskProgramCall,
     CompiledTaskProgramSegment,
     CompiledTaskProgramValidator,
+    CompiledConditionValidator,
     TaskProgramCompileError,
     TaskProgramCompiler,
 )
 
 __all__ = [
+    "CompiledHoldPostPolicy",
     "CompiledArticulationJointPositionValidator",
     "CompiledBarrier",
     "CompiledObjectNearRelativeTargetValidator",
@@ -54,6 +57,7 @@ __all__ = [
     "CompiledTaskProgramCall",
     "CompiledTaskProgramSegment",
     "CompiledTaskProgramValidator",
+    "CompiledConditionValidator",
     "TaskProgramCompileError",
     "TaskProgramCompiler",
 ]

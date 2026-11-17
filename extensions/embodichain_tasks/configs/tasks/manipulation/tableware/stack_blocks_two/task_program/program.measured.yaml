@@ -1,0 +1,31 @@
+program_id: stack_two_blocks
+instruction: Lift block 2 above the configured table clearance, then stack it on block
+  1.
+targets: {}
+program:
+- segment: lift_block
+  instruction: Lift block 2 clear of the table.
+  steps:
+    pick:
+      object: block_2
+      grasp: block_2_grasp
+  validators:
+  - kind: condition
+    ref: lifted
+  contract:
+    outcomes:
+    - kind: validator
+      ref: 0
+- segment: stack_block
+  instruction: Place block 2 on block 1.
+  steps:
+    place:
+      object: block_2
+      'on': block_1_top
+  validators:
+  - kind: condition
+    ref: stacked
+  contract:
+    outcomes:
+    - kind: validator
+      ref: 0

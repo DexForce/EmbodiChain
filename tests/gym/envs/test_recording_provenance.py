@@ -34,13 +34,14 @@ from embodichain.lab.gym.envs.episode_context import EpisodeContext
 import copy
 from dataclasses import asdict
 from pathlib import Path
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
 from uuid import UUID
 
 import pytest
 import torch
 
 from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+from embodichain.lab.gym.envs.demo import DemoEpisodeResult
 from embodichain.lab.gym.envs.managers.datasets import LeRobotRecorder
 from embodichain.data_pipeline.recording import stable_config_hash
 from embodichain.lab.sim.motion.expansion.contracts import (
@@ -80,6 +81,10 @@ def make_env() -> SimpleNamespace:
     env.episode_context = EpisodeContext(1)
     env.episode_context._begin_episode([0])
     env.episode_context._finish_initialization([0])
+    env._seal_episode_outcome = MethodType(EmbodiedEnv._seal_episode_outcome, env)
+    env._task_program_completion_mask = MethodType(
+        EmbodiedEnv._task_program_completion_mask, env
+    )
     return env
 
 
@@ -93,23 +98,50 @@ def test_environment_identity_is_unique_per_episode_and_shared_per_run() -> None
     assert first["config_hash"] == second["config_hash"]
 
 
+def test_metadata_request_materializes_only_requested_row() -> None:
+    env = make_env()
+    env.num_envs = 2
+    env.episode_context = EpisodeContext(2)
+    env.rollout_buffer = None
+    env.rollout_steps = torch.zeros(2, dtype=torch.long)
+    env._demo_steps = torch.zeros(2, dtype=torch.long)
+    env.episode_success_status = torch.zeros(2, dtype=torch.bool)
+    env._demo_metadata_initialized = False
+    env._demo_episode_metadata = [{}, {"instruction": "Execute the selected program"}]
+    env._new_demo_episode_metadata = lambda row: EmbodiedEnv._new_demo_episode_metadata(
+        env, row
+    )
+
+    first = EmbodiedEnv.get_demo_episode_metadata(env, 1)
+    second = EmbodiedEnv.get_demo_episode_metadata(env, 1)
+
+    assert first["episode_uuid"] == second["episode_uuid"]
+    assert UUID(first["episode_uuid"])
+    assert first["env_id"] == 1
+    assert first["instruction"] == "Execute the selected program"
+    assert env._demo_episode_metadata[0] == {}
+    assert env._demo_metadata_initialized
+
+
 def test_episode_override_program_hash_uses_executed_program() -> None:
     env = make_env()
     env.cfg.task_program = {"program_id": "configured_default"}
     actual = {"program_id": "episode_override", "segments": ["pick", "place"]}
     env._active_task_program_bridge = SimpleNamespace(
-        _program=actual, expansion_records=[]
+        _program=actual,
+        expansion_records=[],
+        program_completed=True,
+        completion_mask=torch.tensor([True]),
     )
-    result = SimpleNamespace(
-        instruction=None,
-        instruction_source="unknown",
-        lengths=[3],
-        completed_by_env=[True],
-        terminal_reasons=["success"],
+    result = DemoEpisodeResult(
         episode_index=1,
-        success=[True],
-        terminated=[False],
-        truncated=[False],
+        length=3,
+        completed=True,
+        success=(True,),
+        terminated=(False,),
+        truncated=(False,),
+        terminal_reason="success",
+        lengths=(3,),
     )
 
     EmbodiedEnv._end_demo_episode_recording(env, result)
@@ -117,6 +149,12 @@ def test_episode_override_program_hash_uses_executed_program() -> None:
     recorded_hash = env._demo_episode_metadata[0]["program_hash"]
     assert recorded_hash == stable_config_hash(actual)
     assert recorded_hash != stable_config_hash(env.cfg.task_program)
+    assert (
+        env._demo_episode_metadata[0]["episode_outcome"]["execution"][
+            "program_accepted"
+        ]
+        is True
+    )
 
 
 def test_external_payloads_without_identity_do_not_share_worker_episode_index() -> None:
@@ -164,16 +202,15 @@ def test_executed_expansion_records_preserve_selected_candidate_lineage() -> Non
     env._active_task_program_bridge = SimpleNamespace(
         _program=None, expansion_records=[record]
     )
-    result = SimpleNamespace(
-        instruction=None,
-        instruction_source="unknown",
-        lengths=[3],
-        completed_by_env=[True],
-        terminal_reasons=["success"],
+    result = DemoEpisodeResult(
         episode_index=1,
-        success=[True],
-        terminated=[False],
-        truncated=[False],
+        length=3,
+        completed=True,
+        success=(True,),
+        terminated=(False,),
+        truncated=(False,),
+        terminal_reason="success",
+        lengths=(3,),
     )
 
     EmbodiedEnv._end_demo_episode_recording(env, result)
@@ -722,3 +759,25 @@ def test_training_window_reuse_preserves_episode_observation_history(training_de
     assert manager.read_history(
         [1, 1], fields=["measurement"], episode_ids=[0, 0]
     ).values["measurement"].flatten().tolist() == [5.0, 5.0]
+
+
+def test_episode_metadata_rows_preserve_reset_time_context_and_row_isolation():
+    from embodichain.lab.gym.envs.embodied_env import _EpisodeMetadataRows
+
+    template = {"seed": 12, "provenance": {"labels": ["initial"]}, "segments": []}
+    rows = _EpisodeMetadataRows(3, template)
+    original = rows[0]
+    original["segments"].append({"name": "first"})
+    template["seed"] = 35
+    template["provenance"]["labels"].append("reset")
+    rows.reset_rows([0, 2], template)
+    template["seed"] = 99
+    assert [row["seed"] for row in rows] == [35, 12, 35]
+    assert rows[0]["segments"] == [] and rows[1]["segments"] == []
+    assert original["segments"] == [{"name": "first"}]
+    rows[0]["provenance"]["labels"].append("row zero")
+    assert rows[2]["provenance"]["labels"] == ["initial", "reset"]
+    assert len({row["episode_uuid"] for row in rows}) == 3
+    for index, row in enumerate(rows):
+        assert row["env_id"] == index
+        assert row["source_episode_uuid"] == row["episode_uuid"]

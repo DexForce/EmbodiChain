@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+
 from dataclasses import fields
 
 import dexsim
@@ -107,8 +108,8 @@ def test_articulation_cfg_uses_grouped_physics_fields_only() -> None:
         "joint_props",
     }.isdisjoint(field_names)
     assert root_props == ArticulationRootPropertiesCfg()
-    assert root_props.fixed_base is True
-    assert root_props.self_collision_enabled is False
+    assert root_props.fixed_base is None
+    assert root_props.self_collision_enabled is None
 
 
 @pytest.mark.parametrize(
@@ -285,6 +286,53 @@ def test_robot_cfg_merge_preserves_typed_backend_property_configs() -> None:
     assert isinstance(merged.attrs.material_props, NewtonRigidBodyMaterialCfg)
     assert merged.attrs.material_props.ke == 1000.0
     assert merged.attrs.material_props.kd == 50.0
+
+
+@pytest.mark.parametrize("named_link", [False, True])
+@pytest.mark.parametrize("friction", [None, 0.0])
+def test_legacy_contact_promotion_preserves_portable_robot_defaults(
+    named_link: bool,
+    friction: float | None,
+) -> None:
+    from embodichain.lab.sim.cfg import (
+        CollisionPropertiesCfg,
+        RigidBodyMaterialCfg,
+        RigidBodyPhysicsCfg,
+        LinkPhysicsOverrideCfg,
+        RobotCfg,
+        NewtonCollisionPropertiesCfg,
+        NewtonRigidBodyMaterialCfg,
+    )
+    from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
+
+    attrs = RigidBodyPhysicsCfg(
+        collision_props=CollisionPropertiesCfg(contact_offset=0.1, rest_offset=0.04),
+        material_props=RigidBodyMaterialCfg(dynamic_friction=0.73),
+    )
+    cfg = RobotCfg(
+        attrs=attrs.copy(),
+        link_attrs={
+            "tip": LinkPhysicsOverrideCfg(
+                link_names_expr=["tip"],
+                attrs=attrs.copy(),
+            )
+        },
+    )
+    overlay = {"attrs": {"collision_props": {"solref": [0.002, 1.0]}}}
+    if friction is not None:
+        overlay["attrs"]["material_props"] = {"dynamic_friction": friction}
+    override = {"link_attrs": {"tip": overlay}} if named_link else overlay
+    with pytest.warns(DeprecationWarning, match="material_props"):
+        merged = merge_robot_cfg(cfg, override)
+    result = merged.link_attrs["tip"].attrs if named_link else merged.attrs
+    assert isinstance(result.collision_props, NewtonCollisionPropertiesCfg)
+    assert isinstance(result.material_props, NewtonRigidBodyMaterialCfg)
+    assert result.collision_props.contact_offset == pytest.approx(0.1)
+    assert result.collision_props.rest_offset == pytest.approx(0.04)
+    assert result.material_props.dynamic_friction == pytest.approx(
+        0.73 if friction is None else friction
+    )
+    assert result.material_props.solref == pytest.approx([0.002, 1.0])
 
 
 def test_robot_cfg_merge_preserves_sparse_link_physics_defaults() -> None:
@@ -598,11 +646,14 @@ def test_backend_property_groups_track_dexsim_spawn_descriptors() -> None:
         "use_native_mesh_loader",
         "convert_to_heightfield",
         "heightfield_resolution",
-        "preserve_mesh_transform",
         "max_hull_vertices",  # Mesh cooking is outside rigid-body physics.
     }
+    # Raw MuJoCo parameters are capability-gated for older SDK builds; they
+    # become normal descriptor fields once the bundled SDK patch is applied.
+    optional_native_fields = {"solref", "solimp", "solmix"} - names(NewtonCollisionDesc)
     assert (
-        newton_fields == names(NewtonCollisionDesc) - intentionally_unowned_shape_fields
+        newton_fields - optional_native_fields
+        == names(NewtonCollisionDesc) - intentionally_unowned_shape_fields
     )
 
     assert names(NewtonCollisionPipelineCfg) - {"soft_contact_margin"} == names(
@@ -1002,7 +1053,11 @@ def test_legacy_mesh_collision_physics_rejects_non_mesh_shape() -> None:
 
 def test_backend_joint_and_articulation_configs_round_trip() -> None:
     drive = NewtonJointDrivePropertiesCfg(target_mode=None)
-    root = ArticulationRootPropertiesCfg(fixed_base=False)
+    root = ArticulationRootPropertiesCfg(
+        fixed_base=False,
+        newton_gravity_compensation=0.5,
+        newton_mimic_stabilizer=True,
+    )
 
     restored_drive = JointDrivePropertiesCfg.from_dict(drive.to_dict())
     restored_root = ArticulationRootPropertiesCfg.from_dict(root.to_dict())
@@ -1010,24 +1065,44 @@ def test_backend_joint_and_articulation_configs_round_trip() -> None:
     assert isinstance(restored_drive, NewtonJointDrivePropertiesCfg)
     assert root.to_dict() == {
         "fixed_base": False,
-        "self_collision_enabled": False,
+        "self_collision_enabled": None,
         "sleep_threshold": None,
         "min_position_iters": None,
         "min_velocity_iters": None,
+        "newton_mimic_solref": None,
+        "newton_mimic_solimp": None,
+        "newton_gravity_compensation": 0.5,
+        "newton_mimic_stabilizer": True,
     }
     assert type(restored_root) is ArticulationRootPropertiesCfg
+    assert restored_root == root
 
 
-def test_articulation_root_config_rejects_backend_discriminator() -> None:
-    with pytest.raises(TypeError, match="backend"):
-        ArticulationRootPropertiesCfg.from_dict(
-            {"backend": "newton", "fixed_base": False}
-        )
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("backend", "newton"),
+        ("newton_kinematic", True),
+        ("newton_sleep_policy", "never"),
+        ("newton_shape_collision", False),
+        ("newton_shape_collision_links", ["tool"]),
+        ("newton_particle_collision_links", ["tool"]),
+        ("newton_mesh_approximation", {"method": "convex_hull"}),
+        ("newton_force_sdf", True),
+    ],
+)
+def test_articulation_root_config_rejects_unsupported_fields(name, value) -> None:
+    with pytest.raises(TypeError, match=name):
+        ArticulationRootPropertiesCfg.from_dict({name: value})
+    with pytest.raises(TypeError, match=name):
+        ArticulationCfg.from_dict({"root_props": {name: value}})
 
 
 def test_articulation_root_config_round_trip() -> None:
     root = ArticulationRootPropertiesCfg(
         fixed_base=True,
+        newton_mimic_solref=(0.002, 1.0),
+        newton_mimic_solimp=(0.9999, 0.9999, 0.001, 0.5, 2.0),
         sleep_threshold=0.005,
         min_position_iters=8,
         min_velocity_iters=2,
@@ -1043,6 +1118,20 @@ def test_articulation_root_config_round_trip() -> None:
 def test_articulation_root_requires_both_solver_iteration_counts() -> None:
     with pytest.raises(ValueError, match="must be configured together"):
         ArticulationRootPropertiesCfg(min_position_iters=8)
+
+
+@pytest.mark.parametrize("value", [(0.0, 1.0), (0.002, -1.0), (0.002, float("nan"))])
+def test_articulation_root_rejects_invalid_mimic_reference(value) -> None:
+    with pytest.raises(ValueError, match="newton_mimic_solref"):
+        ArticulationRootPropertiesCfg(newton_mimic_solref=value)
+
+
+@pytest.mark.parametrize(
+    "value", [(0.99, 0.9, 0.001, 0.5, 2.0), (0.9, 0.99, 0.0, 0.5, 2.0)]
+)
+def test_articulation_root_rejects_invalid_mimic_impedance(value) -> None:
+    with pytest.raises(ValueError, match="newton_mimic_solimp"):
+        ArticulationRootPropertiesCfg(newton_mimic_solimp=value)
 
 
 def test_robot_cfg_round_trip_preserves_grouped_backend_types() -> None:
@@ -1088,6 +1177,7 @@ def test_newton_physics_inherits_common_gravity_and_collision_config(
     contact_distance: float,
 ) -> None:
     cfg = NewtonPhysicsCfg(
+        solver_cfg=None,
         gravity=[0.0, 0.0, -1.5],
         collision_cfg=NewtonCollisionPipelineCfg(
             broad_phase="sap",
@@ -1141,6 +1231,43 @@ def test_newton_physics_can_disable_the_external_collision_pipeline() -> None:
     assert not hasattr(cfg, "collision_pipeline_update_interval")
 
 
+def test_newton_physics_forwards_sync_and_capture_options() -> None:
+    defaults = NewtonPhysicsCfg().to_dexsim_cfg(gpu_id=0)
+    assert defaults.async_sync is False
+    assert defaults.rigid_transform_sync_mode == "all"
+    assert defaults.capture_acquire_timeout is None
+    assert defaults.capture_wait_log_interval == 10.0
+
+    dexsim_cfg = NewtonPhysicsCfg(
+        async_sync=True,
+        rigid_transform_sync_mode="dynamic",
+        capture_acquire_timeout=2.5,
+        capture_wait_log_interval=None,
+    ).to_dexsim_cfg(gpu_id=0)
+
+    assert dexsim_cfg.async_sync is True
+    assert dexsim_cfg.rigid_transform_sync_mode == "dynamic"
+    assert dexsim_cfg.capture_acquire_timeout == 2.5
+    assert dexsim_cfg.capture_wait_log_interval is None
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value", "message"),
+    [
+        ("rigid_transform_sync_mode", "static", "rigid_transform_sync_mode"),
+        ("capture_acquire_timeout", -1.0, "capture_acquire_timeout"),
+        ("capture_acquire_timeout", float("inf"), "capture_acquire_timeout"),
+    ],
+)
+def test_newton_physics_rejects_invalid_sync_and_capture_options(
+    field_name: str,
+    value: str | float,
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        NewtonPhysicsCfg(**{field_name: value})
+
+
 @pytest.mark.parametrize(
     ("field_name", "value"),
     [("broad_phase", "sap"), ("visualizer_enabled", True)],
@@ -1178,6 +1305,105 @@ def test_default_physics_cfg_applies_fixed_solver_defaults() -> None:
     assert physics_args["enable_ccd"] is True
     assert physics_args["enable_enhanced_determinism"] is False
     assert physics_args["enable_friction_every_iteration"] is True
+
+
+@pytest.mark.parametrize("serialized", [False, True])
+@pytest.mark.parametrize("apply_display_srgb", [False, True])
+def test_gaussian_render_preset_applies_native_configuration(
+    serialized: bool, apply_display_srgb: bool
+) -> None:
+    cfg = (
+        RenderCfg.from_dict(
+            {
+                "preset": "gaussian",
+                "spp": 4,
+                "gaussian": {"apply_display_srgb": apply_display_srgb},
+            }
+        )
+        if serialized
+        else RenderCfg.for_gaussian(
+            spp=4, gaussian={"apply_display_srgb": apply_display_srgb}
+        )
+    )
+    assert cfg.renderer == "hybrid"
+    assert cfg.gaussian.enabled is True
+    assert cfg.denoising.window == "off"
+    assert cfg.denoising.offscreen == "optix"
+    world_config = dexsim.WorldConfig()
+    cfg.apply_to_dexsim_config(world_config)
+    assert world_config.renderer == Renderer.HYBRID
+    assert world_config.gaussian_config.enabled is True
+    assert world_config.gaussian_config.apply_display_srgb is apply_display_srgb
+    assert world_config.rt_pipeline_config.window.mode == RTRenderMode.RAW
+    assert world_config.rt_pipeline_config.offscreen.mode == RTRenderMode.OPTIX_DENOISE
+    assert world_config.raytrace_config.render_iterations_per_frame == 4
+
+
+def test_gaussian_preset_overrides_roundtrip_without_changing_legacy_defaults() -> None:
+    data = {
+        "preset": "gaussian",
+        "renderer": "fast-rt",
+        "gaussian": {"workspace_memory_budget_mb": 64, "apply_display_srgb": False},
+        "denoising": {"offscreen": "off"},
+        "dlss": {"tiled_enabled": False},
+        "nrd": {"max_indirect_bounces": 2},
+    }
+    cfg = RenderCfg.from_dict(data)
+    restored = RenderCfg.from_dict(cfg.to_dict())
+    assert restored.renderer == "fast-rt"
+    assert restored.gaussian.enabled is True
+    assert restored.gaussian.workspace_memory_budget_mb == 64
+    assert restored.gaussian.apply_display_srgb is False
+    assert restored.denoising.window == restored.denoising.offscreen == "off"
+    assert restored.dlss.tiled_enabled is False
+    assert restored.nrd.max_indirect_bounces == 2
+    cfg.gaussian.workspace_memory_budget_mb = 128
+    assert restored.gaussian.workspace_memory_budget_mb == 64
+    assert data["gaussian"] == {
+        "workspace_memory_budget_mb": 64,
+        "apply_display_srgb": False,
+    }
+    assert data["denoising"] == {"offscreen": "off"}
+    legacy = RenderCfg.from_dict(RenderCfg().to_dict())
+    assert legacy.gaussian.enabled is False
+    assert legacy.gaussian.apply_display_srgb is True
+    assert RenderCfg.for_gaussian().gaussian.apply_display_srgb is True
+    assert legacy.denoising.window == legacy.denoising.offscreen == "dlss"
+
+
+def test_gaussian_preset_preserves_explicit_nested_objects() -> None:
+    resource = sim_cfg.GaussianRenderCfg(enabled=True, workspace_memory_budget_mb=64)
+    denoising = sim_cfg.DenoisingCfg(window="off", offscreen="nrd")
+    cfg = RenderCfg.for_gaussian(
+        renderer="fast-rt", gaussian=resource, denoising=denoising
+    )
+    assert cfg.gaussian.workspace_memory_budget_mb == 64
+    assert cfg.denoising.offscreen == "nrd"
+    cfg.gaussian.workspace_memory_budget_mb = 128
+    cfg.denoising.offscreen = "off"
+    assert resource.workspace_memory_budget_mb == 64
+    assert denoising.offscreen == "nrd"
+    assert RenderCfg.for_gaussian().denoising.offscreen == "optix"
+
+
+@pytest.mark.parametrize(
+    "data,message",
+    [
+        ({"preset": "unknown"}, "preset"),
+        ({"preset": "gaussian", "gaussian": {"enabled": False}}, "enabled"),
+        ({"preset": "gaussian", "renderer": "no-render"}, "renderer"),
+        ({"preset": "gaussian", "denoising": {"window": "nrd"}}, "NRD"),
+    ],
+)
+def test_gaussian_preset_rejects_explicit_conflicts(data, message) -> None:
+    with pytest.raises(ValueError, match=message):
+        RenderCfg.from_dict(data)
+
+
+@pytest.mark.parametrize("substeps", [0, True, 1.5])
+def test_default_physics_rejects_invalid_integration_substeps(substeps) -> None:
+    with pytest.raises(ValueError, match="num_substeps"):
+        DefaultPhysicsCfg(num_substeps=substeps)
 
 
 def test_render_cfg_defaults_to_dlss_rr_without_tone_mapping() -> None:
@@ -1553,3 +1779,60 @@ def test_nrd_rejects_invalid_settings(field_name: str, invalid_value: object) ->
     """Malformed NRD values fail before entering the native renderer."""
     with pytest.raises(ValueError, match=field_name):
         sim_cfg.NRDCfg(**{field_name: invalid_value})
+
+
+@pytest.mark.parametrize("constructor", [None, "sah", "cubql"])
+def test_newton_mesh_bvh_constructor_round_trip(constructor: str | None) -> None:
+    cfg = NewtonPhysicsCfg(mesh_bvh_constructor=constructor)
+    assert cfg.to_dict()["mesh_bvh_constructor"] == constructor
+    assert cfg.to_dexsim_cfg(gpu_id=0).mesh_bvh_constructor == constructor
+
+
+def test_urdf_cfg_preserves_positional_constructor_with_keyword_mounting_flag():
+    from embodichain.lab.sim.cfg import URDFCfg
+
+    cfg = URDFCfg(
+        None, None, None, None, "/tmp", True, "robot_base", force_assembly=True
+    )
+    assert cfg.base_link_name == "robot_base"
+    assert cfg.force_assembly is True
+
+
+@configclass
+class _DexUniRobotPresetCfg(RobotPresetCfg):
+    default: RobotCfg = RobotCfg(uid="portable", control_parts={"arm": ["joint"]})
+    newton_dexuni: RobotCfg | None = RobotCfg(
+        uid="dexuni", control_parts={"arm": ["joint"]}
+    )
+    newton_mujoco_warp: RobotCfg | None = RobotCfg(
+        uid="mujoco", control_parts={"arm": ["joint"]}
+    )
+    newton_mjwarp: RobotCfg | None = RobotCfg(
+        uid="mjwarp", control_parts={"arm": ["joint"]}
+    )
+
+
+@pytest.mark.parametrize(
+    "missing,expected",
+    [
+        ((), "dexuni"),
+        (("newton_dexuni",), "mujoco"),
+        (("newton_dexuni", "newton_mujoco_warp"), "mjwarp"),
+        (("newton_dexuni", "newton_mujoco_warp", "newton_mjwarp"), "portable"),
+    ],
+)
+@pytest.mark.parametrize(
+    "solver_mapping",
+    [None, {}, {"solver_type": "dexuni"}],
+)
+def test_dexuni_preset_priority_and_isolation(
+    missing, expected, solver_mapping
+) -> None:
+    preset = _DexUniRobotPresetCfg()
+    for field in missing:
+        setattr(preset, field, None)
+    physics = NewtonPhysicsCfg(solver_cfg=solver_mapping)
+    resolved = preset.resolve(physics)
+    assert resolved.uid == expected
+    resolved.control_parts["probe"] = ["joint"]
+    assert "probe" not in preset.resolve(physics).control_parts

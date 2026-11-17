@@ -95,7 +95,7 @@ def main() -> None:
         n_sample=args.n_sample,
         force_refresh=args.force_reannotate,
         approach_direction_samples=getattr(args, "grasp_approach_samples", 4),
-        gripper_model=model,
+        gripper_data=model,
     )
     engine = create_simulation_atomic_skill_engine(
         motion_generator=create_tutorial_motion_generator(robot, args.planner),

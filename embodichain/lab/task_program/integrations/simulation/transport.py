@@ -25,7 +25,6 @@ from embodichain.lab.sim.atomic_skills import (
     AtomicSkillEngine,
     MoveHeldObject,
     MoveHeldObjectOptions,
-    HeldObjectPoseGoal,
     PlanningContext,
     SkillDescriptor,
 )
@@ -35,16 +34,14 @@ from embodichain.lab.task_program.semantics import (
     SceneObjectRef,
     SceneRegistry,
     SceneManifest,
-    HeldObjectRelation,
     SemanticEffectKind,
     SemanticPose,
 )
 from embodichain.lab.task_program.compiler.lowering import (
     RegisteredSemanticLowerer,
-    RegisteredSemanticEffect,
-    RegisteredHeldObjectEffect,
     SemanticLowering,
     SemanticObjectTarget,
+    _held_transport_lowering,
 )
 from embodichain.lab.task_program.integrations.extensions import (
     RegisteredSemanticLowererFactory,
@@ -96,12 +93,18 @@ class _RoutedMoveHeldObjectLowerer(RegisteredSemanticLowerer):
 
     def _route(self, call: RegisteredSemanticCall) -> HeldObjectTransportRoute:
         arguments = dict(call.arguments)
-        if "target" not in arguments or set(arguments) - {
-            "target",
-            "object",
-            "reference",
-        }:
-            raise ValueError("MoveHeldObject arguments must select a declared target.")
+        from embodichain.lab.task_program.language.semantic_contracts import (
+            validate_semantic_call_payload,
+        )
+
+        validate_semantic_call_payload(
+            {
+                "kind": "registered",
+                "call_id": self.call_id,
+                "arguments": arguments,
+                "resources": dict(call.resources),
+            }
+        )
         route = self._routes.get(arguments["target"])
         if route is None or arguments.get("object", route.object_id) != route.object_id:
             raise ValueError(
@@ -131,22 +134,8 @@ class _RoutedMoveHeldObjectLowerer(RegisteredSemanticLowerer):
                 "Configured transport requires exact MoveHeldObjectOptions."
             )
         route = self._route(call)
-        return SemanticLowering(
-            goal=HeldObjectPoseGoal(
-                resolve_pose_target(route.pose), object_id=route.object_id
-            ),
-            registered_effect=RegisteredSemanticEffect(
-                effect_kind=SemanticEffectKind.ATTACH,
-                held_objects=(
-                    RegisteredHeldObjectEffect(
-                        expectation_id="primary",
-                        relation=HeldObjectRelation.ATTACHED,
-                        object_id=route.object_id,
-                        slot_id="primary",
-                        retain_during_segments=("transport",),
-                    ),
-                ),
-            ),
+        return _held_transport_lowering(
+            route.object_id, resolve_pose_target(route.pose)
         )
 
     def pick_lookahead_targets(

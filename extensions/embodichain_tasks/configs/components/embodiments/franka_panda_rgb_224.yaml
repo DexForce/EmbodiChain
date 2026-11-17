@@ -5,30 +5,6 @@ simulation:
   uid: FrankaPanda
   urdf_cfg:
     fname: franka_fr3_panda_hand
-    components:
-    - component_type: hand
-      urdf_path: Franka/Panda/Fr3HandV1.urdf
-      transform:
-      - - 0.7071067811865476
-        - 0.7071067811865475
-        - 0.0
-        - 0.0
-      - - -0.7071067811865475
-        - 0.7071067811865476
-        - 0.0
-        - 0.0
-      - - 0.0
-        - 0.0
-        - 1.0
-        - 0.0
-      - - 0.0
-        - 0.0
-        - 0.0
-        - 1.0
-  control_parts:
-    eef:
-    - fr3_finger_joint1
-    - fr3_finger_joint2
   init_qpos:
   - 0.0
   - -0.569
@@ -46,25 +22,6 @@ simulation:
       fr3_finger_joint[1-2]: 100.0
     max_effort:
       fr3_finger_joint[1-2]: 10000.0
-  solver_cfg:
-    arm:
-      tcp:
-      - - 0.7071067811865476
-        - 0.7071067811865475
-        - 0.0
-        - 0.0
-      - - -0.7071067811865475
-        - 0.7071067811865476
-        - 0.0
-        - 0.0
-      - - 0.0
-        - 0.0
-        - 1.0
-        - 0.1034
-      - - 0.0
-        - 0.0
-        - 0.0
-        - 1.0
   link_attrs:
     newton_gripper_contacts:
       link_names_expr:
@@ -102,3 +59,27 @@ sensor:
     - 0.0
     - 0.0
     - 1.0
+grippers:
+  eef:
+    class_type: FrankaPandaHand
+    mode: mounted
+    component_type: hand
+    motion_part: arm
+    control_part: eef
+    transform:
+    - - 0.7071067811865476
+      - 0.7071067811865475
+      - 0.0
+      - 0.0
+    - - -0.7071067811865475
+      - 0.7071067811865476
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 1.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0

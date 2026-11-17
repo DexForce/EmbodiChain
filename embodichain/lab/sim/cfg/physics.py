@@ -110,8 +110,8 @@ class PhysicsBackendCfg:
     physics_dt: float = 1.0 / 100.0
     """Duration of one physics step in seconds.
 
-    Environment control steps may contain multiple physics steps.  For Newton,
-    this interval is further divided by :attr:`NewtonPhysicsCfg.num_substeps`.
+    Environment control steps may contain multiple physics steps. Each backend
+    further divides this interval by its configured ``num_substeps``.
     """
 
     device: str | torch.device = "cpu"
@@ -132,6 +132,14 @@ class PhysicsBackendCfg:
 @configclass
 class DefaultPhysicsCfg(PhysicsBackendCfg):
     """Configuration selector for the Default physics backend."""
+
+    num_substeps: int = 1
+    """Native integration steps per manager physics step.
+
+    Each native step advances ``physics_dt / num_substeps``. Manager clocks,
+    control commands, observers and rendering retain the outer step interval.
+    The default preserves one native step per manager step.
+    """
 
     cache_material: bool = False
     """Reuse identical physics materials across objects and environment clones.
@@ -168,10 +176,19 @@ class DefaultPhysicsCfg(PhysicsBackendCfg):
 
     def __post_init__(self) -> None:
         """Decode mapping input for the nested GPU-memory configuration."""
+        self._substep_count()
         if isinstance(self.gpu_memory, Mapping):
             self.gpu_memory = GPUMemoryCfg(**self.gpu_memory)
         if not isinstance(self.gpu_memory, GPUMemoryCfg):
             raise TypeError("gpu_memory must be a GPUMemoryCfg or mapping.")
+
+    def _substep_count(self) -> int:
+        """Validate the integration count, including mutable config overrides."""
+        if type(self.num_substeps) is not int or self.num_substeps < 1:
+            raise ValueError(
+                "DefaultPhysicsCfg.num_substeps must be a positive integer."
+            )
+        return self.num_substeps
 
     def to_dexsim_args(self) -> dict[str, Any]:
         """Convert to DexSim physics arguments.
@@ -179,6 +196,7 @@ class DefaultPhysicsCfg(PhysicsBackendCfg):
         Solver implementation details that are not exposed by
         :class:`DefaultPhysicsCfg` retain their established defaults here.
         """
+        self._substep_count()
         args = {
             "cache_material": self.cache_material,
             "gravity": _gravity_vector(self.gravity),
@@ -301,6 +319,9 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     on CUDA unless the caller explicitly supplies another device.
     """
 
+    mesh_bvh_constructor: Literal["sah", "median", "lbvh", "cubql"] | None = None
+    """Mesh and heightfield query BVH constructor. ``None`` keeps the SDK default."""
+
     num_substeps: int = 10
     """Number of Newton solver substeps per EmbodiChain physics step.
 
@@ -310,8 +331,10 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     requires_grad: bool = False
     """Whether to finalize the Newton model with differentiable state enabled.
 
-    EmbodiChain currently requires the Semi-implicit solver for this mode and
-    disables CUDA graph capture when gradients are enabled.
+    Requires Semi-implicit or a direct/named provider supporting the requested
+    gradient mode. The provider validates native support during model creation;
+    Scene functional calls additionally require its functional dynamics service.
+    CUDA graph capture is disabled when gradients are enabled.
     """
 
     use_cuda_graph: bool = True
@@ -375,6 +398,7 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     ``solver_type`` or ``class_type`` to select the solver, then add any
     parameters accepted by that DexSim solver config. If omitted, EmbodiChain
     preserves DexSim's ``DexUniSolverCfg`` default and its scene-based dispatch.
+    Native solver config objects use the same supported solver families.
     Unset ownership selectors retain automatic scene partitioning;
     ``contact_mode='auto'`` independently selects the native contact path.
     For ``solver_type='dexuni'``, the current DexSim contract keeps expert
@@ -386,6 +410,16 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     coupling requires ``joint_mode='dynamic'``. Current DexSim supports
     full-surface rigid-soft feedback; native validation owns the compatible
     contact modes and option combinations.
+
+    Installed ``dexsim.newton_solvers`` entry-point names are also accepted by
+    DexSim builds with the named-extension API. Extension names are exact;
+    options pass to their provider.
+
+    Python callers can pass DexSim's ``ProviderNewtonSolverCfg`` with a
+    ``provider_factory`` class or zero-argument factory and provider ``options``.
+    That configuration passes through directly without package discovery. The
+    SDK creates a fresh provider for each model build; pass a factory rather
+    than a live provider or solver instance.
     """
 
     collision_cfg: NewtonCollisionPipelineCfg | Mapping[str, Any] | None = field(
@@ -422,15 +456,11 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
         gpu_id: int,
     ) -> NewtonCfg:
         """Convert this config to ``dexsim.engine.newton_physics.NewtonCfg``."""
+        from dexsim.engine import newton_physics
         from dexsim.engine.newton_physics import (
-            DexUniSolverCfg,
-            FeatherstoneSolverCfg,
-            MJWarpSolverCfg,
             NewtonCfg,
             NewtonCollisionPipelineCfg as DexsimNewtonCollisionPipelineCfg,
-            SemiImplicitSolverCfg,
-            VBDSolverCfg,
-            XPBDSolverCfg,
+            RegisteredNewtonSolverCfg,
         )
 
         torch_device = (
@@ -442,26 +472,55 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
             else str(torch_device)
         )
 
-        solver_cfg_map: dict[str, type] = {
-            "dexuni": DexUniSolverCfg,
-            "mujoco_warp": MJWarpSolverCfg,
-            "xpbd": XPBDSolverCfg,
-            "semi_implicit": SemiImplicitSolverCfg,
-            "featherstone": FeatherstoneSolverCfg,
-            "vbd": VBDSolverCfg,
+        builtin_types = {
+            "dexuni": "DexUniSolverCfg",
+            "mujoco_warp": "MJWarpSolverCfg",
+            "xpbd": "XPBDSolverCfg",
+            "semi_implicit": "SemiImplicitSolverCfg",
+            "featherstone": "FeatherstoneSolverCfg",
+            "vbd": "VBDSolverCfg",
         }
+        # Explicit SDK objects already own their selection. Resolve only a
+        # mapping/registered built-in that actually needs construction, so a
+        # Provider cannot depend on unrelated optional built-in exports.
+        solver_cfg_map: dict[str, type] = {}
+        if isinstance(self.solver_cfg, Mapping):
+            selected = (
+                self.solver_cfg.get("solver_type")
+                or self.solver_cfg.get("class_type")
+                or "dexuni"
+            )
+        elif isinstance(self.solver_cfg, RegisteredNewtonSolverCfg):
+            selected = self.solver_cfg.solver_type
+        elif self.solver_cfg is None:
+            selected = "dexuni"
+        else:
+            selected = None
+        if selected is not None:
+            normalized = _normalize_newton_solver_type(str(selected))
+            if normalized in builtin_types:
+                class_name = builtin_types[normalized]
+                try:
+                    solver_cfg_map[normalized] = getattr(newton_physics, class_name)
+                except AttributeError as exc:
+                    raise ImportError(
+                        f"cannot import name '{class_name}' from dexsim.engine.newton_physics"
+                    ) from exc
         solver_cfg = _newton_solver_cfg_to_dexsim(
             solver_cfg=self.solver_cfg,
             solver_cfg_map=solver_cfg_map,
         )
 
-        if self.requires_grad and (
-            solver_cfg is None or solver_cfg.solver_type != "semi_implicit"
+        solver_name = "dexuni" if solver_cfg is None else str(solver_cfg.solver_type)
+        if (
+            self.requires_grad
+            and solver_name in builtin_types
+            and solver_name != "semi_implicit"
         ):
             logger.log_error(
                 "Newton gradient mode requires an explicit "
-                "solver_type='semi_implicit'; the default does not select a "
-                "differentiable solver."
+                "solver_type='semi_implicit' or a provider supporting gradients; "
+                "the default does not select a differentiable solver."
             )
 
         collision_pipeline_cfg = None
@@ -493,6 +552,8 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
             "capture_acquire_timeout": self.capture_acquire_timeout,
             "capture_wait_log_interval": self.capture_wait_log_interval,
         }
+        if self.mesh_bvh_constructor is not None:
+            newton_cfg_args["mesh_bvh_constructor"] = self.mesh_bvh_constructor
         if solver_cfg is not None:
             newton_cfg_args["solver_cfg"] = solver_cfg
 
@@ -506,6 +567,10 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
 def _normalize_newton_solver_type(solver_type: str) -> str:
     """Normalize public EmbodiChain and DexSim Newton solver aliases."""
     key = solver_type.replace("-", "_").lower()
+    if key in {"sph", "sphsolvercfg", "sph_solver_cfg"}:
+        logger.log_error(
+            "Unsupported Newton solver type 'sph'; configure DexUni with sph_cfg."
+        )
     aliases = {
         "mjwarp": "mujoco_warp",
         "mjwarpsolver": "mujoco_warp",
@@ -536,11 +601,16 @@ def _normalize_newton_solver_type(solver_type: str) -> str:
         "vbdsolvercfg": "vbd",
     }
     if key not in aliases:
-        logger.log_error(
-            f"Unsupported Newton solver type '{solver_type}'. "
-            "Expected one of 'dexuni', 'mjwarp', 'xpbd', 'semi_implicit', "
-            "'featherstone', or 'vbd'."
-        )
+        try:
+            from dexsim.engine.newton_physics import normalize_newton_solver_name
+        except ImportError as exc:
+            raise ValueError(
+                f"Solver {solver_type!r} requires a DexSim build with named solver extensions"
+            ) from exc
+        try:
+            return normalize_newton_solver_name(solver_type)
+        except ValueError as exc:
+            logger.log_error(f"Unsupported Newton solver type {solver_type!r}. {exc}")
     return aliases[key]
 
 
@@ -552,12 +622,33 @@ def _newton_solver_cfg_to_dexsim(
     if solver_cfg is None:
         return None
 
+    from dexsim.engine.newton_physics import RegisteredNewtonSolverCfg
+
     if not isinstance(solver_cfg, Mapping):
+        if isinstance(solver_cfg, RegisteredNewtonSolverCfg):
+            name = _normalize_newton_solver_type(str(solver_cfg.solver_type))
+            if name in solver_cfg_map:
+                if {"solver_type", "class_type"}.intersection(solver_cfg.options):
+                    raise ValueError(
+                        "Builtin solver options cannot override the registered name"
+                    )
+                return solver_cfg_map[name](**dict(solver_cfg.options))
+            return RegisteredNewtonSolverCfg(name, options=dict(solver_cfg.options))
         if not hasattr(solver_cfg, "solver_type"):
             logger.log_error(
                 "Newton solver_cfg must be a mapping or a DexSim Newton solver "
                 "config object with a 'solver_type' attribute."
             )
+        from dexsim.engine import newton_physics
+
+        provider_cfg_type = getattr(newton_physics, "ProviderNewtonSolverCfg", None)
+        if (
+            provider_cfg_type is not None
+            and isinstance(solver_cfg, provider_cfg_type)
+            and str(solver_cfg.solver_type) == "provider"
+        ):
+            return solver_cfg
+        _normalize_newton_solver_type(str(solver_cfg.solver_type))
         return solver_cfg
 
     solver_cfg_data = dict(solver_cfg)
@@ -567,6 +658,16 @@ def _newton_solver_cfg_to_dexsim(
         or "dexuni"
     )
     normalized_solver_type = _normalize_newton_solver_type(str(configured_solver_type))
+    if normalized_solver_type not in solver_cfg_map:
+        unexpected = set(solver_cfg_data) - {"options"}
+        if unexpected:
+            raise ValueError(
+                "Registered solver settings belong in options; unexpected fields: "
+                f"{sorted(unexpected)}"
+            )
+        return RegisteredNewtonSolverCfg(
+            normalized_solver_type, options=solver_cfg_data.get("options", {})
+        )
     solver_cfg_type = solver_cfg_map[normalized_solver_type]
     return solver_cfg_type(**solver_cfg_data)
 

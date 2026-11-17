@@ -34,7 +34,7 @@ from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.data import get_data_path
 from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
-from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
+
 from embodichain.utils import logger
 from examples.sim.atomic_skill.scenario import (
     add_dual_tutorial_robot,
@@ -87,17 +87,17 @@ FINAL_OBJECT_XYZ = (0.0, -0.2, 0.6)
 
 # Calibrated master angle; signed joint commands follow the URDF mimic directions.
 HAND_CLOSE_QPOS = 0.5
-HANDOVER_GRIPPER_MODEL = ParallelJawGripperModelCfg(
-    model_id="robotiq_2f_140",
-    min_opening_width=0.005,
-    max_opening_width=0.140,
-)
+HANDOVER_GRIPPER_MODEL = {
+    "model_id": "robotiq_2f_140",
+    "min_opening_width": 0.005,
+    "max_opening_width": 0.140,
+}
 HORIZONTAL_HAND_CLOSE_QPOS = 0.025
-HORIZONTAL_GRIPPER_MODEL = ParallelJawGripperModelCfg(
-    model_id="dh_pgc_140_50",
-    min_opening_width=0.002,
-    max_opening_width=0.050,
-)
+HORIZONTAL_GRIPPER_MODEL = {
+    "model_id": "dh_pgc_140_50",
+    "min_opening_width": 0.002,
+    "max_opening_width": 0.050,
+}
 HANDOVER_SAMPLE_INTERVAL = 220
 HANDOVER_HAND_INTERP_STEPS = 10
 HANDOVER_PRE_GRASP_DISTANCE = 0.08
@@ -245,7 +245,7 @@ def run_handover_demo(
         n_sample=args.n_sample,
         force_refresh=args.force_reannotate,
         approach_direction_samples=getattr(args, "grasp_approach_samples", 4),
-        gripper_model=(
+        gripper_data=(
             HORIZONTAL_GRIPPER_MODEL if is_horizontal else HANDOVER_GRIPPER_MODEL
         ),
     )

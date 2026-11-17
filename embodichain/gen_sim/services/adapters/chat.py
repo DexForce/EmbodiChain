@@ -76,16 +76,16 @@ class ChatCompletionsAdapter:
         self,
         *,
         model: str,
-        api_key: str,
+        api_key: str | None = None,
         base_url: str = "",
         timeout_s: float = 120,
         max_attempts: int = 1,
         options: dict[str, Any] | None = None,
     ) -> None:
-        if not model or not api_key:
-            raise ServiceConfigurationError("Chat requires a model and API key")
+        if not model:
+            raise ServiceConfigurationError("Chat requires a model")
         self.model = model
-        self.api_key = api_key
+        self.api_key = api_key or None
         self.base_url = (base_url or "https://api.openai.com/v1").rstrip("/")
         self.timeout_s = timeout_s
         self.max_attempts = max_attempts
@@ -152,13 +152,13 @@ class ChatCompletionsAdapter:
             endpoint += ("&" if "?" in endpoint else "?") + urlencode(query)
         for attempt in range(1, self.max_attempts + 1):
             try:
+                headers = {"Content-Type": "application/json"}
+                if self.api_key is not None:
+                    headers["Authorization"] = f"Bearer {self.api_key}"
                 http_request = Request(
                     endpoint,
                     data=json.dumps(payload).encode(),
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
+                    headers=headers,
                     method="POST",
                 )
                 record_attempt()

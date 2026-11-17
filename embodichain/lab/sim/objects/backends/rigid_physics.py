@@ -136,6 +136,22 @@ def get_legacy_friction(entity: object) -> Any:
     return entity.get_physical_body().get_dynamic_friction()
 
 
+def _set_default_spawn_friction(entity: Any, value: float) -> None:
+    """Update a Default Spawn surface and retain its material across rebuilds."""
+    from dexsim.spawn import DexsimCollisionDesc
+
+    attr = entity.get_physical_attr()
+    attr.dynamic_friction = value
+    attr.static_friction = value
+    entity.set_physical_attr(attr)
+    entity.notify_desc_write()
+    for collision in entity.object_desc.collisions:
+        if collision.dexsim is None:
+            collision.dexsim = DexsimCollisionDesc()
+        collision.dexsim.dynamic_friction = value
+        collision.dexsim.static_friction = value
+
+
 def set_legacy_damping(entity: object, linear: float, angular: float) -> None:
     """Set legacy linear and angular damping."""
     body = entity.get_physical_body()

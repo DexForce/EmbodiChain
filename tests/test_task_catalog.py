@@ -30,6 +30,27 @@ def write(path: Path, value: dict) -> None:
     path.write_text(json.dumps(value), encoding="utf-8")
 
 
+def test_gaussian_pick_place_is_one_official_task_with_three_deployments() -> None:
+    root = (
+        Path(__file__).resolve().parents[1]
+        / "extensions/embodichain_tasks/configs/tasks"
+    )
+    tasks = catalog._load_catalog({"embodichain_tasks": root})
+    task = catalog._select_task(tasks, "embodichain_tasks:gaussian_pick_place")
+    assert task.task_path == ("manipulation", "gaussian_pick_place")
+    assert task.default_deployment == "office"
+    assert {deployment.name: deployment.env_id for deployment in task.deployments} == {
+        "office": "FrankaGSPickPlace-Office-v1",
+        "discoverse": "FrankaGSPickPlace-Discoverse-v1",
+        "robosimgs": "FrankaGSPickPlace-Robosimgs-v1",
+    }
+    assert all(
+        deployment.capabilities == {catalog._TASK_PROGRAM}
+        and deployment.physics == "default"
+        for deployment in task.deployments
+    )
+
+
 @pytest.fixture
 def task_root(tmp_path: Path) -> Path:
     task = tmp_path / "manipulation" / "pick"
@@ -422,7 +443,7 @@ def test_agent_relative_config_precedes_cwd_reference(
     assert catalog._RL not in task.deployments[1].capabilities
 
 
-def test_carton_task_has_one_real_source_deployment_without_loading_assets(
+def test_carton_source_and_ordinary_rgbd_deployments_without_loading_assets(
     monkeypatch,
 ) -> None:
     root = (
@@ -440,7 +461,13 @@ def test_carton_task_has_one_real_source_deployment_without_loading_assets(
         if t.qualified_key == "embodichain_tasks:carton_stocking"
     )
     assert task.default_deployment == "panda"
-    assert len(task.deployments) == 1
-    assert task.deployments[0].env_id == "CartonStockingPanda-v1"
-    assert task.deployments[0].capabilities == {catalog._TASK_PROGRAM}
-    assert "--dataset-dir ./datasets" in task.deployments[0].command
+    deployments = {deployment.name: deployment for deployment in task.deployments}
+    assert set(deployments) == {"panda", "panda_rgbd"}
+    assert deployments["panda"].env_id == "CartonStockingPanda-v1"
+    assert deployments["panda"].capabilities == {catalog._TASK_PROGRAM}
+    assert deployments["panda"].requires_dataset_dir
+    assert "--dataset-dir ./datasets" in deployments["panda"].command
+    assert deployments["panda_rgbd"].env_id == "CartonStockingPandaRGBD-v1"
+    assert deployments["panda_rgbd"].capabilities == {catalog._TASK_PROGRAM}
+    assert not deployments["panda_rgbd"].requires_dataset_dir
+    assert "--dataset-dir" not in deployments["panda_rgbd"].command

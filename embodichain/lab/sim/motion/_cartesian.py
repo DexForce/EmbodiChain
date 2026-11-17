@@ -79,7 +79,14 @@ def _generate_cartesian_motion(
     if enabled and options.start_qpos.shape[0] != 1:
         raise ValueError("Cartesian segment recovery currently supports B1 only.")
     start = generator.robot.compute_fk(
-        qpos=options.start_qpos, name=options.control_part, to_matrix=True
+        qpos=options.start_qpos,
+        name=options.control_part,
+        to_matrix=True,
+        **(
+            {"env_ids": generator._env_ids}
+            if getattr(generator, "_env_ids", None) is not None
+            else {}
+        ),
     )
     base = replace(
         options,

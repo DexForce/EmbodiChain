@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from embodichain.lab.sim.utility.gripper_geometry import grasp_generator_parameters
+
 import argparse
 import math
 import pathlib
@@ -76,7 +78,7 @@ from embodichain.toolkits.graspkit.pg_grasp import (
     ParallelJawGraspCollisionCfg,
     FixedGripperCollisionGeometry,
 )
-from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
+
 from embodichain.utils import configclass, logger
 from embodichain.lab.sim.motion.solvers import FEPSolverCfg
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
@@ -123,6 +125,8 @@ _UR_TUTORIAL_QPOS_LIMITS: tuple[tuple[float, float], ...] = tuple(
     (-2.0 * math.pi, 2.0 * math.pi) for _ in range(6)
 )
 DEFAULT_GRIPPER_CLOSE_QPOS = 0.036
+# UR5/DH-PGI calibration for the 5 cm cube with one-way DexUni contacts.
+DEXUNI_CUBE_CLOSE_QPOS = 0.013
 NEWTON_GRASP_CONTACT_STIFFNESS = 4.0e4
 NEWTON_GRASP_CONTACT_DAMPING = 4.0e2
 # MuJoCo-Warp's default contact dimension (3) has no torsional friction.  A
@@ -1409,10 +1413,8 @@ def _tutorial_physics_cfg(
 ) -> PhysicsBackendCfg:
     """Build the shared physics configuration for atomic-skill tutorials.
 
-    Newton tutorials intentionally use MuJoCo Warp's native collision path.
-    It generates contacts inside every solver substep, so an external Newton
-    collision pipeline would be unused and would only allocate unnecessary
-    contact buffers.
+    DexUni owns collision detection and retains MuJoCo articulation drives.
+    Free rigid bodies use VBD with the solver's native one-way coupling.
     """
     physics_cfg = physics_cfg_for_backend(backend)
     if isinstance(physics_cfg, NewtonPhysicsCfg):
@@ -1421,20 +1423,21 @@ def _tutorial_physics_cfg(
         # contacts and fast-changing manipulator loads. DexSim sizes
         # contact/constraint buffers from the finalized scene, including the
         # contact dimensions authored on gripper and object surfaces.
-        # MultiCCD retains up to four contacts per gripper-mesh/object pair,
-        # which prevents a marginal two-finger grasp from sliding away.
+        # Retain the existing MuJoCo articulation tuning. Free-body contacts
+        # remain VBD-owned and do not inherit these MuJoCo contact options.
         physics_cfg.num_substeps = 20
         physics_cfg.collision_cfg = None
         physics_cfg.solver_cfg = {
-            "solver_type": "mujoco_warp",
-            "solver": "newton",
-            "integrator": "implicitfast",
-            "iterations": 20,
-            "ls_iterations": 100,
-            "cone": "elliptic",
-            "impratio": 1_000.0,
-            "use_mujoco_contacts": True,
-            "enable_multiccd": True,
+            "solver_type": "dexuni",
+            "mujoco_options": {
+                "solver": "newton",
+                "integrator": "implicitfast",
+                "iterations": 20,
+                "ls_iterations": 100,
+                "cone": "elliptic",
+                "impratio": 1_000.0,
+                "enable_multiccd": True,
+            },
         }
     return physics_cfg
 
@@ -1444,6 +1447,7 @@ def create_tutorial_simulation(
     *,
     arena_space: float = 2.5,
     sun_direction: Sequence[float] = DEFAULT_TUTORIAL_SUN_DIRECTION,
+    newton_solver_options: Mapping[str, object] | None = None,
 ) -> SimulationManager:
     """Create the shared simulation setup used by atomic-skill tutorials.
 
@@ -1453,10 +1457,17 @@ def create_tutorial_simulation(
         arena_space: Spacing between parallel simulation arenas in meters.
         sun_direction: Direction of the single global sun light. The vector
             points from the light toward the scene.
+        newton_solver_options: Scene-specific Newton solver options, applied
+            before model construction.
 
     Returns:
         A simulation manager with the tutorial key light configured.
     """
+    physics_cfg = _tutorial_physics_cfg(getattr(args, "physics", "default"))
+    if newton_solver_options is not None:
+        if not isinstance(physics_cfg, NewtonPhysicsCfg):
+            raise ValueError("Newton solver options require the Newton backend.")
+        physics_cfg.solver_cfg = {**physics_cfg.solver_cfg, **newton_solver_options}
     if (
         getattr(args, "arena_space", None) is not None
         and getattr(args, "run", None) is not None
@@ -1470,22 +1481,23 @@ def create_tutorial_simulation(
             num_envs=args.num_envs,
             device=args.device,
             gpu_id=getattr(args, "gpu_id", 0),
-            physics_cfg=_tutorial_physics_cfg(getattr(args, "physics", "default")),
+            physics_cfg=physics_cfg,
             render_cfg=RenderCfg(renderer=args.renderer),
             physics_dt=1.0 / 100.0,
             arena_space=arena_space,
             visualization=visualization_cfg_from_args(args),
         )
     )
-    sim.add_light(
-        cfg=LightCfg(
-            uid="main_light",
-            light_type="sun",
-            color=(0.6, 0.6, 0.6),
-            intensity=DEFAULT_TUTORIAL_SUN_INTENSITY,
-            direction=tuple(sun_direction),
+    if sim.has_native_renderer:
+        sim.add_light(
+            cfg=LightCfg(
+                uid="main_light",
+                light_type="sun",
+                color=(0.6, 0.6, 0.6),
+                intensity=DEFAULT_TUTORIAL_SUN_INTENSITY,
+                direction=tuple(sun_direction),
+            )
         )
-    )
     return sim
 
 
@@ -1560,6 +1572,9 @@ def add_tutorial_robot(
     robot_type: TutorialRobot,
     init_pos: Sequence[float] = (0.0, 0.0, 0.0),
     init_qpos: Sequence[float] | None = None,
+    *,
+    newton_gripper_friction: float | None = None,
+    arm_damping: float | None = None,
     **kwargs: object,
 ) -> Robot:
     """Add a selected tutorial robot with the shared PGI gripper.
@@ -1569,6 +1584,8 @@ def add_tutorial_robot(
         robot_type: Tutorial robot family to construct.
         init_pos: Root position of the robot in its arena.
         init_qpos: Optional full robot joint configuration.
+        newton_gripper_friction: Optional sliding friction for gripper links.
+        arm_damping: Optional arm drive damping applied before spawning.
 
     Returns:
         The added robot instance.
@@ -1582,7 +1599,9 @@ def add_tutorial_robot(
         init_qpos=init_qpos,
         **kwargs,
     )
-    configure_newton_gripper_contacts(sim, robot_cfg)
+    if arm_damping is not None:
+        robot_cfg.joint_drive_props.damping["arm"] = arm_damping
+    configure_newton_gripper_contacts(sim, robot_cfg, friction=newton_gripper_friction)
     return sim.add_robot(cfg=robot_cfg)
 
 
@@ -1771,9 +1790,19 @@ def configure_newton_link_contacts(
 def configure_newton_gripper_contacts(
     sim: SimulationManager,
     robot_cfg: RobotCfg,
+    *,
+    friction: float | None = None,
 ) -> None:
-    """Configure Newton gripper contacts and recompute their source inertia."""
+    """Configure Newton gripper contacts and recompute their source inertia.
+
+    Args:
+        sim: Simulation manager that owns the robot.
+        robot_cfg: Robot configuration to update before spawning.
+        friction: Optional static and dynamic sliding-friction coefficient.
+    """
     if not sim.is_newton_backend:
+        if friction is not None:
+            raise ValueError("Newton gripper friction requires the Newton backend.")
         return
 
     configure_newton_link_contacts(
@@ -1782,9 +1811,11 @@ def configure_newton_gripper_contacts(
         group_name="newton_gripper_contacts",
         link_names_expr=[_GRIPPER_CONTACT_LINK_PATTERN],
     )
-    robot_cfg.link_attrs["newton_gripper_contacts"].attrs.mass_props = (
-        MassPropertiesCfg(recompute_inertia=True)
-    )
+    attrs = robot_cfg.link_attrs["newton_gripper_contacts"].attrs
+    attrs.mass_props = MassPropertiesCfg(recompute_inertia=True)
+    if friction is not None:
+        attrs.material_props.static_friction = friction
+        attrs.material_props.dynamic_friction = friction
 
 
 def create_trapezoidal_motion_generator(
@@ -1931,7 +1962,7 @@ def create_parallel_jaw_grasp_pose_generator(
     robot: Robot,
     arm_control_part: str = "arm",
     collision_geometry: FixedGripperCollisionGeometry | None = None,
-    gripper_model: ParallelJawGripperModelCfg | None = None,
+    gripper_data: dict[str, object] | None = None,
     approach_direction_samples: int = 4,
 ) -> AntipodalGraspPoseGenerator:
     """Create a standalone generator for the sample's mounted gripper.
@@ -1942,7 +1973,7 @@ def create_parallel_jaw_grasp_pose_generator(
         robot: Actual mounted robot supplying the runtime TCP calibration.
         arm_control_part: Arm whose mounted tool is sampled.
         collision_geometry: Explicit geometry for custom/native embodiments.
-        gripper_model: Explicit contact aperture; omission uses the mounted tool.
+        gripper_data: Explicit contact aperture; omission uses the mounted tool.
         approach_direction_samples: Candidate approach draws; the fixed-scene
             CLI uses one to isolate geometric and trajectory factors.
 
@@ -1955,16 +1986,16 @@ def create_parallel_jaw_grasp_pose_generator(
         mounted_model, collision_geometry = mounted_gripper_geometry(
             robot.cfg, arm_control_part=arm_control_part
         )
-        if gripper_model is None:
-            gripper_model = mounted_model
-        elif gripper_model.model_id != mounted_model.model_id:
+        if gripper_data is None:
+            gripper_data = mounted_model
+        elif gripper_data["model_id"] != mounted_model["model_id"]:
             raise ValueError(
                 "The requested gripper model does not match the mounted URDF."
             )
-    if gripper_model is None:
+    if gripper_data is None:
         raise ValueError("Explicit collision geometry also requires a gripper model.")
     return AntipodalGraspPoseGenerator(
-        gripper_model,
+        **grasp_generator_parameters(gripper_data),
         collision_geometry=collision_geometry,
         algorithm_cfg=AntipodalGraspPoseGeneratorCfg(
             sample_count=n_sample, approach_direction_samples=approach_direction_samples
@@ -2040,6 +2071,7 @@ def initialize_pre_pick_robot_pose(
     hand_open: torch.Tensor,
     *,
     height: float = 0.36,
+    clear_dynamics: bool = True,
 ) -> None:
     """Set a tutorial robot at a deterministic open-gripper pose above an object.
 
@@ -2048,6 +2080,8 @@ def initialize_pre_pick_robot_pose(
         obj: Object below the pre-pick TCP pose.
         hand_open: Open gripper joint positions.
         height: World-Z coordinate for the pre-pick TCP pose.
+        clear_dynamics: Clear robot dynamics after initialization. Disable only
+            after the host has cleared the complete Newton articulation world.
 
     Raises:
         RuntimeError: If the pre-pick pose is unreachable.
@@ -2066,7 +2100,8 @@ def initialize_pre_pick_robot_pose(
     for target in (False, True):
         robot.set_qpos(arm_qpos, name="arm", target=target)
         robot.set_qpos(hand_qpos, name="eef", target=target)
-    robot.clear_dynamics()
+    if clear_dynamics:
+        robot.clear_dynamics()
 
 
 def prepare_tutorial_scene(
@@ -3029,6 +3064,7 @@ __all__ = [
     "DEFAULT_AXIS_LEN",
     "DEFAULT_AXIS_SIZE",
     "DEFAULT_GRIPPER_CLOSE_QPOS",
+    "DEXUNI_CUBE_CLOSE_QPOS",
     "DEFAULT_TUTORIAL_SUN_DIRECTION",
     "DEFAULT_TUTORIAL_SUN_INTENSITY",
     "GRIPPER_HAND_JOINT_PATTERN",

@@ -1,0 +1,12 @@
+id: TaskProgramRepeatedPickPlace-DualFrankaRobotiq140-v1
+environment:
+  component: envs/dual_franka_robotiq140.default.yaml
+embodiment:
+  component: ../../../components/embodiments/dual_franka_robotiq_arg2f_140.yaml
+task_program:
+  program: task_program/program.robotiq_workbench.yaml
+  integration: task_program/integration.robotiq140.yaml
+  execution_policy: ../../../components/execution_policies/sequential_ik_verified.yaml
+collection:
+  target_episodes: 1
+device: cpu

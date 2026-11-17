@@ -81,9 +81,12 @@ def initialize_simulation(args):
     """
     physics_cfg = physics_cfg_for_backend(args.physics)
     if args.physics == "newton":
-        # Hundreds of free bodies make dense Newton Hessian factorization
-        # expensive. CG avoids that factorization while retaining contacts.
-        physics_cfg.solver_cfg = {"solver_type": "mujoco_warp", "solver": "cg"}
+        physics_cfg.solver_cfg = {
+            "solver_type": "dexuni",
+            "mujoco_options": {"solver": "cg"},
+            # Dense ice contacts exceed VBD's default per-body capacity of 64.
+            "vbd_options": {"rigid_body_contact_buffer_size": 256},
+        }
     config = SimulationManagerCfg(
         headless=True,
         device=args.device,
@@ -289,6 +292,7 @@ def create_padding_box(sim: SimulationManager):
 def create_container(sim: SimulationManager):
     container_cfg = ArticulationCfg(
         uid="container",
+        asset_physics_mode="overlay",
         fpath=get_data_path("ScoopIceNewEnv/IceContainer/ice_container.urdf"),
         init_pos=[0.7, -0.4, 0.21],
         init_rot=[0, 0, -90],
@@ -354,16 +358,19 @@ def create_ice_cubes(sim: SimulationManager):
 
     # Set visual material for ice cubes.
     # Explicit optical parameters select ice scattering in OfflineRT.
-    ice_mat = sim.create_visual_material(
-        cfg=VisualMaterialCfg(
-            base_color=[1.0, 1.0, 1.0, 1.0],
-            ior=1.31,
-            roughness=0.2,
-            parameters={"transmission": 1.0},
+    ice_mat = None
+    if sim.has_native_renderer:
+        ice_mat = sim.create_visual_material(
+            cfg=VisualMaterialCfg(
+                base_color=[1.0, 1.0, 1.0, 1.0],
+                ior=1.31,
+                roughness=0.2,
+                parameters={"transmission": 1.0},
+            )
         )
-    )
     sim.prepare()
-    ice_cubes.set_visual_material(mat=ice_mat)
+    if ice_mat is not None:
+        ice_cubes.set_visual_material(mat=ice_mat)
 
     return ice_cubes
 
@@ -493,9 +500,7 @@ def scoop_ice(sim: SimulationManager, robot: Robot, scoop: RigidObject) -> None:
     """
     arm_ids = robot.get_joint_ids("arm")
     qpos = robot.get_qpos()[:, arm_ids]
-    tcp_pose = robot.compute_fk(qpos, name="arm", to_matrix=True)
     scoop_pose = scoop.get_local_pose(to_matrix=True)
-    scoop_to_tcp = torch.linalg.inv(scoop_pose) @ tcp_pose
     container_pose = sim.get_articulation("container").get_local_pose(to_matrix=True)
 
     lift_pose = scoop_pose.clone()
@@ -521,6 +526,10 @@ def scoop_ice(sim: SimulationManager, robot: Robot, scoop: RigidObject) -> None:
         targets.append(container_pose @ relative)
 
     for target in targets:
+        # Contact with the pile can shift the friction grasp. Measure the tool
+        # again before each phase so the lift preserves the bowl's curl.
+        tcp_pose = robot.compute_fk(qpos, name="arm", to_matrix=True)
+        scoop_to_tcp = torch.linalg.inv(scoop.get_local_pose(to_matrix=True)) @ tcp_pose
         end_qpos = _solve_arm_ik(robot, target @ scoop_to_tcp, qpos)
         # Small target increments avoid impulsive loads on the friction grasp.
         for alpha in torch.linspace(0.0, 1.0, 100, device=sim.device):

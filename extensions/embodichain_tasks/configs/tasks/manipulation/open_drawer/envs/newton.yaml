@@ -1,7 +1,7 @@
 environment_id: open_drawer
 physics: newton
 max_episodes: 1
-max_episode_steps: 600
+max_episode_steps: 3600
 num_envs: 1
 arena_space: 3.0
 
@@ -13,15 +13,15 @@ physics_config:
   num_substeps: 20
   collision_cfg: null
   solver_cfg:
-    solver_type: mujoco_warp
-    solver: newton
-    integrator: implicitfast
-    iterations: 20
-    ls_iterations: 100
-    cone: elliptic
-    impratio: 1000.0
-    use_mujoco_contacts: true
-    enable_multiccd: true
+    solver_type: dexuni
+    mujoco_options:
+      solver: newton
+      integrator: implicitfast
+      iterations: 20
+      ls_iterations: 100
+      cone: elliptic
+      impratio: 1000.0
+      enable_multiccd: true
 
 simulation:
   light:

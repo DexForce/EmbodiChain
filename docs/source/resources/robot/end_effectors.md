@@ -27,6 +27,7 @@ asset ID. No compatibility forwarding module is provided.
 | `Robotiq` | `embodichain_robots.robotiq.assets` | [Shared Robotiq archive](robotiq/assets.md) |
 | `Robotiq2F85` | `embodichain_robots.robotiq.robotiq_2f85.assets` | [Separate 2F-85 archive](robotiq/robotiq_2f85.md) |
 | `WheelTecFA2F` | `embodichain_robots.wheeltec.fa2f.assets` | [FA2F asset](wheeltec/fa2f.md) |
+| `AgxGripper` | `embodichain_robots.agilex.agx_gripper.assets` | [AgileX PiPER-X and AGX](agilex/piper_x.md) |
 | `PikaGripper` | `embodichain_robots.agilex.pika.assets` | [AgileX Pika](agilex/pika.md) |
 | `WujiHand` | `embodichain_robots.wuji.hand.assets` | [Wuji Hand](wuji/hand.md) |
 | `SharpaWave` | `embodichain_robots.sharpa.wave.assets` | [Sharpa Wave 01](sharpa/wave.md) |

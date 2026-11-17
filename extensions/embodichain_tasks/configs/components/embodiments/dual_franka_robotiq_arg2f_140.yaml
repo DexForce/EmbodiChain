@@ -28,8 +28,6 @@ simulation:
         - 0.0
         - 0.0
         - 1.0
-    - component_type: left_hand
-      urdf_path: Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf
     - component_type: right_arm
       urdf_path: Franka/Panda/Panda.urdf
       transform:
@@ -49,8 +47,6 @@ simulation:
         - 0.0
         - 0.0
         - 1.0
-    - component_type: right_hand
-      urdf_path: Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf
   init_pos:
   - -0.7
   - 0.0
@@ -111,13 +107,6 @@ simulation:
     - left_fr3_joint5
     - left_fr3_joint6
     - left_fr3_joint7
-    left_eef:
-    - left_finger_joint
-    - left_inner_knuckle_joint
-    - left_inner_finger_joint
-    - left_right_outer_knuckle_joint
-    - left_right_inner_knuckle_joint
-    - left_right_inner_finger_joint
     right_arm:
     - right_fr3_joint1
     - right_fr3_joint2
@@ -126,13 +115,6 @@ simulation:
     - right_fr3_joint5
     - right_fr3_joint6
     - right_fr3_joint7
-    right_eef:
-    - right_finger_joint
-    - right_left_inner_knuckle_joint
-    - right_left_inner_finger_joint
-    - right_outer_knuckle_joint
-    - right_inner_knuckle_joint
-    - right_inner_finger_joint
     dual_arm:
     - left_fr3_joint1
     - left_fr3_joint2
@@ -151,50 +133,16 @@ simulation:
   solver_cfg:
     left_arm:
       class_type: PytorchSolver
-      urdf_path: null
+      urdf_path:
       end_link_name: left_fr3_link8
       root_link_name: left_base
-      tcp:
-      - - 0.0
-        - -1.0
-        - 0.0
-        - 0.0
-      - - 1.0
-        - 0.0
-        - 0.0
-        - 0.0
-      - - 0.0
-        - 0.0
-        - 1.0
-        - 0.2
-      - - 0.0
-        - 0.0
-        - 0.0
-        - 1.0
       num_samples: 15
       pos_eps: 0.005
     right_arm:
       class_type: PytorchSolver
-      urdf_path: null
+      urdf_path:
       end_link_name: right_fr3_link8
       root_link_name: right_base
-      tcp:
-      - - 0.0
-        - -1.0
-        - 0.0
-        - 0.0
-      - - 1.0
-        - 0.0
-        - 0.0
-        - 0.0
-      - - 0.0
-        - 0.0
-        - 1.0
-        - 0.2
-      - - 0.0
-        - 0.0
-        - 0.0
-        - 1.0
       num_samples: 15
       pos_eps: 0.005
 sensor:
@@ -244,6 +192,7 @@ skill_profile:
       capabilities:
       - interaction.grasp
       command_preset: left_parallel_gripper
+      gripper: left_eef
   - resource_id: right
     endpoints:
     - endpoint_id: motion
@@ -260,6 +209,7 @@ skill_profile:
       capabilities:
       - interaction.grasp
       command_preset: right_parallel_gripper
+      gripper: right_eef
   command_presets:
   - preset_id: left_arm_postures
     control_part: left_arm
@@ -283,40 +233,6 @@ skill_profile:
       - 0.0
       - 3.037
       - 0.0
-  - preset_id: left_parallel_gripper
-    control_part: left_eef
-    commands:
-      open:
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      grasp:
-      - 0.7
-      - -0.7
-      - 0.7
-      - -0.7
-      - -0.7
-      - 0.7
-  - preset_id: right_parallel_gripper
-    control_part: right_eef
-    commands:
-      open:
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      grasp:
-      - 0.7
-      - -0.7
-      - 0.7
-      - -0.7
-      - -0.7
-      - 0.7
   runtime_services:
     grasp_pose_generators:
       left_eef:
@@ -327,28 +243,8 @@ skill_profile:
         max_candidates: 500
         center_mode: centroid
         filter_ground_collision: false
-        model:
-          model_id: robotiq_arg2f_140
-          min_opening_width: 0.002
-          max_opening_width: 0.128
         point_spacing: 0.012
-        root_from_tcp:
-        - - 0.0
-          - -1.0
-          - 0.0
-          - 0.0
-        - - 1.0
-          - 0.0
-          - 0.0
-          - 0.0
-        - - 0.0
-          - 0.0
-          - 1.0
-          - 0.2
-        - - 0.0
-          - 0.0
-          - 0.0
-          - 1.0
+        max_opening_width: 0.128
       right_eef:
         kind: antipodal_parallel_jaw
         sample_count: 10000
@@ -357,28 +253,8 @@ skill_profile:
         max_candidates: 500
         center_mode: centroid
         filter_ground_collision: false
-        model:
-          model_id: robotiq_arg2f_140
-          min_opening_width: 0.002
-          max_opening_width: 0.128
         point_spacing: 0.012
-        root_from_tcp:
-        - - 0.0
-          - -1.0
-          - 0.0
-          - 0.0
-        - - 1.0
-          - 0.0
-          - 0.0
-          - 0.0
-        - - 0.0
-          - 0.0
-          - 1.0
-          - 0.2
-        - - 0.0
-          - 0.0
-          - 0.0
-          - 1.0
+        max_opening_width: 0.128
     control_part_evidence:
       kind: joint_position_constraint
       control_parts:
@@ -419,3 +295,50 @@ skill_profile:
         body_max_edge: 0.01
         pad_max_edge: 0.004
         max_subdivisions: 10
+grippers:
+  left_eef:
+    class_type: RobotiqArg2F140
+    mode: mounted
+    motion_part: left_arm
+    control_part: left_eef
+    component_type: left_hand
+    root_from_tcp:
+    - - 0.0
+      - -1.0
+      - 0.0
+      - 0.0
+    - - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 1.0
+      - 0.2
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+  right_eef:
+    class_type: RobotiqArg2F140
+    mode: mounted
+    motion_part: right_arm
+    control_part: right_eef
+    component_type: right_hand
+    root_from_tcp:
+    - - 0.0
+      - -1.0
+      - 0.0
+      - 0.0
+    - - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 1.0
+      - 0.2
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0

@@ -39,6 +39,7 @@ would break that.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -108,6 +109,24 @@ class PhysicsBackend(ABC):
         """
         del result
 
+    def _prepare_scene_build(self) -> None:
+        """Validate and register backend initialization before Spawn commits.
+
+        Implementations must preflight unsupported combinations before mutating
+        the builder, and leave successful registrations idempotent for retries.
+        """
+
+    def _reset_scene_state(
+        self, env_ids: Sequence[int] | None, excluded_uids: set[str]
+    ) -> list[int] | None:
+        """Optionally reset physical state atomically through the owning Scene.
+
+        Return selected environment IDs when the backend handled every physical
+        asset, or None to use ordinary per-object reset. Lights and sensors
+        remain manager-owned. Reject unsupported exclusions before any mutation.
+        """
+        return None
+
     def sync_render_state(self, result: "dexsim.scene.Scene") -> None:
         """Publish the current physics state to render resources without stepping.
 
@@ -169,6 +188,11 @@ class PhysicsBackend(ABC):
     # ------------------------------------------------------------------ #
     # Capabilities (override in subclasses; defaults are conservative)
     # ------------------------------------------------------------------ #
+    @property
+    def supports_cables(self) -> bool:
+        """Whether this backend can declare cables (solver/device gates apply)."""
+        return False
+
     @property
     def supports_volume_deformables(self) -> bool:
         """Whether this backend has a volume-deformable object adapter."""

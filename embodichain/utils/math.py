@@ -504,7 +504,9 @@ def _sqrt_positive_part(x: torch.Tensor) -> torch.Tensor:
         https://github.com/facebookresearch/pytorch3d/blob/main/pytorch3d/transforms/rotation_conversions.py#L91-L99
     """
     # Use torch.where for vectorized operation instead of indexed assignment
-    return torch.where(x > 0, torch.sqrt(x), torch.zeros_like(x))
+    positive = x > 0
+    safe_x = torch.where(positive, x, torch.ones_like(x))
+    return torch.where(positive, torch.sqrt(safe_x), torch.zeros_like(x))
 
 
 @torch.jit.script
@@ -667,8 +669,11 @@ def axis_angle_to_rotation_matrix(axis_angle: torch.Tensor) -> torch.Tensor:
 
     # Rodrigues formula with stable Taylor fallback near zero angle.
     theta2 = torch.sum(axis_angle * axis_angle, dim=-1, keepdim=True)
-    theta = torch.sqrt(theta2)
     eps = 1.0e-8
+    # Keep the inactive trigonometric branch finite at zero as well: where()
+    # still differentiates both branches before selecting their adjoints.
+    safe_theta2 = theta2.clamp_min(eps)
+    theta = torch.sqrt(safe_theta2)
 
     sin_over_theta = torch.where(
         theta2 > eps,
@@ -677,7 +682,7 @@ def axis_angle_to_rotation_matrix(axis_angle: torch.Tensor) -> torch.Tensor:
     )
     one_minus_cos_over_theta2 = torch.where(
         theta2 > eps,
-        (1.0 - torch.cos(theta)) / theta2,
+        (1.0 - torch.cos(theta)) / safe_theta2,
         0.5 - theta2 / 24.0 + theta2 * theta2 / 720.0,
     )
 
@@ -813,7 +818,9 @@ def axis_angle_from_quat(quat: torch.Tensor, eps: float = 1.0e-6) -> torch.Tenso
     angle = 2.0 * half_angle
     # check whether to apply Taylor approximation
     sin_half_angles_over_angles = torch.where(
-        angle.abs() > eps, torch.sin(half_angle) / angle, 0.5 - angle * angle / 48
+        angle.abs() > eps,
+        torch.sin(half_angle) / angle.clamp_min(eps),
+        0.5 - angle * angle / 48,
     )
     return quat[..., :3] / sin_half_angles_over_angles.unsqueeze(-1)
 

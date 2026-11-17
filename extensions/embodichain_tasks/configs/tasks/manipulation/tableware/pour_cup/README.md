@@ -1,0 +1,93 @@
+# Franka 在线倒水
+
+倒水任务在同一个 World 中通过 DexUni 推进 Franka、动态杯子和 DFSPH 水体。机器人
+使用关节驱动和真实接触抓起杯子，将水倒入接水碗，再放回杯子。耦合方向为刚体到
+流体；水不会反作用于机器人或杯子。初始水体按杯内体积采样，不依赖预录粒子或轨迹。
+
+## 依赖
+
+基础流体接口来自 [PR #777](https://github.com/DexForce/EmbodiChain/pull/777)。
+仓库锁定的 `dexsim_engine==0.6.0rc2` 提供 `DexUniSolverCfg.sph_cfg`、DexUni 流体多 world
+隔离和选择性 reset；在线流体运行还需要 CUDA。
+任务网格由资产缓存中的 `PourCupAssets` 提供。
+
+## 运行
+
+`run-task` 在线生成 `Pick → MoveHeldObject → Pour → Place` 动作，并按部署配置
+验收杯子运动与接水量：
+
+```bash
+embodichain run-task \
+  --gym-config extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml \
+  --num-envs 1 --headless --renderer fast-rt
+```
+
+任务的执行节奏由
+[`trajectory_open_loop_fluid_pour.yaml`](../../../../components/execution_policies/trajectory_open_loop_fluid_pour.yaml)
+配置。轨迹最少采样 80 点，任务级规划加速度预算为 1.5 rad/s²；规划器仍遵守
+机器人原有的关节速度上限。程序的 `wait_stable` 负责放回后的稳定检查。
+
+倾倒和回正各至少运行 4 秒；`simulation.pour` 的 `rotation_duration` 在原规划轨迹
+较短时拉伸整段运动，不再用终点保持帧凑时长。它不改变抓杯与移杯的控制频率。
+
+流体专用的 `franka_panda_fast_fluid` 组件将仿真夹指最大驱动力设为 160，接触
+动摩擦系数设为 3.0，以在更高加速度下保持抓取；这组任务参数不代表实机标定。
+
+独立 Sim 示例从当前场景规划 Atomic Skill 目标，复用部署中的运动策略、动作选项、
+接水区域和验收阈值，通过相同的 DexUni/DFSPH 物理场景执行并录制视频：
+
+```bash
+embodichain run-example sim/demo/franka_dexuni_pour_demo --headless --renderer fast-rt
+```
+
+增加 `--num-envs 4` 可在同一个 World 中并行运行四个环境，分别输出
+`fluid_sim_env0.mp4` 至 `fluid_sim_env3.mp4`。
+
+默认粒子间距为 1.5 mm，初始填充 76,607 粒。`run-task` 的
+`--particle-spacing 0.003` 或 Sim 的 `--spacing 0.003` 可用于较快的物理检查，
+但会改变流体分辨率。NoRender 仅用于物理检查。
+
+## 求解与碰撞
+
+`env.fluid.yaml` 声明 DexUni 的 `sph_cfg`、机器人和场景。外层物理步为 1/240 s，
+每步 2 个 DFSPH 子步，每个 DFSPH 子步包含 15 个 MuJoCo 刚体子步；控制周期为
+0.025 s（每 6 个物理步更新一次控制）。未指定关节所有权时，流体准备阶段将完整的机器人和杯子关节拓扑分配给
+MuJoCo，以满足当前 DexUni/DFSPH 原型的纯 MuJoCo 刚体要求。任务使用完整机器人
+关节目标，使两个手指都收到夹持目标。
+
+杯子质量为 0.30 kg，凸分解形状提供机器人抓取接触，独立的
+`particle_collision_shape` SDF 提供流体边界。当前 DexSim 的碰撞描述符没有单独
+排除边界质量的字段，因此杯子的质心和惯量显式使用仅由刚体接触形状计算的值，
+避免额外 SDF 改变质量属性。使用支持 `contributes_to_mass` 的新构建时，边界也会
+显式标记为不参与质量计算。
+
+## 录制与验收
+
+FastRT 使用蓝色液面材质，并为每个环境生成独立的 960 × 720、40 fps 视频。Gym
+正常录制保存到 `videos/env_000/episode_000000_fluid_gym.mp4`；未完成或不合格的
+片段保存到 `videos/diagnostics/`。Sim 示例输出 `fluid_sim_env0.mp4`。
+
+Gym 的 `qualification_result.json` 和 Sim 的 `validation.json` 分别记录任务完成情况、
+杯子抬升、最大倾角、放回误差和接水量。完整验收要求实际抬升至少 5 cm、倾角
+至少 45°、放回误差不超过 3 cm，且最终接水至少 50 mL；规划成功或部分视频不能
+替代这些物理测量。部署通过 `collection.qualification.object_motion` 声明运动阈值，
+通过 `observations` 声明原始观测上下限；接水量按立方米配置，`0.00005` 为 50 mL。
+`water_summary` 的有效性边界在每次低频采样时检查，接水量在最终采样时检查。使用 `--record-trajectory --record-fluid-state` 可在验收通过后
+保存完整粒子状态；默认任务实测约 1.30 GiB/环境（76,607 粒、757 状态帧）。普通
+`ReplayWrapper` 的 `kinematic`/`control` 模式回填粒子，`dynamic` 模式只回填
+初始粒子状态，之后随录制控制动作重新求解流体。
+
+```bash
+embodichain run-task \
+  --gym-config extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml \
+  --num-envs 1 --headless --renderer fast-rt \
+  --record-trajectory --record-fluid-state \
+  --trajectory-save-dir outputs/fluid-task-program-online
+embodichain run-task \
+  --gym-config extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml \
+  --num-envs 1 --replay \
+  --replay_trajectory outputs/fluid-task-program-online/fluid_batch_000000_RUN_ID.pt \
+  --replay_mode kinematic  # 或 dynamic
+```
+
+将 `RUN_ID` 替换为录制命令输出的对应后缀。

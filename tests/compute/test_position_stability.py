@@ -61,6 +61,29 @@ def test_position_window_validity_and_target_predicate_are_independent():
     assert result.tolist() == [True, False, False]
 
 
+def test_position_window_starts_at_zero_when_each_row_enters_target():
+    monitor = PositionRangeMonitor(
+        torch.tensor([0.11, 0.09]), required_steps=2, position_drift=0.1
+    )
+    samples = [
+        ([0.11, 0.09], [False, False], [0, 0]),
+        ([0.09, 0.09], [False, False], [0, 1]),
+        ([0.09, 0.09], [False, True], [1, 2]),
+        ([0.09, 0.11], [True, False], [2, 0]),
+        ([0.09, 0.09], [True, False], [3, 0]),
+        ([0.09, 0.09], [True, False], [4, 1]),
+        ([0.09, 0.09], [True, True], [5, 2]),
+    ]
+    for step, (positions, expected, counts) in enumerate(samples):
+        values = torch.tensor(positions)
+        result = monitor.observe(values, values.abs() <= 0.1, elapsed_steps=step)
+        assert result.tolist() == expected
+        assert monitor.stable_counts.tolist() == counts
+        if step in (1, 4):
+            torch.testing.assert_close(monitor.minimum, values)
+            torch.testing.assert_close(monitor.maximum, values)
+
+
 def test_position_window_recovers_range_tracking_after_nonfinite_sample():
     monitor = PositionRangeMonitor(
         torch.tensor([float("nan")]), required_steps=2, position_drift=0.001

@@ -232,3 +232,7 @@ scripts/benchmark/rl/reports/*
 
 # Local ACT experiment outputs; existing tracked historical files are unchanged.
 /examples/learning/act/results/
+
+# CPU scheduling hints and opt-in pytest phase artifacts.
+/.pytest-duration-history/
+/test-phase-metrics/

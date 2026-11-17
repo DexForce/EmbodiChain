@@ -29,7 +29,10 @@ sim dependencies.
 from __future__ import annotations
 
 import multiprocessing as mp
+import json
 import os
+import time
+from pathlib import Path
 import sys
 import threading
 import unittest
@@ -74,6 +77,187 @@ ACTION_DIM = 4
 CONSUMER_RESULT_TIMEOUT = 60.0
 PROCESS_CLEANUP_TIMEOUT = 5.0
 LAB_PACKAGE_NAME = "embodichain.lab"
+
+
+def test_gym_config_path_allocates_source_relative_components(
+    tmp_path, monkeypatch
+) -> None:
+    """The public engine allocates component-owned dimensions away from CWD."""
+    component = tmp_path / "physical.yaml"
+    component.write_text(
+        json.dumps(
+            {
+                "environment_id": "ods_test",
+                "physics": "default",
+                "simulation": {},
+                "num_envs": 2,
+                "max_episode_steps": 3,
+                "env": {
+                    "observations": {
+                        "marker": {
+                            "func": "external_marker",
+                            "mode": "add",
+                            "extra": {"shape": [5]},
+                        }
+                    }
+                },
+            }
+        )
+    )
+    directory = tmp_path / "deployment"
+    directory.mkdir()
+    source = directory / "task.json"
+    source.write_text(
+        json.dumps(
+            {
+                "id": "ODS-SourcePath-v1",
+                "environment": {"component": "../physical.yaml"},
+            }
+        )
+    )
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    cfg = OnlineDataEngineCfg(
+        gym_config_path=str(source), buffer_size=2, state_dim=1, refill_policy="manual"
+    )
+    engine = OnlineDataEngine(cfg)
+    try:
+        assert engine.shared_buffer.batch_size == (2, 3)
+        assert engine.shared_buffer["obs", "marker"].shape == (2, 3, 5)
+        assert engine.shared_buffer.is_shared()
+        assert cfg.gym_config == {}
+        assert engine._gym_config_source_path == str(source.resolve())
+        from embodichain.data_pipeline.runtime import (
+            ODSFlowController,
+            ODSFlowControllerCfg,
+        )
+
+        flow = ODSFlowController(engine, ODSFlowControllerCfg(max_generated_episodes=4))
+        assert flow.engine is engine
+        declaration = engine.resolved_gym_config
+        assert declaration["num_envs"] == 2
+        declaration["num_envs"] = 99
+        assert engine.resolved_gym_config["num_envs"] == 2
+    finally:
+        engine.stop()
+
+
+def test_gym_config_dictionary_remains_an_explicit_alternative(tmp_path) -> None:
+    cfg = OnlineDataEngineCfg(gym_config={"id": "Inline-v1"})
+    config, source = engine_module._resolve_engine_gym_config(cfg)
+    assert config == cfg.gym_config and source is None
+    cfg.gym_config_path = str(tmp_path / "unused.json")
+    with pytest.raises(ValueError, match="not both"):
+        OnlineDataEngine(cfg)
+
+
+@pytest.mark.parametrize("outcome", ["accept", "reject", "invalid"])
+def test_custom_episode_runner_owns_reset_and_qualification(
+    monkeypatch, outcome
+) -> None:
+    """The real worker retries qualified results and publishes only accepted rows."""
+    import gymnasium as gym
+    from embodichain.lab.gym.envs.demo import DemoEpisodeResult
+    from embodichain.lab.gym.utils import gym_utils, registration
+
+    context = mp.get_context("forkserver")
+    fill, close = context.Event(), context.Event()
+    fill.set()
+    initialized = MagicMock()
+    initialized.is_set.return_value = False
+    initialized.set.side_effect = lambda: (close.set(), fill.set())
+    env = MagicMock()
+    env_cfg = SimpleNamespace(
+        num_envs=1,
+        sim_cfg=SimpleNamespace(
+            headless=False,
+            render_cfg=SimpleNamespace(renderer=None),
+            gpu_id=0,
+            device=None,
+        ),
+    )
+    calls = []
+    initialized_plugins = []
+    monkeypatch.setattr(
+        registration,
+        "discover_task_packages",
+        lambda: initialized_plugins.append("tasks"),
+    )
+    monkeypatch.setattr(gym_utils, "_EXTRA_MANAGER_MODULES", [])
+
+    def initialize_plugins():
+        initialized_plugins.append("init")
+        gym_utils.register_manager_modules(["ods_external_runner"])
+
+    monkeypatch.setattr(registration, "execute_init_hooks", initialize_plugins)
+
+    def decode(config, *, manager_modules, source_path):
+        assert initialized_plugins == ["tasks", "init"]
+        assert "ods_external_runner" in manager_modules
+        assert source_path == "/frozen/task.json"
+        assert config["id"] == "Frozen-Source-v1"
+        return env_cfg
+
+    monkeypatch.setattr(gym_utils, "config_to_cfg", decode)
+    monkeypatch.setattr(gym, "make", lambda **kwargs: env)
+
+    def runner(actual_env, *, episode_index, attempt_id, should_stop, progress):
+        assert actual_env is env and not should_stop()
+        assert initialized.set.call_count == 0
+        env.reset(options={"save_data": False, "frozen_request": attempt_id})
+        calls.append((episode_index, attempt_id))
+        if outcome == "invalid":
+            return {"completed": True, "success": [True]}
+        success = outcome == "accept" and attempt_id == 1
+        return DemoEpisodeResult(
+            episode_index=episode_index,
+            length=1,
+            completed=success,
+            success=(success,),
+            terminated=(False,),
+            truncated=(False,),
+            terminal_reason="success" if success else "physical_qualification_failed",
+            attempt_id=attempt_id,
+        )
+
+    monkeypatch.setitem(sys.modules, "ods_external_runner", SimpleNamespace(run=runner))
+    args = (
+        OnlineDataEngineCfg(
+            episode_runner="ods_external_runner:run", max_generation_attempts=2
+        ),
+        TensorDict({"valid": torch.ones(1, 1, dtype=torch.bool)}, batch_size=[1, 1]),
+        context.Array("i", [0, 1]),
+        fill,
+        initialized,
+        close,
+        context.Array("B", engine_module._ERROR_BUFFER_SIZE),
+        context.Value("i", 0),
+        context.Event(),
+        context.Value("i", 0),
+        [False],
+    )
+    kwargs = {
+        "gym_config": {"id": "Frozen-Source-v1"},
+        "gym_config_source_path": "/frozen/task.json",
+    }
+    if outcome == "accept":
+        engine_module._run_sim_worker(*args, **kwargs)
+        assert initialized.set.call_count == 1
+    else:
+        error, message = (
+            (TypeError, "DemoEpisodeResult")
+            if outcome == "invalid"
+            else (RuntimeError, "after 2 attempts")
+        )
+        with pytest.raises(error, match=message):
+            engine_module._run_sim_worker(*args, **kwargs)
+        initialized.set.assert_not_called()
+    expected = [(0, 0)] if outcome == "invalid" else [(0, 0), (0, 1)]
+    assert calls == expected
+    assert env.reset.call_count == len(expected)
+    assert env.get_wrapper_attr("set_rollout_buffer").call_count == len(expected)
+    env.close.assert_called_once()
 
 
 def test_action_context_respects_locks_gaps_continuity_and_padded_provenance() -> None:
@@ -527,6 +711,8 @@ def test_policy_recording_rejects_live_schema_mismatch(mismatch: str) -> None:
     "options",
     [
         {"action_semantics": "unknown"},
+        {"episode_runner": "runner_without_module_separator"},
+        {"episode_runner": "external_module:"},
         {"action_semantics": "policy_request", "action_dim": 7},
         {
             "action_semantics": "policy_request",
@@ -668,6 +854,189 @@ def _start_lifecycle_worker(
     )
     engine._monitor_thread.start()
     return process
+
+
+def _creator_death_simulation_worker(args, directory: str, mode: str) -> None:
+    """Run the production worker against the external simulator boundary."""
+    import psutil
+
+    root = Path(directory)
+    os.environ.pop("EMBODICHAIN_SIM_EXIT_PROCESS", None)
+
+    class Environment:
+        def get_wrapper_attr(self, name):
+            return getattr(self, name)
+
+        def set_rollout_buffer(self, buffer):
+            pass
+
+        def reset(self, **kwargs):
+            return {}, {}
+
+        def close(self):
+            (root / "close_started").write_text(str(time.monotonic()))
+            if mode == "stalled_close":
+                while True:
+                    time.sleep(1)
+            (root / "closed").write_text("closed")
+
+    def make_environment(**kwargs):
+        (root / "child.json").write_text(
+            json.dumps(
+                {
+                    "pid": os.getpid(),
+                    "created": psutil.Process().create_time(),
+                    "logical_parent": mp.parent_process().pid,
+                    "os_parent": os.getppid(),
+                }
+            )
+        )
+        return Environment()
+
+    def execute(env, *, should_stop, **kwargs):
+        if mode != "idle":
+            (root / "active").write_text("active")
+            while not should_stop():
+                time.sleep(0.01)
+            return SimpleNamespace(
+                completed=False, all_success=False, terminal_reason="interrupted"
+            )
+        return SimpleNamespace(completed=True, all_success=True)
+
+    config = SimpleNamespace(
+        num_envs=1,
+        sim_cfg=SimpleNamespace(
+            headless=True,
+            render_cfg=SimpleNamespace(renderer=None),
+            gpu_id=0,
+            device=None,
+        ),
+    )
+    sys.modules["gymnasium"] = SimpleNamespace(make=make_environment)
+    sys.modules["embodichain.lab.gym.utils.gym_utils"] = SimpleNamespace(
+        config_to_cfg=lambda *args, **kwargs: config, get_manager_modules=lambda: []
+    )
+    sys.modules["embodichain.lab.gym.utils.registration"] = SimpleNamespace(
+        discover_task_packages=lambda: [], execute_init_hooks=lambda: []
+    )
+    sys.modules["embodichain.lab.gym.envs.demo"] = SimpleNamespace(
+        execute_demo_episode=execute
+    )
+    engine_module._sim_worker_fn(*args)
+
+
+def _creator_with_simulation_worker(args, directory: str, mode: str) -> None:
+    root = Path(directory)
+    worker = mp.get_context("forkserver").Process(
+        target=_creator_death_simulation_worker,
+        args=(args, directory, mode),
+        daemon=False,
+    )
+    worker.start()
+    deadline = time.monotonic() + CONSUMER_RESULT_TIMEOUT
+    while not (args[4].is_set() if mode == "idle" else (root / "active").exists()):
+        if not worker.is_alive() or time.monotonic() >= deadline:
+            raise RuntimeError(
+                "Simulation child did not reach its expected producer state"
+            )
+        time.sleep(0.01)
+    (root / "creator_ready").write_text("ready")
+    while True:
+        time.sleep(1)
+
+
+@pytest.mark.parametrize("mode", ["idle", "active", "stalled_close"])
+def test_forkserver_producer_exits_when_logical_creator_dies(tmp_path, mode) -> None:
+    """Killing the creator closes idle/active envs and bounds a stalled close."""
+    import psutil
+
+    engine = _make_fake_engine(buffer_size=1, max_episode_steps=1)
+    engine.cfg.shutdown_timeout = 0.75
+    engine.cfg.gym_config["id"] = "CPU-OwnerDeath-v1"
+    engine._init_signal.clear()
+    engine._fill_signal.set()
+    args = (
+        engine.cfg,
+        engine.shared_buffer,
+        engine._lock_index,
+        engine._fill_signal,
+        engine._init_signal,
+        engine._close_signal,
+        engine._worker_error_buffer,
+        engine._worker_error_length,
+        engine._worker_failed_signal,
+        engine._state_value,
+    )
+    creator = mp.get_context("forkserver").Process(
+        target=_creator_with_simulation_worker,
+        args=(args, str(tmp_path), mode),
+        daemon=False,
+    )
+    child = None
+
+    def running(process):
+        try:
+            return (
+                process is not None
+                and process.is_running()
+                and process.status() != psutil.STATUS_ZOMBIE
+            )
+        except psutil.NoSuchProcess:
+            return False
+
+    creator.start()
+    try:
+        deadline = time.monotonic() + CONSUMER_RESULT_TIMEOUT
+        while not (tmp_path / "creator_ready").exists() and time.monotonic() < deadline:
+            assert (
+                creator.is_alive()
+            ), f"Creator exited before ready: {creator.exitcode}"
+            time.sleep(0.01)
+        assert (
+            tmp_path / "creator_ready"
+        ).exists(), "Producer did not reach expected state"
+        identity = json.loads((tmp_path / "child.json").read_text())
+        child = psutil.Process(identity["pid"])
+        assert child.create_time() == identity["created"]
+        assert identity["logical_parent"] == creator.pid
+        assert identity["os_parent"] != creator.pid
+        killed_at = time.monotonic()
+        creator.kill()
+        creator.join(PROCESS_CLEANUP_TIMEOUT)
+        assert not creator.is_alive()
+        deadline = (
+            time.monotonic() + engine.cfg.shutdown_timeout + PROCESS_CLEANUP_TIMEOUT
+        )
+        while running(child) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert not running(child)
+        assert (
+            tmp_path / "close_started"
+        ).exists(), "Producer did not reach env.close()"
+        if mode == "stalled_close":
+            assert time.monotonic() - killed_at >= engine.cfg.shutdown_timeout * 0.8
+            assert not (tmp_path / "closed").exists()
+        else:
+            assert (tmp_path / "closed").exists()
+    finally:
+        if creator.is_alive():
+            creator.kill()
+        creator.join(PROCESS_CLEANUP_TIMEOUT)
+        creator.close()
+        if child is None and (tmp_path / "child.json").exists():
+            identity = json.loads((tmp_path / "child.json").read_text())
+            try:
+                candidate = psutil.Process(identity["pid"])
+                if candidate.create_time() == identity["created"]:
+                    child = candidate
+            except psutil.NoSuchProcess:
+                pass
+        if running(child):
+            try:
+                child.kill()
+            except psutil.NoSuchProcess:
+                pass
+        engine.stop()
 
 
 def test_forkserver_monitor_preserves_normal_shutdown_status() -> None:
@@ -880,6 +1249,7 @@ class TestOnlineDataEngine:
         monkeypatch.setattr(
             registration, "discover_task_packages", discover_task_packages
         )
+        monkeypatch.setattr(registration, "execute_init_hooks", lambda: [])
         monkeypatch.setattr(
             gym_utils, "config_to_cfg", lambda *_args, **_kwargs: env_cfg
         )
@@ -2281,7 +2651,9 @@ def test_worker_lifecycle_publication_and_eviction_use_distinct_episode_ids(
     monkeypatch.setitem(
         sys.modules,
         "embodichain.lab.gym.utils.registration",
-        SimpleNamespace(discover_task_packages=lambda: []),
+        SimpleNamespace(
+            discover_task_packages=lambda: [], execute_init_hooks=lambda: []
+        ),
     )
     calls = 0
 

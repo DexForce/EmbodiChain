@@ -259,6 +259,12 @@ class ObservationManager(ManagerBase):
             for name in self._required_fields:
                 if name in self._schema:
                     canonical[self._schema[name]] = name
+            if self._rollout_storage is not None:
+                # Keep preallocated trajectory paths canonical when a rule
+                # gives the same physical channel an additional binding name.
+                for name in self._rollout_storage["raw_obs"].keys():
+                    if name in self._schema:
+                        canonical[self._schema[name]] = name
             self._field_ids = {
                 name: canonical[descriptor] for name, descriptor in self._schema.items()
             }

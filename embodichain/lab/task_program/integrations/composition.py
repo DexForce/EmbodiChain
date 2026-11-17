@@ -24,11 +24,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from embodichain.lab.evaluation import PredicateRegistry
     from embodichain.lab.task_program.language.schema import TaskProgramCfg
 
 from embodichain.lab.task_program.language.schema import TaskProgramIntegrationCfg
@@ -84,6 +85,9 @@ class ConfiguredTaskProgramDeployment:
     scene_binding: dict[str, object]
     planner_config: dict[str, object] | None
     program_declaration: dict[str, Any] | None = None
+    _composed_declarations: dict[str, object] = field(
+        default_factory=dict, repr=False, compare=False, kw_only=True
+    )
 
     @property
     def program_source(self) -> Path | dict[str, Any]:
@@ -121,6 +125,8 @@ def load_configured_task_program_deployment(
     task_program: Mapping[str, object],
     skill_profile: Mapping[str, object],
     base_dir: str | Path,
+    evaluation: Mapping[str, object] | None = None,
+    evaluation_registry: PredicateRegistry | None = None,
 ) -> ConfiguredTaskProgramDeployment:
     """Compose deployment metadata using the shared strict component decoders.
 
@@ -129,6 +135,8 @@ def load_configured_task_program_deployment(
             from a runnable deployment's ``task_program`` mapping.
         skill_profile: The resolved embodiment component's ``skill_profile`` mapping.
         base_dir: Owning deployment directory for relative component paths.
+        evaluation: Owned rule library selected by the deployment, if any.
+        evaluation_registry: Optional trusted registry of built-in and extension predicates.
 
     Returns:
         A fresh deployment with its validated registration, trusted selection and
@@ -152,4 +160,6 @@ def load_configured_task_program_deployment(
         task_program=task_program,
         skill_profile=skill_profile,
         base_dir=base_dir,
+        evaluation=evaluation,
+        evaluation_registry=evaluation_registry,
     )

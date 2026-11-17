@@ -29,8 +29,6 @@ simulation:
         - 0.0
         - 0.0
         - 1.0
-    - component_type: left_hand
-      urdf_path: Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf
     - component_type: right_arm
       urdf_path: Franka/Panda/Panda.urdf
       transform:
@@ -50,8 +48,6 @@ simulation:
         - 0.0
         - 0.0
         - 1.0
-    - component_type: right_hand
-      urdf_path: Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf
   init_pos:
   - -0.7
   - 0.0
@@ -112,13 +108,6 @@ simulation:
     - left_fr3_joint5
     - left_fr3_joint6
     - left_fr3_joint7
-    left_eef:
-    - left_finger_joint
-    - left_inner_knuckle_joint
-    - left_inner_finger_joint
-    - left_right_outer_knuckle_joint
-    - left_right_inner_knuckle_joint
-    - left_right_inner_finger_joint
     right_arm:
     - right_fr3_joint1
     - right_fr3_joint2
@@ -127,13 +116,6 @@ simulation:
     - right_fr3_joint5
     - right_fr3_joint6
     - right_fr3_joint7
-    right_eef:
-    - right_finger_joint
-    - right_left_inner_knuckle_joint
-    - right_left_inner_finger_joint
-    - right_outer_knuckle_joint
-    - right_inner_knuckle_joint
-    - right_inner_finger_joint
     dual_arm:
     - left_fr3_joint1
     - left_fr3_joint2
@@ -154,45 +136,11 @@ simulation:
       class_type: FEPSolver
       end_link_name: left_fr3_link8
       root_link_name: left_base
-      tcp:
-      - - 0.0
-        - -1.0
-        - 0.0
-        - 0.0
-      - - 1.0
-        - 0.0
-        - 0.0
-        - 0.0
-      - - 0.0
-        - 0.0
-        - 1.0
-        - 0.21
-      - - 0.0
-        - 0.0
-        - 0.0
-        - 1.0
       redundancy_search: true
     right_arm:
       class_type: FEPSolver
       end_link_name: right_fr3_link8
       root_link_name: right_base
-      tcp:
-      - - 0.0
-        - -1.0
-        - 0.0
-        - 0.0
-      - - 1.0
-        - 0.0
-        - 0.0
-        - 0.0
-      - - 0.0
-        - 0.0
-        - 1.0
-        - 0.21
-      - - 0.0
-        - 0.0
-        - 0.0
-        - 1.0
       redundancy_search: true
 sensor:
 - sensor_type: Camera
@@ -241,6 +189,7 @@ skill_profile:
       capabilities:
       - interaction.grasp
       command_preset: left_parallel_gripper
+      gripper: left_eef
   - resource_id: right
     endpoints:
     - endpoint_id: motion
@@ -257,6 +206,7 @@ skill_profile:
       capabilities:
       - interaction.grasp
       command_preset: right_parallel_gripper
+      gripper: right_eef
   command_presets:
   - preset_id: left_arm_postures
     control_part: left_arm
@@ -280,40 +230,6 @@ skill_profile:
       - 0
       - 3.037
       - 0.741
-  - preset_id: left_parallel_gripper
-    control_part: left_eef
-    commands:
-      open:
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      grasp:
-      - 0.5
-      - -0.5
-      - 0.5
-      - -0.5
-      - -0.5
-      - 0.5
-  - preset_id: right_parallel_gripper
-    control_part: right_eef
-    commands:
-      open:
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      grasp:
-      - 0.5
-      - -0.5
-      - 0.5
-      - -0.5
-      - -0.5
-      - 0.5
   runtime_services:
     grasp_pose_generators:
       left_eef:
@@ -324,45 +240,9 @@ skill_profile:
         max_candidates: 50
         center_mode: bounds
         filter_ground_collision: false
-        model:
-          model_id: robotiq_arg2f_140
-          min_opening_width: 0.005
-          max_opening_width: 0.14
         point_spacing: 0.012
-        root_from_tcp:
-        - - 0.0
-          - -1.0
-          - 0.0
-          - 0.0
-        - - 1.0
-          - 0.0
-          - 0.0
-          - 0.0
-        - - 0.0
-          - 0.0
-          - 1.0
-          - 0.21
-        - - 0.0
-          - 0.0
-          - 0.0
-          - 1.0
-        root_from_contact_frame:
-        - - 0.0
-          - -1.0
-          - 0.0
-          - 0.0
-        - - 1.0
-          - 0.0
-          - 0.0
-          - 0.0
-        - - 0.0
-          - 0.0
-          - 1.0
-          - 0.21
-        - - 0.0
-          - 0.0
-          - 0.0
-          - 1.0
+        min_opening_width: 0.005
+        max_opening_width: 0.14
       right_eef:
         kind: antipodal_parallel_jaw
         sample_count: 10000
@@ -371,45 +251,9 @@ skill_profile:
         max_candidates: 50
         center_mode: bounds
         filter_ground_collision: false
-        model:
-          model_id: robotiq_arg2f_140
-          min_opening_width: 0.005
-          max_opening_width: 0.14
         point_spacing: 0.012
-        root_from_tcp:
-        - - 0.0
-          - -1.0
-          - 0.0
-          - 0.0
-        - - 1.0
-          - 0.0
-          - 0.0
-          - 0.0
-        - - 0.0
-          - 0.0
-          - 1.0
-          - 0.21
-        - - 0.0
-          - 0.0
-          - 0.0
-          - 1.0
-        root_from_contact_frame:
-        - - 0.0
-          - -1.0
-          - 0.0
-          - 0.0
-        - - 1.0
-          - 0.0
-          - 0.0
-          - 0.0
-        - - 0.0
-          - 0.0
-          - 1.0
-          - 0.21
-        - - 0.0
-          - 0.0
-          - 0.0
-          - 1.0
+        min_opening_width: 0.005
+        max_opening_width: 0.14
     control_part_evidence:
       kind: joint_position_constraint
       control_parts:
@@ -450,3 +294,114 @@ skill_profile:
         body_max_edge: 0.01
         pad_max_edge: 0.004
         max_subdivisions: 10
+grippers:
+  left_eef:
+    class_type: RobotiqArg2F140
+    mode: mounted
+    motion_part: left_arm
+    control_part: left_eef
+    component_type: left_hand
+    root_from_tcp:
+    - - 0.0
+      - -1.0
+      - 0.0
+      - 0.0
+    - - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 1.0
+      - 0.21
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+    root_from_contact_frame:
+    - - 0.0
+      - -1.0
+      - 0.0
+      - 0.0
+    - - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 1.0
+      - 0.21
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+    commands:
+      open:
+        finger_joint: 0.0
+        left_inner_knuckle_joint: 0.0
+        left_inner_finger_joint: 0.0
+        right_outer_knuckle_joint: 0.0
+        right_inner_knuckle_joint: 0.0
+        right_inner_finger_joint: 0.0
+      grasp:
+        finger_joint: 0.5
+        left_inner_knuckle_joint: -0.5
+        left_inner_finger_joint: 0.5
+        right_outer_knuckle_joint: -0.5
+        right_inner_knuckle_joint: -0.5
+        right_inner_finger_joint: 0.5
+  right_eef:
+    class_type: RobotiqArg2F140
+    mode: mounted
+    motion_part: right_arm
+    control_part: right_eef
+    component_type: right_hand
+    root_from_tcp:
+    - - 0.0
+      - -1.0
+      - 0.0
+      - 0.0
+    - - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 1.0
+      - 0.21
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+    root_from_contact_frame:
+    - - 0.0
+      - -1.0
+      - 0.0
+      - 0.0
+    - - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 1.0
+      - 0.21
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+    commands:
+      open:
+        finger_joint: 0.0
+        left_inner_knuckle_joint: 0.0
+        left_inner_finger_joint: 0.0
+        right_outer_knuckle_joint: 0.0
+        right_inner_knuckle_joint: 0.0
+        right_inner_finger_joint: 0.0
+      grasp:
+        finger_joint: 0.5
+        left_inner_knuckle_joint: -0.5
+        left_inner_finger_joint: 0.5
+        right_outer_knuckle_joint: -0.5
+        right_inner_knuckle_joint: -0.5
+        right_inner_finger_joint: 0.5

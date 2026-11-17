@@ -26,3 +26,5 @@ standalone robot preset or a grasping capability.
 
    assets
    robotiq_2f85
+   arg2f85
+   arg2f140

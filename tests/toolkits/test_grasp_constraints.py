@@ -22,10 +22,7 @@ from pathlib import Path
 import json
 import pytest
 import torch
-from embodichain.toolkits.graspkit import (
-    ParallelJawGripperModelCfg,
-    ParallelJawGraspPoseGenerator,
-)
+from embodichain.toolkits.graspkit import ParallelJawGraspPoseGenerator
 from embodichain.toolkits.graspkit.hand_envelope import NominalHandEnvelope
 from embodichain.toolkits.graspkit.pg_grasp.constraints import (
     GraspGeometryConstraint,
@@ -36,7 +33,18 @@ from embodichain.toolkits.graspkit.pg_grasp.constraints import (
 
 class Candidates(ParallelJawGraspPoseGenerator):
     def __init__(self):
-        super().__init__(ParallelJawGripperModelCfg(model_id="robotiq_arg2f_140"))
+        super().__init__(
+            **{
+                key: (
+                    {
+                        "model_id": "robotiq_arg2f_140",
+                        "min_opening_width": 0.001,
+                        "max_opening_width": 0.1,
+                    }
+                )[key]
+                for key in ("model_id", "min_opening_width", "max_opening_width")
+            }
+        )
 
     def get_valid_grasp_poses(self, *, obj_poses, **kwargs):
         rows = []

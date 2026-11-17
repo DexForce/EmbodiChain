@@ -702,3 +702,44 @@ def test_variable_horizon_requires_update_budget_for_implicit_lr_curve() -> None
     ):
         trainer.train(total_timesteps=8)
     assert trainer.num_updates == 0
+
+
+@pytest.mark.parametrize("rollout_mode", ["segmented", "complete"])
+def test_consumed_rollouts_are_released_before_further_collection_or_fitting(
+    monkeypatch, rollout_mode
+):
+    import weakref
+
+    env = _QuadraticActionEnv()
+    policy = ActorOnly(1, 1, env.device, actor=nn.Linear(1, 1))
+    algorithm = APG(APGCfg(device="cpu"), policy)
+    trainer = DifferentiableTrainer(
+        DifferentiableTrainerCfg(
+            rollout_mode=rollout_mode,
+            segment_length=2,
+            update_horizon=4,
+            gradient_accumulation_steps=2,
+            deterministic_actions=True,
+        ),
+        env,
+        policy,
+        algorithm,
+    )
+    completed = []
+    collect = trainer.collector.collect
+    finish = algorithm.finish_update
+
+    def collect_after_release(*args, **kwargs):
+        assert all(reference() is None for reference in completed)
+        rollout = collect(*args, **kwargs)
+        completed.append(weakref.ref(rollout))
+        return rollout
+
+    def finish_after_release():
+        assert all(reference() is None for reference in completed)
+        return finish()
+
+    monkeypatch.setattr(trainer.collector, "collect", collect_after_release)
+    monkeypatch.setattr(algorithm, "finish_update", finish_after_release)
+    trainer.update_once()
+    assert len(completed) == 2

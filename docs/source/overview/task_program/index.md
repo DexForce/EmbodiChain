@@ -14,6 +14,7 @@ cube's resting position, and save one trajectory.**
 :hidden:
 
 quickstart
+authoring
 recipes
 troubleshooting
 validation
@@ -66,6 +67,12 @@ Place. Inspect those results as well as episode completion, and confirm that
 the saved episode can be read. Passing these checks establishes position and
 stability for that run; it does not establish every possible physical property.
 See [assurance and acceptance](architecture.md#effect-assurance-is-mandatory).
+
+## Concise programs and demonstration skills
+
+See [configuration authoring](authoring.md) for the list/action shorthand,
+shared world and scene-relative targets, measured duration holds, and named
+Demo Skill registrations with automatic occurrence-bound sources.
 
 ## What stays with the integration?
 

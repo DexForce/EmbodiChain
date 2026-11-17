@@ -35,7 +35,7 @@ it does not implement the launcher's package-resource lookup.
 **Reproduced:** changing the first Pick to `object: missing_cube` raises:
 
 ```text
-TaskProgramValidationError: $.program.body.items[0].steps.call.object: program.body.items[0].steps.call.object: Unknown scene entity 'missing_cube'. [reference_validation_failed]
+TaskProgramValidationError: $.program.repeat.body[0].steps.pick.object: program.body.items[0].steps.call.object: Unknown scene entity 'missing_cube'. [reference_validation_failed]
 ```
 
 **First check:** that exact program path. The bracket index is zero-based.

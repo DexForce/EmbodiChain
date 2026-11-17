@@ -84,7 +84,9 @@ def _decision(*values: bool | None) -> EffectMonitorDecision:
     )
 
 
-def _transport_system(monkeypatch: pytest.MonkeyPatch, outcome: str) -> SimpleNamespace:
+def _transport_system(
+    monkeypatch: pytest.MonkeyPatch, outcome: str, *, typed: bool = False
+) -> SimpleNamespace:
     registry, _ = _scene_registry()
     factory = RoutedMoveHeldObjectLowererFactory(
         (
@@ -95,9 +97,10 @@ def _transport_system(monkeypatch: pytest.MonkeyPatch, outcome: str) -> SimpleNa
             ),
         )
     )
+    call_id = "move_held_object" if typed else factory.call_id
     preset = _preset(
         "safe",
-        skill_option_templates={factory.call_id: MoveHeldObjectOptions()},
+        skill_option_templates={call_id: MoveHeldObjectOptions()},
         effect_assurance=(
             EffectAssurance.PROJECTED
             if outcome == "projected"
@@ -106,7 +109,7 @@ def _transport_system(monkeypatch: pytest.MonkeyPatch, outcome: str) -> SimpleNa
         effect_monitors=(
             {}
             if outcome == "projected"
-            else {factory.call_id: EffectMonitorRef("builtin.composite_effect", "1")}
+            else {call_id: EffectMonitorRef("builtin.composite_effect", "1")}
         ),
         runner_cfg=ExecutionRunnerCfg(minimum_cycle_time=0.05),
         tracking_policy=TrackingPolicy(
@@ -131,7 +134,9 @@ def _transport_system(monkeypatch: pytest.MonkeyPatch, outcome: str) -> SimpleNa
     manifest = SemanticIntegrationManifest(
         scene=SceneManifest.from_registry(registry),
         robot_profile=profile,
-        call_catalog=builtin_semantic_call_catalog().with_descriptor(
+        call_catalog=builtin_semantic_call_catalog(
+            include_transport=typed
+        ).with_descriptor(
             SemanticCallDescriptor(
                 call_id=factory.call_id,
                 spec_type=RegisteredSemanticCall,
@@ -229,6 +234,18 @@ def _transport_system(monkeypatch: pytest.MonkeyPatch, outcome: str) -> SimpleNa
         arguments={"object": "cube", "target": "destination"},
         resources={"primary": "manipulator"},
     )
+    if typed:
+        from embodichain.lab.task_program.semantics.calls import (
+            MoveHeldObjectCall,
+            SemanticPose,
+        )
+        from embodichain.lab.task_program.semantics.scene import SceneObjectRef
+
+        call = MoveHeldObjectCall(
+            object=SceneObjectRef("cube"),
+            at=SemanticPose((0.1, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0)),
+            resources={"primary": "manipulator"},
+        )
     return SimpleNamespace(
         runtime=runtime,
         call=call,
@@ -237,6 +254,7 @@ def _transport_system(monkeypatch: pytest.MonkeyPatch, outcome: str) -> SimpleNa
         engine=engine,
         grounded=grounded_calls,
         monitors=created,
+        context=context,
     )
 
 
@@ -252,10 +270,11 @@ def test_routed_transport_rejects_incompatible_input_before_motion(
 
 
 @pytest.mark.parametrize("outcome", ["success", "lost", "missing", "terminal_loss"])
+@pytest.mark.parametrize("typed", [False, True])
 def test_routed_transport_executes_retention_and_terminal_verification(
-    monkeypatch: pytest.MonkeyPatch, outcome: str
+    monkeypatch: pytest.MonkeyPatch, outcome: str, typed: bool
 ) -> None:
-    system = _transport_system(monkeypatch, outcome)
+    system = _transport_system(monkeypatch, outcome, typed=typed)
     result = system.runtime.run(system.call, max_steps=100)
     assert system.grounded
     grounded = system.grounded[0]
@@ -301,3 +320,19 @@ def test_routed_transport_checks_only_eligible_input_rows(
     assert result.failure_mask.tolist() == [False, False]
     assert result.calls[0].entered_mask.tolist() == [True, False]
     assert system.sink.sent > 0
+
+
+def test_typed_transport_freezes_relative_target_for_acceptance(monkeypatch):
+    from embodichain.lab.task_program.semantics.calls import SemanticRelativePose
+
+    system = _transport_system(monkeypatch, "success", typed=True)
+    declaration = SemanticRelativePose("table", (0.1, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0))
+    call = replace(system.call, at=declaration)
+    result = system.runtime.run(call, max_steps=100)
+    assert result.success_mask.all()
+    frozen = system.runtime.resolved_object_target("cube", declaration)
+    assert frozen is not None
+    system.context.scene.entities["table"].pose[..., :3, 3] += 10.0
+    torch.testing.assert_close(
+        system.runtime.resolved_object_target("cube", declaration), frozen
+    )

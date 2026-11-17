@@ -350,6 +350,40 @@ def test_gpu_test_job_prepares_headless_sdl_runtime() -> None:
     assert 'install -d -m 0700 "$XDG_RUNTIME_DIR"' in selected["run"]
 
 
+@pytest.mark.parametrize("test_result", ["success", "failure"])
+def test_metrics_upload_is_optional_but_test_failures_still_block(
+    test_result: str,
+) -> None:
+    jobs = _load_workflow("main.yml")["jobs"]
+    steps = jobs["test"]["steps"]
+    upload = next(
+        step for step in steps if step.get("name") == "Upload test phase metrics"
+    )
+    assert upload["if"] == "always()"
+    assert upload["continue-on-error"] == "true"
+    selected = next(step for step in steps if step.get("name") == "Run selected tests")
+    assert selected.get("continue-on-error", "false") == "false"
+    assert jobs["test"].get("continue-on-error", "false") == "false"
+    gate = jobs["test_gate"]["steps"][0]
+    assert gate["env"]["TEST_RESULT"] == "${{ needs.test.result }}"
+    result = subprocess.run(
+        ["bash", "-c", gate["run"]],
+        env={
+            **os.environ,
+            "LINT_RESULT": "success",
+            "PLAN_RESULT": "success",
+            "DOCS_RESULT": "success",
+            "DOCS_NEEDED": "true",
+            "TESTS_NEEDED": "true",
+            "TEST_RESULT": test_result,
+        },
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == (0 if test_result == "success" else 1)
+
+
 @pytest.mark.parametrize(
     "invalid_contents",
     [

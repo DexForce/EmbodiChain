@@ -99,6 +99,10 @@ def clock(monkeypatch):
 
 
 class _Engine:
+    @property
+    def resolved_gym_config(self):
+        return self.cfg.gym_config
+
     def __init__(self, clock):
         plan = _plan()
         self.clock = clock

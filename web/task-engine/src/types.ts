@@ -36,7 +36,7 @@ export interface Call {
     relation?: string;
     [key: string]: unknown;
   };
-  resources: Record<string, string>;
+  resources?: Record<string, string>;
   [key: string]: unknown;
 }
 export interface TaskNode {

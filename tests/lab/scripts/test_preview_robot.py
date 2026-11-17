@@ -118,8 +118,18 @@ def test_preview_defaults_and_opt_outs() -> None:
     assert not disabled.gizmo and not disabled.joint_control
 
 
-@pytest.mark.parametrize("robot_id", (*ROBOT_CONFIGS, "DualArmRobot"))
-def test_all_registered_robot_configs_pass_preview_validation(
+@pytest.mark.parametrize(
+    "robot_id",
+    (
+        *(
+            name
+            for name, spec in ROBOT_CONFIGS.items()
+            if "description_path" not in spec
+        ),
+        "DualArmRobot",
+    ),
+)
+def test_registered_body_configs_pass_preview_validation(
     monkeypatch, robot_asset, robot_id
 ) -> None:
     from importlib import import_module
@@ -127,18 +137,26 @@ def test_all_registered_robot_configs_pass_preview_validation(
     import embodichain.lab.sim.cfg as sim_cfg
     from embodichain_robots.dexforce.w1 import utils
 
-    local = lambda _: str(robot_asset)
-    monkeypatch.setattr(embodichain.data, "get_data_path", local)
-    monkeypatch.setattr(sim_cfg, "get_data_path", local)
-    monkeypatch.setattr(utils, "get_data_path", local)
+    # Import before patching the shared resolver so newly loaded presets cannot
+    # retain the temporary asset function after monkeypatch teardown.
+    preset_modules = []
     for spec in ROBOT_CONFIGS.values():
         path, _, name = spec["class_path"].partition(":")
         cls = getattr(import_module(path), name)
-        monkeypatch.setattr(
-            import_module(cls.__module__), "get_data_path", local, raising=False
+        preset_modules.append(import_module(cls.__module__))
+
+    def local(asset: str) -> str:
+        return str(
+            robot_asset.with_suffix(".usda") if asset.endswith(".usda") else robot_asset
         )
+
+    monkeypatch.setattr(embodichain.data, "get_data_path", local)
+    monkeypatch.setattr(sim_cfg, "get_data_path", local)
+    monkeypatch.setattr(utils, "get_data_path", local)
+    for module in preset_modules:
+        monkeypatch.setattr(module, "get_data_path", local, raising=False)
     cfg = preview_robot.build_robot_cfg(_args("--robot", robot_id))
-    assert cfg.fpath or cfg.urdf_cfg is not None
+    assert cfg.fpath or cfg.source is not None or cfg.urdf_cfg is not None
 
 
 @pytest.mark.parametrize("variant", tuple(ROBOT_CONFIGS["DexforceW1"]["variants"]))
@@ -337,6 +355,20 @@ def test_generic_file_accepts_null_optional_asset_fields(robot_asset) -> None:
 
     assert cfg.fpath == str(robot_asset)
     assert cfg.urdf_cfg is None
+
+
+def test_standalone_usd_source_resolves_from_config_directory(tmp_path: Path) -> None:
+    asset = tmp_path / "robot.usda"
+    asset.write_text("#usda 1.0\n")
+    path = tmp_path / "robot.json"
+    path.write_text(
+        json.dumps({"source": {"file_path": asset.name, "source_prim_path": "/Robot"}})
+    )
+
+    cfg = preview_robot.build_robot_cfg(_args("--robot-config", str(path)))
+
+    assert cfg.source.file_path == str(asset)
+    assert cfg.source.source_prim_path == "/Robot"
 
 
 @pytest.mark.parametrize("arguments", [[], ["preview-robot", "--help"]])
@@ -648,3 +680,26 @@ def test_interrupted_preview_still_releases_its_world(
     monkeypatch.setattr(manager, "update", interrupt)
     preview_robot.main(_args("--robot", "ur5"))
     assert events[-2:] == ["destroy", "flush"]
+
+
+@pytest.mark.parametrize(
+    "robot_id,variant",
+    [
+        ("FrankaPandaHand", None),
+        ("DHPGI14080", None),
+        ("CobotMagicV100Gripper", None),
+        ("PikaGripper", None),
+        ("TianjiMarvinGripper", "left"),
+        ("TianjiMarvinGripper", "right"),
+        ("RobotiqArg2F85", None),
+        ("RobotiqArg2F140", None),
+    ],
+)
+def test_registered_gripper_preview_uses_its_actual_native_asset(robot_id, variant):
+    args = ["--robot", robot_id]
+    if variant is not None:
+        args += ["--variant", variant]
+    cfg = preview_robot.build_robot_cfg(_args(*args))
+    assert cfg.urdf_cfg.force_assembly
+    assert cfg.catalog_id == robot_id
+    assert cfg.solver_cfg == {}

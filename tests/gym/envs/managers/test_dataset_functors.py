@@ -1819,6 +1819,19 @@ def test_segment_fragment_payloads_are_independent_and_keep_provenance() -> None
                 "metadata": {
                     "task_program_id": "repeat_pick_place",
                     "program_segment_id": "pick_0",
+                    "segment_contract": {
+                        "segment_id": "pick_0",
+                        "prerequisites": [],
+                        "outcomes": [
+                            {
+                                "kind": "held",
+                                "ref": "cube",
+                                "assurance": "symbolic",
+                                "status": ["satisfied"],
+                            }
+                        ],
+                        "accepted_mask": [True],
+                    },
                 },
             },
             {
@@ -1859,6 +1872,10 @@ def test_segment_fragment_payloads_are_independent_and_keep_provenance() -> None
     assert fragment_metadata["truncated"] is False
     assert fragment_metadata["segments"][0]["start_step"] == 0
     assert fragment_metadata["segments"][0]["end_step"] == 2
+    assert fragment_metadata["segments"][0]["instruction"] == "Pick the cube"
+    assert fragment_metadata["segments"][0]["metadata"]["segment_contract"] == (
+        metadata["segments"][0]["metadata"]["segment_contract"]
+    )
 
 
 @pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
@@ -2329,7 +2346,15 @@ def test_recording_journal_survives_restart_and_deduplicates_commits(tmp_path) -
         MockEnvForDataset(num_envs=1, has_sensors=False),
     )
     identity = str(uuid4())
-    metadata = {"episode_uuid": identity, "run_uuid": str(uuid4())}
+    metadata = {
+        "episode_uuid": identity,
+        "run_uuid": str(uuid4()),
+        "episode_outcome": {
+            "identity": {"episode_uuid": identity},
+            "acceptance": {"accepted": False},
+            "persistence": None,
+        },
+    }
     observations = TensorDict(
         {
             "robot": {
@@ -2346,6 +2371,14 @@ def test_recording_journal_survives_restart_and_deduplicates_commits(tmp_path) -
     recorder.finalize()
     root = recorder.dataset_full_path
     assert recover_recording(root)["ok"]
+    sidecar = json.loads((root / "meta/embodichain_episodes.jsonl").read_text())
+    assert sidecar["episode_outcome"]["acceptance"] == {"accepted": False}
+    assert sidecar["episode_outcome"]["persistence"] == {
+        "dataset_selected": True,
+        "dataset": [{"status": "persisted", "episode_uuid": identity}],
+        "trajectory": None,
+    }
+    assert metadata["episode_outcome"]["persistence"] is None
 
     # No official SDK reopen is attempted; this exercises persistent duplicate
     # detection with the same root after all SDK writers have been finalized.

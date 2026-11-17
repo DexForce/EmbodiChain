@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
+    from embodichain.lab.evaluation import PredicateRegistry
     from embodichain.lab.task_program.language.schema import TaskProgramCfg
     from .catalog import TaskProgramIntegrationCatalog
 
@@ -41,6 +42,7 @@ from .configured import (
     _decode_motion_policy,
     _decode_recovery_policy,
     _identifier,
+    _identifier_mapping,
     _normalize_skill_options_key,
     _normalize_recovery_policy_keys,
     _mapping,
@@ -78,6 +80,7 @@ _EXECUTION_POLICY_OVERRIDE_FIELDS = {
             "velocity_limit",
             "acceleration_limit",
             "dynamic_collision_mode",
+            "ik_seed_mode",
         }
     ),
     "recovery": frozenset({"skill_timeout", "goal_rotation_threshold"}),
@@ -387,35 +390,128 @@ def _resolve_execution_policy(
     return policy_path, policy
 
 
-def _resolve_task_program_components(
-    value: object,
-    *,
-    base_dir: Path,
-) -> tuple[Path | Mapping[str, object], Mapping[str, object], Mapping[str, object]]:
-    """Resolve program, task integration, and execution policy selections."""
-    declaration = _mapping(
-        value,
-        path="task_program",
-        required=frozenset({"program", "integration", "execution_policy"}),
+def _apply_integration_overrides(
+    source: object, overrides: object
+) -> dict[str, object]:
+    """Apply closed deployment tuning to an owned integration declaration."""
+    result = _owned_mapping(source, path="task integration")
+    patch = _mapping(
+        overrides,
+        path="integration.overrides",
+        required=frozenset(),
+        optional=frozenset({"integration_id", "requires", "profile"}),
     )
-    program_path = (
-        _inline_component(declaration["program"], path="task_program.program")
-        if isinstance(declaration["program"], Mapping)
-        else _component_path(
-            declaration["program"],
-            base_dir=base_dir,
-            path="task_program.program",
-            suffixes=frozenset({".json", ".yaml", ".yml"}),
+    if "integration_id" in patch:
+        result["integration_id"] = _identifier(
+            patch["integration_id"], path="integration.overrides.integration_id"
         )
-    )
-    if isinstance(declaration["integration"], Mapping):
+    if "requires" in patch:
+        requirements = _mapping(
+            patch["requires"],
+            path="integration.overrides.requires",
+            required=frozenset(),
+            optional=frozenset({"embodiment_contract"}),
+        )
+        result["requires"].update(deepcopy(dict(requirements)))
+    if "profile" in patch:
+        result["profile"] = _owned_mapping(
+            _normalize_skill_options_key(
+                result["profile"], path="task integration.profile"
+            ),
+            path="task integration.profile",
+        )
+        profile = _mapping(
+            patch["profile"],
+            path="integration.overrides.profile",
+            required=frozenset(),
+            optional=frozenset({"defaults", "skill_options"}),
+        )
+        defaults = _owned_mapping(
+            profile.get("defaults", {}), path="integration.overrides.profile.defaults"
+        )
+        for name, value in defaults.items():
+            existing = result["profile"]["defaults"]
+            if name not in existing:
+                raise ValueError(
+                    f"Integration override names undeclared resource default {name!r}."
+                )
+            resources = _mapping(
+                value,
+                path=f"integration.overrides.profile.defaults.{name}",
+                required=frozenset(),
+                optional=frozenset(existing[name]),
+            )
+            existing[name] = deepcopy(dict(existing[name]))
+            for slot, resource in resources.items():
+                existing[name][slot] = _identifier(
+                    resource,
+                    path=f"integration.overrides.profile.defaults.{name}.{slot}",
+                )
+        options = _owned_mapping(
+            profile.get("skill_options", {}),
+            path="integration.overrides.profile.skill_options",
+        )
+        allowed = frozenset(
+            {
+                "pre_grasp_distance",
+                "lift_height",
+                "hand_interp_steps",
+                "grasp_settle_steps",
+                "release_settle_steps",
+                "approach_along_grasp_axis",
+                "cartesian_lift",
+                "cartesian_approach",
+                "fixed_object_to_eef",
+                "preserve_current_object_orientation",
+            }
+        )
+        for name, value in options.items():
+            if name not in result["profile"]["skill_options"]:
+                raise ValueError(
+                    f"Integration override names undeclared skill {name!r}."
+                )
+            fields = _mapping(
+                value,
+                path=f"integration.overrides.profile.skill_options.{name}",
+                required=frozenset(),
+                optional=allowed,
+            )
+            existing = result["profile"]["skill_options"]
+            existing[name] = {
+                **deepcopy(dict(existing[name])),
+                **deepcopy(dict(fields)),
+            }
+    return result
+
+
+def _select_integration(
+    value: object, *, base_dir: Path
+) -> tuple[dict[str, object], Path]:
+    """Select and validate integration declarations without loading runtime assets."""
+    integration_selector = value
+    overrides = None
+    if (
+        isinstance(integration_selector, Mapping)
+        and "component" in integration_selector
+    ):
+        selector = _mapping(
+            integration_selector,
+            path="task_program.integration",
+            required=frozenset({"component"}),
+            optional=frozenset({"overrides"}),
+        )
+        integration_selector = selector["component"]
+        overrides = _owned_mapping(
+            selector.get("overrides", {}), path="integration.overrides"
+        )
+    if isinstance(integration_selector, Mapping):
         integration_path = None
         integration_source = _inline_component(
-            declaration["integration"], path="task_program.integration"
+            integration_selector, path="task_program.integration"
         )
     else:
         integration_path = _component_path(
-            declaration["integration"],
+            integration_selector,
             base_dir=base_dir,
             path="task_program.integration",
             suffixes=frozenset({".yaml", ".yml"}),
@@ -423,6 +519,8 @@ def _resolve_task_program_components(
         integration_source = _load_yaml_component(
             integration_path, field_name="task integration"
         )
+    if overrides is not None:
+        integration_source = _apply_integration_overrides(integration_source, overrides)
     integration_base = base_dir if integration_path is None else integration_path.parent
     integration = _mapping(
         integration_source,
@@ -439,18 +537,49 @@ def _resolve_task_program_components(
         optional=frozenset({"runtime_services", "asset_requirements"}),
     )
     integration = deepcopy(dict(integration))
+    if "asset_requirements" in integration:
+        from embodichain.lab.task_program.semantics.asset_requirements import (
+            AssetRequirements,
+        )
+
+        AssetRequirements.from_dict(integration["asset_requirements"])
+    return integration, integration_base
+
+
+def _resolve_integration(value: object, *, base_dir: Path) -> dict[str, object]:
+    """Resolve a selected integration's runtime assets for actual deployment."""
+    integration, integration_base = _select_integration(value, base_dir=base_dir)
     if "runtime_services" in integration:
         runtime_services = _owned_mapping(
             integration["runtime_services"], path="integration.runtime_services"
         )
+        if "demo_skills" in runtime_services:
+            from embodichain.data._references import _resolve_data_reference
+
+            runtime_services["demo_skills"] = _owned_mapping(
+                runtime_services["demo_skills"], path="runtime_services.demo_skills"
+            )
+            for alias, entry in runtime_services["demo_skills"].items():
+                if not isinstance(entry, dict) or "asset_manifest" not in entry:
+                    raise ValueError(f"Demo Skill {alias!r} requires asset_manifest")
+                entry["asset_manifest"] = str(
+                    _resolve_data_reference(
+                        entry["asset_manifest"], base_dir=integration_base
+                    )
+                )
         if "registered_semantic_lowerers" in runtime_services:
             for lowerer in runtime_services["registered_semantic_lowerers"]:
-                if isinstance(lowerer, dict) and lowerer.get("kind") == "demo_skill":
+                if not isinstance(lowerer, dict):
+                    continue
+                field = {
+                    "demo_skill": "asset_manifest",
+                }.get(lowerer.get("kind"))
+                if field is not None and field in lowerer:
                     from embodichain.data._references import _resolve_data_reference
 
-                    lowerer["asset_manifest"] = str(
+                    lowerer[field] = str(
                         _resolve_data_reference(
-                            lowerer["asset_manifest"], base_dir=integration_base
+                            lowerer[field], base_dir=integration_base
                         )
                     )
         if "nominal_motion_sources" in runtime_services:
@@ -489,12 +618,37 @@ def _resolve_task_program_components(
                 resolved_sources.append(value)
             runtime_services["nominal_motion_sources"] = resolved_sources
         integration["runtime_services"] = runtime_services
-    if "asset_requirements" in integration:
-        from embodichain.lab.task_program.semantics.asset_requirements import (
-            AssetRequirements,
-        )
+    return integration
 
-        AssetRequirements.from_dict(integration["asset_requirements"])
+
+def _resolve_task_program_components(
+    value: object,
+    *,
+    base_dir: Path,
+) -> tuple[Path | Mapping[str, object], Mapping[str, object], Mapping[str, object]]:
+    """Resolve program, task integration, and execution policy selections."""
+    declaration = _mapping(
+        value,
+        path="task_program",
+        required=frozenset({"program", "integration", "execution_policy"}),
+        optional=frozenset({"execution", "action_owners"}),
+    )
+    execution = declaration.get("execution", "expert")
+    if execution not in ("expert", "policy"):
+        raise ValueError("task_program.execution must be expert or policy.")
+    if "action_owners" in declaration and execution != "policy":
+        raise ValueError("task_program.action_owners requires policy execution.")
+    program_path = (
+        _inline_component(declaration["program"], path="task_program.program")
+        if isinstance(declaration["program"], Mapping)
+        else _component_path(
+            declaration["program"],
+            base_dir=base_dir,
+            path="task_program.program",
+            suffixes=frozenset({".json", ".yaml", ".yml"}),
+        )
+    )
+    integration = _resolve_integration(declaration["integration"], base_dir=base_dir)
     _, policy = _resolve_execution_policy(
         declaration["execution_policy"], base_dir=base_dir
     )
@@ -608,6 +762,8 @@ def _load_configured_task_program_deployment(
     task_program: object,
     skill_profile: object,
     base_dir: str | Path,
+    evaluation: Mapping[str, object] | None = None,
+    evaluation_registry: PredicateRegistry | None = None,
 ) -> _ConfiguredTaskProgramDeployment:
     """Compose Task Program metadata after Gym resolves physical components."""
     selected_base_dir = Path(base_dir).expanduser()
@@ -615,13 +771,16 @@ def _load_configured_task_program_deployment(
         task_program,
         base_dir=selected_base_dir,
     )
+    from .demo_skill import _prepare_named_demo_skills, _bind_named_demo_sources
+
+    named_demo_sources = _prepare_named_demo_skills(task)
     selected_skill_profile = _mapping(
         skill_profile,
         path="embodiment component.skill_profile",
         required=frozenset(
             {"contract_id", "profile_id", "resources", "command_presets"}
         ),
-        optional=frozenset({"runtime_services"}),
+        optional=frozenset({"runtime_services", "evaluation_links"}),
     )
     scene_binding = _mapping(
         task["scene_binding"],
@@ -647,6 +806,12 @@ def _load_configured_task_program_deployment(
     integration = _decode_configured_task_program_integration(
         payload,
         planner_config=planner_config,
+        evaluation=evaluation,
+        evaluation_registry=evaluation_registry,
+        evaluation_robot_links=_identifier_mapping(
+            selected_skill_profile.get("evaluation_links", {}),
+            path="embodiment component.skill_profile.evaluation_links",
+        ),
     )
     integration_id = _identifier(
         task["integration_id"],
@@ -665,7 +830,11 @@ def _load_configured_task_program_deployment(
         ),
     )
     factory = cast(_ConfiguredTaskProgramAdapterFactory, integration.adapter_factory)
-    if factory.nominal_motion_sources or isinstance(program_path, Mapping):
+    if (
+        factory.nominal_motion_sources
+        or named_demo_sources
+        or isinstance(program_path, Mapping)
+    ):
         from .nominal import _ConfiguredTaskProgramNominalSources
 
         catalog = integration.registration.catalog
@@ -677,6 +846,44 @@ def _load_configured_task_program_deployment(
                 "configured nominal sources require the integration's program_id"
             )
         compiled = catalog.preflight(program)
+        if named_demo_sources:
+            from dataclasses import replace
+
+            factory = replace(
+                factory,
+                nominal_motion_sources=_bind_named_demo_sources(
+                    compiled, named_demo_sources, factory.nominal_motion_sources
+                ),
+            )
+            from dataclasses import asdict
+            import hashlib
+            import json
+
+            source_identity = [
+                {
+                    key: value
+                    for key, value in asdict(item).items()
+                    if key not in {"asset_manifest", "prototype_manifest"}
+                }
+                for item in factory.nominal_motion_sources
+            ]
+            fingerprint = hashlib.sha256(
+                json.dumps(
+                    {
+                        "integration": integration.integration_fingerprint,
+                        "nominal_motion_sources": source_identity,
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                ).encode()
+            ).hexdigest()
+            factory = replace(factory, integration_fingerprint=fingerprint)
+            integration = replace(
+                integration,
+                adapter_factory=factory,
+                integration_fingerprint=fingerprint,
+            )
         if factory.nominal_motion_sources:
             _ConfiguredTaskProgramNominalSources(
                 compiled, factory.nominal_motion_sources
@@ -692,6 +899,11 @@ def _load_configured_task_program_deployment(
         integration=integration,
         scene_binding=deepcopy(dict(scene_binding)),
         planner_config=planner_config,
+        _composed_declarations={
+            "integration": deepcopy(task),
+            "execution_policy": deepcopy(policy),
+            "runtime_services": deepcopy(payload.get("runtime_services", {})),
+        },
     )
 
 

@@ -181,7 +181,13 @@ def create_pick_object(sim, asset_path: str) -> Articulation:
     sim.prepare()
     lock_turn_joint(cube)
     sim.update(step=10)
-    cube.clear_dynamics()
+    if sim.is_newton_backend:
+        # DexUni resets coupled solver history for the complete world, including
+        # the robot and free-root cube. Restore the cube's runtime lock afterwards.
+        sim.reset_objects_state()
+        lock_turn_joint(cube)
+    else:
+        cube.clear_dynamics()
     return cube
 
 
@@ -211,7 +217,9 @@ def main() -> None:
     cube = create_pick_object(sim, args.asset_path)
     sim.prepare()
     hand_open, hand_close = get_hand_open_close_qpos(robot)
-    initialize_pre_pick_robot_pose(robot, cube, hand_open)
+    initialize_pre_pick_robot_pose(
+        robot, cube, hand_open, clear_dynamics=not sim.is_newton_backend
+    )
     motion_gen = create_curobo_motion_generator(
         robot,
         use_cuda_graph=args.physics != "newton",

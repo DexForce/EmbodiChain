@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from typing import Dict
+from contextlib import AbstractContextManager, nullcontext
 
 import torch
 
@@ -60,6 +61,8 @@ def segmented_discounted_return(
 def complete_discounted_return(
     rollout: DifferentiableRollout,
     gamma: float,
+    *,
+    terminal_value: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Compute per-environment returns up to the first terminal transition.
 
@@ -70,12 +73,16 @@ def complete_discounted_return(
     Args:
         rollout: Complete graph-preserving trajectory.
         gamma: Per-step discount factor.
+        terminal_value: Optional value at the final next state, shaped like
+            one reward row. It retains gradients and contributes with discount
+            ``gamma**num_steps`` only for rows with no termination or truncation.
+            Callers own value estimation and any differentiable soft survival.
 
     Returns:
         One masked discounted return per environment.
 
     Raises:
-        ValueError: If the rollout is empty.
+        ValueError: If the rollout is empty or the terminal value has wrong shape.
     """
     if rollout.num_steps == 0:
         raise ValueError("Cannot compute returns for an empty rollout.")
@@ -83,9 +90,18 @@ def complete_discounted_return(
     discounts = torch.as_tensor(gamma, device=rewards.device, dtype=rewards.dtype) ** (
         torch.arange(rollout.num_steps, device=rewards.device, dtype=rewards.dtype)
     )
-    return (
-        rewards * rollout.alive_mask.to(rewards.dtype) * discounts.unsqueeze(-1)
-    ).sum(dim=0)
+    alive_mask = rollout.alive_mask
+    returns = (rewards * alive_mask.to(rewards.dtype) * discounts.unsqueeze(-1)).sum(
+        dim=0
+    )
+    if terminal_value is not None:
+        if terminal_value.shape != returns.shape:
+            raise ValueError("terminal_value must have one value per environment.")
+        survives = alive_mask[-1] & ~rollout.transitions[-1].done
+        returns = returns + gamma**rollout.num_steps * torch.where(
+            survives, terminal_value, torch.zeros_like(terminal_value)
+        )
+    return returns
 
 
 @configclass
@@ -111,7 +127,7 @@ class APG(BaseAlgorithm[DifferentiableRollout]):
         self.cfg = cfg
         self.policy = policy
         self.device = torch.device(cfg.device)
-        self._setup_optimization(cfg, policy.parameters())
+        self._setup_optimization(cfg, self._optimization_parameters())
         self._update_active = False
         self._update_valid = True
         self._discount: torch.Tensor | None = None
@@ -120,6 +136,13 @@ class APG(BaseAlgorithm[DifferentiableRollout]):
         self._entropy_total = 0.0
         self._num_accumulated_steps = 0
         self._action_gradient_stats: list[BatchedGradientNormStats] = []
+
+    def rollout_context(self) -> AbstractContextManager[None]:
+        """Return the model-state context used during graph-preserving collection."""
+        return nullcontext()
+
+    def _optimization_parameters(self) -> tuple[torch.nn.Parameter, ...]:
+        return tuple(self.policy.parameters())
 
     def update(self, rollout: DifferentiableRollout) -> Dict[str, float]:
         """Apply one pathwise-gradient update from a rollout segment."""
@@ -171,6 +194,7 @@ class APG(BaseAlgorithm[DifferentiableRollout]):
         *,
         objective_scale: float | torch.Tensor = 1.0,
         accumulation_scale: float = 1.0,
+        terminal_value: torch.Tensor | None = None,
     ) -> None:
         """Accumulate one independent full-horizon rollout.
 
@@ -179,6 +203,10 @@ class APG(BaseAlgorithm[DifferentiableRollout]):
             objective_scale: Scalar or per-environment return multiplier.
             accumulation_scale: Loss multiplier, normally reciprocal to the
                 number of independent rollout microbatches in one update.
+            terminal_value: Optional graph-connected final-state value. Hard
+                terminal/truncated rows do not bootstrap; see
+                :func:`complete_discounted_return`. Value fitting and freezing
+                estimator weights remain the caller's responsibility.
 
         Raises:
             RuntimeError: If no APG update is active.
@@ -191,7 +219,9 @@ class APG(BaseAlgorithm[DifferentiableRollout]):
         if accumulation_scale <= 0.0:
             raise ValueError("accumulation_scale must be positive.")
 
-        returns = complete_discounted_return(rollout, self.cfg.gamma)
+        returns = complete_discounted_return(
+            rollout, self.cfg.gamma, terminal_value=terminal_value
+        )
         scale = torch.as_tensor(
             objective_scale,
             dtype=returns.dtype,
@@ -251,7 +281,7 @@ class APG(BaseAlgorithm[DifferentiableRollout]):
         # simulator steps. Invoke it even when this accumulation window is
         # already invalid so every rollout can release its retained graph/tape.
         loss.backward()
-        parameters = tuple(self.policy.parameters())
+        parameters = self._optimization_parameters()
         gradients_are_finite = all(
             parameter.grad is None or bool(torch.isfinite(parameter.grad).all())
             for parameter in parameters
@@ -270,7 +300,7 @@ class APG(BaseAlgorithm[DifferentiableRollout]):
         if self._num_accumulated_steps == 0:
             raise RuntimeError("Cannot finish an APG update without any segments.")
 
-        parameters = tuple(self.policy.parameters())
+        parameters = self._optimization_parameters()
         if not self._update_valid:
             metrics = self._accumulated_metrics(
                 grad_norm=float("nan"),
@@ -296,6 +326,7 @@ class APG(BaseAlgorithm[DifferentiableRollout]):
             )
             self._update_active = False
             return metrics
+        self._after_gradient_clip()
         self.optimizer.step()
         self._step_scheduler()
         metrics = self._accumulated_metrics(
@@ -305,6 +336,9 @@ class APG(BaseAlgorithm[DifferentiableRollout]):
         )
         self._update_active = False
         return metrics
+
+    def _after_gradient_clip(self) -> None:
+        """Apply algorithm-specific gradient transforms after norm validation."""
 
     def cancel_update(self) -> None:
         self.optimizer.zero_grad(set_to_none=True)

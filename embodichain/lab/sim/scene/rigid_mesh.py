@@ -120,7 +120,10 @@ class RigidMeshSnapshot:
 def capture_rigid_mesh(
     simulation: SimulationManager, uid: str, *, batch_size: int
 ) -> RigidMeshSnapshot:
-    """Capture native input vertices followed by matching triangles without poses.
+    """Capture semantic vertices and matching triangles without reading poses.
+
+    Independent semantic geometry preserves placement inputs across appearance
+    replacement. Objects without that API retain their source visual-mesh route.
 
     Args:
         simulation: Owner of the exact native rigid object.
@@ -131,7 +134,7 @@ def capture_rigid_mesh(
     Returns:
         An owned CPU input mesh whose vertices already include native body scale.
         Callers supply separately observed poses and recapture after model/scale
-        changes. No proxy hull or AABB substitutes for missing topology.
+        changes. No inferred hull or AABB substitutes for missing topology.
 
     Raises:
         ValueError: The source, batch or complete finite topology is unavailable.
@@ -143,6 +146,10 @@ def capture_rigid_mesh(
     native = simulation.get_rigid_object(uid)
     if native is None:
         raise ValueError("Rigid mesh capture requires its exact bound native object.")
-    vertices, triangles = native.get_vertices(scale=True), native.get_triangles()
+    semantic_mesh = getattr(native, "get_semantic_mesh", None)
+    if callable(semantic_mesh):
+        vertices, triangles = semantic_mesh()
+    else:
+        vertices, triangles = native.get_vertices(scale=True), native.get_triangles()
     _validate_mesh_metadata(vertices, triangles, expected_batch_size=batch_size)
     return RigidMeshSnapshot(uid, vertices, triangles)

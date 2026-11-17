@@ -47,9 +47,31 @@
    This controls only the graceful-close wait; forced-shutdown join bounds remain
    separate. A forced shutdown marks durability unconfirmed and ends in FAILED. Concurrent stop
    cancels a starting engine.
+   The child also watches its logical creator's multiprocessing sentinel. Creator
+   death wakes idle/active close paths; the same shutdown timeout bounds remaining
+   cleanup before forced child exit. The OS parent may be the live forkserver.
 9. `OnlineDataset` is infinite. Item mode samples one row then removes the leading dimension
    so DataLoader can collate; batch mode re-samples a dynamic chunk per yield. Multi-worker
    readers sample shared memory independently.
+
+## Environment sources and episode execution
+
+`OnlineDataEngineCfg.gym_config_path` selects a source-owned JSON/YAML declaration
+instead of a nonempty `gym_config` dictionary. The owner loads it once and gives
+buffer allocation and the forkserver worker the same mapping and absolute source
+path; component paths remain relative to that source. Child processes discover
+task packages and execute `embodichain.init` hooks before decoding manager terms.
+`engine.resolved_gym_config` returns an owned physical declaration snapshot;
+flow-control producer validation reads this declaration for both source paths
+and dictionaries without reloading YAML or inspecting private engine state.
+
+An optional `episode_runner="module:function"` owns reset, demo execution,
+settling and task qualification, returning the same `DemoEpisodeResult` as
+`execute_demo_episode`. The engine attaches/validates its buffer before each
+attempt and keeps bounded retries, publication and cleanup. It does not reset
+before a custom runner. Only completed, all-success results are published; no
+custom result bypasses the normal acceptance boundary. Omitting the runner
+preserves the engine's reset and ordinary SDK demo execution.
 
 ## Explicit owner-side flow control
 
@@ -58,7 +80,7 @@ engine. Its creating process/thread calls the controller; the application still
 starts/stops the engine and owns training, evaluation and resource accounting.
 An optional `ODSConfiguration` must match engine cache, producer count, quotas
 and batch size. A plan or production limit requires an explicit positive
-`gym_config.num_envs` dividing cache size; unplanned/unlimited legacy engines
+`num_envs` in the resolved physical declaration dividing cache size; unplanned/unlimited legacy engines
 retain their existing layout support.
 With a plan, `prepare_batch()` schedules quota-threshold refill, bounded quota
 waits and batch-start pacing; a pause does not accumulate catch-up credits.
@@ -141,8 +163,12 @@ matching semantics.
 The worker selects `EmbodiedEnvCfg.rollout_action_semantics` from the ODS
 configuration. Explicit policy recording uses the existing raw ActionManager
 route without requiring a DatasetManager; floating layout, finite values and
-action-space bounds are checked before processing. Direct `ControllerAction`
-commands cannot enter a policy-request buffer. The expert schema and policy
+action-space bounds are checked before processing. Position-only experts with
+`expert_trajectory.use_action_manager` may record the actual converted manager
+request while retaining their exact FK execution target. Converted requests
+are validated before execution and captured separately from controller targets;
+unmanaged direct `ControllerAction` commands remain unsupported in a
+policy-request buffer. The expert schema and policy
 request schema remain independent. Configuration examples live in the
 [public online-data guide](../../../docs/source/features/online_data.md).
 

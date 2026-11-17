@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+
 import gc
 import json
 from pathlib import Path
@@ -27,7 +28,7 @@ import weakref
 import pytest
 import torch
 
-from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
+
 from embodichain.toolkits.graspkit.pg_grasp import (
     AntipodalGraspPoseGenerator,
     FixedGripperCollisionGeometry,
@@ -78,7 +79,9 @@ def _geometry(role: str) -> SampledHandGeometry:
 
 def _delegate(role: str) -> AntipodalGraspPoseGenerator:
     result = AntipodalGraspPoseGenerator(
-        ParallelJawGripperModelCfg(model_id=role),
+        model_id=role,
+        min_opening_width=0.001,
+        max_opening_width=0.1,
         collision_geometry=FixedGripperCollisionGeometry(
             torch.zeros(1, 3), {"grasp_from_tcp": torch.eye(4).tolist()}
         ),
@@ -201,7 +204,7 @@ def _ports(monkeypatch, *, reject_all=False) -> list[dict]:
             proposals_only
         ), "paired refinement must explicitly request unqualified proposals"
         return backends.setdefault(
-            id(generator), Backend(generator.gripper_model.model_id)
+            id(generator), Backend(generator.gripper_data["model_id"])
         )
 
     monkeypatch.setattr(AntipodalGraspPoseGenerator, "_backend", backend)
@@ -342,7 +345,9 @@ def test_unresolved_or_invalid_budget_is_rejected_before_sampling():
 
 def test_inferred_ground_policy_requires_an_explicit_supported_configuration():
     left = AntipodalGraspPoseGenerator(
-        ParallelJawGripperModelCfg(),
+        model_id="parallel_jaw",
+        min_opening_width=0.001,
+        max_opening_width=0.1,
         collision_geometry=FixedGripperCollisionGeometry(
             torch.zeros(1, 3), {"grasp_from_tcp": torch.eye(4).tolist()}
         ),
@@ -422,7 +427,9 @@ def test_real_contact_refinement_accepts_opposed_box_grasps_without_fixed_checke
 
     def delegate(role):
         return AntipodalGraspPoseGenerator(
-            ParallelJawGripperModelCfg(model_id=role),
+            model_id=role,
+            min_opening_width=0.001,
+            max_opening_width=0.1,
             collision_geometry=FixedGripperCollisionGeometry(
                 torch.zeros(1, 3), {"grasp_from_tcp": torch.eye(4).tolist()}
             ),
@@ -458,3 +465,45 @@ def test_real_contact_refinement_accepts_opposed_box_grasps_without_fixed_checke
     sampler.clear_cache()
     gc.collect()
     assert native_query() is None
+
+
+def test_paired_query_compatibility_tracks_numeric_inputs_and_provider_ownership():
+    """Independent role calibrations are valid only through a shared paired owner."""
+    from embodichain.toolkits.graspkit.pg_grasp.opening import (
+        OpeningEnvelopeGraspPoseGenerator,
+    )
+
+    left, equivalent = _delegate("same"), _delegate("same")
+    assert left.paired_query_key == equivalent.paired_query_key
+    for tcp in (torch.eye(4), torch.eye(4).numpy()):
+        represented = AntipodalGraspPoseGenerator(
+            **left.gripper_data,
+            collision_geometry=FixedGripperCollisionGeometry(
+                torch.zeros(1, 3), {"grasp_from_tcp": tcp}
+            ),
+            collision_cfg=left.collision_cfg,
+        )
+        assert left.paired_query_key == represented.paired_query_key
+    owned_geometry = equivalent.collision_geometry
+    owned_geometry.provenance["grasp_from_tcp"][0][3] = 0.1
+    right = AntipodalGraspPoseGenerator(
+        **equivalent.gripper_data,
+        collision_geometry=owned_geometry,
+        collision_cfg=equivalent.collision_cfg,
+    )
+    assert left.paired_query_key != right.paired_query_key
+    assert (
+        OpeningEnvelopeGraspPoseGenerator(left).paired_query_key
+        == left.paired_query_key
+    )
+    provider = Mock(spec=coordinated.PairedGraspProvider)
+    provider.get_dual_arm_valid_grasp_poses.return_value = [None]
+    left_view = coordinated.CoordinatedGraspPoseGenerator(left, provider)
+    right_view = coordinated.CoordinatedGraspPoseGenerator(right, provider)
+    assert left_view.paired_query_key == right_view.paired_query_key
+    assert left_view.get_dual_arm_valid_grasp_poses(**_query()) == [None]
+    provider.get_dual_arm_valid_grasp_poses.assert_called_once()
+    other = coordinated.CoordinatedGraspPoseGenerator(
+        right, Mock(spec=coordinated.PairedGraspProvider)
+    )
+    assert left_view.paired_query_key != other.paired_query_key

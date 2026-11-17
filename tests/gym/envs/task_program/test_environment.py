@@ -371,6 +371,7 @@ class _FakeDeclarativeEnvironment(EmbodiedEnv):
     """Environment surface requiring no task-level motion implementation."""
 
     def __init__(self, adapter: TaskProgramEnvironmentAdapter) -> None:
+        self._num_envs = _BATCH_SIZE
         self._adapter = adapter
 
     @property

@@ -282,8 +282,9 @@ mixed deformable tasks, destroy/recreate, and steady-state control throughput.
 ### Object Groups and Deformables
 
 - Maintain Newton rigid-object-group parity through the Scene rigid-body batch.
-- Expand mixed rigid/articulation/deformable qualification across AutoSolver
-  outcomes, especially DexUni's rigid-contact limitation.
+- Expand mixed rigid/articulation/deformable qualification across DexUni's
+  automatic MuJoCo, VBD, and coupled paths, including per-row contact-force
+  availability.
 
 ### Articulation / Robot
 
@@ -364,7 +365,7 @@ Remaining:
 
 7. Add rigid-only Newton gym smoke tests.
 10. Add mixed-scene deformable qualification for the supported volume/surface
-    object APIs and their AutoSolver outcomes.
+    object APIs and DexUni's scene-based dispatch.
 11. Newton-native per-link contact params for articulations (after dexsim
     exposes a per-link shape-material setter).
 12. Full migration off legacy `PhysicalAttr` to dexsim's spawn descriptors

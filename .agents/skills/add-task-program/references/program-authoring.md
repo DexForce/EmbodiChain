@@ -30,7 +30,13 @@ A program owns:
 - one bounded program tree.
 
 Supported node families are sequence, repeat, segment, invoke, and parallel
-with an owned barrier. Built-in call configs are Pick, Place, and HandOver.
+with an owned barrier. Built-in call configs are Pick, Place, HandOver, and MoveHeldObject. List/action
+shorthand expands to the same strict AST; objects stay explicit and string
+`at`/`final_target` fields select named targets. Targets support world poses,
+scene-relative poses and repeat-local cyclic poses. Typed transport and duration
+`hold` policies require verified effects. Use `demo_skill: {skill, roles}` only
+with an alias declared by the selected integration's `runtime_services.demo_skills`;
+composition generates its content-pinned occurrence sources.
 `RegisteredSemanticCallCfg` is the extension payload for an allowlisted call.
 
 Do not serialize the trusted integration selection. It is injected from the

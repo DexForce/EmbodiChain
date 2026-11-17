@@ -403,3 +403,20 @@ explicitly and test normalization through the facade. A dynamic-world backend
 also implements `collision_world_info` and `with_collision_world()` without
 mutating caller-owned options. Keep lazy import behavior and optional dependency
 failures covered when changing registrations.
+
+## Cartesian recovery
+
+`MotionGenerator.generate()` and `_cartesian.py` own sampled segment recovery.
+Explicit linear keyframes use fixed-grid sequential IK; pre-sampled paths retain
+`preserve_cartesian_samples`. Alternatives are opt-in, B1-only and reported in
+`PlanResult.recovery`, separate from complete-action retries. Exhaustion keeps
+the first failed result and candidate evidence; `defer_recovery` exposes nominal
+results before a caller selects recovery.
+
+Dense attempts advance the original RNG stream; continuous IK preserves the
+original time grid and its existing Torch RNG fork. Perturbed seeds are hints,
+not executed waypoints: velocity checks use the actual preceding posture.
+Nested searches retain their caller's cooperative deadline. Every real generation
+attempt charges the host budget once; public-entry cancellation checks add no
+extra planning charge and cannot preempt native work. Atomic Skills select
+eligible segments and validate emitted full-robot samples after transforms.

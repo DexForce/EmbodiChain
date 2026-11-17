@@ -149,4 +149,4 @@ tracks:
         - 0.0
         - -0.22
         - 0.06
-    grasp_model: robotiq_arg2f_140
+    grasp_model: RobotiqArg2F140

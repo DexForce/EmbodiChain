@@ -43,6 +43,7 @@ EXPECTED_COMMANDS = {
     "eval-policy",
     "expansion",
     "fit-trajectory",
+    "gensim",
     "list-robot",
     "list-task",
     "show-task",
@@ -544,7 +545,9 @@ def test_preview_scene_help_includes_output_and_viser_options(
 
     assert exc_info.value.code == 0
     output = capsys.readouterr().out
-    assert "--output_root" in output
+    assert "--usd-file" in output
+    assert "--simulate" in output
+    assert "--output_root" not in output
     assert "--viser" in output
 
 
@@ -601,7 +604,7 @@ def test_benchmark_help_distinguishes_benchmark_domains(
             ["--suite", "motion_ur5_free_space_coverage"],
             "motion_ur5_free_space_coverage",
         ),
-        (["--suite", "atomic_franka_pgi_smoke"], "atomic_franka_pgi_smoke"),
+        (["--suite", "atomic_franka_robotiq_smoke"], "atomic_franka_robotiq_smoke"),
     ],
 )
 def test_motion_generation_dispatch_selects_suite(

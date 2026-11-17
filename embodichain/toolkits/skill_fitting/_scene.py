@@ -207,7 +207,6 @@ def _hand_geometry(
     from embodichain.toolkits.graspkit.pg_grasp.fixed_geometry import (
         FixedGripperCollisionGeometry,
     )
-    from embodichain.toolkits.graspkit.pose_generator import ParallelJawGripperModelCfg
 
     arm, hand = pair["motion"], pair["grasp"]
     solver = profile.solvers[arm]
@@ -338,10 +337,10 @@ def _hand_geometry(
     points = geometry.points - geometry.points.new_tensor([0, 0, shift])
     provenance["points_sha256"] = hashlib.sha256(points.numpy().tobytes()).hexdigest()
     geometry = FixedGripperCollisionGeometry(points, provenance)
-    model = ParallelJawGripperModelCfg(
+    gripper_inputs = dict(
         model_id=hand, min_opening_width=0.001, max_opening_width=float(travel.sum())
     )
-    return geometry, model
+    return geometry, gripper_inputs
 
 
 def rank_grasps(
@@ -474,7 +473,9 @@ def prepare_scene_grasps(
             )
 
         target = min(objects, key=distance)
-    geometry, model = _hand_geometry(profile, pair, qpos[0], cfg.grasp_contact_inset_m)
+    geometry, gripper_inputs = _hand_geometry(
+        profile, pair, qpos[0], cfg.grasp_contact_inset_m
+    )
     files.update(geometry.provenance["files_sha256"])
     affordance = AntipodalAffordance(
         mesh_vertices=torch.as_tensor(
@@ -491,7 +492,7 @@ def prepare_scene_grasps(
         # hand realization independently before ranking its full TCP pose.
         variant = _tcp_z_half_turn(geometry) if half_turn else geometry
         generator = AntipodalGraspPoseGenerator(
-            model,
+            **gripper_inputs,
             algorithm_cfg=AntipodalGraspPoseGeneratorCfg(
                 sample_count=cfg.grasp_sample_count,
                 max_candidates=cfg.grasp_max_candidates,

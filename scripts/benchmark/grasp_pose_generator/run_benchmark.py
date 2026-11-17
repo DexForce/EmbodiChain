@@ -25,6 +25,12 @@ Run: embodichain benchmark grasp-pose-generator
 
 from __future__ import annotations
 
+
+from embodichain.robot_registry import resolve_gripper_defaults
+from embodichain.lab.sim.utility.gripper_geometry import (
+    build_gripper_collision_geometry,
+)
+
 import argparse
 import os
 import time
@@ -38,10 +44,8 @@ import torch
 import trimesh
 
 from embodichain.data import get_data_path
-from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
-from embodichain.toolkits.graspkit.pg_grasp.model_geometry import (
-    get_parallel_jaw_collision_geometry,
-)
+
+
 from embodichain.toolkits.graspkit.pg_grasp import (
     AntipodalGraspPoseGenerator,
     AntipodalGraspPoseGeneratorCfg,
@@ -210,12 +214,12 @@ def _make_grasp_generator(
 ) -> AntipodalGraspPoseGenerator:
     """Create the public grasp service for one parameter setting."""
     return AntipodalGraspPoseGenerator(
-        ParallelJawGripperModelCfg(
-            model_id="benchmark_parallel_jaw",
-            min_opening_width=0.003,
-            max_opening_width=0.088,
+        model_id="benchmark_parallel_jaw",
+        min_opening_width=0.003,
+        max_opening_width=0.088,
+        collision_geometry=build_gripper_collision_geometry(
+            resolve_gripper_defaults("DHPGI14080")
         ),
-        collision_geometry=get_parallel_jaw_collision_geometry("dh_pgi_140_80"),
         algorithm_cfg=AntipodalGraspPoseGeneratorCfg(
             sample_count=n_sample,
             max_candidates=n_top_grasps,

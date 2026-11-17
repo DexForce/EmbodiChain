@@ -373,7 +373,9 @@ def test_real_producer_loop_publishes_fresh_quotas_and_preserves_lifetime(
     monkeypatch.setitem(
         sys.modules,
         "embodichain.lab.gym.utils.registration",
-        SimpleNamespace(discover_task_packages=lambda: []),
+        SimpleNamespace(
+            discover_task_packages=lambda: [], execute_init_hooks=lambda: []
+        ),
     )
     calls = 0
 

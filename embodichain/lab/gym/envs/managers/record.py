@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import os
+import math
 import random
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -55,7 +56,7 @@ class record_camera_data(Functor):
             env: The environment instance.
 
         Raises:
-            ValueError: If the asset is not a RigidObject or an Articulation.
+            ValueError: If the video frame rate is not finite and positive.
         """
         super().__init__(cfg, env)
 
@@ -68,6 +69,10 @@ class record_camera_data(Functor):
         intrinsics = cfg.params.get(
             "intrinsics", (600, 600, int(resolution[0] / 2), int(resolution[1] / 2))
         )
+        fps = cfg.params.get("fps", 20.0)
+        self._fps = float(env.control_frequency if fps is None else fps)
+        if not math.isfinite(self._fps) or self._fps <= 0:
+            raise ValueError("Camera recording fps must be finite and positive.")
 
         self.camera: Camera = env.sim.add_sensor(
             sensor_cfg=CameraCfg(
@@ -80,8 +85,9 @@ class record_camera_data(Functor):
             )
         )
 
-        # Add this camera's group ID to the environment for batch rendering when RT is enabled.
-        env.add_camera_group_id(self.camera.group_id)
+        # Render every native group when a camera spans multiple batches.
+        for group_id in self.camera.group_ids:
+            env.add_camera_group_id(group_id)
 
         self._save_path = cfg.params.get("save_path", "./outputs/videos")
         self._num_envs = getattr(env, "num_envs", 1)
@@ -161,7 +167,7 @@ class record_camera_data(Functor):
         name = f"episode_{episode:06d}_{self._name}"
         # Publish complete files only. Failed jobs retain their frames and name.
         with tempfile.TemporaryDirectory(prefix=".camera-", dir=directory) as temporary:
-            images_to_video(frames, temporary, name, fps=20)
+            images_to_video(frames, temporary, name, fps=self._fps)
             staged = Path(temporary)
             (staged / (name + ".json")).write_text(
                 json.dumps(metadata, indent=2) + "\n"
@@ -213,6 +219,7 @@ class record_camera_data(Functor):
                 "env_id": row,
                 "episode_context": deepcopy(snapshot),
                 "frames": len(frames),
+                "fps": self._fps,
             }
             self._jobs[key] = (tuple(frame.copy() for frame in frames), metadata)
             self._frames_list[row] = []
@@ -262,6 +269,7 @@ class record_camera_data(Functor):
         intrinsics: tuple[float, float, float, float] = (600, 600, 320, 240),
         max_env_num: int = 16,
         save_path: str = "./outputs/videos",
+        fps: float | None = 20.0,
     ) -> None:
         """Copy selected camera rows without consuming any other row's frames.
 
@@ -276,8 +284,10 @@ class record_camera_data(Functor):
             intrinsics: Construction-only camera calibration.
             max_env_num: Upper bound on captured row indices.
             save_path: Construction-only output directory.
+            fps: Video frame rate, or None for the environment control rate.
         """
         self._ensure_open()
+        env.sim.render_camera_group(list(self.camera.group_ids))
         self.camera.update(fetch_only=True)
         rgb = self.camera.get_data()["color"]
         for row in self._normalize_env_ids(env_ids):

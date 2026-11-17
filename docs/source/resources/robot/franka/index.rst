@@ -31,3 +31,4 @@ The model pages distinguish bare-arm construction from the separately assembled
 
    panda
    cfg
+   hand

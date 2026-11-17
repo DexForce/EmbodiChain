@@ -27,7 +27,7 @@ from embodichain.learning.rl.algo import PPO, PPOCfg
 from embodichain.learning.rl.buffer import RolloutBuffer
 from embodichain.learning.rl.collector import SyncCollector
 from embodichain.learning.rl.env import (
-    DifferentiableVecEnv,
+    DifferentiableEnvProtocol,
     build_learning_env,
 )
 from embodichain.learning.rl.policies import ActorCritic
@@ -42,7 +42,7 @@ def test_point_mass_is_registered_differentiable_environment() -> None:
     env = build_learning_env("PointMassRL", num_envs=4, device="cpu")
 
     assert isinstance(env, PointMassEnv)
-    assert isinstance(env, DifferentiableVecEnv)
+    assert isinstance(env, DifferentiableEnvProtocol)
     assert env.single_observation_space.shape == (14,)
     assert env.single_action_space.shape == (2,)
 

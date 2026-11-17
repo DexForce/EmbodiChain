@@ -78,6 +78,7 @@ from embodichain.lab.task_program.semantics.effects import (
     EffectMonitorRef,
     HeldObjectRelation,
     HeldObjectStateExpectation,
+    CoordinatedHeldObjectCleanupExpectation,
     SemanticEffectSpec,
     SemanticEffectKind,
 )
@@ -343,6 +344,8 @@ class SemanticCallExecutor:
         self._current_call_index: int | None = None
         self._runner: ExecutionRunner | None = None
         self._grounded: GroundedSemanticCall | None = None
+        self._hold_groundings: dict[str, GroundedSemanticCall] = {}
+        self._resolved_object_targets: dict[str, tuple[object, torch.Tensor]] = {}
         self._active_call: SemanticCallSpec | None = None
         self._active_recovery_item: _WorkflowRecoveryWorkItem | None = None
         self._recovery_barrier: _WorkflowRecoveryBarrier | None = None
@@ -1076,6 +1079,30 @@ class SemanticCallExecutor:
                 else None
             ),
         )
+        from embodichain.lab.task_program.semantics.calls import (
+            SemanticRelativePose,
+            SemanticPose,
+        )
+        from embodichain.lab.sim.atomic_skills.goals import resolve_pose_goal
+
+        declaration = getattr(call, "at", getattr(call, "final_target", None))
+        object_ref = getattr(call, "object", None)
+        if (
+            type(declaration) in (SemanticPose, SemanticRelativePose)
+            and object_ref is not None
+        ):
+            self._resolved_object_targets[object_ref.entity_id] = (
+                declaration.snapshot(),
+                resolve_pose_goal(
+                    (
+                        declaration.to_goal()
+                        if type(declaration) is SemanticRelativePose
+                        else declaration.to_matrix()
+                    ),
+                    context,
+                    name="task target",
+                ).clone(),
+            )
         invocation = grounded.invocation
         grounded_eligible = grounded.eligible_mask
         effect_spec = grounded.effect_spec
@@ -1683,6 +1710,137 @@ class SemanticCallExecutor:
         if runner_step.message:
             self._message = runner_step.message
 
+    def resolved_object_target(
+        self, object_id: str, declaration: object
+    ) -> torch.Tensor | None:
+        """Read a target frozen during grounding without observing the scene.
+
+        Args:
+            object_id: Canonical object identity.
+            declaration: The world or scene-relative target to match.
+
+        Returns:
+            An owned target tensor, or None when no matching call was grounded.
+        """
+        from embodichain.lab.task_program.semantics.calls import (
+            SemanticPose,
+            SemanticRelativePose,
+        )
+
+        if type(declaration) not in (SemanticPose, SemanticRelativePose):
+            raise TypeError("declaration must be a typed shared pose target.")
+        stored = self._resolved_object_targets.get(object_id)
+        if stored is None or type(stored[0]) is not type(declaration):
+            return None
+        if type(declaration) is SemanticPose:
+            matches = torch.equal(
+                stored[0].position, declaration.position
+            ) and torch.equal(stored[0].quaternion_xyzw, declaration.quaternion_xyzw)
+        else:
+            matches = stored[0] == declaration
+        return stored[1].clone() if matches else None
+
+    def observe_hold(
+        self, object_id: str, active_mask: torch.Tensor
+    ) -> tuple[PlanningContext, torch.Tensor, torch.Tensor | None]:
+        """Acquire fresh attachment evidence for a post-policy without commands.
+
+        Args:
+            object_id: Exact object whose verified hold must continue.
+            active_mask: Rows still participating in the duration window.
+
+        Returns:
+            Current observation, measured attachment mask and the preceding
+            transport's frozen target when present. Missing evidence never passes.
+        """
+        context = self._observation_provider.observe(self._task_state)
+        accepted = torch.zeros_like(active_mask)
+        grounded = self._hold_groundings.get(object_id)
+        if (
+            grounded is None
+            or grounded.effect_spec is None
+            or grounded.effect_monitor is None
+        ):
+            return context, accepted, None
+        spec = grounded.effect_spec
+        updates = {
+            item.task_state_key: (
+                self._task_state.get_held_object(item.task_state_key)
+                if item.relation is HeldObjectRelation.ATTACHED
+                else None
+            )
+            for item in spec.state_expectations
+            if isinstance(item, HeldObjectStateExpectation)
+            and item.object_id == object_id
+        }
+        holders = {
+            key: held
+            for key, held in updates.items()
+            if held is not None and held.semantics.entity_id == object_id
+        }
+        if not holders or not active_mask.any():
+            return context, accepted, None
+        now = context.robot.timestamp
+        request = EffectVerificationRequest(
+            verification_id=self._observation_revision,
+            skill_id=spec.skill_id,
+            invocation_id=spec.invocation_id,
+            invocation_revision=spec.invocation_revision,
+            invocation_index=0,
+            attempt_generation=0,
+            terminal_segment=None,
+            requested_at=now,
+            deadline=now,
+            env_mask=active_mask,
+            expected_effects=StateDelta(
+                held_object_updates=updates,
+                coordinated_held_object_updates={
+                    item.task_state_keys: None
+                    for item in spec.state_expectations
+                    if isinstance(item, CoordinatedHeldObjectCleanupExpectation)
+                },
+            ),
+        )
+        revision = self._observation_revision
+        self._observation_revision += 1
+        evidence = self._evidence_collector.collect(
+            spec,
+            timestamp=now,
+            observation_revision=revision,
+            env_ids=spec.env_ids[active_mask],
+        )
+        ref = grounded.analyzed.effect_monitor_ref
+        if ref is None or ref.monitor_id != "builtin.composite_effect":
+            raise ValueError(
+                "Hold requires the standard measured composite-effect monitor."
+            )
+        # The duration window requires every observation; terminal streak
+        # hysteresis must not mask a single unavailable or contradictory sample.
+        monitor = self._compiler.effect_monitor_registry.create(
+            spec,
+            EffectMonitorRef(
+                ref.monitor_id,
+                ref.revision,
+                params={**dict(ref.params), "consecutive_samples": 1},
+            ),
+        )
+        decision = monitor.observe(request, evidence)
+        accepted = active_mask & decision.success_mask & ~decision.failure_mask
+        for key in holders:
+            accepted &= context.task.exclusive_held_object_mask(key)
+        from embodichain.lab.sim.atomic_skills import HeldObjectPoseGoal
+
+        goal = grounded.invocation.goal
+        target = (
+            goal.object_target_pose.clone()
+            if type(goal) is HeldObjectPoseGoal
+            and isinstance(goal.object_target_pose, torch.Tensor)
+            else None
+        )
+        if target is None and object_id in self._resolved_object_targets:
+            target = self._resolved_object_targets[object_id][1].clone()
+        return context, accepted, target
+
     def _finish_active_call(self, runner_step: RunnerStep) -> _FinishedCallAttempt:
         """Project one terminal session without deciding workflow eligibility."""
         runner = self._require_runner()
@@ -1733,6 +1891,21 @@ class SemanticCallExecutor:
             events=tuple(self._events[self._call_event_offset :]),
             effects=tuple(self._effect_traces[self._call_effect_offset :]),
         )
+        if completed.any() and grounded.effect_spec is not None:
+            expectations = [
+                item
+                for item in grounded.effect_spec.state_expectations
+                if isinstance(item, HeldObjectStateExpectation)
+            ]
+            for object_id in {item.object_id for item in expectations}:
+                if any(
+                    item.object_id == object_id
+                    and item.relation is HeldObjectRelation.ATTACHED
+                    for item in expectations
+                ):
+                    self._hold_groundings[object_id] = grounded
+                else:
+                    self._hold_groundings.pop(object_id, None)
         self._runner = None
         self._grounded = None
         self._active_call = None

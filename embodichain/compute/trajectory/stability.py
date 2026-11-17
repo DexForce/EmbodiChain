@@ -34,7 +34,8 @@ class PositionRangeMonitor:
         position_drift: Positive maximum range in one candidate window.
 
     The caller supplies a separate pointwise target predicate. Tick zero does
-    not count as an elapsed interval. Success is current, not latched: a later
+    not count as an elapsed interval. Re-entering the target starts a new window
+    at zero completed intervals. Success is current, not latched: a later
     violation resets the row even if an earlier window succeeded. Duplicate
     step observations are idempotent; missing intervals cannot prove stability.
     This numerical monitor reads no Robot, clock, simulator or normative spec.
@@ -63,6 +64,7 @@ class PositionRangeMonitor:
         self._high = initial.clone()
         self._counts = torch.zeros_like(initial, dtype=torch.long)
         self._satisfied = torch.zeros_like(initial, dtype=torch.bool)
+        self._previous_good = torch.zeros_like(initial, dtype=torch.bool)
         self._required = required_steps
         self._drift = float(position_drift)
         self._last_step = -1
@@ -110,11 +112,17 @@ class PositionRangeMonitor:
         good = within_target & torch.isfinite(values)
         low = torch.minimum(self._low, values)
         high = torch.maximum(self._high, values)
-        reset = ~good | ~torch.isfinite(self._low) | ((high - low) > self._drift)
+        reset = (
+            ~good
+            | (~self._previous_good & (elapsed_steps > 0))
+            | ~torch.isfinite(self._low)
+            | ((high - low) > self._drift)
+        )
         self._low = torch.where(reset, values, low)
         self._high = torch.where(reset, values, high)
         self._counts = torch.where(reset, 0, self._counts + int(elapsed_steps > 0))
         self._satisfied = good & (self._counts >= self._required)
+        self._previous_good = good
         self._last_step = elapsed_steps
         return self._satisfied.clone()
 

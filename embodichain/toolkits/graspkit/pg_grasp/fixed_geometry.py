@@ -23,6 +23,7 @@ mesh-intersection or swept-volume certificate.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from copy import deepcopy
 import hashlib
@@ -123,6 +124,7 @@ class FixedGripperCollisionGeometry:
         point_spacing: float,
         link_from_tcp: np.ndarray | None = None,
         mesh_paths: dict[str, str | Path] | None = None,
+        joint_limits: Mapping[str, Sequence[float]] | None = None,
     ) -> FixedGripperCollisionGeometry:
         """Sample mesh collisions at a declared joint state below ``root_link``.
 
@@ -133,6 +135,9 @@ class FixedGripperCollisionGeometry:
             collision_links: Every gripper link whose collisions must be checked.
             joint_positions: Explicit active positions; mimic joints follow their
                 declared multiplier/offset and cannot contradict their leader.
+            joint_limits: Optional effective bounds by native joint name, replacing
+                source limits for those joints. Each pair must be finite and ordered.
+                Unlisted joints retain their URDF limits.
             grasp_from_tcp: Transform taking runtime TCP coordinates to the
                 generator's canonical contact frame. Public poses use the runtime TCP.
             point_spacing: Maximum edge spacing of each triangle's sample grid.
@@ -144,6 +149,10 @@ class FixedGripperCollisionGeometry:
 
         Returns:
             Surface samples and asset/transform provenance for this opening.
+
+        Raises:
+            ValueError: Joint bounds or an opening are invalid, or a supplied
+                position contradicts the source mimic relation.
         """
         if not np.isfinite(point_spacing) or point_spacing <= 0:
             raise ValueError("point_spacing must be finite and positive.")
@@ -166,6 +175,26 @@ class FixedGripperCollisionGeometry:
         named_joints = {
             joint.attrib["name"]: joint for joint in document.findall("joint")
         }
+        effective_limits = {}
+        for name, bounds in (joint_limits or {}).items():
+            if name not in named_joints or named_joints[name].get("type") not in {
+                "revolute",
+                "prismatic",
+                "continuous",
+            }:
+                raise ValueError(
+                    f"Joint limits require a movable source joint: {name!r}."
+                )
+            values = np.asarray(bounds, dtype=float)
+            if (
+                values.shape != (2,)
+                or not np.isfinite(values).all()
+                or values[0] > values[1]
+            ):
+                raise ValueError(
+                    f"Joint limits for {name!r} must be a finite ordered pair."
+                )
+            effective_limits[name] = values.tolist()
         resolved_positions: dict[str, float] = {}
         resolving: set[str] = set()
 
@@ -192,15 +221,17 @@ class FixedGripperCollisionGeometry:
                 ):
                     raise ValueError(f"Fixed opening contradicts mimic joint {name!r}.")
             limits = joint.find("limit")
-            if not np.isfinite(value) or (
-                joint.attrib["type"] != "continuous"
-                and (
-                    limits is None
-                    or not float(limits.attrib["lower"])
-                    <= value
-                    <= float(limits.attrib["upper"])
+            if name in effective_limits:
+                lower, upper = effective_limits[name]
+            elif joint.attrib["type"] == "continuous":
+                lower, upper = -np.inf, np.inf
+            elif limits is not None:
+                lower, upper = float(limits.attrib["lower"]), float(
+                    limits.attrib["upper"]
                 )
-            ):
+            else:
+                lower, upper = np.nan, np.nan
+            if not np.isfinite(value) or not lower <= value <= upper:
                 raise ValueError(f"Invalid fixed opening for joint {name!r}.")
             resolving.remove(name)
             resolved_positions[name] = value
@@ -314,6 +345,7 @@ class FixedGripperCollisionGeometry:
                     for key, value in (mesh_paths or {}).items()
                 },
                 "joint_positions": dict(resolved_positions),
+                "joint_limits": effective_limits,
                 "grasp_from_tcp": grasp_from_tcp.tolist(),
                 "point_spacing_m": point_spacing,
                 "points_sha256": hashlib.sha256(point_array.tobytes()).hexdigest(),

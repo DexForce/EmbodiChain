@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+
 import hashlib
 import json
 from pathlib import Path
@@ -29,7 +30,7 @@ import pytest
 import torch
 
 from embodichain.lab.sim.utility import grasp_geometry as capture
-from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
+
 from embodichain.toolkits.graspkit.pg_grasp import (
     AntipodalGraspPoseGenerator,
     FixedGripperCollisionGeometry,
@@ -254,7 +255,9 @@ def test_moving_finger_tcp_is_rejected_before_surface_capture(tmp_path, monkeypa
 
 def _delegate():
     return AntipodalGraspPoseGenerator(
-        ParallelJawGripperModelCfg(),
+        model_id="parallel_jaw",
+        min_opening_width=0.001,
+        max_opening_width=0.1,
         collision_geometry=FixedGripperCollisionGeometry(
             torch.zeros(1, 3), {"grasp_from_tcp": torch.eye(4).tolist()}
         ),

@@ -35,6 +35,7 @@ from ..motion.workspace.cfg import RobotWorkspaceCfg
 from .articulation import (
     ArticulationCfg,
     JointDrivePropertiesCfg,
+    _mimic_compliance_from_dict,
     _raise_removed_articulation_cfg_fields,
     link_attrs_from_dict,
 )
@@ -128,6 +129,9 @@ class RobotCfg(ArticulationCfg):
     with its environment-wide acquisition switch, which defaults to True.
     """
 
+    gripper_bindings: dict[str, dict] = {}
+    """Resolved explicit hand bindings; runtime assembly validates their topology."""
+
     @classmethod
     def from_dict(cls, init_dict: Dict[str, str | float | tuple]) -> RobotCfg:
         """Initialize the configuration from a dictionary."""
@@ -140,12 +144,27 @@ class RobotCfg(ArticulationCfg):
 
         solver_module = importlib.import_module("embodichain.lab.sim.motion.solvers")
 
-        cfg = cls()  # Create a new instance of the class (cls)
+        file_fields = {}
+        if "source" in init_dict:
+            file_fields["source"] = _usd_source_from_value(init_dict["source"])
+        if "fpath" in init_dict:
+            path = init_dict["fpath"]
+            file_fields["fpath"] = None if path is None else _get_data_path(path)
+        # Resolve source-dependent defaults with the actual file owner present.
+        cfg = cls(**file_fields)
         for key, value in init_dict.items():
-            if key == "source":
-                cfg.source = _usd_source_from_value(value)
+            if key in file_fields:
+                continue
+            elif key == "link_visuals":
+                from .visuals import _visual_elements
+
+                cfg.link_visuals = {
+                    name: _visual_elements(elements) for name, elements in value.items()
+                }
             elif key == "link_attrs" and isinstance(value, dict):
                 cfg.link_attrs = link_attrs_from_dict(value)
+            elif key == "mimic_compliance":
+                cfg.mimic_compliance = _mimic_compliance_from_dict(value)
             elif key == "attrs" and isinstance(value, Mapping):
                 cfg.attrs = _rigid_body_physics_from_dict(value)
             elif hasattr(cfg, key):
@@ -184,8 +203,6 @@ class RobotCfg(ArticulationCfg):
                             for part, part_cfg in value.items()
                         },
                     )
-                elif key == "fpath":
-                    setattr(cfg, key, None if value is None else _get_data_path(value))
                 elif isinstance(attr, JointDrivePropertiesCfg) and isinstance(
                     value, dict
                 ):
@@ -198,7 +215,11 @@ class RobotCfg(ArticulationCfg):
                     setattr(
                         cfg, key, attr.from_dict(value)
                     )  # Call from_dict on the attribute
-                elif isinstance(value, dict) and "class_type" in value:
+                elif (
+                    key == "solver_cfg"
+                    and isinstance(value, dict)
+                    and "class_type" in value
+                ):
                     setattr(
                         cfg,
                         key,
@@ -206,8 +227,10 @@ class RobotCfg(ArticulationCfg):
                             value
                         ),
                     )
-                elif isinstance(value, dict) and key_in_nested_dict(
-                    value, "class_type"
+                elif (
+                    key == "solver_cfg"
+                    and isinstance(value, dict)
+                    and key_in_nested_dict(value, "class_type")
                 ):
                     setattr(
                         cfg,
@@ -226,6 +249,12 @@ class RobotCfg(ArticulationCfg):
                 logger.log_warning(
                     f"Key '{key}' not found in {cfg.__class__.__name__}."
                 )
+        if cfg.gripper_bindings:
+            from embodichain.lab.sim.utility.gripper_binding import (
+                _apply_gripper_tcp_defaults,
+            )
+
+            _apply_gripper_tcp_defaults(cfg, init_dict.get("solver_cfg"))
         return cfg
 
     def _build_defaults(self, init_dict: dict | None = None) -> None:
@@ -287,7 +316,16 @@ class RobotCfg(ArticulationCfg):
                 if tracked_id is not None:
                     _visited.remove(tracked_id)
 
-        return serialize(self)
+        data = serialize(self)
+        for binding in self.gripper_bindings.values():
+            part = binding["declaration"]["motion_part"]
+            solver = (data.get("solver_cfg") or {}).get(part)
+            if isinstance(solver, dict) and binding.get("explicit_solver_tcp") is None:
+                # A hand-owned TCP is derived at assembly. Serializing either
+                # an unresolved solver default or its derived result as an
+                # override would falsely turn it into an authored calibration.
+                solver.pop("tcp", None)
+        return data
 
     def to_string(self):
         """Return config as a JSON string."""

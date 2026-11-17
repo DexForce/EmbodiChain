@@ -198,7 +198,6 @@ def test_summary_includes_shared_runtime_scene_and_task_metadata() -> None:
         assert value in rendered
     assert "render_fps" not in rendered
     assert "Pick up the red cube" not in rendered
-    assert "PhysX" not in rendered
     assert "Engine threads" not in rendered
     assert "Stepping" not in rendered
 

@@ -34,4 +34,3 @@ connect them to the current robot and the Gym reset lifecycle:
    :maxdepth: 1
 
    embodichain.lab.task_program.integrations.simulation.scene_expansion
-   embodichain.lab.task_program.integrations.simulation.workspace

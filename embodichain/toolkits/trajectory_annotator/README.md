@@ -145,6 +145,11 @@ embodichain annotate-trajectory --hdf5 /data/episode.hdf5 \
    曲线点击按真实帧时间定位视频，支持 VFR。Viser 叠加显示两套 URDF 机器人：原始轨迹保留 visual mesh 的原有外观，回填轨迹使用蓝色、35% 不透明度的模型。
    全轨迹结果的两个播放按钮都覆盖全部视频；两套模型随视频播放、暂停、倍速和时间轴定位同步更新全部关节。
 5. “下载完整回填 NPZ”导出全部原始/重建/回填/校正候选关节、时间戳与元数据。原始视频、HDF5、关节记录均不被覆盖。
+
+![全轨迹拟合结果与运行包导出](../../../docs/architecture/images/trajectory-annotation-fitting.png)
+
+![原始与蓝色半透明回填机器人对比](../../../docs/architecture/images/trajectory-annotation-robots.png)
+
 6. 全部原子技能通过校验后，可下载 **run-task 运行包**。包内包含机器人模型、重建场景、`task.yaml`、`skills.yaml` 和仅 DemoSkill 区间的 tensor。解压后执行：
 
 ```bash

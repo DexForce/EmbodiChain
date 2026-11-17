@@ -18,8 +18,12 @@
 
 from __future__ import annotations
 
+from embodichain.robot_registry import resolve_gripper_defaults
+
+
 import math
 from collections.abc import Callable, Mapping, Sequence
+from copy import deepcopy
 from dataclasses import replace
 from inspect import signature
 from pathlib import Path
@@ -42,16 +46,14 @@ from embodichain.lab.sim.atomic_skills import (
 )
 from embodichain.lab.sim.atomic_skills.plans import CompiledTrajectory
 from embodichain.lab.sim.motion.planners.utils import PlanResult
-from embodichain.toolkits.graspkit import (
-    GraspPoseGenerator,
-    ParallelJawGripperModelCfg,
-    get_parallel_jaw_gripper_model,
-)
+from embodichain.toolkits.graspkit import GraspPoseGenerator
 from embodichain.utils.math import pose_inv
 
 from ..atomic_skill import AtomicSkillCaseProvider, create_atomic_skill_provider
+from .._case_preparation import _CasePreparation
 from ..contracts import validate_physical_evaluations
 from ..config import (
+    ProtocolCfg,
     SuiteCfg,
     TrackCfg,
     resolve_atomic_batch_sizes,
@@ -80,10 +82,13 @@ from .atomic_grasps import (
     parallel_jaw_sampler,
 )
 from ._atomic_pose_sampling import _pose_settings, randomized_scene_pose
-from ._atomic_reference import _recover_reference_ik
+from ._atomic_reference import _qualified_reference_ik, _recover_reference_ik
+from ._case_qualification import _CaseQualificationError, _generate_qualified_case
 
 from .atomic_case_utils import (
+    atomic_case_id,
     canonical_case_qpos,
+    case_name,
     case_generation_seed,
     case_pose,
     float_vector,
@@ -137,13 +142,74 @@ class AtomicSkillScenario(ScenarioProvider):
         self._case_grasp_sampler: CaseSampleCountGraspPoseGenerator | None = None
         self._reference_motion_generator: object | None = None
         self._runtime_entities_created = False
+        self._closing_grasp_geometry = None
+
+    def _closing_grasp_options(self) -> dict[str, object]:
+        """Bind explicit floor qualification to the model-owned hand stroke."""
+        settings = (
+            self.track.config.get("grasp_closing_ground")
+            if self.track is not None
+            else None
+        )
+        if settings is None:
+            return {}
+        if not isinstance(settings, Mapping) or set(settings) != {
+            "sample_count",
+            "height_m",
+            "clearance_m",
+        }:
+            raise ValueError(
+                "grasp_closing_ground requires sample_count, height_m and clearance_m."
+            )
+        if self._closing_grasp_geometry is None:
+            from embodichain.lab.sim.utility.gripper_geometry import (
+                build_gripper_closing_geometry,
+            )
+
+            model = self.grasp_model()
+            if model is None:
+                raise ValueError(
+                    "Closing floor qualification needs an explicit grasp_model."
+                )
+            if self.robot is None or self.end_effector_part is None:
+                raise RuntimeError("Closing geometry requires a bound native hand.")
+            names = [
+                self.robot.joint_names[index]
+                for index in self.robot.get_joint_ids(name=self.end_effector_part)
+            ]
+            commands = model["joint_commands"]
+            if set(names) != set(commands["open"]) or set(names) != set(
+                commands["grasp"]
+            ):
+                raise ValueError(
+                    "Closing geometry must match the native named hand joints."
+                )
+            for key, actual in zip(
+                ("open", "grasp"),
+                self._gripper_states[self.end_effector_part],
+                strict=True,
+            ):
+                expected = actual.new_tensor([commands[key][name] for name in names])
+                if not torch.allclose(actual, expected, rtol=0, atol=1e-7):
+                    raise ValueError(
+                        "Closing geometry must match the executed hand commands."
+                    )
+            self._closing_grasp_geometry = build_gripper_closing_geometry(
+                model,
+                sample_count=settings["sample_count"],
+            )
+        return {
+            "closing_geometry": self._closing_grasp_geometry,
+            "closing_ground_height_m": settings["height_m"],
+            "closing_ground_clearance_m": settings["clearance_m"],
+        }
 
     def batch_sizes(self, suite: SuiteCfg, track: TrackCfg) -> list[int]:
         """Return the explicitly configured physical-execution batch sizes."""
         del suite
         return resolve_atomic_batch_sizes(track)
 
-    def grasp_model(self) -> ParallelJawGripperModelCfg | None:
+    def grasp_model(self) -> dict[str, object] | None:
         """Resolve the track's mounted-hand geometry for preparation and replay.
 
         Returns:
@@ -158,7 +224,7 @@ class AtomicSkillScenario(ScenarioProvider):
             return None
         if not isinstance(model_id, str) or not model_id:
             raise ValueError("track.config.grasp_model must be a non-empty model id.")
-        return get_parallel_jaw_gripper_model(model_id)
+        return resolve_gripper_defaults(model_id)
 
     def grasp_root_from_tcp(self) -> list[list[float]] | None:
         """Bind flange-mounted hand geometry to this fixture's solver TCP.
@@ -169,7 +235,7 @@ class AtomicSkillScenario(ScenarioProvider):
         no flange-relative offset is applied to it.
         """
         model = self.grasp_model()
-        if model is not None and model.model_id not in {
+        if model is not None and model["model_id"] not in {
             "dh_pgi_140_80",
             "robotiq_arg2f_140",
         }:
@@ -382,6 +448,43 @@ class AtomicSkillScenario(ScenarioProvider):
         batch_size: int,
     ) -> list[BenchmarkCase]:
         """Generate the algorithm-independent Atomic Skill case manifest."""
+        return self._generate_cases(suite, track, robot, control_part, batch_size)
+
+    def prepare_cases(
+        self,
+        suite: SuiteCfg,
+        track: TrackCfg,
+        robot: Robot,
+        control_part: str,
+        batch_size: int,
+        progress: _CasePreparation,
+    ) -> list[BenchmarkCase]:
+        """Prepare Atomic inputs, checkpointing each independently qualified case.
+
+        Args:
+            suite: Resolved suite configuration.
+            track: Atomic track with original skill/case/seed ordering.
+            robot: Configured simulator robot.
+            control_part: Controlled arm group.
+            batch_size: Environments in each complete proposal.
+            progress: Exclusive, source-bound preparation store.
+
+        Returns:
+            Complete ordered population, reusing previously accepted cases.
+        """
+        return self._generate_cases(
+            suite, track, robot, control_part, batch_size, progress
+        )
+
+    def _generate_cases(
+        self,
+        suite: SuiteCfg,
+        track: TrackCfg,
+        robot: Robot,
+        control_part: str,
+        batch_size: int,
+        progress: _CasePreparation | None = None,
+    ) -> list[BenchmarkCase]:
         if robot is not self.robot or control_part != self.control_part:
             raise RuntimeError(
                 "AtomicSkillScenario must be configured before generation."
@@ -392,6 +495,15 @@ class AtomicSkillScenario(ScenarioProvider):
         seeds = [int(value) for value in track.config.get("seeds", [11])]
         if not seeds:
             raise ValueError("atomic-skill seeds must not be empty.")
+        max_attempts = track.config.get("case_generation_attempts", 1)
+        if type(max_attempts) is not int or not 1 <= max_attempts <= 128:
+            raise ValueError("case_generation_attempts must be an integer in [1,128].")
+        if (
+            max_attempts > 1
+            and track.domain is not None
+            and track.domain.kind == "nominal"
+        ):
+            raise ValueError("Nominal cases cannot opt in to input resampling.")
 
         cases: list[BenchmarkCase] = []
         for skill_index, skill_value in enumerate(skill_values):
@@ -418,28 +530,61 @@ class AtomicSkillScenario(ScenarioProvider):
                     batch_size=batch_size,
                 )
                 for seed in seeds:
-                    provider = create_atomic_skill_provider(skill_id)
+                    provider: AtomicSkillCaseProvider | None = None
                     rng_devices = (
                         [robot.device]
                         if torch.device(robot.device).type == "cuda"
                         else []
                     )
-                    with torch.random.fork_rng(devices=rng_devices):
-                        torch.manual_seed(
-                            case_generation_seed(
-                                seed,
-                                skill_index=skill_index,
-                                case_index=case_index,
+
+                    def generate(proposal_seed: int) -> BenchmarkCase:
+                        nonlocal provider
+                        provider = create_atomic_skill_provider(skill_id)
+                        with torch.random.fork_rng(devices=rng_devices):
+                            torch.manual_seed(
+                                case_generation_seed(
+                                    proposal_seed,
+                                    skill_index=skill_index,
+                                    case_index=case_index,
+                                )
                             )
-                        )
-                        case = provider.generate_case(
-                            self,
-                            suite,
-                            track,
-                            config,
-                            seed=seed,
-                            batch_size=batch_size,
-                        )
+                            return provider.generate_case(
+                                self,
+                                suite,
+                                track,
+                                deepcopy(config),
+                                seed=proposal_seed,
+                                batch_size=batch_size,
+                            )
+
+                    identity = atomic_case_id(
+                        track.id,
+                        skill_id,
+                        case_name(config),
+                        batch_size=batch_size,
+                        seed=seed,
+                    )
+
+                    def qualify() -> list[BenchmarkCase]:
+                        return [
+                            _generate_qualified_case(
+                                generate,
+                                seed=seed,
+                                identity=identity,
+                                max_attempts=max_attempts,
+                                reset=self._reset_case_preparation,
+                            )
+                        ]
+
+                    (case,) = (
+                        qualify()
+                        if progress is None
+                        else progress.get_or_create("atomic:" + identity, qualify)
+                    )
+                    if case.case_id != identity:
+                        raise ValueError("Atomic preparation case identity changed.")
+                    if provider is None:
+                        provider = create_atomic_skill_provider(skill_id)
                     if case.case_id in self._case_providers:
                         raise ValueError(
                             f"Duplicate Atomic Skill case {case.case_id!r}."
@@ -453,6 +598,14 @@ class AtomicSkillScenario(ScenarioProvider):
         for index, handle in enumerate(self._articulations.values()):
             handle.park(len(self._objects) + index)
         return cases
+
+    def _reset_case_preparation(self) -> None:
+        """Restore preparation state before proposing another complete batch."""
+        self.restore_base_robot()
+        for index, handle in enumerate(self._objects.values()):
+            handle.park(index)
+        for index, handle in enumerate(self._articulations.values()):
+            handle.park(len(self._objects) + index)
 
     def bind_cases(self, cases: list[BenchmarkCase]) -> None:
         """Restore skill providers and scene bindings without resampling inputs.
@@ -539,7 +692,7 @@ class AtomicSkillScenario(ScenarioProvider):
                 {
                     count: parallel_jaw_sampler(
                         count,
-                        gripper_model=self.grasp_model(),
+                        gripper_data=self.grasp_model(),
                         root_from_tcp=self.grasp_root_from_tcp(),
                     )
                     for count in sorted(sampling_counts)
@@ -998,6 +1151,11 @@ class AtomicSkillScenario(ScenarioProvider):
             task_done = bool(task_success[index].item())
             if outcome.failure_code is not None:
                 failure_code = outcome.failure_code
+            elif not outcome.planning_success:
+                # Rejected plans deliberately hold their frozen start state.
+                failure_code = (
+                    outcome.planner_failure_code or "planner_reported_failure"
+                )
             elif not executed:
                 failure_code = "controller_tracking_failure"
             elif not task_done:
@@ -1104,6 +1262,11 @@ class AtomicSkillScenario(ScenarioProvider):
                 "timing_scope": "atomic_skill_compile",
                 **benchmark_motion_attribution(case.skill_id),
                 "physics_validation": "common_joint_target_replay",
+                **(
+                    {"joint_tracking": dict(observation.joint_tracking_metadata)}
+                    if observation is not None and observation.joint_tracking_metadata
+                    else {}
+                ),
                 **(
                     {"grasp_contacts": dict(observation.grasp_contact_metadata)}
                     if observation is not None and observation.grasp_contact_metadata
@@ -1322,10 +1485,10 @@ class AtomicSkillScenario(ScenarioProvider):
     ) -> torch.Tensor:
         """Build independent sequential-IK validity evidence for a case.
 
-        Failed exact IK may recover a joint witness inside the suite's arrival
-        tolerances. Recovery FK checks the original request; target poses and
-        accepted exact solutions remain unchanged. This does not certify a path
-        or a physical task outcome.
+        With a configured suite, every canonical witness is checked by FK and
+        joint limits, including reported exact IK successes. Failed witnesses
+        may recover inside the unchanged arrival tolerances. This does not
+        certify a path or a physical task outcome.
 
         Args:
             start_qpos: Frozen arm state with shape ``(B, dof)``.
@@ -1334,8 +1497,8 @@ class AtomicSkillScenario(ScenarioProvider):
             control_part: Arm to solve, defaulting to the scenario's primary arm.
 
         Returns:
-            Canonical joint witnesses with shape ``(B, K, dof)``. Callers needing
-            independent certification must also verify exact IK successes by FK.
+            Canonical joint witnesses with shape ``(B, K, dof)``. Certification
+            uses the configured suite's protocol.
         """
         if self.robot is None:
             raise RuntimeError("Atomic Skill runtime is not configured.")
@@ -1344,23 +1507,19 @@ class AtomicSkillScenario(ScenarioProvider):
         references: list[torch.Tensor] = []
         for index in range(target_waypoints.shape[1]):
             target = target_waypoints[:, index].clone()
-            success, solved = self.robot.compute_ik(
-                pose=target,
-                joint_seed=seed,
-                name=arm,
-            )
-            if (
-                not bool(torch.as_tensor(success).all().item())
-                and self.suite is not None
-            ):
-                success, solved = _recover_reference_ik(
+            if self.suite is not None:
+                success, solved = _qualified_reference_ik(
                     self.robot,
                     target,
                     seed,
-                    success,
-                    solved,
                     control_part=arm,
                     protocol=self.suite.protocol,
+                )
+            else:
+                success, solved = self.robot.compute_ik(
+                    pose=target,
+                    joint_seed=seed,
+                    name=arm,
                 )
             if not bool(torch.as_tensor(success).all().item()):
                 rows = (
@@ -1369,10 +1528,18 @@ class AtomicSkillScenario(ScenarioProvider):
                     .flatten()
                     .tolist()
                 )
-                raise RuntimeError(
+                raise _CaseQualificationError(
                     f"Independent IK rejected atomic target waypoint {index} for "
                     f"arm {arm!r}, rows {rows}: no qualified witness found; "
-                    "this does not establish unreachability."
+                    "this does not establish unreachability.",
+                    evidence={
+                        "kind": "endpoint_reference",
+                        "control_part": arm,
+                        "waypoint": index,
+                        "rows": rows,
+                        "seed_qpos": seed[rows].detach().cpu().tolist(),
+                        "target_poses": target[rows].detach().cpu().tolist(),
+                    },
                 )
             seed = canonical_case_qpos(solved)
             references.append(seed.clone())
@@ -1519,7 +1686,15 @@ class AtomicSkillScenario(ScenarioProvider):
         raise _AntipodalGraspSearchError(
             f"No independently reachable antipodal grasp remained for "
             f"{handle.object_id!r} in environment rows {failed_rows} after "
-            f"screening up to {[len(pool) for pool in ranked_pools]} candidates per row."
+            f"screening up to {[len(pool) for pool in ranked_pools]} candidates per row.",
+            evidence={
+                "kind": "grasp_reference",
+                "object_id": handle.object_id,
+                "rows": failed_rows,
+                "proposal_seed": seed,
+                "pool_sizes": [len(pool) for pool in ranked_pools],
+                "object_poses": object_pose[failed_rows].detach().cpu().tolist(),
+            },
         )
 
     def _ranked_antipodal_grasp_pools(
@@ -1561,8 +1736,9 @@ class AtomicSkillScenario(ScenarioProvider):
                 n_sample=n_sample,
                 force_refresh=False,
                 max_candidates=max_candidates,
-                gripper_model=self.grasp_model(),
+                gripper_data=self.grasp_model(),
                 root_from_tcp=self.grasp_root_from_tcp(),
+                **self._closing_grasp_options(),
                 **(
                     {"approach_alignment_angle": math.radians(alignment_max_angle_deg)}
                     if alignment_max_angle_deg is not None
@@ -1589,9 +1765,19 @@ class AtomicSkillScenario(ScenarioProvider):
                 if allow_empty:
                     ranked_pools.append(candidates[:0].to(self.robot.device))
                     continue
-                raise RuntimeError(
+                raise _AntipodalGraspSearchError(
                     f"No valid antipodal grasp candidates were found for "
-                    f"{handle.object_id!r} in environment row {row}."
+                    f"{handle.object_id!r} in environment row {row}.",
+                    evidence={
+                        "kind": "grasp_geometry",
+                        "object_id": handle.object_id,
+                        "rows": [row],
+                        "proposal_seed": seed,
+                        "object_poses": object_pose[row : row + 1]
+                        .detach()
+                        .cpu()
+                        .tolist(),
+                    },
                 )
             if row_rank is not None:
                 order = row_rank(row, candidates[finite_indices], costs[finite_indices])
@@ -1618,6 +1804,7 @@ class AtomicSkillScenario(ScenarioProvider):
         env_ids: Sequence[int] | None = None,
         initial_selection: torch.Tensor | None = None,
         initial_found: torch.Tensor | None = None,
+        reference_protocol: ProtocolCfg | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Return independently accepted rows without discarding unresolved ones.
 
@@ -1662,6 +1849,7 @@ class AtomicSkillScenario(ScenarioProvider):
                     waypoint_poses(variant),
                     eligible=eligible,
                     env_ids=env_ids,
+                    reference_protocol=reference_protocol,
                 )
                 selected[feasible] = variant[feasible]
                 found |= feasible
@@ -1676,23 +1864,36 @@ class AtomicSkillScenario(ScenarioProvider):
         *,
         eligible: torch.Tensor,
         env_ids: Sequence[int] | None = None,
+        reference_protocol: ProtocolCfg | None = None,
     ) -> torch.Tensor:
         """Keep each eligible row's chain result without truncating other rows.
 
         Full-batch calls retain Robot's environment/pose contract. Each row uses
         its own previous solution; already rejected rows cannot become feasible
         again, and accepted rows are frozen by the caller between candidates.
+        An explicit reference protocol uses the same bounded arrival-region
+        witnesses as final case qualification, without changing target poses.
         """
         assert self.robot is not None
         feasible = eligible.clone()
         seed = start_qpos
         for pose in poses:
-            success, solved = self.robot.compute_ik(
-                pose=pose,
-                joint_seed=seed,
-                name=self.control_part,
-                **({"env_ids": env_ids} if env_ids is not None else {}),
-            )
+            if reference_protocol is None:
+                success, solved = self.robot.compute_ik(
+                    pose=pose,
+                    joint_seed=seed,
+                    name=self.control_part,
+                    **({"env_ids": env_ids} if env_ids is not None else {}),
+                )
+            else:
+                success, solved = _qualified_reference_ik(
+                    self.robot,
+                    pose,
+                    seed,
+                    control_part=self.control_part,
+                    protocol=reference_protocol,
+                    env_ids=env_ids,
+                )
             feasible &= torch.as_tensor(
                 success, device=feasible.device, dtype=torch.bool
             ) & torch.isfinite(solved).all(dim=-1)
@@ -1842,7 +2043,7 @@ class AtomicSkillScenario(ScenarioProvider):
                 n_sample=n_sample,
                 force_refresh=False,
                 max_candidates=max_candidates,
-                gripper_model=self.grasp_model(),
+                gripper_data=self.grasp_model(),
                 root_from_tcp=self.grasp_root_from_tcp(),
             )
             candidates, costs = generator.get_valid_grasp_poses(
@@ -2206,6 +2407,7 @@ class AtomicSkillScenario(ScenarioProvider):
         if close is not None:
             close()
         self._engine = None
+        self._closing_grasp_geometry = None
         self._case_providers.clear()
         self._cases_by_id.clear()
         self._objects.clear()

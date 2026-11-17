@@ -209,6 +209,10 @@ def test_web_fitting_comparison_download_rejection_and_invalidation(
             "execute_demo_skill",
         ]
         for span in manifest["timeline"]:
+            if span["skill_id"] != "execute_demo_skill":
+                assert span["execution"] == "native_atomic_skill"
+                assert "tensor" not in span
+                continue
             data = torch.load(
                 io.BytesIO(archive.read(span["tensor"])), weights_only=True
             )

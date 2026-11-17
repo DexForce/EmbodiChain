@@ -76,7 +76,7 @@ class AtomicSkillRunCfg:
     variants: int = 1
     expansion: str = "both"
     seed: int = 0
-    device: str = "cpu"
+    device: str | None = None
     renderer: str = "auto"
     headless: bool = False
     arena_space: float | None = None

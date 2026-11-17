@@ -108,6 +108,16 @@ def test_list_robot_dispatch_reads_installed_catalogs(
     assert "Mimic" in output and "Joints" in output
     assert "Control" in output and "DOF" in output and "Parts" in output
     expected_ids = {
+        "AgibotG2",
+        "AgibotG1",
+        "YamI2rt",
+        "FrankaPandaHand",
+        "DHPGI14080",
+        "CobotMagicV100Gripper",
+        "PikaGripper",
+        "TianjiMarvinGripper",
+        "RobotiqArg2F85",
+        "RobotiqArg2F140",
         "BrainCoRevo1",
         "SharpaWave",
         "WujiHand",
@@ -116,6 +126,7 @@ def test_list_robot_dispatch_reads_installed_catalogs(
         "TianjiMarvin",
         "DexforceW1",
         "CobotMagic",
+        "AgilexPiperX",
         "Franka",
         "FrankaPanda",
         "FlexivRizon4S",
@@ -145,7 +156,11 @@ def test_list_robot_dispatch_reads_installed_catalogs(
         "ur10e",
         "FrankaPanda",
     }:
-        assert re.search(rf"│\s*{re.escape(robot_id)}\s*│", output)
+        # Narrow terminals wrap long model IDs within the first column.
+        id_column = "".join(re.findall(r"^│([^│]*)│", output, re.MULTILINE)).replace(
+            " ", ""
+        )
+        assert robot_id in id_column
     assert set(registry.list_robot_cfgs()) == expected_ids
     for alias in (
         "aloha_mini",
@@ -161,7 +176,9 @@ def test_list_robot_dispatch_reads_installed_catalogs(
     for model in ("ur3", "ur3e", "ur5", "ur5e", "ur10", "ur10e"):
         assert model in output
     assert "arm (7)" in _column_text(output, 4)
-    assert "fr3_finger_joint2" not in _column_text(output, 5)
+    assert "fr3_finger_joint2" in _column_text(
+        output, 5
+    )  # The standalone hand owns this mimic.
 
 
 @pytest.mark.parametrize("terminal_width", [80, 120])
@@ -233,6 +250,7 @@ main(["list-robot"])
 
     assert "SharpaWave" in result.stdout
     assert "WujiHand" in result.stdout
+    assert "AgilexPiperX" in result.stdout
     assert result.stderr == ""
 
 

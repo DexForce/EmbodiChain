@@ -38,6 +38,7 @@ from embodichain.lab.sim.atomic_skills import (
 )
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
+    ArticulationRootPropertiesCfg,
     JointDrivePropertiesCfg,
 )
 from embodichain.lab.sim.objects import Articulation
@@ -90,13 +91,20 @@ def create_drawer(
         uid="drawer",
         fpath=get_data_path(DRAWER_ASSET),
         asset_physics_mode="overlay",
+        root_props=ArticulationRootPropertiesCfg(fixed_base=True),
         init_pos=DRAWER_POSITION,
         init_rot=DRAWER_ORIENTATION,
         init_qpos=(0.0,),
-        joint_drive_props=JointDrivePropertiesCfg(drive_type="none"),
+        joint_drive_props=JointDrivePropertiesCfg(
+            drive_type="force",
+            target_mode="velocity",
+            stiffness=0.0,
+            damping=5.0,
+        ),
         attrs=create_tutorial_rigid_body_physics(
             static_friction=1.0,
             dynamic_friction=1.0,
+            linear_damping=0.0,
         ),
     )
     configure_newton_link_contacts(

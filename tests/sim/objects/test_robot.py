@@ -747,6 +747,8 @@ class TestRobotNewton:
     default/CUDA classes already cover the shared control-part/FK/IK logic.
     """
 
+    MIMIC_STABILIZER = False
+
     def setup_method(self):
         physics_cfg = physics_cfg_for_backend("newton")
         physics_cfg.solver_cfg = {
@@ -760,6 +762,7 @@ class TestRobotNewton:
         self.sim = SimulationManager(config)
         cfg = DexforceW1Cfg.from_dict({"uid": "dexforce_w1", "version": "v021"})
         cfg.init_qpos = [0.0001 * (index + 1) for index in range(W1_ACTIVE_DOF)]
+        cfg.root_props.newton_mimic_stabilizer = self.MIMIC_STABILIZER
         self.robot: Robot = self.sim.add_robot(cfg=cfg)
         self.sim.prepare()
 
@@ -799,9 +802,17 @@ class TestRobotNewton:
             and "_HAND_" in state_joint_names[parent_id]
             for mimic_id, parent_id, _, _ in mimic_relations
         )
+        if not self.MIMIC_STABILIZER:
+            # Without the stabilizer, reset starts each follower on its
+            # native mimic relation to avoid a corrective impulse.
+            for mimic_id, parent_id, multiplier, offset in mimic_relations:
+                initial_qpos_by_name[state_joint_names[mimic_id]] = (
+                    initial_qpos_by_name[state_joint_names[parent_id]] * multiplier
+                    + offset
+                )
         initial_qpos = self.robot.body_data.qpos[0].detach().cpu().tolist()
         assert dict(zip(state_joint_names, initial_qpos, strict=True)) == pytest.approx(
-            initial_qpos_by_name
+            initial_qpos_by_name, abs=1e-6
         )
 
         binding = self.robot._entities[0]._physics_binding
@@ -828,25 +839,37 @@ class TestRobotNewton:
         selected_eq = np.isin(mapping, np.asarray(constraint_rows, dtype=np.int32))
         assert int(selected_eq.sum()) == len(mimic_relations)
         eq_solref = np.asarray(solver.mjw_model.eq_solref.numpy())
-        np.testing.assert_allclose(
-            eq_solref[selected_eq],
-            np.broadcast_to([2.0e-3, 1.0e1], (len(mimic_relations), 2)),
-        )
         target_ke = np.asarray(model.joint_target_ke.numpy())
         target_kd = np.asarray(model.joint_target_kd.numpy())
         target_mode = np.asarray(model.joint_target_mode.numpy())
         eq_active = np.asarray(solver.mjw_data.eq_active.numpy())
         assert np.all(eq_active[selected_eq])
-        for mimic_id, parent_id, _, _ in mimic_relations:
-            child = runtime_joints[state_joint_names[mimic_id]]
-            parent = runtime_joints[state_joint_names[parent_id]]
-            assert target_ke[child.qd_start] == pytest.approx(
-                target_ke[parent.qd_start] * 1.0e-2
+        if self.MIMIC_STABILIZER:
+            np.testing.assert_allclose(
+                eq_solref[selected_eq],
+                np.broadcast_to([2.0e-3, 1.0e1], (len(mimic_relations), 2)),
             )
-            assert target_kd[child.qd_start] == pytest.approx(
-                target_kd[parent.qd_start] * 1.0e-2
+            for mimic_id, parent_id, _, _ in mimic_relations:
+                child = runtime_joints[state_joint_names[mimic_id]]
+                parent = runtime_joints[state_joint_names[parent_id]]
+                assert target_ke[child.qd_start] == pytest.approx(
+                    target_ke[parent.qd_start] * 1.0e-2
+                )
+                assert target_kd[child.qd_start] == pytest.approx(
+                    target_kd[parent.qd_start] * 1.0e-2
+                )
+                assert target_mode[child.qd_start] == target_mode[parent.qd_start]
+        else:
+            # Native DexSim behavior: MuJoCo's default equality solref and
+            # the follower drives configured by the W1 preset (none).
+            np.testing.assert_allclose(
+                eq_solref[selected_eq],
+                np.broadcast_to([2.0e-2, 1.0], (len(mimic_relations), 2)),
             )
-            assert target_mode[child.qd_start] == target_mode[parent.qd_start]
+            for mimic_id, _, _, _ in mimic_relations:
+                child = runtime_joints[state_joint_names[mimic_id]]
+                assert target_ke[child.qd_start] == 0.0
+                assert target_kd[child.qd_start] == 0.0
 
         # This physical check covers both hands and keeps the native coupled
         # constraints bounded under the W1's self-contacts. Default can also
@@ -897,7 +920,11 @@ class TestRobotNewton:
         self.robot.set_qpos(hand_target, name="right_eef")
         target_qpos = self.robot.body_data.target_qpos
         torch.testing.assert_close(target_qpos[:, right_eef_ids], hand_target)
-        for mimic_id, parent_id, multiplier, offset in mimic_relations:
+        # Follower targets are mirrored only by the opt-in stabilizer; native
+        # followers keep their own (here unused, zero-gain) targets.
+        for mimic_id, parent_id, multiplier, offset in (
+            mimic_relations if self.MIMIC_STABILIZER else []
+        ):
             torch.testing.assert_close(
                 target_qpos[:, mimic_id],
                 target_qpos[:, parent_id] * multiplier + offset,
@@ -910,7 +937,9 @@ class TestRobotNewton:
         self.robot.set_qvel(hand_velocity_target, name="right_eef")
         target_qvel = self.robot.body_data.target_qvel
         torch.testing.assert_close(target_qvel[:, right_eef_ids], hand_velocity_target)
-        for mimic_id, parent_id, multiplier, _ in mimic_relations:
+        for mimic_id, parent_id, multiplier, _ in (
+            mimic_relations if self.MIMIC_STABILIZER else []
+        ):
             torch.testing.assert_close(
                 target_qvel[:, mimic_id],
                 target_qvel[:, parent_id] * multiplier,
@@ -930,3 +959,9 @@ if __name__ == "__main__":
     test_cpu = TestRobotCUDA()
     test_cpu.setup_method()
     test_cpu.test_compute_jacobian()
+
+
+class TestRobotNewtonMimicStabilizer(TestRobotNewton):
+    """The same W1 coverage with the opt-in Default-parity mimic stabilizer."""
+
+    MIMIC_STABILIZER = True

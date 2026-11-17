@@ -20,20 +20,22 @@ from __future__ import annotations
 
 from copy import deepcopy
 import math
+import hashlib
+import json
 from typing import Literal, Protocol, TypeVar
 
 import torch
 
 from embodichain.toolkits.graspkit import (
     ParallelJawGraspPoseGenerator,
-    ParallelJawGripperModelCfg,
 )
 from embodichain.utils import configclass, logger
 
 from ._antipodal_backend import _AntipodalMeshBackend
+from .contact_fit import SampledHandGeometry
 from .antipodal_sampler import AntipodalSamplerCfg
 from .gripper_collision_checker import GripperCollisionCfg
-from .fixed_geometry import FixedGripperCollisionGeometry
+from .fixed_geometry import FixedGripperCollisionGeometry, _rigid_transform
 
 __all__ = [
     "AntipodalGraspPoseGenerator",
@@ -291,18 +293,34 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
     at the declared pre-grasp opening. Internal sampling and collision use its
     canonical contact frame; every public pose result is transformed once to
     the geometry's runtime TCP. Widths, costs and failure masks are preserved.
+
+    Optional ``closing_geometry`` uses that same canonical contact frame and
+    requires an explicit ``closing_ground_height_m``. It qualifies discrete
+    open-to-contact floor clearance before ranking, including both runtime TCP
+    half-turn variants. ``closing_ground_clearance_m`` defaults to zero. It does
+    not infer a support plane, qualify closing contact with the target, or
+    establish continuous collision freedom.
     """
 
     def __init__(
         self,
-        gripper_model: ParallelJawGripperModelCfg,
         *,
+        min_opening_width: float,
+        max_opening_width: float,
+        model_id: str = "parallel_jaw",
         algorithm_cfg: AntipodalGraspPoseGeneratorCfg | None = None,
         collision_cfg: ParallelJawGraspCollisionCfg | None = None,
         annotation_cfg: GraspAnnotationCfg | None = None,
         collision_geometry: FixedGripperCollisionGeometry,
+        closing_geometry: SampledHandGeometry | None = None,
+        closing_ground_height_m: float | None = None,
+        closing_ground_clearance_m: float = 0.0,
     ) -> None:
-        super().__init__(gripper_model)
+        super().__init__(
+            min_opening_width=min_opening_width,
+            max_opening_width=max_opening_width,
+            model_id=model_id,
+        )
         self._algorithm_cfg = deepcopy(
             AntipodalGraspPoseGeneratorCfg() if algorithm_cfg is None else algorithm_cfg
         )
@@ -325,8 +343,68 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         if not isinstance(collision_geometry, FixedGripperCollisionGeometry):
             raise TypeError("collision_geometry must be explicit fixed mesh geometry.")
         self._collision_geometry = deepcopy(collision_geometry)
+        if (closing_geometry is None) != (closing_ground_height_m is None):
+            raise ValueError(
+                "Closing floor qualification needs both geometry and a plane."
+            )
+        if closing_geometry is not None and not isinstance(
+            closing_geometry, SampledHandGeometry
+        ):
+            raise TypeError("closing_geometry must be SampledHandGeometry or None.")
+        if closing_ground_height_m is not None and (
+            isinstance(closing_ground_height_m, bool)
+            or not math.isfinite(closing_ground_height_m)
+        ):
+            raise ValueError("closing_ground_height_m must be finite.")
+        _real_number(
+            closing_ground_clearance_m,
+            field_name="closing_ground_clearance_m",
+            minimum=0.0,
+        )
+        self._closing_geometry = deepcopy(closing_geometry)
+        self._closing_ground_height_m = closing_ground_height_m
+        self._closing_ground_clearance_m = closing_ground_clearance_m
+        digest = hashlib.sha256()
+        digest.update(self._collision_geometry.points.double().numpy().tobytes())
+        digest.update(
+            _rigid_transform(
+                self._collision_geometry.provenance["grasp_from_tcp"],
+                error_message="Explicit rigid grasp_from_tcp is required.",
+            )
+            .astype("<f8")
+            .tobytes()
+        )
+        digest.update(
+            json.dumps(
+                {
+                    "inputs": self.gripper_data,
+                    "algorithm": self._algorithm_cfg.to_dict(),
+                    "collision": self._collision_cfg.to_dict(),
+                    "annotation": self._annotation_cfg.to_dict(),
+                },
+                sort_keys=True,
+            ).encode()
+        )
+        if self._closing_geometry is not None:
+            for values in (
+                self._closing_geometry.body,
+                self._closing_geometry.pads,
+                self._closing_geometry.gaps,
+            ):
+                digest.update(values.detach().cpu().double().numpy().tobytes())
+            digest.update(
+                json.dumps(
+                    [closing_ground_height_m, closing_ground_clearance_m]
+                ).encode()
+            )
+        self._paired_query_key = ("antipodal_parallel_jaw", digest.hexdigest())
         self._backends: dict[tuple[object, ...], _AntipodalMeshBackend] = {}
         self._proposal_backends: dict[tuple[object, ...], _AntipodalMeshBackend] = {}
+
+    @property
+    def paired_query_key(self) -> object:
+        """Identify equivalent numeric geometry, TCP mapping and query policies."""
+        return self._paired_query_key
 
     @property
     def collision_geometry(self) -> FixedGripperCollisionGeometry:
@@ -379,7 +457,6 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         if prepared is not None and not prepared.is_prepared:
             prepared = None
 
-        model = self._gripper_model
         algorithm = self._algorithm_cfg
         collision = self._collision_cfg
         annotation = self._annotation_cfg
@@ -389,8 +466,8 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
             sampler_cfg=AntipodalSamplerCfg(
                 n_sample=algorithm.sample_count,
                 max_angle=algorithm.ray_deviation_angle,
-                max_length=model.max_opening_width,
-                min_length=model.min_opening_width,
+                max_length=self.max_opening_width,
+                min_length=self.min_opening_width,
                 center_mode=algorithm.center_mode,
             ),
             collision_cfg=GripperCollisionCfg(
@@ -409,6 +486,15 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
             filter_ground_collision=collision.filter_ground_collision,
             check_collision=not proposals_only,
             prepared=prepared,
+            **(
+                {
+                    "closing_geometry": self._closing_geometry,
+                    "closing_ground_height_m": self._closing_ground_height_m,
+                    "closing_ground_clearance_m": self._closing_ground_clearance_m,
+                }
+                if self._closing_geometry is not None
+                else {}
+            ),
         )
         if prepared is None and (annotation.force_refresh or not backend.is_prepared):
             backend.annotate()

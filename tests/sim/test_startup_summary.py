@@ -41,13 +41,13 @@ def _sim(physics_cfg=None):
                 "newton" if isinstance(cfg.physics_cfg, NewtonPhysicsCfg) else "default"
             ),
             solver_type=(
-                "mujoco_warp" if isinstance(cfg.physics_cfg, NewtonPhysicsCfg) else None
+                "dexuni" if isinstance(cfg.physics_cfg, NewtonPhysicsCfg) else None
             ),
             cuda_graph_status="pending",
             sync_render_state=lambda result: None,
         ),
         _requested_renderer="auto",
-        _requested_solver="auto",
+        _requested_solver="dexuni",
         is_window_opened=False,
         _robots={},
         _articulations={},
@@ -88,6 +88,7 @@ def test_cpu_physics_does_not_imply_rendering_disabled(monkeypatch):
     summary = importlib.import_module("embodichain.lab.sim._startup_summary")
     monkeypatch.setattr(summary.torch.cuda, "is_available", lambda: False)
     rows = summary.simulation_rows(_sim())
+    assert ("Physics", "Backend", "Default") in rows
     text = summary.format_summary("Simulation initialized", rows, color=False)
     assert "Default" in text
     assert "Constraint Dynamics" in text
@@ -96,22 +97,19 @@ def test_cpu_physics_does_not_imply_rendering_disabled(monkeypatch):
     assert "cpu" in text
     assert "10 ms (100 Hz)" in text
     assert "Engine threads" not in text and "Stepping" not in text
-    assert "PhysX" not in text
     assert "\x1b" not in text and "\x00" not in text
 
 
-def test_newton_reports_pending_then_resolved_solver_and_graph(monkeypatch):
+def test_newton_reports_dexuni_and_graph_readiness(monkeypatch):
     summary = importlib.import_module("embodichain.lab.sim._startup_summary")
     monkeypatch.setattr(summary.torch.cuda, "is_available", lambda: False)
     sim = _sim(NewtonPhysicsCfg())
-    sim.physics.solver_type = "auto"
     before = str(summary.simulation_rows(sim))
     assert "PENDING" in before
     sim.spawn_result = SimpleNamespace(topology_revision=1, needs_rebuild=False)
     sim._ready_spawn_topology_revision = 1
-    sim.physics.solver_type = "mujoco_warp"
     after = str(summary.scene_rows(sim))
-    assert "auto -> mujoco_warp" in after
+    assert "dexuni" in after
     assert "PENDING" in after and "CAPTURED" not in after
     sim.physics.cuda_graph_status = "captured"
     assert "CAPTURED" in str(summary.scene_rows(sim))

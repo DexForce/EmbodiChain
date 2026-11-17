@@ -18,180 +18,145 @@
 
 from __future__ import annotations
 
-from embodichain.gen_sim.services.runtime import GenSimServices, service_entry
-
 import argparse
-import base64
 from collections.abc import Sequence
-from datetime import datetime, timezone
-import hashlib
-from io import BytesIO
-import math
 from pathlib import Path
-import shutil
-import uuid
-from time import perf_counter
-from typing import Any
+from typing import TYPE_CHECKING
 
-from .image_planning import (
-    generate_semantic_task_graph_from_image,
-    SemanticPlanningError,
-)
-from .orchestration.workflow_artifacts import WorkflowRunArtifacts, write_run_json
-from .semantic_graph_html import render_semantic_task_graph_html
+if TYPE_CHECKING:
+    from embodichain.gen_sim.services.runtime import GenSimServices
 
 __all__ = ["main"]
 
 
-@service_entry
 def main(
-    argv: Sequence[str] | None = None, *, services: GenSimServices | None = None
+    argv: Sequence[str] | None = None,
+    *,
+    services: GenSimServices | None = None,
+    prog: str = "embodichain task-engine",
 ) -> None:
     """Generate JSON declarations and an offline graph viewer from a photograph.
 
     Args:
         argv: CLI arguments, excluding the executable; defaults to sys.argv.
+        services: Optional borrowed model-service run for an embedded caller.
+        prog: Display name supplied by the unified GenSim dispatcher.
     """
     parser = argparse.ArgumentParser(
-        prog="embodichain task-engine",
+        prog=prog,
         description="Plan image-grounded canonical Semantic Calls without simulation.",
     )
-    parser.add_argument("--image", type=Path, required=True)
+    parser.add_argument("--image", type=Path)
+    parser.add_argument(
+        "--scene-grounding",
+        type=Path,
+        help="Reviewed source-image grounding for hybrid rigid placement qualification",
+    )
+    parser.add_argument(
+        "--route",
+        choices=("template", "goal", "hybrid"),
+        default="hybrid",
+        help="Authoring route (default: hybrid). Use template for the legacy template/revision format. No automatic fallback.",
+    )
+    parser.add_argument(
+        "--proposal",
+        type=Path,
+        help="Offline agent-authored objective and calls (goal route).",
+    )
+    parser.add_argument(
+        "--deployment",
+        type=Path,
+        help="Configured deployment for goal witness compilation",
+    )
     parser.add_argument("--instruction", required=True)
     parser.add_argument(
         "--output",
+        "--output-root",
+        "--output_root",
         type=Path,
         required=True,
         help="Fresh output directory; existing directories are never overwritten.",
     )
-    parser.add_argument("--task-id", default="image_task")
+    parser.add_argument("--task-id", "--task_id", default="image_task")
     args = parser.parse_args(argv)
-    args.image = args.image.expanduser().resolve(strict=True)
-    started = perf_counter()
-    with WorkflowRunArtifacts(args.output) as artifacts:
-        try:
-            result = generate_semantic_task_graph_from_image(
-                args.image, args.instruction, task_id=args.task_id, services=services
-            )
-        except SemanticPlanningError as error:
-            failure = args.output.with_name(
-                args.output.name + ".failure-" + uuid.uuid4().hex + ".json"
-            )
-            write_run_json(
-                failure,
-                {
-                    "error": str(error),
-                    "artifacts": error.artifacts,
-                    "service_calls": services.records(),
-                    "service_selections": services.selections(),
-                },
-                overwrite=False,
-            )
-            raise
-        for name, value in result.items():
-            write_run_json(artifacts.output_dir / f"{name}.json", value)
-        source_copy = artifacts.output_dir / f"source_image{args.image.suffix.lower()}"
-        shutil.copyfile(args.image, source_copy)
-        if (
-            hashlib.sha256(source_copy.read_bytes()).hexdigest()
-            != result["image_grounding"]["image_sha256"]
-        ):
-            raise ValueError("Input image changed before preview publication.")
-        summary = {
-            "schema_version": "task_engine.image_semantic_run/v1",
-            "task_id": args.task_id,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "elapsed_seconds": perf_counter() - started,
-            "elapsed_scope": "instruction interpretation and image semantic planning",
-            "stage": "semantic_graph",
-            "status": "graph_ready",
-            "semantic_status": result["semantic_graph_validation"]["coverage"][
-                "semantic_status"
-            ],
-            "visual_status": result["semantic_graph_validation"]["coverage"][
-                "visual_status"
-            ],
-            "pending_bindings": len(result["binding_requirements"]),
-            "execution_ready": False,
-            "runtime_evidence_status": "not_run",
-            "image_sha256": result["image_grounding"]["image_sha256"],
-            "integration_status": "unbound",
-            "service_selections": services.selections(),
-        }
-        (artifacts.output_dir / "semantic_task_graph.html").write_text(
-            _image_preview(result, source_copy, summary), encoding="utf-8"
+    if not args.instruction.strip():
+        parser.error("--instruction must not be empty")
+    if args.scene_grounding and args.route != "hybrid":
+        parser.error("--scene-grounding requires --route hybrid")
+    if args.route == "hybrid":
+        from .hybrid import publish_hybrid
+
+        if args.image is None or args.proposal:
+            parser.error("Hybrid authoring requires --image and live interpretation")
+        result = publish_hybrid(
+            args.instruction,
+            args.task_id,
+            args.image,
+            args.output,
+            services,
+            args.deployment,
+            scene_grounding=args.scene_grounding,
         )
-        services.write_records(artifacts.output_dir / "service_calls.json")
-        write_run_json(artifacts.output_dir / "run_manifest.json", summary)
-        artifacts.commit()
-    print(f"Semantic graph: {artifacts.output_dir / 'semantic_task_graph.json'}")
-    print(f"Offline viewer: {artifacts.output_dir / 'semantic_task_graph.html'}")
-    print("Stage: semantic_graph; runtime integration unbound; simulation not run.")
+        print("Coverage:", result["coverage"]["status"])
+        return
+    if args.route == "goal":
+        import json
+        from .goal_planning import publish
+
+        proposal = json.loads(args.proposal.read_text()) if args.proposal else None
+        result = publish(
+            args.instruction,
+            args.task_id,
+            args.output,
+            proposal,
+            services,
+            args.deployment,
+            args.image,
+        )
+        print(
+            "Coverage:",
+            result["coverage"]["status"],
+            "Deployment:",
+            result["deployment_preflight"]["status"],
+        )
+        return
+    if args.image is None or args.proposal or args.deployment:
+        parser.error(
+            "Template planning requires --image and does not accept --proposal"
+        )
+
+    from ._image_run import _plan_image_task
+
+    _plan_image_task(
+        args.image,
+        args.instruction,
+        args.output,
+        task_id=args.task_id,
+        services=services,
+    )
 
 
-def _image_preview(
-    result: dict[str, Any], image_path: Path, summary: dict[str, Any]
-) -> str:
-    from PIL import Image
+def _revise(argv: Sequence[str] | None = None, *, prog: str) -> None:
+    import json
+    from ..workflow import revise_task_plan
 
-    assets = []
-    names = {}
-    candidate_id = result["task_spec"]["metadata"]["candidate_id"]
-    for candidate in result["task_candidates"]["candidates"]:
-        if candidate["candidate_id"] == candidate_id:
-            for ref in candidate["scene_request"]["references"]:
-                uid = result["image_grounding"]["bindings"][ref["reference_id"]][0]
-                names.setdefault(uid, ref["reference"])
-    with Image.open(image_path) as source:
-        for item in result["image_grounding"]["objects"]:
-            if item["bbox"] is None:
-                assets.append(
-                    {
-                        "uid": item["id"],
-                        "name": names.get(item["id"], item["id"]),
-                        "description": item["description"],
-                        "role": item["provenance"],
-                        "render": None,
-                        "cutout": None,
-                    }
-                )
-                continue
-            x0, y0, x1, y1 = item["bbox"]
-            crop = source.crop(
-                (
-                    math.floor(x0 * source.width),
-                    math.floor(y0 * source.height),
-                    math.ceil(x1 * source.width),
-                    math.ceil(y1 * source.height),
-                )
-            ).convert("RGB")
-            crop.thumbnail((256, 256))
-            buffer = BytesIO()
-            crop.save(buffer, format="PNG")
-            assets.append(
-                {
-                    "uid": item["id"],
-                    "name": names.get(item["id"], item["id"]),
-                    "description": item["description"],
-                    "category": "image reference",
-                    "role": "visual",
-                    "render": None,
-                    "cutout": "data:image/png;base64,"
-                    + base64.b64encode(buffer.getvalue()).decode("ascii"),
-                    "cutout_source": f"source image crop: {item['bbox']}",
-                }
-            )
-    return render_semantic_task_graph_html(
-        result["semantic_task_graph"],
-        task_spec=result["task_spec"],
-        validation=result["semantic_graph_validation"],
-        presentation={
-            "robot": "未绑定（图片语义预览）",
-            "assets": assets,
-            "created_at": summary["created_at"],
-            "wall_seconds": summary["elapsed_seconds"],
-            "wall_source": summary["elapsed_scope"],
-        },
+    parser = argparse.ArgumentParser(prog=prog)
+    parser.add_argument("--parent", type=Path, required=True)
+    parser.add_argument("--proposal", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--expected-spec-digest", required=True)
+    parser.add_argument("--expected-graph-digest", required=True)
+    parser.add_argument("--expected-plan-digest", required=True)
+    args = parser.parse_args(argv)
+    print(
+        revise_task_plan(
+            args.parent,
+            json.loads(args.proposal.read_text()),
+            args.output,
+            expected_spec_digest=args.expected_spec_digest,
+            expected_graph_digest=args.expected_graph_digest,
+            expected_plan_digest=args.expected_plan_digest,
+        )
     )
 
 

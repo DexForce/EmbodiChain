@@ -26,6 +26,11 @@ backend.
 | franka | franka_panda | default or newton | `task.franka.yaml` |
 | ur5 | ur5_dh_pgi_140_80 | default or newton | `task.ur5.yaml` |
 | tianji_marvin | tianji_marvin | default | `task.tianji_marvin.yaml` |
+| dexforce_w1_030_pika | dexforce_w1_030_pika | default | `task.dexforce_w1_030_pika.yaml` |
+| dual_franka_robotiq_arg2f_140 | dual_franka_robotiq_arg2f_140 | default | `task.dual_franka_robotiq_arg2f_140.yaml` |
+| dual_ur10_robotiq_arg2f_140 | dual_ur10_robotiq_arg2f_140 | default | `task.dual_ur10_robotiq_arg2f_140.yaml` |
+| dual_ur10_robotiq_arg2f_140_gensim | dual_ur10_robotiq_arg2f_140_gensim | default | `task.dual_ur10_robotiq_arg2f_140_gensim.yaml` |
+| dual_franka_robotiq_arg2f_140_gensim | dual_franka_robotiq_arg2f_140_gensim | default | `task.dual_franka_robotiq_arg2f_140_gensim.yaml` |
 
 Inspect the available deployments:
 
@@ -137,3 +142,47 @@ Sensor-enabled runs expose `cam_left_wrist` and `cam_right_wrist`, each with
 D405-equivalent nominal optics and mesh-estimated mounts; these are simulation
 defaults, not hardware calibration. Add `--disable-sensor` to skip acquisition.
 Dataset recording remains controlled separately by `--filter-dataset-saving`.
+
+## Pika and ARG2F-140 workcells
+
+Select a deployment for the complete robot/tool/workcell combination. A matching
+`dual_arm_parallel_gripper` contract identifies capabilities; it does not qualify
+a different robot's base position, grasp offset or workspace.
+
+- `task.dexforce_w1_030_pika.yaml` uses sequential seeded IK, an object-aligned
+  top grasp, and two reachable positions in the left-arm workbench lane. It
+  retains the native hand commands and 8 N drive limit. Each pickup must lift
+  the cube at least 4 cm; each placement must finish within 2 cm of its target
+  and within 15 degrees of upright.
+- `task.dual_franka_robotiq_arg2f_140.yaml` selects a worktable and fixed arm-base
+  supports matching the frozen robot installation.
+- `task.dual_ur10_robotiq_arg2f_140.yaml` places the base on 40 cm supports and
+  starts with the elbow-up branch. This avoids the table intersections of the
+  floor-level, elbow-down validation layout. No joint limit, drive gain or
+  hand TCP is changed.
+- `task.dual_ur10_robotiq_arg2f_140_gensim.yaml` uses the same workcell and
+  expert path. `DualArmRobot` composes the registered `URRobot` UR10 arms and
+  Robotiq 2F-140 grippers; the component retains GenSim zero friction/armature
+  and the model's 150 mm grasp-search opening.
+- `task.dual_franka_robotiq_arg2f_140_gensim.yaml` installs the GenSim Panda
+  assembly over the workbench supports. `DualArmRobot` composes the registered
+  `Franka` FR3 arms and Robotiq 2F-140 grippers. The component preserves the
+  source's 0.741 rad seventh-joint pose; the arm preset supplies FEP IK and arm
+  drive, and the gripper preset supplies the 200 mm TCP. Explicit hand geometry
+  remains in the skill profile.
+
+The ARG2F-140 deployments share a known-cube grasp selection and program,
+with independent physical environments and robot placement. The object-frame
+pose selects a center top grasp with surface clearance; it is not an extra
+hand-frame conversion. They use 400 Hz Default physics, a 25 Hz control clock,
+and position/velocity controller targets. The smaller physics interval improves
+coupled-linkage contact stability; GenSim drive/friction changes are confined
+to the new embodiment variants.
+
+`sequential_ik_verified.yaml` seeds each keyframe from its preceding solution and
+retimes to the existing velocity/acceleration limits. This avoids the large
+lateral FK bow of an independently seeded sparse joint-space approach. It does
+not assert continuous Cartesian-line or swept-collision certification.
+
+Run an expert and separately replay its stored controller actions when qualifying
+a deployment. Keep the segment lift, placement and upright validators enabled.

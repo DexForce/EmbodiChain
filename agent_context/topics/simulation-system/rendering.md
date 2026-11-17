@@ -4,6 +4,27 @@ Read this for physics/render synchronization, native-window/offscreen image
 processing and readiness reporting. Return to the
 [simulation overview](simulation-system.md).
 
+## Rigid file appearance
+
+`RigidObjectCfg.visuals` remains the appearance owner. SDK 0.6 cannot combine
+multiple file-backed render segments on one actor, so Spawn imports each segment
+through a separate visual object and tracks the physical owner's pose on Default
+and Newton. This also covers a compound physical shape whose default appearance
+mixes files and primitives. Physical collision pieces and semantic geometry stay
+independent; imported file materials and UVs use the native file importer.
+Camera foreground segmentation matches `RigidObject.get_render_ids()`, including
+mesh companion IDs in each selected environment. `get_user_ids()` retains only
+physical body IDs for physics consumers; Gaussian splats have no mesh mask IDs.
+Without a companion, file-batch semantic queries still decode the physical shape
+or explicit proxy, including on NoRender; empty native render buffers are not a
+semantic source. Existing local files resolve before data-root or registry paths.
+Unresolved file-like references remain deferred until materialization, while
+failures from registered catalog assets propagate. Multi-segment file appearance with `env_variants` rejects
+before declaration; use array geometry or separate logical objects for that case.
+Group members requiring this companion composition also reject before declaration;
+declare separate rigid objects. Single-mesh projective UV mapping uses each row's effective configuration, preserving
+a replacement row that does not request projection.
+
 ## NoRender initialization
 
 `RenderCfg(renderer="no-render")` selects `Renderer.NORENDER` and requires
@@ -48,15 +69,22 @@ skips configured lights/IBL and built-in native visual effects; background
 objects and collision geometry remain. Render-only `VisualObject` declarations
 stay in the registry without native handles; visual pose events must skip
 native writes in this mode. DexSim uses its existing package and
-device-free NoRender engine. Native camera and window operations require a
-native renderer. Viser retains native rendering because its current exporter
-reads visual meshes. Checkpoint evaluation with `--viewer` defaults to Hybrid
+device-free NoRender engine. Native camera, light creation and window operations
+require a native renderer. Standalone scene helpers skip optional light
+declarations when `has_native_renderer` is false. Viser retains native rendering
+because its current exporter reads visual meshes. Checkpoint evaluation with `--viewer` defaults to Hybrid
 when the saved training configuration uses NoRender.
 
 DexSim 0.6 still processes Spawn's visual material table on NoRender native
 add/finalize calls. `SpawnScene` temporarily excludes that table during those
 calls so texture binding is never attempted without a renderer, then restores
 the authored definitions for metadata and later declarations.
+
+Explicit task render selections must be preserved during physical qualification.
+For example, the `pour_water` deployment is calibrated for the native glTF
+loader's axis conversion and owns `renderer: hybrid`. Forcing NoRender is not
+an equivalent qualification of that scene even when cameras are disabled.
+Headless native rendering still requires the host's offscreen display setup.
 
 ## Default scene presentation
 
@@ -84,6 +112,12 @@ physics, interval events or reset writes. An open native window, nonempty camera
 groups, due simulation-time recording and due Viser captures share one state
 publication in that phase. Empty camera groups alone are not consumers; an open
 window remains a consumer even with `NewtonPhysicsCfg.sync_to_renderer=False`.
+Window publication stages transforms and marker updates without waiting for
+native render completion. Scenes containing fluids retain completion waits to
+prevent bounded native staging from discarding newer particle updates.
+Camera reads and due captures complete those uploads
+before consumption, sharing one completion wait within the frame. Explicit
+`sync_render_state()` always publishes and waits for native completion.
 Viser decides whether a frame is due before invoking its publication callback.
 
 `update()` renders after each substep by default. Gym uses
@@ -103,6 +137,10 @@ The Newton backend step hook suppresses automatic DexSim publication during
 manager-owned updates to avoid publishing twice. The manager honors explicit
 `sync_to_renderer=True` even without consumers; `None`/`False` publish only for
 consumers. Raw DexSim `World.update()` retains its configured automatic policy.
+When fluids are present, publication orders Newton and Torch work before the
+native CUDA staging copy and waits for that copy before a camera reads the frame.
+After an explicit fluid-state write, it first drains prior staged updates so a
+busy native double buffer cannot silently discard the newer state.
 Render-thread recording only consumes already-published state and must never
 call the blocking physics-to-render bridge. Marker publication while paused uses
 `capture_visualization(force=True)` without advancing physics.
@@ -113,6 +151,19 @@ Spawn. Closed windows do not imply disabled offscreen cameras. Browser export
 and native controls have their own owners:
 [visualization](../sim-visualization/sim-visualization.md) and
 [native gizmos](../sim-visualization/native-gizmos.md).
+
+Native single-frame captures are configured by ``SimulationManagerCfg.window_capture``
+and use the **C** hotkey by default. Input callbacks enqueue requests; the next
+`render_frame()` consumes them on its caller's thread after state publication,
+including frames entered by `update()`. DexSim's synchronous window readback
+cannot run on its render owner. Closing a window discards pending requests;
+late callbacks from its old control cannot capture a reopened window.
+The manager copies a non-empty
+``Windows.get_picture()`` frame when DexSim provides one; renderers without
+native CPU readback may use the legacy missing/empty-frame offscreen fallback
+at the current window pose. A native readback exception returns no image and
+must not enter that fallback: an OS-closed window shell can outlive its camera.
+Unavailable captures never create an empty output file.
 
 ## Parented cameras
 
@@ -153,6 +204,55 @@ Scalar validation runs at construction and conversion after mutable edits.
 Configuration tests do not prove GPU/NGX/NRD runtime support, which initializes
 on a rendered frame. Read exact renderer and algorithm defaults in the config
 source.
+
+Optical settings use `VisualMaterialCfg.parameters` for direct and shape-owned
+materials. Resource definitions and their reset baselines are owned by the
+[material system](materials.md).
+
+## Gaussian composition
+
+`RenderCfg.gaussian` configures native CUDA raster before World construction.
+`RenderCfg.for_gaussian()` composes a native renderer and compatible denoising;
+`RenderCfg.from_dict()` also resolves `preset: gaussian` for Gym YAML/JSON.
+`GaussianRenderCfg.apply_display_srgb` preserves the native True default. Set
+False before World construction for display-referred SuperSplat/Inria captures;
+this applies to every Gaussian in the World, not individual assets. Lit mesh and
+background blending stays scene-linear, and tone mapping can change the result.
+The scanned-scene example defaults to False; the synthetic/mixed example keeps
+True and exposes `--no-apply-display-srgb` for scanned inputs. Both expose the
+positive CLI spelling as an override and record the selected setting.
+Explicit overrides remain authoritative; conflicting preset choices fail
+instead of silently disabling rendering or changing denoising. The preset is
+resolved to ordinary typed settings, and configuration writes need not retain
+the preset name. Existing configs without a preset keep their defaults.
+Gaussian resources enter through Spawn, and `SpawnScene.sync_visuals()` runs
+after physics publication and before CameraGroups consume the state. Each
+binding retains only instance transforms/visibility and immutable references;
+resource residency and cloning remain native-owned. Rebind on topology changes,
+retain reset baselines, and do not assume native batch failures roll back.
+Window-only publication stages Gaussian companions without a completion wait.
+Failed staging or completion invalidates Gaussian capture identities; a failed
+completion can retry the staged publication before another camera read.
+
+USD visual Xforms may reference an external Gaussian PLY through DexSim's
+native parser. This produces a Gaussian render on its original USD rigid or
+visual owner, with USD collision and mass left independent. EmbodiChain binds
+that source through `add_usd()` or `UsdSourceCfg` in one Arena with Default
+physics and Hybrid rendering. Native USD Gaussian renders cannot currently be
+replicated across Arenas or replaced by the explicit `visuals` list; reject
+those requests before Spawn mutation. The standalone `GaussianSplatCfg` path
+continues to support multi-Arena companions and per-instance randomization.
+NoRender omits the USD Gaussian render resource but keeps its authored physics
+and collision descriptions, including replicated bodies. Type queries retain
+the authored visual reference without allocating Gaussian points.
+
+Gaussian cameras currently support pinhole color and native view-Z depth.
+Hybrid standalone NRD, full Gaussian mask/normal/position/motion and StereoCamera
+metadata are rejected. Captured SH is not scene-light relighting. Completed
+CameraGroups retain their own status/calibration snapshot before another group
+can overwrite native last-frame status; failures prevent successful observations.
+Depth/alpha meanings come from the native output contract, not mesh assumptions.
+
 
 ## Startup summaries
 

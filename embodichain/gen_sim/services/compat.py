@@ -89,6 +89,7 @@ class VisionFacade:
 def structured_call(
     *,
     prompt: str,
+    image_path: Path | None = None,
     schema: Mapping[str, Any],
     model: str | None = None,
     role: str = "task_interpretation",
@@ -101,7 +102,11 @@ def structured_call(
             ChatRequest(
                 (
                     ChatMessage("system", (TextPart(system_prompt),)),
-                    ChatMessage("user", (TextPart(prompt),)),
+                    ChatMessage(
+                        "user",
+                        (TextPart(prompt),)
+                        + ((ImagePart(image_path),) if image_path is not None else ()),
+                    ),
                 ),
                 schema=schema,
                 model=model,

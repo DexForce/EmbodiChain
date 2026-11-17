@@ -24,7 +24,7 @@ from __future__ import annotations
 from importlib import import_module
 from types import ModuleType
 
-__all__ = ["layers", "models", "rl", "sl"]
+__all__ = ["layers", "models", "rl", "sl", "dynamics"]
 
 
 def __getattr__(name: str) -> ModuleType:

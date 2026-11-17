@@ -462,9 +462,14 @@ class CoordinatedGraspPoseGenerator(ParallelJawGraspPoseGenerator):
             raise TypeError("delegate must be a parallel-jaw grasp generator.")
         if not isinstance(paired, PairedGraspProvider):
             raise TypeError("paired must implement PairedGraspProvider.")
-        super().__init__(delegate.gripper_model)
+        super().__init__(**delegate.gripper_data)
         self._delegate = delegate
         self._paired = paired
+
+    @property
+    def paired_query_key(self) -> object:
+        """Preserve the identity of the provider owning both paired roles."""
+        return ("paired_provider", id(self._paired))
 
     def get_valid_grasp_poses(
         self, **kwargs: Any

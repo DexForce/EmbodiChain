@@ -91,6 +91,7 @@ registration, and simulation assembly. Gym stepping remains in
 
    embodichain.lab.task_program.integrations.scene_expansion
    embodichain.lab.task_program.integrations.simulation
+   embodichain.lab.task_program.integrations.progress
 
 .. autoclass:: TaskProgramEnvironmentAdapter
    :members:
@@ -496,3 +497,14 @@ The default ``None`` keeps legacy custom factory calls unchanged: no new keyword
 is passed to them. Explicit scope requests require a factory supporting the
 optional keyword. The validator must not acquire observations or mutate physical
 state. Control-service construction and evidence collection remain separate.
+
+
+Policy-owned stage declarations
+-------------------------------
+
+.. autoclass:: embodichain.lab.task_program.integrations.TaskProgramProgress
+   :no-index:
+
+The same progress class is available through this lazy public facade. See
+:mod:`embodichain.lab.task_program.integrations.progress` for its methods and
+supported declaration subset.

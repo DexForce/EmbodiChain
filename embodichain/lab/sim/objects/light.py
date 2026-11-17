@@ -16,36 +16,44 @@
 
 from __future__ import annotations
 
-import torch
+from collections.abc import Sequence
+from typing import TYPE_CHECKING
+
 import numpy as np
-from typing import TYPE_CHECKING, List, Sequence
-from dexsim.render import Light as _Light
+import torch
+
 from embodichain.lab.sim.cfg import LightCfg
 from embodichain.lab.sim.common import BatchEntity
+from embodichain.lab.sim._render_selection import (
+    _normalize_render_rows,
+    _select_render_values,
+)
 from embodichain.utils import logger
 
 if TYPE_CHECKING:
     from dexsim.models import MeshObject
+    from dexsim.scene import LightBatch, Scene, SpawnedLight
+
+__all__ = ["Light"]
 
 
 class Light(BatchEntity):
-    """Light represents a batch of lights in the simulation.
-
-    Each light supports the following properties:
-        - Color (3 floats)
-        - Intensity (1 float)
-        - Falloff (1 float)
-        - Location (3 floats)
-    """
+    """Environment-ordered lights owned by one Scene and updated in native batches."""
 
     def __init__(
         self,
         cfg: LightCfg,
-        entities: List[_Light] = None,
+        entities: Sequence[SpawnedLight],
         device: torch.device = torch.device("cpu"),
+        *,
+        scene: Scene,
     ) -> None:
-
-        super().__init__(cfg, entities, device)
+        self._scene = scene
+        self._light_handles = tuple(entities)
+        self._light_batch: LightBatch | None = None
+        self._batch_revision = -1
+        self._is_destroyed = False
+        super().__init__(cfg, [handle.native for handle in entities], device)
         self.reset()
 
     def get_color(self) -> torch.Tensor:
@@ -64,223 +72,189 @@ class Light(BatchEntity):
             device=self.device,
         )
 
-    def set_color(
-        self, colors: torch.Tensor, env_ids: Sequence[int] | None = None
+    @property
+    def _batch(self) -> LightBatch:
+        """Reselect stable handles after physical topology changes."""
+        if self._is_destroyed:
+            raise RuntimeError("Light has been destroyed.")
+        revision = self._scene.topology_revision
+        if self._light_batch is None or self._batch_revision != revision:
+            self._light_batch = self._scene.create_light_batch(self._light_handles)
+            self._batch_revision = revision
+        return self._light_batch
+
+    def apply_state(
+        self,
+        *,
+        color: torch.Tensor | None = None,
+        intensity: torch.Tensor | None = None,
+        position: torch.Tensor | None = None,
+        direction: torch.Tensor | None = None,
+        shadow_enabled: torch.Tensor | None = None,
+        spot_inner_angle: torch.Tensor | None = None,
+        spot_outer_angle: torch.Tensor | None = None,
+        rect_width: torch.Tensor | None = None,
+        rect_height: torch.Tensor | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
     ) -> None:
-        """Set color for one or more lights.
+        """Validate and apply selected light fields in one native publication.
+
+        Omitted fields and environments are preserved. Scalar fields and RGB/xyz
+        vectors broadcast. CPU/CUDA inputs retain their device until the native
+        adapter; support for CUDA input does not imply device-resident execution.
+        Positions are parent-local translations, matching ``set_local_pose``.
 
         Args:
-            colors (torch.Tensor): Tensor of shape (M, 3) or (3,), representing RGB values.
-                - If shape is (3,), the same color is applied to all targeted instances.
-                - If shape is (M, 3), M must match the number of targeted instances.
-            env_ids (Sequence[int] | None): Indices of instances to set. If None:
-                - For colors.shape == (3,), applies to all instances.
-                - For colors.shape == (M, 3), M must equal num_instances, applies per-instance.
+            color: RGB (3,) or (N,3).
+            intensity: Legacy intensity scalar or (N,).
+            position: Local position (3,) or (N,3).
+            direction: Direction (3,) or (N,3) for directional light types.
+            shadow_enabled: Scalar or (N,) nonzero flags.
+            spot_inner_angle: Spot inner full cone angle in degrees.
+            spot_outer_angle: Spot outer full cone angle in degrees.
+            rect_width: Rectangular light width, scalar or (N,).
+            rect_height: Rectangular light height, scalar or (N,).
+            env_ids: Selected environment rows, in input order, or all rows.
         """
-        self._apply_vector3(colors, env_ids, "set_color")
+        if position is not None and self.is_global:
+            logger.log_warning(
+                f"Position ignored for global {self.cfg.light_type!r} light."
+            )
+            position = None
+        rows, offsets = _normalize_render_rows(env_ids, self.num_instances)
+        fields = {
+            "color": color,
+            "intensity": intensity,
+            "position": position,
+            "direction": direction,
+            "shadow_enabled": None if shadow_enabled is None else shadow_enabled != 0,
+            "spot_inner_angle": spot_inner_angle,
+            "spot_outer_angle": spot_outer_angle,
+            "rect_width": rect_width,
+            "rect_height": rect_height,
+        }
+        fields = {
+            name: _select_render_values(
+                value, offsets, 1 if name in ("color", "position", "direction") else 0
+            )
+            for name, value in fields.items()
+            if value is not None
+        }
+        self._batch.apply_state(**fields, rows=rows, frame="local")
+
+    def set_color(
+        self, colors: torch.Tensor, env_ids: Sequence[int] | torch.Tensor | None = None
+    ) -> None:
+        """Set RGB colors using one native batch.
+
+        Args:
+            colors: RGB (3,) broadcast or selected (N,3) values.
+            env_ids: Selected environment rows, or all rows.
+        """
+        rows, offsets = _normalize_render_rows(env_ids, self.num_instances)
+        self._batch.apply_color(_select_render_values(colors, offsets, 1), rows=rows)
 
     def set_intensity(
-        self, intensities: torch.Tensor, env_ids: Sequence[int] | None = None
+        self,
+        intensities: torch.Tensor,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
     ) -> None:
-        """Set intensity for one or more lights.
+        """Set scalar or selected per-environment intensities.
 
         Args:
-            intensities (torch.Tensor): Tensor of shape (M,), (1,), or scalar (0-dim).
-                - If scalar or shape (1,), the same intensity is applied to all targeted instances.
-                - If shape (M,), M must match the number of targeted instances.
-            env_ids (Sequence[int] | None): Indices of instances to set. If None:
-                - For scalar/shape (1,), applies to all instances.
-                - For shape (M,), M must equal num_instances, applies per-instance.
+            intensities: A scalar, (1,), or selected (N,) values.
+            env_ids: Selected environment rows, or all rows.
         """
-        self._apply_scalar(intensities, env_ids, "set_intensity")
+        rows, offsets = _normalize_render_rows(env_ids, self.num_instances)
+        self._batch.apply_intensity(
+            _select_render_values(intensities, offsets, 0), rows=rows
+        )
 
     def set_falloff(
-        self, falloffs: torch.Tensor, env_ids: Sequence[int] | None = None
+        self,
+        falloffs: torch.Tensor,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
     ) -> None:
-        """Set falloff (radius) for one or more lights.
+        """Retain the legacy falloff setter, which has no effective SDK consumer.
+
+        This unsupported field has no native batch implementation. It remains
+        a compatibility path and is excluded from fused state/reset writes.
 
         Args:
-            falloffs (torch.Tensor): Tensor of shape (M,), (1,), or scalar (0-dim).
-                - If scalar or shape (1,), the same falloff is applied to all targeted instances.
-                - If shape (M,), M must match the number of targeted instances.
-            env_ids (Sequence[int] | None): Indices of instances to set. If None:
-                - For scalar/shape (1,), applies to all instances.
-                - For shape (M,), M must equal num_instances, applies per-instance.
+            falloffs: A scalar, (1,), or selected (N,) values.
+            env_ids: Selected environment rows, or all rows.
         """
-        self._apply_scalar(falloffs, env_ids, "set_falloff")
+        ids = range(self.num_instances) if env_ids is None else env_ids
+        values = falloffs.detach().cpu().reshape(-1)
+        for offset, row in enumerate(ids):
+            self._entities[row].set_falloff(
+                float(values[0 if len(values) == 1 else offset])
+            )
 
     def set_direction(
-        self, directions: torch.Tensor, env_ids: Sequence[int] | None = None
+        self,
+        directions: torch.Tensor,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
     ) -> None:
-        """Set direction for directional-type lights.
-
-        Only applies to ``sun``, ``direction``, ``spot``, ``rect``, and ``mesh``
-        light types. Logs a warning and no-ops for other types.
+        """Set emitted directions for directional light types in one batch.
 
         Args:
-            directions (torch.Tensor): Tensor of shape (3,) or (M, 3), representing
-                (x, y, z) direction vectors.
-            env_ids (Sequence[int] | None): Indices of instances to set. If None:
-                - For shape (3,), applies to all instances.
-                - For shape (M, 3), M must equal num_instances, applies per-instance.
+            directions: Direction (3,) or selected (N,3) values.
+            env_ids: Selected environment rows, or all rows.
         """
         if self.cfg.light_type not in ("sun", "direction", "spot", "rect", "mesh"):
             logger.log_warning(
-                f"set_direction not applicable to light type "
-                f"'{self.cfg.light_type}', ignoring."
+                f"set_direction not applicable to light type {self.cfg.light_type!r}, ignoring."
             )
             return
-        self._apply_vector3(directions, env_ids, "set_direction")
+        rows, offsets = _normalize_render_rows(env_ids, self.num_instances)
+        self._batch.apply_direction(
+            _select_render_values(directions, offsets, 1), rows=rows, frame="local"
+        )
 
     def set_spot_angle(
         self,
         inner_angles: torch.Tensor,
         outer_angles: torch.Tensor,
-        env_ids: Sequence[int] | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
     ) -> None:
-        """Set inner and outer cone angles for spot lights.
-
-        Only applies to ``spot`` light type. Logs a warning and no-ops for other types.
+        """Set both cone angles atomically for selected spot lights.
 
         Args:
-            inner_angles (torch.Tensor): Tensor of shape () (0-dim), (1,), or (M,)
-                representing inner cone angle in degrees.
-            outer_angles (torch.Tensor): Tensor of shape () (0-dim), (1,), or (M,)
-                representing outer cone angle in degrees.
-            env_ids (Sequence[int] | None): Indices of instances to set.
+            inner_angles: Inner full cone degrees, scalar or (N,).
+            outer_angles: Outer full cone degrees, scalar or (N,).
+            env_ids: Selected environment rows, or all rows.
         """
         if self.cfg.light_type != "spot":
             logger.log_warning(
-                f"set_spot_angle not applicable to light type "
-                f"'{self.cfg.light_type}', ignoring."
+                f"set_spot_angle not applicable to light type {self.cfg.light_type!r}, ignoring."
             )
             return
-
-        if not torch.is_tensor(inner_angles) or not torch.is_tensor(outer_angles):
-            logger.log_error("set_spot_angle requires torch.Tensor arguments")
-            return
-
-        inner_cpu = inner_angles.detach().cpu()
-        outer_cpu = outer_angles.detach().cpu()
-
-        if env_ids is None:
-            all_ids = list(range(self.num_instances))
-        else:
-            all_ids = list(env_ids)
-
-        # Both scalar (0-dim): broadcast to all_ids
-        if inner_cpu.ndim == 0 and outer_cpu.ndim == 0:
-            iv = float(inner_cpu.item())
-            ov = float(outer_cpu.item())
-            for i in all_ids:
-                self._entities[i].set_spot_angle(iv, ov)
-            return
-
-        # Both 1D with matching length
-        if inner_cpu.ndim == 1 and outer_cpu.ndim == 1:
-            ilen, olen = inner_cpu.shape[0], outer_cpu.shape[0]
-            inner_arr = inner_cpu.numpy()
-            outer_arr = outer_cpu.numpy()
-
-            if ilen == olen == self.num_instances and env_ids is None:
-                for i in range(self.num_instances):
-                    self._entities[i].set_spot_angle(
-                        float(inner_arr[i]), float(outer_arr[i])
-                    )
-                return
-
-            if env_ids is not None and ilen == olen == len(all_ids):
-                for idx, i in enumerate(all_ids):
-                    self._entities[i].set_spot_angle(
-                        float(inner_arr[idx]), float(outer_arr[idx])
-                    )
-                return
-
-            # length-1 broadcast
-            if ilen == olen == 1:
-                iv = float(inner_arr[0])
-                ov = float(outer_arr[0])
-                for i in all_ids:
-                    self._entities[i].set_spot_angle(iv, ov)
-                return
-
-        logger.log_error(
-            f"set_spot_angle: invalid tensor shapes "
-            f"inner={tuple(inner_cpu.shape)}, outer={tuple(outer_cpu.shape)}"
+        self.apply_state(
+            spot_inner_angle=inner_angles,
+            spot_outer_angle=outer_angles,
+            env_ids=env_ids,
         )
 
     def set_rect_wh(
         self,
         widths: torch.Tensor,
         heights: torch.Tensor,
-        env_ids: Sequence[int] | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
     ) -> None:
-        """Set width and height for rectangular area lights.
-
-        Only applies to ``rect`` light type. Logs a warning and no-ops for other types.
+        """Set both rectangle dimensions in one native batch.
 
         Args:
-            widths (torch.Tensor): Tensor of shape () (0-dim), (1,), or (M,)
-                representing width of the rectangular light.
-            heights (torch.Tensor): Tensor of shape () (0-dim), (1,), or (M,)
-                representing height of the rectangular light.
-            env_ids (Sequence[int] | None): Indices of instances to set.
+            widths: Width scalar or selected (N,) values.
+            heights: Height scalar or selected (N,) values.
+            env_ids: Selected environment rows, or all rows.
         """
         if self.cfg.light_type != "rect":
             logger.log_warning(
-                f"set_rect_wh not applicable to light type "
-                f"'{self.cfg.light_type}', ignoring."
+                f"set_rect_wh not applicable to light type {self.cfg.light_type!r}, ignoring."
             )
             return
-
-        if not torch.is_tensor(widths) or not torch.is_tensor(heights):
-            logger.log_error("set_rect_wh requires torch.Tensor arguments")
-            return
-
-        w_cpu = widths.detach().cpu()
-        h_cpu = heights.detach().cpu()
-
-        if env_ids is None:
-            all_ids = list(range(self.num_instances))
-        else:
-            all_ids = list(env_ids)
-
-        # Both scalar (0-dim): broadcast to all_ids
-        if w_cpu.ndim == 0 and h_cpu.ndim == 0:
-            wv = float(w_cpu.item())
-            hv = float(h_cpu.item())
-            for i in all_ids:
-                self._entities[i].set_rect_wh(wv, hv)
-            return
-
-        # Both 1D with matching length
-        if w_cpu.ndim == 1 and h_cpu.ndim == 1:
-            wlen, hlen = w_cpu.shape[0], h_cpu.shape[0]
-            w_arr = w_cpu.numpy()
-            h_arr = h_cpu.numpy()
-
-            if wlen == hlen == self.num_instances and env_ids is None:
-                for i in range(self.num_instances):
-                    self._entities[i].set_rect_wh(float(w_arr[i]), float(h_arr[i]))
-                return
-
-            if env_ids is not None and wlen == hlen == len(all_ids):
-                for idx, i in enumerate(all_ids):
-                    self._entities[i].set_rect_wh(float(w_arr[idx]), float(h_arr[idx]))
-                return
-
-            # length-1 broadcast
-            if wlen == hlen == 1:
-                wv = float(w_arr[0])
-                hv = float(h_arr[0])
-                for i in all_ids:
-                    self._entities[i].set_rect_wh(wv, hv)
-                return
-
-        logger.log_error(
-            f"set_rect_wh: invalid tensor shapes "
-            f"width={tuple(w_cpu.shape)}, height={tuple(h_cpu.shape)}"
-        )
+        self.apply_state(rect_width=widths, rect_height=heights, env_ids=env_ids)
 
     def set_mesh(
         self,
@@ -317,71 +291,22 @@ class Light(BatchEntity):
                 logger.log_error(f"set_mesh: error for instance {i}: {e}")
 
     def enable_shadow(
-        self,
-        flags: torch.Tensor,
-        env_ids: Sequence[int] | None = None,
+        self, flags: torch.Tensor, env_ids: Sequence[int] | torch.Tensor | None = None
     ) -> None:
-        """Enable or disable shadow casting.
-
-        Applies to all light types.
+        """Enable shadows for scalar or selected per-environment flags.
 
         Args:
-            flags (torch.Tensor): Boolean tensor of shape () (0-dim), (1,), or (M,).
-                Non-zero values enable shadows; zero disables.
-            env_ids (Sequence[int] | None): Indices of instances to set.
+            flags: Scalar or (N,) values; nonzero enables the shadow.
+            env_ids: Selected environment rows, or all rows.
         """
-        if not torch.is_tensor(flags):
-            logger.log_error(
-                f"enable_shadow requires a torch.Tensor, got {type(flags)}"
-            )
-            return
-
-        cpu = flags.detach().cpu()
-        if env_ids is None:
-            all_ids = list(range(self.num_instances))
-        else:
-            all_ids = list(env_ids)
-
-        # Scalar: broadcast
-        if cpu.ndim == 0:
-            val = bool(cpu.item() != 0)
-            for i in all_ids:
-                self._entities[i].set_shadow(val)
-            return
-
-        # 1D tensor
-        if cpu.ndim == 1:
-            length = cpu.shape[0]
-            arr = cpu.numpy()
-            if length == self.num_instances and env_ids is None:
-                for i in range(self.num_instances):
-                    self._entities[i].set_shadow(bool(arr[i] != 0))
-                return
-            if env_ids is not None and length == len(all_ids):
-                for idx, i in enumerate(all_ids):
-                    self._entities[i].set_shadow(bool(arr[idx] != 0))
-                return
-            if length == 1:
-                val = bool(arr[0] != 0)
-                for i in all_ids:
-                    self._entities[i].set_shadow(val)
-                return
-
-        logger.log_error(
-            f"enable_shadow: tensor shape {tuple(cpu.shape)} is invalid for broadcasting"
+        rows, offsets = _normalize_render_rows(env_ids, self.num_instances)
+        self._batch.apply_shadow_enabled(
+            _select_render_values(flags, offsets, 0) != 0, rows=rows
         )
 
     @property
     def is_global(self) -> bool:
-        """Whether this light is a global scene light (single instance).
-
-        Global lights (``"sun"``, ``"direction"``) are infinite-distance
-        light sources that illuminate the entire scene. They are never
-        batched per environment.
-
-        Returns:
-            bool: True if the light is a global scene light.
-        """
+        """Whether this is a single scene-wide sun or directional light."""
         return self.cfg.light_type in ("sun", "direction")
 
     def set_local_pose(
@@ -539,120 +464,46 @@ class Light(BatchEntity):
             f"(expected (3,) or ({self.num_instances},3) or ({len(all_ids)},3))."
         )
 
-    def _apply_scalar(
-        self,
-        tensor: torch.Tensor,
-        env_ids: Sequence[int] | None,
-        setter_name: str,
-    ) -> None:
-        """
-        Generic helper for scalar floats (intensity, falloff).
-        Accepts tensor shape: () (0-dim), (1,), or (M,) with M == num_instances or M == len(env_ids).
-        env_ids: Sequence[int] | None
-        """
-        if not torch.is_tensor(tensor):
-            logger.log_error(
-                f"{setter_name} requires a torch.Tensor, got {type(tensor)}"
-            )
-            return
+    def reset(self, env_ids: Sequence[int] | torch.Tensor | None = None) -> None:
+        """Restore selected initial light properties with one fused write.
 
-        cpu = tensor.detach().cpu()
-        if env_ids is None:
-            all_ids = list(range(self.num_instances))
-        else:
-            all_ids = list(env_ids)
-
-        # 1) scalar tensor: broadcast
-        if cpu.ndim == 0:
-            val = float(cpu.item())
-            for i in all_ids:
-                getattr(self._entities[i], setter_name)(val)
-            return
-
-        # 2) 1D tensor:
-        if cpu.ndim == 1:
-            length = cpu.shape[0]
-            arr = cpu.numpy()
-            # a) length == num_instances and env_ids None: map one-to-one
-            if length == self.num_instances and env_ids is None:
-                for i in range(self.num_instances):
-                    getattr(self._entities[i], setter_name)(float(arr[i]))
-                return
-            # b) length == len(env_ids) when env_ids provided: map one-to-one
-            if env_ids is not None and length == len(all_ids):
-                for idx, i in enumerate(all_ids):
-                    getattr(self._entities[i], setter_name)(float(arr[idx]))
-                return
-            # c) length == 1: broadcast
-            if length == 1:
-                val = float(arr[0])
-                for i in all_ids:
-                    getattr(self._entities[i], setter_name)(val)
-                return
-
-        logger.log_error(
-            f"{setter_name}: tensor shape {tuple(cpu.shape)} is invalid for broadcasting "
-            f"(expected scalar, (1,), ({self.num_instances},) or ({len(all_ids)},))."
-        )
-
-    def reset(self, env_ids: Sequence[int] | None = None) -> None:
-        """Reset the light to its initial configuration state.
-
-        Applies only the properties relevant to ``self.cfg.light_type``.
-
-        .. attention::
-            When this light has only one instance (global lights such as
-            ``"sun"`` and ``"direction"``, or any light in a single-environment
-            scene), ``env_ids`` is normalized to ``None`` because there is only
-            one instance to update. Passing per-environment indices is silently
-            ignored.
+        Single-instance lights normalize selections to all rows as before.
+        Falloff has no applied consumer and is not part of the native batch.
 
         Args:
-            env_ids (Sequence[int] | None): The environment IDs to reset.
-                If None, resets all environments.
+            env_ids: Selected environment rows, or all rows.
         """
-        self.cfg: LightCfg
-        light_type = self.cfg.light_type
-
-        # Global lights have a single instance — ignore per-env indices.
         if self.num_instances == 1:
             env_ids = None
-
-        # Universal properties
-        self.set_color(torch.as_tensor(self.cfg.color), env_ids=env_ids)
-        self.set_intensity(torch.as_tensor(self.cfg.intensity), env_ids=env_ids)
-        self.enable_shadow(
-            torch.as_tensor(float(self.cfg.enable_shadow)), env_ids=env_ids
+        cfg = self.cfg
+        fields = dict(
+            color=torch.as_tensor(cfg.color),
+            intensity=torch.as_tensor(cfg.intensity),
+            shadow_enabled=torch.as_tensor(cfg.enable_shadow),
         )
-
-        # Position (all types except global infinite-distance lights)
         if not self.is_global:
-            self.set_local_pose(torch.as_tensor(self.cfg.init_pos), env_ids=env_ids)
-
-        # Point light: falloff
-        if light_type == "point":
-            self.set_falloff(torch.as_tensor(self.cfg.radius), env_ids=env_ids)
-
-        # Directional types: direction vector
-        if light_type in ("sun", "direction", "spot", "rect", "mesh"):
-            self.set_direction(torch.as_tensor(self.cfg.direction), env_ids=env_ids)
-
-        # Spot light: cone angles
-        if light_type == "spot":
-            self.set_spot_angle(
-                torch.as_tensor(self.cfg.spot_angle_inner),
-                torch.as_tensor(self.cfg.spot_angle_outer),
-                env_ids=env_ids,
+            fields["position"] = torch.as_tensor(cfg.init_pos)
+        if cfg.light_type in ("sun", "direction", "spot", "rect", "mesh"):
+            fields["direction"] = torch.as_tensor(cfg.direction)
+        if cfg.light_type == "spot":
+            fields.update(
+                spot_inner_angle=torch.as_tensor(cfg.spot_angle_inner),
+                spot_outer_angle=torch.as_tensor(cfg.spot_angle_outer),
             )
-
-        # Rect light: dimensions
-        if light_type == "rect":
-            self.set_rect_wh(
-                torch.as_tensor(self.cfg.rect_width),
-                torch.as_tensor(self.cfg.rect_height),
-                env_ids=env_ids,
+        if cfg.light_type == "rect":
+            fields.update(
+                rect_width=torch.as_tensor(cfg.rect_width),
+                rect_height=torch.as_tensor(cfg.rect_height),
             )
+        self.apply_state(**fields, env_ids=env_ids)
 
-        # Mesh light: mesh_path is stored in cfg but actual mesh assignment
-        # is done via set_mesh() which requires a MeshObject.
-        # Sun-specific angular_radius/halo are reserved for future backend support.
+    def destroy(self) -> None:
+        """Remove native lights as one batch before releasing borrowed views."""
+        if self._is_destroyed:
+            return
+        self._light_batch = None
+        self._scene.remove_lights(self._light_handles)
+        self._light_handles = ()
+        self._entities = []
+        self._scene = None
+        self._is_destroyed = True

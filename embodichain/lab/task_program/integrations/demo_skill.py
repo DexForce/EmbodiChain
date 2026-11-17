@@ -173,10 +173,19 @@ class _DemoSkillLowererFactory:
                                 "release_on_exit requires an explicit terminal object role"
                             )
                     if owner.terminal_held_role is not None:
-                        semantics = scene_registry.object_semantics(
-                            scene_registry.resolve(
-                                roles[role], expected_type=SceneObjectRef
-                            )
+                        from embodichain.lab.sim.atomic_skills import (
+                            ObjectSemantics,
+                            Affordance,
+                        )
+
+                        registration = scene_registry.lookup(roles[role])
+                        # The asset owns acquisition geometry and measured grasp
+                        # evidence; it need not expose a native Pick affordance.
+                        semantics = ObjectSemantics(
+                            affordance=Affordance(),
+                            geometry={},
+                            label=registration.semantic_type or "none",
+                            entity_id=roles[role],
                         )
                     registered_effect = RegisteredSemanticEffect(
                         effect_kind=(
@@ -206,20 +215,26 @@ class _DemoSkillLowererFactory:
         return _Lowerer()
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class _NamedDemoSkillLowererFactory(_DemoSkillLowererFactory):
+    alias: str
+    initial_held_role: str | None = None
+
+
 @lru_cache(maxsize=256)
-def _lowerer_type(call_id: str) -> type[_DemoSkillLowererFactory]:
+def _lowerer_type(call_id: str, named: bool = False) -> type[_DemoSkillLowererFactory]:
     _call_id(call_id)
     # Only the validated call identity varies; no arbitrary import or class path
     # is accepted from configuration. All factories share the same closed code.
     return type(
         "_DemoSkill_" + call_id.replace(".", "__"),
-        (_DemoSkillLowererFactory,),
+        (_NamedDemoSkillLowererFactory if named else _DemoSkillLowererFactory,),
         {"call_id": call_id, "__module__": __name__},
     )
 
 
 def _decode_demo_skill_lowerer(value: Mapping) -> _DemoSkillLowererFactory:
-    if set(value) != {"kind", "call_id", "asset_manifest", "asset_sha256"}:
+    if set(value) - {"alias"} != {"kind", "call_id", "asset_manifest", "asset_sha256"}:
         raise ValueError(
             "DemoSkill lowerer requires kind, call_id, asset_manifest and asset_sha256"
         )
@@ -227,7 +242,7 @@ def _decode_demo_skill_lowerer(value: Mapping) -> _DemoSkillLowererFactory:
     if artifact.content_sha256 != value["asset_sha256"]:
         raise ValueError("DemoSkill lowerer asset digest mismatch")
     spec = artifact.spec
-    return _lowerer_type(value["call_id"])(
+    return _lowerer_type(value["call_id"], "alias" in value)(
         artifact.content_sha256,
         tuple(role.role_id for role in spec.roles),
         spec.terminal_held_role,
@@ -235,4 +250,120 @@ def _decode_demo_skill_lowerer(value: Mapping) -> _DemoSkillLowererFactory:
         next(
             (role.role_id for role in spec.roles if role.reference_kind == "held"), None
         ),
+        **(
+            {"alias": value["alias"], "initial_held_role": spec.initial_held_role}
+            if "alias" in value
+            else {}
+        ),
     )
+
+
+def _prepare_named_demo_skills(task):
+    """Expand a task-owned registry into existing closed runtime declarations."""
+    services = task.get("runtime_services", {})
+    registry = services.pop("demo_skills", {})
+    if not isinstance(registry, Mapping):
+        raise ValueError("runtime_services.demo_skills must be a named mapping")
+    result = {}
+    for alias, declaration in registry.items():
+        if not isinstance(alias, str) or not alias or alias != alias.strip():
+            raise ValueError("Demo Skill aliases must be nonempty identifiers")
+        if (
+            not isinstance(declaration, Mapping)
+            or set(declaration)
+            - {
+                "call_id",
+                "asset_manifest",
+                "asset_sha256",
+                "contact_sensor_uid",
+                "tcp_contact_links",
+            }
+            or not {"call_id", "asset_manifest", "asset_sha256"} <= set(declaration)
+        ):
+            raise ValueError(
+                f"Demo Skill {alias!r} requires call_id, asset_manifest and asset_sha256"
+            )
+        if declaration["call_id"] in result:
+            raise ValueError("Demo Skill call IDs must be unique")
+        value = dict(declaration)
+        factory = _decode_demo_skill_lowerer(
+            {
+                "kind": "demo_skill",
+                "alias": alias,
+                **{
+                    key: value[key]
+                    for key in ("call_id", "asset_manifest", "asset_sha256")
+                },
+            }
+        )
+        links = value.get("tcp_contact_links", ())
+        if type(links) not in (tuple, list):
+            raise ValueError("tcp_contact_links must be a list of explicit link names")
+        source = _ConfiguredDemoSkillSource(
+            call_index=0,
+            program_fingerprint="0" * 64,
+            **{**value, "tcp_contact_links": tuple(links)},
+        )
+        source.validate_source()
+        services.setdefault("registered_semantic_lowerers", []).append(
+            {
+                "kind": "demo_skill",
+                "alias": alias,
+                **{
+                    key: value[key]
+                    for key in ("call_id", "asset_manifest", "asset_sha256")
+                },
+            }
+        )
+        profile = task["profile"]
+        profile.setdefault("skill_options", {}).setdefault(
+            factory.call_id, {"kind": "execute_demo_skill"}
+        )
+        defaults = profile.setdefault("defaults", {})
+        if "execute_demo_skill" not in defaults:
+            primary = defaults.get("pick_up", defaults.get("move_held_object"))
+            if primary is not None:
+                defaults["execute_demo_skill"] = dict(primary)
+        if factory.terminal_held_role or factory.release_on_exit:
+            monitors = profile.setdefault("effect_monitors", {})
+            monitors.setdefault(
+                factory.call_id,
+                {
+                    "monitor_id": "builtin.composite_effect",
+                    "revision": "1",
+                    "params": {},
+                },
+            )
+        result[factory.call_id] = source
+    return result
+
+
+def _bind_named_demo_sources(program, templates, existing):
+    """Seal each expanded call to an asset and the actual compiled program."""
+    from dataclasses import replace
+    from ._program_identity import task_program_fingerprint
+
+    fingerprint = task_program_fingerprint(program)
+    sources = list(existing)
+    owned = {item.call_index for item in sources}
+    for segment in program.iter_segments():
+        for occurrence in segment.calls:
+            call = occurrence.call
+            if type(call) is RegisteredSemanticCall and call.call_id in templates:
+                if occurrence.call_index in owned:
+                    raise ValueError(
+                        "Demo Skill occurrence has both automatic and explicit source owners"
+                    )
+                owned.add(occurrence.call_index)
+                sources.append(
+                    replace(
+                        templates[call.call_id],
+                        call_index=occurrence.call_index,
+                        program_fingerprint=fingerprint,
+                    )
+                )
+    if sources and any(
+        segment.parallel_block is not None for segment in program.iter_segments()
+    ):
+        raise ValueError("configured Demo Skills require a sequential program")
+    return tuple(sources)
