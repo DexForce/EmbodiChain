@@ -27,6 +27,7 @@ from matplotlib.figure import Figure
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import ArticulationCfg, NewtonPhysicsCfg, RenderCfg
 from embodichain.lab.sim.sensors import SensorCfg
+from embodichain.lab.visualization import VisualizationCfg
 
 from .._preview import write_preview
 from .._scene_camera import capture_rgb, scene_camera, show_scene, SCENE_RENDER
@@ -42,6 +43,7 @@ def run_wrench(output: Path, device: str, video: bool) -> None:
     sim = SimulationManager(
         SimulationManagerCfg(
             headless=True,
+            visualization=VisualizationCfg(backend="none"),
             physics_dt=0.01,
             render_cfg=SCENE_RENDER,
             enable_entity_gizmo=False,
