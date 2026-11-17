@@ -1,0 +1,22 @@
+<robot name="wrench">
+  <link name="base"/>
+  <link name="payload">
+    <inertial><origin xyz="0.1 0 0"/><mass value="1"/>
+      <inertia ixx=".01" iyy=".01" izz=".01" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+    <collision><geometry><box size=".1 .1 .1"/></geometry></collision>
+  </link>
+  <link name="carrier">
+    <inertial><mass value="1"/>
+      <inertia ixx=".01" iyy=".01" izz=".01" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+  </link>
+  <joint name="load_cell" type="fixed">
+    <parent link="carrier"/><child link="payload"/>
+  </joint>
+  <joint name="slider" type="prismatic">
+    <parent link="base"/><child link="carrier"/>
+    <origin xyz="0 0 0.5"/><axis xyz="1 0 0"/>
+    <limit lower="0" upper="0.1" effort="100" velocity="1"/>
+  </joint>
+</robot>

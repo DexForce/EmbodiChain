@@ -54,3 +54,19 @@ or backends. `auto` selects native when available and uses finite differences
 on Default CPU. The plot displays the selected source and the free-fall and
 centripetal references. For the offset sensor, the latter is
 `-0.18 m × (6 rad/s)² = -6.48 m/s²` along local X.
+
+## Joint wrench
+
+```bash
+python -m examples.sim.sensors.state.wrench --device cuda:0 --output /tmp/sensor-wrench
+```
+
+This mode requires the CUDA Newton MuJoCo Warp capacity for joint reactions.
+It sets `NewtonPhysicsCfg(enable_joint_wrenches=True)` and selects
+`solver_type="mujoco_warp"` with `rne_mode="last_substep"`. The registered
+`JointWrench` samples the parent-on-child reaction at the named fixed joint
+`load_cell`. A 1 kg payload with its COM 0.10 m along local X produces
+force (0, 0, 9.81) N and torque (0, -0.981, 0) N·m at the joint origin.
+The plot shows all six measured components, the gravity reference and the
+validity gap at reset. The frame view scales force arrows by 0.012 m/N and
+torque arrows by 0.11 m/(N·m) for display.
