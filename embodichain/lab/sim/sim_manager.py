@@ -3011,10 +3011,15 @@ class SimulationManager:
                 ]
             return False
         if self.num_envs != 1:
-            raise NotImplementedError(
-                "DexSim USD Gaussian visuals cannot be replicated across Arenas; "
-                "use explicit GaussianSplatCfg visuals for multi-environment scenes."
-            )
+            from dexsim.scene.objects import SpawnedRigidBody
+
+            if not callable(
+                getattr(SpawnedRigidBody, "get_gaussian_resource_ids", None)
+            ):
+                raise NotImplementedError(
+                    "USD Gaussian arena replication requires a qualified DexSim "
+                    "build with native companion cloning and resource-ID queries."
+                )
         if self.sim_config.visualization.backend == "viser":
             raise NotImplementedError(
                 "USD Gaussian visuals require native camera or window rendering."
@@ -3295,7 +3300,7 @@ class SimulationManager:
                         "USD-native Gaussian appearance cannot be replaced by visuals; "
                         "use a Mesh USD source with explicit GaussianSplatCfg visuals."
                     )
-                descriptor.per_env = False
+                descriptor.per_env = self.num_envs > 1
         else:
             descriptor, materials = visual_desc_from_cfg(cfg)
         visual = VisualObject(cfg, self.device)
@@ -3450,7 +3455,7 @@ class SimulationManager:
                             "USD-native Gaussian appearance cannot be replaced by visuals; "
                             "use a Mesh USD source with explicit GaussianSplatCfg visuals."
                         )
-                    descriptor.per_env = False
+                    descriptor.per_env = self.num_envs > 1
             else:
                 descriptor, materials = rigid_desc_from_cfg(
                     cfg,

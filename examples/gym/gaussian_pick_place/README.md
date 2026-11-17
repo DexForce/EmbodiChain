@@ -53,9 +53,10 @@ The deployments preserve each scene's `cam_third` calibration with UID-scoped
 `camera_overrides`; the wrist calibration remains shared.
 Programs own `Pick → Place → wait_stable`, world targets and acceptance.
 The integration binds only the cube and support surface to semantics. Gaussian
-backgrounds use explicit `GaussianSplatCfg` PLY visuals for arena replication.
-Office's visual root applies the source-to-scene X-axis rotation of 90 degrees
-once; Lab3's decoded PLY and RoboSimGS's original PLY use identity placement.
+backgrounds import the packages' USD visual subtrees, preserving their authored
+placement. A qualified DexSim build replicates the parent and its native Gaussian
+companions with shared point resources and independent instance state. Office's
+X-axis rotation of 90 degrees comes from USD and must not be repeated in YAML.
 
 Preparation resolves the authoritative definitions through the imported SDK,
 including an installed wheel, and freezes them in the existing flat `resolved/`
@@ -102,6 +103,10 @@ display-referred, so `apply_display_srgb=False` avoids an extra display transfer
 ## Parallel qualification
 
 The official deployments support `run-task --num_envs 4 --max_episodes 4`.
+USD replication requires the DexSim native companion-cloning build exposing
+`SpawnedRigidBody.get_gaussian_resource_ids()`; older SDKs retain singleton use.
+The required SDK implementation is in
+[DexSim MR !1628](http://192.168.3.16/Engine/dexverse/-/merge_requests/1628).
 The existing `run`/`run_all` recorders retain their single-environment format.
 To qualify a batched deployment, use:
 

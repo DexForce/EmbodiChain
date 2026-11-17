@@ -308,18 +308,30 @@ Correcting that audit assertion changed no production code or configuration;
 both subsequent six-episode batches passed. These remain seed-42 regression
 checks, rather than a multi-seed reliability claim or metric GS-depth audit.
 
-## Explicit Gaussian multi-arena qualification
+## Native USD multi-arena qualification
 
-The official environments now declare explicit `GaussianSplatCfg` PLY visuals
-instead of native USD Gaussian references. Office retains the packaged X-axis
-rotation of 90 degrees exactly once; Lab3 uses `visual/scene.ply`, while Office
-and RoboSimGS use `source/original.ply`. Each arena has its own instance pose
-and visibility, with one shared immutable native resource per background.
+Dependency: [DexSim MR !1628](http://192.168.3.16/Engine/dexverse/-/merge_requests/1628)
+provides native companion cloning, owner visibility and the resource-ID query.
+The submitted SDK commit is `abed3d05b`; its final formatting correction preserves
+the qualified Python AST. An SDK build containing that implementation is required
+for the four-arena path.
 
-Fresh seed-42 batches were measured with `num_envs=4`, Python 3.12.16, DexSim
-0.6.0rc2 and NVIDIA RTX PRO 5000 72 GB Blackwell GPUs. Default/CPU physics,
-Hybrid/8 spp, OptiX, 960x540 cameras, 25 Hz control and
-`apply_display_srgb=False` retain the original settings.
+The current official deployments again reference the packages' `asset.usda`
+visual subtrees with `source_pose_mode: preserve`. Office's rotation is authored
+only in USD. No explicit `GaussianSplatCfg` replacement is used in these runs.
+
+DexSim's candidate Python Spawn/Scene implementation clones each actor's
+Gaussian companions through the existing native Arena cloning API, binds them
+to the owning handle and cleans new records/cameras/lights before parents when
+birth fails. Immutable resource IDs are exposed by the public
+`SpawnedRigidBody.get_gaussian_resource_ids()` query. Owner visibility includes
+its Gaussians; EmbodiChain restores selected native-Gaussian visibility on reset.
+The existing qualified C++/CUDA artifact was unchanged. These results require
+the candidate SDK patch; unpatched SDKs retain singleton support and reject
+multi-arena USD rendering before declaration.
+
+Final seed-42 runs used four arenas, Default/CPU physics, Hybrid/8 spp, OptiX,
+960x540 RGB, 25 Hz control and `apply_display_srgb=False`:
 
 | Scene | Accepted rows | Actions per row | Frames per camera | RGB images |
 | --- | ---: | ---: | ---: | ---: |
@@ -327,44 +339,40 @@ Hybrid/8 spp, OptiX, 960x540 cameras, 25 Hz control and
 | DISCOVERSE lab3 | 4/4 | 284 | 285 | 2,280 |
 | RoboSimGS tabletop | 4/4 | 284 | 285 | 2,280 |
 
-All 12 rows passed measured Pick/Place effects, lift, release and settled
-placement. Independent captures measured lift >=0.129421 m and final position
-error <=7.271 mm. The batch native trajectories have shape `(4, 284, 9)`;
-all captured cube poses match their corresponding native trajectory rows
-exactly, including the terminal state.
+All 12 measured Pick/Place rows passed. Minimum lift was 0.129421 m and maximum
+final position error was 7.271 mm. All 6,840 RGB images and 24 encoded camera
+videos passed the existing boundary and decoded-video/raw-RGB audits; maximum
+per-frame mean absolute compression error remained below 1.640 uint8 levels.
+Every capture names USD prim `/Asset/Visual` and has one resource identity shared
+by its four rows. Hiding arena 1 changed only its two views; all pixel differences
+in arenas 0, 2 and 3 were exactly zero. Captured cube poses matched all native
+trajectory rows exactly, including terminal states.
 
-The `verify_parallel` example checked all 6,840 native RGB images and exported
-24 full-resolution camera videos. Every camera boundary passed completed
-Gaussian status, arena ordering, native frame identity, control clock,
-nonblank uint8 RGB, fixed third-person pose and rigid wrist-mount checks.
-The initial projected cube pixels were red in all 24 views. Every encoded
-video frame was decoded against the original raw RGB; maximum per-frame mean
-absolute compression error was below 1.640 uint8 levels.
+The final SDK regression has 68 passing cases, covering both supported thread
+modes, prepared/finalized/incremental creation, native transforms, shared
+resource identities, visibility, deletion and failure cleanup. The longest
+recorded test call was under 10 seconds. EmbodiChain's candidate-SDK native USD
+matrix passed 11 cases; an unpatched SDK separately passed five singleton and
+early-rejection compatibility cases. New feature success cases skip on older
+SDKs, while the negative capability test remains enabled. Fast configuration
+tests stub GS resources with local paths and make no archive requests.
 
-Before each batch, hiding only arena 1's background changed both of that
-arena's views. Pixel differences in arenas 0, 2 and 3 were exactly zero for
-both cameras in all three scenes. The background resources retained identical
-resource IDs across the four instances.
+Affected regressions completed in separate process groups: 497 passed and eight
+opt-in/resource cases skipped across 505 collected cases, including a fresh
+installed-wheel check. An earlier combined invocation received SIGTERM during
+the wheel check and is recorded as incomplete, not a passing result. The wheel
+case passed independently, and all other groups have complete XML receipts.
 
-The standard `run-task --num_envs 4 --max_episodes 4 --record_trajectory`
-entry point also saved four accepted episodes in one batch for each deployment.
-All three existing single-environment recorder preparation commands passed.
-295 focused configuration, package-data, catalog and context cases passed;
-Black 26.10.1, source syntax/header checks, API coverage (4961/4961) and context
-validation passed. The three added configuration cases protect replicable PLY
-selection, source-axis placement and the display-transfer setting. Existing
-camera/component and packaging coverage was reused.
+The existing registered `spawn_load_dexsim_64` scenario passed on both the base
+SDK and candidate in serial runs with identical settings. The single samples
+measured 48.04 ms and 45.23 ms for finalization of 129 objects in 65 arenas.
+These shared-host smoke measurements are not a statistical speedup claim.
 
-Evidence is retained under `outputs/gaussian-parallel-validation/`, including
-per-scene resolved definitions, raw RGB, execution results, batch trajectories,
-capture metadata, videos, the isolation measurements and a combined preview.
-The [machine-readable summary](evidence/parallel_qualification.json) and
-[four-arena RGB preview](evidence/parallel_rgb_preview.png) are included here
-for review without access to the local raw recordings.
-Context impact was reviewed: environment guidance now identifies the explicit
-PLY replication route; Task Program and RL ownership guidance remains accurate.
-These are seed-42, four-arena checks, rather than multi-seed or scale-limit
-qualification. Metric GS depth remains unqualified.
+See the [native USD measured summary](evidence/usd_parallel_qualification.json)
+and [four-arena RGB preview](evidence/usd_parallel_rgb_preview.png). Full frozen
+candidate recordings are retained in `outputs/usd-gaussian-parallel-validation/`.
+This is a seed-42 four-arena qualification, not a multi-seed stability or metric
+Gaussian-depth qualification.
 
 ## Limits
 

@@ -35,11 +35,14 @@ existing third-person intrinsics/extrinsics through
 timed tracking and verified effects. Program targets and acceptance remain
 scene-specific; the common integration binds only the cube and support.
 
-Backgrounds use explicit `GaussianSplatCfg` PLY visuals, sharing one immutable
-resource across arenas. Each arena owns its instance pose and visibility.
-Office retains the source-to-scene X-axis rotation of 90 degrees; Lab3 uses
-its decoded PLY and RoboSimGS uses its original PLY with identity placement.
-`num_envs` defaults to one and can be increased with the launcher override.
+Backgrounds use the registered packages' `asset.usda` visual subtrees. A qualified
+DexSim build clones their native Gaussian companions across arenas, sharing one
+immutable resource with independent instance poses and visibility. Source placement
+is preserved, including Office's authored X-axis rotation of 90 degrees; do not
+repeat that rotation in the environment. `num_envs` defaults to one and can be
+increased with the launcher override. Multi-arena USD rendering requires a build
+with `SpawnedRigidBody.get_gaussian_resource_ids()` and native companion cloning;
+older SDKs receive a capability error before scene declaration.
 
 The source Gaussian packages are visual-only and supply no scanned collision
 geometry. Task acceptance requires lift >=4 cm, final position error <=2 cm,

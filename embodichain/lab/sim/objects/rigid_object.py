@@ -2328,6 +2328,20 @@ class RigidObject(BatchEntity):
             visual_ids = _descriptor_visual_env_ids(self.cfg, ids)
             if visual_ids:
                 self.set_visible(True, env_ids=visual_ids)
+            native_gaussian_ids = [
+                index
+                for index in ids
+                if self.is_spawn_bound
+                and getattr(self.cfg, "source", None) is not None
+                and callable(
+                    getter := getattr(
+                        self._entities[index], "get_gaussian_resource_ids", None
+                    )
+                )
+                and getter()
+            ]
+            if native_gaussian_ids:
+                self.set_visible(self.cfg.render_enabled, env_ids=native_gaussian_ids)
         self.restore_visual_material(env_ids=local_env_ids)
 
         # Preserve the legacy Default-backend attribute reset before restoring

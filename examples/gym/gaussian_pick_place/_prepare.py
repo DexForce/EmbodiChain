@@ -130,7 +130,7 @@ def prepare(
         for item in environment["simulation"]["visual_object"]
         if item["uid"] == "scan_background"
     )
-    asset_reference = background["visuals"][0]["representation"]["file_path"]
+    asset_reference = background["source"]["file_path"]
     get_data_path(asset_reference)
     asset_json = Path(get_data_path(asset_reference.split("/", 1)[0] + "/asset.json"))
     asset_document = json.loads(asset_json.read_text())

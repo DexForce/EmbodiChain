@@ -70,19 +70,28 @@ CUBE_SCENE_REGISTRY_ID = "task_program_repeated_pick_place"
 
 
 @pytest.mark.parametrize(
-    "scene, resource, rotation",
+    "scene, resource",
     [
-        ("office", "RoboSplatterOfficeGS/source/original.ply", (90, 0, 0)),
-        ("discoverse", "DiscoverseLab3GS/visual/scene.ply", (0, 0, 0)),
-        ("robosimgs", "RoboSimGSTabletopGS/source/original.ply", (0, 0, 0)),
+        ("office", "RoboSplatterOfficeGS/asset.usda"),
+        ("discoverse", "DiscoverseLab3GS/asset.usda"),
+        ("robosimgs", "RoboSimGSTabletopGS/asset.usda"),
     ],
 )
 def test_gaussian_task_backgrounds_allow_replication_with_original_coordinates(
-    scene: str, resource: str, rotation: tuple[int, int, int]
+    scene: str, resource: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Official tasks use replicable PLY visuals and retain their source axes."""
-    from embodichain.lab.sim.cfg import GaussianSplatCfg
+    """Official tasks retain authored USD placement for native replication."""
+    from embodichain.data import get_data_path
 
+    source = tmp_path / "asset.usda"
+    source.write_text('#usda 1.0\ndef Xform "Asset" { def Xform "Visual" {} }\n')
+
+    def resolve(reference: str, *args, **kwargs) -> str:
+        if reference == resource:
+            return str(source)
+        return get_data_path(reference, *args, **kwargs)
+
+    monkeypatch.setattr("embodichain.data.get_data_path", resolve)
     path = (
         _REPOSITORY_ROOT
         / "extensions/embodichain_tasks/configs/tasks/manipulation/gaussian_pick_place"
@@ -95,10 +104,11 @@ def test_gaussian_task_backgrounds_allow_replication_with_original_coordinates(
         item for item in cfg.visual_object if item.uid == "scan_background"
     )
     assert cfg.num_envs == 4
-    assert background.source is None
-    assert tuple(background.init_rot) == rotation
-    assert isinstance(background.visuals[0].representation, GaussianSplatCfg)
-    assert background.visuals[0].representation.file_path == resource
+    assert background.source.file_path == str(source)
+    assert background.source.source_prim_path == "/Asset/Visual"
+    assert background.source_pose_mode == "preserve"
+    assert tuple(background.init_rot) == (0, 0, 0)
+    assert background.visuals is None
     assert cfg.sim_cfg.render_cfg.gaussian.apply_display_srgb is False
 
 

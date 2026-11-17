@@ -29,10 +29,10 @@ managers, demonstration collection and the opt-in Task Program bridge.
 | Captured-GS Pick/Place deployments | `extensions/embodichain_tasks/configs/tasks/manipulation/gaussian_pick_place/`; reusable components under `extensions/embodichain_tasks/configs/components/` |
 | Timing instrumentation | `embodichain/lab/gym/utils/profiler.py` |
 
-Captured-GS backgrounds use explicit `GaussianSplatCfg` PLY visuals for arena
-replication; the environment owns any source-axis conversion. Native Gaussian
-references inside USD retain the separate singleton limit described in
-[rendering](../simulation-system/rendering.md#gaussian-composition).
+Captured-GS backgrounds retain native USD references and their authored placement.
+Arena replication requires the qualified DexSim companion-cloning build; explicit
+`GaussianSplatCfg` visuals remain a separate supported path. Read the capability
+and renderer boundaries in [rendering](../simulation-system/rendering.md#gaussian-composition).
 
 Read [configuration and registration](configuration.md) for task-first layout,
 physical/semantic component ownership, config IDs and paths; [execution](execution.md)
