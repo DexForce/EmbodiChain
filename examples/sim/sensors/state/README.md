@@ -37,3 +37,20 @@ velocity and specific force. Specific force is near zero in free fall and near
 9.81 m/s² along Z at rest. The spinning sensor measures centripetal specific
 force along negative local X. Dots in the validity panel identify samples
 where acceleration is unavailable, including startup and the mid-run reset.
+
+### Acceleration source
+
+```bash
+python -m examples.sim.sensors.state.inertial --source finite_difference --output /tmp/inertial-fd
+python -m examples.sim.sensors.state.inertial --backend newton --device cuda:0 --source native --output /tmp/inertial-native
+python -m examples.sim.sensors.state.inertial --source auto --output /tmp/inertial-auto
+```
+
+Native measurements require a CUDA runtime and a DexSim SDK with Newton
+MuJoCo Warp acceleration reports. The example selects
+`solver_type="mujoco_warp"` and `rne_mode="last_substep"`. Native acquisition
+requires a dynamic rigid body. Explicit `native` rejects unsupported targets
+or backends. `auto` selects native when available and uses finite differences
+on Default CPU. The plot displays the selected source and the free-fall and
+centripetal references. For the offset sensor, the latter is
+`-0.18 m × (6 rad/s)² = -6.48 m/s²` along local X.
