@@ -35,6 +35,7 @@ from embodichain.lab.sim.cfg import DefaultPhysicsCfg, RigidObjectCfg, VisualObj
 from embodichain.lab.sim.objects import RigidObject
 from embodichain.lab.sim.sensors import BaseSensor, SensorCfg
 from embodichain.lab.sim.shapes import MeshCfg, SphereCfg
+from embodichain.lab.visualization import VisualizationCfg
 
 from .._scene_camera import capture_rgb, scene_camera, show_scene, SCENE_RENDER
 
@@ -65,6 +66,7 @@ def create_manager(args: argparse.Namespace) -> SimulationManager:
     return SimulationManager(
         SimulationManagerCfg(
             headless=True,
+            visualization=VisualizationCfg(backend="none"),
             startup_summary="off",
             enable_ground_plane=False,
             render_cfg=SCENE_RENDER,
