@@ -45,6 +45,12 @@ _DOMAINS = {
             "Convert an existing asset directory into a SimReady asset.",
         ),
     },
+    "image": {
+        "clean-robot": (
+            "embodichain.gen_sim.scene_engine.cli.robot_cleanup:main",
+            "Remove robot hardware from a dual-arm tabletop reference frame.",
+        ),
+    },
     "scene": {
         "generate": (
             "embodichain.gen_sim.scene_engine.cli.start:main",

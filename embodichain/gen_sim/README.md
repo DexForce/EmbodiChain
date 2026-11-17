@@ -5,6 +5,7 @@ Use the unified namespace; every command also works with `python -m embodichain`
 ```bash
 embodichain gensim --help
 embodichain gensim asset ingest --input raw_asset --category cup --output outputs/assets
+embodichain gensim image clean-robot --image head.png --output outputs/clean-head
 embodichain gensim scene generate --image table.png --output outputs/scene
 embodichain gensim scene edit --scene outputs/scene --prompt "Move the cup to the left"
 embodichain gensim scene expand --scene outputs/scene --config layouts.yaml
@@ -53,6 +54,23 @@ Install the `embodichain[gensim]` extra for its optional dependencies.
 Model implementations and serving frameworks remain operator-selected; see the
 [deployment and BYOS guide](services/DEPLOYMENT.md) and the versioned
 [HTTP protocol](services/spec/v1/README.md).
+
+### Clean a tabletop reference frame
+
+`gensim image clean-robot` accepts a dual-arm head-camera RGB frame with the
+two arms at opposite sides and a visible camera plate at the bottom center.
+It uses the regular [GenSim service configuration](services/README.md) for
+`image_segmentation` and an `image_generation` adapter with image-to-image
+editing. For the built-in `image_http` adapter, the `generate_image_by_image_path`
+option defaults to `/generate_image_by_image`. The endpoint accepts multipart
+`image`, `prompt`, `width`, `height`, and `seed` fields and returns a PNG.
+
+The output directory must be new. It contains `input.png`, the original RGB
+frame, the per-part and combined masks, the editor response, and a
+`preparation.json` pixel audit. The cleaned PNG keeps the input dimensions
+and every decoded RGB pixel outside `robot-mask.png`. The camera support
+must resolve to an unambiguous bottom-edge component. An edit that leaves all
+detected robot pixels unchanged fails without publishing `input.png`.
 
 External whole-scene generators use the independent
 `embodichain.gensim_scene_providers` contract. Public operations in
