@@ -1,0 +1,1165 @@
+{
+  "date": "2026-11-17",
+  "base_commit": "9474d998d3fb5d78390aba7473ff7a89ffb77cda",
+  "gpu": "NVIDIA GeForce RTX 5090, 595.58.03, 32607",
+  "runtime": {
+    "sdk": "0.6.0rc2",
+    "torch": "2.11.0+cu130",
+    "python": "3.12.16",
+    "cpu_threads": 4
+  },
+  "sdk_native_sha256": "03a48c24f4254b51109e601e547474b86f522747d557dd50dd085d87a39425c9",
+  "settings": {
+    "scene": "fixed_reflective",
+    "resolution": "640x480",
+    "camera_count": 1,
+    "enable_depth": true,
+    "env_sweep": [
+      2,
+      4,
+      8,
+      16,
+      32,
+      64
+    ],
+    "repeats": 5,
+    "warmup_frames": 16,
+    "measure_frames": 64,
+    "gpu_id": 0,
+    "device": "cuda:0",
+    "render_cfg": {
+      "renderer": "fast-rt",
+      "spp": 1,
+      "min_bounces": 1,
+      "max_bounces": 8,
+      "denoising": {
+        "window": "dlss",
+        "offscreen": "dlss"
+      },
+      "dlss": {
+        "dlss_quality": 2,
+        "tiled_enabled": true,
+        "tiled_gutter_pixels": 0,
+        "tiled_overscan_pixels": 0,
+        "frame_time_delta_ms": 4.166666666666667,
+        "exposure_compensation": 1.0
+      },
+      "tone_mapping_enabled": true,
+      "tone_mapping_type": "aces",
+      "tone_mapping_exposure": 1.0
+    },
+    "quality_render_cfg": {
+      "renderer": "fast-rt",
+      "spp": 1,
+      "min_bounces": 1,
+      "max_bounces": 8,
+      "denoising": {
+        "window": "dlss",
+        "offscreen": "dlss"
+      },
+      "dlss": {
+        "dlss_quality": 2,
+        "tiled_enabled": true,
+        "tiled_gutter_pixels": 16,
+        "tiled_overscan_pixels": 0,
+        "frame_time_delta_ms": 4.166666666666667,
+        "exposure_compensation": 1.0
+      },
+      "tone_mapping_enabled": true,
+      "tone_mapping_type": "aces",
+      "tone_mapping_exposure": 1.0
+    }
+  },
+  "effective_native": {
+    "default": {
+      "dlss": {
+        "dlss_quality": 2,
+        "tiled_enabled": true,
+        "tiled_gutter_pixels": 16,
+        "tiled_overscan_pixels": null,
+        "frame_time_delta_ms": 0.0
+      },
+      "min_bounces": 4,
+      "max_bounces": 8,
+      "render_iterations_per_frame": 1,
+      "tone_mapping_enabled": false,
+      "tone_mapping_type": "ToneMappingType.MODIFIED_REINHARD",
+      "tone_mapping_exposure": 1.0
+    },
+    "high-throughput": {
+      "dlss": {
+        "dlss_quality": 2,
+        "tiled_enabled": true,
+        "tiled_gutter_pixels": 0,
+        "tiled_overscan_pixels": null,
+        "frame_time_delta_ms": 4.166666507720947
+      },
+      "min_bounces": 1,
+      "max_bounces": 8,
+      "render_iterations_per_frame": 1,
+      "tone_mapping_enabled": true,
+      "tone_mapping_type": "ToneMappingType.ACES",
+      "tone_mapping_exposure": 1.0
+    },
+    "quality-preserving": {
+      "dlss": {
+        "dlss_quality": 2,
+        "tiled_enabled": true,
+        "tiled_gutter_pixels": 16,
+        "tiled_overscan_pixels": null,
+        "frame_time_delta_ms": 4.166666507720947
+      },
+      "min_bounces": 1,
+      "max_bounces": 8,
+      "render_iterations_per_frame": 1,
+      "tone_mapping_enabled": true,
+      "tone_mapping_type": "ToneMappingType.ACES",
+      "tone_mapping_exposure": 1.0
+    }
+  },
+  "source_sha256": {
+    "scripts/benchmark/rendering/camera_profiles.py": "964ccd3ab486932e0378de717def81f5ed9474e4bd7e9a64e40152e992895087",
+    "embodichain/lab/sim/cfg/rendering.py": "68aedea187759354820aa2052f1fd6b1b5522f7e639ae066534cda5097f9fa12",
+    "scripts/benchmark/rendering/settings/fast_rt_high_throughput.yaml": "06b2ee3222b1a7d01be26d7512c4de98190efed7e95b2c7b8655d43e72745da9",
+    "scripts/benchmark/rendering/settings/fast_rt_quality_preserving.yaml": "67b8c5de07a70d6afb84455d6eebba78ea1559214673ddae6919be747440bc9d"
+  },
+  "method": "Five independent process blocks per Arena count, rotating/reversing three profiles. Warmup16, measured64; render includes native publication,ordered render and GPU completion. Complete includes GPU fetch. CPU readback and memory queries untimed. Physics disabled. peak_gpu_mb is sampled process VRAM.",
+  "aggregate": {
+    "performance": [
+      {
+        "arenas": 2,
+        "profile": "default",
+        "processes": 5,
+        "render_ms": 2.598,
+        "render_median_ms": 2.513,
+        "cost_time_ms": 2.626,
+        "complete_median_ms": 2.549,
+        "complete_p95_ms": 2.976,
+        "render_images_per_s": 769.8,
+        "complete_images_per_s": 761.5,
+        "cpu_delta_mb": 2700.3,
+        "gpu_delta_mb": 5539.0,
+        "peak_gpu_mb": 6037.0,
+        "success_rate": 100.0
+      },
+      {
+        "arenas": 2,
+        "profile": "high-throughput",
+        "processes": 5,
+        "render_ms": 2.412,
+        "render_median_ms": 2.34,
+        "cost_time_ms": 2.437,
+        "complete_median_ms": 2.355,
+        "complete_p95_ms": 2.706,
+        "render_images_per_s": 829.0,
+        "complete_images_per_s": 820.7,
+        "cpu_delta_mb": 2700.3,
+        "gpu_delta_mb": 5533.0,
+        "peak_gpu_mb": 6031.0,
+        "success_rate": 100.0
+      },
+      {
+        "arenas": 2,
+        "profile": "quality-preserving",
+        "processes": 5,
+        "render_ms": 2.443,
+        "render_median_ms": 2.347,
+        "cost_time_ms": 2.466,
+        "complete_median_ms": 2.364,
+        "complete_p95_ms": 2.795,
+        "render_images_per_s": 818.8,
+        "complete_images_per_s": 811.1,
+        "cpu_delta_mb": 2700.3,
+        "gpu_delta_mb": 5539.0,
+        "peak_gpu_mb": 6037.0,
+        "success_rate": 100.0
+      },
+      {
+        "arenas": 4,
+        "profile": "default",
+        "processes": 5,
+        "render_ms": 3.116,
+        "render_median_ms": 2.992,
+        "cost_time_ms": 3.147,
+        "complete_median_ms": 3.021,
+        "complete_p95_ms": 3.472,
+        "render_images_per_s": 1283.8,
+        "complete_images_per_s": 1270.9,
+        "cpu_delta_mb": 2703.0,
+        "gpu_delta_mb": 5705.0,
+        "peak_gpu_mb": 6203.0,
+        "success_rate": 100.0
+      },
+      {
+        "arenas": 4,
+        "profile": "high-throughput",
+        "processes": 5,
+        "render_ms": 2.84,
+        "render_median_ms": 2.763,
+        "cost_time_ms": 2.871,
+        "complete_median_ms": 2.793,
+        "complete_p95_ms": 3.2,
+        "render_images_per_s": 1408.5,
+        "complete_images_per_s": 1393.1,
+        "cpu_delta_mb": 2702.9,
+        "gpu_delta_mb": 5697.0,
+        "peak_gpu_mb": 6195.0,
+        "success_rate": 100.0
+      },
+      {
+        "arenas": 4,
+        "profile": "quality-preserving",
+        "processes": 5,
+        "render_ms": 2.85,
+        "render_median_ms": 2.774,
+        "cost_time_ms": 2.885,
+        "complete_median_ms": 2.806,
+        "complete_p95_ms": 3.217,
+        "render_images_per_s": 1403.4,
+        "complete_images_per_s": 1386.7,
+        "cpu_delta_mb": 2703.0,
+        "gpu_delta_mb": 5705.0,
+        "peak_gpu_mb": 6203.0,
+        "success_rate": 100.0
+      },
+      {
+        "arenas": 8,
+        "profile": "default",
+        "processes": 5,
+        "render_ms": 4.299,
+        "render_median_ms": 4.225,
+        "cost_time_ms": 4.335,
+        "complete_median_ms": 4.275,
+        "complete_p95_ms": 4.858,
+        "render_images_per_s": 1860.8,
+        "complete_images_per_s": 1845.6,
+        "cpu_delta_mb": 2708.6,
+        "gpu_delta_mb": 6120.0,
+        "peak_gpu_mb": 6618.0,
+        "success_rate": 100.0
+      },
+      {
+        "arenas": 8,
+        "profile": "high-throughput",
+        "processes": 5,
+        "render_ms": 3.838,
+        "render_median_ms": 3.751,
+        "cost_time_ms": 3.881,
+        "complete_median_ms": 3.797,
+        "complete_p95_ms": 4.237,
+        "render_images_per_s": 2084.2,
+        "complete_images_per_s": 2061.3,
+        "cpu_delta_mb": 2708.6,
+        "gpu_delta_mb": 6095.0,
+        "peak_gpu_mb": 6593.0,
+        "success_rate": 100.0
+      },
+      {
+        "arenas": 8,
+        "profile": "quality-preserving",
+        "processes": 5,
+        "render_ms": 3.887,
+        "render_median_ms": 3.784,
+        "cost_time_ms": 3.927,
+        "complete_median_ms": 3.811,
+        "complete_p95_ms": 4.316,
+        "render_images_per_s": 2058.3,
+        "complete_images_per_s": 2037.4,
+        "cpu_delta_mb": 2708.6,
+        "gpu_delta_mb": 6120.0,
+        "peak_gpu_mb": 6618.0,
+        "success_rate": 100.0
+      },
+      {
+        "arenas": 16,
+        "profile": "default",
+        "processes": 5,
+        "render_ms": 6.668,
+        "render_median_ms": 6.488,
+        "cost_time_ms": 6.711,
+        "complete_median_ms": 6.53,
+        "complete_p95_ms": 7.287,
+        "render_images_per_s": 2399.5,
+        "complete_images_per_s": 2384.0,
+        "cpu_delta_mb": 2720.2,
+        "gpu_delta_mb": 6866.0,
+        "peak_gpu_mb": 7364.0,
+        "success_rate": 100.0
+      },
+      {
+        "arenas": 16,
+        "profile": "high-throughput",
+        "processes": 5,
+        "render_ms": 5.641,
+        "render_median_ms": 5.508,
+        "cost_time_ms": 5.686,
+        "complete_median_ms": 5.558,
+        "complete_p95_ms": 6.1,
+        "render_images_per_s": 2836.4,
+        "complete_images_per_s": 2813.7,
+        "cpu_delta_mb": 2720.3,
+        "gpu_delta_mb": 6786.0,
+        "peak_gpu_mb": 7284.0,
+        "success_rate": 100.0
+      },
+      {
+        "arenas": 16,
+        "profile": "quality-preserving",
+        "processes": 5,
+        "render_ms": 5.823,
+        "render_median_ms": 5.672,
+        "cost_time_ms": 5.867,
+        "complete_median_ms": 5.725,
+        "complete_p95_ms": 6.36,
+        "render_images_per_s": 2747.9,
+        "complete_images_per_s": 2727.1,
+        "cpu_delta_mb": 2720.2,
+        "gpu_delta_mb": 6866.0,
+        "peak_gpu_mb": 7364.0,
+        "success_rate": 100.0
+      },
+      {
+        "arenas": 32,
+        "profile": "default",
+        "processes": 5,
+        "render_ms": 11.845,
+        "render_median_ms": 11.713,
+        "cost_time_ms": 11.894,
+        "complete_median_ms": 11.763,
+        "complete_p95_ms": 12.532,
+        "render_images_per_s": 2701.6,
+        "complete_images_per_s": 2690.4,
+        "cpu_delta_mb": 2741.1,
+        "gpu_delta_mb": 8495.0,
+        "peak_gpu_mb": 8993.0,
+        "success_rate": 100.0
+      },
+      {
+        "arenas": 32,
+        "profile": "high-throughput",
+        "processes": 5,
+        "render_ms": 10.077,
+        "render_median_ms": 9.937,
+        "cost_time_ms": 10.124,
+        "complete_median_ms": 9.979,
+        "complete_p95_ms": 10.707,
+        "render_images_per_s": 3175.5,
+        "complete_images_per_s": 3160.8,
+        "cpu_delta_mb": 2741.0,
+        "gpu_delta_mb": 8387.0,
+        "peak_gpu_mb": 8885.0,
+        "success_rate": 100.0
+      },
+      {
+        "arenas": 32,
+        "profile": "quality-preserving",
+        "processes": 5,
+        "render_ms": 10.362,
+        "render_median_ms": 10.289,
+        "cost_time_ms": 10.407,
+        "complete_median_ms": 10.345,
+        "complete_p95_ms": 10.936,
+        "render_images_per_s": 3088.2,
+        "complete_images_per_s": 3074.9,
+        "cpu_delta_mb": 2741.1,
+        "gpu_delta_mb": 8495.0,
+        "peak_gpu_mb": 8993.0,
+        "success_rate": 100.0
+      },
+      {
+        "arenas": 64,
+        "profile": "default",
+        "processes": 5,
+        "render_ms": 21.288,
+        "render_median_ms": 21.386,
+        "cost_time_ms": 21.348,
+        "complete_median_ms": 21.442,
+        "complete_p95_ms": 22.088,
+        "render_images_per_s": 3006.4,
+        "complete_images_per_s": 2997.9,
+        "cpu_delta_mb": 2779.8,
+        "gpu_delta_mb": 10408.0,
+        "peak_gpu_mb": 10906.0,
+        "success_rate": 100.0
+      },
+      {
+        "arenas": 64,
+        "profile": "high-throughput",
+        "processes": 5,
+        "render_ms": 17.683,
+        "render_median_ms": 17.711,
+        "cost_time_ms": 17.741,
+        "complete_median_ms": 17.781,
+        "complete_p95_ms": 18.422,
+        "render_images_per_s": 3619.3,
+        "complete_images_per_s": 3607.4,
+        "cpu_delta_mb": 2779.9,
+        "gpu_delta_mb": 10140.0,
+        "peak_gpu_mb": 10638.0,
+        "success_rate": 100.0
+      },
+      {
+        "arenas": 64,
+        "profile": "quality-preserving",
+        "processes": 5,
+        "render_ms": 18.28,
+        "render_median_ms": 18.207,
+        "cost_time_ms": 18.343,
+        "complete_median_ms": 18.274,
+        "complete_p95_ms": 18.979,
+        "render_images_per_s": 3501.1,
+        "complete_images_per_s": 3489.1,
+        "cpu_delta_mb": 2779.9,
+        "gpu_delta_mb": 10408.0,
+        "peak_gpu_mb": 10906.0,
+        "success_rate": 100.0
+      }
+    ],
+    "quality": [
+      {
+        "arenas": 2,
+        "reference": "default",
+        "candidate": "high-throughput",
+        "success_rate": 100.0,
+        "render_gain_pct": 7.69,
+        "paired_95_interval_pct": "[5.82, 9.59]",
+        "depth_mask_iou": 1.0,
+        "depth_max_abs_m": 0.0,
+        "rgb_ssim": 0.9265,
+        "rgb_ssim_last": 0.9229
+      },
+      {
+        "arenas": 2,
+        "reference": "default",
+        "candidate": "quality-preserving",
+        "success_rate": 100.0,
+        "render_gain_pct": 6.38,
+        "paired_95_interval_pct": "[2.81, 10.08]",
+        "depth_mask_iou": 1.0,
+        "depth_max_abs_m": 0.0,
+        "rgb_ssim": 0.9643,
+        "rgb_ssim_last": 0.9644
+      },
+      {
+        "arenas": 2,
+        "reference": "high-throughput",
+        "candidate": "quality-preserving",
+        "success_rate": 100.0,
+        "render_gain_pct": -1.22,
+        "paired_95_interval_pct": "[-4.28, 1.94]",
+        "depth_mask_iou": 1.0,
+        "depth_max_abs_m": 0.0,
+        "rgb_ssim": 0.9582,
+        "rgb_ssim_last": 0.9536
+      },
+      {
+        "arenas": 4,
+        "reference": "default",
+        "candidate": "high-throughput",
+        "success_rate": 100.0,
+        "render_gain_pct": 9.7,
+        "paired_95_interval_pct": "[6.78, 12.71]",
+        "depth_mask_iou": 1.0,
+        "depth_max_abs_m": 0.0,
+        "rgb_ssim": 0.933,
+        "rgb_ssim_last": 0.9047
+      },
+      {
+        "arenas": 4,
+        "reference": "default",
+        "candidate": "quality-preserving",
+        "success_rate": 100.0,
+        "render_gain_pct": 9.32,
+        "paired_95_interval_pct": "[7.00, 11.68]",
+        "depth_mask_iou": 1.0,
+        "depth_max_abs_m": 0.0,
+        "rgb_ssim": 0.9651,
+        "rgb_ssim_last": 0.9653
+      },
+      {
+        "arenas": 4,
+        "reference": "high-throughput",
+        "candidate": "quality-preserving",
+        "success_rate": 100.0,
+        "render_gain_pct": -0.35,
+        "paired_95_interval_pct": "[-2.32, 1.66]",
+        "depth_mask_iou": 1.0,
+        "depth_max_abs_m": 0.0,
+        "rgb_ssim": 0.9645,
+        "rgb_ssim_last": 0.9324
+      },
+      {
+        "arenas": 8,
+        "reference": "default",
+        "candidate": "high-throughput",
+        "success_rate": 100.0,
+        "render_gain_pct": 11.99,
+        "paired_95_interval_pct": "[9.49, 14.55]",
+        "depth_mask_iou": 1.0,
+        "depth_max_abs_m": 0.0,
+        "rgb_ssim": 0.9327,
+        "rgb_ssim_last": 0.9083
+      },
+      {
+        "arenas": 8,
+        "reference": "default",
+        "candidate": "quality-preserving",
+        "success_rate": 100.0,
+        "render_gain_pct": 10.6,
+        "paired_95_interval_pct": "[8.26, 12.99]",
+        "depth_mask_iou": 1.0,
+        "depth_max_abs_m": 0.0,
+        "rgb_ssim": 0.965,
+        "rgb_ssim_last": 0.9653
+      },
+      {
+        "arenas": 8,
+        "reference": "high-throughput",
+        "candidate": "quality-preserving",
+        "success_rate": 100.0,
+        "render_gain_pct": -1.24,
+        "paired_95_interval_pct": "[-2.37, -0.10]",
+        "depth_mask_iou": 1.0,
+        "depth_max_abs_m": 0.0,
+        "rgb_ssim": 0.9645,
+        "rgb_ssim_last": 0.9372
+      },
+      {
+        "arenas": 16,
+        "reference": "default",
+        "candidate": "high-throughput",
+        "success_rate": 100.0,
+        "render_gain_pct": 18.21,
+        "paired_95_interval_pct": "[17.28, 19.13]",
+        "depth_mask_iou": 1.0,
+        "depth_max_abs_m": 0.0,
+        "rgb_ssim": 0.9334,
+        "rgb_ssim_last": 0.9275
+      },
+      {
+        "arenas": 16,
+        "reference": "default",
+        "candidate": "quality-preserving",
+        "success_rate": 100.0,
+        "render_gain_pct": 14.52,
+        "paired_95_interval_pct": "[13.42, 15.62]",
+        "depth_mask_iou": 1.0,
+        "depth_max_abs_m": 0.0,
+        "rgb_ssim": 0.9653,
+        "rgb_ssim_last": 0.9657
+      },
+      {
+        "arenas": 16,
+        "reference": "high-throughput",
+        "candidate": "quality-preserving",
+        "success_rate": 100.0,
+        "render_gain_pct": -3.12,
+        "paired_95_interval_pct": "[-3.83, -2.41]",
+        "depth_mask_iou": 1.0,
+        "depth_max_abs_m": 0.0,
+        "rgb_ssim": 0.9645,
+        "rgb_ssim_last": 0.9573
+      },
+      {
+        "arenas": 32,
+        "reference": "default",
+        "candidate": "high-throughput",
+        "success_rate": 100.0,
+        "render_gain_pct": 17.54,
+        "paired_95_interval_pct": "[16.19, 18.91]",
+        "depth_mask_iou": 1.0,
+        "depth_max_abs_m": 0.0,
+        "rgb_ssim": 0.9331,
+        "rgb_ssim_last": 0.9184
+      },
+      {
+        "arenas": 32,
+        "reference": "default",
+        "candidate": "quality-preserving",
+        "success_rate": 100.0,
+        "render_gain_pct": 14.31,
+        "paired_95_interval_pct": "[12.97, 15.66]",
+        "depth_mask_iou": 1.0,
+        "depth_max_abs_m": 0.0,
+        "rgb_ssim": 0.9652,
+        "rgb_ssim_last": 0.9644
+      },
+      {
+        "arenas": 32,
+        "reference": "high-throughput",
+        "candidate": "quality-preserving",
+        "success_rate": 100.0,
+        "render_gain_pct": -2.75,
+        "paired_95_interval_pct": "[-3.87, -1.62]",
+        "depth_mask_iou": 1.0,
+        "depth_max_abs_m": 0.0,
+        "rgb_ssim": 0.9645,
+        "rgb_ssim_last": 0.9483
+      },
+      {
+        "arenas": 64,
+        "reference": "default",
+        "candidate": "high-throughput",
+        "success_rate": 100.0,
+        "render_gain_pct": 20.38,
+        "paired_95_interval_pct": "[19.84, 20.93]",
+        "depth_mask_iou": 1.0,
+        "depth_max_abs_m": 0.0,
+        "rgb_ssim": 0.9344,
+        "rgb_ssim_last": 0.9136
+      },
+      {
+        "arenas": 64,
+        "reference": "default",
+        "candidate": "quality-preserving",
+        "success_rate": 100.0,
+        "render_gain_pct": 16.45,
+        "paired_95_interval_pct": "[16.08, 16.83]",
+        "depth_mask_iou": 1.0,
+        "depth_max_abs_m": 0.0,
+        "rgb_ssim": 0.9653,
+        "rgb_ssim_last": 0.9651
+      },
+      {
+        "arenas": 64,
+        "reference": "high-throughput",
+        "candidate": "quality-preserving",
+        "success_rate": 100.0,
+        "render_gain_pct": -3.27,
+        "paired_95_interval_pct": "[-3.55, -2.98]",
+        "depth_mask_iou": 1.0,
+        "depth_max_abs_m": 0.0,
+        "rgb_ssim": 0.9658,
+        "rgb_ssim_last": 0.944
+      }
+    ],
+    "gains": [
+      {
+        "arenas": 2,
+        "reference": "default",
+        "candidate": "high-throughput",
+        "gain_pct": 7.692500842609948,
+        "lower95": 5.824222742552295,
+        "upper95": 9.593762535352676
+      },
+      {
+        "arenas": 2,
+        "reference": "default",
+        "candidate": "quality-preserving",
+        "gain_pct": 6.379321446072235,
+        "lower95": 2.805765304182173,
+        "upper95": 10.077095363701384
+      },
+      {
+        "arenas": 2,
+        "reference": "high-throughput",
+        "candidate": "quality-preserving",
+        "gain_pct": -1.2193786812109553,
+        "lower95": -4.278917355983052,
+        "upper95": 1.9379522107390295
+      },
+      {
+        "arenas": 4,
+        "reference": "default",
+        "candidate": "high-throughput",
+        "gain_pct": 9.704590238397179,
+        "lower95": 6.7826288962421755,
+        "upper95": 12.70650707680939
+      },
+      {
+        "arenas": 4,
+        "reference": "default",
+        "candidate": "quality-preserving",
+        "gain_pct": 9.315911292277473,
+        "lower95": 6.998644817244758,
+        "upper95": 11.683362738582321
+      },
+      {
+        "arenas": 4,
+        "reference": "high-throughput",
+        "candidate": "quality-preserving",
+        "gain_pct": -0.3542959736462024,
+        "lower95": -2.324666764838028,
+        "upper95": 1.6558224275735798
+      },
+      {
+        "arenas": 8,
+        "reference": "default",
+        "candidate": "high-throughput",
+        "gain_pct": 11.990504976404829,
+        "lower95": 9.485491680752297,
+        "upper95": 14.552832638692287
+      },
+      {
+        "arenas": 8,
+        "reference": "default",
+        "candidate": "quality-preserving",
+        "gain_pct": 10.600998585485842,
+        "lower95": 8.259311530090427,
+        "upper95": 12.993337157022502
+      },
+      {
+        "arenas": 8,
+        "reference": "high-throughput",
+        "candidate": "quality-preserving",
+        "gain_pct": -1.240735892039906,
+        "lower95": -2.369547744813462,
+        "upper95": -0.09887261760918621
+      },
+      {
+        "arenas": 16,
+        "reference": "default",
+        "candidate": "high-throughput",
+        "gain_pct": 18.206237869681786,
+        "lower95": 17.284835169997198,
+        "upper95": 19.134879211376273
+      },
+      {
+        "arenas": 16,
+        "reference": "default",
+        "candidate": "quality-preserving",
+        "gain_pct": 14.518756523347454,
+        "lower95": 13.423491942443045,
+        "upper95": 15.624597436206027
+      },
+      {
+        "arenas": 16,
+        "reference": "high-throughput",
+        "candidate": "quality-preserving",
+        "gain_pct": -3.1195319407759587,
+        "lower95": -3.8277458779092166,
+        "upper95": -2.406102705474552
+      },
+      {
+        "arenas": 32,
+        "reference": "default",
+        "candidate": "high-throughput",
+        "gain_pct": 17.542593372218942,
+        "lower95": 16.188455298118672,
+        "upper95": 18.912513478355205
+      },
+      {
+        "arenas": 32,
+        "reference": "default",
+        "candidate": "quality-preserving",
+        "gain_pct": 14.306951469175816,
+        "lower95": 12.971055531345336,
+        "upper95": 15.658644532635677
+      },
+      {
+        "arenas": 32,
+        "reference": "high-throughput",
+        "candidate": "quality-preserving",
+        "gain_pct": -2.7527399304496414,
+        "lower95": -3.8676485293120026,
+        "upper95": -1.6249010207730668
+      },
+      {
+        "arenas": 64,
+        "reference": "default",
+        "candidate": "high-throughput",
+        "gain_pct": 20.383963361427547,
+        "lower95": 19.83708712198976,
+        "upper95": 20.933335269180077
+      },
+      {
+        "arenas": 64,
+        "reference": "default",
+        "candidate": "quality-preserving",
+        "gain_pct": 16.452599885464647,
+        "lower95": 16.077220673436194,
+        "upper95": 16.829193026910136
+      },
+      {
+        "arenas": 64,
+        "reference": "high-throughput",
+        "candidate": "quality-preserving",
+        "gain_pct": -3.265687028561938,
+        "lower95": -3.5467417795400564,
+        "upper95": -2.983813313305113
+      }
+    ],
+    "leaderboard": [
+      {
+        "profile": "high-throughput",
+        "success_rate": 100.0,
+        "geomean_render_images_per_s": 2072.9
+      },
+      {
+        "profile": "quality-preserving",
+        "success_rate": 100.0,
+        "geomean_render_images_per_s": 2031.4
+      },
+      {
+        "profile": "default",
+        "success_rate": 100.0,
+        "geomean_render_images_per_s": 1815.8
+      }
+    ]
+  },
+  "matched_tone_quality": {
+    "first": {
+      "rgb_view": 0,
+      "static_vs_matched_default": {
+        "zero_gutter": {
+          "ssim": 0.9668393592803762,
+          "psnr_db": 38.250170689741914,
+          "mae_8bit": 1.6874403211805553
+        },
+        "retained_gutter": {
+          "ssim": 0.9953953890524425,
+          "psnr_db": 47.51629190781779,
+          "mae_8bit": 0.504125434027778
+        }
+      },
+      "static_temporal_std_8bit": {
+        "matched_default": 0.46016281843185425,
+        "high_throughput": 0.47735053300857544,
+        "high_with_gutter": 0.4642697870731354
+      },
+      "motion_ssim": {
+        "zero_gutter": {
+          "mean": 0.963878026468797,
+          "minimum": 0.9624401798068711
+        },
+        "retained_gutter": {
+          "mean": 0.9945847694615716,
+          "minimum": 0.9943867277128239
+        }
+      },
+      "depth": {
+        "zero_gutter": {
+          "static_depth": {
+            "valid_mask_iou": 1.0,
+            "max_abs_m": 0.0
+          },
+          "motion_depth": {
+            "valid_mask_iou": 1.0,
+            "max_abs_m": 0.0
+          }
+        },
+        "retained_gutter": {
+          "static_depth": {
+            "valid_mask_iou": 1.0,
+            "max_abs_m": 0.0
+          },
+          "motion_depth": {
+            "valid_mask_iou": 1.0,
+            "max_abs_m": 0.0
+          }
+        }
+      },
+      "captures": {
+        "matched_default": {
+          "capture_sha256": "5c6194e0804202f6d890e6fa579e0343fd7749c993c297f8a2e18df635e52daf",
+          "rgb_view": 0,
+          "static_warmup": 64,
+          "static_frames": 32,
+          "motion_warmup": 16,
+          "motion_frames": 32,
+          "source_sha256": {
+            "embodichain/lab/sim/cfg/rendering.py": "68aedea187759354820aa2052f1fd6b1b5522f7e639ae066534cda5097f9fa12",
+            "embodichain/lab/sim/sensors/camera.py": "50c36c5dbb7aaf3a976bbec46eaeffe8d30b444f19ae53011d9809bf59a74011",
+            "embodichain/lab/sim/sim_manager.py": "81385916cf5e8615ac6b61f5f2bbfacc609847dae893e9c4cd9357d925fe4ccc",
+            "embodichain/lab/sim/sensors/base_sensor.py": "d56b81b8c86a45aac575470bd79f5d6140d9304e96305d76b35c92c7ac73b82a"
+          },
+          "relevant_render_cfg": {
+            "renderer": "fast-rt",
+            "spp": 1,
+            "min_bounces": 4,
+            "max_bounces": 8,
+            "tone_mapping_enabled": true,
+            "tone_mapping_type": "aces",
+            "tone_mapping_exposure": 1.0,
+            "denoising": {
+              "window": "dlss",
+              "offscreen": "dlss"
+            },
+            "dlss": {
+              "dlss_quality": 2,
+              "upsample_ratio": null,
+              "render_width": 0,
+              "render_height": 0,
+              "target_width": 0,
+              "target_height": 0,
+              "tiled_enabled": true,
+              "tiled_gutter_pixels": 16,
+              "tiled_overscan_pixels": null,
+              "frame_time_delta_ms": 4.166666666666667,
+              "exposure_compensation": 1.0
+            }
+          }
+        },
+        "high_throughput": {
+          "capture_sha256": "99247db6e21f26e8f74d5cb62754b1a907c088576c1753f354f144ac16f1f79b",
+          "rgb_view": 0,
+          "static_warmup": 64,
+          "static_frames": 32,
+          "motion_warmup": 16,
+          "motion_frames": 32,
+          "source_sha256": {
+            "embodichain/lab/sim/cfg/rendering.py": "68aedea187759354820aa2052f1fd6b1b5522f7e639ae066534cda5097f9fa12",
+            "embodichain/lab/sim/sensors/camera.py": "50c36c5dbb7aaf3a976bbec46eaeffe8d30b444f19ae53011d9809bf59a74011",
+            "embodichain/lab/sim/sim_manager.py": "81385916cf5e8615ac6b61f5f2bbfacc609847dae893e9c4cd9357d925fe4ccc",
+            "embodichain/lab/sim/sensors/base_sensor.py": "d56b81b8c86a45aac575470bd79f5d6140d9304e96305d76b35c92c7ac73b82a"
+          },
+          "relevant_render_cfg": {
+            "renderer": "fast-rt",
+            "spp": 1,
+            "min_bounces": 1,
+            "max_bounces": 8,
+            "tone_mapping_enabled": true,
+            "tone_mapping_type": "aces",
+            "tone_mapping_exposure": 1.0,
+            "denoising": {
+              "window": "dlss",
+              "offscreen": "dlss"
+            },
+            "dlss": {
+              "dlss_quality": 2,
+              "upsample_ratio": null,
+              "render_width": 0,
+              "render_height": 0,
+              "target_width": 0,
+              "target_height": 0,
+              "tiled_enabled": true,
+              "tiled_gutter_pixels": 0,
+              "tiled_overscan_pixels": 0,
+              "frame_time_delta_ms": 4.166666666666667,
+              "exposure_compensation": 1.0
+            }
+          }
+        },
+        "high_with_gutter": {
+          "capture_sha256": "e16c89dfcc65daa8990ae32147dca29dbdbe1bae4d29e53b3441126739afe3f1",
+          "rgb_view": 0,
+          "static_warmup": 64,
+          "static_frames": 32,
+          "motion_warmup": 16,
+          "motion_frames": 32,
+          "source_sha256": {
+            "embodichain/lab/sim/cfg/rendering.py": "68aedea187759354820aa2052f1fd6b1b5522f7e639ae066534cda5097f9fa12",
+            "embodichain/lab/sim/sensors/camera.py": "50c36c5dbb7aaf3a976bbec46eaeffe8d30b444f19ae53011d9809bf59a74011",
+            "embodichain/lab/sim/sim_manager.py": "81385916cf5e8615ac6b61f5f2bbfacc609847dae893e9c4cd9357d925fe4ccc",
+            "embodichain/lab/sim/sensors/base_sensor.py": "d56b81b8c86a45aac575470bd79f5d6140d9304e96305d76b35c92c7ac73b82a"
+          },
+          "relevant_render_cfg": {
+            "renderer": "fast-rt",
+            "spp": 1,
+            "min_bounces": 1,
+            "max_bounces": 8,
+            "tone_mapping_enabled": true,
+            "tone_mapping_type": "aces",
+            "tone_mapping_exposure": 1.0,
+            "denoising": {
+              "window": "dlss",
+              "offscreen": "dlss"
+            },
+            "dlss": {
+              "dlss_quality": 2,
+              "upsample_ratio": null,
+              "render_width": 0,
+              "render_height": 0,
+              "target_width": 0,
+              "target_height": 0,
+              "tiled_enabled": true,
+              "tiled_gutter_pixels": 16,
+              "tiled_overscan_pixels": 0,
+              "frame_time_delta_ms": 4.166666666666667,
+              "exposure_compensation": 1.0
+            }
+          }
+        }
+      }
+    },
+    "last": {
+      "rgb_view": 63,
+      "static_vs_matched_default": {
+        "zero_gutter": {
+          "ssim": 0.9419393222591661,
+          "psnr_db": 36.958067629786285,
+          "mae_8bit": 2.0194379340277777
+        },
+        "retained_gutter": {
+          "ssim": 0.9954391064627822,
+          "psnr_db": 47.5141612100093,
+          "mae_8bit": 0.47170030381944433
+        }
+      },
+      "static_temporal_std_8bit": {
+        "matched_default": 0.4939752519130707,
+        "high_throughput": 1.0552903413772583,
+        "high_with_gutter": 0.5066734552383423
+      },
+      "motion_ssim": {
+        "zero_gutter": {
+          "mean": 0.9543742687990612,
+          "minimum": 0.9439398577973565
+        },
+        "retained_gutter": {
+          "mean": 0.9943433441759199,
+          "minimum": 0.9938733904910544
+        }
+      },
+      "depth": {
+        "zero_gutter": {
+          "static_depth": {
+            "valid_mask_iou": 1.0,
+            "max_abs_m": 0.0
+          },
+          "motion_depth": {
+            "valid_mask_iou": 1.0,
+            "max_abs_m": 0.0
+          }
+        },
+        "retained_gutter": {
+          "static_depth": {
+            "valid_mask_iou": 1.0,
+            "max_abs_m": 0.0
+          },
+          "motion_depth": {
+            "valid_mask_iou": 1.0,
+            "max_abs_m": 0.0
+          }
+        }
+      },
+      "captures": {
+        "matched_default": {
+          "capture_sha256": "ae9378b743c6f308b0e780b181217e75ce9d55559fae63be4926a7fe1a562222",
+          "rgb_view": 63,
+          "static_warmup": 64,
+          "static_frames": 32,
+          "motion_warmup": 16,
+          "motion_frames": 32,
+          "source_sha256": {
+            "embodichain/lab/sim/cfg/rendering.py": "68aedea187759354820aa2052f1fd6b1b5522f7e639ae066534cda5097f9fa12",
+            "embodichain/lab/sim/sensors/camera.py": "50c36c5dbb7aaf3a976bbec46eaeffe8d30b444f19ae53011d9809bf59a74011",
+            "embodichain/lab/sim/sim_manager.py": "81385916cf5e8615ac6b61f5f2bbfacc609847dae893e9c4cd9357d925fe4ccc",
+            "embodichain/lab/sim/sensors/base_sensor.py": "d56b81b8c86a45aac575470bd79f5d6140d9304e96305d76b35c92c7ac73b82a"
+          },
+          "relevant_render_cfg": {
+            "renderer": "fast-rt",
+            "spp": 1,
+            "min_bounces": 4,
+            "max_bounces": 8,
+            "tone_mapping_enabled": true,
+            "tone_mapping_type": "aces",
+            "tone_mapping_exposure": 1.0,
+            "denoising": {
+              "window": "dlss",
+              "offscreen": "dlss"
+            },
+            "dlss": {
+              "dlss_quality": 2,
+              "upsample_ratio": null,
+              "render_width": 0,
+              "render_height": 0,
+              "target_width": 0,
+              "target_height": 0,
+              "tiled_enabled": true,
+              "tiled_gutter_pixels": 16,
+              "tiled_overscan_pixels": null,
+              "frame_time_delta_ms": 4.166666666666667,
+              "exposure_compensation": 1.0
+            }
+          }
+        },
+        "high_throughput": {
+          "capture_sha256": "14c4013dbfd419e81ace809f3f1810df3ea5a20b18006e084a625ffc48e624ea",
+          "rgb_view": 63,
+          "static_warmup": 64,
+          "static_frames": 32,
+          "motion_warmup": 16,
+          "motion_frames": 32,
+          "source_sha256": {
+            "embodichain/lab/sim/cfg/rendering.py": "68aedea187759354820aa2052f1fd6b1b5522f7e639ae066534cda5097f9fa12",
+            "embodichain/lab/sim/sensors/camera.py": "50c36c5dbb7aaf3a976bbec46eaeffe8d30b444f19ae53011d9809bf59a74011",
+            "embodichain/lab/sim/sim_manager.py": "81385916cf5e8615ac6b61f5f2bbfacc609847dae893e9c4cd9357d925fe4ccc",
+            "embodichain/lab/sim/sensors/base_sensor.py": "d56b81b8c86a45aac575470bd79f5d6140d9304e96305d76b35c92c7ac73b82a"
+          },
+          "relevant_render_cfg": {
+            "renderer": "fast-rt",
+            "spp": 1,
+            "min_bounces": 1,
+            "max_bounces": 8,
+            "tone_mapping_enabled": true,
+            "tone_mapping_type": "aces",
+            "tone_mapping_exposure": 1.0,
+            "denoising": {
+              "window": "dlss",
+              "offscreen": "dlss"
+            },
+            "dlss": {
+              "dlss_quality": 2,
+              "upsample_ratio": null,
+              "render_width": 0,
+              "render_height": 0,
+              "target_width": 0,
+              "target_height": 0,
+              "tiled_enabled": true,
+              "tiled_gutter_pixels": 0,
+              "tiled_overscan_pixels": 0,
+              "frame_time_delta_ms": 4.166666666666667,
+              "exposure_compensation": 1.0
+            }
+          }
+        },
+        "high_with_gutter": {
+          "capture_sha256": "68ab55f8acd47fd627ad39861bdfe921e6f20c9e6f20063dd9f37b476ae3a15f",
+          "rgb_view": 63,
+          "static_warmup": 64,
+          "static_frames": 32,
+          "motion_warmup": 16,
+          "motion_frames": 32,
+          "source_sha256": {
+            "embodichain/lab/sim/cfg/rendering.py": "68aedea187759354820aa2052f1fd6b1b5522f7e639ae066534cda5097f9fa12",
+            "embodichain/lab/sim/sensors/camera.py": "50c36c5dbb7aaf3a976bbec46eaeffe8d30b444f19ae53011d9809bf59a74011",
+            "embodichain/lab/sim/sim_manager.py": "81385916cf5e8615ac6b61f5f2bbfacc609847dae893e9c4cd9357d925fe4ccc",
+            "embodichain/lab/sim/sensors/base_sensor.py": "d56b81b8c86a45aac575470bd79f5d6140d9304e96305d76b35c92c7ac73b82a"
+          },
+          "relevant_render_cfg": {
+            "renderer": "fast-rt",
+            "spp": 1,
+            "min_bounces": 1,
+            "max_bounces": 8,
+            "tone_mapping_enabled": true,
+            "tone_mapping_type": "aces",
+            "tone_mapping_exposure": 1.0,
+            "denoising": {
+              "window": "dlss",
+              "offscreen": "dlss"
+            },
+            "dlss": {
+              "dlss_quality": 2,
+              "upsample_ratio": null,
+              "render_width": 0,
+              "render_height": 0,
+              "target_width": 0,
+              "target_height": 0,
+              "tiled_enabled": true,
+              "tiled_gutter_pixels": 16,
+              "tiled_overscan_pixels": 0,
+              "frame_time_delta_ms": 4.166666666666667,
+              "exposure_compensation": 1.0
+            }
+          }
+        }
+      }
+    }
+  },
+  "quality_capture_source": {
+    "first": {
+      "sha256": "49f3fe77c97c7ac0378a4ac8c6667f85aceb260c6977f7edaf35672adfa42e8a",
+      "source": "# ----------------------------------------------------------------------------\n# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.\n#\n# Licensed under the Apache License, Version 2.0 (the \"License\");\n# you may not use this file except in compliance with the License.\n# You may obtain a copy of the License at\n#\n#     http://www.apache.org/licenses/LICENSE-2.0\n#\n# Unless required by applicable law or agreed to in writing, software\n# distributed under the License is distributed on an \"AS IS\" BASIS,\n# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n# See the License for the specific language governing permissions and\n# limitations under the License.\n# ----------------------------------------------------------------------------\n\n\"\"\"Capture native RGB sequences for quality analysis; no throughput is measured.\"\"\"\n\nfrom __future__ import annotations\n\nimport argparse\nimport hashlib\nimport importlib.metadata\nimport json\nimport os\nimport subprocess\nimport sys\nfrom pathlib import Path\n\nimport numpy as np\nimport yaml\n\n__all__: list[str] = []\n\nROOT = Path(__file__).resolve().parent\nCASES = (\n    \"default\", \"default_aces\", \"matched_default\", \"high_throughput\",\n    \"high_with_gutter\", \"high_with_default_bounces\",\n)\n\n\ndef _capture(case: str, arenas: int) -> None:\n    \"\"\"Retain first-view RGB sequences on GPU until each capture phase finishes.\"\"\"\n    import dexsim\n    import torch\n    from embodichain.lab.sim import SimulationManager, SimulationManagerCfg\n    from embodichain.lab.sim.cfg import RenderCfg\n    from embodichain.lab.sim.sensors import CameraCfg\n    from scripts.benchmark.rendering.offscreen_denoising import (\n        _build_benchmark_scene, _camera_pose, _set_frame_state,\n    )\n\n    torch.set_num_threads(4)\n    torch.set_num_interop_threads(1)\n    torch.cuda.set_device(0)\n    torch.manual_seed(20261117)\n    np.random.seed(20261117)\n    raw = yaml.safe_load(Path(\"scripts/benchmark/rendering/settings/fast_rt_high_throughput.yaml\").read_text())\n    if case.startswith(\"high\"):\n        config = RenderCfg.from_dict(raw[\"render_cfg\"])\n        if case == \"high_with_gutter\":\n            config.dlss.tiled_gutter_pixels = 16\n        if case == \"high_with_default_bounces\":\n            config.min_bounces = 4\n    else:\n        config = RenderCfg(renderer=\"fast-rt\")\n        if case != \"default\":\n            config.tone_mapping_enabled = True\n            config.tone_mapping_type = \"aces\"\n        if case == \"matched_default\":\n            config.dlss.frame_time_delta_ms = 1000 / 240\n    sim = SimulationManager(SimulationManagerCfg(\n        headless=True, device=\"cuda:0\", gpu_id=0, num_envs=arenas,\n        enable_entity_gizmo=False, robot_ik_gizmo=None,\n        startup_summary=\"off\", dexsim_startup_info=False, render_cfg=config,\n    ))\n    try:\n        moving = _build_benchmark_scene(sim, \"fixed_reflective\")\n        sim.prepare()\n        sim.get_world().enable_physics(False)\n        camera = sim.add_sensor(CameraCfg(\n            uid=\"quality_camera\", width=640, height=480,\n            intrinsics=(499.2, 499.2, 320., 240.), near=.05, far=20.,\n            enable_color=True, enable_depth=True,\n            extrinsics=CameraCfg.ExtrinsicsCfg(\n                eye=_camera_pose(0, 1), target=(0., .35, .55), up=(0., 0., 1.),\n            ),\n        ))\n        groups = list(camera.group_ids)\n        if len(groups) != 1:\n            raise RuntimeError(\"Quality capture must use one FastRT group.\")\n\n        def render() -> None:\n            \"\"\"Complete render/fetch before cloning borrowed native RGB buffers.\"\"\"\n            sim.render_camera_group(groups)\n            camera.update(fetch_only=True)\n            torch.cuda.synchronize(0)\n\n        # Static warmup exceeds the original experiment's sixteen warmup frames.\n        for _ in range(64):\n            render()\n        frames = []\n        for _ in range(32):\n            render()\n            frames.append(camera.get_data()[\"color\"][0, ..., :3].clone())\n            torch.cuda.synchronize(0)\n        static = torch.stack(frames).cpu().numpy()\n        frames.clear()\n        selected = [0, arenas - 1]\n        static_depth = camera.get_data()[\"depth\"][selected].cpu().numpy()\n\n        # Identical deterministic camera and object trajectory in every case.\n        for index in range(16):\n            _set_frame_state(sim, [camera], moving, index)\n            render()\n        for index in range(16, 48):\n            _set_frame_state(sim, [camera], moving, index)\n            render()\n            frames.append(camera.get_data()[\"color\"][0, ..., :3].clone())\n            torch.cuda.synchronize(0)\n        motion = torch.stack(frames).cpu().numpy()\n        motion_depth = camera.get_data()[\"depth\"][selected].cpu().numpy()\n        np.savez_compressed(\n            ROOT / f\"{arenas}_{case}.npz\", static=static, motion=motion,\n            static_depth=static_depth, motion_depth=motion_depth,\n            selected_envs=selected,\n        )\n        metadata = {\n            \"case\": case, \"arenas\": arenas, \"width\": 640, \"height\": 480,\n            \"static_warmup\": 64, \"static_frames\": 32,\n            \"motion_warmup\": 16, \"motion_frames\": 32,\n            \"rgb_view\": 0, \"depth_views\": selected,\n            \"render_cfg\": config.to_dict(),\n            \"sdk\": importlib.metadata.version(\"dexsim_engine\"),\n            \"sdk_path\": dexsim.__file__, \"torch\": torch.__version__,\n            \"capture_source_sha256\": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),\n            \"limitations\": \"Sequential quality capture with per-frame GPU clone; not a throughput rerun. Motion temporal differences are not flicker metrics without motion compensation.\",\n        }\n        (ROOT / f\"{arenas}_{case}.json\").write_text(json.dumps(metadata, indent=2) + \"\\n\")\n    finally:\n        sim.destroy(exit_process=False)\n        SimulationManager.flush_cleanup_queue()\n\n\ndef _main() -> None:\n    \"\"\"Launch serial, isolated quality captures with shared-GPU exclusion.\"\"\"\n    parser = argparse.ArgumentParser()\n    parser.add_argument(\"--case\", choices=CASES)\n    parser.add_argument(\"--arenas\", type=int, default=64)\n    args = parser.parse_args()\n    if args.case:\n        _capture(args.case, args.arenas)\n        return\n    from scripts.benchmark.rendering.camera_grouping import _other_gpu_processes\n    jobs = [(64, case) for case in CASES]\n    jobs += [(2, case) for case in (\"matched_default\", \"high_throughput\")]\n    env = dict(os.environ, OMP_NUM_THREADS=\"4\", MKL_NUM_THREADS=\"4\", OPENBLAS_NUM_THREADS=\"1\", EMBODICHAIN_SIM_EXIT_PROCESS=\"0\")\n    for arenas, case in jobs:\n        if others := _other_gpu_processes():\n            raise RuntimeError(f\"GPU is shared: {others}\")\n        print(f\"Quality capture: arenas={arenas}, case={case}\", flush=True)\n        with (ROOT / f\"{arenas}_{case}.log\").open(\"w\") as log:\n            subprocess.run([\n                sys.executable, str(Path(__file__).resolve()),\n                \"--case\", case, \"--arenas\", str(arenas),\n            ], check=True, env=env, stdout=log, stderr=subprocess.STDOUT)\n        if others := _other_gpu_processes():\n            raise RuntimeError(f\"GPU became shared: {others}\")\n\n\nif __name__ == \"__main__\":\n    _main()\n"
+    },
+    "last": {
+      "sha256": "48a188a0fdef645f88eb0130a4eecfe9d85b09f2384945fe6253346dcebe5866",
+      "source": "# ----------------------------------------------------------------------------\n# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.\n#\n# Licensed under the Apache License, Version 2.0 (the \"License\");\n# you may not use this file except in compliance with the License.\n# You may obtain a copy of the License at\n#\n#     http://www.apache.org/licenses/LICENSE-2.0\n#\n# Unless required by applicable law or agreed to in writing, software\n# distributed under the License is distributed on an \"AS IS\" BASIS,\n# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n# See the License for the specific language governing permissions and\n# limitations under the License.\n# ----------------------------------------------------------------------------\n\n\"\"\"Capture native RGB sequences for quality analysis; no throughput is measured.\"\"\"\n\nfrom __future__ import annotations\n\nimport argparse\nimport hashlib\nimport importlib.metadata\nimport json\nimport os\nimport subprocess\nimport sys\nfrom pathlib import Path\n\nimport numpy as np\nimport yaml\n\n__all__: list[str] = []\n\nROOT = Path(__file__).resolve().parent\nCASES = (\n    \"default\", \"default_aces\", \"matched_default\", \"high_throughput\",\n    \"high_with_gutter\", \"high_with_default_bounces\",\n)\n\n\ndef _capture(case: str, arenas: int) -> None:\n    \"\"\"Retain last-view RGB sequences on GPU until each capture phase finishes.\"\"\"\n    import dexsim\n    import torch\n    from embodichain.lab.sim import SimulationManager, SimulationManagerCfg\n    from embodichain.lab.sim.cfg import RenderCfg\n    from embodichain.lab.sim.sensors import CameraCfg\n    from scripts.benchmark.rendering.offscreen_denoising import (\n        _build_benchmark_scene, _camera_pose, _set_frame_state,\n    )\n\n    torch.set_num_threads(4)\n    torch.set_num_interop_threads(1)\n    torch.cuda.set_device(0)\n    torch.manual_seed(20261117)\n    np.random.seed(20261117)\n    raw = yaml.safe_load(Path(\"scripts/benchmark/rendering/settings/fast_rt_high_throughput.yaml\").read_text())\n    if case.startswith(\"high\"):\n        config = RenderCfg.from_dict(raw[\"render_cfg\"])\n        if case == \"high_with_gutter\":\n            config.dlss.tiled_gutter_pixels = 16\n        if case == \"high_with_default_bounces\":\n            config.min_bounces = 4\n    else:\n        config = RenderCfg(renderer=\"fast-rt\")\n        if case != \"default\":\n            config.tone_mapping_enabled = True\n            config.tone_mapping_type = \"aces\"\n        if case == \"matched_default\":\n            config.dlss.frame_time_delta_ms = 1000 / 240\n    sim = SimulationManager(SimulationManagerCfg(\n        headless=True, device=\"cuda:0\", gpu_id=0, num_envs=arenas,\n        enable_entity_gizmo=False, robot_ik_gizmo=None,\n        startup_summary=\"off\", dexsim_startup_info=False, render_cfg=config,\n    ))\n    try:\n        moving = _build_benchmark_scene(sim, \"fixed_reflective\")\n        sim.prepare()\n        sim.get_world().enable_physics(False)\n        camera = sim.add_sensor(CameraCfg(\n            uid=\"quality_camera\", width=640, height=480,\n            intrinsics=(499.2, 499.2, 320., 240.), near=.05, far=20.,\n            enable_color=True, enable_depth=True,\n            extrinsics=CameraCfg.ExtrinsicsCfg(\n                eye=_camera_pose(0, 1), target=(0., .35, .55), up=(0., 0., 1.),\n            ),\n        ))\n        groups = list(camera.group_ids)\n        if len(groups) != 1:\n            raise RuntimeError(\"Quality capture must use one FastRT group.\")\n\n        def render() -> None:\n            \"\"\"Complete render/fetch before cloning borrowed native RGB buffers.\"\"\"\n            sim.render_camera_group(groups)\n            camera.update(fetch_only=True)\n            torch.cuda.synchronize(0)\n\n        # Static warmup exceeds the original experiment's sixteen warmup frames.\n        for _ in range(64):\n            render()\n        frames = []\n        for _ in range(32):\n            render()\n            frames.append(camera.get_data()[\"color\"][-1, ..., :3].clone())\n            torch.cuda.synchronize(0)\n        static = torch.stack(frames).cpu().numpy()\n        frames.clear()\n        selected = [0, arenas - 1]\n        static_depth = camera.get_data()[\"depth\"][selected].cpu().numpy()\n\n        # Identical deterministic camera and object trajectory in every case.\n        for index in range(16):\n            _set_frame_state(sim, [camera], moving, index)\n            render()\n        for index in range(16, 48):\n            _set_frame_state(sim, [camera], moving, index)\n            render()\n            frames.append(camera.get_data()[\"color\"][-1, ..., :3].clone())\n            torch.cuda.synchronize(0)\n        motion = torch.stack(frames).cpu().numpy()\n        motion_depth = camera.get_data()[\"depth\"][selected].cpu().numpy()\n        np.savez_compressed(\n            ROOT / f\"{arenas}_{case}.npz\", static=static, motion=motion,\n            static_depth=static_depth, motion_depth=motion_depth,\n            selected_envs=selected,\n        )\n        metadata = {\n            \"case\": case, \"arenas\": arenas, \"width\": 640, \"height\": 480,\n            \"static_warmup\": 64, \"static_frames\": 32,\n            \"motion_warmup\": 16, \"motion_frames\": 32,\n            \"rgb_view\": arenas - 1, \"depth_views\": selected,\n            \"render_cfg\": config.to_dict(),\n            \"sdk\": importlib.metadata.version(\"dexsim_engine\"),\n            \"sdk_path\": dexsim.__file__, \"torch\": torch.__version__,\n            \"capture_source_sha256\": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),\n            \"limitations\": \"Sequential quality capture with per-frame GPU clone; not a throughput rerun. Motion temporal differences are not flicker metrics without motion compensation.\",\n        }\n        (ROOT / f\"{arenas}_{case}.json\").write_text(json.dumps(metadata, indent=2) + \"\\n\")\n    finally:\n        sim.destroy(exit_process=False)\n        SimulationManager.flush_cleanup_queue()\n\n\ndef _main() -> None:\n    \"\"\"Launch serial, isolated quality captures with shared-GPU exclusion.\"\"\"\n    parser = argparse.ArgumentParser()\n    parser.add_argument(\"--case\", choices=CASES)\n    parser.add_argument(\"--arenas\", type=int, default=64)\n    args = parser.parse_args()\n    if args.case:\n        _capture(args.case, args.arenas)\n        return\n    from scripts.benchmark.rendering.camera_grouping import _other_gpu_processes\n    jobs = [(64, case) for case in CASES]\n    jobs += [(2, case) for case in (\"matched_default\", \"high_throughput\")]\n    env = dict(os.environ, OMP_NUM_THREADS=\"4\", MKL_NUM_THREADS=\"4\", OPENBLAS_NUM_THREADS=\"1\", EMBODICHAIN_SIM_EXIT_PROCESS=\"0\")\n    for arenas, case in jobs:\n        if others := _other_gpu_processes():\n            raise RuntimeError(f\"GPU is shared: {others}\")\n        print(f\"Quality capture: arenas={arenas}, case={case}\", flush=True)\n        with (ROOT / f\"{arenas}_{case}.log\").open(\"w\") as log:\n            subprocess.run([\n                sys.executable, str(Path(__file__).resolve()),\n                \"--case\", case, \"--arenas\", str(arenas),\n            ], check=True, env=env, stdout=log, stderr=subprocess.STDOUT)\n        if others := _other_gpu_processes():\n            raise RuntimeError(f\"GPU became shared: {others}\")\n\n\nif __name__ == \"__main__\":\n    _main()\n"
+    }
+  },
+  "raw_samples": {
+    "file": "fast_rt_profiles_640x480_20261117.samples.jsonl",
+    "count": 90,
+    "sha256": "ba4976e590f8f1eb661c79d8d624ff427f15b35947f3eda0771b0641137af012"
+  }
+}

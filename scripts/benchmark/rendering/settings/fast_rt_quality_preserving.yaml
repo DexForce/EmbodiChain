@@ -1,0 +1,20 @@
+# Retain the copied atlas guard band to limit temporal variation at view edges.
+# Use --quality-config with camera_profiles; workload comes from --config.
+render_cfg:
+  renderer: fast-rt
+  spp: 1
+  min_bounces: 1
+  max_bounces: 8
+  denoising:
+    window: dlss
+    offscreen: dlss
+  dlss:
+    dlss_quality: 2
+    tiled_enabled: true
+    tiled_gutter_pixels: 16
+    tiled_overscan_pixels: 0
+    frame_time_delta_ms: 4.166666666666667
+    exposure_compensation: 1.0
+  tone_mapping_enabled: true
+  tone_mapping_type: aces
+  tone_mapping_exposure: 1.0
