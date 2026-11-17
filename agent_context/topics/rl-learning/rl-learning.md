@@ -149,10 +149,13 @@ through collection and PPO epochs, then update for the next rollout. Actor
 export excludes critic and contact decoder; inference alignment does not
 qualify task learning or simulator throughput.
 
-Blind-assembly observation producers live in the manager observation package.
-All three task families use the current-first temporal input convention and
-encoder-derived joint/FK features. There are no per-task historical layout flags. Examples under
-`examples/learning/blind_assembly/` own actor export and native preview.
+Blind-assembly producers and manager functors live in the official task
+extension's `manipulation/assembly/functors.py`. The generic observation package
+does not own assembly state or task rules. All three families use current-first
+encoder/FK features; history storage remains a reusable policy component.
+[Assembly ownership](../assembly-assets/assembly-assets.md) identifies shared
+geometry, gravity, resource snapshots and declarative task defaults. Examples
+under `examples/learning/blind_assembly/` own actor export and native preview.
 
 ## Episode evaluation and saved resources
 

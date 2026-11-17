@@ -20,53 +20,15 @@ from __future__ import annotations
 from typing import Any
 import torch
 from embodichain.utils.math import trans_matrix_to_xyz_quat
-from embodichain.lab.gym.envs.managers.observations._assembly import (
+from .functors import (
     _assembly_kinematic_chain,
 )
+from embodichain.compute.geometry import signed_distance_to_polygon
 from .preparation import AssemblyScene
 from ._config import assembly_cfg
 from ._control import EncoderGravityCompensation
 
 __all__ = ["initialize_assembly", "update_assembly"]
-
-
-def _signed_polygon_distance(
-    samples: torch.Tensor, polygon: torch.Tensor
-) -> torch.Tensor:
-    """Compute point-to-polygon distance with bounded point-edge temporaries."""
-    endpoint = polygon.roll(-1, 0)
-    edges = endpoint - polygon
-    length_squared = edges.square().sum(dim=-1).clamp_min(1e-12)
-    distances = []
-    for chunk in samples.reshape(-1, 2).split(16384):
-        rx = chunk[:, 0, None] - polygon[None, :, 0]
-        ry = chunk[:, 1, None] - polygon[None, :, 1]
-        projection = (
-            (rx * edges[None, :, 0] + ry * edges[None, :, 1]) / length_squared[None]
-        ).clamp(0, 1)
-        distance = (
-            (
-                (rx - projection * edges[None, :, 0]).square()
-                + (ry - projection * edges[None, :, 1]).square()
-            )
-            .amin(dim=-1)
-            .sqrt()
-        )
-        crossings = (
-            (
-                (polygon[None, :, 1] > chunk[:, 1, None])
-                != (endpoint[None, :, 1] > chunk[:, 1, None])
-            )
-            & (
-                chunk[:, 0, None]
-                < edges[None, :, 0]
-                * (chunk[:, 1, None] - polygon[None, :, 1])
-                / (edges[None, :, 1] + 1e-12)
-                + polygon[None, :, 0]
-            )
-        ).sum(dim=-1)
-        distances.append(torch.where(crossings % 2 == 1, -distance, distance))
-    return torch.cat(distances).reshape(samples.shape[:2])
 
 
 class AssemblyState:
@@ -359,7 +321,7 @@ class AssemblyState:
             # static/js/assembly_task.js: segment distance, even-odd interior,
             # and a 1 mm band around both the opening rim and top plane.
             samples = torch.cat([points[:, :, :2], bottom_points[:, :, :2]], dim=1)
-            signed_distance = _signed_polygon_distance(samples, self._hole_polygon)
+            signed_distance = signed_distance_to_polygon(samples, self._hole_polygon)
             edge_distance = signed_distance[:, : points.shape[1]]
             all_inside = (signed_distance[:, points.shape[1] :] <= 0).all(dim=-1)
             depth = self.scene._fixture_zmax - bottom_points[:, :, 2].amax(dim=1)

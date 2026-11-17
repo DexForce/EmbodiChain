@@ -78,9 +78,17 @@ profiles retain their measured overrides. Buffer overflow fails immediately
 instead of accepting truncated grasp evidence. The configured interval event advances shared state
 once after each control transition, independently of selected termination terms.
 Observation, reward and condition functors read that snapshot; reset updates only
-selected rows. Encoder features stay in the observation package, with dimensions
-computed from the selected arm and orientation representation. The task's
-`resources.py` packages the manifest and prepared robot for checkpoint relocation.
+selected rows. Task-owned `functors.py` owns observations, reset, rewards and conditions;
+`_state.py` owns the shared measurement snapshot. Encoder dimensions follow the
+selected arm and orientation representation. Task parameter and geometry
+defaults live in `configs/tasks/manipulation/assembly/defaults.yaml` inside the
+official task package; deployment declarations override those data-owned values.
+The task's `resources.py` serializes assembly manifests/fidelity and delegates
+prepared robot-tree copying to `embodichain.data.resources.snapshot_urdf_resources`.
+Pure polygon distances belong to `embodichain.compute.geometry`; URDF gravity
+feedforward belongs to `embodichain.compute.kinematics`. Robot joint-order and
+root-frame adaptation remains task-owned. Preparation/resource-export entry paths
+remain stable for frozen current-schema runs.
 No import-owned task registration aliases or environment-method replacements are used.
 
 `embodichain_benchmarks.assembly.robot_reference` prepares the historical public Rizon/Robotiq approximation

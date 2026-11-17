@@ -33,6 +33,16 @@ Offline job preflight, run, resume and verified inspection commands.
 
    main
 
+embodichain.compute.geometry
+----------------------------
+
+Chunked planar distances preserve tensor batch axes, dtype and device.
+
+.. currentmodule:: embodichain.compute.geometry
+
+.. autofunction:: signed_distance_to_polygon
+
+
 embodichain.compute.geometry.particles
 --------------------------------------
 
@@ -43,6 +53,16 @@ Deterministic lattice sampling for primitive, revolved and closed mesh fill volu
    embodichain.compute.geometry.particles.sample_volume_particles
 
 .. autofunction:: embodichain.compute.geometry.particles.sample_volume_particles
+
+embodichain.compute.geometry.polygon
+------------------------------------
+
+Signed distances support concave planar outlines and bounded point-edge intermediates.
+
+.. currentmodule:: embodichain.compute.geometry.polygon
+
+.. autofunction:: signed_distance_to_polygon
+
 
 embodichain.compute.geometry.shading
 ------------------------------------
@@ -59,6 +79,28 @@ simulator, and does not establish collision or manifold validity.
    has_inconsistent_shading_normals
 
 .. autofunction:: has_inconsistent_shading_normals
+
+embodichain.compute.kinematics
+------------------------------
+
+URDF gravity feedforward evaluates encoder coordinates in an explicit root frame.
+
+.. currentmodule:: embodichain.compute.kinematics
+
+.. autoclass:: URDFGravityCompensation
+   :members: torques
+
+
+embodichain.compute.kinematics.gravity
+--------------------------------------
+
+Cached URDF kinematics and mass/COM data provide simulator-independent holding torques.
+
+.. currentmodule:: embodichain.compute.kinematics.gravity
+
+.. autoclass:: URDFGravityCompensation
+   :members: torques
+
 
 embodichain.compute.kinematics.ik_path
 --------------------------------------
@@ -113,6 +155,13 @@ asset definitions can import the dataset base without circular initialization.
    get_data_path
    list_default_materials
    get_default_material_info
+
+Prepared robot snapshots preserve resource trees and source notices for relocatable runs.
+
+.. currentmodule:: embodichain.data
+
+.. autofunction:: snapshot_urdf_resources
+
 
 embodichain.data.assets.demo_assets
 -----------------------------------
@@ -320,6 +369,16 @@ not change geometry or UVs.
 
 .. autofunction:: get_default_material_info
    :no-index:
+
+embodichain.data.resources
+--------------------------
+
+Filesystem resource snapshots retain relative mesh, material and texture references without simulator imports.
+
+.. currentmodule:: embodichain.data.resources
+
+.. autofunction:: snapshot_urdf_resources
+
 
 embodichain.data_pipeline
 -------------------------
@@ -5302,20 +5361,6 @@ existing locomotion configuration name while implementations move into a package
 
 
    assembly_robot_reference
-embodichain.lab.gym.envs.managers.assembly
-------------------------------------------
-
-Stateful proprioceptive history, privileged labels, reset and milestone rewards used by the registered assembly tasks. Actor observation groups exclude labels and fixture truth.
-
-.. currentmodule:: embodichain.lab.gym.envs.managers.assembly
-
-.. autosummary::
-
-   reset_assembly
-   assembly_milestone_reward
-
-
-
 embodichain_tasks.manipulation.assembly.assets
 ----------------------------------------------
 
@@ -5329,28 +5374,6 @@ Public-generator composition of held pegs, perforated gears and nuts with physic
 
 
 
-Blind assembly observation functors
------------------------------------
-
-These task-specific observations maintain proprioceptive history and provide
-privileged mating state and contact labels for training. Only the proprioceptive
-observation belongs to the actor input.
-
-.. autosummary::
-
-   AssemblyProprioception
-   assembly_privileged_state
-   assembly_contact_labels
-
-.. autoclass:: AssemblyProprioception
-   :members: reset
-   :no-index:
-
-.. autofunction:: assembly_privileged_state
-
-.. autofunction:: assembly_contact_labels
-
-
 Shared observation functors
 ---------------------------
 
@@ -5362,17 +5385,7 @@ for training; policy configuration controls which observations reach the actor.
 
 .. autosummary::
 
-   AssemblyProprioception
-   assembly_privileged_state
-   assembly_contact_labels
    velocity_locomotion_observation
-
-.. autoclass:: AssemblyProprioception
-   :members: reset
-
-.. autofunction:: assembly_privileged_state
-
-.. autofunction:: assembly_contact_labels
 
 .. autofunction:: velocity_locomotion_observation
 

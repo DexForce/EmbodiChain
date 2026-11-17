@@ -34,8 +34,28 @@ Preparation and saved resources
 Termination conditions
 ----------------------
 
-.. currentmodule:: embodichain.lab.gym.envs.managers.assembly
+.. currentmodule:: embodichain_tasks.manipulation.assembly.functors
 
 .. autofunction:: assembly_success
 
 .. autofunction:: assembly_failure
+
+Task observation, reset and reward components
+--------------------------------------------
+
+The task package owns proprioceptive feature construction, contact labels,
+selected-row grasp resets and assembly milestone rewards. Configuration binds
+these functors to the common environment managers.
+
+.. currentmodule:: embodichain_tasks.manipulation.assembly.functors
+
+.. autoclass:: AssemblyProprioception
+   :members:
+
+.. autofunction:: assembly_privileged_state
+
+.. autofunction:: assembly_contact_labels
+
+.. autofunction:: reset_assembly
+
+.. autofunction:: assembly_milestone_reward

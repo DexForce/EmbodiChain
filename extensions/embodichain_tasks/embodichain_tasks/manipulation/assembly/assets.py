@@ -31,6 +31,7 @@ from embodichain.toolkits.assembly.adapter import (
     import_mjcf,
 )
 from embodichain.toolkits.assembly.model import AssemblyAsset
+from ._defaults import assembly_defaults
 
 __all__ = ["build_task_assembly"]
 
@@ -57,22 +58,14 @@ def _add_ring(
 
 def _gear_asset(config: dict[str, Any], seed: int) -> AssemblyAsset:
     mjfit, revision = load_mjfit()
-    shaft_radius = float(config.pop("shaft_radius", 0.005))
-    bore_clearance = float(config.pop("bore_clearance", 0.000875))
-    shaft_tip = float(config.pop("shaft_tip", 0.0065))
-    boss_radius = float(config.pop("boss_radius", 0.009))
-    boss_height = float(config.pop("boss_height", 0.018))
-    cfg = {
-        "kind": "gear",
-        "teeth": [20, 20],
-        "module": 0.00275,
-        "face_width": 0.0115,
-        "pressure_angle": 22.5,
-        "tooth_width": 0.46,
-        "motor": False,
-        "axles": False,
-        **config,
-    }
+    defaults = assembly_defaults("assets")["gear"]
+    recipe = defaults["recipe"]
+    shaft_radius = float(config.pop("shaft_radius", recipe["shaft_radius"]))
+    bore_clearance = float(config.pop("bore_clearance", recipe["bore_clearance"]))
+    shaft_tip = float(config.pop("shaft_tip", recipe["shaft_tip"]))
+    boss_radius = float(config.pop("boss_radius", recipe["boss_radius"]))
+    boss_height = float(config.pop("boss_height", recipe["boss_height"]))
+    cfg = {**defaults["generator"], **config}
     source = build_assembly(cfg, seed=seed)
     model = ET.fromstring(source.source_mjcf)
     body = model.find("./worldbody/body[@name='gear_b']")
@@ -94,19 +87,27 @@ def _gear_asset(config: dict[str, Any], seed: int) -> AssemblyAsset:
         ("bore_", outline, width, 0.0),
         (
             "boss_",
-            {"type": "circle", "radius": boss_radius, "n": 48},
+            {
+                "type": "circle",
+                "radius": boss_radius,
+                "n": recipe["boss_outline_samples"],
+            },
             boss_height,
             (width + boss_height) / 2,
         ),
     ):
         ring = mjfit.peg(
-            hole={"type": "circle", "radius": shaft_radius + bore_clearance, "n": 64},
+            hole={
+                "type": "circle",
+                "radius": shaft_radius + bore_clearance,
+                "n": recipe["shaft_outline_samples"],
+            },
             plate=outer,
             plate_thickness=thickness,
-            plate_density=7800.0,
+            plate_density=recipe["plate_density"],
             include_peg=False,
-            friction=cfg.get("friction", 0.5),
-            condim=cfg.get("condim", 3),
+            friction=cfg.get("friction", recipe["ring_friction"]),
+            condim=cfg.get("condim", recipe["ring_condim"]),
             standalone=False,
         )
         _add_ring(model, body, ring, name, z)
@@ -120,6 +121,8 @@ def _gear_asset(config: dict[str, Any], seed: int) -> AssemblyAsset:
         childclass="mjfit",
         pos=f"{source_position[0]} 0 {collar_top}",
     )
+    shaft_friction = " ".join(map(str, recipe["shaft_friction"]))
+    collar_half_height = recipe["collar_half_height"]
     ET.SubElement(
         shaft,
         "geom",
@@ -127,18 +130,18 @@ def _gear_asset(config: dict[str, Any], seed: int) -> AssemblyAsset:
         type="cylinder",
         size=f"{shaft_radius} {shaft_height/2}",
         pos=f"0 0 {shaft_height/2}",
-        friction="1.0 0.005 0.0001",
-        condim="3",
+        friction=shaft_friction,
+        condim=str(recipe["shaft_condim"]),
     )
     ET.SubElement(
         shaft,
         "geom",
         name="collar_collision",
         type="cylinder",
-        size=f"{boss_radius*1.5} 0.0025",
-        pos="0 0 -0.0025",
-        friction="1.0 0.005 0.0001",
-        condim="3",
+        size=f"{boss_radius*recipe['collar_radius_scale']} {collar_half_height}",
+        pos=f"0 0 {-collar_half_height}",
+        friction=shaft_friction,
+        condim=str(recipe["shaft_condim"]),
     )
     asset = import_mjcf(
         ET.tostring(model, encoding="unicode"),
@@ -177,17 +180,7 @@ def build_task_assembly(
     if kind == "gear":
         return _gear_asset(parameters, seed)
     if kind == "peg":
-        cfg = {
-            "kind": "peg",
-            "hole": {"type": "stadium", "width": 0.052, "height": 0.032, "n": 32},
-            "clearance": 0.00125,
-            "plate_size": 0.14,
-            "plate_thickness": 0.018,
-            "bottom_thickness": 0.002,
-            "peg_length": 0.09,
-            "peg_mass": 0.5,
-            **parameters,
-        }
+        cfg = {**assembly_defaults("assets")["peg"]["generator"], **parameters}
         asset = build_assembly(cfg, seed=seed)
         mjfit, _ = load_mjfit()
         hole = cfg["hole"]
@@ -200,20 +193,7 @@ def build_task_assembly(
         )
         return asset
     if kind == "nut":
-        cfg = {
-            "kind": "thread",
-            "major_diameter": 0.036,
-            "pitch": 0.004,
-            "thread_length": 0.05,
-            "clearance": 0.00015,
-            "nut_shape": "hex",
-            "nut_size": 0.055,
-            "nut_height": 0.029,
-            "bolt_shank_length": 0.0,
-            "friction": 0.29,
-            "condim": 3,
-            **parameters,
-        }
+        cfg = {**assembly_defaults("assets")["nut"]["generator"], **parameters}
         source = build_assembly(cfg, seed=seed)
         model = ET.fromstring(source.source_mjcf)
         for name, free in (("bolt", False), ("nut", True)):

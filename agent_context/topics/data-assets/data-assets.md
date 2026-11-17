@@ -10,6 +10,7 @@ Online sampling and demonstration persistence belong to
 
 | Request | Owner |
 |---|---|
+| Prepared URDF resource snapshots | `embodichain/data/resources.py`: `snapshot_urdf_resources()` |
 | Asset path lookup | `embodichain/data/dataset.py`: `get_data_path()`, `get_data_class()` |
 | Cache roots / mirror prefix | `embodichain/data/constants.py` |
 | Locked download and ZIP integrity | `embodichain/data/dataset.py`: `EmbodiChainDataset`, `_dataset_download_lock()` |
@@ -42,6 +43,14 @@ base URL for asset archives (default: the hf-mirror.com copy of
 Lookup does not verify the final nested file. Check the shared index and installed
 entry points for missing IDs. Explicit loaded modules remain available through
 `extra_modules` after registered IDs; package re-exports do not register assets.
+
+Prepared robot snapshots copy an existing URDF parent tree into a caller-owned
+standalone directory, retaining relative OBJ/MTL/texture references. An explicit
+provenance root contributes its manifest and model license/notice files without
+robot-name rules. Self-snapshots are idempotent; nested source destinations are
+rejected before copying. Task adapters own configuration path rewriting and
+assembly-specific fidelity; the shared filesystem helper does not import Gym,
+simulation or task packages.
 
 ## Download and registry boundaries
 

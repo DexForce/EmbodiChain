@@ -16,13 +16,12 @@
 """Observation functors for environment managers.
 
 Existing imports and configuration names resolve from this package. The
-implementation modules group general, assembly and locomotion observations.
+implementation modules group general and locomotion observations.
 """
 
 from __future__ import annotations
 
 from ._common import *
-from ._assembly import *
 from ._common import (
     _capture_proprioception,
     _get_deformable_centroid_state,
@@ -51,8 +50,5 @@ __all__ = [
     "get_fluid_particle_state",
     "get_fluid_summary",
     "get_fluid_volume_in_region",
-    "AssemblyProprioception",
-    "assembly_privileged_state",
-    "assembly_contact_labels",
     "velocity_locomotion_observation",
 ]

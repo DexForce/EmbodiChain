@@ -20,6 +20,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from embodichain.data.resources import snapshot_urdf_resources
+
 __all__ = ["export_assembly_resources"]
 
 
@@ -44,7 +46,6 @@ def export_assembly_resources(
     state = env.assembly_state
     from copy import deepcopy
     import json
-    import shutil
 
     frozen = deepcopy(config)
     for name in ("scene_preparation", "resource_export"):
@@ -60,19 +61,16 @@ def export_assembly_resources(
     )
     source = Path(state.env.cfg.robot._pk_urdf_path).resolve()
     robot_directory = resources / "robot"
-    if source.parent.resolve() != robot_directory.resolve():
-        shutil.copytree(source.parent, robot_directory, dirs_exist_ok=True)
-    # Preserve upstream license texts and immutable resource identities,
-    # even though generated mesh files live in a separate cache directory.
-    licenses = robot_directory / "licenses"
-    licenses.mkdir(parents=True, exist_ok=True)
-    for model in ("flexiv_rizon4s", "robotiq_2f85"):
-        license_path = source.parent.parent / model / "LICENSE"
-        if license_path.is_file():
-            shutil.copy2(license_path, licenses / f"{model}.LICENSE")
-    source_manifest = source.parent.parent / "source_manifest.json"
-    if source_manifest.is_file():
-        shutil.copy2(source_manifest, robot_directory / "source_manifest.json")
+    provenance = source.parent.parent
+    snapshot_urdf_resources(
+        source,
+        robot_directory,
+        provenance_root=(
+            provenance if (provenance / "source_manifest.json").is_file() else None
+        ),
+    )
+    # Fidelity is task metadata; the filesystem helper does not interpret it.
+    if (robot_directory / "source_manifest.json").is_file():
         marker = robot_directory / "fidelity.json"
         if marker.is_file():
             fidelity = json.loads(marker.read_text())

@@ -22,52 +22,17 @@ from typing import Any
 import numpy as np
 from scipy.spatial.transform import Rotation
 import torch
+from embodichain.compute.kinematics import URDFGravityCompensation
 from embodichain.lab.gym.envs.managers.actions import RelativeJointPositionAction
 
 __all__ = ["AssemblyJointPositionAction"]
 
 
 class EncoderGravityCompensation:
-    """Compute encoder-only feedforward from the prepared robot's URDF."""
+    """Adapt configured robot joint order and root frame to the shared model."""
 
     def __init__(self, env: Any, arm_part: str) -> None:
         self.env = env
-        import xml.etree.ElementTree as ET
-        import pytorch_kinematics as pk
-
-        xml = Path(self.env.cfg.robot._pk_urdf_path).read_bytes()
-        self._gravity_chain = pk.build_chain_from_urdf(xml).to(device=self.env.device)
-        names = self._gravity_chain.get_joint_parameter_names()
-        self._gravity_joint_ids = torch.tensor(
-            [self.env.robot.joint_names.index(name) for name in names],
-            device=self.env.device,
-        )
-        self._gravity_arm_ids = torch.tensor(
-            [
-                names.index(self.env.robot.joint_names[index])
-                for index in self.env.robot.get_joint_ids(
-                    name=arm_part, remove_mimic=True
-                )
-            ],
-            device=self.env.device,
-        )
-        self._gravity_links = []
-        for link in ET.fromstring(xml).findall("link"):
-            inertia = link.find("inertial")
-            if inertia is not None:
-                origin = inertia.find("origin")
-                com = (
-                    np.fromstring(origin.attrib.get("xyz", "0 0 0"), sep=" ")
-                    if origin is not None
-                    else np.zeros(3)
-                )
-                self._gravity_links.append(
-                    (
-                        link.attrib["name"],
-                        float(inertia.find("mass").attrib["value"]),
-                        torch.tensor(com, dtype=torch.float32, device=self.env.device),
-                    )
-                )
         gravity = np.asarray(self.env.sim_cfg.physics_cfg.gravity, dtype=float)
         if gravity.ndim == 0:
             gravity = np.array([0, 0, float(gravity)])
@@ -90,29 +55,28 @@ class EncoderGravityCompensation:
         self.robot_base = torch.tensor(
             root_transform, dtype=torch.float32, device=self.env.device
         )
-        self._gravity_acceleration = torch.tensor(
-            root_rotation.T @ gravity, dtype=torch.float32, device=self.env.device
+
+        self._model = URDFGravityCompensation(
+            Path(env.cfg.robot._pk_urdf_path).read_bytes(),
+            root_rotation.T @ gravity,
+            device=env.device,
+        )
+        names = list(self._model.joint_names)
+        self._gravity_joint_ids = torch.tensor(
+            [env.robot.joint_names.index(name) for name in names], device=env.device
+        )
+        self._gravity_arm_ids = torch.tensor(
+            [
+                names.index(env.robot.joint_names[index])
+                for index in env.robot.get_joint_ids(name=arm_part, remove_mimic=True)
+            ],
+            device=env.device,
         )
 
     def torques(self) -> torch.Tensor:
-        # One batched differentiation per control step. The chain and COMs
-        # are prepared once; no host transfers or simulator truth enter it.
-        with torch.enable_grad():
-            q = (
-                self.env.robot.get_qpos()[:, self._gravity_joint_ids]
-                .detach()
-                .requires_grad_(True)
-            )
-            transforms = self._gravity_chain.forward_kinematics(q)
-            potential = torch.zeros(self.env.num_envs, device=self.env.device)
-            for name, mass, com in self._gravity_links:
-                transform = transforms[name].get_matrix()
-                position = transform[:, :3, :3] @ com + transform[:, :3, 3]
-                potential = potential - mass * (
-                    position * self._gravity_acceleration
-                ).sum(dim=-1)
-            torque = torch.autograd.grad(potential.sum(), q)[0]
-        return torque[:, self._gravity_arm_ids].detach()
+        """Read encoders and select configured arm torques without simulator truth."""
+        q = self.env.robot.get_qpos()[:, self._gravity_joint_ids]
+        return self._model.torques(q)[:, self._gravity_arm_ids]
 
 
 class AssemblyJointPositionAction(RelativeJointPositionAction):
@@ -125,7 +89,7 @@ class AssemblyJointPositionAction(RelativeJointPositionAction):
         """Apply the per-row warmup mask before measured-position delta scaling.
 
         Args:
-            actions: Batched seven-joint policy requests; the input is unchanged.
+            actions: Batched configured-arm policy requests; the input is unchanged.
         """
         masked = actions.clone()
         masked[

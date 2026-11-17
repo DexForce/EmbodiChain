@@ -389,7 +389,10 @@ sys.meta_path.insert(0, NoSimulation())
 import torch
 from tensordict import TensorDict
 from embodichain.learning.rl.policies import ActorCritic, ContactPrediction, TemporalActor, build_policy
-for cls in (ActorCritic, ContactPrediction, TemporalActor):
+from embodichain.compute.geometry import signed_distance_to_polygon
+from embodichain.compute.kinematics import URDFGravityCompensation
+from embodichain.data.resources import snapshot_urdf_resources
+for cls in (ActorCritic, ContactPrediction, TemporalActor, signed_distance_to_polygon, URDFGravityCompensation, snapshot_urdf_resources):
     assert Path(inspect.getfile(cls)).is_relative_to(target)
 policy = build_policy({
     'name': 'actor_critic',
@@ -410,6 +413,37 @@ assert not any(name.startswith(('dexsim', 'embodichain.lab')) for name in sys.mo
 """
     result = subprocess.run(
         [str(target / "bin/python"), "-I", "-c", script, str(target), str(repository)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_installed_assembly_functors_and_defaults_have_task_ownership(
+    installed_benchmark: tuple[Path, Path], tmp_path: Path
+) -> None:
+    """Installed task components resolve their packaged defaults without a checkout."""
+    target, _ = installed_benchmark
+    script = r"""
+from pathlib import Path
+from types import SimpleNamespace
+import inspect,sys
+sys.meta_path=[finder for finder in sys.meta_path if "__editable__" not in str(finder)]
+import torch
+from embodichain_tasks.manipulation.assembly.functors import AssemblyProprioception,assembly_milestone_reward
+from embodichain.lab.gym.envs.managers import observations
+from embodichain.lab.gym.utils.gym_utils import get_manager_modules
+assert Path(inspect.getfile(AssemblyProprioception)).is_relative_to(sys.prefix)
+assert not hasattr(observations,"AssemblyProprioception")
+assert "embodichain_tasks.manipulation.assembly.functors" in get_manager_modules()
+state=SimpleNamespace(refresh_assembly_state=lambda:None,_assembly_new_milestones=torch.tensor([[True,False,True,False],[False,False,False,False]]))
+env=SimpleNamespace(assembly_state=state,device=torch.device("cpu"))
+torch.testing.assert_close(assembly_milestone_reward(env,None,None,{},[1.,0.,2.,0.]),torch.tensor([3.,0.]))
+"""
+    result = subprocess.run(
+        [str(target / "bin/python"), "-I", "-c", script],
         cwd=tmp_path,
         capture_output=True,
         text=True,

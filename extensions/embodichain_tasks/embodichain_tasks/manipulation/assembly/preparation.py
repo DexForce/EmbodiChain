@@ -33,7 +33,7 @@ from .assets import build_task_assembly
 __all__ = ["prepare_assembly_scene"]
 
 
-def _body_vertices(body: Any) -> np.ndarray:
+def _body_vertices(body: Any, cylinder_samples: int) -> np.ndarray:
     clouds = []
     for geometry in body.geometries:
         if not geometry.collision:
@@ -43,11 +43,15 @@ def _body_vertices(body: Any) -> np.ndarray:
             vertices = np.asarray(geometry.vertices)
         elif geometry.kind == "cylinder":
             radius, half_height = geometry.size[:2]
-            angle = np.arange(64) * 2 * np.pi / 64
+            angle = np.arange(cylinder_samples) * 2 * np.pi / cylinder_samples
             vertices = np.concatenate(
                 [
                     np.column_stack(
-                        [radius * np.cos(angle), radius * np.sin(angle), np.full(64, z)]
+                        [
+                            radius * np.cos(angle),
+                            radius * np.sin(angle),
+                            np.full(cylinder_samples, z),
+                        ]
                     )
                     for z in (-half_height, half_height)
                 ]
@@ -169,13 +173,17 @@ class AssemblyScene:
         bodies = {body.name: body for body in self.assembly_asset.bodies}
         self._moving_definition = bodies[self._moving_uid]
         self._fixture_definition = bodies[self._fixture_uid]
-        vertices = _body_vertices(self._moving_definition)
+        vertices = _body_vertices(
+            self._moving_definition, self.task_cfg.cylinder_boundary_samples
+        )
         self._moving_zmin, self._moving_zmax = float(vertices[:, 2].min()), float(
             vertices[:, 2].max()
         )
         grip_vertices = vertices[
             vertices[:, 2]
-            > self._moving_zmax - 0.2 * (self._moving_zmax - self._moving_zmin)
+            > self._moving_zmax
+            - self.task_cfg.grip_section_fraction
+            * (self._moving_zmax - self._moving_zmin)
         ]
         width = float(np.ptp(grip_vertices[:, 1]))
         # These coefficients are the pinned public Robotiq four-bar geometry,
@@ -191,22 +199,29 @@ class AssemblyScene:
         low, high = 0.0, upper
         for _ in range(40):
             middle = (low + high) / 2
-            if aperture(middle) > width + 0.0005:
+            if aperture(middle) > width + self.task_cfg.grasp_aperture_clearance:
                 low = middle
             else:
                 high = middle
         self._parallel_jaw = self.task_cfg.gripper_model == "parallel_jaw"
         self._grasp_reset_joint = (
-            (aperture(0) - width - 0.0005) / 2
+            (aperture(0) - width - self.task_cfg.grasp_aperture_clearance) / 2
             if self._parallel_jaw
             else (low + high) / 2
         )
         self._grasp_target_joint = (
-            min(0.0425, self._grasp_reset_joint + 0.0035)
+            min(
+                self.task_cfg.parallel_grasp_target_upper,
+                self._grasp_reset_joint + self.task_cfg.parallel_grasp_closure,
+            )
             if self._parallel_jaw
-            else min(upper, self._grasp_reset_joint + 0.08)
+            else min(
+                upper, self._grasp_reset_joint + self.task_cfg.four_bar_grasp_closure
+            )
         )
-        fixture_vertices = _body_vertices(self._fixture_definition)
+        fixture_vertices = _body_vertices(
+            self._fixture_definition, self.task_cfg.cylinder_boundary_samples
+        )
         self._fixture_zmax = float(fixture_vertices[:, 2].max())
         bottom = vertices[np.isclose(vertices[:, 2], self._moving_zmin, atol=1e-7), :2]
         if len(bottom) >= 3:

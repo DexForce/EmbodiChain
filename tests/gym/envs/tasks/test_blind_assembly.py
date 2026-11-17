@@ -37,7 +37,7 @@ from embodichain_tasks.manipulation.assembly.preparation import (
 )
 from embodichain_tasks.manipulation.assembly._control import EncoderGravityCompensation
 from embodichain_tasks.manipulation.assembly.resources import export_assembly_resources
-from embodichain.lab.gym.envs.managers.observations._assembly import (
+from embodichain_tasks.manipulation.assembly.functors import (
     _proprioceptive_frame,
 )
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg, register_manager_modules
@@ -69,7 +69,7 @@ def _state_fixture() -> AssemblyState:
 
 
 def test_configured_interval_advances_once_and_condition_reads_do_not_advance():
-    from embodichain.lab.gym.envs.managers.assembly import (
+    from embodichain_tasks.manipulation.assembly.functors import (
         assembly_success,
         assembly_failure,
     )
@@ -149,7 +149,7 @@ def _task_state(state):
 def test_grasp_reset_uses_source_mimic_relations_without_joint_name_assumptions() -> (
     None
 ):
-    from embodichain.lab.gym.envs.managers.assembly import _grasp_joint_reset
+    from embodichain_tasks.manipulation.assembly.functors import _grasp_joint_reset
 
     robot = SimpleNamespace(
         get_joint_ids=lambda **kwargs: [7],
@@ -193,7 +193,7 @@ def test_nominal_task_uses_production_component_loader(
 
     module = importlib.import_module("embodichain_robots.flexiv.rizon4s.cfg")
     monkeypatch.setattr(module, "get_data_path", lambda path: str(urdf))
-    register_manager_modules(["embodichain.lab.gym.envs.managers.assembly"])
+    register_manager_modules(["embodichain_tasks.manipulation.assembly.functors"])
     path = _CONFIG_ROOT / task / f"task.{profile}.nominal.yaml"
     declaration = load_config(str(path))
     cfg = config_to_cfg(declaration, source_path=path)
@@ -208,7 +208,7 @@ def test_nominal_task_uses_production_component_loader(
     assert cfg.events.initialize_assembly.mode == "startup"
     assert cfg.events.update_assembly.interval_step == 1
     assert cfg.rl_task.success["assembly"].func.__name__ == "assembly_success"
-    from embodichain.lab.gym.envs.managers.observations import (
+    from embodichain_tasks.manipulation.assembly.functors import (
         AssemblyProprioception,
         assembly_contact_labels,
         assembly_privileged_state,
@@ -567,13 +567,13 @@ def test_partial_reset_recomputes_selected_assembly_geometry(
     )
     env._contact_grasp = lambda: torch.ones(2, dtype=torch.bool)
     observed = []
-    original = module._signed_polygon_distance
+    original = module.signed_distance_to_polygon
 
     def measured(samples, polygon):
         observed.append(samples.shape[0])
         return original(samples, polygon)
 
-    monkeypatch.setattr(module, "_signed_polygon_distance", measured)
+    monkeypatch.setattr(module, "signed_distance_to_polygon", measured)
     _task_state(env)
     before = {key: value[0].clone() for key, value in env._assembly_metrics.items()}
     previous_metrics = dict(env._assembly_metrics)
@@ -763,7 +763,7 @@ def test_encoder_gravity_feedforward_matches_mujoco_bias(
 def test_manager_history_selective_reset_does_not_repeat_other_rows(
     monkeypatch,
 ) -> None:
-    from embodichain.lab.gym.envs.managers.observations import AssemblyProprioception
+    from embodichain_tasks.manipulation.assembly.functors import AssemblyProprioception
     from embodichain.lab.gym.envs.managers.cfg import FunctorCfg
 
     frame = torch.zeros((2, 33))
@@ -777,7 +777,7 @@ def test_manager_history_selective_reset_does_not_repeat_other_rows(
         refresh_assembly_state=lambda: None,
         proprioceptive_frame=lambda: frame.clone(),
     )
-    from embodichain.lab.gym.envs.managers.observations import _assembly as observations
+    from embodichain_tasks.manipulation.assembly import functors as observations
 
     env.assembly_state = SimpleNamespace(
         scene=SimpleNamespace(assembly_kind="peg"),
@@ -869,7 +869,7 @@ def test_default_asset_composition_keeps_materials_joint_names_and_arm_tcp(
     import importlib
     import xml.etree.ElementTree as ET
     from embodichain_robots import FlexivRizon4SCfg
-    from embodichain.lab.gym.envs.managers.observations._assembly import (
+    from embodichain_tasks.manipulation.assembly.functors import (
         _assembly_kinematic_chain,
     )
     from embodichain.robot_registry import list_robot_cfgs
@@ -931,7 +931,7 @@ def test_default_asset_composition_keeps_materials_joint_names_and_arm_tcp(
     monkeypatch.setattr(
         arm_module, "get_data_path", lambda path: assets.get(path, path)
     )
-    register_manager_modules(["embodichain.lab.gym.envs.managers.assembly"])
+    register_manager_modules(["embodichain_tasks.manipulation.assembly.functors"])
     path = _CONFIG_ROOT / "peg_insertion/task.study.default_assets.yaml"
     config = load_config(str(path))
     import yaml
@@ -1167,7 +1167,9 @@ def test_proprioception_respects_configured_arm_and_action_names_with_four_joint
 
 
 def test_configured_milestone_weights_and_hold_duration_are_effective():
-    from embodichain.lab.gym.envs.managers.assembly import assembly_milestone_reward
+    from embodichain_tasks.manipulation.assembly.functors import (
+        assembly_milestone_reward,
+    )
 
     state, _ = _analytic_mating_state()
     state.cfg.success_hold_steps = 2

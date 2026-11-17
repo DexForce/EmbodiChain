@@ -8,6 +8,7 @@ identity and calibrated defaults belong to `embodichain_robots`.
 | Change or question | Start here |
 |---|---|
 | Runtime control parts, FK/IK adaptation, joint ordering | `embodichain/lab/sim/objects/robot.py` → `Robot` |
+| Encoder-only URDF gravity feedforward | `embodichain/compute/kinematics/gravity.py` → `URDFGravityCompensation` |
 | Pure parallel-jaw defaults, mounted/existing bindings and standalone hand configs | `embodichain/robot_registry.py` → `resolve_gripper_defaults`; `embodichain/lab/gym/utils/_gripper_composition.py`; `embodichain/lab/sim/cfg/gripper.py` |
 | Explicit hand geometry capture and lazy paired grasp ownership | `embodichain/lab/sim/utility/grasp_geometry.py` |
 | Config decoding, construction hooks, backend alternatives | `embodichain/lab/sim/cfg/robot.py` → `RobotCfg`, `RobotPresetCfg` |
@@ -53,6 +54,13 @@ Dual-arm composition maps base `mimic_compliance` entries to each side's
 assembled master-joint names, including explicitly bound hands.
 
 ## Joint and solver boundaries
+
+The pure gravity model accepts URDF XML, root-frame gravity and batched encoder
+coordinates in its declared joint order. It owns cached kinematics/mass/COM
+values and returns detached holding torques without reading simulator state.
+Runtime adapters resolve robot/control-part order and rotate gravity into the
+configured root frame; they do not belong in compute.
+
 
 Control-part keys are explicit configuration, not inferred hand capabilities.
 Official conventions live in AGENTS; custom keys and asset-defined link/joint
