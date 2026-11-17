@@ -141,6 +141,29 @@ without `base_dir` retains its ordinary filesystem/CWD behavior.
 Component-owned fields and their
 inline counterparts are mutually exclusive; without a selector, the original
 inline `robot`, `sensor`, and scene fields continue to parse unchanged.
+
+An embodiment selector permits robot installation `overrides` (`uid`,
+`init_pos`, `init_rot`, `init_qpos`) and a separate `camera_overrides` mapping
+keyed by camera UID. The latter selects ordinary `Camera` entries explicitly
+declared in the component's independent `sensor` or mounted
+`simulation.sensors` list. It changes only `intrinsics: [fx, fy, cx, cy]` and
+`extrinsics`; it cannot add sensors, change type, parent, resolution or outputs,
+or implicitly materialize model-owned sensor defaults. Unknown/duplicate UIDs
+and non-camera targets fail during physical component expansion, including
+file-free snapshot composition.
+
+Calibration numbers must be finite, focal lengths positive, and explicit XYZW
+quaternions unit length. Extrinsics use either `pos`/`quat` or
+`eye`/`target`/`up`; look-at direction and up must be nonzero and nonparallel.
+Partial edits retain unspecified values within the same representation.
+Switching representation requires complete `pos`/`quat` or `eye`/`target`
+(`up` defaults to +Z in the camera's reference frame), clears the other pose
+fields and retains parent.
+The resolver copies nested declarations; subsequent deployments retain their
+base calibration. Sensor membership and model hardware defaults stay with the
+embodiment. See the shared GS embodiment and its three thin deployments for
+scene-specific third-person calibration.
+
 `build_env_cfg_from_args()` expands the selected environment before applying
 launcher arguments so environment-owned run controls such as `max_episodes`
 remain visible to the run loop while explicit CLI values retain precedence.

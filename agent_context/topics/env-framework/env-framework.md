@@ -26,6 +26,7 @@ managers, demonstration collection and the opt-in Task Program bridge.
 | Cable scene declarations and raw recording | `gym_utils.py` → `EmbodiedEnv._setup_interactive_objects()`; `trajectory_state.py` → `observations.get_entity_state` |
 | Demo segment execution / outcomes / collection qualification | `embodichain/lab/gym/envs/demo.py` |
 | Configured Task Program registration | `embodichain/lab/gym/envs/task_program/registration.py` |
+| Captured-GS Pick/Place deployments | `extensions/embodichain_tasks/configs/tasks/manipulation/gaussian_pick_place/`; reusable components under `extensions/embodichain_tasks/configs/components/` |
 | Timing instrumentation | `embodichain/lab/gym/utils/profiler.py` |
 
 Read [configuration and registration](configuration.md) for task-first layout,
