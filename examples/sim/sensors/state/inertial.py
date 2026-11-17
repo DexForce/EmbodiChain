@@ -34,6 +34,7 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.lab.sim.sensors import SensorCfg
 from embodichain.lab.sim.shapes import CubeCfg
+from embodichain.lab.visualization import VisualizationCfg
 
 from .._preview import write_preview
 from .._scene_camera import capture_rgb, scene_camera, show_scene, SCENE_RENDER
@@ -54,6 +55,7 @@ def run_inertial(output: Path, device: str, video: bool) -> None:
     sim = SimulationManager(
         SimulationManagerCfg(
             headless=True,
+            visualization=VisualizationCfg(backend="none"),
             physics_cfg=DefaultPhysicsCfg(device=device),
             physics_dt=DT,
             render_cfg=SCENE_RENDER,
