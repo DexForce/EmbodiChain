@@ -282,6 +282,7 @@ def test_add_usd_classifies_visuals_without_promoting_collision_only_objects(tmp
         "_rigid_objects",
         "_rigid_object_groups",
         "_deformable_objects",
+        "_cable_objects",
         "_fluid_objects",
         "_articulations",
         "_robots",

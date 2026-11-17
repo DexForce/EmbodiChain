@@ -89,12 +89,13 @@ experiments. Failed motion validators log planning status, TCP position error
 and maximum measured grasp slip with their limits.
 Every motion is followed by an explicit bounded hold and a measured TCP
 position/orientation check. Insertion corrections read the latest material
-geometry when grounded; the finite correction slots retain the commanded pose
-once the release condition is reached. They do not run an unbounded Python loop.
+geometry when grounded. Early correction slots retain the commanded pose once
+the release condition is reached; the final two slots continue toward an
+interior endpoint target. They do not run an unbounded Python loop.
 
 ## Stages and reusable boundaries
 
-The program contains 51 segments and 129 Semantic Call invocations.
+The program contains 57 segments and 148 Semantic Call invocations.
 
 The deployment starts with both grippers open, 180 mm above the bench.
 In the arena frame, the right TCP starts at approximately `(0.45, -0.26, 0.93)` m
@@ -116,18 +117,54 @@ post-closure slip reference.
 | Right, 0.162 m | 1.5 mm | 0.774 m |
 | Right, 0.282 m | 3 mm | 0.780 m |
 | Right, 0.438 m | 8 mm | 0.800 m |
-| Left, 0.570 m | 3 mm | 0.780 m |
+| Left, 0.570 m | 8 mm | 0.780 m |
+
+The final right-arm carry places the held 0.438 m material point at TCP
+`[0.555, -0.010, 0.800]` m before lowering and releasing it. This leaves more
+longitudinal space for the cable between the second spool and the channel,
+while the leftward offset leaves room for rightward relaxation after release.
 
 The left arm selects a wrist branch that can reach the staging TCP position
-`[0.586, 0.055, 0.805]` m above the open channel. The staging target constructs a
+`[0.586, 0.055, 0.795]` m above the open channel. The left lift retracts 8 mm
+proximally to supply slack, and the staging height limits the subsequent upward travel
+to reduce loading on the routed cable around the second spool.
+The staging target constructs a
 complete orthonormal rotation, including when the measured tool has pitch or
 roll. Four bounded XY corrections aim the observed free end at
 `[0.586, 0.077]` m. Subsequent TCP height stages are 0.795, 0.7875, 0.780 and
-0.7655 m, each followed by two correction slots. Each correction is limited to
+0.7685 m, each followed by two correction slots. Each correction is limited to
 5 mm and keeps TCP Y at or below 0.05 m so the hand stays outside the channel
-mouth while lowering. Final vertical corrections are limited to 3 mm and retain
-a 0.7655 m TCP height floor. Corrections accumulate on the commanded pose to
-compensate for contact-load bias.
+mouth while lowering. Before the last descent, two bounded pitch corrections
+aim the observed distal span 15° downward. Each can turn downward by at most
+10°, with a 20° downward limit on the measured tool axis. An already downward
+span is never rotated upward. The complete interpolated motion pivots around
+the observed grasped material point, and a seated row retains its loaded command.
+After the last nominal descent, `soften_free_end` adjusts each finger toward a
+4 mm joint target over 60 control samples, then holds for 30 samples before the
+last two endpoint corrections. This reduces the commanded pinch load while
+retaining the original grasp reference and accumulated slip measurements.
+The adjustment neither releases the grasp reference nor resets the 12 mm slip
+guard; subsequent motion still checks displacement from the acknowledged close.
+Final vertical corrections are limited to 3 mm and retain
+a 0.7655 m TCP height floor, leaving 3 mm of downward command travel after the
+last nominal height stage. The final two slots continue toward endpoint
+`[0.586, 0.077, 0.7535]` m even if the tip has just entered the release region.
+Its Z coordinate places the cable centre one radius above the bench.
+This avoids cancelling downward correction at the nominal stage height or
+stopping immediately beside the release boundary. Corrections accumulate on
+the commanded pose to compensate for contact-load bias.
+
+Before the release check, two bounded `lay_down` moves rotate the wrist back
+toward horizontal around the observed cable endpoint. Each move turns at most
+10° and limits its angle so the complete pivot arc stays at or above a 0.7625 m
+TCP height. The rotation lowers the held cable section before opening the hand;
+it does not clamp translation after constructing the rotation. The endpoint
+must already be seated, and the original grasp reference and slip guard remain
+active. The floor can stop the return before the wrist reaches horizontal.
+At the floor, measured tracking error up to 0.1 mm only permits holding the
+existing command; it never permits further downward motion. A row with invalid
+geometry fails independently. The original release
+check runs again after these moves, using the resulting physical cable state.
 
 Release requires the observed endpoint to be inside the strict channel with
 `y >= 0.072` m. The configured release region is
@@ -136,17 +173,19 @@ channel; readiness also accepts an endpoint already seated in the strict final
 region at the same minimum depth. The X bounds account for the 3.5 mm cable
 radius between the channel's inner walls. Merely crossing the channel mouth
 does not stop the remaining corrections. Release also requires sampled cable
-penetration no greater than 1 mm. Once ready, subsequent correction slots retain
-the commanded pose and its contact load. Ordinary measured TCP tracking remains
-required until the endpoint is seated inside the strict channel.
+penetration no greater than 1 mm. These release and final acceptance bounds are
+unchanged. Ordinary measured TCP tracking remains required until the endpoint
+is seated inside the strict channel.
 
-The left hand first releases with an 8 mm joint target per finger, then retreats
-to TCP `[same X, 0.03, 0.82]` m. `open_clear_of_port` opens the hand fully only
-after that retreat, avoiding a full finger sweep through the upstream cable at
-the insertion pose. The final validator requires the actual end inside the
-strict channel after release, retreat and settling. Each stage is planned
-lazily from the latest cable state. Both hands return home before the final
-settling period.
+The left hand releases toward an 8 mm joint target per finger over 60 control
+samples, then holds the arm stationary for 30 samples. It withdraws vertically
+to TCP `[same X, same Y, 0.80]` m before a separate retreat moves the TCP to
+`[same X, 0.015, 0.82]` m. `open_clear_of_port` opens the hand fully after
+that raised retreat, avoiding a full finger sweep through the upstream cable at
+the insertion pose.
+The final validator requires the actual end inside the strict channel after
+release, retreat and settling. Each stage is planned lazily from the latest
+cable state. Both hands return home before the final settling period.
 
 The YAM IK uses 10 μm position and 1e-5 rad rotation convergence so finite-
 difference joint acceleration is not dominated by numerical jitter during
@@ -238,7 +277,8 @@ spool:
 python -m pytest tests/gym/envs/tasks/test_route_the_cable_cuda.py --run-gpu -m gpu -q
 ```
 
-The standard headless collector completed one episode with the original point
+Before the terminal insertion and retreat changes described above, the standard
+headless collector completed one episode with the original point
 list and one with the packaged USD on DexSim `0.6.0rc2` (build `dbaca660`),
 using the same RTX 5090 D v2 and seed 73. Both passed all 51 segments and final
 physical acceptance after two seconds of settling. The original and USD runs
@@ -247,36 +287,26 @@ by 1.184 mm, both inside the strict channel. Maximum grasp slip was 0.316 mm
 and 0.307 mm, respectively, and both runs reported zero final sampled cable
 penetration against the bench, spools and port.
 
-With the two-arm ready pose, the same USD deployment passed all 51 segments
-in 4,802 control steps at seed 73. The first approaches took 181 steps for
-the right arm and 301 for the left, down from 638 and 518. The separate
-full-route contact regression reported zero robot penetration against the
-bench, spools and port.
+The 57-segment insertion/release trajectory was qualified on 2026-11-17 with
+DexSim `0.6.0rc2` build `dbaca660471d5aaa7e750093e7fe1c207465c4af`,
+Newton 1.7.0, seed 73, 20 VBD iterations and an RTX 5090 D v2. Four fresh
+2-environment batches passed 8/8 tasks, and three fresh 16-environment batches
+passed 48/48. All batches used the same source and initial state for each batch
+size. The unchanged full-route and third-carry CUDA cases also passed in
+separate fresh processes. The complete-route regression checks raw robot/bench,
+robot/spool and robot/port contacts after every control step; the repeated
+batches retain the original observable first-release and third-carry milestones.
+Final endpoint Z across the 56 multi-environment tasks was 753.595–757.615 mm,
+within the unchanged 753–759 mm range. The original displacement, penetration,
+spool seating, clearance, speed and two-second settling requirements remain active.
 
-The earlier three NoRender CUDA regressions ran on DexSim development build
-`b040478a`, using seed 73 and a fresh process per case. The full-route case naturally
-exhausts all Task Program segments, validates every stage, then requires
-`task_success=True` after release, retreat and two seconds of physical settling.
-
-| Case | Maximum material-point displacement | Reported robot/obstacle penetration |
-| --- | --- | --- |
-| First-spool release | 0.080 mm | 0 mm |
-| Third carry through release and retreat | 0.379 mm | 0 mm |
-| Complete route after the main integration | 0.306 mm | 0 mm |
-
-The full route was repeated successfully after integrating main `1955c640`
-and finished at endpoint `[0.58459103, 0.07624141, 0.75500649]` m,
-inside the unchanged strict channel. Sampled cable/bench, cable/spool and
-cable/port penetration were all zero. The complete-route regression checks raw
-robot/bench, robot/spool and robot/port contacts after every control step; it also
-checks the final bounds independently of the configured evaluator. The original
-12 mm displacement and 1 mm penetration limits remain active.
-
-The production deployment inspector and 45 focused CPU cases cover the new
-material lift, staging orientation, commanded hold, release-depth gating and
-acceptance behavior. Diagnostic suffix fixtures are excluded from complete-route
-qualification. These individual fresh-process cases do not establish multi-seed
-success rates or repeated-reset reliability.
+The deployment inspector reports 57 segments / 148 calls. The 104 focused CPU
+cases comprise 70 cable runtime/material tests, two packaged-resource tests and
+32 VisualObject tests. They cover bounded pivot motion, both wrist branches,
+floor limits, per-environment failures and grip adjustment preserving the
+original slip reference. Validation jobs ran sequentially on a shared GPU with
+read-only state observers. These fixed-seed runs do not establish deterministic
+physics, multi-seed success rates or repeated-reset reliability.
 
 Recordings contain full robot commands and
 `states.cables.cable.segment_state_w`, shaped `(environments, time, 50, 13)` in

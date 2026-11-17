@@ -967,6 +967,58 @@ program:
         target: align_tip_2_1_tracking
       resources:
         primary: left_manipulator
+- segment: pitch_free_end_0
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: pitch_free_end_0
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: pitch_free_end_0_tracking
+      resources:
+        primary: left_manipulator
+- segment: pitch_free_end_1
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: pitch_free_end_1
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: pitch_free_end_1_tracking
+      resources:
+        primary: left_manipulator
 - segment: lower_channel_3
   steps:
   - kind: invoke
@@ -991,6 +1043,32 @@ program:
       call_id: simulation.cable_check
       arguments:
         target: lower_channel_3_tracking
+      resources:
+        primary: left_manipulator
+- segment: soften_free_end
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: soften_free_end
+      resources:
+        primary: left_hand
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_soft_grasp
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: soften_free_end_tracking
       resources:
         primary: left_manipulator
 - segment: align_tip_3_0
@@ -1045,6 +1123,58 @@ program:
         target: align_tip_3_1_tracking
       resources:
         primary: left_manipulator
+- segment: lay_down_free_end_0
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: lay_down_free_end_0
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: lay_down_free_end_0_tracking
+      resources:
+        primary: left_manipulator
+- segment: lay_down_free_end_1
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: lay_down_free_end_1
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: lay_down_free_end_1_tracking
+      resources:
+        primary: left_manipulator
 - segment: verify_release_alignment
   steps:
   - kind: invoke
@@ -1065,6 +1195,14 @@ program:
         target: release_free_end
       resources:
         primary: left_hand
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_released_end
+      resources:
+        primary: left_manipulator
 - segment: retreat_free_end
   steps:
   - kind: invoke
@@ -1089,6 +1227,32 @@ program:
       call_id: simulation.cable_check
       arguments:
         target: retreat_free_end_tracking
+      resources:
+        primary: left_manipulator
+- segment: raise_clear_of_port
+  steps:
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_move
+      arguments:
+        target: raise_clear_of_port
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_joint
+      arguments:
+        target: settle_motion
+      resources:
+        primary: left_manipulator
+  - kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.cable_check
+      arguments:
+        target: raise_clear_of_port_tracking
       resources:
         primary: left_manipulator
 - segment: open_clear_of_port

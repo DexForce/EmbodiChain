@@ -88,6 +88,9 @@ class _CableTarget:
     maximum_z_correction: float = 0.003
     minimum_z: float | None = None
     maximum_y: float | None = None
+    pitch: float = 0.0
+    maximum_rotation: float = math.pi / 18
+    minimum_tool_pitch: float = -math.pi / 9
     samples: int = 2
     finger_position: float = 0.0475
     condition: str | None = None
@@ -323,6 +326,76 @@ class _CableRuntime:
             self.port_yaw[part] = torch.where(choose, -math.pi / 2, math.pi / 2)
         return torch.where(choose[:, None, None], second[2], first[2])
 
+    def _pitch_delta(
+        self, target: _CableTarget, part: str, pose: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        assert target.material_distance is not None
+        point = self.point(target.material_distance)[0] - self.origins
+        end = cable_endpoints(self.state(), self.lengths)[1][:, -1] - self.origins
+        direction = end - point
+        # Both selected wrist branches have a material-forward local X axis;
+        # its sign follows the branch's staging yaw.
+        forward = pose[:, :3, 0] * torch.sin(self.port_yaw[part]).sign()[:, None]
+        valid = (
+            torch.isfinite(direction).all(-1)
+            & (direction[:, 1] > 1e-6)
+            & (forward[:, 1] > 1e-6)
+        )
+        ray_pitch = torch.atan2(direction[:, 2], direction[:, 1])
+        tool_pitch = torch.atan2(forward[:, 2], forward[:, 1])
+        angle = (target.pitch - ray_pitch).clamp(-target.maximum_rotation, 0)
+        angle = torch.maximum(
+            angle, (target.minimum_tool_pitch - tool_pitch).clamp(max=0)
+        )
+        return point, torch.where(valid, angle, torch.zeros_like(angle)), valid
+
+    def _lay_down_delta(
+        self, target: _CableTarget, part: str, pose: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        if part not in self.grasps:
+            raise ValueError(
+                "Cable lay-down requires an active grasp for its motion part."
+            )
+        assert target.minimum_z is not None
+        point = cable_endpoints(self.state(), self.lengths)[1][:, -1] - self.origins
+        offset = pose[:, :3, 3] - point
+        forward = pose[:, :3, 0] * torch.sin(self.port_yaw[part]).sign()[:, None]
+        valid = (
+            self.seated()
+            & torch.isfinite(pose).all(dim=(-2, -1))
+            & torch.isfinite(point).all(-1)
+            & torch.isfinite(forward).all(-1)
+            & (forward[:, 1] > 1e-6)
+            & (offset[:, 1] < -1e-6)
+            & (offset[:, 2] >= 0)
+            # Allow 0.1 mm of measured tracking error only for holding the
+            # loaded command at the floor, never for further downward motion.
+            & (pose[:, 2, 3] >= target.minimum_z - 0.0001)
+        )
+        angle = (-torch.atan2(forward[:, 2], forward[:, 1])).clamp(
+            min=0, max=target.maximum_rotation
+        )
+        # With TCP behind and above the tip, positive world-X rotation lowers
+        # TCP monotonically: z(theta) = tip_z + radius * cos(theta + phase).
+        # Limit the angle at the floor instead of moving the fixed tip pivot.
+        radius = offset[:, 1:3].norm(dim=-1)
+        phase = torch.atan2(-offset[:, 1], offset[:, 2])
+        floor_angle = (
+            torch.acos(((target.minimum_z - point[:, 2]) / radius).clamp(-1, 1)) - phase
+        )
+        angle = torch.minimum(angle, floor_angle.clamp(min=0))
+        angle = torch.where(
+            pose[:, 2, 3] <= target.minimum_z, torch.zeros_like(angle), angle
+        )
+        return point, torch.where(valid, angle, torch.zeros_like(angle)), valid
+
+    def _pivot_delta(
+        self, target: _CableTarget, part: str, pose: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        if target.kind == "lay_down":
+            return self._lay_down_delta(target, part, pose)
+        return self._pitch_delta(target, part, pose)
+
     def pose(self, target: _CableTarget, part: str) -> torch.Tensor:
         if target.kind == "material":
             return self._material_pose(target, part)
@@ -338,7 +411,24 @@ class _CableRuntime:
             pose[:, 0, 0], pose[:, 0, 1] = c, s
             pose[:, 1, 0], pose[:, 1, 1] = s, -c
             pose[:, 2, 2] = -1
-        if target.kind in {"yaw_align", "ray_align"}:
+        if target.kind in {"pitch_align", "lay_down"}:
+            point, angle, valid = self._pivot_delta(target, part, pose)
+            c, s = torch.cos(angle), torch.sin(angle)
+            rotation = torch.eye(3, device=pose.device).repeat(len(pose), 1, 1)
+            rotation[:, 1, 1], rotation[:, 1, 2] = c, -s
+            rotation[:, 2, 1], rotation[:, 2, 2] = s, c
+            aligned = pose.clone()
+            aligned[:, :3, 3] = point - (
+                rotation @ (point - pose[:, :3, 3]).unsqueeze(-1)
+            ).squeeze(-1)
+            aligned[:, :3, :3] = rotation @ pose[:, :3, :3]
+            pose = torch.where(valid[:, None, None], aligned, pose)
+            if target.kind == "lay_down":
+                holding = valid & (angle == 0)
+                pose = torch.where(
+                    holding[:, None, None], self.tool(part, commanded=True), pose
+                )
+        elif target.kind in {"yaw_align", "ray_align"}:
             assert target.material_distance is not None
             point = self.point(target.material_distance)[0] - self.origins
             end = cable_endpoints(self.state(), self.lengths)[1][:, -1] - self.origins
@@ -489,13 +579,30 @@ class _CableMoveLowerer(_CableLowerer):
         service, target = self._target(call)
         part = self._part(bound)
         start, end = service.tool(part), service.pose(target, part)
+        pivot_geometry = (
+            service._pivot_delta(target, part, start)
+            if target.kind in {"pitch_align", "lay_down"}
+            else None
+        )
         if target.stop_when_seated:
             # Seated rows retain the loaded command throughout the path;
             # interpolating from their measured pose would first unload it.
             start = torch.where(service.seated()[:, None, None], end, start)
-        distance = (start[:, :3, 3] - end[:, :3, 3]).norm(dim=-1).max().item()
+        if target.kind == "lay_down":
+            assert pivot_geometry is not None
+            holding = pivot_geometry[2] & (pivot_geometry[1] == 0)
+            start = torch.where(holding[:, None, None], end, start)
+        path_start, path_end = start, end
+        if pivot_geometry is not None:
+            valid = pivot_geometry[2][:, None, None]
+            identity = torch.eye(4, dtype=start.dtype, device=start.device)
+            # Invalid rows are rejected independently, including nonfinite
+            # observations; they must not poison the shared sample count.
+            path_start = torch.where(valid, start, identity)
+            path_end = torch.where(valid, end, identity)
+        distance = (path_start[:, :3, 3] - path_end[:, :3, 3]).norm(dim=-1).max().item()
         trace = (
-            (start[:, :3, :3].transpose(1, 2) @ end[:, :3, :3])
+            (path_start[:, :3, :3].transpose(1, 2) @ path_end[:, :3, :3])
             .diagonal(dim1=-2, dim2=-1)
             .sum(-1)
         )
@@ -508,8 +615,37 @@ class _CableMoveLowerer(_CableLowerer):
             + 1,
         )
         service.last_targets[part] = end.clone()
+        path = interpolate_xpos_batched(path_start, path_end, count)[:, 1:]
+        failures = {}
+        if pivot_geometry is not None:
+            point, _, valid = pivot_geometry
+            local_point = start[:, :3, :3].transpose(1, 2) @ (
+                point - start[:, :3, 3]
+            ).unsqueeze(-1)
+            pivot_path = point[:, None] - (
+                path[:, :, :3, :3] @ local_point[:, None]
+            ).squeeze(-1)
+            path[:, :, :3, 3] = torch.where(
+                valid[:, None, None], pivot_path, path[:, :, :3, 3]
+            )
+            frozen = ~valid
+            if target.kind == "lay_down":
+                frozen |= holding
+            if target.stop_when_seated:
+                frozen |= service.seated()
+            path = torch.where(frozen[:, None, None, None], start[:, None], path)
+            reason = (
+                "Cable lay-down requires a seated tip and a finite, forward, "
+                "monotonically descending pivot arc above its TCP floor."
+                if target.kind == "lay_down"
+                else "The distal cable span or tool points away from the channel."
+            )
+            failures = {
+                int(context.env_ids[row]): reason
+                for row in (~valid).nonzero().flatten().tolist()
+            }
         return SemanticLowering(
-            goal=EndEffectorPoseGoal(interpolate_xpos_batched(start, end, count)[:, 1:])
+            goal=EndEffectorPoseGoal(path), failed_preconditions=failures
         )
 
 
@@ -532,16 +668,25 @@ class _CableJointLowerer(_CableLowerer):
             :, ids
         ]
         path = start[:, None, :].repeat(1, target.samples, 1)
-        if target.kind == "open":
-            # Only release the grasp whose configured gripper is being opened.
-            motion_part = target.release_part
-            if (
-                motion_part not in self.cfg.motion_parts
-                or service.hand_to_motion.get(part) != motion_part
-            ):
-                raise ValueError("Opening a hand requires its declared motion part.")
-            service.grasps.pop(motion_part, None)
-            service.pending_pick = None
+        if target.kind in {"open", "grip_adjust"}:
+            if target.kind == "open":
+                # Only release the grasp whose configured gripper is being opened.
+                motion_part = target.release_part
+                if (
+                    motion_part not in self.cfg.motion_parts
+                    or service.hand_to_motion.get(part) != motion_part
+                ):
+                    raise ValueError(
+                        "Opening a hand requires its declared motion part."
+                    )
+                service.grasps.pop(motion_part, None)
+                service.pending_pick = None
+            elif service.hand_to_motion.get(part) not in service.grasps:
+                raise ValueError(
+                    "Adjusting a grip requires an active grasp for the declared hand."
+                )
+            # Adjustment retains the original grasp reference and slip history;
+            # only the finger command changes while physical contact settles.
             path = torch.lerp(
                 start[:, None],
                 torch.full_like(start[:, None], target.finger_position),
@@ -550,7 +695,9 @@ class _CableJointLowerer(_CableLowerer):
                 ],
             )
         elif target.kind != "hold":
-            raise ValueError("Cable joint targets must be open or hold declarations.")
+            raise ValueError(
+                "Cable joint targets must be open, grip_adjust or hold declarations."
+            )
         return SemanticLowering(goal=JointPositionGoal(path))
 
 
@@ -643,10 +790,10 @@ class _CableFactory(RegisteredSemanticLowererFactory):
         if self.call_id == "simulation.cable_pick":
             return target.kind == "material"
         if self.call_id == "simulation.cable_joint":
-            return target.kind in {"open", "hold"}
+            return target.kind in {"open", "grip_adjust", "hold"}
         if self.call_id == "simulation.cable_check":
             return target.kind == "check"
-        return target.kind not in {"open", "hold", "check"}
+        return target.kind not in {"open", "grip_adjust", "hold", "check"}
 
     def create(
         self,
@@ -737,6 +884,15 @@ def _decode_cable_service(value: object) -> _CableService:
             "port_stage": motion_fields | {"position"},
             "yaw_align": motion_fields | {"material_distance"},
             "ray_align": motion_fields | {"material_distance"},
+            "pitch_align": motion_fields
+            | {
+                "material_distance",
+                "pitch",
+                "maximum_rotation",
+                "minimum_tool_pitch",
+                "stop_when_seated",
+            },
+            "lay_down": motion_fields | {"minimum_z", "maximum_rotation"},
             "tip_align": motion_fields
             | {
                 "position",
@@ -748,6 +904,7 @@ def _decode_cable_service(value: object) -> _CableService:
             },
             "hold": {"samples"},
             "open": {"samples", "finger_position", "release_part"},
+            "grip_adjust": {"samples", "finger_position"},
             "check": {
                 "condition",
                 "tolerance",
@@ -766,9 +923,12 @@ def _decode_cable_service(value: object) -> _CableService:
             "port_stage",
             "yaw_align",
             "ray_align",
+            "pitch_align",
+            "lay_down",
             "tip_align",
             "hold",
             "open",
+            "grip_adjust",
             "check",
         }:
             raise ValueError(f"Unsupported cable target kind {kind!r}")
@@ -799,10 +959,26 @@ def _decode_cable_service(value: object) -> _CableService:
             or target.maximum_correction <= 0
         ):
             raise ValueError("Cable motion limits must be positive.")
-        if kind in {"material", "material_lift", "yaw_align", "ray_align"} and (
-            target.material_distance is None or target.material_distance < 0
-        ):
+        if kind in {
+            "material",
+            "material_lift",
+            "yaw_align",
+            "ray_align",
+            "pitch_align",
+        } and (target.material_distance is None or target.material_distance < 0):
             raise ValueError("A cable material coordinate must be nonnegative.")
+        if kind == "pitch_align" and not (
+            -math.pi / 2 < target.pitch <= 0
+            and -math.pi / 2 < target.minimum_tool_pitch <= 0
+            and 0 < target.maximum_rotation <= math.pi / 2
+        ):
+            raise ValueError("Cable pitch alignment requires bounded downward angles.")
+        if kind == "lay_down" and (
+            target.minimum_z is None or not 0 < target.maximum_rotation <= math.pi / 18
+        ):
+            raise ValueError(
+                "Cable lay-down requires minimum_z and a rotation limit in (0, 10 degrees]."
+            )
         if kind == "material_lift":
             if target.retract_distance < 0:
                 raise ValueError("Cable retraction distance must be nonnegative.")

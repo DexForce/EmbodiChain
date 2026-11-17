@@ -50,7 +50,7 @@ runtime_services:
       port_stage:
       - 0.586
       - 0.055
-      - 0.805
+      - 0.795
       port_mouth:
       - 0.586
       - 0.064
@@ -347,8 +347,8 @@ runtime_services:
       carry_2:
         kind: command
         position:
-        - 0.565
-        - 0.008
+        - 0.555
+        - -0.01
         - null
       carry_2_tracking:
         kind: check
@@ -431,7 +431,7 @@ runtime_services:
         position:
         - 0.586
         - 0.055
-        - 0.805
+        - 0.795
       stage_free_end_tracking:
         kind: check
         condition: pose
@@ -591,16 +591,57 @@ runtime_services:
         tolerance: 0.006
         orientation_tolerance: 0.25
         stop_when_seated: true
+      pitch_free_end_0:
+        kind: pitch_align
+        material_distance: 0.57
+        pitch: -0.2617993877991494
+        maximum_rotation: 0.17453292519943295
+        minimum_tool_pitch: -0.3490658503988659
+        tolerance: 0.006
+        stop_when_seated: true
+      pitch_free_end_0_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.006
+        orientation_tolerance: 0.25
+        stop_when_seated: true
+      pitch_free_end_1:
+        kind: pitch_align
+        material_distance: 0.57
+        pitch: -0.2617993877991494
+        maximum_rotation: 0.17453292519943295
+        minimum_tool_pitch: -0.3490658503988659
+        tolerance: 0.006
+        stop_when_seated: true
+      pitch_free_end_1_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.006
+        orientation_tolerance: 0.25
+        stop_when_seated: true
       lower_channel_3:
         kind: command
         position:
         - null
         - null
-        - 0.7655
+        - 0.7685
         speed: 0.025
         tolerance: 0.006
         stop_when_seated: true
       lower_channel_3_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.006
+        orientation_tolerance: 0.25
+        stop_when_seated: true
+      soften_free_end:
+        kind: grip_adjust
+        samples: 60
+        finger_position: 0.004
+      settle_soft_grasp:
+        kind: hold
+        samples: 30
+      soften_free_end_tracking:
         kind: check
         condition: pose
         tolerance: 0.006
@@ -611,13 +652,13 @@ runtime_services:
         position:
         - 0.586
         - 0.077
-        - 0.754
+        - 0.7535
         maximum_correction: 0.005
         maximum_y: 0.05
         minimum_z: 0.7655
         speed: 0.02
         tolerance: 0.006
-        stop_when_seated: true
+        stop_when_seated: false
         maximum_z_correction: 0.003
       align_tip_3_0_tracking:
         kind: check
@@ -630,13 +671,13 @@ runtime_services:
         position:
         - 0.586
         - 0.077
-        - 0.754
+        - 0.7535
         maximum_correction: 0.005
         maximum_y: 0.05
         minimum_z: 0.7655
         speed: 0.02
         tolerance: 0.006
-        stop_when_seated: true
+        stop_when_seated: false
         maximum_z_correction: 0.003
       align_tip_3_1_tracking:
         kind: check
@@ -644,27 +685,66 @@ runtime_services:
         tolerance: 0.006
         orientation_tolerance: 0.25
         stop_when_seated: true
+      lay_down_free_end_0:
+        kind: lay_down
+        maximum_rotation: 0.17453292519943295
+        minimum_z: 0.7625
+        speed: 0.015
+        tolerance: 0.006
+      lay_down_free_end_0_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.006
+        orientation_tolerance: 0.25
+        stop_when_seated: false
+      lay_down_free_end_1:
+        kind: lay_down
+        maximum_rotation: 0.17453292519943295
+        minimum_z: 0.7625
+        speed: 0.015
+        tolerance: 0.006
+      lay_down_free_end_1_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.006
+        orientation_tolerance: 0.25
+        stop_when_seated: false
       release_alignment:
         kind: check
         condition: seated
       release_free_end:
         kind: open
-        samples: 36
+        samples: 60
         release_part: left_arm
         finger_position: 0.008
+      settle_released_end:
+        kind: hold
+        samples: 30
       retreat_free_end:
         kind: command
         position:
         - null
-        - 0.03
-        - 0.82
-        speed: 0.08
+        - null
+        - 0.80
+        speed: 0.025
       retreat_free_end_tracking:
         kind: check
         condition: pose
         tolerance: 0.02
         orientation_tolerance: 0.25
         stop_when_seated: false
+      raise_clear_of_port:
+        kind: command
+        position:
+        - null
+        - 0.015
+        - 0.82
+        speed: 0.08
+      raise_clear_of_port_tracking:
+        kind: check
+        condition: pose
+        tolerance: 0.02
+        orientation_tolerance: 0.25
       home_left:
         kind: home
         speed: 0.15
@@ -748,7 +828,7 @@ runtime_services:
       raise_free_end:
         kind: material_lift
         material_distance: 0.57
-        retract_distance: 0.003
+        retract_distance: 0.008
         position:
         - null
         - null

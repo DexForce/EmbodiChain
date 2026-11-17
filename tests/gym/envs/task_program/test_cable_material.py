@@ -26,6 +26,7 @@ import pytest
 import torch
 import yaml
 
+from embodichain.compute.geometry.cable import cable_endpoints
 from embodichain.lab.gym.utils.composition import resolve_gym_components
 from embodichain.lab.task_program.integrations import (
     load_configured_task_program_deployment,
@@ -34,6 +35,9 @@ from embodichain.lab.task_program.integrations.simulation.cable import (
     _decode_cable_service,
     _CableRuntime,
     _CableCheckLowerer,
+    _CableJointLowerer,
+    _CableJointFactory,
+    _CableMoveFactory,
     _CableMoveLowerer,
     _CablePickFactory,
 )
@@ -72,7 +76,7 @@ def test_cable_deployment_preflights_all_calls_and_measured_final_acceptance():
     deployment = _deployment()
     registration = deployment.integration.registration
     compiled = registration.catalog.preflight(deployment.load_program())
-    assert compiled.segment_count == 51
+    assert compiled.segment_count == 57
     assert registration.evaluation_final_refs == ("route_success",)
     assert registration.scene_binding.declare().entries == ()
     factories = registration.registered_semantic_lowerer_factories
@@ -127,6 +131,28 @@ def test_material_lift_rejects_invalid_geometry_and_inapplicable_fields(changes)
     if target.get("material_distance") is None:
         target.pop("material_distance")
     value["targets"] = {"lift": target}
+    with pytest.raises((ValueError, TypeError)):
+        _decode_cable_service(value)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"material_distance": -1},
+        {"pitch": 0.1},
+        {"pitch": -math.pi / 2},
+        {"minimum_tool_pitch": float("nan")},
+        {"maximum_rotation": float("inf")},
+        {"maximum_rotation": 0},
+        {"maximum_rotation": math.pi},
+        {"kind": "yaw_align", "pitch": -0.1},
+    ],
+)
+def test_pitch_alignment_rejects_invalid_angles_and_inapplicable_fields(changes):
+    value = _declaration()
+    target = {"kind": "pitch_align", "material_distance": 0.162}
+    target.update(changes)
+    value["targets"] = {"pitch": target}
     with pytest.raises((ValueError, TypeError)):
         _decode_cable_service(value)
 
@@ -370,6 +396,419 @@ def test_seated_rows_preserve_contact_loading_command_while_other_rows_move():
     assert bool((path[1, :, 2, 3].diff() < 0).all())
     assert path[1, 0, 2, 3] < measured[1, 2]
     assert path[1, 0, 2, 3] > commanded[1, 2]
+
+
+@pytest.mark.parametrize("target_id", ["align_tip_3_0", "align_tip_3_1"])
+def test_terminal_tip_correction_has_downward_travel_and_does_not_stop_at_gate(
+    target_id,
+):
+    service, state, measured = _runtime()
+    commanded = measured.clone()
+    measured[[3, 1]] = torch.tensor([0.586, 0.05, 0.7706])
+    commanded[[3, 1]] = torch.tensor([0.586, 0.05, 0.7685])
+    service.robot.get_qpos = lambda *, target=False: commanded if target else measured
+    # Reproduce a rejected 760.756 mm endpoint and an accepted endpoint only
+    # 0.2 mm below the gate. Both still need to move toward the interior target.
+    tip_heights = (0.760756, 0.7588)
+    for row, height in zip((3, 1), tip_heights):
+        # The fixture's last capsule points along +X and is 12 mm long.
+        state[row, -1, :3] = torch.tensor([0.580, 0.077, height])
+        state[row, -1, :3] += service.origins[0 if row == 3 else 1]
+    service.seated = lambda: torch.tensor([False, True])
+
+    pose = service.pose(service.cfg.target(target_id), "left_arm")
+
+    # Keep 3 mm of downward travel below the last nominal height stage.
+    # Reaching the release gate must not freeze the second row at the boundary.
+    torch.testing.assert_close(
+        pose[:, 2, 3] - commanded[[3, 1], 2],
+        torch.tensor([-0.003, -0.003]),
+        atol=1e-7,
+        rtol=0,
+    )
+    torch.testing.assert_close(pose[:, :2, 3], commanded[[3, 1], :2], atol=4e-6, rtol=0)
+
+
+def _pitch_runtime(tool_pitch, ray_pitch):
+    service, state, measured = _runtime()
+    value = _declaration()
+    value["targets"] = {
+        "pitch": {
+            "kind": "pitch_align",
+            "material_distance": 0.162,
+            "pitch": -math.pi / 12,
+        }
+    }
+    service.cfg = _decode_cable_service(value)
+    service.port_yaw["left_arm"] = torch.tensor([math.pi / 2, -math.pi / 2])
+    branch_rotation = torch.tensor(
+        [
+            [[0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, -1.0]],
+            [[0.0, -1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, -1.0]],
+        ]
+    )
+    c, s = math.cos(tool_pitch), math.sin(tool_pitch)
+    rotation = torch.tensor([[1.0, 0.0, 0.0], [0.0, c, -s], [0.0, s, c]])
+    initial_rotation = rotation @ branch_rotation
+    original_fk = service.robot.compute_fk
+
+    def fk(qpos, **kwargs):
+        pose = original_fk(qpos, **kwargs)
+        pose[:, :3, :3] = initial_rotation
+        return pose
+
+    service.robot.compute_fk = fk
+    measured[[3, 1]] = torch.tensor([0.586, 0.04, 0.795])
+    point = torch.tensor([0.586, 0.05, 0.785])
+    direction = torch.tensor(
+        [0.0, 0.04 * math.cos(ray_pitch), 0.04 * math.sin(ray_pitch)]
+    )
+    for selected_row, native_row in enumerate((3, 1)):
+        state[native_row, 13, :3] = point + service.origins[selected_row]
+        state[native_row, -1, :3] = (
+            point
+            + direction
+            - torch.tensor([0.006, 0.0, 0.0])
+            + service.origins[selected_row]
+        )
+    return service, state
+
+
+def _lower_pitch(service, target="pitch"):
+    lowerer = _CableMoveLowerer(service.cfg)
+    lowerer.runtime = service
+    endpoint = SimpleNamespace(runtime_target=SimpleNamespace(control_part="left_arm"))
+    bound = SimpleNamespace(
+        binding=SimpleNamespace(
+            resources={"primary": SimpleNamespace(endpoints={"motion": endpoint})}
+        )
+    )
+    return lowerer.lower(
+        RegisteredSemanticCall(
+            call_id="simulation.cable_move", arguments={"target": target}
+        ),
+        context=SimpleNamespace(
+            env_ids=service.env_ids, require_control_dt=lambda: 1 / 60
+        ),
+        bound=bound,
+        option_template=MoveEndEffectorOptions(),
+    )
+
+
+@pytest.mark.parametrize(
+    "tool_degrees,ray_degrees,expected_degrees",
+    [(0, 30, -10), (-15, 30, -20), (-25, 30, -25), (0, -30, 0)],
+)
+def test_pitch_alignment_bounds_both_wrist_branches_and_keeps_material_pivot(
+    tool_degrees, ray_degrees, expected_degrees
+):
+    service, _ = _pitch_runtime(math.radians(tool_degrees), math.radians(ray_degrees))
+    start = service.tool("left_arm")
+    point = service.point(0.162)[0] - service.origins
+    local_point = start[:, :3, :3].transpose(1, 2) @ (
+        point - start[:, :3, 3]
+    ).unsqueeze(-1)
+
+    result = _lower_pitch(service)
+
+    assert not result.failed_preconditions
+    path = result.goal.xpos
+    rotations = path[:, :, :3, :3]
+    predicted_point = (rotations @ local_point[:, None]).squeeze(-1) + path[:, :, :3, 3]
+    torch.testing.assert_close(
+        predicted_point, point[:, None].expand_as(predicted_point)
+    )
+    torch.testing.assert_close(
+        rotations.transpose(-1, -2) @ rotations, torch.eye(3).expand_as(rotations)
+    )
+    torch.testing.assert_close(
+        torch.linalg.det(rotations), torch.ones(rotations.shape[:2])
+    )
+    forward = rotations[:, -1, :, 0] * torch.tensor([1.0, -1.0])[:, None]
+    torch.testing.assert_close(
+        torch.atan2(forward[:, 2], forward[:, 1]),
+        torch.full((2,), math.radians(expected_degrees)),
+        atol=1e-6,
+        rtol=0,
+    )
+
+
+def test_pitch_alignment_rejects_only_the_row_with_backward_distal_span():
+    service, state = _pitch_runtime(0, math.pi / 6)
+    state[1, -1, 1] = 0.01
+    initial = service.tool("left_arm")
+
+    result = _lower_pitch(service)
+
+    assert set(result.failed_preconditions) == {1}
+    torch.testing.assert_close(
+        result.goal.xpos[1], initial[1].expand_as(result.goal.xpos[1])
+    )
+    assert not torch.allclose(result.goal.xpos[0, -1], initial[0])
+
+
+def test_pitch_alignment_preserves_seated_rows_loaded_command():
+    service, _ = _pitch_runtime(0, math.pi / 6)
+    measured = service.robot.get_qpos().clone()
+    commanded = measured.clone()
+    commanded[[3, 1], 2] -= 0.003
+    service.robot.get_qpos = lambda *, target=False: commanded if target else measured
+    target = replace(service.cfg.target("pitch"), stop_when_seated=True)
+    service.cfg = replace(service.cfg, targets=(target,))
+    service.seated = lambda: torch.tensor([True, False])
+    loaded = service.tool("left_arm", commanded=True)
+
+    result = _lower_pitch(service)
+
+    assert torch.equal(result.goal.xpos[0], loaded[0].expand_as(result.goal.xpos[0]))
+    assert not torch.allclose(result.goal.xpos[1, -1], loaded[1])
+
+
+def _lay_down_runtime(tool_degrees=-20, minimum_z=0.7625):
+    service, state = _pitch_runtime(math.radians(tool_degrees), -math.pi / 12)
+    value = _declaration()
+    value["targets"] = {"lay": {"kind": "lay_down", "minimum_z": minimum_z}}
+    service.cfg = _decode_cable_service(value)
+    service.robot.get_qpos()[[3, 1]] = torch.tensor([0.586, 0.04, 0.7655])
+    tip = torch.tensor([0.586, 0.077, 0.756])
+    for row, native_row in enumerate((3, 1)):
+        state[native_row, -1, :3] = (
+            tip - torch.tensor([0.006, 0.0, 0.0]) + service.origins[row]
+        )
+    service.seated = lambda: torch.ones(2, dtype=torch.bool)
+    service.grasps["left_arm"] = (
+        0.162,
+        service.point_in_tool("left_arm", 0.162).clone(),
+    )
+    return service, state
+
+
+@pytest.mark.parametrize("tool_degrees,expected_degrees", [(-20, -10), (-5, 0), (0, 0)])
+def test_lay_down_returns_both_wrist_branches_toward_flat_without_overshoot(
+    tool_degrees, expected_degrees
+):
+    service, _ = _lay_down_runtime(tool_degrees, minimum_z=0.74)
+    initial = service.tool("left_arm")
+
+    result = _lower_pitch(service, "lay")
+
+    assert not result.failed_preconditions
+    forward = result.goal.xpos[:, -1, :3, 0] * torch.tensor([1.0, -1.0])[:, None]
+    torch.testing.assert_close(
+        torch.atan2(forward[:, 2], forward[:, 1]),
+        torch.full((2,), math.radians(expected_degrees)),
+        atol=1e-6,
+        rtol=0,
+    )
+    if tool_degrees == 0:
+        torch.testing.assert_close(
+            result.goal.xpos, initial[:, None].expand_as(result.goal.xpos)
+        )
+
+
+def test_lay_down_limits_rotation_at_floor_and_preserves_tip_in_every_sample():
+    service, _ = _lay_down_runtime()
+    initial = service.tool("left_arm")
+    tip = cable_endpoints(service.state(), service.lengths)[1][:, -1] - service.origins
+    local_tip = initial[:, :3, :3].transpose(1, 2) @ (
+        tip - initial[:, :3, 3]
+    ).unsqueeze(-1)
+
+    result = _lower_pitch(service, "lay")
+
+    assert not result.failed_preconditions
+    path = result.goal.xpos
+    transformed_tip = (path[:, :, :3, :3] @ local_tip[:, None]).squeeze(-1) + path[
+        :, :, :3, 3
+    ]
+    torch.testing.assert_close(transformed_tip, tip[:, None].expand_as(transformed_tip))
+    # The floor is reached before the ten-degree rotation allowance; clamping
+    # TCP translation after rotation would violate the fixed-tip check above.
+    torch.testing.assert_close(path[:, -1, 2, 3], torch.full((2,), 0.7625))
+    assert bool((path[:, :, 2, 3] >= 0.7625 - 1e-7).all())
+    assert bool((path[:, 1:, 2, 3] <= path[:, :-1, 2, 3] + 1e-7).all())
+    forward = path[:, -1, :3, 0] * torch.tensor([1.0, -1.0])[:, None]
+    final_pitch = torch.atan2(forward[:, 2], forward[:, 1])
+    assert bool((final_pitch > math.radians(-20)).all())
+    assert bool((final_pitch < math.radians(-10)).all())
+
+
+@pytest.mark.parametrize("below_floor", [0.0, 0.000005, 0.00009])
+def test_lay_down_at_floor_holds_loaded_command_without_unloading(below_floor):
+    service, _ = _lay_down_runtime()
+    measured = service.robot.get_qpos().clone()
+    measured[[3, 1], 2] = 0.7625 - below_floor
+    commanded = measured.clone()
+    commanded[[3, 1], 2] = 0.7625
+    commanded[[3, 1], 1] += 0.001
+    service.robot.get_qpos = lambda *, target=False: commanded if target else measured
+    loaded = service.tool("left_arm", commanded=True)
+
+    result = _lower_pitch(service, "lay")
+
+    assert not result.failed_preconditions
+    assert torch.equal(result.goal.xpos, loaded[:, None].expand_as(result.goal.xpos))
+
+
+@pytest.mark.parametrize(
+    "invalid", ["unseated", "backward", "nonfinite", "pivot", "below_floor"]
+)
+def test_lay_down_rejects_only_invalid_environment_and_keeps_its_pose(invalid):
+    service, state = _lay_down_runtime()
+    if invalid == "unseated":
+        service.seated = lambda: torch.tensor([True, False])
+    elif invalid == "backward":
+        service.port_yaw["left_arm"][1] = math.pi / 2
+    elif invalid == "nonfinite":
+        state[1, -1, 0] = float("nan")
+    elif invalid == "pivot":
+        state[1, -1, 1] = 0.03
+    else:
+        service.robot.get_qpos()[1, 2] = 0.76239
+    initial = service.tool("left_arm")
+
+    result = _lower_pitch(service, "lay")
+
+    assert service.env_ids.tolist() == [3, 1]
+    assert set(result.failed_preconditions) == {1}
+    assert torch.equal(result.goal.xpos[1], initial[1].expand_as(result.goal.xpos[1]))
+    assert not torch.allclose(result.goal.xpos[0, -1], initial[0])
+
+
+def test_lay_down_preserves_active_grasp_and_original_slip_reference():
+    service, state = _lay_down_runtime()
+    baseline = service.point_in_tool("left_arm", 0.162).clone()
+    reference = (0.162, baseline)
+    service.grasps["left_arm"] = reference
+    service.hand_to_motion["left_eef"] = "left_arm"
+    service.grasp_slip["left_arm"] = torch.tensor([0.001, 0.002])
+    service.max_slip[:] = service.grasp_slip["left_arm"]
+    pending = ("right_arm", service.cfg.target("lay"))
+    service.pending_pick = pending
+
+    _lower_pitch(service, "lay")
+
+    assert service.grasps["left_arm"] is reference
+    assert service.grasps["left_arm"][1] is baseline
+    assert service.pending_pick is pending
+    torch.testing.assert_close(service.max_slip, torch.tensor([0.001, 0.002]))
+    torch.testing.assert_close(service.grasp_slip["left_arm"], service.max_slip)
+    state[3, :, 0] += 0.013
+    assert service.observe().tolist() == [True, False]
+
+
+def test_lay_down_rejects_a_motion_part_without_an_active_grasp():
+    service, _ = _lay_down_runtime()
+    service.grasps.pop("left_arm")
+    with pytest.raises(ValueError, match="active grasp"):
+        _lower_pitch(service, "lay")
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"minimum_z": None},
+        {"minimum_z": float("nan")},
+        {"maximum_rotation": 0},
+        {"maximum_rotation": math.pi / 6},
+        {"maximum_rotation": float("inf")},
+        {"stop_when_seated": True},
+    ],
+)
+def test_lay_down_requires_explicit_floor_and_bounded_unfrozen_rotation(changes):
+    value = _declaration()
+    target = {"kind": "lay_down", "minimum_z": 0.7625}
+    target.update(changes)
+    if target.get("minimum_z") is None:
+        target.pop("minimum_z")
+    value["targets"] = {"lay": target}
+    with pytest.raises((ValueError, TypeError)):
+        _decode_cable_service(value)
+
+
+def _grip_adjust_runtime():
+    service, state, _ = _runtime()
+    value = _declaration()
+    value["targets"]["adjust"] = {
+        "kind": "grip_adjust",
+        "samples": 60,
+        "finger_position": 0.003,
+    }
+    service.cfg = _decode_cable_service(value)
+    return service, state
+
+
+def _lower_grip_adjust(service):
+    lowerer = _CableJointLowerer(service.cfg)
+    lowerer.runtime = service
+    endpoint = SimpleNamespace(runtime_target=SimpleNamespace(control_part="left_eef"))
+    bound = SimpleNamespace(
+        binding=SimpleNamespace(
+            resources={"primary": SimpleNamespace(endpoints={"motion": endpoint})}
+        )
+    )
+    return lowerer.lower(
+        RegisteredSemanticCall(
+            call_id="simulation.cable_joint", arguments={"target": "adjust"}
+        ),
+        context=SimpleNamespace(env_ids=service.env_ids),
+        bound=bound,
+        option_template=MoveJointsOptions(),
+    )
+
+
+def test_grip_adjust_preserves_grasp_reference_and_slip_guard():
+    service, state = _grip_adjust_runtime()
+    service.hand_to_motion["left_eef"] = "left_arm"
+    baseline = service.point_in_tool("left_arm", 0.162).clone()
+    reference = (0.162, baseline)
+    service.grasps["left_arm"] = reference
+    service.grasp_slip["left_arm"] = torch.tensor([0.001, 0.002])
+    service.max_slip[:] = service.grasp_slip["left_arm"]
+    original_max_slip = service.max_slip
+    pending = ("right_arm", service.cfg.target("right_grasp_0.162"))
+    service.pending_pick = pending
+
+    result = _lower_grip_adjust(service)
+
+    assert service.grasps["left_arm"] is reference
+    assert service.grasps["left_arm"][1] is baseline
+    assert service.pending_pick is pending
+    assert service.max_slip is original_max_slip
+    torch.testing.assert_close(service.max_slip, torch.tensor([0.001, 0.002]))
+    torch.testing.assert_close(
+        service.grasp_slip["left_arm"], torch.tensor([0.001, 0.002])
+    )
+    torch.testing.assert_close(result.goal.target[:, 0], torch.zeros(2, 3))
+    torch.testing.assert_close(result.goal.target[:, -1], torch.full((2, 3), 0.003))
+    assert (
+        "adjust" in _CableJointFactory(service.cfg).argument_contract.required["target"]
+    )
+    assert (
+        "adjust"
+        not in _CableMoveFactory(service.cfg).argument_contract.required["target"]
+    )
+    # Adjustment must not rebase or disable the reference when contact slips.
+    state[3, :, 0] += 0.013
+    assert service.observe().tolist() == [True, False]
+
+
+@pytest.mark.parametrize("missing", ["mapping", "grasp"])
+def test_grip_adjust_requires_current_hand_grasp(missing):
+    service, _ = _grip_adjust_runtime()
+    if missing == "mapping":
+        service.grasps["left_arm"] = (0.162, service.point_in_tool("left_arm", 0.162))
+    else:
+        service.hand_to_motion["left_eef"] = "left_arm"
+    with pytest.raises(ValueError, match="active grasp"):
+        _lower_grip_adjust(service)
+
+
+def test_grip_adjust_rejects_release_semantics():
+    value = _declaration()
+    value["targets"] = {"adjust": {"kind": "grip_adjust", "release_part": "left_arm"}}
+    with pytest.raises(ValueError, match="Unsupported fields"):
+        _decode_cable_service(value)
 
 
 def _lower_check(service, target):
