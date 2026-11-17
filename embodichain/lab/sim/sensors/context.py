@@ -177,7 +177,8 @@ class _ManagerSensorServices:
     ) -> TensorDict:
         manager = self._manager()
         asset = self._physical_asset(asset_uid)
-        is_newton = getattr(getattr(manager, "physics", None), "name", None) == "newton"
+        backend = getattr(getattr(manager, "physics", None), "name", None)
+        com_velocity = backend in ("default", "newton")
         link_index = None
         if link_name is not None:
             if link_name not in getattr(asset, "link_names", ()):
@@ -186,7 +187,7 @@ class _ManagerSensorServices:
             state = asset.body_state[:, link_index]
         elif getattr(type(asset), "root_state", None) is not None:
             state = asset.root_state
-            if is_newton:
+            if com_velocity and getattr(asset, "body_data", None) is not None:
                 link_index = asset.link_names.index(asset.root_link_name)
         else:
             state = asset.body_state
@@ -196,12 +197,15 @@ class _ManagerSensorServices:
             "linear_velocity": state[:, 7:10],
             "angular_velocity": state[:, 10:13],
         }
-        if is_newton and not getattr(asset, "is_static", False):
-            # Newton pairs the body-frame pose with velocity at the center of mass.
-            com_pose = asset.body_data.com_pose
-            if link_index is not None:
-                com_pose = com_pose[:, link_index]
-            fields["linear_velocity_offset"] = com_pose[:, :3]
+        if com_velocity and not getattr(asset, "is_static", False):
+            # Default and Newton pair the body pose with a COM linear velocity.
+            body_data = getattr(asset, "body_data", None)
+            if body_data is not None:
+                fields["linear_velocity_offset"] = (
+                    body_data.com_pose[:, :3]
+                    if link_index is None
+                    else body_data._read_link_com_position(link_index)
+                )
         return TensorDict(
             {
                 key: value.expand(manager.num_envs, -1).clone()

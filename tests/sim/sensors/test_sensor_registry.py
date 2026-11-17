@@ -1132,12 +1132,15 @@ def test_imu_distinguishes_freefall_from_rest_and_partial_reset() -> None:
     assert sensor.get_data()["acceleration_valid"].tolist() == [False, True]
 
 
+@pytest.mark.parametrize("backend", ["default", "newton"])
 @pytest.mark.parametrize("frame", ["link", "root", "rigid"])
-def test_newton_inertial_difference_uses_velocity_at_sensor_point(frame: str) -> None:
+def test_inertial_difference_uses_velocity_at_sensor_point(
+    frame: str, backend: str
+) -> None:
     from embodichain.lab.sim.sensors import IMUCfg, PVACfg
 
     manager = _manager()
-    manager.physics = SimpleNamespace(name="newton")
+    manager.physics = SimpleNamespace(name=backend)
     manager.sim_config.physics_cfg = SimpleNamespace(gravity=(0.0, 0.0, 0.0))
     omega = torch.pi / 2
     body_state = torch.zeros((2, 13))
@@ -1166,9 +1169,26 @@ def test_newton_inertial_difference_uses_velocity_at_sensor_point(frame: str) ->
         robot.body_state = torch.stack(
             (torch.zeros_like(body_state), body_state), dim=1
         )
-        robot.body_data = SimpleNamespace(
-            com_pose=torch.stack((torch.zeros_like(com_pose), com_pose), dim=1)
-        )
+        link_com_poses = torch.stack((torch.zeros_like(com_pose), com_pose), dim=1)
+        if backend == "newton":
+            from embodichain.lab.sim.objects.articulation import ArticulationData
+
+            def fetch_link_physical_properties(mass, inertia, poses):
+                poses.copy_(link_com_poses)
+
+            data = object.__new__(ArticulationData)
+            data.articulation_view = SimpleNamespace(
+                is_newton_backend=True,
+                fetch_link_physical_properties=fetch_link_physical_properties,
+            )
+            data._mass = torch.zeros((2, 2))
+            data._inertia = torch.zeros((2, 2, 3))
+            data._com_pose = torch.empty_like(link_com_poses)
+            robot.body_data = data
+        else:
+            robot.body_data = SimpleNamespace(
+                _read_link_com_position=lambda index: link_com_poses[:, index, :3]
+            )
         manager._robots["body"] = robot
         body_state = robot.body_state[:, 1]
         if frame == "link":
