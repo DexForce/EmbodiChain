@@ -20,7 +20,7 @@ live in `embodichain.compute`, and resource snapshots in `embodichain.data`.
 A pinned checkpoint, frozen physical resources and native replay evidence are
 available through [the reproduction guide](REPRODUCING.md) and `model.json`.
 The existing Python 3.12 / DexSim 0.6.0rc2 frozen peg model was replayed after
-the core/task refactor: **7940/8192 (96.92%)** in source and **7939/8192 (96.91%)**
+the core/task refactor and review fixes: **7910/8192 (96.56%)** in source and **7923/8192 (96.72%)**
 with an isolated installed wheel. Both exceed the 95% development target, with
 per-episode reports matching aggregate statistics. `model.json` pins the unchanged
 model archive, original qualification and separate current-code replay evidence.

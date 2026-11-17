@@ -125,82 +125,97 @@
     }
   ],
   "integration": {
-    "code_revision": "24e50dd95553f292982ddc06bdea56ea5d8aae65",
+    "code_revision": "5a701a81e7251ab60c2fcfdafbecc1ac53fe13ee",
+    "evaluation_runtime_revision": "428ab3df7a34a51c3d85932074a335d0d5c286e2",
     "main_revision": "9474d998d3fb5d78390aba7473ff7a89ffb77cda",
     "base_pr": 981,
     "base_revision": "ad761bd69cb5c0e9f6752818580e709c7028cbc0",
-    "scope": "Shared compute/resource extraction, task-owned functors and YAML defaults; existing checkpoint unchanged; clear unrecorded row terminal caches during reset.",
+    "scope": "Eight review fixes; nominal declaration points to generated cache. Frozen checkpoint unchanged.",
     "evaluation_protocol": {
       "seed": 20000,
       "num_envs": 1024,
       "allocation": "balanced;8 scored completions per arena"
     },
     "reports": {
-      "source_full": {
+      "source": {
+        "successes": 7910,
         "episodes": 8192,
-        "successes": 7940,
-        "success_rate": 0.96923828125,
+        "success_rate": 0.965576171875,
         "wilson95": [
-          0.9652736005966067,
-          0.9727630901602484
+          0.9614048607666836,
+          0.9693110441622044
         ],
+        "returncode": 0,
         "terminal_reports_match_metrics": true
       },
-      "installed_wheel_full": {
+      "installed_wheel": {
+        "successes": 7923,
         "episodes": 8192,
-        "successes": 7939,
-        "success_rate": 0.9691162109375,
+        "success_rate": 0.9671630859375,
         "wilson95": [
-          0.9651444292156929,
-          0.9726482353468967
+          0.9630797355961658,
+          0.9708085098581747
         ],
+        "returncode": 0,
         "terminal_reports_match_metrics": true
       }
     },
-    "installed_wheel": {
-      "code_revision": "24e50dd95553f292982ddc06bdea56ea5d8aae65",
+    "evaluation_wheel": {
+      "code_revision": "428ab3df7a34a51c3d85932074a335d0d5c286e2",
+      "wheel_sha256": "3cad6238d1c85975082a749458ef9ef6b5495569d27de6e50c043aaa2eb1800d",
       "matched_runtime_files": 1197,
-      "matched_packaged_task_yaml": 291,
-      "missing": [],
-      "different": [],
-      "wheel_sha256": "c2be37d60cf06daa4a3e486d26de7fc401c2b1a0bfc88ed0294fa443261f45a5"
+      "matched_task_yaml": 291,
+      "runtime": {
+        "torch": "2.11.0+cu128",
+        "dexsim-engine": "0.6.0rc2",
+        "mujoco": "3.15.0",
+        "mujoco-warp": "3.15.0",
+        "newton": "1.7.0",
+        "warp-lang": "1.17.0"
+      },
+      "prepared_reference_module_exact": true
+    },
+    "final_wheel": {
+      "sha256": "61a2363c64dbcb8bb934fdbd29950825f61b650cfa7110f708a649ea0d8a0d23",
+      "matched_runtime_files": 1197,
+      "prepared_reference_module_exact": true,
+      "matched_task_yaml": 291
     },
     "preview": {
-      "status": "completed",
       "seeds": [
         30000,
         30001,
         30002
       ],
-      "successes": 3,
       "episodes": 3,
+      "successes": 3,
       "width": 1280,
       "height": 720,
       "fps": 25,
-      "frames": 110,
-      "duration_seconds": 4.4,
-      "video": "preview/preview.mp4",
-      "trace": "preview/trace.json"
+      "frames": 100,
+      "duration_seconds": 4.0,
+      "scope": "complete predeclared native RGB sequence; not a success-rate estimate"
     },
     "validation": {
-      "focused_case_selection": 239,
-      "outcome_evaluation_recording_case_selection": 100,
-      "source_free_wheel_consumers": 4,
-      "architecture_cases": 54,
-      "test_counts_overlap": true,
+      "focused_passed": 281,
+      "focused_skipped": 7,
+      "package_and_context_selection_passed": 46,
+      "final_source_free_wheel_consumers": 4,
+      "architecture_passed": 54,
+      "counts_overlap": true,
       "api_exports_documented": 5024,
-      "black": "26.10.1; black .",
-      "context": "check and representative routes passed"
+      "black": "26.10.1;black .",
+      "context": "passed"
     },
     "evidence": {
-      "artifact_commit": "721d1110aad0a06e9e57f974091a20cc12af0b50",
-      "url": "https://raw.githubusercontent.com/DexForce/EmbodiChain/721d1110aad0a06e9e57f974091a20cc12af0b50/refactor-24e50dd95/replay-evidence.zip",
-      "sha256": "eab0b7da85ade4c2531106ef5f5dd03cb405dd2ad2a117cb4df8986de293c9db",
-      "bytes": 2402767,
-      "summary_url": "https://raw.githubusercontent.com/DexForce/EmbodiChain/721d1110aad0a06e9e57f974091a20cc12af0b50/refactor-24e50dd95/reproduction.json"
+      "artifact_commit": "75b2f4ab83e41fe7e8601121af813485af286169",
+      "url": "https://raw.githubusercontent.com/DexForce/EmbodiChain/75b2f4ab83e41fe7e8601121af813485af286169/review-5a701a81e/validation.zip",
+      "sha256": "75eae4960e532f8665549f4259d8377e11ff38a90d66af3d52cf12fd7170e609",
+      "bytes": 1904344,
+      "summary_url": "https://raw.githubusercontent.com/DexForce/EmbodiChain/75b2f4ab83e41fe7e8601121af813485af286169/review-5a701a81e/reproduction.json"
     },
     "architecture": {
-      "source_revision": "24e50dd95553f292982ddc06bdea56ea5d8aae65",
+      "source_revision": "5a701a81e7251ab60c2fcfdafbecc1ac53fe13ee",
       "nodes": 123,
       "edges": 248,
       "tests_passed": 54

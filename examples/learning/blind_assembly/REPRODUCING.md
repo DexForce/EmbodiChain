@@ -76,7 +76,7 @@ are also retained, with their separate code revisions.
 
 ## Replay after the core/task refactor
 
-Code revision `24e50dd95553f292982ddc06bdea56ea5d8aae65` moves polygon distances and
+Runtime revision `428ab3df7a34a51c3d85932074a335d0d5c286e2` moves polygon distances and
 URDF gravity computation into `embodichain.compute`, and resource snapshots into
 `embodichain.data`. Assembly functors remain in the task extension, whose packaged
 `defaults.yaml` owns default measurement, grasp and asset-generation parameters.
@@ -87,22 +87,27 @@ Both executions repeated the original 8192-episode balanced protocol:
 
 | Execution | Success | Wilson 95% interval |
 |---|---:|---:|
-| Source checkout | **7940/8192 (96.9238%)** | 96.5274–97.2763% |
-| Isolated installed wheel | **7939/8192 (96.9116%)** | 96.5144–97.2648% |
+| Source checkout | **7910/8192 (96.5576%)** | 96.1405–96.9311% |
+| Isolated installed wheel | **7923/8192 (96.7163%)** | 96.3080–97.0809% |
 
 The installed execution blocks the generator import and uses an empty asset
 cache. All 1197 checked runtime files and 291 packaged task YAML files match
 source. Terminal outcome counts match aggregate success statistics; every arena
-has eight scored completions. The reset path now clears unrecorded terminal
-reports for selected rows, preventing reuse of a previous episode's cached report.
-This changes report bookkeeping, not the success conditions or policy.
+has eight scored completions. The reset path clears unrecorded terminal reports for selected rows and defers
+assembly measurement until reset preparation finishes. Review regressions cover
+optional schema-v2 PPO coefficients, multidimensional auxiliary targets, APG
+parameter ownership, calibrated solver URDFs, intrinsic base rotations and scaled
+multi-start thread lead. Nominal model declarations at
+`5a701a81e7251ab60c2fcfdafbecc1ac53fe13ee` use the generated resource tree. That
+follow-up changes the nominal YAML path and CPU fixtures; executable runtime
+files and this frozen Peg configuration remain the same.
 
-[Replay evidence](https://raw.githubusercontent.com/DexForce/EmbodiChain/721d1110aad0a06e9e57f974091a20cc12af0b50/refactor-24e50dd95/replay-evidence.zip)
+[Replay evidence](https://raw.githubusercontent.com/DexForce/EmbodiChain/75b2f4ab83e41fe7e8601121af813485af286169/review-5a701a81e/validation.zip)
 contains both complete raw reports, runtime warnings, current RGB trace/video,
-wheel integrity and numerical extraction diagnostics. It also retains initial
-smoke/full executions with explicitly marked stale terminal details, before the
-report-cache correction. Their aggregate statistics are separate from the final
-per-episode evidence. The adjacent `model.json` pins this archive's hash and code
+wheel integrity and numerical extraction diagnostics. It also retains the initial installed-wheel report (7931/8192), whose task
+session ended with signal 143 after writing the report. A separate detached
+monitor confirmed the reported final installed execution exited 0; both results
+remain available. The adjacent `model.json` pins this archive's hash and code
 revision, while retaining the original model and qualification references.
 The current-code RGB preview completes all seeds 30000–30002 with 3/3 successes,
 1280×720 at 25 fps; it is visual evidence, not a success-rate estimate.
