@@ -64,8 +64,10 @@ unfinished groups; capacity remains exactly W times B. Queued groups keep their
 normal lane priority. Healthy candidates fill only their remaining quota. Each
 observed unsuccessful attempt permits one additional competing candidate, bounded
 by the existing attempt, admission-time, settling, step and pending-byte limits.
-The low-level flag defaults false; the native Task Program job enables it by
-default and accepts `engine.reuse_idle_rows: false` to retain fixed lanes.
+The low-level flag and native Task Program job both default false. Enable
+reuse explicitly with `engine.reuse_idle_rows: true`. On
+CPU-bound planning, competing retries may increase total work despite higher
+row occupancy; validate qualified output per wall time before enabling reuse.
 
 This mode requires a source `cancel(result, *, reason)` port. Only a confirmed
 receipt fills quota. Remaining live candidates use the ordinary safe-stop
