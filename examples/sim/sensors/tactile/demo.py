@@ -45,6 +45,12 @@ TOOL_RADIUS = 0.035
 MAX_DEPTH = 0.012
 RESOLUTION = (32, 24)
 CURVATURE_RADIUS = 0.075
+ARROW_SCALE = 3.0
+MARKER_INDICES = tuple(
+    y * RESOLUTION[0] + x
+    for y in range(2, RESOLUTION[1], 5)
+    for x in range(2, RESOLUTION[0], 5)
+)
 
 Sample = dict[str, np.ndarray]
 
@@ -63,6 +69,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--y-response", nargs=3, type=float, default=(0.07, 0.43, -0.28)
+    )
+    parser.add_argument(
+        "--shear", action="store_true", help="Show estimated pad loads."
+    )
+    parser.add_argument(
+        "--markers", action="store_true", help="Use sparse marker readout with --shear."
     )
     parser.add_argument("--frames", type=int, default=24)
     parser.add_argument("--fps", type=int, default=10)
@@ -134,6 +146,14 @@ def create_scene(
             "x_response": args.x_response,
             "y_response": args.y_response,
         }
+    shear = None
+    if args.shear:
+        shear = {
+            "normal_stiffness": 2.8,
+            "shear_stiffness": 7.5,
+            "friction": 0.6,
+            "marker_indices": MARKER_INDICES if args.markers else (),
+        }
     sensor = sim.add_sensor(
         SensorCfg.from_dict(
             {
@@ -146,6 +166,7 @@ def create_scene(
                 "curvature_radius": CURVATURE_RADIUS if args.pad == "curved" else None,
                 "max_depth": MAX_DEPTH,
                 "rgb": optical,
+                "shear": shear,
             }
         )
     )
@@ -230,6 +251,54 @@ def draw_rgb(axis: Axes, sample: Sample) -> None:
     axis.set(title="Tactile RGB", xlabel="Pad X (m)", ylabel="Pad Y (m)")
 
 
+def draw_displacement(axis: Axes, sample: Sample, args: argparse.Namespace) -> None:
+    """Overlay the sparse markers or a subsample of the dense displacement."""
+    width, height = RESOLUTION
+    indices = np.asarray(MARKER_INDICES)
+    rows, columns = np.divmod(indices, width)
+    x = ((columns + 0.5) / width - 0.5) * PAD_SIZE[0]
+    y = ((rows + 0.5) / height - 0.5) * PAD_SIZE[1]
+    displacement = (
+        sample["marker_displacement"]
+        if args.markers
+        else sample["shear_displacement"][rows, columns]
+    )
+    moved = np.linalg.norm(displacement, axis=1) > 1e-6
+    if moved.any():
+        axis.quiver(
+            x[moved],
+            y[moved],
+            displacement[moved, 0],
+            displacement[moved, 1],
+            color="#f3f1e7" if args.rgb else "#312845",
+            angles="xy",
+            scale_units="xy",
+            scale=1 / ARROW_SCALE,
+            width=0.006,
+        )
+    overlay = "Markers" if args.markers else "Shear displacement"
+    axis.set_title(f"{overlay} ({ARROW_SCALE:g}×)")
+
+
+def draw_loads(axis: Axes, samples: list[Sample], index: int) -> None:
+    """Plot signed shear component sums and normal loads over physics time."""
+    t = np.array([sample["time"] for sample in samples])
+    normal = np.array([sample["normal_force"].sum() for sample in samples])
+    shear = np.array([sample["shear_force"].sum(axis=(0, 1)) for sample in samples])
+    axis.plot(t, normal, label="Normal", color="#198491", linewidth=1.8)
+    axis.plot(t, shear[:, 0], label="Shear X", color="#cf6541", linewidth=1.8)
+    axis.plot(t, shear[:, 1], label="Shear Y", color="#6577b9", linewidth=1.3)
+    axis.axvline(t[index], color="#526571", linewidth=0.9, linestyle="--")
+    axis.axhline(0, color="#c5cbd0", linewidth=0.7)
+    axis.set(
+        xlabel="Simulation time (s)",
+        ylabel="Force (N)",
+        title="Geometric elastic-penalty loads",
+    )
+    axis.spines[["right", "top"]].set_visible(False)
+    axis.legend(loc="upper right", frameon=False, ncols=3)
+
+
 def draw_sample(
     figure: Figure, samples: list[Sample], index: int, args: argparse.Namespace
 ) -> None:
@@ -237,11 +306,19 @@ def draw_sample(
     sample = samples[index]
     figure.clear()
     figure.set_layout_engine("constrained")
-    axes = figure.subplots(1, 3 if args.rgb else 2)
+    columns = 3 if args.rgb else 2
+    if args.shear:
+        layout = figure.add_gridspec(2, columns, height_ratios=(3, 2))
+        axes = [figure.add_subplot(layout[0, column]) for column in range(columns)]
+        draw_loads(figure.add_subplot(layout[1, :]), samples, index)
+    else:
+        axes = figure.subplots(1, columns)
     show_scene(axes[0], sample["camera_rgb"])
     draw_depth(figure, axes[1], sample)
     if args.rgb:
         draw_rgb(axes[2], sample)
+    if args.shear:
+        draw_displacement(axes[-1], sample, args)
     figure.supxlabel(
         f"Sample {sample['sample_id']}   ·   t = {sample['time']:.3f} s", fontsize=9
     )
@@ -254,8 +331,21 @@ def export(samples: list[Sample], args: argparse.Namespace) -> None:
         args.output_dir / "samples.npz",
         **{key: np.stack([sample[key] for sample in samples]) for key in samples[0]},
     )
-    figure = plt.figure(figsize=(10.8 if args.rgb else 7.6, 3.8), dpi=120)
-    preview = int(np.argmax([sample["depth"].max() for sample in samples]))
+    figure = plt.figure(
+        figsize=(10.8 if args.rgb else 7.6, 6.0 if args.shear else 3.8), dpi=120
+    )
+    preview = (
+        int(
+            np.argmax(
+                [
+                    np.linalg.norm(sample["shear_displacement"], axis=-1).sum()
+                    for sample in samples
+                ]
+            )
+        )
+        if args.shear
+        else int(np.argmax([sample["depth"].max() for sample in samples]))
+    )
     draw_sample(figure, samples, preview, args)
     figure.savefig(args.output_dir / "preview.png")
     if args.video:
@@ -275,6 +365,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.frames < 9 or args.fps < 1:
         parser.error("--frames must be at least 9 and --fps must be positive")
+    if args.markers and not args.shear:
+        parser.error("--markers requires --shear")
     if args.video and not animation.writers.is_available("ffmpeg"):
         parser.error("--video requires ffmpeg on PATH")
 

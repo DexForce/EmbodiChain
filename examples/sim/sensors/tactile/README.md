@@ -42,3 +42,23 @@ probe columns and rows. The defaults are illustrative settings. Calibrate all
 three triples for a physical pad before comparing its images. The sphere
 releases at the end and every pixel returns to the same background used by a
 reset row. The archive includes the normalized `rgb` array in Y/X/channel order.
+
+## Shear and marker trajectories
+
+```bash
+python -m examples.sim.sensors.tactile.demo --pad planar --rgb --shear --markers --output-dir /tmp/tactile-shear --video
+```
+
+`--shear` enables the geometric elastic-penalty model and overlays the
+sampled displacement on the RGB or depth image. Add `--markers` to use the
+public sparse marker displacement instead of subsampling the dense field.
+Arrows represent elastic displacement in metres at 3× display scale. They
+use the local tangent along mount +X projected onto the probe plane and the
+second tangent from normal × first tangent. These are pad X/Y on planar pads.
+
+The bottom panel plots sums over probes in newtons during loading, forward
+and reverse sliding, and release. The signed traces are sums of local
+components. On curved pads, different probes have different tangent frames.
+The dashed line identifies the time of the shared scene/depth/RGB sample.
+Shear stiffness, normal stiffness, and Coulomb friction are illustrative
+geometric-model parameters. For physical use, calibrate them for the pad.
