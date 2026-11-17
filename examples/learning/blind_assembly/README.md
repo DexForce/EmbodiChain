@@ -13,9 +13,13 @@ IDs and flat extension fields are removed.
 
 A pinned checkpoint, frozen physical resources and native replay evidence are
 available through [the reproduction guide](REPRODUCING.md) and `model.json`.
-Those measured replay results use a pinned historical source/SDK profile. The
-current Python 3.12 / DexSim 0.6.0rc2 task lifecycle has separate smoke checks;
-the historical success rates do not qualify its learning performance.
+The current Python 3.12 / DexSim 0.6.0rc2 frozen peg model passed independent
+8192-episode balanced evaluations in source (**96.80%**) and isolated installed
+wheel (**96.84%**) executions. Its complete configuration/resources and raw evidence
+are pinned in `model.json`; both results exceed the 95% development target.
+
+[Trained Peg inference video (1280×720, 25 fps)](https://raw.githubusercontent.com/DexForce/EmbodiChain/a9869001f1ad961f5496ca0c7f6aa4aeeeae6029/preview.mp4)
+records the complete fixed seed sequence 30000–30002, with 3/3 successes.
 
 ## Training and evaluation
 
@@ -45,13 +49,14 @@ unsupported builds fail explicitly.
 
 ```bash
 embodichain run-example learning/blind_assembly/export_actor CHECKPOINT --config RUN/configs/train.yaml --output RUN/exports/actor.pt
-DISPLAY=:1 embodichain run-example learning/blind_assembly/preview RUN --checkpoint best --episodes 3 --seed 30000 --output outputs/assembly_preview
+embodichain run-example learning/blind_assembly/preview RUN --checkpoint best --headless --episodes 3 --seed 30000 --output outputs/assembly_preview
 ```
 
 The actor export is checked against eager inference and excludes critic and
 contact decoder. The preview uses the production checkpoint loader and native
 DexSim rendering, captures all requested episodes, and writes recordings and
-traces beneath the output directory. A display and FFmpeg are required.
+traces beneath the output directory. Native RGB capture requires the graphics
+runtime and FFmpeg; unattended validation used Xvfb with `--headless`.
 
 A checkpoint's bundled embodiment and feature convention must match training.
 Changing the hand, TCP, normalization or history layout requires separate

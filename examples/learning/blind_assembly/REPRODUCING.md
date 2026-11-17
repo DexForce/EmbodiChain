@@ -1,117 +1,109 @@
-# Reproduce the default-asset peg policy
+# Reproduce the configuration-driven peg policy
 
-This delivery replays the unchanged validation-selected update-850 checkpoint
-from the earlier 1000-update native PPO run. It uses the default Rizon4S and
-full Robotiq2F85 assets with frozen geometry, materials and physical settings.
-It does not claim a new full training run or the paper's heterogeneous task
-and calibrated robot distribution.
+The current delivery uses `ActorCritic` with `TemporalActor` (`official_v1`) and
+optional `ContactPrediction`. The task registers the common `EmbodiedEnv` through
+its root `rl_task` declaration. Preparation, actions, observations, rewards,
+startup/interval/reset events and resource export are explicitly configured.
+Historical policy constructors, previous-history layouts and checkpoint migration
+paths have been removed.
 
-## Runtime
+## Qualified runtime and selection
 
-The synchronized source uses Python 3.12 and DexSim 0.6.0rc2. Its tasks passed
-two-environment reset, three control steps and selected-row reset checks on
-that profile (default robot assets for peg, explicit nominal assets for gear
-and nut). Full training and the 8192-episode success-rate evaluation have not
-been repeated on the new profile. A separate four-transition native smoke
-checks the composable actor, contact auxiliary loss, PPO update and actor
-export; it does not establish task learning performance.
+Python **3.12.14**, Torch **2.11.0+cu128**, DexSim **0.6.0rc2**, Newton **1.7.0**
+and MuJoCo/MuJoCo-Warp **3.15.0**, on an RTX PRO5000 72GB Blackwell.
+The evidence records exact package versions and installation RECORD hashes;
+all 1547 checked dependency code/binary files matched their installation records.
+No dependency modification or SDK binary is shipped in the model archive.
 
-The results below describe the pre-sync split at commit
-`5401a00ce26beee81be2248629e3d993b27f618d`. Use that source revision and an
-isolated Python 3.11 / Torch 2.7 environment to reconstruct its historical
-measurements. The measured profile pins Torch 2.7.1+cu128, Newton 1.7.0,
-MuJoCo 3.15.0, MuJoCo Warp 3.15.0 and Warp 1.17.0 on an RTX 5090.
-Use an isolated environment for these pins; do not upgrade a shared training
-runtime. FFmpeg and a native display are needed for preview recording.
+Training started from random weights with seed **0**, **4096 arenas** and
+**32 control transitions per rollout**. The maximum budget was 1000 updates.
+Update **300** was frozen for early stopping after balanced validation on seed
+**11000** scored **1988/2048 (97.0703%)**, Wilson 95% **96.2472–97.7172%**.
+The candidate checkpoint and its SHA-256 were recorded before test episodes ran;
+later updates were discarded. The test set did not select the model.
 
-The exact replay uses historical DexSim source revision
-`528daf12fd44b9383b30165ac484cf79b574e873` with source-contact forwarding.
-Prepare that SDK through its normal build/package process, using the
-historical contact patch and binary hashes described in the bundle's evidence
-and [archived runtime material](https://github.com/DexForce/EmbodiChain/tree/e15c945a8976b06b447f933400d12e5bd936dd3a/scripts).
-The unextended `dexsim_engine==0.5.1rc1` wheel alone is insufficient for raw
-contact parameters. SDK binaries are not redistributed with the model.
-The earlier dev integration was tracked separately by
-[Dexverse Draft MR !1562](http://192.168.3.16/Engine/dexverse/-/merge_requests/1562);
-its status does not qualify a different native release. Current direct-compound
-smoke checks use the installed 0.6.0rc2 package without the historical overlay.
-A new SDK/solver profile requires a new evaluation and must not inherit the
-historical result.
-
-Current source and distributions do not provide dependency-overlay tooling.
-Reconstruct historical measurements only with the external runtime recorded in
-the bundle's provenance; its capacity modification remains part of that
-historical profile rather than the current SDK installation.
+The explicit file-backed appearance path preserves the physical collision pieces,
+source mass/COM/inertia and contact parameters while reducing material-reset
+work. MuJoCo-Warp startup gains use the shared batched physics view with unchanged
+configured values. Complete current-schema optimizer/normalizer/RNG continuation
+was verified; it does not provide historical checkpoint migration.
 
 ## Download and replay
 
-Current assembly deployments use explicit configuration-owned registration,
-manager declarations and the nested `env.extensions.assembly` schema. They do
-not accept historical import-registered task IDs or flat-field run configs.
-Use the pinned historical source above for the unchanged archive replay; the
-fresh configuration-driven runs have separate checkpoint and evaluation evidence.
-
-The adjacent `model.json` pins the downloadable archive by immutable Git commit
-and SHA-256. Model binaries, frozen physical resources and raw evidence live
-in a separate artifact branch; they are not merged into the feature source.
-The archive retains robot/gripper attribution and contains no SDK binaries.
+The adjacent `model.json` pins the current archive to an immutable artifact commit
+and SHA-256. It contains the selected complete checkpoint, portable configuration,
+frozen robot and assembly resources, attribution and raw evidence.
 
 ```bash
 python - <<'PYCODE'
 import hashlib, json, pathlib, urllib.request
 info = json.loads(pathlib.Path("examples/learning/blind_assembly/model.json").read_text())
-archive = pathlib.Path("default-assets-peg.zip")
+archive = pathlib.Path("configured-peg.zip")
 with urllib.request.urlopen(info["url"]) as response:
     archive.write_bytes(response.read())
 assert hashlib.sha256(archive.read_bytes()).hexdigest() == info["sha256"]
 PYCODE
-unzip default-assets-peg.zip
-export RUN="$PWD/default-assets-peg"
+unzip configured-peg.zip
+export RUN="$PWD/configured-peg"
 embodichain eval-policy "$RUN" --checkpoint best --episodes 8192 --num-envs 1024 --seed 20000 --episode-allocation balanced --renderer no-render
-DISPLAY=:1 embodichain run-example learning/blind_assembly/preview "$RUN" --checkpoint best --episodes 3 --seed 30000 --output outputs/assembly_preview
 ```
 
-Replay loads all physical resources from the bundle and needs neither mjfit nor
-the original source-model cache. Preserve its actor normalization, feature/history
-convention and full hand model. Contact solves need not be bitwise identical;
-compare balanced completed-episode statistics with the recorded confidence
-intervals. Solver iteration-budget warnings and SDK teardown entity-accounting
-warnings remain in the evidence and prevent claiming precision qualification.
+Replay needs the installed current code and declared SDK dependencies. It loads
+physical resources from the archive and does not need mjfit or the original asset
+cache. A source-free installed-wheel smoke with an empty asset cache and the
+generator import blocked completed **62/64** episodes; that smoke is separate from
+the full evaluations below. GPU physics is not bitwise deterministic.
 
-## Training
+## Independent evaluation
 
-To start a fresh random-initialization run against the frozen physical assets:
+Both executions use the same frozen checkpoint, deterministic action means,
+seed **20000**, **1024 arenas**, and **8 scored completions per arena**:
+
+| Execution | Success | Wilson 95% interval |
+|---|---:|---:|
+| Source checkout | **7930/8192 (96.8018%)** | 96.3983–97.1614% |
+| Isolated installed wheel | **7933/8192 (96.8384%)** | 96.4370–97.1959% |
+
+Both exceed the **95% engineering target**. The installed wheel was checked
+against the current production sources and imported its three main packages from
+its own environment. The raw source and wheel reports are retained separately;
+no preferred replay result was substituted for the other. Earlier executions of
+the same frozen model, before the other profiles' sensor-capacity correction,
+scored 7942/8192 in source and 7929/8192 in the installed wheel. Those reports
+are also retained, with their separate code revisions.
+
+## Fresh training, export and RGB preview
 
 ```bash
 embodichain train-rl --config "$RUN/configs/train.yaml"
+embodichain run-example learning/blind_assembly/export_actor "$RUN/checkpoints/configured_current_peg_insertion_seed0_best_step_39321600.pt" --config "$RUN/configs/train.yaml" --output "$RUN/exports/actor.pt"
+embodichain run-example learning/blind_assembly/preview "$RUN" --checkpoint best --headless --episodes 3 --seed 30000 --output outputs/assembly_preview
 ```
 
-This configuration retains 4096 arenas, 32 controls per rollout and 1000 updates.
-The new-run source recipe is
-`extensions/embodichain_tasks/configs/tasks/manipulation/assembly/peg_insertion/agents/ppo.study.default_assets.dev.yaml`;
-it composes the bare arm and hand in the application embodiment. Generation of
-new manifests needs the pinned mjfit provider described by the simulation examples.
+The saved training config reuses the frozen geometry and tested optimizer settings
+with new random weights. The task-supplied
+`peg_insertion/agents/ppo.study.default_assets.dev.yaml` is also available as a
+fresh-generation recipe; its evaluation cadence differs from the recorded run.
 
-The split was checked with a separate 16-arena, 8-control, 2-update random-start
-run, including checkpoint/resource saving. This checks the training path;
-it is not a replacement for a full training experiment. Formal study/full-range
-profiles retain their qualification gates. The 95% success target is unmet.
+Fresh training and frozen-checkpoint replay are distinct experiments; a new run
+is not guaranteed to reproduce the same checkpoint or success rate. Validation
+must remain separate from the final test seed. Generation of new geometry needs
+the pinned provider described in the simulation examples.
 
-## Recorded results
+The exported actor excludes critic/contact heads and matched eager inference with
+trace error **0**. The current native RGB preview records the complete predeclared
+seed sequence **30000, 30001, 30002**, with **3/3** successes and the original grip,
+penetration and stable-seat guards. Headless recording uses an actual native
+camera and finishes encoding before native cleanup. Omit `--headless` for a window.
+The three-episode preview is visual evidence, not a success-rate estimate.
 
-The machine-readable descriptor and bundled `evidence/split_replay_20261105/`
-contain source and installed-wheel results, native preview traces, logs,
-checkpoint/resource identities and runtime provenance. The wheel check installs
-the built distribution in a separate system-site-packages environment outside
-the source checkout; it reuses Torch and the explicitly selected SDK profile.
+## Qualification boundary
 
-| Replay | Episodes / arenas | Success | 95% Wilson interval |
-|---|---:|---:|---:|
-| Source checkout | 8192 / 1024 | 7275 (88.8062%) | 88.1051–89.4708% |
-| Installed wheel | 8192 / 1024 | 7288 (88.9648%) | 88.2680–89.6252% |
-
-Both use seed 20000 and eight scored completions per arena. The historical
-selected checkpoint scored 7240/8192 (88.3789%) on its original implementation.
-The small 64-arena smoke results (source 46/64, wheel 42/64) are retained in the
-bundle; they do not replace either full-protocol result. The native preview is
-3/3 on its predeclared seeds and is visual evidence, not a success-rate estimate.
+This is a single-geometry, single-training-seed development profile with the
+public default arm/full mimic hand. It does not qualify the paper's heterogeneous
+geometry distribution, identified hardware dynamics, other-task learning or real
+device performance. Formal study/full-range deployments retain their explicit
+qualification gates. Solver iteration-budget warnings remain in the evidence;
+the success result is not a contact-precision certification. Gear and nut
+configurations retain lifecycle coverage; their learning performance is outside
+this Peg qualification.
