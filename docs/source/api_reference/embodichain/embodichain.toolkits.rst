@@ -11,6 +11,7 @@ manipulation utilities that can be used independently of the simulation loop.
    .. autosummary::
 
       acd
+      assembly
       graspkit
       urdf_assembly
 
@@ -454,3 +455,18 @@ queries explicitly or through the closing query's context manager.
 
 .. automodule:: embodichain.toolkits.graspkit.pg_grasp.native_contact
    :members:
+
+Precision Assembly
+------------------
+
+``embodichain.toolkits.assembly`` owns portable mating-part assets, pinned
+optional generation, seeded sampling and USD export. The explicit
+``embodichain.toolkits.assembly.native`` adapter prepares compound rigid
+configurations and supported hinge articulations without changing authored
+collision pieces or mass properties. The toolkit root stays independent of
+simulation initialization.
+
+See :doc:`the Precision Assembly guide <../../features/toolkits/precision_assembly>`
+for the public entry-point tables, manifest workflow, native RGB demos,
+reproduction commands and the original paper citation. Export-level entries
+are indexed under :doc:`public API coverage <../public_api>`.

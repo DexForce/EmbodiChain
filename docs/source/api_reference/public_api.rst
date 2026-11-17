@@ -5156,6 +5156,140 @@ qualified DriverOpeningBinding type must be rebuilt with its Atomic owner.
 .. autoclass:: DriverOpeningBinding
    :members:
 
+embodichain.toolkits.assembly
+-----------------------------
+
+Public assembly generation and portable manifests preserve one physical body with multiple convex collision pieces. Generator dependencies are optional at manifest load time. GenSim and simulation integrations consume this toolkit; its data model does not import either runtime.
+
+See :doc:`Precision Assembly <../features/toolkits/precision_assembly>` for
+functional entry points, installation, native demo recordings and research attribution.
+
+.. currentmodule:: embodichain.toolkits.assembly
+
+.. autosummary::
+
+   AssemblyAsset
+   AssemblyBody
+   AssemblyGeometry
+   AssemblyJoint
+   MJFIT_REVISION
+   build_assembly
+   build_many_pegs
+   import_mjcf
+   sample_assemblies
+   load_mjfit
+
+
+
+
+embodichain.toolkits.assembly.native
+------------------------------------
+
+Prepare native rigid and hinge configurations from portable assembly assets.
+File-backed appearance is optional and preserves source collision ownership.
+
+.. currentmodule:: embodichain.toolkits.assembly.native
+
+.. autosummary::
+
+   to_rigid_config
+   to_rigid_configs
+   to_articulation_configs
+   prepare_native_configs
+
+.. autofunction:: to_rigid_config
+.. autofunction:: to_rigid_configs
+.. autofunction:: to_articulation_configs
+.. autofunction:: prepare_native_configs
+
+embodichain.toolkits.assembly.adapter
+-------------------------------------
+
+Pinned public mjfit generation, deterministic sampling and bounded MuJoCo conversion. Source mesh frames and mass tensors are converted at this boundary.
+
+.. currentmodule:: embodichain.toolkits.assembly.adapter
+
+.. autosummary::
+
+   MJFIT_REVISION
+   build_assembly
+   import_mjcf
+   sample_assemblies
+   load_mjfit
+
+
+
+
+embodichain.toolkits.assembly.many
+----------------------------------
+
+The official many-pegs grid preserves the public sampler's indexed seed,
+per-cell configuration and prefixed body ownership in one portable scene.
+Optional curved-outline precision settings record both the original sample
+and the actual public generator configuration. The grid does not represent
+independent simulation arenas.
+
+.. currentmodule:: embodichain.toolkits.assembly.many
+
+.. autosummary::
+
+   build_many_pegs
+
+
+
+
+embodichain.toolkits.assembly.model
+-----------------------------------
+
+Self-contained body-local geometry, joint attachment and mass-property records with content-addressed, checksummed serialization. Native configuration conversion is owned by ``embodichain.toolkits.assembly.native``.
+
+.. currentmodule:: embodichain.toolkits.assembly.model
+
+.. autosummary::
+
+   AssemblyGeometry
+   AssemblyJoint
+   AssemblyBody
+   AssemblyAsset
+
+
+
+
+embodichain_benchmarks.assembly.precision
+-----------------------------------------
+
+Independent USD geometry/mass acceptance and passive source/native simulation measurements. Missing overflow accounting remains unverified rather than a precision certification. ``PrecisionRunCfg.newton_solver`` explicitly selects MuJoCo Warp or DexUni; ``solver`` retains the MuJoCo algorithm. Native results retain the prepared family and actual SDK dispatch.
+
+.. currentmodule:: embodichain_benchmarks.assembly.precision
+
+.. autosummary::
+
+   PrecisionRunCfg
+   compare_usd_geometry
+   run_passive_probe
+
+
+
+
+embodichain_benchmarks.assembly.probes
+--------------------------------------
+
+Circle/square analytic clearance oracles, state-controlled S0 contact scans and
+real slide/hinge S2-S4 equilibrium probes. Native and source runners preserve
+the same force/torque and geometry; unmeasured health limits qualification.
+
+.. currentmodule:: embodichain_benchmarks.assembly.probes
+
+.. autosummary::
+
+   AnalyticPegGeometry
+   ConstrainedProbeCfg
+   ConstrainedProbeDefinition
+   prepare_probe
+   run_reference_probe
+   run_native_probe
+   run_warp_probe
+
 Shared locomotion observation functor
 ------------------------------------
 

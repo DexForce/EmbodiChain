@@ -6690,9 +6690,6 @@ class SimulationManager:
         # Release backend-owned views before Scene closes the native
         # resources that back them. Newton also synchronizes its device here.
         self.physics.prepare_for_teardown()
-        # Run wrapper destructors while their World is still alive. The later
-        # collections continue to break cycles left by the native teardown.
-        gc.collect()
 
         # Render-only cameras may be attached to Spawn articulation link
         # nodes. Remove their Arena views before closing Scene, which
@@ -6740,6 +6737,13 @@ class SimulationManager:
                         asset._spawn_result = None
                     if hasattr(asset, "_entities"):
                         asset._entities = []
+
+        # Drop facade-owned references before collecting their wrapper cycles.
+        # Otherwise those cycles can survive until a later GC, after Scene
+        # has destroyed the native resources backing the views.
+        gc.collect()
+
+        if self._spawn_scene is not None:
             try:
                 self._spawn_scene.close()
             finally:
