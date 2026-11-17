@@ -1,0 +1,251 @@
+{
+  "schema_version": 1,
+  "description": "PR983: eight review findings fixed, with unchanged frozen Peg model; no retraining or checkpoint selection.",
+  "code_revision": "5a701a81e7251ab60c2fcfdafbecc1ac53fe13ee",
+  "evaluation_runtime_revision": "428ab3df7a34a51c3d85932074a335d0d5c286e2",
+  "later_change_scope": "Nominal embodiment YAML cache path and CPU test fixture only; executable runtime files unchanged. Final wheel verifies the updated declaration.",
+  "checkpoint_sha256": "42dfb6961c7a6e4ea0dd728ee072e010599746bc05ee104163284cb47863070f",
+  "reports": {
+    "source": {
+      "successes": 7910,
+      "episodes": 8192,
+      "metrics": {
+        "eval/avg_length": 46.7752685546875,
+        "eval/avg_reward": 1.9366455078125,
+        "eval/completed_episodes": 8192.0,
+        "eval/episodes_per_env_max": 8.0,
+        "eval/episodes_per_env_min": 8.0,
+        "eval/metrics/success.assembly.captured": 0.9700927734375,
+        "eval/metrics/success.assembly.depth": 0.016889405474103114,
+        "eval/metrics/success.assembly.grasped": 0.9725341796875,
+        "eval/metrics/success.assembly.penetration": 4.113752389647485e-06,
+        "eval/metrics/success.assembly.radial_error": 0.0021191699017015786,
+        "eval/metrics/success.assembly.tilt": 0.035897685399927326,
+        "eval/success_ci95_high": 0.9693110441622044,
+        "eval/success_ci95_low": 0.9614048607666836,
+        "eval/success_rate": 0.965576171875,
+        "eval/success_samples": 8192.0
+      },
+      "inputs": {
+        "checkpoint": {
+          "path": "/tmp/configured-assembly-qualification/delivery/configured-peg/checkpoints/configured_current_peg_insertion_seed0_best_step_39321600.pt",
+          "requested": "best",
+          "selected": "best"
+        },
+        "configs": {
+          "gym": "/tmp/configured-assembly-qualification/delivery/configured-peg/configs/gym.yaml",
+          "train": "/tmp/configured-assembly-qualification/delivery/configured-peg/configs/train.yaml"
+        },
+        "device": "cuda:1",
+        "embodichain_version": "0.3.2",
+        "episode_allocation": "balanced",
+        "num_envs": 1024,
+        "run": "/tmp/configured-assembly-qualification/delivery/configured-peg",
+        "seed": 20000,
+        "task_id": "BlindPegInsertionRL-StudyDefaultAssets-v1"
+      },
+      "terminal_reports_match_metrics": true,
+      "returncode": 0
+    },
+    "installed_wheel": {
+      "successes": 7923,
+      "episodes": 8192,
+      "metrics": {
+        "eval/avg_length": 47.304443359375,
+        "eval/avg_reward": 1.939453125,
+        "eval/completed_episodes": 8192.0,
+        "eval/episodes_per_env_max": 8.0,
+        "eval/episodes_per_env_min": 8.0,
+        "eval/metrics/success.assembly.captured": 0.970947265625,
+        "eval/metrics/success.assembly.depth": 0.016967982256801406,
+        "eval/metrics/success.assembly.grasped": 0.974365234375,
+        "eval/metrics/success.assembly.penetration": 4.0929384887184306e-06,
+        "eval/metrics/success.assembly.radial_error": 0.0020295224112263366,
+        "eval/metrics/success.assembly.tilt": 0.034348132253832375,
+        "eval/success_ci95_high": 0.9708085098581747,
+        "eval/success_ci95_low": 0.9630797355961658,
+        "eval/success_rate": 0.9671630859375,
+        "eval/success_samples": 8192.0
+      },
+      "inputs": {
+        "checkpoint": {
+          "path": "/tmp/configured-assembly-qualification/delivery/configured-peg/checkpoints/configured_current_peg_insertion_seed0_best_step_39321600.pt",
+          "requested": "best",
+          "selected": "best"
+        },
+        "configs": {
+          "gym": "/tmp/configured-assembly-qualification/delivery/configured-peg/configs/gym.yaml",
+          "train": "/tmp/configured-assembly-qualification/delivery/configured-peg/configs/train.yaml"
+        },
+        "device": "cuda:3",
+        "embodichain_version": "0.3.2",
+        "episode_allocation": "balanced",
+        "num_envs": 1024,
+        "run": "/tmp/configured-assembly-qualification/delivery/configured-peg",
+        "seed": 20000,
+        "task_id": "BlindPegInsertionRL-StudyDefaultAssets-v1"
+      },
+      "terminal_reports_match_metrics": true,
+      "returncode": 0
+    },
+    "earlier_interrupted_wheel": {
+      "successes": 7931,
+      "episodes": 8192,
+      "metrics": {
+        "eval/avg_length": 47.5543212890625,
+        "eval/avg_reward": 1.9412841796875,
+        "eval/completed_episodes": 8192.0,
+        "eval/episodes_per_env_max": 8.0,
+        "eval/episodes_per_env_min": 8.0,
+        "eval/metrics/success.assembly.captured": 0.9716796875,
+        "eval/metrics/success.assembly.depth": 0.016818393553649003,
+        "eval/metrics/success.assembly.grasped": 0.9769287109375,
+        "eval/metrics/success.assembly.penetration": 4.162831925250956e-06,
+        "eval/metrics/success.assembly.radial_error": 0.0018728723457788199,
+        "eval/metrics/success.assembly.tilt": 0.03226532819475736,
+        "eval/success_ci95_high": 0.971728846550753,
+        "eval/success_ci95_low": 0.9641116084577119,
+        "eval/success_rate": 0.9681396484375,
+        "eval/success_samples": 8192.0
+      },
+      "inputs": {
+        "checkpoint": {
+          "path": "/tmp/configured-assembly-qualification/delivery/configured-peg/checkpoints/configured_current_peg_insertion_seed0_best_step_39321600.pt",
+          "requested": "best",
+          "selected": "best"
+        },
+        "configs": {
+          "gym": "/tmp/configured-assembly-qualification/delivery/configured-peg/configs/gym.yaml",
+          "train": "/tmp/configured-assembly-qualification/delivery/configured-peg/configs/train.yaml"
+        },
+        "device": "cuda:3",
+        "embodichain_version": "0.3.2",
+        "episode_allocation": "balanced",
+        "num_envs": 1024,
+        "run": "/tmp/configured-assembly-qualification/delivery/configured-peg",
+        "seed": 20000,
+        "task_id": "BlindPegInsertionRL-StudyDefaultAssets-v1"
+      },
+      "terminal_reports_match_metrics": true,
+      "returncode": 143
+    }
+  },
+  "earlier_interrupted_wheel_scope": "Complete report retained, but the task session ended with signal 143. A detached monitored execution was required and exited 0; both scores retained.",
+  "evaluation_wheel": {
+    "code_revision": "428ab3df7a34a51c3d85932074a335d0d5c286e2",
+    "wheel_sha256": "3cad6238d1c85975082a749458ef9ef6b5495569d27de6e50c043aaa2eb1800d",
+    "matched_runtime_files": 1197,
+    "matched_task_yaml": 291,
+    "runtime": {
+      "torch": "2.11.0+cu128",
+      "dexsim-engine": "0.6.0rc2",
+      "mujoco": "3.15.0",
+      "mujoco-warp": "3.15.0",
+      "newton": "1.7.0",
+      "warp-lang": "1.17.0"
+    },
+    "prepared_reference_module_exact": true
+  },
+  "final_wheel": {
+    "sha256": "61a2363c64dbcb8bb934fdbd29950825f61b650cfa7110f708a649ea0d8a0d23",
+    "matched_runtime_files": 1197,
+    "prepared_reference_module_exact": true,
+    "matched_task_yaml": 291
+  },
+  "validation": {
+    "focused_passed": 281,
+    "focused_skipped": 7,
+    "package_and_context_selection_passed": 46,
+    "final_source_free_wheel_consumers": 4,
+    "architecture_passed": 54,
+    "counts_overlap": true,
+    "api_exports_documented": 5024,
+    "black": "26.10.1;black .",
+    "context": "passed"
+  },
+  "cold_resource_verification": {
+    "prepared": [
+      "/tmp/pr983-review-cold-resources/generated/assembly/FlexivRizon4SMenagerie/prepared_v4_parallel_jaw/rizon4s_robotiq2f85.urdf",
+      "/tmp/pr983-review-cold-resources/generated/assembly/FlexivRizon4SMenagerie/prepared_v4/rizon4s_robotiq2f85.urdf"
+    ],
+    "source_removed": true,
+    "mesh_manifest_licenses": "verified"
+  },
+  "preview": {
+    "seeds": [
+      30000,
+      30001,
+      30002
+    ],
+    "episodes": 3,
+    "successes": 3,
+    "width": 1280,
+    "height": 720,
+    "fps": 25,
+    "frames": 100,
+    "duration_seconds": 4.0,
+    "scope": "complete predeclared native RGB sequence; not a success-rate estimate"
+  },
+  "limitations": [
+    "single development geometry and training seed; no new Gear/Nut learning qualification",
+    "GPU physics is not bitwise deterministic; native solver warnings retained"
+  ],
+  "files": {
+    "source/evaluation.json": {
+      "bytes": 15442295,
+      "sha256": "e6a3906054ccc098fb677fb56015b34196ddde0cfe4f1619d90dc40d704669cc"
+    },
+    "source/runtime.log": {
+      "bytes": 64661,
+      "sha256": "e17ea804e088cc2bd124256989ec83f8f1255191e0aea75b03fda808fc4931a0"
+    },
+    "installed_wheel/evaluation.json": {
+      "bytes": 15441957,
+      "sha256": "29470cfbb8082c8790baf10718a54965baf72ba7c80834e10e4de6d1b0f4024f"
+    },
+    "installed_wheel/runtime.log": {
+      "bytes": 62448,
+      "sha256": "a0773e23c74e57c18d586365544eb49aab226c1385b7520b1b76899becb2c89b"
+    },
+    "earlier_interrupted_wheel/evaluation.json": {
+      "bytes": 15442917,
+      "sha256": "e6ae7412819ee9d5c0f8342a3278983952a80ed99de641899ff0ed1d0beff2a3"
+    },
+    "earlier_interrupted_wheel/runtime.log": {
+      "bytes": 67227,
+      "sha256": "cf44a5112ce768fa46f95d8806e4d3c2e19d2815691410b6d5b79907b0ea34e9"
+    },
+    "preview/preview.mp4": {
+      "bytes": 165171,
+      "sha256": "e4da0bcd1ffd67e6e15be46e383defaeb3279ab0e0f726105dfebbda97501385"
+    },
+    "preview/trace.json": {
+      "bytes": 218414,
+      "sha256": "d23addbd3e0ef03e3ef3ba3d0f8d1b743bf529d111c0c502fc5b2459678e1da8"
+    },
+    "preview/contact_sheet.png": {
+      "bytes": 272110,
+      "sha256": "978eca9a175200e8191b1b5a430d55d422df5a8d305026b912bac90ce18e5102"
+    },
+    "focused-complete.log": {
+      "bytes": 1559,
+      "sha256": "2d7107b78990a97d887bd39771fdd9854a6b1589cc305044265937783af04fc2"
+    },
+    "wheel-tests.log": {
+      "bytes": 1165,
+      "sha256": "c8b0ed701c894ec4c6244ac150293a0d4fc99fb8c62a1ea31f96a6a48d892e4c"
+    },
+    "wheel-final-tests.log": {
+      "bytes": 1154,
+      "sha256": "1dd8c9173ca1ee5a550ee3a6b9d1ad182f61de37aa85bcb0dc0bfced79941499"
+    },
+    "architecture-tests.log": {
+      "bytes": 789,
+      "sha256": "6b4e2f5d90adad53fdff8feb6fefa44ffcd45e5f16fb5eb0267616093e03880e"
+    },
+    "installed-wheel-exit-status.json": {
+      "bytes": 408,
+      "sha256": "c7c5e8ad990c0121e26f0145633c9e20dced8211cf877e635acc2beb25588767"
+    }
+  }
+}
