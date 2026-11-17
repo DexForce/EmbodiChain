@@ -37,6 +37,29 @@ from ._gym_context import GymHostContext
 __all__: list[str] = []
 
 
+def _save_partial(numeric, path: Path, step_dt: float) -> dict:
+    """Publish actual T+1 buffers for rejected or administratively cancelled work."""
+    arrays = {
+        "qpos": torch.stack(numeric["qpos"]).numpy(),
+        "timestamps": np.arange(len(numeric["qpos"])) * step_dt,
+    }
+    if numeric["actions"]:
+        arrays["actions"] = torch.stack(numeric["actions"]).numpy()
+    arrays.update(
+        {
+            "object_" + str(index): torch.stack(values).numpy()
+            for index, values in enumerate(numeric["objects"].values())
+        }
+    )
+    with path.open("wb") as stream:
+        np.savez_compressed(stream, **arrays)
+    return {
+        "path": path.name,
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "object_uids": list(numeric["objects"]),
+    }
+
+
 class GymEpisodeAssembler:
     """Convert frozen cohort buffers into canonical accepted or rejected evidence."""
 
@@ -73,27 +96,9 @@ class GymEpisodeAssembler:
                     record["source_execution_reports"] = dict(
                         services[row].tracer.execution_reports
                     )
-                partial = records[row]
-                path = directory / "rejected.npz"
-                arrays = {
-                    "qpos": torch.stack(partial["qpos"]).numpy(),
-                    "timestamps": np.arange(len(partial["qpos"])) * env.step_dt,
-                }
-                if partial["actions"]:
-                    arrays["actions"] = torch.stack(partial["actions"]).numpy()
-                arrays.update(
-                    {
-                        "object_" + str(index): torch.stack(values).numpy()
-                        for index, values in enumerate(partial["objects"].values())
-                    }
+                record["partial_rollout"] = _save_partial(
+                    records[row], directory / "rejected.npz", env.step_dt
                 )
-                with path.open("wb") as stream:
-                    np.savez_compressed(stream, **arrays)
-                record["partial_rollout"] = {
-                    "path": path.name,
-                    "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-                    "object_uids": list(partial["objects"]),
-                }
                 _atomic_json(directory / "attempt.json", record)
                 episodes[row] = None
                 continue

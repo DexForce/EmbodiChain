@@ -68,6 +68,16 @@ class _WorkloadCursor(_Cursor):
             try:
                 action = super().next()
                 if action is not None:
+                    if (
+                        self.rejection is not None or self.emergency is not None
+                    ) and self.last_command is not None:
+                        # The safe-stop value is new; its active invocation and
+                        # phase still belong to the command being interrupted.
+                        # Phase-aware physical validators must see that context.
+                        action = ControllerAction(
+                            action.value,
+                            metadata={**self.last_command.metadata, **action.metadata},
+                        )
                     self.last_command = action
                 if self.finished and self.rejection is not None:
                     self.accepted, self.reason = False, self.rejection

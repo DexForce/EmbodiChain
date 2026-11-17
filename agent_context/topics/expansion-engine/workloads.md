@@ -59,6 +59,22 @@ counter so another row cannot advance outside the World-owner loop.
 Frozen groups export through one bounded writer thread without World access.
 Fresh output is required; this facade does not resume interrupted collection.
 
+`WorkloadExecutionCfg.reuse_idle_rows` optionally lends unused physical rows to
+unfinished groups; capacity remains exactly W times B. Queued groups keep their
+normal lane priority. Healthy candidates fill only their remaining quota. Each
+observed unsuccessful attempt permits one additional competing candidate, bounded
+by the existing attempt, admission-time, settling, step and pending-byte limits.
+The low-level flag defaults false; the native Task Program job enables it by
+default and accepts `engine.reuse_idle_rows: false` to retain fixed lanes.
+
+This mode requires a source `cancel(result, *, reason)` port. Only a confirmed
+receipt fills quota. Remaining live candidates use the ordinary safe-stop
+handshake; unstarted warming rows are cancelled without fabricated commands.
+Already completed peers retain their canonical program acceptance in cancelled
+diagnostics; they do not become physical failures or successful persisted rows.
+The native source retains measured T+1 partial buffers and plan traces, then
+releases the native assignment. Cancelled rows earn no receipt or quota credit.
+
 `WorkloadSource.prepare` runs inside the selected-row `episode_prepare` reset
 callback. It must not step physics, alter an active peer or mutate World-wide
 appearance/resources. Incompatible topology or shared resources require a
@@ -92,6 +108,13 @@ control indices. It assembles the original source evidence and calls
 count. None is a rejection, never a placeholder success. Unavailable or ambiguous
 writes retain the ordinary native stage/reconciliation contract and stop the
 rolling owner from issuing unsupported quota credit.
+`ExpansionSession.take_ready(speculative=True)` may reserve competing running
+rows while quota is unfilled. Required physical checks are unchanged, and
+pending writes plus confirmed commits can never exceed the original target.
+`ExpansionEngine.cancel_row` cannot release pending persistence; its existing
+reconciliation path still owns uncertain or failed writes. Safe-stop controller
+values retain the interrupted invocation/phase metadata for ordinary physical
+validators, while their cancellation kind and reason remain explicit.
 
 Frozen groups can call `export_expansion_episodes` from bounded writer threads.
 The callback must not retain mutable live state or operate on the World.

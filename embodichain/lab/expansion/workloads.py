@@ -93,6 +93,10 @@ class WorkloadExecutionCfg:
         settling_steps: Minimum physical substeps before a row becomes active.
         seed: Base seed; each candidate owns a stream keyed by local ordinal.
         batch_planning: Cooperatively merge compatible native motion/solver calls.
+        reuse_idle_rows: Let unfinished groups borrow otherwise idle rows. A
+            rejected attempt permits one additional competing candidate, bounded
+            by physical capacity and the original admission budgets. Sources must
+            implement ``cancel(result, *, reason)`` without returning a receipt.
     """
 
     workload_count: int = 1
@@ -101,6 +105,7 @@ class WorkloadExecutionCfg:
     settling_steps: int = 5
     seed: int = 0
     batch_planning: bool = True
+    reuse_idle_rows: bool = False
 
     def __post_init__(self) -> None:
         for name in ("workload_count", "batch_size", "max_steps"):
@@ -111,6 +116,8 @@ class WorkloadExecutionCfg:
                 raise ValueError(f"{name} must be a nonnegative integer")
         if type(self.batch_planning) is not bool:
             raise TypeError("batch_planning must be a bool")
+        if type(self.reuse_idle_rows) is not bool:
+            raise TypeError("reuse_idle_rows must be a bool")
 
     @property
     def num_envs(self) -> int:
@@ -160,6 +167,9 @@ class WorkloadSource(Protocol):
     after all required checks pass and native persistence confirms the write.
     Callbacks must not advance physics or create another World. A completed
     group's frozen evidence can be exported independently of the live World.
+    Idle-row reuse additionally requires ``cancel(result, *, reason) -> None``.
+    That port retires uncommitted native work and preserves the canonical
+    program result; administrative cancellation never earns quota.
     """
 
     def prepare(self, assignments: tuple[WorkloadAssignment, ...]) -> None:
@@ -239,6 +249,8 @@ class WorkloadProgramExecutor:
         if len(self.workloads) != len(workloads) or cfg.workload_count > len(workloads):
             raise ValueError("workload IDs must be unique and cover every active lane")
         self.cfg, self.source = WorkloadExecutionCfg(**cfg.to_dict()), source
+        if cfg.reuse_idle_rows and not callable(getattr(source, "cancel", None)):
+            raise TypeError("idle-row reuse requires a native source cancellation port")
         self.checkpoint, self.on_workload_done = checkpoint, on_workload_done
         self.owner = get_ident()
         from embodichain.lab.sim import SimulationManager
@@ -279,6 +291,8 @@ class WorkloadProgramExecutor:
         self.hold = self.env.robot.get_qpos(target=True).clone()
         self.observation = None
         self.planning_stats: dict[str, int] = {}
+        self.reused_rows = 0
+        self.cancelled = {name: 0 for name in self.workloads}
         self.torch = torch
 
     @property
@@ -349,6 +363,36 @@ class WorkloadProgramExecutor:
                 self.started_at.setdefault(name, time.monotonic())
                 self.warming[row] = {"assignment": assignment, "settled": 0}
                 added.append(assignment)
+        if self.cfg.reuse_idle_rows:
+            for row in range(self.cfg.num_envs):
+                if row in self.live or row in self.warming:
+                    continue
+                candidates = []
+                for name in dict.fromkeys(self.lanes):
+                    if name is None or not self._eligible(name):
+                        continue
+                    counts = self.counts[name]
+                    inflight = self._inflight(name)
+                    failed = counts["attempts"] - counts["committed"] - inflight
+                    demand = (
+                        self.workloads[name].target_episodes
+                        - counts["committed"]
+                        + failed
+                    )
+                    if inflight < demand:
+                        candidates.append((inflight, counts["attempts"], name))
+                if not candidates:
+                    break
+                name = min(candidates)[2]
+                counts = self.counts[name]
+                assignment = WorkloadAssignment(
+                    name, counts["attempts"], row, self.cfg.seed + counts["attempts"]
+                )
+                counts["attempts"] += 1
+                self.started_at.setdefault(name, time.monotonic())
+                self.warming[row] = {"assignment": assignment, "settled": 0}
+                added.append(assignment)
+                self.reused_rows += 1
         if not added:
             return
         self.refills += bool(self.live)
@@ -439,9 +483,15 @@ class WorkloadProgramExecutor:
             (cursor.reason,),
             (tuple(cursor.results),),
         )
-        receipt = self.source.complete(
-            WorkloadRowResult(assignment, result, state["start"], end)
-        )
+        row_result = WorkloadRowResult(assignment, result, state["start"], end)
+        cancelled = state.get("cancel_reason")
+        if cancelled:
+            if getattr(self.source, "cancel")(row_result, reason=cancelled) is not None:
+                raise ValueError("cancelled work cannot earn a receipt")
+            self.cancelled[assignment.workload_id] += 1
+            receipt = None
+        else:
+            receipt = self.source.complete(row_result)
         if receipt is not None:
             if (
                 not isinstance(receipt, CommitReceipt)
@@ -463,6 +513,41 @@ class WorkloadProgramExecutor:
             self.counts[assignment.workload_id]["committed"] += 1
         cursor.close()
         del self.live[row]
+        name = assignment.workload_id
+        if (
+            receipt is not None
+            and self.cfg.reuse_idle_rows
+            and self.counts[name]["committed"] == self.workloads[name].target_episodes
+        ):
+            self._cancel_peers(name)
+
+    def _cancel_peers(self, name: str) -> None:
+        from .program import ProgramBatchResult
+
+        reason = "quota_fulfilled_by_peer"
+        for state in self.live.values():
+            if state["assignment"].workload_id == name and not state.get(
+                "cancel_reason"
+            ):
+                state["cancel_reason"] = reason
+                cursor = state["cursor"]
+                # An existing rejection/stop already yielded its next real
+                # hold during gather. Do not resume and acknowledge it twice.
+                state["replace_command"] = (
+                    not cursor.finished
+                    and cursor.rejection is None
+                    and cursor.emergency is None
+                )
+                state["cursor"].abort(reason)
+        for row, state in tuple(self.warming.items()):
+            if state["assignment"].workload_id != name:
+                continue
+            outcome = ProgramBatchResult((row,), (0,), (False,), (reason,), ((),))
+            result = WorkloadRowResult(state["assignment"], outcome, None, None)
+            if getattr(self.source, "cancel")(result, reason=reason) is not None:
+                raise ValueError("cancelled preparation cannot earn a receipt")
+            self.cancelled[name] += 1
+            del self.warming[row]
 
     def run(self) -> Mapping[str, object]:
         """Collect until every group meets quota or exhausts its original budget.
@@ -525,6 +610,13 @@ class WorkloadProgramExecutor:
                     )
                     for row in tuple(commands):
                         cursor = self.live[row]["cursor"]
+                        if self.live[row].pop("replace_command", False):
+                            replacement = cursor.next()
+                            if replacement is None:
+                                del commands[row]
+                                self._finish(row)
+                                continue
+                            commands[row] = replacement
                         if (
                             cursor.length >= self.cfg.max_steps
                             and cursor.emergency is None
@@ -644,6 +736,8 @@ class WorkloadProgramExecutor:
                     self.counts[name]["committed"] == spec.target_episodes
                     for name, spec in self.workloads.items()
                 ),
+                "reused_rows": self.reused_rows,
+                "cancelled": dict(self.cancelled),
                 "num_envs": self.cfg.num_envs,
                 "workload_count": self.cfg.workload_count,
                 "batch_size": self.cfg.batch_size,

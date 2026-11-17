@@ -106,10 +106,13 @@ def _preview_snapshot(env: Any) -> dict[str, object]:
 class _GymWorkloadSource:
     """Compose existing native admission, frame assembly and persistence owners."""
 
-    def __init__(self, owner: Any, groups: Mapping[str, Any]) -> None:
+    def __init__(
+        self, owner: Any, groups: Mapping[str, Any], *, reuse_idle_rows: bool = False
+    ) -> None:
         from ._gym_frames import GymFrameCollector
 
         self.owner, self.groups, self.env = owner, groups, owner.env
+        self.reuse_idle_rows = reuse_idle_rows
         self.collector = GymFrameCollector(owner._context, {})
         self.active: dict[int, dict[str, Any]] = {}
         self.activation_snapshot = None
@@ -299,7 +302,7 @@ class _GymWorkloadSource:
             ctx.compatibility.key,
             row,
         )
-        native = engine.admit_row(item)
+        native = engine.admit_row(item, speculative=self.reuse_idle_rows)
         if native is None:
             ctx.journal.update(request, status="initial_rejected")
             return None
@@ -441,6 +444,56 @@ class _GymWorkloadSource:
                     },
                 )
             return group["engine"].complete_row(state["native"], episode)
+        finally:
+            state["adapter"].close()
+            self.collector.discard(row)
+
+    def cancel(self, result: WorkloadRowResult, *, reason: str) -> None:
+        """Retire competing work without changing its canonical program outcome."""
+        from ._gym_episode import _save_partial
+
+        row = result.assignment.env_id
+        state = self.active.pop(row, None)
+        group = self.groups[result.assignment.workload_id]
+        ctx = group["host"]._context
+        request = ctx.requests[row]
+        record = {
+            "status": "cancelled",
+            "reason": reason,
+            "program_accepted": result.program.accepted[0],
+            "program_reason": result.program.reasons[0],
+            "program_segments": result.program.segments[0],
+            "steps": result.program.lengths[0],
+            "world_control_start": result.world_control_start,
+            "world_control_end": result.world_control_end,
+        }
+        if state is None:
+            ctx.journal.update(request, **record)
+            return
+        try:
+            group["engine"].cancel_row(state["native"], reason=reason)
+            measured = (
+                None
+                if self.owner.collision is None
+                else self.owner.collision.results.get(row)
+            )
+            if measured is not None:
+                record["measured_collision"] = {
+                    "status": measured.status,
+                    "reason": measured.reason,
+                }
+            if state["factory"] is not None:
+                record["expansion"] = [
+                    r.to_metadata() for r in state["factory"].records
+                ]
+            record["partial_rollout"] = _save_partial(
+                self.collector.records[row],
+                request.directory / "cancelled.npz",
+                self.env.step_dt,
+            )
+            if row in self.collector.spools:
+                record["media_manifest"] = str(self.collector.spools[row].finish())
+            ctx.journal.update(request, **record)
         finally:
             state["adapter"].close()
             self.collector.discard(row)
@@ -804,7 +857,9 @@ def run_gym_expansion_workloads(
                 "admitted_at": admitted_at,
             }
             journal.stage("collection", "running")
-        source = _GymWorkloadSource(owner, groups)
+        source = _GymWorkloadSource(
+            owner, groups, reuse_idle_rows=execution.reuse_idle_rows
+        )
         specs = tuple(
             ExpansionWorkloadCfg(
                 workload_id=w.workload_id,

@@ -156,6 +156,12 @@ Compatible fixed-grid planning and pure solver requests can be cooperatively
 merged on the owner thread. Scoped planning budgets retain per-row charges;
 unsupported requests keep native execution. Export callbacks receive frozen
 group evidence and never access the World. See [rolling execution](workloads.md).
+Optional idle-row reuse keeps the same W×B capacity while competing retry
+candidates use otherwise idle slots. Native write reservations still enforce
+the original quota; peers are cancelled only after a confirmed receipt, using
+measured partial evidence and the bridge's ordinary stop handshake. The low-level
+source must supply an explicit cancellation port. Native Task Program jobs enable
+this policy by default without adding processes or Worlds.
 
 Native numerical evidence has T submitted actions and T+1 measured states. It includes
 all represented dynamic scene entities, source/action semantics, physical parameters

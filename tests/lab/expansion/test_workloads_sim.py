@@ -588,6 +588,215 @@ def _facade_probe(output: str) -> None:
     assert not SimulationManager._instances
 
 
+def _reuse_probe(output: str) -> None:
+    """A real rejected installation opens reuse, then only one receipt wins."""
+    import json
+    import numpy as np
+    import torch
+    from embodichain.lab.expansion import (
+        ArtifactEpisodeSink,
+        ExpansionRunCfg,
+        GymExpansionHostExtensions,
+        GymExpansionWorkload,
+        WorkloadExecutionCfg,
+        run_gym_expansion_workloads,
+        load_expansion_episode,
+    )
+    from embodichain.lab.expansion.collision import _MeasuredCollision
+    from embodichain.lab.sim.scene.expansion import SceneVariant
+    from embodichain.lab.sim.scene.feasibility import (
+        JointSceneCandidate,
+        RobotDeploymentCandidate,
+    )
+    from embodichain.lab.sim import SimulationManager
+    from embodichain.lab.expansion._planning_batches import PlanningBatches
+    from embodichain.utils.utility import load_config
+    import yaml
+
+    torch.set_num_threads(1)
+    root = Path(__file__).resolve().parents[3]
+    task = (
+        root
+        / "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place"
+    )
+    path = Path(output)
+    path.mkdir(exist_ok=True)
+    raw = load_config(task / "task.ur5.yaml")
+
+    def absolute(value, base):
+        if isinstance(value, dict):
+            return {k: absolute(v, base) for k, v in value.items()}
+        if isinstance(value, list):
+            return [absolute(v, base) for v in value]
+        if isinstance(value, str) and value.endswith((".yaml", ".yml", ".json")):
+            return str((base / value).resolve())
+        return value
+
+    raw = absolute(raw, task)
+    program = yaml.safe_load((task / "task_program/program.yaml").read_text())
+    program["program"]["repeat"]["count"] = 1
+    program_path = path / "program.yaml"
+    program_path.write_text(yaml.safe_dump(program))
+    raw["task_program"]["program"] = str(program_path)
+    deployment = path / "deployment.yaml"
+    deployment.write_text(yaml.safe_dump(raw))
+
+    def scenes(env):
+        nominal = env.robot.get_local_pose(to_matrix=True)[0].cpu().tolist()
+
+        class Source:
+            def candidate(self, ordinal):
+                pose = np.array(nominal)
+                if ordinal == 0:
+                    pose[2, 3] -= 0.6
+                elif ordinal == 2:
+                    pose[0, 3] += 0.02
+                return JointSceneCandidate(
+                    "retry",
+                    SceneVariant("retry", 2, ordinal, ()),
+                    RobotDeploymentCandidate({env.robot.uid: pose.tolist()}),
+                    "installation",
+                    (),
+                )
+
+        return Source()
+
+    cfg = ExpansionRunCfg(
+        deployment=str(deployment),
+        output_dir=str(path / "group"),
+        batch_size=1,
+        target_episodes=1,
+        max_attempts=6,
+        max_steps=2500,
+        max_wall_time_s=180,
+        settling_steps=5,
+        seed=2,
+    )
+    workload = GymExpansionWorkload(
+        "retry",
+        cfg,
+        {
+            "job_id": "retry",
+            "semantic_id": "retry",
+            "execution_id": "retry",
+            "recipe_revision": "v1",
+            "input_files": {},
+            "runtime_versions": {},
+        },
+        {},
+        GymExpansionHostExtensions(scene_source_factory=scenes),
+    )
+    original_gather = PlanningBatches.gather
+    boundary = {"injected": False, "executed": False}
+
+    def gather(broker, cursors):
+        actions = original_gather(broker, cursors)
+        if not boundary["injected"] and any(
+            c.finished and c.accepted for c in cursors.values()
+        ):
+            for row, cursor in cursors.items():
+                if row not in actions or cursor.finished:
+                    continue
+                # Exercise the real host-stop path before quota completion;
+                # the controlled administrative stop is not fake physics.
+                cursor.abort("test_stop_before_peer_quota")
+                hold = cursor.next()
+                assert hold is not None
+                actions[row] = hold
+                boundary.update(
+                    injected=True,
+                    row=row,
+                    cursor=cursor,
+                    clock=cursor.bridge.clock.step_index,
+                    hold=hold,
+                )
+                break
+        return actions
+
+    def validator(env, output):
+        original_step = env.step
+
+        def step(action, *args, **kwargs):
+            pending = boundary["injected"] and not boundary["executed"]
+            if pending:
+                assert boundary["cursor"].bridge.clock.step_index == boundary["clock"]
+                actual = (
+                    action.value
+                    if isinstance(action.value, torch.Tensor)
+                    else action.value["qpos"]
+                )
+                expected = boundary["hold"].value
+                expected = (
+                    expected if isinstance(expected, torch.Tensor) else expected["qpos"]
+                )
+                torch.testing.assert_close(
+                    actual[boundary["row"]], expected[0], rtol=0, atol=0
+                )
+            result = original_step(action, *args, **kwargs)
+            if pending:
+                boundary["executed"] = True
+            return result
+
+        env.step = step
+        return _MeasuredCollision(
+            env,
+            str(root / "examples/expansion/scene_robot_feasibility/search.ur5.yaml"),
+            output,
+        )
+
+    PlanningBatches.gather = gather
+    try:
+        result = run_gym_expansion_workloads(
+            (workload,),
+            WorkloadExecutionCfg(
+                workload_count=1,
+                batch_size=2,
+                max_steps=2500,
+                settling_steps=5,
+                seed=2,
+                reuse_idle_rows=True,
+            ),
+            extensions=GymExpansionHostExtensions(validator_factory=validator),
+            output_dir=path / "execution",
+        )
+    finally:
+        PlanningBatches.gather = original_gather
+    assert boundary["injected"] and boundary["executed"]
+    assert result["complete"] and result["reused_rows"] > 0, result
+    assert result["counts"]["retry"]["committed"] == 1
+    assert result["cancelled"]["retry"] > 0
+    assert result["num_envs"] == 2 and result["world"]["world_count"] == 1
+    receipts = ArtifactEpisodeSink(path / "group").inspect()
+    assert len(receipts) == 1
+    episode = load_expansion_episode(receipts[0].storage_id)
+    assert (
+        episode.validation.accepted
+        and len(episode.timestamps) == len(episode.actions) + 1
+    )
+    records = [
+        json.loads(p.read_text())
+        for p in (path / "group/attempts").glob("*/attempt.json")
+    ]
+    assert next(r for r in records if r["ordinal"] == 0)["status"] in {
+        "initial_rejected",
+        "rejected",
+    }
+    cancelled = [
+        p
+        for p in (path / "group/attempts").glob("*/attempt.json")
+        if json.loads(p.read_text())["status"] == "cancelled"
+    ]
+    assert cancelled
+    for entry in cancelled:
+        record = json.loads(entry.read_text())
+        assert record["reason"] == "quota_fulfilled_by_peer"
+        if "partial_rollout" in record:
+            with np.load(entry.parent / record["partial_rollout"]["path"]) as data:
+                assert len(data["qpos"]) == record["steps"] + 1
+                assert len(data.get("actions", [])) == record["steps"]
+    assert not SimulationManager._instances
+
+
 def _declarative_probe(output: str) -> None:
     import json
     from embodichain.lab.expansion import (
@@ -619,7 +828,7 @@ def _declarative_probe(output: str) -> None:
 
 
 @pytest.mark.requires_sim
-@pytest.mark.parametrize("mode", ["executor", "facade", "declarative"])
+@pytest.mark.parametrize("mode", ["executor", "facade", "declarative", "reuse"])
 def test_rolling_workloads_keep_native_receipts_and_world_boundaries(tmp_path, mode):
     result = subprocess.run(
         [sys.executable, __file__, str(tmp_path), mode],
@@ -633,6 +842,9 @@ def test_rolling_workloads_keep_native_receipts_and_world_boundaries(tmp_path, m
 
 
 if __name__ == "__main__":
-    {"executor": _probe, "facade": _facade_probe, "declarative": _declarative_probe}[
-        sys.argv[2] if len(sys.argv) > 2 else "executor"
-    ](sys.argv[1])
+    {
+        "executor": _probe,
+        "facade": _facade_probe,
+        "declarative": _declarative_probe,
+        "reuse": _reuse_probe,
+    }[sys.argv[2] if len(sys.argv) > 2 else "executor"](sys.argv[1])

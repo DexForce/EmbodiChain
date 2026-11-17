@@ -100,6 +100,7 @@ def load_task_program_expansion(path: str | Path) -> dict[str, Any]:
         "grasp_nms_chunk_size",
         "collection_renderer",
         "collision_backend",
+        "reuse_idle_rows",
     }:
         raise ValueError("Unknown or missing expansion engine settings")
     engine.setdefault("cpu_threads", 1)
@@ -116,6 +117,8 @@ def load_task_program_expansion(path: str | Path) -> dict[str, Any]:
     engine.setdefault("grasp_nms_chunk_size", 2048)
     engine.setdefault("collection_renderer", "auto")
     engine.setdefault("collision_backend", "newton")
+    if "reuse_idle_rows" in engine and type(engine["reuse_idle_rows"]) is not bool:
+        raise ValueError("engine.reuse_idle_rows must be a boolean")
     if engine["collection_renderer"] not in ("auto", "rt", "fast-rt", "hybrid"):
         raise ValueError(
             "engine.collection_renderer must be auto, rt, fast-rt or hybrid"

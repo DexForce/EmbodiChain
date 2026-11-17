@@ -480,12 +480,16 @@ class ExpansionEngine:
                 break
         return self._snapshot()
 
-    def admit_row(self, item: PreparedEpisodeWorkItem) -> ExpansionAssignment | None:
+    def admit_row(
+        self, item: PreparedEpisodeWorkItem, *, speculative: bool = False
+    ) -> ExpansionAssignment | None:
         """Admit one independently prepared physical row through the native session.
 
         Args:
             item: Host-owned candidate proposed in this session, bound to its
                 actual World row. Cohort collection remains unchanged.
+            speculative: Permit a competing rollout while quota is unfilled;
+                persistence still reserves at most the original target count.
 
         Returns:
             Assigned episode/commit identity, or None for rejected preparation
@@ -494,6 +498,8 @@ class ExpansionEngine:
         """
         if self._configured_cfg is not None or self._failed:
             raise RuntimeError("row admission requires a healthy custom engine")
+        if type(speculative) is not bool:
+            raise TypeError("speculative must be a bool")
         if not isinstance(item, PreparedEpisodeWorkItem):
             raise TypeError("rolling admission requires PreparedEpisodeWorkItem")
         if (
@@ -517,6 +523,7 @@ class ExpansionEngine:
                 identity.initial_state_id,
                 episode_byte_budget=self.cfg.episode_byte_budget,
                 candidate_id=identity.candidate_id,
+                speculative=speculative,
             )
             if ready is None:
                 self.session.release(identity, reason="row_admission_backpressure")
@@ -595,6 +602,31 @@ class ExpansionEngine:
         del self._row_assignments[row]
         self._started_rows.discard(row)
         return receipt
+
+    def cancel_row(self, assignment: ExpansionAssignment, *, reason: str) -> None:
+        """Retire an uncommitted row without a receipt or fabricated rejection.
+
+        Args:
+            assignment: Exact active identity returned by :meth:`admit_row`.
+            reason: Explicit cancellation reason retained in native diagnostics.
+
+        Raises:
+            ValueError: For an inactive row or work with pending persistence.
+        """
+        row = assignment.env_id
+        if self._row_assignments.get(row) != assignment:
+            raise ValueError("cancellation does not identify an active rolling row")
+        if (
+            assignment.commit_id in self._pending
+            or assignment.commit_id in self._submitted
+        ):
+            raise ValueError(
+                "pending persistence must be reconciled before cancellation"
+            )
+        self.session.release(assignment.item.spec.identity, reason=reason)
+        self._queue.remove(assignment.item)
+        del self._row_assignments[row]
+        self._started_rows.discard(row)
 
     def run_source(self, source: ExpansionRecipeSource) -> Mapping[str, object]:
         """Drive bounded source batches through the same admission/execution/writer core.
