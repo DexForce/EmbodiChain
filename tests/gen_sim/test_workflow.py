@@ -1120,8 +1120,12 @@ def _node(node_id: str, call: dict, depends_on: list[str], **semantic) -> dict:
 
 
 @pytest.mark.parametrize("configured", [False, True])
+@pytest.mark.parametrize("clearance", [0.0, 0.02])
 def test_relative_placement_validators_follow_the_selected_lowerer(
-    run_cfg: _RunCfg, monkeypatch: pytest.MonkeyPatch, configured: bool
+    run_cfg: _RunCfg,
+    monkeypatch: pytest.MonkeyPatch,
+    configured: bool,
+    clearance: float,
 ) -> None:
     instruction = "Put the cube right of the table"
     semantic = dict(
@@ -1166,7 +1170,7 @@ def test_relative_placement_validators_follow_the_selected_lowerer(
         **{
             **run_cfg.to_dict(),
             "instruction": instruction,
-            "binding": {"runtime_services": services},
+            "binding": {"runtime_services": services, "release_clearance": clearance},
         }
     )
 
@@ -1184,7 +1188,13 @@ def test_relative_placement_validators_follow_the_selected_lowerer(
         assert validators == []
     else:
         (validator,) = validators
-        assert lowerer["routes"][0]["world_displacement"] == validator["displacement"]
+        # The route is the release pose; acceptance still measures the resting
+        # landing pose. Explicit zero clearance retains contact placement.
+        landing = validator["displacement"]
+        release = lowerer["routes"][0]["world_displacement"]
+        assert release[:2] == landing[:2]
+        assert landing[2] == pytest.approx(0.005)
+        assert release[2] == pytest.approx(0.005 + clearance)
 
 
 def test_held_upright_without_reference_validates_its_terminal_pose(
@@ -1923,7 +1933,7 @@ def test_legacy_configured_coordinated_target_survives_binding(run_cfg, monkeypa
     route = dict(
         object_id="source", target_id="tray_target", world_displacement=[0.1, 0.0, 0.0]
     )
-    run_cfg.binding = {
+    binding = {
         "runtime_services": {
             "registered_semantic_lowerers": [
                 dict(kind="coordinated_transport", routes=[route])
@@ -1937,6 +1947,7 @@ def test_legacy_configured_coordinated_target_survives_binding(run_cfg, monkeypa
             }
         },
     }
+    run_cfg = _RunCfg(**{**run_cfg.to_dict(), "binding": binding})
     run_cfg.output.mkdir()
     with _services(step=step, plan=proposed) as services:
         task = plan_image_task(
