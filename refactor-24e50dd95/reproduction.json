@@ -1,0 +1,400 @@
+{
+  "schema_version": 1,
+  "description": "Existing frozen Peg replay after shared-compute/resource extraction and task functor/YAML refactor. No training or model selection.",
+  "code_revision": "24e50dd95553f292982ddc06bdea56ea5d8aae65",
+  "baseline_revision": "3a97f8c311933318ede01d626ef067485c8c1594",
+  "checkpoint_sha256": "42dfb6961c7a6e4ea0dd728ee072e010599746bc05ee104163284cb47863070f",
+  "original_model_artifact_commit": "a9869001f1ad961f5496ca0c7f6aa4aeeeae6029",
+  "runtime": {
+    "python": "3.12.14",
+    "torch": "2.11.0+cu128",
+    "mujoco": "3.15.0",
+    "mujoco_warp": "3.15.0",
+    "newton": "1.7.0",
+    "warp_lang": "1.17.0",
+    "dexsim_engine": "0.6.0rc2",
+    "dependencies_unmodified": true,
+    "gpu": "NVIDIA RTX PRO5000 72GB Blackwell"
+  },
+  "reports": {
+    "source_full": {
+      "episodes": 8192,
+      "successes": 7940,
+      "terminal_outcome_successes": 7940,
+      "terminal_reports_match_metrics": true,
+      "metrics": {
+        "eval/avg_length": 47.25048828125,
+        "eval/avg_reward": 1.943359375,
+        "eval/completed_episodes": 8192.0,
+        "eval/episodes_per_env_max": 8.0,
+        "eval/episodes_per_env_min": 8.0,
+        "eval/metrics/success.assembly.captured": 0.9727783203125,
+        "eval/metrics/success.assembly.depth": 0.01691822123507336,
+        "eval/metrics/success.assembly.grasped": 0.9764404296875,
+        "eval/metrics/success.assembly.penetration": 3.9938704573747256e-06,
+        "eval/metrics/success.assembly.radial_error": 0.0019245336063540286,
+        "eval/metrics/success.assembly.tilt": 0.03338160132456025,
+        "eval/success_ci95_high": 0.9727630901602484,
+        "eval/success_ci95_low": 0.9652736005966067,
+        "eval/success_rate": 0.96923828125,
+        "eval/success_samples": 8192.0
+      },
+      "inputs": {
+        "checkpoint": {
+          "path": "/tmp/configured-assembly-qualification/delivery/configured-peg/checkpoints/configured_current_peg_insertion_seed0_best_step_39321600.pt",
+          "requested": "best",
+          "selected": "best"
+        },
+        "configs": {
+          "gym": "/tmp/configured-assembly-qualification/delivery/configured-peg/configs/gym.yaml",
+          "train": "/tmp/configured-assembly-qualification/delivery/configured-peg/configs/train.yaml"
+        },
+        "device": "cuda:1",
+        "embodichain_version": "0.3.2",
+        "episode_allocation": "balanced",
+        "num_envs": 1024,
+        "run": "/tmp/configured-assembly-qualification/delivery/configured-peg",
+        "seed": 20000,
+        "task_id": "BlindPegInsertionRL-StudyDefaultAssets-v1"
+      },
+      "raw_report": "source_full/evaluation.json",
+      "sha256": "e963bffc3c3d4165df99a9395329bc7cfe8ba315cdf148d221e46fd0d287ce1a"
+    },
+    "installed_wheel_full": {
+      "episodes": 8192,
+      "successes": 7939,
+      "terminal_outcome_successes": 7939,
+      "terminal_reports_match_metrics": true,
+      "metrics": {
+        "eval/avg_length": 47.4306640625,
+        "eval/avg_reward": 1.9427490234375,
+        "eval/completed_episodes": 8192.0,
+        "eval/episodes_per_env_max": 8.0,
+        "eval/episodes_per_env_min": 8.0,
+        "eval/metrics/success.assembly.captured": 0.972412109375,
+        "eval/metrics/success.assembly.depth": 0.016791565353287297,
+        "eval/metrics/success.assembly.grasped": 0.978271484375,
+        "eval/metrics/success.assembly.penetration": 4.0842999066862215e-06,
+        "eval/metrics/success.assembly.radial_error": 0.0018950626098095391,
+        "eval/metrics/success.assembly.tilt": 0.03308236880699056,
+        "eval/success_ci95_high": 0.9726482353468967,
+        "eval/success_ci95_low": 0.9651444292156929,
+        "eval/success_rate": 0.9691162109375,
+        "eval/success_samples": 8192.0
+      },
+      "inputs": {
+        "checkpoint": {
+          "path": "/tmp/configured-assembly-qualification/delivery/configured-peg/checkpoints/configured_current_peg_insertion_seed0_best_step_39321600.pt",
+          "requested": "best",
+          "selected": "best"
+        },
+        "configs": {
+          "gym": "/tmp/configured-assembly-qualification/delivery/configured-peg/configs/gym.yaml",
+          "train": "/tmp/configured-assembly-qualification/delivery/configured-peg/configs/train.yaml"
+        },
+        "device": "cuda:3",
+        "embodichain_version": "0.3.2",
+        "episode_allocation": "balanced",
+        "num_envs": 1024,
+        "run": "/tmp/configured-assembly-qualification/delivery/configured-peg",
+        "seed": 20000,
+        "task_id": "BlindPegInsertionRL-StudyDefaultAssets-v1"
+      },
+      "raw_report": "installed_wheel_full/evaluation.json",
+      "sha256": "66520db72471352b0e96a7844bced202d6f50bf0ceba7b9bb163f142d4e92499"
+    }
+  },
+  "before_report_fix": {
+    "code_revision": "1b5faeee7889a035f74635632f35c6ccc03cc2ab",
+    "issue": "Unrecorded automatic row reset retained the first sealed terminal report; aggregate info.success statistics were unaffected. These raw terminal records are stale and are not final per-episode evidence. All executions retained.",
+    "reports": {
+      "before_report_fix_source_full": {
+        "episodes": 8192,
+        "successes": 7932,
+        "terminal_outcome_successes": 7864,
+        "terminal_reports_match_metrics": false,
+        "metrics": {
+          "eval/avg_length": 46.9501953125,
+          "eval/avg_reward": 1.941650390625,
+          "eval/completed_episodes": 8192.0,
+          "eval/episodes_per_env_max": 8.0,
+          "eval/episodes_per_env_min": 8.0,
+          "eval/metrics/success.assembly.captured": 0.972900390625,
+          "eval/metrics/success.assembly.depth": 0.017028949858058695,
+          "eval/metrics/success.assembly.grasped": 0.9749755859375,
+          "eval/metrics/success.assembly.penetration": 4.148210953535837e-06,
+          "eval/metrics/success.assembly.radial_error": 0.0020644052518665745,
+          "eval/metrics/success.assembly.tilt": 0.03499174870908206,
+          "eval/success_ci95_high": 0.9718438228515878,
+          "eval/success_ci95_low": 0.9642406583511427,
+          "eval/success_rate": 0.96826171875,
+          "eval/success_samples": 8192.0
+        },
+        "inputs": {
+          "checkpoint": {
+            "path": "/tmp/configured-assembly-qualification/delivery/configured-peg/checkpoints/configured_current_peg_insertion_seed0_best_step_39321600.pt",
+            "requested": "best",
+            "selected": "best"
+          },
+          "configs": {
+            "gym": "/tmp/configured-assembly-qualification/delivery/configured-peg/configs/gym.yaml",
+            "train": "/tmp/configured-assembly-qualification/delivery/configured-peg/configs/train.yaml"
+          },
+          "device": "cuda:1",
+          "embodichain_version": "0.3.2",
+          "episode_allocation": "balanced",
+          "num_envs": 1024,
+          "run": "/tmp/configured-assembly-qualification/delivery/configured-peg",
+          "seed": 20000,
+          "task_id": "BlindPegInsertionRL-StudyDefaultAssets-v1"
+        },
+        "raw_report": "before_report_fix_source_full/evaluation.json",
+        "sha256": "97428f97ec659fb93394db362d1b0d081dd674675e5ef16a457674c826ad6878"
+      },
+      "before_report_fix_wheel_full": {
+        "episodes": 8192,
+        "successes": 7946,
+        "terminal_outcome_successes": 7872,
+        "terminal_reports_match_metrics": false,
+        "metrics": {
+          "eval/avg_length": 46.9141845703125,
+          "eval/avg_reward": 1.9449462890625,
+          "eval/completed_episodes": 8192.0,
+          "eval/episodes_per_env_max": 8.0,
+          "eval/episodes_per_env_min": 8.0,
+          "eval/metrics/success.assembly.captured": 0.9747314453125,
+          "eval/metrics/success.assembly.depth": 0.016983302868538885,
+          "eval/metrics/success.assembly.grasped": 0.97705078125,
+          "eval/metrics/success.assembly.penetration": 4.060604912546227e-06,
+          "eval/metrics/success.assembly.radial_error": 0.001932456531510418,
+          "eval/metrics/success.assembly.tilt": 0.0333579820904184,
+          "eval/success_ci95_high": 0.9734518887363871,
+          "eval/success_ci95_low": 0.9660489591860614,
+          "eval/success_rate": 0.969970703125,
+          "eval/success_samples": 8192.0
+        },
+        "inputs": {
+          "checkpoint": {
+            "path": "/tmp/configured-assembly-qualification/delivery/configured-peg/checkpoints/configured_current_peg_insertion_seed0_best_step_39321600.pt",
+            "requested": "best",
+            "selected": "best"
+          },
+          "configs": {
+            "gym": "/tmp/configured-assembly-qualification/delivery/configured-peg/configs/gym.yaml",
+            "train": "/tmp/configured-assembly-qualification/delivery/configured-peg/configs/train.yaml"
+          },
+          "device": "cuda:3",
+          "embodichain_version": "0.3.2",
+          "episode_allocation": "balanced",
+          "num_envs": 1024,
+          "run": "/tmp/configured-assembly-qualification/delivery/configured-peg",
+          "seed": 20000,
+          "task_id": "BlindPegInsertionRL-StudyDefaultAssets-v1"
+        },
+        "raw_report": "before_report_fix_wheel_full/evaluation.json",
+        "sha256": "3e0a585f47ee23694c59fa3d17edf143921ef44a3a620cd76778ad8c56ef08cf"
+      },
+      "before_report_fix_source_smoke": {
+        "episodes": 64,
+        "successes": 63,
+        "terminal_outcome_successes": 64,
+        "terminal_reports_match_metrics": false,
+        "metrics": {
+          "eval/avg_length": 47.359375,
+          "eval/avg_reward": 1.96875,
+          "eval/completed_episodes": 64.0,
+          "eval/episodes_per_env_max": 4.0,
+          "eval/episodes_per_env_min": 4.0,
+          "eval/metrics/success.assembly.captured": 0.984375,
+          "eval/metrics/success.assembly.depth": 0.01709472801303491,
+          "eval/metrics/success.assembly.grasped": 0.984375,
+          "eval/metrics/success.assembly.penetration": 3.6195099226699057e-06,
+          "eval/metrics/success.assembly.radial_error": 0.001250035209750422,
+          "eval/metrics/success.assembly.tilt": 0.02003975413754233,
+          "eval/success_ci95_high": 0.9972364580766624,
+          "eval/success_ci95_low": 0.9166589839990573,
+          "eval/success_rate": 0.984375,
+          "eval/success_samples": 64.0
+        },
+        "inputs": {
+          "checkpoint": {
+            "path": "/tmp/configured-assembly-qualification/delivery/configured-peg/checkpoints/configured_current_peg_insertion_seed0_best_step_39321600.pt",
+            "requested": "best",
+            "selected": "best"
+          },
+          "configs": {
+            "gym": "/tmp/configured-assembly-qualification/delivery/configured-peg/configs/gym.yaml",
+            "train": "/tmp/configured-assembly-qualification/delivery/configured-peg/configs/train.yaml"
+          },
+          "device": "cuda:1",
+          "embodichain_version": "0.3.2",
+          "episode_allocation": "balanced",
+          "num_envs": 16,
+          "run": "/tmp/configured-assembly-qualification/delivery/configured-peg",
+          "seed": 25000,
+          "task_id": "BlindPegInsertionRL-StudyDefaultAssets-v1"
+        },
+        "raw_report": "before_report_fix_source_smoke/evaluation.json",
+        "sha256": "0edc1937f95f86dcd914eec72b35dd2f4e6942bd47576d513bcd72fcfcde25ea"
+      },
+      "before_report_fix_wheel_smoke": {
+        "episodes": 64,
+        "successes": 59,
+        "terminal_outcome_successes": 60,
+        "terminal_reports_match_metrics": false,
+        "metrics": {
+          "eval/avg_length": 48.65625,
+          "eval/avg_reward": 1.859375,
+          "eval/completed_episodes": 64.0,
+          "eval/episodes_per_env_max": 4.0,
+          "eval/episodes_per_env_min": 4.0,
+          "eval/metrics/success.assembly.captured": 0.9375,
+          "eval/metrics/success.assembly.depth": 0.01574536581756547,
+          "eval/metrics/success.assembly.grasped": 0.9375,
+          "eval/metrics/success.assembly.penetration": 3.958858164843093e-06,
+          "eval/metrics/success.assembly.radial_error": 0.003794047574046999,
+          "eval/metrics/success.assembly.tilt": 0.07413149797321239,
+          "eval/success_ci95_high": 0.9661688230914496,
+          "eval/success_ci95_low": 0.8298046264583709,
+          "eval/success_rate": 0.921875,
+          "eval/success_samples": 64.0
+        },
+        "inputs": {
+          "checkpoint": {
+            "path": "/tmp/configured-assembly-qualification/delivery/configured-peg/checkpoints/configured_current_peg_insertion_seed0_best_step_39321600.pt",
+            "requested": "best",
+            "selected": "best"
+          },
+          "configs": {
+            "gym": "/tmp/configured-assembly-qualification/delivery/configured-peg/configs/gym.yaml",
+            "train": "/tmp/configured-assembly-qualification/delivery/configured-peg/configs/train.yaml"
+          },
+          "device": "cuda:1",
+          "embodichain_version": "0.3.2",
+          "episode_allocation": "balanced",
+          "num_envs": 16,
+          "run": "/tmp/configured-assembly-qualification/delivery/configured-peg",
+          "seed": 25000,
+          "task_id": "BlindPegInsertionRL-StudyDefaultAssets-v1"
+        },
+        "raw_report": "before_report_fix_wheel_smoke/evaluation.json",
+        "sha256": "e4400138ef0fae28242e675df7f272ac42b22db60f5e99f22da20972a03fd3ef"
+      }
+    }
+  },
+  "wheel_integrity": {
+    "code_revision": "24e50dd95553f292982ddc06bdea56ea5d8aae65",
+    "matched_runtime_files": 1197,
+    "matched_packaged_task_yaml": 291,
+    "missing": [],
+    "different": [],
+    "wheel_sha256": "c2be37d60cf06daa4a3e486d26de7fc401c2b1a0bfc88ed0294fa443261f45a5"
+  },
+  "validation": {
+    "focused_case_selection": 239,
+    "outcome_evaluation_recording_case_selection": 100,
+    "source_free_wheel_consumers": 4,
+    "architecture_cases": 54,
+    "test_counts_overlap": true,
+    "api_exports_documented": 5024,
+    "black": "26.10.1; black .",
+    "context": "check and representative routes passed"
+  },
+  "parity": {
+    "polygon_and_gravity": "Exact CPU/CUDA old/current comparisons at batches 1,64,4096; see performance.json. Extracted numerical code unchanged by the subsequent outcome-cache fix.",
+    "source_asset_hashes_seed13": {
+      "peg": "b104f6dd0d7ee83b691cc600a564432a1ab0156cfcf2579e00f4cddc9c736dba",
+      "gear": "6834279ad73b83a022003c9ccc83c954952bf52c2876b6279458a04d53dc2955",
+      "nut": "5f3ef3939eeef9e9c0aefc9bccc1fe0f4d0f54c8d17dddd66636c8fd0a4741fd"
+    },
+    "source_asset_comparison": "Full generated content hashes match before/after for peg, gear and nut."
+  },
+  "preview": {
+    "status": "completed",
+    "seeds": [
+      30000,
+      30001,
+      30002
+    ],
+    "successes": 3,
+    "episodes": 3,
+    "width": 1280,
+    "height": 720,
+    "fps": 25,
+    "frames": 110,
+    "duration_seconds": 4.4,
+    "video": "preview/preview.mp4",
+    "trace": "preview/trace.json"
+  },
+  "scope": "Single frozen development geometry and training seed; solver warnings retained; physics is not bitwise deterministic. No preferred replay substituted for another.",
+  "files": {
+    "source_full/evaluation.json": {
+      "sha256": "e963bffc3c3d4165df99a9395329bc7cfe8ba315cdf148d221e46fd0d287ce1a",
+      "bytes": 15440902
+    },
+    "source_full/runtime.log": {
+      "sha256": "0a4fee296bee1b763d8ea2cef091d7a53feb498ee85de8405ae203f1ac9f5888",
+      "bytes": 64157
+    },
+    "installed_wheel_full/evaluation.json": {
+      "sha256": "66520db72471352b0e96a7844bced202d6f50bf0ceba7b9bb163f142d4e92499",
+      "bytes": 15442991
+    },
+    "installed_wheel_full/runtime.log": {
+      "sha256": "b3f53592434b82067055fa177567da5c93e803a3959adc8e74fc78e69e6e3720",
+      "bytes": 68815
+    },
+    "before_report_fix_source_full/evaluation.json": {
+      "sha256": "97428f97ec659fb93394db362d1b0d081dd674675e5ef16a457674c826ad6878",
+      "bytes": 15441942
+    },
+    "before_report_fix_source_full/runtime.log": {
+      "sha256": "a3f4c780d3d192547800e325bb7b240ca64a071c3383e1004ba038d684bf1fbd",
+      "bytes": 62617
+    },
+    "before_report_fix_wheel_full/evaluation.json": {
+      "sha256": "3e0a585f47ee23694c59fa3d17edf143921ef44a3a620cd76778ad8c56ef08cf",
+      "bytes": 15444696
+    },
+    "before_report_fix_wheel_full/runtime.log": {
+      "sha256": "451acab90ab505f2f398d397aaa1505a993eae3989c62c5b7b9578ef339d6f4b",
+      "bytes": 66369
+    },
+    "before_report_fix_source_smoke/evaluation.json": {
+      "sha256": "0edc1937f95f86dcd914eec72b35dd2f4e6942bd47576d513bcd72fcfcde25ea",
+      "bytes": 122280
+    },
+    "before_report_fix_source_smoke/runtime.log": {
+      "sha256": "0091fb4d27a941a5e9a88405cd08f9465bf5868e8ef0c925743a5eec81518e8b",
+      "bytes": 40386
+    },
+    "before_report_fix_wheel_smoke/evaluation.json": {
+      "sha256": "e4400138ef0fae28242e675df7f272ac42b22db60f5e99f22da20972a03fd3ef",
+      "bytes": 122331
+    },
+    "before_report_fix_wheel_smoke/runtime.log": {
+      "sha256": "07b4753312ee0c00473263ed2fadcdc45d7e43ac46457244441865c9d12ba448",
+      "bytes": 40934
+    },
+    "preview/preview.mp4": {
+      "sha256": "2fd1e2c296c8ec2072c57f2a0818084491470fcade441fd9ab1a83fbeddeb7b6",
+      "bytes": 176502
+    },
+    "preview/trace.json": {
+      "sha256": "3ec8db3853817d2202c03451e7367d2373f45d56f9bdab55830895676e29eeea",
+      "bytes": 253157
+    },
+    "preview/contact_sheet.png": {
+      "sha256": "52f3d11d3b0545a1d8882af74efae9ccbfdbfb67d0e3ef59b55cb634f231c6f0",
+      "bytes": 273172
+    },
+    "performance.json": {
+      "sha256": "e874d1ca2c69bc018efad0850fb3805376e436d971f58a7ef55a5431c4919d8a",
+      "bytes": 6957
+    },
+    "wheel-consumer-tests.log": {
+      "sha256": "5f2a7ab8ae1d8aedcae96b95665fc0197bad483d7bc7f0d47747bfd52ce401bf",
+      "bytes": 799
+    }
+  }
+}
