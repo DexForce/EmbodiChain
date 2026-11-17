@@ -6160,6 +6160,75 @@ def test_open_door_plans_approach_grasp_arc_release_and_rotated_retract(
     )
 
 
+def test_open_door_approach_seeds_keep_the_most_continuous_contact_path() -> None:
+    semantics = ObjectSemantics(
+        affordance=_door_affordance(),
+        geometry={},
+        entity_id=DOOR_ENTITY_ID,
+        label="door_handle",
+    )
+    generator = _motion_generator()
+    robot = generator.robot
+    action = _bind_action(generator, OpenDoor())
+    grasp_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    grasp_pose[:, 0, 3] = 1.0
+    _GRASP_GENERATORS[id(action)].get_valid_grasp_poses = Mock(
+        return_value=[
+            (grasp_pose[index : index + 1], torch.zeros(1)) for index in range(NUM_ENVS)
+        ]
+    )
+    limits = torch.tensor([-3.0, 3.0]).expand(NUM_ENVS, ARM_DOF, 2).clone()
+    robot.get_qpos_limits.return_value = limits
+    planned_batch_ik = robot.compute_batch_ik.side_effect
+    continuous_calls: list[tuple[int, torch.Tensor]] = []
+
+    def compute_batch_ik(
+        pose: torch.Tensor,
+        name: str,
+        joint_seed: torch.Tensor,
+        continuous: bool = False,
+        **kwargs: object,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if not continuous:
+            return planned_batch_ik(pose=pose, name=name, joint_seed=joint_seed)
+        continuous_calls.append((pose.shape[1], joint_seed.clone()))
+        path = joint_seed[:, None].expand(-1, pose.shape[1], -1).clone()
+        if pose.shape[1] > 1:
+            # Row 0 jumps branches mid-path unless its last joint starts at -1;
+            # row 1 is smooth from every posture.
+            jump = (joint_seed[0, -1] - -1.0).abs() > 1.0e-6
+            path[0, pose.shape[1] // 2 :, 0] += 1.0 if bool(jump) else 0.0
+        return torch.ones(path.shape[:2], dtype=torch.bool), path
+
+    robot.compute_batch_ik.side_effect = compute_batch_ik
+    options = OpenDoorOptions(hand_interp_steps=3, door_waypoint_count=4)
+    seeded = replace(options, approach_ik_seeds=2)
+    invocation = SkillInvocation(
+        skill_id="open_door",
+        goal=OpenDoorGoal(semantics, SceneEntityPose("target"), open_fraction=0.5),
+        binding=_binding(action),
+        motion_policy=MotionPolicy(sample_count=24),
+        skill_options=seeded,
+    )
+
+    plan = _plan_action(action, invocation, _context(scene=_door_scene()))
+
+    assert plan.plan_success.tolist() == [True, True]
+    approach_end = _joint_trajectory(plan).positions[
+        :, plan.segment("approach").stop - 1, :ARM_DOF
+    ]
+    # Seeds hold the last joint at -1 and 1 inside its limits. Row 0 takes the
+    # only posture with a continuous path; row 1 keeps the start-state posture.
+    assert approach_end[:, -1].tolist() == pytest.approx([-1.0, 0.0])
+    n_reach, n_open, n_retract = OpenDoor._motion_segment_lengths(24, 3, 4)[1:]
+    path_length = 4 * (n_reach + n_open + n_retract) - 3
+    assert [count for count, _ in continuous_calls] == [1, path_length] * 3
+    with pytest.raises(ValueError, match="approach_ik_seeds"):
+        OpenDoorOptions(approach_ik_seeds=-1)
+    with pytest.raises(ValueError, match="approach_ik_seeds"):
+        OpenDoorOptions(approach_ik_seeds=True)
+
+
 def test_open_door_interpolates_link_arc_and_recovers_eef_poses() -> None:
     action = _bind_action(_motion_generator(), OpenDoor())
     link_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)

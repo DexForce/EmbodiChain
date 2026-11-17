@@ -127,6 +127,11 @@ planar axis nearest the push, so a box aligned with the target keeps that
 clearance when the push is oblique to its faces. Invocation-level
 `SkillControlOverrides` can replace an endpoint's `open` or `grasp` command,
 for example a partial opening, without changing the embodiment profile.
+OpenDoor's opt-in `approach_ik_seeds` also solves the approach pose with the
+last arm joint held at evenly spaced values, scores each posture by the largest
+joint step of the continuous reach, hinge arc and retreat, and plans the
+approach in joint space to each row's best posture; zero keeps the posture
+solved from the start state.
 Each phase retains its native time profile while retiming to the control grid;
 requested phase counts are minima, so long phases expand rather than speeding
 up. Composite phases use terminal holds to align lengths; they do not
