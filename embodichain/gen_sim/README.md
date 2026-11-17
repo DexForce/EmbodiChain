@@ -164,6 +164,31 @@ references, unsupported geometry and incompatible capabilities reject rather
 than selecting a substitute or claiming execution readiness. Model grounding
 never creates capabilities, rewrites control-part names or chooses physics.
 
+### Automatic cleanup for verified head-camera inputs
+
+For a verified RoboDojo dual-arm head frame, add its camera view and the
+SHA-256 from the reference episode's `cam_head.first_png_sha256`:
+
+```yaml
+input_camera:
+  view: robodojo_dual_arm_head
+  sha256: <64 lowercase hex digits>
+```
+
+`image` must be that exact raw 640 × 480 frame. Other views and already cleaned
+images use the ordinary configuration without `input_camera`. GenSim uses its
+shared service configuration to clean the verified raw frame before Task Engine
+and scene generation. Both stages consume the same cleaned PNG. If cleanup
+fails, the run stops at `image_preprocessing`.
+
+To reuse a plan on the same raw frame, keep the previous run directory with
+`run_manifest.json`, `image_preprocessing/`, and `task/`. Run with the same
+`input_camera` declaration and `--task PREVIOUS_RUN/task`. GenSim checks the
+raw image, the Task Plan digest, and the previously grounded PNG and mask.
+It copies the cleanup artifacts without requesting a new image edit. For an
+independent published Task Plan, supply its exact grounded image as `image`
+and omit `input_camera`.
+
 ## Outputs and verdicts
 
 For a route comparison and the path from specification to physical evidence, see the
@@ -214,7 +239,9 @@ still rejects the scene.
 
 A new run directory contains:
 
-- `source_image.*`: the input frozen for the run, with a SHA-256 in the manifest;
+- `source_image.*`: the raw input frozen as `source_image_sha256`;
+- `image_preprocessing/`: when enabled, both images, masks and the pixel audit.
+  The manifest's `image_sha256` identifies the effective image used downstream;
 - `task/`: source semantic graph, TaskSpec, image grounding and offline viewer;
 - `scene/`: generated workspace, unless an existing workspace was selected;
 - `deployment/`: robot/policy snapshots, native mesh copies, integration,
