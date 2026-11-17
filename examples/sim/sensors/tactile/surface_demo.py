@@ -33,6 +33,7 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.lab.sim.sensors import SensorCfg
 from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
+from embodichain.lab.visualization import VisualizationCfg
 
 from .._scene_camera import SCENE_RENDER, capture_rgb, scene_camera, show_scene
 
@@ -58,6 +59,7 @@ def collect_samples(args: Namespace) -> list[Sample]:
     sim = SimulationManager(
         SimulationManagerCfg(
             headless=True,
+            visualization=VisualizationCfg(backend="none"),
             startup_summary="off",
             enable_ground_plane=False,
             render_cfg=SCENE_RENDER,
