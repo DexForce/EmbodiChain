@@ -11,12 +11,19 @@ Entity bindings, sampling counts and measurement thresholds live in the validate
 `env.extensions.assembly` namespace. Old import-registered assembly environment
 IDs and flat extension fields are removed.
 
+Assembly observations, conditions, rewards and reset behavior live in the task
+extension's `assembly/functors.py`. Its packaged `assembly/defaults.yaml` owns
+measurement, grasp and asset-generation defaults; deployments override them
+through configuration. Shared polygon distances and URDF gravity computation
+live in `embodichain.compute`, and resource snapshots in `embodichain.data`.
+
 A pinned checkpoint, frozen physical resources and native replay evidence are
 available through [the reproduction guide](REPRODUCING.md) and `model.json`.
-The current Python 3.12 / DexSim 0.6.0rc2 frozen peg model passed independent
-8192-episode balanced evaluations in source (**96.80%**) and isolated installed
-wheel (**96.84%**) executions. Its complete configuration/resources and raw evidence
-are pinned in `model.json`; both results exceed the 95% development target.
+The existing Python 3.12 / DexSim 0.6.0rc2 frozen peg model was replayed after
+the core/task refactor: **7940/8192 (96.92%)** in source and **7939/8192 (96.91%)**
+with an isolated installed wheel. Both exceed the 95% development target, with
+per-episode reports matching aggregate statistics. `model.json` pins the unchanged
+model archive, original qualification and separate current-code replay evidence.
 
 [Trained Peg inference video (1280×720, 25 fps)](https://raw.githubusercontent.com/DexForce/EmbodiChain/a9869001f1ad961f5496ca0c7f6aa4aeeeae6029/preview.mp4)
 records the complete fixed seed sequence 30000–30002, with 3/3 successes.

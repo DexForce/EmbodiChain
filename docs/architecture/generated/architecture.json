@@ -3,8 +3,8 @@
   "kind": "static-architecture",
   "coverage": "curated-sample",
   "repository": "DexForce/EmbodiChain",
-  "revision": "8f40e42f99c58cc546ca5f3c9dfce82b68da63a9",
-  "source_ref": "8f40e42f99c58cc546ca5f3c9dfce82b68da63a9",
+  "revision": "24e50dd95553f292982ddc06bdea56ea5d8aae65",
+  "source_ref": "24e50dd95553f292982ddc06bdea56ea5d8aae65",
   "package_version": "0.3.2",
   "topic_index": "agent_context/MAP.yaml",
   "limitations": [
@@ -4697,8 +4697,8 @@
         {
           "path": "embodichain/lab/gym/envs/embodied_env.py",
           "symbol": "EmbodiedEnv.create_task_program_bridge",
-          "start_line": 4307,
-          "end_line": 4307,
+          "start_line": 4311,
+          "end_line": 4311,
           "excerpt": "        bridge = self._checked_task_program_adapter().create_bridge("
         }
       ]
@@ -4715,8 +4715,8 @@
         {
           "path": "embodichain/lab/gym/envs/embodied_env.py",
           "symbol": "EmbodiedEnv.compile_task_program",
-          "start_line": 4242,
-          "end_line": 4242,
+          "start_line": 4246,
+          "end_line": 4246,
           "excerpt": "        return self._checked_task_program_adapter().compile(program)"
         }
       ]
@@ -4733,8 +4733,8 @@
         {
           "path": "embodichain/lab/gym/envs/embodied_env.py",
           "symbol": "EmbodiedEnv._declare_robot",
-          "start_line": 3966,
-          "end_line": 3966,
+          "start_line": 3970,
+          "end_line": 3970,
           "excerpt": "        return self.sim.add_robot(robot_cfg)"
         }
       ]

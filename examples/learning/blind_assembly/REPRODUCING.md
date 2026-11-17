@@ -56,8 +56,10 @@ the full evaluations below. GPU physics is not bitwise deterministic.
 
 ## Independent evaluation
 
-Both executions use the same frozen checkpoint, deterministic action means,
-seed **20000**, **1024 arenas**, and **8 scored completions per arena**:
+The original qualification at code revision
+`fb4ff20a87b6af835b2aa851d18cf2a609d67c44` used the same frozen checkpoint,
+deterministic action means, seed **20000**, **1024 arenas**, and
+**8 scored completions per arena**:
 
 | Execution | Success | Wilson 95% interval |
 |---|---:|---:|
@@ -71,6 +73,39 @@ no preferred replay result was substituted for the other. Earlier executions of
 the same frozen model, before the other profiles' sensor-capacity correction,
 scored 7942/8192 in source and 7929/8192 in the installed wheel. Those reports
 are also retained, with their separate code revisions.
+
+## Replay after the core/task refactor
+
+Code revision `24e50dd95553f292982ddc06bdea56ea5d8aae65` moves polygon distances and
+URDF gravity computation into `embodichain.compute`, and resource snapshots into
+`embodichain.data`. Assembly functors remain in the task extension, whose packaged
+`defaults.yaml` owns default measurement, grasp and asset-generation parameters.
+The existing current-schema checkpoint and all frozen resources are unchanged;
+no retraining, migration or alternate checkpoint selection was performed.
+
+Both executions repeated the original 8192-episode balanced protocol:
+
+| Execution | Success | Wilson 95% interval |
+|---|---:|---:|
+| Source checkout | **7940/8192 (96.9238%)** | 96.5274–97.2763% |
+| Isolated installed wheel | **7939/8192 (96.9116%)** | 96.5144–97.2648% |
+
+The installed execution blocks the generator import and uses an empty asset
+cache. All 1197 checked runtime files and 291 packaged task YAML files match
+source. Terminal outcome counts match aggregate success statistics; every arena
+has eight scored completions. The reset path now clears unrecorded terminal
+reports for selected rows, preventing reuse of a previous episode's cached report.
+This changes report bookkeeping, not the success conditions or policy.
+
+[Replay evidence](https://raw.githubusercontent.com/DexForce/EmbodiChain/721d1110aad0a06e9e57f974091a20cc12af0b50/refactor-24e50dd95/replay-evidence.zip)
+contains both complete raw reports, runtime warnings, current RGB trace/video,
+wheel integrity and numerical extraction diagnostics. It also retains initial
+smoke/full executions with explicitly marked stale terminal details, before the
+report-cache correction. Their aggregate statistics are separate from the final
+per-episode evidence. The adjacent `model.json` pins this archive's hash and code
+revision, while retaining the original model and qualification references.
+The current-code RGB preview completes all seeds 30000–30002 with 3/3 successes,
+1280×720 at 25 fps; it is visual evidence, not a success-rate estimate.
 
 ## Fresh training, export and RGB preview
 
