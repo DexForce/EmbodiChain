@@ -76,6 +76,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--markers", action="store_true", help="Use sparse marker readout with --shear."
     )
+    parser.add_argument(
+        "--surface",
+        action="store_true",
+        help="Project completed Newton faces onto a physical planar pad.",
+    )
     parser.add_argument("--frames", type=int, default=24)
     parser.add_argument("--fps", type=int, default=10)
     parser.add_argument("--video", action="store_true", help="Also export H.264 MP4.")
@@ -303,6 +308,11 @@ def draw_sample(
     figure: Figure, samples: list[Sample], index: int, args: argparse.Namespace
 ) -> None:
     """Render both panels using the same completed physics sample."""
+    if args.surface:
+        from .surface_demo import draw_sample as draw_surface_sample
+
+        draw_surface_sample(figure, samples, index, args)
+        return
     sample = samples[index]
     figure.clear()
     figure.set_layout_engine("constrained")
@@ -331,11 +341,21 @@ def export(samples: list[Sample], args: argparse.Namespace) -> None:
         args.output_dir / "samples.npz",
         **{key: np.stack([sample[key] for sample in samples]) for key in samples[0]},
     )
-    figure = plt.figure(
-        figsize=(10.8 if args.rgb else 7.6, 6.0 if args.shear else 3.8), dpi=120
+    figsize = (
+        (12.0, 3.6)
+        if args.surface
+        else (
+            10.8 if args.rgb else 7.6,
+            6.0 if args.shear else 3.8,
+        )
     )
-    preview = (
-        int(
+    figure = plt.figure(figsize=figsize, dpi=120)
+    if args.surface:
+        preview = int(
+            np.argmax([sample["surface_face_count"].sum() for sample in samples])
+        )
+    elif args.shear:
+        preview = int(
             np.argmax(
                 [
                     np.linalg.norm(sample["shear_displacement"], axis=-1).sum()
@@ -343,9 +363,8 @@ def export(samples: list[Sample], args: argparse.Namespace) -> None:
                 ]
             )
         )
-        if args.shear
-        else int(np.argmax([sample["depth"].max() for sample in samples]))
-    )
+    else:
+        preview = int(np.argmax([sample["depth"].max() for sample in samples]))
     draw_sample(figure, samples, preview, args)
     figure.savefig(args.output_dir / "preview.png")
     if args.video:
@@ -369,6 +388,18 @@ def main() -> None:
         parser.error("--markers requires --shear")
     if args.video and not animation.writers.is_available("ffmpeg"):
         parser.error("--video requires ffmpeg on PATH")
+
+    if args.surface:
+        if args.rgb or args.shear:
+            parser.error("--surface uses a separate planar contact scene")
+        from .surface_demo import collect_samples as collect_surface_samples
+
+        try:
+            samples = collect_surface_samples(args)
+        finally:
+            SimulationManager.flush_cleanup_queue()
+        export(samples, args)
+        return
 
     sim = create_manager(args)
     try:

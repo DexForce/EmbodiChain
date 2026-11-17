@@ -62,3 +62,26 @@ components. On curved pads, different probes have different tangent frames.
 The dashed line identifies the time of the shared scene/depth/RGB sample.
 Shear stiffness, normal stiffness, and Coulomb friction are illustrative
 geometric-model parameters. For physical use, calibrate them for the pad.
+
+## Newton contact surface
+
+Use a CUDA-enabled DexSim SDK that exposes
+`Scene.get_hydroelastic_contact_capabilities()` and
+`Scene.get_hydroelastic_contact_surface()`. The preview was recorded with the
+DexSim 0.6.0 completed-surface candidate (Python 3.11). Use the
+Newton MuJoCo Warp solver with `use_mujoco_contacts=False`, collision
+`update_interval=1`, and `output_contact_surface=True`. Install `trimesh`
+alongside the plotting dependencies above.
+
+```bash
+python -m examples.sim.sensors.tactile.demo --surface --device cuda:0 \
+  --frames 33 --video --output-dir /tmp/tactile-surface
+```
+
+The tool loads, slides across, and releases a planar SDF pad. Each frame shows
+the tool position, geometric depth (m), face count per probe cell, and signed
+separation (m) from the same completed sample. The footer and `samples.npz`
+record `surface_complete`, collision generation and substep. An empty
+complete snapshot is labeled “Complete · no faces”. Missing or truncated
+snapshots mask the surface panels. The other demo modes use only geometric
+queries and run without the completed-surface SDK.
