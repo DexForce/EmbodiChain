@@ -5,7 +5,7 @@ embodiment_id: flexiv_rizon4s_robotiq2f85.nominal
 simulation:
   class_type: FlexivRizon4S
   uid: FlexivRizon4SRobotiq
-  fpath: FlexivRizon4SMenagerie/prepared_v4_parallel_jaw/rizon4s_robotiq2f85.urdf
+  fpath: generated/assembly/FlexivRizon4SMenagerie/prepared_v4_parallel_jaw/rizon4s_robotiq2f85.urdf
   control_parts:
     arm:
     - joint1

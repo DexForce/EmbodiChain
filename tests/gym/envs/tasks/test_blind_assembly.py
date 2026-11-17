@@ -187,12 +187,18 @@ def test_formal_and_nominal_profiles_schedule_every_100_updates() -> None:
 def test_nominal_task_uses_production_component_loader(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, task: str, profile: str
 ) -> None:
-    urdf = tmp_path / "robot.urdf"
-    urdf.write_text('<robot name="test"><link name="base"/></robot>')
-    import importlib
+    from embodichain.data import constants
 
-    module = importlib.import_module("embodichain_robots.flexiv.rizon4s.cfg")
-    monkeypatch.setattr(module, "get_data_path", lambda path: str(urdf))
+    component = load_config(
+        str(
+            _CONFIG_ROOT.parents[2] / "components/embodiments/"
+            "flexiv_rizon4s_robotiq2f85.nominal.yaml"
+        )
+    )
+    urdf = tmp_path / component["simulation"]["fpath"]
+    urdf.parent.mkdir(parents=True)
+    urdf.write_text('<robot name="test"><link name="base"/></robot>')
+    monkeypatch.setattr(constants, "EMBODICHAIN_DEFAULT_DATA_ROOT", str(tmp_path))
     register_manager_modules(["embodichain_tasks.manipulation.assembly.functors"])
     path = _CONFIG_ROOT / task / f"task.{profile}.nominal.yaml"
     declaration = load_config(str(path))
