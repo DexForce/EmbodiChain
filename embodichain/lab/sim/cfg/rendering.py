@@ -334,7 +334,7 @@ class DLSSCfg:
     None preserves the installed SDK's default. Active overscan replaces the
     copied gutter without changing public intrinsics or geometry outputs.
     Zero also works with SDKs predating overscan; nonzero values require a
-    supporting SDK. Set both borders to zero for the throughput reference.
+    supporting SDK.
     """
 
     frame_time_delta_ms: float = 0.0

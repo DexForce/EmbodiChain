@@ -1,51 +1,5 @@
 # Rendering benchmark
 
-Compare default FastRT rendering, high-throughput settings from the upstream
-CameraVK benchmark, and a quality-prioritized retained-gutter profile:
-
-```bash
-python -m scripts.benchmark.rendering.camera_profiles \
-  --config scripts/benchmark/rendering/settings/fast_rt_high_throughput.yaml
-```
-
-All three profiles use the same static `fixed_reflective` scene, one RGB-D camera per
-Arena, one shared FastRT group and CUDA-resident observations. The configuration
-selects 640×480 images, 2/4/8/16/32/64 Arenas, 16 warmup frames, 64 measured
-frames and five matched process blocks. Each block runs all three profiles in
-fresh processes; their order rotates and reverses across blocks.
-The reference render settings use RR quality 2, one sample/iteration, bounce
-limits 1/8, no gutter/overscan, a fixed 240 Hz DLSS interval, and ACES exposure 1.
-`settings/fast_rt_quality_preserving.yaml` retains a 16-pixel gutter with the
-same remaining render settings. Use `--quality-config` to select this rendering
-fragment. The report compares both candidates with the default and directly
-compares retained-gutter throughput with the zero-gutter candidate.
-The YAML files' `render_cfg` mappings can also be passed to `RenderCfg.from_dict()` or
-used as the `render_cfg` section of a Gym configuration. Other fields configure
-only the experiment. Existing rendering defaults are unchanged.
-
-This compares settings with different RGB appearance and path budgets, rather
-than equal-quality implementations. Rendering parameters follow the MR, while
-the portable scene replaces its external preview-v4 assets. All profiles use
-the same installed SDK. With SDKs predating overscan, zero disables that absent
-feature and an omitted setting preserves native behavior; positive overscan
-requires a newer SDK. The report records effective native settings and SDK
-identity instead of assuming the MR build is installed.
-
-Each worker measures completed render latency and render-plus-GPU-fetch latency.
-CPU copies, quality checks, PNG encoding and memory queries are untimed. Process
-VRAM is sampled before warmup and after measurement; no memory query interrupts
-the steady-state timing sequence. This is not a transient allocator peak.
-Paired confidence intervals match independent process means within each block.
-Final RGB comparisons cover first and last Arena views. These compare two
-captures, not an independent ground-truth image. The
-runner refuses shared-GPU samples and retains all raw results and logs under
-`outputs/benchmarks/camera_profiles_<timestamp>/`, alongside one three-table
-Markdown report, JSON summary, RGB preview and PNG/SVG throughput plots.
-
-The [recorded 640×480 comparison](reports/fast_rt_profiles_640x480_20261117.md)
-includes both throughput profiles, matched-tone first/last-view quality checks,
-per-frame process timings, effective SDK settings and source identities.
-
 Compare native group sharing for three 640×480 RGB-only cameras in the fixed
 scene:
 

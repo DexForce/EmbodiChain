@@ -103,9 +103,7 @@ setup while retaining physical ground.
 
 `RenderCfg` owns final RGB tone mapping and fixed exposure for native windows
 and offscreen cameras. Tone mapping is disabled by default; explicit
-`tone_mapping_enabled=True` enables the curve selected by `tone_mapping_type`.
-The mapper selection preserves modified Reinhard for existing configurations
-and can explicitly select ACES.
+`tone_mapping_enabled=True` enables the tone-mapping curve.
 
 ## Rendering does not advance physics
 
@@ -201,12 +199,6 @@ The actual camera/window owns output dimensions; compatibility target fields
 must not resize it. Internal dimensions/upsample ratio affect FastRT/OfflineRT
 windows; hybrid/offscreen sizes derive from output size and quality.
 `frame_time_delta_ms` is render cadence, not physics/control cadence.
-DLSS atlas gutter and offscreen RR overscan are separate controls: active
-overscan replaces the copied gutter and crops a private RGB reconstruction
-without changing public image dimensions or geometry calibration. An omitted
-overscan setting inherits the installed SDK default. Older SDKs without this
-feature support zero overscan but reject a nonzero request. Fixed DLSS cadence
-is explicit; zero retains the native wall-clock measurement.
 `gym/utils/gym_utils.py:config_to_cfg()` decodes all three nested mappings.
 Scalar validation runs at construction and conversion after mutable edits.
 Configuration tests do not prove GPU/NGX/NRD runtime support, which initializes
