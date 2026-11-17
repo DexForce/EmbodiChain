@@ -1076,6 +1076,7 @@ class TaskProgramCfg:
     program: ProgramNodeCfg = MISSING
     targets: dict[str, TargetCfg] = field(default_factory=dict)
     instruction: str | None = None
+    rewards: dict[str, DeclarativeCfgValue] | None = None
 
     def __post_init__(self) -> None:
         """Validate the complete static configuration and target graph."""
@@ -1110,6 +1111,19 @@ class TaskProgramCfg:
         if expanded <= 0:
             raise ValueError("program must contain at least one semantic call.")
         self.targets = targets
+        if self.rewards is not None:
+            if type(self.rewards) is not dict or set(self.rewards) - {
+                "discount",
+                "weight",
+                "skills",
+                "success",
+                "failure",
+                "milestone_budget",
+                "time_cost",
+                "profiles",
+            }:
+                raise ValueError("Program rewards accept discount, weight and skills")
+            self.rewards = _snapshot_declarative_value(self.rewards, path="rewards")
 
 
 __all__: list[str] = []

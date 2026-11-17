@@ -471,3 +471,108 @@ def test_replacing_episode_owner_with_matching_ids_does_not_rebind_evidence():
     p.advance(_frame(foreign, [0.2, 0.2], 2), step=1, episode_owner=foreign)
     assert not p.snapshot()["achieved"].any()
     assert not p.condition()[1].any()
+
+
+def test_multicall_segment_requires_each_measured_call_in_order():
+    from embodichain.lab.task_program import CompiledTaskProgram
+
+    env, owner, _, _, graph = _setup()
+    original = env.task_program_progress._program_for_test
+    stage = next(original.iter_segments())
+    call = stage.calls[0]
+    stage = replace(
+        stage, calls=(call, replace(call, call_index=1, segment_call_index=1))
+    )
+    program = CompiledTaskProgram._create(
+        program_id=original.program_id,
+        instruction=original.instruction,
+        integration=original.integration,
+        segments=(stage,),
+    )
+    progress = TaskProgramProgress(
+        program,
+        {"lifted": graph},
+        env_ids=(0, 1),
+        episode_ids=owner.episode_ids,
+        skill_conditions={"call:0": graph, "call:1": graph},
+    )
+    progress.advance(_frame(owner, [0.2, 0.2], 1), step=0, episode_owner=owner)
+    assert progress.snapshot()["achieved"].tolist() == [[True, False], [True, False]]
+    progress.advance(_frame(owner, [0.2, 0.2], 2), step=1, episode_owner=owner)
+    assert progress.snapshot()["achieved"].tolist() == [[True, True], [True, True]]
+    assert progress.indices(stage.segment_id) == (0, 1)
+    assert progress.indices("call:1") == (1,)
+    with pytest.raises(ValueError, match="every call_index"):
+        TaskProgramProgress(
+            program,
+            {"lifted": graph},
+            env_ids=(0, 1),
+            episode_ids=owner.episode_ids,
+            skill_conditions={"call:0": graph},
+        )
+
+
+def test_progress_identity_binds_additional_skill_acceptance_graph():
+    env, owner, _, _, graph = _setup()
+    original = env.task_program_progress
+    changed = TaskProgramProgress(
+        original._program_for_test,
+        {"lifted": graph},
+        env_ids=(0, 1),
+        episode_ids=owner.episode_ids,
+        skill_conditions={"lift": graph},
+    )
+    assert original.compiled.identity != changed.compiled.identity
+
+
+def test_program_rewards_have_exact_milestone_and_terminal_values_across_partial_reset():
+    from embodichain.lab.gym.envs.managers.reward_composition import (
+        compose_reward_terms,
+        _add_common_rewards,
+    )
+    from embodichain.lab.gym.envs.managers.reward_context import RewardTransitionContext
+
+    env, owner, _, _, _ = _setup(repeat=2)
+    env.step_dt = 0.04
+    env.episode_context = owner
+    progress = env.task_program_progress
+    specification = {"discount": 0.99, "skills": []}
+    task = RLTaskCfg(
+        success={
+            "all_stages": ConditionCfg(
+                func=program_stage_condition, params={"state": "achieved"}
+            )
+        },
+        reward_composition=specification,
+    )
+    terms = compose_reward_terms(specification, program=True)
+    _add_common_rewards(
+        SimpleNamespace(rl_task=task, rewards=SimpleNamespace()),
+        terms,
+        tuple(progress._program_for_test.iter_segments()),
+    )
+    manager = env.reward_manager = RewardManager(terms, env)
+    termination = TerminationManager(task, env)
+    manager.initialize_observation(_frame(owner, [0.0, 0.0], 0), [0, 1])
+    for step, heights, expected in (
+        (0, [0.2, 0.0], [0.995, 0.0]),
+        (1, [0.2, 0.2], [10.0, 0.995]),
+        (2, [0.0, 0.2], [0.0, 10.0]),
+    ):
+        if step == 2:
+            owner._begin_episode([0])
+            progress.reset([0], [owner.episode_ids[0]])
+            manager.reset([0])
+            termination.reset([0])
+            manager.initialize_observation(_frame(owner, [0.0, 0.2], 3), [0])
+        frame = _frame(owner, heights, step + 4)
+        progress.advance(frame, step=step, episode_owner=owner)
+        termination.compute()
+        info = {"task_outcome": termination.snapshot()}
+        manager.transition_context = RewardTransitionContext(
+            frame, termination.terminated
+        )
+        value, _ = manager.compute({}, torch.zeros(2, 1), info)
+        torch.testing.assert_close(value, torch.tensor(expected), atol=1e-6, rtol=0)
+        again, _ = manager.compute({}, torch.zeros(2, 1), info)
+        torch.testing.assert_close(again, value)

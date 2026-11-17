@@ -100,6 +100,16 @@ never infer capabilities or general physical success from a sample name. The
 host's sampled footprint/support checks remain finite measured acceptance,
 separate from geometric proposal qualification.
 
+## Reward templates
+
+`AtomicSkill.reward_profiles()` discovers immutable named measured-potential
+recipes independently of planning. The same skill identity can use those recipes
+for standalone training or a Task Program objective. Missing default templates
+reject explicit requests; trusted registration cannot overwrite an installed name.
+Gym owns binding and execution through the
+[RewardManager composition contract](../manager-functor/manager-functor.md#composed-skill-rewards).
+Reward configuration does not implement a learned-policy execution backend.
+
 ## Recommended change sites
 
 Modify the package-map owner for the changed contract. Add skill goals,

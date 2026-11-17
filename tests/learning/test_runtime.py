@@ -253,3 +253,36 @@ def test_learning_environment_rejects_config_resource_collision():
             num_envs=2,
             resources={"model": object()},
         )
+
+
+def test_reward_discount_mismatch_rejects_before_simulator_construction(
+    tmp_path, monkeypatch
+):
+    from embodichain.learning.rl import runtime
+
+    source = tmp_path / "gym.yaml"
+    source.write_text("id: Example\n")
+    monkeypatch.setattr(
+        runtime,
+        "config_to_cfg",
+        lambda *args, **kwargs: SimpleNamespace(
+            rl_task=SimpleNamespace(reward_composition={"discount": 0.9})
+        ),
+    )
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Simulator must not be built for inconsistent reward discounts")
+
+    monkeypatch.setattr(runtime, "build_env", forbidden)
+    with pytest.raises(ValueError, match="algorithm gamma"):
+        _build_gym_environment(
+            {
+                "trainer": {"gym_config": str(source)},
+                "algorithm": {"name": "ppo", "cfg": {"gamma": 0.99}},
+            },
+            simulation_device=torch.device("cpu"),
+            num_envs=1,
+            headless=True,
+            renderer=None,
+            gpu_id=0,
+        )

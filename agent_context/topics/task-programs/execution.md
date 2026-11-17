@@ -380,3 +380,12 @@ physical progress, acceptance, Gym flags and persistence separate; no expert
 bridge completion is required. Selected resets clear progress and bonus identity
 only after terminal reports are sealed. The runnable example and limitations live
 in `examples/learning/task_program_progress/README.md`.
+
+
+Policy programs can additionally declare `rewards` defaults, expanded by Gym into
+ordinary RewardManager terms. Measured skill objectives conjoin the existing
+stage conditions and protect the final physical gate. Multi-call segments need
+an explicit objective for every compiled `call_index`; progress expands these
+into ordered occurrence-local criteria while retaining authored segment aliases.
+The [manager-owned reward contract](../manager-functor/manager-functor.md#composed-skill-rewards)
+owns configuration, observation, weighting, reset and invalid-evidence behavior.

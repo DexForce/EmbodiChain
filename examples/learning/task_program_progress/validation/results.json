@@ -1,0 +1,146 @@
+{
+  "scope": "Task Program reward composition, without a trained policy or optimizer",
+  "program_id": "stack_two_blocks",
+  "seed": 17,
+  "controller_source_sha256": "d076213ece504d5247ceee33077b1c2835ccffe8e5409f382fb9c7450d8964fe",
+  "cases": {
+    "success": {
+      "steps": 892,
+      "num_envs": 2,
+      "passed": true,
+      "max_reward_error": 3.2782554626464844e-07,
+      "max_repeat_read_error": 0.0,
+      "shaping_identity_error": 1.460712188639852e-08,
+      "weighted_milestone_sums": [
+        [
+          0.5,
+          0.5
+        ],
+        [
+          0.0,
+          0.0
+        ]
+      ],
+      "outcome_sums": [
+        10.0,
+        0.0
+      ],
+      "effective_contract_sha256": "778dac5dd806654354660a68bf2db2d41b9049322786dc37276d25a975bb6b00"
+    },
+    "hold": {
+      "steps": 64,
+      "num_envs": 2,
+      "passed": true,
+      "max_reward_error": 1.70985004177256e-12,
+      "max_repeat_read_error": 0.0,
+      "shaping_identity_error": 2.7795459625623315e-11,
+      "weighted_milestone_sums": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ]
+      ],
+      "outcome_sums": [
+        0.0,
+        0.0
+      ],
+      "effective_contract_sha256": "2ca02929987cdefda2a2364ec134312765a5321cb0363339d10df47c16d91b3f"
+    },
+    "truncated": {
+      "steps": 600,
+      "num_envs": 2,
+      "passed": true,
+      "max_reward_error": 7.219612596642833e-08,
+      "max_repeat_read_error": 0.0,
+      "shaping_identity_error": 1.256202905781413e-08,
+      "weighted_milestone_sums": [
+        [
+          0.5,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ]
+      ],
+      "outcome_sums": [
+        0.0,
+        0.0
+      ],
+      "effective_contract_sha256": "f0167f48687fb4714f039787d64c2e917f42af3ef276d4c047c5dfd860e92f2e"
+    },
+    "failure": {
+      "steps": 1,
+      "num_envs": 2,
+      "passed": true,
+      "max_reward_error": 0.0,
+      "max_repeat_read_error": 0.0,
+      "shaping_identity_error": 0.0,
+      "weighted_milestone_sums": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ]
+      ],
+      "outcome_sums": [
+        -10.0,
+        -10.0
+      ],
+      "effective_contract_sha256": "82502831f832a91a1f3dc9259f7d1654869562ccd0b8fc48a838c6d955dd4175"
+    }
+  },
+  "env_step_calls": 1558,
+  "reward_samples": 3116,
+  "max_reward_error": 3.2782554626464844e-07,
+  "max_repeat_read_error": 0.0,
+  "max_shaping_identity_error": 1.460712188639852e-08,
+  "events": [
+    {
+      "event": "lift",
+      "step_zero_based": 469,
+      "milestone_bonus": 0.5,
+      "shape": 0.07818761467933655,
+      "program_progress_shape": 0.495,
+      "skill_goal_shape": -0.4168124069646001,
+      "outcome": 0.0,
+      "total": 0.5781875848770142
+    },
+    {
+      "event": "place",
+      "step_zero_based": 891,
+      "milestone_bonus": 0.5,
+      "shape": -0.9447418451309204,
+      "program_progress_shape": -0.5,
+      "skill_goal_shape": -0.4447418749332428,
+      "outcome": 10.0,
+      "total": 9.555257797241211
+    }
+  ],
+  "oracle": "Independent scalar reward-composition arithmetic using canonical measured skill potentials; not an independent geometry/skill-formula oracle",
+  "runtime": {
+    "python": "3.12.16",
+    "torch": "2.11.0+cu128",
+    "physics": "default / CPU",
+    "num_envs": 2,
+    "control_dt": 0.04
+  },
+  "planning_input_hashes": {
+    "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.cobotmagic.yaml": "0983659aad52ea61690a83112c3502a645461665183b8fae94311210ad2698f5",
+    "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/env.yaml": "ee4429137de0a2f93c5eccdbc6ce3a15c0c54e39b63014e5935936c3a5bab3c8",
+    "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task_program/program.yaml": "a80048649cce766a03e2c6e7dd3bc4e2ce2aa6169102bb98b582de45a1e1b58b",
+    "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task_program/integration.yaml": "49e42e6e1038206b91b336f49c2a5e09235923a3a6c80908cae508a90ce81988",
+    "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task_program/evaluation.yaml": "2321e22b5a4ca8a0f2283183895340d9c960bbe9d33a831d1926112d57ea93ed",
+    "extensions/embodichain_tasks/configs/components/embodiments/cobotmagic.yaml": "5ae01deea9270ae5bcc4df7e4195f32fc1e1a10c18355aa9a867f48157ba12ea",
+    "extensions/embodichain_tasks/configs/components/execution_policies/trajectory_open_loop.yaml": "632cc1624f5836eda60dabeacbb8e61540ec74882e56f6024689f3fade0b65bf"
+  },
+  "preview_sha256": "cd540f3f8b368e7c1bfcb325da3406a3fea322fef63a551a0db9e4971d05f267",
+  "post_reset_peer_reward_error": 9.822542762884592e-13
+}

@@ -56,7 +56,50 @@ if TYPE_CHECKING:
 __all__ = ["TaskProgramProgress"]
 
 
-def _progress_graph(program, conditions, final_rules, process_rules):
+def _matches_stage(stage, selector):
+    return (
+        selector in (stage.name, stage.segment_id)
+        or (len(stage.calls) == 1 and selector == f"call:{stage.calls[0].call_index}")
+        or (
+            "/call:" in stage.segment_id
+            and selector == stage.segment_id.rsplit("/call:", 1)[0]
+        )
+    )
+
+
+def _policy_stages(program, skill_conditions):
+    """Expand multi-call policy segments only with explicit per-call criteria."""
+    result = []
+    for segment in program.iter_segments():
+        calls = segment.calls
+        requested = any(f"call:{call.call_index}" in skill_conditions for call in calls)
+        if len(calls) == 1 or not requested:
+            result.append(replace(segment, segment_index=len(result)))
+            continue
+        if any(f"call:{call.call_index}" not in skill_conditions for call in calls):
+            raise ValueError(
+                "Multi-call policy stages require a measured objective for every call_index"
+            )
+        for index, call in enumerate(calls):
+            contract = segment.contract
+            if index and contract is not None:
+                contract = replace(contract, prerequisites=())
+            result.append(
+                replace(
+                    segment,
+                    segment_index=len(result),
+                    segment_id=f"{segment.segment_id}/call:{call.call_index}",
+                    calls=(replace(call, segment_call_index=0),),
+                    validators=segment.validators if index == len(calls) - 1 else (),
+                    contract=contract,
+                )
+            )
+    return tuple(result)
+
+
+def _progress_graph(
+    program, conditions, final_rules, process_rules, skill_conditions=None
+):
     nodes, names, fields = [], {}, set()
 
     def include(spec):
@@ -85,7 +128,7 @@ def _progress_graph(program, conditions, final_rules, process_rules):
             )
         return local[spec.roots[0]]
 
-    stages = tuple(program.iter_segments())
+    stages = _policy_stages(program, skill_conditions or {})
     roots, current, achievements = [], [], []
     for i, segment in enumerate(stages):
         path = segment.source_path
@@ -112,9 +155,13 @@ def _progress_graph(program, conditions, final_rules, process_rules):
                     "Policy prerequisites must reference measured conditions, not expert symbolic state."
                 )
             refs.append(include(conditions[entry.ref]))
-        if not segment.validators or any(
-            type(v) is not CompiledConditionValidator for v in segment.validators
-        ):
+        if (
+            not segment.validators
+            and not any(
+                _matches_stage(segment, selector)
+                for selector in (skill_conditions or {})
+            )
+        ) or any(type(v) is not CompiledConditionValidator for v in segment.validators):
             fail("Policy segment validators must use named shared conditions.")
         for entry in segment.contract.outcomes:
             if entry.required and entry.kind != "validator":
@@ -123,6 +170,9 @@ def _progress_graph(program, conditions, final_rules, process_rules):
                 )
         for validator in segment.validators:
             refs.append(include(conditions[validator.cfg.ref]))
+        for selection, spec in (skill_conditions or {}).items():
+            if _matches_stage(segment, selection):
+                refs.append(include(spec))
         goal, reached = f"stage/{i}/current", f"stage/{i}/achieved"
         nodes.append((goal, BooleanRule("all", tuple(dict.fromkeys(refs)))))
         nodes.append(
@@ -136,6 +186,12 @@ def _progress_graph(program, conditions, final_rules, process_rules):
     gates = {}
     for label, specs in (("final", final_rules), ("process", process_rules)):
         refs = tuple(include(spec) for spec in specs.values())
+        if label == "final":
+            refs += tuple(
+                include(spec)
+                for selector, spec in (skill_conditions or {}).items()
+                if _matches_stage(stages[-1], selector)
+            )
         if refs:
             key = f"gate/{label}"
             nodes.append((key, BooleanRule("all", tuple(dict.fromkeys(refs)))))
@@ -148,6 +204,10 @@ def _progress_graph(program, conditions, final_rules, process_rules):
                 [(name, spec.identity) for name, spec in conditions.items()],
                 [(name, spec.identity) for name, spec in final_rules.items()],
                 [(name, spec.identity) for name, spec in process_rules.items()],
+                [
+                    (selector, spec.identity)
+                    for selector, spec in (skill_conditions or {}).items()
+                ],
             ],
             sort_keys=True,
         ).encode()
@@ -188,6 +248,7 @@ class TaskProgramProgress:
         device: str | torch.device = "cpu",
         final_rules: Mapping[str, CompiledEvaluation] | None = None,
         process_rules: Mapping[str, CompiledEvaluation] | None = None,
+        skill_conditions: Mapping[str, CompiledEvaluation] | None = None,
     ) -> None:
         (
             self._stages,
@@ -195,7 +256,13 @@ class TaskProgramProgress:
             self._current_refs,
             self._achievement_refs,
             self._gates,
-        ) = _progress_graph(program, conditions, final_rules or {}, process_rules or {})
+        ) = _progress_graph(
+            program,
+            conditions,
+            final_rules or {},
+            process_rules or {},
+            skill_conditions,
+        )
         self.program_identity = task_program_fingerprint(program)
         self._session = RuleSession(
             self.compiled,
@@ -246,7 +313,7 @@ class TaskProgramProgress:
         if stage is None:
             return tuple(range(len(self._stages)))
         selected = tuple(
-            i for i, s in enumerate(self._stages) if stage in (s.name, s.segment_id)
+            i for i, s in enumerate(self._stages) if _matches_stage(s, stage)
         )
         if not selected:
             raise ValueError(f"Unknown policy stage {stage!r}.")
@@ -517,6 +584,10 @@ class TaskProgramProgress:
             name: self._snapshot.rules[ref] for name, ref in self._gates.items()
         }
 
+    def ordered_progress(self) -> tuple[torch.Tensor, int]:
+        """Return completed occurrence counts and total, without copying rule reports."""
+        return self._achieved.long().sum(1), len(self._stages)
+
     def snapshot(self) -> dict[str, Any]:
         """Read progress without advancing or exposing mutable session state.
 
@@ -566,6 +637,10 @@ def _validate_policy_deployment(cfg, registration):
     if not cfg.actions:
         raise ValueError("Policy Task Program execution requires env.actions.")
     program = registration.catalog.preflight(cfg.task_program, strict_contracts=True)
+    from embodichain.lab.gym.envs.managers.skill_objective import (
+        _program_objective_conditions,
+    )
+
     stages, _, _, _, _ = _progress_graph(
         program,
         registration.evaluation_conditions,
@@ -578,7 +653,54 @@ def _validate_policy_deployment(cfg, registration):
             for ref in registration.evaluation_process_refs
         },
     )
-    selections = {s.name for s in stages} | {s.segment_id for s in stages}
+    # Validate the identical extra measured conditions before constructing a World.
+    stages, _, _, _, _ = _progress_graph(
+        program,
+        registration.evaluation_conditions,
+        {},
+        {},
+        _program_objective_conditions(cfg),
+    )
+    selections = (
+        {s.name for s in stages}
+        | {s.segment_id for s in stages}
+        | {f"call:{s.calls[0].call_index}" for s in stages if len(s.calls) == 1}
+    )
+    composition = getattr(cfg.rl_task, "reward_composition", None)
+    if composition is not None:
+        claimed = set()
+        for skill in composition.get("skills", []):
+            matching = [
+                stage for stage in stages if _matches_stage(stage, skill["stage"])
+            ]
+            if not matching:
+                raise ValueError(f"Unknown reward stage {skill['stage']!r}")
+            for stage in matching:
+                if stage.segment_id in claimed:
+                    raise ValueError("Overlapping reward stage selectors")
+                claimed.add(stage.segment_id)
+                if len(stage.calls) != 1:
+                    raise ValueError(
+                        "Automatic skill shaping currently requires one call per stage"
+                    )
+                descriptor = registration.catalog.call_catalog.discover(
+                    stage.calls[0].call.semantic_id
+                )
+                if descriptor.skill_id != skill["skill_id"]:
+                    raise ValueError("Reward skill must match its stage's Atomic Skill")
+
+    from embodichain.lab.gym.envs.managers.skill_objective import (
+        _validate_program_objective_bindings,
+    )
+
+    _validate_program_objective_bindings(cfg, registration, stages)
+    _progress_graph(
+        program,
+        registration.evaluation_conditions,
+        {},
+        {},
+        _program_objective_conditions(cfg),
+    )
     success_terms = cfg.rl_task.success.values()
     if not any(term.func is program_stage_condition for term in success_terms):
         raise ValueError(

@@ -60,6 +60,21 @@ simulator, and does not establish collision or manifold validity.
 
 .. autofunction:: has_inconsistent_shading_normals
 
+
+embodichain.compute.geometry.skill_measurements
+-----------------------------------------------
+
+Batched, backend-independent reductions of explicit contact actors into opposing-pad and upward-support facts.
+
+.. currentmodule:: embodichain.compute.geometry.skill_measurements
+
+.. autosummary::
+
+   manipulation_contacts
+
+.. autofunction:: embodichain.compute.geometry.skill_measurements.manipulation_contacts
+
+
 embodichain.compute.kinematics.ik_path
 --------------------------------------
 
@@ -72,6 +87,24 @@ no simulation objects. Failure means the bounded search did not produce a path.
 .. autosummary::
 
    resolve_seeded_ik_path
+
+
+embodichain.compute.rewards
+---------------------------
+
+Discount-consistent potential differences and executed-prefix aggregation for control-step and action-chunk learners.
+
+.. currentmodule:: embodichain.compute.rewards
+
+.. autosummary::
+
+   potential_shaping
+   aggregate_reward_sequence
+
+.. autofunction:: embodichain.compute.rewards.potential_shaping
+
+.. autofunction:: embodichain.compute.rewards.aggregate_reward_sequence
+
 
 embodichain.compute.trajectory.limits
 -------------------------------------
@@ -2036,6 +2069,81 @@ embodichain.lab.gym.envs.embodied_env
 
    EmbodiedEnvCfg
    EmbodiedEnv
+
+
+embodichain.lab.gym.envs.managers.reward_composition
+----------------------------------------------------
+
+Bind skill-owned potentials to canonical raw measurements and expand declarations into ordinary RewardManager terms.
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.reward_composition
+
+.. autosummary::
+
+   ComposedPotentialReward
+   compose_reward_terms
+
+.. autoclass:: embodichain.lab.gym.envs.managers.reward_composition.ComposedPotentialReward
+
+.. autofunction:: embodichain.lab.gym.envs.managers.reward_composition.compose_reward_terms
+
+
+
+embodichain.lab.gym.envs.managers.reward_context
+------------------------------------------------
+
+Carry pre-reset physical acquisition and true task termination into once-per-transition reward computation.
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.reward_context
+
+.. autosummary::
+
+   RewardTransitionContext
+
+.. autoclass:: embodichain.lab.gym.envs.managers.reward_context.RewardTransitionContext
+
+
+
+embodichain.lab.gym.envs.managers.skill_objective
+-------------------------------------------------
+
+Measure skill goals independently of their planner or policy, including occurrence-local grip and stable-placement windows.
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.skill_objective
+
+.. autosummary::
+
+   SkillObjectiveObservation
+   validate_skill_objective
+
+.. autoclass:: embodichain.lab.gym.envs.managers.skill_objective.SkillObjectiveObservation
+
+.. autofunction:: embodichain.lab.gym.envs.managers.skill_objective.validate_skill_objective
+
+
+
+embodichain.lab.sim.atomic_skills.reward_profiles
+-------------------------------------------------
+
+Discover versioned skill reward templates without constructing an engine; trusted extensions may register named profiles.
+
+.. currentmodule:: embodichain.lab.sim.atomic_skills.reward_profiles
+
+.. autosummary::
+
+   SkillRewardProfile
+   default_skill_reward_profile
+   register_skill_reward_profile
+   skill_reward_profiles
+
+.. autoclass:: embodichain.lab.sim.atomic_skills.reward_profiles.SkillRewardProfile
+
+.. autofunction:: embodichain.lab.sim.atomic_skills.reward_profiles.default_skill_reward_profile
+
+.. autofunction:: embodichain.lab.sim.atomic_skills.reward_profiles.register_skill_reward_profile
+
+.. autofunction:: embodichain.lab.sim.atomic_skills.reward_profiles.skill_reward_profiles
+
 
 embodichain.lab.sim.cfg.fluid
 -----------------------------

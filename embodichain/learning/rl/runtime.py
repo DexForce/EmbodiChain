@@ -222,6 +222,20 @@ def _build_gym_environment(
     env_cfg = config_to_cfg(
         gym_config, manager_modules=get_manager_modules(), source_path=gym_config_path
     )
+    composition = getattr(getattr(env_cfg, "rl_task", None), "reward_composition", None)
+    if composition is not None:
+        from embodichain.learning.rl.algo import (
+            _ALGO_REGISTRY,
+            _normalize_algo_cfg_kwargs,
+        )
+
+        algorithm = config["algorithm"]
+        cfg_type, _ = _ALGO_REGISTRY[algorithm["name"].lower()]
+        algorithm_cfg = cfg_type(**_normalize_algo_cfg_kwargs(algorithm.get("cfg", {})))
+        if composition["discount"] != algorithm_cfg.gamma:
+            raise ValueError(
+                "Reward composition discount must equal the algorithm gamma"
+            )
     if num_envs is not None:
         env_cfg.num_envs = int(num_envs)
     if seed is not None:

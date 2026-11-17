@@ -1058,6 +1058,9 @@ class BaseEnv(gym.Env):
                     with self._profiler.section("get_obs"):
                         observation_frame = self._capture_observation(**options)
                         obs = observation_frame.policy
+                reward_manager = getattr(self, "reward_manager", None)
+                if reward_manager is not None:
+                    reward_manager.initialize_observation(observation_frame, reset_ids)
                 self._after_episode_reset(obs, reset_ids)
                 context._finish_initialization(reset_ids)
                 self._record_initial_observation(observation_frame, reset_ids)

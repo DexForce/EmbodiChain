@@ -26,9 +26,11 @@ from typing import TYPE_CHECKING, Union
 from embodichain.utils import logger
 from .manager_base import Functor, ManagerBase
 from .cfg import RewardCfg
+from .reward_context import RewardTransitionContext
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
+    from .observation_types import ObservationFrame
 
 
 __all__ = ["RewardManager"]
@@ -61,6 +63,10 @@ class RewardManager(ManagerBase):
         self._mode_functor_names: dict[str, list[str]] = dict()
         self._mode_functor_cfgs: dict[str, list[RewardCfg]] = dict()
         self._mode_class_functor_cfgs: dict[str, list[RewardCfg]] = dict()
+
+        self.transition_context: RewardTransitionContext | None = None
+        self._reward_cache = None
+        self._reward_cache_key = None
 
         # call the base class (this will parse the functors config)
         super().__init__(cfg, env)
@@ -105,6 +111,9 @@ class RewardManager(ManagerBase):
         Returns:
             An empty dictionary (no logging needed for reset).
         """
+        self._reward_cache_key = None
+        self._reward_cache = None
+        self.transition_context = None
         # call all functors that are classes
         for mode_cfg in self._mode_class_functor_cfgs.values():
             for functor_cfg in mode_cfg:
@@ -113,11 +122,50 @@ class RewardManager(ManagerBase):
         # nothing to log here
         return {}
 
+    def prepare_observation(self, frame: ObservationFrame) -> torch.Tensor:
+        """Qualify reward measurements before the host seals terminal results."""
+        valid = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+        owner = self._env.episode_context
+        if frame.episode_owner is not owner:
+            valid.zero_()
+        else:
+            valid &= torch.tensor(
+                [
+                    a == b
+                    for a, b in zip(frame.episode_ids, owner.episode_ids, strict=True)
+                ],
+                device=self.device,
+            )
+        if frame.revision <= getattr(self, "_last_reward_revision", -1):
+            valid.zero_()
+        self._last_reward_revision = frame.revision
+        for configs in self._mode_class_functor_cfgs.values():
+            for cfg in configs:
+                prepare = getattr(cfg.func, "prepare_observation", None)
+                if prepare is not None:
+                    valid &= prepare(self._env, frame)
+        return valid
+
+    def initialize_observation(
+        self, frame: ObservationFrame, env_ids: Sequence[int] | torch.Tensor
+    ) -> None:
+        """Initialize selected reward baselines from the final reset acquisition."""
+        from .skill_objective import _initialize_objectives
+
+        _initialize_objectives(self._env, frame, env_ids)
+        for configs in self._mode_class_functor_cfgs.values():
+            for cfg in configs:
+                initialize = getattr(cfg.func, "initialize_observation", None)
+                if initialize is not None:
+                    initialize(self._env, frame, env_ids)
+
     def compute(
         self,
         obs: "EnvObs",
         action: "EnvAction",
         info: dict,
+        *,
+        context: RewardTransitionContext | None = None,
     ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
         """Compute the total reward by calling each reward functor.
 
@@ -128,6 +176,8 @@ class RewardManager(ManagerBase):
             obs: The observation from the environment.
             action: The action applied to the robot.
             info: Additional information dictionary.
+            context: Optional canonical physical transition; repeated reads of
+                the same acquisition return owned cached rewards without advancing history.
 
         Returns:
             A tuple containing:
@@ -137,6 +187,19 @@ class RewardManager(ManagerBase):
         Raises:
             ValueError: If the mode is not supported.
         """
+        if context is not None:
+            self.transition_context = context
+        key = (
+            None
+            if self.transition_context is None
+            else self.transition_context.identity
+        )
+        if key is not None and key == self._reward_cache_key:
+            total, terms, validity = self._reward_cache
+            info.setdefault("reward_validity", {}).update(
+                {k: v.clone() for k, v in validity.items()}
+            )
+            return total.clone(), {k: v.clone() for k, v in terms.items()}
         # initialize total reward
         total_reward = torch.zeros(self._env.num_envs, device=self._env.device)
         reward_info = {}
@@ -173,6 +236,13 @@ class RewardManager(ManagerBase):
                 # store for logging (use unweighted value for clarity)
                 reward_info[functor_name] = reward_term
 
+        if key is not None:
+            self._reward_cache_key = key
+            self._reward_cache = (
+                total_reward.clone(),
+                {k: v.clone() for k, v in reward_info.items()},
+                {k: v.clone() for k, v in info.get("reward_validity", {}).items()},
+            )
         return total_reward, reward_info
 
     def get_functor_cfg(self, functor_name: str) -> RewardCfg:

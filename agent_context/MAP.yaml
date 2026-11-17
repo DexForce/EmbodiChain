@@ -95,7 +95,7 @@ topics:
     reward manager, event manager, action manager, dataset manager, 观测 functor, 观测管理器, 管理器]
   keywords: [FunctorCfg, ObservationCfg, RewardCfg, ActionTermCfg, ObservationManager, RewardManager,
     EventManager, ActionManager, ActionDescriptor, ActionTermDescriptor, ParallelGripperAction,
-    DatasetManager, SceneEntityCfg, TerminationManager, ConditionResult, ObservationDescriptor, ObservationSample, get_entity_state, observation consumers]
+    DatasetManager, SceneEntityCfg, TerminationManager, ConditionResult, reward_composition, ObservationDescriptor, ObservationSample, get_entity_state, observation consumers]
   paths: [topics/manager-functor/manager-functor.md]
   source_of_truth:
   - embodichain/lab/gym/envs/managers/action_manager.py
@@ -107,6 +107,9 @@ topics:
   - embodichain/lab/gym/envs/managers/observations/
   - embodichain/lab/gym/envs/managers/observation_types.py
   - embodichain/lab/gym/envs/managers/reward_manager.py
+  - embodichain/lab/gym/envs/managers/reward_composition.py
+  - embodichain/lab/gym/envs/managers/skill_objective.py
+  - embodichain/compute/rewards.py
   - embodichain/lab/gym/envs/managers/event_manager.py
   - embodichain/lab/gym/envs/managers/dataset_manager.py
   watch_paths: [embodichain/lab/gym/envs/managers/, tests/gym/envs/managers/]
@@ -439,7 +442,7 @@ topics:
 - id: atomic-actions
   title: Atomic Skills
   aliases: [atomic skill, atomic skills, atomic action, 原子技能, 原子动作]
-  keywords: [PlanningBudget, PlanningRecovery, ExecutionPlanLifecycle, AtomicSkillEngine, run-atomic-skill, PlanningContext, ExecutionSession, ExecutionRunner, SkillInvocation,
+  keywords: [SkillRewardProfile, PlanningBudget, PlanningRecovery, ExecutionPlanLifecycle, AtomicSkillEngine, run-atomic-skill, PlanningContext, ExecutionSession, ExecutionRunner, SkillInvocation,
     hand_geometry_cfgs, GraspOpeningTarget, prepare_grasp_query, scoped grasp preparation,
     RecoveryPolicy, HeldObjectGuardRequest, PhaseEffectGateRequest, articulation_geometry, control-grid retiming,
     AffordanceSamplingContext, AffordancePoseCandidates, AffordanceSample, affordance sampling]
@@ -447,6 +450,7 @@ topics:
   source_of_truth:
   - embodichain/lab/sim/atomic_skills/engine.py
   - embodichain/lab/sim/atomic_skills/core.py
+  - embodichain/lab/sim/atomic_skills/reward_profiles.py
   - embodichain/lab/sim/atomic_skills/goals.py
   - embodichain/lab/sim/atomic_skills/execution.py
   - embodichain/lab/sim/atomic_skills/verification.py

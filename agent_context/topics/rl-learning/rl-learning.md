@@ -145,6 +145,15 @@ Gym configs can resume without relaxing checks on changed parameters.
 Resource-packaging failures are
 synchronized across ranks before resume or training starts.
 
+Reward-composed simulator environments validate the shaping discount against the
+resolved algorithm gamma before World construction. Saved Gym configurations pin
+template revisions and resolved goal thresholds; reload rejects an incompatible
+installed profile. `compute.rewards.aggregate_reward_sequence` aggregates only an
+executed episode prefix, preserving time-limit bootstrap. Observation/action
+codecs and VA/VLA token losses remain model/collector-owned. The
+[manager contract](../manager-functor/manager-functor.md#composed-skill-rewards)
+owns measurement and potential lifecycle.
+
 ## Invariants and validation
 
 Rollout kind, collector, payload and trainer must agree. APG requires graph-

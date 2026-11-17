@@ -611,3 +611,60 @@ def test_falling_is_failure_only_in_configured_deployment(monkeypatch):
     assert info["fail"].all()
     assert not info["success"].any()
     assert not env.check_truncated({}, info).any()
+
+
+def _program_reward_config():
+    path = (
+        _ROOT
+        / "extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.policy.cobotmagic.yaml"
+    )
+    raw = yaml.safe_load(path.read_text())
+    raw["rl_task"]["reward_composition"] = {
+        "discount": 0.99,
+        "skills": [
+            {
+                "stage": "lift_block",
+                "objective": {
+                    "skill_id": "pick_up",
+                    "binding": {
+                        "robot": "CobotMagic",
+                        "motion_part": "right_arm",
+                        "object": "block_2",
+                        "support": "table",
+                        "pad_links": ["right_link7", "right_link8"],
+                        "hand_links": [
+                            "right_gripper_base",
+                            "right_link7",
+                            "right_link8",
+                        ],
+                    },
+                    "goal": {"position": [0.75, 0.1, 1.05]},
+                },
+            }
+        ],
+    }
+    return path, raw
+
+
+def test_program_rewards_bind_to_the_same_semantic_object_and_endpoint():
+    path, raw = _program_reward_config()
+    cfg = config_to_cfg(raw, source_path=path, _register_env=False)
+    assert "composed_potential" in vars(cfg.rewards)
+    objective = raw["rl_task"]["reward_composition"]["skills"][0]["objective"]
+    objective["binding"]["object"] = "block_1"
+    with pytest.raises(ValueError, match="exact object"):
+        config_to_cfg(raw, source_path=path, _register_env=False)
+    objective["binding"]["object"] = "block_2"
+    objective["binding"]["motion_part"] = "left_arm"
+    with pytest.raises(ValueError, match="motion endpoint"):
+        config_to_cfg(raw, source_path=path, _register_env=False)
+
+
+def test_duplicate_program_reward_declarations_cannot_charge_an_occurrence_twice():
+    path, raw = _program_reward_config()
+    cfg = config_to_cfg(raw, source_path=path, _register_env=False)
+    raw["rl_task"]["reward_composition"]["skills"].append(
+        deepcopy(raw["rl_task"]["reward_composition"]["skills"][0])
+    )
+    with pytest.raises(ValueError, match="Duplicate skill shaping|Overlapping"):
+        config_to_cfg(raw, source_path=path, _register_env=False)

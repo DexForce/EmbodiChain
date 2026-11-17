@@ -94,6 +94,34 @@ maps them into `env.active_joint_ids`; observed mimic joints are included.
 Use this selector for reusable arm/gripper observations across robot DOFs and
 state orders. Physical joint IDs are not observation-column indices.
 
+## Composed skill rewards
+
+`managers/reward_composition.py` expands optional `RLTaskCfg.reward_composition`
+and standalone `skill` goals into standard `RewardCfg` terms. Program-authored
+reward defaults are declared in `TaskProgramCfg.rewards`; the deployment may
+explicitly override them. `RewardManager` remains the sole weighting/reset owner.
+Stateful potential shaping consumes one `RewardTransitionContext` from the
+canonical post-step observation after measured termination. Reset acquisition
+initializes baselines without paying rewards; repeated transition reads are cached.
+Unavailable required measurements terminate affected rows and cannot erase a
+negative shaping boundary. True task termination and time truncation remain distinct.
+
+`SkillObjectiveObservation` owns bounded, occurrence-local physical windows;
+read-only queries do not commit history. Its contact sensor joins the public
+sensor suite. Capture identities include the objective, avoiding aliasing across
+multiple goals on one robot. Physical success remains independent of reward weights. Positive support witnesses
+may persist through sleeping-body reports only while both physical poses remain
+unchanged; sensor invalidity, geometry motion and reset invalidate that history.
+Single-skill goals and explicit per-call program criteria use the same measurement
+and skill-owned profile. Program object/resource/support bindings reject semantic
+contradictions. `compute.rewards` owns numerical transforms and chunk aggregation;
+registered templates live in `sim/atomic_skills/reward_profiles.py` without Gym imports.
+
+See `examples/learning/task_program_progress/README.md` for configuration and
+native qualification commands. Cover numerical identities in `tests/compute/`,
+manager lifecycle in `tests/gym/envs/managers/test_reward_composition.py`, and
+physical-window boundaries in `test_skill_objective.py` in the same directory.
+
 ## Raw observations and consumer views
 
 `managers/observation_types.py` contains the shared raw value/frame types.
