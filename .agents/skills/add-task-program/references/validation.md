@@ -26,6 +26,16 @@ The inspector:
 
 It never constructs a live simulator or registers a Gym environment.
 
+### Resolved values and owners
+
+Use `--explain` for a readable backend/component summary and composed
+integration/policy parameters with their authored owners. Add `--json` for
+`resolved_configuration`, typed runtime preset defaults, and machine-readable
+source paths. The view distinguishes component values, inline/derived values,
+deployment overrides, and built-in composite monitor SDK defaults. Other
+monitor providers' defaults are not guessed. These values describe configuration,
+not live measurements or evidence of physical success.
+
 ## Focused test surfaces
 
 ```bash

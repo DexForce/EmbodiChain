@@ -10,7 +10,6 @@ scene_binding:
   registry_id: task_program_repeated_pick_place
   rigid_objects:
     - entity_id: cube
-      simulation_uid: cube
       dynamics: dynamic
       semantic_type: cube
       affordances:

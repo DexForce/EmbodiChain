@@ -934,7 +934,7 @@ def test_example_gym_configs_keep_minimal_recording_configuration(
         "integration",
         "execution_policy",
     }
-    assert set(payload["embodiment"]) <= {"component", "overrides"}
+    assert set(payload["embodiment"]) <= {"component", "overrides", "camera_overrides"}
     assert "task_program" not in environment
     assert "version" not in payload
     assert "task_program_path" not in payload

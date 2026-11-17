@@ -8,14 +8,12 @@ scene_binding:
   registry_id: carton_worktop
   rigid_objects:
   - entity_id: carton
-    simulation_uid: carton
     dynamics: dynamic
     semantic_type: carton
     affordances:
     - entity_id: carton_grasp
       kind: antipodal_grasp
   - entity_id: worktop
-    simulation_uid: worktop
     dynamics: static
     semantic_type: worktop
     affordances:
@@ -24,22 +22,8 @@ scene_binding:
       native_name: top
       object_target_frame: parent
       object_target_pose:
-      - 1.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 1.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 1.0
-      - 0.062095391004831975
-      - 0.0
-      - 0.0
-      - 0.0
-      - 1.0
+        position: [0.0, 0.0, 0.062095391004831975]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
 profile:
   defaults:
     pick_up:
@@ -48,7 +32,7 @@ profile:
       primary: primary_manipulator
     place:
       primary: primary_manipulator
-  action_options:
+  skill_options:
     pick:
       kind: pick_up
       lift_height: 0.045
@@ -56,39 +40,17 @@ profile:
       hand_interp_steps: 30
       grasp_settle_steps: 10
       grasp_frame_to_eef:
-      - 2.220446049250313e-16
-      - 1.0
-      - 0.0
-      - 0.0
-      - -1.0
-      - 2.220446049250313e-16
-      - -0.0
-      - 0.0
-      - -0.0
-      - 0.0
-      - 1.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 1.0
+        position: [0.0, 0.0, 0.0]
+        rotation_matrix:
+        - [2.220446049250313e-16, 1.0, 0.0]
+        - [-1.0, 2.220446049250313e-16, -0.0]
+        - [-0.0, 0.0, 1.0]
       fixed_object_to_eef:
-      - 1.0
-      - -2.220446049250313e-16
-      - 0.0
-      - -0.014791118689052474
-      - -2.220446049250313e-16
-      - -1.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - 0.0
-      - -1.0
-      - -0.005
-      - 0.0
-      - 0.0
-      - 0.0
-      - 1.0
+        position: [-0.014791118689052474, 0.0, -0.005]
+        rotation_matrix:
+        - [1.0, -2.220446049250313e-16, 0.0]
+        - [-2.220446049250313e-16, -1.0, 0.0]
+        - [0.0, 0.0, -1.0]
     simulation.move_held_object:
       kind: move_held_object
     place:
@@ -116,22 +78,8 @@ runtime_services:
     target_id: above_worktop
     reference_entity_id: worktop
     relative_pose:
-    - 1.0
-    - 0.0
-    - 0.0
-    - 0.0
-    - 0.0
-    - 1.0
-    - 0.0
-    - 0.0
-    - 0.0
-    - 0.0
-    - 1.0
-    - 0.09509539100483197
-    - 0.0
-    - 0.0
-    - 0.0
-    - 1.0
+      position: [0.0, 0.0, 0.09509539100483197]
+      quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
   control_part_evidence:
     kind: joint_position_constraint
     control_parts:

@@ -233,8 +233,13 @@ def _prepare_asset(baseline, directory, selected):
         integration = yaml.safe_load(
             (TASK / "task_program/integration.yaml").read_text()
         )
-        grasp = tuple(
-            integration["profile"]["skill_options"]["pick"]["fixed_object_to_eef"]
+        from embodichain.lab.task_program.integrations.configured import (
+            _pose_matrix,
+        )
+
+        grasp = _pose_matrix(
+            integration["profile"]["skill_options"]["pick"]["fixed_object_to_eef"],
+            path="integration.profile.skill_options.pick.fixed_object_to_eef",
         )
         constraints = (
             DemoSkillConstraint(

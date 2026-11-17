@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+from copy import copy
 import math
 from typing import TYPE_CHECKING
 
@@ -295,10 +296,49 @@ def plan_named_arm_trajectory(
     motion_policy: MotionPolicy,
     interpolation_dt: float | None,
     *,
+    active_mask: torch.Tensor | None = None,
     cartesian_linear: bool = False,
     cartesian_path_sampler: Callable[[torch.Tensor], torch.Tensor] | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Plan a fixed-size pose trajectory for one named manipulator."""
+    """Plan one manipulator, bypassing IK and timing for inactive rows."""
+    if active_mask is not None:
+        if active_mask.dtype != torch.bool or active_mask.shape != start_qpos.shape[:1]:
+            raise ValueError("active_mask must contain one boolean per planning row.")
+        if not bool(active_mask.all()):
+            if motion_policy.strategy != "ik_interp":
+                raise ValueError("Active-row planning requires strategy='ik_interp'.")
+            rows = active_mask.nonzero(as_tuple=True)[0]
+            if rows.numel() == 0:
+                return (
+                    active_mask.clone(),
+                    start_qpos[:, None].expand(-1, n_waypoints, -1).clone(),
+                )
+            scoped = copy(motion_generator)
+            parent_ids = getattr(motion_generator, "_env_ids", None)
+            physical_ids = (
+                tuple(range(start_qpos.shape[0])) if parent_ids is None else parent_ids
+            )
+            scoped._env_ids = tuple(physical_ids[i] for i in rows.tolist())
+            success, positions = plan_named_arm_trajectory(
+                scoped,
+                control_part,
+                start_qpos[rows],
+                target_poses[rows],
+                n_waypoints,
+                motion_policy,
+                interpolation_dt,
+                cartesian_linear=cartesian_linear,
+                cartesian_path_sampler=(
+                    None
+                    if cartesian_path_sampler is None
+                    else lambda progress: cartesian_path_sampler(progress)[rows]
+                ),
+            )
+            full = start_qpos[:, None].expand(-1, positions.shape[1], -1).clone()
+            full[rows] = positions.to(full)
+            mask = torch.zeros_like(active_mask)
+            mask[rows] = success
+            return mask, full
     result = motion_generator.generate(
         build_pose_plan_states(target_poses),
         options=motion_policy.to_motion_gen_options(
