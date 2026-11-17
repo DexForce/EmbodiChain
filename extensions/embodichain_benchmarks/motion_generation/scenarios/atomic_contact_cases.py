@@ -27,6 +27,7 @@ import torch
 from embodichain.compute.geometry import nearest_half_turn_pose
 
 from embodichain.lab.sim.atomic_skills import (
+    OPEN_COMMAND,
     SkillInvocation,
     ObjectSemantics,
     PressAffordance,
@@ -52,9 +53,12 @@ from .atomic_evaluation import (
 )
 from .atomic_case_utils import (
     atomic_case_id,
+    case_hand_qpos,
     case_name,
     case_pose,
     difficulty,
+    float_vector,
+    hand_command_override,
     randomization_parameters,
     slide_direction,
     snapshot_case_qpos,
@@ -403,6 +407,7 @@ class SlideCases(AtomicSkillCaseProvider):
             alignment_max_angle_deg=float(
                 config.get("grasp_alignment_max_angle_deg", 10.0)
             ),
+            grasp_depth_offset_m=float(config.get("grasp_depth_offset_m", 0.0)),
         )
         options = SlideOptions(
             direction=slide_direction(config.get("direction", "pull")),
@@ -461,6 +466,7 @@ class SlideCases(AtomicSkillCaseProvider):
                 "grasp_alignment_max_angle_deg": float(
                     config.get("grasp_alignment_max_angle_deg", 10.0)
                 ),
+                "grasp_depth_offset_m": float(config.get("grasp_depth_offset_m", 0.0)),
                 "direction": options.direction,
                 "hand_interp_steps": options.hand_interp_steps,
                 "approach_distance_m": options.approach_distance,
@@ -650,8 +656,18 @@ class TwistCases(AtomicSkillCaseProvider):
             seed=seed,
             config=config,
         )
+        grasp_tilt = float(config.get("grasp_tilt_rad", 0.0))
+        grasp_tilt_axis = config.get("grasp_tilt_axis")
         affordance = TwistAffordance(
             grasp_position=tuple(float(value) for value in grasp_position_tensor),
+            grasp_tilt=grasp_tilt,
+            grasp_tilt_axis=(
+                None
+                if grasp_tilt_axis is None
+                else tuple(
+                    float_vector(grasp_tilt_axis, name="grasp_tilt_axis", length=3)
+                )
+            ),
         )
         ObjectSemantics(
             affordance=affordance,
@@ -725,6 +741,13 @@ class TwistCases(AtomicSkillCaseProvider):
                 "axis_origin": axis_origin,
                 "twist_axis": twist_axis,
                 "grasp_pose": grasp_pose.detach().cpu().tolist(),
+                "grasp_tilt_rad": affordance.grasp_tilt,
+                "grasp_tilt_axis": (
+                    None
+                    if affordance.grasp_tilt_axis is None
+                    else list(affordance.grasp_tilt_axis)
+                ),
+                "hand_open_qpos": case_hand_qpos(config, "hand_open_qpos"),
                 "hand_interp_steps": options.hand_interp_steps,
                 "twist_waypoint_count": options.twist_waypoint_count,
                 "pre_grasp_distance_m": options.pre_grasp_distance,
@@ -768,6 +791,12 @@ class TwistCases(AtomicSkillCaseProvider):
             affordance=TwistAffordance(
                 grasp_position=tuple(case.case_parameters["grasp_position"]),
                 axis_origin=tuple(case.case_parameters["axis_origin"]),
+                grasp_tilt=float(case.case_parameters.get("grasp_tilt_rad", 0.0)),
+                grasp_tilt_axis=(
+                    None
+                    if case.case_parameters.get("grasp_tilt_axis") is None
+                    else tuple(case.case_parameters["grasp_tilt_axis"])
+                ),
                 twist_axis=torch.tensor(
                     case.case_parameters["twist_axis"],
                     dtype=torch.float32,
@@ -803,6 +832,11 @@ class TwistCases(AtomicSkillCaseProvider):
                 twist_waypoint_count=int(case.case_parameters["twist_waypoint_count"]),
                 pre_grasp_distance=float(case.case_parameters["pre_grasp_distance_m"]),
                 twist_angle=float(case.case_parameters["twist_angle_rad"]),
+            ),
+            control_overrides=hand_command_override(
+                OPEN_COMMAND,
+                case.case_parameters.get("hand_open_qpos"),
+                device=scenario.robot.device,
             ),
         )
 

@@ -35,6 +35,7 @@ from embodichain.compute.geometry import nearest_half_turn_pose, rotate_rigid_gr
 from embodichain.compute.kinematics import pose_error
 
 from embodichain.lab.sim.atomic_skills import (
+    GRASP_COMMAND,
     SkillInvocation,
     Affordance,
     AxisAlignAffordance,
@@ -66,11 +67,13 @@ from .atomic_case_utils import (
     TOP_DOWN_ROTATION,
     atomic_case_id,
     canonical_case_qpos,
+    case_hand_qpos,
     case_name,
     case_pose,
     difficulty,
     float_vector,
     folded_object_yaw,
+    hand_command_override,
     randomization_parameters,
     randomized_vector_batch,
     snapshot_case_qpos,
@@ -2123,18 +2126,13 @@ class _PushObjectEvaluator:
         return evaluate_skill_stage_batch("push_object", evidence)
 
 
-def _push_poses(
+def _push_contact_frame(
     object_pose: torch.Tensor,
     target_pose: torch.Tensor,
     *,
-    contact_distance: float,
-    approach_height: float,
-    retract_height: float,
-    push_overshoot: float,
-    contact_frame_to_eef: torch.Tensor,
-    object_contact_offset: torch.Tensor,
-) -> torch.Tensor:
-    """Mirror PushObject: approach, contact, pushed and retract TCP poses."""
+    contact_along_target_face: bool,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Return support normal, push direction and distance, frame, and contact axis."""
     normal = torch.nn.functional.normalize(target_pose[:, :3, 2], dim=1)
     displacement = target_pose[:, :3, 3] - object_pose[:, :3, 3]
     planar = displacement - (displacement * normal).sum(dim=1, keepdim=True) * normal
@@ -2150,11 +2148,81 @@ def _push_poses(
     x_axis = x_axis - (x_axis * normal).sum(dim=1, keepdim=True) * normal
     frame[:, :3, 0] = torch.nn.functional.normalize(x_axis, dim=1)
     frame[:, :3, 1] = torch.linalg.cross(frame[:, :3, 2], frame[:, :3, 0], dim=1)
+    contact_axis = direction
+    if contact_along_target_face:
+        axes = torch.stack(
+            (frame[:, :3, 0], -frame[:, :3, 0], frame[:, :3, 1], -frame[:, :3, 1]),
+            dim=1,
+        )
+        nearest = (axes * direction[:, None]).sum(dim=-1).argmax(dim=1)
+        contact_axis = axes[torch.arange(axes.shape[0], device=axes.device), nearest]
+    return normal, direction, distance, frame, contact_axis
+
+
+def _push_contact_distance_from_face(
+    vertices: torch.Tensor,
+    object_pose: torch.Tensor,
+    target_pose: torch.Tensor,
+    *,
+    face_distance: float,
+    object_contact_offset: torch.Tensor,
+    contact_along_target_face: bool,
+) -> float:
+    """Return the centre contact distance that keeps ``face_distance`` behind the face.
+
+    Args:
+        vertices: Object-local vertices, shape ``(B, V, 3)`` or ``(V, 3)``.
+        object_pose: Settled object poses, shape ``(B, 4, 4)``.
+        target_pose: Target object poses, shape ``(B, 4, 4)``.
+        face_distance: TCP distance behind the object's rear face along the
+            contact axis, in metres.
+        object_contact_offset: Object-local contact-centre offset.
+        contact_along_target_face: Whether the contact axis follows the
+            nearest target face, as in :func:`_push_poses`.
+
+    Returns:
+        The distance from the contact centre shared by every environment.
+    """
+    *_, contact_axis = _push_contact_frame(
+        object_pose, target_pose, contact_along_target_face=contact_along_target_face
+    )
+    if vertices.dim() == 2:
+        vertices = vertices.expand(object_pose.shape[0], -1, -1)
+    rotation = object_pose[:, :3, :3].to(dtype=torch.float32)
+    local_back = torch.matmul(rotation.transpose(1, 2), -contact_axis[:, :, None])
+    offset = object_contact_offset.to(device=vertices.device, dtype=torch.float32)
+    extent = torch.matmul(vertices.to(torch.float32) - offset, local_back).amax(
+        dim=(1, 2)
+    )
+    if float(extent.max() - extent.min()) > 1.0e-4:
+        raise ValueError(
+            "contact_distance_from_face_m needs the same rear-face extent in every "
+            f"environment; got {extent.detach().cpu().tolist()}."
+        )
+    return float(extent.mean()) + face_distance
+
+
+def _push_poses(
+    object_pose: torch.Tensor,
+    target_pose: torch.Tensor,
+    *,
+    contact_distance: float,
+    approach_height: float,
+    retract_height: float,
+    push_overshoot: float,
+    contact_frame_to_eef: torch.Tensor,
+    object_contact_offset: torch.Tensor,
+    contact_along_target_face: bool = False,
+) -> torch.Tensor:
+    """Mirror PushObject: approach, contact, pushed and retract TCP poses."""
+    normal, direction, distance, frame, contact_axis = _push_contact_frame(
+        object_pose, target_pose, contact_along_target_face=contact_along_target_face
+    )
     contact_center = object_pose[:, :3, 3] + torch.matmul(
         object_pose[:, :3, :3],
         object_contact_offset.to(device=object_pose.device, dtype=torch.float32),
     )
-    frame[:, :3, 3] = contact_center - direction * contact_distance
+    frame[:, :3, 3] = contact_center - contact_axis * contact_distance
     contact = torch.matmul(frame, contact_frame_to_eef.to(device=frame.device))
     approach = _translate(contact, normal * approach_height)
     pushed = _translate(contact, direction * (distance + push_overshoot))
@@ -2223,14 +2291,34 @@ class _PushObjectCases(AtomicSkillCaseProvider):
             dtype=torch.float32,
             device=object_pose.device,
         )
+        contact_along_target_face = bool(config.get("contact_along_target_face", False))
+        face_distance = config.get("contact_distance_from_face_m")
+        if face_distance is None:
+            contact_distance = float(config.get("contact_distance_m", 0.03))
+        elif "contact_distance_m" in config:
+            raise ValueError(
+                "PushObject cases set contact_distance_m or "
+                "contact_distance_from_face_m, not both."
+            )
+        else:
+            # Sized variants keep the clearance behind the face actually pushed.
+            contact_distance = _push_contact_distance_from_face(
+                handle.entity.get_vertices(scale=True),
+                object_pose,
+                target_pose,
+                face_distance=float(face_distance),
+                object_contact_offset=contact_offset,
+                contact_along_target_face=contact_along_target_face,
+            )
         options = PushObjectOptions(
             hand_interp_steps=int(config.get("hand_interp_steps", 12)),
             approach_height=float(config.get("approach_height_m", 0.1)),
             retract_height=float(config.get("retract_height_m", 0.1)),
-            contact_distance=float(config.get("contact_distance_m", 0.03)),
+            contact_distance=contact_distance,
             push_overshoot=float(config.get("push_overshoot_m", 0.0)),
             object_contact_offset=contact_offset,
             contact_frame_to_eef=calibration,
+            contact_along_target_face=contact_along_target_face,
         )
         targets = _push_poses(
             object_pose,
@@ -2241,6 +2329,7 @@ class _PushObjectCases(AtomicSkillCaseProvider):
             push_overshoot=options.push_overshoot,
             contact_frame_to_eef=calibration,
             object_contact_offset=contact_offset,
+            contact_along_target_face=options.contact_along_target_face,
         )
         references = scenario.solve_reference_qpos(start_qpos, targets)
         return BenchmarkCase(
@@ -2270,9 +2359,14 @@ class _PushObjectCases(AtomicSkillCaseProvider):
                 "approach_height_m": options.approach_height,
                 "retract_height_m": options.retract_height,
                 "contact_distance_m": options.contact_distance,
+                "contact_distance_from_face_m": (
+                    None if face_distance is None else float(face_distance)
+                ),
                 "push_overshoot_m": options.push_overshoot,
                 "contact_frame_to_eef": calibration.detach().cpu().tolist(),
                 "object_contact_offset_m": contact_offset.detach().cpu().tolist(),
+                "contact_along_target_face": options.contact_along_target_face,
+                "hand_grasp_qpos": case_hand_qpos(config, "hand_grasp_qpos"),
                 "pre_action_settle_steps": settle_steps,
                 "object_initial_pose": object_pose.detach().cpu().tolist(),
                 "target_object_pose": target_pose.detach().cpu().tolist(),
@@ -2324,6 +2418,14 @@ class _PushObjectCases(AtomicSkillCaseProvider):
                     dtype=torch.float32,
                     device=device,
                 ),
+                contact_along_target_face=bool(
+                    parameters.get("contact_along_target_face", False)
+                ),
+            ),
+            control_overrides=hand_command_override(
+                GRASP_COMMAND,
+                parameters.get("hand_grasp_qpos"),
+                device=device,
             ),
         )
 

@@ -1,12 +1,17 @@
 schema_version: 1
 name: atomic_franka_robotiq_randomized
-suite_version: atomic_franka_robotiq_randomized_v7
+suite_version: atomic_franka_robotiq_randomized_v8
 profile: coverage
 
 robot:
   id: franka_robotiq
   provider: franka_robotiq
-  config: {}
+  config:
+    # Cartesian contact paths: hold each FEP sample within 0.1 rad of the
+    # previous one; independent q7 searches alternate near the shoulder singularity.
+    solver_cfg:
+      arm:
+        continuous_path_joint_step: 0.1
 
 planners:
   - id: nmg
@@ -172,9 +177,10 @@ tracks:
           sample_count: 256
           hand_interp_steps: 12
           approach_distance_m: 0.12
-          # Closed native pads project 23.16 mm ahead of the solver TCP.
-          press_tcp_offset_m: -0.02316
-          press_distance_m: 0.006
+          # Closed pads first touch the button 25.2 mm ahead of the solver TCP;
+          # stop 1 mm short, then press through the 6 mm stroke plus 1 mm.
+          press_tcp_offset_m: -0.0262
+          press_distance_m: 0.008
           articulation: microwave
           target_link: button_link
           target_joint: button_joint

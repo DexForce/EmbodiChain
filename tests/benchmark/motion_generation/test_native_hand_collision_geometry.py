@@ -267,10 +267,10 @@ def test_robotiq_push_targets_clear_ground_with_closed_native_geometry(suite_nam
     )
     cfg = create_robot_provider(suite.robot).build_cfg()
     model = deepcopy(resolve_gripper_defaults(track.config["grasp_model"]))
+    # Pushes may replace the grasp command with a partial closure.
+    push_qpos = skill.get("hand_grasp_qpos", track.config["gripper"]["grasp_qpos"])
     model["joint_commands"]["open"] = dict(
-        zip(
-            cfg.control_parts["eef"], track.config["gripper"]["grasp_qpos"], strict=True
-        )
+        zip(cfg.control_parts["eef"], push_qpos, strict=True)
     )
     geometry = build_gripper_collision_geometry(
         model, root_from_tcp=cfg.solver_cfg["arm"].tcp, point_spacing=0.005
@@ -286,15 +286,27 @@ def test_robotiq_push_targets_clear_ground_with_closed_native_geometry(suite_nam
         for case in skill["cases"]:
             target = object_pose.clone()
             target[:, :3, 3] += torch.tensor(case["target_object_offset_m"])
+            face_distance = case.get(
+                "contact_distance_from_face_m",
+                skill.get("contact_distance_from_face_m"),
+            )
             poses = _push_poses(
                 object_pose,
                 target,
-                contact_distance=case["contact_distance_m"],
+                contact_along_target_face=skill.get("contact_along_target_face", False),
+                contact_distance=(
+                    case["contact_distance_m"]
+                    if face_distance is None
+                    else size / 2 + face_distance
+                ),
                 approach_height=skill["approach_height_m"],
                 retract_height=skill["retract_height_m"],
                 push_overshoot=skill["push_overshoot_m"],
                 contact_frame_to_eef=torch.tensor(
-                    skill.get("contact_frame_to_eef", torch.eye(4).tolist())
+                    case.get(
+                        "contact_frame_to_eef",
+                        skill.get("contact_frame_to_eef", torch.eye(4).tolist()),
+                    )
                 ),
                 object_contact_offset=torch.tensor(skill["object_contact_offset_m"]),
             )
@@ -305,8 +317,9 @@ def test_robotiq_push_targets_clear_ground_with_closed_native_geometry(suite_nam
                 points @ world_from_contact[:3, :3].T + world_from_contact[:3, 3]
             )
             assert float(world_points[:, 2].min()) >= 0.001
-            if size == 0.05:
-                # Nominal cube starts about 2 mm ahead of the closed finger face.
+            if size == 0.05 or face_distance is not None:
+                # The cube starts about 2 mm ahead of the closed finger face;
+                # face-relative distances keep that for every authored size.
                 direction = (target[0, :3, 3] - object_pose[0, :3, 3]).to(torch.float64)
                 direction = direction / torch.linalg.vector_norm(direction)
                 slab = world_points[
@@ -364,12 +377,17 @@ def test_robotiq_press_calibrates_closed_pads_to_button_surface(suite_name):
         :3, :3
     ]
     forward_extent = float(tcp_points[:, 2].max())
-    assert forward_extent + skill["press_tcp_offset_m"] == pytest.approx(0.0, abs=1e-6)
+    # In replay the closed pads already move the button 2 mm at the geometric
+    # contact pose, so the contact pose stops 3 mm outside it (1 mm clear).
+    assert forward_extent + skill["press_tcp_offset_m"] == pytest.approx(
+        -0.003, abs=1e-4
+    )
 
     microwave = ElementTree.parse(get_data_path("Microwave/microwave.urdf")).getroot()
     button_joint = microwave.find("joint[@name='button_joint']")
     stroke = float(button_joint.find("limit").get("upper"))
-    assert skill["press_distance_m"] == pytest.approx(stroke)
+    # Close the 1 mm gap, travel the whole stroke, then 1 mm against the stop.
+    assert skill["press_distance_m"] == pytest.approx(stroke + 0.002)
 
     button_collision = microwave.find("link[@name='button_link']/collision")
     button_center = np.fromstring(button_collision.find("origin").get("xyz"), sep=" ")

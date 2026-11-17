@@ -1834,6 +1834,7 @@ class AtomicSkillScenario(ScenarioProvider):
         n_sample: int,
         max_candidates: int,
         alignment_max_angle_deg: float,
+        grasp_depth_offset_m: float = 0.0,
     ) -> torch.Tensor:
         """Freeze a mounted-hand grasp that can complete a Slide path."""
         translation_sign = -1.0 if direction == "pull" else 1.0
@@ -1861,6 +1862,7 @@ class AtomicSkillScenario(ScenarioProvider):
             max_candidates=max_candidates,
             alignment_max_angle_deg=alignment_max_angle_deg,
             waypoint_poses=slide_poses,
+            grasp_depth_offset_m=grasp_depth_offset_m,
         )
 
     def screen_articulation_grasp(
@@ -1876,6 +1878,7 @@ class AtomicSkillScenario(ScenarioProvider):
         max_candidates: int,
         alignment_max_angle_deg: float,
         waypoint_poses: Callable[[torch.Tensor], Sequence[torch.Tensor]],
+        grasp_depth_offset_m: float = 0.0,
     ) -> torch.Tensor:
         """Freeze the first sampled link grasp whose skill poses are reachable.
 
@@ -1896,6 +1899,8 @@ class AtomicSkillScenario(ScenarioProvider):
                 approach axis in every row.
             waypoint_poses: Skill poses that a batched grasp variant must reach,
                 in order.
+            grasp_depth_offset_m: Contact-centre shift toward the hand, applied
+                to the hand surfaces before candidate qualification.
 
         Returns:
             The selected grasp batch with shape ``(B, 4, 4)``.
@@ -1940,8 +1945,12 @@ class AtomicSkillScenario(ScenarioProvider):
                 max_candidates=max_candidates,
                 gripper_data=self.grasp_model(),
                 root_from_tcp=self.grasp_root_from_tcp(),
-                closure_sweep=self.grasp_closure_sweep(),
+                # A mounted link rests on no support: the closure sweep would
+                # infer one at the link's lowest point and reject every grasp
+                # whose lower finger closes beneath a handle or knob.
+                closure_sweep=False,
                 ray_deviation_angle=self.grasp_ray_deviation_angle(),
+                grasp_depth_offset_m=grasp_depth_offset_m,
             )
             candidates, costs = generator.get_valid_grasp_poses(
                 mesh_vertices=mesh_vertices,

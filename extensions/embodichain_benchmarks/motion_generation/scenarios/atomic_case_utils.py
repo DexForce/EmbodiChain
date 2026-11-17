@@ -27,7 +27,9 @@ import torch
 from embodichain.lab.sim.atomic_skills import (
     Affordance,
     HeldObjectState,
+    JointPositionCommand,
     ObjectSemantics,
+    SkillControlOverrides,
 )
 from embodichain.compute.geometry import rotate_rigid_grasp
 
@@ -72,6 +74,8 @@ __all__ = [
     "folded_object_yaw",
     "yaw_following_grasp_rotation",
     "grasp_follows_object_yaw",
+    "case_hand_qpos",
+    "hand_command_override",
 ]
 
 
@@ -405,3 +409,49 @@ def twist_arc_poses(
     return rotate_rigid_grasp(target_pose, grasp_pose, twist_axis, axis_origin, angles)[
         1
     ]
+
+
+def case_hand_qpos(config: Mapping[str, object], key: str) -> list[float] | None:
+    """Read an optional gripper joint-position vector from a case config.
+
+    Args:
+        config: Merged skill and case configuration.
+        key: Configuration key, such as ``hand_open_qpos``.
+
+    Returns:
+        The finite joint positions, or ``None`` when the key is absent.
+
+    Raises:
+        ValueError: If the value is not a non-empty list of finite numbers.
+    """
+    value = config.get(key)
+    if value is None:
+        return None
+    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+        raise ValueError(f"{key} must be a list of joint positions.")
+    qpos = [float(item) for item in value]
+    if not qpos or not all(math.isfinite(item) for item in qpos):
+        raise ValueError(f"{key} must contain finite joint positions.")
+    return qpos
+
+
+def hand_command_override(
+    command: str, qpos: Sequence[float] | None, *, device: torch.device
+) -> SkillControlOverrides | None:
+    """Replace one grasp-endpoint semantic command for a single invocation.
+
+    Args:
+        command: Semantic command name, such as ``open`` or ``grasp``.
+        qpos: Joint positions of the gripper control part, or ``None``.
+        device: Device of the robot.
+
+    Returns:
+        Endpoint overrides for the ``primary`` slot's ``grasp`` endpoint, or
+        ``None`` to keep the embodiment's command profile.
+    """
+    if qpos is None:
+        return None
+    positions = JointPositionCommand(
+        torch.tensor(list(qpos), dtype=torch.float32, device=device)
+    )
+    return SkillControlOverrides(endpoints={"primary": {"grasp": {command: positions}}})

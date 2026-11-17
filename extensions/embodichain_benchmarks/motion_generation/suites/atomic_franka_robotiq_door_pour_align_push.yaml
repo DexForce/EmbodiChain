@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_franka_robotiq_door_pour_align_push
-suite_version: atomic_franka_robotiq_door_pour_align_push_v9
+suite_version: atomic_franka_robotiq_door_pour_align_push_v10
 profile: smoke
 
 # OpenDoor, Pour, AxisAlign and PushObject on the Franka + Robotiq 2F-140 embodiment.
@@ -11,6 +11,11 @@ robot:
   id: franka_robotiq
   provider: franka_robotiq
   config:
+    # Cartesian contact paths: hold each FEP sample within 0.1 rad of the
+    # previous one; independent q7 searches alternate near the shoulder singularity.
+    solver_cfg:
+      arm:
+        continuous_path_joint_step: 0.1
     attrs:
       material_props:
         static_friction: 1.0
@@ -193,6 +198,13 @@ tracks:
           approach_height_m: 0.10
           retract_height_m: 0.10
           push_overshoot_m: 0.0
+          # Push with the pads 75% closed, about 34 mm apart: two contacts straddle
+          # the cube face. The closed fingers form a 15 mm pusher about which the cube
+          # turned and drifted sideways; nominal and object-xy rows failed 25 of 54.
+          hand_grasp_qpos: [0.525, -0.525, 0.525, -0.525, -0.525, 0.525]
+          # Keep the contact behind the cube face nearest the push, so yawed cubes
+          # keep the 2 mm approach clearance instead of starting inside the hand.
+          contact_along_target_face: true
           # Closed Robotiq pads need clearance above the support plane.
           # A 5 mm upward offset clears the 40 mm cube support by >1.8 mm,
           # even without extra clearance from native rest offsets.
@@ -207,5 +219,13 @@ tracks:
             - name: cube_push_toward_base_8cm
               object: cube_50mm
               task_difficulty: simple
-              contact_distance_m: 0.048
+              # Turn the hand 90 degrees so a closed finger face, spanning the cube's
+              # height, pushes; facing this way the knuckles struck the top edge and
+              # tipped the cube. Same 2 mm clearance as the lateral push.
+              contact_distance_m: 0.0405
+              contact_frame_to_eef:
+                - [0.0, -1.0, 0.0, 0.0]
+                - [1.0, 0.0, 0.0, 0.0]
+                - [0.0, 0.0, 1.0, 0.0]
+                - [0.0, 0.0, 0.0, 1.0]
               target_object_offset_m: [0.08, 0.0, 0.0]

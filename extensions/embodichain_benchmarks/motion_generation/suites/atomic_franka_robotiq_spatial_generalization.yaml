@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_franka_robotiq_spatial_generalization
-suite_version: atomic_franka_robotiq_spatial_generalization_v18
+suite_version: atomic_franka_robotiq_spatial_generalization_v20
 profile: coverage
 
 # Reusable strict-spatial domain definitions. Every track below selects only
@@ -575,10 +575,28 @@ x-microwave-controls: &microwave_controls
   position: [-1.0, -0.30, 0.4]
   rotation_deg: [0.0, 0.0, 90.0]
   init_qpos: [0.0, 0.0, 0.0, 0.0]
+  # The button returns on a 300 N/m spring (1.8 N at its 6 mm stroke). With
+  # only the weak shared drive, a 10-degree roll or pitch let the 25 g button
+  # creep inwards under gravity during replay, so a downward-facing press
+  # started with up to its whole stroke already spent.
   drive:
-    stiffness: 0.001
+    stiffness:
+      door_hinge: 0.001
+      turntable_joint: 0.001
+      knob_joint: 0.001
+      button_joint: 300.0
     damping: 100.0
-    max_effort: 0.01
+    max_effort:
+      door_hinge: 0.01
+      turntable_joint: 0.01
+      knob_joint: 0.01
+      button_joint: 5.0
+  # Articulation-only tracks need explicit solver iterations: GPU physics
+  # solves the whole scene with its largest per-actor count, the native
+  # articulation default is 4/1, and without a 32/8 rigid object in the scene
+  # finger contacts never converged and the fingers closed through handles.
+  min_position_iters: 32
+  min_velocity_iters: 8
   fix_base: true
   settle_steps: 10
 
@@ -594,6 +612,9 @@ x-drawer: &drawer
     material_props:
       static_friction: 1.0
       dynamic_friction: 1.0
+  # See microwave_controls: 32/8 iterations for the articulation-only track.
+  min_position_iters: 32
+  min_velocity_iters: 8
   fix_base: true
   settle_steps: 10
   reset_settle_steps: 0
@@ -610,6 +631,9 @@ x-microwave-door: &microwave_door
     material_props:
       static_friction: 1.0
       dynamic_friction: 1.0
+  # See microwave_controls: 32/8 iterations for the articulation-only track.
+  min_position_iters: 32
+  min_velocity_iters: 8
   fix_base: true
   settle_steps: 10
 
@@ -676,9 +700,10 @@ x-skill-press: &skill_press
   sample_count: 256
   hand_interp_steps: 12
   approach_distance_m: 0.12
-  # Closed native pads project 23.16 mm ahead of the solver TCP.
-  press_tcp_offset_m: -0.02316
-  press_distance_m: 0.006
+  # Closed pads first touch the button 25.2 mm ahead of the solver TCP;
+  # stop 1 mm short, then press through the 6 mm stroke plus 1 mm.
+  press_tcp_offset_m: -0.0262
+  press_distance_m: 0.008
   articulation: microwave
   target_link: button_link
   target_joint: button_joint
@@ -695,6 +720,9 @@ x-skill-slide: &skill_slide
   grasp_sample_count: 10000
   grasp_max_candidates: 128
   grasp_alignment_max_angle_deg: 10.0
+  # Seat the 32 mm bar mid-pad: on the solver TCP it sat 22 mm from the
+  # fingertips of the vertically closing pads and slid out in fast pulls.
+  grasp_depth_offset_m: 0.011
   hand_interp_steps: 12
   approach_distance_m: 0.10
   translation_distance_m: 0.18
@@ -715,6 +743,14 @@ x-skill-twist: &skill_twist
   twist_waypoint_count: 8
   pre_grasp_distance_m: 0.12
   twist_angle_rad: -0.7853981634
+  # Open only to ~82 mm around the 52 mm knob: fully open fingers spread
+  # 140 mm and one strikes the door handle 64 mm beside the knob.
+  hand_open_qpos: [0.28, -0.28, 0.28, -0.28, -0.28, 0.28]
+  # Even 82 mm apart, a straight-in side grasp puts the finger links on the
+  # handle 45 mm in front of the knob; they were pried open or shut. Reach
+  # in 22 degrees from the far side, about the knob's vertical axis.
+  grasp_tilt_rad: 0.3839724354
+  grasp_tilt_axis: [0.0, 0.0, 1.0]
   articulation: microwave
   target_link: knob_link
   target_joint: knob_joint
@@ -823,23 +859,45 @@ x-skill-push-object: &skill_push_object
   approach_height_m: 0.10
   retract_height_m: 0.10
   push_overshoot_m: 0.0
+  # Push with the pads 75% closed, about 34 mm apart: two contacts straddle
+  # the cube face. The closed fingers form a 15 mm pusher about which the cube
+  # turned and drifted sideways; nominal and object-xy rows failed 25 of 54.
+  hand_grasp_qpos: [0.525, -0.525, 0.525, -0.525, -0.525, 0.525]
+  # Keep the contact behind the cube face nearest the push, so yawed cubes
+  # keep the 2 mm approach clearance instead of starting inside the hand.
+  contact_along_target_face: true
   object_contact_offset_m: [0.0, 0.0, 0.005]
+  # Measure the start from the face pushed: 13.5 mm pad half-width plus 2 mm.
+  # A 40.5 mm centre distance left 40 mm cubes 7 mm short, and started inside
+  # 60 mm cubes and the 70 mm side of elongated ones, which then tipped.
+  contact_distance_from_face_m: 0.0155
   cases:
     - name: spatial_cube_push_lateral_10cm
       object: cube_50mm
       task_difficulty: simple
-      contact_distance_m: 0.0405
       target_object_offset_m: [0.0, 0.10, 0.0]
     - name: spatial_cube_push_toward_base_8cm
       object: cube_50mm
       task_difficulty: simple
-      contact_distance_m: 0.048
+      # Turn the hand 90 degrees so a closed finger face, spanning the cube's
+      # height, pushes; facing this way the knuckles struck the top edge and
+      # tipped the cube. Same 2 mm clearance as the lateral push.
+      contact_frame_to_eef:
+        - [0.0, -1.0, 0.0, 0.0]
+        - [1.0, 0.0, 0.0, 0.0]
+        - [0.0, 0.0, 1.0, 0.0]
+        - [0.0, 0.0, 0.0, 1.0]
       target_object_offset_m: [0.08, 0.0, 0.0]
 
 robot:
   id: franka_robotiq
   provider: franka_robotiq
   config:
+    # Cartesian contact paths: hold each FEP sample within 0.1 rad of the
+    # previous one; independent q7 searches alternate near the shoulder singularity.
+    solver_cfg:
+      arm:
+        continuous_path_joint_step: 0.1
     attrs:
       material_props:
         static_friction: 1.0

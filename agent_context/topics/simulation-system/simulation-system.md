@@ -220,6 +220,7 @@ bookkeeping; host integrations own execution, reset and persistence.
 | Unexpected control rate | Gym control/physics ratio and fixed command grid |
 | Reset changes untouched worlds or loses physical baseline | Batch selections, immutable `default_*` snapshots and complete Newton articulation clear |
 | Native leaks/crash during teardown | Deferred queue flushing and child-before-parent release order |
+| Default GPU contacts with an articulation are soft or let fingers pass through | The scene is solved at its largest per-actor `min_position_iters`/`min_velocity_iters`; articulations default to the native 4/1, so an articulation-only scene needs explicit counts (a rigid object at 32/8 raises the whole scene) |
 
 Focused validation is linked with each detail page. The primary lifecycle
 coverage is `tests/sim/test_sim_manager.py` and `tests/sim/spawn/test_scene.py`;

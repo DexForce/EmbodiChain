@@ -1057,6 +1057,85 @@ def test_pour_poses_rotate_the_held_object_about_its_axis_and_return() -> None:
     assert torch.allclose(poured[:, :3, 3], lifted[:, :3, 3], atol=1.0e-6)
 
 
+def test_push_poses_can_keep_the_contact_behind_the_nearest_target_face() -> None:
+    yaw = math.radians(20.0)
+    rotation = torch.tensor(
+        [
+            [math.cos(yaw), -math.sin(yaw), 0.0],
+            [math.sin(yaw), math.cos(yaw), 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+    )
+    object_pose = torch.eye(4)[None]
+    object_pose[:, :3, :3] = rotation
+    target_pose = object_pose.clone()
+    target_pose[:, 1, 3] += 0.10
+    arguments = dict(
+        contact_distance=0.04,
+        approach_height=0.1,
+        retract_height=0.1,
+        push_overshoot=0.0,
+        contact_frame_to_eef=torch.eye(4),
+        object_contact_offset=torch.zeros(3),
+    )
+
+    along_push = providers._push_poses(object_pose, target_pose, **arguments)
+    along_face = providers._push_poses(
+        object_pose, target_pose, contact_along_target_face=True, **arguments
+    )
+
+    direction = torch.tensor([0.0, 1.0, 0.0])
+    torch.testing.assert_close(along_push[0, 1, :3, 3], -direction * 0.04)
+    # The target's +y face is nearest the push; the contact sits behind it.
+    torch.testing.assert_close(along_face[0, 1, :3, 3], -rotation[:, 1] * 0.04)
+    torch.testing.assert_close(
+        along_face[0, 2, :3, 3] - along_face[0, 1, :3, 3], direction * 0.10
+    )
+    torch.testing.assert_close(along_face[0, 1, :3, :3], along_push[0, 1, :3, :3])
+
+
+def test_push_contact_distance_from_face_follows_the_pushed_side() -> None:
+    yaw = math.radians(20.0)
+    object_pose = torch.eye(4).repeat(2, 1, 1)
+    object_pose[:, :3, :3] = torch.tensor(
+        [
+            [math.cos(yaw), -math.sin(yaw), 0.0],
+            [math.sin(yaw), math.cos(yaw), 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+    )
+    half = torch.tensor([0.035, 0.021, 0.021])
+    corners = torch.tensor(
+        [[x, y, z] for x in (-1, 1) for y in (-1, 1) for z in (-1, 1)],
+        dtype=torch.float32,
+    )
+    vertices = corners * half
+    arguments = dict(
+        face_distance=0.0155,
+        object_contact_offset=torch.tensor([0.0, 0.0, 0.005]),
+        contact_along_target_face=True,
+    )
+    lateral = object_pose.clone()
+    lateral[:, 1, 3] += 0.10
+    toward_base = object_pose.clone()
+    toward_base[:, 0, 3] += 0.08
+
+    # The nearest face of a yawed box is pushed, so its own half-extent counts.
+    assert providers._push_contact_distance_from_face(
+        vertices, object_pose, lateral, **arguments
+    ) == pytest.approx(0.021 + 0.0155)
+    assert providers._push_contact_distance_from_face(
+        vertices, object_pose, toward_base, **arguments
+    ) == pytest.approx(0.035 + 0.0155)
+    with pytest.raises(ValueError, match="same rear-face extent"):
+        providers._push_contact_distance_from_face(
+            torch.stack((vertices, vertices * 1.2)),
+            object_pose,
+            lateral,
+            **arguments,
+        )
+
+
 def test_push_poses_place_the_tcp_behind_the_object_and_push_to_target() -> None:
     object_pose = torch.eye(4).repeat(2, 1, 1)
     object_pose[:, 0, 3] = torch.tensor([0.4, 0.5])

@@ -181,20 +181,89 @@ the same approach direction, 10,000 samples, 128-candidate budget and seeded
 object population; its changed selection law requires fresh manifests.
 
 PushObject uses a contact point 5 mm above the cube centre to accommodate the
-closed Robotiq finger-pad geometry. The minimum authored 40 mm cube retains over
-1.8 mm ground clearance even with zero rest-offset allowance. The nominal 50 mm
-cube's lateral and toward-base contact distances are 40.5 and 48 mm, respectively,
-leaving about 2 mm between its face and the closed finger surfaces at approach.
-The two calibrated suites have new versions and require fresh frozen manifests.
+Robotiq finger-pad geometry. The minimum authored 40 mm cube retains over
+1.8 mm ground clearance even with zero rest-offset allowance. Both pushes now
+use the pads' side edges, 40.5 mm behind the nominal cube centre, which leaves
+about 2 mm between the cube face and the pads at approach. The toward-base push
+turns the hand 90 degrees (`contact_frame_to_eef`): facing the push, the inner
+finger links above the pads struck the cube's top edge and tipped it. The pads
+are only 75% closed (`hand_grasp_qpos`), about 34 mm apart, so two contacts
+straddle the face; the closed fingers form a 15 mm pusher about which the cube
+turned and drifted sideways in replay. `contact_along_target_face` keeps the
+contact behind the cube face nearest the push, so yawed cubes keep the 2 mm
+clearance instead of starting inside the hand. The spatial suite measures that
+start from the face pushed (`contact_distance_from_face_m: 0.0155`, the pads'
+13.5 mm half-width plus 2 mm), using the object's own extent along the contact
+axis: a fixed 40.5 mm centre distance left 40 mm cubes 7 mm short of their
+target, and started inside 60 mm cubes and the 70 mm side of elongated ones,
+which then tipped. The calibrated suites have new versions and require fresh
+frozen manifests.
 
-Press places the closed Robotiq fingertips at the sampled button surface with
-`press_tcp_offset_m: -0.02316`, measured along the local press axis from surface
-to TCP. Its 6 mm travel matches the microwave button's joint stroke, leaving
-35 mm to the fixed electronics panel at the terminal pose. The frozen case
+Press stops the closed Robotiq fingertips 3 mm short of the sampled button
+surface (`press_tcp_offset_m: -0.0262`, measured along the local press axis
+from surface to TCP) and then presses 8 mm. In measured replay the pads
+already moved the button 2 mm at the geometric contact pose (23.16 mm), and the
+press stage scores only the stroke gained inside the press segment, so the
+former calibration peaked at 67% of the 6 mm stroke against the 80% threshold.
+The pads now close the 1 mm gap, travel the whole stroke and press 1 mm against
+its stop, leaving over 30 mm to the fixed electronics panel. The frozen case
 records both the sampled surface point and calibrated TCP contact point, so
 replay uses the same calibration under articulation rotations. All four Press
-suites have new versions and require fresh manifests. This geometric check
-does not establish measured button actuation or trajectory tracking.
+suites have new versions and require fresh manifests.
+
+Press, Slide, Twist, OpenDoor and PushObject follow scenario-owned Cartesian IK
+paths rather than cuRobo plans. The Franka FEP solver otherwise searches q7
+independently at every path sample: the answers alternate between sampled q7
+values and, near the shoulder singularity, between distant joint-1/joint-3
+pairs, so the Cartesian retiming exhausted its 10,000-interval budget for
+nearly every row. The single-arm Robotiq suites set the arm solver's
+`continuous_path_joint_step: 0.1`, which keeps the seed's q7 where that path
+stays within 0.1 rad per sample and otherwise ramps q7 to the end value with
+the shortest bounded joint path; cuRobo plans never use this path query. The
+batched Cartesian retiming no longer lets one unreachable row fail its batch:
+a row that fails IK or alone exceeds the 10,000-interval budget holds its start
+and is no longer solved, while the remaining rows are timed and replayed. Every
+row still shares one time grid, so a slow row lengthens its batch's trajectory.
+
+Articulation grasps (Slide handles and OpenDoor handles) skip the Robotiq
+closure sweep. That check infers a support plane at the grasped link's lowest
+point, which a mounted handle does not rest on, and rejected every Slide
+handle grasp. Slide also seats the 32 mm drawer bar 11 mm deeper
+(`grasp_depth_offset_m`), at the middle of the vertically closing pads: on the
+solver TCP the bar sat 22 mm from the fingertips and slid out of the pads in
+the faster pulls.
+
+The spatial suite's articulation-only tracks (control panel, drawer and door)
+declare `min_position_iters: 32` and `min_velocity_iters: 8` on the
+articulation. GPU physics solves the whole scene with its largest per-actor
+iteration counts, rigid objects default to 32/8, and both the Franka and the
+benchmark articulations otherwise use the native 4/1. Without any rigid object
+in the scene the finger contacts carried 10 to 100 times less impulse than with
+one, so the closing Robotiq fingers passed through the drawer and door handles
+while the geometric grasp check still reported contact, and nothing moved. With
+32/8 on the drawer alone the replay matches the run with a parked cube exactly.
+
+The spatial suite's control-panel microwave gives the button a 300 N/m return
+spring (1.8 N at its 6 mm stroke) in place of the shared 0.01 N drive cap. Under
+a 10-degree roll or pitch the 25 g button otherwise crept inwards under gravity
+during replay, so the presses whose axis pointed downwards began with part or
+all of the stroke already spent and scored only the remainder; restating the
+asset's joint friction slowed but did not stop that creep.
+
+Twist opens the Robotiq hand only to about 82 mm around the 52 mm knob
+(`hand_open_qpos`, an invocation-level override of the grasp endpoint's
+`open` command). Fully open fingers spread 140 mm, and one struck the door
+handle 64 mm beside the knob before the hand could close. A straight-in side
+grasp still places the 2F-140 finger links on that handle, which stands 45 mm
+in front of the knob: in replay the contact pried the linkage fully open or
+pushed it shut, and the open rows never closed on the knob. The hand therefore
+reaches in 22 degrees from the far side (`grasp_tilt_rad` about the knob's
+local vertical `grasp_tilt_axis`, a `TwistAffordance` option), which leaves
+about 8 mm to the handle, 13 mm to the knob and 10 mm to the panel along the
+whole approach while both pads still overlap the knob (pose batch: 8 of 8 rows,
+from 3 of 8). Some spatial domains move the knob to the edge of the arm's reach,
+where the tilt's 8 cm wrist offset leaves a row without a continuous Cartesian
+path; that row fails while the rest of its batch is still timed.
 
 The 90-degree OpenDoor cases retain their full opening arc and use a 5 cm
 release retreat. With the longer TCP, the nominal grasp pool yields no complete

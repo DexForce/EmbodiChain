@@ -1,12 +1,17 @@
 schema_version: 1
 name: atomic_franka_robotiq_smoke
-suite_version: atomic_franka_robotiq_smoke_v9
+suite_version: atomic_franka_robotiq_smoke_v11
 profile: smoke
 
 robot:
   id: franka_robotiq
   provider: franka_robotiq
   config:
+    # Cartesian contact paths: hold each FEP sample within 0.1 rad of the
+    # previous one; independent q7 searches alternate near the shoulder singularity.
+    solver_cfg:
+      arm:
+        continuous_path_joint_step: 0.1
     attrs:
       material_props:
         static_friction: 1.0
@@ -228,9 +233,10 @@ tracks:
           sample_count: 256
           hand_interp_steps: 12
           approach_distance_m: 0.12
-          # Closed native pads project 23.16 mm ahead of the solver TCP.
-          press_tcp_offset_m: -0.02316
-          press_distance_m: 0.006
+          # Closed pads first touch the button 25.2 mm ahead of the solver TCP;
+          # stop 1 mm short, then press through the 6 mm stroke plus 1 mm.
+          press_tcp_offset_m: -0.0262
+          press_distance_m: 0.008
           articulation: microwave
           target_link: button_link
           target_joint: button_joint
@@ -249,6 +255,9 @@ tracks:
           grasp_sample_count: 10000
           grasp_max_candidates: 128
           grasp_alignment_max_angle_deg: 10.0
+          # Seat the 32 mm bar mid-pad: on the solver TCP it sat 22 mm from the
+          # fingertips of the vertically closing pads and slid out in fast pulls.
+          grasp_depth_offset_m: 0.011
           hand_interp_steps: 12
           approach_distance_m: 0.10
           translation_distance_m: 0.18
@@ -272,6 +281,14 @@ tracks:
           twist_waypoint_count: 8
           pre_grasp_distance_m: 0.12
           twist_angle_rad: -0.7853981634
+          # Open only to ~82 mm around the 52 mm knob: fully open fingers spread
+          # 140 mm and one strikes the door handle 64 mm beside the knob.
+          hand_open_qpos: [0.28, -0.28, 0.28, -0.28, -0.28, 0.28]
+          # Even 82 mm apart, a straight-in side grasp puts the finger links on the
+          # handle 45 mm in front of the knob; they were pried open or shut. Reach
+          # in 22 degrees from the far side, about the knob's vertical axis.
+          grasp_tilt_rad: 0.3839724354
+          grasp_tilt_axis: [0.0, 0.0, 1.0]
           articulation: microwave
           target_link: knob_link
           target_joint: knob_joint

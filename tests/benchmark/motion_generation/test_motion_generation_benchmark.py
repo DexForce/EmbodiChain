@@ -2317,6 +2317,20 @@ def test_atomic_skill_twist_invocation_uses_tutorial_options():
         ("primary", "motion"),
         ("primary", "grasp"),
     }
+    assert invocation.control_overrides.is_empty
+
+    case.case_parameters["hand_open_qpos"] = [0.3]
+    invocation = create_atomic_skill_provider("twist").build_invocation(
+        scenario,
+        case,
+        Mock(),
+    )
+    (command,) = invocation.control_overrides.endpoints["primary"]["grasp"].values()
+    assert set(invocation.control_overrides.endpoints["primary"]["grasp"]) == {"open"}
+    torch.testing.assert_close(
+        command.resolve(num_envs=1, control_dof=1, device="cpu"),
+        torch.tensor([[0.3]]),
+    )
 
 
 def test_atomic_skill_move_held_object_uses_current_options_contract():

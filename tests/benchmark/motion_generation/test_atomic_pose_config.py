@@ -58,7 +58,7 @@ def test_pose_batch_suite_declares_translation_only_batched_trials() -> None:
     track = suite.enabled_tracks()[0]
 
     settings = resolve_atomic_pose_randomization(track)
-    assert suite.suite_version == "atomic_franka_robotiq_pose_batch_v10"
+    assert suite.suite_version == "atomic_franka_robotiq_pose_batch_v12"
     assert settings.enabled is True
     assert settings.mode == "translation"
     assert settings.pose_batch_size == 8
@@ -76,7 +76,7 @@ def test_pose_batch_suite_declares_translation_only_batched_trials() -> None:
         "twist",
     }
     assert skills["pick_up"]["grasp_source"] == "fixed"
-    assert skills["press"]["press_distance_m"] == pytest.approx(0.006)
+    assert skills["press"]["press_distance_m"] == pytest.approx(0.008)
     assert {
         skill_id: (
             skills[skill_id]["sample_count"],
@@ -227,7 +227,7 @@ def test_spatial_generalization_suite_covers_task_level_single_arm_skills() -> N
         ),
     }
 
-    assert suite.suite_version == "atomic_franka_robotiq_spatial_generalization_v18"
+    assert suite.suite_version == "atomic_franka_robotiq_spatial_generalization_v20"
     assert len(suite.evaluation_tracks()) == 79
     assert set(expected) == {track.id for track in suite.tracks}
     for track in suite.tracks:
@@ -381,6 +381,39 @@ def test_dual_arm_spatial_suites_cover_meaningful_domains(
         [entry["id"] for entry in track.config["skills"]] == [skill_id]
         for track in tracks
     )
+
+
+def test_articulation_only_tracks_declare_rigid_solver_iterations() -> None:
+    """GPU physics solves a scene at its largest per-actor solver iterations.
+
+    Atomic rigid objects default to 32/8, which also covers every articulation
+    in their scene; without one, articulations otherwise run at the native 4/1
+    and the closing fingers pass through their handles.
+    """
+    from importlib.resources import files
+
+    suites = files("embodichain_benchmarks.motion_generation").joinpath("suites")
+    checked = 0
+    for path in sorted(suites.iterdir(), key=lambda entry: entry.name):
+        if not path.name.endswith(".yaml"):
+            continue
+        for track in load_suite(path.name[: -len(".yaml")]).tracks:
+            if track.config.get("objects") or not track.config.get("articulations"):
+                continue
+            for articulation in track.config["articulations"]:
+                checked += 1
+                assert articulation.get("min_position_iters", 4) >= 32, (
+                    path.name,
+                    track.id,
+                    articulation["id"],
+                )
+                assert articulation.get("min_velocity_iters", 1) >= 8, (
+                    path.name,
+                    track.id,
+                    articulation["id"],
+                )
+    # The spatial suite's control-panel, drawer and door tracks.
+    assert checked >= 3
 
 
 def test_spatial_suites_cover_every_non_motion_atomic_skill() -> None:
@@ -1282,7 +1315,7 @@ def test_randomize_articulation_root_pose_is_deterministic() -> None:
     scenario.simulation.update.assert_called_with(step=1)
 
 
-@pytest.mark.parametrize("model_id", [None, "franka_panda_hand"])
+@pytest.mark.parametrize("model_id", [None, "franka_panda_hand", "robotiq_arg2f_140"])
 def test_resolve_articulation_grasp_broadcasts_one_local_candidate_over_batch(
     monkeypatch: pytest.MonkeyPatch,
     model_id: str | None,
@@ -1331,7 +1364,13 @@ def test_resolve_articulation_grasp_broadcasts_one_local_candidate_over_batch(
     scenario.robot = robot
     scenario.control_part = "arm"
     scenario.track = Mock(
-        config={"grasp_model": "FrankaPandaHand" if model_id else None}
+        config={
+            "grasp_model": {
+                None: None,
+                "franka_panda_hand": "FrankaPandaHand",
+                "robotiq_arg2f_140": "RobotiqArg2F140",
+            }[model_id]
+        }
     )
 
     grasp = scenario.resolve_articulation_grasp(
@@ -1347,17 +1386,24 @@ def test_resolve_articulation_grasp_broadcasts_one_local_candidate_over_batch(
         n_sample=32,
         max_candidates=8,
         alignment_max_angle_deg=10.0,
+        grasp_depth_offset_m=0.011,
     )
 
     expected = target_pose.clone()
     expected[:, 0, 3] += 0.01
     torch.testing.assert_close(grasp, expected)
+    # The depth shift qualifies candidates against the rebased hand surfaces.
+    assert factory.call_args.kwargs["grasp_depth_offset_m"] == pytest.approx(0.011)
     selected_model = factory.call_args.kwargs["gripper_data"]
     if model_id is None:
         assert selected_model is None
     else:
         assert selected_model["model_id"] == model_id
-        assert selected_model["max_opening_width"] == pytest.approx(0.08)
+        assert selected_model["max_opening_width"] == pytest.approx(
+            {"franka_panda_hand": 0.08, "robotiq_arg2f_140": 0.15}[model_id]
+        )
+    # A mounted handle rests on no support, even for the Robotiq closure sweep.
+    assert factory.call_args.kwargs["closure_sweep"] is False
     sampled = generator.get_valid_grasp_poses.call_args.kwargs
     assert sampled["obj_poses"].shape == (1, 4, 4)
     assert sampled["approach_direction"].shape == (1, 3)
