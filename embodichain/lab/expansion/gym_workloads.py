@@ -751,6 +751,7 @@ def run_gym_expansion_workloads(
         )
 
     owner = source = None
+    feedback_closers = []
     groups: dict[str, Any] = {}
     adapters: dict[int, Any] = {}
     futures: dict[str, Any] = {}
@@ -847,6 +848,9 @@ def run_gym_expansion_workloads(
                 ctx.feedback = workload.extensions.feedback_factory(
                     env, ctx.scene_source, path
                 )
+                close = getattr(ctx.feedback, "close", None)
+                if close is not None:
+                    feedback_closers.append(close)
             builder = GymRecipeBuilder(ctx)
             transform = workload.extensions.recipe_transform
             ctx.recipe = lambda ordinal, builder=builder, transform=transform: (
@@ -1064,5 +1068,7 @@ def run_gym_expansion_workloads(
             adapter.close()
         for group in groups.values():
             group["host"]._context.journal.checkpoint(force=True, state="finished")
+        for close in reversed(feedback_closers):
+            close()
         if owner is not None:
             owner.close()

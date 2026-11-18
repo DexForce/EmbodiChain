@@ -204,6 +204,47 @@ The configured acceptance task is
 `extensions/embodichain_tasks/configs/tasks/manipulation/workspace_pose_pick_place`;
 its four-way runner is `scripts/benchmark/expansion/task_pose_coverage.py`.
 
+## Conditional layout proposals and task screening
+
+`scene_sampling.strategy: scene_first` adds a prepared support-tree layout source
+before ordinary native execution. `_scene_first_sampling.py` reuses shared scene
+preparation/conditional generation and `RobotFeasibilityBackend`/`plan_task_mode`;
+it creates no physics World and owns only the isolated collision-query resources.
+`layout` and `task_mode` are explicit, validated task declarations. Root layout
+variables currently use XY only; selected nested members retain declared XY/yaw.
+B=1 is checked before runtime creation. A `bounded_pose` job may opt into the
+same layout/task-mode screens for a controlled comparison without changing
+ordinary simple-sampling defaults. Screening budgets are bounded and separate
+from fixed physical quality thresholds. Prepared candidates stay immutable by
+ordinal; failed screening cannot turn into an accepted simple fallback.
+
+`robot_first` anchors one movable support-tree root per proposal from the
+workspace of a declared `robot_anchors` phase/part target. It uses the target's
+initial rigid relation to the root and projects current-arena TCP XY onto the
+root's allowed XY domain, preserving authored height and rotation. Per-part FK
+populations are prepared once and selected across occupied cells. The layout
+generator reserves the anchor and completes the remaining groups. A prior
+without an in-domain sample is a budgeted rejection.
+
+`bidirectional` alternates scene-first and robot-first by raw ordinal, including
+rejections. Attempt budgets, FIFO or task-pose coverage selection, execution and
+receipt rules stay in their shared owners. The source records the direction of
+each draw and selection, and records the requested anchor separately from the
+generated and measured poses.
+
+The current geometry, joint limits, full-pose FK residuals, full-state/mimic
+branches and synchronized path collision checks remain in their existing owners.
+Actual execution replans and measured acceptance/persistence remain mandatory.
+`scene-first-checks.json` retains phase results, workspace prior and anchor
+evidence, and the unchanged World clock;
+the query is closed before the owner environment, including setup failures.
+The reproducible cross-task runner is
+`scripts/benchmark/expansion/scene_first.py`; per-task fixtures are under the
+existing grab/place, stack and dual-arm RGB sorting task configurations. The
+sorting program operates the two arms sequentially and retains its original
+segment validators; receipt-based coverage counts both manipulated blocks and
+does not turn fixed-goal tracking noise into placement diversity.
+
 ## Focused validation
 
 `tests/lab/expansion/test_workloads_sim.py` runs a real four-row task through

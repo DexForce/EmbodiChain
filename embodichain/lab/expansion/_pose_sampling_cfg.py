@@ -22,6 +22,9 @@ import numpy as np
 
 __all__: list[str] = []
 
+_ROBOT_LAYOUT_STRATEGIES = ("robot_first", "bidirectional")
+_LAYOUT_STRATEGIES = ("scene_first", *_ROBOT_LAYOUT_STRATEGIES)
+
 
 def validate_sampling(value: dict) -> None:
     """Normalize optional settings without changing legacy configurations."""
@@ -29,6 +32,10 @@ def validate_sampling(value: dict) -> None:
 
     allowed = {
         "strategy",
+        "layout",
+        "task_mode",
+        "screening",
+        "robot_anchors",
         "workspace_source",
         "control_part",
         "sample_count",
@@ -70,9 +77,14 @@ def validate_sampling(value: dict) -> None:
         "exploration_fraction": 0.25,
     }.items():
         schedule.setdefault(k, v)
-    if sampling["strategy"] not in ("bounded_pose", "workspace_joint"):
+    if sampling["strategy"] not in (
+        "bounded_pose",
+        "workspace_joint",
+        *_LAYOUT_STRATEGIES,
+    ):
         raise ValueError(
-            "scene_sampling.strategy must be bounded_pose or workspace_joint"
+            "scene_sampling.strategy must be bounded_pose, workspace_joint, "
+            "scene_first, robot_first or bidirectional"
         )
     if sampling["workspace_source"] not in ("cache", "joint_uniform_fk"):
         raise ValueError(
@@ -134,6 +146,156 @@ def validate_sampling(value: dict) -> None:
             raise ValueError(
                 "Workspace targets require a declared independent scene entity and rigid transform"
             )
+    if sampling["strategy"] == "workspace_joint" and "layout" in sampling:
+        raise ValueError(
+            "workspace_joint does not consume layout conditions; choose scene_first or a screened bounded_pose baseline"
+        )
+    if sampling["strategy"] in _LAYOUT_STRATEGIES or "layout" in sampling:
+        if (
+            value["engine"].get("batch_size", 1)
+            * value["engine"].get("workload_count", 1)
+            != 1
+        ):
+            raise ValueError("Layout task-path screening currently requires B=1")
+        layout = sampling.get("layout")
+        if (
+            not isinstance(layout, dict)
+            or set(layout) - {"support_uid", "parent_by_uid", "policy", "conditions"}
+            or not {"support_uid", "parent_by_uid", "policy"} <= layout.keys()
+        ):
+            raise ValueError(
+                "Layout sampling requires support_uid, parent_by_uid and policy"
+            )
+        if (
+            not isinstance(layout["support_uid"], str)
+            or not layout["support_uid"].strip()
+            or not isinstance(layout["parent_by_uid"], dict)
+            or not layout["parent_by_uid"]
+            or any(
+                type(k) is not str or type(v) is not str
+                for k, v in layout["parent_by_uid"].items()
+            )
+        ):
+            raise ValueError(
+                "layout requires an explicit support UID and parent mapping"
+            )
+        if not isinstance(layout["policy"], dict):
+            raise ValueError("layout.policy must be a mapping")
+        mode = sampling.get("task_mode")
+        if (
+            not isinstance(mode, dict)
+            or set(mode) - {"mode_id", "phases"}
+            or not {"mode_id", "phases"} <= mode.keys()
+            or not isinstance(mode["phases"], list)
+            or not mode["phases"]
+        ):
+            raise ValueError(
+                "Layout sampling requires a declared task_mode phase graph"
+            )
+        screening = sampling.setdefault("screening", {})
+        if not isinstance(screening, dict) or set(screening) - {
+            "beam_width",
+            "ik_seeds",
+            "max_rrt_nodes",
+            "planning_timeout_s",
+        }:
+            raise ValueError("Unknown scene-first screening budgets")
+        for key, default in {
+            "beam_width": 2,
+            "ik_seeds": 2,
+            "max_rrt_nodes": 64,
+            "planning_timeout_s": 0.5,
+        }.items():
+            screening.setdefault(key, default)
+        for key in ("beam_width", "ik_seeds", "max_rrt_nodes"):
+            if type(screening[key]) is not int or not 1 <= screening[key] <= 4096:
+                raise ValueError("Screening counts must be positive and bounded")
+        if (
+            type(screening["planning_timeout_s"]) not in (int, float)
+            or not math.isfinite(screening["planning_timeout_s"])
+            or not 0 < screening["planning_timeout_s"] <= 60
+        ):
+            raise ValueError("Screening timeout must be positive and bounded")
+        from embodichain.lab.sim.scene.expansion.layout import _policy_data
+        from embodichain.lab.sim.scene.feasibility import request_from_mapping
+
+        normalized_policy = _policy_data(layout["policy"])
+        if any(
+            "follow" in value["scene"].get(uid, {})
+            for uid in normalized_policy["intra_group"]["targets"]
+        ):
+            raise ValueError(
+                "Rigid scene followers cannot also be independent intra-group targets"
+            )
+        parents = layout["parent_by_uid"]
+        support = layout["support_uid"]
+        for uid in parents:
+            seen = set()
+            current = uid
+            while current != support:
+                if current in seen or current not in parents:
+                    raise ValueError("Layout parents must form one rooted support tree")
+                seen.add(current)
+                current = parents[current]
+        identities = {support, *parents, *value["scene"]}
+        request = request_from_mapping(
+            dict(
+                task_id="preflight",
+                robot_profile_id="preflight",
+                policy_id="preflight",
+                validator_id="preflight",
+                parent_scene_id="preflight",
+                entity_poses={uid: np.eye(4).tolist() for uid in identities},
+                variables=[],
+                modes=[mode],
+            )
+        )
+        for uid, parent in parents.items():
+            if (
+                parent == support
+                and uid in value["scene"]
+                and "follow" not in value["scene"][uid]
+            ):
+                bounds = value["scene"][uid]
+                if bounds["yaw_rad"] != [0, 0] or bounds["translation_m"][2] != [0, 0]:
+                    raise ValueError("Root layout domains currently support XY only")
+        conditions = layout.get("conditions", {})
+        if not isinstance(conditions, dict):
+            raise ValueError("layout.conditions must map UIDs to arena poses")
+        for uid, m in conditions.items():
+            m = np.asarray(m, dtype=float)
+            if (
+                m.shape != (4, 4)
+                or not np.isfinite(m).all()
+                or not np.allclose(m[3], [0, 0, 0, 1])
+                or not np.allclose(m[:3, :3].T @ m[:3, :3], np.eye(3), atol=1e-6)
+                or not np.isclose(np.linalg.det(m[:3, :3]), 1)
+            ):
+                raise ValueError("layout conditions require proper rigid matrices")
+        if (
+            "robot_anchors" in sampling
+            or sampling["strategy"] in _ROBOT_LAYOUT_STRATEGIES
+        ):
+            from ._robot_first_sampling import _anchor_targets
+
+            anchors = _anchor_targets(
+                request.modes[0],
+                layout,
+                normalized_policy,
+                sampling.get("robot_anchors"),
+            )
+            if any(
+                a.root_uid not in value["scene"]
+                or "follow" in value["scene"][a.root_uid]
+                for a in anchors
+            ):
+                raise ValueError(
+                    "A robot anchor requires an independently declared scene root"
+                )
+    elif "task_mode" in sampling:
+        raise ValueError("task_mode screening requires an explicit layout")
+    elif "robot_anchors" in sampling:
+        raise ValueError("robot_anchors requires an explicit layout and task_mode")
     coverage = value.get("pose_coverage")
     if coverage is None:
         if schedule["policy"] == "task_pose_coverage":

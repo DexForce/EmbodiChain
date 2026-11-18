@@ -37,6 +37,7 @@ from .._validation import _identifier, _rigid_pose
 from ..geometry import SupportSurfaceConfig, detect_support_region
 from ..query import _backend_tensor
 from .contracts import ScenePoseChange, SceneVariant
+from .conditions import SceneLayoutCondition, _condition_prepared
 from ._layout_numeric import (
     _hierarchy_batch_limit,
     _numeric_geometry,
@@ -571,6 +572,7 @@ def generate_scene_variants(
     candidate_count: int = 10,
     max_attempts: int = 1000,
     start_ordinal: int = 0,
+    conditions: SceneLayoutCondition | None = None,
 ) -> SceneRandomizationBatch:
     """Generate a batch without loading meshes or constructing simulation objects.
 
@@ -580,10 +582,17 @@ def generate_scene_variants(
         candidate_count: Requested valid layouts.
         max_attempts: Whole-layout proposal budget.
         start_ordinal: First logical proposal; allows bounded continuation.
+        conditions: Optional owned arena-pose anchors. They restrict existing
+            root XY/member XY-yaw domains and never authorize extra motion.
+            Moving ancestors must be anchored explicitly. Empty conditions
+            preserve the ordinary sequence. Infeasible geometry exhausts the
+            declared proposal budget without moving or repairing anchors.
 
     Returns:
         Complete or budget-exhausted proposals with exact continuation ordinal.
     """
+    if conditions is not None:
+        prepared = _condition_prepared(prepared, conditions)
     _validate_generation_parameters(
         seed=seed,
         candidate_count=candidate_count,
@@ -600,6 +609,15 @@ def generate_scene_variants(
     ):
         raise ValueError("Requested CUDA device is unavailable.")
     spec = _specification(prepared._geometry, policy, device)
+    anchored_roots = (
+        tuple(
+            i
+            for i in prepared._movable_roots
+            if prepared._geometry["nodes"][i]["uid"] in conditions.poses
+        )
+        if conditions is not None
+        else ()
+    )
     limit = (
         _hierarchy_batch_limit(policy["batch_size"], len(spec[-1]))
         if policy["randomize_groups"]
@@ -619,6 +637,7 @@ def generate_scene_variants(
             group_margin=policy["collision_margin_m"],
             support_gap=policy["intra_group"]["support_gap_m"],
             movable_roots=prepared._movable_roots,
+            anchored_roots=anchored_roots,
             root_offset_bounds={
                 i: torch.tensor(
                     policy["group_xy_offset_bounds_m"][node["uid"]],
@@ -656,6 +675,11 @@ def generate_scene_variants(
             ("generator", _ALGORITHM),
             ("source_sha256", prepared.source.fingerprint),
             ("geometry_sha256", prepared.geometry_sha256),
+            *(
+                (("conditions_sha256", _digest(conditions.to_dict())),)
+                if conditions is not None and conditions.poses
+                else ()
+            ),
         ),
     )
     return SceneRandomizationBatch(

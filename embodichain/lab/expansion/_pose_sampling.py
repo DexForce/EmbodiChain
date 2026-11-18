@@ -375,6 +375,16 @@ class _AdaptivePoseSource(_BoundedPoseSource):
                 return False, "full_pose_fk_residual"
         return True, "passed"
 
+    def _offer(self, candidate, rng, raw):
+        if self.cfg["strategy"] == "workspace_joint":
+            candidate, origin = self._guided(candidate, rng)
+            ok, reason = self._check(candidate)
+            return candidate, origin, ok, reason
+        return candidate, "bounded_pose", True, "passed"
+
+    def _offer_origin(self, raw):
+        return self.cfg["strategy"]
+
     def candidate(self, ordinal):
         from dataclasses import replace
         from embodichain.lab.sim.scene.feasibility import FeasibilityBudgetExhausted
@@ -420,15 +430,12 @@ class _AdaptivePoseSource(_BoundedPoseSource):
                 else raw
             )
             last = candidate
+            origin = self._offer_origin(raw)
             try:
                 self.budget.charge("candidates")
                 self._raw_ordinal += 1
                 ok = True
-                if self.cfg["strategy"] == "workspace_joint":
-                    candidate, origin = self._guided(candidate, rng)
-                    ok, reason = self._check(candidate)
-                else:
-                    reason = "passed"
+                candidate, origin, ok, reason = self._offer(candidate, rng, raw)
             except FeasibilityBudgetExhausted as e:
                 ok = False
                 reason = str(e)
@@ -457,7 +464,7 @@ class _AdaptivePoseSource(_BoundedPoseSource):
                 }
             )
             if ok:
-                pool.append((candidate, cells, origin))
+                pool.append((candidate, cells, origin, raw))
             if self.schedule["policy"] == "fifo" and pool:
                 break
             if self.budget._blocked is not None:
@@ -488,7 +495,7 @@ class _AdaptivePoseSource(_BoundedPoseSource):
                 ids = np.flatnonzero(scores == scores.max())
                 chosen = pool[int(rng.choice(ids))]
                 selection = "coverage"
-            candidate, cells, origin = chosen
+            candidate, cells, origin, raw = chosen
             self._predicted[ordinal] = cells
             reason = "passed"
         else:
@@ -514,6 +521,7 @@ class _AdaptivePoseSource(_BoundedPoseSource):
             {
                 "event": "selection",
                 "ordinal": ordinal,
+                "raw_ordinal": raw,
                 "candidate_id": candidate.candidate_id,
                 "selection": selection,
                 "origin": origin,
