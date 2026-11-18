@@ -6380,3 +6380,23 @@ Batched triangle ray queries
 
    TriangleRayMesh
    cast_rays
+
+
+Terrain scan
+------------
+
+.. currentmodule:: embodichain.lab.sim.sensors
+
+.. autosummary::
+
+   RayScene
+   TerrainScan
+   TerrainScanCfg
+
+.. currentmodule:: embodichain.lab.sim.sensors.ray
+
+.. autosummary::
+
+   RayScene
+   TerrainScan
+   TerrainScanCfg
