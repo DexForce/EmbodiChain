@@ -43,6 +43,19 @@ class RobotProvider(ABC):
     def __init__(self, spec: "RobotSpecCfg") -> None:
         self.spec = spec
 
+    def identity_config(self) -> dict[str, object]:
+        """Return asset-free configuration inputs for frozen-case identity.
+
+        Providers that change an implicit assembly default must resolve that
+        default here and use the same configuration when building the robot.
+        Unchanged providers retain their existing raw-configuration identity.
+
+        Returns:
+            Independent configuration mapping that can be hashed without
+            constructing a robot or resolving its assets.
+        """
+        return deepcopy(dict(self.spec.config))
+
     @abstractmethod
     def build_cfg(self) -> "RobotCfg":
         """Build the robot configuration without mutating a simulation."""

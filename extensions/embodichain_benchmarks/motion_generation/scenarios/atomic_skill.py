@@ -99,8 +99,10 @@ from .atomic_policy import (
     benchmark_motion_policy_strategy,
     policy_motion_budget,
     with_axis_align_rotation_waypoints,
+    with_hand_over_approach_waypoints,
     with_pick_approach_waypoints,
     with_pick_lift_waypoints,
+    with_pick_reach_waypoints,
     with_motion_budget,
     with_plan_options,
     with_pour_rotation_waypoints,
@@ -258,6 +260,22 @@ class AtomicSkillScenario(ScenarioProvider):
         only the pre-grasp, grasp and lift poses.
         """
         return self._track_waypoint_count("pick_approach_waypoints")
+
+    def pick_reach_waypoints(self) -> int:
+        """Straight-line PickUp reach poses requested by the track.
+
+        Tracks opt in with ``pick_reach_waypoints``; the default ``0`` plans
+        the pre-grasp pose directly from the start state.
+        """
+        return self._track_waypoint_count("pick_reach_waypoints")
+
+    def hand_over_approach_waypoints(self) -> int:
+        """Straight-line HandOver empty-hand approach poses requested by the track.
+
+        Tracks opt in with ``hand_over_approach_waypoints``; the default ``0``
+        plans each pre-grasp pose directly.
+        """
+        return self._track_waypoint_count("hand_over_approach_waypoints")
 
     def pick_lift_waypoints(self) -> int:
         """Straight vertical PickUp lift poses requested by the track.
@@ -1036,6 +1054,16 @@ class AtomicSkillScenario(ScenarioProvider):
             )
             invocations = tuple(
                 with_pick_approach_waypoints(item, self.pick_approach_waypoints())
+                for item in invocations
+            )
+            invocations = tuple(
+                with_pick_reach_waypoints(item, self.pick_reach_waypoints())
+                for item in invocations
+            )
+            invocations = tuple(
+                with_hand_over_approach_waypoints(
+                    item, self.hand_over_approach_waypoints()
+                )
                 for item in invocations
             )
             invocations = tuple(

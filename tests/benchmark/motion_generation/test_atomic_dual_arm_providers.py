@@ -938,11 +938,19 @@ def test_dual_case_does_not_freeze_when_only_the_primary_arm_is_qualified(failur
         assert "does not establish unreachability" in str(error.value)
 
 
-def _hand_over_generation(monkeypatch, *, endpoint_failure=None):
+def _hand_over_generation(
+    monkeypatch, *, endpoint_failure=None, approach_waypoints=False
+):
     """Prepare real case/endpoint qualification around a CPU reference result."""
     batch = 8
     suite = load_suite("atomic_dual_franka_robotiq_hand_over")
     scenario = AtomicSkillScenario()
+    offsets = [0.1, 0.2]
+    if approach_waypoints:
+        # The packaged track's approach keyframes precede each arm's pre-grasp.
+        scenario.track = suite.tracks[0]
+        count = scenario.hand_over_approach_waypoints()
+        offsets = [0.01 * (index + 1) for index in range(count)] + offsets
     scenario.robot = robot = _EndpointRobot(batch, endpoint_failure)
     scenario.control_part = "left_arm"
     scenario.suite = suite
@@ -959,7 +967,7 @@ def _hand_over_generation(monkeypatch, *, endpoint_failure=None):
             "candidate_ids": [0] * batch,
         }
         poses[arm] = [
-            robot.forward(torch.full((batch, 3), offset), arm) for offset in (0.1, 0.2)
+            robot.forward(torch.full((batch, 3), offset), arm) for offset in offsets
         ]
     reference = dual._ReferencePlan(
         compiled=SimpleNamespace(
@@ -1059,6 +1067,20 @@ def test_hand_over_valid_samples_allow_failed_reference_plan(
         torch.testing.assert_close(
             torch.tensor(evidence[arm]["reference_qpos"]),
             torch.tensor([0.1, 0.2]).reshape(1, 2, 1).expand(8, 2, 3),
+        )
+
+
+def test_hand_over_freezes_the_grasp_after_its_approach_keyframes(monkeypatch):
+    """Approach keyframes shift each arm's grasp; the frozen pose follows it."""
+    generate, reference, robot = _hand_over_generation(
+        monkeypatch, approach_waypoints=True
+    )
+    assert reference.arm_poses("left_arm").shape[1] > 2
+    frozen = generate().case_parameters["frozen_grasps"]
+    for part, arm in (("left_eef", "left_arm"), ("right_eef", "right_arm")):
+        torch.testing.assert_close(
+            torch.tensor(frozen[part][1]),
+            robot.forward(torch.full((8, 3), 0.2), arm),
         )
 
 

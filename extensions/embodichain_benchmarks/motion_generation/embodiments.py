@@ -250,10 +250,14 @@ def resolve_embodiment(
     if not isinstance(robot, RobotSpecCfg):
         raise TypeError("robot must be a RobotSpecCfg.")
     if spec is None:
+        from . import robots as _builtin_robots  # noqa: F401 - registration
+        from .registry import create_robot_provider
+
+        identity_config = create_robot_provider(robot).identity_config()
         return EmbodimentResolution(
             embodiment_id=robot.id,
             component_path=None,
-            config_hash=stable_hash(robot.config),
+            config_hash=stable_hash(identity_config),
             capabilities=frozenset(),
             endpoint_bindings={},
             runtime_services={},

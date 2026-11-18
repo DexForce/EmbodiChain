@@ -145,6 +145,7 @@ def build_pan_handle_grasp_pose(
     device: torch.device,
     *,
     z_clearance: float = 0.006,
+    root_offset: float = PAN_HANDLE_ROOT_OFFSET,
     pan_frame: str = "authored_z_up",
 ) -> torch.Tensor:
     """Build a downward-facing grasp displaced toward the pan handle root.
@@ -154,6 +155,8 @@ def build_pan_handle_grasp_pose(
         pan_vertices: Local pan mesh vertices with shape ``(N, 3)``.
         device: Device for the output transform.
         z_clearance: TCP clearance above the handle in metres.
+        root_offset: Shift from the handle's centre toward its root in metres;
+            a negative value grasps nearer the handle's free end.
         pan_frame: Authored OBJ or native GLB mesh frame, as in
             :func:`get_pan_basin_vertices`.
 
@@ -185,7 +188,7 @@ def build_pan_handle_grasp_pose(
         ),
         torch.tensor([1.0, -0.2, 0.0], dtype=torch.float32, device=device),
     )
-    grasp_position[:2] -= handle_axis[:2] * PAN_HANDLE_ROOT_OFFSET
+    grasp_position[:2] -= handle_axis[:2] * root_offset
     grasp_position[2] = handle_max[2] + z_clearance
 
     y_axis = handle_axis

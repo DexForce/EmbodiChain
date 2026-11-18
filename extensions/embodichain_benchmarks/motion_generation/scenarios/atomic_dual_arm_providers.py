@@ -92,7 +92,15 @@ from .atomic_evaluation import (
     trace_validity,
 )
 from .atomic_grasps import parallel_jaw_sampler
-from .atomic_policy import with_plan_options
+from .atomic_policy import (
+    with_axis_align_rotation_waypoints,
+    with_hand_over_approach_waypoints,
+    with_pick_approach_waypoints,
+    with_pick_lift_waypoints,
+    with_pick_reach_waypoints,
+    with_plan_options,
+    with_pour_rotation_waypoints,
+)
 from ..atomic_skill import register_atomic_skill_provider
 
 if TYPE_CHECKING:
@@ -649,6 +657,32 @@ def _compile_reference(
         sample_interval=scenario.suite.protocol.sample_interval,
     )
     invocations = tuple(with_plan_options(item, plan_opts) for item in build(engine))
+    invocations = tuple(
+        with_pick_approach_waypoints(item, scenario.pick_approach_waypoints())
+        for item in invocations
+    )
+    invocations = tuple(
+        with_pick_reach_waypoints(item, scenario.pick_reach_waypoints())
+        for item in invocations
+    )
+    invocations = tuple(
+        with_hand_over_approach_waypoints(item, scenario.hand_over_approach_waypoints())
+        for item in invocations
+    )
+    invocations = tuple(
+        with_pick_lift_waypoints(item, scenario.pick_lift_waypoints())
+        for item in invocations
+    )
+    invocations = tuple(
+        with_axis_align_rotation_waypoints(
+            item, scenario.axis_align_rotation_waypoints()
+        )
+        for item in invocations
+    )
+    invocations = tuple(
+        with_pour_rotation_waypoints(item, scenario.pour_rotation_waypoints())
+        for item in invocations
+    )
     context = engine.initial_context(
         control_dt=float(scenario.simulation.sim_config.physics_dt)
     )
@@ -1103,6 +1137,7 @@ class _HandOverCases(AtomicSkillCaseProvider):
             int(config.get("grasp_sample_count", 10_000)),
             gripper_data=scenario.grasp_model(),
             root_from_tcp=scenario.grasp_root_from_tcp(),
+            ray_deviation_angle=scenario.grasp_ray_deviation_angle(),
             grasp_depth_offset_m=float(parameters["grasp_depth_offset_m"]),
         )
         semantics = _antipodal_semantics(handle)
@@ -1127,13 +1162,15 @@ class _HandOverCases(AtomicSkillCaseProvider):
         _require_hand_over_samples(reference, batch_size=batch_size)
         # HandOver samples one grasp per gripper: the pickup grasp on the
         # settled object, then the receiving grasp on the predicted handover
-        # pose.  Each arm's first request ends at its grasp.
+        # pose.  Each arm's first request ends at its grasp, after the optional
+        # approach keyframes and the pre-grasp.
+        grasp_index = scenario.hand_over_approach_waypoints() + 1
         frozen: dict[str, list] = {}
         for part, obj_poses in reference.grasp_requests:
             if part in frozen:
                 continue
             arm = next(v["motion"] for v in parts.values() if v["grasp"] == part)
-            grasp = reference.arm_poses(arm)[:, 1]
+            grasp = reference.arm_poses(arm)[:, grasp_index]
             frozen[part] = [obj_poses.cpu().tolist(), grasp.cpu().tolist()]
         if set(frozen) != set(grasp_parts):
             raise RuntimeError("The reference HandOver did not sample both grasps.")
@@ -1340,6 +1377,7 @@ class _CoordinatedPickmentCases(AtomicSkillCaseProvider):
             int(parameters["grasp_sample_count"]),
             gripper_data=scenario.grasp_model(),
             root_from_tcp=scenario.grasp_root_from_tcp(),
+            ray_deviation_angle=scenario.grasp_ray_deviation_angle(),
         )
         semantics = _antipodal_semantics(handle)
         reference = _compile_reference(
@@ -1492,6 +1530,12 @@ def _placement_pose_row(
         support_vertices,
         device,
         z_clearance=float(config.get("support_grasp_z_clearance_m", 0.0)),
+        root_offset=float(
+            config.get(
+                "support_grasp_handle_root_offset_m",
+                placement_geometry.PAN_HANDLE_ROOT_OFFSET,
+            )
+        ),
         pan_frame=str(config.get("support_mesh_frame", "authored_z_up")),
     )
     if placing_target_frame_pose is None:

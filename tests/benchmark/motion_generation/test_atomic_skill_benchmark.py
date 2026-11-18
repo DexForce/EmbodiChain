@@ -3825,12 +3825,15 @@ def test_track_waypoint_counts_are_opt_in(key: str) -> None:
 def test_track_waypoints_thread_only_into_their_skill_options() -> None:
     from embodichain.lab.sim.atomic_skills import (
         AxisAlignOptions,
+        HandOverOptions,
         PickUpOptions,
         PourOptions,
     )
     from embodichain_benchmarks.motion_generation.scenarios.atomic_policy import (
         with_axis_align_rotation_waypoints,
+        with_hand_over_approach_waypoints,
         with_pick_lift_waypoints,
+        with_pick_reach_waypoints,
         with_pour_rotation_waypoints,
     )
 
@@ -3862,6 +3865,16 @@ def test_track_waypoints_thread_only_into_their_skill_options() -> None:
     assert (lifted.lift_waypoints, lifted.approach_waypoints) == (4, 5)
     assert with_pick_lift_waypoints(pour, 4) is pour
     assert with_pick_lift_waypoints(pick, 0) is pick
+    # Reach keyframes belong to PickUp alone; AxisAlign plans its own approach.
+    assert with_pick_reach_waypoints(pick, 5).skill_options.reach_waypoints == 5
+    assert with_pick_reach_waypoints(axis_align, 5) is axis_align
+    assert with_pick_reach_waypoints(pick, 0) is pick
+    hand_over = invocation("hand_over", HandOverOptions())
+    handed = with_hand_over_approach_waypoints(hand_over, 5).skill_options
+    assert handed.approach_waypoints == 5
+    assert with_hand_over_approach_waypoints(pick, 5) is pick
+    assert with_hand_over_approach_waypoints(hand_over, 0) is hand_over
+    assert with_pick_reach_waypoints(hand_over, 5) is hand_over
 
 
 def test_atomic_preparation_resumes_cases_without_renumbering_random_streams(

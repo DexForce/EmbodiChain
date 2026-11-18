@@ -83,6 +83,7 @@ from embodichain.lab.sim.atomic_skills.trajectory_ops import (
     build_pose_plan_states,
     axis_translation_keyframes,
     interpolate_hand_qpos,
+    pose_line_keyframes,
     resolve_pose_target,
     split_three_segments,
     translate_pose_world,
@@ -225,6 +226,16 @@ class PickUpOptions(SkillOptions):
     inherits the same approach.
     """
 
+    reach_waypoints: int = 0
+    """Intermediate poses on the straight line from the start TCP pose to pre-grasp.
+
+    The motion policy plans through them in the same call, which keeps an
+    open hand near that line instead of letting a free-space reach sweep the
+    target or its support. The line starts at the initial lift pose when
+    ``initial_lift_height`` is set. ``0`` plans the pre-grasp pose directly.
+    AxisAlign does not support it.
+    """
+
     lift_waypoints: int = 0
     """Intermediate poses on the straight world +Z line from grasp to lift.
 
@@ -310,6 +321,8 @@ class PickUpOptions(SkillOptions):
             raise TypeError("approach_along_grasp_axis must be boolean.")
         if type(self.approach_waypoints) is not int or self.approach_waypoints < 0:
             raise ValueError("approach_waypoints must be a non-negative integer.")
+        if type(self.reach_waypoints) is not int or self.reach_waypoints < 0:
+            raise ValueError("reach_waypoints must be a non-negative integer.")
         if type(self.lift_waypoints) is not int or self.lift_waypoints < 0:
             raise ValueError("lift_waypoints must be a non-negative integer.")
         if self.cartesian_lift and self.lift_waypoints:
@@ -438,8 +451,8 @@ class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
             # planner options were supplied.
             motion_options.sample_count = None
         approach_poses = [pre_grasp_xpos[:, None]]
-        if options.initial_lift_height > 0.0:
-            start_xpos = self.robot.compute_fk(
+        if options.initial_lift_height > 0.0 or options.reach_waypoints:
+            reach_start = self.robot.compute_fk(
                 qpos=start_arm_qpos,
                 name=manipulator.control_part,
                 to_matrix=True,
@@ -449,11 +462,22 @@ class PickUp(AtomicSkill[GraspGoal, PickUpOptions]):
                     else {}
                 ),
             )
-            initial_lift = translate_pose_world(
-                start_xpos,
-                start_xpos.new_tensor([0.0, 0.0, options.initial_lift_height]),
-            )
-            approach_poses.insert(0, initial_lift[:, None])
+            if options.initial_lift_height > 0.0:
+                reach_start = translate_pose_world(
+                    reach_start,
+                    reach_start.new_tensor([0.0, 0.0, options.initial_lift_height]),
+                )
+            if options.reach_waypoints:
+                approach_poses.insert(
+                    0,
+                    pose_line_keyframes(
+                        reach_start.to(pre_grasp_xpos),
+                        pre_grasp_xpos,
+                        n_waypoints=options.reach_waypoints + 1,
+                    )[:, :-1],
+                )
+            if options.initial_lift_height > 0.0:
+                approach_poses.insert(0, reach_start[:, None])
         if options.approach_waypoints:
             approach_poses.append(
                 axis_translation_keyframes(

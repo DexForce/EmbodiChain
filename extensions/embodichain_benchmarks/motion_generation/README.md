@@ -342,6 +342,11 @@ Measured replay calibrates the Robotiq grasp and its cuRobo timing:
 - PickUp and AxisAlign plan their approach through five intermediate poses
   on the straight pre-grasp line (`pick_approach_waypoints`). A free-space approach
   can leave a diagonal line and sweep the target before closing.
+- The dual-arm suites also reach each pre-grasp through five poses on the
+  straight line from the start pose (`pick_reach_waypoints`,
+  `hand_over_approach_waypoints`). In cuRobo's empty collision world the
+  HandOver pickup hand otherwise swung 0.65 m out at table height, and the
+  CoordinatedPlacement hands dipped 16 cm into the objects.
 - PickUp and AxisAlign lift through four poses on the straight vertical line
   above the grasp (`pick_lift_waypoints`); a free-space lift dragged the held
   cube about 6 cm across the table before rising.
@@ -481,6 +486,9 @@ These suites contain one nominal case at seed 11 and keep geometry, timing,
 execution and physical success separate. Input preparation freezes both arm
 waypoints and sampled grasps independently of the candidate methods. Their
 existence does not establish spatial generalization or physical success.
+The Franka CoordinatedPlacement fixture does not yet pass physically: both
+hands load, but the top-down pinch across the pan handle does not keep the
+pan's orientation in the hand, so the alignment stage fails.
 New coordinated cases also retain `case_parameters.endpoint_qualification`:
 independent sequential IK witnesses and original-goal FK, finite-state and joint
 limit checks for every endpoint of each arm. Both arms start from their frozen
@@ -758,6 +766,11 @@ provider source. Changed robot configuration or embodiment overrides are rejecte
 before simulation even when the public name and DOF match. Declared performance
 subsets and batch sizes retain that identity without regenerating tasks; keep
 timing replicas separate from quality denominators.
+
+Provider-backed identities also include provider-declared effective defaults.
+In particular, an omitted dual-Franka hand selector resolves to Robotiq before
+hashing, so custom suites cannot reuse former implicit-PGI manifests with the
+same raw configuration. Regenerate those manifests after the migration.
 
 Omitting `sampling_method` retains the legacy `joint_templates` population.
 Its L/S/wrist templates describe joint displacements; those labels do not certify

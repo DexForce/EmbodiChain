@@ -25,6 +25,7 @@ import pytest
 from embodichain_benchmarks.motion_generation.config import (
     EmbodimentSpecCfg,
     RobotSpecCfg,
+    stable_hash,
 )
 from embodichain_benchmarks.motion_generation.embodiments import (
     EmbodimentResolution,
@@ -94,19 +95,61 @@ def test_yaml_embodiment_resolution_collects_bindings_and_capabilities(
     )
 
 
-def test_legacy_robot_resolution_is_available_without_a_component() -> None:
+@pytest.mark.parametrize(
+    "provider,config",
+    [
+        ("franka_panda", {"uid": "test"}),
+        ("ur5", {}),
+        ("ur5_pgi", {}),
+        ("dual_arm", {"robot_type": "ur5"}),
+        ("dual_arm", {"robot_type": "franka", "gripper_type": None}),
+        ("dual_arm", {"robot_type": "franka", "gripper_type": "robotiq_2f_140"}),
+    ],
+)
+def test_legacy_robot_resolution_preserves_unchanged_provider_hashes(
+    provider: str, config: dict[str, object]
+) -> None:
     resolution = resolve_embodiment(
         None,
         RobotSpecCfg(
-            id="legacy_panda",
-            provider="franka_panda",
-            config={"uid": "test"},
+            id="legacy_robot",
+            provider=provider,
+            config=config,
         ),
     )
 
-    assert resolution.embodiment_id == "legacy_panda"
+    assert resolution.embodiment_id == "legacy_robot"
     assert resolution.component_path is None
-    assert resolution.source == "robot_provider:franka_panda"
+    assert resolution.source == f"robot_provider:{provider}"
+    assert resolution.config_hash == stable_hash(config)
+
+
+def test_implicit_franka_hand_identity_matches_explicit_robotiq_without_assets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from embodichain_benchmarks.motion_generation import _atomic_fixtures
+    from embodichain_benchmarks.motion_generation.robots.dual_arm import DualArmProvider
+
+    def forbid_assets(*args: object, **kwargs: object) -> None:
+        pytest.fail("identity resolution constructed native robot assets")
+
+    monkeypatch.setattr(DualArmProvider, "build_cfg", forbid_assets)
+    monkeypatch.setattr(_atomic_fixtures, "get_data_path", forbid_assets)
+    config = {"robot_type": "franka"}
+    implicit = resolve_embodiment(
+        None, RobotSpecCfg(id="franka", provider="dual_arm", config=config)
+    )
+    explicit = resolve_embodiment(
+        None,
+        RobotSpecCfg(
+            id="franka",
+            provider="dual_arm",
+            config={"robot_type": "franka", "gripper_type": "robotiq_2f_140"},
+        ),
+    )
+    assert implicit.to_metadata() == explicit.to_metadata()
+    assert implicit.config_hash != stable_hash(config)
+    assert config == {"robot_type": "franka"}
 
 
 def test_missing_component_is_reported_with_path(tmp_path: Path) -> None:

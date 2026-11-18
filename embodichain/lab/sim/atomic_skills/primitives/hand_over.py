@@ -83,6 +83,7 @@ from embodichain.lab.sim.atomic_skills.requirements import (
 from embodichain.lab.sim.atomic_skills.state import HeldObjectState, PlanningContext
 from embodichain.lab.sim.atomic_skills.trajectory_ops import (
     interpolate_hand_qpos,
+    pose_line_keyframes,
     translate_pose_world,
 )
 
@@ -135,6 +136,15 @@ class HandOverOptions(SkillOptions):
     followed by a later Place call without moving that workflow into Task Engine.
     """
 
+    approach_waypoints: int = 0
+    """Intermediate poses on each empty hand's straight line to its pre-grasp.
+
+    The line runs from the hand's start TCP pose to its pre-grasp pose, and
+    the motion policy plans through the poses in the same call. This keeps
+    the open hand near that line instead of letting a free-space approach
+    sweep the object or its support. ``0`` plans each pre-grasp pose directly.
+    """
+
     arm_selection: Literal["nearest", "bound"] = "nearest"
     """How the transfer participant is selected.
 
@@ -161,6 +171,8 @@ class HandOverOptions(SkillOptions):
                 raise ValueError(f"{name} must be a non-negative integer.")
         if self.retreat_steps < 2:
             raise ValueError("retreat_steps must be at least 2.")
+        if type(self.approach_waypoints) is not int or self.approach_waypoints < 0:
+            raise ValueError("approach_waypoints must be a non-negative integer.")
         if self.receive_pick_object_part not in ("center", "top", "bottom"):
             raise ValueError(
                 "receive_pick_object_part must be exactly 'center', 'top', or "
@@ -886,8 +898,14 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
 
         paired_transfer = None
         policy_batching = None
-        destination_targets = torch.stack(
-            (destination_pre_grasp, destination_grasp), dim=1
+        destination_targets = torch.cat(
+            (
+                self._approach_keyframes(
+                    destination_eef, destination_pre_grasp, options
+                ),
+                destination_grasp[:, None],
+            ),
+            dim=1,
         )
         if request.motion_policy.strategy == "motion_gen":
             # The requests are independent even for a backend that executes
@@ -1464,7 +1482,9 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
         # Export the pre-grasp as an explicit phase boundary. Spatial
         # expansion may vary the empty-hand approach, while the final reach
         # and every subsequent grasp/held-object motion stay exact.
-        pickup_approach_targets = handover_pre_grasp[:, None]
+        pickup_approach_targets = self._approach_keyframes(
+            handover_start_eef, handover_pre_grasp, options
+        )
         phase_success, pickup_approach = plan_named_arm_trajectory(
             self.motion_generator,
             handover.arm.control_part,
@@ -1484,7 +1504,7 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
             context,
             phase_name="pickup_approach",
             waypoint_names=("pickup_pre_grasp",),
-            target_poses=pickup_approach_targets,
+            target_poses=handover_pre_grasp[:, None],
             start_qpos=handover_start_qpos,
             arm=handover.arm,
             failed_mask=active_mask & ~pickup_approach_success,
@@ -1525,8 +1545,12 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
         pickup_transport_targets = torch.stack(
             [handover_lift_eef, handover_middle_eef], dim=1
         )
-        receive_approach_targets = torch.stack(
-            [receive_pre_grasp, receive_grasp], dim=1
+        receive_approach_targets = torch.cat(
+            [
+                self._approach_keyframes(receive_start_eef, receive_pre_grasp, options),
+                receive_grasp[:, None],
+            ],
+            dim=1,
         )
         paired_transfer = None
         policy_batching = None
@@ -1603,7 +1627,7 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
             context,
             phase_name="receive_approach",
             waypoint_names=("receive_pre_grasp", "receive_grasp"),
-            target_poses=receive_approach_targets,
+            target_poses=receive_approach_targets[:, -2:],
             start_qpos=receive_start_qpos,
             arm=receive.arm,
             failed_mask=active_mask & ~receive_approach_success,
@@ -1943,6 +1967,21 @@ class HandOver(AtomicSkill[HandOverGoal, HandOverOptions]):
         logger.log_warning(
             f"HandOver waypoint '{waypoint_name}' failed for "
             f"env_ids={env_ids.detach().cpu().tolist()}: {reason}."
+        )
+
+    @staticmethod
+    def _approach_keyframes(
+        start_eef: torch.Tensor,
+        pre_grasp: torch.Tensor,
+        options: HandOverOptions,
+    ) -> torch.Tensor:
+        """Return the empty-hand approach targets ending at the pre-grasp pose."""
+        if not options.approach_waypoints:
+            return pre_grasp[:, None]
+        return pose_line_keyframes(
+            start_eef.to(pre_grasp),
+            pre_grasp,
+            n_waypoints=options.approach_waypoints + 1,
         )
 
     def _report_phase_failure(
