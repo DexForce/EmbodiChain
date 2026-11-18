@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import os
+from email.parser import Parser
 from pathlib import Path
 import shutil
 import subprocess
@@ -26,6 +27,7 @@ import sys
 import zipfile
 
 import pytest
+from packaging.requirements import Requirement
 
 pytestmark = pytest.mark.no_sim
 
@@ -54,6 +56,7 @@ def installed_benchmark(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path,
         "extensions/embodichain_tasks",
         "extensions/embodichain_benchmarks",
         "extensions/embodichain_models",
+        "extensions/embodichain_solvers",
     ):
         shutil.copytree(root / name, source / name, ignore=ignore)
     built = subprocess.run(
@@ -74,9 +77,28 @@ def installed_benchmark(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path,
     wheel = next((workspace / "dist").glob("*.whl"))
     with zipfile.ZipFile(wheel) as archive:
         entries = archive.namelist()
+        metadata_path = next(
+            name for name in entries if name.endswith(".dist-info/METADATA")
+        )
+        metadata = Parser().parsestr(archive.read(metadata_path).decode())
+        assert "assembly" not in metadata.get_all("Provides-Extra", [])
+        assert not any(
+            Requirement(value).name.lower() == "mujoco"
+            for value in metadata.get_all("Requires-Dist", [])
+        )
         assert "embodichain_benchmarks/__init__.py" in entries
         assert "embodichain_benchmarks/motion_generation/api.py" in entries
         assert "embodichain/cli/benchmark.py" in entries
+        assert "embodichain/toolkits/assembly/native.py" in entries
+        assert not any(
+            name.startswith("embodichain/lab/sim/assembly/") for name in entries
+        )
+        assert not any(
+            "share/embodichain/assembly_patches/" in name for name in entries
+        )
+
+        for name in ("LICENSE.worldparticle", "LICENSE.tome", "PROVENANCE.json"):
+            assert f"embodichain_models/dynamics/worldparticle/{name}" in entries
         suites = {
             Path(name).name
             for name in entries
@@ -181,6 +203,13 @@ import embodichain_benchmarks.motion_generation as benchmark
 from embodichain_benchmarks.motion_generation import load_suite, run_benchmark
 assert Path(benchmark.__file__).is_relative_to(target)
 assert "embodichain.lab.sim" not in sys.modules
+from embodichain.toolkits.assembly import native
+assert Path(native.__file__).is_relative_to(target)
+assert callable(native.prepare_native_configs)
+from embodichain_benchmarks.assembly.precision import PrecisionRunCfg
+profile = PrecisionRunCfg(backend="newton", newton_solver="dexuni", solver="cg")
+assert profile.to_dict()["newton_solver"] == "dexuni"
+assert "embodichain.lab.sim" not in sys.modules
 for source in Path(benchmark.__file__).parent.rglob("*.py"):
     for node in ast.walk(ast.parse(source.read_text())):
         names = ([node.module] if isinstance(node, ast.ImportFrom) else
@@ -239,3 +268,76 @@ print("installed benchmark suites and CLI passed")
     )
     assert cli.returncode == 0, cli.stdout + cli.stderr
     assert "--suite" in cli.stdout
+
+    for example in ("drop_peg", "visual_demo"):
+        help_result = subprocess.run(
+            [
+                str(target / "bin/embodichain"),
+                "run-example",
+                f"sim/assembly/{example}",
+                "--help",
+            ],
+            cwd=tmp_path,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert help_result.returncode == 0, help_result.stdout + help_result.stderr
+        assert "--newton-solver" in help_result.stdout
+        assert "dexuni" in help_result.stdout
+
+
+def test_installed_solver_entry_point_and_core_dependency_boundary(
+    installed_benchmark: tuple[Path, Path], tmp_path: Path
+) -> None:
+    """Discover optional adapters without eagerly importing models or the SDK."""
+    target, _ = installed_benchmark
+    script = r"""
+import importlib.abc
+from importlib import metadata
+from pathlib import Path
+import sys
+
+import embodichain_solvers.physics.nerd
+import embodichain_solvers.physics.worldparticle
+assert Path(embodichain_solvers.__file__).is_relative_to(Path(sys.prefix))
+for name in ('torch', 'newton', 'dexsim', 'embodichain_models'):
+    assert name not in sys.modules, name
+
+class ConcreteImportsForbidden(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split('.')[0] in {'embodichain_models', 'embodichain_solvers'}:
+            raise AssertionError('Core imported a concrete implementation: ' + fullname)
+
+blocker = ConcreteImportsForbidden()
+sys.meta_path.insert(0, blocker)
+from embodichain.lab.gym.envs.differentiable_env import DifferentiableEnv
+from embodichain.lab.sim.diff._newton_fk import _newton_fk
+sys.meta_path.remove(blocker)
+assert 'embodichain_models' not in sys.modules
+entries = [entry for entry in metadata.entry_points(group='dexsim.newton_solvers') if entry.name == 'nerd']
+assert len(entries) == 1
+assert entries[0].value == 'embodichain_solvers.physics.nerd.provider:NeRDProvider'
+provider = entries[0].load()
+assert provider.capabilities.supported_control_fields == ('joint_f',)
+entries = [entry for entry in metadata.entry_points(group='dexsim.newton_solvers') if entry.name == 'worldparticle']
+assert len(entries) == 1
+assert entries[0].value == 'embodichain_solvers.physics.worldparticle.provider:WorldParticleProvider'
+provider = entries[0].load()
+assert provider.capabilities.supported_particle_kinds == ('fluid',)
+assert not provider.capabilities.cuda_graph
+assert 'embodichain_models.dynamics.worldparticle' not in sys.modules
+assert 'open3d.ml.torch' not in sys.modules
+assert 'flash_attn' not in sys.modules
+import dexsim
+assert dexsim.get_world_num() == 0
+"""
+    result = subprocess.run(
+        [str(target / "bin/python"), "-I", "-c", script],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

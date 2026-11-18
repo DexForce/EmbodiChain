@@ -51,6 +51,8 @@ class BaseAlgorithm(ABC, Generic[RolloutT]):
 
     device: torch.device
     rollout_kind = RolloutKind.STANDARD
+    uses_value_bootstrap: bool = True
+    """Whether standard collection needs terminal values for timeout bootstrap."""
     optimizer: torch.optim.Optimizer
     lr_scheduler: torch.optim.lr_scheduler.LRScheduler | None
 

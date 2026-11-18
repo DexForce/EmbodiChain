@@ -213,6 +213,30 @@ respect the configured download host, with the official Hub as fallback.
 .. autoclass:: DemoStudio
 .. autoclass:: CleanLab
 
+Captured Gaussian backgrounds
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+These versioned, visual-only packages provide a metre/Z-up USD entry and an
+AssetRevision inventory. They preserve upstream point data and licensing
+evidence; collision reconstruction and metric-depth certification are separate.
+
+.. autosummary::
+   :nosignatures:
+
+   RoboSplatterOfficeGS
+   DiscoverseLab3GS
+   RoboSimGSTabletopGS
+
+.. autoclass:: RoboSplatterOfficeGS
+   :members:
+
+.. autoclass:: DiscoverseLab3GS
+   :members:
+
+.. autoclass:: RoboSimGSTabletopGS
+   :members:
+
+
 embodichain.data.assets.solver_assets
 -------------------------------------
 
@@ -847,9 +871,7 @@ Entity metadata and deterministic UID indexing for schema-v2 USD scene stages.
 .. autosummary::
 
    USD_SCENE_SCHEMA
-   UsdEntityBinding
    UsdEntityDesc
-   UsdSceneBinding
    UsdSceneIndex
 
 embodichain.gen_sim.scene_engine.randomization.adapter
@@ -1162,6 +1184,7 @@ execution remains with the ordinary task runner.
    prepare_task_deployment
    qualify_task_scene
    resume_scene_generation
+   revise_task_plan
    submit_scene_generation
 
 .. autofunction:: cancel_scene_generation
@@ -1182,6 +1205,7 @@ execution remains with the ordinary task runner.
 
 .. autofunction:: resume_scene_generation
 
+.. autofunction:: revise_task_plan
 .. autofunction:: submit_scene_generation
 
 embodichain.gen_sim.task_engine.evidence
@@ -1497,6 +1521,36 @@ normalization are standard-library-only.
 
 .. autofunction:: evaluate_pour_evidence
 
+
+embodichain.gen_sim.task_spec.publication
+-----------------------------------------
+
+Publish a task with independent episode and generalization identities. Scene
+providers consume the initial conditions and achievable goals, while expansion
+consumers check requested coverage against their available dimensions.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.publication
+
+.. autosummary::
+
+   freeze_task_spec
+   decode_task_document
+   project_scene_requirements
+   project_expansion_requirements
+   scene_agent_messages
+   evaluate_attempt_observations
+
+.. autofunction:: freeze_task_spec
+
+.. autofunction:: decode_task_document
+
+.. autofunction:: project_scene_requirements
+
+.. autofunction:: project_expansion_requirements
+
+.. autofunction:: scene_agent_messages
+
+.. autofunction:: evaluate_attempt_observations
 
 embodichain.gen_sim.task_spec.registry
 --------------------------------------
@@ -2831,6 +2885,22 @@ preview with managed control-part Gizmos and optional joint controls.
 .. autofunction:: cli
 
 .. autofunction:: main
+
+
+embodichain.lab.scripts.preview_scene
+------------------------------------
+
+.. currentmodule:: embodichain.lab.scripts.preview_scene
+
+Preview ordinary USD scenes through the Lab import owner. The default preserves
+imported initial state without physics steps; explicit simulation, offscreen PNG
+output and portable stage diagnostics share the same owned lifecycle.
+
+.. autosummary::
+
+   preview_scene
+
+.. autofunction:: preview_scene
 
 
 embodichain.lab.scripts.run_task
@@ -5092,6 +5162,151 @@ qualified DriverOpeningBinding type must be rebuilt with its Atomic owner.
 .. autoclass:: DriverOpeningBinding
    :members:
 
+embodichain.toolkits.assembly
+-----------------------------
+
+Public assembly generation and portable manifests preserve one physical body with multiple convex collision pieces. Generator dependencies are optional at manifest load time. GenSim and simulation integrations consume this toolkit; its data model does not import either runtime.
+
+See :doc:`Precision Assembly <../features/toolkits/precision_assembly>` for
+functional entry points, installation, native demo recordings and research attribution.
+
+.. currentmodule:: embodichain.toolkits.assembly
+
+.. autosummary::
+
+   AssemblyAsset
+   AssemblyBody
+   AssemblyGeometry
+   AssemblyJoint
+   MJFIT_REVISION
+   build_assembly
+   build_many_pegs
+   import_mjcf
+   sample_assemblies
+   load_mjfit
+
+
+
+
+embodichain.toolkits.assembly.native
+------------------------------------
+
+Prepare native rigid and hinge configurations from portable assembly assets.
+File-backed appearance is optional and preserves source collision ownership.
+
+.. currentmodule:: embodichain.toolkits.assembly.native
+
+.. autosummary::
+
+   to_rigid_config
+   to_rigid_configs
+   to_articulation_configs
+   prepare_native_configs
+
+.. autofunction:: to_rigid_config
+.. autofunction:: to_rigid_configs
+.. autofunction:: to_articulation_configs
+.. autofunction:: prepare_native_configs
+
+embodichain.toolkits.assembly.adapter
+-------------------------------------
+
+Pinned public mjfit generation, deterministic sampling and bounded MuJoCo conversion. Source mesh frames and mass tensors are converted at this boundary.
+
+.. currentmodule:: embodichain.toolkits.assembly.adapter
+
+.. autosummary::
+
+   MJFIT_REVISION
+   build_assembly
+   import_mjcf
+   sample_assemblies
+   load_mjfit
+
+
+
+
+embodichain.toolkits.assembly.many
+----------------------------------
+
+The official many-pegs grid preserves the public sampler's indexed seed,
+per-cell configuration and prefixed body ownership in one portable scene.
+Optional curved-outline precision settings record both the original sample
+and the actual public generator configuration. The grid does not represent
+independent simulation arenas.
+
+.. currentmodule:: embodichain.toolkits.assembly.many
+
+.. autosummary::
+
+   build_many_pegs
+
+
+
+
+embodichain.toolkits.assembly.model
+-----------------------------------
+
+Self-contained body-local geometry, joint attachment and mass-property records with content-addressed, checksummed serialization. Native configuration conversion is owned by ``embodichain.toolkits.assembly.native``.
+
+.. currentmodule:: embodichain.toolkits.assembly.model
+
+.. autosummary::
+
+   AssemblyGeometry
+   AssemblyJoint
+   AssemblyBody
+   AssemblyAsset
+
+
+
+
+embodichain_benchmarks.assembly.precision
+-----------------------------------------
+
+Independent USD geometry/mass acceptance and passive source/native simulation measurements. Missing overflow accounting remains unverified rather than a precision certification. ``PrecisionRunCfg.newton_solver`` explicitly selects MuJoCo Warp or DexUni; ``solver`` retains the MuJoCo algorithm. Native results retain the prepared family and actual SDK dispatch.
+
+.. currentmodule:: embodichain_benchmarks.assembly.precision
+
+.. autosummary::
+
+   PrecisionRunCfg
+   compare_usd_geometry
+   run_passive_probe
+
+
+
+
+embodichain_benchmarks.assembly.probes
+--------------------------------------
+
+Circle/square analytic clearance oracles, state-controlled S0 contact scans and
+real slide/hinge S2-S4 equilibrium probes. Native and source runners preserve
+the same force/torque and geometry; unmeasured health limits qualification.
+
+.. currentmodule:: embodichain_benchmarks.assembly.probes
+
+.. autosummary::
+
+   AnalyticPegGeometry
+   ConstrainedProbeCfg
+   ConstrainedProbeDefinition
+   prepare_probe
+   run_reference_probe
+   run_native_probe
+   run_warp_probe
+
+Shared locomotion observation functor
+------------------------------------
+
+The observation package exposes task-built actor or critic state and preserves the
+existing locomotion configuration name while implementations move into a package.
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.observations
+
+.. autofunction:: velocity_locomotion_observation
+
+
 Stability execution ownership
 ----------------------------
 
@@ -5927,3 +6142,76 @@ live one-way rigid-to-fluid simulation.
    :members:
 
 .. autofunction:: embodichain.lab.scripts.run_fluid_task_program.main
+
+
+Sensor extension contracts
+--------------------------
+
+Registration and runtime dependencies
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The sensor registry pairs configuration classes with factories for both Python
+and YAML. Installed entry points are discovered by name and loaded only when
+selected. Context-backed factories acquire owned joint-state snapshots and
+read the explicitly selected manager's simulation clock; legacy built-in
+constructors retain their existing signatures.
+
+.. currentmodule:: embodichain.lab.sim.sensors
+
+.. autosummary::
+   :nosignatures:
+
+   SensorClock
+   SensorStateProvider
+   SensorContext
+   SensorRegistration
+   register_sensor
+   discover_sensor_plugins
+   get_sensor_registration
+   list_sensor_types
+
+.. autoclass:: SensorClock
+   :members:
+
+.. autoclass:: SensorStateProvider
+   :members:
+
+.. autoclass:: SensorContext
+   :members:
+
+.. autoclass:: SensorRegistration
+   :members:
+
+.. autofunction:: register_sensor
+
+.. autofunction:: discover_sensor_plugins
+
+.. autofunction:: get_sensor_registration
+
+.. autofunction:: list_sensor_types
+
+Implementation module imports
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+These are the implementation paths for the same public runtime and registry
+contracts. The package-level imports above are the convenient extension API.
+
+.. currentmodule:: embodichain.lab.sim.sensors.context
+
+.. autosummary::
+   :nosignatures:
+
+   SensorClock
+   SensorStateProvider
+   SensorContext
+
+.. currentmodule:: embodichain.lab.sim.sensors.registry
+
+.. autosummary::
+   :nosignatures:
+
+   SensorRegistration
+   register_sensor
+   discover_sensor_plugins
+   get_sensor_registration
+   list_sensor_types

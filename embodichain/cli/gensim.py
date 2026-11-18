@@ -59,11 +59,19 @@ _DOMAINS = {
             "Generate and save layout variants of an existing scene.",
         ),
         "preview": (
-            "embodichain.gen_sim.scene_engine.cli.preview:main",
-            "Preview a scene export or a standalone USD scene.",
+            "embodichain.lab.scripts.preview_scene:main",
+            "Preview an exported standard USD scene through Lab.",
         ),
     },
     "task": {
+        "view": (
+            "embodichain.gen_sim.task_engine._review:main",
+            "Render a verified offline plan or execution review.",
+        ),
+        "revise": (
+            "embodichain.gen_sim.task_engine.cli:_revise",
+            "Validate and publish a graph revision against a frozen TaskSpec.",
+        ),
         "plan": (
             "embodichain.gen_sim.task_engine.cli:main",
             "Plan image-grounded Semantic Calls without simulation.",

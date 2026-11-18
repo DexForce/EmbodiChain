@@ -107,6 +107,20 @@ Keep its source revision and complete file checksums together when updating it.
 ZIP bundles must include directory entries before nested files for Open3D
 extraction. Validate new bundles through `get_data_path()` with an empty cache.
 
+Captured Gaussian backgrounds register as `RoboSplatterOfficeGS`,
+`DiscoverseLab3GS` and `RoboSimGSTabletopGS` in `assets/scene_assets.py`.
+Each resolves `asset.usda` from an immutable Hub snapshot and a versioned cache.
+The metre/Z-up entry references original or separately decoded PLY data; the
+package includes an AssetRevision inventory, source hashes and licensing
+evidence. These are visual-only scenes and supply no enclosing collision box.
+`scripts/tools/prepare_gaussian_scene_assets.py` owns explicit offline packaging;
+normal runtime consumers download the completed archive. Package admission and
+native RGB evidence do not certify metric Gaussian depth or industrial readiness.
+Official Task Program deployments live under
+`extensions/embodichain_tasks/configs/tasks/manipulation/gaussian_pick_place/`.
+`examples/gym/gaussian_pick_place/` consumes those definitions for RGB recording,
+video export and offline acceptance; it does not own another task configuration.
+
 `Franka` also materializes `Panda/Fr3HandV1.urdf` from the pinned integrated
 hand subtree, retaining source names and relative mesh paths. Bare FR3 arms
 resolve the existing `Panda/Panda.urdf`; embodiments mount the derived hand
@@ -187,6 +201,19 @@ cache. Robot references still use `get_data_path()` and its existing asset cache
 Task packages must already be installed; downloading weights does not register
 new environment implementations. Test the Hub boundary with fake downloads and
 validate a real selected-model download separately.
+
+## Qualified cloth replay inputs
+
+`scripts/tools/prepare_cloth_fold_assets.py` installs the pinned M02 input bundle
+into the normal data root. It uses the shared download lock, verifies archive
+and task-owned URDF/mesh SHA-256 values, includes URDF-relative visual and
+collision dependencies, and rejects conflicting local files. Each input is copied
+to a same-directory temporary file, verified and atomically published without
+overwriting an existing file, so interrupted copies remain retryable. The packaged
+cloth task retains its qualified replay stream and 15 mm final centroid rules.
+The installer also supports an explicit custom root; launch with that same
+`EMBODICHAIN_DATA_ROOT`. It does not change the global root or substitute the
+generic W1 archive for the qualified robot.
 
 ## Failure diagnosis and change sites
 

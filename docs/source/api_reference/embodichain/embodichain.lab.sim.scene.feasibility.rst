@@ -114,7 +114,7 @@ Host integration
 
 ``TaskProgramFeasibilityHost`` rebuilds a copied robot deployment, prepares the
 scene through ``SimulationSceneExpansionHost``, screens the phase graph, restores
-the actual initial state, and invokes ``execute_scene_variant``. The canonical
+the actual initial state, and invokes ``execute_scene_variants``. The canonical
 Task Program remains the action producer and Gym owns every physics step.
 Initial validation requires both semantics and geometry. Actual controller
 provenance selects runtime contact permissions. Missing mappings fail explicitly.

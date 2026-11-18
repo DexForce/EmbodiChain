@@ -53,6 +53,7 @@ from embodichain.lab.sim.objects import (
     SurfaceDeformableObject,
 )
 from embodichain.lab.sim.sensors import Camera, CameraCfg, StereoCamera, StereoCameraCfg
+from embodichain.lab.sim.sensors.registry import _resolve_sensor_factory
 from .descriptors import _pose_from_cfg, configure_articulation_desc
 from .usd import (
     _configure_articulation_usd,
@@ -98,10 +99,11 @@ def _compile_usd_import(
     physics_backend: str = "default",
     device_type: str = "cpu",
 ) -> _UsdImportPlan:
-    """Plan source identities and descriptors, optionally declaring facades.
+    """Compile source identities and descriptors, optionally declaring facades.
 
     Without a manager, no World or facade is created and Gaussian appearance
-    remains descriptive metadata. Native admission belongs to the manager path.
+    remains descriptive metadata. Identity, overrides and constraints use the
+    same compiler; native admission belongs to the manager path.
     """
     recipe.validate_import()
     solver_type = None if manager is None else manager._active_newton_solver_type
@@ -195,6 +197,8 @@ def _compile_usd_import(
     declarations = []
     mounted_sensors = []
     sensor_uids = set() if manager is None else set(manager._sensors)
+    if manager is not None:
+        sensor_uids.update(getattr(manager, "_pending_mounted_sensors", {}))
     robot_paths: set[str] = set()
     renamed = {}
     rigid_renames = {}
@@ -472,50 +476,52 @@ def _compile_usd_import(
             descriptor.per_env = False
         source.materials.update(materials)
         if isinstance(cfg, RobotCfg) and cfg.enable_sensor:
+            if manager is None and cfg.sensors:
+                raise ValueError("Static environment imports do not bind USD robots.")
             for sensor_cfg in cfg.sensors:
-                if not isinstance(sensor_cfg, CameraCfg):
-                    raise TypeError("RobotCfg.sensors supports mounted cameras only.")
                 from embodichain.lab.sim.sim_manager import SimulationManager
+                from embodichain.lab.sim.sensors.attachment import _qualify_robot_mount
 
                 factories = (
                     SimulationManager.SUPPORTED_SENSOR_TYPES
                     if manager is None
                     else manager.SUPPORTED_SENSOR_TYPES
                 )
-                sensor_factory = factories.get(sensor_cfg.sensor_type)
-                if not isinstance(sensor_factory, type) or not issubclass(
-                    sensor_factory, Camera
-                ):
-                    raise ValueError(
-                        f"Unsupported mounted camera type {sensor_cfg.sensor_type!r}."
-                    )
-                if issubclass(sensor_factory, StereoCamera) and not isinstance(
-                    sensor_cfg, StereoCameraCfg
-                ):
+                _, sensor_factory, legacy = _resolve_sensor_factory(
+                    sensor_cfg.sensor_type, factories
+                )
+                if isinstance(sensor_cfg, CameraCfg):
+                    if isinstance(sensor_factory, type) and not issubclass(
+                        sensor_factory, Camera
+                    ):
+                        raise ValueError(
+                            f"Unsupported mounted camera type {sensor_cfg.sensor_type!r}."
+                        )
+                    if (
+                        isinstance(sensor_factory, type)
+                        and issubclass(sensor_factory, StereoCamera)
+                        and not isinstance(sensor_cfg, StereoCameraCfg)
+                    ):
+                        raise TypeError(
+                            "StereoCamera requires a StereoCameraCfg configuration."
+                        )
+                    if manager is not None:
+                        manager._require_native_renderer("Mounted cameras")
+                elif legacy:
                     raise TypeError(
-                        "StereoCamera requires a StereoCameraCfg configuration."
+                        "Nonvisual mounted sensors require a context-backed registration."
                     )
-                if manager is not None:
-                    manager._require_native_renderer("Mounted cameras")
-                if not isinstance(sensor_cfg.uid, str) or not sensor_cfg.uid.strip():
-                    raise ValueError("Mounted sensors require a non-empty uid.")
-                if sensor_cfg.uid in sensor_uids:
-                    raise ValueError(f"Sensor {sensor_cfg.uid!r} already exists.")
-                sensor_uids.add(sensor_cfg.uid)
-                parent = sensor_cfg.extrinsics.parent
-                if not isinstance(parent, str) or not parent.strip():
-                    raise ValueError("Mounted sensors require a parent link.")
-                link_name = parent.removeprefix(f"{uid}/")
-                if not link_name or "/" in link_name:
-                    raise ValueError(
-                        f"Mounted sensor {sensor_cfg.uid!r} must refer to a local link on robot {uid!r}."
-                    )
+                bound_cfg = _qualify_robot_mount(sensor_cfg, uid, sensor_uids)
+                offset = (
+                    bound_cfg.extrinsics
+                    if isinstance(bound_cfg, CameraCfg)
+                    else bound_cfg.mount
+                )
+                link_name = offset.parent.removeprefix(f"{uid}/")
                 if link_name not in {link.name for link in descriptor.links}:
                     raise ValueError(
                         f"Mounted sensor {sensor_cfg.uid!r} refers to unknown link {link_name!r} on robot {uid!r}."
                     )
-                bound_cfg = deepcopy(sensor_cfg)
-                bound_cfg.extrinsics.parent = f"{uid}/{link_name}"
                 mounted_sensors.append(bound_cfg)
         facade = (
             None if manager is None else facade_type(cfg=cfg, device=manager.device)

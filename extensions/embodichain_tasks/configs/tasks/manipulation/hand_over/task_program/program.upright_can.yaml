@@ -3,29 +3,27 @@ instruction: Pass the can from one robot arm to the other and move it to the del
   position.
 targets:
   delivery_pose:
-    kind: cyclic_pose
-    values:
-    - position:
-      - 0.0
-      - -0.2
-      - 0.6
-      quaternion_xyzw:
-      - 0.7071067812
-      - 0.0
-      - 0.0
-      - 0.7071067812
+    kind: pose
+    position:
+    - 0.0
+    - -0.2
+    - 0.6
+    quaternion_xyzw:
+    - 0.7071067812
+    - 0.0
+    - 0.0
+    - 0.7071067812
   delivery_rest_pose:
-    kind: cyclic_pose
-    values:
-    - position:
-      - 0
-      - -0.2
-      - 0.5582232
-      quaternion_xyzw:
-      - 0.7071067812
-      - 0
-      - 0
-      - 0.7071067812
+    kind: pose
+    position:
+    - 0
+    - -0.2
+    - 0.5582232
+    quaternion_xyzw:
+    - 0.7071067812
+    - 0
+    - 0
+    - 0.7071067812
 program:
   kind: segment
   name: hand_over_can

@@ -28,6 +28,12 @@ class MyTaskEnv(EmbodiedEnv):
    classes/types). A `RuntimeError` is raised otherwise.
 6. Use `override=True` to re-register an existing uid (useful in scripts/tests).
 
+In a source checkout, `embodichain_tasks/__init__.py` resolves the sibling
+`configs` package before eager registration. This keeps task code and resources
+in the same selected worktree even when an editable install maps configs to
+another checkout. Its temporary search path is removed before walking task
+modules; wheel installations retain their normal nested resource layout.
+
 ### Gym ID convention
 
 Format: `<TaskName>-v<N>` (e.g. `PourWater-v1`, `PushCubeRL`).
@@ -75,6 +81,32 @@ owns capture, completion qualification and terminal evidence.
 Component files do not use compatibility `version` fields. Inline runnable
 Gym configs remain supported when no conflicting component selector is used.
 
+### Whole-scene USD environments
+
+An environment's `simulation.usd_scene` (inline: `usd_scene`) supplies one
+`UsdImportCfg`, alongside any ordinary physical declarations. Its file resolves
+from the declaring environment file. Task-bound imported resources need explicit
+`asset_cfgs` UIDs; `integration.yaml.scene_binding` retains logical/native mapping
+and affordance ownership. The embodiment supplies the robot: source scenes must
+already omit robots, and this route rejects USD robot configuration bindings.
+The source importer does not identify robots from names or generate task semantics.
+
+Component resolution statically compiles the scene without a World or facades,
+retaining a detached `usd_scene_inventory`. Binding validation includes imported
+resource types and link names. Environment construction rechecks source bytes and
+the actual import mapping, declares the whole scene once, then uses the ordinary
+prepare/reset/Task Program lifecycle. The deployment inspector prints source prim,
+native UID and logical entity mappings. Use the
+[USD pick/place example](../../../examples/gym/usd_scene_pick_place/README.md)
+for the existing `run-task` entry and measured qualification.
+
+`enable_ground_plane` is an optional physical environment setting. With a USD scene,
+omission disables the added plane; ordinary environments retain their existing
+default. Backend and world gravity remain environment-owned, and an explicitly
+authored USD gravity must agree after source-convention and scene-pose conversion.
+Package admission and dependency lifetime belong to the
+[simulation importer](../simulation-system/simulation-system.md).
+
 ### Reusable Gym deployment components
 
 `resolve_gym_components()` in `lab.gym.utils.composition` exposes physical
@@ -109,6 +141,29 @@ without `base_dir` retains its ordinary filesystem/CWD behavior.
 Component-owned fields and their
 inline counterparts are mutually exclusive; without a selector, the original
 inline `robot`, `sensor`, and scene fields continue to parse unchanged.
+
+An embodiment selector permits robot installation `overrides` (`uid`,
+`init_pos`, `init_rot`, `init_qpos`) and a separate `camera_overrides` mapping
+keyed by camera UID. The latter selects ordinary `Camera` entries explicitly
+declared in the component's independent `sensor` or mounted
+`simulation.sensors` list. It changes only `intrinsics: [fx, fy, cx, cy]` and
+`extrinsics`; it cannot add sensors, change type, parent, resolution or outputs,
+or implicitly materialize model-owned sensor defaults. Unknown/duplicate UIDs
+and non-camera targets fail during physical component expansion, including
+file-free snapshot composition.
+
+Calibration numbers must be finite, focal lengths positive, and explicit XYZW
+quaternions unit length. Extrinsics use either `pos`/`quat` or
+`eye`/`target`/`up`; look-at direction and up must be nonzero and nonparallel.
+Partial edits retain unspecified values within the same representation.
+Switching representation requires complete `pos`/`quat` or `eye`/`target`
+(`up` defaults to +Z in the camera's reference frame), clears the other pose
+fields and retains parent.
+The resolver copies nested declarations; subsequent deployments retain their
+base calibration. Sensor membership and model hardware defaults stay with the
+embodiment. See the shared GS embodiment and its three thin deployments for
+scene-specific third-person calibration.
+
 `build_env_cfg_from_args()` expands the selected environment before applying
 launcher arguments so environment-owned run controls such as `max_episodes`
 remain visible to the run loop while explicit CLI values retain precedence.
@@ -130,6 +185,10 @@ An inline runnable config must declare exactly one
 exactly one backend and its optional `physics_config`; the thin deployment
 cannot repeat either field. `config_to_cfg()` constructs the backend-specific
 typed physics config and rejects fields from the other backend.
+
+The physical environment also owns `enable_ground_plane`. It controls
+creation of the default physical/render plane and can be disabled for
+contact-free scenes; a deployment cannot repeat or override the field.
 
 An `environment` selection may name one `component`, or declare separate
 `default` / `newton` component paths (also accepted inside `variants`). These

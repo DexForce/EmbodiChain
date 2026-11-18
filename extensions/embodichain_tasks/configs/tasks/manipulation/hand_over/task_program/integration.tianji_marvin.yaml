@@ -17,7 +17,6 @@ scene_binding:
         - entity_id: can_antipodal_grasp
           kind: antipodal_grasp
     - entity_id: support_surface
-      simulation_uid: support_surface
       dynamics: static
       semantic_type: support_surface
 

@@ -372,12 +372,21 @@ def test_marvin_pour_lowers_scene_and_targets_without_changing_program_steps(
     targets, original_targets = program.pop("targets"), original_program.pop("targets")
     assert targets.keys() - original_targets.keys() == {"bottle_pour_pose"}
     assert original_targets.keys() <= targets.keys()
-    for name, target in original_targets.items():
-        position = targets[name]["values"][0].pop("position")
-        original_position = target["values"][0].pop("position")
+    from embodichain.lab.task_program import load_task_program
+
+    decoded = deployment.load_program().targets
+    original_decoded = load_task_program(
+        path.parent / reference["task_program"]["program"],
+        integration=deployment.selection,
+    ).targets
+    for name, target in original_decoded.items():
+        pose = decoded[name]
+        position, original_position = pose.position, target.position
         assert position[:2] == original_position[:2]
         assert position[2] == pytest.approx(original_position[2] - 0.125)
-        assert targets[name] == target
+        assert pose.quaternion_xyzw == target.quaternion_xyzw
+        assert pose.frame == target.frame
+        assert pose.kind == target.kind
     marvin_segments = program["program"]["items"]
     cobot_segments = original_program["program"]["items"]
     assert cobot_segments[0].pop("validators") == [

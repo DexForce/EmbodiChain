@@ -26,6 +26,7 @@ from pxr import Usd, UsdGeom, UsdPhysics
 import pytest
 
 from embodichain.lab.sim.scene.articulation_inputs import (
+    PrismaticBinding,
     discover_prismatic_parts,
 )
 
@@ -71,6 +72,36 @@ def test_handleless_noncontrol_remains_an_error(tmp_path: Path) -> None:
 def test_named_control_with_a_real_pull_handle_is_not_discarded(tmp_path: Path) -> None:
     parts = discover_prismatic_parts(_asset(tmp_path, "switch", with_handle=True))
     assert {part.link for part in parts} == {"rack", "switch"}
+
+
+@pytest.mark.parametrize("limits", [(0.0, 0.2), (0.3, 0.5)])
+def test_prismatic_targets_require_explicit_endpoint_semantics(
+    limits: tuple[float, float],
+) -> None:
+    binding = PrismaticBinding(
+        object_id="drawer",
+        joint="slider",
+        link="drawer_link",
+        parent="base",
+        handle_path="/drawer/handle",
+        source_sha256="0" * 64,
+        scale=1.0,
+        axis=(1.0, 0.0, 0.0),
+        limits=limits,
+    )
+    payload = binding.payload()
+    assert "closed_position" not in payload
+    for state in ("open", "closed"):
+        with pytest.raises(ValueError, match="explicit closed_position"):
+            binding.target(state)
+    with pytest.raises(ValueError, match="explicit closed_position"):
+        _ = binding.axis_sign
+
+    # A task-owned binding can explicitly select the upper endpoint as closed.
+    configured = PrismaticBinding.decode({**payload, "closed_position": limits[1]})
+    assert configured.target("closed") == limits[1]
+    assert configured.target("open") == limits[0]
+    assert configured.axis_sign == 1
 
 
 @pytest.mark.parametrize("qualified", [True, False])

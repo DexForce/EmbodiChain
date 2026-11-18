@@ -16,5 +16,6 @@
 
 """Standalone asset-preparation and manipulation utilities usable independently of the simulation loop.
 
-Includes parallel-gripper grasp sampling, URDF convex decomposition, and URDF assembly.
+Includes parallel-gripper grasp sampling, URDF convex decomposition, URDF assembly,
+and precision assembly assets.
 """

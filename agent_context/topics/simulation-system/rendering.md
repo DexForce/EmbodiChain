@@ -80,6 +80,12 @@ add/finalize calls. `SpawnScene` temporarily excludes that table during those
 calls so texture binding is never attempted without a renderer, then restores
 the authored definitions for metadata and later declarations.
 
+Explicit task render selections must be preserved during physical qualification.
+For example, the `pour_water` deployment is calibrated for the native glTF
+loader's axis conversion and owns `renderer: hybrid`. Forcing NoRender is not
+an equivalent qualification of that scene even when cameras are disabled.
+Headless native rendering still requires the host's offscreen display setup.
+
 ## Default scene presentation
 
 `SimulationManager.set_default_background()` authors the native ground material
@@ -208,6 +214,13 @@ materials. Resource definitions and their reset baselines are owned by the
 `RenderCfg.gaussian` configures native CUDA raster before World construction.
 `RenderCfg.for_gaussian()` composes a native renderer and compatible denoising;
 `RenderCfg.from_dict()` also resolves `preset: gaussian` for Gym YAML/JSON.
+`GaussianRenderCfg.apply_display_srgb` preserves the native True default. Set
+False before World construction for display-referred SuperSplat/Inria captures;
+this applies to every Gaussian in the World, not individual assets. Lit mesh and
+background blending stays scene-linear, and tone mapping can change the result.
+The scanned-scene example defaults to False; the synthetic/mixed example keeps
+True and exposes `--no-apply-display-srgb` for scanned inputs. Both expose the
+positive CLI spelling as an override and record the selected setting.
 Explicit overrides remain authoritative; conflicting preset choices fail
 instead of silently disabling rendering or changing denoising. The preset is
 resolved to ordinary typed settings, and configuration writes need not retain

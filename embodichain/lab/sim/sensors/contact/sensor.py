@@ -227,6 +227,34 @@ class ContactSensor(BaseSensor):
 
         super().__init__(config, device, num_instances=owner.num_envs)
 
+    def destroy(self) -> None:
+        """Release query and sampling resources before the owning Scene closes.
+
+        Complete the recorded producer before dropping borrowed native views.
+        Repeated destruction is safe. Previously returned observation/history
+        tensors retain their owned storage; further sampling needs a new sensor.
+        """
+        if self._sample_ready_stream is not None:
+            self._sample_ready_stream.synchronize()
+        self._sample_ready_stream = None
+        self._sample_graph = None
+        self._sample_graph_key = None
+        self._sample_stream = None
+        self._sample_torch_stream = None
+        self._last_contact_buffer = None
+        self._empty_contact_buffer = None
+        self._metadata_actor_table = None
+        self._metadata_selected_ids = None
+        self._query = None
+        self._last_update_key = None
+        self._last_history_key = None
+        self._sampling_observers.clear()
+        self._histories.clear()
+        if self._visualizer is not None:
+            self._visualizer.clear()
+            self._visualizer = None
+        self._sim = None
+
     @property
     def max_total_contacts(self) -> int:
         """Get the maximum total number of contacts across all environments.

@@ -6,7 +6,7 @@
 |------|------|
 | Base classes (`ManagerBase`, `Functor`) | `embodichain/lab/gym/envs/managers/manager_base.py` |
 | All config classes (`FunctorCfg`, `EventCfg`, `ObservationCfg`, `RewardCfg`, `ActionTermCfg`, `DatasetFunctorCfg`, `SceneEntityCfg`) | `embodichain/lab/gym/envs/managers/cfg.py` |
-| Observation manager + built-in functors | `managers/observation_manager.py`, `managers/observations.py` |
+| Observation manager + built-in functors | `managers/observation_manager.py`, `managers/observations/` |
 | Reward manager + built-in functors | `managers/reward_manager.py`, `managers/rewards.py` |
 | Event manager + built-in functors | `managers/event_manager.py`, `managers/events.py` |
 | Episode camera recording events | `managers/record.py` |
@@ -16,6 +16,9 @@
 | Randomization functors (event sub-type) | `managers/randomization/` (spatial, visual, physics, geometry) |
 
 All paths relative to `embodichain/lab/gym/envs/`.
+Observation implementations are grouped in `managers/observations/` and
+re-exported by that package for configuration lookup and existing imports.
+The historical locomotion module forwards its existing observation name.
 
 ---
 
@@ -185,9 +188,9 @@ helper. See [profiling](../env-framework/profiling.md).
 ### Camera recording
 
 `record_camera_data` is an interval event, independent of policy dataset
-recording. It renders its camera group before reading the buffers because
-interval events precede observation rendering. Views use arena-relative camera
-extrinsics. It retains separate owned CPU frames and episode counters per row.
+recording. It renders all groups belonging to its camera before reading buffers
+because interval events precede observation rendering. Views use arena-relative
+camera extrinsics. It retains separate owned CPU frames and episode counters per row.
 It captures only the event's selected `env_ids` within `max_env_num`, preserving
 their original arena IDs; `None` captures all views within that limit. Selected
 save/discard only touches those rows. `fps=None` follows control frequency for

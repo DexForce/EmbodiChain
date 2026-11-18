@@ -1,0 +1,17 @@
+task_key: gaussian_pick_place
+title: Pick and Place in Captured Gaussian Scenes
+summary: Physically pick and place a cube in three visual-only 3DGS backgrounds with third-person and wrist RGB cameras.
+tags:
+- pick_place
+- single_arm
+- task_program
+- gaussian_background
+- rgb
+default_deployment: office
+deployments:
+  office:
+    config: task.office.yaml
+  discoverse:
+    config: task.discoverse.yaml
+  robosimgs:
+    config: task.robosimgs.yaml

@@ -25,6 +25,7 @@ from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -59,6 +60,8 @@ _LAYOUTS = frozenset({"none", "line"})
 _AXES = frozenset({"none", "world_x", "world_y"})
 _DIRECTIONS = TRANSPORT_DIRECTIONS
 _TERMINAL_BEHAVIORS = TERMINAL_BEHAVIORS
+# Single-arm placements whose released terminal may instead be held.
+_HOLDABLE_PLACEMENTS = frozenset({"E1", "E2"})
 _SELECTOR_KINDS = frozenset({"none", "scene_ref", "step_result"})
 _QUANTIFIERS = frozenset({"one", "all", "count"})
 _STEP_KEYS = frozenset(
@@ -81,7 +84,7 @@ _STEP_KEYS = frozenset(
         "depends_on",
     }
 )
-_OPTIONAL_STEP_KEYS = frozenset({"pour_goal_mode", "twist_goal_mode"})
+_OPTIONAL_STEP_KEYS = frozenset({"lift_height_m", "pour_goal_mode", "twist_goal_mode"})
 _INTENT_TASK_FIELD_REGISTRY = {
     task_type: contract.applicable_intent_fields
     for task_type, contract in TASK_CONTRACTS.items()
@@ -219,6 +222,11 @@ _INTENT_OUTPUT_SCHEMA = {
                         "description": "MANDATORY for every E3 step, in addition to the 16 common fields. Use motion for a requested pouring gesture without liquid-transfer evidence; fluid for actual liquid transfer. Omit on other E types.",
                     },
                     "twist_goal_mode": {"type": "string", "enum": ["coarse"]},
+                    "lift_height_m": {
+                        "type": "number",
+                        "exclusiveMinimum": 0,
+                        "description": "Minimum vertical increase from the initial object pose in metres, only for targetless E1 lift-and-hold.",
+                    },
                     "layout": {"type": "string", "enum": sorted(_LAYOUTS)},
                     "axis": {"type": "string", "enum": sorted(_AXES)},
                     "direction": {
@@ -275,8 +283,8 @@ def interpret_instruction_draft(
                 "JSON object only; do not repeat the sparse response. Every step "
                 "must contain all 16 step keys and every selector all 5 selector "
                 "keys. Keep semantic fields explicit: E4 requires transfer_arm "
-                "and receive_arm, and E1/E3 require target plus relation (unless "
-                "E1 layout=line). A return-to-origin cleanup belonging to a pour stays within that E3 step; do not add a targetless E1 for it or invent an original-position scene object. Keep all other original steps. Use canonical defaults only for fields that do "
+                "and receive_arm. E1/E3 require a target except E1 line arrangement "
+                "and E1 metric lift-and-hold. A return-to-origin cleanup belonging to a pour stays within that E3 step; do not add a targetless E1 for it or invent an original-position scene object. Keep all other original steps. Use canonical defaults only for fields that do "
                 "not apply. E3 MUST include the additional key pour_goal_mode with value motion or fluid; the 16 common fields alone are NOT sufficient for E3. Validation error: "
                 f"{first_error}\n"
                 "Copy this complete shape before filling values (shape only; do "
@@ -295,6 +303,7 @@ def interpret_instruction_draft(
             normalized, normalizations = _normalize_instruction_intent_fields(
                 _coerce_instruction_response(response)
             )
+            _apply_explicit_lift_height(instruction_text, normalized, normalizations)
             intent = validate_instruction_intent(normalized)
             if any(
                 step["task_type"] == "E3" and "pour_goal_mode" not in step
@@ -425,6 +434,14 @@ def _normalize_instruction_intent_fields(
                 field_applies = raw_step.get("layout") != "line"
             if task_type == "E1" and field == "axis":
                 field_applies = raw_step.get("layout") == "line"
+            if task_type == "E1" and field == "direction":
+                target = raw_step.get("target")
+                field_applies = (
+                    raw_step.get("direction") == "up"
+                    and raw_step.get("terminal_behavior") == "hold"
+                    and isinstance(target, Mapping)
+                    and target.get("kind") == "none"
+                )
             if field_applies:
                 continue
             default = (
@@ -462,6 +479,20 @@ def _normalize_instruction_intent_fields(
                     "reason": "e5_hold_defaults_to_lift",
                 }
             )
+        if (
+            task_type in _HOLDABLE_PLACEMENTS
+            and raw_step.get("terminal_behavior") == "place"
+        ):
+            # Release is the default E1/E2 terminal; only hold is explicit.
+            raw_step["terminal_behavior"] = "none"
+            changes.append(
+                {
+                    "path": f"steps[{index}].terminal_behavior",
+                    "from": "place",
+                    "to": "none",
+                    "reason": "release_is_the_default_terminal",
+                }
+            )
         if task_type == "E4" and raw_step.get("terminal_behavior") == "none":
             terminal = (
                 "place"
@@ -489,6 +520,63 @@ def _empty_selector() -> dict[str, Any]:
         "quantifier": "one",
         "count": 0,
     }
+
+
+def _apply_explicit_lift_height(
+    instruction: str,
+    intent: dict[str, Any],
+    normalizations: list[dict[str, Any]],
+) -> None:
+    """Recover a unique metric minimum from the source of an explicit upward hold."""
+    raw_steps = intent.get("steps")
+    if not isinstance(raw_steps, list):
+        return
+    lifts = [
+        (index, step)
+        for index, step in enumerate(raw_steps)
+        if isinstance(step, dict)
+        and step.get("task_type") == "E1"
+        and step.get("direction") == "up"
+        and step.get("terminal_behavior") == "hold"
+        and isinstance(step.get("target"), Mapping)
+        and step["target"].get("kind") == "none"
+    ]
+    if len(lifts) != 1:
+        return
+    matches = re.findall(
+        r"\b(?:lift|raise)\b[^.!?;\n]*?\bby\s+(?:more than|at least|over)\s+"
+        r"(\d+(?:\.\d+)?)\s*(millimet(?:er|re)s?|centimet(?:er|re)s?|"
+        r"met(?:er|re)s?|mm|cm|m)\b",
+        instruction,
+        flags=re.IGNORECASE,
+    )
+    if len(matches) != 1:
+        return
+    amount, unit = matches[0]
+    unit = unit.lower()
+    scale = 1.0
+    if unit == "mm" or unit.startswith("milli"):
+        scale = 0.001
+    elif unit == "cm" or unit.startswith("centi"):
+        scale = 0.01
+    index, step = lifts[0]
+    height = float(amount) * scale
+    if "lift_height_m" in step:
+        proposed = step["lift_height_m"]
+        if type(proposed) not in {int, float} or not math.isclose(proposed, height):
+            raise ValueError(
+                "lift_height_m must match the explicit source height in metres."
+            )
+    else:
+        normalizations.append(
+            {
+                "path": f"steps[{index}].lift_height_m",
+                "from": None,
+                "to": height,
+                "reason": "explicit_source_lift_height",
+            }
+        )
+    step["lift_height_m"] = height
 
 
 def validate_instruction_intent(value: Mapping[str, Any]) -> dict[str, Any]:
@@ -664,7 +752,9 @@ def _validate_instruction_resources(steps: Sequence[Mapping[str, Any]]) -> None:
                         if known_owner and known_owner != (resource,):
                             continue
                         updated = list(state)
-                        updated[resource] = None
+                        updated[resource] = (
+                            subject if step["terminal_behavior"] == "hold" else None
+                        )
                         next_states.add(tuple(updated))
                     elif state[resource] is None:
                         next_states.add(state)
@@ -774,7 +864,26 @@ def _validate_task_fields(step: Mapping[str, Any], context: str) -> None:
         raise ValueError(
             f"{context} orientation_goal is only valid for E1, E2, and E4."
         )
-    if task_type == "E1" and step["layout"] == "line":
+    metric_lift = task_type == "E1" and step["direction"] == "up"
+    if "lift_height_m" in step and not metric_lift:
+        raise ValueError(
+            f"{context} lift_height_m is only valid for an upward E1 hold."
+        )
+    if metric_lift:
+        height = step.get("lift_height_m")
+        if (
+            target_kind != "none"
+            or step["relation"] != "none"
+            or step["layout"] != "none"
+            or step["terminal_behavior"] != "hold"
+        ):
+            raise ValueError(
+                f"{context} an upward E1 lift requires a terminal hold without "
+                "a target, relation or layout."
+            )
+        if type(height) not in {int, float} or not math.isfinite(height) or height <= 0:
+            raise ValueError(f"{context} lift_height_m must be finite and positive.")
+    elif task_type == "E1" and step["layout"] == "line":
         if target_kind != "none":
             raise ValueError(f"{context} E1 line arrangement cannot carry a target.")
         if step["relation"] != "none":
@@ -839,10 +948,17 @@ def _validate_task_fields(step: Mapping[str, Any], context: str) -> None:
     elif target_kind != "none":
         raise ValueError(f"{context} {task_type} does not accept a target selector.")
     if task_type not in {"E4", "E5"}:
-        if step["direction"] != "none":
-            raise ValueError(f"{context} direction is only valid for E5.")
-        if step["terminal_behavior"] != "none":
-            raise ValueError(f"{context} terminal_behavior is only valid for E5.")
+        if step["direction"] != "none" and not metric_lift:
+            raise ValueError(
+                f"{context} direction is only valid for transport or an upward E1 hold."
+            )
+        if step["terminal_behavior"] != "none" and not (
+            task_type in _HOLDABLE_PLACEMENTS and step["terminal_behavior"] == "hold"
+        ):
+            raise ValueError(
+                f"{context} terminal_behavior is only valid for E4/E5, or hold "
+                "for E1/E2."
+            )
     if task_type == "E4":
         transfer = str(step["transfer_arm"])
         receive = str(step["receive_arm"])
@@ -914,7 +1030,15 @@ def _instruction_prompt(instruction: str) -> str:
         "the same user intent, emit one E4 with target, relation, and "
         "terminal_behavior=place; do not emit a trailing E1. Use "
         "terminal_behavior=hold only when the receiver should keep holding the "
-        "object. Each gripper can hold only one object: a held receiver cannot "
+        "object. E1 and E2 release by default (terminal_behavior=none); use "
+        "terminal_behavior=hold on E1/E2 only when the instruction requires the "
+        "object to stay in the gripper at the end, such as lifting it upright and "
+        "holding it, or striking/touching a target with a held tool. For a single-arm "
+        "lift by at least a specified height from the object's initial pose followed by a hold, "
+        "use E1, direction=up, terminal_behavior=hold, target.kind=none, relation=none "
+        "and lift_height_m in metres. Lifting vertically specifies translation, "
+        "not the object's orientation. Other E1 holds retain their named target and relation. "
+        "Each gripper can hold only one object: a held receiver cannot "
         "accept another handover, and an E5 pickup requires both hands free. "
         "For multiple objects that are handed over and then placed, use per-object "
         "transfer and placement before the next object's handover, unless the "
@@ -992,7 +1116,7 @@ def _instruction_prompt(instruction: str) -> str:
         "direction: 'carry forward and keep raised' uses direction=front and "
         "terminal_behavior=hold. The hold recipe includes a raised terminal pose. "
         "Use direction=up only for a dual-arm pick, lift, raise, or hold request "
-        "without an explicit horizontal direction or another target, "
+        "without an explicit horizontal direction or another target in E5, "
         "and terminal_behavior=hold. Use hold unless the instruction explicitly "
         "says to put/release the object. For pick "
         "and release at the original location, use direction=none and place. A dual-arm "
@@ -1002,8 +1126,8 @@ def _instruction_prompt(instruction: str) -> str:
         "default shown in the example, never omit the field. E4 must explicitly "
         "state transfer_arm, receive_arm, and terminal_behavior. For an E4 arm "
         "not named in the instruction, set that arm field to auto; do not "
-        "invent a left/right side before scene binding. E1/E3 must explicitly state target "
-        "and relation (except E1 layout=line). For E1 and E2, copy an explicitly "
+        "invent a left/right side before scene binding. Keep explicit targets for E1/E3 "
+        "except E1 line arrangement or metric lift-and-hold. For E1 and E2, copy an explicitly "
         "named left/right arm into required_arm; use required_arm=auto only when "
         "the instruction does not specify an arm, and never use none."
     )
@@ -1154,7 +1278,10 @@ def _instruction_repair_guidance(error: Exception) -> str:
             "is part of the same E3 task.\n"
         )
     return (
-        "\nMissing-target repair rule: for a non-line E1 placement, object is "
+        "\nMissing-target repair rule: an explicit single-arm lift by a measured "
+        "height relative to the object's initial pose and held at the end uses "
+        "E1 with direction=up, lift_height_m in metres, terminal_behavior=hold, "
+        "target.kind=none and relation=none. For a non-line E1 placement, object is "
         "the item being moved and target is the explicit reference object "
         "after the spatial relation in the original instruction. For example, "
         "in 'place it to the left of the striped pedestal', object is the earlier "

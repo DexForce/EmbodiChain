@@ -38,6 +38,12 @@ handles before closing the Scene.
 owner to `ContactSensor`. The sensor resolves configured rigid/link targets to
 Spawn handles and creates one query.
 
+`ContactSensor.destroy()` completes its recorded sampling producer and releases
+the query, raw reports, capture resources and observer registrations before the
+owning Scene closes. Repeated destruction is safe; previously returned tensors
+retain their owned storage. Callers also release borrowed solver/report views
+before draining deferred manager cleanup.
+
 Sampling reads completed solver contacts through DexSim's
 `fetch_solver_report()` or `fetch_solver_report_async()`. `detect()` and
 `fetch()` operate on a separate geometry-only observation and cannot replace

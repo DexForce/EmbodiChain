@@ -1302,11 +1302,22 @@ def test_default_physics_cfg_applies_fixed_solver_defaults() -> None:
 
 
 @pytest.mark.parametrize("serialized", [False, True])
-def test_gaussian_render_preset_applies_native_configuration(serialized: bool) -> None:
+@pytest.mark.parametrize("apply_display_srgb", [False, True])
+def test_gaussian_render_preset_applies_native_configuration(
+    serialized: bool, apply_display_srgb: bool
+) -> None:
     cfg = (
-        RenderCfg.from_dict({"preset": "gaussian", "spp": 4})
+        RenderCfg.from_dict(
+            {
+                "preset": "gaussian",
+                "spp": 4,
+                "gaussian": {"apply_display_srgb": apply_display_srgb},
+            }
+        )
         if serialized
-        else RenderCfg.for_gaussian(spp=4)
+        else RenderCfg.for_gaussian(
+            spp=4, gaussian={"apply_display_srgb": apply_display_srgb}
+        )
     )
     assert cfg.renderer == "hybrid"
     assert cfg.gaussian.enabled is True
@@ -1316,6 +1327,7 @@ def test_gaussian_render_preset_applies_native_configuration(serialized: bool) -
     cfg.apply_to_dexsim_config(world_config)
     assert world_config.renderer == Renderer.HYBRID
     assert world_config.gaussian_config.enabled is True
+    assert world_config.gaussian_config.apply_display_srgb is apply_display_srgb
     assert world_config.rt_pipeline_config.window.mode == RTRenderMode.RAW
     assert world_config.rt_pipeline_config.offscreen.mode == RTRenderMode.OPTIX_DENOISE
     assert world_config.raytrace_config.render_iterations_per_frame == 4
@@ -1325,7 +1337,7 @@ def test_gaussian_preset_overrides_roundtrip_without_changing_legacy_defaults() 
     data = {
         "preset": "gaussian",
         "renderer": "fast-rt",
-        "gaussian": {"workspace_memory_budget_mb": 64},
+        "gaussian": {"workspace_memory_budget_mb": 64, "apply_display_srgb": False},
         "denoising": {"offscreen": "off"},
         "dlss": {"tiled_enabled": False},
         "nrd": {"max_indirect_bounces": 2},
@@ -1335,15 +1347,21 @@ def test_gaussian_preset_overrides_roundtrip_without_changing_legacy_defaults() 
     assert restored.renderer == "fast-rt"
     assert restored.gaussian.enabled is True
     assert restored.gaussian.workspace_memory_budget_mb == 64
+    assert restored.gaussian.apply_display_srgb is False
     assert restored.denoising.window == restored.denoising.offscreen == "off"
     assert restored.dlss.tiled_enabled is False
     assert restored.nrd.max_indirect_bounces == 2
     cfg.gaussian.workspace_memory_budget_mb = 128
     assert restored.gaussian.workspace_memory_budget_mb == 64
-    assert data["gaussian"] == {"workspace_memory_budget_mb": 64}
+    assert data["gaussian"] == {
+        "workspace_memory_budget_mb": 64,
+        "apply_display_srgb": False,
+    }
     assert data["denoising"] == {"offscreen": "off"}
     legacy = RenderCfg.from_dict(RenderCfg().to_dict())
     assert legacy.gaussian.enabled is False
+    assert legacy.gaussian.apply_display_srgb is True
+    assert RenderCfg.for_gaussian().gaussian.apply_display_srgb is True
     assert legacy.denoising.window == legacy.denoising.offscreen == "dlss"
 
 
@@ -1470,6 +1488,20 @@ def test_render_cfg_applies_renderer_and_sample_count() -> None:
     assert world_config.raytrace_config.render_iterations_per_frame == expected_spp
 
 
+def test_render_cfg_mapping_selects_aces() -> None:
+    """Serialized settings can select ACES without changing the exposure."""
+    world_config = dexsim.WorldConfig()
+    config = RenderCfg.from_dict(
+        {"tone_mapping_enabled": True, "tone_mapping_type": "aces"}
+    )
+
+    config.apply_to_dexsim_config(world_config)
+
+    assert world_config.postprocess_config.tone_mapping_enabled is True
+    assert world_config.postprocess_config.tone_mapping_type == ToneMappingType.ACES
+    assert world_config.postprocess_config.tone_mapping_exposure == 1.0
+
+
 def test_render_cfg_default_bounce_limits_preserve_native_defaults() -> None:
     """Existing callers retain the native path budget when limits are omitted."""
     world_config = dexsim.WorldConfig()
@@ -1558,6 +1590,8 @@ def test_render_cfg_rejects_invalid_bounce_limits_at_construction_and_conversion
     ("field_name", "invalid_value"),
     [
         ("tone_mapping_exposure", -0.1),
+        ("tone_mapping_type", "unknown"),
+        ("tone_mapping_type", None),
         ("spp", 0),
     ],
 )
@@ -1567,6 +1601,10 @@ def test_render_cfg_rejects_invalid_image_processing_settings(
     """Invalid image-processing values fail at configuration construction."""
     with pytest.raises(ValueError):
         RenderCfg(**{field_name: invalid_value})
+    config = RenderCfg()
+    setattr(config, field_name, invalid_value)
+    with pytest.raises(ValueError):
+        config.apply_to_dexsim_config(dexsim.WorldConfig())
 
 
 def test_dlss_defaults_preserve_native_quality_resolution() -> None:
@@ -1574,9 +1612,11 @@ def test_dlss_defaults_preserve_native_quality_resolution() -> None:
     native = dexsim.DLSSConfig()
     converted = DLSSCfg().to_dexsim_cfg(1920, 1080)
 
-    for name in DLSSCfg().to_dict():
-        if name != "upsample_ratio":
+    for name, value in DLSSCfg().to_dict().items():
+        if name != "upsample_ratio" and value is not None:
             assert getattr(converted, name) == getattr(native, name), name
+    if hasattr(native, "tiled_overscan_pixels"):
+        assert converted.tiled_overscan_pixels == native.tiled_overscan_pixels
     assert converted.render_width == converted.render_height == 0
     assert converted.dlss_quality == 2
 
@@ -1587,6 +1627,47 @@ def test_dlss_tiled_switch_survives_conversion(tiled_enabled: bool) -> None:
     converted = DLSSCfg(tiled_enabled=tiled_enabled).to_dexsim_cfg(1920, 1080)
 
     assert converted.tiled_enabled is tiled_enabled
+
+
+def test_dlss_atlas_and_render_cadence_survive_mapping_conversion() -> None:
+    """The throughput settings reach native DLSS without resizing public outputs."""
+    config = RenderCfg.from_dict(
+        {
+            "dlss": {
+                "tiled_gutter_pixels": 0,
+                "tiled_overscan_pixels": 0,
+                "frame_time_delta_ms": 1000 / 240,
+            }
+        }
+    )
+    native = config.dlss.to_dexsim_cfg(640, 480)
+
+    assert native.tiled_gutter_pixels == 0
+    assert getattr(native, "tiled_overscan_pixels", 0) == 0
+    assert native.frame_time_delta_ms == pytest.approx(1000 / 240)
+    assert native.target_width == native.target_height == 0
+
+
+@pytest.mark.parametrize("supported", [False, True])
+def test_dlss_overscan_respects_sdk_capability(monkeypatch, supported: bool) -> None:
+    """New SDKs receive overscan; older SDKs retain their no-overscan behavior."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        dexsim,
+        "DLSSConfig",
+        lambda: SimpleNamespace(**({"tiled_overscan_pixels": 8} if supported else {})),
+    )
+    default = DLSSCfg().to_dexsim_cfg(640, 480)
+    assert getattr(default, "tiled_overscan_pixels", None) == (8 if supported else None)
+    disabled = DLSSCfg(tiled_overscan_pixels=0).to_dexsim_cfg(640, 480)
+    assert getattr(disabled, "tiled_overscan_pixels", 0) == 0
+    config = DLSSCfg(tiled_overscan_pixels=4)
+    if supported:
+        assert config.to_dexsim_cfg(640, 480).tiled_overscan_pixels == 4
+    else:
+        with pytest.raises(NotImplementedError, match="overscan support"):
+            config.to_dexsim_cfg(640, 480)
 
 
 @pytest.mark.parametrize("quality", range(-1, 6))
@@ -1655,6 +1736,16 @@ def test_render_cfg_instances_do_not_share_image_processing_settings() -> None:
         ("target_width", -1),
         ("target_height", -1),
         ("render_width", 1.5),
+        ("tiled_gutter_pixels", -1),
+        ("tiled_gutter_pixels", True),
+        ("tiled_overscan_pixels", -1),
+        ("tiled_overscan_pixels", 1.5),
+        ("tiled_overscan_pixels", False),
+        ("frame_time_delta_ms", -1.0),
+        ("frame_time_delta_ms", float("nan")),
+        ("frame_time_delta_ms", float("inf")),
+        ("frame_time_delta_ms", "4.167"),
+        ("frame_time_delta_ms", True),
         ("upsample_ratio", 0.5),
         ("upsample_ratio", float("inf")),
         ("upsample_ratio", float("nan")),
@@ -1712,6 +1803,9 @@ def test_dlss_accepts_integer_and_float_numeric_settings(value: int | float) -> 
         ("upsample_ratio", "2.0"),
         ("exposure_compensation", "1.0"),
         ("tiled_enabled", "false"),
+        ("tiled_gutter_pixels", -1),
+        ("tiled_overscan_pixels", -1),
+        ("frame_time_delta_ms", float("nan")),
     ],
 )
 def test_dlss_conversion_revalidates_mutated_settings(
