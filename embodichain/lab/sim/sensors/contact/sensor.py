@@ -245,6 +245,10 @@ class ContactSensor(BaseSensor):
         self._empty_contact_buffer = None
         self._metadata_actor_table = None
         self._metadata_selected_ids = None
+        if self._query is not None:
+            close = getattr(self._query, "close", None)
+            if callable(close):
+                close()
         self._query = None
         self._last_update_key = None
         self._last_history_key = None
@@ -882,16 +886,6 @@ class ContactSensor(BaseSensor):
         if tokens is not None:
             for observer, token in tokens:
                 observer.after_sample(dt, token)
-
-    def destroy(self) -> None:
-        """Close the contact query and release retained sampling buffers."""
-        if self._query is not None:
-            close = getattr(self._query, "close", None)
-            if callable(close):
-                close()
-            self._query = None
-        self._last_contact_buffer = None
-        self._sample_graph = None
 
     @property
     def normal_impulse_available(self) -> bool:
