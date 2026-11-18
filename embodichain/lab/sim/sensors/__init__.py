@@ -32,6 +32,7 @@ from .contact import (
     ContactSensorCfg,
     ArticulationContactFilterCfg,
 )
+from .contact_resultant import ContactResultant, ContactResultantCfg
 from .registry import (
     SensorRegistration,
     register_sensor,
@@ -42,6 +43,8 @@ from .registry import (
 
 __all__ = [
     "BaseSensor",
+    "ContactResultant",
+    "ContactResultantCfg",
     "PVA",
     "PVACfg",
     "IMU",
@@ -84,3 +87,7 @@ register_sensor(SensorRegistration("FrameTransform", FrameTransformCfg, FrameTra
 
 register_sensor(SensorRegistration("PVA", PVACfg, PVA))
 register_sensor(SensorRegistration("IMU", IMUCfg, IMU))
+
+register_sensor(
+    SensorRegistration("ContactResultant", ContactResultantCfg, ContactResultant)
+)

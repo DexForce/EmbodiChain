@@ -113,3 +113,38 @@ def test_default_contact_sensor_preserves_contact_multiplicity(
     finally:
         sim.destroy(exit_process=False)
         SimulationManager.flush_cleanup_queue()
+
+
+def test_resultant_does_not_claim_normal_force_from_total_default_cpu_impulse() -> None:
+    from embodichain.lab.sim.sensors import ContactResultantCfg
+
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            num_envs=2,
+            arena_space=2.0,
+            physics_cfg=DefaultPhysicsCfg(device="cpu"),
+        )
+    )
+    try:
+        sim.add_rigid_object(
+            RigidObjectCfg(
+                uid="cube",
+                shape=CubeCfg(size=(0.2, 0.2, 0.2)),
+                body_type="dynamic",
+                init_pos=(0.0, 0.0, 0.15),
+            )
+        )
+        sensor = sim.add_sensor(ContactResultantCfg(uid="resultant", asset_uid="cube"))
+        for _ in range(40):
+            sim.update(step=1, render_final_step=False)
+            if sensor.get_data()["contact"].all():
+                break
+        assert sensor.get_data()["contact"].tolist() == [True, True]
+        assert sensor.get_data()["normal_valid"].tolist() == [False, False]
+        assert sensor.get_data()["friction_valid"].tolist() == [False, False]
+        sim.reset_objects_state(env_ids=[0])
+        assert sensor.get_sample_metadata()["valid"].tolist() == [False, True]
+    finally:
+        sim.destroy(exit_process=False)
+        SimulationManager.flush_cleanup_queue()
