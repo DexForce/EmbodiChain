@@ -54,6 +54,16 @@ created for EEF planning; only a cold validation call creates a joint backend.
 Disable self-collision in both solver rollouts and the selected graph planner's
 `resources_config.rollout_config`; RRT and PRM have separate configuration owners.
 
+`CuroboPlannerCfg.self_collision` opts in to planning-time self-collision. The
+runtime config then carries an ignore list from cuRobo's `RobotBuilder`
+(neighbouring links and default-configuration overlaps, without pruning sampled
+pairs) and locks joints outside the control part at their observed positions,
+so an idle arm is avoided where it is. A cached backend is rebuilt once those
+joints move beyond `self_collision_lock_tolerance`. The cached YAML and exact
+sample validation are unchanged. A skill that plans two arms from one
+observation, such as HandOver, sees the other arm where it was observed, not
+where the skill will move it; keep the option off for those calls.
+
 Shared pose conventions belong to [simulation](../simulation-system/simulation-system.md).
 cuRobo goal/scene adapters alone convert `xyzw` to native `wxyz`, exactly once;
 homogeneous dynamic-pose matrices need no quaternion conversion until then.

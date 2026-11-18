@@ -414,6 +414,26 @@ class CuroboPlannerCfg(BasePlannerCfg):
     collision_activation_distance: float = 0.01
     """cuRobo collision activation distance (optimizer setting)."""
 
+    self_collision: bool = field(default=False, kw_only=True)
+    """Whether cuRobo avoids robot self-collision while planning.
+
+    Off by default, which keeps self-collision checking disabled. When enabled,
+    the ignore list comes from cuRobo's ``RobotBuilder``: neighbouring links and
+    links whose spheres overlap at the default configuration. Joints outside
+    the planned control part are locked at their observed positions instead of
+    the initial ones, so another arm is avoided where it currently is. A cached
+    backend is rebuilt once those joints have moved by more than
+    :attr:`self_collision_lock_tolerance`. Exact trajectory validation stays
+    limited to world collision.
+    """
+
+    self_collision_lock_tolerance: float = field(default=0.05, kw_only=True)
+    """Movement of a locked joint (rad or m) that rebuilds a cached backend.
+
+    Only used with :attr:`self_collision`. The default ignores gripper finger
+    travel and follows arm joints.
+    """
+
     graph_planner_algorithm: str = field(default="rrt", kw_only=True)
     """Fallback route initializer: GPU ``"rrt"`` or legacy ``"prm"``.
 
@@ -897,7 +917,8 @@ class CuroboPlanner(BasePlanner):
     Cartesian (``EEF_MOVE``) targets are forwarded to cuRobo unchanged because
     the backend accepts them directly and performs its own collision-aware IK
     and trajectory optimization. Robot-to-world collision checking remains
-    enabled, but robot self-collision checking is temporarily disabled.
+    enabled. Robot self-collision checking is disabled unless
+    :attr:`CuroboPlannerCfg.self_collision` is set.
     By default the returned collision-checked samples are arc-length resampled to
     the action's ``sample_interval`` waypoint count
     (``preserve_plan_samples=False``); set
@@ -1028,7 +1049,8 @@ class CuroboPlanner(BasePlanner):
         if backend.collision_checker is None:
             checker_cfg = self._bindings.RobotCollisionCheckerCfg.load_from_config(
                 robot_config=self._query_runtime_robot_config(
-                    backend.profile.robot_config_path
+                    backend.profile.robot_config_path,
+                    getattr(backend, "passive_locks", None),
                 ),
                 scene_collision_checker=backend.planner.scene_collision_checker,
                 device_cfg=self._bindings.DeviceCfg(device=self._curobo_device),
@@ -1435,9 +1457,16 @@ class CuroboPlanner(BasePlanner):
             self.robot.cfg.fpath, control_part, None, self.cfg.auto_gen
         )
         cached = self._backend_cache.get(key)
+        passive_locks = self._observed_passive_locks()
         if cached is not None:
             gravity = self._timeopt_gravity(cached) if self.cfg.enable_timeopt else None
-            if cached.motion_limits_key == limits_key and cached.gravity == gravity:
+            if (
+                cached.motion_limits_key == limits_key
+                and cached.gravity == gravity
+                and self._passive_locks_match(
+                    getattr(cached, "passive_locks", None), passive_locks
+                )
+            ):
                 return cached
             if getattr(self, "_query_snapshot", None) is not None:
                 detach_error = self._detach_payload(cached)
@@ -1516,6 +1545,7 @@ class CuroboPlanner(BasePlanner):
                 scene_model=scene_model,
                 use_cuda_graph=use_cuda_graph,
                 planning_mode=planning_mode,
+                passive_locks=passive_locks,
             )
             try:
                 self._warmup_backend(backend)
@@ -1568,6 +1598,7 @@ class CuroboPlanner(BasePlanner):
         scene_model: "Any | list[Any] | None",
         use_cuda_graph: bool,
         planning_mode: MoveType,
+        passive_locks: Mapping[str, float] | None = None,
     ) -> "_CuroboBackend":
         """Construct and validate one cuRobo planner on the selected CUDA device."""
         algorithm = self.cfg.graph_planner_algorithm
@@ -1584,7 +1615,14 @@ class CuroboPlanner(BasePlanner):
         )
         if self.cfg.enable_timeopt:
             backend.gravity = self._timeopt_gravity(backend)
-        robot_config = self._query_runtime_robot_config(profile.robot_config_path)
+        robot_config = self._query_runtime_robot_config(
+            profile.robot_config_path, passive_locks
+        )
+        self_collision = bool(getattr(self.cfg, "self_collision", False))
+        if self_collision:
+            backend.passive_locks = dict(
+                robot_config["robot_cfg"]["kinematics"].get("lock_joints") or {}
+            )
         if backend.gravity is not None:
             robot_config["robot_cfg"]["load_dynamics"] = True
         with (
@@ -1594,7 +1632,7 @@ class CuroboPlanner(BasePlanner):
             planner_cfg = self._bindings.MotionPlannerCfg.create(
                 robot=robot_config,
                 scene_model=scene_model,
-                self_collision_check=False,
+                self_collision_check=self_collision,
                 device_cfg=self._bindings.DeviceCfg(device=self._curobo_device),
                 max_batch_size=batch_size,
                 multi_env=bool(self.cfg.world.multi_env),
@@ -1620,7 +1658,8 @@ class CuroboPlanner(BasePlanner):
                 planner_cfg.rrt_graph_planner_config.planner_config.max_batched_lanes = (
                     1 << (lanes - 1).bit_length()
                 )
-            self._disable_curobo_self_collision_rollouts(planner_cfg)
+            if not self_collision:
+                self._disable_curobo_self_collision_rollouts(planner_cfg)
             planner = (
                 self._bindings.MotionPlanner(planner_cfg)
                 if batch_size == 1
@@ -1716,14 +1755,96 @@ class CuroboPlanner(BasePlanner):
             raise ValueError("Payload control_part does not match the query.")
         self._query_control_part = control_part
 
-    def _query_runtime_robot_config(self, path: str) -> dict:
+    def _query_runtime_robot_config(
+        self, path: str, passive_locks: Mapping[str, float] | None = None
+    ) -> dict:
         config = self._load_runtime_robot_config(path)
         snapshot = getattr(self, "_query_snapshot", None)
-        return (
-            config
-            if snapshot is None
-            else _query_robot_config(config, snapshot, self.robot.joint_names)
+        if snapshot is not None:
+            config = _query_robot_config(config, snapshot, self.robot.joint_names)
+        if getattr(self.cfg, "self_collision", False):
+            kinematics = config["robot_cfg"]["kinematics"]
+            kinematics["self_collision_ignore"] = self._self_collision_ignore(path)
+            if snapshot is None and passive_locks is not None:
+                # Lock the joints outside the control part where they are
+                # observed, so other arms occupy their current place.
+                kinematics["lock_joints"] = {
+                    name: float(passive_locks[name])
+                    for name in (kinematics.get("lock_joints") or {})
+                } or None
+        return config
+
+    def _observed_passive_locks(self) -> dict[str, float] | None:
+        """Return observed positions of every robot joint for self-collision.
+
+        Returns:
+            Joint positions keyed by name, or ``None`` when self-collision is
+            off or an observed query snapshot owns the joint locks.
+
+        Raises:
+            ValueError: Environment rows disagree by more than the lock
+                tolerance; one cuRobo model cannot represent them.
+        """
+        if not getattr(self.cfg, "self_collision", False):
+            return None
+        if getattr(self, "_query_snapshot", None) is not None:
+            return None
+        qpos = self.robot.get_qpos().detach().cpu()
+        tolerance = float(self.cfg.self_collision_lock_tolerance)
+        if bool((qpos - qpos[:1]).abs().max() > tolerance):
+            raise ValueError(
+                "cuRobo self-collision requires the joints of all environment "
+                "rows to agree within self_collision_lock_tolerance."
+            )
+        return dict(zip(self.robot.joint_names, qpos[0].tolist(), strict=True))
+
+    def _passive_locks_match(
+        self,
+        built: Mapping[str, float] | None,
+        observed: Mapping[str, float] | None,
+    ) -> bool:
+        """Return whether a backend's locked joints still match the observation."""
+        if built is None or observed is None:
+            return True
+        tolerance = float(self.cfg.self_collision_lock_tolerance)
+        return all(
+            abs(float(observed[name]) - value) <= tolerance
+            for name, value in built.items()
         )
+
+    def _self_collision_ignore(self, robot_config_path: str) -> dict[str, list[str]]:
+        """Return the self-collision ignore list of one generated robot YAML.
+
+        cuRobo's ``RobotBuilder`` ignores neighbouring links and links whose
+        spheres overlap at the default joint configuration. Pairs that random
+        sampling never finds in collision stay checked, because a joint that is
+        locked for one control part moves for another.
+        """
+        cache = self.__dict__.setdefault("_self_collision_ignore_cache", {})
+        if robot_config_path not in cache:
+            try:
+                builder_mod = importlib.import_module(
+                    "curobo._src.robot.builder.builder_robot"
+                )
+            except ModuleNotFoundError as exc:
+                raise ImportError(
+                    "CuroboPlannerCfg.self_collision needs cuRobo's RobotBuilder "
+                    "(cuRobo V2-Fast 0.9+)."
+                ) from exc
+            with torch.cuda.device(self._curobo_device):
+                builder = builder_mod.RobotBuilder.from_config(
+                    robot_config_path,
+                    device_cfg=self._bindings.DeviceCfg(device=self._curobo_device),
+                )
+                matrix = builder.compute_collision_matrix(prune_collisions=False)
+            cache[robot_config_path] = {
+                link: sorted(ignored) for link, ignored in matrix.items()
+            }
+            logger.log_info(
+                "cuRobo self-collision ignore list computed for "
+                f"{len(cache[robot_config_path])} links."
+            )
+        return deepcopy(cache[robot_config_path])
 
     def _attach_payload(self, backend: _CuroboBackend) -> None:
         snapshot = getattr(self, "_query_snapshot", None)
@@ -3363,6 +3484,7 @@ class _CuroboBackend:
     graph_planner_algorithm: str = "prm"
     gravity: tuple[float, float, float] | None = None
     motion_limits_key: str | None = None
+    passive_locks: dict[str, float] | None = None
     collision_checker: "Any | None" = None
     # Lazily-built device-tensor caches for the shared post-processing. The
     # cuRobo joint order and the profile's fixed transforms are stable for a

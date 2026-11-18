@@ -148,7 +148,16 @@ uses the arm already holding its object, or the arm anchored nearest to it, and
 a placement on a support prefers its robot-side region. `binding.release_clearance`
 (metres, default 0) releases placements above their resting pose while validators
 keep the resting target; the place gate otherwise expects a released object to
-separate from the open gripper before retracting.
+separate from the open gripper before retracting. `binding.park_idle_arms: true`
+(off by default) inserts a `simulation.park` call for an arm that a placement or
+hand-over leaves free when another arm acts next, so the idle arm does not stay
+in the workspace; the embodiment must define a `park` posture for that arm. A
+plan that contains `simulation.park` gets the park lowerer without further
+configuration. `binding.collision_world: true` (off by default) declares the
+table and every scene object the plan does not use as static planner obstacles,
+so a collision-aware planner such as cuRobo avoids them. Objects that a call
+grasps or places against stay out of the planner world, because they move or
+are touched during that call.
 
 Further optional run fields: `task` reuses a published task-plan directory instead
 of planning, after verifying its artifacts and that it planned the same instruction
