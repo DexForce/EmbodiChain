@@ -1553,6 +1553,8 @@ def test_resource_anchors_select_the_nearest_arm(run_cfg: _RunCfg) -> None:
         _RunCfg(**{**run_cfg.to_dict(), "binding": {"resource_anchors": {"left": [0]}}})
     with pytest.raises(ValueError, match="release_clearance"):
         _RunCfg(**{**run_cfg.to_dict(), "binding": {"release_clearance": -0.01}})
+    with pytest.raises(ValueError, match="handover_pose"):
+        _RunCfg(**{**run_cfg.to_dict(), "binding": {"handover_pose": "table_center"}})
 
 
 def test_registered_calls_get_templates_keyed_by_call_id() -> None:
@@ -2067,3 +2069,200 @@ def test_repeated_coordinated_release_has_unique_routes(run_cfg, different_pose)
     assert len(routes) == (2 if different_pose else 1)
     selectors = {(r["object_id"], r["target_id"]) for r in routes}
     assert len(selectors) == len(routes)
+
+
+@pytest.mark.parametrize("mode", ["off", "arm_roots", "configured"])
+def test_handover_pose_defaults_to_the_arm_root_midpoint_only_on_request(
+    run_cfg, monkeypatch, mode
+):
+    from embodichain.gen_sim import _handover_pose
+    from embodichain.gen_sim.workflow import plan_image_task, load_task_plan
+    from embodichain.gen_sim._run_binding import _bind_deployment, _load_runtime
+
+    _dual_runtime(run_cfg)
+    seen = []
+
+    def roots(simulation, profile, resources):
+        seen.append(list(resources))
+        return np.array([[0.5, 0.3, 0.6], [0.5, -0.3, 0.8]])
+
+    monkeypatch.setattr(_handover_pose, "_arm_root_positions", roots)
+    semantic = dict(
+        object="source",
+        reference="table",
+        relation="on",
+        intent={"relation": "on", "terminal_behavior": "place"},
+    )
+    proposed = dict(
+        nodes=[
+            dict(
+                id="pick",
+                step_id="step_01",
+                call=dict(kind="pick", object="source", resources={"primary": "right"}),
+                depends_on=[],
+                semantic=semantic,
+            ),
+            dict(
+                id="transfer",
+                step_id="step_01",
+                call=dict(
+                    kind="hand_over",
+                    object="source",
+                    resources={"source": "right", "destination": "left"},
+                ),
+                depends_on=["pick"],
+                semantic=semantic,
+            ),
+            dict(
+                id="place",
+                step_id="step_01",
+                call=dict(
+                    kind="place",
+                    object="source",
+                    on="table_surface",
+                    resources={"primary": "left"},
+                ),
+                depends_on=["transfer"],
+                semantic=semantic,
+            ),
+        ],
+        requirements=[
+            dict(
+                id="r1",
+                quote=run_cfg.instruction,
+                node_ids=["pick", "transfer", "place"],
+            )
+        ],
+    )
+    configured = dict(
+        kind="configured_pose",
+        final_position=[0.4, 0.0, 0.9],
+        final_quaternion_xyzw=[0.0, 0.0, 0.0, 1.0],
+    )
+    run_cfg.binding = {
+        "off": {},
+        "arm_roots": {"handover_pose": "arm_root_midpoint"},
+        "configured": {
+            "handover_pose": "arm_root_midpoint",
+            "profile": {
+                "grounding_providers": {
+                    "hand_over": "simulation.configured_handover_pose"
+                }
+            },
+            "runtime_services": {"handover_pose_providers": [configured]},
+        },
+    }[mode]
+    run_cfg.output.mkdir()
+    step = _step(
+        task_type="E4",
+        transfer_arm="right_arm",
+        receive_arm="left_arm",
+        terminal_behavior="place",
+    )
+    with _services(step=step, plan=proposed) as services:
+        task = plan_image_task(
+            run_cfg.image,
+            run_cfg.instruction,
+            run_cfg.output / "task",
+            services=services,
+        )
+        scene = run_cfg.output / "scene"
+        _write_scene(scene)
+        from embodichain.gen_sim.services import compat
+
+        monkeypatch.setattr(
+            compat,
+            "structured_call",
+            lambda **kw: dict(
+                objects={"source": "cube_native", "table": "table"},
+                resources={"left": "left", "right": "right"},
+            ),
+        )
+        runtime, policy, profile = _load_runtime(run_cfg)
+
+        path = _bind_deployment(
+            run_cfg,
+            scene,
+            task,
+            runtime,
+            policy,
+            profile,
+            services=services,
+            expected_plan_digest=load_task_plan(task)["plan_digest"],
+        )
+    integration = yaml.safe_load((path.parent / "integration.yaml").read_text())
+    if mode == "off":
+        # Without the request, the deployment keeps no hand-over pose.
+        assert "grounding_providers" not in integration["profile"]
+        assert "handover_pose_providers" not in integration["runtime_services"]
+        assert not seen
+        return
+    assert integration["profile"]["grounding_providers"] == {
+        "hand_over": "simulation.configured_handover_pose"
+    }
+    providers = integration["runtime_services"]["handover_pose_providers"]
+    if mode == "configured":
+        assert providers == [configured] and not seen
+    else:
+        assert seen == [["left", "right"]]
+        assert providers == [
+            dict(
+                kind="configured_pose",
+                final_position=[0.5, 0.0, 0.7],
+                final_quaternion_xyzw=[0.0, 0.0, 0.0, 1.0],
+            )
+        ]
+
+
+def test_arm_root_positions_follow_fixed_joints_from_the_robot_base(tmp_path):
+    from embodichain.gen_sim._handover_pose import _arm_root_positions
+
+    def fixed(name, parent, child, xyz):
+        return (
+            f'<joint name="{name}" type="fixed"><parent link="{parent}"/>'
+            f'<child link="{child}"/><origin xyz="{xyz}" rpy="0 0 0"/></joint>'
+        )
+
+    urdf = tmp_path / "dual.urdf"
+    urdf.write_text(
+        '<robot name="dual">'
+        + "".join(
+            f'<link name="{name}"/>'
+            for name in ("base", "stand", "left_root", "right_root", "left_tip")
+        )
+        + fixed("stand", "base", "stand", "0 0 0.5")
+        + fixed("left_mount", "stand", "left_root", "0.2 0.3 0")
+        + fixed("right_mount", "stand", "right_root", "0.2 -0.3 0")
+        + '<joint name="left_joint" type="revolute"><parent link="left_root"/>'
+        '<child link="left_tip"/><axis xyz="0 0 1"/>'
+        '<limit lower="-1" upper="1" effort="1" velocity="1"/></joint>'
+        "</robot>"
+    )
+    solver = dict(class_type="PytorchSolver", end_link_name="left_tip")
+    simulation = dict(
+        fpath=str(urdf),
+        init_pos=[1.0, 0.0, 0.1],
+        init_rot=[0.0, 0.0, 90.0],
+        solver_cfg={
+            "left_arm": dict(solver, root_link_name="left_root"),
+            "right_arm": dict(solver, root_link_name="right_root"),
+            "moving_arm": dict(solver, root_link_name="left_tip"),
+        },
+    )
+    profile = dict(
+        resources=[
+            dict(
+                resource_id=resource,
+                endpoints=[dict(endpoint_id="motion", control_part=f"{resource}_arm")],
+            )
+            for resource in ("left", "right", "moving")
+        ]
+    )
+    # The base is yawed 90 degrees: base +x maps to world +y, +y to world -x.
+    np.testing.assert_allclose(
+        _arm_root_positions(simulation, profile, ["left", "right"]),
+        [[0.7, 0.2, 0.6], [1.3, 0.2, 0.6]],
+        atol=1e-9,
+    )
+    with pytest.raises(ValueError, match="rigidly attached"):
+        _arm_root_positions(simulation, profile, ["moving"])
