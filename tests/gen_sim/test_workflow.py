@@ -1319,8 +1319,18 @@ def test_runtime_mesh_handoff_bakes_axis_and_scale_without_changing_source(
     before = source.read_bytes()
     data = json.loads((export / "scene_config.json").read_text())
     data["background"][0]["body_scale"] = [2.0, 3.0, 4.0]
+    authored = {
+        "approximation": "convex_decomposition",
+        "max_hulls": 8,
+        "acd_method": "vhacd",
+    }
+    data["background"][0]["shape"]["collision"] = authored
     result = _physical_scene(export, data, tmp_path / "runtime-assets")
     table = result["background"][0]
+    # An authored collision policy is kept; other meshes follow their hull budget.
+    assert table["shape"]["collision"] == authored
+    cube = result["rigid_object"][0]["shape"]["collision"]
+    assert cube["approximation"] == "convex_hull"
     mesh = trimesh.load_scene(table["shape"]["fpath"])
     vertices = np.concatenate(
         [geometry.vertices for geometry in mesh.geometry.values()]

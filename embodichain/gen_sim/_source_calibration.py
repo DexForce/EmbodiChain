@@ -258,6 +258,7 @@ def calibrate_scene(
         raise ValueError("Source calibration requires exactly one generated table")
     table = tables[0]
     from ._run_binding import _z_up_mesh
+    from .scene_engine.pipeline.utils.scene_usd import _mesh_collision_cfg
 
     body = np.asarray(_z_up_mesh(table, export).vertices)
     world_rotation = (
@@ -291,10 +292,14 @@ def calibrate_scene(
         float(surface_z - high[2]),
     ]
     table["init_rot"] = oriented(table)
-    # A convex decomposition raises the collision surface of a table-sized mesh
-    # about a centimetre above its mesh. The calibrated table is box-like, so
-    # its convex hull keeps the collision surface at ``surface_z``.
-    table["max_convex_hull_num"] = 1
+    # The default decomposition (``visacd``) returns hulls about 1% of the
+    # mesh's longest side larger than the mesh, which raises the collision
+    # surface of a table-sized mesh about a centimetre above ``surface_z``.
+    # V-HACD keeps the hulls on the mesh, within the table's own hull budget.
+    collision = _mesh_collision_cfg(table.get("max_convex_hull_num", 32))
+    if collision.approximation == "convex_decomposition":
+        collision.acd_method = "vhacd"
+    table["shape"]["collision"] = collision.to_dict()
     for entry in result.get("rigid_object", []):
         mask = masks / f"{entry['uid']}_mask.png"
         if not mask.is_file():
