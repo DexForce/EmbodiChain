@@ -218,11 +218,15 @@ def test_relative_target_canonicalizes_aliases_and_rejects_unobserved_frames():
     assert provider.calls == 0
 
 
-def test_authoring_diagnostics_do_not_change_serialized_program_payload():
+@pytest.mark.parametrize("rewards", [None, {"discount": 0.99, "skills": []}])
+def test_authoring_diagnostics_do_not_change_serialized_program_payload(rewards):
     import json
     from embodichain.lab.task_program import loads_task_program_json
 
-    config = decode_task_program(_data())
+    data = _data()
+    if rewards is not None:
+        data["rewards"] = deepcopy(rewards)
+    config = decode_task_program(data)
     payload = config.to_dict()
     assert set(payload) == {
         "program_id",
@@ -230,8 +234,11 @@ def test_authoring_diagnostics_do_not_change_serialized_program_payload():
         "integration",
         "targets",
         "program",
+        "rewards",
     }
+    assert json.loads(json.dumps(payload["rewards"])) == rewards
     restored = loads_task_program_json(json.dumps(payload))
+    assert restored.rewards == config.rewards
     registry, _ = _scene_registry()
     compiler = TaskProgramCompiler(SceneManifest.from_registry(registry))
     assert task_program_fingerprint(
