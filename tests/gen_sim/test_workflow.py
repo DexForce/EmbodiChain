@@ -2265,3 +2265,87 @@ def test_collision_world_declares_the_table_and_unused_objects_on_request(
         }
     else:
         assert roles == {"cube_native": "none", "table": "none"}
+
+
+def test_planned_park_is_bound_without_run_configuration(run_cfg, monkeypatch):
+    from embodichain.gen_sim.workflow import plan_image_task, load_task_plan
+    from embodichain.gen_sim._run_binding import _bind_deployment, _load_runtime
+
+    _dual_runtime(run_cfg)
+    semantic = dict(
+        object="source", reference="table", relation="on", intent={"relation": "on"}
+    )
+    proposed = dict(
+        nodes=[
+            dict(
+                id="pick",
+                step_id="step_01",
+                call=dict(kind="pick", object="source", resources={"primary": "left"}),
+                depends_on=[],
+                semantic=semantic,
+            ),
+            dict(
+                id="place",
+                step_id="step_01",
+                call=dict(
+                    kind="place",
+                    object="source",
+                    on="table_surface",
+                    resources={"primary": "left"},
+                ),
+                depends_on=["pick"],
+                semantic=semantic,
+            ),
+            dict(
+                id="away",
+                step_id="step_01",
+                call=dict(
+                    kind="registered",
+                    call_id="simulation.park",
+                    arguments={},
+                    resources={"primary": "left"},
+                ),
+                depends_on=["place"],
+                semantic=semantic,
+            ),
+        ],
+        requirements=[
+            dict(id="r1", quote=run_cfg.instruction, node_ids=["pick", "place", "away"])
+        ],
+    )
+    run_cfg.output.mkdir()
+    step = _step(required_arm="left_arm")
+    with _services(step=step, plan=proposed) as services:
+        task = plan_image_task(
+            run_cfg.image,
+            run_cfg.instruction,
+            run_cfg.output / "task",
+            services=services,
+        )
+        scene = run_cfg.output / "scene"
+        _write_scene(scene)
+        from embodichain.gen_sim.services import compat
+
+        monkeypatch.setattr(
+            compat,
+            "structured_call",
+            lambda **kw: dict(
+                objects={"source": "cube_native", "table": "table"},
+                resources={"left": "left"},
+            ),
+        )
+        runtime, policy, profile = _load_runtime(run_cfg)
+        path = _bind_deployment(
+            run_cfg,
+            scene,
+            task,
+            runtime,
+            policy,
+            profile,
+            services=services,
+            expected_plan_digest=load_task_plan(task)["plan_digest"],
+        )
+    integration = yaml.safe_load((path.parent / "integration.yaml").read_text())
+    lowerers = integration["runtime_services"]["registered_semantic_lowerers"]
+    # The planned park is bound although the run configures no park lowerer.
+    assert {"kind": "park"} in lowerers
