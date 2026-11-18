@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 __all__ = ["TaskPoseCoverage"]
 
 
-from ._pose_cells import _grid, _pose_cell
+from ._pose_cells import _grid, _pose_cell, _measurements
 
 
 class TaskPoseCoverage:
@@ -43,20 +43,37 @@ class TaskPoseCoverage:
             installation and grid, excluding sampled scene poses and RNG seed.
         entity_uid: Manipulated rigid object whose measured states are counted.
         grids: Explicit ``pick`` and ``place`` XY/yaw grids in arena coordinates.
+        measurements: Optional named entity/boundary declarations. Initial,
+            terminal and named segment-end states are measured independently.
+            Fixed categories never turn tracking noise into pose novelty.
 
     Scene cases keep their existing identities. This adapter aggregates them
     within one declared experiment, never across separate instances/domains.
     """
 
-    def __init__(self, domain_id: str, entity_uid: str, grids: Mapping) -> None:
+    def __init__(
+        self,
+        domain_id: str,
+        entity_uid: str,
+        grids: Mapping,
+        *,
+        measurements: Mapping | None = None,
+    ) -> None:
         if not all(
             type(s) is str and s.strip() == s and s for s in (domain_id, entity_uid)
         ):
             raise ValueError("Coverage requires nonempty domain and entity identities")
-        if not isinstance(grids, Mapping) or set(grids) != {"pick", "place"}:
-            raise ValueError("Coverage requires pick and place grids")
+        if not isinstance(grids, Mapping) or not grids:
+            raise ValueError("Coverage requires explicit grids")
+        if measurements is None and set(grids) != {"pick", "place"}:
+            raise ValueError("Legacy coverage requires pick and place grids")
+        if measurements is not None and set(measurements) != set(grids):
+            raise ValueError("Coverage measurements must match grid names")
         self.domain_id, self.entity_uid = domain_id, entity_uid
         self.grids = {k: _grid(v) for k, v in grids.items()}
+        self.measurements = (
+            None if measurements is None else _measurements(measurements, grids)
+        )
         self._cases: dict[str, tuple[str, str, str]] = {}
         self._population = None
         self._pending: dict[str, tuple[str, tuple]] = {}
@@ -117,17 +134,43 @@ class TaskPoseCoverage:
             raise ValueError("Episode scene is outside this coverage domain")
         if not episode.validation.accepted:
             return False
-        states = episode.observations.get(f"rigid/{self.entity_uid}/state")
-        if (
-            states is None
-            or states.ndim != 2
-            or states.shape[0] != len(episode.timestamps)
-            or states.shape[1] < 7
-        ):
-            raise ValueError("Task coverage requires T+1 measured rigid states")
-        cells = self.cells(
-            states[0].detach().cpu().numpy(), states[-1].detach().cpu().numpy()
-        )
+        if self.measurements is None:
+            states = self._states(episode, self.entity_uid)
+            cells = self.cells(
+                states[0].detach().cpu().numpy(), states[-1].detach().cpu().numpy()
+            )
+        else:
+            measured = []
+            for phase, declaration in self.measurements.items():
+                states = self._states(episode, declaration["entity"])
+                boundary = declaration["boundary"]
+                index = 0 if boundary == "initial" else len(states) - 1
+                if boundary == "segment_end":
+                    segments = [
+                        s
+                        for s in episode.metadata.get("program_segments", ())
+                        if s["name"] == declaration["segment"]
+                    ]
+                    if len(segments) != 1 or not segments[0]["success"]:
+                        raise ValueError(
+                            "Coverage requires one successful named segment"
+                        )
+                    index = int(segments[0]["end_step"])
+                    if not 0 <= index < len(states):
+                        raise ValueError(
+                            "Coverage segment boundary is outside T+1 states"
+                        )
+                cell = _pose_cell(
+                    states[index].detach().cpu().numpy(), self.grids[phase]
+                )
+                if cell is not None:
+                    measured.append(
+                        (
+                            phase,
+                            *((0, 0, 0) if declaration.get("fixed", False) else cell),
+                        )
+                    )
+            cells = tuple(measured)
         value = (case_id, cells)
         previous = self._confirmed.get(
             episode.commit_id, self._pending.get(episode.commit_id)
@@ -137,6 +180,33 @@ class TaskPoseCoverage:
         if episode.commit_id not in self._confirmed:
             self._pending[episode.commit_id] = value
         return True  # Duplicates are valid data; they cannot increase unique coverage.
+
+    @staticmethod
+    def _states(episode: ExpertEpisode, entity: str) -> torch.Tensor:
+        states = episode.observations.get(f"rigid/{entity}/state")
+        if (
+            states is None
+            or states.ndim != 2
+            or states.shape[0] != len(episode.timestamps)
+            or states.shape[1] < 7
+            or not bool(torch.isfinite(states).all())
+        ):
+            raise ValueError("Task coverage requires finite T+1 measured rigid states")
+        return states
+
+    def proposal_cells(self, poses: Mapping) -> tuple:
+        """Predict only declared initial cells; later phases require measurements."""
+        if self.measurements is None:
+            raise ValueError(
+                "Legacy proposal cells require explicit pick/place references"
+            )
+        return tuple(
+            (phase, *((0, 0, 0) if declaration.get("fixed", False) else cell))
+            for phase, declaration in self.measurements.items()
+            if declaration["boundary"] == "initial"
+            and (cell := _pose_cell(poses[declaration["entity"]], self.grids[phase]))
+            is not None
+        )
 
     def confirm(self, case_id: str, commit_id: str) -> None:
         """Idempotently count the reservation qualified by the session's receipt."""
@@ -186,6 +256,7 @@ class TaskPoseCoverage:
                 "domain_id": self.domain_id,
                 "entity_uid": self.entity_uid,
                 "grids": self.grids,
+                "measurements": self.measurements,
                 "population": self._population,
                 "cases": self._cases,
                 "pending": self._pending,
@@ -198,7 +269,7 @@ class TaskPoseCoverage:
         data = deepcopy(dict(state))
         if data.get("version") != 1 or any(
             data.get(k) != getattr(self, k)
-            for k in ("domain_id", "entity_uid", "grids")
+            for k in ("domain_id", "entity_uid", "grids", "measurements")
         ):
             raise ValueError("Coverage checkpoint belongs to another domain/grid")
         if self._pending or self._confirmed or self._cases:

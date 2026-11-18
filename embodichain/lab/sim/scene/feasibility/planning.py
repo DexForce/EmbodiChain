@@ -227,7 +227,7 @@ def plan_task_mode(
 
 
 class RobotFeasibilityBackend:
-    """Live B=1 Robot adapter with multi-seed IK and full-joint RRT fallback.
+    """Selected-row Robot adapter with multi-seed IK and full-joint RRT fallback.
 
     Args:
         robot: Prepared robot at the candidate's actual installation.
@@ -235,6 +235,9 @@ class RobotFeasibilityBackend:
         cfg: Bounded branch and discretization settings.
         entity_poses: Settled arena poses for static and movable scene entities.
         seed: Candidate-local planner randomness.
+        env_id: Explicit prototype row for numeric solver and geometry bindings.
+        initial_qpos: Optional owned nominal full-joint planning start. This avoids
+            using another rollout's current state during rolling admission.
 
     The fallback plans in full joint coordinates, with the same collision checks
     for straight connections and sampled detours. It does not replace runtime
@@ -249,19 +252,37 @@ class RobotFeasibilityBackend:
         entity_poses: Mapping[str, object],
         *,
         seed: int = 0,
+        env_id: int = 0,
+        initial_qpos: np.ndarray | None = None,
     ) -> None:
-        if robot.get_qpos().shape[0] != 1 or robot.pk_chain is None:
+        if (
+            type(env_id) is not int
+            or not 0 <= env_id < robot.get_qpos().shape[0]
+            or robot.pk_chain is None
+        ):
             raise UnsupportedFeasibilityError(
-                "Robot planning requires B=1 and full-link kinematics"
+                "Robot planning requires a valid selected row and full-link kinematics"
             )
         self.robot, self.collision, self.cfg = robot, collision, cfg
+        self.env_id = env_id
         self.joint_names = tuple(robot.joint_names)
-        self.initial_qpos = robot.get_qpos()[0].detach().cpu().double().numpy().copy()
+        self.initial_qpos = (
+            robot.get_qpos()[env_id].detach().cpu().double().numpy().copy()
+            if initial_qpos is None
+            else np.array(initial_qpos, dtype=float, copy=True)
+        )
+        if (
+            self.initial_qpos.shape != (len(self.joint_names),)
+            or not np.isfinite(self.initial_qpos).all()
+        ):
+            raise ValueError(
+                "Planning start must contain finite full-joint coordinates"
+            )
         self.joint_limits = (
-            robot.get_qpos_limits()[0].detach().cpu().double().numpy().copy()
+            robot.get_qpos_limits()[env_id].detach().cpu().double().numpy().copy()
         )
         self._root = (
-            robot.get_local_pose(to_matrix=True)[0].detach().cpu().double().numpy()
+            robot.get_local_pose(to_matrix=True)[env_id].detach().cpu().double().numpy()
         )
         self._entities = {k: np.asarray(v) for k, v in entity_poses.items()}
         self._rng = np.random.default_rng(seed)
@@ -380,7 +401,9 @@ class RobotFeasibilityBackend:
             solver = self.robot.get_solver(name=target.control_part)
             live_root = (
                 self.robot.get_link_pose(
-                    link_name=solver.root_link_name, env_ids=[0], to_matrix=True
+                    link_name=solver.root_link_name,
+                    env_ids=[self.env_id],
+                    to_matrix=True,
                 )[0]
                 .detach()
                 .cpu()
@@ -397,7 +420,7 @@ class RobotFeasibilityBackend:
                 budget.check()
                 samples = self.robot.sample_reachable_pose(
                     name=target.control_part,
-                    env_ids=[0],
+                    env_ids=[self.env_id],
                     num_samples=self.cfg.ik_seeds,
                     max_attempts=self.cfg.ik_seeds,
                     generator=torch.Generator(device=self.robot.device).manual_seed(
@@ -434,7 +457,7 @@ class RobotFeasibilityBackend:
                         device=self.robot.device,
                     ),
                     name=target.control_part,
-                    env_ids=[0],
+                    env_ids=[self.env_id],
                     return_all_solutions=True,
                 )
                 budget.check()
@@ -484,7 +507,7 @@ class RobotFeasibilityBackend:
                                 q[None], dtype=torch.float32, device=self.robot.device
                             ),
                             name=target.control_part,
-                            env_ids=[0],
+                            env_ids=[self.env_id],
                             to_matrix=True,
                         )[0]
                         .detach()

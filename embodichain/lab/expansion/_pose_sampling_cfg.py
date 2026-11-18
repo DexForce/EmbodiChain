@@ -151,12 +151,6 @@ def validate_sampling(value: dict) -> None:
             "workspace_joint does not consume layout conditions; choose scene_first or a screened bounded_pose baseline"
         )
     if sampling["strategy"] in _LAYOUT_STRATEGIES or "layout" in sampling:
-        if (
-            value["engine"].get("batch_size", 1)
-            * value["engine"].get("workload_count", 1)
-            != 1
-        ):
-            raise ValueError("Layout task-path screening currently requires B=1")
         layout = sampling.get("layout")
         if (
             not isinstance(layout, dict)
@@ -302,6 +296,17 @@ def validate_sampling(value: dict) -> None:
             raise ValueError(
                 "task_pose_coverage scheduling requires pose_coverage grids"
             )
+        return
+    if isinstance(coverage, dict) and set(coverage) == {"measurements", "grids"}:
+        from ._pose_cells import _measurements
+
+        measurements, grids = coverage["measurements"], coverage["grids"]
+        if not isinstance(grids, dict):
+            raise ValueError("Named coverage measurements require matching grids")
+        coverage["measurements"] = _measurements(measurements, grids)
+        if any(d["entity"] not in value["scene"] for d in measurements.values()):
+            raise ValueError("Coverage requires declared scene entities")
+        coverage["grids"] = {k: _grid(v) for k, v in grids.items()}
         return
     if not isinstance(coverage, dict) or set(coverage) != {
         "entity",

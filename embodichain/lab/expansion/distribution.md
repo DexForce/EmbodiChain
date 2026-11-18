@@ -1,5 +1,11 @@
 # Task distribution report
 
+Integrators call the lazy public `embodichain.lab.expansion.report_expansion_distribution`
+with before/after native jobs, expansion aggregates or workflow directories. It
+uses the same receipt reader and report writer as the command below, returns the
+HTML path and snapshot identity, and creates no simulation World. Preserve the
+complete output directory, including detail pages and JSONL records.
+
 Run from an EmbodiChain environment with the existing artifact reader dependencies:
 
 ```bash

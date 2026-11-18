@@ -83,6 +83,7 @@ __all__ = [
     "MeasuredTrajectory",
     "record_reference_trajectory",
     "preview_expansion_comparison",
+    "report_expansion_distribution",
 ]
 
 
@@ -144,6 +145,7 @@ def __getattr__(name: str) -> object:
         "MeasuredTrajectory": "comparison",
         "record_reference_trajectory": "comparison",
         "preview_expansion_comparison": "comparison",
+        "report_expansion_distribution": "distribution",
     }.get(name, "engine")
     module = f"{__name__}.{owner}"
     value = getattr(import_module(module), name)

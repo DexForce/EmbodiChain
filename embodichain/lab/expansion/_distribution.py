@@ -269,6 +269,7 @@ def _run(
         "XY bins cover observed domain only; no feasible-volume denominator.",
         "TCP is recorded-URDF FK from measured qpos/root plus explicit gripper TCP calibration.",
         "Orientation bins: canonical SO(3) rotation vectors, 30-degree Cartesian bins, not equal-volume; no symmetry folding.",
+        "Raw terminal pose bins include tracking variation; receipt-confirmed fixed task categories are a separate coverage metric.",
         "Joint path length mixes joint coordinates; compare only matching domains.",
         "Geometry buckets reuse existing 1e-3 descriptor quantization, not clustering.",
     ]

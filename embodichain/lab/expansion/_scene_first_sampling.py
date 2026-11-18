@@ -47,8 +47,6 @@ class _LayoutPoseSource(_AdaptivePoseSource):
     """
 
     def __init__(self, env, options, *, seed, revision):
-        if env.num_envs != 1:
-            raise ValueError("Layout task-path screening currently requires B=1")
         before = self._world_clock(env.sim)
         self._collision = None
         super().__init__(env, options, seed=seed, revision=revision)
@@ -119,6 +117,7 @@ class _LayoutPoseSource(_AdaptivePoseSource):
                         f"Task phase names unavailable control part {target.control_part!r}"
                     )
         self._entities = {k: np.array(v) for k, v in entities.items()}
+        self._initial_qpos = None
         self._anchor_pools = ()
         self._workspace_seconds = self._screening_seconds = 0.0
         if self.cfg["strategy"] in _ROBOT_LAYOUT_STRATEGIES:
@@ -170,6 +169,11 @@ class _LayoutPoseSource(_AdaptivePoseSource):
         """Keep the declared phase graph and live runtime independent authorities."""
         if not tuple(program.iter_segments()):
             raise ValueError("Layout sampling requires a nonempty task program")
+        # The owner binds every group before rolling admission. Retain its
+        # nominal planning start even while another row subsequently executes.
+        self._initial_qpos = (
+            self.env.robot.get_qpos()[0].detach().cpu().double().numpy().copy()
+        )
 
     @staticmethod
     def _world_clock(sim):
@@ -331,6 +335,7 @@ class _LayoutPoseSource(_AdaptivePoseSource):
             self.budget.cfg,
             poses,
             seed=self.seed + raw,
+            initial_qpos=self._initial_qpos,
         )
         plan = plan_task_mode(self._mode, backend, poses, self.budget)
         self._task_checks[raw] = [

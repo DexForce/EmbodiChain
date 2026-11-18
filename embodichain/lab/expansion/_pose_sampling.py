@@ -164,7 +164,11 @@ class _AdaptivePoseSource(_BoundedPoseSource):
             None
             if self.coverage_cfg is None
             else TaskPoseCoverage(
-                self.domain_id, self.coverage_cfg["entity"], self.coverage_cfg["grids"]
+                self.domain_id,
+                self.coverage_cfg.get("entity")
+                or next(iter(self.coverage_cfg["measurements"].values()))["entity"],
+                self.coverage_cfg["grids"],
+                measurements=self.coverage_cfg.get("measurements"),
             )
         )
         self.budget = _PoseBudget(
@@ -443,9 +447,13 @@ class _AdaptivePoseSource(_BoundedPoseSource):
             cells = (
                 ()
                 if self.coverage is None
-                else self.coverage.cells(
-                    poses[self.coverage_cfg["entity"]],
-                    poses[self.coverage_cfg["place_reference"]],
+                else (
+                    self.coverage.proposal_cells(poses)
+                    if self.coverage_cfg.get("measurements") is not None
+                    else self.coverage.cells(
+                        poses[self.coverage_cfg["entity"]],
+                        poses[self.coverage_cfg["place_reference"]],
+                    )
                 )
             )
             self._events.append(

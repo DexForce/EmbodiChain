@@ -68,8 +68,10 @@ and plans again from the measured prepared scene.
 it changes preflight effort, not acceptance thresholds. All raw proposals,
 discarded candidates and IK/planning calls consume the declared budgets. Failed
 layout or task screening remains preparation rejection and never earns physical
-success or a sink receipt. The B=1 path is explicit; batch settings reject before
-World construction. Collision queries own no physical World and are released on
+success or a sink receipt. Homogeneous W times B replicas share one prepared
+prototype and retain a frozen nominal planning start; eight-row collection is
+covered by `tests/lab/expansion/test_layout_sampling_sim.py`. Each proposal still
+uses the complete task-path screen before normal measured execution. Collision queries own no physical World and are released on
 normal completion and startup failures. A topology revision invalidates the
 prepared source instead of silently retaining stale geometry.
 

@@ -1744,6 +1744,18 @@ and durable episode-boundary recovery. See the offline expansion example.
    MeasuredTrajectory
    record_reference_trajectory
    preview_expansion_comparison
+   report_expansion_distribution
+
+Offline distribution reporting validates confirmed native receipts and emits a
+complete HTML/JSON/JSONL bundle without opening a physics World. Comparisons
+require matching task, robot installation and configured scene domains.
+
+embodichain.lab.expansion.distribution
+-------------------------------------
+
+.. currentmodule:: embodichain.lab.expansion.distribution
+
+.. autofunction:: report_expansion_distribution
 
 embodichain.lab.expansion.acceptance
 ------------------------------------

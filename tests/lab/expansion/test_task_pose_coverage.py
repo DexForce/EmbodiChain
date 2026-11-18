@@ -131,6 +131,113 @@ def test_cells_boundaries_periodicity_and_measured_not_requested_pose():
     assert cov.gain((("pick", 0, 2, 1),)) == 0.5
 
 
+def test_named_boundaries_use_real_artifacts_and_fixed_categories(tmp_path):
+    from embodichain.lab.expansion import ArtifactEpisodeSink, load_expansion_episode
+    from embodichain.lab.expansion.contracts import (
+        CandidateIdentity,
+        ExpertEpisode,
+        ValidationCheck,
+        ValidationResult,
+    )
+
+    measurements = {
+        "initial": {"entity": "object", "boundary": "initial"},
+        "handover": {
+            "entity": "object",
+            "boundary": "segment_end",
+            "segment": "handover",
+            "fixed": True,
+        },
+        "handover_pose": {
+            "entity": "object",
+            "boundary": "segment_end",
+            "segment": "handover",
+        },
+        "held": {"entity": "object", "boundary": "terminal", "fixed": True},
+    }
+    grid = grids()["pick"]
+    cov = TaskPoseCoverage(
+        "domain",
+        "object",
+        {name: grid for name in measurements},
+        measurements=measurements,
+    )
+    cov.register_case(
+        SceneCase("case", "initial", "signature", "task", "robot"),
+        torch.tensor([[-1.0, 1.0]]),
+        ("joint",),
+        None,
+    )
+    sink = ArtifactEpisodeSink(tmp_path / "episodes")
+    for ordinal, x in enumerate((-0.7, 0.7)):
+        state = torch.tensor(
+            [
+                [x, 0.1, 0.1, 0, 0, 0, 1],
+                [0.1, 0.1, 0.1, 0, 0, 0, 1],
+                [0.1 + ordinal * 0.6, 0.1, 0.1, 0, 0, 0, 1],
+            ]
+        )
+        episode = ExpertEpisode(
+            CandidateIdentity(
+                "case",
+                "initial",
+                f"candidate{ordinal}",
+                "family",
+                "source",
+                "v1",
+                "plan",
+            ),
+            {"rigid/object/state": state},
+            torch.zeros(2, 1),
+            torch.tensor([0.0, 0.1, 0.2]),
+            "qpos",
+            ValidationResult((ValidationCheck("task", "passed"),)),
+            f"episode{ordinal}",
+            f"commit{ordinal}",
+            metadata={
+                "program_segments": [
+                    {
+                        "name": "handover",
+                        "start_step": 0,
+                        "end_step": 1,
+                        "success": True,
+                    }
+                ]
+            },
+        )
+        assert cov.reserve(episode)
+        assert cov.phase_counts()["initial"] == ordinal
+        receipt = sink.submit(episode, submission_id=ordinal)
+        restored = load_expansion_episode(receipt.storage_id)
+        assert cov.reserve(restored)
+        cov.confirm("case", episode.commit_id)
+        cov.confirm("case", episode.commit_id)
+    assert cov.phase_counts() == {
+        "initial": 2,
+        "handover": 1,
+        "handover_pose": 1,
+        "held": 1,
+    }
+    assert ("handover_pose", 2, 2, 1) in cov.state_dict()["confirmed"]["commit1"][1]
+    assert cov.proposal_cells({"object": np.eye(4)}) == (("initial", 2, 2, 1),)
+    snapshot = cov.state_dict()
+    restored = TaskPoseCoverage(
+        "domain",
+        "object",
+        {name: grid for name in measurements},
+        measurements=measurements,
+    )
+    restored.load_state_dict(snapshot)
+    assert restored.phase_counts() == cov.phase_counts()
+    with pytest.raises(ValueError, match="segment name"):
+        TaskPoseCoverage(
+            "domain",
+            "object",
+            {"bad": grid},
+            measurements={"bad": {"entity": "object", "boundary": "segment_end"}},
+        )
+
+
 class _Robot:
     control_parts = {"arm": [0, 1, 2]}
     device = torch.device("cpu")

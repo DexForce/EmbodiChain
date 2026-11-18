@@ -320,7 +320,7 @@ def test_source_obeys_hard_raw_candidate_budget(monkeypatch):
     assert source.budget.counts["candidates"] == 64
 
 
-def test_scene_first_config_rejects_batch_and_unknown_phase_fields_before_runtime():
+def test_scene_first_config_accepts_batch_and_rejects_unknown_phase_fields():
     # Reuse a valid source's owned config, without constructing a new World.
     import yaml
     from pathlib import Path
@@ -331,10 +331,8 @@ def test_scene_first_config_rejects_batch_and_unknown_phase_fields_before_runtim
         / "extensions/embodichain_tasks/configs/tasks/manipulation/workspace_pose_pick_place/acceptance/scene_first/expansion.yaml"
     )
     cfg = yaml.safe_load(path.read_text())
-    cfg["engine"]["batch_size"] = 4
-    with pytest.raises(ValueError, match="B=1"):
-        validate_sampling(cfg)
-    cfg["engine"]["batch_size"] = 1
+    cfg["engine"]["batch_size"] = 8
+    validate_sampling(cfg)
     cfg["scene_sampling"]["task_mode"]["phases"][0]["unknown"] = True
     with pytest.raises(ValueError, match="Unknown TaskPhase"):
         validate_sampling(cfg)

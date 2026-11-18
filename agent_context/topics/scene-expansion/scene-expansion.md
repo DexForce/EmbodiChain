@@ -44,8 +44,10 @@ root XY conditions before generating the rest of the layout. See the
 [conditional layout source contract](../expansion-engine/workloads.md#conditional-layout-proposals-and-task-screening)
 for selectors and direction scheduling. Explicit
 `layout` and `task_mode` declarations bind support parents, permissions and
-synchronized task stages. Its current path screening requires B=1, including
-for a bounded-sampling baseline that opts into the same screens. Declared
+synchronized task stages. Homogeneous replicas can share the prepared layout
+and frozen nominal planning start within one rolling W times B World; the
+feasibility adapter explicitly selects its solver row. A bounded-sampling
+baseline can opt into the same screens. Declared
 workspace caches supply seeds; no cache hit certifies a pose or task. Pure
 layout queries do not advance the owning World; topology changes invalidate
 the prepared geometry. This is distinct from offline atlas region validation

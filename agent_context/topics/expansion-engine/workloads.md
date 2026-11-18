@@ -192,6 +192,12 @@ or `workspace_joint`) independently of `scheduling.policy` (`fifo` or
 `_pose_sampling.py` owns bounded candidate snapshots, source feedback and budgets;
 `task_pose_coverage.TaskPoseCoverage` implements the session coverage protocol.
 Measured rigid initial/terminal poses contribute only after native sink receipts.
+An optional `pose_coverage.measurements` mapping selects entity states at initial,
+terminal or an explicitly named successful segment end. Its grids use the same
+names. This supports held-object and multi-stage tasks without creating fake
+place-reference entities. `fixed: true` contributes one category inside its
+declared grid; tracking noise does not create placement novelty. Proposal ranking
+predicts only initial cells; later boundaries require measured T+1 evidence.
 Separate SceneCase identities aggregate within a declared configuration/grid
 fingerprint; installation changes remain separate domains. FIFO can omit coverage.
 
@@ -212,7 +218,11 @@ preparation/conditional generation and `RobotFeasibilityBackend`/`plan_task_mode
 it creates no physics World and owns only the isolated collision-query resources.
 `layout` and `task_mode` are explicit, validated task declarations. Root layout
 variables currently use XY only; selected nested members retain declared XY/yaw.
-B=1 is checked before runtime creation. A `bounded_pose` job may opt into the
+Homogeneous replicas support rolling W times B collection, including eight rows.
+Preparation snapshots the common prototype geometry, installation and nominal
+full-joint planning start before any row executes. The feasibility adapter uses
+an explicit solver row and never treats an active peer's live posture as its
+planning start. It creates no additional physical World. A `bounded_pose` job may opt into the
 same layout/task-mode screens for a controlled comparison without changing
 ordinary simple-sampling defaults. Screening budgets are bounded and separate
 from fixed physical quality thresholds. Prepared candidates stay immutable by

@@ -24,6 +24,36 @@ import numpy as np
 __all__: list[str] = []
 
 
+def _measurements(value: Mapping, grids: Mapping) -> dict:
+    from copy import deepcopy
+
+    if not isinstance(value, Mapping) or not value or set(value) != set(grids):
+        raise ValueError("Named coverage measurements require matching grids")
+    for name, declaration in value.items():
+        if (
+            not isinstance(name, str)
+            or not name
+            or not isinstance(declaration, Mapping)
+            or set(declaration) - {"entity", "boundary", "segment", "fixed"}
+            or not {"entity", "boundary"} <= declaration.keys()
+            or not isinstance(declaration["entity"], str)
+            or not declaration["entity"]
+            or declaration["boundary"] not in ("initial", "terminal", "segment_end")
+        ):
+            raise ValueError("Invalid named coverage measurement")
+        if (declaration["boundary"] == "segment_end") != ("segment" in declaration) or (
+            "segment" in declaration
+            and (
+                not isinstance(declaration["segment"], str)
+                or not declaration["segment"]
+            )
+        ):
+            raise ValueError("Segment coverage requires an explicit segment name")
+        if "fixed" in declaration and type(declaration["fixed"]) is not bool:
+            raise ValueError("Coverage fixed flag must be boolean")
+    return deepcopy(dict(value))
+
+
 def _grid(value: Mapping) -> dict:
     if not isinstance(value, Mapping) or set(value) != {
         "lower",
