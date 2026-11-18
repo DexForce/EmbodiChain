@@ -44,6 +44,8 @@ def _run_episode(variant: str, seed: int) -> dict[str, Any]:
     from embodichain.lab.gym.utils.gym_utils import config_to_cfg
     from embodichain.lab.gym.utils.registration import discover_task_packages, make
     from embodichain.lab.sim import SimulationManager
+    from embodichain.lab.task_program.language.decoder import _decode_target
+    from embodichain.lab.task_program.integrations.configured import _pose_matrix
     from embodichain.utils.utility import load_config
 
     discover_task_packages()
@@ -67,7 +69,10 @@ def _run_episode(variant: str, seed: int) -> dict[str, Any]:
     target = None
     if variant != "cobotmagic":
         target = np.array(
-            program["targets"]["bottle_pour_pose"]["values"][0]["position"]
+            _decode_target(
+                program["targets"]["bottle_pour_pose"],
+                path=("targets", "bottle_pour_pose"),
+            ).position
         )
     env = None
     try:
@@ -84,7 +89,9 @@ def _run_episode(variant: str, seed: int) -> dict[str, Any]:
                 ]
                 if lowerer.get("target_id") == "cup_pour_pose"
             )
-            relative = np.array(transport["relative_pose"]).reshape(4, 4)
+            relative = np.array(
+                _pose_matrix(transport["relative_pose"], path="transport.relative_pose")
+            ).reshape(4, 4)
             cup = (
                 env.sim.get_rigid_object("cup")
                 .get_local_pose(to_matrix=True)[0]

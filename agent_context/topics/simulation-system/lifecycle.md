@@ -61,6 +61,12 @@ are environment, environment/link and environment/object respectively.
 snapshots: setters/randomizers must not mutate them. Reset restores selected
 rows before episode initialization events run.
 
+Visual and semantic environment selections share strict index validation before
+geometry reads or visibility writes. Descriptor-owned visual operations use each
+selected row's effective variant config. A visibility command rejects any selected
+row without explicit visuals before writing; reset restores only selected explicit
+visual rows, preserving implicit and unselected visibility.
+
 Manager reset restores all selected Newton articulations before one complete
 Scene batch clears drive targets, dynamics, warm-start state, kinematics and
 external wrenches. MuJoCo-Warp and DexUni cannot safely clear a selected world's
@@ -82,7 +88,10 @@ Teardown state exists before native allocation, and the manager owns the Viser
 runtime before starting it so partial startup can be stopped. Registry removal
 checks object identity and leaves other live managers intact.
 `_deferred_destroy()` stops recording/window rendering, calls
-`PhysicsBackend.prepare_for_teardown()`, and runs GC while parents still live.
+`PhysicsBackend.prepare_for_teardown()`, and drops facade data/material references
+before running GC while parents still live. Collect newly unreachable wrapper
+cycles before closing Scene; a collection before dropping those references can
+leave their destructors until after native parent teardown.
 Newton synchronizes its resolved Warp CUDA device and releases render-link
 views before Spawn closes skeletons. Cameras and result-scoped facade/batch
 references are released before Scene, Arena and World teardown. Instance IDs

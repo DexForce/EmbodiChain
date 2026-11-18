@@ -1,0 +1,39 @@
+id: FrankaGSPickPlace-Robosimgs-v1
+enable_sensor: true
+environment:
+  component: env.robosimgs.yaml
+embodiment:
+  component: ../../../components/embodiments/franka_gs_dual_camera.yaml
+  overrides:
+    init_pos:
+    - 0
+    - 0
+    - 0
+    init_rot:
+    - 0
+    - 0
+    - 0
+  camera_overrides:
+    cam_third:
+      intrinsics:
+      - 480
+      - 480
+      - 480
+      - 270
+      extrinsics:
+        eye:
+        - 0.85
+        - -0.65
+        - 0.85
+        target:
+        - 0.3
+        - 0
+        - 0.38
+        up:
+        - 0
+        - 0
+        - 1
+task_program:
+  program: task_program/program.robosimgs.yaml
+  integration: task_program/integration.yaml
+  execution_policy: ../../../components/execution_policies/franka_gs_verified.yaml

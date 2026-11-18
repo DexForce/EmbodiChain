@@ -1,5 +1,11 @@
 # Running examples
 
+The [Gaussian scene Pick/Place example](gym/gaussian_pick_place/README.md)
+records the official `gaussian_pick_place` task deployments from the task
+extension, using standardized public 3DGS backgrounds, independent collision
+supports, and third-person/wrist RGB cameras.
+Use `embodichain run-example gym/gaussian_pick_place/run --scene office`.
+
 Use the path of any Python script under this directory, with or without `.py`:
 
 ```bash
@@ -109,6 +115,11 @@ It saves RGB mosaics, depth arrays and capture-policy metadata. This requires th
 DexSim camera render-category API; the default camera configuration continues to
 work with older SDKs. Ground hidden in a camera still supports the falling box.
 
+The [Library Pick/Place example](gym/library_pick_place/README.md) combines the
+existing Library Gaussian scan with a verified Dual UR5 task. It records every
+initial, control and terminal RGB-D boundary, saves the native trajectory, and
+provides a CPU-only offline integrity and physical-result verifier.
+
 The [Expansion Engine showcase](expansion/engine/showcase/README.md) demonstrates
 native and real-demonstration-driven experts through the shared engine. Its offline
 viewer pairs measured 3D playback with RGB-D, recipes, source clocks and explicit
@@ -128,15 +139,15 @@ python scripts/tutorials/sim/create_cable.py
 python scripts/tutorials/sim/create_cable.py --headless --renderer no-render --num-envs 2
 ```
 
-The cable examples use CUDA and DexSim `0.6.0rc1` (engine commit
-`1b968250ada2b06b210bc7aa08ef219769f01217`). The DexForce package index
+The cable examples use CUDA and DexSim `0.6.0rc2` (engine commit
+`dbaca660471d5aaa7e750093e7fe1c207465c4af`). The DexForce package index
 provides Linux x86_64 wheels for Python 3.11 and 3.12. To install the pinned
 engine in your EmbodiChain environment and check its build, run:
 
 ```bash
 python -m pip install --index-url https://pypi.org/simple \
   --extra-index-url http://pyp.open3dv.site:2345/simple/ --trusted-host pyp.open3dv.site \
-  dexsim-engine==0.6.0rc1
+  dexsim-engine==0.6.0rc2
 python -c "import dexsim; from dexsim.scene import SpawnedCable; print(dexsim.__version__, dexsim.__commit_id__)"
 ```
 

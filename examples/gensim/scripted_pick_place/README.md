@@ -1,5 +1,19 @@
 # Scripted GenSim pick/place reproduction
 
+For the independent TaskSpec revision pilot, run:
+
+```bash
+python -m examples.gensim.scripted_pick_place.revision_pilot --output outputs/revision-pilot
+```
+
+This uses the prepared UR5 cube/platform deployment, one Default backend
+environment and two fresh worker processes. Attempt 1 selects an offset landing
+site. Its measured footprint and height checks drive a second attempt at the
+platform center. Both workers evaluate the same frozen geometric criteria.
+Each attempt writes its program, capture point, identities and physical verdict
+in its own directory. The pilot checks episode acceptance independently of
+reported geometry. Its measurements establish footprint and height only.
+
 This example prepares fixed inputs, runs the shared GenSim workflow, and measures
 wall-clock time through native execution and cleanup. It demonstrates the
 previous dual-UR5 table/cube case without a live model or reconstruction service.

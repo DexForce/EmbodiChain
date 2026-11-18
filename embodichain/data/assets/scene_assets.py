@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import os
+from typing import ClassVar
 import open3d as o3d
 from embodichain.data.dataset import EmbodiChainDataset
 from embodichain.data.constants import (
@@ -31,9 +32,87 @@ __all__ = [
     "IndustrialWorkshop",
     "DemoStudio",
     "CleanLab",
+    "RoboSplatterOfficeGS",
+    "DiscoverseLab3GS",
+    "RoboSimGSTabletopGS",
 ]
 
 scene_assets = "scene_assets"
+
+# Immutable Hub snapshot; V1 archives are additionally protected by their
+# exact DataDescriptor checksums and version-specific extraction prefixes.
+_GAUSSIAN_REVISION = "3ec5b1fb7d320599c54f07bc20d4c49d570a2e2b"
+
+
+class _GaussianBackground(EmbodiChainDataset):
+    """Shared locked transport for versioned visual-only Gaussian packages."""
+
+    cache_prefix: ClassVar[str]
+    archive_file: ClassVar[str]
+    archive_md5: ClassVar[str]
+
+    def __init__(self, data_root: str | None = None) -> None:
+        """Download a complete USD-entry package under a version-specific cache.
+
+        Args:
+            data_root: Optional cache root overriding the EmbodiChain default.
+        """
+        relative = "scene_assets/gaussian_backgrounds_v1/" + self.archive_file
+        prefix = EMBODICHAIN_DOWNLOAD_PREFIX.replace(
+            "/resolve/main/", f"/resolve/{_GAUSSIAN_REVISION}/", 1
+        )
+        urls = [prefix + relative]
+        official = (
+            "https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/"
+            + _GAUSSIAN_REVISION
+            + "/"
+            + relative
+        )
+        if official not in urls:
+            urls.append(official)
+        descriptor = o3d.data.DataDescriptor(urls, self.archive_md5)
+        root = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+        super().__init__(self.cache_prefix, descriptor, root)
+
+
+class RoboSplatterOfficeGS(_GaussianBackground):
+    """RoboSplatter office scan with a metre/Z-up USD and AssetRevision entry.
+
+    Resolve ``RoboSplatterOfficeGS/asset.usda`` through ``get_data_path``.
+    The USD carries the source Y-up rotation; do not apply it a second time.
+    This Apache-2.0 scan contains appearance only, with no collision geometry.
+    """
+
+    cache_prefix = "RoboSplatterOfficeGSV1"
+    archive_file = "robosplatter_office_v1.zip"
+    archive_md5 = "c36ff7550a47677479f22a21a8ee3c40"
+
+
+class DiscoverseLab3GS(_GaussianBackground):
+    """DISCOVERSE lab3 with preserved source and decoded Gaussian PLY bytes.
+
+    Resolve ``DiscoverseLab3GS/asset.usda`` through ``get_data_path``.
+    This is a visual-only metre/Z-up scene. Upstream model licensing is not
+    separately declared; the package retains that status and its provenance.
+    Packaging does not infer the project's software license for model data.
+    """
+
+    cache_prefix = "DiscoverseLab3GSV1"
+    archive_file = "discoverse_lab3_v1.zip"
+    archive_md5 = "ec9f17d4610e0dd5347ddb4815c531ad"
+
+
+class RoboSimGSTabletopGS(_GaussianBackground):
+    """RoboSimGS single-view tabletop with a visual-only USD/AssetRevision entry.
+
+    Resolve ``RoboSimGSTabletopGS/asset.usda`` through ``get_data_path``.
+    Coordinates are metres/Z-up with the captured tabletop near Z=0. Source
+    bytes and the upstream dataset's MIT declaration are retained in the bundle.
+    """
+
+    cache_prefix = "RoboSimGSTabletopGSV1"
+    archive_file = "robosimgs_tabletop_v1.zip"
+    archive_md5 = "b6fc69397d64ccff611bff5712931b1a"
 
 
 class SceneData(EmbodiChainDataset):

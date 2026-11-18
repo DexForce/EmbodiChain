@@ -50,9 +50,12 @@ reference remains supported. Do not add policy inheritance or arbitrary merges.
 - An environment component is Task Program independent and may also serve a
   handwritten or RL deployment.
 - A physical scene component contains no Task Program metadata.
-- Embodiment overrides are limited to `uid`, `init_pos`, `init_rot`,
-  `init_qpos`, and bounded calibration of existing drive gains and hand
-  `open`/`grasp` commands; the sensor suite is selected atomically.
+- Embodiment robot installation `overrides` are limited to `uid`, `init_pos`,
+  `init_rot`, `init_qpos`, and bounded calibration of existing drive gains and
+  hand `open`/`grasp` commands. A separate UID-keyed `camera_overrides` may change
+  only declared ordinary cameras' intrinsics/extrinsics; sensor membership,
+  type, parent, resolution and outputs remain component-owned. See the
+  [calibration contract](../../../../agent_context/topics/env-framework/configuration.md#reusable-gym-deployment-components).
 
 ## Multiple embodiments
 

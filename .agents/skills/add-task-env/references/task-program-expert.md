@@ -49,8 +49,12 @@ embodiment:
 ```
 
 Paths resolve relative to the runnable deployment. Deployment embodiment
-overrides are limited to `uid`, `init_pos`, `init_rot`, `init_qpos`, and
-bounded calibration of existing drive gains and hand `open`/`grasp` commands.
+robot installation overrides are limited to `uid`, `init_pos`, `init_rot`,
+`init_qpos`, and bounded calibration of existing drive gains and hand
+`open`/`grasp` commands. Use the separate UID-keyed `camera_overrides` for
+scene-specific intrinsics/extrinsics of explicitly declared ordinary cameras,
+following the
+[calibration contract](../../../../agent_context/topics/env-framework/configuration.md#reusable-gym-deployment-components).
 
 ## Python boundary
 

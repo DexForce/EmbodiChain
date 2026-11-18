@@ -1,0 +1,342 @@
+{
+  "candidate": {
+    "candidate_id": "candidate_01",
+    "draft": {
+      "schema_version": "action_engine_task_draft_v1",
+      "task_id": "case",
+      "instruction": "执行测试任务",
+      "steps": [
+        {
+          "id": "step_01",
+          "task_type": "E2",
+          "object": {
+            "kind": "scene_ref",
+            "step_id": "",
+            "reference": "source",
+            "quantifier": "one",
+            "count": 0
+          },
+          "target": {
+            "kind": "none",
+            "step_id": "",
+            "reference": "",
+            "quantifier": "one",
+            "count": 0
+          },
+          "relation": "none",
+          "required_arm": "auto",
+          "transfer_arm": "none",
+          "receive_arm": "none",
+          "orientation_goal": "upright",
+          "target_state": "none",
+          "target_setting": 0,
+          "layout": "none",
+          "axis": "none",
+          "direction": "none",
+          "terminal_behavior": "hold",
+          "depends_on": []
+        }
+      ]
+    },
+    "scene_request": {
+      "schema_version": "action_engine_scene_request_v1",
+      "task_id": "case",
+      "references": [
+        {
+          "reference_id": "step_01.object",
+          "step_id": "step_01",
+          "role": "object",
+          "reference": "source",
+          "quantifier": "one",
+          "count": 0,
+          "source_structure": "rigid_object",
+          "affordances": [
+            "graspable",
+            "orientable"
+          ],
+          "initial_state": {},
+          "attributes": {}
+        }
+      ]
+    },
+    "success_spec": {
+      "schema_version": "action_engine_success_spec_v1",
+      "task_id": "case",
+      "op": "all",
+      "terms": [
+        {
+          "step_id": "step_01",
+          "type": "object_upright"
+        }
+      ]
+    },
+    "semantic_hash": "e96133335ac34bf6a2224f4a69c9fd5c478160c6468a4e3cb0e247c9b2290a75",
+    "vote_count": 1,
+    "attempts": 1,
+    "normalizations": []
+  },
+  "projections": [
+    {
+      "commit": "50d3bbcf1",
+      "task_spec": {
+        "schema_version": "task_spec/v0.1",
+        "canonicalization_version": "task_spec_c14n/v1",
+        "roles": [
+          {
+            "id": "role_001",
+            "kind": "object",
+            "cardinality": "one",
+            "affordances": [
+              "graspable",
+              "orientable"
+            ],
+            "properties": {},
+            "source_structure": "rigid_object"
+          }
+        ],
+        "init": [],
+        "goal": [
+          {
+            "id": "goal_001",
+            "predicate": "object_upright",
+            "operator": "eq",
+            "expected": true,
+            "subject": "role_001",
+            "arguments": {
+              "orientation_goal": "upright",
+              "task_type": "E2",
+              "terminal_behavior": "hold"
+            }
+          }
+        ],
+        "invariants": [],
+        "temporal": [],
+        "milestones": [
+          {
+            "id": "step_01",
+            "achieve": [
+              {
+                "id": "milestone:step_01:0",
+                "predicate": "object_upright",
+                "operator": "eq",
+                "expected": true,
+                "subject": "role_001",
+                "arguments": {
+                  "orientation_goal": "upright",
+                  "task_type": "E2",
+                  "terminal_behavior": "hold"
+                }
+              }
+            ]
+          }
+        ],
+        "requirements": [
+          {
+            "consumer": "asset",
+            "key": "role_001",
+            "value": {
+              "affordances": [
+                "graspable",
+                "orientable"
+              ],
+              "attributes": {},
+              "source_structure": "rigid_object"
+            }
+          },
+          {
+            "consumer": "expansion",
+            "key": "lineage_key",
+            "value": "task_spec.semantic_hash"
+          },
+          {
+            "consumer": "scene",
+            "key": "role_001",
+            "value": {
+              "initial_state": {},
+              "kind": "object"
+            }
+          },
+          {
+            "consumer": "task_program",
+            "key": "goal_predicates",
+            "value": [
+              "object_upright"
+            ]
+          }
+        ],
+        "task_id": "case",
+        "instruction": "执行测试任务",
+        "metadata": {
+          "candidate_id": "candidate_01",
+          "generator": "embodichain.gen_sim.task_engine",
+          "goal_sources": {
+            "goal_001": [
+              "step_01"
+            ]
+          },
+          "instruction_coverage": "validated_draft_only",
+          "legacy_semantic_hash": "e96133335ac34bf6a2224f4a69c9fd5c478160c6468a4e3cb0e247c9b2290a75",
+          "milestone_sources": {
+            "step_01": "step_01"
+          },
+          "role_references": {
+            "role_001": [
+              "step_01.object"
+            ]
+          },
+          "step_roles": {
+            "step_01": {
+              "object": "role_001"
+            }
+          },
+          "task_candidate_schema": "action_engine_task_draft_v1",
+          "terminal_goal_policy": "explicit_state_slots/v1"
+        },
+        "semantic_hash": "20bcb1b03469d3b17f2c2c0770ef064643b47b2662a48b10797ea9bff680bad1"
+      }
+    },
+    {
+      "commit": "8010a3027",
+      "task_spec": {
+        "schema_version": "task_spec/v0.1",
+        "canonicalization_version": "task_spec_c14n/v1",
+        "roles": [
+          {
+            "id": "role_001",
+            "kind": "object",
+            "cardinality": "one",
+            "affordances": [
+              "graspable",
+              "orientable"
+            ],
+            "properties": {},
+            "source_structure": "rigid_object"
+          }
+        ],
+        "init": [],
+        "goal": [
+          {
+            "id": "goal_001",
+            "predicate": "object_upright",
+            "operator": "eq",
+            "expected": true,
+            "subject": "role_001",
+            "arguments": {
+              "orientation_goal": "upright",
+              "task_type": "E2",
+              "terminal_behavior": "hold"
+            }
+          },
+          {
+            "id": "goal_002",
+            "predicate": "held",
+            "operator": "eq",
+            "expected": true,
+            "subject": "role_001",
+            "arguments": {
+              "task_type": "E2"
+            }
+          }
+        ],
+        "invariants": [],
+        "temporal": [],
+        "milestones": [
+          {
+            "id": "step_01",
+            "achieve": [
+              {
+                "id": "milestone:step_01:0",
+                "predicate": "object_upright",
+                "operator": "eq",
+                "expected": true,
+                "subject": "role_001",
+                "arguments": {
+                  "orientation_goal": "upright",
+                  "task_type": "E2",
+                  "terminal_behavior": "hold"
+                }
+              },
+              {
+                "id": "milestone:step_01:1",
+                "predicate": "held",
+                "operator": "eq",
+                "expected": true,
+                "subject": "role_001",
+                "arguments": {
+                  "task_type": "E2"
+                }
+              }
+            ]
+          }
+        ],
+        "requirements": [
+          {
+            "consumer": "asset",
+            "key": "role_001",
+            "value": {
+              "affordances": [
+                "graspable",
+                "orientable"
+              ],
+              "attributes": {},
+              "source_structure": "rigid_object"
+            }
+          },
+          {
+            "consumer": "expansion",
+            "key": "lineage_key",
+            "value": "task_spec.semantic_hash"
+          },
+          {
+            "consumer": "scene",
+            "key": "role_001",
+            "value": {
+              "initial_state": {},
+              "kind": "object"
+            }
+          },
+          {
+            "consumer": "task_program",
+            "key": "goal_predicates",
+            "value": [
+              "held",
+              "object_upright"
+            ]
+          }
+        ],
+        "task_id": "case",
+        "instruction": "执行测试任务",
+        "metadata": {
+          "candidate_id": "candidate_01",
+          "generator": "embodichain.gen_sim.task_engine",
+          "goal_sources": {
+            "goal_001": [
+              "step_01"
+            ],
+            "goal_002": [
+              "step_01"
+            ]
+          },
+          "instruction_coverage": "validated_draft_only",
+          "legacy_semantic_hash": "e96133335ac34bf6a2224f4a69c9fd5c478160c6468a4e3cb0e247c9b2290a75",
+          "milestone_sources": {
+            "step_01": "step_01"
+          },
+          "role_references": {
+            "role_001": [
+              "step_01.object"
+            ]
+          },
+          "step_roles": {
+            "step_01": {
+              "object": "role_001"
+            }
+          },
+          "task_candidate_schema": "action_engine_task_draft_v1",
+          "terminal_goal_policy": "explicit_state_slots/v1"
+        },
+        "semantic_hash": "32cc2eea147a3789743973aca2bf9b8cd71bf8b3161a111956c1b4d8033dd80c"
+      }
+    }
+  ]
+}

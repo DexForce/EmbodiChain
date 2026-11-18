@@ -305,7 +305,9 @@ needed to hold the bottle as gravity changes direction. The bottle is released
 only in the Place action.
 
 `task.dual_ur5_dh_pgi_140_80.yaml` uses the same low table and program, with
-`integration.dual_ur5.yaml` owning its PGI-specific bottle grasp. The deeper
+the deployment integration overrides owning its PGI-specific bottle grasp.
+It shares `integration.dual_arm.yaml`; the explicit grasp matrix and
+integration identity remain selected by `task.dual_ur5_dh_pgi_140_80.yaml`. The deeper
 grip places the bottle between the pads instead of at their tips. This is a
 simulation calibration, not a factory grasp specification.
 

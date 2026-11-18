@@ -1132,9 +1132,6 @@ def test_place_effect_spec_binds_source_and_verified_detach_baseline() -> None:
     assert isinstance(gate_relation, HeldObjectStateExpectation)
     assert gate_relation.expectation_id == "source"
     assert gate_relation.relation is HeldObjectRelation.DETACHED
-    # A released object may still be beside the gripper before retraction.
-    # Full pose separation remains required by the terminal effect above.
-    assert len(gate.effect_spec.clauses) == 1
     (gate_constraint,) = gate.effect_spec.clauses
     assert isinstance(gate_constraint, BinaryEffectClause)
     assert gate_constraint.expected is False

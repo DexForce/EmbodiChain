@@ -8,14 +8,12 @@ scene_binding:
   registry_id: robotiq140_tabletop
   rigid_objects:
   - entity_id: cube
-    simulation_uid: cube
     dynamics: dynamic
     semantic_type: cube
     affordances:
     - entity_id: cube_grasp
       kind: antipodal_grasp
   - entity_id: support_surface
-    simulation_uid: support_surface
     dynamics: static
     semantic_type: support_surface
 profile:
@@ -24,7 +22,7 @@ profile:
       primary: left
     place:
       primary: left
-  action_options:
+  skill_options:
     pick:
       kind: pick_up
       hand_interp_steps: 20
@@ -34,22 +32,11 @@ profile:
       lift_height: 0.1
       # Known-cube grasp with 10 mm surface clearance, without another hand-frame conversion.
       fixed_object_to_eef:
-      - 0
-      - -1
-      - 0
-      - 0
-      - -1
-      - 0
-      - 0
-      - 0
-      - 0
-      - 0
-      - -1
-      - 0.01
-      - 0
-      - 0
-      - 0
-      - 1
+        position: [0.0, 0.0, 0.01]
+        rotation_matrix:
+        - [0.0, -1.0, 0.0]
+        - [-1.0, 0.0, 0.0]
+        - [0.0, 0.0, -1.0]
     place:
       kind: place
       hand_interp_steps: 40

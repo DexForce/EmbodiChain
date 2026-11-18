@@ -29,6 +29,7 @@ from embodichain.lab.sim.cfg import (
     NewtonPhysicsCfg,
     PhysicsBackendCfg,
     WindowCameraPoseCfg,
+    WindowCaptureCfg,
 )
 from embodichain.lab.sim.physics import DefaultPhysicsBackend, NewtonPhysicsBackend
 from embodichain.lab.sim.physics import newton as newton_physics
@@ -108,6 +109,14 @@ def test_simulation_manager_cfg_initializes_window_camera_pose() -> None:
     assert cfg.window_camera_pose == window_camera_pose
 
 
+def test_simulation_manager_cfg_initializes_window_capture() -> None:
+    cfg = SimulationManagerCfg()
+
+    assert cfg.window_capture == WindowCaptureCfg()
+    assert cfg.window_capture.enable_hotkey is True
+    assert cfg.window_capture.hotkey.name == "SCANCODE_C"
+
+
 def test_simulation_manager_cfg_has_no_scene_construction_switch() -> None:
     cfg = SimulationManagerCfg()
 
@@ -135,6 +144,88 @@ def test_newton_physics_cfg_preserves_dexsim_dexuni_default() -> None:
 
     assert isinstance(dexsim_cfg.solver_cfg, DexUniSolverCfg)
     assert dexsim_cfg.solver_cfg.solver_type == "dexuni"
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize("form", ["direct", "registered", "mapping"])
+def test_external_provider_options_do_not_require_unrelated_builtin_exports(
+    monkeypatch, form
+):
+    from dexsim.engine import newton_physics
+    from dexsim.engine.newton_physics import (
+        ProviderNewtonSolverCfg,
+        RegisteredNewtonSolverCfg,
+    )
+
+    options = {"checkpoint": "/models/example"}
+    normalize = newton_physics.normalize_newton_solver_name
+    # Unit-test conversion independently of this checkout's installation.
+    # Actual entry-point discovery is covered by the installed-wheel probe.
+    monkeypatch.setattr(
+        newton_physics,
+        "normalize_newton_solver_name",
+        lambda name: name if name == "nerd" else normalize(name),
+    )
+    if form == "direct":
+        solver = ProviderNewtonSolverCfg(
+            provider_factory=lambda: object(), options=options
+        )
+    elif form == "registered":
+        solver = RegisteredNewtonSolverCfg("nerd", options=options)
+    else:
+        solver = {"solver_type": "nerd", "options": options}
+    monkeypatch.delattr(newton_physics, "DexUniSolverCfg")
+    config = NewtonPhysicsCfg(solver_cfg=solver, collision_cfg=None)
+    native = config.to_dexsim_cfg(0)
+    assert native.solver_cfg.options == options
+    if form == "direct":
+        assert native.solver_cfg is config.solver_cfg
+    else:
+        assert native.solver_cfg.solver_type == "nerd"
+
+
+@pytest.mark.no_sim
+def test_registered_builtin_cannot_bypass_gradient_or_identity_guards(monkeypatch):
+    from dexsim.engine.newton_physics import RegisteredNewtonSolverCfg
+    from dexsim.engine import newton_physics
+
+    normalize = newton_physics.normalize_newton_solver_name
+    monkeypatch.setattr(
+        newton_physics,
+        "normalize_newton_solver_name",
+        lambda name: name if name == "nerd" else normalize(name),
+    )
+
+    with pytest.raises(RuntimeError, match="gradient mode"):
+        NewtonPhysicsCfg(
+            requires_grad=True,
+            solver_cfg=RegisteredNewtonSolverCfg(
+                "mjwarp", options={"use_mujoco_cpu": True}
+            ),
+        ).to_dexsim_cfg(0)
+    with pytest.raises(ValueError, match="cannot override"):
+        NewtonPhysicsCfg(
+            solver_cfg=RegisteredNewtonSolverCfg(
+                "mjwarp", options={"solver_type": "xpbd"}
+            )
+        ).to_dexsim_cfg(0)
+    with pytest.raises(ValueError, match="belong in options"):
+        NewtonPhysicsCfg(
+            solver_cfg={"solver_type": "nerd", "checkpoint": "model"}
+        ).to_dexsim_cfg(0)
+
+
+@pytest.mark.no_sim
+def test_default_ground_is_creation_owned_and_serialized():
+    cfg = SimulationManagerCfg(enable_ground_plane=False)
+    assert cfg.to_dict()["enable_ground_plane"] is False
+    sim = object.__new__(SimulationManager)
+    sim.sim_config = cfg
+    sim._spawn_scene = MagicMock()
+    sim._declare_spawn_default_plane()
+    sim._spawn_scene.declare.assert_not_called()
+    with pytest.raises(TypeError, match="boolean"):
+        SimulationManagerCfg(enable_ground_plane="false")
 
 
 @pytest.mark.no_sim
@@ -628,3 +719,10 @@ def test_two_way_full_surface_options_are_forwarded_to_native() -> None:
         native.solver_cfg.collision_options["enable_rigid_soft_full_surface_contact"]
         is True
     )
+
+
+def test_enable_ground_plane_is_an_explicit_independent_boolean():
+    assert SimulationManagerCfg().enable_ground_plane is True
+    assert SimulationManagerCfg(enable_ground_plane=False).enable_ground_plane is False
+    with pytest.raises(TypeError, match="enable_ground_plane"):
+        SimulationManagerCfg(enable_ground_plane="false")

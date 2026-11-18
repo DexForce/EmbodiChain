@@ -66,9 +66,17 @@ def compute_gae(
     dones = rollout["done"][:, :-1].bool()
     truncated = rollout["truncated"][:, :-1].bool()
 
-    # Bootstrap time-limit truncations with the value stored for the
-    # transition before the done mask cuts GAE recursion.
-    rewards = rewards + gamma * values[:, :-1] * truncated
+    # Native environments preserve the terminal observation before auto-reset.
+    # Retain the historical fallback for external environments that do not yet
+    # publish terminal observations; never bootstrap from a reset state.
+    timeout_values = values[:, :-1]
+    if "timeout_value" in rollout.keys():
+        terminal_values = rollout["timeout_value"][:, :-1]
+        timeout_values = torch.where(
+            torch.isfinite(terminal_values), terminal_values, timeout_values
+        )
+    truncated = truncated & ~rollout["terminated"][:, :-1].bool()
+    rewards = rewards + gamma * timeout_values * truncated
 
     if rewards.ndim != 2:
         raise ValueError(

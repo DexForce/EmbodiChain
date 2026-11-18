@@ -118,11 +118,17 @@ embodiment:
   component: ../../../components/embodiments/<embodiment_id>.yaml
 ```
 
-Optional deployment overrides are limited to `uid`, `init_pos`, `init_rot`,
-`init_qpos`, and bounded calibration: replacing existing named
+Optional robot installation `overrides` are limited to `uid`, `init_pos`,
+`init_rot`, `init_qpos`, and bounded calibration: replacing existing named
 `joint_drive_props.stiffness`/`damping` values and a declared hand's complete
 `open`/`grasp` commands. Prefer these over copying a component for task-local
-gains or commands. Do not repeat inline `robot` or `sensor` fields.
+gains or commands. The separate `camera_overrides` mapping may select
+an ordinary Camera UID explicitly declared in `sensor` or `simulation.sensors`
+and change only intrinsics/extrinsics. Keep sensor membership, parent, resolution
+and output flags with the component. Do not repeat inline `robot` or `sensor`
+fields or copy an embodiment merely for scene-specific camera calibration.
+Follow the closed [calibration contract](../../../agent_context/topics/env-framework/configuration.md#reusable-gym-deployment-components),
+including representation-switch and finite/degenerate-pose checks.
 
 One task can provide multiple thin deployments selecting compatible
 embodiments. Keep the program embodiment-independent and validate the

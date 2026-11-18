@@ -29,6 +29,11 @@ Available Toolkits
        collisions for parallel-jaw grippers.
      - Annotate graspable regions and generate candidate grasps for manipulation.
 
+   * - :doc:`Precision Assembly <precision_assembly>`
+     - Generates clearance-preserving peg/hole, thread and gear assets; prepares
+       portable manifests, USD exports and native compound/hinge configurations.
+     - Build precision assembly scenes and inspect recorded physical demos.
+
 Choosing a Toolkit
 ------------------
 
@@ -37,6 +42,10 @@ robot but its collision meshes are unsuitable for simulation. Use URDF assembly
 when the robot is distributed across multiple component files. Use grasp
 generation after the target object's mesh is ready and a manipulation workflow
 needs feasible end-effector poses.
+
+Use precision assembly for mating parts whose collision clearance must be
+retained. Its guide includes native demo recordings and the original mjfit
+research reference. URDF assembly instead combines robot component descriptions.
 
 The asset tools can be chained: preprocess component collision meshes, assemble
 the components into one URDF, and then load the resulting robot in a grasping
@@ -48,3 +57,4 @@ task.
    URDF Convex Decomposition <convex_decomposition>
    URDF Assembly <urdf_assembly>
    Parallel-Gripper Grasp Generation <grasp_generator>
+   Precision Assembly <precision_assembly>

@@ -1,0 +1,343 @@
+{
+  "seed": 7,
+  "passed": true,
+  "input": {
+    "layout_valid": false,
+    "counts": {
+      "overlapping_part_pairs": 2,
+      "parts_in_keep_out": 2,
+      "parts_outside_bounds": 1
+    },
+    "fixed_components_unchanged": true,
+    "max_support_height_error_m": 0.04999999523162835,
+    "part_xy_m": {
+      "part_A": [
+        -0.05000000074505806,
+        -0.10000000149011612
+      ],
+      "part_B": [
+        0.019999999552965164,
+        -0.10000000149011612
+      ],
+      "part_C": [
+        0.07999999821186066,
+        -0.11999999731779099
+      ],
+      "part_D": [
+        -0.05000000074505806,
+        0.20000000298023224
+      ],
+      "part_E": [
+        0.14000000059604645,
+        0.2199999988079071
+      ],
+      "part_F": [
+        0.8700000047683716,
+        -0.4000000059604645
+      ]
+    },
+    "checks": [
+      {
+        "name": "scene.layout.actual",
+        "status": "failed",
+        "metrics": {
+          "linear": 0.13500000417232513,
+          "fixed": 0.0,
+          "collision": 0.18000000298023225
+        }
+      }
+    ]
+  },
+  "layout_operations_did_not_step": true,
+  "entity_count": 22,
+  "repaired": {
+    "layout_valid": true,
+    "counts": {
+      "overlapping_part_pairs": 0,
+      "parts_in_keep_out": 0,
+      "parts_outside_bounds": 0
+    },
+    "fixed_components_unchanged": true,
+    "max_support_height_error_m": 0.04999999523162835,
+    "part_xy_m": {
+      "part_A": [
+        -0.15166670083999634,
+        -0.12999999523162842
+      ],
+      "part_B": [
+        0.01333329826593399,
+        -0.11999999731779099
+      ],
+      "part_C": [
+        0.18833330273628235,
+        -0.11999999731779099
+      ],
+      "part_D": [
+        -0.05000000074505806,
+        0.019999999552965164
+      ],
+      "part_E": [
+        0.3050000071525574,
+        0.2199999988079071
+      ],
+      "part_F": [
+        0.7799999713897705,
+        -0.4000000059604645
+      ]
+    },
+    "checks": [
+      {
+        "name": "scene.layout.actual",
+        "status": "passed",
+        "metrics": {
+          "linear": 8.940696794024205e-10,
+          "fixed": 0.0,
+          "collision": 5.2154064122955646e-09
+        }
+      }
+    ]
+  },
+  "final_layouts": [
+    {
+      "layout_valid": true,
+      "counts": {
+        "overlapping_part_pairs": 0,
+        "parts_in_keep_out": 0,
+        "parts_outside_bounds": 0
+      },
+      "fixed_components_unchanged": true,
+      "max_support_height_error_m": 4.371609502396012e-06,
+      "part_xy_m": {
+        "part_A": [
+          -0.15163955092430115,
+          -0.1299760639667511
+        ],
+        "part_B": [
+          0.013365942984819412,
+          -0.11996784061193466
+        ],
+        "part_C": [
+          0.1883649379014969,
+          -0.1199703961610794
+        ],
+        "part_D": [
+          -0.049966730177402496,
+          0.020032022148370743
+        ],
+        "part_E": [
+          0.30502375960350037,
+          0.22001902759075165
+        ],
+        "part_F": [
+          0.7800273299217224,
+          -0.39997556805610657
+        ]
+      },
+      "checks": [
+        {
+          "name": "scene.layout.actual",
+          "status": "passed",
+          "metrics": {
+            "linear": 3.441373414714288e-05,
+            "fixed": 0.0,
+            "collision": 3.831056490527507e-05
+          }
+        }
+      ]
+    },
+    {
+      "layout_valid": true,
+      "counts": {
+        "overlapping_part_pairs": 0,
+        "parts_in_keep_out": 0,
+        "parts_outside_bounds": 0
+      },
+      "fixed_components_unchanged": true,
+      "max_support_height_error_m": 4.371148825232929e-06,
+      "part_xy_m": {
+        "part_A": [
+          -0.019972801208496094,
+          0.49002400040626526
+        ],
+        "part_B": [
+          0.14503240585327148,
+          -0.2802565395832062
+        ],
+        "part_C": [
+          0.32003164291381836,
+          0.03502959385514259
+        ],
+        "part_D": [
+          -0.7915430068969727,
+          0.04003222659230232
+        ],
+        "part_E": [
+          0.3250236511230469,
+          0.19501900672912598
+        ],
+        "part_F": [
+          -0.30724191665649414,
+          -0.22598141431808472
+        ]
+      },
+      "checks": [
+        {
+          "name": "scene.layout.actual",
+          "status": "passed",
+          "metrics": {
+            "linear": 2.3334345296471826e-05,
+            "fixed": 0.0,
+            "collision": 4.0038546194443025e-05
+          }
+        }
+      ]
+    },
+    {
+      "layout_valid": true,
+      "counts": {
+        "overlapping_part_pairs": 0,
+        "parts_in_keep_out": 0,
+        "parts_outside_bounds": 0
+      },
+      "fixed_components_unchanged": true,
+      "max_support_height_error_m": 4.401626101824263e-06,
+      "part_xy_m": {
+        "part_A": [
+          -0.22232551872730255,
+          -0.3880486488342285
+        ],
+        "part_B": [
+          -0.0573200024664402,
+          -0.3468132019042969
+        ],
+        "part_C": [
+          0.11767897009849548,
+          0.0017752647399902344
+        ],
+        "part_D": [
+          0.7885558605194092,
+          -0.19745969772338867
+        ],
+        "part_E": [
+          -0.28035131096839905,
+          0.005019187927246094
+        ],
+        "part_F": [
+          -0.4023253321647644,
+          -0.4736900329589844
+        ]
+      },
+      "checks": [
+        {
+          "name": "scene.layout.actual",
+          "status": "passed",
+          "metrics": {
+            "linear": 1.6748335037869433e-05,
+            "fixed": 0.0,
+            "collision": 2.2683047973287573e-05
+          }
+        }
+      ]
+    },
+    {
+      "layout_valid": true,
+      "counts": {
+        "overlapping_part_pairs": 0,
+        "parts_in_keep_out": 0,
+        "parts_outside_bounds": 0
+      },
+      "fixed_components_unchanged": true,
+      "max_support_height_error_m": 4.4223132500409434e-06,
+      "part_xy_m": {
+        "part_A": [
+          -0.35522031784057617,
+          -0.054822444915771484
+        ],
+        "part_B": [
+          0.05967903137207031,
+          0.020032882690429688
+        ],
+        "part_C": [
+          0.23467779159545898,
+          -0.22280263900756836
+        ],
+        "part_D": [
+          -0.5809192657470703,
+          -0.10123729705810547
+        ],
+        "part_E": [
+          -0.32497596740722656,
+          0.2756805419921875
+        ],
+        "part_F": [
+          -0.7124819755554199,
+          -0.32494020462036133
+        ]
+      },
+      "checks": [
+        {
+          "name": "scene.layout.actual",
+          "status": "passed",
+          "metrics": {
+            "linear": 1.6920166726774877e-05,
+            "fixed": 0.0,
+            "collision": 4.295251819716461e-05
+          }
+        }
+      ]
+    }
+  ],
+  "augmentation_variant_ids": [
+    "scene-variant:f8632375dca2432b9600c680d1bec866dff63246006cb31b75b53e3f6c34aa29",
+    "scene-variant:c170e1ddc83e9a5f205d6b5846a0f96a0d9b3b5ef09c0145266899395d30c0a4",
+    "scene-variant:d435ec2dc467137d33f3182e644c9e6625a74f59bf66829d473ba99e82e66b4c"
+  ],
+  "augmentation_rms_displacement_m": [
+    0.612360816096741,
+    0.6696485552666279,
+    0.7084474440765356
+  ],
+  "physics_steps": 51,
+  "stable": true,
+  "stability_checks": [
+    {
+      "name": "scene.stability",
+      "status": "passed",
+      "metrics": {
+        "steps": 51,
+        "max_linear_speed": 0.0,
+        "max_angular_speed": 0.0,
+        "max_joint_speed": 0.0,
+        "linear_threshold": 0.01,
+        "angular_threshold": 0.01,
+        "joint_threshold": 0.01
+      }
+    }
+  ],
+  "phases": [
+    {
+      "stage": "construction_table",
+      "physical_time_s": 0.0
+    },
+    {
+      "stage": "construction_fixtures",
+      "physical_time_s": 0.0
+    },
+    {
+      "stage": "constructed_input",
+      "physical_time_s": 0.0
+    },
+    {
+      "stage": "constraint_solved",
+      "physical_time_s": 0.0
+    },
+    {
+      "stage": "generated_variants",
+      "physical_time_s": 0.0
+    },
+    {
+      "stage": "validated_variants",
+      "physical_time_s": 0.5100000000000002
+    }
+  ]
+}

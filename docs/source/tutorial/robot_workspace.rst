@@ -128,7 +128,7 @@ server; offscreen rendering requires the graphics runtime.
 
 ``scene`` mode uses ``SimulationManager`` and ``sim.scene`` without importing
 Gym or Task Program. ``task`` mode assembles the same scene in ``EmbodiedEnv``
-and runs the existing Pick/Place calls through ``execute_scene_variant()``.
+and runs the existing Pick/Place calls through ``execute_scene_variants()``.
 Viser and the native Hybrid renderer display the same checked red/green points;
 the camera captures that point cloud directly in the simulation scene.
 

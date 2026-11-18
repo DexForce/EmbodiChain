@@ -166,7 +166,7 @@ def test_unsupported_policy_subset_fails_static_preflight(tmp_path, unsupported,
         config_to_cfg(config, source_path=_TASK, _register_env=False)
 
 
-def test_strict_inspector_checks_policy_authority_without_registering(monkeypatch):
+def test_strict_inspector_checks_policy_authority_without_registering(tmp_path):
     import runpy
     import gymnasium
     from embodichain.lab.gym.utils.registration import REGISTERED_ENVS
@@ -182,7 +182,18 @@ def test_strict_inspector_checks_policy_authority_without_registering(monkeypatc
     assert before == (set(REGISTERED_ENVS), set(gymnasium.envs.registry))
     config = _load("InvalidPolicyInspector-v1")
     config.pop("rl_task")
-    monkeypatch.setitem(inspect.__globals__, "load_config", lambda path: config)
+    for key in ("environment", "embodiment", "evaluation"):
+        config[key]["component"] = str(
+            (_TASK.parent / config[key]["component"]).resolve()
+        )
+    for key in ("program", "integration"):
+        config["task_program"][key] = str(
+            (_TASK.parent / config["task_program"][key]).resolve()
+        )
+    policy = config["task_program"]["execution_policy"]
+    policy["component"] = str((_TASK.parent / policy["component"]).resolve())
+    invalid = tmp_path / "invalid_policy.yaml"
+    invalid.write_text(yaml.safe_dump(config))
     with pytest.raises(ValueError, match="require rl_task"):
-        inspect(_TASK, strict_contracts=True)
+        inspect(invalid, strict_contracts=True)
     assert before == (set(REGISTERED_ENVS), set(gymnasium.envs.registry))
