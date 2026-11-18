@@ -486,6 +486,9 @@ These suites contain one nominal case at seed 11 and keep geometry, timing,
 execution and physical success separate. Input preparation freezes both arm
 waypoints and sampled grasps independently of the candidate methods. Their
 existence does not establish spatial generalization or physical success.
+The Franka CoordinatedPlacement fixture does not yet pass physically: both
+hands load, but the top-down pinch across the pan handle does not keep the
+pan's orientation in the hand, so the alignment stage fails.
 New coordinated cases also retain `case_parameters.endpoint_qualification`:
 independent sequential IK witnesses and original-goal FK, finite-state and joint
 limit checks for every endpoint of each arm. Both arms start from their frozen
