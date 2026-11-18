@@ -75,6 +75,55 @@ def test_missing_layout_is_not_zero():
     assert r["joint"] == {}
 
 
+@pytest.mark.parametrize(
+    ("tasks", "source_uuids", "matches"),
+    [
+        (("program-a", "program-b"), ("source-a", "source-b"), False),
+        (("program-a", "program-a"), ("source-a", "source-b"), True),
+        ((None, None), ("source-a", "source-b"), False),
+        ((None, None), ("source-a", "source-a"), True),
+    ],
+)
+def test_report_requires_matching_recorded_task_identity(
+    tmp_path, monkeypatch, tasks, source_uuids, matches
+):
+    from types import SimpleNamespace
+    import torch
+    from embodichain.lab.expansion import report_expansion_distribution
+    from embodichain.lab.expansion import persistence
+
+    jobs = [tmp_path / name for name in ("before", "after")]
+    episodes = {}
+    for job, task_id, source_uuid in zip(jobs, tasks, source_uuids, strict=True):
+        job.mkdir()
+        (job / "job.json").write_text("{}")
+        metadata = {"instruction": "Pick and place", "source_episode_uuid": source_uuid}
+        if task_id is not None:
+            metadata["scene_case"] = {"task_id": task_id}
+        episodes[job.name] = SimpleNamespace(
+            episode_id=f"episode-{job.name}",
+            commit_id=f"commit-{job.name}",
+            metadata=metadata,
+            timestamps=torch.tensor([0.0, 1.0]),
+            observations={},
+            validation=SimpleNamespace(accepted=True),
+        )
+    monkeypatch.setattr(
+        persistence.ArtifactEpisodeSink,
+        "inspect",
+        lambda self: (SimpleNamespace(confirmed=True, storage_id=self.directory.name),),
+    )
+    monkeypatch.setattr(persistence, "load_expansion_episode", episodes.__getitem__)
+    output = tmp_path / "report"
+    if matches:
+        report = report_expansion_distribution(jobs[:1], jobs[1:], output, entity="mug")
+        assert (report["before"], report["after"]) == (1, 1)
+    else:
+        with pytest.raises(ValueError, match="matching domain"):
+            report_expansion_distribution(jobs[:1], jobs[1:], output, entity="mug")
+        assert not output.exists()
+
+
 def test_orientation_sign_and_out_of_plane_rotation():
     from embodichain.lab.expansion._distribution_pose import orientation
 

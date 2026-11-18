@@ -45,13 +45,10 @@ from ._layout_numeric import (
     _specification,
 )
 from ._policy import (
-    IntraGroupRandomizationCfg,
     SceneRandomizationPolicyCfg,
-    _decode_intra,
-    _intra_payload,
+    _policy_data,
     _validate_backend,
     _validate_generation_parameters,
-    _validate_intra,
 )
 
 if TYPE_CHECKING:
@@ -251,66 +248,6 @@ def scene_layout_input_from_sim(
         parent_by_uid,
         None if movable_entity_ids is None else tuple(movable_entity_ids),
     )
-
-
-def _policy_data(cfg: SceneRandomizationPolicyCfg | Mapping) -> dict:
-    if isinstance(cfg, Mapping):
-        raw = dict(cfg)
-        cfg = SceneRandomizationPolicyCfg(**raw)
-    if not isinstance(cfg, SceneRandomizationPolicyCfg):
-        raise TypeError("policy must be a SceneRandomizationPolicyCfg or mapping")
-    cfg = cfg.copy()
-    cfg.validate()
-    _validate_backend(backend=cfg.backend, device=cfg.device, batch_size=cfg.batch_size)
-    if cfg.backend != "batched":
-        raise ValueError(
-            "The source-independent layout API supports backend='batched'."
-        )
-    _validate_generation_parameters(
-        seed=0,
-        candidate_count=1,
-        max_attempts=1,
-        collision_margin_m=cfg.collision_margin_m,
-    )
-    if type(cfg.randomize_groups) is not bool:
-        raise ValueError("randomize_groups must be a boolean.")
-    intra = cfg.intra_group
-    if isinstance(intra, dict) or intra is None:
-        intra = _decode_intra(intra)
-    if intra is None:
-        intra = IntraGroupRandomizationCfg()
-    _validate_intra(intra)
-    if not isinstance(cfg.group_xy_offset_bounds_m, dict):
-        raise ValueError("group_xy_offset_bounds_m must map root UIDs to XY bounds.")
-    for uid, bounds in cfg.group_xy_offset_bounds_m.items():
-        if bounds is None:
-            raise ValueError(
-                "Root XY bounds must be explicit lower/upper corners; omit unbounded roots."
-            )
-        _decode_intra(
-            {
-                "targets": {
-                    uid: {"xy_offset_bounds_m": bounds, "yaw_delta_range_deg": [0, 0]}
-                }
-            }
-        )
-    if cfg.group_xy_offset_bounds_m and not cfg.randomize_groups:
-        raise ValueError("Root XY bounds require randomize_groups=True.")
-    if cfg.group_targets is not None and (
-        isinstance(cfg.group_targets, str)
-        or len(set(cfg.group_targets)) != len(cfg.group_targets)
-    ):
-        raise ValueError("group_targets must contain unique root UIDs.")
-    return {
-        "backend": cfg.backend,
-        "device": cfg.device,
-        "batch_size": cfg.batch_size,
-        "collision_margin_m": float(cfg.collision_margin_m),
-        "randomize_groups": cfg.randomize_groups,
-        "group_targets": None if cfg.group_targets is None else list(cfg.group_targets),
-        "group_xy_offset_bounds_m": deepcopy(cfg.group_xy_offset_bounds_m),
-        "intra_group": _intra_payload(intra),
-    }
 
 
 @dataclass(frozen=True)

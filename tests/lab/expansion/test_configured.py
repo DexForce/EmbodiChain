@@ -58,6 +58,40 @@ def test_task_program_declarations_are_pure_and_protect_contact_phases(tmp_path)
         load_task_program_expansion(invalid)
 
 
+def test_official_layout_jobs_load_without_simulation_imports():
+    import subprocess
+    import sys
+
+    task_root = (
+        Path(__file__).resolve().parents[3]
+        / "extensions/embodichain_tasks/configs/tasks/manipulation"
+    )
+    paths = sorted(task_root.glob("**/acceptance/scene_first/expansion.yaml"))
+    assert paths
+    code = """
+import importlib.abc
+import sys
+
+class NoSimulator(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.startswith(("dexsim", "embodichain.lab.sim", "embodichain.lab.gym")):
+            raise AssertionError(f"configuration loader imported {fullname}")
+
+sys.meta_path.insert(0, NoSimulator())
+from embodichain.lab.expansion import load_task_program_expansion
+for path in sys.argv[1:]:
+    sampling = load_task_program_expansion(path)["scene_sampling"]
+    assert sampling["layout"]["policy"] and sampling["task_mode"]["phases"]
+    assert sampling["robot_anchors"]
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code, *map(str, paths)],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 @pytest.mark.parametrize("name", ["default", "newton", "rgbd", "motion"])
 def test_example_preflight_resolves_owned_backend_and_budget(name, tmp_path):
     path = (

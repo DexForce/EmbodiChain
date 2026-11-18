@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
+from collections.abc import Mapping
 from copy import deepcopy
 import hashlib
 import json
@@ -164,6 +165,17 @@ def _read(paths: list[Path], entity: str) -> tuple[list[dict], list[str]]:
             if not episode.validation.accepted:
                 raise ValueError("Confirmed episode lacks acceptance")
             meta = episode.metadata
+            case = meta.get("scene_case")
+            task_id = case.get("task_id") if isinstance(case, Mapping) else None
+            source_uuid = meta.get("source_episode_uuid")
+            if isinstance(task_id, str) and task_id.strip():
+                task_identity = ("task_id", task_id)
+            elif isinstance(source_uuid, str) and source_uuid.strip():
+                task_identity = ("legacy_source_episode_uuid", source_uuid)
+            else:
+                raise ValueError(
+                    f"Episode {episode.episode_id} lacks a recorded task identity"
+                )
             # Fixed topology, installation and task identity; sampled object poses are features.
             robot = [
                 dict(
@@ -177,6 +189,7 @@ def _read(paths: list[Path], entity: str) -> tuple[list[dict], list[str]]:
             domain = _digest(
                 {
                     "robot": robot,
+                    "task_identity": task_identity,
                     "instruction": meta.get("instruction"),
                     "backend": meta.get("physics_backend"),
                     "deployment_robot": deployment.get("robot"),
@@ -217,7 +230,8 @@ def _read(paths: list[Path], entity: str) -> tuple[list[dict], list[str]]:
                     "artifact": receipt.storage_id,
                     "job": str(directory),
                     "domain_id": domain,
-                    "source_episode_uuid": meta.get("source_episode_uuid"),
+                    "task_id": task_id,
+                    "source_episode_uuid": source_uuid,
                     "initial_pose": None if state is None else state[0, :7].tolist(),
                     "final_pose": None if state is None else state[-1, :7].tolist(),
                     "orientation": (

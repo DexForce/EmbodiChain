@@ -93,6 +93,14 @@ class MeasuredTaskMonitor:
             self.events.append((data["event_id"], conditions, steps))
         if len({e[0] for e in self.events}) != len(self.events):
             raise ValueError("event IDs must be unique")
+        event_conditions = (
+            condition for _, conditions, _ in self.events for condition in conditions
+        )
+        self._transport_guards = {
+            json.dumps(condition, sort_keys=True): condition
+            for condition in (*self.final_checks, *event_conditions)
+            if condition["kind"] == "transport_guard"
+        }
         self.initial_heights = {}
         self._index = 0
         self._steps = 0
@@ -434,10 +442,7 @@ class MeasuredTaskMonitor:
     def observe(self, env: Any, action: Any) -> None:
         """Record consecutive event predicates at actual control boundaries."""
         self._steps += 1
-        for condition in self.final_checks:
-            if condition["kind"] != "transport_guard":
-                continue
-            key = json.dumps(dict(condition), sort_keys=True)
+        for key, condition in self._transport_guards.items():
             lifted, dropped = self._transport.get(key, (False, False))
             pose = env.sim.get_rigid_object(condition["entity"]).get_local_pose()[
                 self.env_id, :3

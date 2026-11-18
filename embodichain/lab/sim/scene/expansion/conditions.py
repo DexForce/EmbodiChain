@@ -35,6 +35,10 @@ if TYPE_CHECKING:
 __all__ = ["SceneLayoutCondition"]
 
 
+class _LayoutConditionDomainError(ValueError):
+    """A well-formed anchor conflicts with its prepared layout domain."""
+
+
 @dataclass(frozen=True)
 class SceneLayoutCondition:
     """Fix declared entities to arena poses without enlarging their motion domain.
@@ -94,7 +98,7 @@ def _condition_prepared(
             parent = parent_uid
             while parent != source.support_uid:
                 if parent in variable and parent not in condition.poses:
-                    raise ValueError(
+                    raise _LayoutConditionDomainError(
                         f"Anchor {uid!r} requires its moving ancestor {parent!r} to be anchored"
                     )
                 parent = source.parent_by_uid[parent]
@@ -108,20 +112,24 @@ def _condition_prepared(
                 not np.allclose(wanted[:3, :3], original[:3, :3], rtol=0, atol=1e-9)
                 or abs(wanted[2, 3] - original[2, 3]) > 1e-9
             ):
-                raise ValueError(
+                raise _LayoutConditionDomainError(
                     "Root anchors support declared XY translation only; rotation/height must remain authored"
                 )
             delta = wanted[:2, 3] - original[:2, 3]
             if uid not in roots:
                 if not np.allclose(delta, 0, rtol=0, atol=1e-9):
-                    raise ValueError(f"Condition cannot move fixed group {uid!r}")
+                    raise _LayoutConditionDomainError(
+                        f"Condition cannot move fixed group {uid!r}"
+                    )
             else:
                 bounds = policy["group_xy_offset_bounds_m"].get(uid)
                 if bounds is not None and (
                     np.any(delta < np.asarray(bounds)[0] - 1e-9)
                     or np.any(delta > np.asarray(bounds)[1] + 1e-9)
                 ):
-                    raise ValueError("Anchor lies outside declared root XY bounds")
+                    raise _LayoutConditionDomainError(
+                        "Anchor lies outside declared root XY bounds"
+                    )
                 policy["group_xy_offset_bounds_m"][uid] = [
                     delta.tolist(),
                     delta.tolist(),
@@ -135,7 +143,9 @@ def _condition_prepared(
         wanted = np.asarray(condition.poses[uid])
         if uid not in targets:
             if not np.allclose(wanted, parent_world @ relative, rtol=0, atol=1e-9):
-                raise ValueError(f"Condition cannot move undeclared member {uid!r}")
+                raise _LayoutConditionDomainError(
+                    f"Condition cannot move undeclared member {uid!r}"
+                )
             world[uid] = wanted
             continue
         spec = targets[uid]
@@ -158,18 +168,22 @@ def _condition_prepared(
             not np.allclose(rotation, yaw_rotation, rtol=0, atol=1e-9)
             or abs(local[2, 3] - height) > 1e-9
         ):
-            raise ValueError(
+            raise _LayoutConditionDomainError(
                 "Member anchor violates its authored tilt or support height"
             )
         if angle < low - 1e-8 or angle > high + 1e-8:
-            raise ValueError("Member anchor lies outside declared yaw bounds")
+            raise _LayoutConditionDomainError(
+                "Member anchor lies outside declared yaw bounds"
+            )
         offset = local[:2, 3] - baseline[:2, 3]
         bounds = spec["xy_offset_bounds_m"]
         if bounds is not None and (
             np.any(offset < np.asarray(bounds)[0] - 1e-9)
             or np.any(offset > np.asarray(bounds)[1] + 1e-9)
         ):
-            raise ValueError("Member anchor lies outside declared XY bounds")
+            raise _LayoutConditionDomainError(
+                "Member anchor lies outside declared XY bounds"
+            )
         spec["xy_offset_bounds_m"] = [offset.tolist(), offset.tolist()]
         spec["yaw_delta_range_deg"] = [angle, angle]
         world[uid] = wanted

@@ -96,16 +96,69 @@ def test_expired_warming_row_finishes_group_without_disturbing_live_peer(
     assert executor.live[1] is peer
 
 
-def test_native_source_retires_expired_attempt_before_reading_world():
+@pytest.mark.parametrize("stop", ["wall_time_exhausted", "rollout_budget_exhausted"])
+def test_native_source_retires_exhausted_attempt_before_reading_world(stop):
+    from embodichain.lab.expansion.contracts import (
+        EpisodeCandidate,
+        SceneCase,
+        ValidationCheck,
+        ValidationResult,
+    )
     from embodichain.lab.expansion.session import ExpansionSession
     from embodichain.lab.expansion.session_cfg import ExpansionSessionCfg
 
     clock = [0.0]
     session = ExpansionSession(
-        ExpansionSessionCfg.from_mapping({"collection": {"max_wall_time_s": 0.01}}),
+        ExpansionSessionCfg.from_mapping(
+            {
+                "collection": {
+                    "max_wall_time_s": 0.01,
+                    "target_committed_episodes": 2,
+                    "max_proposals": 3,
+                    "max_rollout_attempts": 2,
+                },
+                "execution": {"ready_high_watermark": 3, "ready_low_watermark": 0},
+                "persistence": {"pending_episode_limit": 2, "pending_max_bytes": 4096},
+            }
+        ),
         clock=lambda: clock[0],
     )
-    clock[0] = 1.0
+    if stop == "wall_time_exhausted":
+        clock[0] = 1.0
+    else:
+        session.register_case(
+            SceneCase("case", "initial", "scene", "task", "robot"),
+            torch.tensor([[-1.0, 1.0]]),
+            joint_names=("joint",),
+        )
+        passed = ValidationResult(
+            (
+                ValidationCheck("path_collision", "passed"),
+                ValidationCheck("task_success", "passed"),
+            )
+        )
+        identities = []
+        for index in range(2):
+            identity, _ = session.propose(
+                "case",
+                "initial",
+                source_id="source",
+                source_revision="revision",
+                template_id=f"recipe-{index}",
+                operator_id="episode",
+            )
+            session.add_prepared_episode(EpisodeCandidate(identity, "{}"), passed)
+            assert (
+                session.take_ready("case", "initial", episode_byte_budget=1024)
+                is not None
+            )
+            session.mark_rollout_started(identity)
+            identities.append(identity)
+        session.release(identities[0], reason="rejected")
+        assert session.stop_reason is None
+        session.release(identities[1], reason="rejected")
+    assert session.stop_reason == stop
+    proposed = session.snapshot()["counts"]["proposed"]
     request = object()
     journal = Mock()
     ctx = SimpleNamespace(requests={0: request}, journal=journal)
@@ -119,12 +172,14 @@ def test_native_source_retires_expired_attempt_before_reading_world():
     }
     assert source.activate(WorkloadAssignment("expired", 0, 0, 0), None) is None
     journal.update.assert_called_once_with(
-        request, status="initial_rejected", reason="wall_time_exhausted"
+        request, status="initial_rejected", reason=stop
     )
-    assert session.snapshot()["counts"]["proposed"] == 0
+    assert session.snapshot()["counts"]["proposed"] == proposed
 
 
-@pytest.mark.parametrize("stop", ["wall_time_exhausted", "unexpected"])
+@pytest.mark.parametrize(
+    "stop", ["wall_time_exhausted", "rollout_budget_exhausted", "unexpected"]
+)
 def test_admission_expiry_race_only_suppresses_budget_exhaustion(stop):
     session = SimpleNamespace(stop_reason=None, register_case=Mock())
 
@@ -162,7 +217,7 @@ def test_admission_expiry_race_only_suppresses_budget_exhaustion(stop):
     source.activation_snapshot = (SimpleNamespace(batches={0: ()}), {})
     source.env = SimpleNamespace(robot=SimpleNamespace(uid="robot"))
     assignment = WorkloadAssignment("group", 0, 0, 0)
-    if stop == "wall_time_exhausted":
+    if stop != "unexpected":
         assert source.activate(assignment, None) is None
         assert ctx.journal.update.call_args.kwargs["reason"] == stop
     else:

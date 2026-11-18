@@ -20,6 +20,10 @@ Inputs must be job directories containing `job.json` and confirmed artifact rece
 Repeated input paths/commit identities do not multiply samples. Conflicting commit
 identities fail. Output must be new; inputs are never overwritten. Both snapshots
 must have the same task, robot installation, topology and configured scene domain.
+The recorded scene-case task ID identifies the task across seeds and source
+recordings. Older artifacts can use their recorded source UUID when the task ID
+is absent. Artifacts without either identity cannot be compared.
+
 For installation identity only, measured XYZ and sign-canonical normalized xyzw
 components are rounded to 1e-6 to avoid splitting one fixed base by readout noise.
 Declared robot calibration remains exact in the domain fingerprint. Raw episode

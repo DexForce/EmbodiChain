@@ -24,8 +24,8 @@ import time
 import numpy as np
 
 from ._pose_sampling import _AdaptivePoseSource
-from ._pose_sampling_cfg import _ROBOT_LAYOUT_STRATEGIES
-from ._robot_first_sampling import _anchor_targets, _prepare_anchor_pools
+from ._pose_sampling_cfg import _ROBOT_LAYOUT_STRATEGIES, _anchor_targets
+from ._robot_first_sampling import _prepare_anchor_pools
 from embodichain.lab.sim.scene.expansion import (
     SceneLayoutCondition,
     scene_layout_input_from_sim,
@@ -34,6 +34,7 @@ from embodichain.lab.sim.scene.expansion import (
     ScenePoseChange,
     SceneVariant,
 )
+from embodichain.lab.sim.scene.expansion.conditions import _LayoutConditionDomainError
 
 __all__: list[str] = []
 
@@ -254,6 +255,16 @@ class _LayoutPoseSource(_AdaptivePoseSource):
                 for c in candidate.scene.pose_changes
             }
             changes.update({c.entity_uid: c for c in generated.pose_changes})
+            for uid, options in self.configuration.items():
+                if (
+                    uid not in self._prepared_layout.source.poses
+                    and "follow" in options
+                ):
+                    parent = options["follow"]
+                    pose = self._follower_pose(
+                        uid, parent, np.asarray(changes[parent].arena_pose)
+                    )
+                    changes[uid] = ScenePoseChange(uid, pose)
             candidate = replace(
                 candidate,
                 scene=SceneVariant(
@@ -281,14 +292,17 @@ class _LayoutPoseSource(_AdaptivePoseSource):
                 actual = anchors.get(uid, self._prepared_layout.source.poses[uid])
                 if not np.allclose(actual, pose, rtol=0, atol=1e-9):
                     return candidate, "bounded_pose", False, "condition_mismatch"
-            batch = generate_scene_variants(
-                self._prepared_layout,
-                seed=self.seed,
-                candidate_count=1,
-                max_attempts=1,
-                start_ordinal=raw,
-                conditions=SceneLayoutCondition(anchors),
-            )
+            try:
+                batch = generate_scene_variants(
+                    self._prepared_layout,
+                    seed=self.seed,
+                    candidate_count=1,
+                    max_attempts=1,
+                    start_ordinal=raw,
+                    conditions=SceneLayoutCondition(anchors),
+                )
+            except _LayoutConditionDomainError:
+                return candidate, origin, False, "layout_outside_sampled_domain"
             if not batch.variants:
                 return candidate, "bounded_pose", False, "layout_budget_exhausted"
         poses = {

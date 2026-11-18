@@ -143,8 +143,13 @@ inline counterparts are mutually exclusive; without a selector, the original
 inline `robot`, `sensor`, and scene fields continue to parse unchanged.
 
 An embodiment selector permits robot installation `overrides` (`uid`,
-`init_pos`, `init_rot`, `init_qpos`) and a separate `camera_overrides` mapping
-keyed by camera UID. The latter selects ordinary `Camera` entries explicitly
+`init_pos`, `init_rot`, `init_qpos`), bounded robot calibration in the same
+mapping, and a separate `camera_overrides` mapping keyed by camera UID.
+Calibration may replace finite, nonnegative `joint_drive_props.stiffness` or
+`damping` values for entries the component already names, and a declared
+hand's `grippers.<instance>.commands.open` or `grasp` with positions for every
+native hand joint within the hand limits; new entries, other drive fields and
+structural hand changes are rejected. The latter selects ordinary `Camera` entries explicitly
 declared in the component's independent `sensor` or mounted
 `simulation.sensors` list. It changes only `intrinsics: [fx, fy, cx, cy]` and
 `extrinsics`; it cannot add sensors, change type, parent, resolution or outputs,

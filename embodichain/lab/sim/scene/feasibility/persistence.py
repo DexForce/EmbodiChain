@@ -19,21 +19,15 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import fields
 from pathlib import Path
 import json
 import numpy as np
 
+from embodichain.lab._scene_config.feasibility import _closed, request_from_mapping
 from ..expansion import ScenePoseChange, SceneVariant
 from ._values import atomic_json, digest, plain
 from .cfg import SceneRobotFeasibilityCfg
 from .contracts import (
-    PoseSearchVariable,
-    PhaseTarget,
-    HeldObject,
-    TaskPhase,
-    TaskOperationMode,
-    TaskFeasibilityRequest,
     RobotDeploymentCandidate,
     JointSceneCandidate,
     CandidateEvaluation,
@@ -47,46 +41,6 @@ from .search import (
 )
 
 __all__ = ["request_from_mapping", "save_feasibility_atlas", "load_feasibility_atlas"]
-
-
-def _closed(cls: type, value: Mapping[str, object]) -> dict:
-    if not isinstance(value, Mapping):
-        raise ValueError(f"{cls.__name__} requires a mapping")
-    unknown = set(value) - {f.name for f in fields(cls)}
-    if unknown:
-        raise ValueError(f"Unknown {cls.__name__} fields: {sorted(unknown)}")
-    return dict(value)
-
-
-def request_from_mapping(value: Mapping[str, object]) -> TaskFeasibilityRequest:
-    """Decode a provider-independent request through closed production contracts.
-
-    Args:
-        value: JSON/YAML task, scene, mounting and phase declarations.
-    Returns:
-        Validated immutable request. No dotted import or model client is loaded.
-    """
-    data = _closed(TaskFeasibilityRequest, value)
-    data["variables"] = tuple(
-        PoseSearchVariable(**_closed(PoseSearchVariable, v)) for v in data["variables"]
-    )
-    modes = []
-    for mode in data["modes"]:
-        m = _closed(TaskOperationMode, mode)
-        phases = []
-        for phase in m["phases"]:
-            p = _closed(TaskPhase, phase)
-            for key, cls in (
-                ("targets", PhaseTarget),
-                ("held_objects", HeldObject),
-                ("resulting_poses", ScenePoseChange),
-            ):
-                p[key] = tuple(cls(**_closed(cls, v)) for v in p.get(key, ()))
-            phases.append(TaskPhase(**p))
-        m["phases"] = tuple(phases)
-        modes.append(TaskOperationMode(**m))
-    data["modes"] = tuple(modes)
-    return TaskFeasibilityRequest(**data)
 
 
 def save_feasibility_atlas(atlas: FeasibilityAtlas, path: str | Path) -> None:

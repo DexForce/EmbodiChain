@@ -219,10 +219,11 @@ class _GymWorkloadSource:
         host, engine = group["host"], group["engine"]
         ctx = host._context
         request = ctx.requests[row]
-        if group["session"].stop_reason == "wall_time_exhausted":
-            ctx.journal.update(
-                request, status="initial_rejected", reason="wall_time_exhausted"
-            )
+        session = group["session"]
+        budget_stops = ("wall_time_exhausted", "rollout_budget_exhausted")
+        stop_reason = session.stop_reason
+        if stop_reason in budget_stops:
+            ctx.journal.update(request, status="initial_rejected", reason=stop_reason)
             return None
         if self.activation_snapshot is None:
             self.activation_snapshot = (
@@ -274,7 +275,6 @@ class _GymWorkloadSource:
             ctx.program.program_id,
             self.env.robot.uid,
         )
-        session = group["session"]
         session.register_case(case, ctx.limits, joint_names=ctx.names)
         try:
             identity, _ = session.propose(
@@ -289,11 +289,10 @@ class _GymWorkloadSource:
         except RuntimeError:
             # The budget can expire during initial-state validation, including
             # between the early check and the session's atomic proposal guard.
-            if session.stop_reason != "wall_time_exhausted":
+            stop_reason = session.stop_reason
+            if stop_reason not in budget_stops:
                 raise
-            ctx.journal.update(
-                request, status="initial_rejected", reason="wall_time_exhausted"
-            )
+            ctx.journal.update(request, status="initial_rejected", reason=stop_reason)
             return None
         episode_id, commit_id = session.episode_ids(identity)
         record = ctx.journal.update(
