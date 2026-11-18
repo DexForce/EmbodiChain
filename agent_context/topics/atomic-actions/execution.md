@@ -269,3 +269,6 @@ unchanged. HandOver can explicitly retract
 sampled grasp TCPs through `grasp_retract_distance` before deriving transport
 and handover targets. The offset is a planning declaration; acquisition,
 retention and final acceptance still require the original physical evidence.
+When HandOver continues an existing hold, the source hand holds its observed
+closure by default. `source_hand_hold="grasp"` keeps commanding the grasp
+setpoint, so a position-driven gripper keeps squeezing until it releases.
