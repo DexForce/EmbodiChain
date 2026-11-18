@@ -28,6 +28,12 @@ Joint task-conditioned layout/installation search is owned by
 attempts. Its configured search adapter still evaluates one B=1 deployment per
 attempt through the shared selected-row preparation/restoration contract.
 
+The task-facing rolling collector also exposes selectable bounded versus
+workspace-conditioned pose proposals with optional receipt-confirmed task-pose
+coverage feedback; see [workload feedback](../expansion-engine/workloads.md#optional-task-pose-proposal-feedback).
+This is distinct from offline atlas region validation and does not certify
+continuous reachable volume.
+
 ## Entry points
 
 | Request | Owner |

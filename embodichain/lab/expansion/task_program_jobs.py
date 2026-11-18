@@ -55,67 +55,7 @@ def _load_deployment(path: Path) -> None:
     config_to_cfg(load_mapping(path), source_path=path)
 
 
-class _BoundedPoseSource:
-    """Sample bounded arena-frame changes with task-declared support followers."""
-
-    def __init__(
-        self, env: Any, configuration: Mapping[str, Any], *, seed: int, revision: str
-    ) -> None:
-        self.configuration, self.seed, self.request_id = configuration, seed, revision
-        self.poses = {
-            uid: env.sim.get_rigid_object(uid)
-            .get_local_pose(to_matrix=True)[0]
-            .detach()
-            .cpu()
-            .numpy()
-            .copy()
-            for uid in configuration
-        }
-        self.roots = {
-            env.robot.uid: env.robot.get_local_pose(to_matrix=True)[0]
-            .detach()
-            .cpu()
-            .tolist()
-        }
-
-    def candidate(self, ordinal: int) -> JointSceneCandidate:
-        import numpy as np
-        from embodichain.lab.sim.scene.expansion import ScenePoseChange, SceneVariant
-        from embodichain.lab.sim.scene.feasibility import (
-            JointSceneCandidate,
-            RobotDeploymentCandidate,
-        )
-
-        offsets = {}
-        for uid, options in self.configuration.items():
-            if "follow" in options:
-                continue
-            seed = int.from_bytes(
-                hashlib.sha256(f"{self.seed}/{ordinal}/{uid}".encode()).digest()[:8],
-                "little",
-            )
-            generator = np.random.default_rng(seed)
-            offsets[uid] = [
-                generator.uniform(*bounds)
-                for bounds in (*options["translation_m"], options["yaw_rad"])
-            ]
-        changes, parameters = [], []
-        for uid, options in self.configuration.items():
-            dx, dy, dz, yaw = offsets[options.get("follow", uid)]
-            pose = self.poses[uid].copy()
-            c, s = np.cos(yaw), np.sin(yaw)
-            pose[:3, :3] = np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]]) @ pose[:3, :3]
-            pose[:3, 3] += (dx, dy, dz)
-            changes.append(ScenePoseChange(uid, tuple(map(tuple, pose))))
-            parameters.extend((dx, dy, dz, yaw))
-        scene = SceneVariant(self.request_id, self.seed, ordinal, tuple(changes))
-        return JointSceneCandidate(
-            self.request_id,
-            scene,
-            RobotDeploymentCandidate(self.roots),
-            "object_pose",
-            tuple(parameters),
-        )
+from ._pose_sampling import _BoundedPoseSource, _AdaptivePoseSource
 
 
 def _task_expansion_extensions(*, options, operator, seed, report):
@@ -126,10 +66,19 @@ def _task_expansion_extensions(*, options, operator, seed, report):
 
     def source(env):
         nonlocal pose_source
-        pose_source = _BoundedPoseSource(
-            env, options["scene"], seed=seed, revision=report["semantic_id"]
+        pose_source = (
+            _AdaptivePoseSource(env, options, seed=seed, revision=report["semantic_id"])
+            if "scene_sampling" in options
+            else _BoundedPoseSource(
+                env, options["scene"], seed=seed, revision=report["semantic_id"]
+            )
         )
         return pose_source
+
+    def feedback(env, source, path):
+        source.output = path
+        source.checkpoint()
+        return source
 
     def recipe_transform(recipe):
         operations = []
@@ -163,6 +112,7 @@ def _task_expansion_extensions(*, options, operator, seed, report):
 
     return GymExpansionHostExtensions(
         scene_source_factory=source,
+        feedback_factory=feedback if "scene_sampling" in options else None,
         recipe_transform=recipe_transform,
         plan_transform_factory=plans,
         require_plan_transform=operator != "object_pose",

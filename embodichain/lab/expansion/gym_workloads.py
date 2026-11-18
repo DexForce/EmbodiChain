@@ -125,6 +125,24 @@ class _GymWorkloadSource:
             for uid in self.env.sim.get_rigid_object_uid_list()
         }
 
+    def planning_budget(self, assignment):
+        feedback = self.groups[assignment.workload_id]["host"]._context.feedback
+        return None if feedback is None else feedback.budget
+
+    def can_admit(self, name):
+        feedback = self.groups[name]["host"]._context.feedback
+        if feedback is None:
+            return True
+        if self.groups[name]["session"].stop_reason is not None:
+            return False
+        from embodichain.lab.sim.scene.feasibility import FeasibilityBudgetExhausted
+
+        try:
+            feedback.budget.check()
+        except FeasibilityBudgetExhausted:
+            return False
+        return True
+
     def prepare(self, assignments: tuple[WorkloadAssignment, ...]) -> None:
         from embodichain.lab.sim.scene import (
             SceneView,
@@ -168,9 +186,12 @@ class _GymWorkloadSource:
                     )
             ctx.requests[assignment.env_id] = request
             if ctx.scene_source is not None:
-                candidates[assignment.env_id] = ctx.scene_source.candidate(
-                    assignment.ordinal
-                )
+                candidate = ctx.scene_source.candidate(assignment.ordinal)
+                if (
+                    ctx.feedback is None
+                    or ctx.feedback.validate(assignment.ordinal).accepted
+                ):
+                    candidates[assignment.env_id] = candidate
         if candidates:
             apply_joint_scene_candidates(
                 SceneView(self.env.sim, env_ids=tuple(candidates)), candidates
@@ -297,6 +318,11 @@ class _GymWorkloadSource:
                 ),
             )
         )
+        if ctx.feedback is not None:
+            ctx.preparation_checks[row] = ValidationResult(
+                ctx.preparation_checks[row].checks
+                + ctx.feedback.validate(assignment.ordinal).checks
+            )
         item = PreparedEpisodeWorkItem(
             EpisodeCandidate(identity, json.dumps(request.recipe.to_dict())),
             ctx.compatibility.key,
@@ -346,6 +372,8 @@ class _GymWorkloadSource:
         state = self.active[row]
         ctx = state["group"]["host"]._context
         state["group"]["engine"].mark_row_started(state["native"])
+        if ctx.feedback is not None:
+            ctx.feedback.budget.counts["rollouts"] += 1
         ctx.prepared[row][4]["world_control_start"] = world_control_step
         ctx.journal.update(
             ctx.requests[row], status="running", world_control_start=world_control_step
@@ -392,6 +420,10 @@ class _GymWorkloadSource:
                     ctx.requests[row],
                     status="initial_rejected",
                     reason="wall_time_exhausted",
+                )
+            if ctx.feedback is not None:
+                ctx.feedback.finish(
+                    result.assignment.ordinal, None, None, executed=False
                 )
             return None
         group = state["group"]
@@ -451,7 +483,18 @@ class _GymWorkloadSource:
                         },
                     },
                 )
-            return group["engine"].complete_row(state["native"], episode)
+            receipt = None
+            try:
+                receipt = group["engine"].complete_row(state["native"], episode)
+                return receipt
+            finally:
+                if ctx.feedback is not None:
+                    ctx.feedback.finish(
+                        result.assignment.ordinal,
+                        episode,
+                        receipt,
+                        executed=result.world_control_start is not None,
+                    )
         finally:
             state["adapter"].close()
             self.collector.discard(row)
@@ -465,6 +508,13 @@ class _GymWorkloadSource:
         group = self.groups[result.assignment.workload_id]
         ctx = group["host"]._context
         request = ctx.requests[row]
+        if ctx.feedback is not None:
+            ctx.feedback.finish(
+                result.assignment.ordinal,
+                None,
+                None,
+                executed=result.world_control_start is not None,
+            )
         record = {
             "env_id": row,
             "status": "cancelled",
@@ -513,6 +563,10 @@ class _GymWorkloadSource:
             self.collector.discard(row)
 
     def close(self) -> None:
+        for group in self.groups.values():
+            feedback = group["host"]._context.feedback
+            if feedback is not None:
+                feedback.checkpoint()
         for state in self.active.values():
             state["adapter"].close()
         self.active.clear()
@@ -569,6 +623,7 @@ def run_gym_expansion_workloads(
     common = extensions or GymExpansionHostExtensions()
     if (
         common.scene_source_factory
+        or common.feedback_factory
         or common.recipe_transform
         or common.plan_transform_factory
     ):
@@ -784,9 +839,14 @@ def run_gym_expansion_workloads(
                 bridges={},
                 extensions=workload.extensions,
                 scene_source=None,
+                feedback=None,
             )
             if workload.extensions.scene_source_factory is not None:
                 ctx.scene_source = workload.extensions.scene_source_factory(env)
+            if workload.extensions.feedback_factory is not None:
+                ctx.feedback = workload.extensions.feedback_factory(
+                    env, ctx.scene_source, path
+                )
             builder = GymRecipeBuilder(ctx)
             transform = workload.extensions.recipe_transform
             ctx.recipe = lambda ordinal, builder=builder, transform=transform: (
@@ -814,6 +874,10 @@ def run_gym_expansion_workloads(
                 )
                 adapters[id(factory)] = adapter
             ctx.program = adapter.compile(environment_cfg.task_program)
+            if ctx.feedback is not None:
+                bind = getattr(ctx.feedback, "bind_program", None)
+                if bind is not None:
+                    bind(adapter, ctx.program)
             if (
                 workload.extensions.plan_transform_factory is not None
                 and adapter.configured_nominal_sources
@@ -839,7 +903,11 @@ def run_gym_expansion_workloads(
                     {
                         "collection": {
                             "target_committed_episodes": cfg.target_episodes,
-                            "max_rollout_attempts": cfg.max_attempts,
+                            "max_rollout_attempts": (
+                                cfg.max_attempts
+                                if ctx.feedback is None
+                                else ctx.feedback.budget.cfg.max_rollouts
+                            ),
                             "max_proposals": cfg.max_attempts,
                             "max_wall_time_s": cfg.max_wall_time_s,
                         },
@@ -855,6 +923,7 @@ def run_gym_expansion_workloads(
                         "validation": {"require_path_collision": True},
                     }
                 ),
+                coverage=None if ctx.feedback is None else ctx.feedback.coverage,
                 episode_namespace=journal.job_instance_id,
                 clock=admission_clock,
             )
@@ -907,6 +976,8 @@ def run_gym_expansion_workloads(
         def done(name: str, counts: Mapping[str, object]) -> None:
             group = groups[name]
             journal = group["host"]._context.journal
+            if group["host"]._context.feedback is not None:
+                group["host"]._context.feedback.checkpoint()
             complete = counts["committed"] == group["host"].cfg.target_episodes
             journal.stage("collection", "complete" if complete else "budget_exhausted")
             journal.checkpoint(force=True)

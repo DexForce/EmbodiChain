@@ -72,6 +72,7 @@ class GymHostContext:
     auxiliary_baseline: Mapping[str, torch.Tensor] | None = None
     profile: Real2SimTabletopCollectionCfg | None = None
     scene_source: JointSceneSource | None = None
+    feedback: Any | None = None
     motion_profile: CombinedExpansionProfile | None = None
     motion_recipes: tuple[CandidateRecipe, ...] = ()
     names: tuple[str, ...] = ()

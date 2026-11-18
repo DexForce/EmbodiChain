@@ -6321,3 +6321,18 @@ contracts. The package-level imports above are the convenient extension API.
    discover_sensor_plugins
    get_sensor_registration
    list_sensor_types
+
+Task pose coverage
+------------------
+
+The task pose coverage adapter counts measured pick/place XY-yaw cells across
+scene cases in one explicitly declared experiment domain. Reservations remain
+pending until the ordinary ExpansionSession persistence receipt confirms them;
+planned candidate poses never contribute to confirmed coverage.
+
+.. autosummary::
+
+   embodichain.lab.expansion.task_pose_coverage.TaskPoseCoverage
+
+.. autoclass:: embodichain.lab.expansion.task_pose_coverage.TaskPoseCoverage
+   :members:

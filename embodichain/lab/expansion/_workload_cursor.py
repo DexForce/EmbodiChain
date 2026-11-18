@@ -32,9 +32,17 @@ __all__: list[str] = []
 
 
 class _WorkloadCursor(_Cursor):
-    def __init__(self, bridge: TaskProgramDemoBridge, robot: Any, seed: int) -> None:
+    def __init__(
+        self,
+        bridge: TaskProgramDemoBridge,
+        robot: Any,
+        seed: int,
+        *,
+        budget: Any = None,
+    ) -> None:
         super().__init__(bridge)
         self.robot = robot
+        self.budget = budget
         self.rejection = None
         self.last_command = None
         self.devices = (
@@ -66,7 +74,34 @@ class _WorkloadCursor(_Cursor):
             np.random.set_state(self.numpy_rng)
             random.setstate(self.python_rng)
             try:
-                action = super().next()
+                if (
+                    self.budget is None
+                    or self.rejection is not None
+                    or self.emergency is not None
+                ):
+                    action = super().next()
+                else:
+                    from embodichain.lab.sim.motion._budget import (
+                        _planning_budget_scope,
+                    )
+                    from embodichain.lab.sim.scene.feasibility import (
+                        FeasibilityBudgetExhausted,
+                    )
+
+                    try:
+                        with _planning_budget_scope(self.budget):
+                            action = super().next()
+                    except FeasibilityBudgetExhausted as error:
+                        if self.segment is None:
+                            # No command or segment exists yet: rejection has no
+                            # safe-stop action to acknowledge and earns no step.
+                            self.finished = True
+                            self.accepted = False
+                            self.reason = str(error)
+                            action = None
+                        else:
+                            self.abort(str(error))
+                            action = super().next()
                 if action is not None:
                     if (
                         self.rejection is not None or self.emergency is not None

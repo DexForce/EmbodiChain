@@ -77,10 +77,13 @@ def load_task_program_expansion(path: str | Path) -> dict[str, Any]:
     """
     path = Path(path)
     value = load_mapping(path)
-    if (
-        set(value) != {"schema_version", "engine", "scene", "trajectory", "validation"}
-        or value["schema_version"] != 1
-    ):
+    if (set(value) - {"scene_sampling", "scheduling", "pose_coverage"}) != {
+        "schema_version",
+        "engine",
+        "scene",
+        "trajectory",
+        "validation",
+    } or value["schema_version"] != 1:
         raise ValueError("Invalid demo expansion configuration")
     engine, motion = value["engine"], value["trajectory"]
     required_engine = {
@@ -365,4 +368,7 @@ def load_task_program_expansion(path: str | Path) -> dict[str, Any]:
                 or hold[field] <= 0
             ):
                 raise ValueError(f"contact_hold.{field} must be finite and positive")
+    from ._pose_sampling_cfg import validate_sampling
+
+    validate_sampling(value)
     return value

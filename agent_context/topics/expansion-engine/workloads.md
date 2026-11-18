@@ -184,6 +184,26 @@ limitations remain explicit admission constraints. Physics devices and task
 qualification must be reported separately. Existing CPU deployments do not
 switch devices.
 
+## Optional task-pose proposal feedback
+
+Task-facing expansion configs select `scene_sampling.strategy` (`bounded_pose`
+or `workspace_joint`) independently of `scheduling.policy` (`fifo` or
+`task_pose_coverage`). Absent settings preserve the legacy bounded sampler.
+`_pose_sampling.py` owns bounded candidate snapshots, source feedback and budgets;
+`task_pose_coverage.TaskPoseCoverage` implements the session coverage protocol.
+Measured rigid initial/terminal poses contribute only after native sink receipts.
+Separate SceneCase identities aggregate within a declared configuration/grid
+fingerprint; installation changes remain separate domains. FIFO can omit coverage.
+
+Joint sampling uses an explicit cache or joint-uniform FK prior and repeats
+full-pose IK/FK checks after planar projection. Fixed pick grasp policy and prior
+must agree; unsupported dynamic grasp replacement rejects. Normal scene preparation,
+planning, measured acceptance and persistence still determine success. Feedback
+checkpoints do not restore a live World or replace job receipt reconciliation.
+The configured acceptance task is
+`extensions/embodichain_tasks/configs/tasks/manipulation/workspace_pose_pick_place`;
+its four-way runner is `scripts/benchmark/expansion/task_pose_coverage.py`.
+
 ## Focused validation
 
 `tests/lab/expansion/test_workloads_sim.py` runs a real four-row task through

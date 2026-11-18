@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, Protocol
@@ -83,6 +83,9 @@ class GymExpansionHostExtensions:
         plan_transform_factory: Receives environment and immutable row identity;
             returns an ordinary Task Program transform factory. Its record metadata
             and hashed plan attachments are archived by the native episode owner.
+        feedback_factory: Optional rolling-collection feedback owner receiving env,
+            scene source and artifact directory; exposes coverage, budget, validate,
+            finish and checkpoint without advancing physics or writing episodes.
         require_plan_transform: Reject completed programs without transform records.
     """
 
@@ -91,6 +94,9 @@ class GymExpansionHostExtensions:
     validator_factory: Callable[[Any, Path], ExpansionValidator] | None = None
     recipe_transform: Callable[[ExpansionRecipe], ExpansionRecipe] | None = None
     plan_transform_factory: Callable[[Any, ExpansionRowContext], Any] | None = None
+    feedback_factory: Callable[[Any, Any, Path], Any] | None = field(
+        default=None, kw_only=True
+    )
     require_plan_transform: bool = False
 
     def __post_init__(self) -> None:
@@ -101,6 +107,7 @@ class GymExpansionHostExtensions:
             raise ValueError("collection_renderer must be a nonempty renderer name")
         for name in (
             "scene_source_factory",
+            "feedback_factory",
             "validator_factory",
             "recipe_transform",
             "plan_transform_factory",

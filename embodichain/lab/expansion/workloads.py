@@ -305,7 +305,8 @@ class WorkloadProgramExecutor:
     def _eligible(self, name: str) -> bool:
         workload, counts = self.workloads[name], self.counts[name]
         return (
-            counts["committed"] < workload.target_episodes
+            getattr(self.source, "can_admit", lambda name: True)(name)
+            and counts["committed"] < workload.target_episodes
             and counts["attempts"] < workload.max_attempts
             and (
                 name not in self.started_at
@@ -464,7 +465,14 @@ class WorkloadProgramExecutor:
                 )
             self.live[row] = {
                 **state,
-                "cursor": _WorkloadCursor(bridge, self.env.robot, assignment.seed),
+                "cursor": _WorkloadCursor(
+                    bridge,
+                    self.env.robot,
+                    assignment.seed,
+                    budget=getattr(
+                        self.source, "planning_budget", lambda assignment: None
+                    )(assignment),
+                ),
                 "start": None,
             }
 

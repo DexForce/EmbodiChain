@@ -103,6 +103,8 @@ class GymExpansionHost:
         self._context.extensions = extensions or GymExpansionHostExtensions()
         if not isinstance(self._context.extensions, GymExpansionHostExtensions):
             raise TypeError("extensions must be GymExpansionHostExtensions")
+        if self._context.extensions.feedback_factory is not None:
+            raise ValueError("feedback_factory requires run_gym_expansion_workloads")
         self._recipe_builder = GymRecipeBuilder(self._context)
         self._context.recipe = self.recipe
         self._preparer = GymCohortPreparer(self._context)

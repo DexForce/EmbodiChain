@@ -207,3 +207,18 @@ measured state plus explicitly labeled FK, and pure-visual children retain their
 physical parent's clock. Qualification requires admitted operator evidence, not
 just a requested profile or completed nominal episodes. Report completeness and
 capability acceptance are separate, including diagnostic unsupported combinations.
+
+## Offline distribution reports
+
+`python -m embodichain.lab.expansion._distribution` compares explicit before/after
+confirmed job directories using the existing receipt inspector and episode loader.
+It emits structured JSON/JSONL and a standalone HTML report with world-XY layout
+bins, start/end joint counts, measured object paths, joint-motion summaries, and
+existing geometry descriptor buckets. Version 2 adds full SO(3) orientation
+features and recorded-URDF TCP FK with explicit gripper calibration. A lightweight
+index drives filters; 100-record detail pages are shared by the offline viewer
+and Agent JSON consumers. Matching task/robot/scene domains are required.
+The report distinguishes cumulative additions from independent cohorts; observed
+bins are not a feasible-volume certificate. The reader uses existing artifact
+validation dependencies but creates no World. See
+[distribution usage](../../../embodichain/lab/expansion/distribution.md).
