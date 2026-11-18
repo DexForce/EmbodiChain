@@ -2487,6 +2487,61 @@ def test_pick_rejects_negative_approach_waypoints() -> None:
         PickUpOptions(approach_waypoints=-1)
 
 
+def test_pick_reach_waypoints_lie_on_the_line_to_the_pre_grasp() -> None:
+    """One combined plan reaches the pre-grasp through evenly spaced poses."""
+    waypoints = 2
+    generator = _motion_generator()
+    generator.generate = Mock(
+        return_value=PlanResult(
+            success=torch.ones(NUM_ENVS, dtype=torch.bool),
+            positions=torch.zeros(NUM_ENVS, 6, ARM_DOF),
+            dt=torch.zeros(NUM_ENVS, 6),
+        )
+    )
+    action = _bind_action(generator, PickUp())
+    grasp = torch.eye(4)
+    grasp[:3, 3] = torch.tensor([0.4, 0.1, 0.2])
+
+    _plan_action(
+        action,
+        SkillInvocation(
+            skill_id="pick_up",
+            goal=GraspGoal(semantics=_semantics(entity_id="target"), grasp_xpos=grasp),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(strategy="motion_gen", sample_count=20),
+            skill_options=PickUpOptions(
+                reach_waypoints=waypoints,
+                approach_direction=torch.tensor([0.0, 0.0, -1.0]),
+                pre_grasp_distance=0.12,
+            ),
+        ),
+        _context(
+            scene=_target_scene(
+                torch.eye(4).repeat(NUM_ENVS, 1, 1), timestamp=0.0, version=0
+            )
+        ),
+    )
+
+    generator.generate.assert_called_once()
+    targets = torch.stack(
+        [state.xpos for state in generator.generate.call_args.args[0]]
+    )
+    # Reach keyframes, pre-grasp, grasp and lift; the test robot starts at the origin.
+    assert targets.shape[:2] == (waypoints + 3, NUM_ENVS)
+    pre_grasp = grasp[:3, 3] + torch.tensor([0.0, 0.0, 0.12])
+    expected = torch.stack(
+        [pre_grasp * (i + 1) / (waypoints + 1) for i in range(waypoints + 1)]
+    )
+    assert torch.allclose(
+        targets[: waypoints + 1, :, :3, 3], expected[:, None], atol=1e-6
+    )
+    assert torch.equal(targets[waypoints + 1], grasp.expand(NUM_ENVS, -1, -1))
+    with pytest.raises(ValueError, match="reach_waypoints"):
+        PickUpOptions(reach_waypoints=-1)
+    with pytest.raises(ValueError, match="only by PickUp"):
+        AxisAlignOptions(reach_waypoints=1)
+
+
 @pytest.mark.parametrize("lift_waypoints", [0, 2])
 def test_pick_lift_waypoints_rise_vertically_after_the_grasp(
     lift_waypoints: int,
@@ -3323,6 +3378,11 @@ def test_waypoint_options_require_non_negative_integers(waypoints: object) -> No
     assert PourOptions().rotation_waypoints == 0
     assert AxisAlignOptions().alignment_waypoints == 0
     assert PickUpOptions().lift_waypoints == AxisAlignOptions().lift_waypoints == 0
+    assert PickUpOptions().reach_waypoints == HandOverOptions().approach_waypoints == 0
+    with pytest.raises(ValueError, match="reach_waypoints"):
+        PickUpOptions(reach_waypoints=waypoints)
+    with pytest.raises(ValueError, match="approach_waypoints"):
+        HandOverOptions(approach_waypoints=waypoints)
     with pytest.raises(ValueError, match="rotation_waypoints"):
         PourOptions(rotation_waypoints=waypoints)
     with pytest.raises(ValueError, match="alignment_waypoints"):
@@ -7324,13 +7384,20 @@ def test_handover_midpoint_preserves_coincident_roots_per_row() -> None:
 
 
 @pytest.mark.parametrize(
-    "planner_type,packed",
-    [("stub", False), ("curobo", False), ("stub", True), ("toppra", "sequential")],
+    "planner_type,packed,approach_waypoints",
+    [
+        ("stub", False, 0),
+        ("curobo", False, 0),
+        ("curobo", False, 2),
+        ("stub", True, 0),
+        ("toppra", "sequential", 0),
+    ],
 )
 def test_handover_picks_with_nearer_arm_and_preserves_waypoint_rotations(
     monkeypatch: pytest.MonkeyPatch,
     planner_type: str,
     packed: bool | str,
+    approach_waypoints: int,
 ) -> None:
     generator = _dual_motion_generator()
     generator.planner.cfg.planner_type = planner_type
@@ -7417,6 +7484,7 @@ def test_handover_picks_with_nearer_arm_and_preserves_waypoint_rotations(
             pre_grasp_distance=0.1,
             lift_height=0.2,
             hand_interp_steps=2,
+            approach_waypoints=approach_waypoints,
         ),
     )
     context = _handover_context(object_pose)
@@ -7461,7 +7529,20 @@ def test_handover_picks_with_nearer_arm_and_preserves_waypoint_rotations(
         planned_targets[2][:, :, :3, :3],
         pickup_grasp_rotation[:, None].expand(-1, 2, -1, -1),
     )
-    receive_grasp_rotation = planned_targets[3][:, 1, :3, :3]
+    # Each empty hand reaches its pre-grasp on a straight line from its start
+    # TCP pose, which the test robot reports at the origin.
+    fractions = torch.arange(1, approach_waypoints + 2) / (approach_waypoints + 1)
+    for approach, pre_grasp_index in (
+        (planned_targets[0], -1),
+        (planned_targets[3], -2),
+    ):
+        keyframes = approach[:, : approach_waypoints + 1, :3, 3]
+        assert approach.shape[1] == approach_waypoints - pre_grasp_index
+        torch.testing.assert_close(
+            keyframes,
+            approach[:, pre_grasp_index, None, :3, 3] * fractions[None, :, None],
+        )
+    receive_grasp_rotation = planned_targets[3][:, -1, :3, :3]
     assert torch.allclose(
         planned_targets[5][:, :, :3, :3],
         receive_grasp_rotation[:, None].expand(-1, 2, -1, -1),
@@ -7476,7 +7557,7 @@ def test_handover_picks_with_nearer_arm_and_preserves_waypoint_rotations(
     )
     assert torch.allclose(
         planned_targets[5][:, 0, 2, 3],
-        planned_targets[3][:, 1, 2, 3],
+        planned_targets[3][:, -1, 2, 3],
     )
 
     pickup_close_end = plan.segment("pickup_close").stop - 1

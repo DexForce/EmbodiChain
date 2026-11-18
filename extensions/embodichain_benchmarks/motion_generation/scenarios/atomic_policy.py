@@ -23,6 +23,7 @@ from typing import Literal
 
 from embodichain.lab.sim.atomic_skills import (
     AxisAlignOptions,
+    HandOverOptions,
     MotionPolicy,
     PickUpOptions,
     PourOptions,
@@ -37,8 +38,10 @@ __all__ = [
     "benchmark_motion_attribution",
     "policy_motion_budget",
     "with_axis_align_rotation_waypoints",
+    "with_hand_over_approach_waypoints",
     "with_pick_approach_waypoints",
     "with_pick_lift_waypoints",
+    "with_pick_reach_waypoints",
     "with_pour_rotation_waypoints",
     "with_motion_budget",
     "with_plan_options",
@@ -166,6 +169,38 @@ def with_pick_approach_waypoints(
     """
     options = invocation.skill_options
     if not isinstance(options, PickUpOptions) or waypoints == 0:
+        return invocation
+    return replace(
+        invocation, skill_options=replace(options, approach_waypoints=waypoints)
+    )
+
+
+def with_pick_reach_waypoints(
+    invocation: SkillInvocation, waypoints: int
+) -> SkillInvocation:
+    """Plan PickUp reaches through straight-line poses up to the pre-grasp.
+
+    The invocation's own policy still plans reach, approach and lift in one
+    call. AxisAlign and other skills are returned unchanged.
+    """
+    options = invocation.skill_options
+    if type(options) is not PickUpOptions or waypoints == 0:
+        return invocation
+    return replace(
+        invocation, skill_options=replace(options, reach_waypoints=waypoints)
+    )
+
+
+def with_hand_over_approach_waypoints(
+    invocation: SkillInvocation, waypoints: int
+) -> SkillInvocation:
+    """Plan HandOver empty-hand approaches through straight-line poses.
+
+    Each approach still ends at its pre-grasp pose. Other skills are returned
+    unchanged.
+    """
+    options = invocation.skill_options
+    if not isinstance(options, HandOverOptions) or waypoints == 0:
         return invocation
     return replace(
         invocation, skill_options=replace(options, approach_waypoints=waypoints)

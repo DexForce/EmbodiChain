@@ -130,6 +130,8 @@ class AxisAlignOptions(PickUpOptions):
         PickUpOptions.__post_init__(self)
         if self.initial_lift_height > 0.0:
             raise ValueError("initial_lift_height is supported only by PickUp.")
+        if self.reach_waypoints:
+            raise ValueError("reach_waypoints is supported only by PickUp.")
         if type(self.alignment_waypoints) is not int or self.alignment_waypoints < 0:
             raise ValueError("alignment_waypoints must be a non-negative integer.")
         if (

@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import math
 from unittest.mock import Mock, patch
 
 import pytest
@@ -36,6 +37,7 @@ from embodichain.lab.sim.atomic_skills.trajectory_ops import (
     build_pose_plan_states,
     interpolate_hand_qpos,
     interpolate_joint_trajectory,
+    pose_line_keyframes,
     resolve_joint_target,
     resolve_pose_target,
     split_three_segments,
@@ -542,6 +544,36 @@ class TestAxisTranslationKeyframes:
                 torch.tensor([1.0, 0.0, 0.0]),
                 n_waypoints=2,
             )
+
+
+def test_pose_line_keyframes_follow_the_line_and_the_shortest_rotation():
+    start = torch.eye(4).repeat(2, 1, 1)
+    start[:, :3, 3] = torch.tensor([[-0.1, 0.2, 0.3], [0.4, -0.2, 0.1]])
+    end = torch.eye(4).repeat(2, 1, 1)
+    end[:, :3, 3] = torch.tensor([[0.2, 0.2, 0.0], [0.4, 0.1, 0.4]])
+    # Row 0 yaws by 1.2 rad; row 1 keeps its orientation.
+    end[0, :2, :2] = torch.tensor(
+        [[math.cos(1.2), -math.sin(1.2)], [math.sin(1.2), math.cos(1.2)]]
+    )
+
+    keyframes = pose_line_keyframes(start, end, n_waypoints=3)
+
+    assert keyframes.shape == (2, 3, 4, 4)
+    assert torch.equal(keyframes[:, -1], end)
+    fractions = torch.tensor([1.0, 2.0, 3.0]) / 3.0
+    torch.testing.assert_close(
+        keyframes[:, :, :3, 3],
+        torch.lerp(
+            start[:, None, :3, 3], end[:, None, :3, 3], fractions[None, :, None]
+        ),
+    )
+    yaw = torch.atan2(keyframes[0, :, 1, 0], keyframes[0, :, 0, 0])
+    torch.testing.assert_close(yaw, 1.2 * fractions, atol=1.0e-5, rtol=0.0)
+    torch.testing.assert_close(
+        keyframes[1, :, :3, :3], torch.eye(3).expand(3, -1, -1), atol=1.0e-6, rtol=0.0
+    )
+    with pytest.raises(ValueError, match="n_waypoints"):
+        pose_line_keyframes(start, end, n_waypoints=0)
 
 
 def test_interpolate_hand_qpos_preserves_endpoints():

@@ -3,7 +3,7 @@
 # its arm-local observations with the checked base and tool transforms below.
 schema_version: 1
 name: atomic_dual_franka_robotiq_coordinated_placement
-suite_version: atomic_dual_franka_robotiq_coordinated_placement_v4
+suite_version: atomic_dual_franka_robotiq_coordinated_placement_v5
 profile: smoke
 robot:
   id: dual_franka_robotiq_coordinated_placement
@@ -153,6 +153,8 @@ tracks:
   enabled: true
   config:
     grasp_model: RobotiqArg2F140
+    # The open hand reaches its pre-grasp on a straight line from its start.
+    pick_reach_waypoints: 5
     # Straight-line poses keep the open hand from sweeping the target.
     pick_approach_waypoints: 5
     # Straight vertical lift keeps the held object off the support.

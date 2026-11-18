@@ -67,6 +67,10 @@ def test_handle_grasp_points_down_and_moves_toward_handle_root() -> None:
     grasp = build_pan_handle_grasp_pose(torch.eye(4), pan, _CPU)
     torch.testing.assert_close(grasp[:3, 3], torch.tensor([0.0, 0.115, 0.056]))
     torch.testing.assert_close(grasp[:3, 2], torch.tensor([0.0, 0.0, -1.0]))
+    # A negative root offset grasps nearer the free end, at the same height.
+    end_grasp = build_pan_handle_grasp_pose(torch.eye(4), pan, _CPU, root_offset=-0.03)
+    torch.testing.assert_close(end_grasp[:3, 3], torch.tensor([0.0, 0.18, 0.056]))
+    torch.testing.assert_close(end_grasp[:3, :3], grasp[:3, :3])
     torch.testing.assert_close(grasp[:3, :3].T @ grasp[:3, :3], torch.eye(3))
     assert torch.linalg.det(grasp[:3, :3]).item() == pytest.approx(1.0)
 

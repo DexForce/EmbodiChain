@@ -94,8 +94,10 @@ from .atomic_evaluation import (
 from .atomic_grasps import parallel_jaw_sampler
 from .atomic_policy import (
     with_axis_align_rotation_waypoints,
+    with_hand_over_approach_waypoints,
     with_pick_approach_waypoints,
     with_pick_lift_waypoints,
+    with_pick_reach_waypoints,
     with_plan_options,
     with_pour_rotation_waypoints,
 )
@@ -660,6 +662,14 @@ def _compile_reference(
         for item in invocations
     )
     invocations = tuple(
+        with_pick_reach_waypoints(item, scenario.pick_reach_waypoints())
+        for item in invocations
+    )
+    invocations = tuple(
+        with_hand_over_approach_waypoints(item, scenario.hand_over_approach_waypoints())
+        for item in invocations
+    )
+    invocations = tuple(
         with_pick_lift_waypoints(item, scenario.pick_lift_waypoints())
         for item in invocations
     )
@@ -1152,13 +1162,15 @@ class _HandOverCases(AtomicSkillCaseProvider):
         _require_hand_over_samples(reference, batch_size=batch_size)
         # HandOver samples one grasp per gripper: the pickup grasp on the
         # settled object, then the receiving grasp on the predicted handover
-        # pose.  Each arm's first request ends at its grasp.
+        # pose.  Each arm's first request ends at its grasp, after the optional
+        # approach keyframes and the pre-grasp.
+        grasp_index = scenario.hand_over_approach_waypoints() + 1
         frozen: dict[str, list] = {}
         for part, obj_poses in reference.grasp_requests:
             if part in frozen:
                 continue
             arm = next(v["motion"] for v in parts.values() if v["grasp"] == part)
-            grasp = reference.arm_poses(arm)[:, 1]
+            grasp = reference.arm_poses(arm)[:, grasp_index]
             frozen[part] = [obj_poses.cpu().tolist(), grasp.cpu().tolist()]
         if set(frozen) != set(grasp_parts):
             raise RuntimeError("The reference HandOver did not sample both grasps.")
@@ -1518,6 +1530,12 @@ def _placement_pose_row(
         support_vertices,
         device,
         z_clearance=float(config.get("support_grasp_z_clearance_m", 0.0)),
+        root_offset=float(
+            config.get(
+                "support_grasp_handle_root_offset_m",
+                placement_geometry.PAN_HANDLE_ROOT_OFFSET,
+            )
+        ),
         pan_frame=str(config.get("support_mesh_frame", "authored_z_up")),
     )
     if placing_target_frame_pose is None:

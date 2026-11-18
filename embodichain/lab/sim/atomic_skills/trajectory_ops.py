@@ -26,6 +26,12 @@ from embodichain.compute.trajectory import (
     retime_to_control_grid,
 )
 
+from embodichain.utils.math import (
+    axis_angle_from_quat,
+    axis_angle_to_rotation_matrix,
+    quat_from_matrix,
+)
+
 from .plans import TimedTrajectory, normalize_success_mask
 
 
@@ -297,6 +303,64 @@ def axis_translation_keyframes(
     return result
 
 
+def pose_line_keyframes(
+    start_pose: torch.Tensor,
+    end_pose: torch.Tensor,
+    *,
+    n_waypoints: int,
+) -> torch.Tensor:
+    """Build Cartesian targets on the straight line between two poses.
+
+    Positions are interpolated linearly and rotations along the shortest arc.
+    The returned targets exclude ``start_pose`` and include ``end_pose``,
+    matching motion generation, where the observed start configuration is
+    added separately.
+
+    Args:
+        start_pose: Batched segment-start poses, shape ``(B, 4, 4)``.
+        end_pose: Batched segment-end poses, shape ``(B, 4, 4)``.
+        n_waypoints: Number of target poses, excluding the segment start.
+
+    Returns:
+        Batched keyframes with shape ``(B, n_waypoints, 4, 4)``.
+
+    Raises:
+        ValueError: If the poses or the count are invalid.
+    """
+    if (
+        start_pose.dim() != 3
+        or start_pose.shape[1:] != (4, 4)
+        or end_pose.shape != start_pose.shape
+    ):
+        raise ValueError("start_pose and end_pose must have shape (B, 4, 4).")
+    if n_waypoints < 1:
+        raise ValueError("n_waypoints must be at least 1.")
+    end_pose = end_pose.to(start_pose)
+    weights = torch.linspace(
+        0.0,
+        1.0,
+        n_waypoints + 1,
+        dtype=start_pose.dtype,
+        device=start_pose.device,
+    )[1:]
+    start_rotation = start_pose[:, :3, :3]
+    relative = axis_angle_from_quat(
+        quat_from_matrix(start_rotation.transpose(1, 2) @ end_pose[:, :3, :3])
+    )
+    result = start_pose[:, None].expand(-1, n_waypoints, -1, -1).clone()
+    result[:, :, :3, :3] = start_rotation[:, None] @ axis_angle_to_rotation_matrix(
+        weights[None, :, None] * relative[:, None]
+    )
+    result[:, :, :3, 3] = torch.lerp(
+        start_pose[:, None, :3, 3],
+        end_pose[:, None, :3, 3],
+        weights[None, :, None],
+    )
+    # The last keyframe is the requested pose itself, not its reconstruction.
+    result[:, -1] = end_pose
+    return result
+
+
 def split_three_segments(
     sample_count: int,
     hand_interp_steps: int,
@@ -456,6 +520,7 @@ __all__ = [
     "build_pose_plan_states",
     "interpolate_hand_qpos",
     "interpolate_joint_trajectory",
+    "pose_line_keyframes",
     "resolve_joint_target",
     "resolve_pose_target",
     "split_three_segments",
